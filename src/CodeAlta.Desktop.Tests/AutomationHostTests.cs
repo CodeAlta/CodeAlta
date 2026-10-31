@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Collections.Frozen;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
@@ -1093,6 +1094,60 @@ public sealed class AutomationHostTests
     }
 
     [TestMethod]
+    public async Task WorkStartedFromASession_RunsWithTheModelOfThatSession_NotTheDefaultOne()
+    {
+        var root = Directory.CreateTempSubdirectory("codealta-work-like-").FullName;
+        try
+        {
+            var global = Path.Combine(root, "global");
+            var projectPath = Path.Combine(root, "project");
+            var home = Path.Combine(root, "home");
+            var builtin = Path.Combine(root, "builtin");
+            foreach (var path in new[] { global, projectPath, home, builtin }) Directory.CreateDirectory(path);
+            var provider = new RunnerProvider
+            {
+                Models =
+                [
+                    new AgentModelInfo("fixture-model", SupportedReasoningEfforts: [AgentReasoningEffort.Low, AgentReasoningEffort.High]),
+                    new AgentModelInfo("other-model", SupportedReasoningEfforts: [AgentReasoningEffort.Low, AgentReasoningEffort.High]),
+                ],
+            };
+            provider.Release.SetResult();
+            await using var host = await CodeAltaHost.CreateAsync(new CodeAltaHostOptions
+            {
+                GlobalRoot = global, CurrentProjectPath = projectPath, DiscoveryScope = new(home, root), BuiltInSkillRoot = builtin,
+                PluginEnvironment = FrozenDictionary<string, string?>.Empty, StartPlugins = false, IsHeadless = true, OwnsLogging = false,
+                ConfigureModelProviders = registry => registry.RegisterOrReplace(provider.Descriptor, () => new RunnerRuntime(provider)),
+            });
+            var project = await host.ProjectCatalog.UpsertFromPathAsync(projectPath);
+            var starter = new CodeAlta.Desktop.WorkItems.SessionStarter(host, null, () => null);
+            var providerId = provider.Descriptor.ProviderId.Value;
+
+            // The session that shows the card of a task runs on a model that is not the default one of its provider.
+            var shows = await starter.StartAsync(project, "Proposer", _ => "Work.", false, null, "task", new(new(providerId, "other-model", "low")));
+            Assert.IsNull(shows.Problem);
+            await provider.Sends.Reader.ReadAsync().AsTask().WaitAsync(Patience);
+            Assert.AreEqual(("other-model", (AgentReasoningEffort?)AgentReasoningEffort.Low), (provider.Created[shows.SessionId!].Model, provider.Created[shows.SessionId!].ReasoningEffort));
+
+            // Started from that card in a new session, the task runs with what that session runs with.
+            var started = await starter.StartAsync(project, "A task", _ => "Do the task.", false, shows.SessionId, "workitem", new());
+            Assert.IsNull(started.Problem);
+            await provider.Sends.Reader.ReadAsync().AsTask().WaitAsync(Patience);
+            var created = provider.Created[started.SessionId!];
+            Assert.AreEqual(("other-model", (AgentReasoningEffort?)AgentReasoningEffort.Low), (created.Model, created.ReasoningEffort));
+            var workspace = new WorkspaceService(host, Epoch);
+            await workspace.CloseSessionsAsync();
+            await workspace.CloseImportsAsync();
+        }
+        finally
+        {
+            try { Directory.Delete(root, recursive: true); }
+            catch (IOException) { }
+            catch (UnauthorizedAccessException) { }
+        }
+    }
+
+    [TestMethod]
     public async Task RunsAndWork_StartWithAProviderOfTheirSpace_AndOneNamedOutsideItIsRefused()
     {
         var root = Directory.CreateTempSubdirectory("codealta-provider-space-").FullName;
@@ -1369,6 +1424,9 @@ public sealed class AutomationHostTests
         internal ModelProviderDescriptor Descriptor { get; } = new(new ModelProviderId(key), "Automation fixture") { IsDefault = true, DefaultModelId = "fixture-model" };
         internal Channel<(string SessionId, AgentSendOptions Options)> Sends { get; } = Channel.CreateUnbounded<(string, AgentSendOptions)>();
         internal TaskCompletionSource Release { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        internal IReadOnlyList<AgentModelInfo> Models { get; init; } = [new AgentModelInfo("fixture-model", SupportedReasoningEfforts: [AgentReasoningEffort.Low, AgentReasoningEffort.High])];
+        // The options of the last attachment of each session: created, or resumed with other options.
+        internal ConcurrentDictionary<string, AgentSessionCreateOptions> Created { get; } = new();
     }
 
     private sealed class RunnerRuntime(RunnerProvider provider) : IModelProviderSessionRuntime
@@ -1380,13 +1438,19 @@ public sealed class AutomationHostTests
             => Task.FromResult(new ModelProviderProbeResult
             {
                 ProviderId = provider.Descriptor.ProviderId,
-                Models = [new AgentModelInfo("fixture-model", SupportedReasoningEfforts: [AgentReasoningEffort.Low, AgentReasoningEffort.High])],
+                Models = provider.Models,
             });
         public IModelProviderTurnExecutor CreateTurnExecutor() => throw new InvalidOperationException("No turn executor.");
         public Task<IAgentSession> CreateSessionAsync(AgentSessionCreateOptions options, CancellationToken cancellationToken = default)
-            => Task.FromResult<IAgentSession>(new RunnerSession(provider, options.SessionId!, options.WorkingDirectory));
+        {
+            provider.Created[options.SessionId!] = options;
+            return Task.FromResult<IAgentSession>(new RunnerSession(provider, options.SessionId!, options.WorkingDirectory));
+        }
         public Task<IAgentSession> ResumeSessionAsync(string sessionId, AgentSessionResumeOptions options, CancellationToken cancellationToken = default)
-            => Task.FromResult<IAgentSession>(new RunnerSession(provider, sessionId, options.WorkingDirectory));
+        {
+            provider.Created[sessionId] = options;
+            return Task.FromResult<IAgentSession>(new RunnerSession(provider, sessionId, options.WorkingDirectory));
+        }
         public ValueTask DisposeAsync() => ValueTask.CompletedTask;
     }
 
