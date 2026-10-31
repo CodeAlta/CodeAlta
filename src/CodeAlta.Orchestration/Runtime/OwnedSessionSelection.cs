@@ -73,6 +73,9 @@ public sealed record OwnedSelectionChoices(OwnedSessionSelection Current, IReadO
     /// model chosen by hand.
     /// </summary>
     public string? Tier { get; init; }
+
+    /// <summary>Gets whether CodeAlta chooses the model of each turn of the session (Adaptive); <see cref="Tier"/> is then the tier of its turns.</summary>
+    public bool Adaptive { get; init; }
 }
 
 /// <summary>The outcome of completing a selection named by its parts (<see cref="OwnedSessionCommandService.CheckSelectionAsync"/>).</summary>
@@ -185,7 +188,7 @@ public sealed partial class OwnedSessionCommandService
         // What the session runs with, never "a default": a session without a model shows the one it starts with.
         var (modelId, effort) = StartingModel(provider, session.ModelId, session.ReasoningEffort, models);
         var configured = SelectionProvider?.Invoke(new ModelProviderId(provider));
-        var tier = await _runtime.GetSessionTierAsync(sessionId, cancellationToken).ConfigureAwait(false);
+        var (tier, adaptive) = await _runtime.GetSessionModelChoiceAsync(sessionId, cancellationToken).ConfigureAwait(false);
         // The modes of the provider when it has some, as Claude Code does. Any other provider runs the tools of
         // CodeAlta, whose requests the host answers: where the mode of a session decides that, it offers the modes of the host.
         var modes = configured?.PermissionModes.Where(static mode => !ProviderOnlyPermissionModes.Contains(mode)).Take(16).ToArray() ?? [];
@@ -202,6 +205,7 @@ public sealed partial class OwnedSessionCommandService
             DefaultPermissionMode = _runtime.SessionPermissionModes ? _runtime.GetDefaultPermissionMode(provider) : configured?.DefaultPermissionMode,
             SupportsRemoteControl = configured?.SupportsRemoteControl ?? false,
             Tier = tier is { } recorded ? Catalog.ModelTiers.ModelTiers.NameOf(recorded) : null,
+            Adaptive = adaptive,
         };
     }
 

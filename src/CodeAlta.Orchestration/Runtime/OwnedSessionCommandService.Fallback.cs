@@ -50,7 +50,7 @@ public sealed partial class OwnedSessionCommandService
 
     /// <summary>
     /// Records the tier of models a session runs on, or that its model was chosen by hand, as the user chose it with
-    /// the model of its next prompt.
+    /// the model of its next prompt. A session on Adaptive leaves it: the user pinned its model.
     /// </summary>
     /// <param name="sessionId">The session.</param>
     /// <param name="tier">The tier, or null for a model chosen by hand.</param>
@@ -61,8 +61,37 @@ public sealed partial class OwnedSessionCommandService
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
         lock (_gate) { if (_closed || _retained) return "closed"; }
-        try { return await _runtime.SetSessionTierAsync(sessionId, tier, cancellationToken).ConfigureAwait(false) ? "ok" : "unavailable"; }
+        try { return await _runtime.SetSessionModelChoiceAsync(sessionId, tier, adaptive: false, cancellationToken).ConfigureAwait(false) ? "ok" : "unavailable"; }
         catch (ObjectDisposedException) { return "closed"; }
+    }
+
+    /// <summary>
+    /// Puts a session on Adaptive: CodeAlta then chooses the model of each of its turns, from the tiers of its space as
+    /// <c>[models.adaptive]</c> names them. The model of its next prompt is the one of the turn tier, which the caller
+    /// chooses as it chooses a tier.
+    /// </summary>
+    /// <param name="sessionId">The session.</param>
+    /// <param name="cancellationToken">Stops waiting.</param>
+    /// <returns>
+    /// The status (<c>ok</c>; <c>not_ready</c> when Adaptive is not set up or the tiers it names have no model;
+    /// <c>unavailable</c> for a session that is not known; <c>closed</c>) and, with <c>ok</c>, the tier of its turns.
+    /// </returns>
+    /// <exception cref="ArgumentException"><paramref name="sessionId"/> is blank.</exception>
+    public async Task<(string Status, Catalog.ModelTiers.ModelTier? Tier)> SetSessionAdaptiveAsync(string sessionId, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
+        lock (_gate) { if (_closed || _retained) return ("closed", null); }
+        try
+        {
+            var session = await _runtime.ResolveOwnedSessionAsync(sessionId, cancellationToken).ConfigureAwait(false);
+            if (session is null) return ("unavailable", null);
+            var scope = await _runtime.LoadModelTierScopeAsync(session.SpaceId, session.ProjectRef, cancellationToken).ConfigureAwait(false);
+            if (!scope.IsAdaptiveReady) return ("not_ready", null);
+            var tier = scope.Adaptive!.Code;
+            return await _runtime.SetSessionModelChoiceAsync(sessionId, tier, adaptive: true, cancellationToken).ConfigureAwait(false)
+                ? ("ok", tier) : ("unavailable", null);
+        }
+        catch (ObjectDisposedException) { return ("closed", null); }
     }
 
     // Whether a command of the session still holds it, as the send of a run that just failed does until it is cleaned up.

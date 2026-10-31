@@ -326,13 +326,16 @@ public sealed record ModelFallbackSettings(bool Enabled, bool OnQuota, bool OnUn
     }
 }
 
-/// <summary>The model tiers and the provider fallback, from the global <c>[models]</c> table.</summary>
+/// <summary>The model tiers, the provider fallback and Adaptive, from the global <c>[models]</c> table.</summary>
 /// <param name="Tiers">The ordered targets of each tier.</param>
 /// <param name="Fallback">When a session goes on with the next target of its tier.</param>
 public sealed record ModelSettings(ModelTierSettings Tiers, ModelFallbackSettings Fallback)
 {
-    /// <summary>Gets the choices when nothing is configured: no tier, fallback off.</summary>
+    /// <summary>Gets the choices when nothing is configured: no tier, fallback off, Adaptive not set up.</summary>
     public static ModelSettings Default { get; } = new(ModelTierSettings.Empty, ModelFallbackSettings.Default);
+
+    /// <summary>Gets how CodeAlta chooses the model of each turn of a session on Adaptive, or <see langword="null"/> when it is not set up.</summary>
+    public AdaptiveModelSettings? Adaptive { get; init; }
 
     /// <summary>Reads the <c>[models]</c> table.</summary>
     /// <param name="document">The table, or <see langword="null"/> when the file has none.</param>
@@ -348,7 +351,10 @@ public sealed record ModelSettings(ModelTierSettings Tiers, ModelFallbackSetting
                 ParseTier(document?.Tiers?.Complex),
                 ParseTier(document?.Tiers?.Standard),
                 ParseTier(document?.Tiers?.Quick)),
-            ReadFallback(document?.Fallback));
+            ReadFallback(document?.Fallback))
+        {
+            Adaptive = AdaptiveModelSettings.Read(document?.Adaptive),
+        };
     }
 
     /// <summary>Lists what is wrong with a <c>[models]</c> table, each message naming the setting.</summary>
@@ -374,6 +380,7 @@ public sealed record ModelSettings(ModelTierSettings Tiers, ModelFallbackSetting
             errors.Add($"models.fallback.max_resumes: {resumes} is not a number of resumes. Use a number from 1 to {ModelFallbackSettings.MaximumMaxResumes}.");
         }
 
+        AdaptiveModelSettings.Validate(errors, document.Adaptive);
         return errors;
     }
 
@@ -383,7 +390,8 @@ public sealed record ModelSettings(ModelTierSettings Tiers, ModelFallbackSetting
     {
         var tiers = Tiers.ToDocument();
         var fallback = Fallback.ToDocument();
-        return tiers is null && fallback is null ? null : new CodeAltaModelSettingsDocument { Tiers = tiers, Fallback = fallback };
+        var adaptive = Adaptive?.ToDocument();
+        return tiers is null && fallback is null && adaptive is null ? null : new CodeAltaModelSettingsDocument { Tiers = tiers, Fallback = fallback, Adaptive = adaptive };
     }
 
     private static void ValidateTier(List<string> errors, ModelTier tier, List<string>? targets)

@@ -171,6 +171,44 @@ public sealed class ModelTierSettingsTests
     }
 
     [TestMethod]
+    public void Adaptive_IsSetUpByItsTable_RoundTrips_AndIsReadyOnlyWithModelsInItsTiers()
+    {
+        WithStore(store =>
+        {
+            var tiers = Read(complex: ["claude-code:opus@xhigh"], standard: [], quick: ["claude-code:haiku@high"]);
+            Assert.IsNull(store.LoadGlobalModelSettings().Adaptive);
+
+            store.SaveGlobalModelSettings(new ModelSettings(tiers, ModelFallbackSettings.Default) { Adaptive = AdaptiveModelSettings.Recommended });
+            var content = File.ReadAllText(store.ConfigPath);
+            StringAssert.Contains(content, "[models.adaptive]");
+            StringAssert.Contains(content, "code = \"quick\"");
+            StringAssert.Contains(content, "escalate = \"complex\"");
+            var loaded = store.LoadGlobalModelSettings();
+            Assert.AreEqual(AdaptiveModelSettings.Recommended, loaded.Adaptive);
+            Assert.IsTrue(loaded.Adaptive!.IsReadyIn(loaded.Tiers));
+            // A tier it names without a model: Adaptive is set up but cannot be chosen.
+            Assert.IsFalse((loaded.Adaptive with { Code = ModelTier.Standard }).IsReadyIn(loaded.Tiers));
+            Assert.IsTrue(ModelTierScope.Of(loaded, null, SpaceAssignments.Empty).IsAdaptiveReady);
+            Assert.IsFalse(ModelTierScope.Of(loaded with { Adaptive = null }, null, SpaceAssignments.Empty).IsAdaptiveReady);
+
+            // Saving the tiers again keeps it; taking it out writes no table.
+            store.SaveGlobalModelSettings(loaded with { Tiers = Read(complex: ["claude-code:opus@high"], standard: [], quick: ["claude-code:haiku@high"]) });
+            Assert.AreEqual(AdaptiveModelSettings.Recommended, store.LoadGlobalModelSettings().Adaptive);
+            store.SaveGlobalModelSettings(loaded with { Adaptive = null });
+            Assert.DoesNotContain("adaptive", File.ReadAllText(store.ConfigPath));
+        });
+
+        // A table that names nothing takes the recommended choices; a tier that is none fails the validation of the file.
+        Assert.AreEqual(AdaptiveModelSettings.Recommended, ModelSettings.Read(new CodeAltaModelSettingsDocument { Adaptive = new() }).Adaptive);
+        Assert.AreEqual(new AdaptiveModelSettings(ModelTier.Standard, ModelTier.Complex, false),
+            ModelSettings.Read(new CodeAltaModelSettingsDocument { Adaptive = new() { Code = "Standard", Recheck = false } }).Adaptive);
+        var result = CodeAltaConfigStore.ValidateGlobalConfigContent("[models.adaptive]\ncode = \"cheap\"\n");
+        Assert.IsFalse(result.IsValid);
+        StringAssert.Contains(result.Message, "models.adaptive.code");
+        Assert.IsTrue(CodeAltaConfigStore.ValidateGlobalConfigContent("[models.adaptive]\ncode = \"standard\"\nescalate = \"complex\"\nrecheck = false\n").IsValid);
+    }
+
+    [TestMethod]
     public void InvalidTargets_FailTheValidationOfTheFile()
     {
         var result = CodeAltaConfigStore.ValidateGlobalConfigContent("[models.tiers]\nquick = [\"haiku\"]\n");

@@ -480,6 +480,40 @@ type = "fake-agent"
     }
 
     [TestMethod]
+    public async Task Adaptive_IsSetUpAndTakenOut_ReadWithTheTiers_AndKeptWhenTheTiersAreSaved()
+    {
+        await using var fixture = new Fixture("[providers.openai]\nenabled = true\ntype = \"openai-responses\"\napi_key = \"sk-kept\"\n");
+        var service = fixture.Service;
+        var none = ReadTiers(service, new(Epoch));
+        Assert.IsNull(none.Adaptive);
+        Assert.IsFalse(none.AdaptiveReady);
+
+        // Set up before its tiers have models: it is saved, and cannot be chosen yet.
+        var set = await service.SaveAdaptiveAsync(new(Epoch, new AdaptiveSetting("quick", "complex", true)), CancellationToken.None);
+        Assert.AreEqual("ok", set.Status, set.Message);
+        Assert.AreEqual(new AdaptiveSetting("quick", "complex", true), set.Adaptive);
+        Assert.IsFalse(set.AdaptiveReady);
+        StringAssert.Contains(File.ReadAllText(fixture.ConfigPath), "[models.adaptive]");
+
+        var tiers = SaveTiers(service, new(Epoch,
+            [new("complex", [new("claude-code", "opus", ["XHigh"])]), new("quick", [new("claude-code", "haiku", ["High"])])],
+            new(false, true, true, false, 5)));
+        Assert.AreEqual(new AdaptiveSetting("quick", "complex", true), tiers.Adaptive, "Saving the tiers keeps Adaptive.");
+        Assert.IsTrue(tiers.AdaptiveReady);
+
+        var changed = await service.SaveAdaptiveAsync(new(Epoch, new AdaptiveSetting("standard", "complex", false)), CancellationToken.None);
+        Assert.AreEqual(new AdaptiveSetting("standard", "complex", false), changed.Adaptive);
+        Assert.IsFalse(changed.AdaptiveReady, "The standard tier has no model.");
+
+        Assert.AreEqual("invalid", (await service.SaveAdaptiveAsync(new(Epoch, new AdaptiveSetting("cheap", "complex", true)), CancellationToken.None)).Status);
+        var removed = await service.SaveAdaptiveAsync(new(Epoch, null), CancellationToken.None);
+        Assert.IsNull(removed.Adaptive);
+        Assert.DoesNotContain("adaptive", File.ReadAllText(fixture.ConfigPath));
+        StringAssert.Contains(File.ReadAllText(fixture.ConfigPath), "claude-code:opus@xhigh", "Taking Adaptive out keeps the tiers.");
+        Assert.AreEqual("stale_epoch", (await service.SaveAdaptiveAsync(new("another", null), CancellationToken.None)).Status);
+    }
+
+    [TestMethod]
     public async Task ModelTiersOfASpace_ReplaceTheGlobalOnes_AndTakeOnlyTheProvidersOfTheSpace()
     {
         await using var fixture = new Fixture("""

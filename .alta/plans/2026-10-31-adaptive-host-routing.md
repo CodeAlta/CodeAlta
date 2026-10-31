@@ -1,6 +1,6 @@
 ---
 title: Adaptive model choice by CodeAlta, turn by turn (#273)
-status: draft
+status: in-progress
 created: 2026-10-31
 summary: An Adaptive choice of the model list where CodeAlta, not the agent, runs each user turn on the tier its kind calls for, asks a turn that changed code to recheck it against the request, escalates a turn that ends in visible trouble, and shows the model of each turn, as the evaluation of #273 found that agents do not adapt by themselves.
 ---
@@ -28,7 +28,8 @@ When this is done, the model list of the composer offers **Adaptive** beside the
 ### 1. Adaptive, a choice of the model list
 
 - The list of the **Agent** chip offers **Adaptive** after Complex, Standard and Quick, with the models it uses now. A session on Adaptive records it as its model choice, like a tier.
-- Settings > Models > **Adaptive**, under the tiers: the tier of code turns and of the other turns, the tier an escalation goes to, and whether code turns recheck. In `config.toml`, `[models.adaptive] code = "quick"`, `other = "quick"`, `escalate = "complex"`, `recheck = true`; a space can have its own. The defaults follow the HARD-51 evidence; a family whose cheap model writes weak code, as Codex's Luna in the trial, sets `code = "standard"`.
+- Settings > Models > **Adaptive**, under the tiers, tagged **Experimental**: the tier of the turns, the tier an escalation goes to, and whether code turns recheck, with how to choose the models (the combinations tested in October 2026, and independent leaderboards such as Artificial Analysis). In `config.toml`, `[models.adaptive] code = "quick"`, `escalate = "complex"`, `recheck = true`, for every space; `other` comes with the router. The defaults follow the HARD-51 evidence; for Codex, GPT-6.1 Terra goes in the quick tier rather than GPT-6 Luna.
+- Adaptive is never chosen before it is set up: choosing it then says so and offers Settings > Models.
 - New sessions keep their current default (Standard); Adaptive is a choice, not the default, until the days of use say otherwise.
 
 ### 2. The router, before each user turn
@@ -58,9 +59,9 @@ When this is done, the model list of the composer offers **Adaptive** beside the
 
 ### Milestone 1: the choice, the recheck, the escalation
 
-- [ ] 1. `[models.adaptive]` settings (catalog and spaces), their defaults and validation; tests.
-- [ ] 2. The host loop of an Adaptive turn in orchestration: the model of the turn, the recheck when the turn changed code, the escalation on the signs of trouble (the same as `_trouble` of `benchmarks/harbor/locked_codealta.py` and `Trouble` of `EvalScenarioRunner`), their usage, and the tier recorded for the fallback; tests with a fake provider.
-- [ ] 3. Adaptive in the model list of the composer (desktop), the model on each prompt bubble, the cards of the recheck and of the escalation, the pin; frontend tests; the user guide (`site/docs/model-tiers.md`, a section **Adaptive**).
+- [x] 1. `[models.adaptive]` settings (catalog), their defaults and validation; tests. *Done (`AdaptiveModelSettings`): `code`, `escalate`, `recheck`; global only, taking its models from the tiers of the space of each session; Adaptive must be set up (the table, and models in the tiers it names) before a session can be put on it. `other` waits for the router (milestone 2).*
+- [x] 2. The host loop of an Adaptive turn in orchestration: the model of the turn, the recheck when the turn changed code, the escalation on the signs of trouble (the same as `_trouble` of `benchmarks/harbor/locked_codealta.py` and `Trouble` of `EvalScenarioRunner`), their usage, and the tier recorded for the fallback; tests with a fake provider. *Done (`AdaptiveTurnCoordinator`, `AdaptiveTurnTests`): the command service starts each run (providers that run their own loop publish no user message); "changed code" is a git tree of the working folder before and after the turn (docs and `.alta` left out), else the files the tool calls report; the refusal sign only matches a refusal about tools or files. `altacli run --tier adaptive` runs the real feature.*
+- [ ] 3. Adaptive in the model list of the composer (desktop), the model on each prompt bubble, the cards of the recheck and of the escalation, the pin; frontend tests; the user guide (`site/docs/model-tiers.md`, a section **Adaptive**). *Done: the entry after the tiers, tagged **Experimental**, with a dialog that offers Settings while it is not set up; new sessions on Adaptive; Settings > Models > Adaptive with how to choose the models; info cards; the host prompts titled **Adaptive recheck** / **Adaptive escalation**; the pin; the guide. Seen in the developer instance (the entry, the dialog and its Open Settings, the section). Left: the model on each prompt bubble.*
 
 ### Milestone 2: the router
 
@@ -68,8 +69,8 @@ When this is done, the model list of the composer offers **Adaptive** beside the
 
 ### Milestone 3: measure the host, not the emulation
 
-- [ ] 5. `altacli run` with Adaptive (the setting through `-c`), so that `CodeAlta.Evals` and the HARD-51 kit run the real feature instead of their emulations (`EvalScenarioRunner` policies, `recheck` and `escalate_to` of the adapter); the scenarios and HARD-51 with the quality judge, against the trial's numbers.
-- [ ] 6. HARD-51 on Codex once the subscription can be used in its sandboxes (a gateway on the host that holds the sign-in), to set the code tier of that family on real repositories.
+- [ ] 5. `altacli run` with Adaptive (`--tier adaptive`, done; the setting through `-c`), so that `CodeAlta.Evals` and the HARD-51 kit run the real feature instead of their emulations (`EvalScenarioRunner` policies, `recheck` and `escalate_to` of the adapter); the scenarios and HARD-51 with the quality judge, against the trial's numbers.
+- [ ] 6. HARD-51 on Codex once the subscription can be used in its sandboxes (a gateway on the host that holds the sign-in), or on the OpenAI API (`CODEALTA_OPENAI_API_KEY` exists; its budget is the user's decision), to set the code tier of that family on real repositories. The user expects GPT-6.1 Terra, not GPT-6 Luna, as the cheap code model of Codex (Terra ~10x Luna's price, ~1/2 Sol's).
 - [ ] 7. A few days of use on CodeAlta's own work, with the user; each wrong choice noted.
 
 ## How it is verified
@@ -89,6 +90,9 @@ When this is done, the model list of the composer offers **Adaptive** beside the
 | Code tier by default | `quick` with the recheck, `standard` for a family whose cheap model writes weak code | HARD-51 on the Anthropic API; on Codex the small scenarios favored Terra for code, not yet measured on real repositories |
 | Escalation | On visible trouble only, once, to `complex` | Cheap insurance; the misses that matter pass their own tests |
 | Reviews, acceptance tests by `complex` | Not in this plan | 3–5 times the cost of a recheck for no more success in the trial |
+| Before it is set up | Not offered: a dialog leads to the settings | The user asked that Adaptive never run on models nobody chose |
+| How "changed code" is told | A git tree before and after the turn; the files the tools report without git | Provider-neutral; a turn that commits or edits docs is not rechecked |
+| Shown as | **Experimental**, in the composer and the settings | The user's request, until days of use and milestone 3 confirm it |
 
 ## Risks
 

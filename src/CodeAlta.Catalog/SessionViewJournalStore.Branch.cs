@@ -186,6 +186,7 @@ public sealed partial class SessionViewJournalStore
             // The sandbox of a fork can be another than its source's: its agent is told again at its first prompt.
             SandboxNoted = string.IsNullOrWhiteSpace(target.Sandbox) ? sourceLocal?.SandboxNoted : null,
             Tier = sourceLocal?.Tier,
+            Adaptive = sourceLocal?.Adaptive,
             AgentPromptId = sourceLocal?.AgentPromptId,
             Archived = target.Status == SessionViewStatus.Archived,
             ParentSessionId = target.ParentSessionId,

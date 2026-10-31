@@ -1099,6 +1099,23 @@ input.scheme-color-well:disabled { cursor: not-allowed; opacity: .6; }
 .composer-tier-name { font-size: 11px; font-weight: 600; letter-spacing: .03em; text-transform: uppercase; }
 .composer-tier-model { overflow: hidden; color: var(--muted); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
 .composer-tier.bp6-button.bp6-active .composer-tier-name { color: var(--accent); }
+/* Adaptive beside the tiers, with its Experimental tag; muted while it is not set up. */
+.composer-adaptive .composer-tier-name { display: inline-flex; align-items: center; gap: 6px; }
+.composer-adaptive[data-ready="false"] .composer-tier-model { font-style: italic; }
+.adaptive-experimental.bp6-tag { min-height: 0; padding: 0 6px; font-size: 10px; font-weight: 500; letter-spacing: 0; line-height: 16px; text-transform: none; }
+.adaptive-setup-title { margin: 0 0 6px; font-size: 14px; }
+/* Adaptive on Settings > Models, under the tiers. */
+.adaptive-settings { display: grid; justify-items: start; gap: 8px; padding-top: 12px; border-top: 1px solid var(--line); }
+.adaptive-settings h2 { display: flex; align-items: center; gap: 8px; margin: 0; font-size: 14px; }
+.adaptive-settings .settings-field-help { margin: 2px 0 0; }
+.adaptive-settings .bp6-switch { margin: 0; }
+.adaptive-fields { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 18px; padding-left: 38px; }
+.adaptive-field { display: inline-flex; align-items: center; gap: 8px; font-size: 12px; }
+.adaptive-fields .bp6-checkbox { margin: 0; font-size: 12px; }
+.adaptive-missing { flex-basis: 100%; margin: 0; color: var(--muted); font-size: 12px; font-style: italic; }
+.adaptive-guidance { max-width: 72ch; color: var(--muted); font-size: 12px; }
+.adaptive-guidance h3 { margin: 4px 0; color: var(--text); font-size: 12px; }
+.adaptive-guidance p { margin: 0 0 4px; }
 .model-picker-settings { flex: none; margin-bottom: 12px; }
 .model-picker-settings .settings-field { border-bottom: 1px solid var(--line); }
 .model-picker-rows .bp6-input { width: 58px; text-align: right; }

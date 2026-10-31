@@ -4666,7 +4666,12 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
                     ObserveAdmittedUsage(sessionId, projector.Entry!, sanitized);
                     published = sanitized;
                     if (sanitized is not null)
-                        mark(CapturePluginEvent(sanitized, sessionId, projectId, workingDirectory));
+                    {
+                        var envelope = CapturePluginEvent(sanitized, sessionId, projectId, workingDirectory);
+                        // On the actor of the session: the events of its runs are followed in the order they came.
+                        RunEventObserver?.Invoke(envelope);
+                        mark(envelope);
+                    }
                     notifications = projector.Entry!.TakeParentNotifications(sanitized);
                     // A failure the session goes on from with the next model of its tier is not told to the parent,
                     // and its queue waits for the run that continues: both are held until the fallback settles.

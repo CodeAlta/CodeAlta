@@ -6,10 +6,11 @@ import { matchingModels } from "./modelPicker";
 import { addTierTarget, emptyTiers, maximumMaxResumes, moveEffort, moveTierTarget, readTierState, removeTierTarget, replaceTierTarget, setTierReasoning, startingEfforts, tierLabels,
   tierLists, tierNames, tierStore, useTiers, type TierName, type TierState, type TierStore, type TierTarget } from "./modelTiers";
 import { ProviderIcon } from "./ProviderIcon";
+import { AdaptiveSettings } from "./AdaptiveSettings";
 import { useShellLanguage } from "./shellLanguage";
 import { inSpace } from "./spaces/spaces";
 
-type Save = Pick<typeof globalConfig, "saveModelTiers">;
+type Save = Pick<typeof globalConfig, "saveModelTiers"> & Partial<Pick<typeof globalConfig, "saveAdaptive">>;
 type Drag = Readonly<{ tier: TierName; index: number }>;
 const dragType = "application/x-codealta-model-tier";
 
@@ -207,6 +208,8 @@ export function ModelTierSettings({ epoch, providers, models, spaceId = null, sp
         </section>;
       })}
     </div>
+    {/* Adaptive is set up once for every space: it takes its models from the tiers of the space of each session. */}
+    {!spaceId && api.saveAdaptive && <AdaptiveSettings epoch={epoch} state={state} api={{ saveAdaptive: api.saveAdaptive }} store={store} onSaved={setShown} />}
   </section>;
 }
 

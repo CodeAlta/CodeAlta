@@ -16,6 +16,12 @@ public sealed partial class SessionRuntimeService
         => RuntimePluginAgentEventEnvelope.Capture(publishedEvent, sessionId, projectId, workingDirectory,
             PluginEventCurrentProjectId, PluginEventCurrentProjectPath);
 
+    /// <summary>
+    /// Follows the events a provider gives the sessions, on the actor of each session and so in their order: what chooses
+    /// the model of the turns of a session on Adaptive. It must return at once and never throw.
+    /// </summary>
+    internal Action<RuntimePluginAgentEventEnvelope>? RunEventObserver { get; set; }
+
     private Task ObserveLivePluginEventAsync(RuntimePluginAgentEventEnvelope envelope)
         => PluginEventObserver?.ObserveAsync(envelope, CancellationToken.None).AsTask() ?? Task.CompletedTask;
 

@@ -114,7 +114,7 @@ internal static class CliCommandLine
             "Session and model:",
             { "C|project=", "The {FOLDER} of a new session (default: cwd)", v => run.Project = v },
             { "m|model=", "The {MODEL}: provider:model or provider:model@effort", v => run.Model = v },
-            { "tier=", "The model of a {TIER}: complex, standard or quick", v => run.Tier = v },
+            { "tier=", "A model {TIER}: complex, standard, quick, adaptive", v => run.Tier = v },
             { "reasoning=", "The {EFFORT}: none, minimal, low ... xhigh, max", v => run.Reasoning = v },
             { "prompt-id=", "The agent prompt {ID}: default, plan...", v => run.PromptId = v },
             { "title=", "The {TITLE} of a new session", v => run.Title = v },

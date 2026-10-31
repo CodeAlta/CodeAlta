@@ -437,6 +437,23 @@ next target of its tier. `SessionFallbackCoordinator` (owned by `OwnedSessionCom
 - Protected reasoning (signatures, encrypted reasoning) is replayed only to the provider, transport and model that
   produced it (`AgentReasoningReplay`); another provider gets it as text.
 
+## Adaptive turns
+
+A session on Adaptive (`adaptive` in its local state, `[models.adaptive]`; see
+[catalog and config](catalog-and-config.md#model-tiers-and-fallback)) has the model of its turns chosen by the host, not
+by its agent. `AdaptiveTurnCoordinator` (owned by `OwnedSessionCommandService`) does it.
+
+- A send the user started takes the model of the turn tier on the session's provider, at preparation. The command
+  service starts the run of each send it makes (`BeginRun`): a provider that runs its own loop publishes no prompt.
+- What a run does is followed on the actor of the session (`SessionRuntimeService.RunEventObserver`), so in order: tool
+  calls, test commands and their exit code, the files the tools report, the answer. Its idle event starts the decision,
+  beside the events, which the settlement of the session waits for.
+- A user turn that changed code (a git tree of the working folder before and after, docs and `.alta` left out; the
+  reported files without git) gets one recheck prompt on the same model. A turn that ends in visible trouble (no
+  answer, a refusal to use tools it did not call, a failed last test run) continues once on the escalation tier, then
+  the session returns to the turn tier. Both are host prompts with their own provenance.
+- Choosing a model or a tier takes the session off Adaptive; a run that fails is the fallback's.
+
 ## Session retention
 
 Automatic cleanup of old sessions (`SessionRetentionService`, desktop only, one pass at startup, policy

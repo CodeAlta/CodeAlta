@@ -3,7 +3,7 @@ import { modelCatalog, workspace, type ConfigurationSnapshot, type ModelCatalogM
 import type { createMutationCapability } from "./sessionOperations";
 import { chosenNewSessionPreference, newSessionPreferencesKey, newSessionProvider, newSessionSelection, newSessionTier, providersInSpace, newSessionTierProvider, rememberNewSessionPreference,
   restoreNewSessionPreferences, tierNewSessionPreference, type NewSessionChoiceField } from "./newSessionPreferences";
-import { useTiers } from "./modelTiers";
+import { adaptiveChoice, adaptiveTier, useTiers } from "./modelTiers";
 
 // Catalogs only. Draft choices are preferences, never send or provider-switch authority.
 export function useNewSessionChoices(epoch: string | undefined | null, projectId: string | null, projectPath: string | null,
@@ -79,7 +79,9 @@ export function useNewSessionChoices(epoch: string | undefined | null, projectId
     prompts?.key === key ? prompts.defaultId : null);
   // The mode chosen while the provider still offers it; none runs the session in the default one, as an existing session.
   const value = { ...selection, permissionMode: permissionModes.find(mode => mode.id === saved?.permissionMode)?.id ?? null };
-  const tier = newSessionTier(saved, value, tiers?.choices);
+  // Adaptive is offered as a tier that gives the model of the tier of its turns, while it is set up.
+  const tierChoices = tiers ? { ...tiers.choices, [adaptiveTier]: adaptiveChoice(tiers) } : null;
+  const tier = newSessionTier(saved, value, tierChoices);
   // The modes are read before a creation, so that a mode chosen earlier is not left out while they load.
   const ready = !!provider && prompts?.key === key && prompts.rows.some(prompt => prompt.id === value.agentPromptId) && permissions?.key === key
     && models?.key === key && !models.loading && !models.failed
@@ -108,7 +110,7 @@ export function useNewSessionChoices(epoch: string | undefined | null, projectId
     tiers,
     /** Takes the model a tier gives now, and the tier with it; false when the tier gives none. */
     chooseTier(name: string) {
-      const choice = tiers?.choices[name as keyof typeof tiers.choices];
+      const choice = tierChoices?.[name as keyof typeof tierChoices];
       if (!choice) return false;
       setRemembered(rememberNewSessionPreference(remembered, scope, tierNewSessionPreference(saved, name, choice, provider),
         stored => localStorage.setItem(newSessionPreferencesKey, stored)));

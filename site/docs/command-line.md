@@ -24,7 +24,7 @@ altacli run - < task.md
 ```
 
 - The session works in the current folder, or the folder of `-C`.
-- `-m provider:model[@reasoning]` chooses the model, `--tier complex|standard|quick` a [model tier](model-tiers.md), `--reasoning` the effort, `--prompt-id` the [agent prompt](prompts.md) (`default`, `plan`...).
+- `-m provider:model[@reasoning]` chooses the model, `--tier complex|standard|quick` a [model tier](model-tiers.md) (`--tier adaptive` puts the session on [Adaptive](model-tiers.md#adaptive-experimental)), `--reasoning` the effort, `--prompt-id` the [agent prompt](prompts.md) (`default`, `plan`...).
 - The prompt is the words given. `-` reads it from standard input; when standard input is piped and words are given too, it is added after them in a `<stdin>...</stdin>` block. `-f FILE` attaches a file or an image.
 - `--resume ID` continues a session; `--session-id ID` opens the session `ID`, or creates it with this id.
 - `--timeout DURATION` (seconds, or `hh:mm:ss`) stops the run when the time is up. The agent is told when the run ends, and its background jobs are stopped a little before then, so that their results still reach it.
