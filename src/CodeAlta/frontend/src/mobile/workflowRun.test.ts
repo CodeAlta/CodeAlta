@@ -49,6 +49,20 @@ test("a run CodeAlta ended while it ran: what still ran was interrupted; runs ar
   assert.deepEqual([second.runId, second.title, second.callId, second.state], ["run-2", "Other", "call-9", "running"]);
 });
 
+test("the calls a script made: one line per call, its last phase and title, in their order; the version changes with them", () => {
+  const call = (kind: string, second: number, id: string, text: string, parentId = "call-1"): TimelineEvent =>
+    ({ seq: ++seq, at: at(second), kind: `activity.toolcall.${kind}`, text, activityId: id, parentId });
+  const started = [record("runStarted", 0, {}), call("started", 1, "read-1", "toolcall"), call("progressed", 1, "read-1", "read_file src/app.ts"),
+    call("started", 2, "grep-1", "grep \"login\""), call("started", 2, "other", "elsewhere", "call-9"), call("started", 3, "self", "exec", "self")];
+  const [running] = foldWorkflows(started);
+  assert.deepEqual(running.calls.map(item => [item.title, item.phase]), [["read_file src/app.ts", "progressed"], ["grep \"login\"", "started"]],
+    "the title of a later event names a call first seen by its tool; calls of other calls are not the script's");
+  const [ended] = foldWorkflows([...started, call("completed", 4, "read-1", "read_file src/app.ts"), call("failed", 5, "grep-1", "grep \"login\"")]);
+  assert.deepEqual(ended.calls.map(item => [item.key, item.phase, item.at, item.end]), [["cread-1", "completed", at(1), at(4)], ["cgrep-1", "failed", at(2), at(5)]]);
+  assert.notEqual(ended.version, running.version, "a call that ends draws the card again");
+  assert.deepEqual(foldWorkflows([record("runStarted", 0, {})])[0].calls, []);
+});
+
 test("what a run presented, in its order, and whether the host started it for the user", () => {
   const records = [record("runStarted", 0, { title: "Review", forUser: true }), record("presented", 1, { stepId: "read" }, "## Reading"),
     record("presented", 2, {}, "  "), record("presented", 3, { stepId: "report" }, "## Findings\n- one")];

@@ -10,7 +10,7 @@ import { linkedImageUrl, matchLinkedImages, savedImageUrl, splitFiles, type Imag
 import type { ImageViewer } from "./imageViewer";
 import { activityFacts, type ActivityBlock, type MessageBlock, type PendingPrompt, type ToolRow, type WorkflowBlock } from "./timeline";
 import { timelineIcon, type TimelineIconName } from "./timelineIcons";
-import type { WorkflowRun, WorkflowState } from "./workflowRun";
+import type { WorkflowCall, WorkflowRun, WorkflowState } from "./workflowRun";
 
 /** A block as the page holds it: its element, the version it was drawn at, and whether it has a diagram (drawn again with the theme). */
 export type DrawnBlock = { element: HTMLLIElement; version: string; diagram: boolean };
@@ -39,6 +39,7 @@ const stateWords: Readonly<Record<WorkflowState, string>> = {
 };
 
 const duration = (milliseconds: number | null | undefined): string | null => milliseconds == null ? null : activityDuration(milliseconds);
+const endedPhase = (phase: string) => phase === "completed" || phase === "failed" || phase === "canceled";
 
 /** Draws the blocks of the timeline, and answers the taps on what it drew. */
 export function createTimelineView(options: TimelineViewOptions) {
@@ -318,7 +319,7 @@ export function createTimelineView(options: TimelineViewOptions) {
   /** Draws a run of a script again in its block. */
   function drawWorkflow(item: HTMLLIElement, block: WorkflowBlock) { item.replaceChildren(workflowCard(block.run)); }
 
-  // ---- A run of a script: one line (its state, its title, its progress and the step it is at), which opens on its steps and sessions ----
+  // ---- A run of a script: one line (its state, its title, its progress and the step it is at), which opens on its steps, sessions and calls ----
 
   function workflowCard(run: WorkflowRun): HTMLElement {
     const key = `run:${run.runId}`;
@@ -361,7 +362,7 @@ export function createTimelineView(options: TimelineViewOptions) {
     return card;
   }
 
-  // What the line under the title says: what the run waits for, the step it is at, or how it ended.
+  // What the line under the title says: what the run waits for, the step (or, without steps, the call) it is at, or how it ended.
   function workflowLine(run: WorkflowRun): string {
     if (run.waiting?.kind === "question") return "Waits for your answer";
     if (run.waiting?.kind === "approval") return "Waits for an approval";
@@ -369,11 +370,16 @@ export function createTimelineView(options: TimelineViewOptions) {
       const until = Date.parse(run.waiting.until ?? "");
       return Number.isFinite(until) ? `Sleeps until ${new Date(until).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}` : "Sleeps";
     }
-    if (run.state === "running") return run.current ? `▸ ${run.current}` : "Running…";
+    if (run.state === "running") {
+      const current = run.current ?? (run.steps.length ? null : run.calls.filter(call => !endedPhase(call.phase)).at(-1)?.title);
+      return current ? `▸ ${current}` : "Running…";
+    }
     if (run.state === "failed" && run.message) return run.message;
     const took = duration(run.durationMs ?? (Date.parse(run.endedAt ?? "") - Date.parse(run.startedAt ?? "")));
     const sessions = run.sessions.length ? `${run.sessions.length} session${run.sessions.length === 1 ? "" : "s"}` : null;
-    return [stateWords[run.state], took, sessions].filter(Boolean).join(" · ");
+    // Without steps, the calls say what the script did.
+    const calls = !run.steps.length && run.calls.length ? `${run.calls.length} call${run.calls.length === 1 ? "" : "s"}` : null;
+    return [stateWords[run.state], took, sessions, calls].filter(Boolean).join(" · ");
   }
 
   function workflowBody(run: WorkflowRun): HTMLElement {
@@ -409,9 +415,31 @@ export function createTimelineView(options: TimelineViewOptions) {
       }
       body.append(list);
     }
+    if (run.calls.length) {
+      body.append(make("div", "wf-section", "Calls"));
+      const list = make("ol", "wf-calls");
+      const live = run.state === "running" || run.state === "waiting";
+      for (const call of run.calls) list.append(callRow(call, live));
+      body.append(list);
+    }
     if (run.state === "failed" && run.message) body.append(make("p", "wf-message", run.message));
-    if (!run.steps.length && !run.sessions.length && !(run.state === "failed" && run.message)) body.append(make("p", "wf-empty", "The script declared no step yet."));
+    if (!run.steps.length && !run.sessions.length && !run.calls.length && !(run.state === "failed" && run.message))
+      body.append(make("p", "wf-empty", run.state === "running" || run.state === "waiting" ? "The script made no call yet." : "The script made no call."));
     return body;
+  }
+
+  // A call of the script: its state, its title (the tool and what it was given) and how long it took. A call still
+  // running in a run that ended was stopped with it.
+  function callRow(call: WorkflowCall, live: boolean): HTMLLIElement {
+    const state: WorkflowState = call.phase === "completed" ? "completed" : call.phase === "failed" ? "failed" : call.phase === "canceled" ? "canceled" : live ? "running" : "interrupted";
+    const row = make("li", "wf-call");
+    row.dataset.state = state;
+    const mark = timelineIcon(document, stateIcons[state], "wf-step-mark");
+    mark.title = stateWords[state];
+    const took = Date.parse(call.end ?? "") - Date.parse(call.at ?? "");
+    row.append(mark, make("span", "wf-step-title", call.title), make("span", "wf-step-time", state !== "running" && took >= 1000 ? duration(took) : ""));
+    row.setAttribute("aria-label", `${call.title}: ${stateWords[state]}`);
+    return row;
   }
 
   /** Answers a tap the view draws for; says whether it did. */

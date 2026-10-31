@@ -656,16 +656,19 @@ textarea:focus, select:focus { outline: 2px solid var(--accent); outline-offset:
 /* What the script presented: whole, as an answer, under the line of its run. */
 .wf-presented { display: flex; flex-direction: column; gap: .5rem; padding: .25rem .625rem .5rem; border-top: 1px solid var(--line); min-width: 0; }
 .wf-body { display: flex; flex-direction: column; gap: .25rem; padding: .25rem .625rem .5rem; border-top: 1px solid var(--line); }
-.wf-steps, .wf-sessions { display: flex; flex-direction: column; margin: 0; padding: 0; list-style: none; }
-.wf-step, .wf-session { --step-tone: var(--muted); display: flex; align-items: center; gap: .5rem; min-width: 0; min-height: 2rem; font-size: .8125rem; }
-.wf-step[data-state="running"], .wf-session[data-state="running"] { --step-tone: var(--accent); }
+.wf-steps, .wf-sessions, .wf-calls { display: flex; flex-direction: column; margin: 0; padding: 0; list-style: none; }
+.wf-step, .wf-session, .wf-call { --step-tone: var(--muted); display: flex; align-items: center; gap: .5rem; min-width: 0; min-height: 2rem; font-size: .8125rem; }
+.wf-step[data-state="running"], .wf-session[data-state="running"], .wf-call[data-state="running"] { --step-tone: var(--accent); }
 .wf-step[data-state="waiting"] { --step-tone: var(--yellow); }
-.wf-step[data-state="completed"], .wf-session[data-state="completed"] { --step-tone: var(--green); }
-.wf-step[data-state="failed"], .wf-session[data-state="failed"] { --step-tone: var(--red); }
+.wf-step[data-state="completed"], .wf-session[data-state="completed"], .wf-call[data-state="completed"] { --step-tone: var(--green); }
+.wf-step[data-state="failed"], .wf-session[data-state="failed"], .wf-call[data-state="failed"] { --step-tone: var(--red); }
 .wf-step[data-state="pending"] .wf-step-title { color: var(--muted); }
 .wf-step-mark { color: var(--step-tone); font-size: .875rem; }
 .wf-step-title, .wf-session-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .wf-step-title small { color: var(--muted); }
+.wf-call { min-height: 1.75rem; }
+.wf-call .wf-step-title { font-family: var(--code-font); }
+.wf-call[data-state="failed"] .wf-step-title { color: var(--red); }
 .wf-step-time { flex: none; color: var(--muted); font-size: .75rem; font-variant-numeric: tabular-nums; }
 .wf-section { margin-top: .25rem; color: var(--muted); font-size: .6875rem; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; }
 .wf-session { width: 100%; min-height: 44px; padding: 0 .25rem; border: 0; border-radius: 6px; background: transparent; color: inherit; font: inherit; font-size: .8125rem; text-align: start; cursor: pointer; }

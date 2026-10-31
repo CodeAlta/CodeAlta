@@ -22,7 +22,7 @@ export type ToolImage = Readonly<{ key: string; title: string; id: string }>;
 /**
  * The work between two messages, folded into one line that opens on its rows. The images its tools gave the model and the
  * runs of the scripts its calls ran (Code Mode's `exec`) show under that line, folded or not; the calls a script made are
- * the script's, not rows of their own.
+ * the script's, listed on the card of its run, not rows of their own.
  */
 export type ActivityBlock = Readonly<{ kind: "activity"; key: string; rows: readonly (ThoughtRow | ToolRow)[]; images?: readonly ToolImage[]; workflows?: readonly WorkflowRun[] }>;
 /** A run of a script whose call the timeline does not hold: a card of its own. */

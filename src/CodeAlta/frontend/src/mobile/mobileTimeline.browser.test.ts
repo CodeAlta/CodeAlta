@@ -122,6 +122,18 @@ test("the phone timeline shows what the host sent as what it is, images, and the
     live("stepEnded", 30, { stepId: "research", status: "completed", durationMs: 27_000 }),
     live("stepStarted", 31, { stepId: "compare" }),
     live("waitStarted", 32, { stepId: "compare", status: "question", title: "Which cache should the service use?" }),
+    // Scripts that declare no step: their calls say what they do.
+    event("activity.toolcall.started", "exec", 33, { activityId: "exec-3" }),
+    run("run-c3", "exec-3")("runStarted", 33),
+    event("activity.toolcall.started", "read_file docs/cache.md", 33, { activityId: "inner-3", parentId: "exec-3" }),
+    event("activity.toolcall.completed", "read_file docs/cache.md", 35, { activityId: "inner-3", parentId: "exec-3" }),
+    event("activity.toolcall.started", "grep \"ttl\" src", 35, { activityId: "inner-4", parentId: "exec-3" }),
+    event("activity.toolcall.started", "exec", 36, { activityId: "exec-4" }),
+    run("run-c4", "exec-4")("runStarted", 36),
+    event("activity.toolcall.started", "list_dir src", 36, { activityId: "inner-5", parentId: "exec-4" }),
+    event("activity.toolcall.failed", "list_dir src", 36, { activityId: "inner-5", parentId: "exec-4" }),
+    run("run-c4", "exec-4")("runEnded", 38, { status: "completed", durationMs: 2_000 }),
+    event("activity.toolcall.completed", "exec", 38, { activityId: "exec-4" }),
   ]);
   server.state.asks.set("t2", question);
   for (const [key, body] of [["t1/20261027-01-login.png", login], ["t1/20261027-tool-render.png", screenshot], [`t1/linked/22/0`, chart]] as const)
@@ -243,6 +255,10 @@ test("the phone timeline shows what the host sent as what it is, images, and the
     assert.deepEqual(await evaluate("[...document.querySelectorAll('.wf-card .wf-step')].map(s => [s.dataset.state, s.querySelector('.wf-step-title').textContent, s.querySelector('.wf-step-time').textContent])"),
       [["completed", "Research each option", "35s"], ["completed", "Compare", "11s"], ["completed", "Write the report", "8s"]]);
     assert.deepEqual(await texts(".wf-card .wf-session .wf-session-title"), ["Research: Redis"]);
+    // The calls of the script, after its steps and sessions.
+    assert.deepEqual(await evaluate("[...document.querySelectorAll('.wf-card .wf-call')].map(c => [c.dataset.state, c.querySelector('.wf-step-title').textContent, c.querySelector('.wf-step-time').textContent])"),
+      [["completed", "read_file", "1s"]]);
+    assert.deepEqual(await texts(".wf-card .wf-section"), ["Sessions", "Calls"]);
     await theme("light");
     await evaluate(`document.querySelector('.msg-user').scrollIntoView({ block: "start" })`);
     await shot("t1-light-top.png");
@@ -290,6 +306,19 @@ test("the phone timeline shows what the host sent as what it is, images, and the
     await click(".wf-card .wf-head");
     await waitFor(`document.querySelectorAll(".wf-card .wf-step").length === 3`, "the steps of the running run");
     assert.deepEqual(await evaluate("[...document.querySelectorAll('.wf-card .wf-step')].map(s => s.dataset.state)"), ["completed", "waiting", "pending"]);
+    // A script that declares no step says the call it is at, and once it ended, how many calls it made; open, it lists them.
+    assert.equal(await evaluate("document.querySelector('.wf-card[data-run=run-c3] .wf-sub').textContent"), '▸ grep "ttl" src');
+    assert.match(await evaluate<string>("document.querySelector('.wf-card[data-run=run-c4] .wf-sub').textContent"), /^Done · 2s · 1 call$/);
+    await click(".wf-card[data-run=run-c3] .wf-head");
+    await waitFor(`document.querySelectorAll(".wf-card[data-run=run-c3] .wf-call").length === 2`, "the calls of the script");
+    assert.deepEqual(await evaluate("[...document.querySelectorAll('.wf-card[data-run=run-c3] .wf-call')].map(c => [c.dataset.state, c.querySelector('.wf-step-title').textContent, c.querySelector('.wf-step-time').textContent])"),
+      [["completed", "read_file docs/cache.md", "2s"], ["running", 'grep "ttl" src', ""]]);
+    assert.equal(await evaluate("document.querySelector('.wf-card[data-run=run-c3] .wf-empty')"), null, "no empty card");
+    await click(".wf-card[data-run=run-c4] .wf-head");
+    await waitFor(`document.querySelector(".wf-card[data-run=run-c4] .wf-call")`, "the call of the ended script");
+    assert.equal(await evaluate("document.querySelector('.wf-card[data-run=run-c4] .wf-call').dataset.state"), "failed");
+    await evaluate(`document.querySelector('.wf-card[data-run=run-c3]').scrollIntoView({ block: "center" })`);
+    await shot("t2-script-calls.png");
     await noOverflow("t2");
     await shot("t2-dark-waiting.png");
     await theme("light");

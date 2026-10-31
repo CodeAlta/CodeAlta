@@ -1,7 +1,8 @@
 // A run of a script of Code Mode (the `exec` tool), read from its records (`workflow.*` events) as the desktop's timeline
 // reads them (timeline.ts scriptRunOf): the steps its scripts declare and their states, the sessions it started, what it
-// waits for, and how it ended. The phone shows it as one card on the call that runs it, which opens on its steps and
-// sessions; it draws no graph.
+// waits for, and how it ended; and the calls its script made, the events whose parent is the call that runs it, as the
+// desktop lists them in that call (timeline.ts scriptChildren). The phone shows it as one card on the call that runs it,
+// which opens on its steps, sessions and calls; it draws no graph.
 import type { TimelineEvent } from "./contract";
 
 /** The state of a step, of a session of a run, or of the run itself. */
@@ -12,6 +13,9 @@ export type WorkflowStep = Readonly<{ id: string; title: string; state: Workflow
 
 /** A session a run started, which a tap opens. */
 export type WorkflowSession = Readonly<{ sessionId: string; title: string | null; stepId: string | null; state: WorkflowState; durationMs: number | null }>;
+
+/** A call the script made (a tool, `alta`): its title, its last phase and the times of its first and last events. */
+export type WorkflowCall = Readonly<{ key: string; title: string; phase: string; at: string | null; end: string | null }>;
 
 /** What a running script waits for: the answer of an `ask()`, the approval of one of its calls, or the end of a `sleep()`. */
 export type WorkflowWait = Readonly<{ kind: "question" | "approval" | "sleep"; stepId: string | null; text: string | null; until: string | null }>;
@@ -26,6 +30,8 @@ export type WorkflowRun = Readonly<{
   waiting: WorkflowWait | null;
   steps: readonly WorkflowStep[];
   sessions: readonly WorkflowSession[];
+  /** The calls the script made, in their order: what a script that declares no step did. */
+  calls: readonly WorkflowCall[];
   /** The steps that ended, and all the steps known (declared or run). */
   done: number;
   total: number;
@@ -62,7 +68,7 @@ export function workflowState(status: string | null | undefined, fallback: Workf
   }
 }
 
-/** Reads the runs of the records, in the order of their first record. */
+/** Reads the runs of the records, in the order of their first record, each with the calls its script made. */
 export function foldWorkflows(events: readonly TimelineEvent[]): WorkflowRun[] {
   const records = new Map<string, TimelineEvent[]>();
   for (const event of events) {
@@ -71,7 +77,36 @@ export function foldWorkflows(events: readonly TimelineEvent[]): WorkflowRun[] {
     if (!list) records.set(event.workflow.runId, list = []);
     list.push(event);
   }
-  return [...records.entries()].map(([runId, list]) => workflowRun(runId, list));
+  const calls = callsByParent(events);
+  return [...records.entries()].map(([runId, list]) => {
+    const run = workflowRun(runId, list);
+    const made = run.callId ? calls.get(run.callId) : undefined;
+    return made ? { ...run, calls: made.calls, version: `${run.version}|${made.calls.length}:${made.seq}` } : run;
+  });
+}
+
+// The calls each call made: the events of a call (`activity.<tool>.<phase>`) that name another call as their parent, one
+// line per call, with the last event seen of them all (a call changes its phase in a later event).
+function callsByParent(events: readonly TimelineEvent[]): Map<string, { calls: WorkflowCall[]; seq: number }> {
+  const parents = new Map<string, { calls: WorkflowCall[]; seq: number; index: Map<string, number> }>();
+  for (const event of events) {
+    const kind = event.kind ?? "";
+    if (!kind.startsWith("activity.") || kind.startsWith("activity.turn.") || !event.parentId || event.parentId === event.activityId) continue;
+    let parent = parents.get(event.parentId);
+    if (!parent) parents.set(event.parentId, parent = { calls: [], seq: 0, index: new Map() });
+    parent.seq = Math.max(parent.seq, event.seq);
+    const parts = kind.split(".");
+    const phase = parts.at(-1) ?? "", name = parts[1] || "tool", id = event.activityId || `s${event.seq}`;
+    const index = parent.index.get(id);
+    if (index === undefined) {
+      parent.index.set(id, parent.calls.length);
+      parent.calls.push({ key: `c${id}`, title: event.text?.trim() || name, phase, at: event.at, end: event.at });
+    } else {
+      const call = parent.calls[index];
+      parent.calls[index] = { ...call, phase, end: event.at ?? call.end, title: call.title === name && event.text?.trim() ? event.text.trim() : call.title };
+    }
+  }
+  return parents;
 }
 
 /** Reads one run from its records, in their order. */
@@ -136,7 +171,7 @@ export function workflowRun(runId: string, records: readonly TimelineEvent[]): W
   const steps = [...new Set(ids)].map(id => step(id, declared.find(known => known.id === id)?.title ?? id, instances.filter(instance => instance.id === id), waiting));
   const now = steps.find(item => item.state === "running" || item.state === "waiting");
   return {
-    runId, callId, title: title ?? declaredTitle, state: !ended(state) && waiting ? "waiting" : state, waiting, steps, sessions,
+    runId, callId, title: title ?? declaredTitle, state: !ended(state) && waiting ? "waiting" : state, waiting, steps, sessions, calls: [],
     done: steps.filter(item => ended(item.state)).length, total: steps.length, current: now?.title ?? null, message,
     startedAt: records[0]?.at ?? null, endedAt, durationMs, presented, forUser, version: `${records.length}:${records.at(-1)?.seq ?? 0}`,
   };
