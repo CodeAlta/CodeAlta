@@ -3595,9 +3595,18 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
     public async Task AbortAsync(string sessionId, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        if (_forwarding.IsClosed) return;
-        await AdmitAsync(() => AbortOwnedBodyAsync(sessionId, cancellationToken), cancellationToken)
-            .WaitAsync(cancellationToken).ConfigureAwait(false);
+        Task admitted;
+        try { admitted = AdmitAsync(() => AbortOwnedBodyAsync(sessionId, cancellationToken), cancellationToken); }
+        // A runtime that closed has nothing left to abort: its disposal ends the work of its sessions. It can close
+        // while an abort comes (a command owner that closes beside it), so the closure is read where the admission
+        // refuses, not checked before it.
+        catch (ObjectDisposedException failure) when (_forwarding.IsClosed
+            && failure.ObjectName == typeof(OwnedProviderEventForwarding).FullName)
+        {
+            return;
+        }
+
+        await admitted.WaitAsync(cancellationToken).ConfigureAwait(false);
     }
 
     private async Task AbortOwnedBodyAsync(string sessionId, CancellationToken cancellationToken)
@@ -3620,8 +3629,10 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
                     async actorCancellationToken =>
                     {
                         var entry = await GetEntryAsync(sessionId, actorCancellationToken).ConfigureAwait(false);
-                        handleUse = entry.Attachment.TryAcquireHandleUse()
-                            ?? throw new InvalidOperationException("The coordinator attachment is retiring.");
+                        handleUse = entry.Attachment.TryAcquireHandleUse();
+                        // The runtime that closes retires its attachments and ends their runs: nothing is left to abort.
+                        if (handleUse is null && _disposed) return;
+                        if (handleUse is null) throw new InvalidOperationException("The coordinator attachment is retiring.");
                         capturedEntry = entry;
                     },
                     CancellationToken.None).AsTask())
@@ -3631,6 +3642,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
                 throw new InvalidOperationException(
                     result.Message ?? $"Failed to abort session '{sessionId}'.", result.Exception);
             }
+            if (capturedEntry is null) return;
             lifetime = new RuntimeAbortLifetime(new { Runtime = this, Entry = capturedEntry, Use = handleUse, Admission = admission });
             await lifetime.RunAsync(() => Permissions.InvalidateOwnedAttachmentAsync(capturedEntry!.Attachment),
                 token => _agentHub.AbortAsync(capturedEntry!.SessionHandleId, token),

@@ -21,6 +21,23 @@ public sealed class OwnedSessionUserInputRuntimeTests
     }
 
     [TestMethod]
+    public async Task IsolatedRuntime_ClosesBesideItsCommandOwner_UnderLoad()
+    {
+        // The fixture closes the command owner and the runtime at once: the abort of a send the owner still holds can
+        // reach a runtime that is closing. Under load (many fixtures at once) it must find nothing to abort, not fail.
+        var failures = new System.Collections.Concurrent.ConcurrentBag<Exception>();
+        for (var round = 0; round < 4; round++)
+        {
+            await Task.WhenAll(Enumerable.Range(0, 12).Select(index => Task.Run(async () =>
+            {
+                try { await RuntimeFixture.Run(index % 2 == 0 ? "ordinary" : "ask-response"); }
+                catch (Exception ex) { failures.Add(ex); }
+            })));
+        }
+        Assert.IsEmpty(failures, string.Join(Environment.NewLine + Environment.NewLine, failures.Take(2)));
+    }
+
+    [TestMethod]
     public async Task PartialStartedFailure_StartsBothClosingObligations()
     {
         // No start failure, first start failure, or partial (second) start failure; all close masks,
