@@ -32,6 +32,25 @@ public sealed partial class OwnedSessionCommandService
         catch (ObjectDisposedException) { return new("closed"); }
     }
 
+    /// <summary>Records a cloud session started elsewhere, from its link (<see cref="SessionRuntimeService.AdoptCloudSessionAsync"/>).</summary>
+    /// <param name="project">The project.</param>
+    /// <param name="provider">The provider.</param>
+    /// <param name="spaceId">The space of the session, or null.</param>
+    /// <param name="title">The title given, or null.</param>
+    /// <param name="link">The link or the identifier the user pasted.</param>
+    /// <returns>The outcome; <c>closed</c> when the owner is closing.</returns>
+    /// <exception cref="ArgumentNullException">An argument is null.</exception>
+    public async Task<CloudSessionStartResult> AdoptCloudSessionAsync(ProjectDescriptor project, ModelProviderDescriptor provider, string? spaceId, string? title, string link)
+    {
+        lock (_gate)
+        {
+            if (_closed || _retained) return new("closed");
+        }
+
+        try { return await _runtime.AdoptCloudSessionAsync(project, provider, spaceId, title, link).ConfigureAwait(false); }
+        catch (ObjectDisposedException) { return new("closed"); }
+    }
+
     /// <summary>Reads what a session holds of the cloud session it runs as, or ran as.</summary>
     /// <param name="sessionId">The session.</param>
     /// <param name="cancellationToken">Ends the read.</param>

@@ -282,6 +282,10 @@ internal sealed class ClaudeCodeTurnExecutor :
     public (string Command, string? ConfigDirectory) BringBackCommand(string cloudSessionId, string conversationId)
         => (ClaudeCodeCloud.TeleportCommand(cloudSessionId, conversationId), _options.ResolveConfigDirectory());
 
+    /// <inheritdoc />
+    public (string Id, string Url)? FindCloudSession(string text)
+        => ClaudeCodeCloud.FindCloudSessionId(text) is { } id ? (id, ClaudeCodeCloud.UrlOf(id)) : null;
+
     private Task<ClaudeCodeCommandResult> RunCommandAsync(ClaudeCodeLaunch launch, string? input, TimeSpan timeout, CancellationToken cancellationToken)
         => (_options.RunCommand ?? ClaudeCodeCloud.RunAsync)(launch, input, timeout, cancellationToken);
 

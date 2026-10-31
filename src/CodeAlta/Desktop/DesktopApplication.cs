@@ -1119,6 +1119,9 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                     // while that folder is there, the folder of its project otherwise.
                     builder.AddTerminalsService(new TerminalsService(terminals, host.ProjectCatalog, epoch,
                         async (sessionId, token) => await SessionFolderAsync(host, sessionId, token).ConfigureAwait(false)));
+                    // The cloud sessions of Claude Code: started in a terminal of the window, which is shown when Claude Code asks.
+                    builder.AddCloudSessionsService(new CloudSessionsService(host.Commands, host.ProjectCatalog, host.ModelProviderRegistry,
+                        () => host.ModelProviderInitializationService.CurrentStates, terminals, worktrees, epoch));
                     builder.AddMcpHostService(new McpHostService(mcp, McpTools, epoch));
                     builder.AddPromptImagesService(new PromptImagesService(host.WorkspaceReads, epoch));
                     builder.AddToolCallsService(new ToolCallsService(host.WorkspaceReads, host.RuntimeService.ToolOutput, epoch) { Jobs = host.RuntimeService.Jobs });
@@ -1439,6 +1442,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
             builder.AddWorktreesService(new WorktreesService());
             builder.AddMcpHostService(new McpHostService());
             builder.AddTerminalsService(new TerminalsService());
+            builder.AddCloudSessionsService(new CloudSessionsService());
             builder.AddAutomationsService(new AutomationsService());
             builder.AddWorkflowsService(new WorkflowsService());
             builder.AddWorkItemsService(new WorkItemsService());

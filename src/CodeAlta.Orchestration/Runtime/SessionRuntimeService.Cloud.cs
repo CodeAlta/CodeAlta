@@ -74,8 +74,9 @@ public sealed record CloudSessionContinueResult(string Status, string? Message =
 /// <param name="Sent">The messages sent to it from CodeAlta.</param>
 /// <param name="Continuing">Whether it is being brought back, or a bring-back was interrupted.</param>
 /// <param name="ContinuedAt">When it was brought back; null while it runs in the cloud.</param>
+/// <param name="ProjectId">The project of the session, or null.</param>
 public sealed record CloudSessionDetails(string Id, string? Url, string? Title, string? Task, string? Branch, DateTimeOffset? StartedAt, string? Note,
-    IReadOnlyList<SessionCloudMessage> Sent, bool Continuing, DateTimeOffset? ContinuedAt);
+    IReadOnlyList<SessionCloudMessage> Sent, bool Continuing, DateTimeOffset? ContinuedAt, string? ProjectId = null);
 
 public sealed partial class SessionRuntimeService
 {
@@ -155,14 +156,55 @@ public sealed partial class SessionRuntimeService
         }, CancellationToken.None).ConfigureAwait(false);
     }
 
+    /// <summary>
+    /// Records a cloud session started elsewhere (on claude.ai, in the Claude app) as a session of a project that runs in
+    /// the cloud, from the link or the identifier the user pasted, so that it is brought back with
+    /// <see cref="ContinueCloudSessionHereAsync"/>. Nothing is read from the cloud session: its title is the one the user
+    /// gives, else the name of the project, until it is brought back.
+    /// </summary>
+    /// <param name="project">The project it is to be brought into.</param>
+    /// <param name="provider">The provider, signed in to the account of the cloud session.</param>
+    /// <param name="spaceId">The space of the session, or null.</param>
+    /// <param name="title">The title given, or null.</param>
+    /// <param name="link">The link or the identifier the user pasted.</param>
+    /// <returns>
+    /// <c>created</c> with the session; <c>existing</c> with the session that holds it already; <c>invalid_link</c>;
+    /// <c>unavailable</c>; <c>provider_outside_space</c>.
+    /// </returns>
+    /// <exception cref="ArgumentNullException">An argument is null.</exception>
+    public async Task<CloudSessionStartResult> AdoptCloudSessionAsync(ProjectDescriptor project, ModelProviderDescriptor provider, string? spaceId, string? title, string link)
+    {
+        ArgumentNullException.ThrowIfNull(project);
+        ArgumentNullException.ThrowIfNull(provider);
+        ArgumentNullException.ThrowIfNull(link);
+        var space = NormalizeSpaceId(spaceId);
+        return await AdmitAsync(async () =>
+        {
+            if (!IsProviderInSpace(provider.ProviderId.Value, await ResolveSpaceIdAsync(space, project.Id, CancellationToken.None).ConfigureAwait(false)))
+                return new CloudSessionStartResult(ProviderOutsideSpace);
+            if (await _agentHub.GetCloudSessionsAsync(provider.ProviderId, CancellationToken.None).ConfigureAwait(false) is not { } found)
+                return new CloudSessionStartResult("unavailable", Message: "This provider cannot run sessions in the cloud.");
+            if (found.Cloud.FindCloudSession(link) is not { } cloud) return new CloudSessionStartResult("invalid_link");
+            await foreach (var listed in ListRecoverableSessionsAsync(CancellationToken.None).ConfigureAwait(false))
+            {
+                if (listed.Cloud is { } known && string.Equals(known.Id, cloud.Id, StringComparison.Ordinal))
+                    return new CloudSessionStartResult("existing", listed, cloud.Id, cloud.Url);
+            }
+
+            var session = await RecordCloudSessionAsync(project, provider, found.Runtime, space, title, task: null, await ReadBranchAsync(project.ProjectPath).ConfigureAwait(false),
+                new AgentCloudStart("created", cloud.Id, cloud.Url)).ConfigureAwait(false);
+            return new CloudSessionStartResult("created", session, cloud.Id, cloud.Url);
+        }, CancellationToken.None).ConfigureAwait(false);
+    }
+
     // The session of a cloud session, written whole with its cloud state, then listed.
     private async Task<SessionViewDescriptor> RecordCloudSessionAsync(ProjectDescriptor project, ModelProviderDescriptor provider,
-        ModelProviderRuntimeDescriptor runtime, string? spaceId, string? title, string task, string? branch, AgentCloudStart started)
+        ModelProviderRuntimeDescriptor runtime, string? spaceId, string? title, string? task, string? branch, AgentCloudStart started)
     {
         var now = DateTimeOffset.UtcNow;
         var sessionId = Guid.CreateVersion7().ToString();
         var named = !string.IsNullOrWhiteSpace(title) && SessionTitleError(title.Trim()) is null ? title.Trim() : null;
-        var sessionTitle = named ?? ImportedTitle(started.Title ?? task, project);
+        var sessionTitle = named ?? ImportedTitle(started.Title ?? task ?? project.DisplayName, project);
         var target = new SessionViewDescriptor
         {
             SessionId = sessionId,
@@ -242,7 +284,7 @@ public sealed partial class SessionRuntimeService
         var local = await ReadLatestLocalStateAsync(sessionId, session.CreatedAt, cancellationToken).ConfigureAwait(false);
         return local?.Cloud is { Id.Length: > 0 } cloud
             ? new CloudSessionDetails(cloud.Id, cloud.Url, cloud.Title, cloud.Task, cloud.Branch, cloud.StartedAt, cloud.Note, cloud.Sent ?? [],
-                cloud.Continuing is not null, cloud.ContinuedAt)
+                cloud.Continuing is not null, cloud.ContinuedAt, session.ProjectRef)
             : null;
     }
 

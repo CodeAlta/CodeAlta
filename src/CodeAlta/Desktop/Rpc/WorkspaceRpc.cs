@@ -249,7 +249,8 @@ internal sealed partial class WorkspaceService
             var cost = 512 + 64 + 6 * (session.SessionId.Length + title.Length + fullTitle.Length + (parent?.Length ?? 0)
                 + (session.WorkspacePath?.Length ?? 0) + (session.ProviderKey?.Length ?? 0) + (projectId?.Length ?? 0) + (automationId?.Length ?? 0)
                 + (worktreePath?.Length ?? 0) + (worktreeRoot?.Length ?? 0) + (worktreeName?.Length ?? 0)
-                + (forkedFrom?.Length ?? 0) + (forkedTitle?.Length ?? 0) + (spaceId?.Length ?? 0) + 24);
+                + (forkedFrom?.Length ?? 0) + (forkedTitle?.Length ?? 0) + (spaceId?.Length ?? 0) + 24
+                + (session.ViewState?.Cloud is null ? 0 : 6 * 900));
             if (cost > remaining) break;
             remaining -= cost;
             displayedSessions.Add(new WorkspaceSession(session.SessionId, title, session.WorkspacePath, session.ProviderKey, session.UpdatedAt,
@@ -260,6 +261,7 @@ internal sealed partial class WorkspaceService
                 session.ViewState?.Archived == true, session.ViewState?.Archived == true ? session.ViewState.ArchivedAt : null)
             {
                 ProviderConversation = (session.Details as RawApiSessionMetadataDetails)?.ProviderSessionId is { Length: > 0 } ? true : null,
+                Cloud = WorkspaceSessionCloud.Of(session.ViewState?.Cloud),
             });
         }
         return new WorkspaceSnapshot(true, displayedProjects.ToArray(), displayedSessions.ToArray(),
@@ -333,4 +335,24 @@ internal sealed record WorkspaceSession(string Id, string Title, string? Workspa
     // which VS Code and a terminal can open); absent otherwise.
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public bool? ProviderConversation { get; init; }
+
+    // The cloud session the session runs as, or ran as before it was brought back; absent for any other session.
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public WorkspaceSessionCloud? Cloud { get; init; }
+}
+
+/// <summary>What the Explorer shows of the cloud session a session runs as, or ran as.</summary>
+/// <param name="Id">The cloud session.</param>
+/// <param name="Url">Its address on claude.ai, or null.</param>
+/// <param name="Title">Its title, or null.</param>
+/// <param name="Continued">Whether it was brought back to this computer.</param>
+/// <param name="Continuing">Whether it is being brought back now.</param>
+internal sealed record WorkspaceSessionCloud(string Id, string? Url, string? Title, bool Continued, bool Continuing)
+{
+    /// <summary>The view of the cloud state of a listing; null for a session that never ran in the cloud.</summary>
+    internal static WorkspaceSessionCloud? Of(CodeAlta.Agent.AgentSessionCloud? cloud)
+        => cloud is { Id.Length: > 0 and <= 80 }
+            ? new(cloud.Id, cloud.Url is { Length: <= 512 } url && url.StartsWith("https://claude.ai/", StringComparison.Ordinal) ? url : null,
+                cloud.Title is { Length: > 0 } title ? title.Length <= 256 ? title : title[..256] : null, cloud.Continued, cloud.Continuing)
+            : null;
 }

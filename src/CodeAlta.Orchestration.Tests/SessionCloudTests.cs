@@ -130,6 +130,21 @@ public sealed class SessionCloudTests
     }
 
     [TestMethod]
+    public async Task ACloudSessionStartedElsewhere_IsRecordedFromItsLink_Once()
+    {
+        using var temp = TempDirectory.Create();
+        var provider = new CloudProvider();
+        await using var host = await CreateHostAsync(temp, provider);
+        Assert.AreEqual("invalid_link", (await host.Commands.AdoptCloudSessionAsync(host.CurrentProject, provider.Descriptor, null, null, "not a link").WaitAsync(Timeout)).Status);
+        var adopted = await host.Commands.AdoptCloudSessionAsync(host.CurrentProject, provider.Descriptor, null, null, CloudProvider.CloudId).WaitAsync(Timeout);
+        Assert.AreEqual("created", adopted.Status);
+        var details = (await host.Commands.GetCloudSessionAsync(adopted.Session!.SessionId).WaitAsync(Timeout))!;
+        Assert.AreEqual((CloudProvider.CloudId, (string?)null), (details.Id, details.Task), "Nothing is read from the cloud session: no task is known.");
+        var again = await host.Commands.AdoptCloudSessionAsync(host.CurrentProject, provider.Descriptor, null, null, CloudProvider.CloudId).WaitAsync(Timeout);
+        Assert.AreEqual(("existing", adopted.Session.SessionId), (again.Status, again.Session!.SessionId), "A cloud session is held by one session.");
+    }
+
+    [TestMethod]
     public async Task ACloudSession_IsNotBroughtIntoAFolderWithChangesOfTrackedFiles()
     {
         using var temp = TempDirectory.Create();
@@ -315,6 +330,9 @@ public sealed class SessionCloudTests
 
         public (string Command, string? ConfigDirectory) BringBackCommand(string cloudSessionId, string conversationId)
             => ($"claude --teleport {cloudSessionId} --session-id {conversationId}", null);
+
+        public (string Id, string Url)? FindCloudSession(string text)
+            => text.StartsWith("session_", StringComparison.Ordinal) ? (text, "https://claude.ai/code/" + text) : null;
 
         public string[] LastConversation()
         {

@@ -133,4 +133,9 @@ internal interface IAgentProviderCloudSessions
     /// <param name="cloudSessionId">The cloud session.</param>
     /// <param name="conversationId">The conversation it is brought into.</param>
     (string Command, string? ConfigDirectory) BringBackCommand(string cloudSessionId, string conversationId);
+
+    /// <summary>Reads the cloud session a text a user pasted names: its identifier, or its link.</summary>
+    /// <param name="text">The text.</param>
+    /// <returns>The identifier and the address of the cloud session, or null when the text names none.</returns>
+    (string Id, string Url)? FindCloudSession(string text);
 }
