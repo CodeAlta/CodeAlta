@@ -1,6 +1,6 @@
 ---
 title: Run Claude Code sessions in the cloud from CodeAlta Desktop
-status: in-progress
+status: done
 created: 2026-10-31
 summary: A new session of a project can run in the cloud. CodeAlta starts it with Claude Code's own `claude --cloud`, sends it messages with `claude -p --cloud`, and brings it back with `claude --teleport` into the same session, whose cloud turns are then marked "in the cloud". CodeAlta reads nothing from Anthropic's cloud service.
 ---
