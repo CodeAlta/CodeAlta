@@ -75,8 +75,9 @@ When this is done, the model list of the composer offers **Adaptive** beside the
 
 ## How it is verified
 
-- [ ] A session on Adaptive answers a question on `quick`, makes a change, rechecks it, and the bubbles and cards say so.
-- [ ] A turn whose last test run fails is continued on the escalation tier, with its card.
+- [x] A session on Adaptive answers a question on `quick`, makes a change, rechecks it, and the timeline says so. *Tried in the developer instance on 2026-10-31 with Claude Code: set up from Settings > Models, a new session on Adaptive, a question (no recheck), a change (one **Adaptive recheck** on Haiku 5.5), the pin and the return to Adaptive.*
+- [x] A turn whose last test run fails is continued on the escalation tier. *Same trial: `npm test 2>&1 | grep` failed with exit code 0; the summary of the runner now tells it, and the turn went on Opus 5.5, then the next turn on Haiku 5.5 again.*
+- Fixed by the trial: the timeline showed no card of Adaptive (an info update next to the statistics of a turn is folded, and a model one is moved after the next prompt): the prompts of Adaptive are its cards now, and only a turn Adaptive could not continue writes a warning; the chip names Adaptive and the model of the next turn; a tier whose provider still starts says **No model ready**, not **Not set up**, and the tiers are read again once the provider lists its models; Adaptive has a line of its own under the tiers.
 - [ ] Milestone 3 reproduces the emulated numbers within their variance.
 - [ ] Every .NET test, `npm test` and `lunet build` pass.
 

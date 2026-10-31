@@ -69,7 +69,7 @@ In CodeAlta Desktop, the **Agent** chip opens one picker for the agent prompt, t
 - **More options**, at the end of the picker: options that are rarely changed. **Sub-sessions**, on by default, lets the agent [delegate](../sessions/delegation.md) to sessions of its own; off, it does all the work itself, is not told about sub-agents and has no tool to start them. A change applies from the next prompt. **Context size**, for a model that offers several, sets the [input limit](../model-providers/readme.md#context-and-compaction) of the session. The section opens by itself when an option is not its default, and a struck-through mark on the chip shows a session without sub-sessions.
 
 <figure class="alta-figure my-4" style="max-width: 24rem;">
-  <img src="{{site.basepath}}/img/alta-desktop-model-search.webp" alt="The model list of the picker of CodeAlta Desktop filtered by a search box" loading="lazy">
+  <img src="{{site.basepath}}/img/alta-desktop-model-search.webp" alt="The model list of the picker of CodeAlta Desktop: the Complex, Standard and Quick tiers and Adaptive at the top, then the models filtered by a search box" loading="lazy">
   <figcaption class="small text-secondary mt-2">Type in the search box of the model list to find a model.</figcaption>
 </figure>
 
