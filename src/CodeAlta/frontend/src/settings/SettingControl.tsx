@@ -95,5 +95,6 @@ export function SettingControl({ entry, source, revision, label }: { entry: Sett
     default:
       control = null;
   }
-  return <>{control}{reset}{message}</>;
+  // Reset goes before the control: the controls stay in one column at the right edge of the rows.
+  return <>{reset}{control}{message}</>;
 }

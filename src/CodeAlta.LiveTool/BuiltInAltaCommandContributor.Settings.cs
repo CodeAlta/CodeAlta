@@ -39,18 +39,19 @@ internal sealed partial class BuiltInAltaCommandContributor
 
     private static Command CreateSettingsListCommand(AltaCommandContext context)
     {
-        string? words = null, page = null;
+        var words = new List<string>();
+        string? page = null;
         var changed = false;
         var detailed = false;
         var command = Leaf("list", "List the settings, or those that match words.");
-        command.Add("<words>?", "Words the label, the help, the page or the id of a setting all contain; quote several words.", value => words = value);
+        command.Add("<words>*", "Words the label, the help, the page or the id of a setting all contain.", value => { if (value is not null) words.Add(value); });
         command.Add("page=", "Only the settings of a page of Settings, by its id (`sessions`, `appearance`).", value => page = value);
         command.Add("changed", "Only the settings whose value is not their default.", _ => changed = true);
         command.Add("detailed", "Give each setting whole, with its value.", _ => detailed = true);
-        command.Add(async (_, _) => await HandleSettingsListAsync(context, words, page, changed, detailed).ConfigureAwait(false));
+        command.Add(async (_, _) => await HandleSettingsListAsync(context, string.Join(' ', words), page, changed, detailed).ConfigureAwait(false));
         AddHelpText(command,
             "A record names the setting, its label, its page, its kind and what agents may do with it (`agents`: `readWrite` or `read`). `managedBy` names the commands of a list of items.",
-            "Examples: `alta settings list`; `alta settings list \"keep awake\"`; `alta settings list --page sessions --detailed`; `alta settings list --changed`.");
+            "Examples: `alta settings list`; `alta settings list keep awake`; `alta settings list --page sessions --detailed`; `alta settings list --changed`.");
         return command;
     }
 

@@ -6229,10 +6229,8 @@ function SettingsOverlay({ section, onSection, onClose, spaces, spacePage, onSpa
     onCancel={event => { event.preventDefault(); if (!composingEscape.current) onClose(); }}>
     <div className="settings-dialog-body">
       <nav className="settings-dialog-navigation" aria-label={t("Settings pages")} ref={navigation} data-searching={counts !== null || undefined}>
-        <InputGroup inputRef={searchField} className="settings-search-field" type="search" size="small" leftIcon={<AppIcon name="search" size={14} />}
+        <div className="settings-search-bar"><InputGroup inputRef={searchField} className="settings-search-field" type="search" size="small" leftIcon={<AppIcon name="search" size={14} className="bp6-icon" />}
           placeholder={t("Search settings")} aria-label={t("Search settings")} value={search.query} onValueChange={search.onQuery}
-          rightElement={search.query ? <Button variant="minimal" size="small" icon={<AppIcon name="close" size={13} />} aria-label={t("Clear the search")}
-            onClick={() => { search.onQuery(""); searchField.current?.focus(); }} /> : undefined}
           onKeyDown={event => {
             if (event.key === "Escape" && search.query && !event.nativeEvent.isComposing) { event.preventDefault(); event.stopPropagation(); search.onQuery(""); }
             else if (event.key === "Enter" && search.query.trim()) { event.preventDefault(); search.onSubmit(); }
@@ -6240,15 +6238,15 @@ function SettingsOverlay({ section, onSection, onClose, spaces, spacePage, onSpa
               const first = document.querySelector<HTMLElement>(".settings-search-results :is(button, input, select, [tabindex='0'])");
               if (first) { event.preventDefault(); first.focus(); }
             }
-          }} />
+          }} /></div>
         {settingsGroups.map(({ group, pages }) => group === "Spaces"
           // Each space is a setup of its own: the group lists them after the overview and the labels, right after Personalization.
           ? <div key={group} className="settings-dialog-group settings-dialog-spaces">
             <h3>{t(group)}</h3>
             {pages.map(({ id, label, icon }) => <button key={id} type="button" aria-current={counts === null && section === id && (id !== "spaces" || !spacePage) ? "page" : undefined}
               data-settings-section={id} data-dimmed={dimmed(id) || undefined} onClick={() => { onSection(id); if (id === "spaces") onSpacePage(null); }}><AppIcon name={icon} size={16} /><span>{t(label)}</span>{count(id)}</button>)}
-            {spaces.map(space => <button key={space.id} type="button" aria-current={section === "spaces" && spacePage?.spaceId === space.id ? "page" : undefined}
-              data-settings-space={space.id} onClick={() => { onSection("spaces"); onSpacePage({ spaceId: space.id, section: spacePage?.section ?? "general" }); }}>
+            {spaces.map(space => <button key={space.id} type="button" aria-current={counts === null && section === "spaces" && spacePage?.spaceId === space.id ? "page" : undefined}
+              data-settings-space={space.id} data-dimmed={counts !== null || undefined} onClick={() => { onSection("spaces"); onSpacePage({ spaceId: space.id, section: spacePage?.section ?? "general" }); }}>
               <SpaceIcon space={space} size={16} /><span>{space.name}</span></button>)}
           </div>
           : <div key={group} className="settings-dialog-group">
@@ -6256,9 +6254,12 @@ function SettingsOverlay({ section, onSection, onClose, spaces, spacePage, onSpa
             {pages.map(({ id, label, icon }) => <button key={id} type="button" aria-current={counts === null && section === id ? "page" : undefined}
               data-settings-section={id} data-dimmed={dimmed(id) || undefined} onClick={() => onSection(id)}><AppIcon name={icon} size={16} /><span>{t(label)}</span>{count(id)}</button>)}
             {/* Each plugin that has a settings page has its own, after the pages of the extensions, named and iconed as its canvas. */}
-            {group === "Extensions" && pluginPages.map(page => <button key={`${page.pluginKey}/${page.canvasId}`} type="button"
-              aria-current={section === "plugin" && samePluginSettingsPage(pluginPage, page) ? "page" : undefined} data-settings-plugin={`${page.pluginKey}/${page.canvasId}`}
-              onClick={() => onPluginPage(page)}><CanvasIcon name={page.icon} pluginKey={page.pluginKey} size={16} /><span>{page.title}</span></button>)}
+            {group === "Extensions" && pluginPages.map(page => {
+              const id = page.canvasId ? `plugin/${page.pluginKey}/${page.canvasId}` : `plugin/${page.pluginKey}`;
+              return <button key={`${page.pluginKey}/${page.canvasId}`} type="button"
+                aria-current={counts === null && section === "plugin" && samePluginSettingsPage(pluginPage, page) ? "page" : undefined} data-settings-plugin={`${page.pluginKey}/${page.canvasId}`}
+                data-dimmed={dimmed(id) || undefined} onClick={() => onPluginPage(page)}><CanvasIcon name={page.icon} pluginKey={page.pluginKey} size={16} /><span>{page.title}</span>{count(id)}</button>;
+            })}
           </div>)}
         <OverflowTip within={navigation} target=".settings-dialog-navigation button" label=":scope > span:last-child" />
       </nav>

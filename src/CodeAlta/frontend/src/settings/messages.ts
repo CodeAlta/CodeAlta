@@ -7,6 +7,7 @@ export const settingsSearchMessages = {
     "「{query}」に一致する設定はありません。", "没有与“{query}”匹配的设置。"],
   "{count} results for “{query}”": ["{count} resultados para «{query}»", "{count} résultats pour « {query} »", "{count} Ergebnisse für „{query}“", "「{query}」の結果 {count} 件",
     "“{query}”的 {count} 个结果"],
+  "1 result for “{query}”": ["1 resultado para «{query}»", "1 résultat pour « {query} »", "1 Ergebnis für „{query}“", "「{query}」の結果 1 件", "“{query}”的 1 个结果"],
   "Open page": ["Abrir la página", "Ouvrir la page", "Seite öffnen", "ページを開く", "打开页面"],
   "Change it on its page": ["Cámbialo en su página", "Modifiez-le sur sa page", "Auf seiner Seite ändern", "そのページで変更します", "在其页面上更改"],
   "Not available here": ["No disponible aquí", "Non disponible ici", "Hier nicht verfügbar", "ここでは利用できません", "此处不可用"],

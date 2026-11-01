@@ -58,7 +58,7 @@ export function SettingsSearchResults({ query, result, entries, source, revision
   }
   return <main className="configuration-page settings-search-results" aria-label={t("Search settings")}>
     <header className="page-heading"><span className="eyebrow">{t("Settings")}</span>
-      <h1 role="status">{t("{count} results for “{query}”", { count, query: query.trim() })}</h1></header>
+      <h1 role="status">{count === 1 ? t("1 result for “{query}”", { query: query.trim() }) : t("{count} results for “{query}”", { count, query: query.trim() })}</h1></header>
     {groups.map(group => {
       const first = group.settings[0];
       const page = settingsPageOf(group.page);

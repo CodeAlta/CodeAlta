@@ -1,7 +1,8 @@
 /* The search of Settings, its results, and the glow of a setting that is opened. */
 
 /* The field heads the navigation and stays in view while the list scrolls. */
-.settings-dialog-navigation .settings-search-field { position: sticky; top: -15px; z-index: 1; margin: -3px 0 12px; padding: 3px 0 6px; background: var(--panel); }
+/* The bar is sticky and padded; the input group inside keeps its own box, where Blueprint centers its icon. */
+.settings-dialog-navigation .settings-search-bar { position: sticky; top: -15px; z-index: 1; margin: -15px -12px 10px; padding: 15px 12px 6px; background: var(--panel); }
 .settings-dialog-navigation .settings-search-field input { border-radius: 7px; }
 /* While a query is typed, the pages without a result step back and the others say how many they have. */
 .settings-dialog-navigation[data-searching] button[data-dimmed] { opacity: .42; }
@@ -19,7 +20,8 @@
 .settings-search-section { margin: 6px 0 0; color: var(--muted); font-size: 11px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; }
 .settings-search-section + .settings-search-row { border-top: 0; }
 .settings-search-row mark, .settings-search-group mark, .settings-search-page mark { padding: 0 1px; border-radius: 3px; color: inherit; background: color-mix(in srgb, var(--accent) 28%, transparent); }
-.settings-search-row .setting-control-number { width: 110px; }
+.setting-control-number { flex: none; }
+.setting-control-number .bp6-input-group { width: 90px; }
 .settings-search-row .setting-control-text { min-width: 240px; }
 .settings-search-row .setting-control-list { min-width: 260px; max-width: 420px; }
 .settings-search-row .error-text { flex-basis: 100%; text-align: right; }
