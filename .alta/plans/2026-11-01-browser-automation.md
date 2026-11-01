@@ -1,6 +1,6 @@
 ---
 title: Drive Chrome, Edge, Firefox and Safari from CodeAlta sessions
-status: in-progress
+status: done
 created: 2026-11-01
 summary: A built-in `browser` plugin gives sessions the tools of Chrome DevTools MCP for real browsers, in .NET only (CDP for Chromium browsers, WebDriver BiDi for Firefox, Safari 27's own MCP server for Safari), in a throwaway profile by default or in the user's own browser after they agree; the browser is the one the user names, prefers in Settings, or uses on this computer (#281).
 ---
@@ -290,7 +290,7 @@ Settings and documentation:
 
 ## How it is verified
 
-- [ ] `dotnet build -c <Configuration>`, `dotnet test -c <Configuration> --no-build`, `npm test` and `lunet build` pass. The browser tests ran against Chrome, Edge and Firefox on this computer, and are skipped where a browser is missing.
+- [x] `dotnet build -c <Configuration>`, `dotnet test -c <Configuration> --no-build`, `npm test` and `lunet build` pass. The browser tests ran against Chrome, Edge and Firefox on this computer, and are skipped where a browser is missing.
 - [x] On this computer, `alta browser list` shows the installed browsers with their versions, last use and default status, and Automatic picks the browser the user uses. A session told "use Firefox" gets Firefox, and with Edge preferred in Settings, a session gets Edge.
 - [x] In the developer instance, a session is asked to open the fixture page, sign in with `test@example.com` and give the title. It does so in Chrome, Edge and Firefox (`isolated`), with screenshots in the timeline, and leaves no profile folder behind.
 - [x] Two sessions browse at the same time without seeing each other's tabs or cookies, and a child session does not see its parent's tabs.
@@ -305,6 +305,9 @@ Settings and documentation:
 
 > [!NOTE]
 > Verification notes (2026-11-01): the developer-instance run used https://example.com in Edge (chosen by Automatic) and Firefox (named), with a screenshot and no profile left behind; the fixture sign-in flow, two sessions apart and the sandbox rules run in `BrowserPluginTests` against headless Edge and Firefox. The user's own browser was checked up to the permission card in the developer instance: Chrome's remote-debugging dialog, a Chromium trace opened in DevTools and Safari 27 need a person and a Mac, and stay to check by hand.
+
+> [!NOTE]
+> Review (GPT-6.1 Sol, 2026-11-01): the confirmed findings were fixed with regression tests (links in paths and swapped after a check, the denied and protected paths of a sandbox, WebRTC and DNS around its proxy, a changed sandbox, UNC paths, `file:` pages and frames, popups read before consent, downloads, `altacli` profiles, Safari before 27, the lifetimes of a session and of CDP flushes, one call at a time). Not changed: a popup's first request in the user's own browser (stopping it would pause every new tab of the user; what the tools read of it is checked), the other ports of CodeAlta (they check a token on every request), and Safari's activation by the agent itself (it gets the tools in the running turn).
 
 ## Decisions
 
