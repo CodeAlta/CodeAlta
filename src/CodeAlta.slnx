@@ -87,4 +87,8 @@
     <Project Path="CodeAlta.Benchmarks/CodeAlta.Benchmarks.csproj" />
     <Project Path="CodeAlta.Evals/CodeAlta.Evals.csproj" />
     <Project Path="CodeAlta.ColorSchemes.Generator/CodeAlta.ColorSchemes.Generator.csproj" />
-  </Folder></Solution>
+  </Folder>
+  <Project Path="CodeAlta.Browser.Cdp.Generator/CodeAlta.Browser.Cdp.Generator.csproj" />
+  <Project Path="CodeAlta.Browser.Tests/CodeAlta.Browser.Tests.csproj" />
+  <Project Path="CodeAlta.Browser/CodeAlta.Browser.csproj" />
+</Solution>

@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsAotCompatible>true</IsAotCompatible>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <Description>Drives web browsers for the agents of CodeAlta: the Chrome DevTools Protocol for Chromium browsers, WebDriver BiDi for Firefox, and the tools of Chrome DevTools MCP over both.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- WebDriver BiDi, for Firefox. Pinned and used only behind IBrowserDriver (see doc/browser.md). -->
+    <PackageReference Include="WebDriverBiDi" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Include="Agent\browser-agent.js" LogicalName="CodeAlta.Browser.browser-agent.js" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="CodeAlta.Browser.Tests" />
+    <InternalsVisibleTo Include="CodeAlta.Plugin.Browser" />
+  </ItemGroup>
+</Project>
