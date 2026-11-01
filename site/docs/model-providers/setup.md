@@ -163,7 +163,7 @@ The `codex-cli` provider runs OpenAI's Codex agent itself, with your ChatGPT pla
 | Sign-in | CodeAlta's ChatGPT sign-in | Codex's ChatGPT sign-in, run by CodeAlta |
 | Business and Enterprise workspaces | refused by most | accepted |
 
-To add it in CodeAlta Desktop: **Settings > Providers > Add provider > Codex CLI…**, then **Add**. CodeAlta downloads the version of Codex it is tested with (Codex 0.165.0, about 100 MB) and adds the provider. Then **Sign in** in its form:
+To add it in CodeAlta Desktop: **Settings > Providers > Add provider > Codex CLI…**, then **Add**. CodeAlta downloads the version of Codex it is tested with (Codex 0.166.0, about 150 MB) and adds the provider. Then **Sign in** in its form:
 
 - **Sign in with ChatGPT** opens the ChatGPT sign-in in the browser.
 - **Sign in with a device code** shows a code to enter on the page it opens, for a computer whose browser cannot return to CodeAlta.

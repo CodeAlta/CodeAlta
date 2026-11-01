@@ -64,9 +64,11 @@ public sealed class CodexCliLiveTests
             return new AgentToolResult(true, [new AgentToolResultItem.Text("echo:" + text)]);
         })];
 
+        // Codex runs commands with PowerShell on Windows, which has no `touch`.
+        var create = OperatingSystem.IsWindows() ? "New-Item -ItemType File codex-live.txt" : "touch codex-live.txt";
         var conversation = await fixture.RunAsync(
             "Do exactly this, in order: 1) call the `echo` tool of the `codealta` MCP server with text \"pong\"; " +
-            "2) run the shell command `touch codex-live.txt` in the working folder; 3) answer with the result of the echo tool only.");
+            $"2) run the shell command `{create}` in the working folder; 3) answer with the result of the echo tool only.");
 
         CollectionAssert.Contains(echoed, "pong");
         Assert.IsTrue(File.Exists(Path.Combine(fixture.WorkingDirectory, "codex-live.txt")), "the command ran in the working folder");

@@ -74,7 +74,9 @@ public sealed class ClaudeCodeLiveCliTests
     }
 
     [TestMethod]
-    public async Task Turn_ACommitTheHostRefuses_IsDeniedEvenInBypassMode()
+    [DataRow("Bash")]
+    [DataRow("Monitor")]
+    public async Task Turn_ACommitTheHostRefuses_IsDeniedEvenInBypassMode(string tool)
     {
         var checkedCommands = new List<string>();
         using var live = await LiveSession.StartAsync(permissionMode: "bypassPermissions", guard: (command, _, _) =>
@@ -88,7 +90,7 @@ public sealed class ClaudeCodeLiveCliTests
             await git.WaitForExitAsync();
         }
 
-        await live.SendAsync("Run exactly this shell command with the Bash tool, in one call, then say in one sentence what happened: git commit --allow-empty -m codealta-live");
+        await live.SendAsync($"Run exactly this shell command with the {tool} tool, in one call, then say in one sentence what happened: git commit --allow-empty -m codealta-live");
 
         // The hook ran before the permissions of the CLI, which bypass every question: the commit was refused.
         lock (checkedCommands) Assert.IsTrue(checkedCommands.Any(AgentGitCommands.IsCommit), string.Join(" | ", checkedCommands));
@@ -192,7 +194,7 @@ public sealed class ClaudeCodeLiveCliTests
         StringAssert.Contains(live.LastAnswer.ToLowerInvariant(), "kumquat");
 
         // A turn that is stopped while its command runs leaves a session that still answers. The CLI refuses a command
-        // whose first part is a long `sleep` (checked with CLI 2.1.300 and 2.1.309): this one starts with an echo.
+        // whose first part is a long `sleep` (checked with CLI 2.1.300, 2.1.309 and 2.1.316): this one starts with an echo.
         var stopped = live.Session.SendAsync(new AgentSendOptions { Input = AgentInput.Text("Run exactly this shell command with the Bash tool, in one call: echo waiting && sleep 60") });
         await live.WaitForAsync(static e => e is AgentActivityEvent { Name: "Bash", Phase: AgentActivityPhase.Started });
         await live.Session.AbortAsync().WaitAsync(Timeout);

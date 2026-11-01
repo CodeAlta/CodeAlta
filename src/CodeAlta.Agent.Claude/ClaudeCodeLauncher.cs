@@ -43,7 +43,7 @@ internal static class ClaudeCodeLauncher
     private const string SubagentTools = "Agent,Task,Workflow";
 
     /// <summary>
-    /// The tools of the CLI that run commands, as version 2.1.309 names them: the shell, the PowerShell of Windows,
+    /// The tools of the CLI that run commands, as version 2.1.316 names them: the shell, the PowerShell of Windows,
     /// and Monitor, which runs a command in the background and reads its output. A session that does without
     /// <c>shell_command</c> is started without them.
     /// </summary>

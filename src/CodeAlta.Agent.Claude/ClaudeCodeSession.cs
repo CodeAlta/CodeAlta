@@ -28,7 +28,8 @@ internal sealed partial class ClaudeCodeSession : IAsyncDisposable
     private const string PlanModeHookId = "codealta_plan_mode";
     private const string PlanModeHookMatcher = "EnterPlanMode";
     private const string CommandHookId = "codealta_command";
-    private const string CommandHookMatcher = "Bash|PowerShell";
+    // Monitor runs a shell command too: Claude Code before 2.1.314 does not run the hooks of Bash for it.
+    private const string CommandHookMatcher = "Bash|PowerShell|Monitor";
     private const string ToolHookId = "codealta_tool_hooks";
     private const string ReasoningDisplayOption = "--thinking-display";
     private const string NothingLeftOfOwnTurn = "Claude Code had nothing more to show for this turn.";

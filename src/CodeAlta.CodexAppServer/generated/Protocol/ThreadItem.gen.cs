@@ -6,6 +6,9 @@ using System.Text.Json.Serialization;
 
 namespace CodeAlta.CodexAppServer.Protocol;
 
+/// <summary>
+/// A thread item and its recorded lifecycle times. The payload stays flat on the wire.
+/// </summary>
 [JsonPolymorphic(TypeDiscriminatorPropertyName = "type", IgnoreUnrecognizedTypeDiscriminators = true)]
 [JsonDerivedType(typeof(UserMessageThreadItem), typeDiscriminator: "userMessage")]
 [JsonDerivedType(typeof(HookPromptThreadItem), typeDiscriminator: "hookPrompt")]
@@ -28,6 +31,13 @@ namespace CodeAlta.CodexAppServer.Protocol;
 [JsonDerivedType(typeof(ContextCompactionThreadItem), typeDiscriminator: "contextCompaction")]
 public partial record ThreadItem
 {
+    /// <summary>Unix timestamp in milliseconds when the item completed, if recorded.</summary>
+    [JsonPropertyName("completedAtMs")]
+    public long? CompletedAtMs { get; set; }
+    /// <summary>Unix timestamp in milliseconds when the item started, if recorded.</summary>
+    [JsonPropertyName("startedAtMs")]
+    public long? StartedAtMs { get; set; }
+
     public sealed partial record UserMessageThreadItem : ThreadItem
     {
         [JsonPropertyName("clientId")]
@@ -286,6 +296,9 @@ public partial record ThreadItem
     {
         [JsonPropertyName("failure")]
         public ImageGenerationFailure? Failure { get; set; }
+        /// <summary>Image generation identifier for the generated image, when provided by the image backend.</summary>
+        [JsonPropertyName("generationId")]
+        public string? GenerationId { get; set; }
         [JsonPropertyName("id")]
         public string Id { get; set; } = string.Empty;
         /// <summary>Observed local inputs for a completed generation, absent on older items.</summary>

@@ -952,9 +952,10 @@ public sealed class ClaudeCodeSessionTests
 
         await session.SendAsync(new AgentSendOptions { Input = AgentInput.Text("commit") }).WaitAsync(Timeout);
 
-        // The hook is registered for the shell tools; a hook runs before the permissions of the CLI, bypass included.
+        // The hook is registered for the tools that run commands, Monitor included; a hook runs before the permissions
+        // of the CLI, bypass included.
         var hooks = SessionProcess(cli).InitializeRequest.GetProperty("hooks").GetProperty("PreToolUse");
-        Assert.AreEqual("Bash|PowerShell", hooks[2].GetProperty("matcher").GetString());
+        Assert.AreEqual("Bash|PowerShell|Monitor", hooks[2].GetProperty("matcher").GetString());
         Assert.AreEqual("codealta_command", hooks[2].GetProperty("hookCallbackIds")[0].GetString());
         var denied = answers[0].GetProperty("response").GetProperty("hookSpecificOutput");
         Assert.AreEqual(("deny", "Request a review first."), (denied.GetProperty("permissionDecision").GetString(), denied.GetProperty("permissionDecisionReason").GetString()));

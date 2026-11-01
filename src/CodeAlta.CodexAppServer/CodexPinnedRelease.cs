@@ -27,7 +27,7 @@ public sealed record CodexAppServerPackage(string Target, long Size, string Sha2
 public static class CodexPinnedRelease
 {
     /// <summary>The version of Codex CodeAlta runs.</summary>
-    public const string Version = "0.165.0";
+    public const string Version = "0.166.0";
 
     /// <summary>The tag of the release in the Codex repository.</summary>
     public const string Tag = "rust-v" + Version;
@@ -42,12 +42,12 @@ public static class CodexPinnedRelease
 
     private static readonly FrozenDictionary<string, CodexAppServerPackage> PackagesByTarget = new CodexAppServerPackage[]
     {
-        new("aarch64-apple-darwin", 105_257_885, "db80061560c75c440efe11d347f5bebcf78aa895b40e38ca47623d8a37b41cd7"),
-        new("x86_64-apple-darwin", 113_965_237, "d61cc6997e95d548dcc7c4ba4b71bd1395ea7407fc06f2a4f22a8d91ba9c5cbd"),
-        new("aarch64-unknown-linux-musl", 112_680_748, "656970a7c788a77d7b7e9d490e764df5ee8e13902772ed51811c8fb17ac6be75"),
-        new("x86_64-unknown-linux-musl", 120_636_305, "0c2c2e151c08a13dc751ab579e5132b3b0dc6afbf25b945509b64b3fa1b02632"),
-        new("aarch64-pc-windows-msvc", 123_233_115, "b438db352fd89b04c9ae1bb919ca46bd7ebab89cb24b9d516f763c3bf4e4bcf8"),
-        new("x86_64-pc-windows-msvc", 133_356_098, "23a2b31fce7fcfe26da8ec8ea3ddc5d3e620c3a4e92cf8f89fa519604d10094e"),
+        new("aarch64-apple-darwin", 133_124_660, "ee0010686a1a36dd26d1614e070955fb1cb42b11d7f98e955ad13715d66cd0de"),
+        new("x86_64-apple-darwin", 144_423_333, "c474377b4ea73451b06367911157ff84d07917be7268658e23636933b3129ab7"),
+        new("aarch64-unknown-linux-musl", 145_150_661, "50bb0d5ce10faa13eb6e7b0b25e1fe9712d686c41b3c3fdff587512064630d5d"),
+        new("x86_64-unknown-linux-musl", 155_332_411, "e69a1b62488288f702186b9c216a8e3930e45475f70124381d4e1c633f2e0c76"),
+        new("aarch64-pc-windows-msvc", 153_395_534, "c8d8cd06d1b91be81f92faf10f9a1c44ad54155fd96a377ce048b251b79fa256"),
+        new("x86_64-pc-windows-msvc", 165_654_104, "2476ec968c64e9ae47f449446320e47a54d16f5436ce6eb95eec758584f12eb6"),
     }.ToFrozenDictionary(static package => package.Target, StringComparer.Ordinal);
 
     /// <summary>Gets the packages of the pinned release, one per platform.</summary>

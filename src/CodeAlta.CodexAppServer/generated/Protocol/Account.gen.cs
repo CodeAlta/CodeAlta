@@ -21,6 +21,9 @@ public partial record Account
         public string? Email { get; set; }
         [JsonPropertyName("planType")]
         public PlanType PlanType { get; set; } = default!;
+        /// <summary>Display name of the selected ChatGPT workspace, when available.</summary>
+        [JsonPropertyName("workspaceName")]
+        public string? WorkspaceName { get; set; }
     }
 
     public sealed partial record AmazonBedrockAccount : Account
