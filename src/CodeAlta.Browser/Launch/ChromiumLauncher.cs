@@ -33,6 +33,10 @@ internal static class ChromiumLauncher
             "--hide-crash-restore-bubble",
             "--enable-automation",
             "--metrics-recording-only",
+            // Every connection goes through the proxy of its context when it has one: WebRTC sends no UDP of its own, and no
+            // name is resolved ahead of a request, so that a sandboxed session's pages reach the network of its sandbox only.
+            "--force-webrtc-ip-handling-policy=disable_non_proxied_udp",
+            "--dns-prefetch-disable",
         };
         // A temporary profile keeps no secret worth the system keychain; a kept one, where the user signs in, uses it.
         if (options.Temporary) arguments.AddRange(["--password-store=basic", "--use-mock-keychain"]);

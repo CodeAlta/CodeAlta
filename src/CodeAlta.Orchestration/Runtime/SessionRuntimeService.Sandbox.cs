@@ -44,6 +44,13 @@ public sealed record SessionSandboxReach(string Profile, IReadOnlyList<string> R
     /// </summary>
     public IReadOnlyList<string> Protected { get; init; } = [];
 
+    /// <summary>
+    /// Gets a text that changes whenever what the sandbox reaches changes (its profile, folders, network, hosts or ports):
+    /// a program started with the reach of before is stopped when it differs.
+    /// </summary>
+    public string Fingerprint => string.Join('\u001f', [Profile, Network.ToString(), Hosts is null ? "*" : string.Join(',', Hosts),
+        string.Join(',', LocalPorts), string.Join(',', ReservedPorts.Order()), string.Join('|', Read), string.Join('|', Write), string.Join('|', Denied), string.Join('|', Protected)]);
+
     /// <summary>Starts a proxy of the network of the profile on a free port of the loopback: the program goes through it only.</summary>
     /// <returns>The proxy, which its owner disposes.</returns>
     /// <exception cref="System.Net.Sockets.SocketException">No port could be listened on.</exception>

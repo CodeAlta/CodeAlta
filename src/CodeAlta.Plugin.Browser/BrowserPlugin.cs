@@ -172,7 +172,7 @@ public sealed class BrowserPlugin : PluginBase
     private async ValueTask<string?> SandboxChangedAsync(BrowserAgentSession session, CancellationToken cancellationToken)
     {
         var now = _host.Sandbox is { } read ? await read(session.SessionId, cancellationToken).ConfigureAwait(false) : null;
-        if ((now is null) == (session.Sandbox is null) && now?.Profile == session.Sandbox?.Profile) return null;
+        if (BrowserSandbox.SameReach(session.Sandbox, now)) return null;
         await DeactivateAsync(session.SessionId).ConfigureAwait(false);
         return "The sandbox of this session changed since it turned the browser tools on, so its browser was closed. Run `alta browser activate` again.";
     }
@@ -392,7 +392,7 @@ public sealed class BrowserPlugin : PluginBase
         var target = new BrowserTarget(choice.Browser, profile, headless || settings.Headless || !_host.HasUser);
         var existing = SessionOf(sessionId);
         BrowserAgentSession session;
-        if (existing is not null && existing.Target == target && (existing.Sandbox is null) == (sandbox is null))
+        if (existing is not null && existing.Target == target && BrowserSandbox.SameReach(existing.Sandbox, sandbox))
         {
             session = existing;
         }

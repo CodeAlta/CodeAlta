@@ -207,6 +207,7 @@ internal sealed class CliHost : IAsyncDisposable
                 {
                     Denied = reach.Denied,
                     ReadOnly = reach.Protected,
+                    Fingerprint = reach.Fingerprint,
                 }
                 : null;
             browser.ReservedPorts = static () => [2582, 2583];

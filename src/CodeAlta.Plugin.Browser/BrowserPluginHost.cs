@@ -28,6 +28,20 @@ public sealed record BrowserSandbox(
 
     /// <summary>Gets the folders and files never written, also inside the write roots: what other programs run later.</summary>
     public IReadOnlyList<string> ReadOnly { get; init; } = [];
+
+    /// <summary>
+    /// Gets a text that changes whenever what the sandbox reaches changes, its network included: a session's browser
+    /// started with another one is closed. Null to compare the profile and the folders only.
+    /// </summary>
+    public string? Fingerprint { get; init; }
+
+    /// <summary>Whether a session's browser started in one sandbox may go on in another: the same reach.</summary>
+    public static bool SameReach(BrowserSandbox? before, BrowserSandbox? now)
+        => before is null || now is null
+            ? before is null && now is null
+            : before.Profile == now.Profile && before.Fingerprint == now.Fingerprint
+              && before.ReadRoots.SequenceEqual(now.ReadRoots) && before.WriteRoots.SequenceEqual(now.WriteRoots)
+              && before.Denied.SequenceEqual(now.Denied) && before.ReadOnly.SequenceEqual(now.ReadOnly);
 }
 
 /// <summary>

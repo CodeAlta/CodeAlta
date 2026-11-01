@@ -122,6 +122,30 @@ public sealed class BrowserPluginTests
     }
 
     [TestMethod]
+    public void TheBrowsersOfCodeAlta_SendWebRtcThroughTheProxyOnly_AndResolveNoNameAhead()
+    {
+        var options = new CodeAlta.Browser.Launch.BrowserLaunchOptions { Executable = "chrome", ProfileDirectory = "profile" };
+        var arguments = CodeAlta.Browser.Launch.ChromiumLauncher.Arguments(options);
+        CollectionAssert.Contains(arguments.ToArray(), "--force-webrtc-ip-handling-policy=disable_non_proxied_udp");
+        CollectionAssert.Contains(arguments.ToArray(), "--dns-prefetch-disable");
+        var userJs = CodeAlta.Browser.Launch.FirefoxLauncher.UserJs(options);
+        StringAssert.Contains(userJs, "user_pref(\"media.peerconnection.ice.proxy_only\", true);");
+        StringAssert.Contains(userJs, "user_pref(\"network.dns.disablePrefetch\", true);");
+    }
+
+    [TestMethod]
+    public void ASandboxIsTheSameOnlyWithTheSameReach()
+    {
+        BrowserSandbox Sandbox(string fingerprint, string folder = "C:/work") => new("strict", [folder], [folder], null) { Fingerprint = fingerprint };
+        Assert.IsTrue(BrowserSandbox.SameReach(null, null));
+        Assert.IsTrue(BrowserSandbox.SameReach(Sandbox("a"), Sandbox("a")));
+        Assert.IsFalse(BrowserSandbox.SameReach(Sandbox("a"), Sandbox("b")), "the same profile with other hosts or ports");
+        Assert.IsFalse(BrowserSandbox.SameReach(Sandbox("a"), Sandbox("a", "C:/other")), "the same profile with other folders");
+        Assert.IsFalse(BrowserSandbox.SameReach(Sandbox("a"), null));
+        Assert.IsFalse(BrowserSandbox.SameReach(null, Sandbox("a")));
+    }
+
+    [TestMethod]
     public void Guidance_TellsTheAgentWhenToNameABrowser()
     {
         var text = BrowserPlugin.Guidance(null);

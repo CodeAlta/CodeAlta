@@ -19,6 +19,7 @@ internal static class DesktopBrowser
             {
                 Denied = reach.Denied,
                 ReadOnly = reach.Protected,
+                Fingerprint = reach.Fingerprint,
             };
 
     /// <summary>The ports of CodeAlta on this computer: the MCP servers of the window and of the developer instance.</summary>

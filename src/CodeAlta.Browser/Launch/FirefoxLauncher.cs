@@ -42,6 +42,12 @@ internal static partial class FirefoxLauncher
         // A proxy, of the browser or of a user context, also gets the addresses of the loopback: the proxy of a sandbox
         // decides which local ports a session reaches.
         ("network.proxy.allow_hijacking_localhost", "true"),
+        // WebRTC goes through the proxy only, and no name is resolved ahead of a request: a sandboxed session's pages reach
+        // the network of its sandbox only.
+        ("media.peerconnection.ice.proxy_only", "true"),
+        ("media.peerconnection.ice.default_address_only", "true"),
+        ("network.dns.disablePrefetch", "true"),
+        ("network.predictor.enabled", "false"),
     ];
 
     [GeneratedRegex(@"WebDriver BiDi listening on (ws://[^\s]+)")]
