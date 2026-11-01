@@ -70,6 +70,12 @@ public interface IPluginServices
     /// window shows and answers. A host without asks, and the commands a plugin gives agents, have none.
     /// </summary>
     IPluginAskService Asks => NoopPluginAskService.Instance;
+
+    /// <summary>
+    /// Gets what sessions ask permission for, which a plugin that serves the user beyond the window shows and answers. A host
+    /// without it, and the commands a plugin gives agents, have none.
+    /// </summary>
+    IPluginPermissionService Permissions => NoopPluginPermissionService.Instance;
 }
 
 /// <summary>

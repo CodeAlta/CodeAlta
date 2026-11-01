@@ -1,3 +1,4 @@
+import { approvalWaiting } from "./approval";
 import { askWaiting } from "./ask";
 import { createCalmOrder, type CalmClock, type CalmTiming } from "./calmOrder";
 import { activityLine, el, icon } from "./dom";
@@ -35,14 +36,14 @@ export function createSessionList(options: Readonly<{
   // not repeat the space and the project of the parent; one shown on its own names its parent.
   function card(row: TreeRow, now: number): { element: HTMLDivElement; version: string } {
     const view = row.view, live = view.live;
-    const state = dotOf(view, now), waiting = askWaiting(live);
+    const state = dotOf(view, now), approving = approvalWaiting(live), waiting = approving || askWaiting(live);
     const when = live?.at ?? view.lastActivity;
     const parent = row.depth > 0 && view.parentId ? sessions.view(view.parentId) : null;
     const sameProject = !!parent && parent.projectId === view.projectId;
     const space = showSpaces(sessions.spaces) && !sameProject;
     const meta = sessionMeta(view, { space, live: true, project: !sameProject, child: false });
     const lineText = live?.line ?? view.summary;
-    const version = JSON.stringify([state, waiting, view.title, ago(when, now), live?.kind, lineText, live?.activity, meta, row.parentElsewhere,
+    const version = JSON.stringify([state, waiting, approving, view.title, ago(when, now), live?.kind, lineText, live?.activity, meta, row.parentElsewhere,
       row.subAgents && [summaryVersion(row.subAgents, now), row.open]]);
 
     const element = make("div", `card ${state}${waiting ? " waiting" : ""}`);
@@ -76,7 +77,7 @@ export function createSessionList(options: Readonly<{
     anchor.append(facts);
     if (waiting) {
       const badge = make("span", "waiting-badge");
-      badge.append(icon(document, "ask"), make("span", null, "Waits for your answer"));
+      badge.append(icon(document, approving ? "shield" : "ask"), make("span", null, approving ? "Waits for your approval" : "Waits for your answer"));
       anchor.append(badge);
     }
     if (live?.kind === "activity" && live.activity) anchor.append(activityLine(document, live.activity, live.activity.state === "running", now));
@@ -96,7 +97,7 @@ export function createSessionList(options: Readonly<{
   }
 
   const summaryVersion = (subAgents: SubAgents, now: number) =>
-    [subAgents.count, subAgents.running, subAgents.waiting, subAgents.children.map(child => [dotOf(child, now), askWaiting(child.live)])];
+    [subAgents.count, subAgents.running, subAgents.waiting, subAgents.children.map(child => [dotOf(child, now), askWaiting(child.live) || approvalWaiting(child.live)])];
 
   // The sub-agents of a session, in one row at the bottom of its card: how many, a dot for each, and what they do; a tap shows
   // them under it or folds them.
@@ -111,7 +112,7 @@ export function createSessionList(options: Readonly<{
     button.append(icon(document, "chevron", "subagents-chevron"), make("span", "subagents-count", words.count));
     const dots = make("span", "subagents-dots");
     dots.setAttribute("aria-hidden", "true");
-    for (const child of subAgents.children.slice(0, 8)) dots.append(make("span", `dot ${askWaiting(child.live) ? "waiting" : dotOf(child, now)}`));
+    for (const child of subAgents.children.slice(0, 8)) dots.append(make("span", `dot ${askWaiting(child.live) || approvalWaiting(child.live) ? "waiting" : dotOf(child, now)}`));
     if (subAgents.children.length > 8) dots.append(make("span", "subagents-more", `+${subAgents.children.length - 8}`));
     button.append(dots);
     if (words.states.length) {

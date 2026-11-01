@@ -59,6 +59,8 @@ public sealed class MobilePlugin : PluginBase
     private bool _stopped;
     // Whether the last reading of the asks failed: it is logged once.
     private bool _askingFailed;
+    // Whether the last reading of the permission requests failed: it is logged once.
+    private bool _approvingFailed;
 
     /// <summary>Creates the plugin with the Tailscale command line of this computer.</summary>
     public MobilePlugin()
@@ -172,7 +174,7 @@ public sealed class MobilePlugin : PluginBase
         {
             Port = _settings.Port, Access = _access!, Hosts = () => _state.TailnetHost is { } host ? [host] : [],
             Files = Services.AppFiles, Sessions = sessions, Api = new MobileApi(Services.Alta, sessions, attachments),
-            Asks = new MobileAsks(Services.Asks, sessions), Live = _live, Logger = Logger,
+            Asks = new MobileAsks(Services.Asks, sessions), Permissions = new MobilePermissions(Services.Permissions, sessions), Live = _live, Logger = Logger,
         });
         try
         {
@@ -364,7 +366,7 @@ public sealed class MobilePlugin : PluginBase
         {
             while (await timer.WaitForNextTickAsync(cancellationToken).ConfigureAwait(false))
             {
-                _live.Flush(await ReadAskingAsync(cancellationToken).ConfigureAwait(false));
+                _live.Flush(await ReadAskingAsync(cancellationToken).ConfigureAwait(false), await ReadApprovingAsync(cancellationToken).ConfigureAwait(false));
                 if (++ticks % 60 == 0) _live.Broadcast("ping", "{}");
             }
         }
@@ -390,6 +392,26 @@ public sealed class MobilePlugin : PluginBase
         {
             if (!_askingFailed) Logger.Warn(exception, "Mobile: the asks of the sessions could not be read; the phones keep those read before.");
             _askingFailed = true;
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Reads the permission requests the sessions wait on for the next flush. A host that cannot say stops nothing: the flush
+    /// keeps those read before (null), and the failure is logged once until a reading succeeds again.
+    /// </summary>
+    internal async ValueTask<IReadOnlyList<PluginPermissionSummary>?> ReadApprovingAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            var approving = await Services.Permissions.ListWaitingAsync(cancellationToken).ConfigureAwait(false);
+            _approvingFailed = false;
+            return approving;
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
+        {
+            if (!_approvingFailed) Logger.Warn(exception, "Mobile: the permission requests of the sessions could not be read; the phones keep those read before.");
+            _approvingFailed = true;
             return null;
         }
     }

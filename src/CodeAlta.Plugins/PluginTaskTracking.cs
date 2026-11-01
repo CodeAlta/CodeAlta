@@ -291,6 +291,7 @@ internal sealed class PluginRuntimeServices : IPluginServices
             : inner.Spaces;
         // Asks answer for the user: the host decides which plugin may, and a host that does not tell plugins apart gives none.
         Asks = inner.Asks is IPluginAskRuntimeService asks ? asks.ForPlugin(pluginRuntimeKey, builtIn) : NoopPluginAskService.Instance;
+        Permissions = inner.Permissions is IPluginPermissionRuntimeService permissions ? permissions.ForPlugin(pluginRuntimeKey, builtIn) : NoopPluginPermissionService.Instance;
     }
 
     public Logger Logger { get; }
@@ -325,6 +326,8 @@ internal sealed class PluginRuntimeServices : IPluginServices
     public IPluginAppFileService AppFiles => _inner.AppFiles;
 
     public IPluginAskService Asks { get; }
+
+    public IPluginPermissionService Permissions { get; }
 
     // The spaces of the plugin as the global configuration says them when they are asked.
     private sealed class AssignedSpaces(string pluginId, Func<CodeAlta.Catalog.SpaceAssignments> read) : IPluginSpaceService

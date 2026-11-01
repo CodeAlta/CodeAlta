@@ -23,11 +23,16 @@ internal sealed class MobileLive
     private readonly ConcurrentDictionary<Channel<string>, byte> _listeners = new();
     // The sessions that wait for the user to answer a question or a review request, with their ask, as the last flush read them.
     private volatile FrozenDictionary<string, PluginAskSummary> _asking = FrozenDictionary<string, PluginAskSummary>.Empty;
+    // The sessions whose permission requests wait for the user, as the last flush read them.
+    private volatile FrozenDictionary<string, PluginPermissionSummary> _approving = FrozenDictionary<string, PluginPermissionSummary>.Empty;
 
     internal int ListenerCount => _listeners.Count;
 
     /// <summary>Gets the asks the sessions wait on, as the last flush read them.</summary>
     internal IReadOnlyDictionary<string, PluginAskSummary> Asking => _asking;
+
+    /// <summary>Gets the permission requests the sessions wait on, as the last flush read them.</summary>
+    internal IReadOnlyDictionary<string, PluginPermissionSummary> Approving => _approving;
 
     /// <summary>
     /// Whether a session can be steered now. alta steers a session when its runtime entry has an active run
@@ -52,6 +57,7 @@ internal sealed class MobileLive
         ["id"] = sessionId, ["projectId"] = projectId, ["live"] = running ? Running : Idle, ["kind"] = null, ["line"] = null,
         // alta steers a session whose turn runs, as `isRunning` says it.
         ["at"] = null, ["activity"] = null, ["canSteer"] = running, ["asking"] = _asking.TryGetValue(sessionId, out var ask) ? MobileAsks.Mark(ask) : null,
+        ["approving"] = _approving.TryGetValue(sessionId, out var approval) ? MobilePermissions.Mark(approval) : null,
     };
 
     /// <summary>Follows one event of a session.</summary>
@@ -137,10 +143,16 @@ internal sealed class MobileLive
     /// or changes its revision or state. A session the plugin has not seen run is not told of: the list says it of each
     /// session the phone sees.
     /// </param>
-    internal void Flush(IReadOnlyCollection<PluginAskSummary>? asking = null)
+    /// <param name="approving">
+    /// The permission requests the sessions wait on, now; null keeps those of the last flush. A session is pushed when its
+    /// first request or their number changes, under the same conditions as <paramref name="asking"/>.
+    /// </param>
+    internal void Flush(IReadOnlyCollection<PluginAskSummary>? asking = null, IReadOnlyCollection<PluginPermissionSummary>? approving = null)
     {
         if (asking is not null && !Same(_asking, asking)) _asking = asking.DistinctBy(static ask => ask.SessionId, StringComparer.Ordinal).ToFrozenDictionary(static ask => ask.SessionId, StringComparer.Ordinal);
+        if (approving is not null && !Same(_approving, approving)) _approving = approving.DistinctBy(static summary => summary.SessionId, StringComparer.Ordinal).ToFrozenDictionary(static summary => summary.SessionId, StringComparer.Ordinal);
         var waiting = _asking;
+        var approvals = _approving;
         foreach (var (id, session) in _sessions)
         {
             Probe(id, session);
@@ -149,6 +161,8 @@ internal sealed class MobileLive
             {
                 var ask = waiting.GetValueOrDefault(id);
                 if (session.Asking != ask) { session.Asking = ask; session.Dirty = true; }
+                var approval = approvals.GetValueOrDefault(id);
+                if (session.Approving != approval) { session.Approving = approval; session.Dirty = true; }
                 if (!session.Dirty) continue;
                 session.Dirty = false;
                 payload = session.ToJson(id).ToJsonString();
@@ -165,6 +179,17 @@ internal sealed class MobileLive
         foreach (var ask in asking)
         {
             if (!known.TryGetValue(ask.SessionId, out var same) || same != ask) return false;
+        }
+
+        return true;
+    }
+
+    private static bool Same(FrozenDictionary<string, PluginPermissionSummary> known, IReadOnlyCollection<PluginPermissionSummary> approving)
+    {
+        if (known.Count != approving.Count) return false;
+        foreach (var summary in approving)
+        {
+            if (!known.TryGetValue(summary.SessionId, out var same) || same != summary) return false;
         }
 
         return true;
@@ -269,6 +294,7 @@ internal sealed class MobileLive
         internal readonly MobileActivity Activity = new();
         internal bool CanSteer, Probing;
         internal PluginAskSummary? Asking;
+        internal PluginPermissionSummary? Approving;
         internal int NotRunning;
         internal DateTimeOffset ProbedAt;
 
@@ -292,6 +318,7 @@ internal sealed class MobileLive
             ["id"] = id, ["projectId"] = ProjectId, ["live"] = State, ["kind"] = Kind, ["line"] = Line, ["at"] = At == default ? null : At.ToString("O"),
             ["activity"] = Kind == "activity" ? Activity.ToJson(State != Idle) : null,
             ["canSteer"] = CanSteer, ["asking"] = Asking is { } ask ? MobileAsks.Mark(ask) : null,
+            ["approving"] = Approving is { } approval ? MobilePermissions.Mark(approval) : null,
         };
     }
 }

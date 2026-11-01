@@ -237,7 +237,7 @@ internal static class DesktopPlugins
 /// operation context carries.
 /// </remarks>
 internal sealed class DesktopPluginServices(IPluginAltaService alta, DesktopPluginUi ui, DesktopCanvases? canvases = null, DesktopPluginIdentities? identities = null,
-    IPluginAppFileService? appFiles = null, DesktopPluginAsks? asks = null) : IPluginServices
+    IPluginAppFileService? appFiles = null, DesktopPluginAsks? asks = null, DesktopPluginPermissions? permissions = null) : IPluginServices
 {
     private readonly NoopPluginServices _inner = NoopPluginServices.Create();
     private readonly DesktopPluginUi _ui = ui ?? throw new ArgumentNullException(nameof(ui));
@@ -273,6 +273,9 @@ internal sealed class DesktopPluginServices(IPluginAltaService alta, DesktopPlug
 
     // The questions and the review requests of the sessions, once the host runs, which the page of the phones answers.
     public IPluginAskService Asks { get; } = (IPluginAskService?)asks ?? NoopPluginAskService.Instance;
+
+    // What the sessions ask permission for, once the host runs, which the page of the phones answers.
+    public IPluginPermissionService Permissions { get; } = (IPluginPermissionService?)permissions ?? NoopPluginPermissionService.Instance;
 
     private sealed class RunWorkspace(DesktopPluginUi ui) : IPluginWorkspaceService
     {
