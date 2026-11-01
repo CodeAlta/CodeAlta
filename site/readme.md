@@ -106,7 +106,7 @@ alta</code></pre>
           <div class="alta-story-copy">
             <p class="alta-kicker"><span>04</span> On your phone</p>
             <h3 id="feature-title-mobile">Step away.<br>Stay in the loop.</h3>
-            <p>Scan a QR code and your sessions are on your phone: follow each one live, read its timeline, then answer, steer or stop it, change its model and its effort, or start a new session. The phone reaches your computer over your own Tailscale network, and nothing else of your computer is published.</p>
+            <p>Scan a QR code and your sessions are on your phone: follow each one live, read its timeline, then answer, steer or stop it, allow or deny what its agent asks permission for, follow its background jobs, change its model and its effort, or start a new session. The phone reaches your computer over your own Tailscale network, and nothing else of your computer is published.</p>
             <a href="{{site.basepath}}/docs/plugins/mobile/">Connect your phone <i class="bi bi-arrow-right" aria-hidden="true"></i></a>
           </div>
           <div class="alta-window alta-story-shot"><img src="{{site.basepath}}/img/alta-desktop-mobile.webp" alt="Three phones showing the sessions of CodeAlta live, the timeline of a session with its prompt, and the choice of a model and its reasoning effort" width="2400" height="1500" loading="lazy"></div>
@@ -133,7 +133,7 @@ alta</code></pre>
           <div class="alta-story-copy">
             <p class="alta-kicker"><span>07</span> Code &amp; git</p>
             <h3 id="feature-title-code">Stay close<br>to the code.</h3>
-            <p>Search a project, edit files, run a terminal and inspect git diffs without leaving the workspace. Open any tool call to see what the agent did.</p>
+            <p>Search a project, edit files, run a terminal and inspect git diffs without leaving the workspace. Open any tool call to see what the agent did. Let agents <a href="{{site.basepath}}/docs/browser/">drive Chrome, Edge, Firefox or Safari</a> to check the page they build, in a private profile or, once you agree, in your own browser.</p>
             <a href="{{site.basepath}}/docs/workspace/code/#code-editor">Explore the editor <i class="bi bi-arrow-right" aria-hidden="true"></i></a>
           </div>
           <div class="alta-window alta-story-shot"><img src="{{site.basepath}}/img/alta-desktop-editor-search.webp" alt="The SharpYaml code editor with a search across files and matching source lines" width="2400" height="1500" loading="lazy"></div>
@@ -214,7 +214,7 @@ alta</code></pre>
           <div class="alta-story-copy">
             <p class="alta-kicker"><span>16</span> Welcome home</p>
             <h3 id="feature-title-welcome">Pick up where<br>you left off.</h3>
-            <p>Start from recent sessions, projects and useful shortcuts. Press <kbd>Ctrl+P</kbd> to <a href="{{site.basepath}}/docs/search/">find any earlier conversation</a>, plan or tool by its words, or by its meaning with a model that runs on your computer. The built-in documentation is always nearby, with an agent ready to answer your questions.</p>
+            <p>Start from recent sessions, projects and useful shortcuts. Press <kbd>Ctrl+P</kbd> to <a href="{{site.basepath}}/docs/search/">find any earlier conversation</a>, plan, tool or setting by its words, or by its meaning with a model that runs on your computer. The built-in documentation is always nearby, with an agent ready to answer your questions.</p>
             <a href="{{site.basepath}}/docs/workspace/#welcome-page">Meet your workspace <i class="bi bi-arrow-right" aria-hidden="true"></i></a>
           </div>
           <div class="alta-window alta-story-shot"><img src="{{site.basepath}}/img/alta-desktop-landing.webp" alt="The Welcome page with recent projects and sessions, Statistics and quick access to the documentation" width="2400" height="1500" loading="lazy"></div>
@@ -232,7 +232,7 @@ alta</code></pre>
           <div class="alta-story-copy">
             <p class="alta-kicker"><span>18</span> Your choice of AI</p>
             <h3 id="feature-title-models">Your AI.<br>Your choice.</h3>
-            <p>Use your Claude Code, Codex, GitHub Copilot or Mistral Vibe subscriptions, even several accounts, run OpenAI's Codex agent itself with <a href="{{site.basepath}}/docs/model-providers/setup/#codex-cli">Codex CLI</a> (ChatGPT Business and Enterprise included), or connect an API-based provider or a <a href="{{site.basepath}}/docs/model-providers/setup/#llamacpp">llama.cpp</a> server of your own, and continue in CodeAlta the Claude Code sessions you started in VS Code or a terminal. Add any agent of the <a href="{{site.basepath}}/docs/model-providers/acp-agents/">ACP registry</a>, such as Cursor, Gemini CLI or Qwen Code, in one click: it works with the tools and permissions of CodeAlta. Choose a model for each session, or a tier (Complex, Standard, Quick), and let CodeAlta go on with the next model of the tier when a provider runs out of quota. Or try <a href="{{site.basepath}}/docs/model-tiers/#adaptive-experimental">Adaptive</a>: CodeAlta chooses the model of each turn, close to the best model for a fraction of its cost.</p>
+            <p>Use your Claude Code, Codex, GitHub Copilot or Mistral Vibe subscriptions, even several accounts, run OpenAI's Codex agent itself with <a href="{{site.basepath}}/docs/model-providers/setup/#codex-cli">Codex CLI</a> (ChatGPT Business and Enterprise included), or connect an API-based provider or a <a href="{{site.basepath}}/docs/model-providers/setup/#llamacpp">llama.cpp</a> server of your own, continue in CodeAlta the Claude Code sessions you started in VS Code or a terminal, and <a href="{{site.basepath}}/docs/sessions/claude-code/#run-in-the-cloud">send one to the cloud</a> to follow it from claude.ai or your phone. Add any agent of the <a href="{{site.basepath}}/docs/model-providers/acp-agents/">ACP registry</a>, such as Cursor, Gemini CLI or Qwen Code, in one click: it works with the tools and permissions of CodeAlta. Choose a model for each session, or a tier (Complex, Standard, Quick), and let CodeAlta go on with the next model of the tier when a provider runs out of quota. Or try <a href="{{site.basepath}}/docs/model-tiers/#adaptive-experimental">Adaptive</a>: CodeAlta chooses the model of each turn, close to the best model for a fraction of its cost.</p>
             <a href="{{site.basepath}}/docs/model-providers/">See model providers <i class="bi bi-arrow-right" aria-hidden="true"></i></a>
           </div>
           <div class="alta-window alta-story-shot"><img src="{{site.basepath}}/img/alta-desktop-model-providers.webp" alt="The Model Providers window listing Claude Code, Codex, GitHub Copilot and API-based providers" width="2400" height="1500" loading="lazy"></div>

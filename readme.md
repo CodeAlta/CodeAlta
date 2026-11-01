@@ -58,7 +58,7 @@ CodeAlta Desktop brings together:
 - **Bookmarks**: mark a message or a whole session, jump between the bookmarks of a timeline, and find them all in one tab.
 - **Issues & pull requests**: browse issues and PRs on GitHub, GitLab, Azure DevOps or Bitbucket, plus Jira issues; start sessions and open PRs.
 - **Automations**: start sessions on a schedule, issue/PR events or on demand.
-- **On your phone**: [follow, answer, steer and start sessions from a phone, and answer the questions and review requests of agents](https://codealta.github.io/docs/plugins/mobile/), on your own tailnet through Tailscale.
+- **On your phone**: [follow, answer, steer and start sessions from a phone, follow their background jobs, and answer the questions, permission requests and review requests of agents](https://codealta.github.io/docs/plugins/mobile/), on your own tailnet through Tailscale.
 - **Canvases**: use interactive boards, checklists, graphs and custom tools beside your conversations.
 - **Plugins**: ask agents to build trusted local .NET canvases, dialogs, tools, commands and buttons for one project or the whole workspace, and [hooks](https://codealta.github.io/docs/plugins/developers/) that check, block or change the tool calls and prompts of sessions, or continue a session when its run ends.
 - **Local statistics**: track activity, models, tokens, costs, tool use, skills and MCP tools by project, session or sub-agent, all on your computer.
@@ -82,6 +82,7 @@ CodeAlta Desktop brings together:
 - **Copilot compatibility**: reuse `.github` instructions, skills and agents unchanged.
 - **UI automation**: let agents see and drive CodeAlta through built-in tools or MCP.
 - **[Browser tools](https://codealta.github.io/docs/browser/)**: let agents drive Chrome, Edge, Firefox or Safari with the tools of Chrome DevTools MCP, without Node.js: in a private profile by default, in a profile where you signed in once, or in your own browser after you agree, site by site.
+- **[Settings you find](https://codealta.github.io/docs/workspace/settings/#search-settings)**: search Settings and change a setting where it is found, find settings with `Ctrl+P`, and ask an agent to show or change one with `alta settings`: it changes only what does not protect you, and the window offers Undo; plugins declare settings of their own.
 - **Storage**: manage [local disk usage and cleanup](https://codealta.github.io/docs/workspace/settings/#storage).
 
 <p align="center">
