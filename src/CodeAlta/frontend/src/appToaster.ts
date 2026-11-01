@@ -20,9 +20,24 @@ const settleAttempts = 60;
 function appToaster(): AppToaster {
   return app ??= {
     toaster: OverlayToaster.create({ position: "top-right", maxToasts: 4, className: "app-toaster" },
-      { domRenderer: (element, container) => createRoot(container).render(element) }),
+      { domRenderer: (element, container) => { if (container instanceof HTMLElement) followModalWindows(container); createRoot(container).render(element); } }),
     keyed: new Map(),
   };
+}
+
+// A window of the app (Settings, a dialog) is a modal <dialog>: it is drawn in the top layer of the page, above any
+// z-index, and makes the rest of the page inert. A toast raised while one is open, or just before it opens (an agent's
+// change of a setting, then Settings opened on it), would be hidden under it and take no click. So while a toast shows,
+// the toaster goes into the modal window on top, and back to the page once no toast shows or the window is gone.
+function followModalWindows(container: HTMLElement): void {
+  const place = () => {
+    const host = container.querySelector(".bp6-toast") ? Array.from(document.querySelectorAll<HTMLDialogElement>("dialog:modal")).at(-1) ?? document.body : document.body;
+    if (container.parentElement !== host) host.append(container);
+  };
+  // The toasts that come and go, and the windows that open, close or leave the page.
+  new MutationObserver(place).observe(container, { childList: true, subtree: true });
+  new MutationObserver(() => { if (container.querySelector(".bp6-toast") || !container.isConnected) place(); })
+    .observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ["open"] });
 }
 
 /**
