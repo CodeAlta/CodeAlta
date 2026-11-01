@@ -50,7 +50,7 @@ internal sealed class BrowserTestHost : IAsyncDisposable
         IBrowserConnection connection;
         if (engine == BrowserEngine.Firefox)
         {
-            throw new NotSupportedException("Firefox comes with the BiDi driver.");
+            connection = await Drivers.BiDi.BiDiBrowserConnection.LaunchAsync(browser, options, CancellationToken.None);
         }
         else
         {

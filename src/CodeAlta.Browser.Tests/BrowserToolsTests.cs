@@ -245,13 +245,11 @@ public abstract class BrowserToolsTests
     {
         await using var session = Host.NewSession();
         await session.OkAsync("navigate_page", $$"""{"url":"{{Host.Site.Url("/form")}}"}""");
-        var emulated = await session.OkAsync("emulate", """{"viewport":"400x700x2,mobile","colorScheme":"dark","geolocation":"48.85,2.35"}""");
+        var emulated = await session.OkAsync("emulate", """{"viewport":"400x700x2,mobile","geolocation":"48.85,2.35"}""");
         StringAssert.Contains(emulated, "Emulation configured successfully");
         StringAssert.Contains(emulated, "Emulating viewport:");
-        StringAssert.Contains(emulated, "Emulating color scheme: dark");
-        var media = await session.OkAsync("evaluate_script", """{"function":"() => [innerWidth, matchMedia('(prefers-color-scheme: dark)').matches]"}""");
-        StringAssert.Contains(media, "400");
-        StringAssert.Contains(media, "true");
+        StringAssert.Contains(emulated, "Emulating geolocation: latitude=48.85, longitude=2.35");
+        StringAssert.Contains(await session.OkAsync("evaluate_script", """{"function":"() => innerWidth"}"""), "400");
         await session.OkAsync("emulate", "{}");
         StringAssert.Contains(await session.OkAsync("resize_page", """{"width":900,"height":600}"""), "## Pages");
     }
@@ -286,8 +284,17 @@ public sealed class ChromiumToolsTests : BrowserToolsTests
         StringAssert.Contains(await session.OkAsync("take_heapsnapshot", """{"filePath":"page.heapsnapshot"}"""), "Heap snapshot saved to");
         StringAssert.StartsWith(await File.ReadAllTextAsync(Path.Combine(Host.Folder, "page.heapsnapshot")), "{\"snapshot\":");
 
+        StringAssert.Contains(await session.OkAsync("emulate", """{"colorScheme":"dark"}"""), "Emulating color scheme: dark");
+        StringAssert.Contains(await session.OkAsync("evaluate_script", """{"function":"() => matchMedia('(prefers-color-scheme: dark)').matches"}"""), "true");
         var throttled = await session.OkAsync("emulate", """{"networkConditions":"Slow 3G","cpuThrottlingRate":4}""");
         StringAssert.Contains(throttled, "Emulating network conditions: Slow 3G");
         StringAssert.Contains(throttled, "Emulating CPU throttling: 4x slowdown");
     }
 }
+
+[TestClass]
+public sealed class FirefoxToolsTests : BrowserToolsTests
+{
+    private protected override BrowserEngine Engine => BrowserEngine.Firefox;
+}
+

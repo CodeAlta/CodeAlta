@@ -630,8 +630,9 @@ internal sealed class CdpPage : IChromiumPage
         await _session.Page.SetInterceptFileChooserDialogAsync(new PageSetInterceptFileChooserDialogParams { Enabled = true }, cancellationToken).ConfigureAwait(false);
         try
         {
+            // The tool layer resolves points across frames; a file input is clicked where the agent of its frame says.
             var point = await CallAgentAsync(frame, "prepareClick", $$"""{"uid":{{Json(uid)}}}""", cancellationToken).ConfigureAwait(false);
-            await ClickAsync(point.GetProperty("x").GetDouble(), point.GetProperty("y").GetDouble(), 1, cancellationToken).ConfigureAwait(false);
+            await ClickAtAsync(point.GetProperty("x").GetDouble(), point.GetProperty("y").GetDouble(), 1, cancellationToken).ConfigureAwait(false);
             if (await Task.WhenAny(chooser.Task, Task.Delay(TimeSpan.FromSeconds(3), cancellationToken)).ConfigureAwait(false) != chooser.Task || chooser.Task.Result is not { } backendNodeId)
             {
                 throw new BrowserToolException("no-file-input", $"The element with uid {uid} is not a file input and opened no file chooser.");
@@ -654,13 +655,17 @@ internal sealed class CdpPage : IChromiumPage
     // -------------------------------------------------------------------------------------------------------------
 
     /// <inheritdoc />
-    public Task MouseMoveAsync(double x, double y, CancellationToken cancellationToken)
+    public Task MouseMoveAsync(BrowserPoint point, CancellationToken cancellationToken) => MoveAsync(point.X, point.Y, cancellationToken);
+
+    private Task MoveAsync(double x, double y, CancellationToken cancellationToken)
         => _session.Input.DispatchMouseEventAsync(new InputDispatchMouseEventParams { Type = "mouseMoved", X = x, Y = y, Button = "none" }, cancellationToken);
 
     /// <inheritdoc />
-    public async Task ClickAsync(double x, double y, int clickCount, CancellationToken cancellationToken)
+    public Task ClickAsync(BrowserPoint point, int clickCount, CancellationToken cancellationToken) => ClickAtAsync(point.X, point.Y, clickCount, cancellationToken);
+
+    private async Task ClickAtAsync(double x, double y, int clickCount, CancellationToken cancellationToken)
     {
-        await MouseMoveAsync(x, y, cancellationToken).ConfigureAwait(false);
+        await MoveAsync(x, y, cancellationToken).ConfigureAwait(false);
         for (var count = 1; count <= clickCount; count++)
         {
             await _session.Input.DispatchMouseEventAsync(new InputDispatchMouseEventParams { Type = "mousePressed", X = x, Y = y, Button = "left", Buttons = 1, ClickCount = count }, cancellationToken).ConfigureAwait(false);
@@ -669,15 +674,16 @@ internal sealed class CdpPage : IChromiumPage
     }
 
     /// <inheritdoc />
-    public async Task DragAsync(double fromX, double fromY, double toX, double toY, CancellationToken cancellationToken)
+    public async Task DragAsync(BrowserPoint from, BrowserPoint to, CancellationToken cancellationToken)
     {
+        var (fromX, fromY, toX, toY) = (from.X, from.Y, to.X, to.Y);
         // A native drag and drop of the page is taken over, as Puppeteer does: the browser gives the drag data, which
         // is dropped where asked; a drag made of pointer events only is moved along.
         Volatile.Write(ref _dragData, null);
         await _session.Input.SetInterceptDragsAsync(new InputSetInterceptDragsParams { Enabled = true }, cancellationToken).ConfigureAwait(false);
         try
         {
-            await MouseMoveAsync(fromX, fromY, cancellationToken).ConfigureAwait(false);
+            await MoveAsync(fromX, fromY, cancellationToken).ConfigureAwait(false);
             await _session.Input.DispatchMouseEventAsync(new InputDispatchMouseEventParams { Type = "mousePressed", X = fromX, Y = fromY, Button = "left", Buttons = 1, ClickCount = 1 }, cancellationToken).ConfigureAwait(false);
             const int steps = 5;
             for (var step = 1; step <= steps; step++)

@@ -401,12 +401,14 @@ internal sealed class BrowserSession : IAsyncDisposable
         return (x, y);
     }
 
-    /// <summary>Where an operation of the agent says to put the pointer, in the viewport of the page.</summary>
-    public static async Task<(double X, double Y, string? ObscuredBy)> PointAsync(BrowserPageState state, string uid, JsonElement point, CancellationToken cancellationToken)
+    /// <summary>Where an operation of the agent says to put the pointer, in the viewports of the page and of its frame.</summary>
+    public static async Task<(BrowserPoint Point, string? ObscuredBy)> PointAsync(BrowserPageState state, string uid, JsonElement point, CancellationToken cancellationToken)
     {
-        var (dx, dy) = await FrameOffsetAsync(state, FrameOf(state, uid), cancellationToken).ConfigureAwait(false);
+        var frame = FrameOf(state, uid);
+        var (dx, dy) = await FrameOffsetAsync(state, frame, cancellationToken).ConfigureAwait(false);
         var obscured = point.TryGetProperty("obscuredBy", out var by) ? by.GetString() : null;
-        return (point.GetProperty("x").GetDouble() + dx, point.GetProperty("y").GetDouble() + dy, obscured);
+        var (x, y) = (point.GetProperty("x").GetDouble(), point.GetProperty("y").GetDouble());
+        return (new BrowserPoint(x + dx, y + dy, frame, x, y), obscured);
     }
 
     /// <summary>JSON text of a string.</summary>

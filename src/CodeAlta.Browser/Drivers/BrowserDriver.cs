@@ -8,6 +8,21 @@ namespace CodeAlta.Browser.Drivers;
 /// <param name="Key">The id of the frame (CDP) or of the browsing context (BiDi).</param>
 internal sealed record BrowserFrame(string Key);
 
+/// <summary>
+/// Where the pointer goes: in the viewport of the page, which CDP takes, and in the viewport of the frame that holds
+/// the element, which WebDriver BiDi takes for a frame of another process.
+/// </summary>
+/// <param name="X">The x coordinate in the viewport of the page.</param>
+/// <param name="Y">The y coordinate in the viewport of the page.</param>
+/// <param name="Frame">The frame the local coordinates are in.</param>
+/// <param name="LocalX">The x coordinate in the viewport of that frame.</param>
+/// <param name="LocalY">The y coordinate in the viewport of that frame.</param>
+internal sealed record BrowserPoint(double X, double Y, BrowserFrame Frame, double LocalX, double LocalY)
+{
+    /// <summary>A point of the page itself.</summary>
+    public static BrowserPoint OfPage(BrowserFrame main, double x, double y) => new(x, y, main, x, y);
+}
+
 /// <summary>A JavaScript dialog a page opened, which stops its scripts until it is answered.</summary>
 /// <param name="Type">The kind: <c>alert</c>, <c>confirm</c>, <c>prompt</c> or <c>beforeunload</c>.</param>
 /// <param name="Message">The message.</param>
@@ -135,13 +150,13 @@ internal interface IBrowserPage
     Task SetFilesAsync(BrowserFrame frame, string uid, IReadOnlyList<string> paths, CancellationToken cancellationToken);
 
     /// <summary>Moves the pointer.</summary>
-    Task MouseMoveAsync(double x, double y, CancellationToken cancellationToken);
+    Task MouseMoveAsync(BrowserPoint point, CancellationToken cancellationToken);
 
     /// <summary>Clicks, or double clicks, with the main button.</summary>
-    Task ClickAsync(double x, double y, int clickCount, CancellationToken cancellationToken);
+    Task ClickAsync(BrowserPoint point, int clickCount, CancellationToken cancellationToken);
 
     /// <summary>Presses the main button at a point, moves to another, and releases it there.</summary>
-    Task DragAsync(double fromX, double fromY, double toX, double toY, CancellationToken cancellationToken);
+    Task DragAsync(BrowserPoint from, BrowserPoint to, CancellationToken cancellationToken);
 
     /// <summary>Presses or releases a key, with the modifiers held (CDP bits: Alt 1, Control 2, Meta 4, Shift 8).</summary>
     Task KeyAsync(BrowserKey key, bool down, int modifiers, CancellationToken cancellationToken);

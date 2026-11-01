@@ -45,21 +45,4 @@ internal static class LaunchHelpers
             listener.Stop();
         }
     }
-
-    /// <summary>Whether something listens on a port of the loopback.</summary>
-    public static async Task<bool> ListensAsync(int port, CancellationToken cancellationToken)
-    {
-        using var client = new TcpClient();
-        try
-        {
-            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-            timeout.CancelAfter(TimeSpan.FromMilliseconds(500));
-            await client.ConnectAsync(IPAddress.Loopback, port, timeout.Token).ConfigureAwait(false);
-            return true;
-        }
-        catch (Exception exception) when (exception is SocketException or OperationCanceledException && !cancellationToken.IsCancellationRequested)
-        {
-            return false;
-        }
-    }
 }

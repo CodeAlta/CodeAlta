@@ -54,8 +54,8 @@ internal static class BrowserTools
                     {
                         var prepared = await BrowserSession.CallOnElementAsync(state, element, "prepareClick", twice ? ",\"dblClick\":true" : string.Empty, call.CancellationToken);
                         if (prepared.TryGetProperty("done", out _)) return null;
-                        var (x, y, obscured) = await BrowserSession.PointAsync(state, element, prepared, call.CancellationToken);
-                        await state.Page.ClickAsync(x, y, twice ? 2 : 1, call.CancellationToken);
+                        var (point, obscured) = await BrowserSession.PointAsync(state, element, prepared, call.CancellationToken);
+                        await state.Page.ClickAsync(point, twice ? 2 : 1, call.CancellationToken);
                         return Obscured(obscured);
                     }, call.CancellationToken);
                     AppendAction(call, outcome,
@@ -74,7 +74,7 @@ internal static class BrowserTools
                     var y = call.RequiredNumber("y");
                     var outcome = await call.Session.ActAsync(state, async () =>
                     {
-                        await state.Page.ClickAsync(x, y, twice ? 2 : 1, call.CancellationToken);
+                        await state.Page.ClickAsync(BrowserPoint.OfPage(state.Page.MainFrame, x, y), twice ? 2 : 1, call.CancellationToken);
                         return null;
                     }, call.CancellationToken);
                     AppendAction(call, outcome, twice ? "Successfully double clicked at the coordinates" : "Successfully clicked at the coordinates", "The click opened a dialog.");
@@ -92,7 +92,7 @@ internal static class BrowserTools
                     {
                         var start = await BrowserSession.PointAsync(state, from, await BrowserSession.CallOnElementAsync(state, from, "point", string.Empty, call.CancellationToken), call.CancellationToken);
                         var end = await BrowserSession.PointAsync(state, to, await BrowserSession.CallOnElementAsync(state, to, "point", string.Empty, call.CancellationToken), call.CancellationToken);
-                        await state.Page.DragAsync(start.X, start.Y, end.X, end.Y, call.CancellationToken);
+                        await state.Page.DragAsync(start.Point, end.Point, call.CancellationToken);
                         return null;
                     }, call.CancellationToken);
                     AppendAction(call, outcome, "Successfully dragged an element", "The drag opened a dialog.");
@@ -186,8 +186,8 @@ internal static class BrowserTools
                     var element = call.RequiredString("uid");
                     var outcome = await call.Session.ActAsync(state, async () =>
                     {
-                        var (x, y, obscured) = await BrowserSession.PointAsync(state, element, await BrowserSession.CallOnElementAsync(state, element, "point", string.Empty, call.CancellationToken), call.CancellationToken);
-                        await state.Page.MouseMoveAsync(x, y, call.CancellationToken);
+                        var (point, obscured) = await BrowserSession.PointAsync(state, element, await BrowserSession.CallOnElementAsync(state, element, "point", string.Empty, call.CancellationToken), call.CancellationToken);
+                        await state.Page.MouseMoveAsync(point, call.CancellationToken);
                         return Obscured(obscured);
                     }, call.CancellationToken);
                     AppendAction(call, outcome, "Successfully hovered over the element", "The element was hovered and it opened a dialog.");
@@ -878,8 +878,8 @@ internal static class BrowserTools
         switch (prepared.GetProperty("action").GetString())
         {
             case "click":
-                var (x, y, _) = await BrowserSession.PointAsync(state, uid, prepared, cancellationToken);
-                await state.Page.ClickAsync(x, y, 1, cancellationToken);
+                var (point, _) = await BrowserSession.PointAsync(state, uid, prepared, cancellationToken);
+                await state.Page.ClickAsync(point, 1, cancellationToken);
                 break;
             case "type":
                 // The agent selected what the element holds: typing replaces it, and Delete clears it.

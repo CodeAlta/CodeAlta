@@ -10,7 +10,8 @@ internal sealed record FirefoxLaunch(BrowserProcess Process, Uri Endpoint);
 
 /// <summary>
 /// Starts Firefox with its own WebDriver BiDi endpoint (<c>--remote-debugging-port</c>), without geckodriver, on a
-/// port of the loopback CodeAlta picks.
+/// port of the loopback Firefox picks and announces on its standard error: a port picked here could be taken before
+/// Firefox binds it.
 /// </summary>
 internal static partial class FirefoxLauncher
 {
@@ -85,7 +86,7 @@ internal static partial class FirefoxLauncher
         ArgumentNullException.ThrowIfNull(options);
         Directory.CreateDirectory(options.ProfileDirectory);
         if (writePreferences) await File.WriteAllTextAsync(Path.Combine(options.ProfileDirectory, "user.js"), UserJs(options), cancellationToken).ConfigureAwait(false);
-        var port = LaunchHelpers.FreePort();
+        const int port = 0;
         var announced = new TaskCompletionSource<Uri>(TaskCreationOptions.RunContinuationsAsynchronously);
         var environment = new Dictionary<string, string?>(StringComparer.Ordinal) { ["MOZ_CRASHREPORTER_DISABLE"] = "1" };
         if (options.Environment is not null) foreach (var (name, value) in options.Environment) environment[name] = value;
@@ -106,14 +107,13 @@ internal static partial class FirefoxLauncher
                     return new FirefoxLaunch(process, new Uri(address, address.AbsolutePath.EndsWith("/session", StringComparison.Ordinal) ? string.Empty : "/session"));
                 }
 
-                if (await LaunchHelpers.ListensAsync(port, cancellationToken).ConfigureAwait(false)) return new FirefoxLaunch(process, new Uri($"ws://127.0.0.1:{port}/session"));
                 if (process.HasExited)
                 {
                     throw new BrowserLaunchException("Firefox exited before it opened its remote endpoint. When its profile is open in another Firefox window, close Firefox first." +
                         (process.Output() is { Length: > 0 } output ? $" It wrote:\n{output}" : string.Empty));
                 }
 
-                await Task.Delay(100, cancellationToken).ConfigureAwait(false);
+                await Task.WhenAny(announced.Task, process.Exited, Task.Delay(100, cancellationToken)).ConfigureAwait(false);
             }
 
             throw new BrowserLaunchException($"Firefox did not open its remote endpoint within {options.StartTimeout.TotalSeconds:0} s.");

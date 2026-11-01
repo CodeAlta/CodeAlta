@@ -230,7 +230,7 @@ Chromium and the tools:
 
 Firefox:
 
-- [ ] 8. **BiDi driver.** `BiDiBrowserDriver` over `WebDriverBiDi`, pinned in `src/Directory.Packages.props` and wrapped behind `IBrowserDriver`.
+- [x] 8. **BiDi driver.** `BiDiBrowserDriver` over `WebDriverBiDi`, pinned in `src/Directory.Packages.props` and wrapped behind `IBrowserDriver`.
   - `FirefoxLauncher`: a temporary `-profile` with a `user.js` of Puppeteer's preferences, `-no-remote`, `--remote-debugging-port 0`, and the address read from its standard error.
   - A user context per session, and the agent in a sandbox realm.
   - `input.performActions`, `network.addDataCollector`/`getData`, `log.entryAdded`, `browsingContext.userPromptOpened`, `input.setFiles`.
