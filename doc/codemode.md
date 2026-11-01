@@ -22,6 +22,15 @@ one host function, `__host(path, json)`, which the prelude hides in a closure. S
 those of the calls it makes, and a call runs with the permissions, the sandbox and the gates of the session that owns
 it. That is why a script is safe in any session, a sandboxed one included.
 
+A provider that judges the uses of its own tools can refuse a nested call (`IAgentProviderScriptTools`), before the call
+runs or asks anything. Claude Code does so in its `auto` and `dontAsk` modes for the tools that change files or run
+commands (`ClaudeCodePrompts.ScriptRefusal`): the CLI allows the tools of CodeAlta by name, so these calls would not reach
+the decision of the mode, and the host would review each one (`SessionPermissionModes.Policy`). Its other modes keep the
+review of the host, which is what they promise. `shell_command` stays where it is how the session runs its commands (a
+sandbox on Windows). The mode read is the one of the session or of its provider: without one, the CLI follows the user's
+settings, and the host's own policy answers. The refusal is checked at each call, so a change of mode applies to a script
+that runs. Claude Code is also told to make these changes with its own tools (`CreateAppendSystemPrompt`, `hasExec`).
+
 `CodeAlta.CodeMode` knows no CodeAlta project (`ArchitectureGuardrailTests`): its host gives it a `CodeModeApi` (the
 paths of the functions, their schemas) and an `ICodeModeCallHandler` (what runs them).
 

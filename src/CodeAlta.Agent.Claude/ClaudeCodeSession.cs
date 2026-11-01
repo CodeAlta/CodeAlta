@@ -673,6 +673,16 @@ internal sealed partial class ClaudeCodeSession : IAsyncDisposable
         _pendingPreamble = null;
     }
 
+    // Why a script may not call a tool now. The mode is read at each call: a mode chosen since applies to a script that
+    // runs. The shell of CodeAlta is offered to the CLI only where its commands run with it.
+    internal string? RefuseInScript(string toolName)
+    {
+        lock (_gate)
+        {
+            return ClaudeCodePrompts.ScriptRefusal(_permissionMode, toolName, _exposedTools.ContainsKey(ShellCommandTool));
+        }
+    }
+
     // Puts the running CLI in a new permission mode now, during a turn or between turns (a turn it starts by itself
     // then follows it), without starting it again: that would end a turn. A CLI that refuses keeps its mode until the
     // next turn of the user, which starts it again in the new one if it must; meanwhile CodeAlta answers what it asks
@@ -751,6 +761,7 @@ internal sealed partial class ClaudeCodeSession : IAsyncDisposable
 
     // The built-in shell tool of CodeAlta, whose counterparts the CLI is started without when the session turns it off.
     private const string ShellCommandTool = "shell_command";
+    private const string ExecTool = "exec";
 
     private static string? NormalizePermissionMode(string? permissionMode)
         => string.IsNullOrWhiteSpace(permissionMode) ? null : permissionMode.Trim();
@@ -758,13 +769,15 @@ internal sealed partial class ClaudeCodeSession : IAsyncDisposable
     private string CreateAppendSystemPrompt(AgentTurnRequest request)
     {
         bool hasGateway;
+        bool hasExec;
         lock (_gate)
         {
             hasGateway = _exposedTools.ContainsKey(ClaudeCodePrompts.GatewayTool);
+            hasExec = _exposedTools.ContainsKey(ExecTool);
         }
 
         return ClaudeCodePrompts.CreateAppendSystemPrompt(AgentInstructionText.DeveloperAndSession(request), hasGateway, request.DisabledTools?.Contains(ShellCommandTool) != true,
-            ClaudeCodeLauncher.CommandsThroughCodeAlta(request.ProcessHost));
+            ClaudeCodeLauncher.CommandsThroughCodeAlta(request.ProcessHost), hasExec);
     }
 
     // Returns what the conversation has to be told of its instructions before the prompt that starts, if anything:

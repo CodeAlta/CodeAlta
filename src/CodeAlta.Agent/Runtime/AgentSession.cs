@@ -1330,6 +1330,11 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
             return new AgentToolResult(false, [new AgentToolResultItem.Text(reason)], reason);
         }
 
+        if (_turnExecutor is IAgentProviderScriptTools provider && provider.RefuseInScript(SessionId, definition.Spec.Name) is { } refusal)
+        {
+            return new AgentToolResult(false, [new AgentToolResultItem.Text(refusal)], refusal);
+        }
+
         var ended = run.Ended;
         AgentRunId? runId = ended ? null : run.RunId;
         var toolCall = new AgentMessagePart.ToolCall(callId, definition.Spec.Name, call.Arguments);

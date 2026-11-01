@@ -62,6 +62,8 @@ A script receives the whole result of a call, such as all the output of a comman
 
 A call has the permissions of the session: a tool turned off is missing, a command that needs your approval asks, and a [sandboxed session](sandbox.md) runs its calls in its sandbox. Commands that wait for your answer, such as `alta ask`, are not available to scripts: they use `ask()`.
 
+In the **Auto** and **Don't ask** [permission modes](../workspace/prompt.md#permission-modes) of Claude Code, a script cannot change files or run commands with `tools.*`: Claude Code decides what runs in these modes, and it never sees the calls of a script. The call fails and tells the agent to use Claude Code's own tools. A saved script that needs these tools runs in the other modes. Where a [sandboxed session](sandbox.md) runs its commands with CodeAlta's shell, a script can still run them, and each one asks for your approval.
+
 A script that went on in the background still asks for its approvals in its session, as during the turn. Its card says that it waits for your answer or your approval, and **Open** shows where to give it.
 
 For example, an agent can count the lines of every file of a folder in one call:

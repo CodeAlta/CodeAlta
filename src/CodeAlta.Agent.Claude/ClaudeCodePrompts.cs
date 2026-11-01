@@ -21,6 +21,35 @@ internal static class ClaudeCodePrompts
     public static FrozenSet<string> ReplacedTools { get; } = CodeAlta.Agent.Runtime.Tools.AgentBuiltInToolFactory.BuiltInToolNames.ToFrozenSet(StringComparer.Ordinal);
 
     /// <summary>
+    /// Gets why a script may not call a tool of CodeAlta in a permission mode.
+    /// </summary>
+    /// <param name="permissionMode">The mode of the session or of its provider, or null for none.</param>
+    /// <param name="toolName">The name of the tool.</param>
+    /// <param name="commandsThroughCodeAlta">Whether the commands of the session run with the <c>shell_command</c> of CodeAlta.</param>
+    /// <returns>What the script is answered, or null when the call runs.</returns>
+    public static string? ScriptRefusal(string? permissionMode, string toolName, bool commandsThroughCodeAlta)
+    {
+        // In these modes the CLI decides what its tools do, and it allows the tools of CodeAlta by name: a call of a
+        // script would not reach that decision. In the others, the review of the host is what the mode promises.
+        if (permissionMode is not ("auto" or "dontAsk") || !ToolsThatChange.Contains(toolName) || (commandsThroughCodeAlta && toolName == "shell_command"))
+        {
+            return null;
+        }
+
+        var own = toolName switch
+        {
+            "write_file" => "Write",
+            "replace_in_file" or "apply_patch" => "Edit",
+            _ => commandsThroughCodeAlta ? $"`{ClaudeCodeLauncher.McpToolPrefix}shell_command`" : "Bash or PowerShell",
+        };
+        return $"`tools.{toolName}` is refused: this session is in the `{permissionMode}` permission mode of Claude Code, which does not judge the calls of a script. Do it outside the script with your own tool: {own}. The calls this script made before this one are not undone.";
+    }
+
+    // The tools of CodeAlta that change files or run commands.
+    private static readonly FrozenSet<string> ToolsThatChange = FrozenSet.Create(StringComparer.Ordinal,
+        "write_file", "replace_in_file", "delete_file_or_dir", "rename_file_or_dir", "apply_patch", "shell_command");
+
+    /// <summary>
     /// Creates the text added to the system prompt of Claude Code, which stays its own: how the instructions
     /// CodeAlta composed for the session, the same for every provider, apply to Claude Code, then those
     /// instructions.
@@ -48,6 +77,17 @@ internal static class ClaudeCodePrompts
     /// <param name="hasShell">Whether the session runs commands; false when it does without <c>shell_command</c>.</param>
     /// <param name="shellOfCodeAlta">Whether its commands run with the <c>shell_command</c> of CodeAlta.</param>
     public static string CreateAppendSystemPrompt(string? developerInstructions, bool hasGateway, bool hasShell, bool shellOfCodeAlta)
+        => CreateAppendSystemPrompt(developerInstructions, hasGateway, hasShell, shellOfCodeAlta, hasExec: false);
+
+    /// <summary>
+    /// Writes what the CLI appends to its own system prompt, for a session that may have the scripts of <c>exec</c>.
+    /// </summary>
+    /// <param name="developerInstructions">The instructions CodeAlta composed for the session.</param>
+    /// <param name="hasGateway">Whether the session has the <c>alta</c> live tool.</param>
+    /// <param name="hasShell">Whether the session runs commands; false when it does without <c>shell_command</c>.</param>
+    /// <param name="shellOfCodeAlta">Whether its commands run with the <c>shell_command</c> of CodeAlta.</param>
+    /// <param name="hasExec">Whether the session has the <c>exec</c> tool.</param>
+    public static string CreateAppendSystemPrompt(string? developerInstructions, bool hasGateway, bool hasShell, bool shellOfCodeAlta, bool hasExec)
     {
         const string Prefix = ClaudeCodeLauncher.McpToolPrefix;
         var builder = new StringBuilder();
@@ -77,6 +117,15 @@ internal static class ClaudeCodePrompts
         if (!hasShell)
         {
             builder.AppendLine("- Shell commands are turned off for this session: run none, not even in the background. Do the work with the other tools, or ask the user to run a command.");
+        }
+
+        if (hasExec)
+        {
+            // The permission mode of the CLI judges its own tools only: the calls of a script never reach it.
+            var ownCommands = hasShell && !shellOfCodeAlta;
+            builder.AppendLine(ownCommands
+                ? "- Scripts of `exec`: use them for reads, searches, `alta` and sub-agents. Make each file change and run each command with your own tools, not with `tools.write_file`, `tools.replace_in_file`, `tools.delete_file_or_dir`, `tools.rename_file_or_dir`, `tools.apply_patch` or `tools.shell_command`, even where the instructions batch edits in one `exec`: the permission mode of this session judges your own tools, while these calls of a script ask the user each time, or are refused."
+                : "- Scripts of `exec`: use them for reads, searches, `alta` and sub-agents. Make each file change with your own tools, not with `tools.write_file`, `tools.replace_in_file`, `tools.delete_file_or_dir`, `tools.rename_file_or_dir` or `tools.apply_patch`, even where the instructions batch edits in one `exec`: the permission mode of this session judges your own tools, while these calls of a script ask the user each time, or are refused.");
         }
 
         if (hasGateway)

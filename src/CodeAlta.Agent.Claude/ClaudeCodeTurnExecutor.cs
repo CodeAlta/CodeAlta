@@ -16,6 +16,7 @@ internal sealed class ClaudeCodeTurnExecutor :
     IAgentProviderBackgroundTasks,
     IAgentProviderRemoteControl,
     IAgentProviderPermissionMode,
+    IAgentProviderScriptTools,
     IAgentProviderExternalTurns,
     IAgentProviderExternalConversations,
     IAgentProviderSharedConversation,
@@ -155,6 +156,10 @@ internal sealed class ClaudeCodeTurnExecutor :
     /// <inheritdoc />
     public Task<bool> SetRunningPermissionModeAsync(string sessionId, string? permissionMode, CancellationToken cancellationToken)
         => _sessions.TryGetValue(sessionId, out var session) ? session.SetRunningPermissionModeAsync(permissionMode, cancellationToken) : Task.FromResult(false);
+
+    /// <inheritdoc />
+    public string? RefuseInScript(string sessionId, string toolName)
+        => _sessions.TryGetValue(sessionId, out var session) ? session.RefuseInScript(toolName) : null;
 
     /// <summary>
     /// Reads the turns VS Code or the CLI in a terminal added to the transcript of the conversation of a session since
