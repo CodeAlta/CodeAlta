@@ -14,10 +14,10 @@ internal sealed partial class CdpSession
     private const int QueueCapacity = 16384;
 
     private readonly CdpConnection _connection;
-    private readonly Channel<(string Method, JsonElement Parameters)> _events = Channel.CreateBounded<(string, JsonElement)>(
+    // An event, or a barrier of FlushAsync, which goes through the same queue so that it completes after the events before it.
+    private readonly Channel<(string Method, JsonElement Parameters, TaskCompletionSource? Barrier)> _events = Channel.CreateBounded<(string, JsonElement, TaskCompletionSource?)>(
         new BoundedChannelOptions(QueueCapacity) { SingleReader = true, SingleWriter = false, FullMode = BoundedChannelFullMode.Wait });
-    private const string BarrierMethod = "codealta.barrier";
-    private readonly System.Collections.Concurrent.ConcurrentQueue<TaskCompletionSource> _barriers = new();
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<TaskCompletionSource, byte> _pending = new();
     private readonly Lock _gate = new();
     private readonly Dictionary<string, List<Action<JsonElement>>> _handlers = new(StringComparer.Ordinal);
     private readonly TaskCompletionSource _completed = new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -73,19 +73,35 @@ internal sealed partial class CdpSession
     internal void Post(string method, JsonElement parameters)
     {
         // The read loop of the connection writes: waiting here holds back that loop while a handler is slow.
-        if (!_events.Writer.TryWrite((method, parameters))) _events.Writer.WriteAsync((method, parameters)).AsTask().GetAwaiter().GetResult();
+        if (!_events.Writer.TryWrite((method, parameters, null))) _events.Writer.WriteAsync((method, parameters, null)).AsTask().GetAwaiter().GetResult();
     }
 
     /// <summary>
     /// Waits until the handlers ran for every event that came before now. The answer of a command can arrive while the
     /// events sent before it still wait for their handlers: a heap snapshot is complete once this ends.
     /// </summary>
-    public Task FlushAsync(CancellationToken cancellationToken)
+    public async Task FlushAsync(CancellationToken cancellationToken)
     {
         var barrier = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        _barriers.Enqueue(barrier);
-        if (!_events.Writer.TryWrite((BarrierMethod, default))) barrier.TrySetResult();
-        return barrier.Task.WaitAsync(cancellationToken);
+        _pending[barrier] = 0;
+        try
+        {
+            await _events.Writer.WriteAsync((string.Empty, default, barrier), cancellationToken).ConfigureAwait(false);
+        }
+        catch (ChannelClosedException)
+        {
+            // The session ended: every event before now was handled or will never be.
+            barrier.TrySetResult();
+        }
+
+        try
+        {
+            await barrier.Task.WaitAsync(cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            _pending.TryRemove(barrier, out _);
+        }
     }
 
     internal void Complete() => _events.Writer.TryComplete();
@@ -94,11 +110,11 @@ internal sealed partial class CdpSession
     {
         try
         {
-            await foreach (var (method, parameters) in _events.Reader.ReadAllAsync().ConfigureAwait(false))
+            await foreach (var (method, parameters, barrier) in _events.Reader.ReadAllAsync().ConfigureAwait(false))
             {
-                if (method == BarrierMethod)
+                if (barrier is not null)
                 {
-                    if (_barriers.TryDequeue(out var barrier)) barrier.TrySetResult();
+                    barrier.TrySetResult();
                     continue;
                 }
 
@@ -124,7 +140,8 @@ internal sealed partial class CdpSession
         }
         finally
         {
-            while (_barriers.TryDequeue(out var barrier)) barrier.TrySetResult();
+            // The barriers of an ended session complete: no event will come before them any more.
+            foreach (var barrier in _pending.Keys) barrier.TrySetResult();
             _completed.TrySetResult();
         }
     }

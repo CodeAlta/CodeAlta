@@ -241,10 +241,13 @@ internal static class BrowserTools
                     var paths = call.OptionalStrings("filePaths") ?? throw BrowserToolCall.Missing("filePaths");
                     if (paths.Count == 0) throw BrowserToolCall.Invalid("filePaths", "a non-empty array");
                     var files = await call.Session.Options.Files(call.CancellationToken);
-                    var resolved = paths.Select(path => files.ResolveRead(path, "filePaths")).ToArray();
-                    foreach (var path in resolved)
+                    // The page gets copies, checked as they are read: a link put in a path after its check leads nowhere.
+                    var resolved = new List<string>(paths.Count);
+                    foreach (var path in paths)
                     {
-                        if (!File.Exists(path)) throw new BrowserToolException("no-file", $"The file {path} does not exist.");
+                        var full = files.ResolveRead(path, "filePaths");
+                        if (!File.Exists(full)) throw new BrowserToolException("no-file", $"The file {full} does not exist.");
+                        resolved.Add(await files.StageReadAsync(path, "filePaths", call.CancellationToken));
                     }
 
                     var element = call.RequiredString("uid");
@@ -622,7 +625,7 @@ internal static class BrowserTools
                         : "Took a screenshot of the current page's viewport.");
                     if (filePath is not null)
                     {
-                        await File.WriteAllBytesAsync(filePath, image, call.CancellationToken);
+                        await files.WriteAsync(filePath, image, call.CancellationToken);
                         call.Lines.Add($"Saved screenshot to {filePath}.");
                     }
                     else if (image.Length >= InlineImageLimit)
@@ -655,7 +658,7 @@ internal static class BrowserTools
                     }
                     else
                     {
-                        await File.WriteAllTextAsync(filePath, snapshot.ToString(), call.CancellationToken);
+                        await files.WriteAsync(filePath, snapshot.ToString(), call.CancellationToken);
                         call.Lines.Add($"Saved snapshot to {filePath}.");
                     }
 
@@ -699,9 +702,8 @@ internal static class BrowserTools
                     if (inline is not null) source = inline;
                     else
                     {
-                        var full = files.ResolveRead(sourcePath!, "sourcePath");
-                        try { source = await File.ReadAllTextAsync(full, call.CancellationToken); }
-                        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+                        try { source = await files.ReadTextAsync(sourcePath!, "sourcePath", call.CancellationToken); }
+                        catch (BrowserToolException exception) when (exception.Code == "io")
                         {
                             throw new BrowserToolException("no-file", $"Unable to read script source from {sourcePath}: {exception.Message}", exception);
                         }
@@ -724,7 +726,7 @@ internal static class BrowserTools
                     var text = output ?? "undefined";
                     if (filePath is not null)
                     {
-                        await File.WriteAllTextAsync(filePath, text, call.CancellationToken);
+                        await files.WriteAsync(filePath, text, call.CancellationToken);
                         call.Lines.Add($"Script ran on page. Output saved to {filePath}.");
                     }
                     else
@@ -803,8 +805,7 @@ internal static class BrowserTools
                 if (state.Page is not IChromiumPage chromium) throw new BrowserToolException("not-supported", "Heap snapshots need a Chromium browser.");
                 var files = await call.Session.Options.Files(call.CancellationToken);
                 var filePath = files.ResolveWrite(call.RequiredString("filePath"), "filePath");
-                Directory.CreateDirectory(Path.GetDirectoryName(filePath)!);
-                await using (var stream = File.Create(filePath)) await chromium.TakeHeapSnapshotAsync(stream, call.CancellationToken);
+                await files.WriteAsync(filePath, stream => chromium.TakeHeapSnapshotAsync(stream, call.CancellationToken), call.CancellationToken);
                 call.Lines.Add($"Heap snapshot saved to {filePath} ({new FileInfo(filePath).Length.ToString("N0", CultureInfo.InvariantCulture)} bytes).");
                 call.Page = state;
             }, BrowserToolScope.Chromium);
@@ -818,15 +819,22 @@ internal static class BrowserTools
         var buffer = new MemoryStream();
         await chromium.StopTraceAsync(buffer, call.CancellationToken);
         buffer.Position = 0;
-        await using (var file = File.Create(target))
+        async Task WriteTraceAsync(Stream file)
         {
             if (target.EndsWith(".gz", StringComparison.OrdinalIgnoreCase))
             {
-                await using var gzip = new GZipStream(file, CompressionLevel.Optimal);
+                await using var gzip = new GZipStream(file, CompressionLevel.Optimal, leaveOpen: true);
                 await buffer.CopyToAsync(gzip, call.CancellationToken);
             }
             else await buffer.CopyToAsync(file, call.CancellationToken);
         }
+
+        if (filePath is null)
+        {
+            await using var file = File.Create(target);
+            await WriteTraceAsync(file);
+        }
+        else await files.WriteAsync(target, WriteTraceAsync, call.CancellationToken);
 
         buffer.Position = 0;
         call.Sections.Add(TraceSummary.Summarize(buffer, state.Page.Url).ToText());
@@ -1063,7 +1071,7 @@ internal static class BrowserTools
             if (call.OptionalString("requestFilePath") is { } requestPath)
             {
                 var path = files.ResolveWrite(requestPath, "requestFilePath");
-                await File.WriteAllTextAsync(path, requestBody, call.CancellationToken);
+                await files.WriteAsync(path, requestBody, call.CancellationToken);
                 builder.Append("Saved to ").Append(path).Append(".\n");
             }
             else builder.Append(Body(requestBody)).Append('\n');
@@ -1081,7 +1089,7 @@ internal static class BrowserTools
             if (call.OptionalString("responseFilePath") is { } responsePath)
             {
                 var path = files.ResolveWrite(responsePath, "responseFilePath");
-                await File.WriteAllTextAsync(path, responseBody, call.CancellationToken);
+                await files.WriteAsync(path, responseBody, call.CancellationToken);
                 builder.Append("Saved to ").Append(path).Append(".\n");
             }
             else builder.Append(responseBody.Length == 0 ? "<empty response>" : Body(responseBody)).Append('\n');

@@ -56,6 +56,8 @@ internal sealed record InstalledBrowser(
     /// <returns>Null when it can, else the reason, for the agent.</returns>
     public string? Refusal(BrowserProfileKind profile) => (Engine, profile) switch
     {
+        (BrowserEngine.Safari, _) when MajorVersion is > 0 and < 27 =>
+            $"{Name} {Version} has no MCP server of its own: that takes Safari 27 or later.",
         (BrowserEngine.Safari, BrowserProfileKind.Persistent or BrowserProfileKind.User) =>
             "Safari's automation always runs in a private window: it never reaches the user's profile, and it keeps no profile of its own.",
         (BrowserEngine.Chromium, BrowserProfileKind.User) when !Id.StartsWith("chrome", StringComparison.Ordinal) && !Id.StartsWith("edge", StringComparison.Ordinal) =>

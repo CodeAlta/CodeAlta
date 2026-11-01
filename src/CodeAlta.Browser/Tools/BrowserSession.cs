@@ -33,8 +33,6 @@ internal sealed class BrowserPageState
     /// <summary>Gets or sets the headers added to the requests of the page.</summary>
     public IReadOnlyDictionary<string, string>? ExtraHeaders { get; set; }
 
-    /// <summary>Gets one call at a time on the page.</summary>
-    public SemaphoreSlim Gate { get; } = new(1, 1);
 
     /// <summary>Gets or sets the number the next snapshot of a frame starts its new uids with.</summary>
     public int NextSnapshot { get; set; } = 1;
@@ -76,6 +74,9 @@ internal sealed class BrowserSession : IAsyncDisposable
 {
     private readonly BrowserSessionOptions _options;
     private readonly SemaphoreSlim _gate = new(1, 1);
+    private readonly SemaphoreSlim _calls = new(1, 1);
+    private readonly CancellationTokenSource _closing = new();
+    private int _disposed;
     private readonly List<BrowserPageState> _pages = [];
     private readonly List<BrowserPageState> _opened = [];
     private readonly Lock _state = new();
@@ -126,6 +127,23 @@ internal sealed class BrowserSession : IAsyncDisposable
     public async Task<BrowserToolResult> CallAsync(string name, JsonElement arguments, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(name);
+        ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);
+        // One call at a time: calls share the pages, their snapshots and their frames. The answer of a dialog does not wait,
+        // since the call the dialog blocks may be the one that holds the turn.
+        var serialized = name != "handle_dialog";
+        if (serialized) await _calls.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            return await CallCoreAsync(name, arguments, cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            if (serialized) _calls.Release();
+        }
+    }
+
+    private async Task<BrowserToolResult> CallCoreAsync(string name, JsonElement arguments, CancellationToken cancellationToken)
+    {
         Touch();
         var tool = Tools.FirstOrDefault(candidate => candidate.Name == name);
         if (tool is null) return new BrowserToolResult($"Unknown tool \"{name}\". Call a tool of the list of tools.", [], true);
@@ -169,6 +187,7 @@ internal sealed class BrowserSession : IAsyncDisposable
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
+            ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);
             if (_context is { IsClosed: false } current) return current;
             var restarted = _context is not null;
             if (_context is not null)
@@ -177,7 +196,18 @@ internal sealed class BrowserSession : IAsyncDisposable
                 catch (Exception exception) when (exception is Cdp.CdpException or IOException or InvalidOperationException) { /* it is gone */ }
             }
 
-            var context = await _options.OpenContext(cancellationToken).ConfigureAwait(false);
+            IBrowserContext context;
+            using (var opening = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _closing.Token))
+            {
+                context = await _options.OpenContext(opening.Token).ConfigureAwait(false);
+            }
+
+            if (Volatile.Read(ref _disposed) != 0)
+            {
+                await context.DisposeAsync().ConfigureAwait(false);
+                throw new ObjectDisposedException(nameof(BrowserSession));
+            }
+
             context.PageOpened += page =>
             {
                 lock (_state)
@@ -373,6 +403,9 @@ internal sealed class BrowserSession : IAsyncDisposable
                 remaining--;
                 try
                 {
+                    // A page of a file can show any other file in a frame, a load no request gate sees: such a frame is read
+                    // only when the session could load that file itself.
+                    if (!await CanReadFrameAsync(state, child, cancellationToken).ConfigureAwait(false)) continue;
                     var (childRoot, childTruncated) = await SnapshotFrameAsync(state, child, verbose, frames, cancellationToken).ConfigureAwait(false);
                     truncated |= childTruncated;
                     holder.Children.Add(childRoot);
@@ -389,6 +422,14 @@ internal sealed class BrowserSession : IAsyncDisposable
         var snapshot = new BrowserSnapshot(root, verbose, truncated, frames);
         state.Snapshot = snapshot;
         return snapshot;
+    }
+
+    private async Task<bool> CanReadFrameAsync(BrowserPageState state, BrowserFrame frame, CancellationToken cancellationToken)
+    {
+        if (_options.CheckNavigation is not { } check) return true;
+        var info = await state.Page.CallAgentAsync(frame, "info", "{}", cancellationToken).ConfigureAwait(false);
+        return !(info.TryGetProperty("url", out var url) && Uri.TryCreate(url.GetString(), UriKind.Absolute, out var address) && address.Scheme == Uri.UriSchemeFile)
+            || await check(address, cancellationToken).ConfigureAwait(false) is null;
     }
 
     private static async Task<(BrowserSnapshotNode Root, bool Truncated)> SnapshotFrameAsync(BrowserPageState state, BrowserFrame frame, bool verbose, Dictionary<string, BrowserFrame> frames, CancellationToken cancellationToken)
@@ -612,6 +653,11 @@ internal sealed class BrowserSession : IAsyncDisposable
     /// <summary>Closes the tabs of the session; the browser closes with the last session that uses it.</summary>
     public async ValueTask DisposeAsync()
     {
+        if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
+        // A browser that is starting for the session stops waiting, and what it opens after all is closed with it.
+        await _closing.CancelAsync().ConfigureAwait(false);
+        await _gate.WaitAsync(CancellationToken.None).ConfigureAwait(false);
+        _gate.Release();
         var context = Interlocked.Exchange(ref _context, null);
         if (context is not null)
         {

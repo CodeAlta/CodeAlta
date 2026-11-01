@@ -59,7 +59,10 @@ at the next call; its choice stays until it gives the tools back.
   before its tab is adopted: that first request is not stopped, as a request of an allowed page for a resource is not. Every page the session's tabs load is checked (`Fetch` or a BiDi intercept): a site not allowed is asked
   while a tool of the session runs, refused otherwise; a frame of a site not allowed is refused without a question.
 - **Every profile:** `file:` pages and uploads inside the session's folders only, never a file that looks like it holds
-  secrets; no request to the ports of CodeAlta; downloads to `<state root>/browser/downloads/<session>`, never opened;
+  secrets, and the files are checked as they are opened (the path the system gives for the handle), uploads being copies
+  in a folder of CodeAlta's; no request to the ports of CodeAlta (the others check a token on every request); downloads to
+  `<state root>/browser/downloads/<session>` (one folder per persistent profile, the user's own browser keeping its
+  own, none for a sandboxed session), never opened;
   no raw CDP for the model; what a page shows is marked as data in every answer that carries it.
 - **A sandboxed session** browses in the isolated profile only. Its context goes through a `SandboxNetworkProxy` of the
   network of its profile (`proxyServer` of a Chromium context, the proxy of a BiDi user context), and its files keep to

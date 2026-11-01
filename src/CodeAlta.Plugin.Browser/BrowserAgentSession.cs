@@ -217,7 +217,11 @@ internal sealed class BrowserAgentSession : IAsyncDisposable
             Proxy = proxy,
             // A sandboxed session saves nothing outside its sandbox; the others save in a folder of their own, and nothing
             // is ever opened.
-            DownloadDirectory = Sandbox is null && !IsUserProfile ? Directory.CreateDirectory(DownloadFolder).FullName : null,
+            DownloadDirectory = Sandbox is not null || IsUserProfile ? null
+                : Target.Profile.Kind == BrowserProfileKind.Persistent
+                    // A persistent profile's browser has one folder of downloads for every session of it.
+                    ? Directory.CreateDirectory(Path.Combine(_host.Root, "downloads", "profile-" + Target.Profile.Name)).FullName
+                    : Directory.CreateDirectory(DownloadFolder).FullName,
             Gate = (url, kind, token) => CheckAsync(url, kind, asking: false, token),
             GateDocuments = IsUserProfile,
             BlockedPorts = ReservedPorts(),
@@ -247,8 +251,9 @@ internal sealed class BrowserAgentSession : IAsyncDisposable
         var files = Path.Combine(_host.Root, "files", SafeName(SessionId));
         if (Sandbox is { } sandbox)
         {
-            var writable = sandbox.WriteRoots.Count != 0 ? sandbox.WriteRoots : folder is null ? [files] : [folder];
-            return new BrowserFiles(folder ?? writable[0], [.. sandbox.ReadRoots, .. writable], writable, writable[0])
+            // The folders of the sandbox, and none when it gives none: never the folder of the project in their place.
+            var writable = sandbox.WriteRoots;
+            return new BrowserFiles(folder ?? (writable.Count != 0 ? writable[0] : files), [.. sandbox.ReadRoots, .. writable], writable, files)
             {
                 Denied = sandbox.Denied,
                 ReadOnly = sandbox.ReadOnly,

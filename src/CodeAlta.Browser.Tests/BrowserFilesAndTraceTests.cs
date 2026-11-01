@@ -36,6 +36,91 @@ public sealed class BrowserFilesAndTraceTests
     }
 
     [TestMethod]
+    public async Task AFolderReplacedByALinkAfterTheCheck_IsRefusedWhenTheFileIsOpened()
+    {
+        if (!OperatingSystem.IsWindows() && !OperatingSystem.IsLinux())
+        {
+            Assert.Inconclusive("The system does not tell the path of an opened file here: the path is resolved again instead.");
+            return;
+        }
+
+        var folder = Directory.CreateDirectory(Path.Combine(Path.GetTempPath(), "codealta-files", Guid.NewGuid().ToString("N")[..8])).FullName;
+        var work = Directory.CreateDirectory(Path.Combine(folder, "work")).FullName;
+        var outside = Directory.CreateDirectory(Path.Combine(folder, "outside")).FullName;
+        var sub = Path.Combine(work, "sub");
+        try
+        {
+            await File.WriteAllTextAsync(Path.Combine(outside, "secret.txt"), "outside");
+            await File.WriteAllTextAsync(Path.Combine(outside, "keep.txt"), "kept");
+            Directory.CreateDirectory(sub);
+            await File.WriteAllTextAsync(Path.Combine(sub, "secret.txt"), "inside");
+            var files = new BrowserFiles(work, [work], [work], Path.Combine(folder, "tmp"));
+            var written = files.ResolveWrite("sub/keep.txt", "filePath");
+            files.ResolveRead("sub/secret.txt", "filePaths");
+
+            // Between the check and the use, the folder becomes a link out of the folders.
+            Directory.Delete(sub, recursive: true);
+            if (OperatingSystem.IsWindows())
+            {
+                using var mklink = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("cmd.exe", $"/c mklink /J \"{sub}\" \"{outside}\"") { CreateNoWindow = true, UseShellExecute = false })!;
+                await mklink.WaitForExitAsync();
+            }
+            else
+            {
+                Directory.CreateSymbolicLink(sub, outside);
+            }
+
+            StringAssert.Contains((await Assert.ThrowsExactlyAsync<BrowserToolException>(() => files.WriteAsync(written, "replaced", CancellationToken.None))).Message, "moved outside");
+            Assert.AreEqual("kept", await File.ReadAllTextAsync(Path.Combine(outside, "keep.txt")), "nothing was truncated or written outside");
+            await Assert.ThrowsExactlyAsync<BrowserToolException>(() => files.StageReadAsync("sub/secret.txt", "filePaths", CancellationToken.None));
+        }
+        finally
+        {
+            try
+            {
+                if (Directory.Exists(sub)) Directory.Delete(sub);
+                Directory.Delete(folder, recursive: true);
+            }
+            catch (IOException) { }
+            catch (UnauthorizedAccessException) { }
+        }
+    }
+
+    [TestMethod]
+    public async Task AnUploadIsACopyThePageGets_AndAScriptIsReadAsItWasChecked()
+    {
+        var folder = Directory.CreateDirectory(Path.Combine(Path.GetTempPath(), "codealta-files", Guid.NewGuid().ToString("N")[..8])).FullName;
+        try
+        {
+            await File.WriteAllTextAsync(Path.Combine(folder, "photo.txt"), "photo");
+            await File.WriteAllTextAsync(Path.Combine(folder, "script.js"), "() => 1");
+            var temporary = Path.Combine(Path.GetTempPath(), "codealta-files-tmp", Guid.NewGuid().ToString("N")[..8]);
+            var files = new BrowserFiles(folder, [folder], [folder], temporary);
+            var staged = await files.StageReadAsync("photo.txt", "filePaths", CancellationToken.None);
+            Assert.IsTrue(BrowserFiles.IsWithin(staged, temporary), staged);
+            Assert.AreEqual("photo.txt", Path.GetFileName(staged));
+            Assert.AreEqual("photo", await File.ReadAllTextAsync(staged));
+            Assert.AreEqual("() => 1", await files.ReadTextAsync("script.js", "sourcePath", CancellationToken.None));
+            await files.WriteAsync(Path.Combine(folder, "out.txt"), "longer text", CancellationToken.None);
+            await files.WriteAsync(Path.Combine(folder, "out.txt"), "short", CancellationToken.None);
+            Assert.AreEqual("short", await File.ReadAllTextAsync(Path.Combine(folder, "out.txt")), "a write replaces what was there");
+            Directory.Delete(temporary, recursive: true);
+        }
+        finally
+        {
+            Directory.Delete(folder, recursive: true);
+        }
+    }
+
+    [TestMethod]
+    public void SafariBeforeVersion27_IsNotChosen()
+    {
+        var old = new CodeAlta.Browser.Discovery.InstalledBrowser("safari", "Safari", CodeAlta.Browser.Discovery.BrowserEngine.Safari, "/usr/bin/safaridriver", "26.2", null, []);
+        StringAssert.Contains(old.Refusal(CodeAlta.Browser.Discovery.BrowserProfileKind.Isolated), "Safari 27");
+        Assert.IsNull((old with { Version = "27.0" }).Refusal(CodeAlta.Browser.Discovery.BrowserProfileKind.Isolated));
+    }
+
+    [TestMethod]
     public void ALinkedFolderLeadsNowhereOutsideTheFolders_AndASandboxKeepsItsDeniedAndProtectedPaths()
     {
         var folder = Directory.CreateDirectory(Path.Combine(Path.GetTempPath(), "codealta-files", Guid.NewGuid().ToString("N")[..8])).FullName;

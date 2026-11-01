@@ -113,12 +113,61 @@ public sealed class BrowserPluginTests
         await using var headless = await StartAsync(Host(folder), new BrowserSettings { UserProfile = new() { Enabled = true } });
         (exit, records) = await RunAsync(headless, folder, "s1", ["browser", "activate", "--profile", "user"]);
         Assert.AreEqual(5, exit);
-        StringAssert.Contains(records[^1].GetProperty("message").GetString(), "no user to agree");
+        StringAssert.Contains(records[^1].GetProperty("message").GetString(), "has no user");
         host.Sandbox = (_, _) => ValueTask.FromResult<BrowserSandbox?>(new BrowserSandbox("strict", [folder.Path], [folder.Path], null));
         (exit, records) = await RunAsync(plugin, folder, "s1", ["browser", "activate", "--profile", "persistent"]);
         Assert.AreEqual(5, exit);
         StringAssert.Contains(records[^1].GetProperty("message").GetString(), "isolated profile only");
         Assert.IsFalse(plugin.IsActive("s1"));
+        (exit, records) = await RunAsync(headless, folder, "s1", ["browser", "activate", "--profile", "persistent"]);
+        Assert.AreEqual(5, exit);
+        StringAssert.Contains(records[^1].GetProperty("message").GetString(), "isolated profile only", "nobody signed in for altacli");
+        host.Sandbox = (_, _) => ValueTask.FromResult<BrowserSandbox?>(new BrowserSandbox("broken", [], [], null));
+        (exit, records) = await RunAsync(plugin, folder, "s1", ["browser", "activate"]);
+        Assert.AreEqual(5, exit);
+        StringAssert.Contains(records[^1].GetProperty("message").GetString(), "cannot run now", "a sandbox that reaches nothing gives no folder in its place");
+    }
+
+    [TestMethod]
+    public async Task ASessionClosedWhileItsBrowserStarts_ClosesWhatTheStartOpens()
+    {
+        var started = new TaskCompletionSource<IBrowserContext>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var context = new FakeContext();
+        var session = new CodeAlta.Browser.Tools.BrowserSession(new CodeAlta.Browser.Tools.BrowserSessionOptions
+        {
+            // The start of a browser goes on when its caller stops waiting: it is the browser's, not the caller's.
+            OpenContext = _ => started.Task,
+            Files = _ => ValueTask.FromResult(new CodeAlta.Browser.Tools.BrowserFiles(Path.GetTempPath(), [], [], Path.GetTempPath())),
+        });
+        var opening = session.ContextAsync(CancellationToken.None);
+        var closing = session.DisposeAsync().AsTask();
+        started.SetResult(context);
+        await Assert.ThrowsExactlyAsync<ObjectDisposedException>(() => opening);
+        await closing;
+        Assert.IsTrue(context.Disposed, "the context the start opened is closed with the session");
+    }
+
+    private sealed class FakeContext : IBrowserContext
+    {
+        public bool Disposed { get; private set; }
+
+        public InstalledBrowser Browser { get; } = new("chrome", "Google Chrome", BrowserEngine.Chromium, "chrome", null, null, []);
+
+        public BrowserCapabilities Capabilities { get; } = new(false, false, false, false);
+
+        public IReadOnlyList<IBrowserPage> Pages => [];
+
+        public bool IsClosed => Disposed;
+
+        public event Action<IBrowserPage>? PageOpened { add { } remove { } }
+
+        public Task<IBrowserPage> NewPageAsync(bool background, CancellationToken cancellationToken) => throw new NotSupportedException();
+
+        public ValueTask DisposeAsync()
+        {
+            Disposed = true;
+            return ValueTask.CompletedTask;
+        }
     }
 
     [TestMethod]

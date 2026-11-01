@@ -180,6 +180,22 @@ internal sealed class BiDiBrowserConnection : IBrowserConnection
                 // A Firefox without the command saves downloads where its profile says, under the temporary profile.
             }
         }
+        else if (_process is not null)
+        {
+            // A profile of CodeAlta's in a Firefox it started: the browser's own setting, for every session of it. The user's
+            // own Firefox keeps where it saves.
+            try
+            {
+                await Driver.Browser.SetDownloadBehaviorAsync(new BrowserModule.SetDownloadBehaviorCommandParameters
+                {
+                    DownloadBehavior = options.DownloadDirectory is { } folder ? new BrowserModule.DownloadBehaviorAllowed(folder) : new BrowserModule.DownloadBehaviorDenied(),
+                }).ConfigureAwait(false);
+            }
+            catch (WebDriverBiDiException)
+            {
+                // A Firefox without the command saves downloads where its profile says.
+            }
+        }
 
         var context = new BiDiBrowserContext(this, userContext, options);
         _contexts[context] = 0;

@@ -21,6 +21,12 @@ internal static partial class FirefoxLauncher
     private static readonly ImmutableArray<(string Name, string Value)> Preferences =
     [
         ("app.update.disabledForTesting", "true"),
+        // No check, download or staging of an update of the installed Firefox, which shows its updater: the automation of a
+        // session never changes the user's Firefox.
+        ("app.update.checkInstallTime", "false"),
+        ("app.update.staging.enabled", "false"),
+        ("app.update.service.enabled", "false"),
+        ("app.update.background.scheduling.enabled", "false"),
         ("browser.shell.checkDefaultBrowser", "false"),
         ("browser.startup.homepage_override.mstone", "\"ignore\""),
         ("browser.startup.page", "0"),

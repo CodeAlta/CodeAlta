@@ -50,6 +50,97 @@ internal sealed record BrowserFiles(string BaseDirectory, IReadOnlyList<string> 
         return full;
     }
 
+    /// <summary>
+    /// Copies a file a page gets (an upload) into the temporary folder of the tools, which a sandboxed session cannot
+    /// change, and gives the path of the copy. The file is checked as it was opened: a link put in its path after the
+    /// check of <see cref="ResolveRead"/> is refused.
+    /// </summary>
+    /// <exception cref="BrowserToolException">The path is outside the folders, names a file of secrets, or cannot be read.</exception>
+    public async Task<string> StageReadAsync(string path, string argument, CancellationToken cancellationToken)
+    {
+        var full = ResolveRead(path, argument);
+        var staged = Path.Combine(TemporaryDirectory, "uploads", Guid.NewGuid().ToString("N")[..12], Path.GetFileName(full));
+        Directory.CreateDirectory(Path.GetDirectoryName(staged)!);
+        await using (var source = OpenChecked(full, argument, FileMode.Open, FileAccess.Read, FileShare.Read, ReadRoots, write: false))
+        await using (var copy = new FileStream(staged, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+        {
+            await source.CopyToAsync(copy, cancellationToken).ConfigureAwait(false);
+        }
+
+        return staged;
+    }
+
+    /// <summary>Reads the text of a file a tool takes (a script), checked as it was opened.</summary>
+    /// <exception cref="BrowserToolException">The path is outside the folders, names a file of secrets, or cannot be read.</exception>
+    public async Task<string> ReadTextAsync(string path, string argument, CancellationToken cancellationToken)
+    {
+        var full = ResolveRead(path, argument);
+        await using var source = OpenChecked(full, argument, FileMode.Open, FileAccess.Read, FileShare.Read, ReadRoots, write: false);
+        using var reader = new StreamReader(source);
+        return await reader.ReadToEndAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Writes a file a tool saves at a path <see cref="ResolveWrite"/> gave, checked as it was opened: a link put in its
+    /// path after the check is refused, and what was there is not truncated before.
+    /// </summary>
+    /// <exception cref="BrowserToolException">The file is not inside the folders a tool writes to any more, or cannot be written.</exception>
+    public async Task WriteAsync(string fullPath, Func<Stream, Task> write, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(write);
+        cancellationToken.ThrowIfCancellationRequested();
+        await using var stream = OpenChecked(fullPath, fullPath, FileMode.OpenOrCreate, FileAccess.Write, FileShare.None, WriteRoots, write: true);
+        stream.SetLength(0);
+        await write(stream).ConfigureAwait(false);
+    }
+
+    /// <summary>Writes bytes, as <see cref="WriteAsync(string, Func{Stream, Task}, CancellationToken)"/>.</summary>
+    public Task WriteAsync(string fullPath, byte[] bytes, CancellationToken cancellationToken)
+        => WriteAsync(fullPath, stream => stream.WriteAsync(bytes, cancellationToken).AsTask(), cancellationToken);
+
+    /// <summary>Writes text in UTF-8, as <see cref="WriteAsync(string, Func{Stream, Task}, CancellationToken)"/>.</summary>
+    public Task WriteAsync(string fullPath, string text, CancellationToken cancellationToken)
+        => WriteAsync(fullPath, System.Text.Encoding.UTF8.GetBytes(text), cancellationToken);
+
+    // Opens a file, then checks the path the system gives for what it opened: where the system cannot tell it, the path is
+    // resolved again, which leaves a smaller window.
+    private FileStream OpenChecked(string fullPath, string argument, FileMode mode, FileAccess access, FileShare share, IReadOnlyList<string> roots, bool write)
+    {
+        var existed = File.Exists(fullPath);
+        FileStream stream;
+        try
+        {
+            stream = new FileStream(fullPath, mode, access, share, 4096, FileOptions.Asynchronous);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            throw new BrowserToolException("io", $"The file of \"{argument}\" could not be {(write ? "written" : "read")}: {exception.Message}", exception);
+        }
+
+        string opened;
+        try
+        {
+            opened = BrowserFileHandles.PathOf(stream.SafeFileHandle) ?? RealPath(fullPath);
+        }
+        catch (IOException)
+        {
+            opened = string.Empty;
+        }
+
+        var allowed = opened.Length != 0 && roots.Any(root => IsWithin(opened, RealPath(root))) && !Denied.Any(entry => IsWithin(opened, RealPath(entry)))
+            && (write ? !ReadOnly.Any(entry => IsWithin(opened, RealPath(entry))) : !IsSecret(opened));
+        if (allowed) return stream;
+        stream.Dispose();
+        // A file this call created where it must not write is removed: it is empty.
+        if (write && !existed && opened.Length != 0)
+        {
+            try { File.Delete(opened); }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException) { /* left empty */ }
+        }
+
+        throw new BrowserToolException("not-allowed", $"The file of \"{argument}\" was moved outside the folders a file can be {(write ? "written to" : "read from")} while it was opened.");
+    }
+
     /// <summary>Whether a path is inside the folders a page may read: a <c>file:</c> address is checked as a read.</summary>
     public bool CanRead(string fullPath)
     {

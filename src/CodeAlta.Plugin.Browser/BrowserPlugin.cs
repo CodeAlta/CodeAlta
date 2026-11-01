@@ -375,10 +375,21 @@ public sealed class BrowserPlugin : PluginBase
             return Fail(context, "browser.invalidProfile", $"Unknown profile \"{profileText}\": isolated, persistent, persistent:<name> or user.");
         }
 
+        // Without a user, nobody signed in to a profile of CodeAlta for this run: the isolated profile only.
+        if (!_host.HasUser && profile.Kind != BrowserProfileKind.Isolated)
+        {
+            return Refused(context, "This application has no user: it browses in the isolated profile only.");
+        }
+
         var sandbox = _host.Sandbox is { } read ? await read(sessionId, cancellationToken).ConfigureAwait(false) : null;
         if (sandbox is not null && profile.Kind != BrowserProfileKind.Isolated)
         {
             return Refused(context, $"This session is sandboxed (profile '{sandbox.Profile}'): it browses in the isolated profile only, through the network of its sandbox.");
+        }
+
+        if (sandbox is { ReadRoots.Count: 0, WriteRoots.Count: 0 })
+        {
+            return Refused(context, $"The sandbox of this session (profile '{sandbox.Profile}') cannot run now, so its browser would reach nothing: fix the sandbox, or ask the user.");
         }
 
         if (profile.Kind == BrowserProfileKind.User && UserProfileRefusal(context, settings) is { } refusal) return Refused(context, refusal);

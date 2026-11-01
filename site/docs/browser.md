@@ -104,5 +104,6 @@ A [sandboxed session](sessions/sandbox.md) browses in the isolated profile only.
 
 - `file:` pages open only from the folders of the session, and never in a sandboxed session. A page never gets a file that looks like it holds secrets (`.env`, keys, `.ssh`).
 - A page never reaches the ports of CodeAlta itself: its MCP server and the developer instance.
-- Downloads go to `~/.alta/browser/downloads` and are never opened.
+- Downloads go to `~/.alta/browser/downloads` and are never opened; in your own browser, they go where your browser saves them. A sandboxed session downloads nothing.
+- A Firefox CodeAlta starts never checks for or installs an update of your Firefox.
 - To keep sessions from using a browser, turn off the **Browser** plugin in **Settings**, **Plugins**.
