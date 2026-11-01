@@ -205,18 +205,18 @@ public sealed class ClaudeCodeProviderTests
     [TestMethod]
     public void AppendSystemPrompt_SendsChangesToItsOwnTools_NotToTheScriptsOfExec()
     {
-        var withExec = ClaudeCodePrompts.CreateAppendSystemPrompt(null, hasGateway: true, hasShell: true, shellOfCodeAlta: false, hasExec: true);
-        StringAssert.Contains(withExec, "Scripts of `exec`");
-        StringAssert.Contains(withExec, "`tools.replace_in_file`");
-        StringAssert.Contains(withExec, "`tools.shell_command`");
+        var refused = ClaudeCodePrompts.CreateAppendSystemPrompt(null, hasGateway: true, hasShell: true, shellOfCodeAlta: false, scriptsRefuseChanges: true);
+        StringAssert.Contains(refused, "Scripts of `exec`");
+        StringAssert.Contains(refused, "`tools.replace_in_file`");
+        StringAssert.Contains(refused, "`tools.shell_command`");
 
         // Where commands run with the shell of CodeAlta, a script runs them too: only the file changes go to its own tools.
-        var withShellOfCodeAlta = ClaudeCodePrompts.CreateAppendSystemPrompt(null, hasGateway: true, hasShell: true, shellOfCodeAlta: true, hasExec: true);
+        var withShellOfCodeAlta = ClaudeCodePrompts.CreateAppendSystemPrompt(null, hasGateway: true, hasShell: true, shellOfCodeAlta: true, scriptsRefuseChanges: true);
         StringAssert.Contains(withShellOfCodeAlta, "`tools.replace_in_file`");
         Assert.DoesNotContain("`tools.shell_command`", withShellOfCodeAlta);
 
-        var withoutExec = ClaudeCodePrompts.CreateAppendSystemPrompt(null, hasGateway: true, hasShell: true, shellOfCodeAlta: false, hasExec: false);
-        Assert.DoesNotContain("Scripts of `exec`", withoutExec);
+        var batched = ClaudeCodePrompts.CreateAppendSystemPrompt(null, hasGateway: true, hasShell: true, shellOfCodeAlta: false, scriptsRefuseChanges: false);
+        Assert.DoesNotContain("Scripts of `exec`", batched);
     }
 
     [TestMethod]

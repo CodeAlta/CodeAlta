@@ -776,8 +776,11 @@ internal sealed partial class ClaudeCodeSession : IAsyncDisposable
             hasExec = _exposedTools.ContainsKey(ExecTool);
         }
 
-        return ClaudeCodePrompts.CreateAppendSystemPrompt(AgentInstructionText.DeveloperAndSession(request), hasGateway, request.DisabledTools?.Contains(ShellCommandTool) != true,
-            ClaudeCodeLauncher.CommandsThroughCodeAlta(request.ProcessHost), hasExec);
+        // The mode of this turn: a mode chosen since changes the instructions, and the conversation is told at its next prompt.
+        var hasShell = request.DisabledTools?.Contains(ShellCommandTool) != true;
+        var mode = ClaudeCodeLauncher.PermissionMode(NormalizePermissionMode(request.PermissionMode) ?? NormalizePermissionMode(_options.PermissionMode), !hasShell);
+        return ClaudeCodePrompts.CreateAppendSystemPrompt(AgentInstructionText.DeveloperAndSession(request), hasGateway, hasShell,
+            ClaudeCodeLauncher.CommandsThroughCodeAlta(request.ProcessHost), hasExec && ClaudeCodePrompts.CliDecidesInMode(mode));
     }
 
     // Returns what the conversation has to be told of its instructions before the prompt that starts, if anything:

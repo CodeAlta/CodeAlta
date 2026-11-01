@@ -29,7 +29,9 @@ the decision of the mode, and the host would review each one (`SessionPermission
 review of the host, which is what they promise. `shell_command` stays where it is how the session runs its commands (a
 sandbox on Windows). The mode read is the one of the session or of its provider: without one, the CLI follows the user's
 settings, and the host's own policy answers. The refusal is checked at each call, so a change of mode applies to a script
-that runs. Claude Code is also told to make these changes with its own tools (`CreateAppendSystemPrompt`, `hasExec`).
+that runs. In these two modes only, Claude Code is also told to make these changes with its own tools
+(`CreateAppendSystemPrompt`, `scriptsRefuseChanges`): in the others, scripts stay the efficient way to batch edits, and
+its instructions do not mention them. A mode chosen since changes the instructions, which the next prompt says.
 
 `CodeAlta.CodeMode` knows no CodeAlta project (`ArchitectureGuardrailTests`): its host gives it a `CodeModeApi` (the
 paths of the functions, their schemas) and an `ICodeModeCallHandler` (what runs them).

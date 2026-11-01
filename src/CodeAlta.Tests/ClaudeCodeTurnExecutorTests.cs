@@ -449,15 +449,46 @@ public sealed class ClaudeCodeTurnExecutorTests
     }
 
     [TestMethod]
-    public async Task AppendSystemPrompt_TellsASessionWithExec_ToChangeFilesWithItsOwnTools()
+    [DataRow("auto", true)]
+    [DataRow("dontAsk", true)]
+    [DataRow("bypassPermissions", false)]
+    [DataRow("acceptEdits", false)]
+    [DataRow("default", false)]
+    [DataRow(null, false)]
+    public async Task AppendSystemPrompt_LeavesChangesToItsOwnTools_OnlyWhereScriptsAreRefused(string? mode, bool told)
     {
         var cli = new ClaudeCodeFakeCli();
         await using var executor = new ClaudeCodeTurnExecutor(cli.CreateOptions());
-        await ExecuteAsync(executor, CreateRequest([User("one")]) with { SessionId = "with", Tools = [Tool("alta"), Tool("exec"), Tool("wait")] });
-        StringAssert.Contains(cli.Last.InitializeRequest.GetProperty("appendSystemPrompt").GetString(), "Scripts of `exec`");
+        await ExecuteAsync(executor, CreateRequest([User("one")]) with { PermissionMode = mode, Tools = [Tool("alta"), Tool("exec"), Tool("wait")] });
+        var prompt = cli.Last.InitializeRequest.GetProperty("appendSystemPrompt").GetString()!;
+        Assert.AreEqual(told, prompt.Contains("Scripts of `exec`", StringComparison.Ordinal), "Elsewhere scripts stay the efficient way to batch edits.");
+    }
 
-        await ExecuteAsync(executor, CreateRequest([User("one")]) with { SessionId = "without", Tools = [Tool("alta")] });
+    [TestMethod]
+    public async Task AppendSystemPrompt_SaysNothingOfScripts_WithoutExec()
+    {
+        var cli = new ClaudeCodeFakeCli();
+        await using var executor = new ClaudeCodeTurnExecutor(cli.CreateOptions());
+        await ExecuteAsync(executor, CreateRequest([User("one")]) with { PermissionMode = "auto", Tools = [Tool("alta")] });
         Assert.DoesNotContain("Scripts of `exec`", cli.Last.InitializeRequest.GetProperty("appendSystemPrompt").GetString()!);
+    }
+
+    [TestMethod]
+    public async Task AModeChosenLater_TellsTheConversationAtItsNextPrompt_BothWays()
+    {
+        var cli = new ClaudeCodeFakeCli();
+        await using var executor = new ClaudeCodeTurnExecutor(cli.CreateOptions());
+        AgentToolDefinition[] tools = [Tool("alta"), Tool("exec"), Tool("wait")];
+        var first = await ExecuteAsync(executor, CreateRequest([User("one")]) with { PermissionMode = "bypassPermissions", Tools = tools });
+        Assert.DoesNotContain("Scripts of `exec`", cli.Last.InitializeRequest.GetProperty("appendSystemPrompt").GetString()!);
+
+        var second = await ExecuteAsync(executor, CreateRequest([User("one"), first.AssistantMessage, User("two")], first) with { PermissionMode = "auto", Tools = tools });
+        StringAssert.Contains(ClaudeCodeFakeProcess.UserText(cli.Last.UserMessages[^1]), "Scripts of `exec`", "Auto: the scripts leave changes to its own tools.");
+
+        await ExecuteAsync(executor, CreateRequest([User("one"), first.AssistantMessage, User("two"), second.AssistantMessage, User("three")], second) with { PermissionMode = "bypassPermissions", Tools = tools });
+        var back = ClaudeCodeFakeProcess.UserText(cli.Last.UserMessages[^1]);
+        StringAssert.Contains(back, "<codealta_instructions_update>", "Back in Bypass: the conversation is told to drop that instruction.");
+        Assert.DoesNotContain("Scripts of `exec`", back);
     }
 
     [TestMethod]
