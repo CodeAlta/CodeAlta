@@ -60,10 +60,12 @@ internal sealed class SessionPermissionsService
                 // half-filled request is refused rather than shown with a blank command or a blank folder.
                 var shaped = entry?.Request is { } value && value.Kind switch
                 {
-                    "commandExecution" => Text(value.Command, 4096, true) && Text(value.WorkingDirectory, 1024, true) && value.GrantRoot is null && value.Skill is null,
-                    "fileChange" => Text(value.GrantRoot, 1024, true) && value.Command is null && value.WorkingDirectory is null && value.Skill is null,
+                    "commandExecution" => Text(value.Command, 4096, true) && Text(value.WorkingDirectory, 1024, true) && value.GrantRoot is null && value.Skill is null && value.Browser is null,
+                    "fileChange" => Text(value.GrantRoot, 1024, true) && value.Command is null && value.WorkingDirectory is null && value.Skill is null && value.Browser is null,
+                    "browser" => value.Browser is { } browser && Identity(browser.Browser) && Identity(browser.Profile) && (browser.Site is null || Identity(browser.Site))
+                        && value.Command is null && value.WorkingDirectory is null && value.GrantRoot is null && value.Skill is null,
                     "skill" => value.Skill is { } skill && Identity(skill.Server) && Identity(skill.Name) && Text(skill.Uri, 1024, true)
-                        && skill.FileCount >= 0 && skill.TotalBytes is >= 0 and <= int.MaxValue && value.Command is null && value.WorkingDirectory is null && value.GrantRoot is null,
+                        && skill.FileCount >= 0 && skill.TotalBytes is >= 0 and <= int.MaxValue && value.Command is null && value.WorkingDirectory is null && value.GrantRoot is null && value.Browser is null,
                     _ => false,
                 };
                 if (entry?.Handle is not { } handle || entry.Request is not { } summary || handle.Attempt is null
@@ -81,6 +83,7 @@ internal sealed class SessionPermissionsService
                     Skill = summary.Skill is { } skillSummary
                         ? new(skillSummary.Server, skillSummary.Name, skillSummary.Uri, skillSummary.FileCount, (int)skillSummary.TotalBytes, skillSummary.Dynamic)
                         : null,
+                    Browser = summary.Browser is { } browserSummary ? new(browserSummary.Browser, browserSummary.Profile, browserSummary.Site) : null,
                 });
             }
             // Four complete commands, each <=6,144 text + 512 identity UTF-16 units. Worst-case six-byte
@@ -102,7 +105,8 @@ internal sealed class SessionPermissionsService
         var decision = request.Decision switch
         {
             "allow_once" => AgentPermissionDecisionKind.AllowOnce,
-            // Only the load of a skill whose files can be checked accepts it: the owner refuses it for anything else.
+            // Only the load of a skill whose files can be checked, and a site of the user's browser, accept it: the owner
+            // refuses it for anything else.
             "allow_always" => AgentPermissionDecisionKind.AllowAlways,
             "deny" => AgentPermissionDecisionKind.Deny,
             _ => AgentPermissionDecisionKind.Cancel,
@@ -179,7 +183,7 @@ internal sealed record SessionPermissionCommandHandle(string OperationId, string
 /// One pending permission of a session. <paramref name="Kind"/> says which shape it has: a
 /// <c>commandExecution</c> carries <paramref name="Command"/> and <paramref name="WorkingDirectory"/> and no
 /// <paramref name="GrantRoot"/>; a <c>fileChange</c> carries only <paramref name="GrantRoot"/>; a <c>skill</c> carries only
-/// <see cref="Skill"/>, the skill of an MCP server it asks to load.
+/// <see cref="Skill"/>, the skill of an MCP server it asks to load; a <c>browser</c> carries only <see cref="Browser"/>.
 /// </summary>
 internal sealed record SessionPermissionCommand(SessionPermissionCommandHandle Handle, string ProviderId, string Kind,
     string? Command, string? WorkingDirectory, string? GrantRoot, string? Reason)
@@ -192,7 +196,12 @@ internal sealed record SessionPermissionCommand(SessionPermissionCommandHandle H
 
     /// <summary>The skill of an MCP server a <c>skill</c> request asks to load; null for another kind.</summary>
     public SessionPermissionSkillEntry? Skill { get; init; }
+
+    /// <summary>The user's browser a <c>browser</c> request asks to drive, and the site; null for another kind.</summary>
+    public SessionPermissionBrowserEntry? Browser { get; init; }
 }
+/// <summary>The user's own browser a permission asks to drive: for the session, or for a <paramref name="Site"/>, which can be allowed from now on.</summary>
+internal sealed record SessionPermissionBrowserEntry(string Browser, string Profile, string? Site);
 /// <summary>The skill of an MCP server a permission asks to load: <paramref name="Dynamic"/> ones are allowed once only.</summary>
 internal sealed record SessionPermissionSkillEntry(string Server, string Name, string Uri, int FileCount, int TotalBytes, bool Dynamic);
 internal sealed record SessionPermissionsPage(string Status, string HostEpoch, string? SessionId, SessionPermissionCommand[] Entries, bool HasMore);

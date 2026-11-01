@@ -38,6 +38,9 @@ public sealed record SessionPermissionSnapshot(
     /// <summary>Gets the skill of an MCP server the request asks to load, for a request of kind <c>skill</c>; null otherwise.</summary>
     public SessionPermissionSkill? Skill { get; init; }
 
+    /// <summary>Gets the user's browser, profile and site the request asks to drive, for a request of kind <c>browser</c>; null otherwise.</summary>
+    public SessionPermissionBrowser? Browser { get; init; }
+
     /// <summary>
     /// Gets a value indicating whether a sandboxed session asks to run the command outside its sandbox
     /// (<see cref="AgentCommandPermissionRequest.OutsideSandbox"/>): no permission mode answers it for the user.
@@ -53,6 +56,12 @@ public sealed record SessionPermissionSnapshot(
 /// <param name="TotalBytes">The number of bytes of its files; 0 when its server generates them.</param>
 /// <param name="Dynamic">Whether its server generates its files: it can then be allowed once only.</param>
 public sealed record SessionPermissionSkill(string Server, string Name, string Uri, int FileCount, long TotalBytes, bool Dynamic);
+
+/// <summary>What a permission request asks to drive in the user's own browser, as the review shows it.</summary>
+/// <param name="Browser">The name of the browser.</param>
+/// <param name="Profile">The profile.</param>
+/// <param name="Site">The site the session would act on; null for the use of the browser itself.</param>
+public sealed record SessionPermissionBrowser(string Browser, string Profile, string? Site);
 
 /// <summary>A permission registration with a read-only completion; no frontend owns its completion source.</summary>
 public sealed class SessionPermissionRegistration
@@ -210,7 +219,7 @@ public sealed partial class SessionPermissionService : IAsyncDisposable
     // A request no permission mode answers for the user: the load of a skill of an MCP server, whose instructions may ask
     // for commands, and a command a sandboxed session asks to run outside its sandbox. It waits for the user, or is
     // denied where nobody can be asked.
-    internal static bool AlwaysAsks(AgentPermissionRequest request) => request is AgentSkillPermissionRequest || IsOutsideSandbox(request);
+    internal static bool AlwaysAsks(AgentPermissionRequest request) => request is AgentSkillPermissionRequest or AgentBrowserPermissionRequest || IsOutsideSandbox(request);
 
     // A host that trusts its sessions fully still has nobody to let a command out of a sandbox: the user chose the sandbox.
     private static bool IsOutsideSandbox(AgentPermissionRequest request) => request is AgentCommandPermissionRequest { OutsideSandbox: true };
@@ -222,7 +231,7 @@ public sealed partial class SessionPermissionService : IAsyncDisposable
     internal bool FullTrust { get; set; }
 
     // Whether the user may allow a request from now on: only the load of a skill whose files can be checked.
-    private static bool OffersAllowAlways(SessionPermissionSnapshot snapshot) => snapshot.Skill is { Dynamic: false };
+    private static bool OffersAllowAlways(SessionPermissionSnapshot snapshot) => snapshot.Skill is { Dynamic: false } || snapshot.Browser is { Site: not null };
 
     private readonly OrchestrationMailboxActor _actor = new(128);
     private readonly Dictionary<SessionPermissionHandle, PendingPermission> _pending = new();
@@ -480,7 +489,7 @@ public sealed partial class SessionPermissionService : IAsyncDisposable
                 if (pending.OwnedExecution is not { FollowsSessionPolicy: true } execution || execution.SessionId != sessionId) continue;
                 if (policy == SessionPermissionPolicy.AcceptEdits && pending.Snapshot.Kind != FileChangeKind) continue;
                 // The load of a skill of an MCP server, and a command out of a sandbox, wait for the user whatever the mode.
-                if (pending.Snapshot.Kind == AgentSkillPermissionRequest.SkillKind || pending.Snapshot.OutsideSandbox) continue;
+                if (pending.Snapshot.Kind is AgentSkillPermissionRequest.SkillKind or AgentBrowserPermissionRequest.BrowserKind || pending.Snapshot.OutsideSandbox) continue;
                 if (Complete(pending.Snapshot.Handle, AgentPermissionDecisionKind.AllowOnce)) allowed++;
             }
             return allowed;
@@ -640,6 +649,10 @@ public sealed partial class SessionPermissionService : IAsyncDisposable
                 && ValidOwnedText(skill.SkillName, OwnedIdentityLimit, required: true)
                 && ValidOwnedText(skill.Uri, OwnedDirectoryLimit, required: true)
                 && skill.FileCount >= 0 && skill.TotalBytes >= 0,
+            AgentBrowserPermissionRequest browser => request.Kind == AgentBrowserPermissionRequest.BrowserKind
+                && ValidOwnedText(browser.Browser, OwnedIdentityLimit, required: true)
+                && ValidOwnedText(browser.Profile, OwnedIdentityLimit, required: true)
+                && ValidOwnedText(browser.Site, OwnedIdentityLimit, required: false, identity: browser.Site is not null),
             _ => false,
         };
 
@@ -668,6 +681,10 @@ public sealed partial class SessionPermissionService : IAsyncDisposable
             AgentSkillPermissionRequest skill => new(handle, request.ProviderId, request.Timestamp, request.Kind, null, null, null, null)
             {
                 Skill = new(skill.Server, skill.SkillName, skill.Uri, skill.FileCount, skill.TotalBytes, skill.Dynamic),
+            },
+            AgentBrowserPermissionRequest browser => new(handle, request.ProviderId, request.Timestamp, request.Kind, null, null, null, null)
+            {
+                Browser = new(browser.Browser, browser.Profile, browser.Site),
             },
             _ => throw new InvalidOperationException($"A permission request of kind '{request.Kind}' is not presented by the owned review."),
         };
@@ -715,6 +732,7 @@ public sealed partial class SessionPermissionService : IAsyncDisposable
             command?.Command, command?.WorkingDirectory, command?.Reason ?? file?.Reason, file?.GrantRoot)
         {
             Skill = request is AgentSkillPermissionRequest skill ? new(skill.Server, skill.SkillName, skill.Uri, skill.FileCount, skill.TotalBytes, skill.Dynamic) : null,
+            Browser = request is AgentBrowserPermissionRequest browser ? new(browser.Browser, browser.Profile, browser.Site) : null,
             OutsideSandbox = command?.OutsideSandbox == true,
         };
         var completion = new TaskCompletionSource<AgentPermissionDecision>(TaskCreationOptions.RunContinuationsAsynchronously);

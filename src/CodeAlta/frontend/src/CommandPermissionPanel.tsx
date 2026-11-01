@@ -167,10 +167,16 @@ export function CommandPermissionPanel({ reviewer, epoch, sessionId, canReview, 
   const ready = canReview() && state === shown && armed === attempt;
   // Deny is the answer that means the same for every provider: the run goes on without the action. Stopping the run
   // is the Stop button of the composer. A skill whose files can be checked can also be allowed from now on.
-  // A command outside the sandbox is allowed once at most: the next one is asked again.
-  const decisions: readonly (readonly [CommandDecision, "Allow this skill" | "Allow once" | "Deny"])[] = !entry.outsideSandbox && offersAllowAlways(entry)
-    ? [["allow_always", "Allow this skill"], ["allow_once", "Allow once"], ["deny", "Deny"]]
-    : [["allow_once", "Allow once"], ["deny", "Deny"]];
+  // A command outside the sandbox is allowed once at most: the next one is asked again. The user's browser is allowed
+  // for the session, and a site of it for the session or from now on.
+  const decisions: readonly (readonly [CommandDecision, "Allow this skill" | "Always allow this site" | "Allow for this session" | "Allow once" | "Deny"])[] =
+    entry.kind === "browser"
+      ? offersAllowAlways(entry)
+        ? [["allow_always", "Always allow this site"], ["allow_once", "Allow for this session"], ["deny", "Deny"]]
+        : [["allow_once", "Allow for this session"], ["deny", "Deny"]]
+      : !entry.outsideSandbox && offersAllowAlways(entry)
+      ? [["allow_always", "Allow this skill"], ["allow_once", "Allow once"], ["deny", "Deny"]]
+      : [["allow_once", "Allow once"], ["deny", "Deny"]];
   // The choices are one list: the arrows move along it, Enter answers with the focused one, Escape denies.
   function move(event: KeyboardEvent<HTMLElement>) {
     const field = event.target instanceof HTMLInputElement;
@@ -198,6 +204,10 @@ export function CommandPermissionPanel({ reviewer, epoch, sessionId, canReview, 
     data-outside-sandbox={entry.outsideSandbox || undefined}>
     <h3 id={`${sessionId}-permission-question`}>{entry.kind === "skill" && entry.skill
       ? t("Load the skill {name} from the MCP server {server}?", { name: entry.skill.name, server: entry.skill.server })
+      : entry.kind === "browser" && entry.browser
+      ? entry.browser.site
+        ? t("Open {site} in your browser {browser}?", { site: entry.browser.site, browser: entry.browser.browser })
+        : t("Let the agent use your browser {browser}?", { browser: entry.browser.browser })
       : t(entry.outsideSandbox ? "Run outside the sandbox?" : entry.kind === "commandExecution" ? "Allow this command?" : "Allow file changes under this folder?")}</h3>
     <p className="sr-only" role="status">{t("A request waits for your permission.")}</p>
     {entry.kind === "skill" && entry.skill
@@ -217,6 +227,14 @@ export function CommandPermissionPanel({ reviewer, epoch, sessionId, canReview, 
         {skillText?.attempt === entry.handle.attemptId && (skillText.text === null
           ? <p className="detail" role="alert">{t("The skill could not be read.")}</p>
           : <pre data-permission-skill-text>{skillText.text}</pre>)}
+      </>
+      : entry.kind === "browser" && entry.browser
+      ? <>
+        <p className="detail" data-permission-browser>{t("Profile {profile}", { profile: entry.browser.profile })}
+          {entry.browser.site && <> · <code data-permission-site>{entry.browser.site}</code></>}</p>
+        <p className="detail">{entry.browser.site
+          ? t("The agent reads and acts on the pages of this site and its subdomains with your sign-ins.")
+          : t("The agent works in tabs of its own, with your sign-ins and cookies. Each new site is asked first.")}</p>
       </>
       : entry.kind === "commandExecution"
       ? <><pre data-permission-command>{entry.command}</pre>
