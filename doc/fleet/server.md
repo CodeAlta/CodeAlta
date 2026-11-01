@@ -1,0 +1,122 @@
+# CodeAlta Server
+
+The coordinator of a fleet. It knows who is who, what is online and who may reach what; it routes and relays; it keeps
+what people share. It runs no agent and reads no content it was not given. Names (`CodeAlta Server`, `altaserver`)
+are proposals ([readme](readme.md#naming)).
+
+## What it does
+
+| Responsibility | Content |
+| --- | --- |
+| Identity | People, sign-in methods, devices and the signed device list, enrollment, tokens ([identity](identity-and-access.md)) |
+| Directory and presence | Machines and their inventory, published sessions (facts and sealed metadata), people online. Presence lives in memory |
+| Routing and relay | Splices session channels between devices; delivers child answers, cross-machine messages and queued commands |
+| Ownership | Which node owns each published session, and its epoch ([sessions across machines](sessions-across-machines.md#ownership-and-fencing)) |
+| Replicas | Stores the encrypted replicas of journals it cannot read |
+| Collaboration | Project channels, shares, handoffs, notifications ([collaboration](collaboration.md)) |
+| Policies | Stores and distributes the signed policy bundles; enforces what is its own (who may reach whom) |
+| Scheduling | Assigns fleet automations to eligible nodes and reassigns them when a node stays offline |
+| Audit | The append-only, chained audit log and its exports |
+| Web pages | Setup, sign-in (passkeys, SSO), device approval; later the phone's page for the whole fleet |
+
+What it does not do: run an agent, hold a model credential, read a journal, clone a repository (unless an
+organization turns on the GitHub token broker, which mints tokens and never clones).
+
+## Stack
+
+- **.NET 10, ASP.NET Core minimal APIs and WebSockets on Kestrel.** One process.
+- **Packaged** as a self-contained single file per platform (ReadyToRun) and a container image (`linux/amd64`,
+  `linux/arm64`). Not Native AOT: the OpenID Connect authentication it needs is not supported under AOT, and SignalR is
+  only partly.
+- **Identity**: ASP.NET Core Identity and OpenIddict.
+- **Storage**: a small store interface with two implementations, SQLite (`Microsoft.Data.Sqlite`, the default) and
+  PostgreSQL (`Npgsql`), SQL with Dapper or ADO.NET, numbered SQL migrations, one contract test suite run against both.
+  No EF Core (its AOT and precompiled-query support is still experimental, and two dialects stay honest in plain SQL).
+- **Blobs** (snapshots, replicas, attachments of messages): the file system by default; S3, Azure Blob Storage or
+  Google Cloud Storage behind an interface.
+- **JSON** with source-generated contracts shared with the nodes (`CodeAlta.Fleet.Protocol`).
+- **OpenTelemetry** for its own traces and metrics; an OTLP endpoint that forwards what nodes send.
+- It references `CodeAlta.Fleet.Protocol` only: never the agent runtime (a guardrail test checks it).
+
+## Inside
+
+- **One writer per thing**, as in the rest of CodeAlta: a mailbox per organization for membership and policies, per
+  node for its connection and deliveries, per session for ownership, so the server needs no locks spread over its
+  state.
+- **Presence and routes in memory**; only state changes are persisted. A heartbeat is never a database write.
+- **Backpressure everywhere**: bounded channels per connection, a write budget, and refusal (`server_busy`, with a
+  delay) rather than unbounded queues.
+
+## Data
+
+| Table | Content |
+| --- | --- |
+| `organizations`, `people`, `logins`, `passkeys` | Accounts and their sign-in methods (logins keyed on issuer and subject) |
+| `devices`, `device_list` | Devices, their public keys, status, and the signed list entries |
+| `teams`, `memberships`, `grants` | Teams and grants `(subject, capability, scope)` |
+| `machines`, `machine_inventory` | Node records (owner, labels, capabilities) and their last inventory |
+| `projects` | Repository keys or blind indexes, per space |
+| `sessions` | Published session facts and the sealed metadata blob |
+| `ownership` | Owner node and epoch per session |
+| `deliveries` | Queued messages per node, with sequence and time to live |
+| `replicas` | Per session: epoch, acknowledged offset, blob reference |
+| `channels`, `messages`, `shares` | Collaboration |
+| `policies`, `wrapped_keys` | Signed bundles; keys wrapped to devices |
+| `usage` | Additive usage facts per person, machine, project, model and quarter hour |
+| `audit` | The audit log, append-only, chained |
+
+Portable by construction: text ids (ULID or GUID), UTC timestamps as 64-bit integers, JSON as text, `ON CONFLICT`
+upserts, no engine-specific functions.
+
+## SQLite or PostgreSQL
+
+SQLite is not the limit; the topology is. Measured for this plan (SQLite 3.50 in WAL mode, an NVMe disk, a Ryzen 9
+9950X, one run; a cloud VM with network-attached disks flushes much more slowly):
+
+| Workload | SQLite |
+| --- | --- |
+| One-row transactions, `synchronous=NORMAL` | about 45,000 commits per second |
+| One-row transactions, `synchronous=FULL` | about 850 commits per second (one disk flush each) |
+| 100-row batches | about 245,000 rows per second |
+| Heartbeat upserts for 1,000 nodes | about 49,000 per second |
+
+| Scale | Nodes | Writes per second (heartbeats every 15 s in memory, a batch per second per active node) | SQLite |
+| --- | --- | --- | --- |
+| A household, a small team | up to ~100 | ≤ 100 | Trivial |
+| Hundreds of people | ~1,000 | ≤ 1,000 | Comfortable |
+| Thousands | ~10,000 | ≤ 10,000 | Feasible with batching, but one machine, no high availability, long restores |
+
+**PostgreSQL is needed for**: more than one server instance, updates without downtime, managed point-in-time recovery,
+or a platform without a local disk (Azure Container Apps, Cloud Run). Not for throughput.
+
+- SQLite's WAL **does not work on a network file system**: never on Azure Files, EFS or a bucket mounted with FUSE.
+- **Backups**: the server copies its database with SQLite's backup API on a schedule (as CodeAlta's application
+  database does) and can stream it with Litestream to object storage; Litestream is asynchronous backup, not failover.
+- `altaserver migrate --to postgres` copies a SQLite database into PostgreSQL and checks the counts.
+- PostgreSQL is small too (a 1 vCPU, 1 to 2 GB machine is plenty for a coordinator); the worry is operations, not size.
+  Managed PostgreSQL starts around 10 to 15 dollars a month on the three clouds.
+
+## Availability
+
+Nodes are autonomous: a server that is down stops visibility, relay and sharing, not work
+([architecture](architecture.md#offline-and-failures)). So:
+
+- **One instance** with backups is the default, also for most organizations: restart in seconds, nodes reconnect and
+  replay.
+- **High availability** (milestone 5) runs two or more instances on PostgreSQL; a channel between two devices
+  connected to different instances needs cross-instance routing (PostgreSQL `LISTEN/NOTIFY` for small fleets, a
+  message bus beyond). Orleans would model it elegantly but is not worth its weight before then.
+
+## Administration
+
+- **From CodeAlta Desktop**: **Settings > Fleet > Server** for the owner and admins: people, teams, machines,
+  policies, enrollment tokens, audit, backups, updates.
+- **`altaserver` commands** on the machine: `run`, `install` (service), `status`, `backup`, `restore`,
+  `migrate --to postgres`, `audit export`, `recover-owner` (with the recovery key, on the console only).
+- **Web pages**: setup, sign-in, device approval; nothing that needs the desktop's richness.
+
+## One organization per server
+
+A server hosts one organization (a household, a company). It is not a multi-tenant service: organizations that must
+not trust each other run separate servers. A hosted CodeAlta service, if ever, is a separate decision
+([security](security-and-privacy.md#compliance)).

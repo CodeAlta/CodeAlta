@@ -1,0 +1,165 @@
+# Fleet protocol
+
+How devices, nodes and the server talk. One protocol for every topology ([architecture](architecture.md#three-topologies)):
+the same messages flow over a direct connection between two machines or through the server's relay.
+
+## Goals
+
+- **Durability lives in the protocol, not in the connection.** Sleep, proxies, outages and forced disconnects are
+  normal; sequences, acknowledgements and cursors make a reconnection resume, never repair.
+- **Safe retries.** Every side-effecting request is idempotent; a command bound to one run never applies to another
+  ([runtime](../runtime.md#owned-session-commands)).
+- **Content never readable by a relay.** The server routes and stores what it is allowed to see
+  ([security](security-and-privacy.md#what-the-server-sees)).
+- **Versioned from day one**, with a compatibility window, so a fleet upgrades in waves.
+- **Bounded.** Every stream and queue has a size; a slow reader costs updates, never memory.
+
+## Layers
+
+| Layer | Content |
+| --- | --- |
+| Services | `node.*`, `sessions.*`, `moves.*`, `projects.*` (node API); `presence.*`, `directory.*`, `facts.*`, `relay.*`, `ownership.*`, `replica.*`, `chat.*`, `shares.*`, `policy.*`, `keys.*` (server API) |
+| Messages | Request, response and event envelopes in JSON, contracts source-generated; idempotency keys; `traceparent` |
+| Channels | Several streams over one connection, with credit-based flow control; lossy (display) or lossless (transfers) |
+| Security | To the server: TLS, plus a proof of possession of the device key on every request. Between devices: TLS 1.3 with the node's key pinned and a signed device proof, direct or relayed |
+| Transport | WebSocket (`wss`) on port 443 of the server, or on the node's port for a direct connection |
+
+## Connections
+
+1. **The control connection**: every device of a fleet keeps one outbound WebSocket to the server
+   (`wss://<server>/fleet/v1`). It carries presence, publications, the directory, deliveries and relay requests.
+   Nothing connects into a node.
+2. **The session channel**: a viewer that opens a session of another node opens a channel to that node.
+   - **Relayed** (the default with a server): the viewer asks `relay.open`; the server checks that the viewer may
+     reach the node, asks the node to accept, then splices the two streams. Relaying is the path that always works;
+     direct paths are an optimization (measured by Harness, one of the products studied: direct peer-to-peer
+     connections through home routers failed in 9 trials out of 9).
+   - **Direct** (paired machines, or a node reachable on the LAN or the tailnet): the viewer connects to
+     `wss://<node>:2585/fleet/v1/channel`.
+   - Inside both: TLS 1.3 with the viewer as client, the node as server; the viewer pins the node's key (from pairing,
+     or from the signed device list of the fleet) and proves its own device key with a signature bound to the TLS
+     channel. The relay sees ciphertext only.
+3. **Transfers** (a session that moves, a replica) are lossless streams of the session channel, or of a second
+   connection when the first one carries live views.
+
+## Handshake
+
+The first frames of every connection, in both directions (patterned on OpenClaw's gateway protocol, the most worked
+example found):
+
+```text
+server/node → hello.challenge { nonce, time, protocol: {min, max}, policy: {maxFrame, heartbeat} }
+client      → hello { protocol: {min, max}, client: {kind, version, os}, device: {id, proof}, resume: {cursors} }
+server/node → welcome { protocol, features, cursors, policy }  |  error { code, hint }
+```
+
+- `proof` signs the nonce, the channel binding and the device id with the device key (ECDSA P-256).
+- Errors say what to do, so a client reacts instead of retrying blindly: `unauthenticated` (bad or expired credential:
+  `reauthenticate`), `pending_approval` (wait for `device.approved`), `forbidden` (authenticated, not allowed),
+  `revoked`, `update_required` (version outside the window), `server_busy` (`retry_after`).
+
+## Envelopes
+
+```json
+{ "t": "req", "id": "01JBX...", "m": "sessions.send", "p": { }, "idem": "rk-...", "tp": "00-4bf9...-01" }
+{ "t": "res", "id": "01JBX...", "ok": true, "r": { } }
+{ "t": "res", "id": "01JBX...", "ok": false, "err": { "code": "session.stale_run", "hint": "refresh" } }
+{ "t": "evt", "ch": 7, "e": "session.display", "seq": 4211, "p": { } }
+```
+
+- Contracts are C# records with source-generated `System.Text.Json` (no reflection, AOT-friendly), in
+  `CodeAlta.Fleet.Protocol`; the TypeScript of the page and the phone is generated from them, as the desktop's RPC
+  client is today.
+- Binary payloads (bundle chunks, replica segments) go in binary frames with a small header (channel, sequence,
+  length).
+- `idem` is the idempotency key: for session commands, the owned command's client retry key.
+- `tp` is the W3C trace context, so work that crosses machines is one trace ([observability](observability.md)).
+
+## Durability
+
+| Flow | Rule |
+| --- | --- |
+| Node to server: session facts | Each fact carries `(sessionId, epoch, version)`; the server keeps the highest version and refuses a stale epoch. The source is the journal and its projection, with a watermark per server: the journal is the outbox. |
+| Node to server: other facts (inventory, usage, audit events) | A small outbox table on the node, with a per-server sequence; the server acknowledges the highest contiguous sequence; the node resends from there after a reconnection. Duplicates are no-ops. |
+| Server to node: deliveries (child answers, cross-machine messages, chat, policy) | A per-node delivery sequence with acknowledgements and a time to live; queued while the node is offline. |
+| Replicas | `replica.append(sessionId, epoch, fromOffset, bytes)`; the server stores what follows the last acknowledged offset, refuses a gap (with the expected offset) or a stale epoch. |
+| Viewers | Display: full replacements with a revision and a gap flag (lossy by design). History: windows by journal cursor. After a reconnection: the current display, then the history after the viewer's cursor. |
+| Commands | The node keeps receipts by idempotency key (bounded); a retry returns the first receipt; an evicted receipt answers `expired`, never runs again. |
+
+Transient streaming deltas (tokens of an answer) are never replicated or acknowledged: the display replacement that
+follows carries the state.
+
+## Flow control and limits
+
+- A credit window per channel (bytes in flight); display channels drop intermediate replacements; transfer channels
+  wait for credits.
+- A write budget per connection; a reader that stays behind is disconnected with a reason and reconnects to the
+  current state.
+- Limits announced in `hello.challenge`: maximum frame (a few MiB), heartbeat period, maximum channels.
+
+## Heartbeats and reconnection
+
+- An application ping every 20 to 30 seconds (it carries the node's state), since proxies and Cloudflare close idle
+  WebSockets after about 100 seconds, and load balancers after 60.
+- Forced disconnects are expected (Cloud Run ends any WebSocket after 60 minutes): reconnection with backoff and jitter
+  (up to a minute) and resumption by cursors is the normal path, one round trip.
+
+## Versions
+
+- `protocol {min, max}` in the handshake; a node one minor version behind the server keeps working (N-1 window);
+  features are announced (`features`), never inferred from a version.
+- Fields are added, never repurposed; unknown fields are ignored; an unknown method answers `method_not_found`.
+- Old versions are removed on a schedule, announced in the release notes, so the protocol does not accumulate
+  dialects.
+
+## Services
+
+### Node API (over a session channel)
+
+| Group | Requests and events |
+| --- | --- |
+| `node` | `info`, `capabilities`, `readiness(space)` (identity check, providers ready) |
+| `projects` | `list`, `resolve(repositoryKey)`, `clone` |
+| `providers` | `status`, `signIn.start` (device code flows), `signIn.poll` |
+| `sessions` | `list`, `watch` (display stream), `history` (windows), `create`, `send`, `queue`, `steer`, `abort`, `answerAsk`, `answerPermission`, `jobs.list`, `jobs.output`, `jobs.stop`, `image`, `archive`, `restore`, `fork` |
+| `moves` | `offer`, `accept`, `transfer`, `commit`, `abort` |
+| `terminal` | `open` (a setup terminal, owner only, audited), `input`, `resize`, `close` |
+
+They map onto what the desktop's RPC services already call (owned commands, the display projection, history
+windows, asks, permissions, jobs); the node API is that surface, made remote, plus moves and readiness.
+
+### Server API (over the control connection)
+
+| Group | Requests and events |
+| --- | --- |
+| `presence` | `update` (in the heartbeat), `watch` |
+| `directory` | `watch` (machines, published sessions, people, projects) |
+| `facts` | `publish`, `ack` (session facts, usage, audit events) |
+| `relay` | `open`, `incoming`, `accept`, `close` |
+| `ownership` | `commit` (a move), `takeover`, `changed` |
+| `replica` | `append`, `read`, `status` |
+| `deliveries` | `push`, `ack` |
+| `chat`, `shares`, `notifications` | Channels, shares and notifications ([collaboration](collaboration.md)) |
+| `policy`, `keys` | Signed policy bundles; the signed device list and wrapped keys ([security](security-and-privacy.md)) |
+| `enroll`, `auth` | Device approval, enrollment tokens, token renewal ([identity](identity-and-access.md)) |
+
+## Choices and why
+
+| Option | Decision |
+| --- | --- |
+| Plain WebSocket with our envelope | **Chosen.** Works through every proxy, tunnel and platform that passes an HTTP upgrade; supported by ASP.NET Core and in browsers; carries relayed TLS. |
+| SignalR | Not for nodes: its stateful reconnect buffers only 100,000 bytes in memory, hubs do not fit relayed end-to-end streams, Native AOT support is partial. Possible later for browser fan-out only. |
+| gRPC | No: needs HTTP/2 end to end (broken by some proxies and tunnels), no bidirectional streaming in browsers. |
+| HTTP/3 and QUIC | No: built into Windows 11 only; Linux needs `libmsquic`; macOS is partially supported; UDP is often blocked. |
+| NATS (leaf nodes, JetStream) | A good model (outbound leaf, per-leaf domain, durable consumers), not adopted: a second server, in Go, to ship and secure. |
+| WebRTC and NAT traversal | No: unreliable through home routers; LAN and tailnet give direct paths where they matter. |
+| StreamJsonRpc as the command layer | A candidate to compare with our envelope in the first sub-plan (its AOT story was not verified); the resume and acknowledgement layer stays ours either way. CodeAlta already has a JSON-RPC transport (`CodeAlta.Acp`). |
+
+## Other protocols
+
+- **ACP**: CodeAlta keeps ACP-shaped session semantics (list, resume, fork, archive; running, requires action, idle;
+  background work) so the node API stays familiar, but ACP's remote transport is still a proposal and does not cover
+  moves, leases or fleets.
+- **A2A** (stable 1.0 since April 2026): later, a node could publish an Agent Card so agents outside CodeAlta delegate
+  tasks to it; the fleet's own traffic stays on this protocol.
+- **MCP**: unchanged; the desktop's MCP server stays local to its machine.

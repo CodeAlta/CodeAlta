@@ -1,0 +1,125 @@
+# CodeAlta Node
+
+The headless CodeAlta host: the always-on machine at home, the Mac that builds iOS, a cloud VM. It answers issue
+[#284](https://github.com/CodeAlta/CodeAlta/issues/284)'s "headless mode". Names (`CodeAlta Node`, `altanode`) are
+proposals ([readme](readme.md#naming)).
+
+## What it is
+
+`altanode` is `CodeAltaHost` without a window: the same runtime, catalog, providers, tools, plugins made for headless
+hosts, sandbox, Code Mode, automations, jobs and reminders, plus the fleet connector and the node API
+([architecture](architecture.md#inside-a-host)). It owns a state root and its lock, as Desktop and TUI do, so it is
+**the** instance of its profile on that machine.
+
+What it is not:
+
+- not `altacli`, which runs one prompt beside an instance and never owns the state root;
+- not a server: it runs agents; the coordinator is [CodeAlta Server](server.md), a separate process that can run
+  on the same machine;
+- not a UI: it is driven from CodeAlta Desktop, the phone, or `altanode` commands for the basics.
+
+## Commands
+
+| Command | What it does |
+| --- | --- |
+| `altanode run` | Runs in the foreground (logs to the console). What a service starts. |
+| `altanode install [--user \| --system --account <name>]` | Installs and starts the service of this OS (below). |
+| `altanode uninstall` | Stops and removes the service; keeps the profile. |
+| `altanode pair` | Shows a pairing code and QR code (in the terminal) for a desktop to scan. |
+| `altanode join <server-url> [--token <enrollment>]` | Enrolls in a fleet: with an enrollment token, or by a device code a person approves. |
+| `altanode status` | The service, the fleet connections, the sessions at work, the providers' readiness. |
+| `altanode logs [--follow]` | The node's log. |
+| `altanode update` | Updates to the version the fleet recommends, when idle. |
+
+## Running as a service
+
+Agents run as an OS user, and the credentials they use (Git, SSH, `gh`, the Claude Code login, cloud CLIs) live in
+that user's home folder and keychain. So the node runs **as the user whose credentials it uses**, never as root or
+LocalSystem.
+
+| OS | A person's machine (their logins) | A machine that uses deploy keys and tokens only (a container, a team machine) |
+| --- | --- | --- |
+| Windows | A task at logon of the user (Task Scheduler). A Windows service would run in Session 0 and not see the user's Credential Manager, ssh-agent or Git Credential Manager | A Windows service (`Microsoft.Extensions.Hosting.WindowsServices`) under a dedicated account |
+| macOS | A LaunchAgent of the user: it runs in the login session, with the keychain. An always-on Mac mini keeps that user logged in (automatic login conflicts with FileVault; the guide explains the choice) | A LaunchDaemon with `UserName` (no login keychain) |
+| Linux | A `systemd --user` unit with lingering on (`loginctl enable-linger`), so it runs without a login; libsecret needs a session bus, so prefer tokens in files the node protects | A system unit with `User=codealta` (`Microsoft.Extensions.Hosting.Systemd`, `Type=notify`, watchdog) |
+
+**One node per OS user.** A machine several people use runs one node per person, never one privileged node acting
+for everyone. A dedicated machine gets its own OS user (`codealta`) with its own logins, set up from the desktop.
+
+- The installer writes the unit with restart on failure, and a bounded log under the state root.
+- A node keeps the machine awake while sessions work (as `DesktopKeepAwake` does), and lets it sleep when idle
+  unless the owner says it is always on.
+- Exit is graceful: admission closes, running turns finish or stop after a bound, journals are flushed; a session
+  interrupted by a stop is resumable, as after a crash today.
+
+## What a node publishes
+
+| Inventory | Content | Who sees it |
+| --- | --- | --- |
+| Identity | Node id, name (editable), owner or team, OS, architecture, CodeAlta version | The fleet |
+| State | Online, busy (sessions at work), always-on, last seen | The fleet |
+| Capabilities | Sandbox backend available, tools found on `PATH` (git, gh, dotnet, node, python, xcodebuild, docker...), CPU and memory class, free disk | The fleet |
+| Labels | Set by the owner (`always-on`, `ios`, `gpu`...) | The fleet |
+| Providers | Keys, types, readiness, models (never a credential) | The owner's devices; the fleet sees readiness only |
+| Projects | Repository keys, branches checked out | The fleet sees the keys (for matching); paths and branches go to the owner's devices only |
+| Spaces | The linked spaces whose sessions it publishes | The server of each space sees only its own |
+
+## Credentials on a node
+
+The fleet never copies a secret from one machine to another ([security](security-and-privacy.md#credentials)).
+Each node signs in by itself; the desktop drives the sign-ins so that nobody has to sit at the server.
+
+| Need | How the node gets it |
+| --- | --- |
+| Providers CodeAlta signs in (Codex subscription, Copilot, xAI) | The device code flow runs on the node; the desktop shows the code and the link; tokens stay in the node's `~/.alta/auth/` |
+| Providers with an API key | Typed by the person in the node's settings from the desktop, sent over the end-to-end channel, kept in the node's protected store (DPAPI, Keychain, libsecret) or named as an environment variable of the service |
+| Claude Code, Codex CLI, ACP agents | Their own login on that machine, done in a setup terminal of the node opened from the desktop (owner only, audited), or over SSH |
+| Git over SSH | A key made on the node; its public key added to the Git host (`gh ssh-key add`, or copied by the person); the space identity names it. Organizations can sign short-lived SSH certificates instead (milestone 5) |
+| GitHub | `gh auth login` with a device code, per space profile as today (`gh auth setup-git` for HTTPS); with a server, the CodeAlta GitHub App's device flow gives the node expiring user tokens (8 hours, refreshed for up to 6 months) |
+| Cloud CLIs | Their device flows (`az login --use-device-code`, `aws sso login --no-browser`, `gcloud auth login --no-browser`), per space CLI profile |
+
+**Readiness.** For each linked space, the desktop shows whether the node is ready to run its sessions: the identity
+**Check** of the space run on the node (who Git commits as, whether keys exist, which GitHub account), and the
+providers of the space that are ready there, with **Set up…** beside what is missing.
+
+## Workspaces
+
+- A node clones the repositories it is asked to work on into its workspace root (`~/code` by default, set per node),
+  as `<host>/<owner>/<repo>`, and adds them to the space that asked.
+- Moved sessions and sessions started remotely work in worktrees of their own, so a person's checkout on that
+  machine is never changed under them.
+- Disk use is shown in the fleet; worktrees of sessions archived or deleted are removed by the existing worktree
+  cleanup.
+
+## Limits and good citizenship
+
+- At most N sessions at work at a time (set per node), the others queued, as a machine shared by a family or a team
+  needs.
+- Background work runs at a lower priority than the person using the machine.
+- A node shared by several people (a team build Mac) runs their sessions in the sandbox, under the team's
+  credentials, until per-person credentials on shared machines exist (milestone 5,
+  [security](security-and-privacy.md#shared-machines)).
+
+## Safety
+
+- A node listens only where its owner allows (loopback, LAN, tailnet interface, or nowhere when a server relays).
+- Every request is authenticated by a device key the node trusts (paired, or the same person in the fleet, or a share).
+- Agent-started sessions from other machines are off until the owner turns them on, per space; they run sandboxed
+  when the policy says so.
+- The node's owner can stop everything it runs, from the desktop or with `altanode` locally, and can quarantine the
+  node (refuse all remote requests) without uninstalling it.
+
+## Desktop and TUI as nodes
+
+A desktop or a TUI that runs on a machine is a node of the fleets its spaces link to, while it runs: its sessions
+are visible, and drivable when the space allows it (**Allow my other devices to drive the sessions of this machine**,
+per space). When it exits, it is offline. A machine that must stay reachable runs `altanode`, and the desktop opens
+it in client mode ([architecture](architecture.md#the-desktop-one-session-host-abstraction)).
+
+## Packaging
+
+- A .NET tool like the other executables (`dotnet tool install -g <package>`), for developers.
+- Self-contained archives per platform (`win-x64`, `win-arm64`, `osx-arm64`, `osx-x64`, `linux-x64`, `linux-arm64`)
+  for servers without the .NET SDK, signed.
+- A container image (`linux/amd64`, `linux/arm64`) for cloud nodes, with the sandbox's Linux backend.
+- Installers come later (winget, Homebrew, apt): see [deployment](deployment.md#packaging).
