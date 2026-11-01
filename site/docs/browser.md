@@ -22,6 +22,11 @@ Check the page in Firefox and take a screenshot.
 
 The agent turns the tools on for its session with `alta browser activate`, then uses them. The browser opens at its first call, in a window you see, and the screenshots appear in the timeline. The session sees only the tabs it opened, never the tabs of another session.
 
+<figure class="alta-figure my-4" style="max-width: 48rem;">
+  <img src="{{site.basepath}}/img/alta-desktop-browser-session.webp" alt="A CodeAlta session whose agent ran alta browser activate, navigate_page to codealta.github.io and take_screenshot: the screenshot in the timeline, and the Browser Edge chip in the composer" loading="lazy">
+  <figcaption class="small text-secondary mt-2">An agent opened the website of CodeAlta in Edge and took a screenshot, shown in the timeline; the chip of the prompt names its browser.</figcaption>
+</figure>
+
 The browser tools and the [UI tools](ui-tools.md) have the same names: a session has one set or the other, and turning one on gives the other back.
 
 ## Which browser
@@ -33,6 +38,11 @@ The first of these that names a browser wins:
 3. **Automatic**, the default: the browser you use on this computer. CodeAlta reads when each browser last wrote the files it keeps while you browse, and which browser is the default one of the system. The default browser wins when it was used within a day of the last one.
 
 Automatic reads file times only, never a history, a cookie or a page, and sends nothing anywhere. `alta browser list` shows the browsers found, their evidence and the choice, and the Browser page of Settings shows the same.
+
+<figure class="alta-figure my-4" style="max-width: 48rem;">
+  <img src="{{site.basepath}}/img/alta-desktop-browser-settings.webp" alt="Settings, Extensions, Browser: the preferred browser Automatic (Microsoft Edge), the Isolated profile of the sessions, Without a window, Scripts in pages, and the persistent profiles" loading="lazy">
+  <figcaption class="small text-secondary mt-2"><strong>Settings › Extensions › Browser</strong>: the browser and the profile of the sessions, and the persistent profiles.</figcaption>
+</figure>
 
 ## Profiles
 
@@ -61,6 +71,11 @@ The agent then acts with your sign-ins. CodeAlta asks you three times:
 3. For each new site the session opens there, its card asks again: **Always allow this site**, **Allow for this session** or **Deny**. A link to another site waits for your answer too.
 
 No permission mode answers these questions for you. The sites you always allow and those you block are listed on the Browser page, where you can change them.
+
+<figure class="alta-figure my-4" style="max-width: 48rem;">
+  <img src="{{site.basepath}}/img/alta-desktop-browser-settings-own.webp" alt="The Browser page of Settings scrolled to Your own browser, with its switch off and the allowed and blocked sites, and to Browsers found, with Edge marked default and Firefox" loading="lazy">
+  <figcaption class="small text-secondary mt-2">Your own browser, off until you turn it on, its sites, and the browsers found on this computer.</figcaption>
+</figure>
 
 - **Chrome and Edge** need remote debugging turned on once: open `chrome://inspect/#remote-debugging` (`edge://inspect/#remote-debugging`) and allow it. The browser then asks you to allow the connection. The agent's tabs open in a window of their own, and the agent sees only those.
 - **Firefox** lets CodeAlta drive it only when CodeAlta starts it: close Firefox when the agent asks, and CodeAlta starts it again on your profile.

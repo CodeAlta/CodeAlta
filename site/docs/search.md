@@ -31,6 +31,11 @@ Press `Ctrl+P` and type a few words. Besides sessions, projects, files, commands
 | A section of the guide | The Documentation tab opens at that section. |
 | An MCP server or a plugin | Its Settings page opens. |
 | A setting, or a page of Settings | Settings opens on its page, and the setting glows. |
+
+<figure class="alta-figure my-4" style="max-width: 44rem;">
+  <img src="{{site.basepath}}/img/alta-desktop-settings-search-global.webp" alt="The Ctrl+P search window with darker dark theme typed: matching conversations, the Settings group with Darker dark theme, and pages of the guide" loading="lazy">
+  <figcaption class="small text-secondary mt-2"><code>Ctrl+P</code> finds settings beside conversations and the pages of the guide.</figcaption>
+</figure>
 | A tool | Its description is shown. |
 
 **Search sessions…** in a project's menu searches that project's conversations.

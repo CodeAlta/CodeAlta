@@ -53,6 +53,16 @@ When something keeps a phone from connecting, the Mobile tab says what it is and
 - **A new session**: the project and the prompt, then the model chip beside **Start**: a tier of the settings or a model, and its effort. The project defaults to that of the session you are viewing; from the list, to the last project used, or to the first project the list keeps to when that one is not among them. **⋯** holds the agent prompt, the provider, the permissions and a worktree of its own. The choices are remembered for each project.
 - **Archive** a session by swiping it to the right, or with the archive button of its page; **Restore** brings it back.
 
+<figure class="alta-figure my-4" style="max-width: 48rem;">
+  <img src="{{site.basepath}}/img/alta-desktop-mobile-approval.webp" alt="Two phones: the session list with a session that Waits for your approval, and the page of that session with the card Allow this command? for git push, Deny and Allow once, and Stop below" loading="lazy">
+  <figcaption class="small text-secondary mt-2">A permission request on the phone: in the list, then on the page of its session.</figcaption>
+</figure>
+
+<figure class="alta-figure my-4" style="max-width: 48rem;">
+  <img src="{{site.basepath}}/img/alta-desktop-mobile-jobs.webp" alt="Three phones: 2 in the background above the prompt, the list of background tasks with Running and Recent, and the output of a job with Stop job" loading="lazy">
+  <figcaption class="small text-secondary mt-2">The background jobs of a session: their count above the prompt, the list, and the output of one.</figcaption>
+</figure>
+
 ## Spaces
 
 With more than the Default space, the **Mobile** row of **Settings > Plugins** has a chip with its [spaces](../spaces.md#what-a-space-has). The phone then lists, opens and acts on the sessions of those spaces only, and a new session goes to one of them. A plugin in every space shows every session.

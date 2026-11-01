@@ -21,6 +21,11 @@ What you create in Settings (a prompt, a skill, a plugin, an MCP server, a color
 
 Settings opens with the focus in **Search settings**, at the top of its pages. Type what you look for, in your language or in English: the settings of every page that match show at once, grouped by page and by the part of the page they are on, and you change them right there. Pages without a match are dimmed, and the others show how many they have.
 
+<figure class="alta-figure my-4" style="max-width: 48rem;">
+  <img src="{{site.basepath}}/img/alta-desktop-settings-search.webp" alt="Settings over a SharpYaml session with tab typed in Search settings: results from Appearance, Windows and Sessions with their controls, the other pages dimmed and the matching ones counted" loading="lazy">
+  <figcaption class="small text-secondary mt-2">A search in Settings: the settings that match, from every page, changed where they are found.</figcaption>
+</figure>
+
 - **Open page** shows the whole page of a group. A list (providers, MCP servers, prompts) or a setting changed on its page has **Open**.
 - `Enter` opens the first result on its page, `↓` moves into the results, and `Esc` clears the search; a second `Esc` closes Settings.
 - A setting you open from the search, from `Ctrl+P` or from an agent glows for a moment on its page, so you see where it is.
@@ -34,6 +39,11 @@ Agents know the settings of CodeAlta: ask one where a setting is, what it does, 
 - When an agent changes a setting, a toast names it, with **Show** and **Undo**.
 - Agents never change what protects you: the permission modes, the confirmations, the tools turned off, **Review changes before commit**, the sandbox, Code Mode, the CodeAlta MCP server, Remote Control, storage cleanup and search by meaning. They show you those, and you change them.
 - A list of items, such as the MCP servers, the prompts or the windows, is changed with its own commands, as before.
+
+<figure class="alta-figure my-4" style="max-width: 48rem;">
+  <img src="{{site.basepath}}/img/alta-desktop-settings-agent-change.webp" alt="A toast saying the agent of a session changed Suggest the next prompt to Off, with Show and Undo, over Settings open on Sessions where Suggest the next prompt glows" loading="lazy">
+  <figcaption class="small text-secondary mt-2">A setting an agent changed: the toast with <strong>Show</strong> and <strong>Undo</strong>, and Settings open on the setting, which glows.</figcaption>
+</figure>
 
 The zoom of the window is in the title bar, before the theme switch: click it, or use `Ctrl+-`, `Ctrl+=` and `Ctrl+0`. It is kept for the next start.
 
