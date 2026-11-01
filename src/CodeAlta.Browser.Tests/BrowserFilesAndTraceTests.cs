@@ -25,6 +25,14 @@ public sealed class BrowserFilesAndTraceTests
         Assert.AreEqual(Path.Combine(root, "photo.jpg"), files.ResolveRead("photo.jpg", "filePaths"));
         Assert.IsTrue(files.CanRead(Path.Combine(root, "photo.jpg")));
         Assert.IsFalse(files.CanRead(Path.Combine(root, ".env")));
+        if (OperatingSystem.IsWindows())
+        {
+            // Refused by its text alone, before anything asks the network for it.
+            var started = System.Diagnostics.Stopwatch.StartNew();
+            StringAssert.Contains(Assert.ThrowsExactly<BrowserToolException>(() => files.ResolveRead(@"\\codealta-test.invalid\share\x.txt", "filePaths")).Message, "outside the folders");
+            Assert.IsFalse(files.CanRead(@"\\codealta-test.invalid\share\x.txt"));
+            Assert.IsTrue(started.Elapsed < TimeSpan.FromSeconds(1), "no lookup of the server");
+        }
     }
 
     [TestMethod]

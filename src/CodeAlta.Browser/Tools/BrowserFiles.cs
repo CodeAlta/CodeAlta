@@ -56,6 +56,8 @@ internal sealed record BrowserFiles(string BaseDirectory, IReadOnlyList<string> 
         string target;
         try
         {
+            // Outside the folders, the path is never touched: a UNC path would make the system reach its server.
+            if (!ReadRoots.Any(root => IsWithin(Path.GetFullPath(fullPath), root))) return false;
             target = RealPath(fullPath);
         }
         catch (Exception exception) when (exception is ArgumentException or NotSupportedException or PathTooLongException or IOException)
@@ -73,6 +75,12 @@ internal sealed record BrowserFiles(string BaseDirectory, IReadOnlyList<string> 
         try
         {
             full = Path.GetFullPath(path, BaseDirectory);
+            // Outside the folders, the path is never touched: a UNC path would make the system reach its server.
+            if (!roots.Any(root => IsWithin(full, root)))
+            {
+                throw new BrowserToolException("not-allowed", $"The path of \"{argument}\" is outside the folders a file can be {verb}: {string.Join(", ", roots)}.");
+            }
+
             target = RealPath(full);
         }
         catch (Exception exception) when (exception is ArgumentException or NotSupportedException or PathTooLongException)
