@@ -51,7 +51,7 @@ export function FontSettings() {
   const options = (families: readonly string[]) => families.map(family => <option key={family} value={family}>{family}</option>);
   return <Card className="appearance-settings font-settings" aria-labelledby="settings-fonts-title">
     <h2 id="settings-fonts-title">{t("Fonts")}</h2>
-    <Field label={t("Code font")} htmlFor="settings-code-font" notice={<div className="settings-field-wide">
+    <Field setting="appearance.code_font" label={t("Code font")} htmlFor="settings-code-font" notice={<div className="settings-field-wide">
       <p className="settings-field-help">{t("Code blocks, editors and file views. Name installed fonts separated by commas: a character the first one lacks is taken from the next one, then from the built-in {font}.", { font: builtinCodeFont })}</p>
       {installed === "unavailable" && <p role="status" className="notice">{t("The installed fonts could not be listed: type their names.")}</p>}
       {!saved && <p role="status" className="notice" data-diagnostic="unsaved">{preferenceNotice(locale, "Fonts", "", "unsaved")}</p>}
@@ -73,7 +73,7 @@ export function FontSettings() {
         : <Button loading={installed === "loading"} onClick={() => void listInstalled()}>{t("Installed fonts")}</Button>)}
       <Button variant="minimal" disabled={!preferences.code.length && !draft} onClick={() => { setDraft(""); update({ code: [] }); }}>{t("Reset")}</Button>
     </Field>
-    <Field label={t("Prompt font")} htmlFor="settings-prompt-font" notice={<div className="settings-field-wide">
+    <Field setting="appearance.prompt_font" label={t("Prompt font")} htmlFor="settings-prompt-font" notice={<div className="settings-field-wide">
       <p className="settings-field-help">{t("The prompt is written in the code font, or in the font of the rest of the window.")}</p>
       <p className="font-settings-preview prompt">{promptSample}</p>
     </div>}>

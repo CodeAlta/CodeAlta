@@ -8,7 +8,7 @@ import { changesViewLabel, changesViews } from "./projectChanges";
 export function ChangesViewSetting() {
   const { t } = useShellLanguage();
   const [preferences, update] = useChangesPreferences();
-  return <Field label={t("Changes are shown")} htmlFor="settings-changes-view">
+  return <Field setting="appearance.changes_view" label={t("Changes are shown")} htmlFor="settings-changes-view">
     <HTMLSelect id="settings-changes-view" value={preferences.view} onChange={event => update({ view: event.target.value === "all" ? "all" : "file" })}>
       {changesViews.map(view => <option key={view} value={view}>{t(changesViewLabel(view))}</option>)}
     </HTMLSelect>

@@ -24,7 +24,7 @@ export function TimelineEmphasisSetting() {
     setOpen(false);
     requestAnimationFrame(() => trigger.current?.focus());
   };
-  return <Field label={t("Entry appearance")} htmlFor="settings-dim-intermediate" notice={<><p className="settings-field-help">{t("Adjust opacity, background, borders and elevation by entry type.")}</p>{notice}</>}>
+  return <Field setting="appearance.entry_appearance" label={t("Entry appearance")} htmlFor="settings-dim-intermediate" notice={<><p className="settings-field-help">{t("Adjust opacity, background, borders and elevation by entry type.")}</p>{notice}</>}>
     <Switch id="settings-dim-intermediate" className="settings-checkbox" checked={emphasis.enabled} onChange={event => setEmphasis({ ...emphasis, enabled: event.currentTarget.checked })} />
     <Button ref={trigger} icon={<AppIcon name="palette" size={15} />} disabled={!emphasis.enabled} aria-haspopup="dialog" aria-expanded={open} onClick={() => setOpen(true)}>{t("Customize")}</Button>
     {open && <TimelineEmphasisWindow emphasis={emphasis} setEmphasis={setEmphasis} notice={notice} onClose={close} />}

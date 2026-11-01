@@ -30,7 +30,7 @@ export function WindowSettings({ hub, state }: { hub: WindowsHub; state: Windows
       <Card className="appearance-settings window-settings" aria-labelledby="settings-windows-title">
         <h2 id="settings-windows-title">{t("Windows")}</h2>
         <p className="settings-field-help">{t("Tabs moved out of the main window open in windows of their own. Name a window to keep it: it opens again where it was.")}</p>
-        <Field label={t("Restore windows at startup")} htmlFor="settings-windows-restore"
+        <Field setting="windows.restore_at_startup" label={t("Restore windows at startup")} htmlFor="settings-windows-restore"
           notice={<p className="settings-field-help">{t("The windows that were open when CodeAlta ended come back where they were, with their tabs.")}</p>}>
           <Switch id="settings-windows-restore" className="settings-checkbox" checked={state.restoreAtStartup}
             onChange={event => void hub.setRestoreAtStartup(event.currentTarget.checked)} />

@@ -476,6 +476,10 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
             var pluginIdentities = new DesktopPluginIdentities();
             var pluginAsks = new DesktopPluginAsks();
             var pluginPermissions = new DesktopPluginPermissions();
+            // The values of the settings plugins declare, in config.toml: a setting of each project is in the file of its project.
+            var settingsProjects = new ProjectCatalog(catalog);
+            var pluginSettingsStore = new PluginSettingsStore(catalog.ConfigPath,
+                projectId => settingsProjects.GetByIdAsync(projectId).GetAwaiter().GetResult() is { Archived: false } project ? project.ProjectPath : null);
             // The tabs that plugins provide: created with the plugins, which start before the window has a page, and attached to their runtime once it exists.
             canvases = pluginAlta is null ? null : new DesktopCanvases(pluginUi);
             pluginUi.Modules = canvases?.Modules;
@@ -543,7 +547,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                 PluginStartupFeedback = new DesktopPluginStartupFeedback(startupStatus),
                 PluginBuiltIns = DesktopPlugins.ForWindow(ui, uiSessions, options.ReviewOwnedCommandPermissions,
                     DesktopPlugins.CreateJournalCatalog(catalog), new StatisticsArchiveStore(catalog.StateRoot), searchRelay, browserHost), PluginSafeMode = DesktopPlugins.SafeMode,
-                PluginServices = pluginAlta is null ? null : new DesktopPluginServices(pluginAlta, pluginUi, canvases, pluginIdentities, new DesktopPluginAppFiles(assets, manifest), pluginAsks, pluginPermissions),
+                PluginServices = pluginAlta is null ? null : new DesktopPluginServices(pluginAlta, pluginUi, canvases, pluginIdentities, new DesktopPluginAppFiles(assets, manifest), pluginAsks, pluginPermissions, pluginSettingsStore),
                 // With the provider types of the plugins, which start later: their providers wait for them, as the log says.
                 ConfigureModelProviders = registry => ConfiguredModelProviderRegistryBuilder.RegisterConfiguredProviders(
                     registry, new CodeAltaConfigStore(catalog), options.CatalogRoot!, modelsDev, pluginProviderTypes),
@@ -883,6 +887,22 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                 }
                 // The runs of scripts are kept with the results of their steps: one CodeAlta ended during is resumed from its card.
                 _ = host.KeepCodeModeRunsAsync();
+                // The settings as one catalog: the built-in ones bound to the stores their pages use, for alta settings and the search of Settings.
+                Action? loggingSaved = null;
+                // The settings of the plugins: their values in config.toml, their changes told to them.
+                var pluginSettings = new Settings.DesktopPluginSettings(() => host.PluginRuntime.ActivePlugins, pluginSettingsStore);
+                host.PluginRuntime.Changed += (_, _) => pluginSettings.OnPluginsChanged();
+                var desktopSettings = new Settings.DesktopSettings(Settings.DesktopSettingsCatalog.Load(), Settings.DesktopSettingBindings.Create(new Settings.DesktopSettingSources
+                {
+                    Config = new CodeAltaConfigStore(host.CatalogOptions), Shell = shell, Windows = windows, Search = search.Host, WorkItems = workItems,
+                    LoggingSaved = () => loggingSaved?.Invoke(),
+                }))
+                {
+                    // Settings is in the main window: a request brings it to the front.
+                    Router = _ => { shell.Show(); return Windows.DesktopWindows.MainLabel; },
+                    Log = static line => LogManager.GetLogger("CodeAlta.Settings").Info(line),
+                    Plugins = pluginSettings,
+                };
                 var altaCommands = DesktopAltaTools.Attach(host, reminders.Reminders, pluginAlta, changesView, editorView,
                     new DesktopAltaTerminals(terminals, acceptsInput: !options.ReviewOwnedCommandPermissions),
                     new DesktopAltaAutomations(automations, host.ProjectCatalog, acceptsCommands: !options.ReviewOwnedCommandPermissions), worktrees, pluginWorkshop, workItems, new DesktopAltaAppearance(shell), spaceView,
@@ -896,8 +916,9 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                     },
                     // The tabs plugins provide: only a host that started its plugins has them.
                     canvases is null ? null : new DesktopAltaCanvases(canvases), documentation, documentationView, bookmarks, search, reviewService,
-                    new RuntimeAltaReviewPolicy(host.RuntimeService), new Windows.DesktopAltaWindows(windows));
+                    new RuntimeAltaReviewPolicy(host.RuntimeService), new Windows.DesktopAltaWindows(windows), desktopSettings);
                 search.AttachCommands(altaCommands);
+                search.AttachSettings(desktopSettings);
                 projectOpening.Attach(async arguments => await altaCommands.InvokeAsync(arguments).ConfigureAwait(false));
                 // The clients of the MCP server run the same commands, as callers that belong to no session.
                 Volatile.Write(ref altaTool, Mcp.DesktopMcpTools.Alta(altaCommands, roots.Project, shell.NotifySessionsChanged));
@@ -968,6 +989,8 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                         PluginProviderTypes = pluginProviderTypes,
                     });
                     var applicationLogs = new ApplicationLogsService(logCapture, configStore, epoch);
+                    loggingSaved = applicationLogs.Reload;
+                    builder.AddSettingsService(new SettingsService(desktopSettings, epoch));
                     var globalConfig = new GlobalConfigService(configStore, host.ModelProviderRegistry, options.CatalogRoot!, epoch)
                     {
                         // The file may change the levels of the log: they are taken at once.
@@ -1449,6 +1472,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
             builder.AddPluginUiService(new PluginUiService());
             builder.AddCanvasesService(new CanvasesService());
             builder.AddDocumentationService(new DocumentationService());
+            builder.AddSettingsService(new SettingsService());
             builder.AddProjectFilesService(new ProjectFilesService());
             builder.AddExternalEditorsService(new ExternalEditorsService());
             builder.AddSettingsFilesService(new SettingsFilesService());

@@ -157,6 +157,7 @@ Override only the methods the plugin needs. A `Get…()` method is called once w
 | `GetSessionEventProjections()` | Cards in the session timeline | yes | yes |
 | `GetCanvases()` | Tabs the plugin fills, or its settings page | yes | no |
 | `GetLandingCards()` | Cards on the welcome page | yes | no |
+| `GetSettings()` | Settings the user changes in Settings, found by its search and by agents: see [Settings](#settings) | yes | no |
 | `GetAgentTools()` | Tools the model can call | yes | yes |
 | `GetAltaCommands()` | Commands under the in-session `alta` tool | yes | yes |
 | `GetSystemPromptContributions()` | Text added to the system or developer prompt | yes | yes |
@@ -170,7 +171,7 @@ Override only the methods the plugin needs. A `Get…()` method is called once w
 | `GetCompactionContributions()` | Hooks of a manual compaction: see [Compaction hooks](#compaction-hooks) | yes | yes |
 | `GetCommandLineContributions()` | Commands of the `altatui` command line | no | yes |
 
-The factories `Command`, `PluginUi`, `PluginTui`, `Prompt`, `AgentTool`, `Resources` and `Startup` build the common contributions.
+The factories `Command`, `PluginUi`, `PluginTui`, `Prompt`, `AgentTool`, `Resources`, `Setting` and `Startup` build the common contributions.
 
 `OnAgentEventAsync` receives the events of every session, including a delta for each streamed fragment. A plugin that reads only finished content returns `false` from `ObservesContentDeltas` and is spared those calls. A plugin that does not override `OnAgentEventAsync` gets no events.
 
@@ -330,6 +331,30 @@ public override IEnumerable<PluginResourceContribution> GetResources()
 }
 ```
 
+## Settings
+
+A plugin declares its settings with `GetSettings()`. CodeAlta Desktop shows them on the plugin's page in **Settings > Extensions** (above its settings canvas when it has one), finds them in the search of Settings and with `Ctrl+P`, and gives them to agents through `alta settings` and `alta search --kind setting`.
+
+```csharp
+public override IEnumerable<PluginSettingContribution> GetSettings()
+{
+    yield return Setting.Integer("poll_minutes", "Check every", "How often new builds are looked for, in minutes.", defaultValue: 5, minimum: 1, maximum: 120)
+        with { Group = "Builds", Keywords = ["refresh", "interval"] };
+    yield return Setting.Choice("notify", "Tell me when a build", "Which builds raise a toast.", ["failed", "always", "never"], defaultValue: "failed")
+        with { Agents = PluginSettingAccess.ReadWrite };
+}
+
+// Read a value when it is used; Changed says that Settings or an agent changed one.
+var minutes = Services.Settings.GetInt64("poll_minutes") ?? 5;
+Services.Settings.Changed += (_, change) => Logger.Info($"{change.Key} changed");
+```
+
+- The kinds are `Boolean`, `Choice`, `Integer`, `Number`, `Text`, `Path` and `List`. A key has lower-case letters, digits and underscores; `enabled`, `required` and `spaces` are taken.
+- CodeAlta keeps the values in `config.toml` under `[plugins.<id>]`: the user's file, or the project's `.alta/config.toml` for a setting with `Scope = PluginSettingScope.Project`. Every setting of a plugin of a project is kept in its project. A value never changed is the default.
+- Agents only read a setting unless it says `Agents = PluginSettingAccess.ReadWrite`. Leave a setting that protects the user, opens access or deletes data to the user.
+- The values can be read from `OnActivatedAsync` on. `Changed` is raised off the window's thread while the plugin runs, never once it stops: return quickly. A hand edit of the file is read at the next `Get…`.
+- A plugin declares at most 64 settings; one that is not valid is left out, and **Settings > Plugins** says why.
+
 ## Lifecycle and data
 
 Override `InitializeAsync`, `OnActivatedAsync`, `OnDeactivatingAsync` and `DisposeAsync` only when the plugin owns something to set up or release.
@@ -354,7 +379,7 @@ Override `InitializeAsync`, `OnActivatedAsync`, `OnDeactivatingAsync` and `Dispo
   }, cancellationToken);
   ```
 
-- `Services.Spaces.GetAssignedSpaces()` gives the [spaces](../spaces.md#what-a-space-has) the plugin is assigned to; an empty list means every space. CodeAlta already keeps the plugin out of other spaces: use it for what the plugin serves itself. Do not read `config.toml` yourself.
+- `Services.Spaces.GetAssignedSpaces()` gives the [spaces](../spaces.md#what-a-space-has) the plugin is assigned to; an empty list means every space. CodeAlta already keeps the plugin out of other spaces: use it for what the plugin serves itself. Do not read `config.toml` yourself: declare [settings](#settings).
 - `Logger` writes to the CodeAlta log.
 - Keep no static references to host objects, and no secrets in plugin source.
 
@@ -381,6 +406,7 @@ The `codealta-plugin-runtime` skill ships complete plugins that CodeAlta's tests
 | `hello-command` | A command |
 | `desktop-and-terminal` | One plugin for both apps: portable dialogs, an HTML dialog, a status item, content above the prompt, a prompt picker |
 | `saved-data` | Data kept between runs with `Services.State` |
+| `settings` | Settings declared with `GetSettings()`, read with `Services.Settings` |
 | `canvas-checklist` | A canvas for the application, a project and a session, ticked from the page, a command or an agent; buttons in the title bar and the project menu |
 | `canvas-board` | A canvas drawn by a React script with Blueprint, a chart and `alta.host`, whose board lives in the plugin and is read with `alta.rpc` |
 | `canvas-flow` | A canvas that draws a pipeline with React Flow: custom nodes, links, a minimap, the graph kept in the plugin |

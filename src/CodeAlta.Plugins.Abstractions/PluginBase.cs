@@ -208,6 +208,14 @@ public abstract class PluginBase : IAsyncDisposable
     public virtual IEnumerable<PluginModelProviderContribution> GetModelProviders() => [];
 
     /// <summary>
+    /// Gets the settings of the plugin: values the user changes in Settings, which the search of Settings, the search of
+    /// the window, <c>alta settings</c> and <c>alta search</c> find. The host keeps them in <c>config.toml</c> under
+    /// <c>[plugins.&lt;id&gt;]</c>; the plugin reads them with <see cref="IPluginServices.Settings"/>.
+    /// </summary>
+    /// <returns>Setting contributions, made with the factories of <see cref="Setting"/>.</returns>
+    public virtual IEnumerable<PluginSettingContribution> GetSettings() => [];
+
+    /// <summary>
     /// A hook that observes or transforms a prompt when it is submitted.
     /// </summary>
     /// <param name="context">The prompt submission context.</param>

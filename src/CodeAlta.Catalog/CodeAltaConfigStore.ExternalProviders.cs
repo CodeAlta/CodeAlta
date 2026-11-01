@@ -127,7 +127,7 @@ public sealed partial class CodeAltaConfigStore
 
                 providers[written ?? key] = section;
                 root[ProvidersSection] = providers;
-                return TomlSerializer.Serialize(root, options);
+                return ConfigComments.Restore(content, TomlSerializer.Serialize(root, options));
             });
         }
         finally
@@ -172,7 +172,7 @@ public sealed partial class CodeAltaConfigStore
                 }
 
                 removed = true;
-                return TomlSerializer.Serialize(root, options);
+                return ConfigComments.Restore(content, TomlSerializer.Serialize(root, options));
             });
         }
         finally

@@ -180,6 +180,16 @@ internal sealed class DesktopSearch : IAsyncDisposable
         return search;
     }
 
+    /// <summary>Gives the settings, which are indexed for <c>alta search --kind setting</c>; their list is read again when it changes.</summary>
+    /// <param name="settings">The registry of the settings.</param>
+    public void AttachSettings(Settings.DesktopSettings settings)
+    {
+        ArgumentNullException.ThrowIfNull(settings);
+        Sources.Settings = settings.List;
+        settings.CatalogChanged += () => Indexer.Signal("settings");
+        Indexer.Signal("settings");
+    }
+
     /// <summary>Gives the dispatcher of the <c>alta</c> commands, whose help is indexed with the tools.</summary>
     /// <param name="commands">The dispatcher of the window.</param>
     public void AttachCommands(LiveTool.AltaCommandDispatcher commands)

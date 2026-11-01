@@ -122,12 +122,12 @@ export function ModelTierSettings({ epoch, providers, models, spaceId = null, sp
   return <section ref={section} className="model-tier-settings" data-space={spaceId ? "true" : undefined}
     {...(spaceId ? { "aria-label": t("Model tiers") } : { "aria-labelledby": "model-tiers-title" })}>
     {/* The tiers of a space are shown under its own heading, with its own fallback. */}
-    <header className="model-tier-header">
+    <header className="model-tier-header" data-setting={spaceId ? undefined : "models.tiers"}>
       {!spaceId && <div>
         <h2 id="model-tiers-title">{t("Model tiers")}</h2>
         <p className="settings-field-help">{t("The models you prefer for complex, standard and quick work, in order.")}</p>
       </div>}
-      <div className="model-tier-fallback">
+      <div className="model-tier-fallback" data-setting={spaceId ? undefined : "models.fallback.enabled models.fallback.on_quota models.fallback.on_unavailable models.fallback.resume models.fallback.max_resumes"}>
         <Switch className="settings-checkbox" checked={state.fallback.enabled} label={t("Fall back to the next model of the tier when a provider fails")}
           onChange={event => void save({ ...state, fallback: { ...state.fallback, enabled: event.currentTarget.checked } })} />
         {state.fallback.enabled && <span className="model-tier-triggers">

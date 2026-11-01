@@ -10,7 +10,7 @@ The index is on by default and light: a few megabytes, built in the background a
 
 ## Find a conversation
 
-Press `Ctrl+P` and type a few words. Besides sessions, projects, files and commands, the search window has three groups from the index:
+Press `Ctrl+P` and type a few words. Besides sessions, projects, files, commands and settings, the search window has three groups from the index:
 
 - **Conversations**: prompts and final answers, session notes, and project plans and tasks. A hit shows the session, **Prompt** or **Answer**, the date and the words found.
 - **Docs**: the sections of this guide, plugin pages included.
@@ -30,6 +30,7 @@ Press `Ctrl+P` and type a few words. Besides sessions, projects, files and comma
 | A plan or a task | Its file opens in the code editor. |
 | A section of the guide | The Documentation tab opens at that section. |
 | An MCP server or a plugin | Its Settings page opens. |
+| A setting, or a page of Settings | Settings opens on its page, and the setting glows. |
 | A tool | Its description is shown. |
 
 **Search sessions…** in a project's menu searches that project's conversations.
@@ -126,12 +127,14 @@ alta search "why did we change the journal fingerprint" --kind message --project
 alta search "post a message on slack" --kind tool,mcp,skill
 alta search "worktree cleanup" --kind doc
 alta search "review a pull request" --kind script
+alta search "stop renaming my sessions" --kind setting
 alta search show msg:<session>/<message> --context 2
 alta search load mcp:slack/post_message
 alta search status
 ```
 
 - Each hit gives its `ref`, a snippet, how it was found (`words`, `meaning` or `both`), and `next`: the command that uses it, such as `alta skill activate …` or `alta documentation read …`.
+- `--kind setting` finds the settings of CodeAlta by what they do; `next` reads one with `alta settings get`, and `alta settings open` shows it to you in Settings.
 - `--kind script` finds the [scripts of the library](sessions/code-mode.md#scripts-of-the-library) by their name, their description and when to use them.
 - An agent sees what its space and project can see, never what is excluded, and not its own session unless it asks with `--include-current`.
 - MCP tools are found once CodeAlta has listed them; search starts no server. `alta search reindex --kind mcp` lists every enabled server once.

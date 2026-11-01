@@ -63,6 +63,40 @@ public static class ConfigTableSyntax
         return Edit(content, table, key, value is null ? null : new StringValueSyntax(value).ToString(), createTable: true, StringComparison.Ordinal);
     }
 
+    /// <summary>Sets <c>key = 12</c> or <c>key = 1.5</c> in a table, or removes the line of the key.</summary>
+    /// <param name="content">The text of the configuration.</param>
+    /// <param name="table">The path of the table.</param>
+    /// <param name="key">The key in the table.</param>
+    /// <param name="value">The number, written as a whole number when it is one; null removes the key.</param>
+    /// <returns>The new text; the same text when nothing changes.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="content"/> or <paramref name="table"/> is <see langword="null"/>.</exception>
+    /// <exception cref="ArgumentException"><paramref name="table"/> is empty, <paramref name="key"/> is empty, or <paramref name="value"/> is not finite.</exception>
+    /// <exception cref="InvalidDataException">The text is not valid TOML, or defines the table in a form that is not edited here.</exception>
+    public static string SetNumber(string content, IReadOnlyList<string> table, string key, double? value)
+    {
+        Validate(content, table, key);
+        if (value is { } number && !double.IsFinite(number)) throw new ArgumentException("The number is not finite.", nameof(value));
+        var literal = value is not { } given ? null
+            : given == Math.Floor(given) && Math.Abs(given) < 9e15 ? ((long)given).ToString(System.Globalization.CultureInfo.InvariantCulture)
+            : given.ToString("R", System.Globalization.CultureInfo.InvariantCulture);
+        return Edit(content, table, key, literal, createTable: true, StringComparison.Ordinal);
+    }
+
+    /// <summary>Sets <c>key = 12</c> in a table, exactly as the whole number is, or removes the line of the key.</summary>
+    /// <param name="content">The text of the configuration.</param>
+    /// <param name="table">The path of the table.</param>
+    /// <param name="key">The key in the table.</param>
+    /// <param name="value">The whole number; null removes the key.</param>
+    /// <returns>The new text; the same text when nothing changes.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="content"/> or <paramref name="table"/> is <see langword="null"/>.</exception>
+    /// <exception cref="ArgumentException"><paramref name="table"/> is empty, or <paramref name="key"/> is empty.</exception>
+    /// <exception cref="InvalidDataException">The text is not valid TOML, or defines the table in a form that is not edited here.</exception>
+    public static string SetInteger(string content, IReadOnlyList<string> table, string key, long? value)
+    {
+        Validate(content, table, key);
+        return Edit(content, table, key, value?.ToString(System.Globalization.CultureInfo.InvariantCulture), createTable: true, StringComparison.Ordinal);
+    }
+
     /// <summary>Sets <c>key = ["...", ...]</c> in a table, an empty list included, or removes the line of the key.</summary>
     /// <param name="content">The text of the configuration.</param>
     /// <param name="table">The path of the table.</param>

@@ -66,11 +66,11 @@ export function SearchSettings({ projects, spaces, onOpenCanvas, onMeaningTurned
       <div className="settings-grid">
         <Card className="appearance-settings" aria-labelledby="settings-search-index-title">
           <h2 id="settings-search-index-title">{t("Search index")}</h2>
-          <Field label={t("Search index")} htmlFor="settings-search-enabled"
+          <Field setting="search.enabled" label={t("Search index")} htmlFor="settings-search-enabled"
             notice={<p className="settings-field-help">{t("Conversations, plans, skills, tools, MCP servers, plugins and the guide, for the search window and for the agents' alta search. Off, nothing is indexed.")}</p>}>
             <Switch id="settings-search-enabled" className="settings-checkbox" checked={settings.enabled} disabled={busy} onChange={event => void save({ enabled: event.currentTarget.checked })} />
           </Field>
-          <Field label={t("Conversations")} htmlFor="settings-search-sessions"
+          <Field setting="search.sessions" label={t("Conversations")} htmlFor="settings-search-sessions"
             notice={<p className="settings-field-help">{t("The prompts and the final answers of your sessions, and their notes. Off keeps only the guide, the plans, the skills and the tools.")}</p>}>
             <Switch id="settings-search-sessions" className="settings-checkbox" checked={settings.sessions} disabled={busy || !settings.enabled}
               onChange={event => void save({ sessions: event.currentTarget.checked })} />
@@ -148,19 +148,19 @@ export function MeaningCard({ meaning, settings, busy, onOpen, onTurnOff, onMode
   return <Card className="appearance-settings" aria-labelledby="settings-search-meaning-title">
     <h2 id="settings-search-meaning-title">{t("Search by meaning")}</h2>
     {!meaning.supported ? <p className="settings-field-help">{t("Search by meaning needs an ONNX Runtime for this platform, which it does not have.")}</p> : <>
-      <Field label={t("Search by meaning")} htmlFor="settings-search-meaning"
+      <Field setting="search.semantic" label={t("Search by meaning")} htmlFor="settings-search-meaning"
         notice={<p className="settings-field-help">{t("Finds what you look for from what it is about, in any language. The model runs on this computer.")}</p>}>
         <Switch id="settings-search-meaning" className="settings-checkbox" checked={meaning.enabled} disabled={busy}
           onChange={event => { if (event.currentTarget.checked) onOpen(); else onTurnOff(); }} />
       </Field>
       {!meaning.enabled && <p className="settings-field-help search-settings-off">{t("Turning it on says what it takes first: nothing is downloaded before you agree.")}</p>}
       {meaning.enabled && <>
-        <Field label={t("Model")} htmlFor="settings-search-model">
+        <Field setting="search.model" label={t("Model")} htmlFor="settings-search-model">
           <HTMLSelect id="settings-search-model" value={meaning.modelId} disabled={busy} onChange={event => onModel(event.target.value)}>
             {meaning.models.map(model => <option key={model.id} value={model.id}>{`${model.name} · ${model.summary} · ${kilobytesText(model.kilobytes, locale)}`}</option>)}
           </HTMLSelect>
         </Field>
-        <Field label={t("Batches at once")} htmlFor="settings-search-parallelism"
+        <Field setting="search.parallelism" label={t("Batches at once")} htmlFor="settings-search-parallelism"
           notice={<p className="settings-field-help">{t("More batches at once index faster, each in a worker of its own that takes about 1 GB of memory with EmbeddingGemma 2 and its share of the cores. A change applies at once, during the indexing too.")}</p>}>
           <HTMLSelect id="settings-search-parallelism" value={settings.parallelism} disabled={busy} onChange={event => onParallelism(Number(event.target.value))}>
             {Array.from({ length: Math.max(1, settings.maximumParallelism) }, (_, index) => index + 1).map(count =>

@@ -299,6 +299,9 @@ export const canvases = Object.freeze({ list: async () => ({ status: "unavailabl
 export const documentation = Object.freeze({ menu: async () => ({ status: "unavailable", home: null, items: [], pages: [], canAsk: false }), page: unavailable, image: unavailable,
   search: unavailable, ask: unavailable, watch: unavailable });
 export const sessionUserInput = Object.freeze({ cancel: unavailable, list: emptyPage, resolve: unavailable });
+// The settings of the host: a browser without the host has the built-in ones of the page alone, read only where the page keeps them.
+export const settings = Object.freeze({ catalog: async () => ({ status: "unavailable", settings: [] }), get: async () => ({ status: "unavailable", value: null, source: null, message: null, choices: null }),
+  set: async () => ({ status: "unavailable", value: null, previous: null, message: null }), reportWindow: async () => ({ status: "unavailable" }), watch: unavailable });
 
 // The demo has no host configuration file: the editor reports itself unavailable.
 export const globalConfig = Object.freeze({

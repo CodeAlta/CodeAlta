@@ -69,6 +69,7 @@ internal sealed class DesktopSearchSources
             new ListSearchSource("mcp", [SearchKind.Mcp], ReadMcpServersAsync),
             new ListSearchSource("commands", [SearchKind.Command], _ => ValueTask.FromResult(WindowCommands)),
             new ListSearchSource("scripts", [SearchKind.Script], ReadScriptsAsync),
+            new ListSearchSource("settings", [SearchKind.Setting], _ => ValueTask.FromResult(ReadSettings())),
         ];
         // A plugin built or reloaded changes its tools and its commands: they are read again.
         host.PluginRuntime.Changed += (_, _) =>
@@ -79,6 +80,9 @@ internal sealed class DesktopSearchSources
 
     /// <summary>Gets or sets the dispatcher of the <c>alta</c> commands, whose help is indexed; null until the window has it.</summary>
     public AltaCommandDispatcher? Dispatcher { get; set; }
+
+    /// <summary>Gets or sets what lists the settings, built in and of the plugins; null until the window has them.</summary>
+    public Func<IReadOnlyList<LiveTool.AltaSettingDescriptor>>? Settings { get; set; }
 
     /// <summary>Gets or sets the commands of the window, as the page sends them.</summary>
     public IReadOnlyList<SearchDocument> WindowCommands
@@ -446,6 +450,34 @@ internal sealed class DesktopSearchSources
         }
 
         lock (_gate) _commands = documents;
+        return documents;
+    }
+
+    // The settings, as agents read them: in English, with what they are and where, never their value, which would make the
+    // document change, and be embedded again, at each change.
+    private IReadOnlyList<SearchDocument> ReadSettings()
+    {
+        if (Settings is not { } list) return [];
+        var documents = new List<SearchDocument>();
+        foreach (var setting in list())
+        {
+            if (!setting.Available) continue;
+            var title = $"{setting.PagePath} › {setting.Label}";
+            var text = new StringBuilder(setting.Label).AppendLine();
+            if (setting.Help is { } help) text.AppendLine(help);
+            if (setting.Section is { } section) text.Append("Section: ").AppendLine(section);
+            if (setting.Keywords.Count > 0) text.Append("Also: ").AppendLine(string.Join(", ", setting.Keywords));
+            if (setting.Choices.Count > 0) text.Append("Choices: ").AppendLine(string.Join(", ", setting.Choices.Select(static choice => choice.Value)));
+            if (setting.ManagedBy is { } commands) text.Append("Changed with: ").AppendLine(commands);
+            // A setting of a plugin of a project belongs to that project: it is found where the project is, two projects may both have it.
+            documents.Add(new SearchDocument(setting.Project is { } project ? $"setting:{setting.Id}@{project}" : "setting:" + setting.Id, SearchKind.Setting, title, text.ToString(), DateTimeOffset.UnixEpoch)
+            {
+                ProjectId = setting.Project,
+                Extra = setting.Plugin is { } plugin ? Extra(("id", setting.Id), ("page", setting.Page), ("plugin", plugin)) : Extra(("id", setting.Id), ("page", setting.Page)),
+                EmbeddingTitle = setting.Help is { } summary ? $"{title} · {summary}" : title,
+            });
+        }
+
         return documents;
     }
 

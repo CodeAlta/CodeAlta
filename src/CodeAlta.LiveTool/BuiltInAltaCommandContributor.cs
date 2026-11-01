@@ -255,6 +255,12 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
             yield return CreateWindowCommand(context.Invocation);
         }
 
+        // The settings as one catalog: only a host with a window has them.
+        if (context.Invocation.Services.Get<IAltaSettings>() is not null)
+        {
+            yield return CreateSettingsCommand(context.Invocation);
+        }
+
         // The issues and the pull requests of projects, from the trackers the plugins of the host know.
         if (context.Invocation.Services.Get<CodeAlta.Plugins.PluginRuntimeManager>() is not null)
         {
@@ -287,7 +293,8 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         var documentation = context.Services.Get<CodeAlta.Catalog.Documentation.ShippedDocumentation>() is not null;
         var search = context.Services.Get<CodeAlta.Search.SearchService>() is not null;
         var windows = context.Services.Get<IAltaWindows>() is not null;
-        if (!changes && !editor && !terminals && !automations && !workItems && !bookmarks && !reviews && !issues && !appearance && !spaces && !canvases && !documentation && !search && !windows && workshop is null) return Policies;
+        var settings = context.Services.Get<IAltaSettings>() is not null;
+        if (!changes && !editor && !terminals && !automations && !workItems && !bookmarks && !reviews && !issues && !appearance && !spaces && !canvases && !documentation && !search && !windows && !settings && workshop is null) return Policies;
         var policies = new List<AltaCommandPolicy>(Policies);
         if (spaces) policies.AddRange(SpacePolicies);
         if (spaces) policies.AddRange(LabelPolicies);
@@ -309,6 +316,7 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         if (terminals) policies.AddRange(TerminalPolicies);
         if (automations) policies.AddRange(AutomationPolicies);
         if (windows) policies.AddRange(WindowPolicies);
+        if (settings) policies.AddRange(SettingsPolicies);
         return policies;
     }
 

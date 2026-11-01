@@ -33,6 +33,7 @@ public sealed class PluginAltaCommandContributor : IAltaCommandContributor
         "documentation",
         "search",
         "window",
+        "settings",
         // Built-in commands that some hosts do not have (the views of the window), and the others a sandboxed session
         // may run (AltaSandboxGate): a plugin never takes their name, which the gate admits by name.
         "notes",
@@ -230,5 +231,7 @@ public sealed class PluginAltaCommandContributor : IAltaCommandContributor
 
         // An agent runs these commands: through them it would answer what it asked the user.
         public IPluginAskService Asks => NoopPluginAskService.Instance;
+
+        public IPluginSettingsService Settings => inner.Settings;
     }
 }

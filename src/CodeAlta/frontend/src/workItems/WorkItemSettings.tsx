@@ -50,8 +50,8 @@ export function WorkItemSettings({ hub, providers = noProviders, loadModels = nu
     setBusy(false);
     setNotice(saved ? { key: "Saved.", intent: "success" } : { key: "The operation did not complete.", intent: "danger" });
   }
-  const row = (title: MessageKey, detail: MessageKey, control: React.ReactNode) =>
-    <label className="work-settings-row"><span><strong>{t(title)}</strong><small>{t(detail)}</small></span>{control}</label>;
+  const row = (title: MessageKey, detail: MessageKey, control: React.ReactNode, setting: string) =>
+    <label className="work-settings-row" data-setting={setting}><span><strong>{t(title)}</strong><small>{t(detail)}</small></span>{control}</label>;
   const closing = (value: string, onChange: (next: string) => void, label: MessageKey) =>
     <HTMLSelect aria-label={t(label)} value={value} disabled={busy} onChange={event => onChange(event.target.value)}>
       <option value="delete">{t("Delete the file")}</option>
@@ -65,16 +65,16 @@ export function WorkItemSettings({ hub, providers = noProviders, loadModels = nu
       <section className="work-settings-group">
         <h2>{t("Proposals")}</h2>
         {row("Let agents propose follow-up tasks", "When an agent finds a real gap, a problem or an improvement beside what it was asked, it writes a task for you to decide on.",
-          <Switch checked={settings.propose} disabled={busy} aria-label={t("Let agents propose follow-up tasks")} onChange={event => void save({ propose: event.currentTarget.checked })} />)}
+          <Switch checked={settings.propose} disabled={busy} aria-label={t("Let agents propose follow-up tasks")} onChange={event => void save({ propose: event.currentTarget.checked })} />, "work_items.propose")}
         {row("Show proposals in the session", "A session shows the tasks it proposed and the plan it had approved as cards over its top right corner. Without it they are only in the Work items tab.",
-          <Switch checked={settings.notify} disabled={busy} aria-label={t("Show proposals in the session")} onChange={event => void save({ notify: event.currentTarget.checked })} />)}
+          <Switch checked={settings.notify} disabled={busy} aria-label={t("Show proposals in the session")} onChange={event => void save({ notify: event.currentTarget.checked })} />, "work_items.notify")}
       </section>
       <section className="work-settings-group">
         <h2>{t("Starting work")}</h2>
         {row("Start by default", "The way of starting that the cards and the Work items tab put first.",
           <HTMLSelect aria-label={t("Start by default")} value={settings.start} disabled={busy} onChange={event => void save({ start: event.target.value })}>
             {workStarts.map(start => <option key={start} value={start}>{t(startLabel(start))}</option>)}
-          </HTMLSelect>)}
+          </HTMLSelect>, "work_items.start")}
         {provider && <div className="work-settings-row"><span><strong>{t("Default provider and model")}</strong>
           <small>{t("What a new session runs with when the session that proposed the work is not known. Change it before starting, in the Work items tab.")}</small></span>
           <div className="work-settings-default"><span data-default-run className="with-logo"><ProviderIcon providerKey={provider.id} size={14} />{[provider.name, starts.modelId, starts.reasoningEffort].filter(Boolean).join(" · ")}</span>
@@ -83,14 +83,14 @@ export function WorkItemSettings({ hub, providers = noProviders, loadModels = nu
       <section className="work-settings-group">
         <h2>{t("Closed tasks")}</h2>
         {row("When a task is completed", "A kept task stays in its folder with the status done, and shows under Closed.",
-          closing(settings.completedTasks, completedTasks => void save({ completedTasks }), "When a task is completed"))}
+          closing(settings.completedTasks, completedTasks => void save({ completedTasks }), "When a task is completed"), "work_items.completed_tasks")}
         {row("When a task is dismissed", "A kept task stays in its folder with the status dismissed, and shows under Closed.",
-          closing(settings.dismissedTasks, dismissedTasks => void save({ dismissedTasks }), "When a task is dismissed"))}
+          closing(settings.dismissedTasks, dismissedTasks => void save({ dismissedTasks }), "When a task is dismissed"), "work_items.dismissed_tasks")}
       </section>
       <section className="work-settings-group">
         <h2>{t("Completed plans")}</h2>
         {row("When a plan is completed", "A kept plan stays in its folder with the status done, and shows under Closed.",
-          closing(settings.completedPlans, completedPlans => void save({ completedPlans }), "When a plan is completed"))}
+          closing(settings.completedPlans, completedPlans => void save({ completedPlans }), "When a plan is completed"), "work_items.completed_plans")}
       </section>
     </>}
   </SettingsPage>;

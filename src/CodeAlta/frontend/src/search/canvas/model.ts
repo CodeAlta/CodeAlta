@@ -6,13 +6,13 @@ import type { MessageKey } from "../../localization";
 // the treemap of the projects, the rank of a hit, its snippet and where it leads. The canvas (SearchCanvas.tsx) only draws them.
 
 /** The kinds of the index, in the order the canvas lists them: what was written first, then what is installed. */
-export const searchKinds = Object.freeze(["message", "session", "note", "plan", "task", "doc", "skill", "tool", "mcp", "plugin", "command"] as const);
+export const searchKinds = Object.freeze(["message", "session", "note", "plan", "task", "doc", "skill", "tool", "mcp", "plugin", "command", "setting"] as const);
 export type SearchKindName = typeof searchKinds[number];
 
 /** The name of a kind, as the canvas writes it. */
 export const kindLabels: Readonly<Record<SearchKindName, MessageKey>> = Object.freeze({
   message: "Messages", session: "Sessions", note: "Notes", plan: "Plans", task: "Tasks", doc: "User guide", skill: "Skills", tool: "Tools", mcp: "MCP servers",
-  plugin: "Plugins", command: "Commands",
+  plugin: "Plugins", command: "Commands", setting: "Settings",
 });
 
 /** Whether a name is one of the kinds of the index. */

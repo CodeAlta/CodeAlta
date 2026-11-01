@@ -17,11 +17,13 @@ import { contentIcon, contentKinds, contentKindsFor, contentResults, markedParts
 import { categoryLimit, flatResults, matchRanges, nextCategory, readQuery, searchArchivedSessions, searchCategories, searchProjects, searchSessions, shownGroups, suggestedCommands, searchClaudeCodeConversations,
   type CommandResult, type FileResult, type SearchCategory, type SearchGroup, type SearchResult } from "./searchResults";
 import { searchSkills, type SkillChoice } from "./skillResults";
+import type { SettingEntry } from "../settings/settingsCatalog";
+import { settingResults } from "../settings/settingsSearch";
 import { skillSourceLabels } from "../skillSources";
 
 const pageStep = 8;
 const categoryLabels: Readonly<Record<SearchCategory, MessageKey>> = { all: "All", sessions: "Sessions", conversations: "Conversations", projects: "Projects", files: "Files",
-  commands: "Commands", skills: "Skills", docs: "Docs", tools: "Tools", archived: "Archived" };
+  commands: "Commands", settings: "Settings", skills: "Skills", docs: "Docs", tools: "Tools", archived: "Archived" };
 const contentCategories: readonly SearchCategory[] = ["conversations", "docs", "tools"];
 type FileProject = Pick<WorkspaceProject, "id" | "name" | "path">;
 type FoundFiles = Readonly<{ query: string; project: string; items: readonly FileResult[]; state: "idle" | "loading" | "indexing" | "ready" | "failed" }>;
@@ -71,8 +73,12 @@ function Marked({ text, words }: { text: string; words: readonly string[] }) {
  * the name of a skill goes with it. It is a movable, resizable window like the others; its place and size are remembered.
  */
 export function GlobalSearch({ snapshot, favorites, start, files, note, available, unavailableReason, onCommand, pluginCommands = [], onPluginCommand, canvases = [], canvasAvailable, onCanvas, onProject, onSession, onFile, onClose,
-  archived = noArchived, archivedProjects, onRestore, skills = noSkills, onSkill, content = null, onContent, onOfferMeaning, claudeCode = null, onClaudeCode }: {
+  archived = noArchived, archivedProjects, onRestore, skills = noSkills, onSkill, content = null, onContent, onOfferMeaning, claudeCode = null, onClaudeCode, settings, onSetting }: {
   snapshot: WorkspaceSnapshot | null;
+  /** The settings the window knows: a query finds them, and the pages of Settings, in a group of their own; absent where Settings is not this window's. */
+  settings?: readonly SettingEntry[];
+  /** A setting or a page of Settings was chosen: Settings opens on its page, and the setting glows. */
+  onSetting?: (page: string, setting: string | null) => void;
   /** The archived sessions of the shown space: a query finds them in a group of their own, and choosing one restores it. */
   archived?: readonly WorkspaceSession[];
   /** The projects of the catalog, which name the project of an archived session that the shown space does not list. */
@@ -132,8 +138,8 @@ export function GlobalSearch({ snapshot, favorites, start, files, note, availabl
   // A text that starts with "/" shows the commands, or the commands and the skills, or one of the two.
   const shownCategory: SearchCategory = scoped ? "sessions" : !query.commands ? category : !offersSkills ? "commands"
     : slashCategories.includes(category) ? category : "all";
-  const latest = useRef({ files, content, available, unavailableReason, onCommand, onPluginCommand, canvasAvailable, onCanvas });
-  latest.current = { files, content, available, unavailableReason, onCommand, onPluginCommand, canvasAvailable, onCanvas };
+  const latest = useRef({ files, content, available, unavailableReason, onCommand, onPluginCommand, canvasAvailable, onCanvas, onSetting });
+  latest.current = { files, content, available, unavailableReason, onCommand, onPluginCommand, canvasAvailable, onCanvas, onSetting };
   const skillSearch = useMemo(() => offersSkills ? searchSkills(skills, text) : [], [skills, text, offersSkills]);
 
   // The files of the project in front are searched by the host, a moment after the last key.
@@ -205,6 +211,8 @@ export function GlobalSearch({ snapshot, favorites, start, files, note, availabl
       projects: query.commands || scoped || !snapshot ? none : searchProjects(snapshot, words, favorites),
       files: query.commands || scoped ? none : foundFiles.items as readonly SearchResult[],
       commands: scoped ? none : [...own, ...plugins, ...canvasRows] as readonly SearchResult[],
+      // The settings and the pages of Settings, found as the search of Settings finds them.
+      settings: scoped || query.commands || !words.length || !settings ? none : settingResults(settings, text, locale, (page, id) => latest.current.onSetting?.(page, id)),
       // Without a query the skills are listed after a slash or in their category, not among the recent sessions.
       skills: scoped || !query.commands && !words.length && category === "all" ? none : skillSearch,
       archived: query.commands || !snapshot || !onRestore ? none
@@ -213,9 +221,9 @@ export function GlobalSearch({ snapshot, favorites, start, files, note, availabl
       docs: wantContent && !scoped ? foundContent.items.docs : none,
       tools: wantContent && !scoped ? foundContent.items.tools : none,
     };
-  }, [snapshot, text, scope, favorites, pluginCommands, canvases, foundFiles, foundContent, wantContent, locale, archived, archivedProjects, !onRestore, skillSearch, category, claudeCode]);
+  }, [snapshot, text, scope, favorites, pluginCommands, canvases, foundFiles, foundContent, wantContent, locale, archived, archivedProjects, !onRestore, skillSearch, category, claudeCode, settings]);
   // The archived sessions, the skills and what the index finds are categories only where there are some.
-  const categories = searchCategories.filter(value => (value !== "archived" || archived.length > 0 && !!onRestore) && (value !== "skills" || offersSkills)
+  const categories = searchCategories.filter(value => (value !== "archived" || archived.length > 0 && !!onRestore) && (value !== "skills" || offersSkills) && (value !== "settings" || !!settings)
     && (!contentCategories.includes(value) || !!content));
 
   const groups = useMemo(() => scoped
@@ -244,7 +252,7 @@ export function GlobalSearch({ snapshot, favorites, start, files, note, availabl
   const move = (delta: number) => { if (rows.length) setActive((index + delta + rows.length * pageStep) % rows.length); };
   const choose = (value: SearchCategory) => { setCategory(value); setActive(0); input.current?.focus(); };
   const counts: Readonly<Record<SearchGroup, number>> = { sessions: found.sessions.length, projects: found.projects.length, files: found.files.length,
-    commands: found.commands.length, skills: found.skills.length, archived: found.archived.length, conversations: found.conversations.length,
+    commands: found.commands.length, settings: found.settings.length, skills: found.skills.length, archived: found.archived.length, conversations: found.conversations.length,
     docs: found.docs.length, tools: found.tools.length };
   const scopeName = !scoped ? null : scope === null ? t("Chats") : snapshot?.projects.find(project => project.id === scope)?.name ?? t("Unavailable project");
   const groupLabel = (group: SearchGroup) => group === "sessions" && !words.length && shownCategory === "all" ? t("Recent sessions")
@@ -388,6 +396,11 @@ function SearchRow({ result, words, id, selected, enabled, reason = null, locale
       {hit.kind === "message" && hit.role && <span className="global-search-tag">{t(hit.role === "assistant" ? "Answer" : hit.role === "agent" ? "Agent" : "Prompt")}</span>}
       {hit.kind !== "message" && <span className="global-search-tag">{t(contentKindLabels[hit.kind] ?? "Tool")}</span>}
       {time && <time dateTime={time.dateTime} title={time.title}>{time.label}</time>}</>;
+  } else if (result.kind === "setting") {
+    icon = "settings"; tone = "gray"; hint = `${result.path}\n${result.description ?? result.label}`;
+    title = <Marked text={result.label} words={words} />;
+    detail = result.path;
+    meta = <span className="global-search-tag">{t(result.page ? "Settings page" : "Setting")}</span>;
   } else if (result.kind === "skill") {
     // A skill is named as it is invoked, with what goes with it to the session.
     const { skill, args } = result;

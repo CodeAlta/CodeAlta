@@ -105,6 +105,8 @@ internal static class DesktopPlugins
         // The mobile view is the window's too: a phone connects to the desktop application.
         builtIns = [.. builtIns, MobileDefinition];
         if (search is not null) builtIns = [.. builtIns, Search.DesktopSearchPlugin.Definition(search)];
+        // The settings of the window, which `alta settings` finds, reads and shows: the plugin tells the sessions so.
+        builtIns = [.. builtIns, Settings.DesktopSettingsPlugin.Definition()];
         return reviewsCommands ? builtIns : [.. builtIns, Ui.DesktopUiPlugin.Definition(ui, sessions)];
     }
 
@@ -237,7 +239,8 @@ internal static class DesktopPlugins
 /// operation context carries.
 /// </remarks>
 internal sealed class DesktopPluginServices(IPluginAltaService alta, DesktopPluginUi ui, DesktopCanvases? canvases = null, DesktopPluginIdentities? identities = null,
-    IPluginAppFileService? appFiles = null, DesktopPluginAsks? asks = null, DesktopPluginPermissions? permissions = null) : IPluginServices
+    IPluginAppFileService? appFiles = null, DesktopPluginAsks? asks = null, DesktopPluginPermissions? permissions = null,
+    PluginSettingsStore? settings = null) : IPluginServices
 {
     private readonly NoopPluginServices _inner = NoopPluginServices.Create();
     private readonly DesktopPluginUi _ui = ui ?? throw new ArgumentNullException(nameof(ui));
@@ -276,6 +279,9 @@ internal sealed class DesktopPluginServices(IPluginAltaService alta, DesktopPlug
 
     // What the sessions ask permission for, once the host runs, which the page of the phones answers.
     public IPluginPermissionService Permissions { get; } = (IPluginPermissionService?)permissions ?? NoopPluginPermissionService.Instance;
+
+    // The values of the settings the plugins declare, in config.toml: each plugin is given its own view of them.
+    public IPluginSettingsService Settings { get; } = (IPluginSettingsService?)settings ?? NoopPluginSettingsService.Instance;
 
     private sealed class RunWorkspace(DesktopPluginUi ui) : IPluginWorkspaceService
     {

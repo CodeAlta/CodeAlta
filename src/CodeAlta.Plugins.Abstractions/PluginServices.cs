@@ -76,6 +76,12 @@ public interface IPluginServices
     /// without it, and the commands a plugin gives agents, have none.
     /// </summary>
     IPluginPermissionService Permissions => NoopPluginPermissionService.Instance;
+
+    /// <summary>
+    /// Gets the values of the settings the plugin declares (<see cref="PluginBase.GetSettings"/>), and tells of their changes.
+    /// A host that was written before plugins had settings has none.
+    /// </summary>
+    IPluginSettingsService Settings => NoopPluginSettingsService.Instance;
 }
 
 /// <summary>

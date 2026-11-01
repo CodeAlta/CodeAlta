@@ -29,7 +29,7 @@ const fixture = { host, microphone, composers, opened: [] as string[], renders: 
   testLimit: 30_000,
   setLocale: (_value: Locale) => { }, setComposers: (_value: boolean) => { }, setSettings: (_value: boolean) => { }, setSize: (_value: { width: number; height: number }) => { } };
 Object.assign(window, { speechFixture: fixture });
-settingsNavigation.subscribe(page => fixture.opened.push(page));
+settingsNavigation.subscribe(target => fixture.opened.push(target.page));
 
 // A composer as the session one keeps it: the text is state of React, and every change of the editor goes through it.
 function Composer({ name, active, speech }: { name: string; active: boolean; speech: Speech }) {

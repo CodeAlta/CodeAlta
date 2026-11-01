@@ -44,7 +44,7 @@ export function CodeModeSettings({ epoch, api = globalConfig, onOpenFile, filesA
       <SettingsFileLocations files={files} disabled={busy} />
       <div className="settings-grid"><Card className="appearance-settings" aria-labelledby="settings-code-mode-title">
         <h2 id="settings-code-mode-title">{t("Code Mode")}</h2>
-        <Field label={t("Mode")} htmlFor="settings-code-mode"
+        <Field setting="code_mode.mode" label={t("Mode")} htmlFor="settings-code-mode"
           notice={<p className="settings-field-help">{known && <>{t(known.help)} </>}{t("A session takes the change with its next prompt.")}</p>}>
           <HTMLSelect id="settings-code-mode" value={listing.mode ?? "on"} disabled={busy}
             onChange={event => {

@@ -1,0 +1,47 @@
+/* The search of Settings, its results, and the glow of a setting that is opened. */
+
+/* The field heads the navigation and stays in view while the list scrolls. */
+/* The bar is sticky and padded; the input group inside keeps its own box, where Blueprint centers its icon. */
+.settings-dialog-navigation .settings-search-bar { position: sticky; top: -15px; z-index: 1; margin: -15px -12px 10px; padding: 15px 12px 6px; background: var(--panel); }
+.settings-dialog-navigation .settings-search-field input { border-radius: 7px; }
+/* While a query is typed, the pages without a result step back and the others say how many they have. */
+.settings-dialog-navigation[data-searching] button[data-dimmed] { opacity: .42; }
+.settings-dialog-navigation .settings-nav-count { flex: none; margin-left: auto; padding: 0 6px; border-radius: 9px; color: var(--accent); background: var(--accent-soft);
+  font-size: 11px; font-variant-numeric: tabular-nums; line-height: 18px; }
+
+/* The results read like the pages they come from: a card per page, the parts of the page as small headings. */
+.settings-dialog-content > .settings-search-results { display: flex; flex-direction: column; gap: 14px; padding: 20px 24px 24px; }
+.settings-search-results .page-heading { margin-bottom: 0; }
+.settings-search-results .page-heading h1 { font-size: 20px; }
+.settings-search-group { padding: 4px 16px 6px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
+.settings-search-group-heading { display: flex; align-items: center; gap: 8px; min-height: 40px; color: var(--muted); }
+.settings-search-group-heading > svg { flex: none; color: var(--accent); }
+.settings-search-group-heading h2 { flex: 1; min-width: 0; margin: 0; overflow: hidden; color: var(--text); font-size: 13px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.settings-search-section { margin: 6px 0 0; color: var(--muted); font-size: 11px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; }
+.settings-search-section + .settings-search-row { border-top: 0; }
+.settings-search-row mark, .settings-search-group mark, .settings-search-page mark { padding: 0 1px; border-radius: 3px; color: inherit; background: color-mix(in srgb, var(--accent) 28%, transparent); }
+.setting-control-number { flex: none; }
+.setting-control-number .bp6-input-group { width: 90px; }
+.settings-search-row .setting-control-text { min-width: 240px; }
+.settings-search-row .setting-control-list { min-width: 260px; max-width: 420px; }
+.settings-search-row .error-text { flex-basis: 100%; text-align: right; }
+.setting-control-placeholder { display: inline-block; width: 120px; height: 24px; border-radius: 4px; background: var(--panel-2); }
+.settings-dialog-content .settings-search-pages { display: flex; flex-direction: column; padding-bottom: 10px; }
+.settings-dialog-content .settings-search-page:not(.bp6-button) { display: flex; align-items: center; gap: 10px; width: 100%; padding: 9px 10px; border: 0; border-radius: 7px; background: transparent; text-align: left; }
+.settings-dialog-content .settings-search-page:not(.bp6-button):hover { background: var(--panel-2); }
+.settings-search-page > span { flex: 1; min-width: 0; }
+.settings-search-page > svg { flex: none; color: var(--muted); }
+
+/* A setting that is opened glows for a moment. Settings is a window region: only paint changes, never a box. */
+.settings-dialog-content [data-glow] { border-radius: 8px; animation: settings-glow 2.4s ease-out; }
+@keyframes settings-glow {
+  0%, 35% { background-color: color-mix(in srgb, var(--accent) 12%, transparent);
+    box-shadow: 0 0 0 2px var(--accent), 0 0 20px -2px color-mix(in srgb, var(--accent) 60%, transparent); }
+  100% { background-color: transparent; box-shadow: 0 0 0 0 transparent; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .settings-dialog-content [data-glow] { animation: none; box-shadow: 0 0 0 2px var(--accent); }
+}
+
+/* The toast of a change an agent made: its Show is a link in the message, its Undo the action of the toast. */
+.settings-change-toast .settings-change-show { margin-left: 4px; padding: 0; border: 0; color: inherit; background: none; font: inherit; text-decoration: underline; cursor: pointer; }

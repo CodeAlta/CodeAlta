@@ -152,7 +152,7 @@ export function ApplicationLogsPanel({ read, clearActions, levelsApi, epoch = nu
             ? "Debug and Trace write more details of a feature, such as each request of an issue tracker and what the service answered. Saved in config.toml ([logging])."
             : "The log levels can be changed only in the window of the running application.")}</p>
           <div className="logs-levels-grid">
-            <label htmlFor="logs-level-all">{t("Default level")}</label>
+            <label htmlFor="logs-level-all" data-setting="logging.level">{t("Default level")}</label>
             <HTMLSelect id="logs-level-all" value={levels.level} disabled={!levels.editable || levelsSaving} onChange={event => saveLevel(null, event.target.value)}>
               {levels.levels.map(item => <option key={item} value={item}>{levelName(item)}</option>)}
             </HTMLSelect>

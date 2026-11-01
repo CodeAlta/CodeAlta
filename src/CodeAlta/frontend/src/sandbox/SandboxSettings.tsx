@@ -225,7 +225,7 @@ function EverySession({ profiles, value, disabled, onChange }: { profiles: reado
   useEffect(() => { if (known) setChosen(known); }, [known]);
   // A profile the settings name that does not exist is shown as it is: sessions run no command with it.
   const missing = sandboxed && !known ? sandboxed : null;
-  return <Card className="appearance-settings sandbox-every-session" aria-labelledby="sandbox-every-session-title">
+  return <Card className="appearance-settings sandbox-every-session" aria-labelledby="sandbox-every-session-title" data-setting="sandbox.all_sessions">
     <h2 id="sandbox-every-session-title">{t("Every session")}</h2>
     <RadioGroup className="sandbox-every-session-choice" selectedValue={sandboxed ? "on" : "off"} disabled={disabled}
       onChange={event => onChange(event.currentTarget.value === "on" ? chosen : null)}>
