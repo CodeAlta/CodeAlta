@@ -82,7 +82,7 @@ test("Settings search shows editable results, opens a setting with a glow, and C
     await evaluate("document.querySelector('.settings-search-field input').focus()");
     await type("darker");
     await until("!!document.querySelector('.settings-search-results [data-setting-result=\"appearance.darker\"] .bp6-switch input')");
-    assert.match(await evaluate("document.querySelector('.settings-search-results h1').textContent"), /results for/);
+    assert.match(await evaluate("document.querySelector('.settings-search-results h1').textContent"), /results? for/);
     assert.equal(await evaluate("[...document.querySelectorAll('.settings-dialog-navigation button[data-settings-section=\"appearance\"] .settings-nav-count')].length"), 1);
     assert.equal(await evaluate("document.querySelector('.settings-dialog-navigation button[data-settings-section=\"providers\"]').hasAttribute('data-dimmed')"), true);
     await evaluate("document.querySelector('.settings-search-results [data-setting-result=\"appearance.darker\"] .bp6-switch input').click()");
