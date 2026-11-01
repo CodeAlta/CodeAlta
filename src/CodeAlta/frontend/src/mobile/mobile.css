@@ -376,6 +376,21 @@ textarea:focus, select:focus { outline: 2px solid var(--accent); outline-offset:
 .ask-actions .ask-cancel { margin-right: auto; }
 .ask-actions .ghost { padding: 0 10px; }
 
+/* What a session asks permission for, above its prompt: a long command scrolls in the card, and the choices stay in view. */
+.approval { min-width: 0; margin-bottom: .5rem; }
+.approval-card { display: flex; flex-direction: column; gap: .5rem; min-width: 0; padding: .75rem; border: 1px solid color-mix(in srgb, var(--yellow) 55%, var(--line)); border-radius: 12px; background: var(--panel); }
+.approval-question { display: flex; align-items: center; gap: 6px; margin: 0; font-size: .9375rem; font-weight: 650; line-height: 1.35; }
+.approval-question .ico { flex: none; color: var(--yellow); }
+.approval-question .ico svg { width: 16px; height: 16px; }
+.approval-subject { max-height: 28vh; margin: 0; padding: .5rem .625rem; overflow: auto; border-radius: 8px; background: var(--panel-2); font-size: .8125rem; line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; }
+.approval-detail { margin: 0; color: var(--muted); font-size: .8125rem; line-height: 1.45; overflow-wrap: anywhere; }
+.approval-folder { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: .75rem; }
+.approval-reason { max-height: 16vh; overflow: auto; }
+.approval-warning { margin: 0; color: var(--red); font-size: .8125rem; line-height: 1.45; overflow-wrap: anywhere; }
+.approval-actions { display: flex; align-items: center; justify-content: flex-end; gap: .5rem; min-width: 0; }
+.approval-actions button { min-width: 6.5rem; min-height: 44px; justify-content: center; }
+.approval-actions button:disabled { opacity: .55; }
+
 /* "Waits for your answer" on the card of a session that asks the user, as on the desktop. */
 .waiting-badge { display: inline-flex; align-items: center; gap: 4px; margin-top: .3125rem; padding: 1px 8px; border-radius: 999px; background: var(--yellow); color: #1c1300; font-size: .75rem; font-weight: 700; }
 /* A card that waits for the user stands out from those that work: a still yellow outline on a faint yellow ground. */

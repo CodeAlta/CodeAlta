@@ -14,6 +14,8 @@ namespace CodeAlta.Sandbox.Mxc;
 public sealed class MxcSandboxBackend : ISandboxBackend
 {
     private readonly Lazy<SandboxAvailability> _availability = new(Discover);
+    private readonly Lazy<bool> _listsVolumeRoots = new(static () => OperatingSystem.IsWindows() && MxcPlatform.GetAvailableBackends()
+        .Any(static item => item.Backend == ContainmentBackend.ProcessContainer && item.Capabilities.Contains(BackendCapability.FilesystemEnumeratePaths)));
     private readonly ProcessLifetimeThread _linuxSpawner = new("CodeAlta sandbox start");
 
     /// <inheritdoc />
@@ -33,7 +35,7 @@ public sealed class MxcSandboxBackend : ISandboxBackend
     private async Task<ISandboxProcess> StartCoreAsync(SandboxPolicy policy, string commandLine, string? proxyEndpoint, CancellationToken cancellationToken)
     {
         MxcRequests.Prepare(policy);
-        var request = MxcRequests.Create(policy, commandLine, proxyEndpoint);
+        var request = MxcRequests.Create(policy, commandLine, proxyEndpoint, _listsVolumeRoots.Value);
         if (OperatingSystem.IsWindows())
         {
             ProbeOutput probe;

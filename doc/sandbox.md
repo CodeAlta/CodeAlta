@@ -50,10 +50,18 @@ Bubblewrap on Linux. Invariants:
   sandboxed session, never commands without a sandbox.
 - **The parents of a grant.** Tools resolve a path one folder at a time from the volume root. A read-only grant
   cascades to everything below it, so each parent folder of a read-write grant is granted read-only with its other
-  entries denied, and the volume root, which does not cascade in the read-write list, is granted there. On macOS,
-  where every path can be looked up, nothing is granted: the other entries of the parents inside the home folder
-  are denied, so that a file a build looks for above the project (`.editorconfig`) is not there rather than there
-  and unreadable.
+  entries denied. The volume root is granted only to be listed (`enumeratePaths`) where Windows reports that capability:
+  read-only it opens the whole disk, and read-write it lets the sandbox create folders there and write in them, which a
+  default Windows lets every user do at the root of a disk. A link to a folder the sandbox needs is not denied, since
+  mxc denies what a denied link names and a Windows profile has such links (`Local Settings` names `AppData\Local`):
+  a shell that walks through that folder could not reach a project below it, and Windows PowerShell would start at the
+  root of the disk instead. On macOS, where every path can be looked up, nothing is granted: the other entries of the
+  parents inside the home folder are denied, so that a file a build looks for above the project (`.editorconfig`) is
+  not there rather than there and unreadable.
+- **A limit on Windows without that capability.** Windows 11 25H2 at build 26200.9457 does not report it, and the volume
+  root then stays in the read-write list, which is all that lets tools walk from it. A sandbox there cannot write files
+  at the root or in the folders that exist, but it can create a folder at the root and write in that folder, such as
+  `C:\.git`, which programs that look in the parent folders of a project may then read.
 - **What tools need beside `PATH` on macOS.** The folders a Homebrew prefix links its commands to (not its `var`),
   the developer folder whose `xcrun` shims `/usr/bin/git` and `python3` load, and the Mach services of the names of
   users and of the check of certificates (.NET's TLS). mxc's `keychainAccess` is never set: the keychains stay out of

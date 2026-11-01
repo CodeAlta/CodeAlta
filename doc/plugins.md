@@ -56,6 +56,12 @@ public sealed class HelloPlugin : PluginBase
   is built in), and the desktop gives it to `builtin:mobile` without a package folder, the no-op service to every other
   plugin; a host without that interface gives none. The services of a plugin's `alta` command, which an agent runs,
   are always wrapped and have the no-op service.
+- **Permission requests are answered the same way.** `Services.Permissions` (`IPluginPermissionService`) reads the
+  commands, file changes and skills a session waits on, and allows one once or denies it, through the service the window
+  answers with, which takes one answer for a request. An agent must not allow what it asks, so the same rule applies:
+  `IPluginPermissionRuntimeService.ForPlugin` gives it to `builtin:mobile` without a package folder and the no-op service
+  to every other plugin, a host without that interface gives none, and a plugin's `alta` command has the no-op service.
+  A plugin cannot allow a skill for good: that stays in the window.
 - **One contract, two applications.** Both hosts run the same runtime. `PluginAttribute.Frontends` says which
   applications a plugin supports; a host does not activate one made for the other. The default, `All`, is the desktop
   and the terminal: the command-line application (`altacli`, no window and no user) is a third value, `Cli`, that a

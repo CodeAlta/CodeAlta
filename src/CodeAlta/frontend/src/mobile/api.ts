@@ -1,4 +1,4 @@
-import type { ActionResult, AskAnswerRequest, AskPage, AskResult, EventPage, JobOutput, JobPage, NewSessionRequest, NewSessionResult, Options, ProjectList, PromptAttachment, PromptMode, PromptSelection, Session, SessionChoices, SessionPage } from "./contract";
+import type { ActionResult, ApprovalAnswer, ApprovalPage, ApprovalResult, AskAnswerRequest, AskPage, AskResult, EventPage, JobOutput, JobPage, NewSessionRequest, NewSessionResult, Options, ProjectList, PromptAttachment, PromptMode, PromptSelection, Session, SessionChoices, SessionPage } from "./contract";
 
 /** What the page says when the server no longer knows this phone. */
 export const signedOutMessage = "This phone is no longer connected: scan the QR code of the Mobile tab again.";
@@ -164,6 +164,9 @@ export function createApi(options: Readonly<{ fetch: FetchLike; store: KeyValueS
     ask: (id: string) => call<AskPage>("GET", `${session(id)}/ask`),
     answerAsk: (id: string, request: AskAnswerRequest) => call<AskResult>("POST", `${session(id)}/ask/answer`, request),
     cancelAsk: (id: string, request: Pick<AskAnswerRequest, "actionId" | "askId" | "revision">) => call<AskResult>("POST", `${session(id)}/ask/cancel`, request),
+    /** What the session asks permission for; an answer that did not reach it says why in its result, not as an error. */
+    permissions: (id: string) => call<ApprovalPage>("GET", `${session(id)}/permissions`),
+    resolvePermission: (id: string, answer: ApprovalAnswer) => call<ApprovalResult>("POST", `${session(id)}/permissions/resolve`, answer),
     diagram: (body: Readonly<{ svg: string; background?: string; text?: string; dark?: boolean }>) => call<{ url?: string }>("POST", "/api/diagrams", body),
   };
 }

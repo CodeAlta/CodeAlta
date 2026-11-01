@@ -7,6 +7,7 @@ using CodeAlta.Sandbox;
 using CodeAlta.Sandbox.Mxc;
 using CodeAlta.Sandbox.Network;
 using CodeAlta.Sandbox.Worker;
+using Microsoft.Mxc.Sdk.V1;
 
 namespace CodeAlta.Cli.Tests;
 
@@ -35,6 +36,14 @@ public sealed class CliSandboxEscapeTests
         foreach (var secret in secrets) File.WriteAllText(secret, "the-secret-of-the-user");
         var link = Path.Combine(project, "link-to-secret");
         var linked = TryLink(link, secrets[0]);
+        // Beside the project, and through a link to its folder, which stays in the sandbox as the links of a Windows
+        // profile do (`Local Settings` names AppData\Local).
+        var besideTheProject = Path.Combine(root, "beside-the-project.txt");
+        File.WriteAllText(besideTheProject, "the-secret-of-the-user");
+        var toTheParent = Path.Combine(root, "to-the-parent");
+        if (windows) Junction(toTheParent, root);
+        // A folder at the root of the disk, which the sandbox must not create; removed at the end if it did.
+        var outside = Path.Combine(Path.GetPathRoot(project)!, "codealta-escape-" + Guid.NewGuid().ToString("N")[..8]);
         Environment.SetEnvironmentVariable("CODEALTA_ESCAPE_API_KEY", "must-not-reach-the-sandbox");
         using var codealta = new TcpListener(IPAddress.Loopback, 0);
         codealta.Start();
@@ -65,6 +74,28 @@ public sealed class CliSandboxEscapeTests
                 Assert.DoesNotContain("the-secret-of-the-user", await Tool("read_file", new { path = "link-to-secret" }), "a link in the project, read by a tool");
             }
 
+            // Relative paths resolve from the folder the shell is really in, which the result of a command does not say
+            // (its `working_directory` is the folder asked for). Checked before they are written: elsewhere, the checks
+            // below would not see them, and they would stay on the disk.
+            Assert.Contains("shell: " + project, await Run(windows ? "'shell: ' + (Get-Location).Path" : "echo \"shell: $(pwd)\""), StringComparison.OrdinalIgnoreCase);
+
+            if (windows)
+            {
+                var throughTheLink = Path.Combine(toTheParent, Path.GetFileName(besideTheProject));
+                Assert.DoesNotContain("the-secret-of-the-user", await Run($"Get-Content -LiteralPath '{besideTheProject}'"), "a file beside the project");
+                Assert.DoesNotContain("the-secret-of-the-user", await Run($"Get-Content -LiteralPath '{throughTheLink}'"), "a file beside the project, through a link to its folder");
+                await Run($"Set-Content -LiteralPath '{Path.Combine(toTheParent, "evil.txt")}' -Value evil");
+                Assert.IsFalse(File.Exists(Path.Combine(root, "evil.txt")), "a file beside the project, written through a link to its folder");
+
+                // A Windows that cannot only list a volume root keeps it read-write, which lets the sandbox create this folder
+                // (doc/sandbox.md).
+                if (MxcPlatform.GetAvailableBackends().Any(static item => item.Backend == ContainmentBackend.ProcessContainer && item.Capabilities.Contains(BackendCapability.FilesystemEnumeratePaths)))
+                {
+                    await Run($"New-Item -ItemType Directory -Path '{outside}' | Out-Null; Set-Content -LiteralPath '{Path.Combine(outside, "evil.txt")}' -Value evil");
+                    Assert.IsFalse(Directory.Exists(outside), "a folder at the root of the disk");
+                }
+            }
+
             // What runs programs later stays as it is.
             foreach (var path in new[] { ".git/hooks/pre-commit", ".git/config", ".alta/plugins/x/plugin.cs", ".vscode/tasks.json" })
             {
@@ -78,17 +109,19 @@ public sealed class CliSandboxEscapeTests
             if (windows)
             {
                 // CodeAlta's own port, directly and through the proxy; a host the profile does not list. (On macOS and
-                // Linux, the test of the network below.)
+                // Linux, the test of the network below.) The proxy is asked directly, for every shell: the web commands of
+                // Windows PowerShell read no proxy variable and send no loopback address through a proxy.
+                string AskTheProxy(string request, string target)
+                    => $"$u = [Uri]$env:HTTP_PROXY; $c = [Net.Sockets.TcpClient]::new($u.Host, $u.Port); $s = $c.GetStream(); " +
+                       $"$b = [Text.Encoding]::ASCII.GetBytes(\"{request} HTTP/1.1`r`nHost: {target}`r`n`r`n\"); $s.Write($b, 0, $b.Length); " +
+                       "$r = [byte[]]::new(64); $n = $s.Read($r, 0, 64); [Text.Encoding]::ASCII.GetString($r, 0, $n)";
                 Assert.Contains("refused-direct", await Run($"try {{ $c = [Net.Sockets.TcpClient]::new(); $c.Connect('127.0.0.1', {reserved}); 'connected-direct' }} catch {{ 'refused-direct' }}"));
-                Assert.Contains("403", await Run($"try {{ Invoke-WebRequest -Uri 'http://127.0.0.1:{reserved}/mcp' -UseBasicParsing -TimeoutSec 20 | Out-Null; 'reached' }} catch {{ $_.Exception.Response.StatusCode.value__ }}"));
-                // For HTTPS, the 403 of the proxy is the failure of the tunnel: the message names it.
-                var unlisted = await Run("try { Invoke-WebRequest -Uri 'https://example.com/' -Method Head -UseBasicParsing -TimeoutSec 20 | Out-Null; 'reached' } catch { $_.Exception.Message }");
-                Assert.DoesNotContain("reached", unlisted);
-                Assert.Contains("403", unlisted);
+                Assert.Contains("HTTP/1.1 403", await Run(AskTheProxy($"GET http://127.0.0.1:{reserved}/mcp", $"127.0.0.1:{reserved}")));
+                Assert.Contains("HTTP/1.1 403", await Run(AskTheProxy("CONNECT example.com:443", "example.com:443")));
             }
 
             // A process started in the background ends with the worker.
-            var started = await Run(windows ? "(Start-Process pwsh -ArgumentList '-NoProfile','-Command','Start-Sleep 600' -PassThru).Id" : "nohup sleep 600 >/dev/null 2>&1 & echo $!");
+            var started = await Run(windows ? "(Start-Process powershell -ArgumentList '-NoProfile','-Command','Start-Sleep 600' -PassThru).Id" : "nohup sleep 600 >/dev/null 2>&1 & echo $!");
             var id = int.Parse(started.Split('\n').Select(static line => line.Trim()).First(static line => line.Length > 0 && line.All(char.IsAsciiDigit)), System.Globalization.CultureInfo.InvariantCulture);
             await worker.DisposeAsync();
             var watch = Stopwatch.StartNew();
@@ -99,6 +132,9 @@ public sealed class CliSandboxEscapeTests
         {
             Environment.SetEnvironmentVariable("CODEALTA_ESCAPE_API_KEY", null);
             foreach (var secret in secrets) File.Delete(secret);
+            if (Directory.Exists(outside)) Directory.Delete(outside, recursive: true);
+            // Alone first: a recursive delete refuses a junction without the rights of an administrator.
+            if (Directory.Exists(toTheParent)) Directory.Delete(toTheParent);
             try
             {
                 Directory.Delete(root, recursive: true);
@@ -214,6 +250,13 @@ public sealed class CliSandboxEscapeTests
             {
             }
         }
+    }
+
+    private static void Junction(string link, string target)
+    {
+        using var process = Process.Start(new ProcessStartInfo("cmd.exe", ["/c", "mklink", "/J", link, target]) { RedirectStandardOutput = true, UseShellExecute = false, CreateNoWindow = true })!;
+        process.WaitForExit();
+        Assert.AreEqual(0, process.ExitCode);
     }
 
     private static bool TryLink(string link, string target)

@@ -1398,6 +1398,44 @@ public sealed partial class AltaLiveToolTests
     [TestMethod]
     [DataRow(true)]
     [DataRow(false)]
+    public async Task PluginAltaCommandContribution_GetsNoPermissionRequests_WhateverItsAltaService(bool runtimeAlta)
+    {
+        // An agent runs the commands of alta: through this service it would allow what it asked to do.
+        IPluginAltaService alta = runtimeAlta ? new PluginAltaServiceBridge() : NoopPluginServices.Create().Alta;
+        IPluginPermissionService? seen = null;
+        var catalog = new FakeAltaPluginCatalog(new AltaPluginCommandContribution
+        {
+            Plugin = CreatePluginDescriptor("permissions-plugin"),
+            Services = new PluginServicesWithAlta(alta) { Permissions = new AnsweringPermissions() },
+            Scope = PluginScope.Global,
+            Command = new PluginAltaCommandContribution
+            {
+                Path = "peek-permissions",
+                Description = "Reads the permission requests of the plugin's services.",
+                CreateCommandNode = pluginContext =>
+                {
+                    var command = new Command("peek-permissions", "Reads the permission requests.") { new CommandUsage(), new HelpOption() };
+                    command.Add((_, _) =>
+                    {
+                        seen = pluginContext.Services.Permissions;
+                        return ValueTask.FromResult(AltaExitCodes.Success);
+                    });
+                    return command;
+                },
+            },
+        });
+        var dispatcher = CreateDispatcher(catalog);
+        if (alta is PluginAltaServiceBridge loopback) loopback.SetDispatcher(dispatcher);
+
+        var result = await dispatcher.InvokeAsync(["peek-permissions"], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+
+        Assert.AreEqual(AltaExitCodes.Success, result.ExitCode, result.Stderr);
+        Assert.AreSame(NoopPluginPermissionService.Instance, seen);
+    }
+
+    [TestMethod]
+    [DataRow(true)]
+    [DataRow(false)]
     public async Task PluginAltaCommandContribution_GetsNoAsks_WhateverItsAltaService(bool runtimeAlta)
     {
         // An agent runs the commands of alta: through the asks it would answer what it asked the user.
@@ -6931,6 +6969,23 @@ public sealed partial class AltaLiveToolTests
         public IPluginAltaService Alta { get; } = alta;
 
         public IPluginAskService Asks { get; init; } = NoopPluginAskService.Instance;
+
+        public IPluginPermissionService Permissions { get; init; } = NoopPluginPermissionService.Instance;
+    }
+
+    // A permission service that answers: what the plugin of the phones gets, which its alta commands must not.
+    private sealed class AnsweringPermissions : IPluginPermissionService
+    {
+        public bool HasPermissions => true;
+
+        public ValueTask<IReadOnlyList<PluginPermissionSummary>> ListWaitingAsync(CancellationToken cancellationToken = default)
+            => ValueTask.FromResult<IReadOnlyList<PluginPermissionSummary>>([new("session", "request", 1)]);
+
+        public ValueTask<PluginPermissionPage> ListAsync(string sessionId, CancellationToken cancellationToken = default)
+            => ValueTask.FromResult(new PluginPermissionPage([], false));
+
+        public ValueTask<PluginPermissionOutcome> ResolveAsync(string sessionId, string requestId, PluginPermissionDecision decision, CancellationToken cancellationToken = default)
+            => ValueTask.FromResult(new PluginPermissionOutcome("resolved"));
     }
 
     // An ask service that answers: what a plugin of the window gets, which its alta commands must not.

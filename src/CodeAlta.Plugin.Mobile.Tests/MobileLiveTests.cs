@@ -45,7 +45,7 @@ public sealed class MobileLiveTests
     {
         var live = new MobileLive();
         var quiet = live.Quiet("s2", "p2", running: true);
-        CollectionAssert.AreEquivalent(new[] { "id", "projectId", "live", "kind", "line", "at", "activity", "canSteer", "asking" }, quiet.Select(static property => property.Key).ToArray());
+        CollectionAssert.AreEquivalent(new[] { "id", "projectId", "live", "kind", "line", "at", "activity", "canSteer", "asking", "approving" }, quiet.Select(static property => property.Key).ToArray());
         Assert.AreEqual(("running", true), ((string?)quiet["live"], (bool)quiet["canSteer"]!));
         Assert.IsNull(quiet["asking"]);
         live.Observe(Activity(AgentActivityKind.Turn, AgentActivityPhase.Started, "turn-1"), "p1");
@@ -87,6 +87,39 @@ public sealed class MobileLiveTests
         live.Flush([]);
         Assert.IsTrue(phone.Reader.TryRead(out var answered));
         Assert.IsNull(Data(answered)["asking"]);
+    }
+
+    [TestMethod]
+    public void ThePermissionRequestsOfASession_ArePushed_WhenTheyChange()
+    {
+        var live = new MobileLive();
+        live.Observe(Activity(AgentActivityKind.Turn, AgentActivityPhase.Started, "turn-1"), "p1");
+        var phone = live.Subscribe();
+        live.Flush();
+        while (phone.Reader.TryRead(out _))
+        {
+        }
+
+        live.Flush(null, [new PluginPermissionSummary("s1", "r1", 1)]);
+        Assert.IsTrue(phone.Reader.TryRead(out var came));
+        Assert.AreEqual(("r1", 1), ((string?)Data(came)["approving"]!["id"], (int)Data(came)["approving"]!["count"]!));
+
+        live.Flush(null, [new PluginPermissionSummary("s1", "r1", 1)]);
+        Assert.IsFalse(phone.Reader.TryRead(out _), "nothing changed");
+
+        live.Flush(null, [new PluginPermissionSummary("s1", "r2", 2)]);
+        Assert.IsTrue(phone.Reader.TryRead(out var next));
+        Assert.AreEqual("r2", (string?)Data(next)["approving"]!["id"]);
+
+        live.Flush();
+        Assert.IsFalse(phone.Reader.TryRead(out _), "a host that could not say keeps what it read before");
+
+        live.Flush(null, []);
+        Assert.IsTrue(phone.Reader.TryRead(out var gone));
+        Assert.IsNull(Data(gone)["approving"]);
+        Assert.IsNull(live.Quiet("s1", null, false)["approving"]);
+        live.Flush(null, [new PluginPermissionSummary("s2", "r3", 1)]);
+        Assert.AreEqual("r3", (string?)live.Quiet("s2", null, true)["approving"]!["id"], "A session not seen run says it when it is listed.");
     }
 
     [TestMethod]

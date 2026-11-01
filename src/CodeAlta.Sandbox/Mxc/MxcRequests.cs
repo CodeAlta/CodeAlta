@@ -16,7 +16,7 @@ internal static class MxcRequests
     private static readonly string[] SeatbeltMachServices =
         ["com.apple.system.opendirectoryd.libinfo", "com.apple.SecurityServer", "com.apple.trustd", "com.apple.trustd.agent"];
 
-    public static ContainerRequest Create(SandboxPolicy policy, string commandLine, string? proxyEndpoint)
+    public static ContainerRequest Create(SandboxPolicy policy, string commandLine, string? proxyEndpoint, bool listsVolumeRoots = true)
     {
         var filesystem = new FilesystemPolicy();
         foreach (var path in policy.ReadWrite) filesystem.ReadwritePaths.Add(path);
@@ -32,12 +32,20 @@ internal static class MxcRequests
             else if (Reachable(path)) filesystem.DeniedPaths.Add(path);
         }
 
-        if (OperatingSystem.IsWindows()) AddParentChain(filesystem, grantParents: true);
+        ProcessContainerFilesystemPolicy? containerFilesystem = null;
+        if (OperatingSystem.IsWindows())
+        {
+            var volumeRoots = AddParentChain(filesystem, grantParents: true);
+            if (listsVolumeRoots) containerFilesystem = new ProcessContainerFilesystemPolicy { EnumeratePaths = volumeRoots };
+            // The only grant that Windows 11 24H2 and 25H2 offer: tools can walk from the root, and the sandbox can create
+            // folders there (doc/sandbox.md).
+            else filesystem.ReadwritePaths.AddRange(volumeRoots);
+        }
         else if (OperatingSystem.IsMacOS()) AddParentChain(filesystem, grantParents: false, policy.DataRoot, Environment.GetFolderPath(Environment.SpecialFolder.UserProfile));
 
         return new ContainerRequest(commandLine)
         {
-            Containment = OperatingSystem.IsWindows() ? new Containment.ProcessContainer()
+            Containment = OperatingSystem.IsWindows() ? new Containment.ProcessContainer { Filesystem = containerFilesystem }
                 : OperatingSystem.IsMacOS() ? new Containment.Seatbelt { ExtraMachLookups = [.. SeatbeltMachServices] }
                 : new Containment.Bubblewrap(),
             WorkingDirectory = policy.WorkingDirectory,
@@ -51,8 +59,12 @@ internal static class MxcRequests
 
     // Tools resolve a path one folder at a time from the volume root (git, node) and fail on a folder that is not
     // granted. A read-only grant cascades to everything below it, so each parent folder of a read-write grant is
-    // granted read-only with every other entry denied; the volume root goes in the read-write list, where a root does
-    // not cascade and cannot be written. A file another program holds open is told apart by how it refuses to open:
+    // granted read-only with every other entry denied. The volume root is returned, for the enumeration list of the
+    // container where Windows has one: read-only it opens the whole disk, and read-write it lets the sandbox create
+    // folders there and write in them, which a default Windows lets every user do at the root of a disk. A link to a folder the sandbox needs stays:
+    // mxc denies what a denied link names, and a Windows profile has such links (`Local Settings` names AppData\Local),
+    // so that a shell that walks through that folder could not reach a project below it. What the link leads to is
+    // checked as by its real path. A file another program holds open is told apart by how it refuses to open:
     // - delete-on-close (the temporary files of %TEMP%): the container opens a denied path without sharing its deletion,
     //   which such a file refuses, and would not start; it is left out;
     // - held by the system for the whole sign-in (NTUSER.DAT and its logs): nobody else reads it; it is left out;
@@ -66,7 +78,7 @@ internal static class MxcRequests
     // grants in the data folder of the sandboxes (`unchained`) are left out too: tools walk up from the project, and
     // mxc takes about half a second more to start with the hundreds of entries of `~/Library` and its caches denied.
     // Only the folders inside `within` (the home folder) deny their entries: those of `/private` are the system's own.
-    internal static void AddParentChain(FilesystemPolicy filesystem, bool grantParents, string? unchained = null, string? within = null,
+    internal static List<string> AddParentChain(FilesystemPolicy filesystem, bool grantParents, string? unchained = null, string? within = null,
         Action<TimeSpan>? wait = null)
     {
         var comparer = SandboxPolicyBuilder.PathComparer;
@@ -88,11 +100,6 @@ internal static class MxcRequests
         foreach (var grant in filesystem.ReadonlyPaths.ToList())
         {
             if (chain.Any(folder => !comparer.Equals(folder, grant) && SandboxPolicyBuilder.IsInside(folder, grant))) AddParents(grant);
-        }
-
-        if (grantParents)
-        {
-            foreach (var root in roots.Where(root => !filesystem.ReadwritePaths.Contains(root, comparer))) filesystem.ReadwritePaths.Add(root);
         }
 
         var denied = 0;
@@ -120,6 +127,10 @@ internal static class MxcRequests
                 {
                     if (IsLink(entry)) continue;
                 }
+                else if (FinalTargetOf(entry) is { } target && (roots.Contains(target) || chain.Contains(target) || grants.Any(grant => SandboxPolicyBuilder.IsInside(grant, target))))
+                {
+                    continue;
+                }
                 else if (File.Exists(entry) && HoldOf(entry) is var hold && hold != FileHold.Free)
                 {
                     if (hold == FileHold.Locked && !IsRegistryHive(entry)) locked.Add(entry);
@@ -132,6 +143,7 @@ internal static class MxcRequests
         }
 
         if (locked.Count > 0) DenyOnceFree(filesystem, locked, wait ?? Thread.Sleep);
+        return grantParents ? [.. roots.Where(root => !grants.Contains(root))] : [];
     }
 
     // The waits for a file locked a moment, about a quarter of a second in all: only a start beside such a file waits.
@@ -230,6 +242,18 @@ internal static class MxcRequests
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
             return true;
+        }
+    }
+
+    private static string? FinalTargetOf(string path)
+    {
+        try
+        {
+            return new FileInfo(path).ResolveLinkTarget(returnFinalTarget: true) is { } target ? Path.TrimEndingDirectorySeparator(target.FullName) : null;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            return null;
         }
     }
 

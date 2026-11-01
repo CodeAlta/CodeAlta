@@ -148,6 +148,35 @@ internal sealed class FakeAsks : IPluginAskService
     }
 }
 
+/// <summary>The permission requests of the sessions a test gives, and the answers they received.</summary>
+internal sealed class FakePermissions : IPluginPermissionService
+{
+    internal Dictionary<string, List<PluginPermissionRequest>> Pending { get; } = new(StringComparer.Ordinal);
+
+    internal ConcurrentQueue<(string SessionId, string RequestId, PluginPermissionDecision Decision)> Answers { get; } = new();
+
+    /// <summary>The outcome of the next answer; <c>resolved</c> when null.</summary>
+    internal string? Outcome { get; set; }
+
+    /// <summary>Holds the outcome until a test releases it.</summary>
+    internal TaskCompletionSource? Hold { get; set; }
+
+    public bool HasPermissions => true;
+
+    public ValueTask<IReadOnlyList<PluginPermissionSummary>> ListWaitingAsync(CancellationToken cancellationToken = default)
+        => ValueTask.FromResult<IReadOnlyList<PluginPermissionSummary>>([.. Pending.Where(static pair => pair.Value.Count > 0).Select(static pair => new PluginPermissionSummary(pair.Key, pair.Value[0].RequestId, pair.Value.Count))]);
+
+    public ValueTask<PluginPermissionPage> ListAsync(string sessionId, CancellationToken cancellationToken = default)
+        => ValueTask.FromResult(new PluginPermissionPage(Pending.GetValueOrDefault(sessionId) ?? [], false));
+
+    public async ValueTask<PluginPermissionOutcome> ResolveAsync(string sessionId, string requestId, PluginPermissionDecision decision, CancellationToken cancellationToken = default)
+    {
+        Answers.Enqueue((sessionId, requestId, decision));
+        if (Hold is { } hold) await hold.Task;
+        return new(Outcome ?? "resolved");
+    }
+}
+
 /// <summary>A Tailscale command line whose answers a test gives.</summary>
 internal sealed class FakeTailscaleCli(bool installed = true) : IMobileTailscaleCli
 {

@@ -2,6 +2,7 @@ import { hasImages, newSessionReadsImages } from "./attachments";
 import { ApiError, browserStore, createApi, failureText, signedOutMessage, SignedOutError, takeFragmentToken } from "./api";
 import { applyAppearance, fontStepKey, nextFontStep, readFontStep, readTheme, themeKey, type Theme } from "./appearance";
 import { coalesce, composerView } from "./composer";
+import { createApprovalPanel } from "./approvalPanel";
 import { createAskPanel } from "./askPanel";
 import { createBackgroundJobs } from "./backgroundJobs";
 import { isBusy, type Live, type Options, type ProjectList, type PromptMode, type SessionChoices, type Space, type TimelineEvent } from "./contract";
@@ -485,6 +486,7 @@ export function startMobile(window: Window & typeof globalThis) {
     showDetailHead();
     void readChoices(id);
     void askPanel.read(id);
+    void approvalPanel.read(id);
     if (!sessions.listed(id) || !sessions.view(id)?.title) void readSessionAlone(id);
     void readDetail().then(() => { if (detail.id === id) toBottom(); });
   }
@@ -532,6 +534,15 @@ export function startMobile(window: Window & typeof globalThis) {
     current: () => detail.id,
     live: id => sessions.view(id)?.live,
     markdown: (element, text) => { const fill = () => markdown.fill(element, text, fill); fill(); },
+    onChange: () => showComposer(),
+    onSent: () => scheduleDetailRead(0),
+    onResize: () => padComposer(),
+  });
+  // ---- What the session asks permission for: above the prompt, whose Stop stays, as on the desktop ----
+  const approvalRoot = $("approval");
+  const approvalPanel = createApprovalPanel({
+    document, window, root: approvalRoot, api, host,
+    current: () => detail.id,
     onChange: () => showComposer(),
     onSent: () => scheduleDetailRead(0),
     onResize: () => padComposer(),
@@ -587,8 +598,12 @@ export function startMobile(window: Window & typeof globalThis) {
     const shown = askPanel.show();
     composer.hidden = shown;
     bottomBar().prepend(backgroundRoot);
+    // A request can wait while a question of a script shows: it goes with the bar that shows.
+    const approvalWas = !approvalRoot.hidden;
+    const approvalShown = approvalPanel.show();
+    bottomBar().prepend(approvalRoot);
     if (detail.id && foot.parentElement !== bottomBar()) bottomBar().append(foot);
-    if (shown !== was) padComposer();
+    if (shown !== was || approvalShown !== approvalWas) padComposer();
   }
 
   // ---- The selection of the composer: the chip (model and effort) and "⋯" (agent prompt, permissions, queue first) ----
@@ -1220,9 +1235,10 @@ export function startMobile(window: Window & typeof globalThis) {
     if (decision === "reload") scheduleListRead(500);
     else if (decision === "listed" && !$("home").hidden) renderList();
     askPanel.onLive(update);
+    approvalPanel.onLive(update);
     if (detail.id === update.id) { showDetailHead(); drawTimeline(); scheduleDetailRead(400); }
   }
-  function readAgain() { void readList(); if (detail.id) { void readDetail(); void askPanel.read(detail.id); void background.refresh(); } }
+  function readAgain() { void readList(); if (detail.id) { void readDetail(); void askPanel.read(detail.id); void approvalPanel.read(detail.id); void background.refresh(); } }
   const stream = createLiveStream({
     create: () => new window.EventSource("/api/events"),
     onSession,
@@ -1251,7 +1267,7 @@ export function startMobile(window: Window & typeof globalThis) {
     button.classList.add("spin");
     if (signedOut) { button.classList.remove("spin"); return; }
     if (!$("home").hidden) sessionList.settle();
-    try { await Promise.all([readList(), refreshDetail(), detail.id ? askPanel.read(detail.id) : null, background.refresh()]); } finally { button.classList.remove("spin"); }
+    try { await Promise.all([readList(), refreshDetail(), detail.id ? askPanel.read(detail.id) : null, detail.id ? approvalPanel.read(detail.id) : null, background.refresh()]); } finally { button.classList.remove("spin"); }
   });
 
   // ---- Sign-in: the token of the QR link (#k=) gets the cookie; without it, the cookie or the kept token is used ----

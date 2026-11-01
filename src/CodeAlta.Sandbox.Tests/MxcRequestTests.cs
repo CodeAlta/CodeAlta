@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using CodeAlta.Sandbox.Mxc;
 using Microsoft.Mxc.Sdk.V1;
 
@@ -23,7 +24,7 @@ public sealed class MxcRequestTests
     }
 
     [TestMethod]
-    public void TheParentsOfAGrant_AreReadOnlyWithTheirOtherEntriesDenied_AndTheVolumeRootIsNotReadOnly()
+    public void TheParentsOfAGrant_AreReadOnlyWithTheirOtherEntriesDenied_AndTheVolumeRootIsOnlyListed()
     {
         if (!OperatingSystem.IsWindows()) Assert.Inconclusive("The chain of parent folders is for Windows.");
         using var temp = new TempTree();
@@ -39,8 +40,50 @@ public sealed class MxcRequestTests
         CollectionAssert.Contains(request.Filesystem.DeniedPaths, Path.Combine(parent, "secret.txt"));
         CollectionAssert.DoesNotContain(request.Filesystem.DeniedPaths, project);
         var root = Path.GetPathRoot(project)!;
-        CollectionAssert.Contains(request.Filesystem.ReadwritePaths, root, "a volume root does not cascade in the read-write list");
+        CollectionAssert.Contains(((Containment.ProcessContainer)request.Containment!).Filesystem!.EnumeratePaths, root);
+        CollectionAssert.DoesNotContain(request.Filesystem.ReadwritePaths, root, "a read-write volume root lets the sandbox create folders on the disk, and write in them");
         CollectionAssert.DoesNotContain(request.Filesystem.ReadonlyPaths, root, "a read-only volume root opens the whole disk");
+    }
+
+    [TestMethod]
+    public void AWindowsThatCannotOnlyListAVolumeRoot_GetsItInTheReadWriteList_AndNoEnumerationList()
+    {
+        if (!OperatingSystem.IsWindows()) Assert.Inconclusive("The chain of parent folders is for Windows.");
+        using var temp = new TempTree();
+        var project = temp.Folder("parent/project");
+
+        var request = MxcRequests.Create(Policy(temp, project, SandboxNetwork.Off), "cmd /c echo", null, listsVolumeRoots: false);
+
+        CollectionAssert.Contains(request.Filesystem!.ReadwritePaths, Path.GetPathRoot(project)!);
+        Assert.IsNull(((Containment.ProcessContainer)request.Containment!).Filesystem, "mxc refuses that policy on a Windows without the capability");
+    }
+
+    [TestMethod]
+    public void ALinkToAFolderTheSandboxNeeds_IsNotDenied_AndALinkToAnotherFolderIs()
+    {
+        if (!OperatingSystem.IsWindows()) Assert.Inconclusive("The chain of parent folders is for Windows.");
+        using var temp = new TempTree();
+        var project = temp.Folder("parent/project");
+        var parent = Path.Combine(temp.Root, "parent");
+        // As the junctions of a Windows profile: `Local Settings` names AppData\Local. mxc denies what a denied link
+        // names, so denying it would deny the parent folder, and the tools that walk through it could not reach the project.
+        var toTheParent = Junction(Path.Combine(parent, "to-the-parent"), parent);
+        var toTheProject = Junction(Path.Combine(parent, "to-the-project"), project);
+        var toAnotherFolder = Junction(Path.Combine(parent, "to-another-folder"), temp.Folder("another-folder"));
+
+        try
+        {
+            var request = MxcRequests.Create(Policy(temp, project, SandboxNetwork.Off), "cmd /c echo", null);
+
+            CollectionAssert.DoesNotContain(request.Filesystem!.DeniedPaths, toTheParent);
+            CollectionAssert.DoesNotContain(request.Filesystem.DeniedPaths, toTheProject);
+            CollectionAssert.Contains(request.Filesystem.DeniedPaths, toAnotherFolder);
+        }
+        finally
+        {
+            // Alone first: a recursive delete refuses a junction without the rights of an administrator.
+            foreach (var link in new[] { toTheParent, toTheProject, toAnotherFolder }) Directory.Delete(link);
+        }
     }
 
     [TestMethod]
@@ -183,6 +226,14 @@ public sealed class MxcRequestTests
         CollectionAssert.IsSubsetOf(new[] { "com.apple.SecurityServer", "com.apple.trustd.agent", "com.apple.system.opendirectoryd.libinfo" }, seatbelt.ExtraMachLookups,
             "TLS of .NET and the names of users and groups");
         Assert.IsFalse(seatbelt.KeychainAccess, "the keychains stay out of reach");
+    }
+
+    private static string Junction(string link, string target)
+    {
+        using var process = Process.Start(new ProcessStartInfo("cmd.exe", ["/c", "mklink", "/J", link, target]) { RedirectStandardOutput = true, UseShellExecute = false, CreateNoWindow = true })!;
+        process.WaitForExit();
+        Assert.AreEqual(0, process.ExitCode);
+        return link;
     }
 
     private static SandboxPolicy Policy(TempTree temp, string project, SandboxNetwork network)
