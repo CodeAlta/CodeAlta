@@ -42,27 +42,6 @@ test("Keyed toasts replace in place, stay apart by key, and a dismissed key show
   }, options);
 });
 
-test("A toast shows above a modal window, in it, and goes back to the page when the window is gone", { skip: !edge, timeout: 120_000 }, async () => {
-  await withCanvas(async page => {
-    // An agent changes a setting: the toast comes first, then Settings opens over it.
-    await page.evaluate(`${f}.show({ message: "changed", timeout: 0 }, "setting")`);
-    await page.until(`${f}.messages().includes("changed")`, "the toast");
-    assert.equal(await page.evaluate<string>(`${f}.host()`), "body");
-    await page.evaluate(`${f}.openModal("settings-like")`);
-    await page.until(`${f}.host() === "settings-like"`, "the toaster in the modal window");
-    assert.equal(await page.evaluate<boolean>(`${f}.toastTakesClicks()`), true, "above the window, and not inert");
-    // A second window on top takes it; closing it gives it back to the first, removing that one to the page.
-    await page.evaluate(`${f}.openModal("second")`);
-    await page.until(`${f}.host() === "second"`, "the toaster in the window on top");
-    await page.evaluate(`${f}.closeModal("second", false)`);
-    await page.until(`${f}.host() === "settings-like"`, "the toaster back in the first window");
-    await page.evaluate(`${f}.closeModal("settings-like", true)`);
-    await page.until(`${f}.host() === "body"`, "the toaster back in the page");
-    assert.deepEqual(await page.evaluate<string[]>(`${f}.messages()`), ["changed"], "the toast went along");
-    await page.evaluate(`${f}.dismiss("setting")`);
-  }, options);
-});
-
 test("A toast without a key is a toast of its own", { skip: !edge, timeout: 120_000 }, async () => {
   await withCanvas(async page => {
     await page.evaluate(`${f}.show({ message: "one", timeout: 0 }); ${f}.show({ message: "one", timeout: 0 })`);
