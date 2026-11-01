@@ -248,20 +248,24 @@ Four milestones, each a series of commits that builds and passes the tests on it
 
 **Milestone 4: plugin settings**
 
-- [ ] 16. In `src/CodeAlta.Plugins.Abstractions`, add:
+> Done with one simplification: `Changed` is raised synchronously on the thread that wrote the value, guarded so that a plugin that throws stops nothing; the guide asks plugins to return quickly. The values live in `PluginSettingsStore` (`CodeAlta.Plugins`), which every plugin reads through its own view of `Services.Settings`.
+
+- [x] 16. In `src/CodeAlta.Plugins.Abstractions`, add:
   - `PluginSettingContribution`, `PluginSettingKind`, `PluginSettingAccess` and the `Setting` factories.
   - `PluginBase.GetSettings()`.
   - `IPluginServices.Settings`, with typed `Get…` methods and `Changed`.
   - `PluginPoint.Settings`.
-- [ ] 17. In `src/CodeAlta.Plugins`, add `PluginSettingValidation.Filter` (keys, kinds, limits), and wire it into the registry of contributions and the activation.
-- [ ] 18. In the host, add the plugin source of `DesktopSettings`: values stored in `[plugins.<id>]` through `ConfigTableSyntax`, `Changed` run with the bounded admission of plugin callbacks, and a catalog change on reload. `SavePluginEnabled` must keep the other keys of the table.
-- [ ] 19. In the window, add the Extensions entry and the generic page of a plugin with settings, above its settings canvas, and the gear on its row in **Plugins**.
-- [ ] 20. Document it for plugin authors: the `codealta-plugin-runtime` skill and its sample, and `site/docs/plugins/developers.md`.
+- [x] 17. In `src/CodeAlta.Plugins`, add `PluginSettingValidation.Filter` (keys, kinds, limits), and wire it into the registry of contributions and the activation.
+- [x] 18. In the host, add the plugin source of `DesktopSettings`: values stored in `[plugins.<id>]` through `ConfigTableSyntax`, `Changed` run with the bounded admission of plugin callbacks, and a catalog change on reload. `SavePluginEnabled` must keep the other keys of the table.
+- [x] 19. In the window, add the Extensions entry and the generic page of a plugin with settings, above its settings canvas, and the gear on its row in **Plugins**.
+- [x] 20. Document it for plugin authors: the `codealta-plugin-runtime` skill and its sample, and `site/docs/plugins/developers.md`.
 
 **Documentation, with the milestone it describes**
 
-- [ ] 21. In the user guide, `site/docs/workspace/settings.md` covers searching, opening a setting from `Ctrl+P`, and asking an agent; `site/docs/search.md` covers settings in the global search. Add a picture of Settings with a search, as `doc/site-screenshots.md` says.
-- [ ] 22. In the architecture docs:
+> The picture of Settings with a search is still to take with the developer instance (step 21).
+
+- [x] 21. In the user guide, `site/docs/workspace/settings.md` covers searching, opening a setting from `Ctrl+P`, and asking an agent; `site/docs/search.md` covers settings in the global search. Add a picture of Settings with a search, as `doc/site-screenshots.md` says.
+- [x] 22. In the architecture docs:
   - `doc/live-tool.md`: the `settings` group, and the amended rule "User settings stay the user's".
   - `doc/desktop.md`: the catalog, and who owns which values.
   - `doc/plugins.md`: the settings contribution.

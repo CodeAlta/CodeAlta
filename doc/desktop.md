@@ -225,6 +225,15 @@ icons, localization, Markdown) stays at the root.
 - **Hidden panes stop reading.** Session tabs that are not visible stay mounted (their drafts and scroll), so what
   a pane polls follows `PaneObservingContext` and stops while it is hidden. Only the tabs of the shown space are
   mounted at all, and the window is given the catalog as that space has it (`scopeSnapshot`).
+- **Settings are one catalog.** `frontend/src/settings/builtInSettings.json` declares the pages of Settings and every
+  built-in setting (id, texts, kind, default, page, who keeps it, what agents may do); the page imports it for its
+  search, and the host embeds it. `DesktopSettings` (`Desktop/Settings/`) is the registry: it binds each setting the
+  host keeps to the store its page already uses, keeps the values of those the page keeps (the page reports them over
+  the `settings` service and applies the changes it is passed, so they stay in `localStorage`), and adds the settings of
+  the plugins. The search of Settings, `Ctrl+P`, `alta settings` and the index read it, so they cannot drift; the page
+  checks in its tests that every text of the catalog is translated, and the host that every setting it keeps has a
+  binding whose default is the catalog's. Why one file: the page owns the words and their translations, the host owns
+  the values and who may change them, and both read the same list.
 - **Live session state** comes from the `display` service (`SessionDisplayService`): the projection of the
   session, sent when it changed and at most every 33 ms. The persisted timeline is read in bounded windows of the
   journal (`WorkspaceHistoryRpc`, cursors tied to the journal's length and time), so a long session never loads

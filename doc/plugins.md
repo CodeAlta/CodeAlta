@@ -189,7 +189,7 @@ This is how an agent writes a plugin from a session: `alta plugin create|build|r
   space only hides what a plugin contributes to the sessions and panes of other spaces
   (`PluginContributionAdapterService.IsAvailableInSpace`, checked before the project). Observers and background work
   keep running. A plugin that serves something of its own (Mobile) reads its spaces with `Services.Spaces`; a plugin
-  never reads `config.toml` itself.
+  never reads `config.toml` itself: its settings come through `Services.Settings`.
 - Safe mode (`CODEALTA_DISABLE_PLUGINS=1`; `--no-plugins` or `--plugin-safe-mode` in the terminal) skips discovery,
   build and load before any plugin command-line option runs, and starts the window without plugin scripts.
 
@@ -278,8 +278,15 @@ no native bridge, so plugin calls cannot be services of that contract. Instead:
 
 | Service | Use | Where |
 | --- | --- | --- |
-| `Services.State` (`IPluginStateStore`) | Settings and small documents read and written whole | JSON files under `~/.alta/plugin-data/<plugin key>/` (user, session) or `<project>/.alta/plugin-data/<plugin key>/`, written atomically |
+| `Services.Settings` (`IPluginSettingsService`) | The settings the plugin declares (`GetSettings()`), which the user changes in Settings and agents with `alta settings` | `config.toml` under `[plugins.<id>]`: the user's file, or the project's for a setting of each project (`PluginSettingsStore`) |
+| `Services.State` (`IPluginStateStore`) | Small documents read and written whole | JSON files under `~/.alta/plugin-data/<plugin key>/` (user, session) or `<project>/.alta/plugin-data/<plugin key>/`, written atomically |
 | `Services.Database` (`IPluginDatabase`) | Rows that are queried, filtered, summed, or that grow | Tables of the application database (`<state root>/data/alta.sqlite3`, see [catalog and config](catalog-and-config.md)) |
+
+Settings are declared, not stored by the plugin: the host validates them (`PluginSettingValidation`), writes one key
+of the table with `ConfigTableSyntax` so the rest of the file stays, and gives each plugin a view of its own keys whose
+`Changed` is raised after a write through the registry of the settings (`DesktopSettings`). A hand edit is read at
+the next read, which is why a plugin reads a value when it uses it. The same declarations put the settings in the search
+of Settings, `Ctrl+P`, `alta settings` and `alta search`; agents change only those the plugin marks `ReadWrite`.
 
 The database service gives each plugin a stable `TablePrefix` from its key, versioned migrations run in one write
 transaction, reads on a connection that never waits for a writer, and writes in turn with every other writer of the

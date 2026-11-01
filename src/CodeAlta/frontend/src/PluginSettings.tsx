@@ -119,7 +119,7 @@ export function PluginProblems({ problems, omitted, files }: { problems: readonl
  * The list of the page. A source plugin says what the running application did with it and what its last build
  * reported; it is built again in the running application while it is turned on, and opened in the code editor.
  */
-export function PluginRows({ rows, disabled, onToggle, onReload, onEdit, onDelete, platform, onReveal, canvases = [], buttons, spaceScope = null, onOpenSettings, question = null }: {
+export function PluginRows({ rows, disabled, onToggle, onReload, onEdit, onDelete, platform, onReveal, canvases = [], buttons, spaceScope = null, onOpenSettings, question = null, typedSettings }: {
   rows: readonly PluginRow[]; disabled: boolean;
   /** A question about one row (stopping a plugin whose agents are at work), shown beside it: the key of the row and the question. */
   question?: Readonly<{ key: string; node: ReactNode }> | null;
@@ -138,11 +138,13 @@ export function PluginRows({ rows, disabled, onToggle, onReload, onEdit, onDelet
   onReveal?: (folder: PluginFolder) => void;
   /** Goes to the settings page of a plugin; without it the rows have no gear button. */
   onOpenSettings?: (page: PluginSettingsPage) => void;
+  /** The pages of the plugins that declare settings without a settings canvas, by the id of the plugin. */
+  typedSettings?: ReadonlyMap<string, PluginSettingsPage>;
 }) {
   const { t } = useShellLanguage();
   return <CardList compact className="settings-editor-rows" aria-label={t("Plugins")}>
     {rows.map(row => { const entry = row.entry; const source = entry?.kind === "Source" && !row.builtIn ? entry : null; const errors = entry?.errors ?? [];
-      const settings = row.enabled && onOpenSettings ? pluginSettingsPageOf(row, canvases) : null;
+      const settings = row.enabled && onOpenSettings ? pluginSettingsPageOf(row, canvases) ?? typedSettings?.get(row.id) ?? null : null;
       const key = pluginRowKey(row);
       return <Card key={key}>
       {question?.key === key && question.node}
@@ -178,7 +180,7 @@ export function PluginRows({ rows, disabled, onToggle, onReload, onEdit, onDelet
  * Settings page for plugins: one list with an enable switch per plugin. A source plugin is also opened in the
  * code editor, built again in the running application, and created from here.
  */
-export function PluginSettings({ epoch, project, revision = 0, onEdit, onOpenFile, api = plugins, reveal = projectFiles.reveal, filesApi, canvases, spaceScope = null, onOpenSettings, askBeforeStop = true, onStopQuestionDismissed }: {
+export function PluginSettings({ epoch, project, revision = 0, onEdit, onOpenFile, api = plugins, reveal = projectFiles.reveal, filesApi, canvases, spaceScope = null, onOpenSettings, askBeforeStop = true, onStopQuestionDismissed, typedSettings }: {
   epoch: string | null; project: SettingsProject;
   /** Whether turning off or building again a plugin whose agents are at work asks first. */
   askBeforeStop?: boolean;
@@ -190,6 +192,8 @@ export function PluginSettings({ epoch, project, revision = 0, onEdit, onOpenFil
   canvases?: readonly CanvasItem[];
   /** Goes to the settings page of a plugin, in Settings > Extensions. */
   onOpenSettings?: (page: PluginSettingsPage) => void;
+  /** The pages of the plugins that declare settings without a settings canvas, by the id of the plugin. */
+  typedSettings?: ReadonlyMap<string, PluginSettingsPage>;
   /** Changes when the application started, replaced or stopped plugins: the list is read again. */
   revision?: number;
   /** Opens the code editor on the folder of a source plugin. */
@@ -303,7 +307,7 @@ export function PluginSettings({ epoch, project, revision = 0, onEdit, onOpenFil
       {project && <div className="settings-editor-toolbar"><ScopeChoice value={scope} project={project} disabled={disabled} onChange={setScope} /></div>}
       <SettingsFileLocations files={files} disabled={disabled} />
       <PluginProblems problems={listing.problems ?? []} omitted={listing.omitted} files={files} />
-      <PluginRows spaceScope={spaceScope} rows={rows} canvases={canvases} disabled={disabled || !!stopping} question={question} onToggle={toggle} onReload={rebuild} onEdit={onEdit} onDelete={remove} platform={files.platform} onReveal={revealPlugin} buttons={buttons} onOpenSettings={onOpenSettings} />
+      <PluginRows spaceScope={spaceScope} rows={rows} canvases={canvases} disabled={disabled || !!stopping} question={question} onToggle={toggle} onReload={rebuild} onEdit={onEdit} onDelete={remove} platform={files.platform} onReveal={revealPlugin} buttons={buttons} onOpenSettings={onOpenSettings} typedSettings={typedSettings} />
     </>}
   </SettingsPage>;
 }

@@ -3,7 +3,6 @@
 // toast of a change made by an agent.
 export const settingsSearchMessages = {
   "Search settings": ["Buscar ajustes", "Rechercher dans les paramètres", "Einstellungen durchsuchen", "設定を検索", "搜索设置"],
-  "Clear the search": ["Borrar la búsqueda", "Effacer la recherche", "Suche löschen", "検索をクリア", "清除搜索"],
   "No setting matches “{query}”.": ["Ningún ajuste coincide con «{query}».", "Aucun paramètre ne correspond à « {query} ».", "Keine Einstellung passt zu „{query}“.",
     "「{query}」に一致する設定はありません。", "没有与“{query}”匹配的设置。"],
   "{count} results for “{query}”": ["{count} resultados para «{query}»", "{count} résultats pour « {query} »", "{count} Ergebnisse für „{query}“", "「{query}」の結果 {count} 件",

@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import type { ScriptLoader } from "../pluginScript/scriptModule";
 import { SettingsPage } from "../SettingsPage";
 import { CanvasPanel } from "./CanvasPanel";
@@ -14,8 +14,10 @@ const nothing = () => { };
  * instance opens when the page is shown; the owner closes it when the page is left, from what `onInstance` says. **Reload** asks the plugin
  * for the page again. While the plugin does not run the page says so, as a tab does.
  */
-export function PluginCanvasSettingsPage({ page, hub, control, onInstance, onAbandoned, onLeave, onOpenSource, loadScript }: {
+export function PluginCanvasSettingsPage({ page, hub, control, onInstance, onAbandoned, onLeave, onOpenSource, loadScript, settings }: {
   page: PluginSettingsPage;
+  /** The settings the plugin declares, drawn above its canvas; absent when it declares none. */
+  settings?: ReactNode;
   hub: CanvasHub;
   /** What can be done about a plugin that does not run; null when its folder is not known (a built-in plugin). */
   control: CanvasPluginControl | null;
@@ -36,6 +38,7 @@ export function PluginCanvasSettingsPage({ page, hub, control, onInstance, onAba
   const [generation, setGeneration] = useState(0);
   return <SettingsPage className="plugin-canvas-settings" label={title} group="Extensions" title={{ text: title }}
     description={page.description ? { text: page.description } : undefined} notice={null} loading={false} busy={false} onReload={() => setGeneration(value => value + 1)}>
+    {settings}
     <CanvasPanel key={generation} tab={tab} spaceId={null} hub={hub} visible active onActivate={nothing} onLook={nothing}
       onInstance={onInstance} onAbandoned={instanceId => onAbandoned(instanceId)} onClose={onLeave} onOpenSource={onOpenSource} control={control} loadScript={loadScript} />
   </SettingsPage>;

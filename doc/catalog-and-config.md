@@ -68,7 +68,7 @@ Skills are also read from `.agents/skills/` of the project and of the home folde
 | Table | Holds |
 | --- | --- |
 | `[chat]`, `[providers.<key>]` | Default provider; provider definitions (`type`, `enabled`, `model`, credentials by environment variable name). |
-| `[plugins.<id>]` | Enablement, plus plugin-owned policy (`[plugins.mcp]`, `[plugins.mcp.servers.*]`) the store does not model. |
+| `[plugins.<id>]` | Enablement, the settings the plugin declares (one key each, written by `PluginSettingsStore`), plus plugin-owned policy (`[plugins.mcp]`, `[plugins.mcp.servers.*]`) the store does not model. |
 | `[skills]`, `[tools]` | Disabled skills; tools every session does without. |
 | `[sessions]`, `[review]`, `[commits]`, `[work_items]` | Title mode and prompt suggestions; review before commit; co-author trailer; tasks and plans. |
 | `[worktrees]`, `[storage]`, `[speech]`, `[search]` | Where worktrees go; scratchpad and session retention; desktop speech and search. |

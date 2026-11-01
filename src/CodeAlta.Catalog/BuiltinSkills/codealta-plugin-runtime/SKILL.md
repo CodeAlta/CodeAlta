@@ -122,6 +122,7 @@ Override only what the plugin needs.
 | `GetUiContributions()` | Status items and content around the prompt; buttons in the window (`PluginUi.Button`) | yes | yes (no buttons) |
 | `GetCanvases()` | Tabs the plugin provides, which users and agents open, filled by HTML or by a script (see "Canvases") | yes | no |
 | `GetLandingCards()` | Cards pinned on the landing page (see "Cards on the landing page") | yes | no |
+| `GetSettings()` | Settings the user changes in Settings, found by its search and by agents (see "Settings") | yes | no |
 | `GetPromptPickers()` | A picker opened by a character typed in the prompt | yes | yes |
 | `GetSessionEventProjections()` | Cards in the timeline of a session | yes | yes |
 | `GetAgentTools()` | Tools the model can call | yes | yes |
@@ -570,6 +571,22 @@ public override ValueTask<PluginPromptResult?> OnPromptSubmittingAsync(PluginPro
 - `Handled(message)` and `Cancel(message)` send nothing: the status line under the prompt in CodeAlta Desktop says that a plugin handled or cancelled the prompt, with the message.
 - `TemporaryPromptContributions` of the result add text to the instructions of that prompt's run only. They apply to a prompt that is sent: the instructions of a turn that a prompt steers do not change.
 
+## Settings
+
+A value the user chooses is a setting, not data: declare it with `GetSettings()` and the factories of `Setting`. CodeAlta Desktop shows it on the page of the plugin in Settings > Extensions (above its settings canvas when it has one), finds it in the search of Settings and with `Ctrl+P`, and gives it to agents (`alta settings`, `alta search --kind setting`). See `samples/settings`.
+```csharp
+public override IEnumerable<PluginSettingContribution> GetSettings()
+{
+    yield return Setting.Integer("poll_minutes", "Check every", "How often new builds are looked for, in minutes.", defaultValue: 5, minimum: 1, maximum: 120) with { Group = "Builds" };
+    yield return Setting.Choice("notify", "Tell me when a build", null, ["failed", "always"], defaultValue: "failed") with { Agents = PluginSettingAccess.ReadWrite };
+}
+// When it is used:
+var minutes = Services.Settings.GetInt64("poll_minutes") ?? 5;
+```
+- Kinds: `Boolean`, `Choice`, `Integer`, `Number`, `Text`, `Path`, `List`. Keys are lower-case letters, digits and underscores; `enabled`, `required` and `spaces` are taken. At most 64 settings.
+- The values are in `config.toml` under `[plugins.<id>]` (the project's `.alta/config.toml` with `Scope = PluginSettingScope.Project`). Never read the file yourself, and read a value when you use it: `Services.Settings.Changed` tells of a change made in Settings or by an agent; return quickly from it.
+- Agents only read a setting unless it says `Agents = PluginSettingAccess.ReadWrite`. Keep what protects the user, opens access or deletes data to the user.
+
 ## Data, background work and logs
 
 - **Data.** `Services.State` keeps JSON between the runs and the reloads. See `samples/saved-data`.
@@ -613,6 +630,7 @@ Each folder under `samples/` is a complete plugin that the tests of CodeAlta bui
 | `hello-command` | A command |
 | `desktop-and-terminal` | One plugin for both applications: commands with a shortcut, an HTML dialog with actions, a status item, content above the prompt, a prompt picker |
 | `saved-data` | Data kept between runs with `Services.State` |
+| `settings` | Settings declared with `GetSettings()`, read with `Services.Settings`, and the change of one |
 | `canvas-checklist` | A tab that the plugin provides: a checklist of the application, of a project and of a session, ticked from the page, a command or an agent; buttons in the title bar and in the menu of a project |
 | `canvas-board` | A tab drawn by a script of the package folder: a React component with Blueprint tabs and menus, a chart, Markdown, links and `alta.host` |
 | `canvas-flow` | A graph drawn with React Flow (`@xyflow/react`): custom nodes in the colors of the window, links drawn and removed, a minimap and panels, the graph kept in the plugin |

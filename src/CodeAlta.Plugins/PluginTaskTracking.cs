@@ -291,6 +291,10 @@ internal sealed class PluginRuntimeServices : IPluginServices
             : inner.Spaces;
         // Asks answer for the user: the host decides which plugin may, and a host that does not tell plugins apart gives none.
         Asks = inner.Asks is IPluginAskRuntimeService asks ? asks.ForPlugin(pluginRuntimeKey, builtIn) : NoopPluginAskService.Instance;
+        // The settings of this plugin alone, under its id in the configuration.
+        Settings = inner.Settings is PluginSettingsStore settings
+            ? settings.ForPlugin(pluginRuntimeKey, pluginId ?? PluginContributionRegistry.PluginIdOf(pluginRuntimeKey, null), scope == PluginScope.Project ? scopeProjectId : null)
+            : inner.Settings;
     }
 
     public Logger Logger { get; }
@@ -325,6 +329,8 @@ internal sealed class PluginRuntimeServices : IPluginServices
     public IPluginAppFileService AppFiles => _inner.AppFiles;
 
     public IPluginAskService Asks { get; }
+
+    public IPluginSettingsService Settings { get; }
 
     // The spaces of the plugin as the global configuration says them when they are asked.
     private sealed class AssignedSpaces(string pluginId, Func<CodeAlta.Catalog.SpaceAssignments> read) : IPluginSpaceService

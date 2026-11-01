@@ -475,6 +475,10 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
             var pluginUi = new DesktopPluginUi(retentionProtection);
             var pluginIdentities = new DesktopPluginIdentities();
             var pluginAsks = new DesktopPluginAsks();
+            // The values of the settings plugins declare, in config.toml: a setting of each project is in the file of its project.
+            var settingsProjects = new ProjectCatalog(catalog);
+            var pluginSettingsStore = new PluginSettingsStore(catalog.ConfigPath,
+                projectId => settingsProjects.GetByIdAsync(projectId).GetAwaiter().GetResult() is { Archived: false } project ? project.ProjectPath : null);
             // The tabs that plugins provide: created with the plugins, which start before the window has a page, and attached to their runtime once it exists.
             canvases = pluginAlta is null ? null : new DesktopCanvases(pluginUi);
             pluginUi.Modules = canvases?.Modules;
@@ -542,7 +546,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                 PluginStartupFeedback = new DesktopPluginStartupFeedback(startupStatus),
                 PluginBuiltIns = DesktopPlugins.ForWindow(ui, uiSessions, options.ReviewOwnedCommandPermissions,
                     DesktopPlugins.CreateJournalCatalog(catalog), new StatisticsArchiveStore(catalog.StateRoot), searchRelay, browserHost), PluginSafeMode = DesktopPlugins.SafeMode,
-                PluginServices = pluginAlta is null ? null : new DesktopPluginServices(pluginAlta, pluginUi, canvases, pluginIdentities, new DesktopPluginAppFiles(assets, manifest), pluginAsks),
+                PluginServices = pluginAlta is null ? null : new DesktopPluginServices(pluginAlta, pluginUi, canvases, pluginIdentities, new DesktopPluginAppFiles(assets, manifest), pluginAsks, pluginSettingsStore),
                 // With the provider types of the plugins, which start later: their providers wait for them, as the log says.
                 ConfigureModelProviders = registry => ConfiguredModelProviderRegistryBuilder.RegisterConfiguredProviders(
                     registry, new CodeAltaConfigStore(catalog), options.CatalogRoot!, modelsDev, pluginProviderTypes),
@@ -883,6 +887,9 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                 _ = host.KeepCodeModeRunsAsync();
                 // The settings as one catalog: the built-in ones bound to the stores their pages use, for alta settings and the search of Settings.
                 Action? loggingSaved = null;
+                // The settings of the plugins: their values in config.toml, their changes told to them.
+                var pluginSettings = new Settings.DesktopPluginSettings(() => host.PluginRuntime.ActivePlugins, pluginSettingsStore);
+                host.PluginRuntime.Changed += (_, _) => pluginSettings.OnPluginsChanged();
                 var desktopSettings = new Settings.DesktopSettings(Settings.DesktopSettingsCatalog.Load(), Settings.DesktopSettingBindings.Create(new Settings.DesktopSettingSources
                 {
                     Config = new CodeAltaConfigStore(host.CatalogOptions), Shell = shell, Windows = windows, Search = search.Host, WorkItems = workItems,
@@ -892,6 +899,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                     // Settings is in the main window: a request brings it to the front.
                     Router = _ => { shell.Show(); return Windows.DesktopWindows.MainLabel; },
                     Log = static line => LogManager.GetLogger("CodeAlta.Settings").Info(line),
+                    Plugins = pluginSettings,
                 };
                 var altaCommands = DesktopAltaTools.Attach(host, reminders.Reminders, pluginAlta, changesView, editorView,
                     new DesktopAltaTerminals(terminals, acceptsInput: !options.ReviewOwnedCommandPermissions),

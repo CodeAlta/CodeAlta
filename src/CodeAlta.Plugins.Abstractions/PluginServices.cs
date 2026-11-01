@@ -70,6 +70,12 @@ public interface IPluginServices
     /// window shows and answers. A host without asks, and the commands a plugin gives agents, have none.
     /// </summary>
     IPluginAskService Asks => NoopPluginAskService.Instance;
+
+    /// <summary>
+    /// Gets the values of the settings the plugin declares (<see cref="PluginBase.GetSettings"/>), and tells of their changes.
+    /// A host that was written before plugins had settings has none.
+    /// </summary>
+    IPluginSettingsService Settings => NoopPluginSettingsService.Instance;
 }
 
 /// <summary>

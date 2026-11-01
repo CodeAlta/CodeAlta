@@ -17,6 +17,24 @@ Open it with `Ctrl+,`, the gear of the title bar, `Ctrl+G Ctrl+W` or `/settings`
 
 What you create in Settings (a prompt, a skill, a plugin, an MCP server, a color scheme, a kind of pull request) has a red **Remove** button there, which asks first.
 
+### Search settings
+
+Settings opens with the focus in **Search settings**, at the top of its pages. Type what you look for, in your language or in English: the settings of every page that match show at once, grouped by page and by the part of the page they are on, and you change them right there. Pages without a match are dimmed, and the others show how many they have.
+
+- **Open page** shows the whole page of a group. A list (providers, MCP servers, prompts) or a setting changed on its page has **Open**.
+- `Enter` opens the first result on its page, `↓` moves into the results, and `Esc` clears the search; a second `Esc` closes Settings.
+- A setting you open from the search, from `Ctrl+P` or from an agent glows for a moment on its page, so you see where it is.
+
+`Ctrl+P` finds settings too: see [Search](../search.md#find-a-conversation).
+
+### Ask an agent
+
+Agents know the settings of CodeAlta: ask one where a setting is, what it does, or to change it. An agent shows you a setting by opening Settings on it, and changes one only when you ask.
+
+- When an agent changes a setting, a toast names it, with **Show** and **Undo**.
+- Agents never change what protects you: the permission modes, the confirmations, the tools turned off, **Review changes before commit**, the sandbox, Code Mode, the CodeAlta MCP server, Remote Control, storage cleanup and search by meaning. They show you those, and you change them.
+- A list of items, such as the MCP servers, the prompts or the windows, is changed with its own commands, as before.
+
 The zoom of the window is in the title bar, before the theme switch: click it, or use `Ctrl+-`, `Ctrl+=` and `Ctrl+0`. It is kept for the next start.
 
 ### Files of the settings

@@ -12,6 +12,7 @@ import { createSettingsHub } from "./settings/settingsHub";
 import { mergeSettings, settingText } from "./settings/settingsCatalog";
 import { groupResults, matchCounts, searchSettings } from "./settings/settingsSearch";
 import { SettingsSearchResults } from "./settings/SettingsSearchResults";
+import { PluginSettingsForm, pluginPageId, typedSettingsPages } from "./settings/PluginSettingsForm";
 import { parseSettingValue, settingValueSource, settingValueText } from "./settings/settingValues";
 import { useWindowSettingBindings, useWindowSettingsBridge } from "./settings/windowSettings";
 import { dismissStartupScreen } from "./startupScreen";
@@ -786,7 +787,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
     if (settingsPageOf(page)) navigate(page as SettingsSection);
     else if (page.startsWith("plugin/")) {
       // `plugin/<key>/<canvas>` opens the settings page of a plugin, while the plugin runs in the space the window shows.
-      const found = (owned ? pluginPages : []).find(candidate => `plugin/${candidate.pluginKey}/${candidate.canvasId}` === page);
+      const found = (owned ? allPluginPages : []).find(candidate => pluginPageId(candidate) === page);
       if (found) openPluginSettings(found); else navigate("plugins");
     } else {
       // `spaces/<id>/<section>` opens the page of a space at one of its sections.
@@ -3227,6 +3228,9 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
     language: language.choice, setLanguage: language.setLanguage });
   useWindowSettingsBridge(secondary ? null : settingsHub, !!pluginEpoch, windowSettings);
   const settingValues = useMemo(() => settingValueSource(settingsHub, windowSettings), [settingsHub, windowSettings]);
+  // The pages of the plugins in Settings: their settings canvases, and a page for the settings of a plugin that has none.
+  const allPluginPages = useMemo(() => [...pluginPages, ...typedSettingsPages(settingEntries)], [pluginPages, settingEntries]);
+  const pluginSettingEntries = (page: PluginSettingsPage) => settingEntries.filter(entry => entry.plugin && entry.page === pluginPageId(page));
   const settingsSearch = useMemo(() => settingsOpen && settingsQuery.trim() ? searchSettings(settingEntries, settingsQuery, language.locale) : null,
     [settingsOpen, settingsQuery, settingEntries, language.locale]);
   // A result of the search of Settings shows its page, with the setting glowing.
@@ -5941,7 +5945,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
       </div>
     {settingsOpen && <SettingsOverlay section={settingsSection} onSection={page => { setSettingsQuery(""); navigate(page); }} onClose={closeSettings}
       spaces={spacesState.available ? spacesState.spaces : []} spacePage={spacePage} onSpacePage={setSpacePage}
-      pluginPages={owned ? pluginPages : []} pluginPage={pluginPage} onPluginPage={page => { setSettingsQuery(""); openPluginSettings(page); }}
+      pluginPages={owned ? allPluginPages : []} pluginPage={pluginPage} onPluginPage={page => { setSettingsQuery(""); openPluginSettings(page); }}
       search={{ query: settingsQuery, onQuery: setSettingsQuery, counts: settingsSearch ? matchCounts(settingsSearch) : null, focusOnOpen: settingsFocusSearch.current,
         onSubmit: () => {
           const first = settingsSearch && (groupResults(settingsSearch, settingEntries)[0]?.settings[0] ?? null);
@@ -5974,12 +5978,16 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
         canEdit={owned && !!mutation?.capability.canMutate()} />
       : settingsSection === "about" ? <AboutSettings status={status} bootError={!!error} demo={demoMode} logo={logoUrl}
         update={owned ? appUpdateResult : undefined} onOpenReleaseNotes={openReleaseNotes} onInstallUpdate={installUpdate} />
+      : settingsSection === "plugin" && pluginPage && !pluginPage.canvasId ? <PluginSettingsForm key={pluginPageId(pluginPage)} page={pluginPage} entries={pluginSettingEntries(pluginPage)}
+        source={settingValues} revision={windowSettings} framed />
       : settingsSection === "plugin" && pluginPage ? <PluginCanvasSettingsPage key={`${pluginPage.pluginKey}/${pluginPage.canvasId}`} page={pluginPage} hub={canvasHub}
+        settings={pluginSettingEntries(pluginPage).length ? <PluginSettingsForm page={pluginPage} entries={pluginSettingEntries(pluginPage)} source={settingValues} revision={windowSettings} framed={false} /> : undefined}
         control={canvasControl(pluginSettingsTab(pluginPage))} onLeave={() => navigate("plugins")}
         onInstance={instance => instance ? settingsCanvasInstances.opened(pluginSettingsTab(pluginPage), "settings", instance) : settingsCanvasInstances.released(pluginSettingsTab(pluginPage), "settings")}
         onAbandoned={instance => settingsCanvasInstances.abandoned(pluginSettingsTab(pluginPage), "settings", instance)}
         onOpenSource={folder => { closeSettings(); openPluginEditor(folder, { path: "plugin.cs", line: null, column: null, explorer: true }); }} />
       : settingsSection === "plugins" ? <PluginSettings epoch={owned ? status!.hostEpoch : null} project={settingsProject} revision={pluginRevision} canvases={declaredCanvases} spaceScope={resourceScope}
+        typedSettings={new Map(typedSettingsPages(settingEntries).map(page => [settingEntries.find(entry => entry.page === pluginPageId(page))?.plugin ?? "", page]))}
         askBeforeStop={confirms.pluginStop} onStopQuestionDismissed={() => setConfirm("pluginStop", false)}
         onOpenSettings={owned ? openPluginSettings : undefined}
         onEdit={owned ? folder => { closeSettings(); openPluginEditor(folder, { path: "plugin.cs", line: null, column: null, explorer: true }); } : undefined}
@@ -6203,14 +6211,14 @@ function SettingsOverlay({ section, onSection, onClose, spaces, spacePage, onSpa
   const composingEscape = useRef(false);
   const navigation = useRef<HTMLElement>(null);
   const searchField = useRef<HTMLInputElement>(null);
-  // Settings opened by the user starts in its search: typing is the quickest way to a setting. One opened on a setting does not.
-  useEffect(() => { if (search.focusOnOpen) searchField.current?.focus(); }, []);
   const counts = search.counts;
   const dimmed = (page: string) => counts !== null && !counts.has(page);
   const count = (page: string) => counts?.get(page) ? <small className="settings-nav-count">{counts.get(page)}</small> : null;
   return <AppWindow storageKey="codealta.desktop.window.settings.v1" className="settings-dialog" titleId="settings-title" title={t("Settings")}
     preferredSize={viewport => ({ width: viewport.width * 0.8, height: viewport.height * 0.8 })} minimumSize={{ width: 560, height: 360 }}
     onClose={onClose} closeLabel={t("Close settings")}
+    // Settings opened by the user starts in its search: typing is the quickest way to a setting. One opened on a setting does not.
+    onOpened={() => { if (search.focusOnOpen) searchField.current?.focus(); }}
     onKeyDown={event => {
       event.stopPropagation();
       if (event.key !== "Escape") return;

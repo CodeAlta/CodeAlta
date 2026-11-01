@@ -375,6 +375,10 @@ public sealed class PluginContributionRegistry
                 // One plugin runs the providers of a type: a second one with the same type shadows the first.
                 yield return new ContributionConflictKey("model-provider", $"model-provider:{provider.ProviderType}", provider.ProviderType);
                 yield break;
+            case PluginSettingContribution setting:
+                // A setting belongs to its plugin: two plugins with the same key do not shadow each other.
+                yield return new ContributionConflictKey("setting", $"setting:{registration.Handle.PluginRuntimeKey}:{setting.Key}", setting.Key);
+                yield break;
             case PluginLandingCardContribution card:
                 // A card belongs to the plugin that pins it: two plugins with the same identifier do not shadow each other.
                 yield return new ContributionConflictKey("landing-card", $"landing-card:{registration.Handle.PluginRuntimeKey}:{card.Id}", card.Id);
@@ -437,6 +441,7 @@ public sealed class PluginContributionRegistry
             PluginCompactionContribution compaction => compaction.Order,
             PluginCanvasContribution canvas => canvas.Order,
             PluginLandingCardContribution card => card.Order,
+            PluginSettingContribution setting => setting.Order,
             _ => 0,
         };
 
@@ -459,6 +464,7 @@ public sealed class PluginContributionRegistry
             PluginCanvasContribution canvas => canvas.Id,
             PluginLandingCardContribution card => card.Id,
             PluginModelProviderContribution provider => provider.ProviderType,
+            PluginSettingContribution setting => setting.Key,
             _ => null,
         };
 

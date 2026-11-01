@@ -50,6 +50,8 @@ public enum PluginPoint
     LandingCard,
     /// <summary>Model provider type: the providers of a type of the configuration that the plugin runs.</summary>
     ModelProvider,
+    /// <summary>Setting: a value of the plugin that the user changes in Settings and agents find with <c>alta settings</c>.</summary>
+    Settings,
 }
 
 /// <summary>

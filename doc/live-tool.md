@@ -85,7 +85,7 @@ services the host registered. Nothing is shared between invocations.
 | `task`, `plan`, `bookmark` | Follow-up tasks and plans of a project (`.alta/tasks`, `.alta/plans`), bookmarks of the instance. |
 | `issue` | Issues and pull requests from the trackers plugins give for a project. |
 | `plugin` | Inspect plugins and their API; in the desktop, create, build and reload source plugins ([plugins](plugins.md)). |
-| `diff`, `editor`, `canvas`, `landing`, `documentation`, `terminal`, `window`, `appearance`, `automation`, `search` | Desktop surfaces: they exist only where the desktop host registers their service (`IAltaChangesView`, `IAltaEditorView`, `IAltaCanvasView`, `IAltaTerminals`, `IAltaWindows`, `IAltaAutomations`, `SearchService`...). |
+| `diff`, `editor`, `canvas`, `landing`, `documentation`, `terminal`, `window`, `appearance`, `automation`, `search`, `settings` | Desktop surfaces: they exist only where the desktop host registers their service (`IAltaChangesView`, `IAltaEditorView`, `IAltaCanvasView`, `IAltaTerminals`, `IAltaWindows`, `IAltaAutomations`, `SearchService`, `IAltaSettings`...). |
 | Plugin roots | `mcp` ([MCP](mcp.md)), `ui` (the window's UI tools), `statistics` ([statistics](statistics.md)), `jira`. |
 
 `note`, `skills activate`, `skills_activate` and `issues` are compatibility aliases.
@@ -105,7 +105,7 @@ services the host registered. Nothing is shared between invocations.
   policy flags, ordering, and a factory that creates a fresh unattached `CommandNode`. A root that collides with a
   reserved root or an earlier plugin root is skipped and diagnosed. Reserved roots (`version`, `ask`, `project`,
   `space`, `session`, `skill`, `skills`, `skills_activate`, `provider`, `model`, `plugin`, `tool`, `canvas`, `landing`,
-  `documentation`, `search`, `window`) are reserved on every host, also where the host lacks the command, so a plugin
+  `documentation`, `search`, `window`, `settings`) are reserved on every host, also where the host lacks the command, so a plugin
   cannot claim a name in the TUI that means something else in the desktop.
 - **Plugins call commands** through `Services.Alta.InvokeAsync(...)` without referencing `CodeAlta.LiveTool`;
   project-scoped plugins inherit their project and working directory.
@@ -146,9 +146,16 @@ it:
   `plugin.buildDenied`. A session never creates or prompts a session that asks the user less than it does
   (`session.permissionModeDenied`, `session.promptDenied`).
 - **User settings stay the user's.** Commands change the calling session or what the user asked for, never a global
-  setting: no command writes the spaces of a resource, the window settings or the `[sessions] title` setting. Window
-  and space commands never move the user's window by themselves: a project of another space answers
-  `project.notInShownSpace`, and the agent asks before `alta space switch`.
+  setting by themselves: no command writes the spaces of a resource or the window settings. Window and space commands
+  never move the user's window by themselves: a project of another space answers `project.notInShownSpace`, and the
+  agent asks before `alta space switch`.
+- **`alta settings set` is bounded.** It is the one command that changes a setting of the user, and only when the user
+  asks for it (its help says so). The catalog marks each setting `readWrite` or `read` for agents: what protects the user,
+  widens what agents may do, exposes the computer or deletes data (permissions, confirmations, tools turned off, review
+  before commit, sandbox, Code Mode, the MCP server, Remote Control, storage cleanup, search by meaning) is `read`, and the
+  registry refuses it to every caller but the window (`settings.readOnly`), whatever the command says. A sandboxed session
+  lists, reads and opens settings but never changes one. Every change by a caller other than the window is shown in the
+  window with **Undo** and written to the log, so the user sees what changed and takes it back.
 - **What only the user decides** says so in the help of the command (`statistics history ...`: "Only when the user
   asks for it"), so the agent reads the rule where it reads the command.
 
