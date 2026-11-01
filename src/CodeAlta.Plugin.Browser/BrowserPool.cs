@@ -137,7 +137,7 @@ internal sealed class BrowserPool : IAsyncDisposable
         var folder = temporary
             ? Path.Combine(TemporaryRoot, Guid.NewGuid().ToString("N")[..12])
             : PersistentFolder(target.Profile.Name ?? BrowserProfileSpec.DefaultName, target.Browser);
-        return new BrowserLaunchOptions { Executable = target.Browser.ExecutablePath, ProfileDirectory = folder, Temporary = temporary, Headless = target.Headless };
+        return new BrowserLaunchOptions { Executable = target.Browser.ExecutablePath, ProfileDirectory = folder, Temporary = temporary, Headless = target.Headless, StartTimeout = _host.StartTimeout };
     }
 
     /// <summary>Gets the folder of the temporary profiles, which the browsers delete when they end.</summary>
@@ -188,7 +188,7 @@ internal sealed class BrowserPool : IAsyncDisposable
 
         var launch = await FirefoxLauncher.LaunchAsync(new BrowserLaunchOptions
         {
-            Executable = browser.ExecutablePath, ProfileDirectory = profile.Directory, Temporary = false,
+            Executable = browser.ExecutablePath, ProfileDirectory = profile.Directory, Temporary = false, StartTimeout = _host.StartTimeout,
         }, writePreferences: false, CancellationToken.None).ConfigureAwait(false);
         try
         {

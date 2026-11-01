@@ -143,4 +143,7 @@ public sealed class BrowserPluginHost
 
     /// <summary>Gets how long a session's browser stays open without a call of its tools.</summary>
     internal TimeSpan IdleTimeout { get; init; } = TimeSpan.FromMinutes(15);
+
+    /// <summary>Gets how long a browser the plugin starts has to open its endpoint: tests on a busy machine give more.</summary>
+    internal TimeSpan StartTimeout { get; init; } = TimeSpan.FromSeconds(30);
 }

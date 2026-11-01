@@ -46,7 +46,8 @@ internal sealed class BrowserTestHost : IAsyncDisposable
         if (Find(engine) is not { } browser) return null;
         var folder = Directory.CreateDirectory(Path.Combine(Path.GetTempPath(), "codealta-browser-tests", Guid.NewGuid().ToString("N")[..8])).FullName;
         var site = await TestSite.StartAsync();
-        var options = new BrowserLaunchOptions { Executable = browser.ExecutablePath, ProfileDirectory = Path.Combine(folder, "profile"), Headless = true };
+        // A browser that starts cold on a busy CI machine can take more than the 30 seconds a desktop gives it.
+        var options = new BrowserLaunchOptions { Executable = browser.ExecutablePath, ProfileDirectory = Path.Combine(folder, "profile"), Headless = true, StartTimeout = TimeSpan.FromMinutes(2) };
         IBrowserConnection connection;
         if (engine == BrowserEngine.Firefox)
         {

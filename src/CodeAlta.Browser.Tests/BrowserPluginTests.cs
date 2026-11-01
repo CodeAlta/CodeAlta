@@ -105,7 +105,7 @@ public sealed class BrowserPluginTests
     public async Task UserBrowser_IsRefusedWhileTheSwitchIsOff_AndASandboxedSessionBrowsesIsolatedOnly()
     {
         using var folder = new TempFolder();
-        var host = new BrowserPluginHost(folder.Path) { HasUser = true };
+        var host = new BrowserPluginHost(folder.Path) { HasUser = true, StartTimeout = BrowserStart };
         await using var plugin = await StartAsync(host, new BrowserSettings());
         var (exit, records) = await RunAsync(plugin, folder, "s1", ["browser", "activate", "--profile", "user"]);
         Assert.AreEqual(5, exit);
@@ -330,7 +330,7 @@ public sealed class BrowserPluginTests
 
         using var folder = new TempFolder();
         await using var site = await TestSite.StartAsync();
-        await using var plugin = await StartAsync(new BrowserPluginHost(folder.Path) { HasUser = false, IdleTimeout = TimeSpan.FromSeconds(2) }, new BrowserSettings { Browser = browser.Id });
+        await using var plugin = await StartAsync(new BrowserPluginHost(folder.Path) { HasUser = false, IdleTimeout = TimeSpan.FromSeconds(2), StartTimeout = BrowserStart }, new BrowserSettings { Browser = browser.Id });
         Assert.AreEqual(0, (await RunAsync(plugin, folder, "s1", ["browser", "activate"])).Exit);
         var tools = plugin.CreateTools(plugin.SessionOf("s1")!);
         Assert.IsTrue((await CallAsync(tools, "s1", "navigate_page", $$"""{"type":"url","url":"{{site.Origin}}/form"}""")).Success);
@@ -344,12 +344,15 @@ public sealed class BrowserPluginTests
 
     // -------------------------------------------------------------------------------------------------------------
 
-    private static BrowserPluginHost Host(TempFolder folder) => new(folder.Path) { HasUser = false };
+    // A browser that starts cold on a busy CI machine can take more than the 30 seconds a desktop gives it.
+    private static readonly TimeSpan BrowserStart = TimeSpan.FromMinutes(2);
+
+    private static BrowserPluginHost Host(TempFolder folder) => new(folder.Path) { HasUser = false, StartTimeout = BrowserStart };
 
     private static BrowserAgentSession Session(BrowserPluginHost host, BrowserProfileKind kind, BrowserSettings settings, List<string>? kept = null)
     {
         var browser = new InstalledBrowser("chrome", "Google Chrome", BrowserEngine.Chromium, "chrome.exe", "150.0", null, [new BrowserProfile("Person 1", "x", true)]);
-        var hosted = kind == BrowserProfileKind.User ? new BrowserPluginHost(host.StateRoot) { HasUser = true, WorkFolder = host.WorkFolder, RequestPermission = host.RequestPermission, ReservedPorts = host.ReservedPorts } : host;
+        var hosted = kind == BrowserProfileKind.User ? new BrowserPluginHost(host.StateRoot) { HasUser = true, WorkFolder = host.WorkFolder, RequestPermission = host.RequestPermission, ReservedPorts = host.ReservedPorts, StartTimeout = host.StartTimeout } : host;
         return new BrowserAgentSession(hosted, new BrowserPool(hosted), "s1", new BrowserTarget(browser, new BrowserProfileSpec(kind, null), true), BrowserChoiceSource.Auto, "test", null,
             () => settings, (site, _) =>
             {
