@@ -47,10 +47,39 @@ export type Live = Readonly<{
   canSteer: boolean;
   /** The ask the session waits on, which the page reads again when it changes; null when it waits for none (an older CodeAlta does not say). */
   asking?: AskMark | null;
+  /** The permission requests the session waits on, which the page reads again when they change; null when it waits for none (an older CodeAlta does not say). */
+  approving?: ApprovalMark | null;
 }>;
 
 /** The ask of a session, as the live stream says it: what changes when an answer goes, or did not reach the session. */
 export type AskMark = Readonly<{ id: string; revision: string; state: Ask["state"]; immediate: boolean }>;
+
+/** The permission requests of a session, as the live stream says them: the first one and how many were read. */
+export type ApprovalMark = Readonly<{ id: string; count: number }>;
+
+/** What a session asks permission for, with what the desktop shows of it. */
+export type ApprovalRequest = Readonly<{
+  id: string;
+  kind: "commandExecution" | "fileChange" | "skill";
+  command: string | null;
+  workingDirectory: string | null;
+  grantRoot: string | null;
+  reason: string | null;
+  /** Too long to show in full: allowing it allows more than what is shown. */
+  shortened: boolean;
+  /** A sandboxed session asks to run the command outside its sandbox. */
+  outsideSandbox: boolean;
+  skill: Readonly<{ server: string | null; name: string }> | null;
+}>;
+
+/** The first permission requests of a session. */
+export type ApprovalPage = Readonly<{ requests: readonly ApprovalRequest[]; hasMore: boolean; error: string | null }>;
+
+/** An answer to a permission request. */
+export type ApprovalAnswer = Readonly<{ requestId: string; decision: "allow_once" | "deny" }>;
+
+/** What became of an answer to a permission request. */
+export type ApprovalResult = Readonly<{ ok: boolean; status: string; error: string | null }>;
 
 /** A space of the computer: its name, and the color and icon the desktop shows it with. */
 export type Space = Readonly<{ id: string; name: string; color: string | null; icon: string | null }>;

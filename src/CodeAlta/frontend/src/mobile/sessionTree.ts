@@ -1,3 +1,4 @@
+import { approvalWaiting } from "./approval";
 import { askWaiting } from "./ask";
 import { isBusy } from "./contract";
 import { lastActive, type SessionView } from "./sessionStore";
@@ -110,6 +111,7 @@ function summarize(node: Node, children: readonly Node[]): SubAgents {
     for (const child of list) {
       const live = child.view.live;
       if (askWaiting(live)) { waiting++; asks.push(`${child.view.id}:${live!.asking!.id}`); }
+      else if (approvalWaiting(live)) { waiting++; asks.push(`${child.view.id}:${live!.approving!.id}`); }
       else if (isBusy(live?.live)) running++;
       walk(child.children);
     }

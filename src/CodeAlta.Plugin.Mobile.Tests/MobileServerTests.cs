@@ -138,6 +138,77 @@ public sealed class MobileServerTests
     }
 
     [TestMethod]
+    public async Task ThePermissionRequestsOfASession_AreReadAndAnswered_AsTheWindowAnswersThem()
+    {
+        await using var fixture = await Fixture.StartAsync();
+        await fixture.SignInAsync();
+        fixture.Alta.Answer("session status known", FakeAlta.Status("known", "p1", "personal"));
+        Assert.AreEqual(HttpStatusCode.NotFound, (await fixture.Client.GetAsync("/api/sessions/unknown/permissions")).StatusCode, "The requests of a session the phone does not see.");
+        Assert.IsEmpty((JsonArray)JsonNode.Parse(await fixture.Client.GetStringAsync("/api/sessions/known/permissions"))!["requests"]!, "A session that waits for nothing.");
+
+        var id = Guid.NewGuid().ToString();
+        fixture.Permissions.Pending["known"] =
+        [
+            new PluginPermissionRequest { RequestId = id, Kind = "commandExecution", Command = "git push", WorkingDirectory = "C:/code", Reason = "To publish.", Shortened = true, OutsideSandbox = true },
+            new PluginPermissionRequest { RequestId = Guid.NewGuid().ToString(), Kind = "skill", SkillServer = "hf", SkillName = "transformers" },
+        ];
+        var requests = (JsonArray)JsonNode.Parse(await fixture.Client.GetStringAsync("/api/sessions/known/permissions"))!["requests"]!;
+        Assert.AreEqual((id, "commandExecution", "git push", "C:/code", "To publish."),
+            ((string?)requests[0]!["id"], (string?)requests[0]!["kind"], (string?)requests[0]!["command"], (string?)requests[0]!["workingDirectory"], (string?)requests[0]!["reason"]));
+        Assert.IsTrue((bool)requests[0]!["shortened"]!);
+        Assert.IsTrue((bool)requests[0]!["outsideSandbox"]!);
+        Assert.IsNull(requests[0]!["skill"]);
+        Assert.AreEqual(("hf", "transformers"), ((string?)requests[1]!["skill"]!["server"], (string?)requests[1]!["skill"]!["name"]));
+
+        async Task<JsonNode> ResolveAsync(string session, string request, string decision)
+            => JsonNode.Parse(await (await fixture.PostAsync($"/api/sessions/{session}/permissions/resolve", new JsonObject { ["requestId"] = request, ["decision"] = decision })).Content.ReadAsStringAsync())!;
+
+        var allowed = await ResolveAsync("known", id, "allow_once");
+        Assert.AreEqual((true, "resolved"), ((bool)allowed["ok"]!, (string?)allowed["status"]));
+        Assert.IsNull(allowed["error"]);
+        Assert.IsTrue(fixture.Permissions.Answers.TryDequeue(out var sent));
+        Assert.AreEqual(("known", id, PluginPermissionDecision.AllowOnce), sent);
+        await ResolveAsync("known", id, "deny");
+        Assert.IsTrue(fixture.Permissions.Answers.TryDequeue(out sent));
+        Assert.AreEqual(PluginPermissionDecision.Deny, sent.Decision);
+
+        // What is not the choice of a request that can be named reaches no session; "always" is not a choice of the phone.
+        foreach (var (request, decision) in new[] { (id, "allow_always"), (id, "cancel"), (id, ""), ("not-a-guid", "allow_once"), (Guid.Empty.ToString(), "allow_once") })
+        {
+            var refused = await ResolveAsync("known", request, decision);
+            Assert.AreEqual((false, "invalid"), ((bool)refused["ok"]!, (string?)refused["status"]), $"{request} {decision}");
+        }
+
+        Assert.IsTrue(fixture.Permissions.Answers.IsEmpty, "Nothing refused reaches the session.");
+        Assert.AreEqual(HttpStatusCode.NotFound, (await fixture.PostAsync("/api/sessions/unknown/permissions/resolve", new JsonObject { ["requestId"] = id, ["decision"] = "allow_once" })).StatusCode);
+        Assert.IsTrue(fixture.Permissions.Answers.IsEmpty, "A session the phone does not see.");
+
+        fixture.Permissions.Outcome = "rejected";
+        var stale = await ResolveAsync("known", id, "allow_once");
+        Assert.AreEqual((false, "rejected", MobilePermissions.Message("rejected")), ((bool)stale["ok"]!, (string?)stale["status"], (string?)stale["error"]));
+        fixture.Permissions.Outcome = null;
+
+        // A host that takes long is not said to have the answer: the phone does not send it again.
+        fixture.Permissions.Hold = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var waiting = await ResolveAsync("known", id, "allow_once");
+        Assert.AreEqual((false, "uncertain"), ((bool)waiting["ok"]!, (string?)waiting["status"]));
+        fixture.Permissions.Hold.SetResult();
+        fixture.Permissions.Hold = null;
+    }
+
+    [TestMethod]
+    public async Task ThePermissionRequests_AreForThePhonesThatSignedIn()
+    {
+        await using var fixture = await Fixture.StartAsync();
+        fixture.Alta.Answer("session status known", FakeAlta.Status("known", "p1", "personal"));
+        var id = Guid.NewGuid().ToString();
+        fixture.Permissions.Pending["known"] = [new PluginPermissionRequest { RequestId = id, Kind = "commandExecution", Command = "git push", WorkingDirectory = "C:/code" }];
+        Assert.AreEqual(HttpStatusCode.Unauthorized, (await fixture.Client.GetAsync("/api/sessions/known/permissions")).StatusCode);
+        Assert.AreEqual(HttpStatusCode.Unauthorized, (await fixture.PostAsync("/api/sessions/known/permissions/resolve", new JsonObject { ["requestId"] = id, ["decision"] = "allow_once" })).StatusCode);
+        Assert.IsTrue(fixture.Permissions.Answers.IsEmpty);
+    }
+
+    [TestMethod]
     public async Task TheAskOfASession_IsReadAndAnswered_AsTheWindowAnswersIt()
     {
         await using var fixture = await Fixture.StartAsync();
@@ -398,6 +469,8 @@ public sealed class MobileServerTests
 
         internal required FakeAsks Asks { get; init; }
 
+        internal required FakePermissions Permissions { get; init; }
+
         internal int Port { get; }
 
         internal required MobileAccess Access { get; init; }
@@ -416,17 +489,19 @@ public sealed class MobileServerTests
             var live = new MobileLive();
             var sessions = new MobileSessions(alta, new FakeSpaces(), live);
             var asks = new FakeAsks();
+            var permissions = new FakePermissions();
             var access = await MobileAccess.LoadAsync(new MobileSettingsTests.MemoryState(), CancellationToken.None);
             await access.PairAsync(CancellationToken.None);
             var server = new MobileServer(new MobileServerOptions
             {
                 Port = port, Access = access, Hosts = () => ["desk.tail1234.ts.net:2584"], Files = files, Sessions = sessions,
                 // An answer the session takes long to take is said pending at once: no test waits the seconds of a phone.
-                Api = new MobileApi(alta, sessions), Asks = new MobileAsks(asks, sessions, TimeSpan.FromMilliseconds(50)), Live = live, Logger = XenoAtom.Logging.LogManager.GetLogger("mobile-tests"),
+                Api = new MobileApi(alta, sessions), Asks = new MobileAsks(asks, sessions, TimeSpan.FromMilliseconds(50)),
+                Permissions = new MobilePermissions(permissions, sessions, TimeSpan.FromMilliseconds(50)), Live = live, Logger = XenoAtom.Logging.LogManager.GetLogger("mobile-tests"),
             });
             await server.StartAsync(default);
             var client = new HttpClient(new HttpClientHandler { UseCookies = true }) { BaseAddress = new Uri($"http://127.0.0.1:{port}") };
-            return new Fixture(server, client, alta, port) { Asks = asks, Access = access };
+            return new Fixture(server, client, alta, port) { Asks = asks, Permissions = permissions, Access = access };
         }
 
         internal Task<HttpResponseMessage> PostAsync(string path, JsonObject body)
