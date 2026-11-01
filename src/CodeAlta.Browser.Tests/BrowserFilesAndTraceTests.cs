@@ -199,6 +199,7 @@ public sealed class BrowserFilesAndTraceTests
         Assert.AreEqual(800, summary.LargestContentfulPaintMs, "The last candidate is the largest paint.");
         Assert.AreEqual(0.05, summary.LayoutShift, 1e-9, "A shift after an input does not count.");
         Assert.AreEqual(900, summary.LoadMs);
+        Assert.AreEqual(910, summary.DurationMs, "from the first timed event to the end of the last one: the metadata events at 0 have no time");
         Assert.AreEqual(1, summary.LongTasks.Count, "Only the tasks of the main thread of the renderer.");
         Assert.AreEqual(120, summary.LongTasks[0].DurationMs);
         Assert.AreEqual(100, summary.MainThreadMs["scripting"], "A call inside a script is part of it, not counted twice.");

@@ -52,10 +52,12 @@ internal sealed class TraceSummary
         double? first = null, last = null, navigation = null;
         foreach (var item in events.EnumerateArray())
         {
-            if (Number(item, "ts") is { } ts)
+            // The metadata events (names of processes and threads) have no time: their 0 is not the start of the trace.
+            if (Text(item, "ph") != "M" && Number(item, "ts") is { } ts and > 0)
             {
+                var end = ts + (Number(item, "dur") ?? 0);
                 first = first is null ? ts : Math.Min(first.Value, ts);
-                last = last is null ? ts : Math.Max(last.Value, ts);
+                last = last is null ? end : Math.Max(last.Value, end);
             }
 
             var name = Text(item, "name");
