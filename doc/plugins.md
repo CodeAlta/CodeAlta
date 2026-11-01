@@ -310,6 +310,7 @@ be delayed by static references, native resources or untracked work: collectible
 | `search` | desktop project | desktop | The canvas and landing card of the search index |
 | `mobile` | `CodeAlta.Plugin.Mobile` | desktop, off by default | A local server published on the tailnet by Tailscale Serve that serves the sessions of its spaces to a phone, acting through `alta` (images by an id resolved from the records of their session, never a path from the phone), and answers their asks through `Services.Asks`. It keeps no usable secret on disk, only the SHA-256 of the pairing token and of each phone's key, so a program that reads its files cannot answer as the user |
 | `ui` | desktop project | desktop | On request, the tools that see and drive the window; not offered when the user reviews commands, since a session could then answer its own review |
+| `browser` | `CodeAlta.Plugin.Browser` | desktop, command line | On request, the tools of Chrome DevTools MCP over a real browser, with the same names as those of `ui`, so that a session has one set or the other; see [browser](browser.md) |
 
 "All three" is the desktop, the terminal and the command-line application (`Cli`): what these plugins give agents
 (tools, `alta` roots, prompt parts, hooks, provider types) needs no window. Their attribute and their definitions in the

@@ -39,6 +39,7 @@ A prompt, an MCP server or a skill is easier to inspect and review. Use a plugin
 | [Mobile](mobile.md) | In CodeAlta Desktop: your sessions on a phone, through Tailscale. Off until you turn it on. |
 | [Statistics](statistics.md) | A statistics card for each turn, `alta statistics`, and in CodeAlta Desktop the Statistics page. |
 | [UI tools](../ui-tools.md) | In CodeAlta Desktop: tools an agent uses to see and drive the window. |
+| [Browser](../browser.md) | In CodeAlta Desktop and `altacli`: tools an agent uses to drive Chrome, Edge, Firefox or Safari. |
 
 ## Manage plugins
 

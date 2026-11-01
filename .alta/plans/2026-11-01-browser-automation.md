@@ -169,7 +169,7 @@ chrome-devtools-mcp analyzes traces, heap snapshots and audits with the JavaScri
 | `src/CodeAlta` | The Settings > Extensions > Browser page, and the permission card of the new request |
 | `src/CodeAlta.Agent` | `AgentBrowserPermissionRequest` |
 
-The settings are the user's own, kept by the plugin in `~/.alta/plugin-data/browser/settings.json`, so a repository cannot change them. `browser` is `auto` or the id of a browser that `alta browser list` shows:
+The settings are the user's own, kept by the plugin in `~/.alta/plugin-data/builtin_browser/settings.json`, so a repository cannot change them. `browser` is `auto` or the id of a browser that `alta browser list` shows:
 
 ```json
 {
@@ -220,7 +220,7 @@ Chromium and the tools:
   - After each action, a wait: a navigation that starts within 100 ms, then a quiet DOM, for at most 3 s.
   - One task at a time per page, and the tools a dialog blocks stay blocked until it is answered.
   - Tests over a fake driver for each text, then against headless Chrome and Edge on pages the test serves.
-- [ ] 7. **The plugin.** `src/CodeAlta.Plugin.Browser` (`[Plugin("browser")]`, desktop and `altacli`):
+- [x] 7. **The plugin.** `src/CodeAlta.Plugin.Browser` (`[Plugin("browser")]`, desktop and `altacli`):
   - `alta browser list|activate|status|close|deactivate`. `list` gives each browser with its evidence, and the choice with its reason. `activate` says where its browser came from: `user`, `settings` or `auto`.
   - The tools come from `OnBeforeAgentRunAsync` and are registered in the running turn with `AgentRunTools.Set`. The desktop wires the session sets of this plugin and `DesktopUiPlugin`, so that activating one turns the other off.
   - The guidance line works like `DesktopUiPlugin.Guidance`, and tells the agent to pass `--browser` only when the user or the task names a browser. The session's files work like `DesktopUiFiles`.
@@ -238,12 +238,12 @@ Firefox:
 
 Profiles and consent:
 
-- [ ] 9. **Persistent profiles.** Stored under `<state root>/browser/profiles/<name>`, with one browser per profile and a window per session. **Open to sign in** in Settings opens the profile with no agent.
-- [ ] 10. **The user's browser.**
+- [x] 9. **Persistent profiles.** Stored under `<state root>/browser/profiles/<name>`, with one browser per profile and a window per session. **Open to sign in** in Settings opens the profile with no agent.
+- [x] 10. **The user's browser.**
   - Chrome and Edge 144+: read `DevToolsActivePort` in their user data folder, and keep one connection for as long as CodeAlta runs. The session's tabs open in a window of their own, and CodeAlta attaches to those only. When the switch is off, the tool's answer says how to turn it on (`chrome://inspect/#remote-debugging`, `edge://inspect/#remote-debugging`).
   - Firefox: find the profile in `profiles.ini`. When the profile is locked, ask the user to close Firefox, then start it on that profile with its remote port.
   - The user's browser is never closed, only detached from.
-- [ ] 11. **Consent.**
+- [x] 11. **Consent.**
   - `AgentBrowserPermissionRequest` in `CodeAlta.Agent` asks about a browser and profile, or a site. No permission mode answers it. It is refused where there is no user, and for a sandboxed session.
   - The window's permission card shows it: this session, always for this site, or deny.
   - Every document the session's tabs load is checked against the sites the user allowed: `Fetch.requestPaused` for documents in Chromium, `network.addIntercept` in Firefox.
@@ -251,7 +251,7 @@ Profiles and consent:
 
 Sandboxed sessions:
 
-- [ ] 12. **Sandboxed sessions get `isolated` only.**
+- [x] 12. **Sandboxed sessions get `isolated` only.**
   - The context gets a `SandboxNetworkProxy` of the sandbox profile: the `proxyServer` of `Target.createBrowserContext` in Chromium, the `proxy` of a BiDi user context in Firefox.
   - Files are limited to the sandbox's folders.
   - The tools are marked `SafeInSandbox`, and the before-run result sets `AdditionalToolsFollowSandbox`. `alta browser` goes into `AltaSandboxGate`.
@@ -259,7 +259,7 @@ Sandboxed sessions:
 
 Chromium extras:
 
-- [ ] 13. **Chromium-only tools.**
+- [x] 13. **Chromium-only tools.**
   - `emulate` gets CPU throttling and network presets.
   - `performance_start_trace` and `performance_stop_trace` write the trace file and the .NET summary (`TraceSummary`, tested on recorded traces).
   - `take_heapsnapshot` writes the file.
@@ -267,14 +267,14 @@ Chromium extras:
 
 Safari:
 
-- [ ] 14. **Safari's MCP server.** On macOS with Safari 27 or later:
+- [x] 14. **Safari's MCP server.** On macOS with Safari 27 or later:
   - A built-in MCP server `safari` (`/usr/bin/safaridriver --mcp`) among the MCP plugin's definitions, listed in Settings > MCP.
   - `alta browser activate --browser safari` activates it with `alta mcp activate safari`.
   - When Safari refuses, the session is told how to turn on **Allow remote automation and external agents**.
 
 Settings and documentation:
 
-- [ ] 15. **Settings > Extensions > Browser.** A `PluginCanvasPlacement.Settings` page, an app module like `mobile-settings`, with:
+- [x] 15. **Settings > Extensions > Browser.** A `PluginCanvasPlacement.Settings` page, an app module like `mobile-settings`, with:
   - the browsers found, with their evidence;
   - the browser: Automatic (with what it picks and why), one of the browsers found, or a program path with its engine;
   - the default profile and the headless setting;
@@ -283,7 +283,7 @@ Settings and documentation:
   - the `evaluate_script` switch.
 
   Frontend tests, and both themes and a narrow window checked in the developer instance.
-- [ ] 16. **Documentation.**
+- [x] 16. **Documentation.**
   - The user guide page `site/docs/browser.md`, listed in `menu.yml` and linked from `ui-tools.md` and the readme.
   - `doc/browser.md`: the drivers, how the browser is chosen, who owns the browsers, consent, the sandbox rules.
   - The lines for the browser in `doc/architecture.md`, `doc/plugins.md` and `doc/sandbox.md`.
@@ -291,10 +291,10 @@ Settings and documentation:
 ## How it is verified
 
 - [ ] `dotnet build -c <Configuration>`, `dotnet test -c <Configuration> --no-build`, `npm test` and `lunet build` pass. The browser tests ran against Chrome, Edge and Firefox on this computer, and are skipped where a browser is missing.
-- [ ] On this computer, `alta browser list` shows the installed browsers with their versions, last use and default status, and Automatic picks the browser the user uses. A session told "use Firefox" gets Firefox, and with Edge preferred in Settings, a session gets Edge.
-- [ ] In the developer instance, a session is asked to open the fixture page, sign in with `test@example.com` and give the title. It does so in Chrome, Edge and Firefox (`isolated`), with screenshots in the timeline, and leaves no profile folder behind.
-- [ ] Two sessions browse at the same time without seeing each other's tabs or cookies, and a child session does not see its parent's tabs.
-- [ ] A sandboxed session with `network = "off"` loads only its own `localhost` server. `file:///` of the user's home and `http://127.0.0.1:2583/mcp` are refused.
+- [x] On this computer, `alta browser list` shows the installed browsers with their versions, last use and default status, and Automatic picks the browser the user uses. A session told "use Firefox" gets Firefox, and with Edge preferred in Settings, a session gets Edge.
+- [x] In the developer instance, a session is asked to open the fixture page, sign in with `test@example.com` and give the title. It does so in Chrome, Edge and Firefox (`isolated`), with screenshots in the timeline, and leaves no profile folder behind.
+- [x] Two sessions browse at the same time without seeing each other's tabs or cookies, and a child session does not see its parent's tabs.
+- [x] A sandboxed session with `network = "off"` loads only its own `localhost` server. `file:///` of the user's home and `http://127.0.0.1:2583/mcp` are refused.
 - [ ] The user's browser with Chrome:
   - CodeAlta asks first, then Chrome asks once.
   - The agent's window opens, and `list_pages` lists only its tabs.
@@ -302,6 +302,9 @@ Settings and documentation:
   - **Stop** closes the agent's window and leaves the user's tabs alone.
 - [ ] A Chromium trace opens in the DevTools Performance panel, and its summary gives the page's LCP and long tasks.
 - [ ] On a Mac with Safari 27, `alta browser activate --browser safari` activates Safari's tools, and a session reads a page with them.
+
+> [!NOTE]
+> Verification notes (2026-11-01): the developer-instance run used https://example.com in Edge (chosen by Automatic) and Firefox (named), with a screenshot and no profile left behind; the fixture sign-in flow, two sessions apart and the sandbox rules run in `BrowserPluginTests` against headless Edge and Firefox. The user's own browser was checked up to the permission card in the developer instance: Chrome's remote-debugging dialog, a Chromium trace opened in DevTools and Safari 27 need a person and a Mac, and stay to check by hand.
 
 ## Decisions
 

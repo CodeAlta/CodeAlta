@@ -81,6 +81,7 @@ CodeAlta Desktop brings together:
 - **Command line**: run a prompt to its end with [`altacli`](https://codealta.github.io/docs/command-line/) from a script, a CI job or a benchmark, with exit codes and a JSON Lines trace in the ACP format, or serve CodeAlta to an editor as an ACP agent; its sessions show in the app as they run.
 - **Copilot compatibility**: reuse `.github` instructions, skills and agents unchanged.
 - **UI automation**: let agents see and drive CodeAlta through built-in tools or MCP.
+- **[Browser tools](https://codealta.github.io/docs/browser/)**: let agents drive Chrome, Edge, Firefox or Safari with the tools of Chrome DevTools MCP, without Node.js: in a private profile by default, in a profile where you signed in once, or in your own browser after you agree, site by site.
 - **Storage**: manage [local disk usage and cleanup](https://codealta.github.io/docs/workspace/settings/#storage).
 
 <p align="center">
