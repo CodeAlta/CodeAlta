@@ -22,5 +22,6 @@ doc:
   - {path: issues.md, title: "<i class='bi bi-record-circle' aria-hidden='true'></i> Issues and PRs"}
   - {path: copilot-layout.md, title: "<i class='bi bi-github' aria-hidden='true'></i> Copilot Layout"}
   - {path: ui-tools.md, title: "<i class='bi bi-cursor' aria-hidden='true'></i> UI Tools and MCP"}
+  - {path: browser.md, title: "<i class='bi bi-globe' aria-hidden='true'></i> Browser Tools"}
   - {path: plugins/readme.md, title: "<i class='bi bi-puzzle' aria-hidden='true'></i> Plugins", folder: true}
   - {path: troubleshooting.md, title: "<i class='bi bi-life-preserver' aria-hidden='true'></i> Troubleshooting"}

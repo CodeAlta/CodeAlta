@@ -1,6 +1,7 @@
 using CodeAlta.Agent;
 using CodeAlta.Orchestration.Runtime.Plugins;
 using CodeAlta.Plugin.Acp;
+using CodeAlta.Plugin.Browser;
 using CodeAlta.Plugin.CodexCli;
 using CodeAlta.Plugin.Git;
 using CodeAlta.Plugin.Mcp;
@@ -90,18 +91,35 @@ internal static class DesktopPlugins
     /// <exception cref="ArgumentNullException"><paramref name="ui"/> or <paramref name="sessions"/> is null.</exception>
     /// <param name="archives">The dedicated archive of the owning StateRoot, borrowed by the same Statistics plugin.</param>
     /// <param name="search">Where the Search plugin forwards the events of the sessions; without it the window has no Search plugin.</param>
+    /// <param name="browser">What the browser plugin is given; without it the window has no browser plugin.</param>
     internal static IReadOnlyList<BuiltInPluginDefinition> ForWindow(Ui.IDesktopUi ui, Ui.DesktopUiSessions sessions, bool reviewsCommands,
-        ISessionJournalCatalog? journals = null, CodeAlta.Catalog.StatisticsArchiveStore? archives = null, Search.DesktopSearchRelay? search = null)
+        ISessionJournalCatalog? journals = null, CodeAlta.Catalog.StatisticsArchiveStore? archives = null, Search.DesktopSearchRelay? search = null,
+        BrowserPluginHost? browser = null)
     {
         ArgumentNullException.ThrowIfNull(ui);
         ArgumentNullException.ThrowIfNull(sessions);
         var builtIns = journals is null ? BuiltIns : [.. BuiltIns.Select(definition => definition.Id == "statistics" ? StatisticsDefinition(journals, archives) : definition)];
+        if (browser is not null) builtIns = [.. builtIns, BrowserDefinition(browser, PluginFrontends.Desktop)];
         // The landing page is the window's: the terminal application has no such plugin.
         builtIns = [.. builtIns, DesktopLandingPlugin.Definition()];
         // The mobile view is the window's too: a phone connects to the desktop application.
         builtIns = [.. builtIns, MobileDefinition];
         if (search is not null) builtIns = [.. builtIns, Search.DesktopSearchPlugin.Definition(search)];
         return reviewsCommands ? builtIns : [.. builtIns, Ui.DesktopUiPlugin.Definition(ui, sessions)];
+    }
+
+    /// <summary>The plugin that gives a session the tools of Chrome DevTools MCP over a web browser of this computer.</summary>
+    /// <param name="host">What the application gives the plugin.</param>
+    /// <param name="frontends">The applications it runs in.</param>
+    /// <exception cref="ArgumentNullException"><paramref name="host"/> is null.</exception>
+    internal static BuiltInPluginDefinition BrowserDefinition(BrowserPluginHost host, PluginFrontends frontends)
+    {
+        ArgumentNullException.ThrowIfNull(host);
+        return new()
+        {
+            Id = BrowserPlugin.Id, DisplayName = "Browser", Description = BrowserPlugin.Description,
+            PluginType = typeof(BrowserPlugin), Factory = () => new BrowserPlugin(host), Frontends = frontends,
+        };
     }
 
     /// <summary>

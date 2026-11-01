@@ -104,6 +104,26 @@ public sealed class McpConfigTests
     }
 
     [TestMethod]
+    public void Discovery_KnowsSafarisOwnServerBelowEveryFile()
+    {
+        using var home = TempDirectory.Create();
+        var safari = McpBuiltInServers.SafariServer("/usr/bin/safaridriver");
+        var snapshot = new McpConfigDiscovery().Discover(new McpConfigPathOptions { UserHomeDirectory = home.Path, BuiltInServers = [safari] });
+        var effective = snapshot.EffectiveServers.Single(server => server.Definition.Key == "safari").Definition;
+        Assert.AreEqual("/usr/bin/safaridriver", effective.Command);
+        CollectionAssert.AreEqual(new[] { "--mcp" }, effective.Args.ToArray());
+        WriteFile(Path.Combine(home.Path, ".alta", "mcp.json"), """{ "mcpServers": { "safari": { "command": "my-safari" } } }""");
+        snapshot = new McpConfigDiscovery().Discover(new McpConfigPathOptions { UserHomeDirectory = home.Path, BuiltInServers = [safari] });
+        Assert.AreEqual("my-safari", snapshot.EffectiveServers.Single(server => server.Definition.Key == "safari").Definition.Command, "a file of the user wins");
+
+        var plist = Path.Combine(home.Path, "Info.plist");
+        File.WriteAllText(plist, "<dict>\n  <key>CFBundleShortVersionString</key>\n  <string>27.1</string>\n</dict>");
+        Assert.AreEqual(27, McpBuiltInServers.SafariMajorVersion(plist));
+        Assert.AreEqual(0, McpBuiltInServers.SafariMajorVersion(Path.Combine(home.Path, "missing.plist")));
+        if (!OperatingSystem.IsMacOS()) Assert.AreEqual(0, McpBuiltInServers.ForThisComputer().Count, "Safari's server is a Mac's only");
+    }
+
+    [TestMethod]
     public void Discovery_ReportsInvalidMixedTransportWithoutThrowing()
     {
         using var home = TempDirectory.Create();

@@ -28,7 +28,7 @@ const list: List = async request => ({ status: "ok", hostEpoch: epoch, sessionId
   handle: { operationId: epoch, runtimeInstanceId: epoch, attachmentGeneration: "1", sessionId: request.sessionId, runId: null, interactionId: "request",
     attemptId: "22222222-2222-4222-8222-222222222222" },
   providerId: "codex", kind: "commandExecution", command: "dotnet nuget push bin/Lib.1.2.0.nupkg --source nuget.org", workingDirectory: "C:\\code\\Lib", grantRoot: null,
-  reason: "Publishing needs the API key in your NuGet.Config, which the sandbox cannot read.", shortened: false, outsideSandbox: true, skill: null }] });
+  reason: "Publishing needs the API key in your NuGet.Config, which the sandbox cannot read.", shortened: false, outsideSandbox: true, skill: null, browser: null }] });
 const resolve: Resolve = async request => { decisions.push(request); answered = true; return { status: "resolved", hostEpoch: epoch, handle: request.handle }; };
 const reviewer = createPermissionReviewer(list, resolve);
 // The sandbox of a project, chosen beside its row: the host has `strict` for it until the popover changes it.

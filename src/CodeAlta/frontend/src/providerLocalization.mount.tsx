@@ -35,10 +35,10 @@ const inputPage = { status: "ok", hostEpoch: epoch, sessionId: "Settings", hasMo
 ] }] };
 const permissionPage = { status: "ok", hostEpoch: epoch, sessionId: "Settings", hasMore: false, entries: [{ handle, providerId: "Settings",
   kind: "commandExecution", grantRoot: null,
-  command: "  echo 'Allow once'\n# 日本語 <script>literal</script>  " + "x".repeat(3000), workingDirectory: "Q:\\fixture\\Settings", reason: "Deny", shortened: false, outsideSandbox: false, skill: null }] };
+  command: "  echo 'Allow once'\n# 日本語 <script>literal</script>  " + "x".repeat(3000), workingDirectory: "Q:\\fixture\\Settings", reason: "Deny", shortened: false, outsideSandbox: false, skill: null, browser: null }] };
 // A request to load a skill of an MCP server whose files can be checked: it can be allowed from now on.
 const skillPage = { ...permissionPage, entries: [{ handle, providerId: "Settings", kind: "skill", command: null, workingDirectory: null, grantRoot: null, reason: null, shortened: false, outsideSandbox: false,
-  skill: { server: "billing", name: "refunds", uri: "skill://acme/billing/refunds/SKILL.md", fileCount: 2, totalBytes: 2048, dynamic: false } }] };
+  skill: { server: "billing", name: "refunds", uri: "skill://acme/billing/refunds/SKILL.md", fileCount: 2, totalBytes: 2048, dynamic: false }, browser: null }] };
 function Fixture() {
   const [locale, language] = useState<Locale>("en");
   const [sessionId, select] = useState("Settings");

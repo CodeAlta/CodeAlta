@@ -18,5 +18,9 @@ jobs:
       contents: write
     runs-on: 'ubuntu-latest'
     steps:
+      # Ubuntu 24.04 denies unprivileged user namespaces, which the sandbox of Chromium browsers needs: Edge then falls
+      # back to a setuid helper the image leaves unconfigured, and aborts. The tests of the browser tools keep the sandbox.
+      - name: "Allow the sandbox of Chromium browsers"
+        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
       - name: "Build, Test, Pack and Publish"
         uses: xoofx/.github/.github/actions/dotnet-releaser-action@main
