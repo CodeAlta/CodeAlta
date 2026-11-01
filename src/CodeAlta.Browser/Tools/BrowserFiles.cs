@@ -1,3 +1,5 @@
+using System.Collections.Immutable;
+
 namespace CodeAlta.Browser.Tools;
 
 /// <summary>
@@ -11,9 +13,9 @@ namespace CodeAlta.Browser.Tools;
 internal sealed record BrowserFiles(string BaseDirectory, IReadOnlyList<string> ReadRoots, IReadOnlyList<string> WriteRoots, string TemporaryDirectory)
 {
     // Names of files that hold secrets: a page never gets them, whatever folder they are in.
-    private static readonly string[] SecretNames = [".env", ".npmrc", ".pypirc", ".netrc", ".git-credentials", "id_rsa", "id_dsa", "id_ecdsa", "id_ed25519", "credentials", "known_hosts"];
-    private static readonly string[] SecretExtensions = [".pem", ".key", ".pfx", ".p12", ".kdbx", ".keystore", ".jks"];
-    private static readonly string[] SecretFolders = [".ssh", ".gnupg", ".aws", ".azure", ".kube", ".docker", ".alta"];
+    private static readonly ImmutableArray<string> SecretNames = [".env", ".npmrc", ".pypirc", ".netrc", ".git-credentials", "id_rsa", "id_dsa", "id_ecdsa", "id_ed25519", "credentials", "known_hosts"];
+    private static readonly ImmutableArray<string> SecretExtensions = [".pem", ".key", ".pfx", ".p12", ".kdbx", ".keystore", ".jks"];
+    private static readonly ImmutableArray<string> SecretFolders = [".ssh", ".gnupg", ".aws", ".azure", ".kube", ".docker", ".alta"];
 
     /// <summary>Resolves a path a tool reads.</summary>
     /// <exception cref="BrowserToolException">The path is outside the folders, or names a file of secrets.</exception>

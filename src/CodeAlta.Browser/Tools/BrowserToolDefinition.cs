@@ -154,7 +154,7 @@ internal sealed class BrowserToolSchema
         writer.WriteString("description", description);
     });
 
-    public BrowserToolSchema Enum(string name, string description, string[] values, bool required = false) => Add(name, required, writer =>
+    public BrowserToolSchema Enum(string name, string description, IReadOnlyList<string> values, bool required = false) => Add(name, required, writer =>
     {
         WriteEnum(writer, values);
         writer.WriteString("description", description);
@@ -170,7 +170,7 @@ internal sealed class BrowserToolSchema
         writer.WriteString("description", description);
     });
 
-    public static void WriteEnum(Utf8JsonWriter writer, string[] values)
+    public static void WriteEnum(Utf8JsonWriter writer, IReadOnlyList<string> values)
     {
         writer.WriteString("type", "string");
         writer.WriteStartArray("enum");

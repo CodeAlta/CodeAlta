@@ -1,3 +1,4 @@
+using System.Collections.Immutable;
 using System.Globalization;
 using System.IO.Compression;
 using System.Text;
@@ -19,19 +20,19 @@ internal static class BrowserTools
     private const int BodyLimit = 10_000;
     private const string LastPageMessage = "The last open page cannot be closed. It is fine to keep it open.";
 
-    private static readonly string[] ConsoleTypes =
+    private static readonly ImmutableArray<string> ConsoleTypes =
     [
         "log", "debug", "info", "error", "warn", "dir", "dirxml", "table", "trace", "clear", "startGroup", "startGroupCollapsed",
         "endGroup", "assert", "profile", "profileEnd", "count", "timeEnd", "verbose", "issue",
     ];
 
-    private static readonly string[] ResourceTypes =
+    private static readonly ImmutableArray<string> ResourceTypes =
     [
         "document", "stylesheet", "image", "media", "font", "script", "texttrack", "xhr", "fetch", "prefetch", "eventsource",
         "websocket", "manifest", "signedexchange", "ping", "cspviolationreport", "preflight", "fedcm", "other",
     ];
 
-    private static readonly string[] NetworkPresets = ["Offline", "Slow 3G", "Fast 3G", "Slow 4G", "Fast 4G"];
+    private static readonly ImmutableArray<string> NetworkPresets = ["Offline", "Slow 3G", "Fast 3G", "Slow 4G", "Fast 4G"];
 
     /// <summary>Describes the tools, sorted by name.</summary>
     public static IReadOnlyList<BrowserToolDefinition> Create(bool allowScriptEvaluation)

@@ -1,3 +1,5 @@
+using System.Collections.Frozen;
+using System.Collections.Immutable;
 using System.Diagnostics;
 using System.Text.Json;
 using System.Text.RegularExpressions;
@@ -12,9 +14,9 @@ internal static partial class BrowserCatalog
 {
     // Where each browser is installed and keeps its data, per system. Paths start with a variable ("%LOCALAPPDATA%"),
     // "~" for the home folder, or "/".
-    private sealed record Known(string Id, string Name, BrowserEngine Engine, string[] Programs, string? Data, string[]? AppPaths = null, string[]? Commands = null);
+    private sealed record Known(string Id, string Name, BrowserEngine Engine, ImmutableArray<string> Programs, string? Data, ImmutableArray<string>? AppPaths = null, ImmutableArray<string>? Commands = null);
 
-    private static readonly Known[] Windows =
+    private static readonly ImmutableArray<Known> Windows =
     [
         new("chrome", "Google Chrome", BrowserEngine.Chromium, Programs(@"Google\Chrome\Application\chrome.exe"), @"%LOCALAPPDATA%\Google\Chrome\User Data", ["chrome.exe"]),
         new("chrome-beta", "Google Chrome Beta", BrowserEngine.Chromium, Programs(@"Google\Chrome Beta\Application\chrome.exe"), @"%LOCALAPPDATA%\Google\Chrome Beta\User Data"),
@@ -32,7 +34,7 @@ internal static partial class BrowserCatalog
         new("firefox-nightly", "Firefox Nightly", BrowserEngine.Firefox, Programs(@"Firefox Nightly\firefox.exe"), @"%APPDATA%\Mozilla\Firefox"),
     ];
 
-    private static readonly Known[] Mac =
+    private static readonly ImmutableArray<Known> Mac =
     [
         new("chrome", "Google Chrome", BrowserEngine.Chromium, App("Google Chrome"), "~/Library/Application Support/Google/Chrome"),
         new("chrome-beta", "Google Chrome Beta", BrowserEngine.Chromium, App("Google Chrome Beta"), "~/Library/Application Support/Google/Chrome Beta"),
@@ -50,7 +52,7 @@ internal static partial class BrowserCatalog
         new("firefox-nightly", "Firefox Nightly", BrowserEngine.Firefox, App("Firefox Nightly", "firefox"), "~/Library/Application Support/Firefox"),
     ];
 
-    private static readonly Known[] Linux =
+    private static readonly ImmutableArray<Known> Linux =
     [
         new("chrome", "Google Chrome", BrowserEngine.Chromium, ["/opt/google/chrome/chrome", "/var/lib/flatpak/exports/bin/com.google.Chrome", "~/.local/share/flatpak/exports/bin/com.google.Chrome"], "~/.config/google-chrome", Commands: ["google-chrome-stable", "google-chrome"]),
         new("chrome-beta", "Google Chrome Beta", BrowserEngine.Chromium, ["/opt/google/chrome-beta/chrome"], "~/.config/google-chrome-beta", Commands: ["google-chrome-beta"]),
@@ -68,20 +70,20 @@ internal static partial class BrowserCatalog
     ];
 
     // Other places Linux packages keep the profiles of a browser: Snap and Flatpak, and the XDG folder of newer Firefox.
-    private static readonly Dictionary<string, string[]> LinuxDataAlternatives = new(StringComparer.Ordinal)
+    private static readonly FrozenDictionary<string, ImmutableArray<string>> LinuxDataAlternatives = new Dictionary<string, ImmutableArray<string>>(StringComparer.Ordinal)
     {
         ["chrome"] = ["~/.var/app/com.google.Chrome/config/google-chrome"],
         ["chromium"] = ["~/snap/chromium/common/chromium", "~/.var/app/org.chromium.Chromium/config/chromium"],
         ["firefox"] = ["~/.config/mozilla/firefox", "~/snap/firefox/common/.mozilla/firefox", "~/.var/app/org.mozilla.firefox/.mozilla/firefox"],
-    };
+    }.ToFrozenDictionary(StringComparer.Ordinal);
 
     /// <summary>The order in which the first browser found is taken when nothing else decides.</summary>
-    public static readonly string[] FallbackOrder = ["chrome", "edge", "firefox", "safari"];
+    public static readonly ImmutableArray<string> FallbackOrder = ["chrome", "edge", "firefox", "safari"];
 
-    private static string[] Programs(string relative)
+    private static ImmutableArray<string> Programs(string relative)
         => [$@"%ProgramFiles%\{relative}", $@"%ProgramFiles(x86)%\{relative}", $@"%LOCALAPPDATA%\{relative}"];
 
-    private static string[] App(string bundle, string? program = null)
+    private static ImmutableArray<string> App(string bundle, string? program = null)
         => [$"/Applications/{bundle}.app/Contents/MacOS/{program ?? bundle}", $"~/Applications/{bundle}.app/Contents/MacOS/{program ?? bundle}"];
 
     /// <summary>Finds the browsers of this computer.</summary>

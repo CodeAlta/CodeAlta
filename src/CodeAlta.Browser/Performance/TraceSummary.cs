@@ -1,3 +1,4 @@
+using System.Collections.Frozen;
 using System.Globalization;
 using System.Text;
 using System.Text.Json;
@@ -15,7 +16,7 @@ internal sealed class TraceSummary
 
     // The events of the main thread by kind of work, as the summary of the Performance panel groups them. Only the
     // outermost event of a kind is counted, so that nested events are not counted twice.
-    private static readonly Dictionary<string, string> Categories = new(StringComparer.Ordinal)
+    private static readonly FrozenDictionary<string, string> Categories = new Dictionary<string, string>(StringComparer.Ordinal)
     {
         ["EvaluateScript"] = "scripting", ["v8.compile"] = "scripting", ["v8.compileModule"] = "scripting", ["v8.evaluateModule"] = "scripting",
         ["FunctionCall"] = "scripting", ["TimerFire"] = "scripting", ["EventDispatch"] = "scripting", ["FireAnimationFrame"] = "scripting",
@@ -24,7 +25,7 @@ internal sealed class TraceSummary
         ["PrePaint"] = "rendering", ["UpdateLayer"] = "rendering", ["IntersectionObserverController::computeIntersections"] = "rendering",
         ["Paint"] = "painting", ["PaintImage"] = "painting", ["CompositeLayers"] = "painting", ["Commit"] = "painting", ["Layerize"] = "painting",
         ["Decode Image"] = "painting", ["ParseHTML"] = "loading", ["ParseAuthorStyleSheet"] = "loading",
-    };
+    }.ToFrozenDictionary(StringComparer.Ordinal);
 
     public string Url { get; private set; } = string.Empty;
     public double DurationMs { get; private set; }

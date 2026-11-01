@@ -1,3 +1,4 @@
+using System.Collections.Immutable;
 using System.Text;
 using System.Text.RegularExpressions;
 
@@ -17,7 +18,7 @@ internal static partial class FirefoxLauncher
 {
     // The preferences Puppeteer gives a profile for automation: no update, no first-run pages, no telemetry, no
     // calls of its own to Mozilla's services.
-    private static readonly (string Name, string Value)[] Preferences =
+    private static readonly ImmutableArray<(string Name, string Value)> Preferences =
     [
         ("app.update.disabledForTesting", "true"),
         ("browser.shell.checkDefaultBrowser", "false"),
