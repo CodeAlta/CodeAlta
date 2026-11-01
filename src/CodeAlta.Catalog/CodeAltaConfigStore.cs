@@ -1850,7 +1850,7 @@ public sealed partial class CodeAltaConfigStore
         var options = TomlSerializerOptions.Default with
         {
             SourceName = path,
-            // Carries the end-of-line comments of the settings that stay in place; full-line comments are not kept.
+            // Carries the end-of-line comments of the settings that stay in place; ConfigComments puts back the others.
             MetadataStore = new TomlMetadataStore(),
             NewLine = existing.Contains("\r\n", StringComparison.Ordinal) ? TomlNewLineKind.CrLf : TomlNewLineKind.Lf,
         };
@@ -1877,7 +1877,7 @@ public sealed partial class CodeAltaConfigStore
         ForgetProviders(modeled, unsupported);
         ApplyModeledSettings(root, modeled, updated);
         RemoveDroppedProviders(root, updated, unsupported);
-        return TomlSerializer.Serialize(root, options);
+        return ConfigComments.Restore(existing, TomlSerializer.Serialize(root, options));
     }
 
     private static TomlTable ToTable(CodeAltaConfigDocument document)

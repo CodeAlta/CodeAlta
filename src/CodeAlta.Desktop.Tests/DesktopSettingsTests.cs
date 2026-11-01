@@ -80,6 +80,44 @@ public sealed class DesktopSettingsTests
     }
 
     [TestMethod]
+    public async Task Set_KeepsTheCommentsOfTheUser_OnLinesOfTheirOwn()
+    {
+        using var fixture = Fixture.Create("""
+            # My CodeAlta configuration
+            # kept by hand
+
+            # How sessions behave
+            [sessions]
+            # The title of a new session
+            title = "model"
+            prompt_suggestions = true # suggest
+
+            # Fallback when a provider is out of quota
+            [models.fallback]
+            # resume once the quota resets
+            resume = true
+
+            # Things I keep
+            [custom]
+            keep = 1
+            # the end
+            """);
+        foreach (var (id, value) in new[] { ("sessions.prompt_suggestions", "false"), ("models.fallback.resume", "false"), ("sessions.title", "\"first_prompt\"") })
+        {
+            var write = await fixture.Settings.SetAsync(id, Value(value), null, AltaSettingOrigin.Window, CancellationToken.None);
+            Assert.AreEqual(AltaSettingStatus.Ok, write.Status, $"{id}: {write.Message}");
+        }
+
+        var text = File.ReadAllText(fixture.ConfigPath);
+        foreach (var comment in new[] { "# My CodeAlta configuration", "# kept by hand", "# How sessions behave", "# The title of a new session", "# suggest",
+            "# Fallback when a provider is out of quota", "# resume once the quota resets", "# Things I keep", "# the end" })
+            StringAssert.Contains(text, comment, $"the comment is kept:\n{text}");
+        StringAssert.Contains(text, "keep = 1");
+        // The values are the ones set; a value back to its default (resume is off by default) leaves the file, not its comment.
+        foreach (var (id, value) in new[] { ("sessions.prompt_suggestions", "false"), ("models.fallback.resume", "false"), ("sessions.title", "\"first_prompt\"") })
+            Assert.AreEqual(value, (await fixture.Settings.GetAsync(id, null, CancellationToken.None)).Value!.Value.GetRawText(), id);
+    }
+    [TestMethod]
     public async Task Values_AreCheckedAgainstTheirSetting()
     {
         using var fixture = Fixture.Create();

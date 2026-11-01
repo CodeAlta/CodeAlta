@@ -100,8 +100,11 @@ Several stores, both instances and the user's editor write the same files. The r
   from the path, shared across processes. Writers outside the store take the same lock
   (`CodeAltaConfigStore.EditConfigFile`, `LockConfigFile`).
 - **Saves keep what they do not model.** Typed saves edit the table model of the existing file, so unknown keys,
-  plugin policy, key order, line endings and end-of-line comments stay. `ConfigTableSyntax` edits one value in the text
-  when comments and blank lines must stay too (space assignments, MCP policy, issue views).
+  plugin policy, key order, line endings and end-of-line comments stay. The table model drops the comments on lines of
+  their own: `ConfigComments` puts them back, with their blank lines, above the same table or setting, or above the next
+  one when the save removed theirs (a value back to its default); a comment of the user is moved, never lost.
+  `ConfigTableSyntax` edits one value in the text when the layout must stay exactly as it is (space assignments, MCP
+  policy, issue views).
 - **Readers take no lock**, so a write publishes with `StagedFileReplacement` (a rename with POSIX semantics):
   a reader finds the old file or the new one, never none, which it would read as an empty configuration. `File.Replace`
   is not used for these files because it moves the target away first.
