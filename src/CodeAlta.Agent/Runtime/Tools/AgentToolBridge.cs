@@ -81,6 +81,152 @@ public static class AgentToolBridge
     }
 
     /// <summary>
+    /// Rewrites each value of a tool schema that has several types in one <c>type</c> array, such as
+    /// <c>["string", "array", "null"]</c>, as an <c>anyOf</c> of one schema per type, for an endpoint whose schemas have
+    /// a single type. The keywords of one type (<c>items</c> of an array, <c>properties</c> of an object) go to its
+    /// schema; the others (<c>description</c>, <c>enum</c>) stay beside the <c>anyOf</c>. A single type that may be null
+    /// stays as it is.
+    /// </summary>
+    /// <param name="schema">The tool input schema.</param>
+    /// <returns>The same schema, without type arrays of several types.</returns>
+    internal static JsonElement CreateInputSchemaWithoutTypeUnions(JsonElement schema)
+    {
+        using var stream = new MemoryStream();
+        using (var writer = new Utf8JsonWriter(stream))
+        {
+            WriteSchemaWithoutTypeUnions(writer, schema);
+        }
+
+        using var document = JsonDocument.Parse(stream.ToArray());
+        return document.RootElement.Clone();
+    }
+
+    private static void WriteSchemaWithoutTypeUnions(Utf8JsonWriter writer, JsonElement schema)
+    {
+        if (schema.ValueKind != JsonValueKind.Object)
+        {
+            schema.WriteTo(writer);
+            return;
+        }
+
+        if (!TryGetTypeUnion(schema, out var types))
+        {
+            writer.WriteStartObject();
+            foreach (var property in schema.EnumerateObject())
+            {
+                WriteSchemaKeywordWithoutTypeUnions(writer, property);
+            }
+
+            writer.WriteEndObject();
+            return;
+        }
+
+        writer.WriteStartObject();
+        foreach (var property in schema.EnumerateObject())
+        {
+            if (!property.NameEquals("type") && TypeOfKeyword(property.Name) is null)
+            {
+                WriteSchemaKeywordWithoutTypeUnions(writer, property);
+            }
+        }
+
+        writer.WritePropertyName("anyOf");
+        writer.WriteStartArray();
+        foreach (var type in types)
+        {
+            writer.WriteStartObject();
+            writer.WriteString("type", type);
+            foreach (var property in schema.EnumerateObject())
+            {
+                if (TypeOfKeyword(property.Name) is { } keywordType &&
+                    (string.Equals(keywordType, type, StringComparison.Ordinal) ||
+                     keywordType == "number" && type == "integer"))
+                {
+                    WriteSchemaKeywordWithoutTypeUnions(writer, property);
+                }
+            }
+
+            writer.WriteEndObject();
+        }
+
+        writer.WriteEndArray();
+        writer.WriteEndObject();
+    }
+
+    // A type array of more than one type besides null, in a schema that has no anyOf or oneOf to merge it with.
+    private static bool TryGetTypeUnion(JsonElement schema, out List<string> types)
+    {
+        types = [];
+        if (!schema.TryGetProperty("type", out var type) ||
+            type.ValueKind != JsonValueKind.Array ||
+            schema.TryGetProperty("anyOf", out _) ||
+            schema.TryGetProperty("oneOf", out _))
+        {
+            return false;
+        }
+
+        foreach (var item in type.EnumerateArray())
+        {
+            if (item.ValueKind == JsonValueKind.String && item.GetString() is { Length: > 0 } name && !types.Contains(name))
+            {
+                types.Add(name);
+            }
+        }
+
+        return types.Count(static name => name != "null") > 1;
+    }
+
+    private static void WriteSchemaKeywordWithoutTypeUnions(Utf8JsonWriter writer, JsonProperty property)
+    {
+        writer.WritePropertyName(property.Name);
+        switch (property.Name)
+        {
+            case "properties" or "patternProperties" or "$defs" or "definitions" or "dependentSchemas"
+                when property.Value.ValueKind == JsonValueKind.Object:
+                writer.WriteStartObject();
+                foreach (var child in property.Value.EnumerateObject())
+                {
+                    writer.WritePropertyName(child.Name);
+                    WriteSchemaWithoutTypeUnions(writer, child.Value);
+                }
+
+                writer.WriteEndObject();
+                break;
+            case "anyOf" or "oneOf" or "allOf" or "prefixItems" or "items"
+                when property.Value.ValueKind == JsonValueKind.Array:
+                writer.WriteStartArray();
+                foreach (var item in property.Value.EnumerateArray())
+                {
+                    WriteSchemaWithoutTypeUnions(writer, item);
+                }
+
+                writer.WriteEndArray();
+                break;
+            case "items" or "additionalProperties" or "additionalItems" or "unevaluatedItems" or "unevaluatedProperties" or
+                "contains" or "propertyNames" or "not" or "if" or "then" or "else":
+                WriteSchemaWithoutTypeUnions(writer, property.Value);
+                break;
+            default:
+                property.Value.WriteTo(writer);
+                break;
+        }
+    }
+
+    // The type a keyword applies to; null for a keyword of any type, such as description or enum.
+    private static string? TypeOfKeyword(string keyword)
+        => keyword switch
+        {
+            "items" or "prefixItems" or "additionalItems" or "unevaluatedItems" or "contains" or "minContains" or
+                "maxContains" or "minItems" or "maxItems" or "uniqueItems" => "array",
+            "properties" or "required" or "additionalProperties" or "patternProperties" or "propertyNames" or
+                "unevaluatedProperties" or "minProperties" or "maxProperties" or "dependentRequired" or
+                "dependentSchemas" => "object",
+            "minLength" or "maxLength" or "pattern" or "format" or "contentEncoding" or "contentMediaType" => "string",
+            "minimum" or "maximum" or "exclusiveMinimum" or "exclusiveMaximum" or "multipleOf" => "number",
+            _ => null,
+        };
+
+    /// <summary>
     /// Creates a lookup map from registered tool name to the underlying definition.
     /// </summary>
     /// <param name="tools">Tool definitions.</param>

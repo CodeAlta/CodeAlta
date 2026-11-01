@@ -194,6 +194,14 @@ public sealed record AgentProviderProfile
     public bool SupportsStrictTools { get; init; }
 
     /// <summary>
+    /// Gets or initializes whether a Chat Completions tool schema can give a value several types in one <c>type</c> array,
+    /// such as <c>["string", "array"]</c>. When false, such a value is sent as an <c>anyOf</c> of one schema per type,
+    /// for an endpoint whose schemas have a single type (Gemini behind GitHub Copilot); a single type that may be null
+    /// stays as it is.
+    /// </summary>
+    public bool SupportsToolSchemaTypeUnions { get; init; } = true;
+
+    /// <summary>
     /// Gets or initializes the provider-specific thinking/reasoning format name, when applicable.
     /// </summary>
     public string? ThinkingFormat { get; init; }

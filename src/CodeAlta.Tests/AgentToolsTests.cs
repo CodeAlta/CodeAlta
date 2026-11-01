@@ -1554,6 +1554,53 @@ public sealed class AgentToolsTests
     }
 
     [TestMethod]
+    public void AgentToolBridge_CreateInputSchemaWithoutTypeUnions_GivesEachTypeItsOwnSchema()
+    {
+        using var schema = JsonDocument.Parse(
+            """
+            {
+              "type": "object",
+              "properties": {
+                "value": {
+                  "type": ["integer", "object", "null"],
+                  "description": "A count or a record.",
+                  "minimum": 1,
+                  "properties": { "name": { "type": "string" } },
+                  "required": ["name"]
+                },
+                "list": { "type": "array", "items": { "type": ["string", "boolean"], "maxLength": 4 } },
+                "optional": { "type": ["string", "null"] },
+                "merged": { "type": ["string", "number"], "anyOf": [{ "type": "string" }, { "type": "number" }] }
+              },
+              "required": ["value"]
+            }
+            """);
+
+        var result = AgentToolBridge.CreateInputSchemaWithoutTypeUnions(schema.RootElement);
+
+        var properties = result.GetProperty("properties");
+        var value = properties.GetProperty("value");
+        Assert.AreEqual("A count or a record.", value.GetProperty("description").GetString());
+        Assert.IsFalse(value.TryGetProperty("type", out _));
+        Assert.IsFalse(value.TryGetProperty("minimum", out _));
+        var branches = value.GetProperty("anyOf").EnumerateArray().ToArray();
+        Assert.AreEqual(3, branches.Length);
+        Assert.AreEqual("{\"type\":\"integer\",\"minimum\":1}", branches[0].GetRawText());
+        Assert.AreEqual("object", branches[1].GetProperty("type").GetString());
+        Assert.AreEqual("string", branches[1].GetProperty("properties").GetProperty("name").GetProperty("type").GetString());
+        Assert.AreEqual("name", branches[1].GetProperty("required")[0].GetString());
+        Assert.AreEqual("{\"type\":\"null\"}", branches[2].GetRawText());
+        // A union in the schema of the items of an array is split too.
+        Assert.AreEqual(
+            "{\"anyOf\":[{\"type\":\"string\",\"maxLength\":4},{\"type\":\"boolean\"}]}",
+            properties.GetProperty("list").GetProperty("items").GetRawText());
+        // A single type that may be null, and a union beside an anyOf, stay as they are.
+        Assert.AreEqual(2, properties.GetProperty("optional").GetProperty("type").GetArrayLength());
+        Assert.AreEqual(2, properties.GetProperty("merged").GetProperty("type").GetArrayLength());
+        Assert.AreEqual("value", result.GetProperty("required")[0].GetString());
+    }
+
+    [TestMethod]
     public void CreateDefaultTools_ExposesApplyPatchOnlyForOfficialOpenAIAndCodexSubscriptionProviders()
     {
         using var temp = TestTempDirectory.Create();

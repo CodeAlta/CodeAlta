@@ -1165,6 +1165,190 @@ public sealed class CopilotDirectProviderTests
         }
     }
 
+    // Copilot refuses a Gemini request whose tool schema gives a property several types ("type": ["string", "array"],
+    // as the path of grep) with "HTTP 400 invalid_request_body": the schema of Gemini has a single type. The same union
+    // as an anyOf is taken (#288).
+    [TestMethod]
+    [DataRow(true, DisplayName = "The profile the application configures")]
+    [DataRow(false, DisplayName = "No profile")]
+    public async Task CopilotDirect_ChatCompletions_SendsTypeUnionsOfToolSchemasAsAnyOfForGemini(bool configuredProfile)
+    {
+        var bodies = new Dictionary<string, JsonElement>(StringComparer.Ordinal);
+        var handler = new StubHandler(request =>
+        {
+            if (request.Method == HttpMethod.Get)
+            {
+                return new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent(
+                        """
+                        {
+                          "data": [
+                            {
+                              "model_picker_enabled": true,
+                              "id": "gemini-3.8-flash",
+                              "name": "Gemini 3.8 Flash",
+                              "version": "gemini-3.8-flash",
+                              "supported_endpoints": ["/chat/completions"],
+                              "policy": { "state": "enabled" },
+                              "capabilities": {
+                                "family": "gemini-3.8-flash",
+                                "supports": { "parallel_tool_calls": true, "reasoning_effort": ["low", "medium", "high"], "streaming": true, "tool_calls": true, "vision": true }
+                              }
+                            },
+                            {
+                              "model_picker_enabled": true,
+                              "id": "kimi-k3",
+                              "name": "Kimi K3",
+                              "version": "kimi-k3",
+                              "supported_endpoints": ["/chat/completions"],
+                              "policy": { "state": "enabled" },
+                              "capabilities": {
+                                "family": "kimi-k3",
+                                "supports": { "parallel_tool_calls": true, "reasoning_effort": ["low", "high", "max"], "streaming": true, "tool_calls": true }
+                              }
+                            }
+                          ]
+                        }
+                        """,
+                        Encoding.UTF8,
+                        "application/json"),
+                };
+            }
+
+            Assert.AreEqual(new Uri("https://api.individual.githubcopilot.com/chat/completions"), request.RequestUri);
+            using (var requestDocument = JsonDocument.Parse(request.Content!.ReadAsStringAsync().GetAwaiter().GetResult()))
+            {
+                bodies[requestDocument.RootElement.GetProperty("model").GetString()!] = requestDocument.RootElement.Clone();
+            }
+
+            return new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(
+                    """
+                    data: {"id":"chatcmpl-test","choices":[{"delta":{"content":"Hi"}}]}
+
+                    data: [DONE]
+
+                    """,
+                    Encoding.UTF8,
+                    "text/event-stream"),
+            };
+        });
+        var providerRuntime = new CopilotDirectModelProviderRuntime(new CopilotDirectModelProviderRuntimeOptions
+        {
+            StateRootPath = Path.GetTempPath(),
+            Providers =
+            {
+                new CopilotDirectProviderOptions
+                {
+                    ProviderKey = "github-copilot",
+                    Auth = new CopilotDirectAuthOptions
+                    {
+                        AuthSource = CopilotDirectAuthSources.CopilotTokenEnvironment,
+                        CopilotTokenEnvironmentVariable = "CODEALTA_TEST_COPILOT_TOKEN",
+                    },
+                    HttpClient = new HttpClient(handler),
+                    // As ConfiguredModelProviderRegistryBuilder makes it: no strict tool schemas.
+                    Profile = configuredProfile
+                        ? new AgentProviderProfile
+                        {
+                            SupportsDeveloperRole = true,
+                            SupportsStore = false,
+                            SupportsReasoningEffort = true,
+                            StreamsUsage = true,
+                            MaxTokensFieldName = "max_completion_tokens",
+                            ReasoningFieldNames = ["reasoning_text", "reasoning_content", "reasoning"],
+                            ReasoningInputFieldName = "reasoning_opaque",
+                        }
+                        : null,
+                },
+            },
+        });
+        using var schema = JsonDocument.Parse(
+            """
+            {
+              "type": "object",
+              "properties": {
+                "pattern": { "type": "string" },
+                "path": { "type": ["string", "array"], "items": { "type": "string" }, "description": "A file or several.", "minItems": 1 },
+                "limit": { "type": ["integer", "null"] }
+              },
+              "required": ["pattern"],
+              "additionalProperties": false
+            }
+            """);
+        var tool = new AgentToolDefinition(
+            new AgentToolSpec("grep", "Searches files.", schema.RootElement.Clone()),
+            static (_, _) => throw new InvalidOperationException("The tool is not called."));
+
+        Environment.SetEnvironmentVariable("CODEALTA_TEST_COPILOT_TOKEN", "test-token");
+        try
+        {
+            var models = await providerRuntime.ListModelsAsync().ConfigureAwait(false);
+            var executor = providerRuntime.CreateTurnExecutor();
+            foreach (var model in models)
+            {
+                _ = await executor.ExecuteTurnAsync(
+                    new AgentTurnRequest
+                    {
+                        Provider = providerRuntime.RuntimeDescriptor,
+                        ProviderId = new ModelProviderId("github-copilot"),
+                        SessionId = "session-test",
+                        RunId = new AgentRunId("run-test"),
+                        ModelId = model.Id,
+                        ModelInfo = model,
+                        Conversation = [new AgentConversationMessage(AgentConversationRole.User, [new AgentMessagePart.Text("test")])],
+                        Tools = [tool],
+                        State = new AgentSessionState
+                        {
+                            SessionId = "session-test",
+                            ProtocolFamily = CopilotDirectModelProviderRuntime.ProtocolFamily,
+                            ProviderKey = "github-copilot",
+                            UpdatedAt = DateTimeOffset.UtcNow,
+                        },
+                    },
+                    static (_, _) => ValueTask.CompletedTask).ConfigureAwait(false);
+            }
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("CODEALTA_TEST_COPILOT_TOKEN", null);
+            await providerRuntime.DisposeAsync().ConfigureAwait(false);
+        }
+
+        var geminiProperties = ToolProperties(bodies["gemini-3.8-flash"]);
+        var path = geminiProperties.GetProperty("path");
+        Assert.IsFalse(path.TryGetProperty("type", out _), path.GetRawText());
+        Assert.IsFalse(path.TryGetProperty("items", out _), path.GetRawText());
+        StringAssert.StartsWith(path.GetProperty("description").GetString(), "A file or several.");
+        var branches = path.GetProperty("anyOf").EnumerateArray().ToArray();
+        // A strict schema makes an optional value nullable.
+        CollectionAssert.AreEqual(
+            configuredProfile ? new[] { "string", "array" } : ["string", "array", "null"],
+            branches.Select(static branch => branch.GetProperty("type").GetString()).ToArray());
+        Assert.AreEqual("string", branches[1].GetProperty("items").GetProperty("type").GetString());
+        Assert.IsFalse(branches[0].TryGetProperty("items", out _));
+        if (configuredProfile)
+        {
+            Assert.AreEqual(1, branches[1].GetProperty("minItems").GetInt32());
+            Assert.IsFalse(path.TryGetProperty("minItems", out _));
+        }
+
+        // A single type that may be null is what Gemini takes: it stays as it is.
+        Assert.AreEqual("integer,null", Types(geminiProperties.GetProperty("limit")));
+
+        // Another model of the Chat Completions endpoint takes the union.
+        var kimiPath = ToolProperties(bodies["kimi-k3"]).GetProperty("path");
+        Assert.AreEqual(configuredProfile ? "string,array" : "string,array,null", Types(kimiPath));
+
+        static JsonElement ToolProperties(JsonElement body)
+            => body.GetProperty("tools")[0].GetProperty("function").GetProperty("parameters").GetProperty("properties");
+
+        static string Types(JsonElement schema)
+            => string.Join(",", schema.GetProperty("type").EnumerateArray().Select(static type => type.GetString()));
+    }
+
     [TestMethod]
     public async Task CopilotDirect_Responses_MapsFunctionCallArgumentsAsToolCallNotAssistantText()
     {

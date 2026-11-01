@@ -154,6 +154,13 @@ internal sealed class CopilotDirectTurnExecutor : IModelProviderTurnExecutor, IM
         CancellationToken cancellationToken)
     {
         var profile = _provider.Profile ?? CreateOpenAIChatProfile(request.ModelInfo);
+        if (profile.SupportsToolSchemaTypeUnions && IsGeminiModel(request))
+        {
+            // Copilot refuses a Gemini request whose tool schema gives a value several types, such as the path of grep
+            // (["string", "array"]): HTTP 400 invalid_request_body. The schema of Gemini has a single type.
+            profile = profile with { SupportsToolSchemaTypeUnions = false };
+        }
+
         var usage = new CopilotRequestUsage();
         var provider = CreateOpenAIProviderOptions(credential, request, profile, usage);
         var executor = new OpenAIChatTurnExecutor(provider);
@@ -169,6 +176,11 @@ internal sealed class CopilotDirectTurnExecutor : IModelProviderTurnExecutor, IM
         {
             SupportsReasoningEffort = modelInfo?.SupportedReasoningEfforts is { Count: > 0 },
         };
+
+    private static bool IsGeminiModel(AgentTurnRequest request)
+        => (request.ModelId ?? request.ModelInfo?.Id)?.StartsWith("gemini", StringComparison.OrdinalIgnoreCase) == true ||
+           request.ModelInfo?.Capabilities?.TryGetValue("family", out var family) == true &&
+           family?.ToString()?.StartsWith("gemini", StringComparison.OrdinalIgnoreCase) == true;
 
     private async Task<AgentTurnResponse> ExecuteOpenAIResponsesAsync(
         AgentTurnRequest request,
