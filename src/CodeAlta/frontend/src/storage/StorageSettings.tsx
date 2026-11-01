@@ -125,7 +125,7 @@ export function StorageSettings({ epoch, api, filesApi, onOpenFile, maintenance,
           <span className="storage-hint">{t("Applies at next startup")}</span>
         </div>
         {!settings ? <p className="storage-hint" role="status">{t(loading ? "Loading…" : "Storage settings unavailable")}</p> : <>
-          <div className="settings-field storage-field">
+          <div className="settings-field storage-field" data-setting="storage.clear_scratchpad_on_startup">
             <label htmlFor="storage-scratchpad">{t("Clear scratchpad on startup")}</label>
             <div className="settings-field-control">
               <Switch id="storage-scratchpad" checked={settings.clearScratchpadOnStartup} disabled={busy}
@@ -244,7 +244,7 @@ export function RetentionEditor({ settings, disabled, onSave }: { settings: Stor
     if (valid !== null && settings.retentionEnabled && retentionUnits.includes(unit as typeof retentionUnits[number]))
       onSave({ ...settings, retentionAmount: valid, retentionUnit: unit });
   };
-  return <div className="settings-field storage-field storage-retention">
+  return <div className="settings-field storage-field storage-retention" data-setting="storage.session_retention.enabled storage.session_retention.amount storage.session_retention.unit">
     <label htmlFor="storage-retention-mode">{t("Delete inactive sessions")}</label>
     <div className="settings-field-control storage-retention-controls"
       onBlur={event => { if (!(event.relatedTarget instanceof Node) || !event.currentTarget.contains(event.relatedTarget)) commit(); }}

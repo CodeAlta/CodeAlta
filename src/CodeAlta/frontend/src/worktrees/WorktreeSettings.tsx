@@ -51,7 +51,7 @@ export function WorktreeSettings({ epoch, pick, api = worktrees, onOpenFile, fil
     description="Where the git worktrees of sessions are created." notice={notice} loading={loading} busy={busy} onReload={reload}>
     {!listing ? <SettingsUnavailable loading={loading} icon="worktree" title="Worktrees unavailable" /> : <>
       <SettingsFileLocations files={files} disabled={busy} />
-      <RadioGroup className="worktree-settings-places" label={t("New worktrees go")} selectedValue={location} disabled={busy}
+      <RadioGroup className="worktree-settings-places" data-setting="worktrees.location" label={t("New worktrees go")} selectedValue={location} disabled={busy}
         onChange={event => {
           const next = event.currentTarget.value as Location;
           // A folder of the user's own is asked for before it can be the place.
@@ -71,7 +71,7 @@ export function WorktreeSettings({ epoch, pick, api = worktrees, onOpenFile, fil
             {folder.trim() && <code>{folder.trim()}{separator(folder)}{t("<project>")}{separator(folder)}{t("<name>")}</code>}</span>
         </Radio>
       </RadioGroup>
-      <div className="worktree-settings-folder">
+      <div className="worktree-settings-folder" data-setting="worktrees.folder">
         <InputGroup aria-label={t("Folder for worktrees")} placeholder={t("Folder for worktrees")} value={folder} disabled={busy} onValueChange={setFolder}
           onKeyDown={event => { if (event.key === "Enter" && folder.trim()) save(location === "custom" ? "custom" : location, folder); }}
           onBlur={() => { if (folder.trim() !== (listing.folder ?? "") && (folder.trim() || location !== "custom")) save(location, folder); }} />

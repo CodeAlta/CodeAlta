@@ -8,10 +8,10 @@ export function LandingSettings({ preferences = landingPreferences }: { preferen
   const { t } = useShellLanguage();
   const chosen = useLandingPreferences(preferences);
   return <>
-    <Field label={t("Show the welcome page at startup")} htmlFor="settings-landing-startup">
+    <Field setting="general.welcome_at_startup" label={t("Show the welcome page at startup")} htmlFor="settings-landing-startup">
       <Switch id="settings-landing-startup" className="settings-checkbox" checked={chosen.openAtStartup} onChange={event => preferences.set("openAtStartup", event.currentTarget.checked)} />
     </Field>
-    <Field label={t("Animate the welcome page")} htmlFor="settings-landing-animation">
+    <Field setting="general.animate_welcome" label={t("Animate the welcome page")} htmlFor="settings-landing-animation">
       <Switch id="settings-landing-animation" className="settings-checkbox" checked={chosen.animate} onChange={event => preferences.set("animate", event.currentTarget.checked)} />
     </Field>
   </>;

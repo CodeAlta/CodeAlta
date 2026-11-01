@@ -48,7 +48,7 @@ export function SessionSettings({ epoch, api = globalConfig, onOpenFile, filesAp
       {listing && <SettingsFileLocations files={files} disabled={busy} />}
       <div className="settings-grid">{listing && <Card className="appearance-settings" aria-labelledby="settings-session-titles-title">
         <h2 id="settings-session-titles-title">{t("Session titles")}</h2>
-        <Field label={t("Title of a session you did not name")} htmlFor="settings-session-title-mode"
+        <Field setting="sessions.title" label={t("Title of a session you did not name")} htmlFor="settings-session-title-mode"
           notice={<p className="settings-field-help">{choice && <>{t(choice.help)} </>}{t("A title you give stays.")}</p>}>
           <HTMLSelect id="settings-session-title-mode" value={choice?.value ?? ""} disabled={busy}
             onChange={event => {
@@ -62,7 +62,7 @@ export function SessionSettings({ epoch, api = globalConfig, onOpenFile, filesAp
       </Card>}
       {listing && listing.promptSuggestions !== null && <Card className="appearance-settings" aria-labelledby="settings-session-suggestions-title">
         <h2 id="settings-session-suggestions-title">{t("Prompt suggestions")}</h2>
-        <Field label={t("Suggest the next prompt")} htmlFor="settings-prompt-suggestions"
+        <Field setting="sessions.prompt_suggestions" label={t("Suggest the next prompt")} htmlFor="settings-prompt-suggestions"
           notice={<p className="settings-field-help">{t("After a turn, the model suggests what you may write next, in the empty prompt: Tab or → takes it.")}</p>}>
           <Switch id="settings-prompt-suggestions" className="settings-checkbox" checked={listing.promptSuggestions} disabled={busy}
             onChange={event => {
@@ -73,7 +73,7 @@ export function SessionSettings({ epoch, api = globalConfig, onOpenFile, filesAp
       </Card>}
       {listing && listing.beforeCommit !== null && <Card className="appearance-settings" aria-labelledby="settings-session-review-title">
         <h2 id="settings-session-review-title">{t("Reviews")}</h2>
-        <Field label={t("Review changes before commit")} htmlFor="settings-review-before-commit"
+        <Field setting="review.before_commit" label={t("Review changes before commit")} htmlFor="settings-review-before-commit"
           notice={<p className="settings-field-help">{t("An agent asks for your review of its changes and commits only what you approve. A session can turn this on or off for itself, in its composer.")}</p>}>
           <Switch id="settings-review-before-commit" className="settings-checkbox" checked={listing.beforeCommit} disabled={busy}
             onChange={event => {
@@ -84,7 +84,7 @@ export function SessionSettings({ epoch, api = globalConfig, onOpenFile, filesAp
       </Card>}
       {listing && listing.coAuthor !== null && <Card className="appearance-settings" aria-labelledby="settings-session-commits-title">
         <h2 id="settings-session-commits-title">{t("Commits")}</h2>
-        <Field label={t("Add CodeAlta as co-author")} htmlFor="settings-commit-co-author"
+        <Field setting="commits.co_author" label={t("Add CodeAlta as co-author")} htmlFor="settings-commit-co-author"
           notice={<p className="settings-field-help">{t("Agents end the message of each commit with a Co-authored-by line for CodeAlta, beside the lines their provider adds.")}</p>}>
           <Switch id="settings-commit-co-author" className="settings-checkbox" checked={listing.coAuthor} disabled={busy}
             onChange={event => {
@@ -95,7 +95,7 @@ export function SessionSettings({ epoch, api = globalConfig, onOpenFile, filesAp
       </Card>}
       {tabs && <Card className="appearance-settings" aria-labelledby="settings-session-tabs-title">
         <h2 id="settings-session-tabs-title">{t("Session tabs")}</h2>
-        <Field label={t("Single tab for sessions")} htmlFor="settings-single-session-tab"
+        <Field setting="sessions.single_tab" label={t("Single tab for sessions")} htmlFor="settings-single-session-tab"
           notice={<p className="settings-field-help">{t("A session you open takes the place of the one shown.")}</p>}>
           <Switch id="settings-single-session-tab" className="settings-checkbox" checked={tabs.single} onChange={event => tabs.setSingle(event.currentTarget.checked)} />
         </Field>

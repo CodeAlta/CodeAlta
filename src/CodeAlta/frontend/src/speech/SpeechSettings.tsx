@@ -99,11 +99,11 @@ export function SpeechSettings({ epoch, api, speech, testLimit = 30_000 }: {
       : !listing.supported ? <NonIdealState icon={<AppIcon name="mic" size={36} />} title={t("Speech to prompt is not available on this system.")} />
       : <div className="speech-layout">
         <Card className="appearance-settings speech-card">
-          <Field label={t("Speech to prompt")} htmlFor="settings-speech-enabled">
+          <Field setting="speech.enabled" label={t("Speech to prompt")} htmlFor="settings-speech-enabled">
             <Switch id="settings-speech-enabled" checked={listing.enabled} disabled={working}
               onChange={event => void save({ enabled: event.currentTarget.checked }, listing)} />
           </Field>
-          <Field label={t("Model")} htmlFor="settings-speech-model" notice={<>
+          <Field setting="speech.model" label={t("Model")} htmlFor="settings-speech-model" notice={<>
             {customOpen && <div className="settings-field-wide speech-custom">
               <InputGroup id="settings-speech-address" fill value={address} disabled={working} placeholder="https://huggingface.co/owner/model"
                 aria-label={t("Hugging Face repository address")} aria-invalid={addressError} aria-describedby={addressError ? "settings-speech-address-error" : undefined}
@@ -131,7 +131,7 @@ export function SpeechSettings({ epoch, api, speech, testLimit = 30_000 }: {
             </HTMLSelect>
           </Field>
           {listing.enabled && microphone && <MicrophoneRow speech={speech} testLimit={testLimit} />}
-          <Field label={t("When a dictation stops")} htmlFor="settings-speech-send">
+          <Field setting="speech.send" label={t("When a dictation stops")} htmlFor="settings-speech-send">
             <HTMLSelect id="settings-speech-send" value={sendMode(listing.send)} disabled={working}
               onChange={event => { const send = event.currentTarget.value; if (send !== sendMode(listing.send)) void save({ send }, listing); }}>
               <option value="manual">{t("Keep the prompt for me to send")}</option>
@@ -179,7 +179,7 @@ function MicrophoneRow({ speech, testLimit }: { speech: Speech; testLimit: numbe
     const timer = setTimeout(() => speech.stopMonitor(testSource), testLimit);
     return () => clearTimeout(timer);
   }, [speech, testing, testLimit]);
-  return <Field label={t("Microphone")} htmlFor="settings-speech-microphone" notice={testing && <div className="settings-field-wide speech-test">
+  return <Field setting="speech.microphone" label={t("Microphone")} htmlFor="settings-speech-microphone" notice={testing && <div className="settings-field-wide speech-test">
     <LevelBar speech={speech} source={testSource} />
     {silent && <p className="speech-silent" role="status">{t("No sound comes from this microphone.")}</p>}
   </div>}>

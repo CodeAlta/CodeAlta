@@ -5,7 +5,15 @@ import { Fragment, StrictMode, createContext, useCallback, useContext, useEffect
 import { createRoot } from "react-dom/client";
 import { ProjectReferenceContext } from "./ProjectReferencePicker";
 import { ComposerStatus } from "./ComposerStatus";
-import { settingsNavigation } from "./settingsNavigation";
+import { settingsNavigation, type SettingsTarget } from "./settingsNavigation";
+import { settingsGroups, settingsPageOf, type SettingsPageId } from "./settings/settingsPages";
+import { glowSetting } from "./settings/settingsGlow";
+import { createSettingsHub } from "./settings/settingsHub";
+import { mergeSettings, settingText } from "./settings/settingsCatalog";
+import { groupResults, matchCounts, searchSettings } from "./settings/settingsSearch";
+import { SettingsSearchResults } from "./settings/SettingsSearchResults";
+import { parseSettingValue, settingValueSource, settingValueText } from "./settings/settingValues";
+import { useWindowSettingBindings, useWindowSettingsBridge } from "./settings/windowSettings";
 import { dismissStartupScreen } from "./startupScreen";
 import { ConfigRecoveryScreen } from "./ConfigRecoveryScreen";
 import { createAppearancePreview } from "./appearancePreview";
@@ -328,6 +336,7 @@ import "@xyflow/react/dist/style.css";
 import "katex/dist/katex.min.css";
 import "./reactFlow.css";
 import "./style.css";
+import "./settings/settings.css";
 import "./timelineEmphasis/timelineEmphasis.css";
 import "./timelineActivity/timelineActivity.css";
 import "./scriptCard/scriptCard.css";
@@ -394,6 +403,7 @@ import { SearchSettings, meaningStateText } from "./search/SearchSettings";
 import { MeaningDialogHost } from "./search/MeaningDialog";
 import { contentTarget } from "./search/contentResults";
 import { worktrees as worktreesApi } from "#neoastra";
+import { settings as settingsRpc, type SettingsEvent } from "#neoastra";
 import { externalEditors as externalEditorsApi } from "#neoastra";
 import { sandboxSettings, type SandboxScopeItem, type SandboxSessionResponse } from "#neoastra";
 import { notSandboxed, sessionSandboxSummary } from "./sandbox/sandboxChoices";
@@ -447,7 +457,7 @@ const cloudProviderKey = "codealta.desktop.cloudProvider.v1";
 if (!demoMode) installLocalCallPolicy(createSlowCallWatch(reportToHost));
 const noSubscription = () => () => { };
 const noBookmarkProjects: readonly { id: string; name: string }[] = [];
-type View = "workspace" | "appearance" | "general" | "windows" | "spaces" | "labels" | "providers" | "models" | "prompts" | "mcp" | "logs" | "skills" | "plugins" | "about" | "config" | "worktrees" | "workItems" | "pullRequests" | "mcpHost" | "permissions" | "sandbox" | "codeMode" | "sessions" | "storage" | "speech" | "search" | "plugin";
+type View = "workspace" | SettingsPageId | "plugin";
 type SettingsSection = Exclude<View, "workspace">;
 
 function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse | null }) {
@@ -714,6 +724,9 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
   const [settingsOpen, setSettingsOpen] = useState(false);
   const settingsVisible = useRef(false);
   const [settingsSection, setSettingsSection] = useState<SettingsSection>("appearance");
+  // What the search of Settings has typed; Settings opened by the user starts in that search, one opened on a setting does not.
+  const [settingsQuery, setSettingsQuery] = useState("");
+  const settingsFocusSearch = useRef(true);
   // The space whose page Settings > Spaces shows, at which section; null for the cards of every space.
   const [spacePage, setSpacePage] = useState<SpacePageTarget | null>(null);
   // The settings page of a plugin that Settings > Extensions shows, when the section is `plugin`.
@@ -728,6 +741,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
   useEffect(() => () => focusRestoration.cancel(), [focusRestoration]);
   function closeSettings() {
     invalidateCreation();
+    setSettingsQuery("");
     settingsVisible.current = false;
     setSettingsOpen(false);
     setProviderGuide(false);
@@ -749,6 +763,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
       if (!settingsVisible.current) {
         settingsOrigin.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
         settingsOriginView.current = currentView.current;
+        settingsFocusSearch.current = true;
       }
       // Settings > Spaces opens on the cards of every space when it is reached from elsewhere.
       if (next === "spaces" && (!settingsVisible.current || currentSettingsSection.current !== "spaces")) setSpacePage(null);
@@ -763,15 +778,29 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
     setPluginPage(page);
     navigate("plugin");
   }
-  // A control outside the shell (a composer status item) asks for a Settings page by name.
-  const openSettingsPage = useRef<(page: string) => void>(() => {});
-  openSettingsPage.current = page => {
-    if (page === "mcp" || page === "models" || page === "plugins" || page === "providers" || page === "sandbox" || page === "skills" || page === "spaces" || page === "speech") { navigate(page); return; }
-    // `spaces/<id>/<section>` opens the page of a space at one of its sections.
-    const target = readSpacePageLink(page);
-    if (target) { navigate("spaces"); setSpacePage(target); }
+  // Opens Settings on a page and makes a setting of it glow: a control outside the shell (a composer status item), a result
+  // of a search, the toast of a change, or `alta settings open`.
+  const cancelGlow = useRef<(() => void) | null>(null);
+  const openSettingsAt = useRef<(target: SettingsTarget) => void>(() => {});
+  openSettingsAt.current = ({ page, setting }) => {
+    if (settingsPageOf(page)) navigate(page as SettingsSection);
+    else if (page.startsWith("plugin/")) {
+      // `plugin/<key>/<canvas>` opens the settings page of a plugin, while the plugin runs in the space the window shows.
+      const found = (owned ? pluginPages : []).find(candidate => `plugin/${candidate.pluginKey}/${candidate.canvasId}` === page);
+      if (found) openPluginSettings(found); else navigate("plugins");
+    } else {
+      // `spaces/<id>/<section>` opens the page of a space at one of its sections.
+      const target = readSpacePageLink(page);
+      if (!target) return;
+      navigate("spaces"); setSpacePage(target);
+    }
+    if (setting) settingsFocusSearch.current = false;
+    cancelGlow.current?.();
+    const content = () => document.querySelector(".settings-dialog-content");
+    cancelGlow.current = setting ? glowSetting(content, setting, () => content()?.querySelector<HTMLElement>(".page-heading h1, h1") ?? null) : null;
   };
-  useEffect(() => settingsNavigation.subscribe(page => openSettingsPage.current(page)), []);
+  useEffect(() => settingsNavigation.subscribe(target => openSettingsAt.current(target)), []);
+  useEffect(() => () => cancelGlow.current?.(), []);
   // A place that chooses a sandbox, from Settings > Sandbox: the editor of its provider, the page of its space, or the
   // row of its project in the Explorer, where its "Sandbox…" action is.
   function openSandboxScope(scope: SandboxScopeItem) {
@@ -3186,6 +3215,48 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
   const pluginEpoch = owned ? status?.hostEpoch ?? null : null;
   // What plugins ask of the window for their tabs, and push to them, is read from the host that runs them.
   useEffect(() => pluginEpoch ? canvasHub.connect(pluginEpoch) : undefined, [canvasHub, pluginEpoch]);
+  // The settings as one catalog: the search of Settings and of the window read it; the page of the main window keeps
+  // some of them (theme, language, fonts...) and tells the host their values, so that agents read and change them too.
+  const [settingsHub] = useState(() => createSettingsHub(settingsRpc));
+  useEffect(() => pluginEpoch ? settingsHub.connect(pluginEpoch) : undefined, [settingsHub, pluginEpoch]);
+  const settingsCatalog = useSyncExternalStore(settingsHub.subscribe, settingsHub.getSnapshot, settingsHub.getSnapshot);
+  const settingEntries = useMemo(() => mergeSettings(settingsCatalog.descriptors), [settingsCatalog]);
+  const windowSettings = useWindowSettingBindings({ theme, setTheme, darker, setDarker, colorScheme, setColorScheme, customSchemes, projectSort, setProjectSort,
+    recentSessionCount, setRecentSessionCount: value => { batchDeletion.invalidate(); setRecentSessionCount(value); }, subAgentCount, setSubAgentCount,
+    railCollapsed: railState.desktopCollapsed, setRailCollapsed: setDesktopCollapsed, confirms, setConfirm, singleTab, setSingleTab,
+    language: language.choice, setLanguage: language.setLanguage });
+  useWindowSettingsBridge(secondary ? null : settingsHub, !!pluginEpoch, windowSettings);
+  const settingValues = useMemo(() => settingValueSource(settingsHub, windowSettings), [settingsHub, windowSettings]);
+  const settingsSearch = useMemo(() => settingsOpen && settingsQuery.trim() ? searchSettings(settingEntries, settingsQuery, language.locale) : null,
+    [settingsOpen, settingsQuery, settingEntries, language.locale]);
+  // A result of the search of Settings shows its page, with the setting glowing.
+  function openSearchedSetting(page: string, setting: string | null) {
+    setSettingsQuery("");
+    settingsNavigation.open({ page, setting });
+  }
+  useEffect(() => settingsHub.onEvent(event => {
+    if (event.kind === "show" && event.page) openSettingsAt.current({ page: event.page, setting: event.id ?? null });
+    else if (event.kind === "changed" && event.id) announceSettingChange.current(event);
+  }), [settingsHub]);
+  // A setting someone but the user changed (an agent, a plugin, another application): a toast says it, with Show and Undo.
+  const announceSettingChange = useRef<(event: SettingsEvent) => void>(() => {});
+  announceSettingChange.current = event => {
+    const entry = settingEntries.find(candidate => candidate.id === event.id);
+    if (!entry) return;
+    const who = event.sessionId ? currentSnapshot.current?.sessions.find(session => session.id === event.sessionId)?.title ?? null : null;
+    const value = settingValueText(language.locale, entry, parseSettingValue(event.value));
+    const label = settingText(language.locale, entry.label, entry.builtIn);
+    const message = who ? t("{who} changed {setting} to {value}", { who, setting: label, value })
+      : t("{setting} was changed to {value}", { setting: label, value });
+    const show = () => settingsNavigation.open({ page: entry.page, setting: entry.id });
+    showToast({ intent: "primary", icon: "cog", timeout: 12_000,
+      message: <span className="settings-change-toast">{message} <button type="button" className="settings-change-show" onClick={show}>{t("Show")}</button></span>,
+      action: { text: t("Undo"), onClick: () => {
+        void settingValues.set(entry, parseSettingValue(event.previous)).then(reply => {
+          if (reply.status !== "ok") showToast({ intent: "warning", icon: "warning-sign", timeout: 6000, message: t("The change could not be undone.") });
+        });
+      } } }, `setting-change-${entry.id}`);
+  };
   const pluginProjectId = projectId ?? null;
   // What the buttons of plugins in the title bar and the rail are asked about: the selected project and session.
   const pluginButtonContext = useMemo<PluginButtonContext>(() => ({ projectId: projectId ?? null, sessionId: sessionId ?? null }), [projectId, sessionId]);
@@ -5868,9 +5939,17 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
             : null}
           </div></SessionTabStrip></main></ProjectReferenceContext.Provider>} />
       </div>
-    {settingsOpen && <SettingsOverlay section={settingsSection} onSection={navigate} onClose={closeSettings}
+    {settingsOpen && <SettingsOverlay section={settingsSection} onSection={page => { setSettingsQuery(""); navigate(page); }} onClose={closeSettings}
       spaces={spacesState.available ? spacesState.spaces : []} spacePage={spacePage} onSpacePage={setSpacePage}
-      pluginPages={owned ? pluginPages : []} pluginPage={pluginPage} onPluginPage={openPluginSettings}>
+      pluginPages={owned ? pluginPages : []} pluginPage={pluginPage} onPluginPage={page => { setSettingsQuery(""); openPluginSettings(page); }}
+      search={{ query: settingsQuery, onQuery: setSettingsQuery, counts: settingsSearch ? matchCounts(settingsSearch) : null, focusOnOpen: settingsFocusSearch.current,
+        onSubmit: () => {
+          const first = settingsSearch && (groupResults(settingsSearch, settingEntries)[0]?.settings[0] ?? null);
+          const page = first ? null : settingsSearch?.pages[0]?.page.id ?? null;
+          if (first) openSearchedSetting(first.page, first.id); else if (page) openSearchedSetting(page, null);
+        },
+        results: settingsSearch ? <SettingsSearchResults query={settingsQuery} result={settingsSearch} entries={settingEntries} source={settingValues} revision={windowSettings}
+          onOpen={openSearchedSetting} /> : null }}>
       {settingsSection === "appearance" ? <ConfigurationPanel preferences={{ theme, setTheme, darker, setDarker,
         schemes: { colorScheme, setColorScheme, shownScheme, variant, customSchemes, library: schemeLibrary, preview: appearancePreview, platform: demoMode ? null : shellPreferences?.platform ?? null,
           onOpenFolder: owned ? openColorSchemeFolder : undefined }, sort: projectSort, setSort: setProjectSort, desktopCollapsed: railState.desktopCollapsed, setDesktopCollapsed, notices: preferenceNotices, recentSessionCount, setRecentSessionCount: value => { batchDeletion.invalidate(); setRecentSessionCount(value); }, subAgentCount, setSubAgentCount,
@@ -6088,6 +6167,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
       content={contentSearch} onContent={hit => chooseSearch({ kind: "content", hit })}
       onOfferMeaning={owned && meaningNow?.offer ? () => { dismissSearch(); setMeaningDialog(true); } : undefined}
       claudeCode={searchedClaudeCode} onClaudeCode={(conversation, providerId) => chooseSearch({ kind: "claude-code", conversation, providerId })}
+      settings={secondary ? undefined : settingEntries} onSetting={(page, setting) => { dismissSearch(); settingsNavigation.open({ page, setting }); }}
       onClose={dismissSearch} />}
     {meaningDialog && <MeaningDialogHost offered={meaningNow?.offer === true} onClose={() => setMeaningDialog(false)} onTurnedOn={() => setFollowMeaning(true)}
       onKeepOut={() => { setMeaningDialog(false); navigate("search"); }} />}
@@ -6101,9 +6181,12 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
   </div></ReviewsListOpenerContext.Provider></ReviewOpenerContext.Provider></ReviewsHubContext.Provider></LocalSearchContext.Provider></SessionListRefreshContext.Provider></ExternalOpenerContext.Provider></OpenRunContext.Provider></OpenEditorContext.Provider></OpenTerminalContext.Provider></ShowChangesContext.Provider></SessionWidthContext.Provider></MarkdownImagesContext.Provider></MessageLinksContext.Provider></SessionLinksContext.Provider></PullRequestSettingsContext.Provider></PluginButtonsActiveContext.Provider></PluginButtonsContext.Provider></PluginHostBridgeContext.Provider></PluginUiContext.Provider></ProviderBrandsContext.Provider></SpeechContext.Provider></HostReadsContext.Provider></ShellLanguageContext.Provider>;
 }
 
+/** The search of Settings: the query, the counts of the pages while one is typed (null otherwise), and the results that take the place of the page. */
+type SettingsSearchControls = Readonly<{ query: string; onQuery(query: string): void; counts: ReadonlyMap<string, number> | null; onSubmit(): void; focusOnOpen: boolean; results: ReactNode | null }>;
+
 // Native modal matches the other shell dialogs: showModal supplies inert background,
 // browser-managed focus trapping and nested native About dialog top-layer ordering.
-function SettingsOverlay({ section, onSection, onClose, spaces, spacePage, onSpacePage, pluginPages, pluginPage, onPluginPage, children }: {
+function SettingsOverlay({ section, onSection, onClose, spaces, spacePage, onSpacePage, pluginPages, pluginPage, onPluginPage, search, children }: {
   section: SettingsSection; onSection: (section: SettingsSection) => void;
   onClose: () => void;
   /** The spaces, each a page of the Spaces group; empty in a window whose host keeps none. */
@@ -6112,20 +6195,19 @@ function SettingsOverlay({ section, onSection, onClose, spaces, spacePage, onSpa
   /** The settings pages of the plugins that run in the space the window shows, each a page of the Extensions group. */
   pluginPages: readonly PluginSettingsPage[];
   pluginPage: PluginSettingsPage | null; onPluginPage: (page: PluginSettingsPage) => void;
+  /** The search of Settings: what is typed, how many results each page has while it is typed, and what Enter opens. */
+  search: SettingsSearchControls;
   children: ReactNode;
 }) {
   const { t } = useShellLanguage();
   const composingEscape = useRef(false);
   const navigation = useRef<HTMLElement>(null);
-  const destinations: readonly [MessageKey, readonly [SettingsSection, MessageKey, IconName][]][] = [
-    ["Personalization", [["appearance", "Appearance", "palette"], ["general", "General", "settings"], ["windows", "Windows", "window"], ["speech", "Speech", "mic"], ["search", "Search", "search"]]],
-    ["Agent & models", [["providers", "Providers", "provider"], ["models", "Models", "model"], ["prompts", "Agent prompts", "assistant"], ["skills", "Skills", "skill"],
-      ["permissions", "Permissions", "shield"], ["sandbox", "Sandbox", "sandbox"], ["codeMode", "Code Mode", "code"], ["sessions", "Sessions", "chat"],
-      ["worktrees", "Worktrees", "worktree"], ["workItems", "Work items", "task"], ["pullRequests", "Pull requests", "pullRequest"]]],
-    ["Extensions", [["plugins", "Plugins", "plugin"], ["mcp", "MCP Servers", "server"]]],
-    ["Advanced", [["config", "Configuration file", "config"], ["storage", "Storage", "database"], ["mcpHost", "CodeAlta MCP", "remote"]]],
-    ["Diagnostics", [["logs", "Application Logs", "logs"], ["about", "About", "info"]]],
-  ];
+  const searchField = useRef<HTMLInputElement>(null);
+  // Settings opened by the user starts in its search: typing is the quickest way to a setting. One opened on a setting does not.
+  useEffect(() => { if (search.focusOnOpen) searchField.current?.focus(); }, []);
+  const counts = search.counts;
+  const dimmed = (page: string) => counts !== null && !counts.has(page);
+  const count = (page: string) => counts?.get(page) ? <small className="settings-nav-count">{counts.get(page)}</small> : null;
   return <AppWindow storageKey="codealta.desktop.window.settings.v1" className="settings-dialog" titleId="settings-title" title={t("Settings")}
     preferredSize={viewport => ({ width: viewport.width * 0.8, height: viewport.height * 0.8 })} minimumSize={{ width: 560, height: 360 }}
     onClose={onClose} closeLabel={t("Close settings")}
@@ -6138,32 +6220,41 @@ function SettingsOverlay({ section, onSection, onClose, spaces, spacePage, onSpa
     }} onKeyUp={() => { composingEscape.current = false; }} onCompositionEnd={() => { composingEscape.current = false; }}
     onCancel={event => { event.preventDefault(); if (!composingEscape.current) onClose(); }}>
     <div className="settings-dialog-body">
-      <nav className="settings-dialog-navigation" aria-label={t("Settings pages")} ref={navigation}>
-        {destinations.map(([group, pages], index) => <Fragment key={group}>
-          <div className="settings-dialog-group">
+      <nav className="settings-dialog-navigation" aria-label={t("Settings pages")} ref={navigation} data-searching={counts !== null || undefined}>
+        <InputGroup inputRef={searchField} className="settings-search-field" type="search" size="small" leftIcon={<AppIcon name="search" size={14} />}
+          placeholder={t("Search settings")} aria-label={t("Search settings")} value={search.query} onValueChange={search.onQuery}
+          rightElement={search.query ? <Button variant="minimal" size="small" icon={<AppIcon name="close" size={13} />} aria-label={t("Clear the search")}
+            onClick={() => { search.onQuery(""); searchField.current?.focus(); }} /> : undefined}
+          onKeyDown={event => {
+            if (event.key === "Escape" && search.query && !event.nativeEvent.isComposing) { event.preventDefault(); event.stopPropagation(); search.onQuery(""); }
+            else if (event.key === "Enter" && search.query.trim()) { event.preventDefault(); search.onSubmit(); }
+            else if (event.key === "ArrowDown" && search.query.trim()) {
+              const first = document.querySelector<HTMLElement>(".settings-search-results :is(button, input, select, [tabindex='0'])");
+              if (first) { event.preventDefault(); first.focus(); }
+            }
+          }} />
+        {settingsGroups.map(({ group, pages }) => group === "Spaces"
+          // Each space is a setup of its own: the group lists them after the overview and the labels, right after Personalization.
+          ? <div key={group} className="settings-dialog-group settings-dialog-spaces">
             <h3>{t(group)}</h3>
-            {pages.map(([value, label, icon]) => <button key={value} type="button" aria-current={section === value ? "page" : undefined}
-              data-settings-section={value} onClick={() => onSection(value)}><AppIcon name={icon} size={16} /><span>{t(label)}</span></button>)}
+            {pages.map(({ id, label, icon }) => <button key={id} type="button" aria-current={counts === null && section === id && (id !== "spaces" || !spacePage) ? "page" : undefined}
+              data-settings-section={id} data-dimmed={dimmed(id) || undefined} onClick={() => { onSection(id); if (id === "spaces") onSpacePage(null); }}><AppIcon name={icon} size={16} /><span>{t(label)}</span>{count(id)}</button>)}
+            {spaces.map(space => <button key={space.id} type="button" aria-current={section === "spaces" && spacePage?.spaceId === space.id ? "page" : undefined}
+              data-settings-space={space.id} onClick={() => { onSection("spaces"); onSpacePage({ spaceId: space.id, section: spacePage?.section ?? "general" }); }}>
+              <SpaceIcon space={space} size={16} /><span>{space.name}</span></button>)}
+          </div>
+          : <div key={group} className="settings-dialog-group">
+            <h3>{t(group)}</h3>
+            {pages.map(({ id, label, icon }) => <button key={id} type="button" aria-current={counts === null && section === id ? "page" : undefined}
+              data-settings-section={id} data-dimmed={dimmed(id) || undefined} onClick={() => onSection(id)}><AppIcon name={icon} size={16} /><span>{t(label)}</span>{count(id)}</button>)}
             {/* Each plugin that has a settings page has its own, after the pages of the extensions, named and iconed as its canvas. */}
             {group === "Extensions" && pluginPages.map(page => <button key={`${page.pluginKey}/${page.canvasId}`} type="button"
               aria-current={section === "plugin" && samePluginSettingsPage(pluginPage, page) ? "page" : undefined} data-settings-plugin={`${page.pluginKey}/${page.canvasId}`}
               onClick={() => onPluginPage(page)}><CanvasIcon name={page.icon} pluginKey={page.pluginKey} size={16} /><span>{page.title}</span></button>)}
-          </div>
-          {/* Each space is a setup of its own: the group lists them after the overview, right after Personalization. */}
-          {index === 0 && <div className="settings-dialog-group settings-dialog-spaces">
-            <h3>{t("Spaces")}</h3>
-            <button type="button" aria-current={section === "spaces" && !spacePage ? "page" : undefined} data-settings-section="spaces"
-              onClick={() => { onSection("spaces"); onSpacePage(null); }}><AppIcon name="canvases" size={16} /><span>{t("Overview")}</span></button>
-            <button type="button" aria-current={section === "labels" ? "page" : undefined} data-settings-section="labels"
-              onClick={() => onSection("labels")}><AppIcon name="tag" size={16} /><span>{t("Labels")}</span></button>
-            {spaces.map(space => <button key={space.id} type="button" aria-current={section === "spaces" && spacePage?.spaceId === space.id ? "page" : undefined}
-              data-settings-space={space.id} onClick={() => { onSection("spaces"); onSpacePage({ spaceId: space.id, section: spacePage?.section ?? "general" }); }}>
-              <SpaceIcon space={space} size={16} /><span>{space.name}</span></button>)}
-          </div>}
-        </Fragment>)}
+          </div>)}
         <OverflowTip within={navigation} target=".settings-dialog-navigation button" label=":scope > span:last-child" />
       </nav>
-      <div className="settings-dialog-content" key={section}>{children}</div>
+      <div className="settings-dialog-content" key={search.results ? "search" : section}>{search.results ?? children}</div>
     </div>
   </AppWindow>;
 }

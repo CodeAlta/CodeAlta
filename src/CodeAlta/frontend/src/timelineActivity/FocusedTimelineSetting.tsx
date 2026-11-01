@@ -10,7 +10,7 @@ import { useTimelineEmphasis } from "../timelineEmphasis/useTimelineEmphasis";
 export function FocusedTimelineSetting() {
   const { t } = useShellLanguage();
   const [emphasis, setEmphasis] = useTimelineEmphasis();
-  return <Field label={t("Focused timeline")} htmlFor="settings-focused-timeline"
+  return <Field setting="appearance.focused_timeline" label={t("Focused timeline")} htmlFor="settings-focused-timeline"
     notice={<p className="settings-field-help">{t("Fold reasoning, tool calls and background jobs between two messages into one line. Click a line to see its steps.")}</p>}>
     <Switch id="settings-focused-timeline" className="settings-checkbox" checked={emphasis.focused}
       onChange={event => setEmphasis({ ...emphasis, focused: event.currentTarget.checked })} />
@@ -21,7 +21,7 @@ export function FocusedTimelineSetting() {
 export function FoldedImagesSetting() {
   const { t } = useShellLanguage();
   const [emphasis, setEmphasis] = useTimelineEmphasis();
-  return <Field label={t("Images under folded lines")} htmlFor="settings-folded-images"
+  return <Field setting="appearance.folded_images" label={t("Images under folded lines")} htmlFor="settings-folded-images"
     notice={<p className="settings-field-help">{t("Show the images the model read, such as screenshots and image files, under the folded line of its work. Click an image to view it.")}</p>}>
     <Switch id="settings-folded-images" className="settings-checkbox" checked={emphasis.foldedImages} disabled={!emphasis.focused}
       onChange={event => setEmphasis({ ...emphasis, foldedImages: event.currentTarget.checked })} />

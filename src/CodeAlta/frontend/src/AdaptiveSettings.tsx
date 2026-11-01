@@ -43,7 +43,7 @@ export function AdaptiveSettings({ epoch, state, api, store, onSaved }: {
       </HTMLSelect>
     </label>;
 
-  return <section className="adaptive-settings" aria-labelledby="adaptive-title">
+  return <section className="adaptive-settings" aria-labelledby="adaptive-title" data-setting="models.adaptive">
     <header>
       <h2 id="adaptive-title">{t("Adaptive")}<Tag minimal round intent="warning" className="adaptive-experimental">{t("Experimental")}</Tag></h2>
       <p className="settings-field-help">{t("A session on Adaptive runs its turns on one tier; a turn that changed code checks its change against the request, and a turn that ends in trouble continues once on a stronger tier.")}</p>

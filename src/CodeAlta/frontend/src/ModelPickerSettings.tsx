@@ -12,7 +12,7 @@ export function ModelPickerSettings({ preferences = modelPickerPreferences }: { 
   const [typed, setTyped] = useState(String(rows));
   useEffect(() => { setTyped(String(rows)); }, [rows]);
   return <div className="model-picker-settings">
-    <Field label={t("Models shown in the model list of the prompt")} htmlFor="settings-model-picker-rows">
+    <Field setting="models.picker_rows" label={t("Models shown in the model list of the prompt")} htmlFor="settings-model-picker-rows">
       <NumericInput id="settings-model-picker-rows" className="model-picker-rows" value={typed} min={minimumModelPickerRows} max={maximumModelPickerRows}
         stepSize={1} majorStepSize={5} minorStepSize={null} allowNumericCharactersOnly selectAllOnFocus
         onValueChange={(value, text) => { setTyped(text); if (modelPickerRows(value) !== null) preferences.set(value); }}

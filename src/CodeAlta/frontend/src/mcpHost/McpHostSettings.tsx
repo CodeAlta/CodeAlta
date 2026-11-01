@@ -43,10 +43,10 @@ export function McpHostView({ state, developer, busy, onEnable, onTailnet, copy 
   const running = state.state === "running" && !!state.url;
   const configuration = running ? mcpClientConfiguration(mcpServerName(developer), state.url!, state.token) : "";
   return <>
-    <Switch className="mcp-host-switch" checked={state.enabled} disabled={busy} label={t("Run the MCP server")}
-      onChange={event => onEnable(event.currentTarget.checked)} />
-    {state.tailnet && <Switch className="mcp-host-switch mcp-host-tailnet" checked={state.tailnet !== "off"} disabled={busy} label={t("Listen on the Tailscale network")}
-      onChange={event => onTailnet(event.currentTarget.checked)} />}
+    <div data-setting="mcp_host.server"><Switch className="mcp-host-switch" checked={state.enabled} disabled={busy} label={t("Run the MCP server")}
+      onChange={event => onEnable(event.currentTarget.checked)} /></div>
+    {state.tailnet && <div data-setting="mcp_host.tailnet"><Switch className="mcp-host-switch mcp-host-tailnet" checked={state.tailnet !== "off"} disabled={busy} label={t("Listen on the Tailscale network")}
+      onChange={event => onTailnet(event.currentTarget.checked)} /></div>}
     {state.tailnet === "unavailable" && state.enabled && <Callout intent="warning" compact role="status">
       {t("This computer is on no Tailscale network: only the applications of this computer reach the server.")}</Callout>}
     {state.state === "failed" && <Callout intent="warning" compact role="alert">

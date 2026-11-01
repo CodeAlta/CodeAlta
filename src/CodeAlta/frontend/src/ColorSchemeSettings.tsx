@@ -140,7 +140,7 @@ export function ColorSchemeSettings({ colorScheme, setColorScheme, shownScheme, 
   const revealLabel = platform === null ? null : t(platform === "windows" ? "Reveal in File Explorer" : platform === "macos" ? "Reveal in Finder" : "Open containing folder");
   const shown = editing ? shownColors(editing.draft, editing.variant) : null;
 
-  return <SettingsField label={t("Color scheme")} htmlFor="settings-color-scheme" notice={<>
+  return <SettingsField setting="appearance.color_scheme" label={t("Color scheme")} htmlFor="settings-color-scheme" notice={<>
     {storageNotice}
     {shownNotice && <Callout className="settings-field-wide" intent={shownNotice.intent} compact role={shownNotice.intent === "success" ? "status" : "alert"}>
       {t(shownNotice.key)}{shownNotice.detail && <div className="config-editor-diagnostic">{shownNotice.detail}</div>}</Callout>}

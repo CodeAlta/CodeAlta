@@ -68,7 +68,7 @@ export function ExternalEditorSettings({ api, onChanged }: { api: ExternalEditor
   const current = reply.current;
   return <Card className="appearance-settings external-editor-settings" aria-labelledby="settings-external-editor-title">
     <h2 id="settings-external-editor-title">{t("External editor")}</h2>
-    <Field label={t("Editor")} htmlFor="settings-external-editor"
+    <Field setting="general.external_editor" label={t("Editor")} htmlFor="settings-external-editor"
       notice={<p className="settings-field-help">{t("Used by Open in… and /external_editor. The code editor of CodeAlta stays the one that opens files.")}</p>}>
       <span className="external-editor-choice">
         {current && selected !== custom && <ExternalEditorIcon id={current.id} size={16} />}
@@ -81,11 +81,11 @@ export function ExternalEditorSettings({ api, onChanged }: { api: ExternalEditor
       </span>
     </Field>
     {selected === custom && <>
-      <Field label={t("Program")} htmlFor="settings-external-editor-program" notice={<p className="settings-field-help">{t("The full path of the editor's program.")}</p>}>
+      <Field setting="general.external_editor" label={t("Program")} htmlFor="settings-external-editor-program" notice={<p className="settings-field-help">{t("The full path of the editor's program.")}</p>}>
         <InputGroup id="settings-external-editor-program" value={program} disabled={busy} spellCheck={false} placeholder={reply.platform === "windows" ? "C:\\Program Files\\Editor\\editor.exe" : "/usr/local/bin/editor"}
           onChange={event => setProgram(event.target.value)} onBlur={saveCustom} onKeyDown={event => { if (event.key === "Enter") saveCustom(); }} />
       </Field>
-      <Field label={t("Arguments")} htmlFor="settings-external-editor-arguments"
+      <Field setting="general.external_editor" label={t("Arguments")} htmlFor="settings-external-editor-arguments"
         notice={<p className={openQuote(args) ? "settings-field-help notice" : "settings-field-help"} role={openQuote(args) ? "status" : undefined}>
           {t(openQuote(args) ? "The arguments have a quote that is not closed." : "{folder}, {file}, {line} and {column} are replaced; an argument with {file} is left out when a folder is opened.")}</p>}>
         <InputGroup id="settings-external-editor-arguments" value={args} disabled={busy} spellCheck={false} placeholder="{folder}"

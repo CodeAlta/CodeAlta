@@ -58,14 +58,14 @@ export function AppearanceSettings({ theme, setTheme, darker, setDarker, schemes
   return <>
     <Card className="appearance-settings" aria-labelledby="settings-theme-title">
     <h2 id="settings-theme-title">{t("Theme and colors")}</h2>
-    <Field label={t("Theme")}
+    <Field setting="appearance.theme" label={t("Theme")}
       notice={notices.theme && <p role="status" className="notice" data-diagnostic={notices.theme}>{preferenceNotice(locale, "Theme", locale === "en" ? "dark" : t("Dark"), notices.theme)}</p>}>
       <ButtonGroup role="group" aria-label={t("Theme")}>
         {themes.map(value => <Button key={value} active={theme === value} aria-pressed={theme === value}
           icon={<AppIcon name={themeIcons[value]} size={15} />} onClick={() => setTheme(value)}>{t(themeLabel(value))}</Button>)}
       </ButtonGroup>
     </Field>
-    <Field label={t("Darker dark theme")} htmlFor="settings-darker">
+    <Field setting="appearance.darker" label={t("Darker dark theme")} htmlFor="settings-darker">
       <Switch id="settings-darker" className="settings-checkbox" checked={darker} disabled={theme === "light"} onChange={event => setDarker(event.currentTarget.checked)} />
     </Field>
     <ColorSchemeSettings {...schemes}
@@ -74,32 +74,32 @@ export function AppearanceSettings({ theme, setTheme, darker, setDarker, schemes
     <FontSettings />
     <Card className="appearance-settings" aria-labelledby="settings-explorer-title">
     <h2 id="settings-explorer-title">{t("Explorer")}</h2>
-    <Field label={t("Sort projects")} htmlFor="settings-project-sort"
+    <Field setting="appearance.project_sort" label={t("Sort projects")} htmlFor="settings-project-sort"
       notice={notices.sort && <p role="status" className="notice" data-diagnostic={notices.sort}>{preferenceNotice(locale, "Project sort", locale === "en" ? "name" : t("Name"), notices.sort)}</p>}>
       <HTMLSelect id="settings-project-sort" value={sort} onChange={event => setSort(event.target.value as ProjectSort)}>
         <option value="name">{t("Name")}</option><option value="recent">{t("Recent visible updates")}</option>
       </HTMLSelect>
     </Field>
-    <Field label={t("Recent session display count (1–50)")} htmlFor="settings-recent-count"
+    <Field setting="appearance.recent_sessions" label={t("Recent session display count (1–50)")} htmlFor="settings-recent-count"
       notice={notices.recent && <p role="status" className="notice" data-diagnostic={notices.recent}>{preferenceNotice(locale, "Recent session count", String(defaultRecentSessionCount), notices.recent)}</p>}>
       <HTMLSelect id="settings-recent-count" value={recentSessionCount} onChange={event => setRecentSessionCount(Number(event.target.value))}>
         {Array.from({ length: 50 }, (_, i) => <option key={i + 1} value={i + 1}>{i + 1}</option>)}
       </HTMLSelect>
     </Field>
-    <Field label={t("Sub-agent display count (1–50)")} htmlFor="settings-sub-agent-count"
+    <Field setting="appearance.sub_agents" label={t("Sub-agent display count (1–50)")} htmlFor="settings-sub-agent-count"
       notice={notices.subAgents && <p role="status" className="notice" data-diagnostic={notices.subAgents}>{preferenceNotice(locale, "Sub-agent count", String(defaultSubAgentCount), notices.subAgents)}</p>}>
       <HTMLSelect id="settings-sub-agent-count" value={subAgentCount} onChange={event => setSubAgentCount(Number(event.target.value))}>
         {Array.from({ length: 50 }, (_, i) => <option key={i + 1} value={i + 1}>{i + 1}</option>)}
       </HTMLSelect>
     </Field>
-    <Field label={t("Collapse desktop project rail")} htmlFor="settings-rail-collapsed"
+    <Field setting="appearance.collapse_rail" label={t("Collapse desktop project rail")} htmlFor="settings-rail-collapsed"
       notice={notices.rail && <p role="status" className="notice" data-diagnostic={notices.rail}>{preferenceNotice(locale, "Desktop projects", locale === "en" ? "expanded" : t("Show projects"), notices.rail)}</p>}>
       <Switch id="settings-rail-collapsed" className="settings-checkbox" checked={desktopCollapsed} onChange={event => setDesktopCollapsed(event.currentTarget.checked)} />
     </Field>
     </Card>
     <Card className="appearance-settings" aria-labelledby="settings-conversation-title">
     <h2 id="settings-conversation-title">{t("Conversation and changes")}</h2>
-    {sessionWidth !== undefined && setSessionWidth && <Field label={t("Width of the conversation")}>
+    {sessionWidth !== undefined && setSessionWidth && <Field setting="appearance.session_width" label={t("Width of the conversation")}>
       <div className="settings-session-width">
         <SessionWidthSlider value={sessionWidth} label={t("Width of the conversation")} onChange={setSessionWidth} />
         <output>{sessionWidth}%</output>

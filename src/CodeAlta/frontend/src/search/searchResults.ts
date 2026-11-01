@@ -9,14 +9,14 @@ import type { SkillResult } from "./skillResults";
  * skills of the project in front, which it asks the session in front to use, and the archived sessions, which it
  * restores.
  */
-export type SearchCategory = "all" | "sessions" | "conversations" | "projects" | "files" | "commands" | "skills" | "docs" | "tools" | "archived";
-export const searchCategories: readonly SearchCategory[] = ["all", "sessions", "conversations", "projects", "files", "commands", "skills", "docs", "tools", "archived"];
+export type SearchCategory = "all" | "sessions" | "conversations" | "projects" | "files" | "commands" | "settings" | "skills" | "docs" | "tools" | "archived";
+export const searchCategories: readonly SearchCategory[] = ["all", "sessions", "conversations", "projects", "files", "commands", "settings", "skills", "docs", "tools", "archived"];
 /** The groups of the results, in the order they are shown when their best matches are as good. */
 export type SearchGroup = Exclude<SearchCategory, "all">;
-export const searchGroups: readonly SearchGroup[] = ["sessions", "conversations", "projects", "files", "commands", "skills", "docs", "tools", "archived"];
+export const searchGroups: readonly SearchGroup[] = ["sessions", "conversations", "projects", "files", "commands", "settings", "skills", "docs", "tools", "archived"];
 
 /** How many results of a group are shown when every category is searched, and at most when one is. */
-export const groupPreview: Readonly<Record<SearchGroup, number>> = { projects: 5, sessions: 7, conversations: 6, files: 6, commands: 6, skills: 6, docs: 4, tools: 4, archived: 5 };
+export const groupPreview: Readonly<Record<SearchGroup, number>> = { projects: 5, sessions: 7, conversations: 6, files: 6, commands: 6, settings: 5, skills: 6, docs: 4, tools: 4, archived: 5 };
 export const categoryLimit = 200;
 /** The commands that start something, by their slash name: they come first when nothing is typed. */
 export const suggestedCommands: readonly string[] = ["new_session", "open", "terminal", "editor", "settings", "help"];
@@ -90,7 +90,9 @@ export type CommandResult = Readonly<{ kind: "command"; key: string; score: numb
 /** A Claude Code session started in VS Code or a terminal, not in CodeAlta yet: found among the sessions. */
 export type ClaudeCodeResult = Readonly<{ kind: "claude-code"; key: string; score: number; conversation: WorkspaceClaudeCodeConversation; project: WorkspaceProject | null;
   providerId: string | null }>;
-export type SearchResult = ProjectResult | SessionResult | FileResult | CommandResult | SkillResult | ContentResult | ClaudeCodeResult;
+/** A setting, or a page of Settings: choosing it opens Settings on its page, with the setting glowing. */
+export type SettingResult = Readonly<{ kind: "setting"; key: string; score: number; label: string; path: string; description: string | null; page: boolean; run: () => void }>;
+export type SearchResult = ProjectResult | SessionResult | FileResult | CommandResult | SettingResult | SkillResult | ContentResult | ClaudeCodeResult;
 
 const byName = (left: string, right: string) => left.localeCompare(right, undefined, { sensitivity: "base" });
 const updated = (session: WorkspaceSession) => Date.parse(session.updatedAt) || 0;

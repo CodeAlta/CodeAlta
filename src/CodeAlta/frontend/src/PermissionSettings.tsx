@@ -34,14 +34,14 @@ export function PermissionSettings({ permissions, confirms, tools = null }: {
       <p>{t("What the sessions do without asking you.")}</p></header>
     <div className="settings-grid"><Card className="appearance-settings" aria-labelledby="settings-agent-permissions-title">
       <h2 id="settings-agent-permissions-title">{t("Agent permissions")}</h2>
-      <Field label={t("Default mode")} htmlFor="settings-permission-mode"
+      <Field setting="permissions.default_mode" label={t("Default mode")} htmlFor="settings-permission-mode"
         notice={<p className="settings-field-help">{t(permissionModeDescription(mode)!)} {t("A session can have a mode of its own.")}</p>}>
         <HTMLSelect id="settings-permission-mode" value={mode} disabled={!permissions}
           onChange={event => permissions?.set(event.target.value === askPermissionMode)}>
           {[bypassPermissionMode, askPermissionMode].map(value => <option key={value} value={value}>{t(permissionModeName(value)!)}</option>)}
         </HTMLSelect>
       </Field>
-      <Field label={t("Sessions created by agents")} htmlFor="settings-permission-created"
+      <Field setting="permissions.created_sessions" label={t("Sessions created by agents")} htmlFor="settings-permission-created"
         notice={<p className="settings-field-help">{t(permissions?.inherit
           ? "A session an agent creates asks what the session that creates it asks."
           : "A session an agent creates does not ask you.")}</p>}>
@@ -56,13 +56,13 @@ export function PermissionSettings({ permissions, confirms, tools = null }: {
     <Card className="appearance-settings" aria-labelledby="settings-confirmations-title">
       <h2 id="settings-confirmations-title">{t("Confirmations")}</h2>
       <p className="settings-field-help">{t("These confirmations apply to manual actions, not automatic session retention.")}</p>
-      <Field label={t("Ask before deleting a session")} htmlFor="settings-confirm-session-delete">
+      <Field setting="permissions.confirm_session_delete" label={t("Ask before deleting a session")} htmlFor="settings-confirm-session-delete">
         <Switch id="settings-confirm-session-delete" className="settings-checkbox" checked={confirms.sessionDelete} onChange={event => confirms.set("sessionDelete", event.currentTarget.checked)} />
       </Field>
-      <Field label={t("Ask before archiving a project")} htmlFor="settings-confirm-project-archive">
+      <Field setting="permissions.confirm_project_archive" label={t("Ask before archiving a project")} htmlFor="settings-confirm-project-archive">
         <Switch id="settings-confirm-project-archive" className="settings-checkbox" checked={confirms.projectArchive} onChange={event => confirms.set("projectArchive", event.currentTarget.checked)} />
       </Field>
-      <Field label={t("Ask before stopping a plugin whose agents are at work")} htmlFor="settings-confirm-plugin-stop">
+      <Field setting="permissions.confirm_plugin_stop" label={t("Ask before stopping a plugin whose agents are at work")} htmlFor="settings-confirm-plugin-stop">
         <Switch id="settings-confirm-plugin-stop" className="settings-checkbox" checked={confirms.pluginStop} onChange={event => confirms.set("pluginStop", event.currentTarget.checked)} />
       </Field>
     </Card></div>
@@ -75,7 +75,7 @@ function ToolSettings({ epoch, api }: { epoch: string; api: Pick<typeof globalCo
   const { listing, busy, notice, mutate } = useSettingsEditor(options => api.disabledTools({ expectedEpoch: epoch }, options), epoch);
   return <Card className="appearance-settings" aria-labelledby="settings-tools-title">
     <h2 id="settings-tools-title">{t("Tools")}</h2>
-    <Field label={t("Tools turned off")}
+    <Field setting="tools.disabled" label={t("Tools turned off")}
       notice={<p className="settings-field-help" role={notice?.intent === "danger" ? "alert" : undefined}>
         {notice && notice.intent !== "success" ? t(notice.key) : t("Every session does without them, whatever its space and its agent.")}</p>}>
       <DisabledToolsField tools={listing?.tools ?? []} known={listing?.known ?? builtInToolNames} disabled={!listing || busy} label={t("Tools turned off")}
