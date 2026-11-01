@@ -1,0 +1,135 @@
+// The commands and events of the Chrome DevTools Protocol that CodeAlta's browser tools use. Add a name here and run the
+// generator again to use another one; only these and the types they reach are generated.
+{
+  "commands": [
+    "Browser.getVersion",
+    "Browser.close",
+    "Browser.getWindowForTarget",
+    "Browser.getWindowBounds",
+    "Browser.setWindowBounds",
+    "Browser.setDownloadBehavior",
+
+    "Target.createTarget",
+    "Target.closeTarget",
+    "Target.activateTarget",
+    "Target.attachToTarget",
+    "Target.detachFromTarget",
+    "Target.getTargets",
+    "Target.getTargetInfo",
+    "Target.setDiscoverTargets",
+    "Target.setAutoAttach",
+    "Target.createBrowserContext",
+    "Target.disposeBrowserContext",
+
+    "Page.enable",
+    "Page.navigate",
+    "Page.reload",
+    "Page.getNavigationHistory",
+    "Page.navigateToHistoryEntry",
+    "Page.captureScreenshot",
+    "Page.getLayoutMetrics",
+    "Page.handleJavaScriptDialog",
+    "Page.createIsolatedWorld",
+    "Page.getFrameTree",
+    "Page.bringToFront",
+    "Page.addScriptToEvaluateOnNewDocument",
+    "Page.removeScriptToEvaluateOnNewDocument",
+    "Page.setLifecycleEventsEnabled",
+    "Page.setInterceptFileChooserDialog",
+
+    "Runtime.enable",
+    "Runtime.evaluate",
+    "Runtime.callFunctionOn",
+    "Runtime.releaseObject",
+    "Runtime.runIfWaitingForDebugger",
+
+    "DOM.enable",
+    "DOM.describeNode",
+    "DOM.resolveNode",
+    "DOM.setFileInputFiles",
+    "DOM.getFrameOwner",
+
+    "Input.dispatchMouseEvent",
+    "Input.dispatchKeyEvent",
+    "Input.insertText",
+    "Input.setInterceptDrags",
+    "Input.dispatchDragEvent",
+
+    "Network.enable",
+    "Network.getResponseBody",
+    "Network.getRequestPostData",
+    "Network.emulateNetworkConditions",
+    "Network.setExtraHTTPHeaders",
+    "Network.setCacheDisabled",
+
+    "Fetch.enable",
+    "Fetch.disable",
+    "Fetch.continueRequest",
+    "Fetch.failRequest",
+
+    "Emulation.setDeviceMetricsOverride",
+    "Emulation.clearDeviceMetricsOverride",
+    "Emulation.setEmulatedMedia",
+    "Emulation.setCPUThrottlingRate",
+    "Emulation.setGeolocationOverride",
+    "Emulation.clearGeolocationOverride",
+    "Emulation.setUserAgentOverride",
+    "Emulation.setTouchEmulationEnabled",
+    "Emulation.setFocusEmulationEnabled",
+
+    "Log.enable",
+
+    "Tracing.start",
+    "Tracing.end",
+    "IO.read",
+    "IO.close",
+
+    "HeapProfiler.enable",
+    "HeapProfiler.disable",
+    "HeapProfiler.takeHeapSnapshot"
+  ],
+  "events": [
+    "Target.attachedToTarget",
+    "Target.detachedFromTarget",
+    "Target.targetCreated",
+    "Target.targetDestroyed",
+    "Target.targetInfoChanged",
+    "Target.targetCrashed",
+
+    "Page.javascriptDialogOpening",
+    "Page.javascriptDialogClosed",
+    "Page.frameNavigated",
+    "Page.frameStartedLoading",
+    "Page.frameStoppedLoading",
+    "Page.frameRequestedNavigation",
+    "Page.frameStartedNavigating",
+    "Page.navigatedWithinDocument",
+    "Page.loadEventFired",
+    "Page.domContentEventFired",
+    "Page.frameDetached",
+    "Page.fileChooserOpened",
+
+    "Runtime.executionContextCreated",
+    "Runtime.executionContextDestroyed",
+    "Runtime.executionContextsCleared",
+    "Runtime.consoleAPICalled",
+    "Runtime.exceptionThrown",
+
+    "Input.dragIntercepted",
+
+    "Network.requestWillBeSent",
+    "Network.responseReceived",
+    "Network.loadingFinished",
+    "Network.loadingFailed",
+
+    "Fetch.requestPaused",
+
+    "Log.entryAdded",
+
+    "Tracing.tracingComplete",
+
+    "HeapProfiler.addHeapSnapshotChunk",
+
+    "Browser.downloadWillBegin"
+  ]
+}

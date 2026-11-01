@@ -143,6 +143,37 @@ public sealed partial class SessionRuntimeService
         return sandbox.IsSandboxed ? sandbox.Profile?.McpServers ?? [] : null;
     }
 
+    /// <summary>
+    /// Gets what the sandbox of a session lets a program that CodeAlta runs for it outside the container reach, such as the
+    /// browser of the session: the folders of its policy and the network of its profile. Null for a session that is not
+    /// sandboxed; a sandbox that cannot run reaches no folder and no network.
+    /// </summary>
+    /// <param name="sessionId">The session.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The reach, or null.</returns>
+    /// <exception cref="ArgumentException"><paramref name="sessionId"/> is blank.</exception>
+    public async Task<SessionSandboxReach?> GetSandboxReachAsync(string sessionId, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
+        var sandbox = await GetSessionSandboxAsync(sessionId, cancellationToken).ConfigureAwait(false);
+        if (!sandbox.IsSandboxed) return null;
+        var name = sandbox.Profile?.Name ?? sandbox.Choice.Profile ?? "?";
+        if (sandbox.Profile is not { } profile || !_entries.TryGetValue(sessionId, out var entry) || entry.IsTerminated)
+        {
+            return new SessionSandboxReach(name, [], [], SandboxNetwork.Off, [], [], ReservedSandboxPorts);
+        }
+
+        var start = await SandboxStartOfAsync(sessionId, entry.ProviderKey, profile, entry.WorktreeDirectory ?? entry.WorkingDirectory, entry.ProjectRoots, environment: null,
+            commandGuard: false, cancellationToken).ConfigureAwait(false);
+        var policy = SandboxWorkers.PolicyOf(start);
+        return new SessionSandboxReach(policy.ProfileName, [.. policy.ReadWrite, .. profile.Read], policy.ReadWrite, policy.Network,
+            policy.Network == SandboxNetwork.On ? null : policy.Hosts, policy.LocalPorts, ReservedSandboxPorts)
+        {
+            Denied = policy.Denied,
+            Protected = policy.Protected,
+        };
+    }
+
     // The note a run carries about the sandbox of its session: what it allows, when the agent was told something else, or
     // nothing yet while it is sandboxed. Null when there is nothing to tell. The instructions stay the same: their text
     // is what the provider keeps in its cache.

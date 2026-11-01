@@ -12,6 +12,7 @@ The architecture of CodeAlta for maintainers and agents: what each part owns, ho
 | [`alta` live tool](live-tool.md) | The commands agents call, their contract and their safety rules. |
 | [Plugins](plugins.md) | Source plugins, contributions, the plugin side of the window, built-in plugins. |
 | [MCP](mcp.md) | MCP servers: configuration, tools, apps and skills of servers. |
+| [Browser](browser.md) | The drivers of real browsers, how a session's browser is chosen and owned, consent, the sandbox rules. |
 | [Skills](skills.md) | Skill discovery, precedence and activation. |
 | [CodeAlta Desktop](desktop.md) | The host, the RPC, the React page, windows, security boundaries, native workers. |
 | [Statistics](statistics.md) | How the statistics read journals and keep their facts. |

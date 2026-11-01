@@ -64,6 +64,7 @@
     <ProjectReference Include="..\CodeAlta.Orchestration\CodeAlta.Orchestration.csproj" />
     <ProjectReference Include="..\CodeAlta.Catalog\CodeAlta.Catalog.csproj" />
     <ProjectReference Include="..\CodeAlta.Plugin.Acp\CodeAlta.Plugin.Acp.csproj" />
+    <ProjectReference Include="..\CodeAlta.Plugin.Browser\CodeAlta.Plugin.Browser.csproj" />
     <ProjectReference Include="..\CodeAlta.Plugin.CodexCli\CodeAlta.Plugin.CodexCli.csproj" />
     <ProjectReference Include="..\CodeAlta.Plugin.Git\CodeAlta.Plugin.Git.csproj" />
     <ProjectReference Include="..\CodeAlta.Plugin.Jira\CodeAlta.Plugin.Jira.csproj" />

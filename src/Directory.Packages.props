@@ -42,6 +42,8 @@
     <PackageVersion Include="SkiaSharp.NativeAssets.macOS" Version="3.119.4" />
     <PackageVersion Include="SkiaSharp.NativeAssets.Win32" Version="3.119.4" />
     <PackageVersion Include="Tomlyn" Version="2.10.1" />
+    <!-- WebDriver BiDi for Firefox in CodeAlta.Browser: 0.x with one main author, so pinned and wrapped behind IBrowserDriver. -->
+    <PackageVersion Include="WebDriverBiDi" Version="0.0.63" />
     <PackageVersion Include="XenoAtom.CommandLine.Terminal" Version="2.0.3" />
     <PackageVersion Include="XenoAtom.Logging.Terminal" Version="1.2.0" />
     <PackageVersion Include="XenoAtom.Glob" Version="1.0.1" />

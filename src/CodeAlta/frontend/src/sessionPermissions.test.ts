@@ -11,7 +11,7 @@ function command(): SessionPermissionCommand {
   return { handle: { operationId: epoch, runtimeInstanceId: runtime, attachmentGeneration: "9223372036854775807",
     sessionId: "selected", runId: null, interactionId: "interaction", attemptId: epoch },
     providerId: "fake", kind: "commandExecution", command: "inert command\ncomplete", workingDirectory: "Q:\\fixture",
-    grantRoot: null, reason: null, shortened: false, outsideSandbox: false, skill: null };
+    grantRoot: null, reason: null, shortened: false, outsideSandbox: false, skill: null, browser: null };
 }
 function fileChange(): SessionPermissionCommand {
   return { ...command(), kind: "fileChange", command: null, workingDirectory: null, grantRoot: "Q:\\fixture" };
@@ -245,6 +245,29 @@ test("a skill of an MCP server is reviewed by its skill, and only one whose file
   // A skill request is held to its own shape, and no other kind carries a skill.
   for (const bad of [{ ...skill(false), command: "x" }, { ...skill(false), skill: null }, { ...command(), skill: skill(false).skill },
     { ...skill(false), skill: { ...skill(false).skill!, server: "ba d\n" } }, { ...skill(false), skill: { ...skill(false).skill!, fileCount: -1 } }]) {
+    const states: PermissionReviewState[] = [];
+    await f.wait(f.reviewer(async () => page([bad])).forSelection(request, f.controller().signal, value => states.push(value)).refresh());
+    assert.deepEqual(states.at(-1), { kind: "error", code: "invalid_response", reloadRequired: false });
+  }
+}));
+
+test("the user's browser is allowed for the session, and a site of it also from now on", () => Fixture.run(async f => {
+  const browser = (site: string | null): SessionPermissionCommand => ({ ...command(), kind: "browser", command: null, workingDirectory: null,
+    browser: { browser: "Microsoft Edge", profile: "Default", site } });
+  assert.equal(offersAllowAlways(browser("example.com")), true);
+  assert.equal(offersAllowAlways(browser(null)), false);
+  for (const [entry, decision, sent] of [[browser("example.com"), "allow_always", true], [browser(null), "allow_always", false], [browser(null), "allow_once", true]] as const) {
+    const states: PermissionReviewState[] = []; const decisions: string[] = [];
+    const scope = f.reviewer(async () => page([entry]),
+        async requested => { decisions.push(requested.decision); return { status: "resolved", hostEpoch: epoch, handle: requested.handle }; })
+      .forSelection(request, f.controller().signal, value => states.push(value));
+    await f.wait(scope.refresh());
+    await f.wait(scope.decide(ready(states).entries[0]!, decision));
+    assert.deepEqual(decisions, sent ? [decision] : []);
+  }
+  // A browser request is held to its own shape, and no other kind carries a browser.
+  for (const bad of [{ ...browser(null), command: "x" }, { ...browser(null), browser: null }, { ...command(), browser: browser(null).browser },
+    { ...browser(null), browser: { ...browser(null).browser!, profile: "" } }, { ...browser("a b\n"), skill: null }]) {
     const states: PermissionReviewState[] = [];
     await f.wait(f.reviewer(async () => page([bad])).forSelection(request, f.controller().signal, value => states.push(value)).refresh());
     assert.deepEqual(states.at(-1), { kind: "error", code: "invalid_response", reloadRequired: false });
