@@ -6159,8 +6159,12 @@ public sealed partial class AgentSessionTests
                 });
     }
 
-    private sealed class ScriptedTurnExecutor : IModelProviderTurnExecutor, IModelProviderModelCatalog
+    private sealed class ScriptedTurnExecutor : IModelProviderTurnExecutor, IModelProviderModelCatalog, IAgentProviderScriptTools
     {
+        public Func<string, string?>? ScriptRefusal { get; init; }
+
+        public string? RefuseInScript(string sessionId, string toolName) => ScriptRefusal?.Invoke(toolName);
+
         private readonly IReadOnlyList<AgentModelInfo> _models;
         private readonly Func<AgentTurnRequest, Func<AgentTurnDelta, CancellationToken, ValueTask>, CancellationToken, Task<AgentTurnResponse>>? _summaryHandler;
         private readonly Queue<Func<AgentTurnRequest, Func<AgentTurnDelta, CancellationToken, ValueTask>, CancellationToken, Task<AgentTurnResponse>>> _steps;

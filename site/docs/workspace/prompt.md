@@ -96,6 +96,7 @@ The **Permissions** row of the picker sets what the session asks before it acts.
 
 - **Default** is the mode of the provider, or else that of **Settings > Permissions** (see [Tool permissions](settings.md#tool-permissions)).
 - A mode applies at once, also to a running turn and to a request that waits. It stays with the session until you switch provider.
+- With **Auto** and **Don't ask**, what the agent changes and runs goes through Claude Code's own tools: [scripts](../sessions/code-mode.md) cannot do it for them.
 - An agent sets the mode of a session it creates with `alta session create --permission-mode <mode>` (`default`, `acceptEdits`, `bypassPermissions`, and for Claude Code `auto` and `dontAsk`), never one that asks less than its own.
 
 ## Attachments

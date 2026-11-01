@@ -384,6 +384,114 @@ public sealed class ClaudeCodeTurnExecutorTests
     }
 
     [TestMethod]
+    [DataRow("auto", true)]
+    [DataRow("dontAsk", true)]
+    [DataRow("default", false)]
+    [DataRow("acceptEdits", false)]
+    [DataRow("bypassPermissions", false)]
+    public async Task RefuseInScript_RefusesWhatChanges_OnlyInTheModesWhereTheCliDecides(string mode, bool refused)
+    {
+        await using var executor = new ClaudeCodeTurnExecutor(new ClaudeCodeFakeCli().CreateOptions());
+        IAgentProviderScriptTools tools = executor;
+        var request = CreateRequest([User("one")]) with { PermissionMode = mode };
+        Assert.IsNull(tools.RefuseInScript(request.SessionId, "write_file"), "No turn ran yet.");
+
+        await ExecuteAsync(executor, request);
+
+        foreach (var tool in new[] { "write_file", "replace_in_file", "delete_file_or_dir", "rename_file_or_dir", "apply_patch", "shell_command" })
+        {
+            Assert.AreEqual(refused, tools.RefuseInScript(request.SessionId, tool) is not null, tool);
+        }
+
+        foreach (var tool in new[] { "read_file", "grep", "list_dir", "alta", "some_plugin_tool" })
+        {
+            Assert.IsNull(tools.RefuseInScript(request.SessionId, tool), tool);
+        }
+    }
+
+    [TestMethod]
+    public async Task RefuseInScript_NamesTheToolToUse_AndFollowsAModeChosenSince()
+    {
+        await using var executor = new ClaudeCodeTurnExecutor(new ClaudeCodeFakeCli().CreateOptions());
+        IAgentProviderScriptTools tools = executor;
+        var request = CreateRequest([User("one")]) with { PermissionMode = "auto" };
+        await ExecuteAsync(executor, request);
+
+        StringAssert.Contains(tools.RefuseInScript(request.SessionId, "replace_in_file"), "Edit");
+        StringAssert.Contains(tools.RefuseInScript(request.SessionId, "shell_command"), "Bash");
+
+        // The session takes the mode whether or not a CLI still runs to be told.
+        await ((IAgentProviderPermissionMode)executor).SetRunningPermissionModeAsync(request.SessionId, "bypassPermissions", CancellationToken.None);
+        Assert.IsNull(tools.RefuseInScript(request.SessionId, "replace_in_file"), "A mode chosen since applies at once.");
+    }
+
+    [TestMethod]
+    public async Task RefuseInScript_FollowsTheModeOfTheProvider_AndLeavesASessionWithoutAMode()
+    {
+        var cli = new ClaudeCodeFakeCli();
+        await using var configured = new ClaudeCodeTurnExecutor(new ClaudeCodeModelProviderRuntimeOptions
+        {
+            ProviderKey = "claude-code",
+            TransportFactory = cli,
+            LocateTranscript = cli.LocateTranscript,
+            ResolveCli = cli.CreateOptions().ResolveCli,
+            IdleTimeout = TimeSpan.Zero,
+            PermissionMode = "auto",
+        });
+        var request = CreateRequest([User("one")]);
+        await ExecuteAsync(configured, request);
+        Assert.IsNotNull(configured.RefuseInScript(request.SessionId, "write_file"));
+
+        // Without a mode, the policy of the host answers what a script does, as before.
+        await using var unconfigured = new ClaudeCodeTurnExecutor(new ClaudeCodeFakeCli { SettingsPermissionMode = "auto" }.CreateOptions());
+        await ExecuteAsync(unconfigured, request);
+        Assert.IsNull(unconfigured.RefuseInScript(request.SessionId, "write_file"));
+    }
+
+    [TestMethod]
+    [DataRow("auto", true)]
+    [DataRow("dontAsk", true)]
+    [DataRow("bypassPermissions", false)]
+    [DataRow("acceptEdits", false)]
+    [DataRow("default", false)]
+    [DataRow(null, false)]
+    public async Task AppendSystemPrompt_LeavesChangesToItsOwnTools_OnlyWhereScriptsAreRefused(string? mode, bool told)
+    {
+        var cli = new ClaudeCodeFakeCli();
+        await using var executor = new ClaudeCodeTurnExecutor(cli.CreateOptions());
+        await ExecuteAsync(executor, CreateRequest([User("one")]) with { PermissionMode = mode, Tools = [Tool("alta"), Tool("exec"), Tool("wait")] });
+        var prompt = cli.Last.InitializeRequest.GetProperty("appendSystemPrompt").GetString()!;
+        Assert.AreEqual(told, prompt.Contains("Scripts of `exec`", StringComparison.Ordinal), "Elsewhere scripts stay the efficient way to batch edits.");
+    }
+
+    [TestMethod]
+    public async Task AppendSystemPrompt_SaysNothingOfScripts_WithoutExec()
+    {
+        var cli = new ClaudeCodeFakeCli();
+        await using var executor = new ClaudeCodeTurnExecutor(cli.CreateOptions());
+        await ExecuteAsync(executor, CreateRequest([User("one")]) with { PermissionMode = "auto", Tools = [Tool("alta")] });
+        Assert.DoesNotContain("Scripts of `exec`", cli.Last.InitializeRequest.GetProperty("appendSystemPrompt").GetString()!);
+    }
+
+    [TestMethod]
+    public async Task AModeChosenLater_TellsTheConversationAtItsNextPrompt_BothWays()
+    {
+        var cli = new ClaudeCodeFakeCli();
+        await using var executor = new ClaudeCodeTurnExecutor(cli.CreateOptions());
+        AgentToolDefinition[] tools = [Tool("alta"), Tool("exec"), Tool("wait")];
+        var first = await ExecuteAsync(executor, CreateRequest([User("one")]) with { PermissionMode = "bypassPermissions", Tools = tools });
+        Assert.DoesNotContain("Scripts of `exec`", cli.Last.InitializeRequest.GetProperty("appendSystemPrompt").GetString()!);
+
+        var second = await ExecuteAsync(executor, CreateRequest([User("one"), first.AssistantMessage, User("two")], first) with { PermissionMode = "auto", Tools = tools });
+        StringAssert.Contains(ClaudeCodeFakeProcess.UserText(cli.Last.UserMessages[^1]), "Scripts of `exec`", "Auto: the scripts leave changes to its own tools.");
+
+        await ExecuteAsync(executor, CreateRequest([User("one"), first.AssistantMessage, User("two"), second.AssistantMessage, User("three")], second) with { PermissionMode = "bypassPermissions", Tools = tools });
+        var back = ClaudeCodeFakeProcess.UserText(cli.Last.UserMessages[^1]);
+        StringAssert.Contains(back, "<codealta_instructions_update>", "Back in Bypass: the conversation is told to drop that instruction.");
+        Assert.DoesNotContain("Scripts of `exec`", back);
+    }
+
+    [TestMethod]
     public async Task PermissionMode_IsSentBeforeEachTurn_WhileRemoteControlIsOn()
     {
         var cli = new ClaudeCodeFakeCli();

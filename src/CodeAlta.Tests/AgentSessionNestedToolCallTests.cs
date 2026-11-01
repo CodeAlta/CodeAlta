@@ -23,6 +23,56 @@ public sealed partial class AgentSessionTests
         });
 
     [TestMethod]
+    public async Task NestedCall_TheProviderRefuses_DoesNotRunAndAsksNothing_AndTheOthersRun()
+    {
+        using var temp = TestTempDirectory.Create();
+        var workspace = Path.Combine(temp.Path, "workspace");
+        Directory.CreateDirectory(workspace);
+        var store = new FileSystemAgentSessionStore(new AgentRuntimePathLayout(Path.Combine(temp.Path, "machine", "agents")));
+        var provider = CreateProvider();
+        var summary = CreateSummary("session-nested-refused") with { WorkingDirectory = workspace };
+        var state = CreateState(summary.SessionId);
+        await store.UpsertSessionAsync(summary);
+        await store.UpsertStateAsync(state);
+        await File.WriteAllTextAsync(Path.Combine(workspace, "kept.txt"), "kept");
+
+        var permissions = new ConcurrentQueue<string>();
+        AgentToolResult? write = null, read = null;
+        var script = ScriptTool(async (tools, cancellationToken) =>
+        {
+            write = await tools.InvokeAsync(new AgentNestedToolCall("write_file", Json("""{"path":"created.txt","content":"hello"}""")), cancellationToken);
+            read = await tools.InvokeAsync(new AgentNestedToolCall("read_file", Json("""{"path":"kept.txt"}""")), cancellationToken);
+            return new AgentToolResult(true, [new AgentToolResultItem.Text("script done")]);
+        });
+        await using var session = new AgentSession(ModelProviderIds.OpenAIResponses, provider, summary, state, [], store,
+            new ScriptedTurnExecutor(
+                CallScript(),
+                static (_, _, _) => Task.FromResult(new AgentTurnResponse { AssistantMessage = new(AgentConversationRole.Assistant, [new AgentMessagePart.Text("Done.")]) }))
+            {
+                ScriptRefusal = static toolName => toolName == "write_file" ? "Use your own tool." : null,
+            },
+            new AgentSessionCreateOptions
+            {
+                ProviderKey = provider.ProviderKey,
+                Model = "gpt-5.4",
+                WorkingDirectory = workspace,
+                OnPermissionRequest = (request, _) =>
+                {
+                    permissions.Enqueue(request.GetType().Name);
+                    return Task.FromResult(new AgentPermissionDecision(AgentPermissionDecisionKind.AllowOnce));
+                },
+            });
+
+        await session.SendAsync(new() { Input = AgentInput.Text("Work"), AdditionalTools = [script] });
+
+        Assert.IsFalse(write!.Success);
+        Assert.AreEqual("Use your own tool.", write.Error);
+        Assert.IsFalse(File.Exists(Path.Combine(workspace, "created.txt")));
+        Assert.IsTrue(permissions.IsEmpty, "a refused call asks the user nothing");
+        Assert.IsTrue(read!.Success);
+    }
+
+    [TestMethod]
     public async Task NestedCalls_TakeThePathOfTheModelsCalls_AndAreActivitiesOfTheirToolCall()
     {
         using var temp = TestTempDirectory.Create();

@@ -104,6 +104,20 @@ public interface IAgentProviderPermissionMode
 }
 
 /// <summary>
+/// A turn executor whose provider has tools of its own and decides by itself what they may do (an agent CLI in a
+/// permission mode that judges each use of a tool): a call of a script to a tool of the session would not reach that
+/// decision.
+/// </summary>
+public interface IAgentProviderScriptTools
+{
+    /// <summary>Gets why a script of a session may not call a tool now.</summary>
+    /// <param name="sessionId">The session.</param>
+    /// <param name="toolName">The name of the tool.</param>
+    /// <returns>What the script is answered, or null when the call runs.</returns>
+    string? RefuseInScript(string sessionId, string toolName);
+}
+
+/// <summary>
 /// A turn executor whose provider goes on working for a session in the background, outside its turns (an agent
 /// CLI with a command that still runs).
 /// </summary>

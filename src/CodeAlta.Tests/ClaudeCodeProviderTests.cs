@@ -202,6 +202,32 @@ public sealed class ClaudeCodeProviderTests
         Assert.DoesNotContain("`webget`, `shell_command`", prompt, "the shell of CodeAlta is part of the session then");
     }
 
+    [TestMethod]
+    public void AppendSystemPrompt_SendsChangesToItsOwnTools_NotToTheScriptsOfExec()
+    {
+        var refused = ClaudeCodePrompts.CreateAppendSystemPrompt(null, hasGateway: true, hasShell: true, shellOfCodeAlta: false, scriptsRefuseChanges: true);
+        StringAssert.Contains(refused, "Scripts of `exec`");
+        StringAssert.Contains(refused, "`tools.replace_in_file`");
+        StringAssert.Contains(refused, "`tools.shell_command`");
+
+        // Where commands run with the shell of CodeAlta, a script runs them too: only the file changes go to its own tools.
+        var withShellOfCodeAlta = ClaudeCodePrompts.CreateAppendSystemPrompt(null, hasGateway: true, hasShell: true, shellOfCodeAlta: true, scriptsRefuseChanges: true);
+        StringAssert.Contains(withShellOfCodeAlta, "`tools.replace_in_file`");
+        Assert.DoesNotContain("`tools.shell_command`", withShellOfCodeAlta);
+
+        var batched = ClaudeCodePrompts.CreateAppendSystemPrompt(null, hasGateway: true, hasShell: true, shellOfCodeAlta: false, scriptsRefuseChanges: false);
+        Assert.DoesNotContain("Scripts of `exec`", batched);
+    }
+
+    [TestMethod]
+    public void ScriptRefusal_LeavesTheShellOfCodeAlta_WhereCommandsRunWithIt()
+    {
+        Assert.IsNull(ClaudeCodePrompts.ScriptRefusal("auto", "shell_command", commandsThroughCodeAlta: true), "no shell of its own takes the command");
+        Assert.IsNotNull(ClaudeCodePrompts.ScriptRefusal("auto", "write_file", commandsThroughCodeAlta: true));
+        Assert.IsNotNull(ClaudeCodePrompts.ScriptRefusal("auto", "shell_command", commandsThroughCodeAlta: false));
+        Assert.IsNull(ClaudeCodePrompts.ScriptRefusal(null, "write_file", commandsThroughCodeAlta: false), "no mode of a session: the host decides");
+    }
+
     private sealed class NoHost : IAgentProcessHost
     {
         public string Key => "none";
