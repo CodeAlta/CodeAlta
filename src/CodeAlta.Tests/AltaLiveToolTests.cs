@@ -5301,7 +5301,9 @@ public sealed partial class AltaLiveToolTests
         StringAssert.Contains(final, "final result");
         Assert.IsFalse(final.Contains("<notify-parent>", StringComparison.OrdinalIgnoreCase));
 
-        var state = await ReadJournalStateAsync(sessionCatalog, parent.SessionId).ConfigureAwait(false);
+        // The journal records a delivery after the provider received it.
+        var state = await WaitForJournalStateAsync(sessionCatalog, parent.SessionId,
+            journal => journal.PromptProvenance.Count(item => item.Kind == "parent-notify" && item.SubmittedBy?.SourceSessionId == child.SessionId) == 2).ConfigureAwait(false);
         var provenance = state.PromptProvenance;
         Assert.AreEqual(2, provenance.Count(item => item.Kind == "parent-notify" && item.SubmittedBy?.SourceSessionId == child.SessionId));
         Assert.IsTrue(provenance.Where(static item => item.Kind == "parent-notify").All(static item => !item.Queued));
@@ -5350,20 +5352,8 @@ public sealed partial class AltaLiveToolTests
         Assert.AreEqual(0, providerRuntime.SteeredOptions.Count);
         StringAssert.Contains(ExtractText(providerRuntime.SentOptions[1].Input), "Kind: answer");
         StringAssert.Contains(ExtractText(providerRuntime.SentOptions[1].Input), "queued final result");
-        SessionViewLocalState? queuedState = null;
-        await WaitUntilAsync(() =>
-        {
-            try
-            {
-                queuedState = ReadJournalStateAsync(sessionCatalog, parent.SessionId).ConfigureAwait(false).GetAwaiter().GetResult();
-                return queuedState.QueuedPrompts.SingleOrDefault()?.State == "submitted";
-            }
-            catch (IOException)
-            {
-                return false;
-            }
-        }).ConfigureAwait(false);
-        Assert.IsNotNull(queuedState);
+        var queuedState = await WaitForJournalStateAsync(sessionCatalog, parent.SessionId,
+            static journal => journal.QueuedPrompts.SingleOrDefault()?.State == "submitted").ConfigureAwait(false);
         var queued = queuedState.QueuedPrompts.Single();
         Assert.AreEqual("parent-notify", queued.Kind);
         Assert.AreEqual("submitted", queued.State);
@@ -5406,7 +5396,9 @@ public sealed partial class AltaLiveToolTests
         Assert.AreEqual(0, providerRuntime.SteeredOptions.Count);
         StringAssert.Contains(ExtractText(providerRuntime.SentOptions[1].Input), "Kind: error");
         StringAssert.Contains(ExtractText(providerRuntime.SentOptions[1].Input), "Run cancelled before the assistant response completed.");
-        var queuedState = await ReadJournalStateAsync(sessionCatalog, parent.SessionId).ConfigureAwait(false);
+        // The prompt is marked submitted after the provider received it.
+        var queuedState = await WaitForJournalStateAsync(sessionCatalog, parent.SessionId,
+            static journal => journal.QueuedPrompts.SingleOrDefault()?.State == "submitted").ConfigureAwait(false);
         var queued = queuedState.QueuedPrompts.Single();
         Assert.AreEqual("parent-notify", queued.Kind);
         Assert.AreEqual("submitted", queued.State);
@@ -6866,6 +6858,28 @@ public sealed partial class AltaLiveToolTests
                 Assert.Fail("Timed out waiting for the expected asynchronous condition.");
             }
 
+            await Task.Delay(25).ConfigureAwait(false);
+        }
+    }
+
+    // Reads the journal of a session until it says what is expected: a record the runtime writes after the provider got
+    // the prompt is not there at once, and a journal being written can be read again.
+    private static async Task<SessionViewLocalState> WaitForJournalStateAsync(SessionViewCatalog catalog, string sessionId, Func<SessionViewLocalState, bool> expected)
+    {
+        var deadline = DateTimeOffset.UtcNow.AddSeconds(10);
+        while (true)
+        {
+            SessionViewLocalState? state = null;
+            try
+            {
+                state = await ReadJournalStateAsync(catalog, sessionId).ConfigureAwait(false);
+            }
+            catch (IOException)
+            {
+            }
+
+            if (state is not null && expected(state)) return state;
+            if (DateTimeOffset.UtcNow >= deadline) Assert.Fail($"The journal of {sessionId} did not reach the expected state.");
             await Task.Delay(25).ConfigureAwait(false);
         }
     }
