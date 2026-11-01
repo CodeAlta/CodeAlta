@@ -22,6 +22,9 @@ internal static class AltaSandboxGate
         "issue trackers", "issue list", "issue filters", "issue views", "issue show",
         "issues trackers", "issues list", "issues filters", "issues views", "issues show",
         "mcp activate", "mcp list", "mcp status", "mcp tool", "mcp skill",
+        // The browser of a sandboxed session keeps to its sandbox: the isolated profile, the network of its profile through
+        // a proxy, its folders.
+        "browser list", "browser activate", "browser status", "browser close", "browser deactivate",
         "session current", "session create", "session fork", "session send", "session queue", "session steer", "session request",
         "session message", "session tail", "session events", "session result", "session info", "session status", "session choices",
         "session abort", "session compact", "session title", "session metrics",

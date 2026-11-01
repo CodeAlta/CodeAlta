@@ -19,6 +19,32 @@ public sealed class SessionPermissionServiceTests
     }
 
     [TestMethod]
+    public async Task BrowserRequest_WaitsUnderAutoApproveAndOnlyASiteIsAllowedFromNowOn()
+    {
+        await using var service = new SessionPermissionService();
+        AgentBrowserPermissionRequest Browser(string interaction, string? site) => new(new ModelProviderId("codex"), "session", DateTimeOffset.UnixEpoch, null, interaction, "Microsoft Edge", "Default", site);
+        var session = await service.RegisterAsync("session", Browser("use", null), true, CancellationToken.None);
+        var site = await service.RegisterAsync("session", Browser("site", "example.com"), true, CancellationToken.None);
+        Assert.IsTrue(session.IsPending, "The user's browser is never allowed by a permission mode.");
+        Assert.IsTrue(site.IsPending);
+        Assert.AreEqual(new SessionPermissionBrowser("Microsoft Edge", "Default", "example.com"), site.Snapshot.Browser);
+        Assert.IsFalse(await service.ResolveAsync(session.Snapshot.Handle, AgentPermissionDecisionKind.AllowAlways), "The browser itself is allowed for the session only.");
+        Assert.IsTrue(await service.ResolveAsync(site.Snapshot.Handle, AgentPermissionDecisionKind.AllowAlways));
+        Assert.AreEqual(AgentPermissionDecisionKind.AllowAlways, (await site.Completion).Kind);
+        Assert.IsTrue(await service.ResolveAsync(session.Snapshot.Handle, AgentPermissionDecisionKind.AllowOnce));
+        Assert.AreEqual(AgentPermissionDecisionKind.AllowOnce, (await session.Completion).Kind);
+    }
+
+    [TestMethod]
+    public async Task BrowserRequest_IsDeniedByAHostThatTrustsItsSessions_ForNobodyIsThereToAgree()
+    {
+        await using var service = new SessionPermissionService { FullTrust = true };
+        var request = new AgentBrowserPermissionRequest(new ModelProviderId("codex"), "session", DateTimeOffset.UnixEpoch, null, "use", "Microsoft Edge", "Default", null);
+        Assert.AreEqual(AgentPermissionDecisionKind.Deny, (await service.RequestForSessionAsync("session", request, CancellationToken.None)).Kind);
+        Assert.AreEqual(AgentPermissionDecisionKind.AllowOnce, (await service.RequestForSessionAsync("session", Request(), CancellationToken.None)).Kind);
+    }
+
+    [TestMethod]
     public async Task PendingSnapshot_IsIndependentImmutableScalarData()
     {
         await using var service = new SessionPermissionService();

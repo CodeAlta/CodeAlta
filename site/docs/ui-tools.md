@@ -11,7 +11,7 @@ An agent can see and drive the window of CodeAlta Desktop: take a screenshot, re
   <figcaption class="small text-secondary mt-2">A session that looks at its own window.</figcaption>
 </figure>
 
-The tools exist in CodeAlta Desktop only, with the names of [Chrome DevTools MCP](https://github.com/ChromeDevTools/chrome-devtools-mcp), which agents already know.
+The tools exist in CodeAlta Desktop only, with the names of [Chrome DevTools MCP](https://github.com/ChromeDevTools/chrome-devtools-mcp), which agents already know. To drive a web browser (Chrome, Edge, Firefox, Safari) instead, see [Browser tools](browser.md): a session has one set or the other.
 
 ## Let an agent look at the window
 

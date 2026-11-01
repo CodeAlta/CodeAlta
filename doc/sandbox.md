@@ -122,6 +122,9 @@ is therefore limited where they run:
   when the hook says they follow the sandbox. The MCP plugin gives the tools of the servers the profile lists
   (`SandboxMcpServers`) and refuses the others in its commands.
 - **The window** (`alta ui`, its tools) is refused.
+- **The browser** (`alta browser`, its tools) is allowed in the isolated profile only: its context goes through a
+  proxy of the network of the profile, and its files keep to the folders of the policy (`GetSandboxReachAsync`). See
+  [browser](browser.md).
 
 ## The agent's side
 

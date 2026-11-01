@@ -2,7 +2,8 @@ import type { SessionPermissionCommand, SessionPermissionCommandHandle, SessionP
   SessionPermissionResolveRequest, SessionPermissionsPage, SessionPermissionsRequest } from "#neoastra";
 import { createOwnerChangeSignal } from "./ownerChangeSignal";
 
-// "allow_always" answers only the load of a skill of an MCP server whose files can be checked (`offersAllowAlways`).
+// "allow_always" answers only the load of a skill of an MCP server whose files can be checked, or a site the agent asks
+// to open in the user's own browser (`offersAllowAlways`).
 export type CommandDecision = "allow_once" | "allow_always" | "deny" | "cancel";
 export type PermissionReviewState =
   | { kind: "loading" | "resolving" }
@@ -207,20 +208,31 @@ function validCommand(entry: SessionPermissionCommand, session: string): boolean
     && shaped(entry) && (entry.reason === null || text(entry.reason, 1024, false))
     && typeof entry.shortened === "boolean";
 }
-/** Whether a request may be allowed from now on: the load of a skill of an MCP server whose files can be checked. */
+/**
+ * Whether a request may be allowed from now on: the load of a skill of an MCP server whose files can be checked, or a
+ * site to open in the user's own browser.
+ */
 export function offersAllowAlways(entry: SessionPermissionCommand): boolean {
-  return entry.kind === "skill" && !!entry.skill && entry.skill.dynamic === false;
+  return entry.kind === "skill" ? !!entry.skill && entry.skill.dynamic === false
+    : entry.kind === "browser" && !!entry.browser && typeof entry.browser.site === "string";
 }
 // Each kind carries its own complete shape and nothing of the others': a command has its command line and its
-// folder, a file change has the root it asks to write under, a skill has the skill of an MCP server it asks to load.
+// folder, a file change has the root it asks to write under, a skill has the skill of an MCP server it asks to load,
+// a browser request has the user's browser and profile, and the site when it asks for one.
 function shaped(entry: SessionPermissionCommand): boolean {
   if (entry.kind === "skill") {
     const skill = entry.skill;
     return !!skill && identity(skill.server) && identity(skill.name) && text(skill.uri, 1024, true)
       && Number.isSafeInteger(skill.fileCount) && skill.fileCount >= 0 && Number.isSafeInteger(skill.totalBytes) && skill.totalBytes >= 0
-      && typeof skill.dynamic === "boolean" && entry.command === null && entry.workingDirectory === null && entry.grantRoot === null;
+      && typeof skill.dynamic === "boolean" && entry.command === null && entry.workingDirectory === null && entry.grantRoot === null
+      && entry.browser == null;
   }
-  return entry.skill == null && (entry.kind === "commandExecution"
+  if (entry.kind === "browser") {
+    const browser = entry.browser;
+    return !!browser && identity(browser.browser) && identity(browser.profile) && (browser.site === null || identity(browser.site))
+      && entry.command === null && entry.workingDirectory === null && entry.grantRoot === null && entry.skill == null;
+  }
+  return entry.skill == null && entry.browser == null && (entry.kind === "commandExecution"
     ? text(entry.command, 4096, true) && text(entry.workingDirectory, 1024, true) && entry.grantRoot === null
     : entry.kind === "fileChange"
     ? text(entry.grantRoot, 1024, true) && entry.command === null && entry.workingDirectory === null

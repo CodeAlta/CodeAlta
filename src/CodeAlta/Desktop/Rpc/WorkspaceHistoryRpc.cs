@@ -218,6 +218,11 @@ internal sealed partial class WorkspaceService
                     type = "permissionSkill"; kind = permission.Kind; interactionId = permission.InteractionId;
                     name = "Skill permission"; text = $"**Skill:** {permission.SkillName}\n\n**MCP server:** `{permission.Server}`\n\n**URI:** `{permission.Uri}`";
                     break;
+                case AgentBrowserPermissionRequest permission:
+                    type = "permissionBrowser"; kind = permission.Kind; interactionId = permission.InteractionId;
+                    name = "Browser permission";
+                    text = permission.Site is { } site ? $"**Site:** {site}\n\n**Browser:** {permission.Browser} ({permission.Profile})" : $"**Browser:** {permission.Browser} ({permission.Profile})";
+                    break;
                 case AgentUserInputRequest input:
                     type = "userInputRequest"; kind = "UserInput"; interactionId = input.InteractionId;
                     name = "User input requested"; text = FormatUserInput(input);

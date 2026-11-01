@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <Description>Built-in plugin of CodeAlta that gives a session the tools of Chrome DevTools MCP over a real browser: Chrome, Edge and the other Chromium browsers, Firefox, and Safari through its own MCP server.</Description>
+    <PackageTags>codealta;plugin;browser;agentic;ai</PackageTags>
+    <PackageProjectUrl>https://github.com/xoofx/CodeAlta</PackageProjectUrl>
+    <PackageLicenseExpression>BSD-2-Clause</PackageLicenseExpression>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\CodeAlta.Browser\CodeAlta.Browser.csproj" />
+    <ProjectReference Include="..\CodeAlta.Plugins.Abstractions\CodeAlta.Plugins.Abstractions.csproj" />
+    <InternalsVisibleTo Include="CodeAlta.Browser.Tests" />
+  </ItemGroup>
+</Project>
