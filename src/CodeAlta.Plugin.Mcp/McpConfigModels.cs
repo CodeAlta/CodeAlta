@@ -184,6 +184,16 @@ internal sealed record McpConfigPathOptions
     // The servers a host was given in memory for its sessions (McpPlugin.AddSessionServers): a source of the project that no
     // file holds, read after the file of CodeAlta of the project.
     public IReadOnlyList<McpServerDefinition> SessionServers { get; init; } = [];
+
+    private readonly IReadOnlyList<McpServerDefinition>? _builtInServers;
+
+    // The servers CodeAlta knows without a file (Safari's own, on a Mac), below every file: a definition of the same key in
+    // a file wins. Those of this computer for the home of the user, none for another home (a separate profile, a test).
+    public IReadOnlyList<McpServerDefinition> BuiltInServers
+    {
+        get => _builtInServers ?? (UserHomeDirectory is null && CodeAltaRoot is null ? McpBuiltInServers.ForThisComputer() : []);
+        init => _builtInServers = value;
+    }
 }
 
 internal sealed record McpConfigMutationResult

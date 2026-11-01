@@ -46,6 +46,19 @@ internal sealed class McpConfigDiscovery
             });
         }
 
+        if (options.BuiltInServers.Count > 0)
+        {
+            external.Add(new McpConfigSource
+            {
+                Scope = McpConfigScope.Global,
+                Origin = McpConfigOrigin.Common,
+                Path = McpBuiltInServers.SourcePath,
+                Exists = true,
+                DirectoryExists = true,
+                Servers = options.BuiltInServers,
+            });
+        }
+
         var (effective, shadowed) = BuildOverlay(sources, external);
         return new McpConfigSnapshot
         {
