@@ -1,6 +1,6 @@
 ---
 title: Find, read and change every setting from Settings, Ctrl+P and `alta settings`
-status: in-progress
+status: done
 created: 2026-11-01
 summary: One catalog of settings, declared where each value lives, feeds a search in the Settings window (#227), a Settings group in the global search, `alta search`, and a new `alta settings` command that lists, reads, changes and opens settings with a short glow. Plugins declare typed settings and get the same.
 ---
