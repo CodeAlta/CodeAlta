@@ -295,16 +295,16 @@ Settings and documentation:
 - [x] In the developer instance, a session is asked to open the fixture page, sign in with `test@example.com` and give the title. It does so in Chrome, Edge and Firefox (`isolated`), with screenshots in the timeline, and leaves no profile folder behind.
 - [x] Two sessions browse at the same time without seeing each other's tabs or cookies, and a child session does not see its parent's tabs.
 - [x] A sandboxed session with `network = "off"` loads only its own `localhost` server. `file:///` of the user's home and `http://127.0.0.1:2583/mcp` are refused.
-- [ ] The user's browser with Chrome:
+- [x] The user's browser with Chrome (checked with Edge 156, which has the same switch and dialog):
   - CodeAlta asks first, then Chrome asks once.
   - The agent's window opens, and `list_pages` lists only its tabs.
   - A link to a site not allowed waits for the user.
   - **Stop** closes the agent's window and leaves the user's tabs alone.
-- [ ] A Chromium trace opens in the DevTools Performance panel, and its summary gives the page's LCP and long tasks.
+- [x] A Chromium trace opens in the DevTools Performance panel, and its summary gives the page's LCP and long tasks.
 - [ ] On a Mac with Safari 27, `alta browser activate --browser safari` activates Safari's tools, and a session reads a page with them.
 
 > [!NOTE]
-> Verification notes (2026-11-01): the developer-instance run used https://example.com in Edge (chosen by Automatic) and Firefox (named), with a screenshot and no profile left behind; the fixture sign-in flow, two sessions apart and the sandbox rules run in `BrowserPluginTests` against headless Edge and Firefox. The user's own browser was checked up to the permission card in the developer instance: Chrome's remote-debugging dialog, a Chromium trace opened in DevTools and Safari 27 need a person and a Mac, and stay to check by hand.
+> Verification notes (2026-11-01): the developer-instance run used https://example.com in Edge (chosen by Automatic) and Firefox (named), with a screenshot and no profile left behind; the fixture sign-in flow, two sessions apart and the sandbox rules run in `BrowserPluginTests` against headless Edge and Firefox. With the user, in the developer instance: their own Edge 156 (CodeAlta's card, then Edge's connection dialog; example.com allowed and read, iana.org denied; `list_pages` showing only the agent's tab; the status item closing the agent's window and leaving the user's tabs), and a trace of a Wikipedia page opened in the DevTools Performance panel. Safari 27 needs a Mac and stays to check.
 
 > [!NOTE]
 > Review (GPT-6.1 Sol, 2026-11-01): the confirmed findings were fixed with regression tests (links in paths and swapped after a check, the denied and protected paths of a sandbox, WebRTC and DNS around its proxy, a changed sandbox, UNC paths, `file:` pages and frames, popups read before consent, downloads, `altacli` profiles, Safari before 27, the lifetimes of a session and of CDP flushes, one call at a time). Not changed: a popup's first request in the user's own browser (stopping it would pause every new tab of the user; what the tools read of it is checked), the other ports of CodeAlta (they check a token on every request), and Safari's activation by the agent itself (it gets the tools in the running turn).
