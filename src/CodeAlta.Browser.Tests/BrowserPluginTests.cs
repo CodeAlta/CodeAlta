@@ -254,12 +254,10 @@ public sealed class BrowserPluginTests
         var internet = await CallAsync(tools, "s1", "navigate_page", """{"type":"url","url":"http://example.com/"}""");
         Assert.IsFalse(Text(internet).Contains("Example Domain", StringComparison.Ordinal), "a profile without network reaches no host: " + Text(internet));
 
+        // Even inside its folders: a page of a file could show any other file in a frame.
         var inside = await CallAsync(tools, "s1", "navigate_page", $$"""{"type":"url","url":"{{new Uri(Path.Combine(work, "page.html")).AbsoluteUri}}"}""");
-        Assert.IsTrue(inside.Success, inside.Error);
-        StringAssert.Contains(Text(inside), "Inside");
-        var outside = await CallAsync(tools, "s1", "navigate_page", $$"""{"type":"url","url":"{{new Uri(Path.Combine(folder.Path, "outside.html")).AbsoluteUri}}"}""");
-        Assert.IsFalse(outside.Success);
-        StringAssert.Contains(outside.Error, "outside the folders");
+        Assert.IsFalse(inside.Success);
+        StringAssert.Contains(inside.Error, "opens no file: page");
         var mcp = await CallAsync(tools, "s1", "navigate_page", """{"type":"url","url":"http://127.0.0.1:2583/mcp"}""");
         Assert.IsFalse(mcp.Success);
         StringAssert.Contains(mcp.Error, "port of CodeAlta");

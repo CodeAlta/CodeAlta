@@ -55,14 +55,16 @@ at the next call; its choice stays until it gives the tools back.
 
 - **The user's own browser** takes the switch of Settings (off by default), the user's answer for the session, and the
   user's answer for each site: an `AgentBrowserPermissionRequest`, which no permission mode answers and a host without a
-  user denies. Every page the session's tabs load is checked (`Fetch` or a BiDi intercept): a site not allowed is asked
+  user denies. What the tools read or use is checked again on the page a tab shows, since a popup can load its first page
+  before its tab is adopted: that first request is not stopped, as a request of an allowed page for a resource is not. Every page the session's tabs load is checked (`Fetch` or a BiDi intercept): a site not allowed is asked
   while a tool of the session runs, refused otherwise; a frame of a site not allowed is refused without a question.
 - **Every profile:** `file:` pages and uploads inside the session's folders only, never a file that looks like it holds
   secrets; no request to the ports of CodeAlta; downloads to `<state root>/browser/downloads/<session>`, never opened;
   no raw CDP for the model; what a page shows is marked as data in every answer that carries it.
 - **A sandboxed session** browses in the isolated profile only. Its context goes through a `SandboxNetworkProxy` of the
   network of its profile (`proxyServer` of a Chromium context, the proxy of a BiDi user context), and its files keep to
-  the folders of its policy. The browser process runs outside the container, as plugin tools do, so the tools follow the
+  the folders of its policy, denied and protected paths included; it opens no `file:` page, which could show any file in a
+  frame, a load no request gate sees. The browser process runs outside the container, as plugin tools do, so the tools follow the
   sandbox themselves (`AdditionalToolsFollowSandbox`); a session whose sandbox changes loses its browser.
 
 ## One target per session

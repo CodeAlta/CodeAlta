@@ -280,6 +280,13 @@ internal sealed class BrowserAgentSession : IAsyncDisposable
         if (kind == BrowserRequestKind.Resource) return null;
         if (url.Scheme == Uri.UriSchemeFile)
         {
+            // A page of a file shows any other file of this computer in a frame, a load no request gate sees: a sandboxed
+            // session would read outside its sandbox.
+            if (Sandbox is not null)
+            {
+                return $"A sandboxed session opens no file: page, since such a page can show other files of this computer. Serve the folder with a local server on a port of the sandbox profile '{Sandbox.Profile}', and open that address.";
+            }
+
             var files = await FilesAsync(cancellationToken).ConfigureAwait(false);
             return files.CanRead(url.LocalPath)
                 ? null

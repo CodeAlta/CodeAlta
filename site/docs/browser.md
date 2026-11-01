@@ -98,11 +98,11 @@ On a Mac with Safari 27 or later, Safari's own MCP server (`safaridriver --mcp`)
 
 ## Sandboxed sessions
 
-A [sandboxed session](sessions/sandbox.md) browses in the isolated profile only. Its browser reaches the network of its sandbox profile, through the same proxy as its commands, and the folders of its sandbox. With a profile without network, it reaches only the local ports the profile lists.
+A [sandboxed session](sessions/sandbox.md) browses in the isolated profile only. Its browser reaches the network of its sandbox profile, through the same proxy as its commands, and the folders of its sandbox for uploads and screenshots. With a profile without network, it reaches only the local ports the profile lists. It opens no `file:` page: serve the folder with a local server on a port the profile lists.
 
 ## Good to know
 
-- `file:` pages open only from the folders of the session. A page never gets a file that looks like it holds secrets (`.env`, keys, `.ssh`).
+- `file:` pages open only from the folders of the session, and never in a sandboxed session. A page never gets a file that looks like it holds secrets (`.env`, keys, `.ssh`).
 - A page never reaches the ports of CodeAlta itself: its MCP server and the developer instance.
 - Downloads go to `~/.alta/browser/downloads` and are never opened.
 - To keep sessions from using a browser, turn off the **Browser** plugin in **Settings**, **Plugins**.
