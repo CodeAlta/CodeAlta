@@ -14,7 +14,7 @@ public sealed class PluginSettingsTests
     public void Validation_KeepsTheValidSettings_AndSaysWhyTheOthersAreLeftOut()
     {
         var diagnostics = new List<PluginRuntimeDiagnostic>();
-        var kept = PluginSettingValidation.Filter(Builds,
+        var kept = PluginSettingValidation.Filter(Builds, PluginScope.Global,
         [
             Setting.Integer("poll_minutes", "Check every", "Minutes between two looks.", 5, 1, 120),
             Setting.Boolean("Bad-Key", "Bad", null, true),
@@ -31,8 +31,41 @@ public sealed class PluginSettingsTests
 
         var many = Enumerable.Range(0, PluginSettingLimits.Settings + 3).Select(static index => Setting.Boolean($"flag_{index}", $"Flag {index}", null, false));
         diagnostics.Clear();
-        Assert.AreEqual(PluginSettingLimits.Settings, PluginSettingValidation.Filter(Builds, many, diagnostics).Count);
+        Assert.AreEqual(PluginSettingLimits.Settings, PluginSettingValidation.Filter(Builds, PluginScope.Global, many, diagnostics).Count);
         Assert.AreEqual(3, diagnostics.Count);
+    }
+
+    [TestMethod]
+    public void APluginOfAProject_KeepsEveryOneOfItsSettingsInThatProject()
+    {
+        var kept = PluginSettingValidation.Filter(Builds, PluginScope.Project, [Setting.Boolean("notify", "Notify", null, true)], []);
+        Assert.AreEqual(PluginSettingScope.Project, kept.Single().Scope, "a plugin a repository brings never writes the configuration of the user");
+
+        using var root = new TemporaryRoot();
+        var project = Directory.CreateDirectory(System.IO.Path.Combine(root.Path, "repo")).FullName;
+        var store = new PluginSettingsStore(root.ConfigPath, id => id == "p1" ? project : null);
+        var view = (PluginSettingsStore.PluginScopedSettings)store.ForPlugin("builds", "p1");
+        IPluginSettingsService reads = view;
+        view.Declare(kept);
+        store.Write("builds", kept.Single(), Json("false"), "p1");
+        Assert.AreEqual(false, reads.GetBoolean("notify"));
+        Assert.AreEqual(false, reads.GetBoolean("notify", "p2"), "it reads its own project, whatever it asks");
+        Assert.IsFalse(File.Exists(root.ConfigPath));
+
+        // Even a setting of the user that reached the view: the plugin of a project reads it from its project.
+        view.Declare([Setting.Boolean("notify", "Notify", null, true)]);
+        Assert.AreEqual(false, reads.GetBoolean("notify"));
+    }
+
+    [TestMethod]
+    public void AWholeNumber_IsWrittenExactly()
+    {
+        using var root = new TemporaryRoot();
+        var store = root.Store();
+        var big = Setting.Integer("big", "Big", null, 0);
+        store.Write("builds", big, Json("9007199254740993"), null);
+        StringAssert.Contains(File.ReadAllText(root.ConfigPath), "big = 9007199254740993");
+        Assert.AreEqual(9007199254740993L, store.Read("builds", big, null).Value!.Value.GetInt64());
     }
 
     [TestMethod]
@@ -79,25 +112,32 @@ public sealed class PluginSettingsTests
     }
 
     [TestMethod]
-    public void APlugin_ReadsItsOwnSettings_AndIsToldOnceOfEachChange()
+    public async Task APlugin_ReadsItsSettingsWhenItStarts_IsToldOfEachChangeWhileItRuns_AndNotOnceStopped()
     {
         using var root = new TemporaryRoot();
-        var store = root.Store();
-        var poll = Setting.Integer("poll_minutes", "Check every", null, 5);
-        store.Declared = runtimeKey => runtimeKey == "source:builds" ? [poll] : [];
-        var builds = store.ForPlugin("source:builds", "builds", null);
-        var other = store.ForPlugin("source:other", "other", null);
-        Assert.AreEqual(5L, builds.GetInt64("poll_minutes"));
-        Assert.IsNull(builds.GetValue("unknown"), "a key the plugin does not declare");
-        Assert.IsNull(other.GetValue("poll_minutes"), "another plugin does not read it");
+        var home = System.IO.Path.Combine(root.Path, "home");
+        Directory.CreateDirectory(home);
+        var config = System.IO.Path.Combine(home, "config.toml");
+        File.WriteAllText(config, "[plugins.builds]\nenabled = true\npoll_minutes = 9\n");
+        var store = new PluginSettingsStore(config, static _ => null);
+        var instances = new List<SettingsPlugin>();
+        await using var runtime = new PluginRuntimeManager();
+        await runtime.StartAsync(new PluginRuntimeManagerOptions
+        {
+            GlobalRoot = home, IsHeadless = true, Services = new WithSettings(store),
+            BuiltIns = [new BuiltInPluginDefinition { Id = "builds", DisplayName = "Builds", PluginType = typeof(SettingsPlugin), Factory = () => { var plugin = new SettingsPlugin(); instances.Add(plugin); return plugin; } }],
+        });
+        var plugin = instances.Single();
+        Assert.AreEqual(9L, plugin.AtStart, "the settings are read from OnActivatedAsync on");
+        var active = runtime.ActivePlugins.Single(static active => active.Descriptor.RuntimeKey == "builtin:builds");
 
-        var told = new List<PluginSettingChangedEventArgs>();
-        builds.Changed += (_, change) => told.Add(change);
-        other.Changed += (_, _) => Assert.Fail("another plugin is not told");
-        store.Write("builds", poll, Json("9"), null);
-        store.NotifyChanged("source:builds", "poll_minutes", null, "agent");
-        Assert.AreEqual(9L, builds.GetInt64("poll_minutes"));
-        Assert.AreEqual(("poll_minutes", "agent"), (told.Single().Key, told.Single().Origin));
+        await store.NotifyChangedAsync(active, "poll_minutes", null, "agent");
+        Assert.AreEqual(("poll_minutes", "agent"), (plugin.Told.Single().Key, plugin.Told.Single().Origin));
+
+        File.WriteAllText(config, "[plugins.builds]\nenabled = false\n");
+        Assert.AreEqual(PluginPackageChange.Stopped, await runtime.ApplyBuiltInAsync("builds"));
+        await store.NotifyChangedAsync(active, "poll_minutes", null, "agent");
+        Assert.AreEqual(1, plugin.Told.Count, "a plugin that stopped is not called");
     }
 
     [TestMethod]
@@ -113,6 +153,51 @@ public sealed class PluginSettingsTests
         Assert.IsFalse(File.Exists(root.ConfigPath), "the file of the user is left alone");
         Assert.AreEqual("release", store.Read("builds", branch, "p1").Value!.Value.GetString());
         Assert.AreEqual("main", store.Read("builds", branch, "p2").Value!.Value.GetString());
+    }
+
+    public sealed class SettingsPlugin : PluginBase
+    {
+        public long? AtStart { get; private set; }
+
+        public List<PluginSettingChangedEventArgs> Told { get; } = [];
+
+        public override IEnumerable<PluginSettingContribution> GetSettings()
+        {
+            yield return Setting.Integer("poll_minutes", "Check every", null, 5);
+        }
+
+        public override ValueTask OnActivatedAsync(CancellationToken cancellationToken = default)
+        {
+            AtStart = Services.Settings.GetInt64("poll_minutes");
+            Services.Settings.Changed += (_, change) => { lock (Told) Told.Add(change); };
+            return ValueTask.CompletedTask;
+        }
+    }
+
+    // The services of a host that keeps the settings of its plugins, and nothing else.
+    private sealed class WithSettings(PluginSettingsStore settings) : IPluginServices
+    {
+        private readonly NoopPluginServices _inner = new(XenoAtom.Logging.LogManager.GetLogger("test"));
+
+        public XenoAtom.Logging.Logger Logger => _inner.Logger;
+
+        public IPluginUiService Ui => _inner.Ui;
+
+        public IPluginStateStore State => _inner.State;
+
+        public IPluginWorkspaceService Workspace => _inner.Workspace;
+
+        public IPluginSessionService Sessions => _inner.Sessions;
+
+        public IPluginPromptService Prompts => _inner.Prompts;
+
+        public IPluginAgentService Agents => _inner.Agents;
+
+        public IPluginTaskService Tasks => _inner.Tasks;
+
+        public IPluginAltaService Alta => _inner.Alta;
+
+        public IPluginSettingsService Settings => settings;
     }
 
     private static (long Value, bool Written) Read(PluginSettingsStore store, PluginSettingContribution setting)

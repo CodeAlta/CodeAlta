@@ -111,6 +111,30 @@ public sealed partial class AltaLiveToolTests
     }
 
     [TestMethod]
+    public async Task TheSettingsOfAPluginOfAProject_AreReachedOnlyFromTheSpacesOfItsProject()
+    {
+        var settings = new ProjectPluginSettings();
+        await using var fixture = await SpaceResourceFixture.CreateAsync(withOwner: false, withLibrary: false, settings).ConfigureAwait(false);
+        var folder = Path.Combine(Path.GetDirectoryName(fixture.Options.GlobalRoot!)!, "work");
+        Directory.CreateDirectory(folder);
+        var project = await fixture.Spaces.Projects.UpsertFromPathAsync(folder).ConfigureAwait(false);
+        await fixture.Spaces.AssignAsync(project.Id, ["business"], null).ConfigureAwait(false);
+        settings.Project = project.Id;
+        var personal = Agent(await fixture.CreateAsync(AltaCallerIdentity.Cli, "--global", "--space", "personal").ConfigureAwait(false));
+        var business = Agent(await fixture.CreateAsync(AltaCallerIdentity.Cli, "--global", "--space", "business").ConfigureAwait(false));
+
+        var listed = await fixture.Dispatcher.InvokeAsync(["settings", "list"], caller: personal).ConfigureAwait(false);
+        Assert.IsFalse(listed.Stdout.Contains("plugins.builds.poll", StringComparison.Ordinal), listed.Stdout);
+        var refused = await fixture.Dispatcher.InvokeAsync(["settings", "set", "plugins.builds.poll", "9"], caller: personal).ConfigureAwait(false);
+        Assert.AreEqual(AltaExitCodes.NotFound, refused.ExitCode, refused.Stdout + refused.Stderr);
+        Assert.AreEqual(0, settings.Writes.Count, "a session of another space does not reach the project");
+
+        var changed = await fixture.Dispatcher.InvokeAsync(["settings", "set", "plugins.builds.poll", "9"], caller: business).ConfigureAwait(false);
+        Assert.AreEqual(AltaExitCodes.Success, changed.ExitCode, changed.Stdout + changed.Stderr);
+        Assert.AreEqual(project.Id, settings.Writes.Single(), "changed for the project of the plugin");
+    }
+
+    [TestMethod]
     public async Task AnAgent_ForksAndSendsTo_OnlyTheSessionsOfItsOwnSpace()
     {
         await using var fixture = await SpaceResourceFixture.CreateAsync().ConfigureAwait(false);
@@ -517,6 +541,29 @@ public sealed partial class AltaLiveToolTests
 
     private static AltaCallerIdentity Agent(JsonElement created) => new() { Kind = "agent", SourceSessionId = Id(created) };
 
+    // One setting of a plugin of a project, which the registry changes for the project it is given.
+    private sealed class ProjectPluginSettings : IAltaSettings
+    {
+        public string? Project { get; set; }
+
+        public List<string?> Writes { get; } = [];
+
+        private AltaSettingDescriptor Poll => new("plugins.builds.poll", "Check every", null, "plugin/project:builds", "Extensions › Builds", null, AltaSettingKinds.Integer, [], null, null,
+            JsonDocument.Parse("5").RootElement.Clone(), AltaSettingAccess.ReadWrite, []) { Owner = "plugin", Plugin = "builds", Scopes = ["project"], Project = Project };
+
+        public IReadOnlyList<AltaSettingDescriptor> List() => [Poll];
+
+        public ValueTask<AltaSettingRead> GetAsync(string id, string? projectId, CancellationToken cancellationToken) => new(new AltaSettingRead(AltaSettingStatus.Ok, Poll.Default, "default", null));
+
+        public ValueTask<AltaSettingWrite> SetAsync(string id, JsonElement? value, string? projectId, AltaSettingOrigin origin, CancellationToken cancellationToken)
+        {
+            Writes.Add(projectId);
+            return new(new AltaSettingWrite(AltaSettingStatus.Ok, value, Poll.Default, null));
+        }
+
+        public bool Open(string? page, string? id, string? callerSessionId) => false;
+    }
+
     private sealed class SpaceResourceFixture : IAsyncDisposable
     {
         private readonly TempDirectory _root;
@@ -545,7 +592,10 @@ public sealed partial class AltaLiveToolTests
         public static Task<SpaceResourceFixture> CreateAsync(bool withOwner, params string[] moreProviders) => CreateAsync(withOwner, withLibrary: false, moreProviders);
 
         // withLibrary: the library of scripts, for `alta script` and the scripts of Code Mode.
-        public static async Task<SpaceResourceFixture> CreateAsync(bool withOwner, bool withLibrary, params string[] moreProviders)
+        public static Task<SpaceResourceFixture> CreateAsync(bool withOwner, bool withLibrary, params string[] moreProviders) => CreateAsync(withOwner, withLibrary, null, moreProviders);
+
+        // settings: the settings of the window, for `alta settings`.
+        public static async Task<SpaceResourceFixture> CreateAsync(bool withOwner, bool withLibrary, IAltaSettings? settings, params string[] moreProviders)
         {
             var root = TempDirectory.Create();
             var options = new CatalogOptions { GlobalRoot = Path.Combine(root.Path, "global") };
@@ -568,6 +618,7 @@ public sealed partial class AltaLiveToolTests
             if (withOwner) services.Add(new OwnedSessionCommandService(runtime, projectCatalog, options, 8, () => true));
             var runs = withLibrary ? new CodeAlta.Orchestration.Runtime.Scripts.CodeModeRunRegistry(null) : null;
             if (withLibrary) services.Add(new CodeAlta.Orchestration.Runtime.Scripts.CodeModeScriptLibrary(options)).Add(runs!);
+            if (settings is not null) services.Add<IAltaSettings>(settings);
             var dispatcher = CreateDispatcher(services
                 .Add(options)
                 .Add(projectCatalog)

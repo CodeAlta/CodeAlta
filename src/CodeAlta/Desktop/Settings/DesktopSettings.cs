@@ -34,6 +34,9 @@ internal interface IDesktopSettingsExtension
 internal sealed class DesktopSettings : IAltaSettings
 {
     private static readonly TimeSpan WindowAnswer = TimeSpan.FromSeconds(3);
+    // The page applies a change it is asked for only before this, well before the host stops waiting for its answer:
+    // a change the host reports as not made is never made later.
+    private static readonly TimeSpan WindowApply = TimeSpan.FromSeconds(2.5);
 
     private readonly DesktopSettingsCatalog _catalog;
     private readonly FrozenDictionary<string, DesktopSettingBinding> _bindings;
@@ -42,6 +45,8 @@ internal sealed class DesktopSettings : IAltaSettings
     private readonly Dictionary<string, JsonElement> _window = new(StringComparer.Ordinal);
     private readonly Dictionary<string, IReadOnlyList<AltaSettingChoice>> _windowChoices = new(StringComparer.Ordinal);
     private readonly Dictionary<string, TaskCompletionSource<string?>> _pending = new(StringComparer.Ordinal);
+    // One change of a setting of the host at a time: each reads the value before and after its own write.
+    private readonly SemaphoreSlim _hostWrites = new(1, 1);
     private IDesktopSettingsExtension? _plugins;
 
     /// <summary>Creates the registry over the catalog and the bindings of the host.</summary>
@@ -90,7 +95,7 @@ internal sealed class DesktopSettings : IAltaSettings
     public async ValueTask<AltaSettingRead> GetAsync(string id, string? projectId, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(id);
-        if (Find(id) is not { } setting) return new(AltaSettingStatus.NotFound, null, null, $"No setting is named {id}.");
+        if (Find(id, projectId) is not { } setting) return new(AltaSettingStatus.NotFound, null, null, $"No setting is named {id}.");
         if (setting.Kind == AltaSettingKinds.Collection) return new(AltaSettingStatus.Managed, null, null, Managed(setting));
         if (!setting.Available) return new(AltaSettingStatus.Unavailable, null, null, $"{setting.Id} is not available here.");
         if (setting.Plugin is not null) return Plugins is { } plugins ? await plugins.GetAsync(setting, projectId, cancellationToken).ConfigureAwait(false) : Unavailable(setting);
@@ -125,7 +130,7 @@ internal sealed class DesktopSettings : IAltaSettings
     {
         ArgumentNullException.ThrowIfNull(id);
         ArgumentNullException.ThrowIfNull(origin);
-        if (Find(id) is not { } setting) return new(AltaSettingStatus.NotFound, null, null, $"No setting is named {id}.");
+        if (Find(id, projectId) is not { } setting) return new(AltaSettingStatus.NotFound, null, null, $"No setting is named {id}.");
         if (setting.Kind == AltaSettingKinds.Collection) return new(AltaSettingStatus.Managed, null, null, Managed(setting));
         if (setting.Kind == AltaSettingKinds.Complex) return new(AltaSettingStatus.Complex, null, null, $"{setting.Id} is changed on its page: Settings › {setting.PagePath}.");
         if (!setting.Writable) return new(AltaSettingStatus.PageOnly, null, null, $"{setting.Id} is changed on its page, which asks first: Settings › {setting.PagePath}.");
@@ -173,7 +178,7 @@ internal sealed class DesktopSettings : IAltaSettings
     /// <inheritdoc />
     public bool Open(string? page, string? id, string? callerSessionId)
     {
-        var setting = id is null ? null : Find(id);
+        var setting = id is null ? null : Find(id, null);
         var shown = page ?? setting?.Page;
         if (shown is null) return false;
         return _watchers.Publish(new SettingsEvent("show") { Page = shown, Id = setting?.Id }, Router?.Invoke(callerSessionId) ?? DesktopWindows.MainLabel);
@@ -218,11 +223,16 @@ internal sealed class DesktopSettings : IAltaSettings
         return binding.Available is { } available && !available() ? setting with { Available = false } : setting;
     }
 
-    private AltaSettingDescriptor? Find(string id)
+    // A setting by its id: a plugin of the project named, else one of the user. Two plugins of two projects may have the
+    // same id; a setting of another project than the one named is never taken.
+    private AltaSettingDescriptor? Find(string id, string? projectId)
     {
         var key = id.Trim();
         if (_catalog.Find(key) is { } builtIn) return Present(builtIn);
-        return Plugins?.List().FirstOrDefault(setting => string.Equals(setting.Id, key, StringComparison.Ordinal));
+        var matches = Plugins?.List().Where(setting => string.Equals(setting.Id, key, StringComparison.Ordinal)).ToList() ?? [];
+        return matches.FirstOrDefault(setting => projectId is not null && string.Equals(setting.Project, projectId, StringComparison.Ordinal))
+            ?? matches.FirstOrDefault(static setting => setting.Project is null)
+            ?? (projectId is null ? matches.FirstOrDefault() : null);
     }
 
     private IReadOnlyList<AltaSettingChoice>? WindowChoices(string id)
@@ -233,6 +243,7 @@ internal sealed class DesktopSettings : IAltaSettings
     private async ValueTask<AltaSettingWrite> SetHostAsync(AltaSettingDescriptor setting, JsonElement value, CancellationToken cancellationToken)
     {
         if (!_bindings.TryGetValue(setting.Id, out var binding) || binding.Write is not { } write) return Unwritable(setting);
+        await _hostWrites.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
             return await Task.Run(() =>
@@ -245,6 +256,10 @@ internal sealed class DesktopSettings : IAltaSettings
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException or InvalidOperationException or FormatException)
         {
             return new(AltaSettingStatus.Failed, null, null, $"{setting.Id} could not be written: {exception.Message}");
+        }
+        finally
+        {
+            _hostWrites.Release();
         }
     }
 
@@ -262,7 +277,8 @@ internal sealed class DesktopSettings : IAltaSettings
 
         try
         {
-            if (!_watchers.Publish(new SettingsEvent("write") { Id = setting.Id, Value = SettingValues.Text(value), RequestId = requestId }, DesktopWindows.MainLabel))
+            var expires = DateTimeOffset.UtcNow.Add(WindowApply).ToUnixTimeMilliseconds().ToString(System.Globalization.CultureInfo.InvariantCulture);
+            if (!_watchers.Publish(new SettingsEvent("write") { Id = setting.Id, Value = SettingValues.Text(value), RequestId = requestId, Expires = expires }, DesktopWindows.MainLabel))
                 return new(AltaSettingStatus.Unavailable, null, previous, $"{setting.Id} is kept by the window, which is not there.");
             var error = await answer.Task.WaitAsync(WindowAnswer, cancellationToken).ConfigureAwait(false);
             if (error is not null) return new(AltaSettingStatus.Invalid, null, previous, error);

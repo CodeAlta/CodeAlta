@@ -10,10 +10,12 @@ internal static class PluginSettingValidation
     /// are left out and each one adds a warning. A setting of each user in a plugin of a project is kept for that project.
     /// </summary>
     /// <param name="descriptor">The plugin that returned the settings.</param>
+    /// <param name="scope">Where the plugin comes from: the settings of a plugin of a project are all kept by that project.</param>
     /// <param name="settings">What the plugin returned.</param>
     /// <param name="diagnostics">Receives a warning for each setting that is left out.</param>
     /// <returns>The settings to register, in their order.</returns>
-    internal static IReadOnlyList<PluginSettingContribution> Filter(PluginDescriptor descriptor, IEnumerable<PluginSettingContribution> settings, List<PluginRuntimeDiagnostic> diagnostics)
+    internal static IReadOnlyList<PluginSettingContribution> Filter(PluginDescriptor descriptor, PluginScope scope, IEnumerable<PluginSettingContribution> settings,
+        List<PluginRuntimeDiagnostic> diagnostics)
     {
         var kept = new List<PluginSettingContribution>();
         var keys = new HashSet<string>(StringComparer.Ordinal);
@@ -25,7 +27,8 @@ internal static class PluginSettingValidation
             if (problem is null && kept.Count >= PluginSettingLimits.Settings) problem = $"is one too many: a plugin declares at most {PluginSettingLimits.Settings} settings";
             if (problem is null)
             {
-                kept.Add(setting);
+                // A plugin a repository brings never writes the configuration of the user.
+                kept.Add(scope == PluginScope.Project && setting.Scope != PluginSettingScope.Project ? setting with { Scope = PluginSettingScope.Project } : setting);
                 continue;
             }
 

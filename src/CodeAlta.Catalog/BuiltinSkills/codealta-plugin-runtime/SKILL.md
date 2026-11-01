@@ -584,7 +584,7 @@ public override IEnumerable<PluginSettingContribution> GetSettings()
 var minutes = Services.Settings.GetInt64("poll_minutes") ?? 5;
 ```
 - Kinds: `Boolean`, `Choice`, `Integer`, `Number`, `Text`, `Path`, `List`. Keys are lower-case letters, digits and underscores; `enabled`, `required` and `spaces` are taken. At most 64 settings.
-- The values are in `config.toml` under `[plugins.<id>]` (the project's `.alta/config.toml` with `Scope = PluginSettingScope.Project`). Never read the file yourself, and read a value when you use it: `Services.Settings.Changed` tells of a change made in Settings or by an agent; return quickly from it.
+- The values are in `config.toml` under `[plugins.<id>]` (the project's `.alta/config.toml` with `Scope = PluginSettingScope.Project`, and for every setting of a plugin of a project). Never read the file yourself, and read a value when you use it, from `OnActivatedAsync` on: `Services.Settings.Changed` tells of a change made in Settings or by an agent, while the plugin runs; return quickly from it.
 - Agents only read a setting unless it says `Agents = PluginSettingAccess.ReadWrite`. Keep what protects the user, opens access or deletes data to the user.
 
 ## Data, background work and logs

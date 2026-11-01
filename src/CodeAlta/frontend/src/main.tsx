@@ -784,6 +784,8 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
   const cancelGlow = useRef<(() => void) | null>(null);
   const openSettingsAt = useRef<(target: SettingsTarget) => void>(() => {});
   openSettingsAt.current = ({ page, setting }) => {
+    // The page asked for is shown, not the results of a search typed before.
+    setSettingsQuery("");
     if (settingsPageOf(page)) navigate(page as SettingsSection);
     else if (page.startsWith("plugin/")) {
       // `plugin/<key>/<canvas>` opens the settings page of a plugin, while the plugin runs in the space the window shows.
@@ -3227,7 +3229,10 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
     railCollapsed: railState.desktopCollapsed, setRailCollapsed: setDesktopCollapsed, confirms, setConfirm, singleTab, setSingleTab,
     language: language.choice, setLanguage: language.setLanguage });
   useWindowSettingsBridge(secondary ? null : settingsHub, !!pluginEpoch, windowSettings);
-  const settingValues = useMemo(() => settingValueSource(settingsHub, windowSettings), [settingsHub, windowSettings]);
+  const settingValues = useMemo(() => settingValueSource(settingsHub, windowSettings, projectId), [settingsHub, windowSettings, projectId]);
+  // The controls of the settings read their value again when the page changes one, or someone else changed one.
+  const [settingsChanges, setSettingsChanges] = useState(0);
+  const settingsRevision = useMemo(() => ({ windowSettings, settingsChanges }), [windowSettings, settingsChanges]);
   // The pages of the plugins in Settings: their settings canvases, and a page for the settings of a plugin that has none.
   const allPluginPages = useMemo(() => [...pluginPages, ...typedSettingsPages(settingEntries)], [pluginPages, settingEntries]);
   const pluginSettingEntries = (page: PluginSettingsPage) => settingEntries.filter(entry => entry.plugin && entry.page === pluginPageId(page));
@@ -3240,7 +3245,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
   }
   useEffect(() => settingsHub.onEvent(event => {
     if (event.kind === "show" && event.page) openSettingsAt.current({ page: event.page, setting: event.id ?? null });
-    else if (event.kind === "changed" && event.id) announceSettingChange.current(event);
+    else if (event.kind === "changed" && event.id) { setSettingsChanges(count => count + 1); announceSettingChange.current(event); }
   }), [settingsHub]);
   // A setting someone but the user changed (an agent, a plugin, another application): a toast says it, with Show and Undo.
   const announceSettingChange = useRef<(event: SettingsEvent) => void>(() => {});
@@ -3256,7 +3261,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
     showToast({ intent: "primary", icon: "cog", timeout: 12_000,
       message: <span className="settings-change-toast">{message} <button type="button" className="settings-change-show" onClick={show}>{t("Show")}</button></span>,
       action: { text: t("Undo"), onClick: () => {
-        void settingValues.set(entry, parseSettingValue(event.previous)).then(reply => {
+        void settingValues.set(entry, parseSettingValue(event.previous), event.projectId ?? null).then(reply => {
           if (reply.status !== "ok") showToast({ intent: "warning", icon: "warning-sign", timeout: 6000, message: t("The change could not be undone.") });
         });
       } } }, `setting-change-${entry.id}`);
@@ -5952,7 +5957,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
           const page = first ? null : settingsSearch?.pages[0]?.page.id ?? null;
           if (first) openSearchedSetting(first.page, first.id); else if (page) openSearchedSetting(page, null);
         },
-        results: settingsSearch ? <SettingsSearchResults query={settingsQuery} result={settingsSearch} entries={settingEntries} source={settingValues} revision={windowSettings}
+        results: settingsSearch ? <SettingsSearchResults query={settingsQuery} result={settingsSearch} entries={settingEntries} source={settingValues} revision={settingsRevision}
           onOpen={openSearchedSetting} /> : null }}>
       {settingsSection === "appearance" ? <ConfigurationPanel preferences={{ theme, setTheme, darker, setDarker,
         schemes: { colorScheme, setColorScheme, shownScheme, variant, customSchemes, library: schemeLibrary, preview: appearancePreview, platform: demoMode ? null : shellPreferences?.platform ?? null,
@@ -5979,9 +5984,9 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
       : settingsSection === "about" ? <AboutSettings status={status} bootError={!!error} demo={demoMode} logo={logoUrl}
         update={owned ? appUpdateResult : undefined} onOpenReleaseNotes={openReleaseNotes} onInstallUpdate={installUpdate} />
       : settingsSection === "plugin" && pluginPage && !pluginPage.canvasId ? <PluginSettingsForm key={pluginPageId(pluginPage)} page={pluginPage} entries={pluginSettingEntries(pluginPage)}
-        source={settingValues} revision={windowSettings} framed />
+        source={settingValues} revision={settingsRevision} framed />
       : settingsSection === "plugin" && pluginPage ? <PluginCanvasSettingsPage key={`${pluginPage.pluginKey}/${pluginPage.canvasId}`} page={pluginPage} hub={canvasHub}
-        settings={pluginSettingEntries(pluginPage).length ? <PluginSettingsForm page={pluginPage} entries={pluginSettingEntries(pluginPage)} source={settingValues} revision={windowSettings} framed={false} /> : undefined}
+        settings={pluginSettingEntries(pluginPage).length ? <PluginSettingsForm page={pluginPage} entries={pluginSettingEntries(pluginPage)} source={settingValues} revision={settingsRevision} framed={false} /> : undefined}
         control={canvasControl(pluginSettingsTab(pluginPage))} onLeave={() => navigate("plugins")}
         onInstance={instance => instance ? settingsCanvasInstances.opened(pluginSettingsTab(pluginPage), "settings", instance) : settingsCanvasInstances.released(pluginSettingsTab(pluginPage), "settings")}
         onAbandoned={instance => settingsCanvasInstances.abandoned(pluginSettingsTab(pluginPage), "settings", instance)}
@@ -6232,7 +6237,9 @@ function SettingsOverlay({ section, onSection, onClose, spaces, spacePage, onSpa
         <div className="settings-search-bar"><InputGroup inputRef={searchField} className="settings-search-field" type="search" size="small" leftIcon={<AppIcon name="search" size={14} className="bp6-icon" />}
           placeholder={t("Search settings")} aria-label={t("Search settings")} value={search.query} onValueChange={search.onQuery}
           onKeyDown={event => {
-            if (event.key === "Escape" && search.query && !event.nativeEvent.isComposing) { event.preventDefault(); event.stopPropagation(); search.onQuery(""); }
+            // A key that commits a candidate of an input method (Japanese, Chinese) belongs to the input method.
+            if (event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229) return;
+            if (event.key === "Escape" && search.query) { event.preventDefault(); event.stopPropagation(); search.onQuery(""); }
             else if (event.key === "Enter" && search.query.trim()) { event.preventDefault(); search.onSubmit(); }
             else if (event.key === "ArrowDown" && search.query.trim()) {
               const first = document.querySelector<HTMLElement>(".settings-search-results :is(button, input, select, [tabindex='0'])");

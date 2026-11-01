@@ -183,6 +183,12 @@ public sealed record AltaSettingDescriptor(string Id, string Label, string? Help
     /// <summary>Gets the display name of the plugin of the setting, or null.</summary>
     public string? PluginName { get; init; }
 
+    /// <summary>
+    /// Gets the project of a plugin of a project, whose settings are all that project's and reached only from its spaces;
+    /// null for a built-in setting or a plugin of the user.
+    /// </summary>
+    public string? Project { get; init; }
+
     /// <summary>Gets whether the setting is there in this host and on this platform.</summary>
     public bool Available { get; init; } = true;
 }

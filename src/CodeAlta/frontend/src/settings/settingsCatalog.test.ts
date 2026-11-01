@@ -51,15 +51,23 @@ test("what protects the user is read only for agents", () => {
 
 test("the host says which built-in settings are not here, and adds those of the plugins, whose texts are their own", () => {
   const plugin: SettingsDescriptor = { id: "plugins.builds.poll_minutes", label: "Check every", help: "Minutes between two looks.", page: "plugin/source:builds", section: "Builds",
-    kind: "integer", choices: [], minimum: 1, maximum: 120, default: "5", owner: "plugin", agents: "readWrite", writable: true, managedBy: null, applies: "now", scopes: ["user"],
-    keywords: ["refresh"], plugin: "builds", pluginName: "Builds", available: true };
+    kind: "integer", choices: [], minimum: "1", maximum: "120", default: "5", owner: "plugin", agents: "readWrite", writable: true, managedBy: null, applies: "now", scopes: ["user"],
+    keywords: ["refresh"], plugin: "builds", pluginName: "Builds", available: true, project: null };
   const unavailable = { ...plugin, id: "general.keep_awake", label: "Keep computer awake when CodeAlta is running", available: false, plugin: null, pluginName: null };
   const merged = mergeSettings([plugin, unavailable]);
   assert.equal(merged.length, builtInSettings.length + 1);
   assert.equal(merged.find(entry => entry.id === "general.keep_awake")?.available, false);
   const added = merged.at(-1)!;
-  assert.deepEqual([added.id, added.builtIn, added.defaultValue, added.pluginName], ["plugins.builds.poll_minutes", false, 5, "Builds"]);
+  assert.deepEqual([added.id, added.builtIn, added.defaultValue, added.pluginName, added.minimum, added.maximum], ["plugins.builds.poll_minutes", false, 5, "Builds", 1, 120]);
   assert.equal(mergeSettings(null), builtInSettings, "without the host, the built-in settings alone");
+});
+
+test("a bound that is a fraction stays a fraction, and a plugin of a project names its project", () => {
+  const ratio: SettingsDescriptor = { id: "plugins.builds.ratio", label: "Ratio", help: null, page: "plugin/source:builds", section: null, kind: "number", choices: [],
+    minimum: "0.1", maximum: "0.4", default: "0.2", owner: "plugin", agents: "readWrite", writable: true, managedBy: null, applies: "now", scopes: ["project"],
+    keywords: [], plugin: "builds", pluginName: "Builds", available: true, project: "p1" };
+  const entry = mergeSettings([ratio]).at(-1)!;
+  assert.deepEqual([entry.minimum, entry.maximum, entry.project], [0.1, 0.4, "p1"]);
 });
 
 test("a built-in text is translated, a plugin's text and the name of a language are shown as they are", () => {

@@ -23,6 +23,8 @@ export type SettingEntry = Readonly<{
   writable: boolean;
   managedBy: string | null; applies: string; scopes: readonly string[]; keywords: readonly string[];
   plugin: string | null; pluginName: string | null; available: boolean;
+  /** The project of a plugin of a project, whose settings are all that project's; null otherwise. */
+  project: string | null;
   /** Built in: its texts are keys of the dictionaries of the window. */
   builtIn: boolean;
 }>;
@@ -38,8 +40,15 @@ export const builtInSettings: readonly SettingEntry[] = Object.freeze((catalog.s
   id: raw.id, label: raw.label, help: raw.help ?? null, page: raw.page, section: raw.section ?? null, kind: raw.kind as SettingKind,
   choices: Object.freeze((raw.choices ?? []).map(choiceOf)), minimum: raw.minimum ?? null, maximum: raw.maximum ?? null, defaultValue: raw.default ?? null,
   owner: raw.owner ?? "host", agents: raw.agents ?? "read", writable: raw.writable !== false, managedBy: raw.managedBy ?? null, applies: raw.applies ?? "now",
-  scopes: Object.freeze(raw.scopes ?? ["user"]), keywords: Object.freeze(raw.keywords ?? []), plugin: null, pluginName: null, available: true, builtIn: true,
+  scopes: Object.freeze(raw.scopes ?? ["user"]), keywords: Object.freeze(raw.keywords ?? []), plugin: null, pluginName: null, available: true, project: null, builtIn: true,
 })));
+
+// A bound of a number, written as a text by the host: a bound of a plugin may be a fraction.
+function bound(text: string | null | undefined): number | null {
+  if (text === null || text === undefined || text.trim() === "") return null;
+  const value = Number(text);
+  return Number.isFinite(value) ? value : null;
+}
 
 function parseDefault(text: string | null): unknown {
   if (text === null) return null;
@@ -51,9 +60,10 @@ function pluginEntry(descriptor: SettingsDescriptor): SettingEntry {
   return Object.freeze({
     id: descriptor.id, label: descriptor.label, help: descriptor.help ?? null, page: descriptor.page, section: descriptor.section ?? null, kind: descriptor.kind as SettingKind,
     choices: Object.freeze(descriptor.choices.map(choice => Object.freeze({ value: choice.value, label: choice.label ?? null, literal: true }))),
-    minimum: descriptor.minimum ?? null, maximum: descriptor.maximum ?? null, defaultValue: parseDefault(descriptor.default ?? null), owner: descriptor.owner,
+    minimum: bound(descriptor.minimum), maximum: bound(descriptor.maximum), defaultValue: parseDefault(descriptor.default ?? null), owner: descriptor.owner,
     agents: descriptor.agents, writable: descriptor.writable, managedBy: descriptor.managedBy ?? null, applies: descriptor.applies, scopes: Object.freeze([...descriptor.scopes]),
-    keywords: Object.freeze([...descriptor.keywords]), plugin: descriptor.plugin ?? null, pluginName: descriptor.pluginName ?? null, available: descriptor.available, builtIn: false,
+    keywords: Object.freeze([...descriptor.keywords]), plugin: descriptor.plugin ?? null, pluginName: descriptor.pluginName ?? null, available: descriptor.available,
+    project: descriptor.project ?? null, builtIn: false,
   });
 }
 

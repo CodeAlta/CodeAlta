@@ -227,6 +227,23 @@ public sealed partial class CodeAltaConfigStore
     public ModelTiers.ModelSettings LoadGlobalModelSettings()
         => ModelTiers.ModelSettings.Read(ReadSharedGlobalDocument().Models);
 
+    /// <summary>
+    /// Runs a change of the global configuration made of a read and a save, such as a change of one field of a table,
+    /// under the lock of its file: no other writer, of this process or another, writes between the read and the save.
+    /// </summary>
+    /// <remarks>The lock is reentrant on the thread: <paramref name="update"/> calls the loads and saves of this store, synchronously.</remarks>
+    /// <param name="update">Reads and saves.</param>
+    /// <exception cref="ArgumentNullException"><paramref name="update"/> is null.</exception>
+    /// <exception cref="IOException">Another writer has held the lock of the file for too long.</exception>
+    /// <exception cref="InvalidOperationException">The store is read-only (<see cref="CodeAltaConfigOptions.ReadOnly"/>).</exception>
+    public void UpdateGlobal(Action update)
+    {
+        ArgumentNullException.ThrowIfNull(update);
+        ThrowIfReadOnly();
+        using var writing = ConfigFileLock.Acquire(_options.ConfigPath);
+        update();
+    }
+
     /// <summary>Saves the global model tiers and provider fallback. Defaults are not written.</summary>
     /// <exception cref="ArgumentNullException">The settings are null.</exception>
     /// <exception cref="InvalidDataException">The existing configuration is invalid.</exception>

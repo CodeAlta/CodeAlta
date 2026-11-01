@@ -293,7 +293,7 @@ internal sealed class PluginRuntimeServices : IPluginServices
         Asks = inner.Asks is IPluginAskRuntimeService asks ? asks.ForPlugin(pluginRuntimeKey, builtIn) : NoopPluginAskService.Instance;
         // The settings of this plugin alone, under its id in the configuration.
         Settings = inner.Settings is PluginSettingsStore settings
-            ? settings.ForPlugin(pluginRuntimeKey, pluginId ?? PluginContributionRegistry.PluginIdOf(pluginRuntimeKey, null), scope == PluginScope.Project ? scopeProjectId : null)
+            ? settings.ForPlugin(pluginId ?? PluginContributionRegistry.PluginIdOf(pluginRuntimeKey, null), scope == PluginScope.Project ? scopeProjectId ?? UnresolvedProjectScopeId : null)
             : inner.Settings;
     }
 

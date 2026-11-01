@@ -98,20 +98,22 @@ internal static class DesktopSettingBindings
             value => Do(() => config.SaveGlobalDisabledTools(value.EnumerateArray().Select(static item => item.GetString()!))));
         Add("sandbox.all_sessions", () => SettingValues.Of(config.LoadGlobalSandbox().AllSessions ?? "off"), null);
 
-        Add("worktrees.location", () => SettingValues.Of(WorktreeLocation(config)), value => SaveWorktrees(config, value.GetString(), WorktreeFolder(config)));
-        Add("worktrees.folder", () => SettingValues.Of(WorktreeFolder(config) ?? ""), value =>
+        Add("worktrees.location", () => SettingValues.Of(WorktreeLocation(config)), value => Locked(config, () => SaveWorktrees(config, value.GetString(), WorktreeFolder(config))));
+        Add("worktrees.folder", () => SettingValues.Of(WorktreeFolder(config) ?? ""), value => Locked(config, () =>
         {
             var folder = value.GetString();
             return SaveWorktrees(config, string.IsNullOrWhiteSpace(folder) && WorktreeLocation(config) == WorktreeSettings.CustomName ? WorktreeSettings.GlobalName : WorktreeLocation(config), folder);
-        });
+        }));
 
-        Bool("speech.enabled", () => config.LoadGlobalSpeechSettings().Enabled, value => config.SaveGlobalSpeechSettings(config.LoadGlobalSpeechSettings() with { Enabled = value }));
+        // A field of a table is read and saved under the lock of the file: two changes at once keep both.
+        Bool("speech.enabled", () => config.LoadGlobalSpeechSettings().Enabled,
+            value => config.UpdateGlobal(() => config.SaveGlobalSpeechSettings(config.LoadGlobalSpeechSettings() with { Enabled = value })));
         Add("speech.model", () => SettingValues.Of(config.LoadGlobalSpeechSettings().Model), null);
         Add("speech.send", () => SettingValues.Of(config.LoadGlobalSpeechSettings().Send),
-            value => Do(() => config.SaveGlobalSpeechSettings(config.LoadGlobalSpeechSettings() with { Send = value.GetString()! })));
+            value => Do(() => config.UpdateGlobal(() => config.SaveGlobalSpeechSettings(config.LoadGlobalSpeechSettings() with { Send = value.GetString()! }))));
 
         Bool("storage.clear_scratchpad_on_startup", () => config.LoadGlobalStorageSettings().ClearScratchpadOnStartup,
-            value => config.SaveGlobalStorageSettings(config.LoadGlobalStorageSettings() with { ClearScratchpadOnStartup = value }));
+            value => config.UpdateGlobal(() => config.SaveGlobalStorageSettings(config.LoadGlobalStorageSettings() with { ClearScratchpadOnStartup = value })));
         Add("storage.session_retention.enabled", () => SettingValues.Of(config.LoadGlobalStorageSettings().SessionRetention.Enabled),
             value => SaveRetention(config, retention => retention with { Enabled = value.GetBoolean() }));
         Add("storage.session_retention.amount", () => SettingValues.Of(config.LoadGlobalStorageSettings().SessionRetention.Amount),
@@ -122,7 +124,7 @@ internal static class DesktopSettingBindings
         Add("logging.level", () => SettingValues.Of(LoggingSettings.LevelName(config.LoadGlobalLoggingSettings().Level)), value =>
         {
             if (!LoggingSettings.TryParseLevel(value.GetString(), out var level) || !LoggingSettings.Levels.Contains(level)) return "Unknown log level.";
-            var refused = Do(() => config.SaveGlobalLoggingSettings(config.LoadGlobalLoggingSettings() with { Level = level }));
+            var refused = Do(() => config.UpdateGlobal(() => config.SaveGlobalLoggingSettings(config.LoadGlobalLoggingSettings() with { Level = level })));
             if (refused is null) sources.LoggingSaved?.Invoke();
             return refused;
         });
@@ -188,6 +190,14 @@ internal static class DesktopSettingBindings
         return map.ToFrozenDictionary(StringComparer.Ordinal);
     }
 
+    // Reads and saves under the lock of the configuration; the refusal is the reason a change did not happen.
+    private static string? Locked(CodeAltaConfigStore config, Func<string?> change)
+    {
+        string? refused = null;
+        config.UpdateGlobal(() => refused = change());
+        return refused;
+    }
+
     // Runs a save; the refusal of the store is the reason a change did not happen.
     private static string? Do(Action save)
     {
@@ -219,17 +229,22 @@ internal static class DesktopSettingBindings
     private static CodeAlta.Catalog.ModelTiers.ModelSettings Models(CodeAltaConfigStore config) => config.LoadGlobalModelSettings();
 
     private static void SaveFallback(CodeAltaConfigStore config, Func<CodeAlta.Catalog.ModelTiers.ModelFallbackSettings, CodeAlta.Catalog.ModelTiers.ModelFallbackSettings> change)
-    {
-        var settings = config.LoadGlobalModelSettings();
-        config.SaveGlobalModelSettings(settings with { Fallback = change(settings.Fallback) });
-    }
+        => config.UpdateGlobal(() =>
+        {
+            var settings = config.LoadGlobalModelSettings();
+            config.SaveGlobalModelSettings(settings with { Fallback = change(settings.Fallback) });
+        });
 
     private static string? SaveRetention(CodeAltaConfigStore config, Func<SessionRetentionSettings, SessionRetentionSettings> change)
     {
-        var storage = config.LoadGlobalStorageSettings();
-        var retention = change(storage.SessionRetention);
-        if (retention.GetValidationError() is { } error) return error;
-        return Do(() => config.SaveGlobalStorageSettings(storage with { SessionRetention = retention }));
+        string? refused = null;
+        config.UpdateGlobal(() =>
+        {
+            var storage = config.LoadGlobalStorageSettings();
+            var retention = change(storage.SessionRetention);
+            refused = retention.GetValidationError() ?? Do(() => config.SaveGlobalStorageSettings(storage with { SessionRetention = retention }));
+        });
+        return refused;
     }
 
     private static string WorktreeLocation(CodeAltaConfigStore config) => config.LoadGlobal().Worktrees?.Location is { Length: > 0 } location ? location : WorktreeSettings.GlobalName;

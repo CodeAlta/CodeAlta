@@ -125,7 +125,7 @@ internal sealed partial class BuiltInAltaCommandContributor
             if (changed || detailed)
             {
                 if (AltaSettingKinds.IsScalar(setting.Kind) || setting.Kind == AltaSettingKinds.Complex)
-                    read = await settings.GetAsync(setting.Id, null, context.CancellationToken).ConfigureAwait(false);
+                    read = await settings.GetAsync(setting.Id, setting.Project, context.CancellationToken).ConfigureAwait(false);
                 if (changed && read is not { Status: AltaSettingStatus.Ok, Source: not "default" }) continue;
             }
 
@@ -148,20 +148,20 @@ internal sealed partial class BuiltInAltaCommandContributor
         var exitCode = AltaExitCodes.Success;
         foreach (var id in ids)
         {
-            if (visible.FirstOrDefault(setting => string.Equals(setting.Id, id.Trim(), StringComparison.Ordinal)) is not { } setting)
+            if (FindVisibleSetting(visible, id, projectId) is not { } setting)
             {
                 exitCode = Math.Max(exitCode, NotFound(context, "settings.notFound", $"No setting is named {id}. `alta settings list <words>` finds one."));
                 continue;
             }
 
-            var read = await settings.GetAsync(setting.Id, projectId, context.CancellationToken).ConfigureAwait(false);
+            var read = await settings.GetAsync(setting.Id, setting.Project ?? projectId, context.CancellationToken).ConfigureAwait(false);
             if (read.Status != AltaSettingStatus.Ok)
             {
                 exitCode = Math.Max(exitCode, SettingRefusal(context, setting, read.Status, read.Message));
                 continue;
             }
 
-            AltaJsonlWriter.WriteRecord(context.Stdout, ValueRecord(context, setting, read, projectId));
+            AltaJsonlWriter.WriteRecord(context.Stdout, ValueRecord(context, setting, read, setting.Project ?? projectId));
         }
 
         return exitCode;
@@ -173,7 +173,12 @@ internal sealed partial class BuiltInAltaCommandContributor
         if (!TryGetSettings(context, out var settings)) return AltaExitCodes.ServiceUnavailable;
         if (NormalizeOptionalText(idRef) is not { } id) return UsageError(context, "usage.missingSetting", $"Name the setting: `{commandPath} <id>`.", commandPath);
         var visible = await VisibleSettingsAsync(context, settings).ConfigureAwait(false);
-        if (visible.FirstOrDefault(setting => string.Equals(setting.Id, id, StringComparison.Ordinal)) is not { } setting)
+        if (NormalizeOptionalText(projectRef) is not null && visible.Any(setting => string.Equals(setting.Id, id, StringComparison.Ordinal))
+            && !visible.Any(setting => string.Equals(setting.Id, id, StringComparison.Ordinal) && setting.Scopes.Contains("project")))
+            return UsageError(context, "usage.noProjectScope", $"{id} has no value per project: leave out --project.", commandPath);
+        var (projectId, projectExit) = await SettingsProjectAsync(context, projectRef).ConfigureAwait(false);
+        if (projectExit != AltaExitCodes.Success) return projectExit;
+        if (FindVisibleSetting(visible, id, projectId) is not { } setting)
             return NotFound(context, "settings.notFound", $"No setting is named {id}. `alta settings list <words>` finds one.");
         if (setting.Kind == AltaSettingKinds.Collection) return SettingRefusal(context, setting, AltaSettingStatus.Managed, null);
         if (setting.Kind == AltaSettingKinds.Complex) return SettingRefusal(context, setting, AltaSettingStatus.Complex, null);
@@ -195,13 +200,16 @@ internal sealed partial class BuiltInAltaCommandContributor
         }
         else
         {
-            value = string.Equals(given, "default", StringComparison.OrdinalIgnoreCase) && setting.Kind != AltaSettingKinds.Text ? null : SettingValueFromText(setting, given);
+            // `default` gives a setting its default, except a text, where it may be the text wanted: `reset` is the way there.
+            value = reset || string.Equals(given, "default", StringComparison.OrdinalIgnoreCase) && setting.Kind is not (AltaSettingKinds.Text or AltaSettingKinds.Path)
+                ? null
+                : SettingValueFromText(setting, given);
         }
 
-        if (NormalizeOptionalText(projectRef) is not null && !setting.Scopes.Contains("project"))
+        if (projectId is not null && !setting.Scopes.Contains("project"))
             return UsageError(context, "usage.noProjectScope", $"{setting.Id} has no value per project: leave out --project.", commandPath);
-        var (projectId, projectExit) = await SettingsProjectAsync(context, projectRef).ConfigureAwait(false);
-        if (projectExit != AltaExitCodes.Success) return projectExit;
+        // The settings of a plugin of a project are that project's, which the space of the caller reaches.
+        projectId = setting.Project ?? projectId;
 
         var write = await settings.SetAsync(setting.Id, value, projectId, OriginOf(context), context.CancellationToken).ConfigureAwait(false);
         if (write.Status != AltaSettingStatus.Ok)
@@ -257,13 +265,49 @@ internal sealed partial class BuiltInAltaCommandContributor
         return AltaExitCodes.Success;
     }
 
-    // The settings a caller reaches: every built-in one, and those of the plugins of its space.
+    // The settings a caller reaches: every built-in one, those of the plugins of its space, and those of the plugins of the
+    // projects of its space.
     private static async Task<IReadOnlyList<AltaSettingDescriptor>> VisibleSettingsAsync(AltaCommandContext context, IAltaSettings settings)
     {
         var all = settings.List();
         if (!all.Any(static setting => setting.Plugin is not null)) return all;
         var filter = await CallerSpaceFilterAsync(context).ConfigureAwait(false);
-        return filter is null ? all : [.. all.Where(setting => setting.Plugin is not { } plugin || filter.Allows(SpaceResourceKind.Plugin, plugin))];
+        if (filter is null) return all;
+        var projects = new Dictionary<string, bool>(StringComparer.Ordinal);
+        var visible = new List<AltaSettingDescriptor>(all.Count);
+        foreach (var setting in all)
+        {
+            if (setting.Plugin is not { } plugin) visible.Add(setting);
+            else if (setting.Project is { } project)
+            {
+                // A plugin a project brings follows its project, like the project's own files.
+                if (!projects.TryGetValue(project, out var reached)) projects[project] = reached = await ProjectInCallerSpaceAsync(context, filter, project).ConfigureAwait(false);
+                if (reached) visible.Add(setting);
+            }
+            else if (filter.Allows(SpaceResourceKind.Plugin, plugin)) visible.Add(setting);
+        }
+
+        return visible;
+    }
+
+    // A setting the caller reaches by its id: a plugin of the project named, else one of the user. Two plugins of two
+    // projects may have the same id; a setting of another project than the one named is never taken.
+    private static AltaSettingDescriptor? FindVisibleSetting(IReadOnlyList<AltaSettingDescriptor> visible, string id, string? projectId)
+    {
+        var key = id.Trim();
+        var matches = visible.Where(setting => string.Equals(setting.Id, key, StringComparison.Ordinal)).ToList();
+        return matches.FirstOrDefault(setting => projectId is not null && string.Equals(setting.Project, projectId, StringComparison.Ordinal))
+            ?? matches.FirstOrDefault(static setting => setting.Project is null)
+            ?? (projectId is null ? matches.FirstOrDefault() : null);
+    }
+
+    // Whether a project is one of the space of the caller, by the rule of --project.
+    private static async Task<bool> ProjectInCallerSpaceAsync(AltaCommandContext context, SpaceFilter filter, string projectId)
+    {
+        if (string.Equals(filter.SpaceId, SpaceDescriptor.DefaultId, StringComparison.Ordinal)) return true;
+        if (context.Services.Get<ProjectCatalog>() is not { } catalog) return false;
+        var project = await ResolveProjectAsync(catalog, projectId, context, includeArchived: false).ConfigureAwait(false);
+        return project is { Archived: false } && project.Spaces.Contains(filter.SpaceId, StringComparer.Ordinal);
     }
 
     // The project of a value per project: one of the space of the caller.

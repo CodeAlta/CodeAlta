@@ -432,7 +432,10 @@ public sealed class PluginRuntimeActivator
         Add(PluginPoint.Canvas, PluginCanvasValidation.Filter(descriptor, instance.GetCanvases(), diagnostics));
         Add(PluginPoint.LandingCard, PluginLandingCardValidation.Filter(descriptor, instance.GetLandingCards(), diagnostics));
         Add(PluginPoint.ModelProvider, PluginModelProviderValidation.Filter(descriptor, instance.GetModelProviders(), diagnostics));
-        Add(PluginPoint.Settings, PluginSettingValidation.Filter(descriptor, instance.GetSettings(), diagnostics));
+        var settings = PluginSettingValidation.Filter(descriptor, context.Scope, instance.GetSettings(), diagnostics);
+        // The plugin reads its settings from OnActivatedAsync on, before the host lists it among the running plugins.
+        if (context.Services.Settings is PluginSettingsStore.PluginScopedSettings own) own.Declare(settings);
+        Add(PluginPoint.Settings, settings);
         return registrations;
 
         void Add(PluginPoint point, IEnumerable<object> contributions)

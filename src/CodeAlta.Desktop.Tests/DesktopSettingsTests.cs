@@ -139,6 +139,37 @@ public sealed class DesktopSettingsTests
     }
 
     [TestMethod]
+    public async Task AWriteThePageIsAskedFor_ExpiresBeforeTheHostStopsWaiting()
+    {
+        using var fixture = Fixture.Create();
+        fixture.Settings.ReportWindow([("appearance.theme", Value("\"dark\""), null)], null, null);
+        SettingsEvent? asked = null;
+        using var page = fixture.Settings.Watch(null, value =>
+        {
+            if (value.Kind != "write") return;
+            asked = value;
+            _ = Task.Run(() => fixture.Settings.ReportWindow([], value.RequestId, "The change came too late and was not made."));
+        });
+        var sent = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        var write = await fixture.Settings.SetAsync("appearance.theme", Value("\"light\""), null, Agent, CancellationToken.None);
+        Assert.AreEqual(AltaSettingStatus.Invalid, write.Status, "a page that did not make the change says so");
+        var expires = long.Parse(asked!.Expires!, System.Globalization.CultureInfo.InvariantCulture);
+        Assert.IsTrue(expires > sent && expires - sent <= 3000, $"the page applies it within the wait of the host: {expires - sent} ms");
+    }
+
+    [TestMethod]
+    public async Task ChangesOfTwoFieldsOfOneTable_AtOnce_KeepBoth()
+    {
+        using var fixture = Fixture.Create();
+        var changes = Enumerable.Range(0, 8).Select(index => fixture.Settings.SetAsync(index % 2 == 0 ? "models.fallback.resume" : "models.fallback.on_quota",
+            Value("false"), null, AltaSettingOrigin.Window, CancellationToken.None).AsTask());
+        foreach (var write in await Task.WhenAll(changes)) Assert.AreEqual(AltaSettingStatus.Ok, write.Status, write.Message);
+        var config = new CodeAltaConfigStore(new CatalogOptions { GlobalRoot = Path.GetDirectoryName(fixture.ConfigPath)! });
+        var fallback = config.LoadGlobalModelSettings().Fallback;
+        Assert.AreEqual((false, false), (fallback.Resume, fallback.OnQuota));
+    }
+
+    [TestMethod]
     public void Open_TellsThePageOfTheMainWindow()
     {
         using var fixture = Fixture.Create();

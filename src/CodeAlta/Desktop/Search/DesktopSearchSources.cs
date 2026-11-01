@@ -469,8 +469,10 @@ internal sealed class DesktopSearchSources
             if (setting.Keywords.Count > 0) text.Append("Also: ").AppendLine(string.Join(", ", setting.Keywords));
             if (setting.Choices.Count > 0) text.Append("Choices: ").AppendLine(string.Join(", ", setting.Choices.Select(static choice => choice.Value)));
             if (setting.ManagedBy is { } commands) text.Append("Changed with: ").AppendLine(commands);
-            documents.Add(new SearchDocument("setting:" + setting.Id, SearchKind.Setting, title, text.ToString(), DateTimeOffset.UnixEpoch)
+            // A setting of a plugin of a project belongs to that project: it is found where the project is, two projects may both have it.
+            documents.Add(new SearchDocument(setting.Project is { } project ? $"setting:{setting.Id}@{project}" : "setting:" + setting.Id, SearchKind.Setting, title, text.ToString(), DateTimeOffset.UnixEpoch)
             {
+                ProjectId = setting.Project,
                 Extra = setting.Plugin is { } plugin ? Extra(("id", setting.Id), ("page", setting.Page), ("plugin", plugin)) : Extra(("id", setting.Id), ("page", setting.Page)),
                 EmbeddingTitle = setting.Help is { } summary ? $"{title} · {summary}" : title,
             });

@@ -10,6 +10,13 @@ export type SettingValueSource = Readonly<{
   set(entry: SettingEntry, value: unknown, projectId?: string | null): Promise<SettingWrite>;
 }>;
 
+/** Whether a change the host asks the page for has expired: `expires` is in milliseconds since 1970, as a text; none never expires. */
+export function writeExpired(expires: string | null | undefined, now: number): boolean {
+  if (!expires) return false;
+  const deadline = Number(expires);
+  return Number.isFinite(deadline) && now > deadline;
+}
+
 /** A value of a JSON text; null for none or for a text that is not JSON. */
 export function parseSettingValue(text: string | null | undefined): unknown {
   if (text === null || text === undefined) return null;
@@ -17,21 +24,32 @@ export function parseSettingValue(text: string | null | undefined): unknown {
 }
 
 /**
- * The values of the settings: those the page keeps are read and changed here, through their bindings, the others in the
- * host. A change of the host goes through the registry, which applies the rules of its page.
+ * The project a value of a setting is read for: the one of a plugin of a project, else the one named, else the selected
+ * project for a setting a project can have; null for the user's.
  */
-export function settingValueSource(hub: Pick<SettingsHub, "get" | "set">, window: ReadonlyMap<string, WindowSettingBinding>): SettingValueSource {
+export function settingProject(entry: SettingEntry, projectId: string | null | undefined, selectedProjectId: string | null): string | null {
+  if (entry.project) return entry.project;
+  if (projectId !== undefined && projectId !== null) return projectId;
+  return entry.scopes.includes("project") ? selectedProjectId : null;
+}
+
+/**
+ * The values of the settings: those the page keeps are read and changed here, through their bindings, the others in the
+ * host. A change of the host goes through the registry, which applies the rules of its page. A setting a project can
+ * have is read and changed for the selected project, unless one is named.
+ */
+export function settingValueSource(hub: Pick<SettingsHub, "get" | "set">, window: ReadonlyMap<string, WindowSettingBinding>, selectedProjectId: string | null = null): SettingValueSource {
   return Object.freeze({
-    async get(entry: SettingEntry, projectId: string | null = null): Promise<SettingRead> {
+    async get(entry: SettingEntry, projectId?: string | null): Promise<SettingRead> {
       if (entry.owner === "window") {
         const binding = window.get(entry.id);
         return Object.freeze(binding
           ? { status: "ok", value: binding.value, source: JSON.stringify(binding.value) === JSON.stringify(entry.defaultValue) ? "default" : "window", message: null, choices: binding.choices ?? null }
           : { status: "unavailable", value: null, source: null, message: null, choices: null });
       }
-      return hub.get(entry.id, projectId);
+      return hub.get(entry.id, settingProject(entry, projectId, selectedProjectId));
     },
-    async set(entry: SettingEntry, value: unknown, projectId: string | null = null): Promise<SettingWrite> {
+    async set(entry: SettingEntry, value: unknown, projectId?: string | null): Promise<SettingWrite> {
       if (entry.owner === "window") {
         const binding = window.get(entry.id);
         if (!binding) return Object.freeze({ status: "unavailable", value: null, previous: null, message: null });
@@ -39,7 +57,7 @@ export function settingValueSource(hub: Pick<SettingsHub, "get" | "set">, window
         const error = binding.set(value === undefined ? entry.defaultValue : value);
         return Object.freeze(error ? { status: "invalid", value: null, previous, message: error } : { status: "ok", value: value === undefined ? entry.defaultValue : value, previous, message: null });
       }
-      return hub.set(entry.id, value, projectId);
+      return hub.set(entry.id, value, settingProject(entry, projectId, selectedProjectId));
     },
   });
 }

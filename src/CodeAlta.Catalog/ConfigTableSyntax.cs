@@ -82,6 +82,21 @@ public static class ConfigTableSyntax
         return Edit(content, table, key, literal, createTable: true, StringComparison.Ordinal);
     }
 
+    /// <summary>Sets <c>key = 12</c> in a table, exactly as the whole number is, or removes the line of the key.</summary>
+    /// <param name="content">The text of the configuration.</param>
+    /// <param name="table">The path of the table.</param>
+    /// <param name="key">The key in the table.</param>
+    /// <param name="value">The whole number; null removes the key.</param>
+    /// <returns>The new text; the same text when nothing changes.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="content"/> or <paramref name="table"/> is <see langword="null"/>.</exception>
+    /// <exception cref="ArgumentException"><paramref name="table"/> is empty, or <paramref name="key"/> is empty.</exception>
+    /// <exception cref="InvalidDataException">The text is not valid TOML, or defines the table in a form that is not edited here.</exception>
+    public static string SetInteger(string content, IReadOnlyList<string> table, string key, long? value)
+    {
+        Validate(content, table, key);
+        return Edit(content, table, key, value?.ToString(System.Globalization.CultureInfo.InvariantCulture), createTable: true, StringComparison.Ordinal);
+    }
+
     /// <summary>Sets <c>key = ["...", ...]</c> in a table, an empty list included, or removes the line of the key.</summary>
     /// <param name="content">The text of the configuration.</param>
     /// <param name="table">The path of the table.</param>

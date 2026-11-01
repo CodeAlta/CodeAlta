@@ -350,9 +350,9 @@ Services.Settings.Changed += (_, change) => Logger.Info($"{change.Key} changed")
 ```
 
 - The kinds are `Boolean`, `Choice`, `Integer`, `Number`, `Text`, `Path` and `List`. A key has lower-case letters, digits and underscores; `enabled`, `required` and `spaces` are taken.
-- CodeAlta keeps the values in `config.toml` under `[plugins.<id>]`: the user's file, or the project's `.alta/config.toml` for a setting with `Scope = PluginSettingScope.Project` (the only scope of a plugin of a project). A value never changed is the default.
+- CodeAlta keeps the values in `config.toml` under `[plugins.<id>]`: the user's file, or the project's `.alta/config.toml` for a setting with `Scope = PluginSettingScope.Project`. Every setting of a plugin of a project is kept in its project. A value never changed is the default.
 - Agents only read a setting unless it says `Agents = PluginSettingAccess.ReadWrite`. Leave a setting that protects the user, opens access or deletes data to the user.
-- `Changed` is raised on the thread that changed the value: return quickly. A hand edit of the file is read at the next `Get…`.
+- The values can be read from `OnActivatedAsync` on. `Changed` is raised off the window's thread while the plugin runs, never once it stops: return quickly. A hand edit of the file is read at the next `Get…`.
 - A plugin declares at most 64 settings; one that is not valid is left out, and **Settings > Plugins** says why.
 
 ## Lifecycle and data

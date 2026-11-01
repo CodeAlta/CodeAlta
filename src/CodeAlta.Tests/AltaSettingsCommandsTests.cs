@@ -123,6 +123,26 @@ public sealed class AltaSettingsCommandsTests
     }
 
     [TestMethod]
+    public async Task Reset_OfAText_GivesBackItsDefault_NotTheWordDefault()
+    {
+        using var fixture = Fixture.Create();
+        fixture.Settings.Values["plugins.builds.branch"] = Json("\"release\"");
+        await fixture.OkAsync(Agent, "settings", "reset", "plugins.builds.branch");
+        Assert.AreEqual("main", fixture.Settings.Values["plugins.builds.branch"].GetString());
+        await fixture.OkAsync(Agent, "settings", "set", "plugins.builds.branch", "default");
+        Assert.AreEqual("default", fixture.Settings.Values["plugins.builds.branch"].GetString(), "set takes the text as it is");
+    }
+
+    [TestMethod]
+    public async Task ASettingOfAPluginOfAProject_IsReadAndChangedForThatProject()
+    {
+        using var fixture = Fixture.Create();
+        await fixture.OkAsync(Agent, "settings", "get", "plugins.builds.branch");
+        await fixture.OkAsync(Agent, "settings", "set", "plugins.builds.branch", "release");
+        CollectionAssert.AreEqual(new[] { "p1", "p1" }, fixture.Settings.Projects.ToArray(), "the project of the plugin, without --project");
+    }
+
+    [TestMethod]
     public async Task Open_ShowsASettingOrAPage_ToTheUser()
     {
         using var fixture = Fixture.Create();
@@ -174,7 +194,11 @@ public sealed class AltaSettingsCommandsTests
             Setting("speech.model", "Model", "speech", "Personalization › Speech", AltaSettingKinds.Choice, AltaSettingAccess.ReadWrite, "\"parakeet\"") with { Writable = false },
             Setting("models.tiers", "Model tiers", "models", "Agent & models › Models", AltaSettingKinds.Complex, AltaSettingAccess.Read, null),
             Setting("mcp.servers", "MCP Servers", "mcp", "Extensions › MCP Servers", AltaSettingKinds.Collection, AltaSettingAccess.Read, null) with { ManagedBy = "alta mcp server" },
+            Setting("plugins.builds.branch", "Release branch", "plugin/source:builds", "Extensions › Builds", AltaSettingKinds.Text, AltaSettingAccess.ReadWrite, "\"main\"")
+                with { Owner = "plugin", Plugin = "builds", PluginName = "Builds", Scopes = ["project"], Project = "p1" },
         ];
+
+        public List<string?> Projects { get; } = [];
 
         public Dictionary<string, JsonElement> Values { get; } = new(StringComparer.Ordinal);
 
@@ -188,6 +212,7 @@ public sealed class AltaSettingsCommandsTests
 
         public ValueTask<AltaSettingRead> GetAsync(string id, string? projectId, CancellationToken cancellationToken)
         {
+            if (id.StartsWith("plugins.", StringComparison.Ordinal)) Projects.Add(projectId);
             if (Descriptors.FirstOrDefault(setting => setting.Id == id) is not { } setting) return new(new AltaSettingRead(AltaSettingStatus.NotFound, null, null, null));
             if (setting.Kind == AltaSettingKinds.Collection) return new(new AltaSettingRead(AltaSettingStatus.Managed, null, null, null));
             var value = Values.TryGetValue(id, out var known) ? known : setting.Default ?? Json("null");
@@ -197,6 +222,7 @@ public sealed class AltaSettingsCommandsTests
         public ValueTask<AltaSettingWrite> SetAsync(string id, JsonElement? value, string? projectId, AltaSettingOrigin origin, CancellationToken cancellationToken)
         {
             var setting = Descriptors.Single(setting => setting.Id == id);
+            if (setting.Plugin is not null) Projects.Add(projectId);
             if (!origin.IsWindow && setting.Agents != AltaSettingAccess.ReadWrite) return new(new AltaSettingWrite(AltaSettingStatus.ReadOnly, null, null, null));
             var wanted = value ?? setting.Default!.Value;
             if (setting.Choices.Count > 0 && (wanted.ValueKind != JsonValueKind.String || setting.Choices.All(choice => choice.Value != wanted.GetString())))

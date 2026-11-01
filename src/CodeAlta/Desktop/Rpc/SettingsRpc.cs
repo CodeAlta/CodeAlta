@@ -119,12 +119,12 @@ internal sealed class SettingsService
 
     private static SettingsChoice Choice(AltaSettingChoice choice) => new(choice.Value, choice.Label);
 
-    // The bounds of a number cross the bridge as whole numbers: the settings that have bounds count things.
-    private static int? Bound(double? value) => value is { } number ? (int)Math.Clamp(Math.Round(number), int.MinValue, int.MaxValue) : null;
+    // The bounds of a number cross the bridge as texts: a bound of a plugin may be a fraction.
+    private static string? Bound(double? value) => value?.ToString("R", System.Globalization.CultureInfo.InvariantCulture);
 
     private static SettingsDescriptor Describe(AltaSettingDescriptor setting) => new(setting.Id, setting.Label, setting.Help, setting.Page, setting.Section, setting.Kind,
         [.. setting.Choices.Select(Choice)], Bound(setting.Minimum), Bound(setting.Maximum), setting.Default?.GetRawText(), setting.Owner, setting.Agents, setting.Writable,
-        setting.ManagedBy, setting.Applies, [.. setting.Scopes], [.. setting.Keywords], setting.Plugin, setting.PluginName, setting.Available);
+        setting.ManagedBy, setting.Applies, [.. setting.Scopes], [.. setting.Keywords], setting.Plugin, setting.PluginName, setting.Available, setting.Project);
 }
 
 /// <summary>Asks for what needs no more than the epoch.</summary>
@@ -136,10 +136,13 @@ internal sealed record SettingsRequest(string ExpectedEpoch);
 /// <param name="Label">What is shown for it, in English; null to show the value.</param>
 internal sealed record SettingsChoice(string Value, string? Label);
 
-/// <summary>What a setting is (see <see cref="AltaSettingDescriptor"/>); its default as a JSON text.</summary>
+/// <summary>
+/// What a setting is (see <see cref="AltaSettingDescriptor"/>): its default as a JSON text, its bounds as numbers written
+/// as texts, and the project of a plugin of a project.
+/// </summary>
 internal sealed record SettingsDescriptor(string Id, string Label, string? Help, string Page, string? Section, string Kind, IReadOnlyList<SettingsChoice> Choices,
-    int? Minimum, int? Maximum, string? Default, string Owner, string Agents, bool Writable, string? ManagedBy, string Applies, IReadOnlyList<string> Scopes,
-    IReadOnlyList<string> Keywords, string? Plugin, string? PluginName, bool Available);
+    string? Minimum, string? Maximum, string? Default, string Owner, string Agents, bool Writable, string? ManagedBy, string Applies, IReadOnlyList<string> Scopes,
+    IReadOnlyList<string> Keywords, string? Plugin, string? PluginName, bool Available, string? Project);
 
 /// <summary>The settings, or why they are not listed.</summary>
 internal sealed record SettingsCatalogResponse(string Status, IReadOnlyList<SettingsDescriptor> Settings);
@@ -194,5 +197,9 @@ internal sealed record SettingsReportResponse(string Status);
 /// <param name="Who">The plugin that changed it.</param>
 /// <param name="ProjectId">The project whose value changed.</param>
 /// <param name="RequestId">The change a <c>write</c> asks for.</param>
+/// <param name="Expires">
+/// When a <c>write</c> expires, in milliseconds since 1970 (UTC), as a text: the page makes the change before, else answers
+/// that it did not, since the host has stopped waiting for it.
+/// </param>
 internal sealed record SettingsEvent(string Kind, string? Page = null, string? Id = null, string? Value = null, string? Previous = null, string? Origin = null,
-    string? SessionId = null, string? Who = null, string? ProjectId = null, string? RequestId = null);
+    string? SessionId = null, string? Who = null, string? ProjectId = null, string? RequestId = null, string? Expires = null);

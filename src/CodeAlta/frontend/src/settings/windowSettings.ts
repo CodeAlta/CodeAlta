@@ -10,6 +10,7 @@ import { maximumModelPickerRows, minimumModelPickerRows, modelPickerPreferences,
 import { useTimelineEmphasis } from "../timelineEmphasis/useTimelineEmphasis";
 import { themes, type Confirmation, type Theme } from "../windowPreferences";
 import type { SettingsHub } from "./settingsHub";
+import { writeExpired } from "./settingValues";
 
 /** The settings the page keeps: those `builtInSettings.json` declares with the owner `window`. */
 export const windowSettingIds = Object.freeze(["appearance.theme", "appearance.darker", "appearance.color_scheme", "appearance.code_font", "appearance.prompt_font",
@@ -111,6 +112,8 @@ export function useWindowSettingsBridge(hub: SettingsHub | null, connected: bool
     if (!hub || !connected) return;
     return hub.onEvent((event: SettingsEvent) => {
       if (event.kind !== "write" || !event.id || !event.requestId) return;
+      // A change that comes after the host stopped waiting is not made: the host told its caller it was not.
+      if (writeExpired(event.expires, Date.now())) { void hub.report([], event.requestId, "The change came too late and was not made."); return; }
       const binding = latest.current.get(event.id);
       let error: string | null = binding ? null : "The window does not keep this setting.";
       let value: unknown = null;
