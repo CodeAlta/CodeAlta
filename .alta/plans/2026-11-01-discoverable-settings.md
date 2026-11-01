@@ -273,33 +273,36 @@ Four milestones, each a series of commits that builds and passes the tests on it
 
 ## How it is verified
 
-- [ ] **`AltaSettingsCommandsTests`** (fake `IAltaSettings`) covers:
+- [x] **`AltaSettingsCommandsTests`** (fake `IAltaSettings`) covers:
   - `list`, `get`, `set`, `reset` and `open`, and values of every kind.
   - Errors and exit codes.
   - `read` settings refused, sandboxed callers refused, space containment.
   - Collections refused, naming their commands.
   - The group absent from the CLI and TUI registries, and the reserved root.
-- [ ] **`DesktopSettingsTests`** checks:
+- [x] **`DesktopSettingsTests`** checks:
   - Every host entry of the catalog has a binding, and every binding has an entry.
   - On an empty profile, each binding reads the catalog's default. This catches drift such as the Code Mode default, which the page and the document disagree on today.
   - `set` then `get` writes the file and keeps its comments.
   - A window write ends in `settings.unavailable` when no page answers.
-- [ ] **Plugin settings tests** check validation, values in `[plugins.<id>]`, the toggle of `enabled` keeping them, `Changed` firing once per write, and a project plugin writing the project file.
-- [ ] **`settingsCatalog.test.ts`** checks that every text of the catalog is a key of the dictionaries, every `page` is in `settingsPages.ts`, and every window entry has a binding in `windowSettings.ts`.
-- [ ] **`settingsSearch.test.ts`** checks ranking in English and in French, keywords, and page results.
-- [ ] **Browser tests** in the settings shell (`settingsOrganization.neoastra.mount.ts`) check:
+- [x] **Plugin settings tests** check validation, values in `[plugins.<id>]`, the toggle of `enabled` keeping them, `Changed` firing once per write, and a project plugin writing the project file.
+- [x] **`settingsCatalog.test.ts`** checks that every text of the catalog is a key of the dictionaries, every `page` is in `settingsPages.ts`, and every window entry has a binding in `windowSettings.ts`.
+- [x] **`settingsSearch.test.ts`** checks ranking in English and in French, keywords, and page results.
+- [x] **Browser tests** in the settings shell (`settingsOrganization.neoastra.mount.ts`) check:
   - Every `.settings-field` with a control, on every page, carries a `data-setting` the catalog knows, so a new field without an entry fails.
   - Typing shows editable results, and a change made there is saved.
   - Opening a setting makes it glow.
   - `Ctrl+P` lists a setting and opens it.
-- [ ] **Search tests** (`DesktopSearchTests`, `AltaSearchCommandsTests`) cover the `setting` document, its `next`, and a plugin hidden by its space.
-- [ ] **In the developer instance** (`codealta-dev`), check in both themes and in a 900×650 window:
+- [x] **Search tests** (`DesktopSearchTests`, `AltaSearchCommandsTests`) cover the `setting` document, its `next`, and a plugin hidden by its space.
+- [x] **In the developer instance** (`codealta-dev`), check in both themes and in a 900×650 window:
   - Typing "title" in Settings shows results from Sessions and Windows, and one can be changed in place.
   - `Ctrl+P` "keep awake" opens General with the glow.
   - From a session, `alta settings set sessions.prompt_suggestions false` shows the toast, and **Undo** restores the value.
   - `alta settings set permissions.default_mode ask` is refused with exit 4.
   - `alta settings open appearance.theme` shows the glow.
-- [ ] `dotnet test`, `npm test` and `lunet build` pass.
+- [x] `dotnet test`, `npm test` and `lunet build` pass.
+- [x] **Review** by a child session on Codex GPT-6.1 Sol (max): 13 findings, all fixed with regression tests (91158b16d): plugins of a project keep every setting in their project and are reached only from its spaces; field changes of `config.toml` under its lock; window writes expire before the host stops waiting; plugin `Changed` through the running activation (readable from `OnActivatedAsync`); `reset` of a text, fractional bounds, exact integers, project context and Undo, controls refreshed after an agent's change, `open` leaves the search, IME Enter.
+- [x] **Follow-up**: a typed save no longer drops the comments on lines of their own (`ConfigComments`, fb2c4e489).
+
 
 ## Decisions
 
