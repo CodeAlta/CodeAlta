@@ -1,10 +1,11 @@
 import { createContext, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type KeyboardEvent } from "react";
+import { showToast } from "./appToaster";
 import { diagramAppearance, diagrams } from "./diagrams";
 import { translate } from "./localization";
 import { createMarkdownRenderer, equationCopy, followFootnote, localImageClass, markdownPending, toggleRenderedSource } from "./markdownBoundary";
 import { loadMath } from "./math";
 import type { MarkdownImage, MarkdownImages } from "./markdownImages";
-import { markdownHrefKind, markdownLinkActivation, type MarkdownLinkScope } from "./markdownLinks";
+import { markdownHrefKind, markdownLinkActivation, maximumMarkdownHrefLength, tooLongMarkdownHref, type MarkdownLinkScope } from "./markdownLinks";
 import { appearanceKey, subscribeAppearance } from "./shellColors";
 import { useShellLanguage } from "./shellLanguage";
 import { inModalDialog, modalDialogOpen } from "./modalDialogs";
@@ -147,7 +148,14 @@ export function MarkdownContent({ source, timelineCodeBlocks = false, document: 
     if (!activate || !link.isConnected || link.closest('[inert], [hidden]')
       || target?.closest("button") || modalDialogOpen() && !inModalDialog(link)) return;
     const address = link.getAttribute("href"); // Read the sanitized literal, not the browser-resolved property.
-    if (!address || !markdownHrefKind(address)) return;
+    if (!address) return;
+    if (!markdownHrefKind(address)) {
+      const length = openLink ? tooLongMarkdownHref(address) : null;
+      if (length !== null) showToast({ intent: "warning", icon: "warning-sign", timeout: 30_000,
+        message: translate(locale, "This link is too long to open: it has {length} characters, and the limit is {limit}.", { length, limit: maximumMarkdownHrefLength }),
+        action: { text: translate(locale, "Copy address"), onClick: () => void navigator.clipboard?.writeText(address).catch(() => { /* The clipboard is unavailable: nothing was copied. */ }) } }, "markdown-link-too-long");
+      return;
+    }
     const picture = link.querySelector<HTMLImageElement>(`:scope > img.${localImageClass}[src]`);
     const image = picture && drawnPictures.current.get(picture);
     if (picture && image && opensPicture(event.nativeEvent)) {

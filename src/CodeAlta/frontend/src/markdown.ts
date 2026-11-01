@@ -1,6 +1,6 @@
 import MarkdownIt from "markdown-it";
 import footnote from "markdown-it-footnote";
-import { fileMarkdownHref } from "./markdownLinks";
+import { fileMarkdownHref, markdownHrefTarget } from "./markdownLinks";
 import { markdownMath } from "./markdownMath";
 import { sourceLinesAttribute } from "./markdownSourceLines";
 
@@ -99,7 +99,7 @@ export function createMarkdownParser(options: Readonly<{ breaks?: boolean;
   if (options.fileLinkMark) md.renderer.rules.link_open = (tokens, index, rendering, _env, renderer) => {
     const token = tokens[index];
     const href = token.attrGet("href");
-    if (typeof href === "string" && fileMarkdownHref(href)) token.attrSet("data-file-link", options.fileLinkMark!);
+    if (typeof href === "string" && markdownHrefTarget(href) === "file") token.attrSet("data-file-link", options.fileLinkMark!);
     return renderer.renderToken(tokens, index, rendering);
   };
   return (source: string, sourceLines?: MarkdownSourceLines) => md.render(source, sourceLines ? { sourceLines } : {});

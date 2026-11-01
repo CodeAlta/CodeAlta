@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { fileMarkdownHref, markdownHrefKind, markdownLinkActivation, openMarkdownLink, safeMarkdownHref } from "./markdownLinks";
+import { fileMarkdownHref, markdownHrefKind, markdownHrefTarget, markdownLinkActivation, maximumMarkdownHrefLength, openMarkdownLink, safeMarkdownHref, tooLongMarkdownHref } from "./markdownLinks";
 import { createMutationCapability } from "./sessionOperations";
 
 const epoch = "3b0a7c1e-52c9-4f0b-8a55-6d0c2f9e1b77";
@@ -30,6 +30,33 @@ test("a target is a file of this computer when it is a path or a file: address w
     assert.equal(markdownHrefKind(value), null, JSON.stringify(value));
   }
   assert.equal(markdownHrefKind(address), "web");
+});
+
+test("a link just over the limit is still a link, refused for its length alone", async () => {
+  const web = (length: number) => "https://example.invalid/".padEnd(length, "x");
+  assert.equal(markdownHrefKind(web(maximumMarkdownHrefLength)), "web");
+  assert.equal(tooLongMarkdownHref(web(maximumMarkdownHrefLength)), null);
+  assert.equal(markdownHrefKind(web(maximumMarkdownHrefLength + 1)), null);
+  assert.equal(markdownHrefTarget(web(maximumMarkdownHrefLength + 1)), "web");
+  assert.equal(tooLongMarkdownHref(web(maximumMarkdownHrefLength + 1)), maximumMarkdownHrefLength + 1);
+  // What the address grows to when it is opened counts: each of these characters is written as six.
+  const grown = `https://example.invalid/${"é".repeat(maximumMarkdownHrefLength / 4)}`;
+  assert.equal(grown.length <= maximumMarkdownHrefLength, true);
+  assert.equal(tooLongMarkdownHref(grown), new URL(grown).href.length);
+  const file = "a".repeat(maximumMarkdownHrefLength + 1);
+  assert.equal(markdownHrefTarget(file), "file");
+  assert.equal(tooLongMarkdownHref(file), file.length);
+  assert.equal(tooLongMarkdownHref("a".repeat(maximumMarkdownHrefLength)), null);
+  // Only the length is forgiven: what is refused for another reason is no link, however long it is.
+  for (const value of [`javascript:${"x".repeat(2048)}`, `https://user:pass@example.invalid/${"x".repeat(2048)}`, `https://example.invalid/${"x".repeat(2048)} y`,
+    `//server/${"x".repeat(2048)}`, `mailto:${"x".repeat(2048)}`, "", address]) {
+    assert.equal(tooLongMarkdownHref(value), null, value.slice(0, 40));
+  }
+  assert.equal(markdownHrefTarget(`javascript:${"x".repeat(2048)}`), null);
+  // The host is never asked to open one.
+  let calls = 0;
+  assert.equal(await openMarkdownLink(async () => { calls++; return { status: "ok", hostEpoch: epoch }; }, epoch, web(maximumMarkdownHrefLength + 1), () => true), "invalid_request");
+  assert.equal(calls, 0);
 });
 
 test("intentional primary, modified primary, middle and Enter activation only", () => {
