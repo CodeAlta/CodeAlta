@@ -308,7 +308,10 @@ The page is trusted; what it shows often is not. Each boundary has one owner:
   is concatenated afterwards. Renderer-owned attributes that must survive (`data-source-lines`, file links) carry a
   random mark of the render, so authored HTML cannot claim them. Rendering never navigates: a web link opens in the
   system browser only on a trusted user gesture, through `markdownLinks.open`, which validates the address again on
-  the host; a file link is resolved by the host (`DesktopFileLinks`) and opens in the code editor.
+  the host; a file link is resolved by the host (`DesktopFileLinks`) and opens in the code editor. A target that only
+  breaks the limit of 2,048 units stays an `href` in the sanitized HTML (`markdownHrefTarget`), so it stays a focusable
+  link and its address is not lost: following it never reaches the opener, and a toast says it is too long and offers
+  **Copy address** (`tooLongMarkdownHref`).
 - **HTML that runs scripts** (the view of an MCP App) never runs on `app://codealta`, the only origin the bridge
   trusts. It is served on the `mcpapp` scheme (`DesktopMcpAppViews`, one origin per session and server, a CSP from
   `DesktopMcpAppPolicy`) in a sandboxed `iframe`, and what it asks goes through a token-bound `mcpApps` RPC. It relies

@@ -3,7 +3,7 @@ import { highlightCode } from "./codeHighlight";
 import { diagramAppearance, diagrams, type DiagramAppearance } from "./diagrams";
 import { loadedMath } from "./math";
 import { createMarkdownParser, footnoteAttribute, frontMatterEntries, frontMatterLineCount, splitFrontMatter } from "./markdown";
-import { markdownHrefKind } from "./markdownLinks";
+import { markdownHrefTarget } from "./markdownLinks";
 import { displayMathAttribute, mathAttribute } from "./markdownMath";
 import { sourceLinesAttribute } from "./markdownSourceLines";
 
@@ -142,8 +142,9 @@ export function createMarkdownRenderer(view: Window & typeof globalThis, labels:
     const { attrName: name, attrValue: value } = data;
     // The target of a link is a page of the web or, for a link of the Markdown, a file of this computer. The
     // sanitizer has a rule of its own for an address, which knows neither a drive nor `file:`: what this
-    // boundary accepts is kept as it is.
-    const kind = name === "href" && tag === "a" ? markdownHrefKind(value) : null;
+    // boundary accepts is kept as it is. A target too long to open stays a link too: following it says why it
+    // does not open, and offers the address, which the text may show nowhere else.
+    const kind = name === "href" && tag === "a" ? markdownHrefTarget(value) : null;
     const link = kind === "web" || kind === "file" && fileLinks.has(node);
     if (link) data.forceKeepAttr = true;
     const lines = name === sourceLinesAttribute ? ownSourceLines(value) : null;

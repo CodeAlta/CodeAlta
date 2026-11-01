@@ -187,6 +187,25 @@ test("production MarkdownContent retains useful HTML without resource or app aut
     assert.deepEqual(await evaluate(`markdownFixture.state.copies.slice(${copiesBefore})`), ["linked code", "linked code"], "Mouse and keyboard Copy retain their action once each inside an anchor");
     assert.equal(await evaluate("markdownFixture.state.external.length"), gestures + 1, "Code-copy must not also open its enclosing link");
     await check();
+    // A link just over the limit stays a link: it opens nothing, says why, and offers the address it may be the only place of.
+    const tooLong = `https://remote.invalid/${"x".repeat(2048 - "https://remote.invalid/".length + 1)}`;
+    assert.equal(tooLong.length, 2049);
+    await evaluate(`markdownFixture.renderGranted('assistant', true, '[pull request](${tooLong})')`);
+    assert.equal(await evaluate("document.querySelector('.markdown-content a[href]')?.getAttribute('href')"), tooLong);
+    await activate();
+    assert.match(await evaluate<string>(`new Promise(resolve => { const look = () => { const toast = document.querySelector('.bp6-toast'); toast ? resolve(toast.textContent) : setTimeout(look, 20); }; look(); })`),
+      /too long to open: it has 2049 characters, and the limit is 2048\./);
+    assert.equal(await evaluate("markdownFixture.state.external.length"), gestures + 1, "A link too long to open is not given to the opener");
+    await evaluate("document.querySelector('.bp6-toast .bp6-button').click()");
+    assert.equal(await evaluate("markdownFixture.state.copies.at(-1)"), tooLong);
+    await evaluate(`new Promise(resolve => { const look = () => document.querySelector('.bp6-toast') ? setTimeout(look, 20) : resolve(true); look(); })`);
+    // What is refused for another reason keeps no address, and where nothing opens links nothing is said.
+    await evaluate(`markdownFixture.renderGranted('assistant', true, '<a href="javascript:${"x".repeat(2048)}">script</a>')`);
+    assert.equal(await evaluate("document.querySelectorAll('.markdown-content a[href]').length"), 0);
+    await evaluate(`markdownFixture.render('[pull request](${tooLong})', true)`);
+    await activate();
+    assert.equal(await evaluate(`new Promise(resolve => setTimeout(() => resolve(document.querySelectorAll('.bp6-toast').length), 100))`), 0);
+    await check();
     // A window that reads the pictures of the disk draws one in its link, from where the session works; one it cannot read stays a link.
     picturesRead = true;
     await evaluate(`markdownFixture.renderPictures(${JSON.stringify("![chart](out/chart.png) ![gone](out/gone.png)")})`);

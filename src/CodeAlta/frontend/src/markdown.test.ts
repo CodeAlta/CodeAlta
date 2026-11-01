@@ -108,6 +108,9 @@ test("a link to a file is a link, and the parser marks the ones it wrote", () =>
   for (const href of ["src/Program.cs#L42", "C:%5Cmy%20code%5Ca.cs", "file:///C:/out/report.html", "file:///tmp/a.txt", "file:///tmp/b.txt"]) assert.ok(marked.includes(`<a href="${href}" data-file-link="mark-1">`), href);
   assert.equal(marked.match(/data-file-link/g)?.length, 5);
   assert.ok(marked.includes('<a href="https://example.invalid/">web</a>') && marked.includes('<a href="mailto:a@b.invalid">mail</a>') && marked.includes('<a href="src/raw.cs">raw</a>'));
+  // A link to a file that is too long to open is marked too: the boundary keeps it, to say why it does not open.
+  const long = "a".repeat(2049);
+  assert.ok(createMarkdownParser({ fileLinkMark: "mark-1" })(`[long](${long})`).includes(`<a href="${long}" data-file-link="mark-1">`));
   // Scripts are still no link.
   assert.doesNotMatch(createMarkdownParser()("[x](javascript:alert(1)) [y](data:text/html,x) [z](vbscript:x)"), /<a /);
 });
