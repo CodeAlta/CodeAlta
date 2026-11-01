@@ -230,7 +230,7 @@ export function CommandPermissionPanel({ reviewer, epoch, sessionId, canReview, 
       </>
       : entry.kind === "browser" && entry.browser
       ? <>
-        <p className="detail" data-permission-browser>{t("Profile {profile}", { profile: entry.browser.profile })}
+        <p className="detail" data-permission-browser>{t("Profile: {profile}", { profile: entry.browser.profile })}
           {entry.browser.site && <> · <code data-permission-site>{entry.browser.site}</code></>}</p>
         <p className="detail">{entry.browser.site
           ? t("The agent reads and acts on the pages of this site and its subdomains with your sign-ins.")

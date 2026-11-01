@@ -1496,7 +1496,7 @@ export const messages = dictionary({
   "Allow for this session": ["Permitir en esta sesión", "Autoriser pour cette session", "Für diese Sitzung erlauben", "このセッションで許可", "在此会话中允许"],
   "Open {site} in your browser {browser}?": ["¿Abrir {site} en tu navegador {browser}?", "Ouvrir {site} dans votre navigateur {browser} ?", "{site} in Ihrem Browser {browser} öffnen?", "ブラウザー {browser} で {site} を開きますか？", "要在你的浏览器 {browser} 中打开 {site} 吗？"],
   "Let the agent use your browser {browser}?": ["¿Dejar que el agente use tu navegador {browser}?", "Laisser l'agent utiliser votre navigateur {browser} ?", "Den Agenten Ihren Browser {browser} verwenden lassen?", "エージェントにブラウザー {browser} の使用を許可しますか？", "允许代理使用你的浏览器 {browser} 吗？"],
-  "Profile {profile}": ["Perfil {profile}", "Profil {profile}", "Profil {profile}", "プロファイル {profile}", "配置文件 {profile}"],
+  "Profile: {profile}": ["Perfil: {profile}", "Profil : {profile}", "Profil: {profile}", "プロファイル: {profile}", "配置文件：{profile}"],
   "The agent reads and acts on the pages of this site and its subdomains with your sign-ins.": [
     "El agente lee y actúa en las páginas de este sitio y sus subdominios con tus sesiones iniciadas.",
     "L'agent lit et agit sur les pages de ce site et de ses sous-domaines avec vos connexions.",

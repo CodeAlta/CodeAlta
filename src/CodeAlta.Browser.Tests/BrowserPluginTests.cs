@@ -182,6 +182,7 @@ public sealed class BrowserPluginTests
         StringAssert.Contains(refused.Error, "alta browser activate");
         Assert.AreEqual(0, plugin.Pool.Running.Count, "the browser ends with its last session");
         Assert.IsFalse(Directory.Exists(plugin.Pool.TemporaryRoot) && Directory.EnumerateDirectories(plugin.Pool.TemporaryRoot).Any(), "the isolated profile leaves no folder");
+        Assert.IsFalse(Directory.Exists(Path.Combine(host.Root, "downloads", "s1")), "nor an empty folder of downloads");
     }
 
     [TestMethod]

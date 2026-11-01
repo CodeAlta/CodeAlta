@@ -10,7 +10,7 @@
 .browser-settings-profile code { overflow-wrap: anywhere; }
 .browser-settings-profile-actions { display: inline-flex; align-items: center; gap: 4px; flex-wrap: wrap; justify-content: flex-end; }
 .browser-settings-delete { position: relative; display: inline-flex; }
-.browser-settings-profile + .browser-settings-add { margin-top: 10px; }
+.browser-settings-profile + .browser-settings-add { display: flex; margin-top: 10px; }
 .browser-settings-found { width: 100%; border-collapse: collapse; table-layout: fixed; }
 .browser-settings-found td { padding: 4px 0; vertical-align: top; overflow-wrap: anywhere; }
 .browser-settings-found td + td { text-align: end; padding-inline-start: 8px; }

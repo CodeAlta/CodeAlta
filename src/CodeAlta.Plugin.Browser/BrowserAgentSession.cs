@@ -171,6 +171,22 @@ internal sealed class BrowserAgentSession : IAsyncDisposable
         }
 
         if (proxy is not null) await proxy.Owner.DisposeAsync().ConfigureAwait(false);
+        DeleteIfEmpty(DownloadFolder);
+    }
+
+    // The folder the downloads of the session go to: kept once something was downloaded there.
+    private string DownloadFolder => Path.Combine(_host.Root, "downloads", SafeName(SessionId));
+
+    private static void DeleteIfEmpty(string folder)
+    {
+        try
+        {
+            if (Directory.Exists(folder) && !Directory.EnumerateFileSystemEntries(folder).Any()) Directory.Delete(folder);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            // A download is being written, or the folder is in use: it stays.
+        }
     }
 
     private async Task<IBrowserContext> OpenContextAsync(CancellationToken cancellationToken)
@@ -201,7 +217,7 @@ internal sealed class BrowserAgentSession : IAsyncDisposable
             Proxy = proxy,
             // A sandboxed session saves nothing outside its sandbox; the others save in a folder of their own, and nothing
             // is ever opened.
-            DownloadDirectory = Sandbox is null && !IsUserProfile ? Directory.CreateDirectory(Path.Combine(_host.Root, "downloads", SafeName(SessionId))).FullName : null,
+            DownloadDirectory = Sandbox is null && !IsUserProfile ? Directory.CreateDirectory(DownloadFolder).FullName : null,
             Gate = (url, kind, token) => CheckAsync(url, kind, asking: false, token),
             GateDocuments = IsUserProfile,
             BlockedPorts = ReservedPorts(),
