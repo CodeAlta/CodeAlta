@@ -329,6 +329,8 @@ dd { margin: 0; overflow-wrap: anywhere; }
 .message-error .avatar { color: var(--red); border-color: color-mix(in srgb, var(--red) 35%, var(--line)); }
 .message strong { font-size: 12px; }
 .message p { margin: 5px 0 0; color: color-mix(in srgb, var(--text) 91%, var(--muted)); line-height: 1.5; white-space: pre-wrap; }
+/* Markdown breaks its own lines: a kept line feed after its <br> would break the line a second time. */
+.message .markdown-content p { white-space: normal; }
 .message pre { margin: 8px 0 0; max-width: 100%; overflow-x: auto; color: var(--text); font: inherit; line-height: 1.65; white-space: pre-wrap; }
 .markdown-content { min-width: 0; overflow-wrap: anywhere; color: color-mix(in srgb, var(--text) 91%, var(--muted)); line-height: 1.65; }
 .markdown-content > :first-child { margin-top: 7px; }
