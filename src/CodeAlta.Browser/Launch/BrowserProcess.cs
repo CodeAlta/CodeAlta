@@ -140,6 +140,23 @@ internal sealed class BrowserProcess : IAsyncDisposable
         }
     }
 
+    /// <summary>Lets the browser run on without CodeAlta: the user's own browser, which CodeAlta started on their profile, is never ended.</summary>
+    public void Release()
+    {
+        if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
+        try
+        {
+            _process.CancelOutputRead();
+            _process.CancelErrorRead();
+        }
+        catch (InvalidOperationException)
+        {
+            // It exited meanwhile.
+        }
+
+        _process.Dispose();
+    }
+
     /// <summary>Ends the browser at once, and deletes its temporary profile.</summary>
     public async ValueTask DisposeAsync()
     {

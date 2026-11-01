@@ -38,6 +38,9 @@ internal static partial class FirefoxLauncher
         ("extensions.update.enabled", "false"),
         ("browser.safebrowsing.malware.enabled", "false"),
         ("browser.safebrowsing.phishing.enabled", "false"),
+        // A proxy, of the browser or of a user context, also gets the addresses of the loopback: the proxy of a sandbox
+        // decides which local ports a session reaches.
+        ("network.proxy.allow_hijacking_localhost", "true"),
     ];
 
     [GeneratedRegex(@"WebDriver BiDi listening on (ws://[^\s]+)")]
@@ -60,11 +63,42 @@ internal static partial class FirefoxLauncher
             }
 
             // Local addresses go through the proxy too, which decides what a sandbox reaches.
-            builder.Append("user_pref(\"network.proxy.allow_hijacking_localhost\", true);\n");
             builder.Append("user_pref(\"network.proxy.no_proxies_on\", \"\");\n");
         }
 
         return builder.ToString();
+    }
+
+    /// <summary>
+    /// Whether a Firefox runs on a profile: on Windows it holds <c>parent.lock</c> open, elsewhere it leaves a <c>lock</c>
+    /// link, which a crash can leave behind, so a Firefox must also run.
+    /// </summary>
+    /// <param name="profileDirectory">The folder of the profile.</param>
+    /// <param name="firefoxRuns">Whether a program named firefox runs.</param>
+    public static bool ProfileInUse(string profileDirectory, Func<bool> firefoxRuns)
+    {
+        ArgumentNullException.ThrowIfNull(firefoxRuns);
+        if (OperatingSystem.IsWindows())
+        {
+            var file = Path.Combine(profileDirectory, "parent.lock");
+            if (!File.Exists(file)) return false;
+            try
+            {
+                using var stream = new FileStream(file, FileMode.Open, FileAccess.ReadWrite, FileShare.None);
+                return false;
+            }
+            catch (IOException)
+            {
+                return true;
+            }
+            catch (UnauthorizedAccessException)
+            {
+                return true;
+            }
+        }
+
+        var link = new FileInfo(Path.Combine(profileDirectory, "lock"));
+        return (link.Exists || link.LinkTarget is not null) && firefoxRuns();
     }
 
     /// <summary>The arguments of a start on a profile, with the endpoint on a port.</summary>

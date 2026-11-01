@@ -145,7 +145,7 @@ public sealed partial class SessionPermissionService : IAsyncDisposable
     private async Task<AgentPermissionDecision> HandleOwnedDefaultAsync(AgentPermissionRequest request, CancellationToken cancellationToken)
     {
         if (cancellationToken.IsCancellationRequested || Volatile.Read(ref _disposeStarted) != 0) return new(AgentPermissionDecisionKind.Cancel);
-        if (FullTrust) return new(IsOutsideSandbox(request) ? AgentPermissionDecisionKind.Deny : AgentPermissionDecisionKind.AllowOnce);
+        if (FullTrust) return new(OnlyTheUserAllows(request) ? AgentPermissionDecisionKind.Deny : AgentPermissionDecisionKind.AllowOnce);
         if (SessionPolicy is not { } policyOf || string.IsNullOrWhiteSpace(request.SessionId))
             return new(_autoApproveOwnedPermissions() && !AlwaysAsks(request) ? AgentPermissionDecisionKind.AllowOnce : AgentPermissionDecisionKind.Deny);
         var policy = policyOf(request.SessionId);
@@ -198,7 +198,7 @@ public sealed partial class SessionPermissionService : IAsyncDisposable
         ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
         ArgumentNullException.ThrowIfNull(request);
         if (cancellationToken.IsCancellationRequested || Volatile.Read(ref _disposeStarted) != 0) return new(AgentPermissionDecisionKind.Cancel);
-        if (FullTrust) return new(IsOutsideSandbox(request) ? AgentPermissionDecisionKind.Deny : AgentPermissionDecisionKind.AllowOnce);
+        if (FullTrust) return new(OnlyTheUserAllows(request) ? AgentPermissionDecisionKind.Deny : AgentPermissionDecisionKind.AllowOnce);
         if (SessionReviewTarget?.Invoke(sessionId) is not { } target) return new(AgentPermissionDecisionKind.Deny);
         request = request with { SessionId = sessionId, ProviderId = target.ProviderId };
         // A review of its own that asks whatever the mode of the session: it follows no policy.
@@ -223,6 +223,9 @@ public sealed partial class SessionPermissionService : IAsyncDisposable
 
     // A host that trusts its sessions fully still has nobody to let a command out of a sandbox: the user chose the sandbox.
     private static bool IsOutsideSandbox(AgentPermissionRequest request) => request is AgentCommandPermissionRequest { OutsideSandbox: true };
+
+    // Nor has it anybody to let a session into the user's own browser, with the user's sign-ins.
+    private static bool OnlyTheUserAllows(AgentPermissionRequest request) => IsOutsideSandbox(request) || request is AgentBrowserPermissionRequest;
 
     /// <summary>
     /// Gets or sets whether every request the host answers by default is granted, the loads of skills that otherwise

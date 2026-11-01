@@ -48,7 +48,9 @@
     <Project Path="CodeAlta.Hosting/CodeAlta.Hosting.csproj" />
     <Project Path="CodeAlta.LiveTool/CodeAlta.LiveTool.csproj" />
     <Project Path="CodeAlta.Orchestration/CodeAlta.Orchestration.csproj" />
+    <Project Path="CodeAlta.Browser/CodeAlta.Browser.csproj" />
     <Project Path="CodeAlta.Plugin.Acp/CodeAlta.Plugin.Acp.csproj" />
+    <Project Path="CodeAlta.Plugin.Browser/CodeAlta.Plugin.Browser.csproj" />
     <Project Path="CodeAlta.Plugin.CodexCli/CodeAlta.Plugin.CodexCli.csproj" />
     <Project Path="CodeAlta.Plugin.Git/CodeAlta.Plugin.Git.csproj" />
     <Project Path="CodeAlta.Plugin.Jira/CodeAlta.Plugin.Jira.csproj" />
@@ -65,6 +67,7 @@
     <Project Path="CodeAlta.Cli/CodeAlta.Cli.csproj" />
   </Folder>
   <Folder Name="/tests/">
+    <Project Path="CodeAlta.Browser.Tests/CodeAlta.Browser.Tests.csproj" />
     <Project Path="CodeAlta.Desktop.Tests/CodeAlta.Desktop.Tests.csproj" />
     <Project Path="CodeAlta.Catalog.Tests/CodeAlta.Catalog.Tests.csproj" />
     <Project Path="CodeAlta.Cli.Tests/CodeAlta.Cli.Tests.csproj" />
@@ -82,13 +85,11 @@
   </Folder>
   <Folder Name="/tools/">
     <Project Path="CodeAlta.Acp.Generator/CodeAlta.Acp.Generator.csproj" />
+    <Project Path="CodeAlta.Browser.Cdp.Generator/CodeAlta.Browser.Cdp.Generator.csproj" />
     <Project Path="CodeAlta.CodexAppServer.Generator/CodeAlta.CodexAppServer.Generator.csproj" />
     <Project Path="CodeAlta.Agent.ModelsDev.Updater/CodeAlta.Agent.ModelsDev.Updater.csproj" />
     <Project Path="CodeAlta.Benchmarks/CodeAlta.Benchmarks.csproj" />
     <Project Path="CodeAlta.Evals/CodeAlta.Evals.csproj" />
     <Project Path="CodeAlta.ColorSchemes.Generator/CodeAlta.ColorSchemes.Generator.csproj" />
   </Folder>
-  <Project Path="CodeAlta.Browser.Cdp.Generator/CodeAlta.Browser.Cdp.Generator.csproj" />
-  <Project Path="CodeAlta.Browser.Tests/CodeAlta.Browser.Tests.csproj" />
-  <Project Path="CodeAlta.Browser/CodeAlta.Browser.csproj" />
 </Solution>

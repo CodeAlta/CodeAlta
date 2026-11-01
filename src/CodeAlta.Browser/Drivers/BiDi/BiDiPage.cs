@@ -237,7 +237,8 @@ internal sealed class BiDiPage : IBrowserPage
             if (_owner.Options.Gate is { } gate && Uri.TryCreate(item.Request.Url, UriKind.Absolute, out var url))
             {
                 var isDocument = item.NavigationId is not null || item.Request.Destination is "document" or "iframe" or "frame";
-                refusal = await gate(url, isDocument, CancellationToken.None).ConfigureAwait(false);
+                var kind = !isDocument ? BrowserRequestKind.Resource : item.BrowsingContextId == Id ? BrowserRequestKind.Page : BrowserRequestKind.Frame;
+                refusal = await gate(url, kind, CancellationToken.None).ConfigureAwait(false);
             }
 
             if (refusal is null) await Driver.Network.ContinueRequestAsync(new ContinueRequestCommandParameters(item.Request.RequestId)).ConfigureAwait(false);

@@ -285,7 +285,9 @@ internal sealed class CdpPage : IChromiumPage
             string? refusal = null;
             if (_owner.Options.Gate is { } gate && Uri.TryCreate(item.Request.Url, UriKind.Absolute, out var url))
             {
-                refusal = await gate(url, item.ResourceType == "Document", CancellationToken.None).ConfigureAwait(false);
+                var kind = item.ResourceType != "Document" ? BrowserRequestKind.Resource
+                    : ReferenceEquals(session, _session) && item.FrameId == Volatile.Read(ref _mainFrameId) ? BrowserRequestKind.Page : BrowserRequestKind.Frame;
+                refusal = await gate(url, kind, CancellationToken.None).ConfigureAwait(false);
             }
 
             if (refusal is null) await session.Fetch.ContinueRequestAsync(new FetchContinueRequestParams { RequestId = item.RequestId }).ConfigureAwait(false);

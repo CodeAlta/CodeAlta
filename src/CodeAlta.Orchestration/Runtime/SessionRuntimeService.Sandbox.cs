@@ -21,6 +21,26 @@ public sealed record SessionSandbox(SandboxChoice Choice, ResolvedSandboxProfile
     public bool IsSandboxed => Choice.IsSandboxed;
 }
 
+/// <summary>
+/// What the sandbox of a session lets a program that CodeAlta runs for it outside its container reach: the browser of a
+/// sandboxed session reads and writes these folders only, and reaches the network through a proxy of these rules.
+/// </summary>
+/// <param name="Profile">The name of the profile.</param>
+/// <param name="Read">The folders it may read.</param>
+/// <param name="Write">The folders it may write.</param>
+/// <param name="Network">What the network of the profile reaches.</param>
+/// <param name="Hosts">The host patterns it reaches, or null for every host of the internet; empty with no network.</param>
+/// <param name="LocalPorts">The ports of this computer it reaches.</param>
+/// <param name="ReservedPorts">The ports of this computer it never reaches: CodeAlta's own.</param>
+public sealed record SessionSandboxReach(string Profile, IReadOnlyList<string> Read, IReadOnlyList<string> Write, SandboxNetwork Network,
+    IReadOnlyList<string>? Hosts, IReadOnlyList<int> LocalPorts, IReadOnlySet<int> ReservedPorts)
+{
+    /// <summary>Starts a proxy of the network of the profile on a free port of the loopback: the program goes through it only.</summary>
+    /// <returns>The proxy, which its owner disposes.</returns>
+    /// <exception cref="System.Net.Sockets.SocketException">No port could be listened on.</exception>
+    public CodeAlta.Sandbox.Network.SandboxNetworkProxy StartProxy() => CodeAlta.Sandbox.Network.SandboxNetworkProxy.Start(Hosts, LocalPorts, ReservedPorts);
+}
+
 public sealed partial class SessionRuntimeService
 {
     /// <summary>Reads the sandbox settings of the user: the setting of every session, and the profiles, mapped for the sandbox.</summary>

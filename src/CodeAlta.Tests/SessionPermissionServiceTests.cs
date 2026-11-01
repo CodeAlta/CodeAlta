@@ -36,6 +36,15 @@ public sealed class SessionPermissionServiceTests
     }
 
     [TestMethod]
+    public async Task BrowserRequest_IsDeniedByAHostThatTrustsItsSessions_ForNobodyIsThereToAgree()
+    {
+        await using var service = new SessionPermissionService { FullTrust = true };
+        var request = new AgentBrowserPermissionRequest(new ModelProviderId("codex"), "session", DateTimeOffset.UnixEpoch, null, "use", "Microsoft Edge", "Default", null);
+        Assert.AreEqual(AgentPermissionDecisionKind.Deny, (await service.RequestForSessionAsync("session", request, CancellationToken.None)).Kind);
+        Assert.AreEqual(AgentPermissionDecisionKind.AllowOnce, (await service.RequestForSessionAsync("session", Request(), CancellationToken.None)).Kind);
+    }
+
+    [TestMethod]
     public async Task PendingSnapshot_IsIndependentImmutableScalarData()
     {
         await using var service = new SessionPermissionService();

@@ -10,6 +10,7 @@ using CodeAlta.Orchestration.Hosting;
 using CodeAlta.Orchestration.Runtime;
 using CodeAlta.Orchestration.Runtime.Plugins;
 using CodeAlta.Plugin.Acp;
+using CodeAlta.Plugin.Browser;
 using CodeAlta.Plugin.CodexCli;
 using CodeAlta.Plugin.Git;
 using CodeAlta.Plugin.Jira;
@@ -153,6 +154,8 @@ internal sealed class CliHost : IAsyncDisposable
             if (!request.Offline && environment.ConfigureModelProviders is null) modelsDev.StartBackgroundRefresh();
             var pluginProviderTypes = new PluginModelProviderTypes(toolEndpoints) { ModelCatalog = modelsDev };
             var catalog = new CatalogOptions { GlobalRoot = storage.GlobalRoot, StateRoot = storage.StateRoot, Config = request.Config };
+            // The browsers of the sessions: headless, in profiles of CodeAlta only, since nobody is there to agree to the user's own.
+            var browser = new BrowserPluginHost(storage.StateRoot) { HasUser = false };
             host = await CodeAltaHost.CreateAsync(new CodeAltaHostOptions
             {
                 GlobalRoot = storage.GlobalRoot,
@@ -181,7 +184,7 @@ internal sealed class CliHost : IAsyncDisposable
                 PluginEnvironment = environment.PluginEnvironment,
                 StartPlugins = request.StartPlugins,
                 PluginFrontend = PluginFrontends.Cli,
-                PluginBuiltIns = BuiltInPlugins(request, catalog, plugin => Volatile.Write(ref mcp, plugin)),
+                PluginBuiltIns = BuiltInPlugins(request, catalog, plugin => Volatile.Write(ref mcp, plugin), browser),
                 RawArguments = [],
                 ConfigureModelProviders = environment.ConfigureModelProviders ?? (registry => ConfiguredModelProviderRegistryBuilder.RegisterConfiguredProviders(
                     registry, new CodeAltaConfigStore(catalog), storage.GlobalRoot, modelsDev, pluginProviderTypes)),
@@ -191,6 +194,18 @@ internal sealed class CliHost : IAsyncDisposable
                     pluginProviderTypes.RegisterOrReplace(registry, new CodeAltaConfigStore(catalog), storage.GlobalRoot, includeDisabled: false);
                 },
             }, cancellationToken).ConfigureAwait(false);
+            var runtime = host.RuntimeService;
+            browser.WorkFolder = async (sessionId, token) => await runtime.TryGetActiveSessionDescriptorAsync(sessionId, token).ConfigureAwait(false) is { } session
+                ? session.WorktreeDirectory ?? session.WorkingDirectory
+                : null;
+            browser.Sandbox = async (sessionId, token) => await runtime.GetSandboxReachAsync(sessionId, token).ConfigureAwait(false) is { } reach
+                ? new BrowserSandbox(reach.Profile, reach.Read, reach.Write, _ =>
+                {
+                    var proxy = reach.StartProxy();
+                    return ValueTask.FromResult(new BrowserSandboxProxy(new Uri(proxy.Endpoint).Authority, proxy));
+                })
+                : null;
+            browser.ReservedPorts = static () => [2582, 2583];
             var alta = ComposeAlta(host, request.ListsSkills);
             // --code-mode wins over the settings, for every session; without it, each session has the mode of its provider and model.
             var codeModeOptions = new CodeModeToolOptions
@@ -236,7 +251,8 @@ internal sealed class CliHost : IAsyncDisposable
     /// <param name="request">What the host is composed with.</param>
     /// <param name="catalog">The roots and the configuration of the host, which the MCP plugin reads its policy through.</param>
     /// <param name="mcpCreated">Told the MCP plugin once it is created; null for nothing.</param>
-    internal static IReadOnlyList<BuiltInPluginDefinition> BuiltInPlugins(CliHostRequest request, CatalogOptions catalog, Action<McpPlugin>? mcpCreated = null)
+    /// <param name="browser">What the browser plugin is given; null for none.</param>
+    internal static IReadOnlyList<BuiltInPluginDefinition> BuiltInPlugins(CliHostRequest request, CatalogOptions catalog, Action<McpPlugin>? mcpCreated = null, BrowserPluginHost? browser = null)
     {
         ArgumentNullException.ThrowIfNull(catalog);
         var plugins = new List<BuiltInPluginDefinition>
@@ -287,6 +303,14 @@ internal sealed class CliHost : IAsyncDisposable
             PluginType = typeof(CodexCliPlugin), Factory = static () => new CodexCliPlugin(),
             Frontends = PluginFrontends.All | PluginFrontends.Cli,
         });
+        if (browser is not null)
+        {
+            plugins.Add(new()
+            {
+                Id = BrowserPlugin.Id, DisplayName = "Browser", Description = BrowserPlugin.Description,
+                PluginType = typeof(BrowserPlugin), Factory = () => new BrowserPlugin(browser), Frontends = PluginFrontends.Cli,
+            });
+        }
         return plugins;
     }
 

@@ -91,6 +91,18 @@ internal sealed class DesktopUiSessions
             : null;
     }
 
+    private Action<string>? _activated;
+
+    /// <summary>
+    /// Gets or sets what is told when a session turns the UI tools on: the browser plugin takes back its tools, which
+    /// have the same names. Null while no other set of these names exists.
+    /// </summary>
+    internal Action<string>? Activated
+    {
+        get => Volatile.Read(ref _activated);
+        set => Volatile.Write(ref _activated, value);
+    }
+
     /// <summary>Whether a session has the tools.</summary>
     internal bool IsActive(string? sessionId)
     {
@@ -317,9 +329,12 @@ internal sealed class DesktopUiPlugin : PluginBase
             if (string.IsNullOrWhiteSpace(context.SourceSessionId)) return NoSession(context);
             if (await _sessions.RefusalAsync(context.SourceSessionId, context.CancellationToken).ConfigureAwait(false) is { } refusal) return Refused(context, refusal);
             _sessions.Set(context.SourceSessionId, active: true);
-            // An agent run that called the command takes the tools at once: its next model request offers them.
+            // The browser tools have the same names: a session drives one target at a time.
+            _sessions.Activated?.Invoke(context.SourceSessionId);
+            // An agent run that called the command takes the tools at once: its next model request offers them, in place
+            // of the browser tools of the same names.
             var tools = CreateTools(_ui, _sessions, context.WorkingDirectory);
-            var registered = context.RunTools?.Add(tools) ?? [];
+            var registered = context.RunTools?.Set(tools) ?? [];
             var now = context.RunTools is { } run && tools.All(tool => run.Contains(tool.Spec.Name));
             WriteRecord(context.Stdout, new
             {

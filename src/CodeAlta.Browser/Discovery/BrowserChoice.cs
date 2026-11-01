@@ -151,15 +151,32 @@ internal static class BrowserChoice
     internal static DateTimeOffset? FirefoxLastUse(InstalledBrowser browser)
     {
         DateTimeOffset? latest = null;
-        foreach (var profile in browser.Profiles)
+        foreach (var profile in browser.Profiles) latest = Max(latest, FirefoxLastUse(profile));
+        return latest;
+    }
+
+    /// <summary>The last use of a profile of Firefox, from the same files.</summary>
+    internal static DateTimeOffset? FirefoxLastUse(BrowserProfile profile)
+    {
+        DateTimeOffset? latest = null;
+        foreach (var file in new[] { "places.sqlite", "places.sqlite-wal", Path.Combine("sessionstore-backups", "recovery.jsonlz4"), "sessionstore.jsonlz4", "prefs.js" })
         {
-            foreach (var file in new[] { "places.sqlite", "places.sqlite-wal", Path.Combine("sessionstore-backups", "recovery.jsonlz4"), "sessionstore.jsonlz4", "prefs.js" })
-            {
-                latest = Max(latest, FileTime(Path.Combine(profile.Directory, file)));
-            }
+            latest = Max(latest, FileTime(Path.Combine(profile.Directory, file)));
         }
 
         return latest;
+    }
+
+    /// <summary>
+    /// The profile of the user's own Firefox a session browses in: the one used last, else the one Firefox opens by
+    /// default, else the first; null when Firefox lists none.
+    /// </summary>
+    internal static BrowserProfile? FirefoxUserProfile(InstalledBrowser browser)
+    {
+        ArgumentNullException.ThrowIfNull(browser);
+        var existing = browser.Profiles.Where(static profile => Directory.Exists(profile.Directory)).ToList();
+        return existing.Select(profile => (Profile: profile, Used: FirefoxLastUse(profile))).Where(static pair => pair.Used is not null).MaxBy(static pair => pair.Used).Profile
+            ?? existing.FirstOrDefault(static profile => profile.IsDefault) ?? existing.FirstOrDefault();
     }
 
     private static DateTimeOffset? FileTime(string path)

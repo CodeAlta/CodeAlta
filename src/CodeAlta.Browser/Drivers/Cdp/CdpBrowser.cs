@@ -94,18 +94,23 @@ internal sealed class CdpBrowserConnection : IBrowserConnection
             contextId = created.BrowserContextId;
         }
 
-        try
+        // Without a context of its own, the setting would be the whole browser's: the user's own browser keeps where it
+        // saves its downloads.
+        if (options.Isolated || OwnsBrowser)
         {
-            await Connection.Browser.Browser.SetDownloadBehaviorAsync(new BrowserSetDownloadBehaviorParams
+            try
             {
-                Behavior = options.DownloadDirectory is null ? "deny" : "allow",
-                DownloadPath = options.DownloadDirectory,
-                BrowserContextId = contextId,
-            }, cancellationToken).ConfigureAwait(false);
-        }
-        catch (CdpException) when (!options.Isolated)
-        {
-            // The user's own browser keeps where it saves its downloads.
+                await Connection.Browser.Browser.SetDownloadBehaviorAsync(new BrowserSetDownloadBehaviorParams
+                {
+                    Behavior = options.DownloadDirectory is null ? "deny" : "allow",
+                    DownloadPath = options.DownloadDirectory,
+                    BrowserContextId = contextId,
+                }, cancellationToken).ConfigureAwait(false);
+            }
+            catch (CdpException) when (!options.Isolated)
+            {
+                // A browser that refuses it saves downloads where its profile says.
+            }
         }
 
         var context = new CdpBrowserContext(this, contextId, options);

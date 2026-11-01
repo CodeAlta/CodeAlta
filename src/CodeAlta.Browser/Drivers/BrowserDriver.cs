@@ -230,10 +230,23 @@ internal interface IBrowserContext : IAsyncDisposable
 /// own browser, a request to a port of CodeAlta. Called by the driver while the request waits.
 /// </summary>
 /// <param name="url">The address.</param>
-/// <param name="isDocument">Whether the request loads a document in a frame of the tab.</param>
+/// <param name="kind">What the request loads: the page of the tab, the document of a frame in it, or a resource.</param>
 /// <param name="cancellationToken">Ends the wait.</param>
 /// <returns>Null to let it go, else why it is refused.</returns>
-internal delegate ValueTask<string?> BrowserRequestGate(Uri url, bool isDocument, CancellationToken cancellationToken);
+internal delegate ValueTask<string?> BrowserRequestGate(Uri url, BrowserRequestKind kind, CancellationToken cancellationToken);
+
+/// <summary>What a request of a tab loads.</summary>
+internal enum BrowserRequestKind
+{
+    /// <summary>A resource of a document: a script, a picture, a call of a script.</summary>
+    Resource,
+
+    /// <summary>The document of a frame inside the page.</summary>
+    Frame,
+
+    /// <summary>The page of the tab itself.</summary>
+    Page,
+}
 
 /// <summary>How the tabs of a session are opened in a browser.</summary>
 internal sealed record BrowserContextOptions

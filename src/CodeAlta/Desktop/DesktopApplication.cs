@@ -359,6 +359,8 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
             var ui = new Ui.DesktopUiAutomation(application, Path.Combine(options.DataRoot, "ui"));
             uiLifetime = ui;
             var uiSessions = new Ui.DesktopUiSessions();
+            // The web browsers sessions drive: what the browser plugin learns of a session comes once the host runs.
+            var browserHost = new CodeAlta.Plugin.Browser.BrowserPluginHost(options.StateRoot ?? options.CatalogRoot!);
             // The Search plugin exists before the host; the index it signals is created once the host runs.
             var searchRelay = new Search.DesktopSearchRelay();
             window = application.CreateWindow(DesktopWindowChrome.WindowOptions(options.Developer, appearance));
@@ -539,7 +541,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                 PluginFrontend = PluginFrontends.Desktop, PluginAuthoringProfile = PluginAuthoringProfile.Terminal,
                 PluginStartupFeedback = new DesktopPluginStartupFeedback(startupStatus),
                 PluginBuiltIns = DesktopPlugins.ForWindow(ui, uiSessions, options.ReviewOwnedCommandPermissions,
-                    DesktopPlugins.CreateJournalCatalog(catalog), new StatisticsArchiveStore(catalog.StateRoot), searchRelay), PluginSafeMode = DesktopPlugins.SafeMode,
+                    DesktopPlugins.CreateJournalCatalog(catalog), new StatisticsArchiveStore(catalog.StateRoot), searchRelay, browserHost), PluginSafeMode = DesktopPlugins.SafeMode,
                 PluginServices = pluginAlta is null ? null : new DesktopPluginServices(pluginAlta, pluginUi, canvases, pluginIdentities, new DesktopPluginAppFiles(assets, manifest), pluginAsks),
                 // With the provider types of the plugins, which start later: their providers wait for them, as the log says.
                 ConfigureModelProviders = registry => ConfiguredModelProviderRegistryBuilder.RegisterConfiguredProviders(
@@ -857,7 +859,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                 // Its indexer waits a little before its first pass, so it does not slow the start.
                 search = Search.DesktopSearch.Start(host, searchRelay, DesktopPlugins.CreateJournalCatalog(host.CatalogOptions), documentation,
                     roots.Home ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-                    DesktopPlugins.ForWindow(ui, uiSessions, options.ReviewOwnedCommandPermissions, search: searchRelay),
+                    DesktopPlugins.ForWindow(ui, uiSessions, options.ReviewOwnedCommandPermissions, search: searchRelay, browser: browserHost),
                     options.ReviewOwnedCommandPermissions ? null : () => [.. ui.Tools.Select(static tool => (tool.Name, tool.Description))],
                     static line => LogManager.GetLogger("CodeAlta.Search").Info(line), skillUsage: _skillUsage);
                 // Search by meaning: a model downloaded once the user turns it on, run in a worker process of its own. An
@@ -905,6 +907,16 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                     (await host.RuntimeService.GetDisabledToolsAsync(sessionId, token).ConfigureAwait(false)).Contains(CodeAlta.Orchestration.Runtime.SystemPrompts.PromptToolConditions.ShellCommand);
                 // Nor does a sandboxed session: the window is outside its sandbox.
                 uiSessions.Sandboxed = async (sessionId, token) => (await host.RuntimeService.GetSessionSandboxAsync(sessionId, token).ConfigureAwait(false)).IsSandboxed;
+                // The browser of a session works in its folder, keeps to its sandbox, asks its user on its card, and never
+                // reaches the ports of CodeAlta.
+                browserHost.WorkFolder = (sessionId, token) => SessionFolderAsync(host, sessionId, token);
+                browserHost.Sandbox = async (sessionId, token) => DesktopBrowser.Sandbox(await host.RuntimeService.GetSandboxReachAsync(sessionId, token).ConfigureAwait(false));
+                browserHost.RequestPermission = async (sessionId, request, token) => await host.RuntimeService.Permissions.RequestForSessionAsync(sessionId, request, token).ConfigureAwait(false);
+                var mcpPort = Mcp.DesktopMcpEndpoint.For(options).Port;
+                browserHost.ReservedPorts = () => DesktopBrowser.ReservedPorts(mcpPort);
+                // The UI tools and the browser tools have the same names: a session has one set or the other.
+                browserHost.Activated = sessionId => uiSessions.Set(sessionId, active: false);
+                uiSessions.Activated = browserHost.ReleaseTools;
                 automations.Start();
                 workspacePrepared.TrySetResult();
                 {
@@ -1027,7 +1039,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                         Fallbacks = () => host.Commands.LastFallbacks,
                         HeldElsewhere = () => host.ExternalSessions?.Held ?? [],
                         ConfigStore = new CodeAltaConfigStore(host.CatalogOptions),
-                        SessionResources = new DesktopSessionResources(host, roots.Home, DesktopPlugins.ForWindow(ui, uiSessions, options.ReviewOwnedCommandPermissions, search: searchRelay)).ReadAsync,
+                        SessionResources = new DesktopSessionResources(host, roots.Home, DesktopPlugins.ForWindow(ui, uiSessions, options.ReviewOwnedCommandPermissions, search: searchRelay, browser: browserHost)).ReadAsync,
                     });
                     builder.AddLabelsService(new LabelsService(host.SpaceCatalog.Labels, spaceView, epoch));
                     builder.AddSpaceIdentityService(new SpaceIdentityService(host.SpaceCatalog, (sessionId, token) => host.RuntimeService.GetSessionIdentityAsync(sessionId, token), epoch));
