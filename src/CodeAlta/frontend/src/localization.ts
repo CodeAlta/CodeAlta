@@ -33,6 +33,7 @@ import { localSearchMessages } from "./search/localSearchMessages";
 import { skillSearchMessages } from "./search/skillMessages";
 import { searchCanvasMessages } from "./search/canvas/messages";
 import { mobileSettingsMessages } from "./mobile/settings/messages";
+import { browserSettingsMessages } from "./browser/settings/messages";
 import { promptInheritanceMessages } from "./promptInheritance/messages";
 import { reviewMessages } from "./review/messages";
 import { conversationHeldMessages } from "./conversationHeld/messages";
@@ -2851,6 +2852,7 @@ export const messages = dictionary({
   ...localSearchMessages,
   ...searchCanvasMessages,
   ...mobileSettingsMessages,
+  ...browserSettingsMessages,
   ...promptInheritanceMessages,
   ...reviewMessages,
   ...conversationHeldMessages,

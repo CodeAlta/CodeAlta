@@ -1,0 +1,19 @@
+/* The settings page of the Browser plugin, in Settings > Extensions: its cards one below the other, in the frame of the page. */
+.browser-settings.settings-grid { grid-template-columns: minmax(0, 1fr); }
+.browser-settings .settings-field-help { margin-top: 6px; overflow-wrap: anywhere; }
+.browser-settings .settings-field-control { min-width: 0; }
+.browser-settings .settings-field-control .bp6-html-select { max-width: 100%; }
+.browser-settings-add { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px; min-width: 0; max-width: 100%; }
+.browser-settings-add .bp6-input-group { flex: 1 1 160px; min-width: 0; }
+.browser-settings-sites { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-width: 0; }
+.browser-settings-profile { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 6px 0; border-bottom: 1px solid var(--line); min-width: 0; }
+.browser-settings-profile code { overflow-wrap: anywhere; }
+.browser-settings-profile-actions { display: inline-flex; align-items: center; gap: 4px; flex-wrap: wrap; justify-content: flex-end; }
+.browser-settings-delete { position: relative; display: inline-flex; }
+.browser-settings-profile + .browser-settings-add { margin-top: 10px; }
+.browser-settings-found { width: 100%; border-collapse: collapse; table-layout: fixed; }
+.browser-settings-found td { padding: 4px 0; vertical-align: top; overflow-wrap: anywhere; }
+.browser-settings-found td + td { text-align: end; padding-inline-start: 8px; }
+.browser-settings-version, .browser-settings-used { color: var(--muted, var(--text)); font-variant-numeric: tabular-nums; }
+.browser-settings-default { margin-inline-start: 6px; }
+.browser-settings-loading { display: grid; place-items: center; min-height: 160px; }
