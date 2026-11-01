@@ -208,6 +208,23 @@ public sealed class DesktopSettingsTests
     }
 
     [TestMethod]
+    public async Task ASettingWithoutDefault_IsRead_AndComparedWithoutFailing()
+    {
+        using var fixture = Fixture.Create();
+        fixture.Settings.ReportWindow([("appearance.entry_appearance", Value("{\"enabled\":false,\"types\":[]}"), null)], null, null);
+        var read = await fixture.Settings.GetAsync("appearance.entry_appearance", null, CancellationToken.None);
+        Assert.AreEqual(AltaSettingStatus.Ok, read.Status, read.Message);
+        Assert.AreEqual("window", read.Source);
+        Assert.IsFalse(read.Value!.Value.GetProperty("enabled").GetBoolean());
+
+        Assert.IsTrue(SettingValues.Same(null, null));
+        Assert.IsTrue(SettingValues.Same(null, Value("null")));
+        Assert.IsFalse(SettingValues.Same(Value("{}"), null), "a value against no default");
+        Assert.IsFalse(SettingValues.Same(null, Value("true")));
+        Assert.IsTrue(SettingValues.Same(Value("[1, 2]"), Value("[1,2]")));
+    }
+
+    [TestMethod]
     public void Open_TellsThePageOfTheMainWindow()
     {
         using var fixture = Fixture.Create();

@@ -47,9 +47,14 @@ internal static class SettingValues
     /// <summary>The JSON text of a value; <c>null</c> for none.</summary>
     internal static string Text(JsonElement? value) => value is { } element ? element.GetRawText() : "null";
 
-    /// <summary>Whether two values say the same.</summary>
-    internal static bool Same(JsonElement? left, JsonElement? right) => JsonElement.DeepEquals(left ?? default, right ?? default)
-        || left is null && right is { ValueKind: JsonValueKind.Null } || right is null && left is { ValueKind: JsonValueKind.Null };
+    /// <summary>Whether two values say the same; none and a JSON null are the same.</summary>
+    /// <remarks>A setting without a default compares its value with none: <see cref="JsonElement.DeepEquals"/> throws on an element that holds nothing.</remarks>
+    internal static bool Same(JsonElement? left, JsonElement? right)
+    {
+        var a = left is { ValueKind: not (JsonValueKind.Undefined or JsonValueKind.Null) } leftValue ? leftValue : (JsonElement?)null;
+        var b = right is { ValueKind: not (JsonValueKind.Undefined or JsonValueKind.Null) } rightValue ? rightValue : (JsonElement?)null;
+        return a is { } x && b is { } y ? JsonElement.DeepEquals(x, y) : a is null && b is null;
+    }
 
     /// <summary>
     /// Checks a value against its setting, and gives it in the form the setting keeps: a whole number for an integer,
