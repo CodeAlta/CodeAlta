@@ -881,6 +881,18 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                 }
                 // The runs of scripts are kept with the results of their steps: one CodeAlta ended during is resumed from its card.
                 _ = host.KeepCodeModeRunsAsync();
+                // The settings as one catalog: the built-in ones bound to the stores their pages use, for alta settings and the search of Settings.
+                Action? loggingSaved = null;
+                var desktopSettings = new Settings.DesktopSettings(Settings.DesktopSettingsCatalog.Load(), Settings.DesktopSettingBindings.Create(new Settings.DesktopSettingSources
+                {
+                    Config = new CodeAltaConfigStore(host.CatalogOptions), Shell = shell, Windows = windows, Search = search.Host, WorkItems = workItems,
+                    LoggingSaved = () => loggingSaved?.Invoke(),
+                }))
+                {
+                    // Settings is in the main window: a request brings it to the front.
+                    Router = _ => { shell.Show(); return Windows.DesktopWindows.MainLabel; },
+                    Log = static line => LogManager.GetLogger("CodeAlta.Settings").Info(line),
+                };
                 var altaCommands = DesktopAltaTools.Attach(host, reminders.Reminders, pluginAlta, changesView, editorView,
                     new DesktopAltaTerminals(terminals, acceptsInput: !options.ReviewOwnedCommandPermissions),
                     new DesktopAltaAutomations(automations, host.ProjectCatalog, acceptsCommands: !options.ReviewOwnedCommandPermissions), worktrees, pluginWorkshop, workItems, new DesktopAltaAppearance(shell), spaceView,
@@ -894,7 +906,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                     },
                     // The tabs plugins provide: only a host that started its plugins has them.
                     canvases is null ? null : new DesktopAltaCanvases(canvases), documentation, documentationView, bookmarks, search, reviewService,
-                    new RuntimeAltaReviewPolicy(host.RuntimeService), new Windows.DesktopAltaWindows(windows));
+                    new RuntimeAltaReviewPolicy(host.RuntimeService), new Windows.DesktopAltaWindows(windows), desktopSettings);
                 search.AttachCommands(altaCommands);
                 projectOpening.Attach(async arguments => await altaCommands.InvokeAsync(arguments).ConfigureAwait(false));
                 // The clients of the MCP server run the same commands, as callers that belong to no session.
@@ -966,6 +978,8 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                         PluginProviderTypes = pluginProviderTypes,
                     });
                     var applicationLogs = new ApplicationLogsService(logCapture, configStore, epoch);
+                    loggingSaved = applicationLogs.Reload;
+                    builder.AddSettingsService(new SettingsService(desktopSettings, epoch));
                     var globalConfig = new GlobalConfigService(configStore, host.ModelProviderRegistry, options.CatalogRoot!, epoch)
                     {
                         // The file may change the levels of the log: they are taken at once.
@@ -1447,6 +1461,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
             builder.AddPluginUiService(new PluginUiService());
             builder.AddCanvasesService(new CanvasesService());
             builder.AddDocumentationService(new DocumentationService());
+            builder.AddSettingsService(new SettingsService());
             builder.AddProjectFilesService(new ProjectFilesService());
             builder.AddExternalEditorsService(new ExternalEditorsService());
             builder.AddSettingsFilesService(new SettingsFilesService());

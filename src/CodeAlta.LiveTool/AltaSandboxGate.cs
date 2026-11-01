@@ -17,7 +17,7 @@ internal static class AltaSandboxGate
     {
         "version", "ask", "notes", "note", "skill", "skills", "skills_activate", "tool", "provider", "model", "documentation",
         "task", "plan", "review", "reminder", "job", "workflow", "script list", "script show", "script check", "script edit", "diff", "editor", "search", "sandbox list", "sandbox show", "sandbox status",
-        "prompt list", "prompt show", "plugin list", "plugin status", "plugin api",
+        "prompt list", "prompt show", "plugin list", "plugin status", "plugin api", "settings list", "settings get", "settings open",
         "project list", "project show", "project resolve", "project current", "space list", "space show", "space current", "label list", "label show",
         "issue trackers", "issue list", "issue filters", "issue views", "issue show",
         "issues trackers", "issues list", "issues filters", "issues views", "issues show",

@@ -33,6 +33,7 @@ public sealed class PluginAltaCommandContributor : IAltaCommandContributor
         "documentation",
         "search",
         "window",
+        "settings",
         // Built-in commands that some hosts do not have (the views of the window), and the others a sandboxed session
         // may run (AltaSandboxGate): a plugin never takes their name, which the gate admits by name.
         "notes",

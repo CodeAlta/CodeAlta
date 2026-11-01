@@ -91,6 +91,10 @@
     <PackageReference Include="XenoAtom.Terminal.UI.Extensions.Screenshot" />
     <PackageReference Include="XenoAtom.Terminal.UI.Graphics" />
   </ItemGroup>
+  <ItemGroup>
+    <!-- The catalog of the built-in settings: the page reads it for its search, the host for agents and the index. -->
+    <EmbeddedResource Include="frontend/src/settings/builtInSettings.json" LogicalName="CodeAlta.Desktop.Settings.builtInSettings.json" />
+  </ItemGroup>
   <!-- The per-runtime builds of a pack run in parallel, and the page is the same for all of them. Only the
        build without a runtime restores and builds it: a per-runtime build takes frontend/dist as it is and
        keeps its generated contracts in its own folder, so that the builds share no file they write. -->
