@@ -908,6 +908,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                     canvases is null ? null : new DesktopAltaCanvases(canvases), documentation, documentationView, bookmarks, search, reviewService,
                     new RuntimeAltaReviewPolicy(host.RuntimeService), new Windows.DesktopAltaWindows(windows), desktopSettings);
                 search.AttachCommands(altaCommands);
+                search.AttachSettings(desktopSettings);
                 projectOpening.Attach(async arguments => await altaCommands.InvokeAsync(arguments).ConfigureAwait(false));
                 // The clients of the MCP server run the same commands, as callers that belong to no session.
                 Volatile.Write(ref altaTool, Mcp.DesktopMcpTools.Alta(altaCommands, roots.Project, shell.NotifySessionsChanged));

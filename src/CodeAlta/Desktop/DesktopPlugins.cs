@@ -105,6 +105,8 @@ internal static class DesktopPlugins
         // The mobile view is the window's too: a phone connects to the desktop application.
         builtIns = [.. builtIns, MobileDefinition];
         if (search is not null) builtIns = [.. builtIns, Search.DesktopSearchPlugin.Definition(search)];
+        // The settings of the window, which `alta settings` finds, reads and shows: the plugin tells the sessions so.
+        builtIns = [.. builtIns, Settings.DesktopSettingsPlugin.Definition()];
         return reviewsCommands ? builtIns : [.. builtIns, Ui.DesktopUiPlugin.Definition(ui, sessions)];
     }
 

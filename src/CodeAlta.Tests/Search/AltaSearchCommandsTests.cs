@@ -26,7 +26,12 @@ public sealed class AltaSearchCommandsTests
             new("tool:builtin/read_file", SearchKind.Tool, "read_file", "Reads a file.", DateTimeOffset.UtcNow) { Extra = "{\"state\":\"loaded\"}" },
             new("doc:worktrees.md#cleanup", SearchKind.Doc, "Worktrees › Cleanup", "A worktree is removed once its branch is merged.", DateTimeOffset.UtcNow) { Extra = "{\"page\":\"worktrees.md\",\"anchor\":\"cleanup\"}" },
         ]));
-        var fixture = new SearchFixture(tools);
+        var settings = new ListSearchSource("settings", [SearchKind.Setting], _ => ValueTask.FromResult<IReadOnlyList<SearchDocument>>(
+        [
+            new("setting:sessions.title", SearchKind.Setting, "Agent & models › Sessions › Title of a session you did not name", "How a session nobody named is titled.\nAlso: rename",
+                DateTimeOffset.UnixEpoch) { Extra = "{\"id\":\"sessions.title\",\"page\":\"sessions\"}" },
+        ]));
+        var fixture = new SearchFixture(tools, settings);
         fixture.Host.Sessions["s1"] = new("s1", "Release work", "p1", "default", false);
         fixture.Journals.Write(new JournalWriter("s1", DateTimeOffset.UtcNow.AddHours(-2)).User("r1", "user:1", "Prepare the release notes").Assistant("r1", "a:1", "The release notes are written.").Idle("r1"));
         await fixture.PassAsync();
@@ -58,6 +63,19 @@ public sealed class AltaSearchCommandsTests
         StringAssert.StartsWith(mcp.GetProperty("next").GetString(), "alta mcp tool call --server slack --tool post_message");
         Assert.AreEqual(AltaExitCodes.Usage, (await dispatcher.InvokeAsync(["search", "x", "--kind", "nothing"], caller: Mcp)).ExitCode);
         Assert.AreEqual(AltaExitCodes.Usage, (await dispatcher.InvokeAsync(["search", "x", "--since", "soon"], caller: Mcp)).ExitCode);
+    }
+
+    [TestMethod]
+    public async Task ASetting_IsFound_AndItsNextCommandReadsIt()
+    {
+        var (fixture, dispatcher) = await CreateAsync();
+        await using var _ = fixture;
+        var result = await dispatcher.InvokeAsync(["search", "rename", "--kind", "setting"], caller: Mcp);
+        Assert.AreEqual(AltaExitCodes.Success, result.ExitCode, result.Stdout + result.Stderr);
+        var hit = Records(result).Single(static record => Type(record) == "alta.search.hit");
+        Assert.AreEqual(("setting", "setting:sessions.title"), (hit.GetProperty("kind").GetString(), hit.GetProperty("ref").GetString()));
+        StringAssert.StartsWith(hit.GetProperty("next").GetString(), "alta settings get sessions.title");
+        Assert.AreEqual("setting", SearchNames.Of(SearchKind.Setting));
     }
 
     [TestMethod]

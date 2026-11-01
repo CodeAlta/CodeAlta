@@ -40,6 +40,9 @@ public enum SearchKind : byte
 
     /// <summary>A script of the library of Code Mode: the samples, yours, and those of the projects.</summary>
     Script = 12,
+
+    /// <summary>A setting of CodeAlta, built in or of a plugin: what it is, never its value.</summary>
+    Setting = 13,
 }
 
 /// <summary>Who wrote a message.</summary>
@@ -101,18 +104,19 @@ public static class SearchNames
         ["command"] = SearchKind.Command, ["commands"] = SearchKind.Command,
         ["doc"] = SearchKind.Doc, ["docs"] = SearchKind.Doc,
         ["script"] = SearchKind.Script, ["scripts"] = SearchKind.Script,
+        ["setting"] = SearchKind.Setting, ["settings"] = SearchKind.Setting,
     }.ToFrozenDictionary(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>Gets every kind, in the order they are listed.</summary>
     public static IReadOnlyList<SearchKind> AllKinds { get; } =
         [SearchKind.Message, SearchKind.Session, SearchKind.Note, SearchKind.Plan, SearchKind.Task, SearchKind.Skill,
-            SearchKind.Tool, SearchKind.Mcp, SearchKind.Plugin, SearchKind.Command, SearchKind.Doc, SearchKind.Script];
+            SearchKind.Tool, SearchKind.Mcp, SearchKind.Plugin, SearchKind.Command, SearchKind.Doc, SearchKind.Script, SearchKind.Setting];
 
     /// <summary>Gets the kinds that are content of sessions and projects, which exclusions remove.</summary>
     public static IReadOnlyList<SearchKind> ContentKinds { get; } = [SearchKind.Message, SearchKind.Session, SearchKind.Note, SearchKind.Plan, SearchKind.Task];
 
     /// <summary>Gets the kinds that describe what is installed, which tool search serves.</summary>
-    public static IReadOnlyList<SearchKind> CatalogKinds { get; } = [SearchKind.Skill, SearchKind.Tool, SearchKind.Mcp, SearchKind.Plugin, SearchKind.Command, SearchKind.Doc, SearchKind.Script];
+    public static IReadOnlyList<SearchKind> CatalogKinds { get; } = [SearchKind.Skill, SearchKind.Tool, SearchKind.Mcp, SearchKind.Plugin, SearchKind.Command, SearchKind.Doc, SearchKind.Script, SearchKind.Setting];
 
     /// <summary>Gets the name of a kind.</summary>
     /// <param name="kind">The kind.</param>
@@ -131,6 +135,7 @@ public static class SearchNames
         SearchKind.Command => "command",
         SearchKind.Doc => "doc",
         SearchKind.Script => "script",
+        SearchKind.Setting => "setting",
         _ => "unknown",
     };
 

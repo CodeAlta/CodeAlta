@@ -44,7 +44,7 @@ export type SearchCanvasProps = Readonly<{
 type PageId = "overview" | "explore" | "activity";
 type IndexData = Readonly<{ status: LocalSearchStatusResponse | null; overview: LocalSearchOverviewResponse | null; failed: boolean }>;
 const kindIcons: Readonly<Record<SearchKindName, IconName>> = { message: "chat", session: "history", note: "notes", plan: "plan", task: "task", doc: "documentation",
-  skill: "skill", tool: "tool", mcp: "server", plugin: "plugin", command: "goto" };
+  skill: "skill", tool: "tool", mcp: "server", plugin: "plugin", command: "goto", setting: "settings" };
 const noProjects: readonly SearchCanvasProject[] = Object.freeze([]);
 const noIds: readonly string[] = Object.freeze([]);
 const contentKinds: ReadonlySet<string> = new Set(["message", "session", "note", "plan", "task"]);

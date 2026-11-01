@@ -243,8 +243,8 @@ Four milestones, each a series of commits that builds and passes the tests on it
   - `settings` in the reserved roots of `PluginAltaCommandContributor`.
   - `list`, `get` and `open` admitted by `AltaSandboxGate`; `set` and `reset` refused there.
 - [x] 13. Enforce the safety rules in `DesktopSettings`: agent access, space containment, and the change event. Make the main page show that event as a toast with **Show** and **Undo**.
-- [ ] 14. Add `SearchKind.Setting` (`src/CodeAlta.Search/SearchModel.cs`) and a `settings` source in `src/CodeAlta/Desktop/Search/DesktopSearchSources.cs`, signalled on plugin changes. In `alta search`, add the kind to `--kind`, `next` and `SourceMayHold`, and filter plugin settings by space. Add the kind's labels to the Search canvas.
-- [ ] 15. Add the built-in `DesktopSettingsPlugin` (`src/CodeAlta/Desktop/Settings/`) with the guidance line.
+- [x] 14. Add `SearchKind.Setting` (`src/CodeAlta.Search/SearchModel.cs`) and a `settings` source in `src/CodeAlta/Desktop/Search/DesktopSearchSources.cs`, signalled on plugin changes. In `alta search`, add the kind to `--kind`, `next` and `SourceMayHold`, and filter plugin settings by space. Add the kind's labels to the Search canvas.
+- [x] 15. Add the built-in `DesktopSettingsPlugin` (`src/CodeAlta/Desktop/Settings/`) with the guidance line.
 
 **Milestone 4: plugin settings**
 
