@@ -228,9 +228,33 @@ internal sealed class BrowserSession : IAsyncDisposable
         }
     }
 
-    /// <summary>The page a call acts on: the one its <c>pageId</c> names, else the selected one.</summary>
-    /// <exception cref="BrowserToolException">No page has that id.</exception>
+    /// <summary>
+    /// The page a call reads or acts on: the one its <c>pageId</c> names, else the selected one. The document the tab
+    /// shows is checked as a load is: a popup can show a page before the session adopts its tab, and the tools never read
+    /// or use a page the session could not have loaded.
+    /// </summary>
+    /// <exception cref="BrowserToolException">No page has that id, or its page is not one the session may load.</exception>
     public async Task<BrowserPageState> ResolvePageAsync(BrowserToolCall call)
+    {
+        var state = await ResolvePageUncheckedAsync(call).ConfigureAwait(false);
+        if (Uri.TryCreate(state.Page.Url, UriKind.Absolute, out var url) && url.Scheme != "about")
+        {
+            try
+            {
+                await CheckNavigationAsync(url, call.CancellationToken).ConfigureAwait(false);
+            }
+            catch (BrowserToolException exception) when (exception.Code == "not-allowed")
+            {
+                throw new BrowserToolException("not-allowed", $"Page {state.Id} shows {url}, which this session may not read or use: {exception.Message} Navigate it elsewhere with navigate_page, or close it.", exception);
+            }
+        }
+
+        return state;
+    }
+
+    /// <summary>The page a call acts on without reading it, such as the one it navigates elsewhere.</summary>
+    /// <exception cref="BrowserToolException">No page has that id.</exception>
+    public async Task<BrowserPageState> ResolvePageUncheckedAsync(BrowserToolCall call)
     {
         var context = await ContextAsync(call.CancellationToken).ConfigureAwait(false);
         if (call.OptionalInteger("pageId") is { } id) return PageById(id);

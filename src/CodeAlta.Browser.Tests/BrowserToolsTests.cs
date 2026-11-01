@@ -170,6 +170,26 @@ public abstract class BrowserToolsTests
     }
 
     [TestMethod]
+    public async Task APopupThatShowsAPageTheSessionMayNotLoad_IsNeitherReadNorUsedUntilItIsSentElsewhere()
+    {
+        // The popup loads /second before its tab is the session's: the tools check what it shows when they read it.
+        await using var session = Host.NewSession((url, _) => ValueTask.FromResult(url.AbsolutePath == "/second" ? "the user did not allow it." : null));
+        await session.OkAsync("navigate_page", $$"""{"url":"{{Host.Site.Url("/form")}}"}""");
+        var snapshot = await session.OkAsync("take_snapshot");
+        await session.OkAsync("click", $$"""{"uid":"{{BrowserToolTesting.Uid(snapshot, "link \"Open in a new tab\"")}}"}""");
+        await session.OkAsync("select_page", """{"pageId":2}""");
+        foreach (var (tool, arguments) in new[] { ("take_snapshot", "{}"), ("take_screenshot", "{}"), ("list_console_messages", "{}"), ("evaluate_script", """{"function":"() => document.title"}""") })
+        {
+            var refused = await session.CallAsync(tool, arguments);
+            Assert.IsTrue(refused.IsError, tool);
+            StringAssert.Contains(refused.Text, "may not read or use", tool);
+        }
+
+        await session.OkAsync("navigate_page", $$"""{"url":"{{Host.Site.Url("/form")}}"}""");
+        StringAssert.Contains(await session.OkAsync("take_snapshot"), "Sign in", "a tab sent elsewhere is the session's again");
+    }
+
+    [TestMethod]
     public async Task FramesOfBothOriginsAreInTheSnapshotAndTakeInput()
     {
         await using var session = Host.NewSession();

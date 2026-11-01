@@ -35,6 +35,15 @@ public sealed record SessionSandbox(SandboxChoice Choice, ResolvedSandboxProfile
 public sealed record SessionSandboxReach(string Profile, IReadOnlyList<string> Read, IReadOnlyList<string> Write, SandboxNetwork Network,
     IReadOnlyList<string>? Hosts, IReadOnlyList<int> LocalPorts, IReadOnlySet<int> ReservedPorts)
 {
+    /// <summary>Gets the folders and files never read or written, also inside <see cref="Read"/> and <see cref="Write"/>.</summary>
+    public IReadOnlyList<string> Denied { get; init; } = [];
+
+    /// <summary>
+    /// Gets the entries inside <see cref="Write"/> that are never written: what other programs run later (git hooks and
+    /// configuration, the settings of CodeAlta and of coding agents).
+    /// </summary>
+    public IReadOnlyList<string> Protected { get; init; } = [];
+
     /// <summary>Starts a proxy of the network of the profile on a free port of the loopback: the program goes through it only.</summary>
     /// <returns>The proxy, which its owner disposes.</returns>
     /// <exception cref="System.Net.Sockets.SocketException">No port could be listened on.</exception>

@@ -15,7 +15,11 @@ internal static class DesktopBrowser
             {
                 var proxy = reach.StartProxy();
                 return ValueTask.FromResult(new BrowserSandboxProxy(new Uri(proxy.Endpoint).Authority, proxy));
-            });
+            })
+            {
+                Denied = reach.Denied,
+                ReadOnly = reach.Protected,
+            };
 
     /// <summary>The ports of CodeAlta on this computer: the MCP servers of the window and of the developer instance.</summary>
     /// <param name="mcpPort">The port of the MCP server of this window; 0 for one the system picks.</param>

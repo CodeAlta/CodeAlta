@@ -248,7 +248,11 @@ internal sealed class BrowserAgentSession : IAsyncDisposable
         if (Sandbox is { } sandbox)
         {
             var writable = sandbox.WriteRoots.Count != 0 ? sandbox.WriteRoots : folder is null ? [files] : [folder];
-            return new BrowserFiles(folder ?? writable[0], [.. sandbox.ReadRoots, .. writable], writable, writable[0]);
+            return new BrowserFiles(folder ?? writable[0], [.. sandbox.ReadRoots, .. writable], writable, writable[0])
+            {
+                Denied = sandbox.Denied,
+                ReadOnly = sandbox.ReadOnly,
+            };
         }
 
         var shared = Path.Combine(_host.Root, "files");

@@ -278,7 +278,8 @@ internal static class BrowserTools
                 NavigateSchema(allowScriptEvaluation, timeout),
                 async call =>
                 {
-                    var state = await PageAsync(call);
+                    // A tab that shows a page the session may not read can still be sent elsewhere.
+                    var state = await PageAsync(call, reads: false);
                     var type = call.OptionalString("type");
                     var url = call.OptionalString("url");
                     if (type is null && url is null) throw new BrowserToolException("invalid-arguments", "Either URL or a type is required.");
@@ -841,9 +842,11 @@ internal static class BrowserTools
         => new(name, category, description, readOnly, schema.Build(), scope, handler);
 
     /// <summary>The page of a call that acts on it: there must be no open dialog.</summary>
-    private static async Task<BrowserPageState> PageAsync(BrowserToolCall call)
+    /// <param name="call">The call.</param>
+    /// <param name="reads">Whether the call reads or uses the page; one that navigates it elsewhere does not.</param>
+    private static async Task<BrowserPageState> PageAsync(BrowserToolCall call, bool reads = true)
     {
-        var state = await call.Session.ResolvePageAsync(call);
+        var state = reads ? await call.Session.ResolvePageAsync(call) : await call.Session.ResolvePageUncheckedAsync(call);
         BrowserSession.EnsureNoDialog(state);
         return state;
     }

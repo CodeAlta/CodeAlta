@@ -167,7 +167,11 @@ public sealed partial class SessionRuntimeService
             commandGuard: false, cancellationToken).ConfigureAwait(false);
         var policy = SandboxWorkers.PolicyOf(start);
         return new SessionSandboxReach(policy.ProfileName, [.. policy.ReadWrite, .. profile.Read], policy.ReadWrite, policy.Network,
-            policy.Network == SandboxNetwork.On ? null : policy.Hosts, policy.LocalPorts, ReservedSandboxPorts);
+            policy.Network == SandboxNetwork.On ? null : policy.Hosts, policy.LocalPorts, ReservedSandboxPorts)
+        {
+            Denied = policy.Denied,
+            Protected = policy.Protected,
+        };
     }
 
     // The note a run carries about the sandbox of its session: what it allows, when the agent was told something else, or

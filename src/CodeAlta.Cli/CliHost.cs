@@ -204,6 +204,10 @@ internal sealed class CliHost : IAsyncDisposable
                     var proxy = reach.StartProxy();
                     return ValueTask.FromResult(new BrowserSandboxProxy(new Uri(proxy.Endpoint).Authority, proxy));
                 })
+                {
+                    Denied = reach.Denied,
+                    ReadOnly = reach.Protected,
+                }
                 : null;
             browser.ReservedPorts = static () => [2582, 2583];
             var alta = ComposeAlta(host, request.ListsSkills);

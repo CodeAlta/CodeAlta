@@ -28,6 +28,57 @@ public sealed class BrowserFilesAndTraceTests
     }
 
     [TestMethod]
+    public void ALinkedFolderLeadsNowhereOutsideTheFolders_AndASandboxKeepsItsDeniedAndProtectedPaths()
+    {
+        var folder = Directory.CreateDirectory(Path.Combine(Path.GetTempPath(), "codealta-files", Guid.NewGuid().ToString("N")[..8])).FullName;
+        try
+        {
+            var work = Directory.CreateDirectory(Path.Combine(folder, "work")).FullName;
+            var outside = Directory.CreateDirectory(Path.Combine(folder, "outside")).FullName;
+            File.WriteAllText(Path.Combine(outside, "secret.txt"), "outside");
+            var files = new BrowserFiles(work, [work], [work], Path.Combine(work, "tmp"))
+            {
+                Denied = [Path.Combine(work, "private")],
+                ReadOnly = [Path.Combine(work, ".git", "hooks")],
+            };
+            // A junction on Windows needs no privilege; a symbolic link elsewhere.
+            var link = Path.Combine(work, "link");
+            if (OperatingSystem.IsWindows())
+            {
+                using var mklink = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("cmd.exe", $"/c mklink /J \"{link}\" \"{outside}\"") { CreateNoWindow = true, UseShellExecute = false })!;
+                mklink.WaitForExit();
+            }
+            else
+            {
+                Directory.CreateSymbolicLink(link, outside);
+            }
+
+            Assert.IsTrue(Directory.Exists(link), "the link was made");
+            StringAssert.Contains(Assert.ThrowsExactly<BrowserToolException>(() => files.ResolveRead("link/secret.txt", "filePaths")).Message, "outside the folders");
+            StringAssert.Contains(Assert.ThrowsExactly<BrowserToolException>(() => files.ResolveWrite("link/new.png", "filePath")).Message, "outside the folders");
+            Assert.IsFalse(files.CanRead(Path.Combine(link, "secret.txt")), "a file: address follows the link too");
+            Assert.IsTrue(files.CanRead(Path.Combine(work, "page.html")));
+
+            StringAssert.Contains(Assert.ThrowsExactly<BrowserToolException>(() => files.ResolveRead("private/a.txt", "filePaths")).Message, "outside the folders");
+            Assert.IsFalse(files.CanRead(Path.Combine(work, "private", "a.txt")));
+            StringAssert.Contains(Assert.ThrowsExactly<BrowserToolException>(() => files.ResolveWrite(".git/hooks/pre-commit", "filePath")).Message, "read-only");
+            Assert.AreEqual(Path.Combine(work, ".git", "hooks", "pre-commit"), files.ResolveRead(".git/hooks/pre-commit", "filePaths"), "a protected path is read");
+        }
+        finally
+        {
+            // The link first, alone: its target is not deleted through it.
+            try
+            {
+                var link = Path.Combine(folder, "work", "link");
+                if (Directory.Exists(link)) Directory.Delete(link);
+                Directory.Delete(folder, recursive: true);
+            }
+            catch (IOException) { }
+            catch (UnauthorizedAccessException) { }
+        }
+    }
+
+    [TestMethod]
     public void TheTraceSummaryReadsPaintsShiftsTasksAndRequests()
     {
         var trace = """

@@ -21,7 +21,14 @@ public sealed record BrowserSandbox(
     string Profile,
     IReadOnlyList<string> ReadRoots,
     IReadOnlyList<string> WriteRoots,
-    Func<CancellationToken, ValueTask<BrowserSandboxProxy>>? StartProxy);
+    Func<CancellationToken, ValueTask<BrowserSandboxProxy>>? StartProxy)
+{
+    /// <summary>Gets the folders and files never read or written, also inside the roots.</summary>
+    public IReadOnlyList<string> Denied { get; init; } = [];
+
+    /// <summary>Gets the folders and files never written, also inside the write roots: what other programs run later.</summary>
+    public IReadOnlyList<string> ReadOnly { get; init; } = [];
+}
 
 /// <summary>
 /// What the application that hosts the <c>browser</c> plugin gives it: where its files go, and what it learns of a session
