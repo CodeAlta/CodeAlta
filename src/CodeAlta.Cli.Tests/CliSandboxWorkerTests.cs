@@ -193,6 +193,54 @@ public sealed class CliSandboxWorkerTests
         }
     }
 
+    [TestMethod]
+    public async Task TheDeveloperToolsOfThisComputer_RunInAContainer_OnWindows()
+    {
+        var backend = new MxcSandboxBackend();
+        if (backend.GetAvailability() is { IsAvailable: false } availability) Assert.Inconclusive(availability.Reason ?? "No sandbox on this computer.");
+        if (!OperatingSystem.IsWindows()) Assert.Inconclusive("The commands of this test are those of PowerShell.");
+        // They resolve a path one folder at a time from the root of the disk, which the sandbox can only list.
+        var tools = new[] { "git", "node", "dotnet" }.Where(static program => OnPath(program + ".exe")).ToList();
+        if (tools.Count == 0) Assert.Inconclusive("None of git, node and dotnet is on PATH.");
+        var root = Directory.CreateDirectory(Path.Combine(SandboxHostDiscovery.DefaultDataRoot(), "tests", "tools-" + Guid.NewGuid().ToString("N")[..8])).FullName;
+        var project = Directory.CreateDirectory(Path.Combine(root, "project")).FullName;
+        try
+        {
+            var policy = SandboxPolicyBuilder.Build(SandboxProfiles.Resolve(SandboxProfiles.Strict, []), new SandboxSessionFolders { WorkingDirectory = project },
+                SandboxHostDiscovery.Current(Path.Combine(root, "data"), []), [], "tools");
+            await using var worker = await SandboxWorkerClient.StartAsync(backend, policy, $"\"{Path.Combine(AppContext.BaseDirectory, "altacli.exe")}\" {SandboxWorker.Option}", null,
+                new SandboxWorkerInit("session-1", "test", project, [project], null, Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), false), CancellationToken.None)
+                .WaitAsync(Deadline);
+            var host = new SandboxToolHost((_, _) => Task.FromResult(new AgentPermissionDecision(AgentPermissionDecisionKind.AllowOnce)), null);
+            foreach (var tool in tools)
+            {
+                var result = await worker.InvokeAsync(Call("shell_command", new { command = tool + " --version" }), host, CancellationToken.None).WaitAsync(Deadline);
+                Assert.IsTrue(result.Success, $"{tool}: {Text(result)}");
+            }
+
+            if (tools.Contains("git"))
+            {
+                var commit = await worker.InvokeAsync(Call("shell_command", new { command = "git init -q; Set-Content a.txt a; git add a.txt; git -c user.name=t -c user.email=t@t commit -qm the-commit; git log --oneline" }),
+                    host, CancellationToken.None).WaitAsync(Deadline);
+                Assert.IsTrue(commit.Success, Text(commit));
+                Assert.Contains("the-commit", Text(commit));
+                Assert.IsTrue(Directory.Exists(Path.Combine(project, ".git")), "the repository is in the project");
+            }
+        }
+        finally
+        {
+            try
+            {
+                // Git makes its objects read-only, which Windows refuses to delete.
+                foreach (var file in Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories)) File.SetAttributes(file, FileAttributes.Normal);
+                Directory.Delete(root, recursive: true);
+            }
+            catch (IOException)
+            {
+            }
+        }
+    }
+
     private static bool OnPath(string program)
         => (Environment.GetEnvironmentVariable("PATH") ?? "").Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries).Any(folder => File.Exists(Path.Combine(folder, program)));
 
