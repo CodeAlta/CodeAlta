@@ -151,7 +151,7 @@ export function MarkdownContent({ source, timelineCodeBlocks = false, document: 
     if (!address) return;
     if (!markdownHrefKind(address)) {
       const length = openLink ? tooLongMarkdownHref(address) : null;
-      if (length !== null) showToast({ intent: "warning", icon: "warning-sign", timeout: 30_000,
+      if (length !== null) showToast({ intent: "warning", icon: "warning-sign", timeout: 12_000,
         message: translate(locale, "This link is too long to open: it has {length} characters, and the limit is {limit}.", { length, limit: maximumMarkdownHrefLength }),
         action: { text: translate(locale, "Copy address"), onClick: () => void navigator.clipboard?.writeText(address).catch(() => { /* The clipboard is unavailable: nothing was copied. */ }) } }, "markdown-link-too-long");
       return;
