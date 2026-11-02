@@ -325,6 +325,25 @@ test("the window of the views keeps what is edited while the tab renders again",
   }, options);
 });
 
+test("on a wide screen, the window of the views opens centered and can be moved over the whole tab", { skip: !edge, timeout: 120_000 }, async () => {
+  await withCanvas(async page => {
+    await page.until(`${rows}.join() === '#128'`, "the issues of the repository");
+    await page.evaluate(choose('.issues-toolbar select[aria-label="Project"]', "ado"));
+    await page.until(`${rows}.join() === '#41'`, "the work items of the view of the team");
+    await page.click('.issues-views-manage');
+    await page.until(`!!document.querySelector('.issue-views-window .app-window')`, "the window of the views");
+
+    // The page lays out its parts in a narrower column; the layer of the window still covers the viewport.
+    const [layer, surface, width, height] = await page.evaluate<[number[], number[], number, number]>(`(() => {
+      const box = element => { const rect = element.getBoundingClientRect(); return [rect.left, rect.top, rect.right, rect.bottom].map(Math.round); };
+      return [box(document.querySelector('.issue-views-window')), box(document.querySelector('.issue-views-window .app-window')), innerWidth, innerHeight];
+    })()`);
+    assert.deepEqual(layer, [0, 0, width, height], "the layer covers the viewport");
+    assert.ok(Math.abs(surface[0] - (width - surface[2])) <= 1, `the window is centered: ${surface.join()} in ${width}`);
+    assert.deepEqual(page.problems, []);
+  }, { ...options, width: 1900, height: 900 });
+});
+
 test("values the host refuses or fails on are not asked again and again, and refused ones are forgotten", { skip: !edge, timeout: 120_000 }, async () => {
   await withCanvas(async page => {
     const key = "ado\\nazure_devops\\nteam\\nSprint board";
