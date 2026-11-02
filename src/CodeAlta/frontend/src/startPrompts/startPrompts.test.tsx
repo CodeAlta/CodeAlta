@@ -4,7 +4,7 @@ import { createElement, type ReactElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import type { StartPromptItem } from "#neoastra";
 import { ShellLanguageContext } from "../shellLanguage";
-import { isStartPromptKey, startPromptForm, startPromptKey, StartPromptDetail, StartPromptRows } from "./StartPrompts";
+import { isStartPromptKey, reconcileStartPrompts, startPromptForm, startPromptKey, StartPromptDetail, StartPromptRows, unsavedStartPromptKey } from "./StartPrompts";
 
 const never = () => assert.fail("rendering must not act");
 const render = (element: ReactElement) => renderToStaticMarkup(createElement(ShellLanguageContext.Provider, { value: { locale: "en", choice: "en", setLanguage: never } }, element));
@@ -47,4 +47,28 @@ test("what ships is only read and copied; a text of the user is saved, reverted 
 
   const copy = detail(startPromptForm(shipped, "Global"), null);
   assert.ok(copy.includes("Not saved yet") && copy.includes("Stored in") && copy.includes(">Cancel<") && !copy.includes(">Remove<"));
+});
+
+test("a list read again shows the text as it is now, and leaves the page alone when the user moved on", () => {
+  const edited = { ...mine, content: "Changed on disk." };
+  const team: StartPromptItem = { id: "pull-request-review", source: "project", overridden: false, content: "The team's.", file: "/app/.alta/prompts/start/pull-request-review.md" };
+  const builtInUnderMine = { ...shipped, overridden: true };
+  const alone = { ...shipped, overridden: false };
+  const state = (selected: string | null, wanted: string | null = null, projectChanged = false) => ({ selected, wanted, id: "pull-request-review", projectChanged });
+
+  // A reload reads the shown text again: what changed on disk replaces the form and what Revert goes back to.
+  assert.deepEqual(reconcileStartPrompts([builtInUnderMine, edited], state(startPromptKey(mine))),
+    { key: startPromptKey(mine), form: startPromptForm(edited) });
+  // A save shows what it wrote; a removal shows the text now in use.
+  assert.deepEqual(reconcileStartPrompts([builtInUnderMine, mine], state(unsavedStartPromptKey, startPromptKey(mine))),
+    { key: startPromptKey(mine), form: startPromptForm(mine) });
+  assert.deepEqual(reconcileStartPrompts([alone], state(startPromptKey(mine), "")), { key: startPromptKey(alone), form: startPromptForm(alone) });
+  // The text of another project is never kept: a project's text gone with its project gives the one in use.
+  assert.deepEqual(reconcileStartPrompts([builtInUnderMine, mine], state(startPromptKey(team), null, true)), { key: startPromptKey(mine), form: startPromptForm(mine) });
+  // A copy not saved yet stays while its project does, and gives way to the text in use in another project.
+  assert.equal(reconcileStartPrompts([alone], state(unsavedStartPromptKey)), undefined);
+  assert.deepEqual(reconcileStartPrompts([alone], state(unsavedStartPromptKey, null, true)), { key: startPromptKey(alone), form: startPromptForm(alone) });
+  // The user went to an agent prompt or a new prompt while the list was read: nothing is taken from them.
+  assert.equal(reconcileStartPrompts([builtInUnderMine, mine], state("Agent:Global\u0000default", startPromptKey(mine))), undefined);
+  assert.equal(reconcileStartPrompts([builtInUnderMine, mine], state(null, startPromptKey(mine))), undefined);
 });

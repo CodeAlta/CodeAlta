@@ -18,7 +18,9 @@ export type StartPromptEditor = (text: Readonly<{ value: string; readOnly: boole
 
 // The keys of the start prompts in the selection of the page of prompts, beside the keys of the agent prompts.
 const prefix = "start\u0000";
-const unsaved = `${prefix}new`;
+/** The key of a copy that is not saved yet. */
+export const unsavedStartPromptKey = `${prefix}new`;
+const unsaved = unsavedStartPromptKey;
 export const startPromptKey = (item: Pick<StartPromptItem, "source" | "id">) => `${prefix}${item.source}\u0000${item.id}`;
 export const isStartPromptKey = (key: string | null): boolean => !!key && key.startsWith(prefix);
 
@@ -31,6 +33,29 @@ const names: Readonly<Record<string, Readonly<{ name: MessageKey; description: M
   },
 };
 const sourceLabel = (source: string): MessageKey => source === "project" ? "Project" : source === "global" ? "Global" : "Built-in";
+
+/**
+ * What the page shows once the texts were listed again: the text it showed, read again as it is now (a save, a
+ * removal, a reload or another project changed it), or the one a save or a removal asks for. Undefined leaves the
+ * page as it is: the page shows something else (the user moved on while the list was read), or a copy that is not
+ * saved yet and still belongs to what is listed.
+ */
+export function reconcileStartPrompts(listed: readonly StartPromptItem[], state: Readonly<{
+  /** What the page shows now. */
+  selected: string | null;
+  /** The text a save or a removal asks to show; "" for the one in use after a removal; null after a reload. */
+  wanted: string | null;
+  /** The start prompt the page showed, whose text in use is shown when the one it showed is gone. */
+  id: string | null;
+  /** The texts are of another project than the one the page showed: a copy that is not saved yet is left. */
+  projectChanged: boolean;
+}>): { key: string | null; form: Form | null } | undefined {
+  if (!isStartPromptKey(state.selected)) return undefined;
+  const target = state.wanted ?? state.selected;
+  if (target === unsaved && !state.projectChanged) return undefined;
+  const next = listed.find(item => startPromptKey(item) === target) ?? listed.find(item => !item.overridden && item.id === state.id) ?? null;
+  return { key: next ? startPromptKey(next) : null, form: next ? startPromptForm(next) : null };
+}
 
 /** The form of a text as it is read, or of a copy of the user's that starts from the text of another. */
 export function startPromptForm(item: StartPromptItem, copy: SettingsScope | null = null): Form {
@@ -63,20 +88,28 @@ export function useStartPrompts({ api, epoch, project, selected, select, setNoti
   const selectAfter = useRef<string | null>(null);
   const projectId = project?.id ?? null;
   const shown = isStartPromptKey(selected);
+  // What the page shows when a list comes back, which may be later than the render that asked for it.
+  const latest = useRef({ selected, id: form?.id ?? null });
+  latest.current = { selected, id: form?.id ?? latest.current.id };
+  const listedFor = useRef<string | null>(null);
 
   useEffect(() => {
+    const scope = `${epoch}\u0000${projectId}`;
+    const projectChanged = listedFor.current !== null && listedFor.current !== scope;
+    // A text or a copy of another project is not shown, nor saved or removed, while the texts of this one are read.
+    if (projectChanged && isStartPromptKey(latest.current.selected)) setForm(null);
     if (!epoch) { setItems([]); return; }
     const controller = new AbortController();
     void api.list({ expectedEpoch: epoch, projectId }, { signal: controller.signal, timeoutMilliseconds: 15_000 }).then(reply => {
       if (controller.signal.aborted) return;
       const listed = reply.status === "ok" ? reply.items : [];
       setItems(listed);
-      // After a save or a removal, the text that is now in use is shown.
+      listedFor.current = scope;
       const wanted = selectAfter.current; selectAfter.current = null;
-      if (wanted === null) return;
-      const next = listed.find(item => startPromptKey(item) === wanted) ?? listed.find(item => !item.overridden && item.id === form?.id) ?? null;
-      setForm(next ? startPromptForm(next) : null);
-      select(next ? startPromptKey(next) : null);
+      const next = reconcileStartPrompts(listed, { selected: latest.current.selected, id: latest.current.id, wanted, projectChanged });
+      if (!next) return;
+      setForm(next.form);
+      select(next.key);
     }, () => { if (!controller.signal.aborted) setItems([]); });
     return () => controller.abort();
   }, [api, epoch, projectId, generation]);

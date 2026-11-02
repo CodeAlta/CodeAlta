@@ -50,6 +50,36 @@ public sealed class StartPromptCatalogTests
     }
 
     [TestMethod]
+    public void AFolderOrAFileThatIsALink_IsNeitherReadNorWrittenNorDeleted()
+    {
+        using var root = new Root();
+        var catalog = new StartPromptCatalog(root.Options);
+        // The folder of the user's prompts, which a link of a project must not reach.
+        var mine = catalog.Save(null, StartPromptCatalog.PullRequestReviewId, "Mine.");
+        var folder = StartPromptCatalog.ProjectFolder(root.Project);
+        Directory.CreateDirectory(Path.GetDirectoryName(folder)!);
+        try { Directory.CreateSymbolicLink(folder, catalog.GlobalFolder); }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or PlatformNotSupportedException)
+        {
+            Assert.Inconclusive("Creating links requires platform permission.");
+        }
+
+        Assert.AreEqual(1, catalog.List(root.Project).Count(static prompt => prompt.Source != StartPromptSource.BuiltIn), "The user's file is not read again as the project's.");
+        Assert.ThrowsExactly<UnauthorizedAccessException>(() => catalog.Save(root.Project, StartPromptCatalog.PullRequestReviewId, "The team's."));
+        Assert.ThrowsExactly<UnauthorizedAccessException>(() => catalog.Delete(root.Project, StartPromptCatalog.PullRequestReviewId));
+        Assert.AreEqual("Mine.\n", File.ReadAllText(mine.Path!));
+        Assert.AreEqual(1, Directory.GetFiles(catalog.GlobalFolder).Length, "A refused write leaves no staged file.");
+
+        // A file that is a link is not read either.
+        Directory.Delete(folder);
+        Directory.CreateDirectory(folder);
+        File.CreateSymbolicLink(Path.Combine(folder, "pull-request-review.md"), mine.Path!);
+        Assert.AreEqual("Mine.", catalog.Text(StartPromptCatalog.PullRequestReviewId, root.Project));
+        Assert.ThrowsExactly<UnauthorizedAccessException>(() => catalog.Delete(root.Project, StartPromptCatalog.PullRequestReviewId));
+        Assert.IsTrue(File.Exists(mine.Path!));
+    }
+
+    [TestMethod]
     public void ThePlaceholders_AreFilledOnce_AndOtherBracesAreKept()
     {
         var values = new Dictionary<string, string> { ["reference"] = "#30", ["location"] = "{service}", ["service"] = "GitHub" };

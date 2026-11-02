@@ -99,8 +99,8 @@ public sealed class StartPromptCatalog
         foreach (var id in Ids)
         {
             var texts = new List<StartPrompt> { new(id, StartPromptSource.BuiltIn, null, BuiltIns[id]) };
-            if (Read(GlobalFolder, id, StartPromptSource.Global) is { } global) texts.Add(global);
-            if (!string.IsNullOrWhiteSpace(projectPath) && Read(ProjectFolder(projectPath), id, StartPromptSource.Project) is { } project) texts.Add(project);
+            if (Read(null, id) is { } global) texts.Add(global);
+            if (!string.IsNullOrWhiteSpace(projectPath) && Read(projectPath, id) is { } project) texts.Add(project);
             // The last one is the one in use: the nearest to the project.
             all.AddRange(texts.Select((text, index) => index < texts.Count - 1 ? text with { Overridden = true } : text));
         }
@@ -116,8 +116,8 @@ public sealed class StartPromptCatalog
     public string Text(string id, string? projectPath)
     {
         var key = NormalizeId(id) ?? throw new ArgumentException($"There is no start prompt '{id}'.", nameof(id));
-        return (!string.IsNullOrWhiteSpace(projectPath) ? Read(ProjectFolder(projectPath), key, StartPromptSource.Project) : null)?.Content
-            ?? Read(GlobalFolder, key, StartPromptSource.Global)?.Content
+        return (!string.IsNullOrWhiteSpace(projectPath) ? Read(projectPath, key) : null)?.Content
+            ?? Read(null, key)?.Content
             ?? BuiltIns[key];
     }
 
@@ -128,18 +128,29 @@ public sealed class StartPromptCatalog
     /// <returns>The text as it was written.</returns>
     /// <exception cref="ArgumentException">The id names no start prompt, or the text is empty or too long.</exception>
     /// <exception cref="IOException">The file could not be written.</exception>
+    /// <exception cref="UnauthorizedAccessException">The file or one of its folders is a link, or access is denied.</exception>
     public StartPrompt Save(string? projectPath, string id, string content)
     {
         var key = NormalizeId(id) ?? throw new ArgumentException($"There is no start prompt '{id}'.", nameof(id));
         ArgumentNullException.ThrowIfNull(content);
         var body = content.ReplaceLineEndings("\n").Trim();
         if (body.Length is 0 or > MaximumContent) throw new ArgumentException($"The text holds between 1 and {MaximumContent} characters.", nameof(content));
-        var folder = projectPath is null ? GlobalFolder : ProjectFolder(projectPath);
-        Directory.CreateDirectory(folder);
-        var path = Path.Combine(folder, key + Extension);
+        var (root, path) = Locate(projectPath, key);
+        CheckNotLinked(root, path);
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        CheckNotLinked(root, path);
         var temporary = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
-        File.WriteAllText(temporary, body + "\n", new UTF8Encoding(false));
-        File.Move(temporary, path, overwrite: true);
+        try
+        {
+            File.WriteAllText(temporary, body + "\n", new UTF8Encoding(false));
+            File.Move(temporary, path, overwrite: true);
+        }
+        finally
+        {
+            // A write that failed leaves no staged file beside the prompt.
+            try { File.Delete(temporary); } catch (Exception exception) when (exception is IOException or UnauthorizedAccessException) { }
+        }
+
         return new(key, projectPath is null ? StartPromptSource.Global : StartPromptSource.Project, path, body);
     }
 
@@ -147,11 +158,14 @@ public sealed class StartPromptCatalog
     /// <param name="projectPath">The folder of the project it is kept with; null for the user's.</param>
     /// <param name="id">The id of the prompt.</param>
     /// <returns>False when there is no such file.</returns>
+    /// <exception cref="IOException">The file could not be deleted.</exception>
+    /// <exception cref="UnauthorizedAccessException">The file or one of its folders is a link, or access is denied.</exception>
     public bool Delete(string? projectPath, string id)
     {
         if (NormalizeId(id) is not { } key) return false;
-        var path = Path.Combine(projectPath is null ? GlobalFolder : ProjectFolder(projectPath), key + Extension);
+        var (root, path) = Locate(projectPath, key);
         if (!File.Exists(path)) return false;
+        CheckNotLinked(root, path);
         File.Delete(path);
         return true;
     }
@@ -196,17 +210,42 @@ public sealed class StartPromptCatalog
         return result.ToString();
     }
 
-    private static StartPrompt? Read(string folder, string id, StartPromptSource source)
+    // The file of a prompt of the user (no project) or of a project, with the folder its path is checked from.
+    private (string Root, string Path) Locate(string? projectPath, string key)
+        => projectPath is null ? (_globalRoot, Path.Combine(GlobalFolder, key + Extension)) : (projectPath, Path.Combine(ProjectFolder(projectPath), key + Extension));
+
+    // A link in the folders below the root, or the file itself as a link, could lead a read, a write or a delete to
+    // any file of whoever opens the project. The root and what is above it are the user's own folders.
+    private static void CheckNotLinked(string root, string path)
     {
-        var path = Path.Combine(folder, id + Extension);
+        var top = Path.TrimEndingDirectorySeparator(Path.GetFullPath(root));
+        for (var component = Path.GetFullPath(path); component.Length > top.Length; component = Path.GetDirectoryName(component)!)
+        {
+            try
+            {
+                if ((File.GetAttributes(component) & FileAttributes.ReparsePoint) != 0) throw new UnauthorizedAccessException("A start prompt is not read or written through a link.");
+            }
+            catch (FileNotFoundException)
+            {
+            }
+            catch (DirectoryNotFoundException)
+            {
+            }
+        }
+    }
+
+    private StartPrompt? Read(string? projectPath, string id)
+    {
+        var (root, path) = Locate(projectPath, id);
         try
         {
             var info = new FileInfo(path);
-            // A link could show any file of whoever opens the project.
-            if (!info.Exists || info.LinkTarget is not null || info.Length > MaximumContent * 4) return null;
-            var content = File.ReadAllText(path).ReplaceLineEndings("\n").Trim();
+            if (!info.Exists || info.Length > MaximumContent * 4) return null;
+            CheckNotLinked(root, path);
+            // A save may replace the file while it is read: the read shares it with writers and deletes.
+            var content = SharedTextFile.ReadAllText(path).ReplaceLineEndings("\n").Trim();
             if (content.Length > MaximumContent) content = content[..MaximumContent];
-            return content.Length == 0 ? null : new(id, source, path, content);
+            return content.Length == 0 ? null : new(id, projectPath is null ? StartPromptSource.Global : StartPromptSource.Project, path, content);
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
