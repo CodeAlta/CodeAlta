@@ -45,6 +45,20 @@ internal sealed partial class IssuesService
     private readonly ISessionStarter? _starter;
     private readonly string? _epoch;
     private readonly Func<string, bool> _open = DesktopLinks.Open;
+    private IssueReadCache<IssueListResponse>? _lists;
+    private IssueReadCache<IssueReadResponse>? _items;
+
+    /// <summary>Gets the clock of what is kept (<see cref="IssueReadCache{T}.Duration"/>); tests give their own.</summary>
+    internal TimeProvider Time { get; init; } = TimeProvider.System;
+
+    // What the tab read, kept a while: lists and items asked again are answered at once, with when they were read.
+    private IssueReadCache<IssueListResponse> Lists => LazyInitializer.EnsureInitialized(ref _lists, () => new(Time, 64));
+
+    private IssueReadCache<IssueReadResponse> Items => LazyInitializer.EnsureInitialized(ref _items, () => new(Time, 200));
+
+    private IssueImageCache? _images;
+
+    private IssueImageCache Images => LazyInitializer.EnsureInitialized(ref _images, () => new(Time));
 
     /// <summary>Creates the service of a window whose host has no trackers: it answers <c>unavailable</c>.</summary>
     public IssuesService()
@@ -96,14 +110,23 @@ internal sealed partial class IssuesService
         timeout.CancelAfter(ListTimeout);
         try
         {
-            // The values of the filters are ones the tracker gave: nothing else is passed on to it. Pull requests have none.
-            var filters = kind == TrackedItemKind.Issue ? await CheckedFiltersAsync(tracker, request.Filters, request.Service, project, timeout.Token).ConfigureAwait(false) : TrackedFilters.None;
+            // The values of the filters are ones the tracker gave: nothing else is passed on to it.
+            var filters = await CheckedFiltersAsync(tracker, kind, request.Filters, request.Service, project, timeout.Token).ConfigureAwait(false);
             if (filters is null) return new("invalid_request", [], false, null, false);
-            var page = await tracker.ListAsync(new(kind, filter, string.IsNullOrWhiteSpace(request.Query) ? null : request.Query.Trim(), limit) { Part = request.Part, Filters = filters }, timeout.Token).ConfigureAwait(false);
+            var query = string.IsNullOrWhiteSpace(request.Query) ? null : request.Query.Trim();
+            // The key is what the tracker is asked: the values the view gives the filters are in it, so a view changed is another list.
+            var key = string.Join('\u001E', [project.Id, request.Service, KindName(kind), request.Filter, query ?? string.Empty, request.Part ?? string.Empty,
+                limit.ToString(CultureInfo.InvariantCulture), .. filters.OrderBy(static pair => pair.Key, StringComparer.Ordinal).Select(static pair => pair.Key + "=" + pair.Value)]);
+            if (request.Fresh != true && Lists.TryGet(key, out var kept, out var keptAt)) return kept with { ReadAt = keptAt };
+            var readAt = Lists.Now;
+            var page = await tracker.ListAsync(new(kind, filter, query, limit) { Part = request.Part, Filters = filters }, timeout.Token).ConfigureAwait(false);
             var problem = page.Problem is null ? null : GitIssuesService.Clean(page.Problem, MaximumTitle);
             // What the tab shows in its place is in the log too, with what the tracker wrote of it before.
             if (problem is not null) LogFailure(tracker, $"listing the {KindName(kind)} shows: {problem}{(page.NeedsSignIn ? " (sign-in asked)" : "")}", null);
-            return new("ok", [.. page.Items.Take(limit).Select(Row).OfType<IssueRow>()], page.More, problem, page.NeedsSignIn);
+            var listed = new IssueListResponse("ok", [.. page.Items.Take(limit).Select(Row).OfType<IssueRow>()], page.More, problem, page.NeedsSignIn) { ReadAt = readAt };
+            // A list the tracker did not give whole is asked again next time.
+            if (problem is null) Lists.Set(key, listed, readAt);
+            return listed;
         }
         catch (OperationCanceledException exception) when (!cancellationToken.IsCancellationRequested)
         {
@@ -131,6 +154,9 @@ internal sealed partial class IssuesService
         if ((await TrackersAsync(project, cancellationToken).ConfigureAwait(false)).FirstOrDefault(candidate => candidate.Service == request.Service) is not { } tracker)
             return new("no_tracker");
 
+        var key = string.Join('\u001E', project.Id, request.Service, KindName(kind), request.Id);
+        if (request.Fresh != true && Items.TryGet(key, out var kept, out var keptAt)) return kept with { ReadAt = keptAt };
+        var readAt = Items.Now;
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         timeout.CancelAfter(ListTimeout);
         try
@@ -147,7 +173,9 @@ internal sealed partial class IssuesService
                 comments.Add(new(Nullable(comment.Author), comment.CreatedAt, text.Text));
             }
 
-            return new("ok", row, body.Text, body.Cut, comments, detail.MoreComments || comments.Count < detail.Comments.Count);
+            var read = new IssueReadResponse("ok", row, body.Text, body.Cut, comments, detail.MoreComments || comments.Count < detail.Comments.Count) { ReadAt = readAt };
+            Items.Set(key, read, readAt);
+            return read;
         }
         catch (OperationCanceledException exception) when (!cancellationToken.IsCancellationRequested)
         {
@@ -185,6 +213,8 @@ internal sealed partial class IssuesService
             detail = null;
         }
         if (detail is null || Row(detail.Item) is not { } row) return new("not_found");
+        // A session of the project works in its repository: an item of another one is read and opened, not worked on here.
+        if (row.Place is not null) return new("refused", null, $"{(kind == TrackedItemKind.PullRequest ? "The pull request" : "The item")} is of {row.Place}, not of the repository of this project.", "other_repository");
 
         // What the user chose in the form of the Agent chip, else what the session that shows the item runs with, else the defaults.
         var asked = request.ProviderId is null ? null : new WorkItemSelection(request.ProviderId, request.ModelId, request.ReasoningEffort);
@@ -193,6 +223,42 @@ internal sealed partial class IssuesService
         var started = await _starter.StartAsync(project, IssuePrompts.SessionTitle(row), _ => IssuePrompts.For(tracker.DisplayName, GitIssuesService.Clean(tracker.Location, MaximumTitle), row, detail.Body),
             request.Worktree, request.SessionId, "issue", model).ConfigureAwait(false);
         return new(started.Problem is null ? "ok" : "refused", started.SessionId, started.Problem, started.Reason);
+    }
+
+    /// <summary>
+    /// Reads an image that the description or a comment of an item shows, through its tracker and with its sign-in: the
+    /// page has no credentials and draws only images it is given. The tracker reads only addresses of its own.
+    /// </summary>
+    [NeoRpcMethod("image", TimeoutMilliseconds = 60_000)]
+    public async Task<IssueImageResponse> ImageAsync(IssueImageRequest request, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        if (Refuse(request.ExpectedEpoch) is { } refused) return new(refused);
+        if (!Name(request.Service) || Https(request.Address) is not { } address) return new("invalid_request");
+        if (await ResolveAsync(request.ProjectId, cancellationToken).ConfigureAwait(false) is not { } project) return new("not_found");
+        if ((await TrackersAsync(project, cancellationToken).ConfigureAwait(false)).FirstOrDefault(candidate => candidate.Service == request.Service) is not { } tracker)
+            return new("no_tracker");
+        var key = string.Join('\u001E', project.Id, request.Service, address);
+        if (!Images.TryGet(key, out var image))
+        {
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            timeout.CancelAfter(ListTimeout);
+            try
+            {
+                image = await tracker.ReadImageAsync(new Uri(address), timeout.Token).ConfigureAwait(false);
+            }
+            catch (Exception exception) when (exception is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
+            {
+                LogFailure(tracker, "reading an image failed.", exception);
+                return new("failed");
+            }
+
+            // A tracker of a plugin is trusted no more than its bytes: the page draws only the images it knows.
+            if (image is not null && (image.Bytes.Length > TrackedImage.MaximumBytes || TrackedImage.Detect(image.Bytes) != image.MediaType)) image = null;
+            Images.Set(key, image);
+        }
+
+        return image is null ? new("not_found") : new("ok", image.MediaType, Convert.ToBase64String(image.Bytes));
     }
 
     /// <summary>Opens the page of an item, or of a tracker, in the browser of the system. Only an https address is opened.</summary>
@@ -268,8 +334,26 @@ internal sealed partial class IssuesService
             Nullable(item.StateText), Nullable(item.Type), Nullable(item.Priority), Nullable(item.Author),
             [.. item.Assignees.Take(MaximumLabels).Select(static name => GitIssuesService.Clean(name, MaximumName)).Where(static name => name.Length > 0)],
             [.. item.Labels.Take(MaximumLabels).Select(static label => new IssueLabel(GitIssuesService.Clean(label.Name, MaximumName), Color(label.Color))).Where(static label => label.Name.Length > 0)],
-            item.CreatedAt, item.UpdatedAt, item.CommentCount is >= 0 ? item.CommentCount : null, Nullable(item.SourceBranch), Nullable(item.TargetBranch));
+            item.CreatedAt, item.UpdatedAt, item.CommentCount is >= 0 ? item.CommentCount : null, Nullable(item.SourceBranch), Nullable(item.TargetBranch))
+        {
+            Place = Nullable(item.Place),
+            Match = Nullable(item.Match),
+            Reviewers = [.. item.Reviewers.Take(MaximumLabels).Select(static reviewer => new IssueReviewer(GitIssuesService.Clean(reviewer.Name, MaximumName), Vote(reviewer.Vote))
+                {
+                    Group = reviewer.IsGroup ? true : null, Required = reviewer.Required ? true : null, Mine = reviewer.Mine ? true : null,
+                }).Where(static reviewer => reviewer.Name.Length > 0)],
+        };
     }
+
+    private static string Vote(TrackedVote vote)
+        => vote switch
+        {
+            TrackedVote.Approved => "approved",
+            TrackedVote.ApprovedWithSuggestions => "suggestions",
+            TrackedVote.WaitingForAuthor => "waiting",
+            TrackedVote.Rejected => "rejected",
+            _ => "none",
+        };
 
     private static string? Nullable(string? value) => GitIssuesService.Clean(value, MaximumName) is { Length: > 0 } text ? text : null;
 
@@ -384,15 +468,20 @@ internal sealed record IssueSource(string Service, string Name, string Location,
 /// <param name="Query">Words the items must match; null or empty for the most recently updated ones.</param>
 /// <param name="Limit">The most items; 50 when null, 100 at most.</param>
 /// <param name="Part">One of the <see cref="IssueSource.Parts"/> of the tracker, to list it alone; null for all of them.</param>
-/// <param name="Filters">The values of the filters of the tracker (<see cref="IssuesService.FiltersAsync"/>), by filter id; issues only.</param>
+/// <param name="Filters">The values of the filters of the tracker for the kind listed (<see cref="IssuesService.FiltersAsync"/>), by filter id.</param>
+/// <param name="Fresh">Whether the tracker is asked again even when the list was read less than five minutes ago.</param>
 internal sealed record IssueListRequest(string ExpectedEpoch, string ProjectId, string Service, string Kind, string Filter, string? Query, int? Limit, string? Part = null,
-    Dictionary<string, string>? Filters = null);
+    Dictionary<string, string>? Filters = null, bool? Fresh = null);
 
 /// <summary>
 /// A listing. Status is <c>ok</c>, <c>unavailable</c>, <c>stale_epoch</c>, <c>invalid_request</c>,
 /// <c>not_found</c> or <c>no_tracker</c>. A tracker that could not answer is <c>ok</c> with a problem.
 /// </summary>
-internal sealed record IssueListResponse(string Status, IReadOnlyList<IssueRow> Items, bool More, string? Problem, bool NeedsSignIn);
+internal sealed record IssueListResponse(string Status, IReadOnlyList<IssueRow> Items, bool More, string? Problem, bool NeedsSignIn)
+{
+    /// <summary>Gets when the tracker was read: the list may be kept up to five minutes.</summary>
+    public DateTimeOffset? ReadAt { get; init; }
+}
 
 /// <summary>One issue or pull request; every text was written by other people and is rendered as text.</summary>
 /// <param name="Kind"><c>issue</c> or <c>pull_request</c>.</param>
@@ -412,13 +501,38 @@ internal sealed record IssueListResponse(string Status, IReadOnlyList<IssueRow> 
 /// <param name="SourceBranch">The branch a pull request brings.</param>
 /// <param name="TargetBranch">The branch a pull request goes to.</param>
 internal sealed record IssueRow(string Kind, string Id, string Title, string Url, string State, string? StateText, string? Type, string? Priority, string? Author,
-    IReadOnlyList<string> Assignees, IReadOnlyList<IssueLabel> Labels, DateTimeOffset? CreatedAt, DateTimeOffset? UpdatedAt, int? Comments, string? SourceBranch, string? TargetBranch);
+    IReadOnlyList<string> Assignees, IReadOnlyList<IssueLabel> Labels, DateTimeOffset? CreatedAt, DateTimeOffset? UpdatedAt, int? Comments, string? SourceBranch, string? TargetBranch)
+{
+    /// <summary>Gets where the item is kept when not in the repository of the project (<c>project/repository</c>): no session is started on it here.</summary>
+    public string? Place { get; init; }
+
+    /// <summary>Gets why the filters of the listing kept it, such as <c>Required · through Platform · No vote yet</c>.</summary>
+    public string? Match { get; init; }
+
+    /// <summary>Gets who reviews a pull request.</summary>
+    public IReadOnlyList<IssueReviewer> Reviewers { get; init; } = [];
+}
+
+/// <summary>A reviewer of a pull request.</summary>
+/// <param name="Name">The person or the group.</param>
+/// <param name="Vote"><c>none</c>, <c>approved</c>, <c>suggestions</c>, <c>waiting</c> or <c>rejected</c>.</param>
+internal sealed record IssueReviewer(string Name, string Vote)
+{
+    /// <summary>Gets whether it is a group; null is no.</summary>
+    public bool? Group { get; init; }
+
+    /// <summary>Gets whether the review is required; null is no.</summary>
+    public bool? Required { get; init; }
+
+    /// <summary>Gets whether it is the user, or a group of the user; null is no.</summary>
+    public bool? Mine { get; init; }
+}
 
 /// <summary>A label of an item, with its color as six hexadecimal digits when the tracker gives one.</summary>
 internal sealed record IssueLabel(string Name, string? Color);
 
-/// <summary>Names one item of a tracker of a project.</summary>
-internal sealed record IssueItemRequest(string ExpectedEpoch, string ProjectId, string Service, string Kind, string Id);
+/// <summary>Names one item of a tracker of a project; <paramref name="Fresh"/> reads it again even when it was read less than five minutes ago.</summary>
+internal sealed record IssueItemRequest(string ExpectedEpoch, string ProjectId, string Service, string Kind, string Id, bool? Fresh = null);
 
 /// <summary>
 /// One item with its description and comments. Status is <c>ok</c>, <c>unavailable</c>, <c>stale_epoch</c>,
@@ -430,7 +544,11 @@ internal sealed record IssueItemRequest(string ExpectedEpoch, string ProjectId, 
 /// <param name="Truncated">Whether the description is longer than what is sent.</param>
 /// <param name="Comments">Its comments, the oldest first.</param>
 /// <param name="MoreComments">Whether it has more comments than what is sent.</param>
-internal sealed record IssueReadResponse(string Status, IssueRow? Item = null, string? Body = null, bool Truncated = false, IReadOnlyList<IssueComment>? Comments = null, bool MoreComments = false);
+internal sealed record IssueReadResponse(string Status, IssueRow? Item = null, string? Body = null, bool Truncated = false, IReadOnlyList<IssueComment>? Comments = null, bool MoreComments = false)
+{
+    /// <summary>Gets when the tracker was read: the item may be kept up to five minutes.</summary>
+    public DateTimeOffset? ReadAt { get; init; }
+}
 
 /// <summary>A comment of an item.</summary>
 internal sealed record IssueComment(string? Author, DateTimeOffset? CreatedAt, string Body);
@@ -460,6 +578,22 @@ internal sealed record IssueStartRequest(string ExpectedEpoch, string ProjectId,
 /// has a text for it), <c>unavailable</c>, <c>stale_epoch</c>, <c>invalid_request</c>, <c>not_found</c> or <c>no_tracker</c>.
 /// </summary>
 internal sealed record IssueStartResponse(string Status, string? SessionId = null, string? Message = null, string? Reason = null);
+
+/// <summary>Asks for an image an item of a tracker shows.</summary>
+/// <param name="ExpectedEpoch">The host epoch.</param>
+/// <param name="ProjectId">The project.</param>
+/// <param name="Service">The tracker of the item.</param>
+/// <param name="Address">The https address of the image, as the text of the item writes it.</param>
+internal sealed record IssueImageRequest(string ExpectedEpoch, string ProjectId, string Service, string Address);
+
+/// <summary>
+/// An image. Status is <c>ok</c>, <c>not_found</c> (not an image the tracker reads, or it could not), <c>failed</c>,
+/// <c>invalid_request</c>, <c>no_tracker</c>, <c>unavailable</c> or <c>stale_epoch</c>.
+/// </summary>
+/// <param name="Status">How the reading ended.</param>
+/// <param name="MediaType">The type of the image: <c>image/png</c>, <c>image/jpeg</c>, <c>image/gif</c> or <c>image/webp</c>.</param>
+/// <param name="Data">The image, as base64.</param>
+internal sealed record IssueImageResponse(string Status, string? MediaType = null, string? Data = null);
 
 /// <summary>Asks to open an https address in the browser of the system.</summary>
 internal sealed record IssueLinkRequest(string ExpectedEpoch, string Address);

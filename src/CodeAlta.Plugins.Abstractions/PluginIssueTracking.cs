@@ -87,6 +87,75 @@ public sealed record TrackedItem(TrackedItemKind Kind, string Id, string Title, 
 
     /// <summary>Gets the branch a pull request goes to.</summary>
     public string? TargetBranch { get; init; }
+
+    /// <summary>
+    /// Gets where the item is kept when that is not the place of its tracker (<see cref="IIssueTracker.Location"/>): the
+    /// <c>project/repository</c> of a pull request a listing of the whole project or organization found; null otherwise.
+    /// A session started on such an item would not work in its repository.
+    /// </summary>
+    public string? Place { get; init; }
+
+    /// <summary>Gets who reviews a pull request, with whether the review is required and the vote; empty when the tracker does not say.</summary>
+    public IReadOnlyList<TrackedReviewer> Reviewers { get; init; } = [];
+
+    /// <summary>Gets why the filters of the listing kept the item, in words for the user (<c>Required · through Platform</c>); null when they say nothing more.</summary>
+    public string? Match { get; init; }
+}
+
+/// <summary>How a reviewer voted on a pull request.</summary>
+public enum TrackedVote
+{
+    /// <summary>No vote yet.</summary>
+    None,
+
+    /// <summary>Approved.</summary>
+    Approved,
+
+    /// <summary>Approved with suggestions.</summary>
+    ApprovedWithSuggestions,
+
+    /// <summary>Waits for the author.</summary>
+    WaitingForAuthor,
+
+    /// <summary>Rejected.</summary>
+    Rejected,
+}
+
+/// <summary>A reviewer of a pull request: a person, or a group whose members review for it.</summary>
+/// <param name="Name">The name of the reviewer.</param>
+/// <param name="Vote">The vote; for a group, the vote one of its members gave for it.</param>
+public sealed record TrackedReviewer(string Name, TrackedVote Vote)
+{
+    /// <summary>Gets whether the reviewer is a group or a team.</summary>
+    public bool IsGroup { get; init; }
+
+    /// <summary>Gets whether the pull request cannot be completed without this review.</summary>
+    public bool Required { get; init; }
+
+    /// <summary>Gets whether the signed-in user is this reviewer, or a member of this group (directly or through other groups).</summary>
+    public bool Mine { get; init; }
+}
+
+/// <summary>An image that the description or a comment of an item shows, as a tracker read it with its sign-in.</summary>
+/// <param name="MediaType">The type of the image: <c>image/png</c>, <c>image/jpeg</c>, <c>image/gif</c> or <c>image/webp</c>.</param>
+/// <param name="Bytes">The image.</param>
+public sealed record TrackedImage(string MediaType, byte[] Bytes)
+{
+    /// <summary>The largest image a tracker reads, in bytes.</summary>
+    public const int MaximumBytes = 10 * 1024 * 1024;
+
+    /// <summary>
+    /// Gets the type of an image from its first bytes: PNG, JPEG, GIF or WebP, the images a page draws safely. What a
+    /// service says of the type is not trusted, and SVG, which can hold scripts, is never an image here.
+    /// </summary>
+    /// <param name="bytes">The start of the image, or all of it.</param>
+    /// <returns>The media type, or null when the bytes are none of these images.</returns>
+    public static string? Detect(ReadOnlySpan<byte> bytes)
+        => bytes.StartsWith((ReadOnlySpan<byte>)[0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]) ? "image/png"
+            : bytes.StartsWith((ReadOnlySpan<byte>)[0xFF, 0xD8, 0xFF]) ? "image/jpeg"
+            : bytes.StartsWith("GIF87a"u8) || bytes.StartsWith("GIF89a"u8) ? "image/gif"
+            : bytes.Length >= 12 && bytes.StartsWith("RIFF"u8) && bytes[8..12].SequenceEqual("WEBP"u8) ? "image/webp"
+            : null;
 }
 
 /// <summary>A comment of an item.</summary>
@@ -185,7 +254,11 @@ public sealed record TrackedField(string Id, string Label, string Type)
 /// <summary>What a tracker is asked of its filters.</summary>
 /// <param name="Selections">The values chosen so far, by filter id: a filter can offer values that depend on them (<see cref="TrackedFilterDescriptor.DependsOn"/>).</param>
 /// <param name="Fields">The ids of the filters made of fields (<see cref="TrackedField.Id"/>) the views name, besides the tracker's own.</param>
-public sealed record TrackedFilterRequest(IReadOnlyDictionary<string, string> Selections, IReadOnlyList<string> Fields);
+public sealed record TrackedFilterRequest(IReadOnlyDictionary<string, string> Selections, IReadOnlyList<string> Fields)
+{
+    /// <summary>Gets the kind of items the filters are asked for: the issues (default), or the pull requests (<see cref="TrackedItemQuery.Kind"/>).</summary>
+    public TrackedItemKind Kind { get; init; } = TrackedItemKind.Issue;
+}
 
 /// <summary>Values shared by the filters of trackers.</summary>
 public static class TrackedFilters
@@ -260,8 +333,8 @@ public interface IIssueTracker
     IReadOnlyList<string> Parts => [];
 
     /// <summary>
-    /// Gets the filters the tracker can apply to a listing of issues (<see cref="TrackedItemQuery.Filters"/>), with
-    /// their values. A tracker without filters answers none.
+    /// Gets the filters the tracker can apply to a listing (<see cref="TrackedItemQuery.Filters"/>) of the kind of items
+    /// the request names (<see cref="TrackedFilterRequest.Kind"/>), with their values. A tracker without filters answers none.
     /// </summary>
     /// <param name="request">The values chosen so far, and the fields the configuration makes filters of.</param>
     /// <param name="cancellationToken">A token to cancel the operation.</param>
@@ -290,6 +363,17 @@ public interface IIssueTracker
     /// <param name="cancellationToken">A token to cancel the operation.</param>
     /// <returns>The item, or null when the tracker has none with this id or cannot be reached.</returns>
     ValueTask<TrackedItemDetail?> ReadAsync(TrackedItemKind kind, string id, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Reads an image that the description or a comment of an item shows, with the sign-in of the tracker: an attachment
+    /// of the tracker, at an address of its own. Any other address is answered null without a request, so that the
+    /// credentials of the tracker go nowhere else. A tracker that reads no image answers null.
+    /// </summary>
+    /// <param name="address">The address of the image, as the text of the item writes it.</param>
+    /// <param name="cancellationToken">A token to cancel the operation.</param>
+    /// <returns>The image, at most <see cref="TrackedImage.MaximumBytes"/> and of a type <see cref="TrackedImage.Detect"/> knows; null otherwise.</returns>
+    ValueTask<TrackedImage?> ReadImageAsync(Uri address, CancellationToken cancellationToken)
+        => ValueTask.FromResult<TrackedImage?>(null);
 }
 
 /// <summary>

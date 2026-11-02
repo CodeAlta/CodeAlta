@@ -38,7 +38,7 @@ Type `#` in the prompt to search the issues of the project's repository, most re
   <figcaption class="small text-secondary mt-2">The <code>#</code> issue picker in CodeAlta TUI, on a GitHub repository. The selected issue is inserted as a Markdown link.</figcaption>
 </figure>
 
-On Azure DevOps, the Issues tab can also show the work items of a team, a sprint, assigned to you, of a type, or by any field: see [Filters](../issues.md#filters). A personal access token needs **Work Items (Read)**, and **Project and Team (Read)** to list teams.
+On Azure DevOps, the Issues tab can also show the work items of a team, a sprint, assigned to you, of a type, or by any field: see [Filters](../issues.md#filters), and the pull requests that wait for your review, also through your groups: see [Pull requests](../issues.md#pull-requests). A personal access token needs **Work Items (Read)**, **Project and Team (Read)** to list teams, **Code (Read)** for pull requests and **Identity (Read)** for your groups.
 
 ## Sign-in for issue lookup
 

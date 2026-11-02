@@ -309,7 +309,7 @@ public sealed class IssuesRpcTests
     public async Task AListing_PassesOnTheValuesOfFilters_OnlyWhenTheTrackerOffersThem()
     {
         await using var fixture = await Fixture.CreateAsync();
-        fixture.Tracker.Filters = TeamAndSprint;
+        fixture.Tracker.Filters = static request => request.Kind == TrackedItemKind.Issue ? TeamAndSprint(request) : [];
 
         var reply = await fixture.Rpc.ListAsync(new(Epoch, fixture.Project.Id, "github", "issue", "open", null, 10, Filters: new() { ["team"] = "t2", ["sprint"] = "s-t2", ["assigned_to"] = "" }), default);
 
@@ -322,8 +322,10 @@ public sealed class IssuesRpcTests
             "The sprint of another team is not offered with this one.");
         Assert.IsNull(fixture.Tracker.Asked);
 
-        await fixture.Rpc.ListAsync(new(Epoch, fixture.Project.Id, "github", "pull_request", "open", null, 10, Filters: new() { ["team"] = "t1" }), default);
-        Assert.AreEqual(0, fixture.Tracker.Asked!.Filters.Count, "Pull requests have no filters.");
+        Assert.AreEqual("invalid_request", (await fixture.Rpc.ListAsync(new(Epoch, fixture.Project.Id, "github", "pull_request", "open", null, 10, Filters: new() { ["team"] = "t1" }), default)).Status,
+            "A filter of the issues is not one of the pull requests.");
+        await fixture.Rpc.ListAsync(new(Epoch, fixture.Project.Id, "github", "pull_request", "open", null, 10), default);
+        Assert.AreEqual(0, fixture.Tracker.Asked!.Filters.Count, "Pull requests without a view are listed without filters.");
     }
 
     [TestMethod]
@@ -444,6 +446,164 @@ public sealed class IssuesRpcTests
     }
 
     [TestMethod]
+    public async Task AListAndAnItem_AreKeptFiveMinutes_WithWhenTheyWereRead_AndFreshReadsThemAgain()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var item = new TrackedItem(TrackedItemKind.Issue, "12", "Crash", "https://github.com/o/r/issues/12", TrackedItemState.Open);
+        fixture.Tracker.Page = new TrackedItemPage([item]);
+        fixture.Tracker.Detail = new TrackedItemDetail(item, "Body.", []);
+        var start = fixture.Clock.Now;
+        Task<IssueListResponse> List(bool? fresh = null, string filter = "open") => fixture.Rpc.ListAsync(new(Epoch, fixture.Project.Id, "github", "issue", filter, null, 50, Fresh: fresh), default);
+        Task<IssueReadResponse> Read(bool? fresh = null) => fixture.Rpc.ReadAsync(new(Epoch, fixture.Project.Id, "github", "issue", "12", fresh), default);
+
+        Assert.AreEqual(start, (await List()).ReadAt);
+        fixture.Clock.Now = start.AddMinutes(4);
+        var kept = await List();
+        Assert.AreEqual((1, start, "12"), (fixture.Tracker.Listings, kept.ReadAt, kept.Items.Single().Id), "Asked again within five minutes, the list is the one kept.");
+        Assert.AreEqual(start.AddMinutes(4), (await List(filter: "all")).ReadAt, "Another list is read.");
+        Assert.AreEqual((start.AddMinutes(4), 3), ((await List(fresh: true)).ReadAt, fixture.Tracker.Listings), "Fresh reads it again.");
+        fixture.Clock.Now = start.AddMinutes(9).AddSeconds(1);
+        await List();
+        Assert.AreEqual(4, fixture.Tracker.Listings, "Past five minutes, it is read again.");
+
+        fixture.Tracker.Page = new TrackedItemPage([item]) { Problem = "GitHub asks to sign in." };
+        fixture.Clock.Now = start.AddMinutes(15);
+        await List();
+        await List();
+        Assert.AreEqual(6, fixture.Tracker.Listings, "A list with a problem is not kept.");
+
+        Assert.AreEqual(start.AddMinutes(15), (await Read()).ReadAt);
+        fixture.Clock.Now = start.AddMinutes(18);
+        var read = await Read();
+        Assert.AreEqual((1, start.AddMinutes(15), "Body."), (fixture.Tracker.Reads, read.ReadAt, read.Body));
+        Assert.AreEqual(start.AddMinutes(18), (await Read(fresh: true)).ReadAt);
+        Assert.AreEqual(2, fixture.Tracker.Reads);
+        fixture.Tracker.Detail = null;
+        await Read(fresh: true);
+        await Read(fresh: true);
+        Assert.AreEqual(4, fixture.Tracker.Reads, "An item that is not found is not kept.");
+        StringAssert.Contains(JsonSerializer.Serialize(kept, DesktopJsonContext.Default.IssueListResponse), "\"readAt\":\"2026-11-02T08:00:00");
+    }
+
+    [TestMethod]
+    public async Task AnImage_IsReadThroughItsTracker_KeptHalfAnHour_AndOneThatIsNotAnImageIsNotGiven()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        byte[] png = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 7];
+        fixture.Tracker.Images = address => address.AbsolutePath.EndsWith("/fake", StringComparison.Ordinal) ? new TrackedImage("image/png", "<svg/>"u8.ToArray())
+            : address.AbsolutePath.EndsWith("/gone", StringComparison.Ordinal) ? null : new TrackedImage("image/png", png);
+        var start = fixture.Clock.Now;
+        Task<IssueImageResponse> Image(string address) => fixture.Rpc.ImageAsync(new(Epoch, fixture.Project.Id, "github", address), default);
+
+        var image = await Image("https://example.com/a.png");
+        Assert.AreEqual(("ok", "image/png", Convert.ToBase64String(png)), (image.Status, image.MediaType, image.Data));
+        await Image("https://example.com/a.png");
+        Assert.HasCount(1, fixture.Tracker.ImageAsks, "An image is read once.");
+
+        Assert.AreEqual("not_found", (await Image("https://example.com/fake")).Status, "Bytes that are not the image the tracker says are not given.");
+        Assert.AreEqual("not_found", (await Image("https://example.com/gone")).Status);
+        await Image("https://example.com/gone");
+        Assert.HasCount(3, fixture.Tracker.ImageAsks, "An image that could not be read is not asked again at once.");
+        fixture.Clock.Now = start.AddMinutes(2);
+        await Image("https://example.com/gone");
+        await Image("https://example.com/a.png");
+        Assert.HasCount(4, fixture.Tracker.ImageAsks, "It is asked again a minute later; the image read is still kept.");
+        fixture.Clock.Now = start.AddMinutes(31);
+        await Image("https://example.com/a.png");
+        Assert.HasCount(5, fixture.Tracker.ImageAsks, "Half an hour later the image is read again.");
+
+        Assert.AreEqual("invalid_request", (await Image("http://example.com/a.png")).Status, "Only an https address is asked.");
+        Assert.AreEqual("no_tracker", (await fixture.Rpc.ImageAsync(new(Epoch, fixture.Project.Id, "gitlab", "https://example.com/a.png"), default)).Status);
+        Assert.AreEqual("stale_epoch", (await fixture.Rpc.ImageAsync(new("other", fixture.Project.Id, "github", "https://example.com/a.png"), default)).Status);
+        Assert.HasCount(5, fixture.Tracker.ImageAsks);
+    }
+
+    [TestMethod]
+    public void TheImagesThatCouldNotBeRead_AreKeptInABoundedNumber()
+    {
+        // Every image of a tracker that reads none (GitHub) is kept as one that could not be read: a long session that
+        // shows many such items does not keep them all.
+        var clock = new AutomationClock { Now = new DateTimeOffset(2026, 11, 2, 8, 0, 0, TimeSpan.Zero) };
+        var cache = new IssueImageCache(clock);
+        for (var index = 0; index < 3 * IssueImageCache.MaximumEntries; index++) cache.Set($"https://github.com/user-attachments/assets/{index}", null);
+        Assert.IsLessThanOrEqualTo(IssueImageCache.MaximumEntries, cache.Count);
+
+        var image = new TrackedImage("image/png", [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]);
+        cache.Set("kept", image);
+        clock.Now = clock.Now.AddMinutes(2);
+        cache.Set("other", null);
+        Assert.IsTrue(cache.TryGet("kept", out var kept) && ReferenceEquals(image, kept), "An image read is kept while those that could not be read leave.");
+        Assert.IsLessThanOrEqualTo(3, cache.Count, "The ones past their minute leave when the cache is full.");
+    }
+
+    [TestMethod]
+    public async Task ThePullRequests_HaveViewsOfTheirOwn_AndTheirListingPassesOnTheirFilters()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        fixture.Tracker.Filters = request => request.Kind == TrackedItemKind.PullRequest
+            ? [new("scope", "Scope", [new("@project", "This project")]) { AllLabel = "This repository" }, new("reviewer", "Reviewer", [new("@me", "Me"), new("@me_groups", "Me or my groups")])]
+            : TeamAndSprint(request);
+        fixture.Tracker.Fields = [new("field:Custom.Customer", "Customer", "text")];
+        WriteTeamViews(fixture, """
+            [github.views.Board.sprint]
+            value = "@current"
+            """);
+
+        Assert.AreEqual("ok", (await fixture.Rpc.SaveViewAsync(new(Epoch, fixture.Project.Id, "github", "personal", "Waiting",
+            [new("scope", "on", "@project", null, true), new("reviewer", "on", "Me or my groups", null)], Select: true, Kind: "pull_request"), default)).Status);
+        var local = File.ReadAllText(Path.Combine(fixture.Project.ProjectPath, ".alta", "local", "issues.toml"));
+        StringAssert.Contains(local, "[github.pull_requests]");
+        StringAssert.Contains(local, "[github.pull_requests.views.Waiting.reviewer]");
+
+        var pulls = await fixture.Rpc.FiltersAsync(new(Epoch, fixture.Project.Id, "github", Kind: "pull_request"), default);
+        Assert.AreEqual((new IssueViewName("Waiting", "personal"), "@me_groups"), (pulls.Current, pulls.Selected["reviewer"]));
+        CollectionAssert.AreEqual(new[] { "scope", "reviewer" }, pulls.Active.ToArray(), "The filter the tab may change first.");
+        CollectionAssert.AreEqual(new[] { ("Waiting", "personal") }, pulls.Views.Select(static view => (view.Name, view.Source)).ToArray(), "The views of the pull requests only.");
+        Assert.AreEqual(TrackedItemKind.PullRequest, fixture.Tracker.FilterAsks[^1].Kind, "The tracker is asked for the filters of the pull requests.");
+        var issues = await fixture.Rpc.FiltersAsync(new(Epoch, fixture.Project.Id, "github"), default);
+        Assert.AreEqual(new IssueViewName("Board", "team"), issues.Current, "The issues keep their own view.");
+        Assert.AreEqual(TrackedItemKind.Issue, fixture.Tracker.FilterAsks[^1].Kind);
+
+        await fixture.Rpc.ListAsync(new(Epoch, fixture.Project.Id, "github", "pull_request", "open", null, 50, Filters: new() { ["scope"] = "" }), default);
+        Assert.AreEqual(("", "@me_groups"), (fixture.Tracker.Asked!.Filters.GetValueOrDefault("scope", ""), fixture.Tracker.Asked.Filters["reviewer"]),
+            "A listing of pull requests passes on the filters of their view, and the scope the tab chose for every repository.");
+        Assert.AreEqual("invalid_request", (await fixture.Rpc.ListAsync(new(Epoch, fixture.Project.Id, "github", "pull_request", "open", null, 50, Filters: new() { ["scope"] = "@galaxy" }), default)).Status);
+
+        Assert.AreEqual(0, (await fixture.Rpc.FieldsAsync(new(Epoch, fixture.Project.Id, "github", "pull_request"), default)).Fields.Count, "The pull requests have no fields to add.");
+        Assert.AreEqual(1, (await fixture.Rpc.FieldsAsync(new(Epoch, fixture.Project.Id, "github"), default)).Fields.Count);
+        Assert.AreEqual("ok", (await fixture.Rpc.SelectViewAsync(new(Epoch, fixture.Project.Id, "github", null, "pull_request"), default)).Status);
+        Assert.AreEqual("not_found", (await fixture.Rpc.SelectViewAsync(new(Epoch, fixture.Project.Id, "github", "Board", "pull_request"), default)).Status, "A view of the issues is not one of the pull requests.");
+        Assert.AreEqual("ok", (await fixture.Rpc.RenameViewAsync(new(Epoch, fixture.Project.Id, "github", "personal", "Waiting", "Mine", "pull_request"), default)).Status);
+        CollectionAssert.AreEqual(new[] { "Mine" }, (await fixture.Rpc.ViewsAsync(new(Epoch, fixture.Project.Id, "github", "pull_request"), default)).Views.Select(static view => view.Name).ToArray());
+        Assert.AreEqual("ok", (await fixture.Rpc.RemoveViewAsync(new(Epoch, fixture.Project.Id, "github", "personal", "Mine", "pull_request"), default)).Status);
+        Assert.AreEqual("invalid_request", (await fixture.Rpc.ViewsAsync(new(Epoch, fixture.Project.Id, "github", "story"), default)).Status);
+        Assert.AreEqual("invalid_request", (await fixture.Rpc.FiltersAsync(new(Epoch, fixture.Project.Id, "github", Kind: "story"), default)).Status);
+    }
+
+    [TestMethod]
+    public async Task APullRequestOfAnotherRepository_IsListedWithItsReviewers_ButNotWorkedOnHere()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var pull = new TrackedItem(TrackedItemKind.PullRequest, "9", "New fields", "https://dev.azure.com/org/proj/_git/other/pullrequest/9", TrackedItemState.Open)
+        {
+            Place = "proj/other", Match = "Required · through Core · No vote yet",
+            Reviewers = [new("Core", TrackedVote.None) { IsGroup = true, Required = true, Mine = true }, new("Bo", TrackedVote.ApprovedWithSuggestions), new("\u0007", TrackedVote.Rejected)],
+        };
+        fixture.Tracker.Page = new TrackedItemPage([pull]);
+        fixture.Tracker.Detail = new TrackedItemDetail(pull, "Body.", []);
+
+        var row = (await fixture.Rpc.ListAsync(new(Epoch, fixture.Project.Id, "github", "pull_request", "open", null, 50), default)).Items.Single();
+        Assert.AreEqual(("proj/other", "Required · through Core · No vote yet"), (row.Place, row.Match));
+        CollectionAssert.AreEqual(new[] { new IssueReviewer("Core", "none") { Group = true, Required = true, Mine = true }, new IssueReviewer("Bo", "suggestions") }, row.Reviewers.ToArray(),
+            "A name that is nothing once cleaned is left out.");
+        StringAssert.Contains(JsonSerializer.Serialize(row, DesktopJsonContext.Default.IssueRow), "\"reviewers\":[{\"name\":\"Core\"");
+
+        var start = await fixture.Rpc.StartAsync(new(Epoch, fixture.Project.Id, "github", "pull_request", "9", true, null), default);
+        Assert.AreEqual(("refused", "other_repository"), (start.Status, start.Reason));
+        Assert.IsEmpty(fixture.Starter.Started, "A session of the project would not work in the repository of the pull request.");
+    }
+
+    [TestMethod]
     public async Task AFileOfViewsThatDoesNotParse_IsSaid_InTheViewsAndTheFilters()
     {
         await using var fixture = await Fixture.CreateAsync();
@@ -547,13 +707,29 @@ public sealed class IssuesRpcTests
 
         public ValueTask<IReadOnlyList<TrackedField>> GetFieldsAsync(CancellationToken cancellationToken) => ValueTask.FromResult(Fields);
 
+        public int Listings { get; private set; }
+        public int Reads { get; private set; }
+        public List<Uri> ImageAsks { get; } = [];
+        public Func<Uri, TrackedImage?> Images { get; set; } = static _ => null;
+
+        public ValueTask<TrackedImage?> ReadImageAsync(Uri address, CancellationToken cancellationToken)
+        {
+            ImageAsks.Add(address);
+            return ValueTask.FromResult(Images(address));
+        }
+
         public ValueTask<TrackedItemPage> ListAsync(TrackedItemQuery query, CancellationToken cancellationToken)
         {
+            Listings++;
             Asked = query;
             return Fails ? throw new HttpRequestException("GET https://api.github.com/secret failed") : ValueTask.FromResult(Page);
         }
 
-        public ValueTask<TrackedItemDetail?> ReadAsync(TrackedItemKind kind, string id, CancellationToken cancellationToken) => ValueTask.FromResult(Detail);
+        public ValueTask<TrackedItemDetail?> ReadAsync(TrackedItemKind kind, string id, CancellationToken cancellationToken)
+        {
+            Reads++;
+            return ValueTask.FromResult(Detail);
+        }
     }
 
     private sealed class FakeStarter : ISessionStarter
@@ -578,7 +754,7 @@ public sealed class IssuesRpcTests
             Sources.Add(new FakeSource(path => string.Equals(path, project.ProjectPath, StringComparison.Ordinal) ? [Tracker] : []));
             Rpc = new IssuesService(() => Sources, projects, Starter, Epoch, address => { Opened.Add(address); return true; })
             {
-                Views = new IssueViewStore(),
+                Views = new IssueViewStore(), Time = Clock,
             };
         }
 
@@ -586,6 +762,7 @@ public sealed class IssuesRpcTests
         public List<IIssueTrackerSource> Sources { get; } = [];
         public FakeTracker Tracker { get; } = new("github", "GitHub", "o/r") { WebUrl = "https://github.com/o/r" };
         public FakeStarter Starter { get; } = new();
+        public AutomationClock Clock { get; } = new() { Now = new DateTimeOffset(2026, 11, 2, 8, 0, 0, TimeSpan.Zero) };
         public List<string> Opened { get; } = [];
         public IssuesService Rpc { get; }
 

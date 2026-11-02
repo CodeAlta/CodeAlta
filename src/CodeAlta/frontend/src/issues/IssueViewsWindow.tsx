@@ -9,7 +9,7 @@ import { useSettingsFiles, type SettingsFilesApi } from "../settingsFiles";
 import { RemoveButton } from "../SettingsPage";
 import type { SettingsNotice } from "../settingsEditing";
 import { useShellLanguage } from "../shellLanguage";
-import { filterValueText, joinValues, movePicks, pickKey, trackerText } from "./issues";
+import { filterValueText, joinValues, movePicks, pickKey, trackerText, type IssueKind } from "./issues";
 import { MultiChoice } from "./MultiChoice";
 import { addableFilters, changeEntry, configuredText, configuredValue, entriesOf, entryFor, fieldTypeLabel, formSelections, freeViewName, isActive, sameEntries, savedEntries,
   switchEntry, valueOf, valuesOf, viewKey, viewSourceLabel, viewSources, type FilterEntry, type ViewSource } from "./issueFilterSettings";
@@ -28,11 +28,13 @@ const shortName = (id: string) => id.startsWith("field:") ? id.slice("field:".le
  * the view chosen there is one row per filter: its name, its field in the tracker, the type of that field, what the tab
  * does with it and its value. Fields of the tracker are added as filters.
  */
-export function IssueViewsWindow({ api, epoch, project, source, onClose, onChanged, onOpenedFile, filesApi }: {
+export function IssueViewsWindow({ api, epoch, project, source, kind = "issue", onClose, onChanged, onOpenedFile, filesApi }: {
   api: IssueViewsApi; epoch: string;
   project: Readonly<{ id: string; name: string }>;
   /** The tracker of the project whose views are managed. */
   source: Readonly<{ service: string; name: string }>;
+  /** The items the views list: the issues, or the pull requests, which have views of their own. */
+  kind?: IssueKind;
   onClose: () => void;
   /** Called after a view was written: the tab reads its filters again, anew when a view was made, renamed or removed (`views`). */
   onChanged: (views: boolean) => void;
@@ -61,11 +63,11 @@ export function IssueViewsWindow({ api, epoch, project, source, onClose, onChang
   useEffect(() => {
     setViews(null); setFields(null);
     const controller = new AbortController();
-    void api.views({ expectedEpoch: epoch, projectId, service: source.service }, { signal: controller.signal, timeoutMilliseconds: 20_000 }).then(
+    void api.views({ expectedEpoch: epoch, projectId, service: source.service, kind }, { signal: controller.signal, timeoutMilliseconds: 20_000 }).then(
       reply => { if (!controller.signal.aborted) setViews(reply.status === "ok" ? reply : { status: reply.status, views: [], current: null, paths: [], problem: null }); },
       () => { if (!controller.signal.aborted) { setViews({ status: "failed", views: [], current: null, paths: [], problem: null }); setNotice({ key: "The operation did not complete.", intent: "danger" }); } });
     return () => controller.abort();
-  }, [api, epoch, projectId, source.service, generation]);
+  }, [api, epoch, projectId, source.service, kind, generation]);
   // The view the window shows: the one chosen in it, else the one the tab shows, else the first.
   const view = views?.views.find(candidate => viewKey(candidate) === chosen) ?? (views?.current ? views.views.find(candidate => viewKey(candidate) === viewKey(views.current!)) : null)
     ?? views?.views[0] ?? null;
@@ -79,11 +81,11 @@ export function IssueViewsWindow({ api, epoch, project, source, onClose, onChang
   const askKey = JSON.stringify([selections, include]);
   useEffect(() => {
     const controller = new AbortController();
-    void api.filters({ expectedEpoch: epoch, projectId, service: source.service, selections, include, withoutView: true }, { signal: controller.signal, timeoutMilliseconds: 60_000 }).then(
+    void api.filters({ expectedEpoch: epoch, projectId, service: source.service, selections, include, withoutView: true, kind }, { signal: controller.signal, timeoutMilliseconds: 60_000 }).then(
       reply => { if (!controller.signal.aborted) setFilters({ value: reply.status === "ok" ? reply.filters : [], problem: reply.problem }); },
       () => { if (!controller.signal.aborted) setFilters({ value: [], problem: null }); });
     return () => controller.abort();
-  }, [api, epoch, projectId, source.service, askKey, generation]);
+  }, [api, epoch, projectId, source.service, kind, askKey, generation]);
 
   const known = filters?.value ?? [];
   // The rows are the filters the view names, in its order.
@@ -101,7 +103,7 @@ export function IssueViewsWindow({ api, epoch, project, source, onClose, onChang
     } catch { setNotice({ key: "The operation did not complete.", intent: "danger" }); }
     finally { setBusy(false); }
   }
-  const base = () => ({ expectedEpoch: epoch, projectId, service: source.service });
+  const base = () => ({ expectedEpoch: epoch, projectId, service: source.service, kind });
   const save = () => view && void run(() => api.saveView({ ...base(), source: view.source, name: view.name, filters: savedEntries(entries), select: false }), "Saved.", undefined, false);
   const create = () => {
     const name = newName.trim();
@@ -113,14 +115,14 @@ export function IssueViewsWindow({ api, epoch, project, source, onClose, onChang
   const renameView = () => view && rename.trim() && rename.trim() !== view.name && void run(() => api.renameView({ ...base(), source: view.source, name: view.name, newName: rename.trim() }),
     "Saved.", () => {
       // The values chosen in the tab for the view follow its name.
-      movePicks(pickKey(projectId, source.service, view), pickKey(projectId, source.service, { name: rename.trim(), source: view.source }));
+      movePicks(pickKey(projectId, source.service, view, kind), pickKey(projectId, source.service, { name: rename.trim(), source: view.source }, kind));
       setChosen(viewKey({ name: rename.trim(), source: view.source }));
     });
   const removeView = () => view && void run(() => api.removeView({ ...base(), source: view.source, name: view.name }), "Removed.", () => setChosen(null));
   const change = (id: string, part: Partial<Omit<FilterEntry, "id">>) => setEntries(value => changeEntry(value, id, part));
   const openFields = () => {
     if (fields !== null) return;
-    void api.fields({ expectedEpoch: epoch, projectId, service: source.service }, { timeoutMilliseconds: 60_000 }).then(
+    void api.fields({ expectedEpoch: epoch, projectId, service: source.service, kind }, { timeoutMilliseconds: 60_000 }).then(
       reply => setFields(reply.status === "ok" ? reply.fields : []), () => setFields([]));
   };
   const words = search.trim().toLowerCase();
@@ -147,7 +149,7 @@ export function IssueViewsWindow({ api, epoch, project, source, onClose, onChang
   // A window with changes not saved stays open when Escape is pressed or the press is beside it, and keeps the view it edits.
   const close = () => { if (!changed) onClose(); };
   const keep = changed ? t("Save or discard the changes first.") : undefined;
-  return <AppWindow storageKey="codealta.desktop.issue-views-window.v1" title={t("Views of {project}", { project: project.name })} titleId={titleId}
+  return <AppWindow storageKey="codealta.desktop.issue-views-window.v1" title={t(kind === "pull_request" ? "Pull request views of {project}" : "Views of {project}", { project: project.name })} titleId={titleId}
     className="issue-views-window" preferredSize={viewport => ({ width: Math.min(1100, viewport.width - 80), height: Math.min(760, viewport.height - 60) })}
     onClose={onClose} closeLabel={t("Close")} keepOnOutsidePress={changed} onCancel={event => { event.preventDefault(); close(); }}>
     <div className="issue-views-body" aria-busy={busy || views === null}>

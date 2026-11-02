@@ -1,6 +1,6 @@
 import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
 import { Button, Callout, HTMLSelect, InputGroup, Menu, MenuItem, PopoverNext, SegmentedControl, Tab, Tabs, Tag } from "@blueprintjs/core";
-import type { issues as issuesService, IssueFilterField, IssueFiltersResponse, IssueReadResponse, IssueRow, IssueSource, WorkspaceProject } from "#neoastra";
+import type { issues as issuesService, IssueFilterField, IssueFiltersResponse, IssueReadResponse, IssueReviewer, IssueRow, IssueSource, WorkspaceProject } from "#neoastra";
 import { ActivitySpinner } from "../ActivitySpinner";
 import { AppIcon } from "../AppIcon";
 import { BrandIcon } from "../BrandIcon";
@@ -8,6 +8,7 @@ import { serviceBrand } from "../brands";
 import { AppWindow } from "../AppWindow";
 import type { MessageKey } from "../localization";
 import { MarkdownContent } from "../MarkdownContent";
+import { createMarkdownImageCache, markdownImageRequest, type MarkdownImages } from "../markdownImages";
 import { sessionTime } from "../sessionTime";
 import { useShellLanguage } from "../shellLanguage";
 import { SessionSettingsChip, useSessionSettingsChoices } from "../sessionSettings/SessionSettingsChip";
@@ -18,7 +19,7 @@ import type { RunProvider } from "../workItems/runsWith";
 import { startRefusal } from "../workItems/startWorkItem";
 import type { WorkStart } from "../workItems/workItems";
 import { allPartsLabel, choosePick, filterValueText, forgetPick, issueFilterLabel, joinValues, listedFilters, pickKey, readPicks, splitValues, trackerText, writePicks, issueFilters, issueIcon, issueKey, issueReference, issueStateLabel, issueTone, kindLabel, labelColors, sameList, shownPart, signInCommand, sourceKinds,
-  type IssueFilter, type IssueKind, type IssueListKey } from "./issues";
+  voteIcon, voteLabel, type IssueFilter, type IssueKind, type IssueListKey } from "./issues";
 import { viewKey, viewSourceLabel, viewSources } from "./issueFilterSettings";
 import { IssueViewsWindow, type IssueViewsApi } from "./IssueViewsWindow";
 import { MultiChoice } from "./MultiChoice";
@@ -26,9 +27,9 @@ import { MultiChoice } from "./MultiChoice";
 const noProviders: readonly RunProvider[] = [];
 
 /** The part of the host the tab uses; a test gives its own. */
-export type IssuesApi = Pick<typeof issuesService, "sources" | "list" | "read" | "start" | "openLink"> & Partial<Pick<typeof issuesService, "filters" | "fields" | "views" | "saveView" | "renameView" | "removeView" | "selectView">>;
+export type IssuesApi = Pick<typeof issuesService, "sources" | "list" | "read" | "start" | "openLink"> & Partial<Pick<typeof issuesService, "filters" | "fields" | "views" | "saveView" | "renameView" | "removeView" | "selectView" | "image">>;
 
-type Listing = Readonly<{ key: IssueListKey; loading: boolean; items: readonly IssueRow[]; more: boolean; problem: string | null; needsSignIn: boolean }>;
+type Listing = Readonly<{ key: IssueListKey; loading: boolean; items: readonly IssueRow[]; more: boolean; problem: string | null; needsSignIn: boolean; readAt: string | null }>;
 type Sources = Readonly<{ projectId: string; loading: boolean; sources: readonly IssueSource[] }>;
 type Detail = Readonly<{ key: string; loading: boolean; value: IssueReadResponse | null }>;
 /**
@@ -89,6 +90,20 @@ export function IssuesPanel({ api, epoch, projects, projectId, visible, preferre
   // The same, as of now: two clicks before a render start the item once.
   const startingNow = useRef(new Set<string>());
   const [revision, setRevision] = useState(0);
+  // A list or an item read again on purpose: the host answers what it kept for five minutes otherwise.
+  const [listRevision, setListRevision] = useState(0);
+  const [itemRevision, setItemRevision] = useState(0);
+  const freshList = useRef(false);
+  const freshItem = useRef(false);
+  const reload = () => { freshList.current = true; freshItem.current = true; setRevision(value => value + 1); };
+  // The age of what is shown follows the minutes while the tab is shown.
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!visible) return;
+    setNow(Date.now());
+    const timer = setInterval(() => setNow(Date.now()), 30_000);
+    return () => clearInterval(timer);
+  }, [visible]);
   const windowTitle = useId();
   const project = projects.find(candidate => candidate.id === scope) ?? null;
   // The project of the window is followed until the user chooses another one in the tab.
@@ -126,12 +141,12 @@ export function IssuesPanel({ api, epoch, projects, projectId, visible, preferre
   // chosen for the filters the view lets the tab change are kept per view, and asked with. A view chosen, made, renamed
   // or removed starts them anew: nothing of the view before is shown, asked with or kept for the next one.
   const [viewChanges, setViewChanges] = useState(0);
-  const filtersKey = project && source ? `${project.id}\n${source.service}\n${viewChanges}` : null;
-  const filtering = !!api.filters && shownKind === "issue";
+  const filtersKey = project && source ? `${project.id}\n${source.service}\n${shownKind}\n${viewChanges}` : null;
+  const filtering = !!api.filters;
   // The view and the filters it lets the tab change are those of the last reply that gave them: a request with values the host
   // refuses or fails on does not make them unknown, else the values would be dropped, asked again and refused again.
   const lastInfo = filtering && trackerFilters?.key === filtersKey ? trackerFilters.kept : null;
-  const picksKey = project && source && lastInfo?.current ? pickKey(project.id, source.service, lastInfo.current) : null;
+  const picksKey = project && source && lastInfo?.current ? pickKey(project.id, source.service, lastInfo.current, shownKind) : null;
   const [picks, setPicks] = useState<Readonly<{ key: string; values: Readonly<Record<string, string>> }> | null>(null);
   const keptPicks = useMemo(() => picksKey === null ? {} : readPicks(picksKey), [picksKey]);
   const storedPicks = picks?.key === picksKey ? picks.values : keptPicks;
@@ -145,7 +160,7 @@ export function IssuesPanel({ api, epoch, projects, projectId, visible, preferre
     setTrackerFilters(current => current?.key === filtersKey ? { ...current, loading: true } : { key: filtersKey, asked: picksText, loading: true, value: null, kept: null });
     const done = (value: IssueFiltersResponse | null) => setTrackerFilters(current => ({ key: filtersKey, asked: picksText, loading: false, value,
       kept: gaveFilters(value) ? value : current?.key === filtersKey ? current.kept : null }));
-    void api.filters({ expectedEpoch: epoch, projectId: project.id, service: source.service, selections: asked, include: null, withoutView: null }, { signal: controller.signal, timeoutMilliseconds: 60_000 }).then(
+    void api.filters({ expectedEpoch: epoch, projectId: project.id, service: source.service, selections: asked, include: null, withoutView: null, kind: shownKind }, { signal: controller.signal, timeoutMilliseconds: 60_000 }).then(
       reply => {
         if (controller.signal.aborted) return;
         // Values the host refuses (a text too long) are forgotten, here and for the next time: the tab asks again with those of the view.
@@ -195,7 +210,7 @@ export function IssuesPanel({ api, epoch, projects, projectId, visible, preferre
     const view = views.find(candidate => viewKey(candidate) === key) ?? null;
     setChoosingView(true);
     try {
-      const reply = await api.selectView({ expectedEpoch: epoch, projectId: project.id, service: source.service, name: view?.name ?? null }, { timeoutMilliseconds: 20_000 });
+      const reply = await api.selectView({ expectedEpoch: epoch, projectId: project.id, service: source.service, name: view?.name ?? null, kind: shownKind }, { timeoutMilliseconds: 20_000 });
       if (reply.status !== "ok") throw new Error(reply.status);
       setSelected(null);
       setViewChanges(value => value + 1);
@@ -210,7 +225,7 @@ export function IssuesPanel({ api, epoch, projects, projectId, visible, preferre
   const valuesText = (shape: IssueFilterField) => splitValues(filterInfo?.selected[shape.id])
     .map(id => { const value = shape.values.find(candidate => candidate.id === id); return value ? trackerText(value.label, t) : id; }).join(", ");
   // The filters the view lists by, those the tab may change first, in its order.
-  const active = shownKind !== "issue" || filterInfo?.status !== "ok" ? []
+  const active = filterInfo?.status !== "ok" ? []
     : filterInfo.active.map(id => filterInfo.filters.find(candidate => candidate.id === id)).filter(candidate => !!candidate)
       .map(shape => ({ id: shape.id, shape, label: trackerText(shape.label, t), text: valuesText(shape), pick: filterInfo.pick.includes(shape.id) }));
   const allText = (shape: IssueFilterField) => shape.allLabel ? trackerText(shape.allLabel, t) : t("All");
@@ -229,7 +244,7 @@ export function IssuesPanel({ api, epoch, projects, projectId, visible, preferre
     : <PickChoice label={trackerText(shape.label, t)} title={shape.problem ?? pickedText(shape)} chosen={pickedValue(shape.id)} allText={allText(shape)}
         values={shape.values.map(value => ({ id: value.id, label: trackerText(value.label, t), detail: value.detail && trackerText(value.detail, t) }))}
         onChange={value => pickValue(shape.id, value)} />;
-  const viewControls = shownKind === "issue" && filterInfo?.status === "ok" && (views.length > 0 || canManage) && <div className="issues-views" role="group" aria-label={t("View")}>
+  const viewControls = filterInfo?.status === "ok" && (views.length > 0 || canManage) && <div className="issues-views" role="group" aria-label={t("View")}>
     {views.length > 0 && api.selectView && <HTMLSelect className="issues-view" aria-label={t("View")} disabled={choosingView}
       value={currentView ? viewKey(currentView) : ""} onChange={event => void selectView(event.target.value)}>
       {!currentView && <option value="">{t("No view")}</option>}
@@ -242,21 +257,23 @@ export function IssuesPanel({ api, epoch, projects, projectId, visible, preferre
   </div>;
 
   const wanted = useMemo<IssueListKey | null>(() => project && source && filtersReady
-    ? { projectId: project.id, service: source.service, kind: shownKind, filter: shownFilter, query, part: listedPart, filters: shownKind === "issue" ? listed.text : "" } : null,
+    ? { projectId: project.id, service: source.service, kind: shownKind, filter: shownFilter, query, part: listedPart, filters: listed.text } : null,
     [project?.id, source?.service, shownKind, shownFilter, query, listedPart, filtersReady, listed.text]);
 
   useEffect(() => {
     if (!available || !visible || !wanted) return;
     const controller = new AbortController();
-    setListing(current => sameList(current?.key ?? null, wanted) ? { ...current!, loading: true } : { key: wanted, loading: true, items: [], more: false, problem: null, needsSignIn: false });
+    setListing(current => sameList(current?.key ?? null, wanted) ? { ...current!, loading: true } : { key: wanted, loading: true, items: [], more: false, problem: null, needsSignIn: false, readAt: null });
+    const fresh = freshList.current;
+    freshList.current = false;
     void api.list({ expectedEpoch: epoch, projectId: wanted.projectId, service: wanted.service, kind: wanted.kind, filter: wanted.filter, query: wanted.query || null, limit: 50, part: wanted.part,
-      filters: wanted.kind === "issue" && listed.text ? listed.values : null },
+      filters: listed.text ? listed.values : null, fresh: fresh || null },
       { signal: controller.signal, timeoutMilliseconds: 60_000 }).then(
       reply => { if (!controller.signal.aborted) setListing({ key: wanted, loading: false, items: reply.status === "ok" ? reply.items : [], more: reply.more,
-        problem: reply.status === "ok" ? reply.problem : t("The list could not be read."), needsSignIn: reply.needsSignIn }); },
-      () => { if (!controller.signal.aborted) setListing({ key: wanted, loading: false, items: [], more: false, problem: t("The list could not be read."), needsSignIn: false }); });
+        problem: reply.status === "ok" ? reply.problem : t("The list could not be read."), needsSignIn: reply.needsSignIn, readAt: reply.status === "ok" ? reply.readAt : null }); },
+      () => { if (!controller.signal.aborted) setListing({ key: wanted, loading: false, items: [], more: false, problem: t("The list could not be read."), needsSignIn: false, readAt: null }); });
     return () => controller.abort();
-  }, [api, epoch, available, visible, wanted, revision]);
+  }, [api, epoch, available, visible, wanted, revision, listRevision]);
 
   const shown = sameList(listing?.key ?? null, wanted) ? listing : null;
   const items = shown?.items ?? [];
@@ -265,13 +282,29 @@ export function IssuesPanel({ api, epoch, projects, projectId, visible, preferre
   useEffect(() => {
     if (!available || !visible || !current || !wanted || !currentKey) return;
     const controller = new AbortController();
-    setDetail(value => value?.key === currentKey ? value : { key: currentKey, loading: true, value: null });
-    void api.read({ expectedEpoch: epoch, projectId: wanted.projectId, service: wanted.service, kind: current.kind, id: current.id }, { signal: controller.signal, timeoutMilliseconds: 60_000 }).then(
+    setDetail(value => value?.key === currentKey ? { ...value, loading: true } : { key: currentKey, loading: true, value: null });
+    const fresh = freshItem.current;
+    freshItem.current = false;
+    void api.read({ expectedEpoch: epoch, projectId: wanted.projectId, service: wanted.service, kind: current.kind, id: current.id, fresh: fresh || null },
+      { signal: controller.signal, timeoutMilliseconds: 60_000 }).then(
       reply => { if (!controller.signal.aborted) setDetail({ key: currentKey, loading: false, value: reply }); },
       () => { if (!controller.signal.aborted) setDetail({ key: currentKey, loading: false, value: null }); });
     return () => controller.abort();
-  }, [api, epoch, available, visible, currentKey, revision]);
+  }, [api, epoch, available, visible, currentKey, revision, itemRevision]);
 
+  // The images of the descriptions and the comments: the host reads them with the sign-in of the tracker and keeps
+  // them; the window keeps those it drew, so that an item shown again draws them at once. Reload starts anew: an image
+  // that could not be read (a sign-in that had expired) is asked for again, and the host gives at once those it keeps.
+  const trackerImages = useMemo<MarkdownImages | null>(() => {
+    if (!available || !project || !source || !api.image) return null;
+    const read = api.image, projectId = project.id, service = source.service;
+    const cache = createMarkdownImageCache(async (request, options) => {
+      const reply = await read({ expectedEpoch: request.expectedHostEpoch, projectId, service, address: request.address }, options);
+      return { status: reply.status, hostEpoch: request.expectedHostEpoch, mediaType: reply.mediaType, base64: reply.data, fullPath: request.address };
+    });
+    const request = (address: string) => markdownImageRequest(epoch, address, null);
+    return { peek: address => cache.peek(request(address)), load: address => cache.load(request(address)), reveal: () => { /* An image of the web has no file. */ }, platform: null };
+  }, [api, epoch, available, project?.id, source?.service, revision]);
   const openLink = (address: string | null | undefined) => {
     if (!address || !available) return;
     void api.openLink({ expectedEpoch: epoch, address }).then(reply => { if (reply.status !== "ok") onNotice(t("The page could not be opened.")); }, () => onNotice(t("The page could not be opened.")));
@@ -304,7 +337,7 @@ export function IssuesPanel({ api, epoch, projects, projectId, visible, preferre
   const noun = kindLabel(shownKind, source?.service, true);
   const command = source ? signInCommand(source.service) : null;
   const read = detail?.key === currentKey ? detail : null;
-  const body = current && <IssueBody item={read?.value?.item ?? current} read={read} service={source?.service ?? null} />;
+  const body = current && <IssueBody item={read?.value?.item ?? current} read={read} service={source?.service ?? null} images={trackerImages} />;
   const runsWith = runChoices.provider && <div className="work-runs-with" role="group" aria-label={t("Runs with")}>
     <span className="work-runs-with-label">{t("Runs with")}</span>
     <SessionSettingsChip id="issue" providers={providers} choices={runChoices} value={runSettings} onChange={setRunSettings} />
@@ -318,7 +351,7 @@ export function IssuesPanel({ api, epoch, projects, projectId, visible, preferre
       <div><h2>{t("Issues")}{(shown?.loading || sources?.loading) && <ActivitySpinner size={13} />}</h2><p>{t("The issues and the pull requests of your projects, from where they are kept.")}</p></div>
       {source?.url && <Button variant="minimal" icon={<AppIcon name="openExternal" size={16} />} aria-label={t("Open {service} in the browser", { service: source.name })}
         title={t("Open {service} in the browser", { service: source.name })} onClick={() => openLink(source.url)} />}
-      <Button variant="minimal" icon={<AppIcon name="refresh" size={16} />} aria-label={t("Reload")} title={t("Reload")} onClick={() => setRevision(value => value + 1)} />
+      <Button variant="minimal" icon={<AppIcon name="refresh" size={16} />} aria-label={t("Reload")} title={t("Reload")} onClick={reload} />
     </header>
     <div className="work-toolbar issues-toolbar">
       <HTMLSelect aria-label={t("Project")} value={project?.id ?? ""} onChange={event => { followed.current = false; setScope(event.target.value || null); setSelected(null); }}>
@@ -368,12 +401,17 @@ export function IssuesPanel({ api, epoch, projects, projectId, visible, preferre
           <p>{t("The folder of this project has no remote on GitHub, GitLab, Azure DevOps or Bitbucket, and no plugin gives it a tracker.")}</p>
         </section>
       : <>
-        <Tabs id="issue-filters" className="work-stages" selectedTabId={shownFilter} onChange={next => { setFilter(next as IssueFilter); setSelected(null); }}>
-          {filters.map(candidate => <Tab key={candidate} id={candidate} disabled={false} title={<>{t(issueFilterLabel(candidate))}
-            {candidate === shownFilter && shown && !shown.loading && <span className="work-count" data-zero={items.length === 0 || undefined}>{items.length}{shown.more ? "+" : ""}</span>}</>} />)}
-        </Tabs>
+        <div className="issues-stages">
+          <Tabs id="issue-filters" className="work-stages" selectedTabId={shownFilter} onChange={next => { setFilter(next as IssueFilter); setSelected(null); }}>
+            {filters.map(candidate => <Tab key={candidate} id={candidate} disabled={false} title={<>{t(issueFilterLabel(candidate))}
+              {candidate === shownFilter && shown && !shown.loading && <span className="work-count" data-zero={items.length === 0 || undefined}>{items.length}{shown.more ? "+" : ""}</span>}</>} />)}
+          </Tabs>
+          {/* How old the list is: the host keeps what it read five minutes; the refresh reads it again. */}
+          {shown?.readAt && <ReadAge readAt={shown.readAt} now={now} busy={shown.loading} label={t("Read the list again")}
+            onRefresh={() => { freshList.current = true; setListRevision(value => value + 1); }} />}
+        </div>
         {/* A file of views that does not parse leaves every item listed, and a tracker that did not give its filters leaves those the tab knew: the user is told why. */}
-        {shownKind === "issue" && filtersProblem && <Callout intent="warning" compact className="work-notice issues-notice issues-filters-problem">{filtersProblem}</Callout>}
+        {filtersProblem && <Callout intent="warning" compact className="work-notice issues-notice issues-filters-problem">{filtersProblem}</Callout>}
         {/* A list that came with a problem is incomplete, not missing: a Jira project the account does not see. */}
         {shown?.problem && <Callout intent={shown.needsSignIn || items.length > 0 ? "warning" : "danger"} compact role="alert" className="work-notice issues-notice">
           {shown.problem}{shown.needsSignIn && command && <> {t("Run {command} in a terminal, then reload.", { command })}</>}</Callout>}
@@ -389,8 +427,10 @@ export function IssuesPanel({ api, epoch, projects, projectId, visible, preferre
                 onClick={() => setSelected(key)} onDoubleClick={() => { setSelected(key); setExpanded(true); }}>
                 <span className="work-row-glyph issue-glyph"><AppIcon name={issueIcon(item)} size={16} /></span>
                 <span className="work-row-text"><strong>{item.title}</strong>
-                  <small className="issue-row-line"><span className="issue-row-facts"><span className="issue-ref">{issueReference(item)}</span>{item.type && <> · {item.type}</>}{item.author && <> · {item.author}</>}
+                  <small className="issue-row-line"><span className="issue-row-facts"><span className="issue-ref">{issueReference(item)}</span>{item.place && <> · <span className="issue-place">{item.place}</span></>}
+                    {item.type && <> · {item.type}</>}{item.author && <> · {item.author}</>}
                     {updated.label && <> · <time dateTime={updated.dateTime} title={updated.title}>{updated.label}</time></>}</span>
+                    {item.reviewers.filter(reviewer => reviewer.mine).slice(0, 2).map(reviewer => <ReviewerChip key={`r:${reviewer.name}`} reviewer={reviewer} />)}
                     {item.labels.slice(0, 3).map(label => <IssueLabelChip key={label.name} name={label.name} color={label.color} />)}
                     {item.labels.length > 3 && <span className="issue-more">+{item.labels.length - 3}</span>}</small></span>
                 <span className="work-row-meta">
@@ -405,7 +445,11 @@ export function IssuesPanel({ api, epoch, projects, projectId, visible, preferre
           <aside className="work-detail">
             {current ? <section className="work-detail-card issue-detail" aria-label={current.title}>
                 <IssueHeading item={read?.value?.item ?? current} service={source.service} busy={!!read?.loading}
-                  action={<Button variant="minimal" size="small" icon={<AppIcon name="expand" size={14} />} aria-label={t("Open in a window")} title={t("Open in a window")} onClick={() => setExpanded(true)} />} />
+                  action={<>
+                    {read?.value?.readAt && <ReadAge readAt={read.value.readAt} now={now} busy={read.loading} label={t("Read it again")}
+                      onRefresh={() => { freshItem.current = true; setItemRevision(value => value + 1); }} />}
+                    <Button variant="minimal" size="small" icon={<AppIcon name="expand" size={14} />} aria-label={t("Open in a window")} title={t("Open in a window")} onClick={() => setExpanded(true)} />
+                  </>} />
                 <div className="work-detail-actions">{actions}</div>
                 <div className="work-detail-text">{body}</div>
               </section>
@@ -414,7 +458,7 @@ export function IssuesPanel({ api, epoch, projects, projectId, visible, preferre
         </div>
       </>}
     {/* The window stays while the tab reads its filters again after a change made in it, even when that read fails. */}
-    {viewsOpen && viewsApi && available && project && source && <IssueViewsWindow api={viewsApi} epoch={epoch} project={project} source={source} onClose={() => setViewsOpen(false)}
+    {viewsOpen && viewsApi && available && project && source && <IssueViewsWindow api={viewsApi} epoch={epoch} project={project} source={source} kind={shownKind} onClose={() => setViewsOpen(false)}
       onChanged={views => views ? setViewChanges(value => value + 1) : setRevision(value => value + 1)} onOpenedFile={() => setViewsOpen(false)} />}
     {expanded && current && source && <AppWindow storageKey="codealta.desktop.issue-window.v1" title={`${issueReference(current)} ${current.title}`} titleId={windowTitle} className="work-item-window issue-window"
       preferredSize={viewport => ({ width: Math.min(980, viewport.width - 80), height: Math.min(820, viewport.height - 60) })}
@@ -426,6 +470,26 @@ export function IssuesPanel({ api, epoch, projects, projectId, visible, preferre
       </div>
     </AppWindow>}
   </div>;
+}
+
+/** A reviewer of a pull request: a person or a group, whether the review is required, the vote, and whether it is the user's. */
+function ReviewerChip({ reviewer }: { reviewer: IssueReviewer }) {
+  const { t } = useShellLanguage();
+  const title = [reviewer.name, reviewer.required ? t("Required review") : null, t(voteLabel(reviewer.vote)), reviewer.mine ? t("Your review, or one of a group of yours") : null]
+    .filter(part => part).join(" · ");
+  return <Tag minimal round role="listitem" className="issue-reviewer" data-vote={reviewer.vote} data-required={reviewer.required || undefined} data-mine={reviewer.mine || undefined}
+    icon={<AppIcon name={reviewer.group ? "subAgents" : "user"} size={11} />} endIcon={<AppIcon name={voteIcon(reviewer.vote)} size={11} />} title={title} aria-label={title}>
+    {reviewer.name}{reviewer.required && <span className="issue-reviewer-required" aria-hidden="true">*</span>}</Tag>;
+}
+
+/** How old what is shown is, as the host read it, and a button that reads it again. */
+function ReadAge({ readAt, now, busy, label, onRefresh }: { readAt: string; now: number; busy: boolean; label: string; onRefresh: () => void }) {
+  const { t, locale } = useShellLanguage();
+  const when = sessionTime(readAt, locale, Math.max(now, Date.parse(readAt)));
+  return <span className="issues-read-at">
+    <time dateTime={when.dateTime} title={when.title}>{t("Read {when}", { when: when.label })}</time>
+    <Button variant="minimal" size="small" icon={<AppIcon name="refresh" size={13} />} aria-label={label} title={label} disabled={busy} onClick={onRefresh} />
+  </span>;
 }
 
 function IssueLabelChip({ name, color }: { name: string; color: string | null }) {
@@ -450,8 +514,11 @@ function IssueHeading({ item, service, busy, action }: { item: IssueRow; service
       {item.comments !== null && item.comments > 0 && <span><AppIcon name="chat" size={12} />{item.comments}</span>}
     </p>
     {item.sourceBranch && <p className="issue-branches"><AppIcon name="branch" size={12} /><code>{item.sourceBranch}</code><AppIcon name="chevronRight" size={12} /><code>{item.targetBranch ?? "?"}</code></p>}
-    {(item.assignees.length > 0 || item.labels.length > 0) && <p className="issue-tags">
-      {item.assignees.map(name => <Tag key={`a:${name}`} minimal round icon={<AppIcon name="user" size={11} />} title={t(item.kind === "pull_request" ? "Reviewer or assignee" : "Assignee")}>{name}</Tag>)}
+    {(item.assignees.length > 0 || item.reviewers.length > 0 || item.labels.length > 0) && <p className="issue-tags">
+      {/* The reviewers of a pull request say more than its assignees: groups, required reviews and votes. */}
+      {item.reviewers.length > 0
+        ? <span className="issue-reviewers" role="list" aria-label={t("Reviewers")}>{item.reviewers.map(reviewer => <ReviewerChip key={`r:${reviewer.name}`} reviewer={reviewer} />)}</span>
+        : item.assignees.map(name => <Tag key={`a:${name}`} minimal round icon={<AppIcon name="user" size={11} />} title={t(item.kind === "pull_request" ? "Reviewer or assignee" : "Assignee")}>{name}</Tag>)}
       {item.labels.map(label => <IssueLabelChip key={`l:${label.name}`} name={label.name} color={label.color} />)}</p>}
   </header>;
 }
@@ -465,8 +532,10 @@ function IssueActions({ item, service, preferredStart, starting, runsWith, onSta
   const { t } = useShellLanguage();
   const [copied, setCopied] = useState(false);
   useEffect(() => { if (!copied) return; const timer = setTimeout(() => setCopied(false), 1500); return () => clearTimeout(timer); }, [copied]);
-  const startable = item.state === "open" || item.state === "draft";
+  // A session of the project works in its repository: an item of another one is opened where it is.
+  const startable = (item.state === "open" || item.state === "draft") && !item.place;
   return <>
+    {item.place && <p className="issue-elsewhere">{t("This pull request is of {place}, not of the repository of this project: open it on {service}.", { place: item.place, service })}</p>}
     {startable && runsWith}
     {startable && <WorkStartButtons preferred={preferredStart === "session" ? "session" : "worktree"} here={false} disabled={starting} onStart={onStart} />}
     <div className="work-detail-buttons">
@@ -478,7 +547,7 @@ function IssueActions({ item, service, preferredStart, starting, runsWith, onSta
 }
 
 /** The description of an item and its comments, as their authors wrote them. */
-function IssueBody({ item, read, service }: { item: IssueRow; read: Detail | null; service: string | null }) {
+function IssueBody({ item, read, service, images }: { item: IssueRow; read: Detail | null; service: string | null; images: MarkdownImages | null }) {
   const { t, locale } = useShellLanguage();
   if (!read || read.loading) return <p className="work-text-state"><ActivitySpinner size={16} /></p>;
   const value = read.value;
@@ -486,7 +555,7 @@ function IssueBody({ item, read, service }: { item: IssueRow; read: Detail | nul
   const comments = value.comments ?? [];
   const missing: MessageKey = item.kind === "pull_request" ? "No description was written." : "No description was written.";
   return <div className="work-text issue-text" data-service={service ?? undefined}>
-    {value.body?.trim() ? <MarkdownContent source={value.body} document /> : <p className="issue-nothing">{t(missing)}</p>}
+    {value.body?.trim() ? <MarkdownContent source={value.body} document webImages={images} /> : <p className="issue-nothing">{t(missing)}</p>}
     {value.truncated && <p className="work-text-more">{t("The description is longer than what is shown here. Open it on the web to read the rest.")}</p>}
     {comments.length > 0 && <section className="issue-comments-list" aria-label={t("Comments")}>
       <h4>{t("Comments")}<span className="work-count">{comments.length}{value.moreComments ? "+" : ""}</span></h4>
@@ -494,7 +563,7 @@ function IssueBody({ item, read, service }: { item: IssueRow; read: Detail | nul
         const when = sessionTime(comment.createdAt, locale);
         return <article key={index} className="issue-comment">
           <header><AppIcon name="user" size={12} /><strong>{comment.author ?? t("Someone")}</strong>{when.label && <time dateTime={when.dateTime} title={when.title}>{when.label}</time>}</header>
-          <MarkdownContent source={comment.body} document />
+          <MarkdownContent source={comment.body} document webImages={images} />
         </article>;
       })}
       {value.moreComments && <p className="work-text-more">{t("There are more comments. Open it on the web to read them all.")}</p>}

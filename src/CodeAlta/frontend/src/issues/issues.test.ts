@@ -4,7 +4,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import type { IssueSource, WorkspaceProject } from "#neoastra";
 import { ShellLanguageContext } from "../shellLanguage";
-import { allPartsLabel, issueFilters, issueIcon, issueReference, issueStateLabel, issueTone, kindLabel, labelColors, sameList, shownPart, signInCommand, sourceKinds } from "./issues";
+import { allPartsLabel, issueFilters, issueIcon, issueReference, issueStateLabel, issueTone, kindLabel, labelColors, sameList, shownPart, signInCommand, sourceKinds, voteIcon, voteLabel } from "./issues";
 import { IssuesPanel, type IssuesApi } from "./IssuesPanel";
 
 test("a pull request can be merged, an issue cannot: each kind has its own lists", () => {
@@ -96,4 +96,9 @@ test("a window without projects shows an empty state instead of waiting for sour
       assert.ok(render(projectId, visible, null).includes("Issues are unavailable in this window."));
     }
   }
+});
+
+test("a vote is said and drawn as the reviewer gave it", () => {
+  assert.deepEqual(["none", "approved", "suggestions", "waiting", "rejected", "other"].map(vote => [voteLabel(vote), voteIcon(vote)]),
+    [["No vote yet", "gap"], ["Approved", "check"], ["Approved with suggestions", "check"], ["Waiting for author", "later"], ["Rejected", "close"], ["No vote yet", "gap"]]);
 });

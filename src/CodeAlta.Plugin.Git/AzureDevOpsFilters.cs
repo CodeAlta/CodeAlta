@@ -53,6 +53,7 @@ internal sealed partial class AzureDevOpsApi
 
     public override async Task<IReadOnlyList<TrackedFilterDescriptor>> FiltersAsync(GitIssueQuery query, CancellationToken cancellationToken)
     {
+        if (query.Kind == TrackedItemKind.PullRequest) return await PullRequestFiltersAsync(query, cancellationToken).ConfigureAwait(false);
         var filters = new List<TrackedFilterDescriptor>(4);
         var teams = await TeamsAsync(query, cancellationToken).ConfigureAwait(false);
         filters.Add(new(TeamFilter, "Team", teams is null ? [] : [.. teams.Select(static team => new TrackedFilterValue(team.Id, team.Name) { Detail = team.Mine ? "Your team" : null })])

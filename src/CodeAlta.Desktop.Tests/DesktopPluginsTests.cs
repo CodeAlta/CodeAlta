@@ -270,7 +270,7 @@ public sealed class DesktopPluginsTests
             var twice = await Run("issue", "list", "--filter", "field:System.State=new", "--filter", "field:System.State=New");
             Assert.AreEqual(0, twice.Code, "The same value twice, in any case, is one value: " + twice.Text);
             Assert.AreEqual(AltaExitCodes.Usage, (await Run("issue", "list", "--filter", "nothing")).Code);
-            Assert.AreEqual(AltaExitCodes.Usage, (await Run("issue", "list", "--kind", "pr", "--filter", "team=t1")).Code, "Pull requests have no filters.");
+            Assert.AreEqual(AltaExitCodes.Usage, (await Run("issue", "list", "--kind", "pr", "--filter", "team=t1")).Code, "Pull requests have filters of their own.");
 
             // The views of the project: the team's is the current one, since the user chose none.
             var views = await Run("issue", "views");
@@ -364,6 +364,26 @@ public sealed class DesktopPluginsTests
             Assert.AreEqual(0, all.Code, all.Text);
             Assert.IsFalse(File.ReadAllText(teamViews).Contains("[github.views.Board.", StringComparison.Ordinal));
 
+            // The pull requests have filters and views of their own, beside those of the issues.
+            var pullFilters = await Run("issue", "filters", "--kind", "pr");
+            StringAssert.Contains(pullFilters.Text, "\"id\":\"reviewer\"");
+            Assert.IsFalse(pullFilters.Text.Contains("\"id\":\"team\"", StringComparison.Ordinal), pullFilters.Text);
+            var pullView = await Run("issue", "filter", "set", "reviewer", "--value", "Me or my groups", "--kind", "pr", "--view", "Waiting");
+            Assert.AreEqual(0, pullView.Code, pullView.Text);
+            StringAssert.Contains(pullView.Text, "\"kind\":\"pull_request\"");
+            StringAssert.Contains(File.ReadAllText(localViews), "[github.pull_requests.views.Waiting.reviewer]");
+            var waiting = await Run("issue", "list", "--kind", "pr", "--configured");
+            StringAssert.Contains(waiting.Text, "github pr Open  [reviewer=@me_groups]");
+            StringAssert.Contains(waiting.Text, "\"place\":\"proj/other\",\"match\":\"Required · through Core\",\"reviewers\":[{\"name\":\"Core\",\"vote\":\"none\",\"group\":true,\"required\":true,\"mine\":true}]");
+            StringAssert.Contains((await Run("issue", "list", "--kind", "pr", "--filter", "scope=@project")).Text, "github pr Open  [scope=@project]");
+            var pullViews = await Run("issue", "views", "--kind", "pr");
+            StringAssert.Contains(pullViews.Text, "\"name\":\"Waiting\"");
+            Assert.IsFalse(pullViews.Text.Contains("\"name\":\"Mine\"", StringComparison.Ordinal), "The views of the issues are not those of the pull requests.");
+            Assert.AreEqual(0, (await Run("issue", "view", "rename", "Waiting", "Reviews", "--kind", "pr")).Code);
+            Assert.AreEqual(AltaExitCodes.NotFound, (await Run("issue", "view", "select", "Reviews")).Code, "A view of the pull requests is not one of the issues.");
+            Assert.AreEqual(0, (await Run("issue", "view", "remove", "Reviews", "--kind", "pr")).Code);
+            Assert.AreEqual(AltaExitCodes.Usage, (await Run("issue", "views", "--kind", "story")).Code);
+
             // A file of views that does not parse is said, not taken for a project without views.
             File.WriteAllText(localViews, "[github.views.Mine\n");
             var broken = await Run("issue", "views");
@@ -407,6 +427,14 @@ public sealed class DesktopPluginsTests
             public ValueTask<IReadOnlyList<TrackedFilterDescriptor>> GetFiltersAsync(TrackedFilterRequest request, CancellationToken cancellationToken)
             {
                 onFilters?.Invoke();
+                if (request.Kind == TrackedItemKind.PullRequest)
+                {
+                    return ValueTask.FromResult<IReadOnlyList<TrackedFilterDescriptor>>(service != "github" ? [] : [
+                        new("scope", "Scope", [new("@project", "This project")]) { AllLabel = "This repository" },
+                        new("reviewer", "Reviewer", [new("@me", "Me"), new("@me_groups", "Me or my groups")]),
+                    ]);
+                }
+
                 return ValueTask.FromResult<IReadOnlyList<TrackedFilterDescriptor>>(service != "github" ? [] : [
                     new("team", "Team", [new("t1", "Platform"), new("t2", "Mobile")]),
                     // The sprints are those of the team asked, Platform's without one.
@@ -422,7 +450,12 @@ public sealed class DesktopPluginsTests
 
             private string Id => service == "jira" ? "ALTA-12" : "12";
 
-            private TrackedItem Item(TrackedItemKind kind, string title) => new(kind, Id, title, "https://example.com/" + Id, TrackedItemState.Open);
+            private TrackedItem Item(TrackedItemKind kind, string title) => kind == TrackedItemKind.Issue
+                ? new(kind, Id, title, "https://example.com/" + Id, TrackedItemState.Open)
+                : new(kind, Id, title, "https://example.com/" + Id, TrackedItemState.Open)
+                {
+                    Place = "proj/other", Match = "Required · through Core", Reviewers = [new("Core", TrackedVote.None) { IsGroup = true, Required = true, Mine = true }],
+                };
         }
     }
 

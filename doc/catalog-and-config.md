@@ -52,7 +52,7 @@ tool output, paths and credentials: they are private user data.
 | Under `<project>/.alta/` | Content |
 | --- | --- |
 | `config.toml` | Project overrides, CLI profiles of its sessions (`[identity.cli.*]`), project automations, `[search] enabled`. |
-| `issues.toml`, `local/issues.toml` | Issue views and the Jira link of the team; the user's own on top (`local/` is git-ignored). |
+| `issues.toml`, `local/issues.toml` | Views of the issues and of the pull requests (`[<service>.pull_requests]`), and the Jira link of the team; the user's own on top (`local/` is git-ignored). |
 | `mcp.json`, `plugins/`, `plugin-data/`, `skills/`, `prompts/` | Project MCP servers, plugins, plugin data, skills, prompts. |
 | `plans/`, `tasks/` | Plans and follow-up tasks, Markdown with a front matter. |
 | `worktrees/` | Worktrees kept inside the repository when the user chose so (git-ignored). |
