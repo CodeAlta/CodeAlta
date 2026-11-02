@@ -73,6 +73,9 @@ test("a value chosen in the tab is kept for its view, and one chosen for a team 
   writePicks(key, { sprint: "s1" }, storage);
   writePicks(pickKey("p1", "azure_devops", { name: "Board", source: "team" }), { sprint: "s9" }, storage);
   assert.deepEqual(readPicks(key, storage), { sprint: "s1" });
+  assert.equal(pickKey("p1", "azure_devops", { name: "Mine", source: "personal" }, "issue"), key, "the values chosen for the views of the issues stay where they were");
+  writePicks(pickKey("p1", "azure_devops", { name: "Mine", source: "personal" }, "pull_request"), { scope: "@project" }, storage);
+  assert.deepEqual(readPicks(key, storage), { sprint: "s1" }, "a view of the pull requests of the same name keeps its own values");
   const renamed = pickKey("p1", "azure_devops", { name: "Sprint", source: "personal" });
   movePicks(key, renamed, storage);
   assert.deepEqual([readPicks(key, storage), readPicks(renamed, storage)], [{}, { sprint: "s1" }], "a renamed view keeps the values chosen for it");

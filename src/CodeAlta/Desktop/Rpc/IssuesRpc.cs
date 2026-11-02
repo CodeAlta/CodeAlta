@@ -96,8 +96,8 @@ internal sealed partial class IssuesService
         timeout.CancelAfter(ListTimeout);
         try
         {
-            // The values of the filters are ones the tracker gave: nothing else is passed on to it. Pull requests have none.
-            var filters = kind == TrackedItemKind.Issue ? await CheckedFiltersAsync(tracker, request.Filters, request.Service, project, timeout.Token).ConfigureAwait(false) : TrackedFilters.None;
+            // The values of the filters are ones the tracker gave: nothing else is passed on to it.
+            var filters = await CheckedFiltersAsync(tracker, kind, request.Filters, request.Service, project, timeout.Token).ConfigureAwait(false);
             if (filters is null) return new("invalid_request", [], false, null, false);
             var page = await tracker.ListAsync(new(kind, filter, string.IsNullOrWhiteSpace(request.Query) ? null : request.Query.Trim(), limit) { Part = request.Part, Filters = filters }, timeout.Token).ConfigureAwait(false);
             var problem = page.Problem is null ? null : GitIssuesService.Clean(page.Problem, MaximumTitle);
@@ -185,6 +185,8 @@ internal sealed partial class IssuesService
             detail = null;
         }
         if (detail is null || Row(detail.Item) is not { } row) return new("not_found");
+        // A session of the project works in its repository: an item of another one is read and opened, not worked on here.
+        if (row.Place is not null) return new("refused", null, $"{(kind == TrackedItemKind.PullRequest ? "The pull request" : "The item")} is of {row.Place}, not of the repository of this project.", "other_repository");
 
         // What the user chose in the form of the Agent chip, else what the session that shows the item runs with, else the defaults.
         var asked = request.ProviderId is null ? null : new WorkItemSelection(request.ProviderId, request.ModelId, request.ReasoningEffort);
@@ -268,8 +270,26 @@ internal sealed partial class IssuesService
             Nullable(item.StateText), Nullable(item.Type), Nullable(item.Priority), Nullable(item.Author),
             [.. item.Assignees.Take(MaximumLabels).Select(static name => GitIssuesService.Clean(name, MaximumName)).Where(static name => name.Length > 0)],
             [.. item.Labels.Take(MaximumLabels).Select(static label => new IssueLabel(GitIssuesService.Clean(label.Name, MaximumName), Color(label.Color))).Where(static label => label.Name.Length > 0)],
-            item.CreatedAt, item.UpdatedAt, item.CommentCount is >= 0 ? item.CommentCount : null, Nullable(item.SourceBranch), Nullable(item.TargetBranch));
+            item.CreatedAt, item.UpdatedAt, item.CommentCount is >= 0 ? item.CommentCount : null, Nullable(item.SourceBranch), Nullable(item.TargetBranch))
+        {
+            Place = Nullable(item.Place),
+            Match = Nullable(item.Match),
+            Reviewers = [.. item.Reviewers.Take(MaximumLabels).Select(static reviewer => new IssueReviewer(GitIssuesService.Clean(reviewer.Name, MaximumName), Vote(reviewer.Vote))
+                {
+                    Group = reviewer.IsGroup ? true : null, Required = reviewer.Required ? true : null, Mine = reviewer.Mine ? true : null,
+                }).Where(static reviewer => reviewer.Name.Length > 0)],
+        };
     }
+
+    private static string Vote(TrackedVote vote)
+        => vote switch
+        {
+            TrackedVote.Approved => "approved",
+            TrackedVote.ApprovedWithSuggestions => "suggestions",
+            TrackedVote.WaitingForAuthor => "waiting",
+            TrackedVote.Rejected => "rejected",
+            _ => "none",
+        };
 
     private static string? Nullable(string? value) => GitIssuesService.Clean(value, MaximumName) is { Length: > 0 } text ? text : null;
 
@@ -384,7 +404,7 @@ internal sealed record IssueSource(string Service, string Name, string Location,
 /// <param name="Query">Words the items must match; null or empty for the most recently updated ones.</param>
 /// <param name="Limit">The most items; 50 when null, 100 at most.</param>
 /// <param name="Part">One of the <see cref="IssueSource.Parts"/> of the tracker, to list it alone; null for all of them.</param>
-/// <param name="Filters">The values of the filters of the tracker (<see cref="IssuesService.FiltersAsync"/>), by filter id; issues only.</param>
+/// <param name="Filters">The values of the filters of the tracker for the kind listed (<see cref="IssuesService.FiltersAsync"/>), by filter id.</param>
 internal sealed record IssueListRequest(string ExpectedEpoch, string ProjectId, string Service, string Kind, string Filter, string? Query, int? Limit, string? Part = null,
     Dictionary<string, string>? Filters = null);
 
@@ -412,7 +432,32 @@ internal sealed record IssueListResponse(string Status, IReadOnlyList<IssueRow> 
 /// <param name="SourceBranch">The branch a pull request brings.</param>
 /// <param name="TargetBranch">The branch a pull request goes to.</param>
 internal sealed record IssueRow(string Kind, string Id, string Title, string Url, string State, string? StateText, string? Type, string? Priority, string? Author,
-    IReadOnlyList<string> Assignees, IReadOnlyList<IssueLabel> Labels, DateTimeOffset? CreatedAt, DateTimeOffset? UpdatedAt, int? Comments, string? SourceBranch, string? TargetBranch);
+    IReadOnlyList<string> Assignees, IReadOnlyList<IssueLabel> Labels, DateTimeOffset? CreatedAt, DateTimeOffset? UpdatedAt, int? Comments, string? SourceBranch, string? TargetBranch)
+{
+    /// <summary>Gets where the item is kept when not in the repository of the project (<c>project/repository</c>): no session is started on it here.</summary>
+    public string? Place { get; init; }
+
+    /// <summary>Gets why the filters of the listing kept it, such as <c>Required · through Platform · No vote yet</c>.</summary>
+    public string? Match { get; init; }
+
+    /// <summary>Gets who reviews a pull request.</summary>
+    public IReadOnlyList<IssueReviewer> Reviewers { get; init; } = [];
+}
+
+/// <summary>A reviewer of a pull request.</summary>
+/// <param name="Name">The person or the group.</param>
+/// <param name="Vote"><c>none</c>, <c>approved</c>, <c>suggestions</c>, <c>waiting</c> or <c>rejected</c>.</param>
+internal sealed record IssueReviewer(string Name, string Vote)
+{
+    /// <summary>Gets whether it is a group; null is no.</summary>
+    public bool? Group { get; init; }
+
+    /// <summary>Gets whether the review is required; null is no.</summary>
+    public bool? Required { get; init; }
+
+    /// <summary>Gets whether it is the user, or a group of the user; null is no.</summary>
+    public bool? Mine { get; init; }
+}
 
 /// <summary>A label of an item, with its color as six hexadecimal digits when the tracker gives one.</summary>
 internal sealed record IssueLabel(string Name, string? Color);

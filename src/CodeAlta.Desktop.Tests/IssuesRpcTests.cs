@@ -309,7 +309,7 @@ public sealed class IssuesRpcTests
     public async Task AListing_PassesOnTheValuesOfFilters_OnlyWhenTheTrackerOffersThem()
     {
         await using var fixture = await Fixture.CreateAsync();
-        fixture.Tracker.Filters = TeamAndSprint;
+        fixture.Tracker.Filters = static request => request.Kind == TrackedItemKind.Issue ? TeamAndSprint(request) : [];
 
         var reply = await fixture.Rpc.ListAsync(new(Epoch, fixture.Project.Id, "github", "issue", "open", null, 10, Filters: new() { ["team"] = "t2", ["sprint"] = "s-t2", ["assigned_to"] = "" }), default);
 
@@ -322,8 +322,10 @@ public sealed class IssuesRpcTests
             "The sprint of another team is not offered with this one.");
         Assert.IsNull(fixture.Tracker.Asked);
 
-        await fixture.Rpc.ListAsync(new(Epoch, fixture.Project.Id, "github", "pull_request", "open", null, 10, Filters: new() { ["team"] = "t1" }), default);
-        Assert.AreEqual(0, fixture.Tracker.Asked!.Filters.Count, "Pull requests have no filters.");
+        Assert.AreEqual("invalid_request", (await fixture.Rpc.ListAsync(new(Epoch, fixture.Project.Id, "github", "pull_request", "open", null, 10, Filters: new() { ["team"] = "t1" }), default)).Status,
+            "A filter of the issues is not one of the pull requests.");
+        await fixture.Rpc.ListAsync(new(Epoch, fixture.Project.Id, "github", "pull_request", "open", null, 10), default);
+        Assert.AreEqual(0, fixture.Tracker.Asked!.Filters.Count, "Pull requests without a view are listed without filters.");
     }
 
     [TestMethod]
@@ -441,6 +443,73 @@ public sealed class IssuesRpcTests
         Assert.AreEqual("config_invalid", (await fixture.Rpc.SaveViewAsync(new(Epoch, fixture.Project.Id, "github", "team", "Board", []), default)).Status,
             "A file that does not parse is left as it is.");
         Assert.AreEqual("[github.views\n", File.ReadAllText(Path.Combine(root, ".alta", "issues.toml")));
+    }
+
+    [TestMethod]
+    public async Task ThePullRequests_HaveViewsOfTheirOwn_AndTheirListingPassesOnTheirFilters()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        fixture.Tracker.Filters = request => request.Kind == TrackedItemKind.PullRequest
+            ? [new("scope", "Scope", [new("@project", "This project")]) { AllLabel = "This repository" }, new("reviewer", "Reviewer", [new("@me", "Me"), new("@me_groups", "Me or my groups")])]
+            : TeamAndSprint(request);
+        fixture.Tracker.Fields = [new("field:Custom.Customer", "Customer", "text")];
+        WriteTeamViews(fixture, """
+            [github.views.Board.sprint]
+            value = "@current"
+            """);
+
+        Assert.AreEqual("ok", (await fixture.Rpc.SaveViewAsync(new(Epoch, fixture.Project.Id, "github", "personal", "Waiting",
+            [new("scope", "on", "@project", null, true), new("reviewer", "on", "Me or my groups", null)], Select: true, Kind: "pull_request"), default)).Status);
+        var local = File.ReadAllText(Path.Combine(fixture.Project.ProjectPath, ".alta", "local", "issues.toml"));
+        StringAssert.Contains(local, "[github.pull_requests]");
+        StringAssert.Contains(local, "[github.pull_requests.views.Waiting.reviewer]");
+
+        var pulls = await fixture.Rpc.FiltersAsync(new(Epoch, fixture.Project.Id, "github", Kind: "pull_request"), default);
+        Assert.AreEqual((new IssueViewName("Waiting", "personal"), "@me_groups"), (pulls.Current, pulls.Selected["reviewer"]));
+        CollectionAssert.AreEqual(new[] { "scope", "reviewer" }, pulls.Active.ToArray(), "The filter the tab may change first.");
+        CollectionAssert.AreEqual(new[] { ("Waiting", "personal") }, pulls.Views.Select(static view => (view.Name, view.Source)).ToArray(), "The views of the pull requests only.");
+        Assert.AreEqual(TrackedItemKind.PullRequest, fixture.Tracker.FilterAsks[^1].Kind, "The tracker is asked for the filters of the pull requests.");
+        var issues = await fixture.Rpc.FiltersAsync(new(Epoch, fixture.Project.Id, "github"), default);
+        Assert.AreEqual(new IssueViewName("Board", "team"), issues.Current, "The issues keep their own view.");
+        Assert.AreEqual(TrackedItemKind.Issue, fixture.Tracker.FilterAsks[^1].Kind);
+
+        await fixture.Rpc.ListAsync(new(Epoch, fixture.Project.Id, "github", "pull_request", "open", null, 50, Filters: new() { ["scope"] = "" }), default);
+        Assert.AreEqual(("", "@me_groups"), (fixture.Tracker.Asked!.Filters.GetValueOrDefault("scope", ""), fixture.Tracker.Asked.Filters["reviewer"]),
+            "A listing of pull requests passes on the filters of their view, and the scope the tab chose for every repository.");
+        Assert.AreEqual("invalid_request", (await fixture.Rpc.ListAsync(new(Epoch, fixture.Project.Id, "github", "pull_request", "open", null, 50, Filters: new() { ["scope"] = "@galaxy" }), default)).Status);
+
+        Assert.AreEqual(0, (await fixture.Rpc.FieldsAsync(new(Epoch, fixture.Project.Id, "github", "pull_request"), default)).Fields.Count, "The pull requests have no fields to add.");
+        Assert.AreEqual(1, (await fixture.Rpc.FieldsAsync(new(Epoch, fixture.Project.Id, "github"), default)).Fields.Count);
+        Assert.AreEqual("ok", (await fixture.Rpc.SelectViewAsync(new(Epoch, fixture.Project.Id, "github", null, "pull_request"), default)).Status);
+        Assert.AreEqual("not_found", (await fixture.Rpc.SelectViewAsync(new(Epoch, fixture.Project.Id, "github", "Board", "pull_request"), default)).Status, "A view of the issues is not one of the pull requests.");
+        Assert.AreEqual("ok", (await fixture.Rpc.RenameViewAsync(new(Epoch, fixture.Project.Id, "github", "personal", "Waiting", "Mine", "pull_request"), default)).Status);
+        CollectionAssert.AreEqual(new[] { "Mine" }, (await fixture.Rpc.ViewsAsync(new(Epoch, fixture.Project.Id, "github", "pull_request"), default)).Views.Select(static view => view.Name).ToArray());
+        Assert.AreEqual("ok", (await fixture.Rpc.RemoveViewAsync(new(Epoch, fixture.Project.Id, "github", "personal", "Mine", "pull_request"), default)).Status);
+        Assert.AreEqual("invalid_request", (await fixture.Rpc.ViewsAsync(new(Epoch, fixture.Project.Id, "github", "story"), default)).Status);
+        Assert.AreEqual("invalid_request", (await fixture.Rpc.FiltersAsync(new(Epoch, fixture.Project.Id, "github", Kind: "story"), default)).Status);
+    }
+
+    [TestMethod]
+    public async Task APullRequestOfAnotherRepository_IsListedWithItsReviewers_ButNotWorkedOnHere()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var pull = new TrackedItem(TrackedItemKind.PullRequest, "9", "New fields", "https://dev.azure.com/org/proj/_git/other/pullrequest/9", TrackedItemState.Open)
+        {
+            Place = "proj/other", Match = "Required · through Core · No vote yet",
+            Reviewers = [new("Core", TrackedVote.None) { IsGroup = true, Required = true, Mine = true }, new("Bo", TrackedVote.ApprovedWithSuggestions), new("\u0007", TrackedVote.Rejected)],
+        };
+        fixture.Tracker.Page = new TrackedItemPage([pull]);
+        fixture.Tracker.Detail = new TrackedItemDetail(pull, "Body.", []);
+
+        var row = (await fixture.Rpc.ListAsync(new(Epoch, fixture.Project.Id, "github", "pull_request", "open", null, 50), default)).Items.Single();
+        Assert.AreEqual(("proj/other", "Required · through Core · No vote yet"), (row.Place, row.Match));
+        CollectionAssert.AreEqual(new[] { new IssueReviewer("Core", "none") { Group = true, Required = true, Mine = true }, new IssueReviewer("Bo", "suggestions") }, row.Reviewers.ToArray(),
+            "A name that is nothing once cleaned is left out.");
+        StringAssert.Contains(JsonSerializer.Serialize(row, DesktopJsonContext.Default.IssueRow), "\"reviewers\":[{\"name\":\"Core\"");
+
+        var start = await fixture.Rpc.StartAsync(new(Epoch, fixture.Project.Id, "github", "pull_request", "9", true, null), default);
+        Assert.AreEqual(("refused", "other_repository"), (start.Status, start.Reason));
+        Assert.IsEmpty(fixture.Starter.Started, "A session of the project would not work in the repository of the pull request.");
     }
 
     [TestMethod]

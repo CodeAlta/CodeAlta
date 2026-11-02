@@ -424,6 +424,7 @@ internal sealed record BootClosing(string? Step, int Seconds, bool CanForceExit)
 [JsonSerializable(typeof(IssueListResponse))]
 [JsonSerializable(typeof(IssueRow))]
 [JsonSerializable(typeof(IssueLabel))]
+[JsonSerializable(typeof(IssueReviewer))]
 [JsonSerializable(typeof(IssueItemRequest))]
 [JsonSerializable(typeof(IssueReadResponse))]
 [JsonSerializable(typeof(IssueComment))]

@@ -235,10 +235,38 @@ test("the toolbar switches between the views of a project, the line under it cha
     await page.until(`document.querySelector('.issues-toolbar').getBoundingClientRect().left > 100`, "the content, centred");
     assert.equal(await page.evaluate(`Math.round(document.querySelector('.issues-active-filters').getBoundingClientRect().left - document.querySelector('.issues-toolbar').getBoundingClientRect().left)`), 0);
 
-    // Pull requests have no filters.
+    // The pull requests have views of their own: the tab asks for their filters, lists by the current one, and says whose reviews they wait for.
+    await page.resize(1300, 800);
     await page.clickText('.issues-toolbar .bp6-segmented-control button', "Pull requests");
-    await page.until(`issuesFixture.state.lists.at(-1).kind === 'pull_request'`, "the pull requests");
-    assert.equal(await page.evaluate(`[document.querySelectorAll('.issues-views, .issues-active-filters').length, issuesFixture.state.lists.at(-1).filters]`).then(JSON.stringify), JSON.stringify([0, null]));
+    await page.until(`issuesFixture.state.lists.at(-1).kind === 'pull_request' && ${rows}.join() === '#7,#9'`, "the pull requests of the view");
+    assert.equal(await page.evaluate(`issuesFixture.state.filterAsks.at(-1).kind`), "pull_request");
+    assert.equal(await page.evaluate(asked), JSON.stringify({ reviewer: "@me_groups", scope: "@project", vote: "@none" }));
+    assert.deepEqual(await page.evaluate(`[...${view}.querySelectorAll('option')].map(option => option.textContent)`), ["Waiting for me"]);
+    assert.deepEqual(await page.evaluate(active), [["Scope: This project"], "+ 2 filters", "2 more filters. Reviewer: Me or my groups. Vote: No vote yet"]);
+    assert.deepEqual(await page.evaluate(`[...document.querySelectorAll('.issue-row-item')].map(row => [row.querySelector('.issue-place')?.textContent ?? null,
+      [...row.querySelectorAll('.issue-reviewer')].map(chip => chip.getAttribute('aria-label'))])`),
+      [[null, ["Core · Required review · No vote yet · Your review, or one of a group of yours"]], ["proj/other", ["Fields · Required review · Waiting for author · Your review, or one of a group of yours"]]],
+      "a row names the reviews of the user, and the repository of a pull request of another one");
+    // A pull request of the repository of the project is worked on here; one of another repository is opened where it is.
+    await page.until(`!!document.querySelector('.work-detail .work-starts')`, "the start of a session on #7");
+    assert.deepEqual(await page.evaluate(`[...document.querySelectorAll('.work-detail .issue-reviewers .issue-reviewer')].map(chip => [chip.textContent, chip.dataset.vote, chip.dataset.mine ?? null])`),
+      [["Core*", "none", "true"], ["Bo", "approved", null]]);
+    await page.clickText('.issue-row-item strong', "New fields");
+    await page.until(`!!document.querySelector('.work-detail .issue-elsewhere')`, "the pull request of another repository");
+    assert.equal(await page.evaluate(`!!document.querySelector('.work-detail .work-starts')`), false);
+    // The scope is changed in the line for a while, and the window manages the views of the pull requests.
+    await pickFromMenu("Organization");
+    await page.until(`JSON.parse(${asked}).scope === '@organization'`, "the pull requests of the organization");
+    await page.click('.issues-views-manage');
+    await page.until(`document.querySelector('.issue-views-window')?.textContent.includes('Pull request views of Platform') && ${rowsOfWindow}.length === 3`, "the views of the pull requests");
+    assert.deepEqual(await page.evaluate(rowsOfWindow), [["scope", true, true], ["reviewer", true, false], ["vote", true, false]]);
+    await page.click('.issue-views-window [aria-label="Close"]');
+    await page.until(`!document.querySelector('.issue-views-window')`, "the window closed again");
+    // The work items keep their own view.
+    await page.clickText('.issues-toolbar .bp6-segmented-control button', "Work items");
+    await page.until(`issuesFixture.state.lists.at(-1).kind === 'issue' && !!${view}`, "the views of the work items");
+    assert.deepEqual(await page.evaluate(`[${view}.selectedOptions[0].textContent, issuesFixture.state.current?.name, [...${view}.querySelectorAll('option')].some(option => option.textContent === 'Waiting for me')]`),
+      await page.evaluate(`[issuesFixture.state.current?.name, issuesFixture.state.current?.name, false]`));
     assert.deepEqual(page.problems, []);
   }, options);
 });

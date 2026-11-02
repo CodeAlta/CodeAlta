@@ -30,22 +30,22 @@ internal sealed partial class IssuesService
     {
         ArgumentNullException.ThrowIfNull(request);
         if (Refuse(request.ExpectedEpoch) is { } refused) return IssueFiltersResponse.Refused(refused);
-        if (!Name(request.Service) || !ValidSelections(request.Selections) || request.Include is { } include && (include.Count > MaximumFilters || !include.All(FilterId)))
+        if (!Name(request.Service) || ViewKind(request.Kind) is not { } kind || !ValidSelections(request.Selections) || request.Include is { } include && (include.Count > MaximumFilters || !include.All(FilterId)))
             return IssueFiltersResponse.Refused("invalid_request");
         if (await ResolveAsync(request.ProjectId, cancellationToken).ConfigureAwait(false) is not { } project) return IssueFiltersResponse.Refused("not_found");
         if ((await TrackersAsync(project, cancellationToken).ConfigureAwait(false)).FirstOrDefault(candidate => candidate.Service == request.Service) is not { } tracker)
             return IssueFiltersResponse.Refused("no_tracker");
 
-        var current = ReadCurrent(request.Service, project);
+        var current = ReadCurrent(request.Service, kind, project);
         // The window of the views asks for the values of the filters of the view it edits, whatever the current view fixes.
         var settings = request.WithoutView == true ? IssueFilterSettings.Empty : current?.Filters ?? IssueFilterSettings.Empty;
-        var views = ReadViews(request.Service, project);
-        var viewsProblem = ReadViewsProblem(request.Service, project);
+        var views = ReadViews(request.Service, kind, project);
+        var viewsProblem = ReadViewsProblem(request.Service, kind, project);
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         timeout.CancelAfter(ListTimeout);
         try
         {
-            var (filters, selected) = await ChooseAsync(tracker, request.Selections ?? [], settings, request.Include ?? [], timeout.Token).ConfigureAwait(false);
+            var (filters, selected) = await ChooseAsync(tracker, ItemKind(kind), request.Selections ?? [], settings, request.Include ?? [], timeout.Token).ConfigureAwait(false);
             // The filters the view lists by, those the tab may change first, then in the order of the view: the tab names them under its toolbar.
             var offered = settings.Filters.Where(setting => setting.Active && filters.Any(filter => filter.Id == setting.Id)).ToArray();
             var pick = offered.Where(static setting => setting.Pick).Select(static setting => setting.Id).ToArray();
@@ -73,10 +73,12 @@ internal sealed partial class IssuesService
     {
         ArgumentNullException.ThrowIfNull(request);
         if (Refuse(request.ExpectedEpoch) is { } refused) return new(refused, []);
-        if (!Name(request.Service)) return new("invalid_request", []);
+        if (!Name(request.Service) || ViewKind(request.Kind) is not { } kind) return new("invalid_request", []);
         if (await ResolveAsync(request.ProjectId, cancellationToken).ConfigureAwait(false) is not { } project) return new("not_found", []);
         if ((await TrackersAsync(project, cancellationToken).ConfigureAwait(false)).FirstOrDefault(candidate => candidate.Service == request.Service) is not { } tracker)
             return new("no_tracker", []);
+        // The fields are those of the issues: the filters of the pull requests are the tracker's own.
+        if (kind == IssueViewKind.PullRequests) return new("ok", []);
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         timeout.CancelAfter(ListTimeout);
         try
@@ -99,14 +101,14 @@ internal sealed partial class IssuesService
         ArgumentNullException.ThrowIfNull(request);
         if (Refuse(request.ExpectedEpoch) is { } refused) return new(refused, [], null);
         if (Views is null) return new("unavailable", [], null);
-        if (!Name(request.Service)) return new("invalid_request", [], null);
+        if (!Name(request.Service) || ViewKind(request.Kind) is not { } kind) return new("invalid_request", [], null);
         if (await ResolveAsync(request.ProjectId, cancellationToken).ConfigureAwait(false) is not { } project) return new("not_found", [], null);
-        var current = ReadCurrent(request.Service, project);
-        return new("ok", [.. ReadAll(request.Service, project).Select(view => new IssueViewDetail(view.Name, SourceName(view.Source),
+        var current = ReadCurrent(request.Service, kind, project);
+        return new("ok", [.. ReadAll(request.Service, kind, project).Select(view => new IssueViewDetail(view.Name, SourceName(view.Source),
             IssueViewStore.Locate(view.Source, project.ProjectPath), [.. view.Filters.Filters.Select(static filter => new IssueFilterEntry(filter.Id, filter.Active ? "on" : "off", filter.Value, filter.Label, filter.Pick ? true : null))]))],
             current is null ? null : new(current.Name, SourceName(current.Source)))
         {
-            Problem = ReadViewsProblem(request.Service, project),
+            Problem = ReadViewsProblem(request.Service, kind, project),
             Paths = [new(SourceName(IssueViewSource.Personal), IssueViewStore.Locate(IssueViewSource.Personal, project.ProjectPath)),
                 new(SourceName(IssueViewSource.Team), IssueViewStore.Locate(IssueViewSource.Team, project.ProjectPath))],
         };
@@ -117,7 +119,7 @@ internal sealed partial class IssuesService
     public async Task<IssueViewChangeResponse> SaveViewAsync(IssueViewSaveRequest request, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
-        if (await CheckViewRequestAsync(request.ExpectedEpoch, request.ProjectId, request.Service, request.Source, request.Name, cancellationToken).ConfigureAwait(false) is not { } checkedRequest)
+        if (await CheckViewRequestAsync(request.ExpectedEpoch, request.ProjectId, request.Service, request.Kind, request.Source, request.Name, cancellationToken).ConfigureAwait(false) is not { } checkedRequest)
             return new(await RefusalAsync(request.ExpectedEpoch, request.ProjectId, cancellationToken).ConfigureAwait(false));
         if (request.Filters is not { } entries || entries.Count > MaximumFilters
             || !entries.All(static entry => entry is not null && FilterId(entry.Id) && (entry.Mode is null or "on" or "off") && IssueViewStore.IsFilterText(entry.Value) && IssueViewStore.IsFilterText(entry.Label))
@@ -125,9 +127,9 @@ internal sealed partial class IssuesService
         // A name is one view: a view of the user does not take the name of one of the team, nor the reverse; the store checks it.
         return WriteViews(() =>
         {
-            checkedRequest.Store.SaveView(checkedRequest.Source, request.Service, checkedRequest.Project.ProjectPath, request.Name,
+            checkedRequest.Store.SaveView(checkedRequest.Source, request.Service, checkedRequest.Kind, checkedRequest.Project.ProjectPath, request.Name,
                 new([.. entries.Select(static entry => new IssueFilterSetting(entry.Id, entry.Mode != "off", entry.Value?.Trim(), string.IsNullOrWhiteSpace(entry.Label) ? null : entry.Label.Trim(), entry.Pick == true))]));
-            if (request.Select) checkedRequest.Store.SetCurrent(request.Service, checkedRequest.Project.ProjectPath, request.Name);
+            if (request.Select) checkedRequest.Store.SetCurrent(request.Service, checkedRequest.Kind, checkedRequest.Project.ProjectPath, request.Name);
         });
     }
 
@@ -136,11 +138,11 @@ internal sealed partial class IssuesService
     public async Task<IssueViewChangeResponse> RenameViewAsync(IssueViewRenameRequest request, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
-        if (await CheckViewRequestAsync(request.ExpectedEpoch, request.ProjectId, request.Service, request.Source, request.Name, cancellationToken).ConfigureAwait(false) is not { } checkedRequest)
+        if (await CheckViewRequestAsync(request.ExpectedEpoch, request.ProjectId, request.Service, request.Kind, request.Source, request.Name, cancellationToken).ConfigureAwait(false) is not { } checkedRequest)
             return new(await RefusalAsync(request.ExpectedEpoch, request.ProjectId, cancellationToken).ConfigureAwait(false));
         if (!IssueViewStore.IsViewName(request.NewName)) return new("invalid_request");
         var found = false;
-        var result = WriteViews(() => found = checkedRequest.Store.RenameView(checkedRequest.Source, request.Service, checkedRequest.Project.ProjectPath, request.Name, request.NewName));
+        var result = WriteViews(() => found = checkedRequest.Store.RenameView(checkedRequest.Source, request.Service, checkedRequest.Kind, checkedRequest.Project.ProjectPath, request.Name, request.NewName));
         return result.Status == "ok" && !found ? new("not_found") : result;
     }
 
@@ -149,10 +151,10 @@ internal sealed partial class IssuesService
     public async Task<IssueViewChangeResponse> RemoveViewAsync(IssueViewRemoveRequest request, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
-        if (await CheckViewRequestAsync(request.ExpectedEpoch, request.ProjectId, request.Service, request.Source, request.Name, cancellationToken).ConfigureAwait(false) is not { } checkedRequest)
+        if (await CheckViewRequestAsync(request.ExpectedEpoch, request.ProjectId, request.Service, request.Kind, request.Source, request.Name, cancellationToken).ConfigureAwait(false) is not { } checkedRequest)
             return new(await RefusalAsync(request.ExpectedEpoch, request.ProjectId, cancellationToken).ConfigureAwait(false));
         var found = false;
-        var result = WriteViews(() => found = checkedRequest.Store.RemoveView(checkedRequest.Source, request.Service, checkedRequest.Project.ProjectPath, request.Name));
+        var result = WriteViews(() => found = checkedRequest.Store.RemoveView(checkedRequest.Source, request.Service, checkedRequest.Kind, checkedRequest.Project.ProjectPath, request.Name));
         return result.Status == "ok" && !found ? new("not_found") : result;
     }
 
@@ -163,19 +165,19 @@ internal sealed partial class IssuesService
         ArgumentNullException.ThrowIfNull(request);
         if (Refuse(request.ExpectedEpoch) is { } refused) return new(refused);
         if (Views is not { } store) return new("unavailable");
-        if (!Name(request.Service) || request.Name is not null && !IssueViewStore.IsViewName(request.Name)) return new("invalid_request");
+        if (!Name(request.Service) || ViewKind(request.Kind) is not { } kind || request.Name is not null && !IssueViewStore.IsViewName(request.Name)) return new("invalid_request");
         if (await ResolveAsync(request.ProjectId, cancellationToken).ConfigureAwait(false) is not { } project) return new("not_found");
-        if (request.Name is not null && ReadAll(request.Service, project).All(view => view.Name != request.Name)) return new("not_found");
-        return WriteViews(() => store.SetCurrent(request.Service, project.ProjectPath, request.Name));
+        if (request.Name is not null && ReadAll(request.Service, kind, project).All(view => view.Name != request.Name)) return new("not_found");
+        return WriteViews(() => store.SetCurrent(request.Service, kind, project.ProjectPath, request.Name));
     }
 
-    private sealed record CheckedViewRequest(IssueViewStore Store, Catalog.ProjectDescriptor Project, IssueViewSource Source);
+    private sealed record CheckedViewRequest(IssueViewStore Store, Catalog.ProjectDescriptor Project, IssueViewSource Source, IssueViewKind Kind);
 
-    // The store, the project and the source a request about one view names; null when one of them is wrong.
-    private async Task<CheckedViewRequest?> CheckViewRequestAsync(string? epoch, string? projectId, string? service, string? source, string? name, CancellationToken cancellationToken)
+    // The store, the project, the kind and the source a request about one view names; null when one of them is wrong.
+    private async Task<CheckedViewRequest?> CheckViewRequestAsync(string? epoch, string? projectId, string? service, string? kind, string? source, string? name, CancellationToken cancellationToken)
     {
-        if (Refuse(epoch) is not null || Views is not { } store || !Name(service) || Source(source) is not { } viewSource || !IssueViewStore.IsViewName(name)) return null;
-        return await ResolveAsync(projectId, cancellationToken).ConfigureAwait(false) is { } project ? new(store, project, viewSource) : null;
+        if (Refuse(epoch) is not null || Views is not { } store || !Name(service) || ViewKind(kind) is not { } viewKind || Source(source) is not { } viewSource || !IssueViewStore.IsViewName(name)) return null;
+        return await ResolveAsync(projectId, cancellationToken).ConfigureAwait(false) is { } project ? new(store, project, viewSource, viewKind) : null;
     }
 
     // Why a request about a view was refused, when CheckViewRequestAsync gave nothing.
@@ -212,11 +214,11 @@ internal sealed partial class IssuesService
         }
     }
 
-    private IReadOnlyList<IssueView> ReadAll(string service, Catalog.ProjectDescriptor project)
+    private IReadOnlyList<IssueView> ReadAll(string service, IssueViewKind kind, Catalog.ProjectDescriptor project)
     {
         try
         {
-            return Views?.ReadViews(service, project.ProjectPath) ?? [];
+            return Views?.ReadViews(service, kind, project.ProjectPath) ?? [];
         }
         catch (ArgumentException)
         {
@@ -225,11 +227,11 @@ internal sealed partial class IssuesService
     }
 
     // Why views are not shown: a file that does not parse leaves the tab with every item, which the user is told.
-    private string? ReadViewsProblem(string service, Catalog.ProjectDescriptor project)
+    private string? ReadViewsProblem(string service, IssueViewKind kind, Catalog.ProjectDescriptor project)
     {
         try
         {
-            return Views?.ReadProblem(service, project.ProjectPath) is { } problem ? GitIssuesService.Clean(problem, 2 * MaximumTitle) : null;
+            return Views?.ReadProblem(service, kind, project.ProjectPath) is { } problem ? GitIssuesService.Clean(problem, 2 * MaximumTitle) : null;
         }
         catch (ArgumentException)
         {
@@ -237,14 +239,14 @@ internal sealed partial class IssuesService
         }
     }
 
-    private IReadOnlyList<IssueViewName> ReadViews(string service, Catalog.ProjectDescriptor project)
-        => [.. ReadAll(service, project).Select(static view => new IssueViewName(view.Name, SourceName(view.Source)))];
+    private IReadOnlyList<IssueViewName> ReadViews(string service, IssueViewKind kind, Catalog.ProjectDescriptor project)
+        => [.. ReadAll(service, kind, project).Select(static view => new IssueViewName(view.Name, SourceName(view.Source)))];
 
-    private IssueView? ReadCurrent(string service, Catalog.ProjectDescriptor project)
+    private IssueView? ReadCurrent(string service, IssueViewKind kind, Catalog.ProjectDescriptor project)
     {
         try
         {
-            return Views?.ReadCurrent(service, project.ProjectPath);
+            return Views?.ReadCurrent(service, kind, project.ProjectPath);
         }
         catch (ArgumentException)
         {
@@ -256,11 +258,16 @@ internal sealed partial class IssuesService
 
     private static string SourceName(IssueViewSource source) => source == IssueViewSource.Team ? "team" : "personal";
 
+    // The kind of items of the views a request names: the issues when it names none.
+    private static IssueViewKind? ViewKind(string? value) => value switch { null or "issue" => IssueViewKind.Issues, "pull_request" => IssueViewKind.PullRequests, _ => null };
+
+    private static TrackedItemKind ItemKind(IssueViewKind kind) => kind == IssueViewKind.PullRequests ? TrackedItemKind.PullRequest : TrackedItemKind.Issue;
+
     /// <summary>Asks the tracker for its filters and gives each one its value (<see cref="IssueFilterChoice"/>), described for the page.</summary>
-    internal static async Task<(IssueFilterField[] Filters, Dictionary<string, string> Selected)> ChooseAsync(IIssueTracker tracker, IReadOnlyDictionary<string, string> chosen,
+    internal static async Task<(IssueFilterField[] Filters, Dictionary<string, string> Selected)> ChooseAsync(IIssueTracker tracker, TrackedItemKind kind, IReadOnlyDictionary<string, string> chosen,
         IssueFilterSettings settings, IReadOnlyList<string> include, CancellationToken cancellationToken)
     {
-        var selection = await IssueFilterChoice.ChooseAsync(tracker, chosen, settings, include, cancellationToken).ConfigureAwait(false);
+        var selection = await IssueFilterChoice.ChooseAsync(tracker, kind, chosen, settings, include, cancellationToken).ConfigureAwait(false);
         return ([.. selection.Filters.Select(descriptor => Describe(descriptor, settings.Find(descriptor.Id)?.Label))], new(selection.Selected, StringComparer.Ordinal));
     }
 
@@ -285,15 +292,15 @@ internal sealed partial class IssuesService
     /// The values a listing passes on to the tracker: those of the active filters of the current view that the tab may not
     /// change, whatever was asked, and the ones asked when the tracker offers them; null when a value asked is not offered.
     /// </summary>
-    private async Task<IReadOnlyDictionary<string, string>?> CheckedFiltersAsync(IIssueTracker tracker, IReadOnlyDictionary<string, string>? chosen, string service,
+    private async Task<IReadOnlyDictionary<string, string>?> CheckedFiltersAsync(IIssueTracker tracker, TrackedItemKind kind, IReadOnlyDictionary<string, string>? chosen, string service,
         Catalog.ProjectDescriptor project, CancellationToken cancellationToken)
     {
-        var settings = ReadCurrent(service, project)?.Filters ?? IssueFilterSettings.Empty;
+        var settings = ReadCurrent(service, kind == TrackedItemKind.PullRequest ? IssueViewKind.PullRequests : IssueViewKind.Issues, project)?.Filters ?? IssueFilterSettings.Empty;
         var asked = (chosen ?? new Dictionary<string, string>()).Where(static pair => pair.Value is { Length: > 0 }).ToDictionary(StringComparer.Ordinal);
         if (asked.Count == 0 && !settings.Filters.Any(static setting => setting.Active)) return TrackedFilters.None;
         // A filter the tab may change lists every item when the listing asks for that, as any filter the view does not fix.
         foreach (var setting in settings.Filters.Where(setting => setting is { Active: true, Pick: true } && chosen?.ContainsKey(setting.Id) == true)) asked.TryAdd(setting.Id, string.Empty);
-        var (_, selected) = await ChooseAsync(tracker, asked, settings, [], cancellationToken).ConfigureAwait(false);
+        var (_, selected) = await ChooseAsync(tracker, kind, asked, settings, [], cancellationToken).ConfigureAwait(false);
         var fixedIds = settings.Filters.Where(static setting => setting.Active && !setting.Pick).Select(static setting => setting.Id).ToHashSet(StringComparer.Ordinal);
         if (!asked.Where(pair => !fixedIds.Contains(pair.Key)).All(pair => selected.GetValueOrDefault(pair.Key) == pair.Value)) return null;
         var passed = selected.Where(static pair => pair.Value.Length > 0).ToDictionary(StringComparer.Ordinal);
@@ -321,8 +328,9 @@ internal sealed partial class IssuesService
 /// </param>
 /// <param name="Include">The filters made of fields to describe besides those the view names: the ones the window of the views adds.</param>
 /// <param name="WithoutView">Whether the current view takes no part: the window of the views asks for the values of the view it edits.</param>
+/// <param name="Kind">The items the filters are of: <c>issue</c> (null too) or <c>pull_request</c>.</param>
 internal sealed record IssueFiltersRequest(string ExpectedEpoch, string ProjectId, string Service, Dictionary<string, string>? Selections = null, IReadOnlyList<string>? Include = null,
-    bool? WithoutView = null);
+    bool? WithoutView = null, string? Kind = null);
 
 /// <summary>
 /// The filters of a tracker. Status is <c>ok</c>, <c>unavailable</c>, <c>stale_epoch</c>, <c>invalid_request</c>,
@@ -379,7 +387,11 @@ internal sealed record IssueFilterField(string Id, string Label, IReadOnlyList<I
 internal sealed record IssueFilterValue(string Id, string Label, string? Detail);
 
 /// <summary>Asks for the fields of a tracker of a project that filters can be made of.</summary>
-internal sealed record IssueFieldsRequest(string ExpectedEpoch, string ProjectId, string Service);
+/// <param name="ExpectedEpoch">The host epoch.</param>
+/// <param name="ProjectId">The project.</param>
+/// <param name="Service">The tracker.</param>
+/// <param name="Kind">The items the views list: <c>issue</c> (null too) or <c>pull_request</c>, which have no fields to add.</param>
+internal sealed record IssueFieldsRequest(string ExpectedEpoch, string ProjectId, string Service, string? Kind = null);
 
 /// <summary>The fields. Status is <c>ok</c>, <c>unavailable</c>, <c>stale_epoch</c>, <c>invalid_request</c>, <c>not_found</c>, <c>no_tracker</c> or <c>failed</c>.</summary>
 internal sealed record IssueFieldsResponse(string Status, IReadOnlyList<IssueFieldInfo> Fields);
@@ -400,7 +412,11 @@ internal sealed record IssueFieldInfo(string Id, string Label, string Type, stri
 internal sealed record IssueFilterEntry(string Id, string? Mode, string? Value, string? Label, bool? Pick = null);
 
 /// <summary>Asks for the views of a tracker of a project.</summary>
-internal sealed record IssueViewsRequest(string ExpectedEpoch, string ProjectId, string Service);
+/// <param name="ExpectedEpoch">The host epoch.</param>
+/// <param name="ProjectId">The project.</param>
+/// <param name="Service">The tracker.</param>
+/// <param name="Kind">The items the views list: <c>issue</c> (null too) or <c>pull_request</c>.</param>
+internal sealed record IssueViewsRequest(string ExpectedEpoch, string ProjectId, string Service, string? Kind = null);
 
 /// <summary>
 /// The views of a tracker, the user's first, and the one the tab uses. Status is <c>ok</c>, <c>unavailable</c>,
@@ -436,16 +452,18 @@ internal sealed record IssueViewPath(string Source, string Path);
 /// <param name="Name">The name of the view; a missing view is made.</param>
 /// <param name="Filters">What the view says of each filter, in its order.</param>
 /// <param name="Select">Whether the view becomes the current one.</param>
-internal sealed record IssueViewSaveRequest(string ExpectedEpoch, string ProjectId, string Service, string Source, string Name, IReadOnlyList<IssueFilterEntry>? Filters, bool Select = false);
+/// <param name="Kind">The items the view lists: <c>issue</c> (null too) or <c>pull_request</c>.</param>
+internal sealed record IssueViewSaveRequest(string ExpectedEpoch, string ProjectId, string Service, string Source, string Name, IReadOnlyList<IssueFilterEntry>? Filters, bool Select = false,
+    string? Kind = null);
 
-/// <summary>Renames a view.</summary>
-internal sealed record IssueViewRenameRequest(string ExpectedEpoch, string ProjectId, string Service, string Source, string Name, string NewName);
+/// <summary>Renames a view of the items of <paramref name="Kind"/>: <c>issue</c> (null too) or <c>pull_request</c>.</summary>
+internal sealed record IssueViewRenameRequest(string ExpectedEpoch, string ProjectId, string Service, string Source, string Name, string NewName, string? Kind = null);
 
-/// <summary>Removes a view.</summary>
-internal sealed record IssueViewRemoveRequest(string ExpectedEpoch, string ProjectId, string Service, string Source, string Name);
+/// <summary>Removes a view of the items of <paramref name="Kind"/>: <c>issue</c> (null too) or <c>pull_request</c>.</summary>
+internal sealed record IssueViewRemoveRequest(string ExpectedEpoch, string ProjectId, string Service, string Source, string Name, string? Kind = null);
 
-/// <summary>Makes a view the current one; a null name forgets the choice.</summary>
-internal sealed record IssueViewSelectRequest(string ExpectedEpoch, string ProjectId, string Service, string? Name);
+/// <summary>Makes a view of the items of <paramref name="Kind"/> the current one; a null name forgets the choice.</summary>
+internal sealed record IssueViewSelectRequest(string ExpectedEpoch, string ProjectId, string Service, string? Name, string? Kind = null);
 
 /// <summary>
 /// Status is <c>ok</c>, <c>unavailable</c>, <c>stale_epoch</c>, <c>invalid_request</c>, <c>not_found</c>,

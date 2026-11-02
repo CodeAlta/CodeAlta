@@ -6,7 +6,7 @@ import { IssuesPanel, type IssuesApi } from "./IssuesPanel";
 // The Issues tab over a host the test plays: a repository on GitHub whose work is in three Jira projects, and a
 // project that has one Jira project only.
 const item = (id: string, title: string, values: Partial<IssueRow> = {}): IssueRow => ({ kind: "issue", id, title, url: `https://example.atlassian.net/browse/${id}`, state: "open", stateText: "To Do",
-  type: "Task", priority: null, author: "Ana", assignees: [], labels: [], createdAt: null, updatedAt: null, comments: null, sourceBranch: null, targetBranch: null, ...values });
+  type: "Task", priority: null, author: "Ana", assignees: [], labels: [], createdAt: null, updatedAt: null, comments: null, sourceBranch: null, targetBranch: null, place: null, match: null, reviewers: [], ...values });
 const jira: IssueRow[] = [
   item("PLAT-7", "The build cache is not shared between agents", { type: "Story", stateText: "In Progress", labels: [{ name: "build", color: null }] }),
   item("ALTA-12", "The list loses its place after a reload", { type: "Bug" }),
@@ -26,6 +26,24 @@ const sources: Record<string, IssueSource[]> = {
 // The work items of an Azure DevOps project, by team; the view of the team lists those of the team Platform in the current
 // sprint, and the user has a view of their own. The host gives an active filter of the current view its value, as here.
 const work: IssueRow[] = [item("41", "Platform work", { url: "https://dev.azure.com/org/proj/_workitems/edit/41" }), item("42", "Mobile work", { url: "https://dev.azure.com/org/proj/_workitems/edit/42" })];
+// The pull requests of the project: one waits for a review of a group of the user, one is of another repository of the project.
+const pulls: IssueRow[] = [
+  item("7", "Cache the build", { kind: "pull_request", url: "https://dev.azure.com/org/proj/_git/app/pullrequest/7", stateText: null, type: null,
+    reviewers: [{ name: "Core", vote: "none", group: true, required: true, mine: true }, { name: "Bo", vote: "approved", group: null, required: null, mine: null }] }),
+  item("9", "New fields", { kind: "pull_request", url: "https://dev.azure.com/org/proj/_git/other/pullrequest/9", stateText: null, type: null, place: "proj/other",
+    reviewers: [{ name: "Fields", vote: "waiting", group: true, required: true, mine: true }] }),
+];
+// The filters of the pull requests, as Azure DevOps gives them.
+const pullFilters = [
+  { id: "scope", label: "Scope", values: [{ id: "@project", label: "This project", detail: "Every repository of the project" }, { id: "@organization", label: "Organization", detail: "Every project" }],
+    dependsOn: [], problem: null, trackerLabel: "Scope", kind: "choice", fieldType: null, allLabel: "This repository" },
+  { id: "reviewer", label: "Reviewer", values: [{ id: "@me", label: "Me", detail: null }, { id: "@me_groups", label: "Me or my groups", detail: "Also through groups in groups" }],
+    dependsOn: [], problem: null, trackerLabel: "Reviewer", kind: "choice", fieldType: null },
+  { id: "vote", label: "Vote", values: [{ id: "@none", label: "No vote yet", detail: null }, { id: "@approved", label: "Approved", detail: null }],
+    dependsOn: [], problem: null, trackerLabel: "Vote", kind: "choice", fieldType: null, multiple: true },
+];
+// The views and the current one of a kind of items: those of the pull requests are their own.
+const store = (kind: string | null | undefined) => kind === "pull_request" ? state.pulls : state;
 const filtersOf = (request: IssueFiltersRequest) => {
   // As the host: a value longer than 128 characters is refused, a tracker that fails answers without its filters, and the
   // problem of a file of views that does not parse comes with the filters.
@@ -34,13 +52,14 @@ const filtersOf = (request: IssueFiltersRequest) => {
   if (state.failFilters || state.failPicks && chosen.length > 0) return { status: "ok", filters: [], selected: {}, active: [], pick: [],
     problem: ["Azure DevOps did not give its filters.", state.viewsProblem].filter(text => text).join(" "), views: state.views.map(({ name, source }) => ({ name, source })), current: state.current };
   if (request.service !== "azure_devops") return { status: "ok", filters: [], selected: {}, active: [], pick: [], problem: null, views: [], current: null };
-  const view = state.views.find(candidate => candidate.name === state.current?.name && candidate.source === state.current?.source);
+  const kept = store(request.kind);
+  const view = kept.views.find(candidate => candidate.name === kept.current?.name && candidate.source === kept.current?.source);
   const on = (view?.filters ?? []).filter(entry => entry.mode !== "off");
   const pick = on.filter(entry => entry.pick).map(entry => entry.id);
   // As the host: the window of the views asks without the current view; the tab, with it, where an active team the tab may not change wins.
   const viewTeam = request.withoutView ? undefined : on.find(entry => entry.id === "team" && !entry.pick && entry.value)?.value;
   const team = viewTeam === "Mobile" ? "t2" : viewTeam === "Platform" ? "t1" : request.selections?.team ?? "t1";
-  const filters = [
+  const filters = request.kind === "pull_request" ? pullFilters : [
     { id: "team", label: "Team", values: [{ id: "t1", label: "Platform", detail: "Your team" }, { id: "t2", label: "Mobile", detail: null }], dependsOn: [], problem: null,
       trackerLabel: "Team", kind: "choice", fieldType: null },
     { id: "sprint", label: "Sprint", values: [{ id: "@current", label: "Current sprint", detail: `S12 of ${team}` }, { id: `s-${team}`, label: `S11 of ${team}`, detail: null }],
@@ -59,13 +78,17 @@ const filtersOf = (request: IssueFiltersRequest) => {
   // A filter the view lets the tab change takes the value chosen there.
   for (const id of pick) if (request.selections && id in request.selections) selected[id] = request.selections[id];
   const active = [...pick, ...on.filter(entry => !entry.pick && selected[entry.id]).map(entry => entry.id)];
-  return { status: "ok", problem: state.viewsProblem, views: state.views.map(({ name, source }) => ({ name, source })), current: state.current, filters, selected, active, pick };
+  return { status: "ok", problem: state.viewsProblem, views: kept.views.map(({ name, source }) => ({ name, source })), current: kept.current, filters, selected, active, pick };
 };
 const state = { lists: [] as IssueListRequest[], filterAsks: [] as IssueFiltersRequest[], views: [
     { name: "Bugs", source: "personal", path: ".alta/local/issues.toml", filters: [{ id: "type", mode: "on", value: "Bug", label: null, pick: null }] },
     { name: "Sprint board", source: "team", path: ".alta/issues.toml", filters: [{ id: "team", mode: "on", value: "Platform", label: null, pick: null },
       { id: "sprint", mode: "on", value: "@current", label: null, pick: true }, { id: "type", mode: "on", value: "Task", label: null, pick: null }] }] as IssueViewDetail[],
-  current: { name: "Sprint board", source: "team" } as IssueViewName | null, saved: [] as IssueViewSaveRequest[], selects: [] as (string | null)[], problem: null as string | null, notices: [] as string[],
+  current: { name: "Sprint board", source: "team" } as IssueViewName | null,
+  pulls: { views: [{ name: "Waiting for me", source: "personal", path: ".alta/local/issues.toml", filters: [{ id: "scope", mode: "on", value: "@project", label: null, pick: true },
+    { id: "reviewer", mode: "on", value: "@me_groups", label: null, pick: null }, { id: "vote", mode: "on", value: "@none", label: null, pick: null }] }] as IssueViewDetail[],
+    current: { name: "Waiting for me", source: "personal" } as IssueViewName | null },
+  saved: [] as IssueViewSaveRequest[], selects: [] as (string | null)[], problem: null as string | null, notices: [] as string[],
   // The tracker fails when values are chosen in the tab, or always; the request of the filters fails; the replies of the filters
   // wait while paused; the views read, and the problem of a file of views.
   failPicks: false, failFilters: false, throwFilters: false, paused: false, waiting: [] as (() => void)[], viewReads: 0, viewsProblem: null as string | null,
@@ -75,7 +98,7 @@ const api = {
   sources: async (request: { projectId: string }) => ({ status: "ok", sources: sources[request.projectId] ?? [] }),
   list: async (request: IssueListRequest) => {
     state.lists.push(request);
-    const all = request.service === "github" ? github : request.service === "azure_devops" ? work.filter(row => request.kind === "pull_request" || (request.filters?.team === "t2") === row.title.startsWith("Mobile"))
+    const all = request.service === "github" ? github : request.service === "azure_devops" ? request.kind === "pull_request" ? pulls : work.filter(row => (request.filters?.team === "t2") === row.title.startsWith("Mobile"))
       : request.projectId === "single" ? [item("DOCS-1", "Explain the Jira projects")] : jira;
     return { status: "ok", items: all.filter(row => !request.part || row.id.startsWith(request.part + "-")), more: false, problem: state.problem, needsSignIn: false };
   },
@@ -85,15 +108,17 @@ const api = {
     if (state.throwFilters) throw new Error("The host did not answer.");
     return filtersOf(request);
   },
-  views: async () => { state.viewReads++; return { status: "ok", views: state.views, current: state.current, paths: [], problem: state.viewsProblem }; },
+  views: async (request: { kind?: string | null }) => { state.viewReads++; const kept = store(request.kind); return { status: "ok", views: kept.views, current: kept.current, paths: [], problem: state.viewsProblem }; },
   saveView: async (request: IssueViewSaveRequest) => {
     state.saved.push(request);
+    const kept = store(request.kind);
     const path = request.source === "team" ? ".alta/issues.toml" : ".alta/local/issues.toml";
-    state.views = [...state.views.filter(view => view.name !== request.name), { name: request.name, source: request.source, path, filters: request.filters ?? [] }];
-    if (request.select) state.current = { name: request.name, source: request.source };
+    kept.views = [...kept.views.filter(view => view.name !== request.name), { name: request.name, source: request.source, path, filters: request.filters ?? [] }];
+    if (request.select) kept.current = { name: request.name, source: request.source };
     return { status: "ok" };
   },
-  fields: async () => ({ status: "ok", fields: [{ id: "field:Microsoft.VSTS.Common.Priority", label: "Priority", type: "list", name: "Microsoft.VSTS.Common.Priority" }] }),
+  fields: async (request: { kind?: string | null }) => ({ status: "ok",
+    fields: request.kind === "pull_request" ? [] : [{ id: "field:Microsoft.VSTS.Common.Priority", label: "Priority", type: "list", name: "Microsoft.VSTS.Common.Priority" }] }),
   renameView: async (request: { name: string; newName: string; source: string }) => {
     state.views = state.views.map(view => view.name === request.name && view.source === request.source ? { ...view, name: request.newName } : view);
     if (state.current?.name === request.name) state.current = { name: request.newName, source: request.source };
@@ -104,13 +129,14 @@ const api = {
     if (state.current?.name === request.name) state.current = null;
     return { status: "ok" };
   },
-  selectView: async (request: { name: string | null }) => {
+  selectView: async (request: { name: string | null; kind?: string | null }) => {
     state.selects.push(request.name);
-    const view = state.views.find(candidate => candidate.name === request.name);
-    state.current = view ? { name: view.name, source: view.source } : null;
+    const kept = store(request.kind);
+    const view = kept.views.find(candidate => candidate.name === request.name);
+    kept.current = view ? { name: view.name, source: view.source } : null;
     return { status: "ok" };
   },
-  read: async (request: { id: string }) => ({ status: "ok", item: [...jira, ...github, ...work].find(row => row.id === request.id) ?? null, body: `Description of ${request.id}.`, comments: [], moreComments: false, truncated: false }),
+  read: async (request: { id: string }) => ({ status: "ok", item: [...jira, ...github, ...work, ...pulls].find(row => row.id === request.id) ?? null, body: `Description of ${request.id}.`, comments: [], moreComments: false, truncated: false }),
   start: (request: { id: string }) => new Promise(resolve => {
     state.starts.push(request.id);
     state.finish[request.id] = sessionId => resolve({ status: "ok", sessionId, reason: null, message: null });

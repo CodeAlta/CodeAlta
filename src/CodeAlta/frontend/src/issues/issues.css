@@ -95,6 +95,17 @@
 .issue-branches { gap: 6px; }
 .issue-branches code { padding: 1px 6px; border-radius: 6px; background: color-mix(in srgb, var(--accent) 12%, transparent); color: var(--accent); font-size: 11.5px; }
 .issue-tags { gap: 5px; }
+.issue-reviewers { display: contents; }
+.issue-reviewer.bp6-tag { max-width: 220px; }
+.issue-row-item .issue-reviewer.bp6-tag { min-height: 16px; padding: 0 6px; font-size: 10.5px; line-height: 15px; }
+.issue-reviewer[data-mine] { box-shadow: inset 0 0 0 1px var(--accent); }
+.issue-reviewer-required { margin-left: 1px; color: var(--accent); font-weight: 700; }
+.issue-reviewer[data-vote="approved"] .bp6-icon:last-child, .issue-reviewer[data-vote="suggestions"] .bp6-icon:last-child,
+.issue-reviewer[data-vote="approved"] > svg:last-child, .issue-reviewer[data-vote="suggestions"] > svg:last-child { color: var(--issue-done); }
+.issue-reviewer[data-vote="waiting"] > svg:last-child { color: var(--issue-draft); }
+.issue-reviewer[data-vote="rejected"] > svg:last-child { color: var(--issue-closed); }
+.issue-place { font-family: var(--bp-typography-family-mono); font-size: .92em; }
+.issue-elsewhere { margin: 0; color: var(--muted); font-size: 12px; }
 .issue-detail .work-detail-actions { gap: 10px; }
 
 .issue-text { display: grid; gap: 4px; min-width: 0; }

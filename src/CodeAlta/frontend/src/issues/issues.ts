@@ -99,9 +99,22 @@ export function filterValueText(value: Readonly<{ label: string; detail: string 
 
 const pickStorage = "codealta.desktop.issue-picks.v1";
 
-/** What names the values chosen in the tab for the filters a view lets it change: the project, the tracker and the view. */
-export function pickKey(projectId: string, service: string, view: Readonly<{ name: string; source: string }>): string {
-  return `${projectId}\n${service}\n${view.source}\n${view.name}`;
+/**
+ * What names the values chosen in the tab for the filters a view lets it change: the project, the tracker, the kind of
+ * items (the views of the pull requests are not those of the issues) and the view.
+ */
+export function pickKey(projectId: string, service: string, view: Readonly<{ name: string; source: string }>, kind: IssueKind = "issue"): string {
+  return `${projectId}\n${kind === "issue" ? service : `${service}/pull_request`}\n${view.source}\n${view.name}`;
+}
+
+/** How a reviewer voted, as the window says it. */
+export function voteLabel(vote: string): MessageKey {
+  return vote === "approved" ? "Approved" : vote === "suggestions" ? "Approved with suggestions" : vote === "waiting" ? "Waiting for author" : vote === "rejected" ? "Rejected" : "No vote yet";
+}
+
+/** The icon of a vote. */
+export function voteIcon(vote: string): IconName {
+  return vote === "approved" || vote === "suggestions" ? "check" : vote === "waiting" ? "later" : vote === "rejected" ? "close" : "gap";
 }
 
 /** Reads the values chosen in the tab for a view, by filter id; none when the storage has nothing usable. */
@@ -159,7 +172,10 @@ export function forgetPick(picks: Readonly<Record<string, string>>, filters: rea
 
 // The words trackers write for their filters and their symbolic values, which the window translates.
 const trackerWords: ReadonlySet<string> = new Set<MessageKey>(["Team", "Sprint", "Assigned to", "Type", "Current sprint", "Next sprint", "Previous sprint", "Me", "Nobody",
-  "Your team", "None today", "Yes", "No", "Order", "Last changed first", "Backlog order", "Highest priority first", "Newest first"]);
+  "Your team", "None today", "Yes", "No", "Order", "Last changed first", "Backlog order", "Highest priority first", "Newest first",
+  "Scope", "This repository", "This project", "Every repository of the project", "Organization", "Every project", "Reviewer", "Me or my groups", "Also through groups in groups",
+  "Required", "Optional", "Vote", "No vote yet", "Approved", "Approved with suggestions", "Waiting for author", "Rejected", "Author", "Not me", "Target branch", "Drafts",
+  "Hide drafts", "Only drafts", "Oldest first"]);
 
 /**
  * A text a tracker gives in the language of the window when it is one of the words of filters, as the tracker wrote
