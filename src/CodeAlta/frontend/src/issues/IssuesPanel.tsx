@@ -293,7 +293,8 @@ export function IssuesPanel({ api, epoch, projects, projectId, visible, preferre
   }, [api, epoch, available, visible, currentKey, revision, itemRevision]);
 
   // The images of the descriptions and the comments: the host reads them with the sign-in of the tracker and keeps
-  // them; the window keeps those it drew, so that an item shown again draws them at once.
+  // them; the window keeps those it drew, so that an item shown again draws them at once. Reload starts anew: an image
+  // that could not be read (a sign-in that had expired) is asked for again, and the host gives at once those it keeps.
   const trackerImages = useMemo<MarkdownImages | null>(() => {
     if (!available || !project || !source || !api.image) return null;
     const read = api.image, projectId = project.id, service = source.service;
@@ -303,7 +304,7 @@ export function IssuesPanel({ api, epoch, projects, projectId, visible, preferre
     });
     const request = (address: string) => markdownImageRequest(epoch, address, null);
     return { peek: address => cache.peek(request(address)), load: address => cache.load(request(address)), reveal: () => { /* An image of the web has no file. */ }, platform: null };
-  }, [api, epoch, available, project?.id, source?.service]);
+  }, [api, epoch, available, project?.id, source?.service, revision]);
   const openLink = (address: string | null | undefined) => {
     if (!address || !available) return;
     void api.openLink({ expectedEpoch: epoch, address }).then(reply => { if (reply.status !== "ok") onNotice(t("The page could not be opened.")); }, () => onNotice(t("The page could not be opened.")));

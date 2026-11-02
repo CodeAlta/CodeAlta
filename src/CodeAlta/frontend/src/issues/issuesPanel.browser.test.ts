@@ -589,6 +589,12 @@ test("the images of a description and of its comments are read through the host 
     await page.clickText('.issue-row-item strong', "Cache the build");
     await page.until(`${pictures}.filter(picture => picture[1]).length === 2`, "the images again");
     assert.equal(await page.evaluate(`issuesFixture.state.images.length`), asked);
+
+    // Reload reads everything again: an image that could not be read is asked for again (a sign-in done meanwhile).
+    const gone = `issuesFixture.state.images.filter(image => image.address.includes('/gone')).length`;
+    const missed = await page.evaluate<number>(gone);
+    await page.click('[aria-label="Reload"]');
+    await page.until(`${gone} > ${missed}`, "the image that could not be read, asked for again");
     assert.deepEqual(page.problems, []);
   }, { ...options, styles: [...options.styles, "../style.css"] });
 });
