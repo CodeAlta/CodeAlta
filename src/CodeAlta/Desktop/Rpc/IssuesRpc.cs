@@ -56,6 +56,10 @@ internal sealed partial class IssuesService
 
     private IssueReadCache<IssueReadResponse> Items => LazyInitializer.EnsureInitialized(ref _items, () => new(Time, 200));
 
+    private IssueImageCache? _images;
+
+    private IssueImageCache Images => LazyInitializer.EnsureInitialized(ref _images, () => new(Time));
+
     /// <summary>Creates the service of a window whose host has no trackers: it answers <c>unavailable</c>.</summary>
     public IssuesService()
     {
@@ -219,6 +223,42 @@ internal sealed partial class IssuesService
         var started = await _starter.StartAsync(project, IssuePrompts.SessionTitle(row), _ => IssuePrompts.For(tracker.DisplayName, GitIssuesService.Clean(tracker.Location, MaximumTitle), row, detail.Body),
             request.Worktree, request.SessionId, "issue", model).ConfigureAwait(false);
         return new(started.Problem is null ? "ok" : "refused", started.SessionId, started.Problem, started.Reason);
+    }
+
+    /// <summary>
+    /// Reads an image that the description or a comment of an item shows, through its tracker and with its sign-in: the
+    /// page has no credentials and draws only images it is given. The tracker reads only addresses of its own.
+    /// </summary>
+    [NeoRpcMethod("image", TimeoutMilliseconds = 60_000)]
+    public async Task<IssueImageResponse> ImageAsync(IssueImageRequest request, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        if (Refuse(request.ExpectedEpoch) is { } refused) return new(refused);
+        if (!Name(request.Service) || Https(request.Address) is not { } address) return new("invalid_request");
+        if (await ResolveAsync(request.ProjectId, cancellationToken).ConfigureAwait(false) is not { } project) return new("not_found");
+        if ((await TrackersAsync(project, cancellationToken).ConfigureAwait(false)).FirstOrDefault(candidate => candidate.Service == request.Service) is not { } tracker)
+            return new("no_tracker");
+        var key = string.Join('\u001E', project.Id, request.Service, address);
+        if (!Images.TryGet(key, out var image))
+        {
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            timeout.CancelAfter(ListTimeout);
+            try
+            {
+                image = await tracker.ReadImageAsync(new Uri(address), timeout.Token).ConfigureAwait(false);
+            }
+            catch (Exception exception) when (exception is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
+            {
+                LogFailure(tracker, "reading an image failed.", exception);
+                return new("failed");
+            }
+
+            // A tracker of a plugin is trusted no more than its bytes: the page draws only the images it knows.
+            if (image is not null && (image.Bytes.Length > TrackedImage.MaximumBytes || TrackedImage.Detect(image.Bytes) != image.MediaType)) image = null;
+            Images.Set(key, image);
+        }
+
+        return image is null ? new("not_found") : new("ok", image.MediaType, Convert.ToBase64String(image.Bytes));
     }
 
     /// <summary>Opens the page of an item, or of a tracker, in the browser of the system. Only an https address is opened.</summary>
@@ -538,6 +578,22 @@ internal sealed record IssueStartRequest(string ExpectedEpoch, string ProjectId,
 /// has a text for it), <c>unavailable</c>, <c>stale_epoch</c>, <c>invalid_request</c>, <c>not_found</c> or <c>no_tracker</c>.
 /// </summary>
 internal sealed record IssueStartResponse(string Status, string? SessionId = null, string? Message = null, string? Reason = null);
+
+/// <summary>Asks for an image an item of a tracker shows.</summary>
+/// <param name="ExpectedEpoch">The host epoch.</param>
+/// <param name="ProjectId">The project.</param>
+/// <param name="Service">The tracker of the item.</param>
+/// <param name="Address">The https address of the image, as the text of the item writes it.</param>
+internal sealed record IssueImageRequest(string ExpectedEpoch, string ProjectId, string Service, string Address);
+
+/// <summary>
+/// An image. Status is <c>ok</c>, <c>not_found</c> (not an image the tracker reads, or it could not), <c>failed</c>,
+/// <c>invalid_request</c>, <c>no_tracker</c>, <c>unavailable</c> or <c>stale_epoch</c>.
+/// </summary>
+/// <param name="Status">How the reading ended.</param>
+/// <param name="MediaType">The type of the image: <c>image/png</c>, <c>image/jpeg</c>, <c>image/gif</c> or <c>image/webp</c>.</param>
+/// <param name="Data">The image, as base64.</param>
+internal sealed record IssueImageResponse(string Status, string? MediaType = null, string? Data = null);
 
 /// <summary>Asks to open an https address in the browser of the system.</summary>
 internal sealed record IssueLinkRequest(string ExpectedEpoch, string Address);

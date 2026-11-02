@@ -486,6 +486,39 @@ public sealed class IssuesRpcTests
     }
 
     [TestMethod]
+    public async Task AnImage_IsReadThroughItsTracker_KeptHalfAnHour_AndOneThatIsNotAnImageIsNotGiven()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        byte[] png = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 7];
+        fixture.Tracker.Images = address => address.AbsolutePath.EndsWith("/fake", StringComparison.Ordinal) ? new TrackedImage("image/png", "<svg/>"u8.ToArray())
+            : address.AbsolutePath.EndsWith("/gone", StringComparison.Ordinal) ? null : new TrackedImage("image/png", png);
+        var start = fixture.Clock.Now;
+        Task<IssueImageResponse> Image(string address) => fixture.Rpc.ImageAsync(new(Epoch, fixture.Project.Id, "github", address), default);
+
+        var image = await Image("https://example.com/a.png");
+        Assert.AreEqual(("ok", "image/png", Convert.ToBase64String(png)), (image.Status, image.MediaType, image.Data));
+        await Image("https://example.com/a.png");
+        Assert.HasCount(1, fixture.Tracker.ImageAsks, "An image is read once.");
+
+        Assert.AreEqual("not_found", (await Image("https://example.com/fake")).Status, "Bytes that are not the image the tracker says are not given.");
+        Assert.AreEqual("not_found", (await Image("https://example.com/gone")).Status);
+        await Image("https://example.com/gone");
+        Assert.HasCount(3, fixture.Tracker.ImageAsks, "An image that could not be read is not asked again at once.");
+        fixture.Clock.Now = start.AddMinutes(2);
+        await Image("https://example.com/gone");
+        await Image("https://example.com/a.png");
+        Assert.HasCount(4, fixture.Tracker.ImageAsks, "It is asked again a minute later; the image read is still kept.");
+        fixture.Clock.Now = start.AddMinutes(31);
+        await Image("https://example.com/a.png");
+        Assert.HasCount(5, fixture.Tracker.ImageAsks, "Half an hour later the image is read again.");
+
+        Assert.AreEqual("invalid_request", (await Image("http://example.com/a.png")).Status, "Only an https address is asked.");
+        Assert.AreEqual("no_tracker", (await fixture.Rpc.ImageAsync(new(Epoch, fixture.Project.Id, "gitlab", "https://example.com/a.png"), default)).Status);
+        Assert.AreEqual("stale_epoch", (await fixture.Rpc.ImageAsync(new("other", fixture.Project.Id, "github", "https://example.com/a.png"), default)).Status);
+        Assert.HasCount(5, fixture.Tracker.ImageAsks);
+    }
+
+    [TestMethod]
     public async Task ThePullRequests_HaveViewsOfTheirOwn_AndTheirListingPassesOnTheirFilters()
     {
         await using var fixture = await Fixture.CreateAsync();
@@ -658,6 +691,14 @@ public sealed class IssuesRpcTests
 
         public int Listings { get; private set; }
         public int Reads { get; private set; }
+        public List<Uri> ImageAsks { get; } = [];
+        public Func<Uri, TrackedImage?> Images { get; set; } = static _ => null;
+
+        public ValueTask<TrackedImage?> ReadImageAsync(Uri address, CancellationToken cancellationToken)
+        {
+            ImageAsks.Add(address);
+            return ValueTask.FromResult(Images(address));
+        }
 
         public ValueTask<TrackedItemPage> ListAsync(TrackedItemQuery query, CancellationToken cancellationToken)
         {
