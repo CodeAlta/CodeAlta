@@ -71,6 +71,37 @@ public sealed class MobileServerTests
     }
 
     [TestMethod]
+    public async Task APageOfATimeline_IsReadFromItsEnd_AndCompressed()
+    {
+        await using var fixture = await Fixture.StartAsync();
+        Assert.AreEqual(HttpStatusCode.OK, (await fixture.PostAsync("/api/login", new JsonObject { ["token"] = fixture.Token })).StatusCode);
+        fixture.Alta.Answer("session status a", FakeAlta.Status("a", "p1", "personal")).Answer("session tail a", (_, _) => FakeAlta.Transcript(0,
+            new JsonObject { ["type"] = "alta.session.event", ["sequenceNumber"] = 41, ["kind"] = "user.message", ["content"] = new JsonArray(new JsonObject { ["text"] = "Hello" }) },
+            new JsonObject { ["type"] = "alta.session.tail.summary", ["truncated"] = true }));
+        using var read = new HttpRequestMessage(HttpMethod.Get, "/api/sessions/a/events/latest?before=42") { Headers = { { "Accept-Encoding", "gzip" } } };
+
+        using var compressed = await fixture.Client.SendAsync(read);
+
+        Assert.AreEqual(HttpStatusCode.OK, compressed.StatusCode);
+        CollectionAssert.Contains(compressed.Content.Headers.ContentEncoding.ToArray(), "gzip", "A phone may be far from this computer.");
+        await using var unzipped = new System.IO.Compression.GZipStream(await compressed.Content.ReadAsStreamAsync(), System.IO.Compression.CompressionMode.Decompress);
+        var page = (JsonObject)JsonNode.Parse(unzipped)!;
+        Assert.AreEqual((41L, true), ((long)page["before"]!, (bool)page["hasMore"]!));
+        CollectionAssert.IsSubsetOf(new[] { "--before", "42" }, fixture.Alta.CallsOf("session tail")[0]);
+
+        var reads = fixture.Alta.CallsOf("session tail").Length;
+        using var latest = await fixture.Client.GetAsync("/api/sessions/a/events/latest");
+        Assert.AreEqual(HttpStatusCode.OK, latest.StatusCode);
+        Assert.IsFalse(fixture.Alta.CallsOf("session tail")[reads].Contains("--before"), "The latest events have no number to start from.");
+
+        // The live stream is written as it comes: it is not compressed.
+        using var stream = new HttpRequestMessage(HttpMethod.Get, "/api/events") { Headers = { { "Accept-Encoding", "gzip" } } };
+        using var live = await fixture.Client.SendAsync(stream, HttpCompletionOption.ResponseHeadersRead);
+        Assert.AreEqual(HttpStatusCode.OK, live.StatusCode);
+        Assert.IsEmpty(live.Content.Headers.ContentEncoding);
+    }
+
+    [TestMethod]
     public async Task ARequestThatNamesAnotherHost_IsRefused()
     {
         await using var fixture = await Fixture.StartAsync();

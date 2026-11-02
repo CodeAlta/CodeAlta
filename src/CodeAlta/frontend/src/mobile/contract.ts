@@ -164,6 +164,12 @@ export type TimelineEvent = Readonly<{
 /** The events of a session after a sequence number. */
 export type EventPage = Readonly<{ since: number; events: readonly TimelineEvent[]; error: string | null }>;
 
+/**
+ * A page of a session's timeline from its end (`GET /api/sessions/<id>/events/latest`): `since` is the last sequence number
+ * read, `before` the first one of the page, which the next page asks for, and `hasMore` says whether events come before it.
+ */
+export type LatestEventPage = EventPage & Readonly<{ before: number | null; hasMore: boolean }>;
+
 /** A project a session can be started in. */
 export type Project = Readonly<{ id: string; path: string; name: string; /** The space a new session of the project goes to. */ space?: Space | null }>;
 

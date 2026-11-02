@@ -19,6 +19,15 @@ internal sealed class MobileSessions(IPluginAltaService alta, IPluginSpaceServic
 
     private const int EventsPerRead = 400;
     private const int MaximumReads = 40;
+
+    /// <summary>The prompts and answers a page of the latest events aims for: many events of a long turn fold into one line.</summary>
+    internal const int MessagesPerPage = 20;
+
+    /// <summary>The most reads of a page of the latest events, so that a turn with few messages stays a page.</summary>
+    internal const int MaximumPageReads = 5;
+
+    private const string IncludedEvents = "user,assistant,reasoning,tool,host,workflow";
+    private const string EventFields = "sequenceNumber,timestamp,kind,content,metadata";
     private const int MaximumSummary = 300;
     private const int MaximumAncestors = 8;
     private static readonly TimeSpan NamesLife = TimeSpan.FromSeconds(30);
@@ -164,8 +173,8 @@ internal sealed class MobileSessions(IPluginAltaService alta, IPluginSpaceServic
         for (var read = 0; read < MaximumReads; read++)
         {
             var result = await MobileAlta.RunAsync(alta, ["session", "events", sessionId, "--since", since.ToString(CultureInfo.InvariantCulture),
-                "--limit", EventsPerRead.ToString(CultureInfo.InvariantCulture), "--no-tool-output", "--tool-images", "--include", "user,assistant,reasoning,tool,host,workflow",
-                "--fields", "sequenceNumber,timestamp,kind,content,metadata"], null, cancellationToken).ConfigureAwait(false);
+                "--limit", EventsPerRead.ToString(CultureInfo.InvariantCulture), "--no-tool-output", "--tool-images", "--include", IncludedEvents,
+                "--fields", EventFields], null, cancellationToken).ConfigureAwait(false);
             if (result.Error is not null)
             {
                 error = result.Error;
@@ -176,11 +185,9 @@ internal sealed class MobileSessions(IPluginAltaService alta, IPluginSpaceServic
             foreach (var record in result.OfType("alta.session.event"))
             {
                 count++;
-                var sequence = record["sequenceNumber"] is JsonValue value && value.TryGetValue<long>(out var number) ? number : 0;
+                var sequence = SequenceOf(record);
                 if (sequence > since) since = sequence;
-                var kind = MobileAlta.Text(record, "kind") ?? "";
-                if (kind is "host.usageupdated" or "host.modelchanged") continue;
-                events.Add(MobileTimeline.Entry(record, sequence, kind));
+                if (EntryOf(record) is { } entry) events.Add(entry);
             }
 
             // A read that filled its page, or whose output the host cut, says there may be more after the last one read.
@@ -189,6 +196,93 @@ internal sealed class MobileSessions(IPluginAltaService alta, IPluginSpaceServic
         }
 
         return new JsonObject { ["since"] = since, ["events"] = events, ["error"] = error };
+    }
+
+    /// <summary>
+    /// A page of the timeline of a session, from its end: the latest events, or those before a sequence number, as
+    /// <see cref="EventsAsync"/> gives them. It holds about <see cref="MessagesPerPage"/> messages, and starts on a prompt
+    /// when it holds one, so that no page cuts a turn in two unless the turn is longer than a page.
+    /// </summary>
+    /// <param name="sessionId">The session.</param>
+    /// <param name="before">The first sequence number the phone holds; null for the latest events.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>
+    /// The events; <c>since</c>, the last sequence number read; <c>before</c>, the first one of the page, which the next page
+    /// asks for; and <c>hasMore</c>, whether events come before it. Null when the phone does not see the session.
+    /// </returns>
+    internal async Task<JsonObject?> LatestEventsAsync(string sessionId, long? before, CancellationToken cancellationToken)
+    {
+        if (await FindAsync(sessionId, cancellationToken).ConfigureAwait(false) is null) return null;
+        var records = new List<JsonObject>();
+        var messages = 0;
+        var hasMore = false;
+        string? error = null;
+        for (var read = 0; read < MaximumPageReads && messages < MessagesPerPage; read++)
+        {
+            var result = await ReadTailAsync(sessionId, records.Count > 0 ? SequenceOf(records[0]) : before, cancellationToken).ConfigureAwait(false);
+            if (result.Error is not null)
+            {
+                // What this read would have given is still to read: the phone asks again from the same place.
+                error = result.Error;
+                hasMore = before is not null || records.Count > 0;
+                break;
+            }
+
+            var page = result.OfType("alta.session.event").ToArray();
+            records.InsertRange(0, page);
+            messages += page.Count(IsMessage);
+            hasMore = page.Length > 0 && result.OfType("alta.session.tail.summary").Any(static summary => MobileAlta.Flag(summary, "truncated"));
+            if (!hasMore) break;
+        }
+
+        // Back to the messages of a page, then on to the first prompt: what comes before it comes with the next page, whole.
+        var since = records.Count > 0 ? SequenceOf(records[^1]) : 0;
+        var start = 0;
+        for (var (index, counted) = (records.Count - 1, 0); index >= 0; index--)
+        {
+            if (!IsMessage(records[index]) || ++counted < MessagesPerPage) continue;
+            start = index;
+            break;
+        }
+
+        var prompt = records.FindIndex(start, static record => MobileAlta.Text(record, "kind") == "user.message");
+        if (prompt >= 0) start = prompt;
+        if (start > 0)
+        {
+            records.RemoveRange(0, start);
+            hasMore = true;
+        }
+
+        return new JsonObject
+        {
+            ["since"] = since, ["before"] = records.Count > 0 ? SequenceOf(records[0]) : before, ["hasMore"] = hasMore,
+            ["events"] = new JsonArray([.. records.Select(EntryOf).OfType<JsonNode>()]), ["error"] = error,
+        };
+    }
+
+    // One read back from a sequence number. The host cuts what is too long at its end, here the latest events of the read, so
+    // a read it cut is made again with fewer events: nothing is missed between two pages.
+    private async Task<MobileAltaResult> ReadTailAsync(string sessionId, long? before, CancellationToken cancellationToken)
+    {
+        for (var last = EventsPerRead; ; last /= 2)
+        {
+            List<string> args = ["session", "tail", sessionId, "--last", last.ToString(CultureInfo.InvariantCulture), "--no-tool-output", "--tool-images", "--include", IncludedEvents, "--fields", EventFields];
+            if (before is { } edge) args.AddRange(["--before", edge.ToString(CultureInfo.InvariantCulture)]);
+            var result = await MobileAlta.RunAsync(alta, args, null, cancellationToken).ConfigureAwait(false);
+            if (!result.Truncated || result.Error is not null) return result;
+            if (last == 1) return result with { Error = "An event of this session is too long to read." };
+        }
+    }
+
+    private static bool IsMessage(JsonObject record) => MobileAlta.Text(record, "kind") is "user.message" or "assistant.message";
+
+    private static long SequenceOf(JsonObject record) => record["sequenceNumber"] is JsonValue value && value.TryGetValue<long>(out var number) ? number : 0;
+
+    // An event as the phone gets it; null for what only counts tokens.
+    private static JsonObject? EntryOf(JsonObject record)
+    {
+        var kind = MobileAlta.Text(record, "kind") ?? "";
+        return kind is "host.usageupdated" or "host.modelchanged" ? null : MobileTimeline.Entry(record, SequenceOf(record), kind);
     }
 
     /// <summary>

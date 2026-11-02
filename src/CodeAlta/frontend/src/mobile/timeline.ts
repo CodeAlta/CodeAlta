@@ -11,7 +11,7 @@ export type MessageAttachment = Readonly<{ title: string; mediaType: string; id?
  */
 export type MessageBlock = Readonly<{
   kind: "message"; key: string; role: "user" | "assistant" | "error"; text: string; attachments?: readonly MessageAttachment[];
-  seq?: number; host?: HostPrompt; images?: readonly EventImage[];
+  seq?: number; at?: string | null; host?: HostPrompt; images?: readonly EventImage[];
 }>;
 /** A thought of the agent, inside an activity. */
 export type ThoughtRow = Readonly<{ type: "thought"; key: string; text: string; at: string | null }>;
@@ -37,6 +37,12 @@ export function appendEvents(held: readonly TimelineEvent[], read: readonly Time
   const last = held.at(-1)?.seq ?? -Infinity;
   const added = read.filter(event => event.seq > last).sort((a, b) => a.seq - b.seq);
   return added.length ? [...held, ...added] : [...held];
+}
+
+/** Adds the events of an older page before the ones already held, without the ones held already. */
+export function prependEvents(held: readonly TimelineEvent[], read: readonly TimelineEvent[]): TimelineEvent[] {
+  const first = held[0]?.seq ?? Infinity;
+  return [...read.filter(event => event.seq < first).sort((a, b) => a.seq - b.seq), ...held];
 }
 
 /**
@@ -71,7 +77,7 @@ export function foldEvents(events: readonly TimelineEvent[]): TimelineBlock[] {
       const host = read?.kind === "workflow" ? { ...read, run: runs.find(item => item.runId === read.result.runId) ?? null } : read;
       const images = role === "assistant" ? (event.images ?? []).filter(image => typeof image?.id === "string") : [];
       if (text.trim() || files.length || role === "error" || host)
-        blocks.push({ kind: "message", key: `m${event.seq}`, role, text, seq: event.seq, ...(files.length ? { attachments: files } : {}), ...(host ? { host } : {}), ...(images.length ? { images } : {}) });
+        blocks.push({ kind: "message", key: `m${event.seq}`, role, text, seq: event.seq, at: event.at, ...(files.length ? { attachments: files } : {}), ...(host ? { host } : {}), ...(images.length ? { images } : {}) });
       continue;
     }
     if (kind.startsWith("workflow.")) {
@@ -197,5 +203,49 @@ export function stillPending(pending: readonly PendingPrompt[], events: readonly
 
 /** The message a pending prompt shows as, after the blocks of the timeline. */
 export const pendingBlock = (prompt: PendingPrompt): MessageBlock => ({
-  kind: "message", key: prompt.key, role: "user", text: prompt.text, ...(prompt.attachments?.length ? { attachments: prompt.attachments } : {}),
+  kind: "message", key: prompt.key, role: "user", text: prompt.text, at: new Date(prompt.sentAt).toISOString(), ...(prompt.attachments?.length ? { attachments: prompt.attachments } : {}),
 });
+
+/** The line that says which day the blocks after it are of. */
+export type DayBlock = Readonly<{ kind: "day"; key: string; label: string }>;
+
+/** The time of a block: when its message was written, or when its work started; null when its events do not say. */
+export function blockTime(block: TimelineBlock): string | null {
+  if (block.kind === "message") return block.at ?? null;
+  if (block.kind === "workflow") return block.run.startedAt ?? null;
+  return block.rows[0]?.at ?? null;
+}
+
+/** "14:32" in the time of the phone; null without a valid time. */
+export function clockTime(iso: string | null | undefined): string | null {
+  const at = Date.parse(iso ?? "");
+  return Number.isFinite(at) ? new Date(at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : null;
+}
+
+/** "Today", "Yesterday", or the day in the language of the phone, with its year when it is not this one. */
+export function dayLabel(day: Date, now: Date): string {
+  const midnight = (date: Date) => new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
+  const today = midnight(now);
+  if (midnight(day) === today) return "Today";
+  if (midnight(day) === midnight(new Date(today - 12 * 3600_000))) return "Yesterday";
+  return day.toLocaleDateString([], { weekday: "short", day: "numeric", month: "short", year: day.getFullYear() === now.getFullYear() ? undefined : "numeric" });
+}
+
+/**
+ * The blocks of the timeline, with the line of a day before the first block of each day of the phone. A block whose time
+ * is not known stays with the blocks around it, and a day has one line: blocks are not always in the order of their times.
+ */
+export function withDays<T extends TimelineBlock>(blocks: readonly T[], now: Date): (T | DayBlock)[] {
+  const shown = new Set<string>();
+  const result: (T | DayBlock)[] = [];
+  for (const block of blocks) {
+    const at = Date.parse(blockTime(block) ?? "");
+    if (Number.isFinite(at)) {
+      const day = new Date(at);
+      const key = `day-${day.getFullYear()}-${day.getMonth() + 1}-${day.getDate()}`;
+      if (!shown.has(key)) { shown.add(key); result.push({ kind: "day", key, label: dayLabel(day, now) }); }
+    }
+    result.push(block);
+  }
+  return result;
+}

@@ -186,6 +186,94 @@ public sealed class MobileSessionsTests
         CollectionAssert.IsSubsetOf(new[] { "--no-tool-output", "--since", "0" }, read);
     }
 
+    // A journal as `alta session tail` reads it: the last events before a number, in order, and whether more come before them.
+    private static FakeAlta TailOf(params JsonObject[] journal)
+        => new FakeAlta().Answer("session status a", FakeAlta.Status("a", "p1", "personal")).Answer("session tail a", (args, _) =>
+        {
+            var last = int.Parse(args[args.ToList().IndexOf("--last") + 1], System.Globalization.CultureInfo.InvariantCulture);
+            var at = args.ToList().IndexOf("--before");
+            var before = at < 0 ? int.MaxValue : int.Parse(args[at + 1], System.Globalization.CultureInfo.InvariantCulture);
+            var held = journal.Where(record => (int)record["sequenceNumber"]! < before).ToArray();
+            return FakeAlta.Transcript(0, [.. held.TakeLast(last), new JsonObject { ["type"] = "alta.session.tail.summary", ["truncated"] = held.Length > last }]);
+        });
+
+    private static long[] Numbers(JsonObject page) => [.. ((JsonArray)page["events"]!).Select(static item => (long)item!["seq"]!)];
+
+    [TestMethod]
+    public async Task LatestEvents_GiveAPageOfMessagesFromTheEnd_StartingOnAPrompt()
+    {
+        // Four turns of six messages each.
+        var journal = Enumerable.Range(0, 24).Select(index => Event(index + 1, index % 6 == 0 ? "user.message" : "assistant.message", "Line " + index)).ToArray();
+        var alta = TailOf(journal);
+        var sessions = new MobileSessions(alta, new FakeSpaces(), new MobileLive());
+
+        var page = await sessions.LatestEventsAsync("a", null, default);
+
+        Assert.IsNotNull(page);
+        var numbers = Numbers(page);
+        Assert.AreEqual(7L, numbers[0], "Twenty messages reach into the first turn: the page starts on the next prompt, so that no turn is cut.");
+        Assert.AreEqual((24L, 7L, true), ((long)page["since"]!, (long)page["before"]!, (bool)page["hasMore"]!));
+        CollectionAssert.IsSubsetOf(new[] { "--no-tool-output", "--tool-images", "user,assistant,reasoning,tool,host,workflow" }, alta.CallsOf("session tail").First());
+        Assert.IsFalse(alta.CallsOf("session tail").First().Contains("--before"), "The latest events have no number to start from.");
+
+        var older = await sessions.LatestEventsAsync("a", 7, default);
+
+        Assert.IsNotNull(older);
+        CollectionAssert.AreEqual(new long[] { 1, 2, 3, 4, 5, 6 }, Numbers(older));
+        Assert.AreEqual((1L, false), ((long)older["before"]!, (bool)older["hasMore"]!), "No event is left before the first one.");
+    }
+
+    [TestMethod]
+    public async Task LatestEvents_OfALongTurn_StopAfterAFewReads_AndLeaveOutWhatOnlyCountsTokens()
+    {
+        // A turn longer than a page of reads, without a prompt: what was read is given, and the next page goes on from it.
+        var count = MobileSessions.MaximumPageReads * 400 + 3;
+        var journal = Enumerable.Range(1, count).Select(index => Event(index, index % 2 == 0 ? "host.usageupdated" : "activity.tool.started", "", "tool-" + index)).ToArray();
+        var alta = TailOf(journal);
+        var sessions = new MobileSessions(alta, new FakeSpaces(), new MobileLive());
+
+        var page = await sessions.LatestEventsAsync("a", null, default);
+
+        Assert.IsNotNull(page);
+        Assert.AreEqual(MobileSessions.MaximumPageReads, alta.CallsOf("session tail").Length);
+        Assert.AreEqual((4L, true, (long)count), ((long)page["before"]!, (bool)page["hasMore"]!, (long)page["since"]!), "The number of what is left out still counts.");
+        Assert.IsTrue(((JsonArray)page["events"]!).All(static item => (string?)item!["kind"] == "activity.tool.started"));
+    }
+
+    [TestMethod]
+    public async Task LatestEvents_ReadAgainWithFewerEvents_WhatTheHostCut()
+    {
+        var journal = Enumerable.Range(1, 3).Select(index => Event(index, "assistant.message", "Line " + index)).ToArray();
+        var alta = TailOf(journal);
+        var cuts = 2;
+        alta.Cut = args => args[1] == "tail" && cuts-- > 0;
+        var sessions = new MobileSessions(alta, new FakeSpaces(), new MobileLive());
+
+        var page = await sessions.LatestEventsAsync("a", null, default);
+
+        Assert.IsNotNull(page);
+        CollectionAssert.AreEqual(new long[] { 1, 2, 3 }, Numbers(page), "The latest events, which the host cuts first, are not lost.");
+        CollectionAssert.AreEqual(new[] { "400", "200", "100" }, alta.CallsOf("session tail").Select(static args => args[args.ToList().IndexOf("--last") + 1]).ToArray());
+    }
+
+    [TestMethod]
+    public async Task LatestEvents_ThatFail_SayItAndCanBeAskedAgain()
+    {
+        var alta = new FakeAlta()
+            .Answer("session status a", FakeAlta.Status("a", "p1", "personal"))
+            .Answer("session tail a", (_, _) => FakeAlta.Transcript(1, new JsonObject { ["type"] = "alta.error", ["message"] = "The journal cannot be read." }));
+        var sessions = new MobileSessions(alta, new FakeSpaces(), new MobileLive());
+
+        var older = await sessions.LatestEventsAsync("a", 50, default);
+
+        Assert.IsNotNull(older);
+        Assert.AreEqual(("The journal cannot be read.", 50L, true), ((string?)older["error"], (long)older["before"]!, (bool)older["hasMore"]!));
+        var latest = await sessions.LatestEventsAsync("a", null, default);
+        Assert.IsNotNull(latest);
+        Assert.AreEqual(("The journal cannot be read.", false), ((string?)latest["error"], (bool)latest["hasMore"]!));
+        Assert.IsNull(await sessions.LatestEventsAsync("theirs", null, default), "A session the phone does not see is not read.");
+    }
+
     [TestMethod]
     public async Task Create_PutsTheSessionInASpaceOfThePluginThatHasTheProject()
     {

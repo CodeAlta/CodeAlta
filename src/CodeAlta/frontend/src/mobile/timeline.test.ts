@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { TimelineEvent } from "./contract";
-import { activityFacts, appendEvents, blockVersion, foldEvents, liveBlock, pendingGrace, planTimeline, stillPending, type ActivityBlock, type PendingPrompt } from "./timeline";
+import {
+  activityFacts, appendEvents, blockTime, blockVersion, clockTime, dayLabel, foldEvents, liveBlock, pendingBlock, pendingGrace, planTimeline, prependEvents, stillPending, withDays,
+  type ActivityBlock, type DayBlock, type MessageBlock, type PendingPrompt, type TimelineBlock,
+} from "./timeline";
 
 let seq = 0;
 const at = (second: number) => new Date(Date.UTC(2026, 9, 24, 12, 0, second)).toISOString();
@@ -25,6 +28,56 @@ test("prompts, answers and errors stand alone; the work between them is one acti
   const blocks = foldEvents(events);
   assert.deepEqual(blocks.map(b => b.kind === "message" ? `${b.role}:${b.text}` : b.kind === "workflow" ? "workflow" : `activity:${b.rows.map(r => r.type === "tool" ? `${r.title}/${r.phase}` : "thought").join(",")}`),
     ["user:Fix it", "activity:thought,read_file/completed,thought,apply_patch/started", "assistant:Done.", "error:Rate limited"]);
+});
+
+test("an older page goes before the events held, without the ones held already, and folds with them", () => {
+  const message = (number: number, kind = "assistant.message", text: string | null = `m${number}`, activityId: string | null = null): TimelineEvent =>
+    ({ seq: number, at: at(number), kind, text, activityId });
+  const held = [message(3, "activity.tool.completed", "read_file", "c1"), message(4)];
+  const merged = prependEvents(held, [message(2, "activity.tool.started", "read_file", "c1"), message(3, "activity.tool.completed", "read_file", "c1"), message(1, "user.message")]);
+  assert.deepEqual(merged.map(event => event.seq), [1, 2, 3, 4]);
+  assert.deepEqual(prependEvents([], [message(1)]).map(event => event.seq), [1]);
+  // A page that started inside an activity: the same call, one row, once the older page is there.
+  const [, activity] = foldEvents(merged);
+  assert.deepEqual((activity as ActivityBlock).rows.map(row => row.type === "tool" ? [row.key, row.phase] : null), [["cc1", "completed"]]);
+});
+
+test("a message keeps its time, and a block says when it started", () => {
+  const blocks = foldEvents([
+    { seq: 1, at: at(1), kind: "user.message", text: "Go", activityId: null },
+    { seq: 2, at: at(2), kind: "assistant.reasoning", text: "Thinking", activityId: null },
+    { seq: 3, at: null, kind: "assistant.message", text: "No time", activityId: null },
+  ]);
+  assert.deepEqual(blocks.map(blockTime), [at(1), at(2), null]);
+  assert.equal(blockTime(pendingBlock({ key: "p1", text: "x", mode: "send", sentAt: Date.UTC(2026, 9, 24, 12), after: 0 })), new Date(Date.UTC(2026, 9, 24, 12)).toISOString());
+  assert.equal(clockTime(null), null);
+  assert.equal(clockTime("not a date"), null);
+  assert.match(clockTime(at(1))!, /\d{1,2}.\d{2}/u);
+});
+
+test("a day is Today, Yesterday, or its date, with its year when it is not this one", () => {
+  const now = new Date(2026, 10, 2, 0, 30);
+  assert.equal(dayLabel(new Date(2026, 10, 2, 23, 59), now), "Today");
+  assert.equal(dayLabel(new Date(2026, 10, 1, 0, 0), now), "Yesterday");
+  const earlier = dayLabel(new Date(2026, 9, 26, 12), now);
+  assert.ok(!/Today|Yesterday|2026/u.test(earlier), earlier);
+  assert.match(earlier, /26/u);
+  assert.match(dayLabel(new Date(2025, 11, 31, 12), now), /2025/u);
+  // The day a clock change makes 23 hours long is still one day.
+  assert.equal(dayLabel(new Date(2026, 2, 28, 12), new Date(2026, 2, 29, 23, 59)), "Yesterday");
+});
+
+test("the line of a day comes before the first block of that day, once, in the time of the phone", () => {
+  const message = (number: number, when: Date | null): MessageBlock =>
+    ({ kind: "message", key: `m${number}`, role: "user", text: "x", seq: number, at: when?.toISOString() ?? null });
+  const now = new Date(2026, 10, 2, 12);
+  const shown = (blocks: readonly MessageBlock[]) => withDays<TimelineBlock>(blocks, now).map(block => block.kind === "day" ? (block as DayBlock).label : block.key);
+  const before = new Date(2026, 10, 1, 23, 59), today = new Date(2026, 10, 2, 0, 1);
+  assert.deepEqual(shown([message(1, before), message(2, null), message(3, before), message(4, today), message(5, today)]),
+    ["Yesterday", "m1", "m2", "m3", "Today", "m4", "m5"]);
+  assert.deepEqual(shown([message(1, null), message(2, today)]), ["m1", "Today", "m2"], "A block without a time needs no line.");
+  assert.deepEqual(shown([message(1, today), message(2, before), message(3, today)]), ["Today", "m1", "Yesterday", "m2", "m3"], "A day has one line: its key is unique on the page.");
+  assert.deepEqual(shown([]), []);
 });
 
 test("a block keeps its key while events are added after it", () => {
