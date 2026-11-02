@@ -449,7 +449,9 @@ internal sealed partial class AzureDevOpsApi : GitHostApi
         if (await FilterClausesAsync(query, cancellationToken).ConfigureAwait(false) is not { } chosen) return [];
         var wiql = "SELECT [System.Id] FROM WorkItems WHERE [System.TeamProject] = @project" + chosen
             + filter switch { TrackedItemFilter.Open => $" AND [System.State] NOT IN ({Closed})", TrackedItemFilter.Closed => $" AND [System.State] IN ({Closed})", _ => string.Empty }
-            + (text is null ? string.Empty : " AND [System.Title] CONTAINS '" + text.Replace("'", "''", StringComparison.Ordinal) + "'")
+            + (text is null ? string.Empty : " AND ([System.Title] CONTAINS '" + text.Replace("'", "''", StringComparison.Ordinal) + "'"
+                // A number is also the id of a work item, however old.
+                + (int.TryParse(text.TrimStart('#'), NumberStyles.None, CultureInfo.InvariantCulture, out var number) ? FormattableString.Invariant($" OR [System.Id] = {number}") : string.Empty) + ")")
             + await OrderByAsync(query, cancellationToken).ConfigureAwait(false);
         var ids = new List<int>(limit);
         using (var response = await query.PostJsonAsync(FormattableString.Invariant($"{Project(repository)}/_apis/wit/wiql?$top={Math.Min(limit, 200)}&api-version={ApiVersion}"),

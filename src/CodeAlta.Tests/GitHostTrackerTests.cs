@@ -285,6 +285,28 @@ public sealed class GitHostTrackerTests
     }
 
     [TestMethod]
+    public async Task AzureDevOps_ANumber_FindsItsWorkItemOrPullRequest_HoweverOld()
+    {
+        var handler = new Handler(request => request.RequestUri!.AbsolutePath switch
+        {
+            "/org/proj/_apis/wit/wiql" => """{"workItems":[]}""",
+            _ => PullRequestAnswer(request),
+        });
+        var tracker = Tracker(handler, GitRepositoryReference.AzureDevOps("org", "proj", "app"));
+
+        await tracker.ListAsync(new(TrackedItemKind.Issue, TrackedItemFilter.All, "#31", 10), default);
+        StringAssert.Contains(System.Text.Json.JsonDocument.Parse(handler.Bodies[^1]).RootElement.GetProperty("query").GetString(), "AND ([System.Title] CONTAINS '#31' OR [System.Id] = 31)");
+        await tracker.ListAsync(new(TrackedItemKind.Issue, TrackedItemFilter.All, "cache", 10), default);
+        Assert.IsFalse(System.Text.Json.JsonDocument.Parse(handler.Bodies[^1]).RootElement.GetProperty("query").GetString()!.Contains("OR [System.Id]", StringComparison.Ordinal));
+
+        var found = await tracker.ListAsync(new(TrackedItemKind.PullRequest, TrackedItemFilter.Open, "2", 10), default);
+        Assert.AreEqual(("2", "proj/other"), (found.Items.Single().Id, found.Items.Single().Place), "A pull request is found by its number, past the most recent ones and in another repository.");
+        Assert.IsEmpty((await tracker.ListAsync(new(TrackedItemKind.PullRequest, TrackedItemFilter.Merged, "2", 10), default)).Items, "Only in the list it belongs to.");
+        Assert.AreEqual("3", (await tracker.ListAsync(new(TrackedItemKind.PullRequest, TrackedItemFilter.Open, "3", 10), default)).Items.Single().Id, "One the list holds is not read twice.");
+        Assert.IsFalse(handler.Requests.Any(static request => request.StartsWith("/org/_apis/git/pullrequests/3", StringComparison.Ordinal)));
+    }
+
+    [TestMethod]
     public async Task AzureDevOps_ReadsTheImagesOfItsAttachments_WithItsSignIn_AndNoOtherAddress()
     {
         byte[] png = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 1, 2, 3];

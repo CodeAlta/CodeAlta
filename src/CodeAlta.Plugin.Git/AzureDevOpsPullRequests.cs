@@ -170,11 +170,31 @@ internal sealed partial class AzureDevOpsApi
             query.Incomplete = FormattableString.Invariant($"Only the {MaximumScanned} most recent pull requests were searched: older ones are not listed, nor ordered.");
         }
 
+        // A number is the id of a pull request, unique in the organization: it is read, however old, when the list does not hold it.
+        if (text is not null && int.TryParse(text.TrimStart('#', '!'), NumberStyles.None, CultureInfo.InvariantCulture, out var number) && number > 0
+            && pulls.All(pull => pull.Id != number.ToString(CultureInfo.InvariantCulture)))
+        {
+            using var one = await GetAnswerAsync(query, FormattableString.Invariant($"{Organization(repository)}/_apis/git/pullrequests/{number}?api-version={ApiVersion}"), cancellationToken, report: false)
+                .ConfigureAwait(false);
+            if (one is not null && ReadPull(one.RootElement, repository, membership) is { } found && Listed(found, filter) && Keeps(found, one.RootElement, filters, membership, out var foundMatch))
+                pulls.Add(foundMatch is null ? found : found with { Match = foundMatch });
+        }
+
         var ordered = filters.GetValueOrDefault(TrackedFilters.Sort) == OldestFirst
             ? pulls.OrderBy(static item => item.CreatedAt ?? DateTimeOffset.MaxValue)
             : pulls.OrderByDescending(static item => item.UpdatedAt);
         return [.. ordered.Take(limit)];
     }
+
+    // Whether a pull request is of the list asked: open (drafts too), merged, closed without a merge, or all.
+    private static bool Listed(TrackedItem pull, TrackedItemFilter filter)
+        => filter switch
+        {
+            TrackedItemFilter.Open => pull.State is TrackedItemState.Open or TrackedItemState.Draft,
+            TrackedItemFilter.Merged => pull.State == TrackedItemState.Merged,
+            TrackedItemFilter.Closed => pull.State == TrackedItemState.Closed,
+            _ => true,
+        };
 
     // Where the pull requests of a scope are listed: the repository, its project, or the organization.
     private static string PullsRoot(GitRepositoryReference repository, string? scope)
