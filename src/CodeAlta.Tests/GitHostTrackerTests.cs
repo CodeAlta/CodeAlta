@@ -225,6 +225,65 @@ public sealed class GitHostTrackerTests
         Assert.HasCount(3, (await tracker.ListAsync(new(TrackedItemKind.PullRequest, TrackedItemFilter.Open, null, 50), default)).Items, "Without those filters the pull requests of the repository are listed.");
     }
 
+    [TestMethod]
+    public async Task AzureDevOps_PullRequests_PastTheMostThatAreRead_AreSaid_AndTheirTargetBranchesAreAllRead()
+    {
+        // Every page is full: 1,000 pull requests to main that wait for no one, and the one to release comes after the first page.
+        static string Page(int skip, int count, Func<int, string> target)
+            => """{"value":[""" + string.Join(',', Enumerable.Range(skip, count).Select(index => "{\"pullRequestId\":" + (index + 1).ToString(System.Globalization.CultureInfo.InvariantCulture)
+                + ",\"title\":\"Pull\",\"status\":\"active\",\"creationDate\":\"2026-10-01T10:00:00Z\",\"targetRefName\":\"refs/heads/" + target(index)
+                + "\",\"repository\":{\"id\":\"app-id\",\"name\":\"app\",\"project\":{\"id\":\"proj-id\",\"name\":\"proj\"}},\"reviewers\":[]}")) + "]}";
+        var handler = new Handler(request =>
+        {
+            var query = Uri.UnescapeDataString(request.RequestUri!.Query);
+            if (request.RequestUri.AbsolutePath != "/org/proj/_apis/git/pullrequests") return PullRequestAnswer(request);
+            var skip = int.Parse(query.Split("$skip=")[1].Split('&')[0], System.Globalization.CultureInfo.InvariantCulture);
+            return Page(skip, 200, index => index == 200 ? "release" : "main");
+        });
+        var tracker = Tracker(handler, GitRepositoryReference.AzureDevOps("org", "proj", "app"));
+
+        var page = await tracker.ListAsync(new(TrackedItemKind.PullRequest, TrackedItemFilter.Open, null, 50)
+        {
+            Filters = new Dictionary<string, string> { ["scope"] = "@project", ["reviewer"] = "@me_groups" },
+        }, default);
+        Assert.IsEmpty(page.Items);
+        StringAssert.Contains(page.Problem, "1000 most recent pull requests", "A listing that did not read them all says so.");
+
+        var filters = await tracker.GetFiltersAsync(new(new Dictionary<string, string> { ["scope"] = "@project" }, []) { Kind = TrackedItemKind.PullRequest }, default);
+        var branches = filters.Single(static filter => filter.Id == "target_branch");
+        CollectionAssert.AreEqual(new[] { "main", "release" }, branches.Values.Select(static value => value.Id).ToArray(), "The target branches past the first page are offered.");
+        StringAssert.Contains(branches.Problem, "1000 most recent open pull requests");
+    }
+
+    [TestMethod]
+    public async Task AzureDevOps_APullRequest_IsRead_WhenTheGroupsOfTheUserCannotBeReached()
+    {
+        var handler = new Handler(request => request.RequestUri!.Host.StartsWith("vssps.", StringComparison.Ordinal)
+            ? throw new HttpRequestException("no route to host") : PullRequestAnswer(request));
+        var tracker = Tracker(handler, GitRepositoryReference.AzureDevOps("org", "proj", "app"));
+
+        var detail = await tracker.ReadAsync(TrackedItemKind.PullRequest, "2", default);
+        Assert.AreEqual("New fields.", detail?.Body, "The groups only mark the reviews of the user.");
+        var filters = await tracker.GetFiltersAsync(new(TrackedFilters.None, []) { Kind = TrackedItemKind.PullRequest }, default);
+        StringAssert.Contains(filters.Single(static filter => filter.Id == "reviewer").Problem, "Identity (Read)", "The filters are still given, and say why the groups are missing.");
+        var page = await tracker.ListAsync(new(TrackedItemKind.PullRequest, TrackedItemFilter.Open, null, 50) { Filters = new Dictionary<string, string> { ["reviewer"] = "@me_groups" } }, default);
+        Assert.IsEmpty(page.Items);
+        StringAssert.Contains(page.Problem, "Identity (Read)", "A listing by the groups of the user says why it is empty.");
+    }
+
+    [TestMethod]
+    public async Task AzureDevOps_ARepositoryNamedByItsId_IsThatOfTheProject()
+    {
+        var tracker = Tracker(new Handler(PullRequestAnswer), GitRepositoryReference.AzureDevOps("org", "proj-id", "app-id"));
+
+        var page = await tracker.ListAsync(new(TrackedItemKind.PullRequest, TrackedItemFilter.Open, null, 50) { Filters = new Dictionary<string, string> { ["scope"] = "@organization" } }, default);
+
+        CollectionAssert.AreEqual(new[] { "1", "2", "3", "5" }, page.Items.Select(static item => item.Id).Order(StringComparer.Ordinal).ToArray());
+        CollectionAssert.AreEqual(new[] { "1", "3", "5" }, page.Items.Where(static item => item.Place is null).Select(static item => item.Id).Order(StringComparer.Ordinal).ToArray(),
+            "A remote that names the project and the repository by their ids is the repository of the pull requests that have them.");
+        Assert.AreEqual("proj/other", page.Items.Single(static item => item.Id == "2").Place);
+    }
+
     // An organization where the user is in Core directly and in Fields through Core, and the open pull requests of its project.
     private static string? PullRequestAnswer(HttpRequestMessage request)
     {

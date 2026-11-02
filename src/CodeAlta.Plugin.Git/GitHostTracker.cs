@@ -110,7 +110,7 @@ internal sealed class GitHostTracker : IIssueTracker
         {
             request = new GitIssueQuery(_client, _repository, await _authorization(cancellationToken).ConfigureAwait(false)) { Filters = query.Filters, Cache = Cache, Kind = query.Kind };
             var items = await Api.ListAsync(request, query.Kind, query.Filter, text, limit + 1, cancellationToken).ConfigureAwait(false);
-            var page = new TrackedItemPage(items.Count > limit ? [.. items.Take(limit)] : items) { More = items.Count > limit };
+            var page = new TrackedItemPage(items.Count > limit ? [.. items.Take(limit)] : items) { More = items.Count > limit, Problem = request.Incomplete };
             if (request.FailureStatusCode is not { } refused) return page;
             page = Refused(page, refused, request.Anonymous);
             LogRefusal($"listing the {Kind(query.Kind)}", refused, request, page.Problem);

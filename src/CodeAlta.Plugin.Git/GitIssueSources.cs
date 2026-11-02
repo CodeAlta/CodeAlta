@@ -45,6 +45,12 @@ internal sealed class GitIssueQuery(HttpClient client, GitRepositoryReference re
     /// <summary>Gets the values chosen for the filters of the tracker, by filter id; the provider applies those it knows.</summary>
     public IReadOnlyDictionary<string, string> Filters { get; init; } = CodeAlta.Plugins.Abstractions.TrackedFilters.None;
 
+    /// <summary>
+    /// Gets or sets why a listing is not whole although the provider answered what it was asked (it holds more than is
+    /// read, or a filter of the user could not be applied), in words for the user; null when it is whole.
+    /// </summary>
+    public string? Incomplete { get; set; }
+
     /// <summary>Gets the kind of items the filters are of: the issues, or the pull requests.</summary>
     public CodeAlta.Plugins.Abstractions.TrackedItemKind Kind { get; init; } = CodeAlta.Plugins.Abstractions.TrackedItemKind.Issue;
 

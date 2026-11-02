@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Text.Json;
 using CodeAlta.Plugins.Abstractions;
+using XenoAtom.Logging;
 
 namespace CodeAlta.Plugin.Git;
 
@@ -79,13 +80,18 @@ internal sealed partial class AzureDevOpsApi
         ("@rejected", "Rejected", TrackedVote.Rejected),
     ];
 
+    private const string NoGroups = "Your groups could not be read from Azure DevOps: sign in again with az login, or give the token Identity (Read).";
+
     /// <summary>The signed-in user and the groups the user is in, directly or through other groups, by identity id.</summary>
     private sealed record Membership(string Id, IReadOnlyDictionary<string, string> Groups);
 
+    /// <summary>The target branches of the open pull requests, and whether there were more pull requests than were read.</summary>
+    private sealed record TargetBranches(IReadOnlyList<string> Names, bool Capped);
+
     private static async Task<IReadOnlyList<TrackedFilterDescriptor>> PullRequestFiltersAsync(GitIssueQuery query, CancellationToken cancellationToken)
     {
-        var membership = await MembershipAsync(query, cancellationToken).ConfigureAwait(false);
-        var noGroups = membership is null ? "Your groups could not be read from Azure DevOps: sign in again with az login, or give the token Identity (Read)." : null;
+        var membership = await TryMembershipAsync(query, cancellationToken).ConfigureAwait(false);
+        var noGroups = membership is null ? NoGroups : null;
         var branches = await TargetBranchesAsync(query, cancellationToken).ConfigureAwait(false);
         return
         [
@@ -97,11 +103,12 @@ internal sealed partial class AzureDevOpsApi
             new(RequiredFilter, "Required", [new(RequiredReview, "Required"), new(OptionalReview, "Optional")]) { Problem = noGroups },
             new(VoteFilter, "Vote", [.. Votes.Select(static vote => new TrackedFilterValue(vote.Id, vote.Label))]) { Multiple = true, Problem = noGroups },
             new(AuthorFilter, "Author", [new(Me, "Me"), new(NotMe, "Not me")]) { Problem = noGroups },
-            new(TargetBranchFilter, "Target branch", branches is null ? [] : [.. branches.Select(static branch => new TrackedFilterValue(branch, branch))])
+            new(TargetBranchFilter, "Target branch", branches is null ? [] : [.. branches.Names.Select(static branch => new TrackedFilterValue(branch, branch))])
             {
                 DependsOn = [ScopeFilter],
                 Multiple = true,
-                Problem = branches is null ? "The pull requests could not be read for their target branches." : null,
+                Problem = branches is null ? "The pull requests could not be read for their target branches."
+                    : branches.Capped ? FormattableString.Invariant($"Only the target branches of the {MaximumScanned} most recent open pull requests are offered.") : null,
             },
             new(DraftFilter, "Drafts", [new(HideDrafts, "Hide drafts"), new(OnlyDrafts, "Only drafts")]),
             new(TrackedFilters.Sort, "Order", [new(OldestFirst, "Oldest first")]) { AllLabel = "Newest first" },
@@ -122,17 +129,24 @@ internal sealed partial class AzureDevOpsApi
         Membership? membership = null;
         if (reviews || filters.GetValueOrDefault(AuthorFilter) is { Length: > 0 })
         {
-            // A filter of the user that cannot be applied lists nothing rather than every pull request.
-            if ((membership = await MembershipAsync(query, cancellationToken).ConfigureAwait(false)) is null) return [];
+            // A filter of the user that cannot be applied lists nothing rather than every pull request, and says why.
+            if ((membership = await TryMembershipAsync(query, cancellationToken).ConfigureAwait(false)) is null)
+            {
+                query.Incomplete = NoGroups;
+                return [];
+            }
         }
 
         // Without a filter the service gives the most recent ones itself; words alone are looked for in the titles of the
         // last hundred, as before there were filters.
         var wanted = filtered ? MaximumScanned : text is not null ? Math.Max(limit, 100) : limit;
         var pulls = new List<TrackedItem>();
+        var whole = true;
         for (var skip = 0; skip < wanted; skip += ScanPage)
         {
             var top = Math.Min(ScanPage, wanted - skip);
+            // The service may have more than the most that are read: what is listed is then of the most recent ones only.
+            whole = skip + top < wanted;
             var url = FormattableString.Invariant($"{PullsRoot(repository, scope)}?searchCriteria.status={status}&$top={top}&$skip={skip}&api-version={ApiVersion}");
             using var document = await GetAnswerAsync(query, url, cancellationToken).ConfigureAwait(false);
             if (document is null) break;
@@ -144,7 +158,16 @@ internal sealed partial class AzureDevOpsApi
                 pulls.Add(match is null ? pull : pull with { Match = match });
             }
 
-            if (page.Length < top || !filtered && text is null) break;
+            if (page.Length < top || !filtered && text is null)
+            {
+                whole = true;
+                break;
+            }
+        }
+
+        if (filtered && !whole)
+        {
+            query.Incomplete = FormattableString.Invariant($"Only the {MaximumScanned} most recent pull requests were searched: older ones are not listed, nor ordered.");
         }
 
         var ordered = filters.GetValueOrDefault(TrackedFilters.Sort) == OldestFirst
@@ -229,16 +252,40 @@ internal sealed partial class AzureDevOpsApi
             : null).OfType<TrackedReviewer>()];
 
     // The target branches of the open pull requests of the scope chosen: a repository has many branches, few are targets.
-    private static Task<IReadOnlyList<string>?> TargetBranchesAsync(GitIssueQuery query, CancellationToken cancellationToken)
+    private static Task<TargetBranches?> TargetBranchesAsync(GitIssueQuery query, CancellationToken cancellationToken)
     {
-        var url = FormattableString.Invariant($"{PullsRoot(query.Repository, query.Filters.GetValueOrDefault(ScopeFilter))}?searchCriteria.status=active&$top={ScanPage}&api-version={ApiVersion}");
-        return CachedAsync<IReadOnlyList<string>>(query, url, cancellationToken, async () =>
+        var root = FormattableString.Invariant($"{PullsRoot(query.Repository, query.Filters.GetValueOrDefault(ScopeFilter))}?searchCriteria.status=active");
+        return CachedAsync(query, root + " targets", cancellationToken, async () =>
         {
-            using var document = await GetAnswerAsync(query, url, cancellationToken, report: false).ConfigureAwait(false);
-            if (document is null) return null;
-            return [.. Items(document.RootElement, "value").Select(static pull => Branch(Text(pull, "targetRefName"))).OfType<string>()
-                .Distinct(StringComparer.Ordinal).Order(StringComparer.OrdinalIgnoreCase)];
+            var names = new HashSet<string>(StringComparer.Ordinal);
+            for (var skip = 0; skip < MaximumScanned; skip += ScanPage)
+            {
+                using var document = await GetAnswerAsync(query, FormattableString.Invariant($"{root}&$top={ScanPage}&$skip={skip}&api-version={ApiVersion}"), cancellationToken, report: false)
+                    .ConfigureAwait(false);
+                if (document is null) return skip == 0 ? null : new TargetBranches([.. names.Order(StringComparer.OrdinalIgnoreCase)], true);
+                var page = Items(document.RootElement, "value").ToArray();
+                names.UnionWith(page.Select(static pull => Branch(Text(pull, "targetRefName"))).OfType<string>());
+                if (page.Length < ScanPage) return new TargetBranches([.. names.Order(StringComparer.OrdinalIgnoreCase)], false);
+            }
+
+            return new TargetBranches([.. names.Order(StringComparer.OrdinalIgnoreCase)], true);
         });
+    }
+
+    // The membership of the user, or null when the service could not be reached for it: who the user is only marks the
+    // reviews of the user, and a failure there does not fail what does not need it.
+    private static async Task<Membership?> TryMembershipAsync(GitIssueQuery query, CancellationToken cancellationToken)
+    {
+        try
+        {
+            return await MembershipAsync(query, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is HttpRequestException or JsonException
+            || exception is OperationCanceledException && !cancellationToken.IsCancellationRequested)
+        {
+            GitIssueLog.Log?.Warn(exception, "Azure DevOps: the groups of the user could not be read.");
+            return null;
+        }
     }
 
     // The signed-in user and every group the user is in; null when they cannot be read.
@@ -277,7 +324,7 @@ internal sealed partial class AzureDevOpsApi
         using var document = await GetAnswerAsync(query, FormattableString.Invariant($"{Organization(repository)}/_apis/git/pullrequests/{number}?api-version={ApiVersion}"), cancellationToken).ConfigureAwait(false);
         if (document is null) return null;
         // Who the user is only marks the reviews of the user: a pull request is read without it.
-        var membership = await MembershipAsync(query, cancellationToken).ConfigureAwait(false);
+        var membership = await TryMembershipAsync(query, cancellationToken).ConfigureAwait(false);
         if (ReadPull(document.RootElement, repository, membership) is not { } pull) return null;
         var comments = new List<TrackedComment>();
         var project = Text(document.RootElement, "repository", "project", "id") ?? repository.Project ?? repository.Name;
@@ -297,6 +344,9 @@ internal sealed partial class AzureDevOpsApi
         return new(pull, Text(document.RootElement, "description") ?? string.Empty, kept ? [.. comments.Take(GitHostTracker.MaximumComments)] : comments) { MoreComments = kept };
     }
 
+    private static bool Names(string written, string name, string? id)
+        => string.Equals(written, name, StringComparison.OrdinalIgnoreCase) || id is not null && string.Equals(written, id, StringComparison.OrdinalIgnoreCase);
+
     private static TrackedItem? ReadPull(JsonElement element, GitRepositoryReference repository, Membership? membership)
     {
         if (Number(element, "pullRequestId") is not { } id || Text(element, "title") is not { } title) return null;
@@ -304,8 +354,9 @@ internal sealed partial class AzureDevOpsApi
         // A pull request of a listing of the project or the organization can be of another repository: its own address and place.
         var project = Text(element, "repository", "project", "name") ?? repository.Project ?? repository.Name;
         var name = Text(element, "repository", "name") ?? repository.Name;
-        var elsewhere = !string.Equals(name, repository.Name, StringComparison.OrdinalIgnoreCase)
-            || !string.Equals(project, repository.Project ?? repository.Name, StringComparison.OrdinalIgnoreCase);
+        // A remote names its project and repository by their names or by their ids.
+        var elsewhere = !Names(repository.Name, name, Text(element, "repository", "id"))
+            || !Names(repository.Project ?? repository.Name, project, Text(element, "repository", "project", "id"));
         var web = elsewhere ? $"{Organization(repository)}/{Escape(project)}/_git/{Escape(name)}" : Instance.WebUrl(repository);
         return new(TrackedItemKind.PullRequest, id.ToString(CultureInfo.InvariantCulture), title, FormattableString.Invariant($"{web}/pullrequest/{id}"),
             status == "completed" ? TrackedItemState.Merged : status == "abandoned" ? TrackedItemState.Closed : Flag(element, "isDraft") ? TrackedItemState.Draft : TrackedItemState.Open)
