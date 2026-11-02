@@ -43,6 +43,7 @@
     <Project Path="CodeAlta.Agent.OpenAI/CodeAlta.Agent.OpenAI.csproj" />
     <Project Path="CodeAlta.Agent/CodeAlta.Agent.csproj" />
     <Project Path="CodeAlta.Catalog/CodeAlta.Catalog.csproj" />
+    <Project Path="CodeAlta.Fleet/CodeAlta.Fleet.csproj" />
     <Project Path="CodeAlta.CodeMode/CodeAlta.CodeMode.csproj" />
     <Project Path="CodeAlta.CodexAppServer/CodeAlta.CodexAppServer.csproj" />
     <Project Path="CodeAlta.Hosting/CodeAlta.Hosting.csproj" />
@@ -70,6 +71,7 @@
     <Project Path="CodeAlta.Browser.Tests/CodeAlta.Browser.Tests.csproj" />
     <Project Path="CodeAlta.Desktop.Tests/CodeAlta.Desktop.Tests.csproj" />
     <Project Path="CodeAlta.Catalog.Tests/CodeAlta.Catalog.Tests.csproj" />
+    <Project Path="CodeAlta.Fleet.Tests/CodeAlta.Fleet.Tests.csproj" />
     <Project Path="CodeAlta.Cli.Tests/CodeAlta.Cli.Tests.csproj" />
     <Project Path="CodeAlta.CodeMode.Tests/CodeAlta.CodeMode.Tests.csproj" />
     <Project Path="CodeAlta.Hosting.Tests/CodeAlta.Hosting.Tests.csproj" />

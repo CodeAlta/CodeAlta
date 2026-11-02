@@ -192,6 +192,12 @@ public sealed class CatalogOptions
     public string UiStatePath => Path.Combine(StateRoot, "ui-state.yaml");
 
     /// <summary>
+    /// Gets the folder of the fleet, under <see cref="StateRoot"/>: the device key of this instance and the devices
+    /// paired with it. Each instance is a device of its own, so the developer instance has its own key and pairings.
+    /// </summary>
+    public string FleetRoot => Path.Combine(StateRoot, "fleet");
+
+    /// <summary>
     /// Gets the legacy machine-agent runtime root path under the legacy catalog.
     /// </summary>
     [Obsolete("Use CacheRoot. The machine root path was renamed to cache.")]
