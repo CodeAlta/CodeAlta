@@ -21,7 +21,7 @@ public sealed class SessionInUseException : InvalidOperationException
         HolderProcessId = holderProcessId;
     }
 
-    /// <summary>Gets the name of a holder as users know it: <c>CodeAlta Desktop</c>, <c>CodeAlta TUI</c>, <c>altacli</c>.</summary>
+    /// <summary>Gets the name of a holder as users know it: <c>CodeAlta Desktop</c>, <c>CodeAlta TUI</c>, <c>CodeAlta Node</c>, <c>altacli</c>.</summary>
     /// <param name="holderKind">The kind of the holder; null when it is not known.</param>
     /// <returns>The name; <c>another process</c> for an unknown holder, the kind itself for another kind.</returns>
     public static string GetHolderName(string? holderKind) => holderKind switch
@@ -29,6 +29,7 @@ public sealed class SessionInUseException : InvalidOperationException
         null or "" => "another process",
         Catalog.SessionLeaseOwner.DesktopKind => "CodeAlta Desktop",
         Catalog.SessionLeaseOwner.TuiKind => "CodeAlta TUI",
+        Catalog.SessionLeaseOwner.NodeKind => "CodeAlta Node",
         _ => holderKind,
     };
 
