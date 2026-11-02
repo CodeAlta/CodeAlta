@@ -32,6 +32,8 @@ Open it with **Issues** in the title bar (in its **…** menu when the window is
 - **Open**, **Closed**, **Merged** and **All** are separate lists, most recently updated first.
 - Type words or a number to filter.
 - Select an item to read its description and comments. Double-click it, or use the expand button, for a larger window.
+- What the tab read is kept 5 minutes: going back to a list or an item shows it at once. *Read 3 min ago* says how old it is; the refresh beside it reads it again, and **Reload** in the header reads everything again.
+- The images of descriptions and comments are shown (Azure DevOps for now), read with the same sign-in. An image that cannot be read stays a link with its name; click a shown image to see it larger.
 
 When a service cannot be read, the tab says so in place of the list, and the log says why: see [An issue tracker shows an error](troubleshooting.md#an-issue-tracker-shows-an-error).
 
