@@ -292,9 +292,12 @@ public sealed class MobileSettingsTests
         // The access of the plugin, read from its files when it started.
         internal Task<MobileAccess> AccessAsync() => Task.FromResult(Plugin.Access!);
 
-        internal async Task StartAsync(int port, int httpsPort, bool write = true)
+        internal Task StartAsync(int port, int httpsPort, bool write = true) => StartAsync(write ? new MobileSettings { Port = port, HttpsPort = httpsPort } : null);
+
+        // Starts the plugin with the settings written first, or with those of the state as they are (null).
+        internal async Task StartAsync(MobileSettings? settings)
         {
-            if (write) await State.WriteJsonAsync(PluginStateScope.User, "mobile.json", new MobileSettings { Port = port, HttpsPort = httpsPort });
+            if (settings is not null) await State.WriteJsonAsync(PluginStateScope.User, "mobile.json", settings);
             var services = new Services(State) { Asks = asks ?? NoopPluginAskService.Instance };
             Plugin.AttachRuntimeContext(new PluginRuntimeContext
             {
@@ -362,7 +365,10 @@ public sealed class MobileSettingsTests
 
         internal MobileSettings Read() => JsonSerializer.Deserialize<MobileSettings>(Text!)!;
 
-        public string GetDirectory(PluginStateScope scope) => Path.GetTempPath();
+        // A folder of its own: a provider keeps its files there (a certificate).
+        private readonly string _directory = Path.Combine(Path.GetTempPath(), "codealta-mobile-state-" + Guid.NewGuid().ToString("N"));
+
+        public string GetDirectory(PluginStateScope scope) => _directory;
 
         public ValueTask<T?> ReadJsonAsync<T>(PluginStateScope scope, string name, CancellationToken cancellationToken = default)
             => ValueTask.FromResult(_files.TryGetValue(name, out var text) ? JsonSerializer.Deserialize<T>(text) : default);

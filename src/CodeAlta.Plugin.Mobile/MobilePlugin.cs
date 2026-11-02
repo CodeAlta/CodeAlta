@@ -10,12 +10,12 @@ namespace CodeAlta.Plugin.Mobile;
 
 /// <summary>
 /// Serves a mobile view of CodeAlta (the recent sessions, their timelines and a composer) from an in-process server, and shows its
-/// address as a QR code in the Mobile tab. A provider of the settings makes the view reachable: Tailscale Serve on the tailnet, or a Dev
-/// Tunnel of Microsoft; the plugin starts the server as the provider says, asks it to publish the view, and shows what it says. It runs
+/// address as a QR code in the Mobile tab. A provider of the settings makes the view reachable: Tailscale Serve on the tailnet, a Dev
+/// Tunnel of Microsoft, or the Internet at a domain name of the user with a certificate of Let's Encrypt; the plugin starts the server as the provider says, asks it to publish the view, and shows what it says. It runs
 /// while it is turned on in Settings &gt; Plugins, which is off until the user turns it on; the provider, its ports and the access of the
 /// phones are on its settings page, Settings &gt; Extensions &gt; Mobile.
 /// </summary>
-[Plugin("mobile", DisplayName = "Mobile", Description = "The sessions of this computer on a phone, through Tailscale or Dev Tunnels.", Frontends = PluginFrontends.Desktop)]
+[Plugin("mobile", DisplayName = "Mobile", Description = "The sessions of this computer on a phone, through Tailscale, Dev Tunnels or the Internet.", Frontends = PluginFrontends.Desktop)]
 public sealed class MobilePlugin : PluginBase
 {
     /// <summary>The id of the Mobile tab.</summary>
@@ -77,17 +77,25 @@ public sealed class MobilePlugin : PluginBase
     {
     }
 
-    /// <summary>Creates the plugin with command lines of the tests.</summary>
+    /// <summary>Creates the plugin with command lines of the tests, and Let's Encrypt.</summary>
     internal MobilePlugin(IMobileTailscaleCli cli, IMobileDevTunnelCli tunnelCli)
+        : this(cli, tunnelCli, MobileInternetOptions.System)
+    {
+    }
+
+    /// <summary>Creates the plugin with command lines and an ACME authority of the tests.</summary>
+    internal MobilePlugin(IMobileTailscaleCli cli, IMobileDevTunnelCli tunnelCli, MobileInternetOptions internet)
         : this((id, host) => id switch
         {
             MobileTailscaleProvider.ProviderId => new MobileTailscaleProvider(cli, host),
             MobileDevTunnelProvider.ProviderId => new MobileDevTunnelProvider(tunnelCli, host),
+            MobileInternetProvider.ProviderId => new MobileInternetProvider(host, internet),
             _ => null,
         })
     {
         ArgumentNullException.ThrowIfNull(cli);
         ArgumentNullException.ThrowIfNull(tunnelCli);
+        ArgumentNullException.ThrowIfNull(internet);
     }
 
     /// <summary>Creates the plugin with the providers a factory makes by their id; null for an id it does not know.</summary>
@@ -99,7 +107,7 @@ public sealed class MobilePlugin : PluginBase
     }
 
     /// <summary>The ids of the providers, in the order the settings page offers them.</summary>
-    internal static IReadOnlyList<string> ProviderIds { get; } = [MobileTailscaleProvider.ProviderId, MobileDevTunnelProvider.ProviderId];
+    internal static IReadOnlyList<string> ProviderIds { get; } = [MobileTailscaleProvider.ProviderId, MobileDevTunnelProvider.ProviderId, MobileInternetProvider.ProviderId];
 
     /// <summary>Gets what the plugin serves now.</summary>
     internal MobileState State => _state;
@@ -548,7 +556,7 @@ public sealed class MobilePlugin : PluginBase
         }) with
         {
             Label = "Mobile: connect a phone",
-            SearchText = "mobile phone qr tailscale dev tunnels connect",
+            SearchText = "mobile phone qr tailscale dev tunnels internet https connect",
             KeyBinding = new PluginKeyBinding(new PluginKeyGesture('G', PluginKeyModifiers.Ctrl), new PluginKeyGesture('M')),
         };
     }
@@ -581,7 +589,7 @@ public sealed class MobilePlugin : PluginBase
         {
             Id = SettingsCanvasId,
             Title = "Mobile",
-            Description = "How phones connect (Tailscale or Dev Tunnels), the ports of the mobile view, and the access of the phones.",
+            Description = "How phones connect (Tailscale, Dev Tunnels or the Internet), the ports of the mobile view, and the access of the phones.",
             Icon = "smartphone",
             Scope = PluginCanvasScope.Application,
             Placement = PluginCanvasPlacement.Settings,

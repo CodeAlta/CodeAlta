@@ -37,6 +37,10 @@ const pages: Readonly<Record<string, ProviderPage>> = {
     name: "Dev Tunnels", address: "Address of the Dev Tunnel", unserved: "Not served through Dev Tunnels", apply: "Apply to open the Dev Tunnel.",
     help: "A Dev Tunnel of Microsoft gives the page an HTTPS address any phone opens, without installing anything on it. This computer needs the Dev Tunnels command line and a Microsoft or GitHub account.",
   },
+  internet: {
+    name: "The Internet", translated: true, address: "Address on the Internet", unserved: "Not served on the Internet", apply: "Apply to get the certificate and serve the page.",
+    help: "Phones open https:// and your domain name. Point the name at the public address of your router, and forward port 443 of the router to the port of this computer below: Let's Encrypt checks the name on that port and CodeAlta gets and renews the certificate.",
+  },
 };
 
 const pageOf = (provider: string): ProviderPage => pages[provider] ?? { name: provider, address: "Address of the page", unserved: "Not served", apply: "Apply to publish the page." };

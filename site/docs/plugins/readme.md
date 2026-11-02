@@ -36,7 +36,7 @@ A prompt, an MCP server or a skill is easier to inspect and review. Use a plugin
 | [Git](git.md) | Issues and pull requests of GitHub, GitLab, Azure DevOps and Bitbucket, the `#` lookup in a prompt, and the `gh`, `glab` and `az` agent tools. |
 | [Jira](jira.md) | The issues of a Jira project, for projects that name one. |
 | [MCP](mcp.md) | Model Context Protocol servers, their tools for agents, `alta mcp` and the MCP Servers page. |
-| [Mobile](mobile.md) | In CodeAlta Desktop: your sessions on a phone, through Tailscale or Dev Tunnels. Off until you turn it on. |
+| [Mobile](mobile.md) | In CodeAlta Desktop: your sessions on a phone, through Tailscale, Dev Tunnels or the Internet. Off until you turn it on. |
 | [Statistics](statistics.md) | A statistics card for each turn, `alta statistics`, and in CodeAlta Desktop the Statistics page. |
 | [UI tools](../ui-tools.md) | In CodeAlta Desktop: tools an agent uses to see and drive the window. |
 | [Browser](../browser.md) | In CodeAlta Desktop and `altacli`: tools an agent uses to drive Chrome, Edge, Firefox or Safari. |

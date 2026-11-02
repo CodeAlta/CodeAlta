@@ -12,6 +12,7 @@ export type MobileProviderField = "httpsPort" | "host";
 export const providerFields: Readonly<Record<string, readonly MobileProviderField[]>> = {
   tailscale: ["httpsPort"],
   devtunnel: [],
+  internet: ["host"],
 };
 
 /** What the plugin says of its settings: the provider and its settings, the address while the view is served, and what keeps it from being served. */

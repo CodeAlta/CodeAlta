@@ -100,6 +100,17 @@ test("the settings page of Mobile shows its ports and its address, applies new p
     assert.equal(await wait("document.getElementById('mobile-settings-address')?.textContent === 'Address of the Dev Tunnel'"), true);
     assert.equal(await evaluate("document.querySelector('.mobile-settings-address').textContent"), "Not served through Dev Tunnels");
 
+    // The Internet: the domain name, the port this computer serves, a line on port 443 and Let's Encrypt; Apply sends the name.
+    assert.equal(await evaluate("document.getElementById('mobile-settings-host')"), null, "Dev Tunnels asks for no name");
+    await evaluate(`document.querySelector('input[name="mobile-settings-mode"][value="internet"]').click()`);
+    assert.equal(await wait("document.getElementById('mobile-settings-host')"), true);
+    assert.equal(await evaluate("[...document.querySelectorAll('.settings-field-help')].some(element => element.textContent.includes('port 443'))"), true);
+    assert.equal(await wait("document.getElementById('mobile-settings-address')?.textContent === 'Address on the Internet'"), true);
+    await type("mobile-settings-host", "pulsar.example.com");
+    assert.equal(await evaluate("[...document.querySelectorAll('.mobile-settings, .mobile-settings .bp6-card')].every(element => element.scrollWidth <= element.clientWidth)"), true, "the name fits too");
+    await evaluate(`${button("Apply")}.click()`);
+    assert.equal(await wait("mobileSettingsFixture.state.calls.includes('set:internet:2590:pulsar.example.com')"), true);
+
     // Reset access asks first, in a popover beside its button; Cancel leaves the access as it is.
     await evaluate(`${button("Reset access")}.click()`);
     assert.equal(await wait("document.querySelector('.confirm-form p')?.textContent === 'Every phone will need to scan the new code.'"), true);

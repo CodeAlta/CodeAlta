@@ -91,7 +91,9 @@ export type MobileText = "The phone page is starting." | "Tailscale is starting 
   | "Scan it with the camera of the phone."
   | "Dev Tunnels is opening the tunnel." | "Waiting for the sign-in in the browser…"
   | "The Dev Tunnels command line is not installed." | "Sign in to Dev Tunnels." | "The Dev Tunnel did not open." | "The Dev Tunnel is closed."
-  | "Install Dev Tunnels" | "Sign in with Microsoft" | "Sign in with GitHub" | "The phone page could not be published.";
+  | "Install Dev Tunnels" | "Sign in with Microsoft" | "Sign in with GitHub" | "The phone page could not be published."
+  | "The domain name is missing." | "The domain name is not known on the Internet." | "Let's Encrypt gave no certificate."
+  | "Getting a certificate from Let's Encrypt…";
 
 /** A button of a problem that runs an action of the provider (`mobile.act`). */
 export type MobileProviderAction = Readonly<{ action: string; label: MobileText; primary?: boolean }>;
@@ -170,6 +172,16 @@ const providers: Readonly<Record<string, ProviderText>> = {
     },
     waiting: { pending: "Dev Tunnels is opening the tunnel.", "signing-in": "Waiting for the sign-in in the browser…" },
     instruction: "Scan it with the camera of the phone. The first time, the phone shows a page of Microsoft: choose Continue.",
+  },
+  internet: {
+    problems: {
+      "address-missing": { title: "The domain name is missing.", danger: true },
+      "dns-missing": { title: "The domain name is not known on the Internet.", retry: true },
+      "certificate-failed": { title: "Let's Encrypt gave no certificate.", retry: true },
+      "failed": { title: "The phone page could not be published.", retry: true },
+    },
+    waiting: { pending: "Getting a certificate from Let's Encrypt…" },
+    instruction: "Scan it with the camera of the phone.",
   },
 };
 
