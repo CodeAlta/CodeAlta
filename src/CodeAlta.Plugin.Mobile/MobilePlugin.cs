@@ -332,7 +332,9 @@ public sealed class MobilePlugin : PluginBase
         if (Interlocked.Exchange(ref _signIn, run) is { } previous) await previous.CancelAsync().ConfigureAwait(false);
         _state = _state with
         {
-            DevTunnel = new MobileDevTunnelStatus("signing-in", null, "Sign in in the browser that opens, then come back here."),
+            DevTunnel = new MobileDevTunnelStatus("signing-in", null, !github && OperatingSystem.IsWindows()
+                ? "Choose your account in the window of Windows that opens, then come back here."
+                : "Sign in in the browser that opens, then come back here."),
         };
         await ChangedAsync().ConfigureAwait(false);
         _ = Tasks.Run("mobile-devtunnel-signin", async _ => await RunSignInAsync(github, run).ConfigureAwait(false),
