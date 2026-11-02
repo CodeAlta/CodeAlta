@@ -267,7 +267,7 @@ export function buildTimelineItems(entries: HistoryResponse["entries"]): Timelin
     // These update the TUI's status/usage surfaces, not its conversation timeline.
     // The cancellation of a resume after a limit is said where its card said when the session would resume.
     if (entry.eventType === "sessionUpdate" && !["warning", "reconnecting", "modelchanged", "providerfallback", "compactionstarted", "compactioncompleted", "diffupdated"].includes(entry.kind?.toLowerCase() ?? "")
-      && !cancelledResume(entry) && !adaptiveCard(entry)) continue;
+      && !cancelledResume(entry) && !adaptiveCard(entry) && !workFolderCard(entry)) continue;
     if ((entry.eventType === "contentCompleted" || entry.eventType === "contentDelta") &&
         isToolOutput(entry.kind) && entry.parentActivityId && calls.has(parentActivityKey(entry))) {
       // The text of an output is shown on the tile of its call; the images the model was given get a card.
@@ -684,6 +684,10 @@ function toTimelineItem(entry: HistoryEntry, streaming: boolean): TimelineItem {
       // The resume a session waited for after a limit was cancelled.
       icon = "reminder";
       title = "Automatic resume cancelled";
+    } else if (workFolderCard(entry)) {
+      // The session was sent to work in another folder of its repository, or a change that waited for it failed.
+      icon = "worktree";
+      title = normalizedKind === "warning" ? "Working folder not changed" : "Working folder changed";
     } else if (adaptiveCard(entry)) {
       // What Adaptive did at the end of a turn: a recheck of its change, or its continuation on a stronger model.
       icon = "model";
@@ -838,6 +842,12 @@ function modelPresentation(text: string | null, details: JsonObject | null) {
 // An informational update that says a resume after a limit was cancelled.
 function cancelledResume(entry: HistoryEntry): boolean {
   return entry.kind?.toLowerCase() === "info" && !!entry.details?.includes("cancelled") && stringAt(parseDetails(entry.details), "resume") === "cancelled";
+}
+
+// A card about the folder a session works in, which its details name.
+function workFolderCard(entry: HistoryEntry): boolean {
+  return ["info", "warning"].includes(entry.kind?.toLowerCase() ?? "") && !!entry.details?.includes("workFolder")
+    && !!stringAt(parseDetails(entry.details), "workFolder");
 }
 
 // A card of Adaptive: what it did at the end of a turn, which its details name.

@@ -1,8 +1,10 @@
 import { CopilotTag, copilotSkillSource } from "./CopilotTag";
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
-import { Button, Card, CardList, FormGroup, InputGroup, NonIdealState, PopoverNext, Switch, Tag } from "@blueprintjs/core";
-import { projectFiles, skills, type SkillsDetailResponse, type SkillsEntry, type SkillsMcpContentResponse, type SkillsMcpEntry, type SkillsMcpListResponse,
+import { Button, Card, CardList, FormGroup, InputGroup, NonIdealState, PopoverNext, SegmentedControl, Switch, Tag } from "@blueprintjs/core";
+import { projectFiles, skills, type SkillsDetailResponse, type SkillsEntry, type SkillsFolder, type SkillsMcpContentResponse, type SkillsMcpEntry, type SkillsMcpListResponse,
   type SkillsMcpServer } from "#neoastra";
+import type { FolderPick } from "./folderPicker";
+import { foldersOf, skillFolderNotice, skillFolderScopes, skillFolderStateLabel, type SkillFolderScope } from "./skillFolders";
 import { AppIcon } from "./AppIcon";
 import { formatFileSize } from "./editor/editorDocuments";
 import { skillReadOnly } from "./fileTabs";
@@ -24,6 +26,12 @@ export { skillSourceLabels };
 
 /** Whether a skill comes from a project, which it follows into the spaces of the project: it has no spaces of its own. */
 export const projectSkillSource = (source: string) => source.startsWith("Project");
+
+/**
+ * Whether a skill has no spaces of its own: a skill of a project follows its project into its spaces, and one of a
+ * folder added for a space is read in that space alone.
+ */
+export const spacelessSkillSource = (source: string) => projectSkillSource(source) || source === "SpaceFolder";
 
 /** Whether a skill is removed from here: one of a CodeAlta folder or of the common folder, of the user or of a project. */
 export const skillRemovable = (source: string) => ["UserAlta", "ProjectAlta", "UserCommon", "ProjectCommon"].includes(source);
@@ -70,7 +78,7 @@ export function SkillDetail({ skill, detail, failed, onEdit, onDelete, disabled,
         {skill.shadowed && <Tag minimal round intent="warning">{t("Overridden")}</Tag>}
         {!skill.valid && <Tag minimal round intent="danger">{t("Invalid")}</Tag>}
         {detail?.linked && <Tag minimal round title={t("This skill is reached through a symbolic link: edit or remove it in the folder the link leads to.")}>{t("Linked")}</Tag>}
-        {!projectSkillSource(skill.source) && skillToggleable(skill.name)
+        {!spacelessSkillSource(skill.source) && skillToggleable(skill.name)
           && <ResourceSpaceChip scope={spaceScope} kind="skill" resourceKey={skill.name} name={skill.title || skill.name} disabled={disabled} />}
         {detail?.folder && detail.skillRootPath && onEdit && <Button size="small" icon={<AppIcon name="code" size={15} />}
           aria-label={t(readOnly ? "View the files of {name}" : "Edit {name}", { name: skill.title || skill.name })}
@@ -130,13 +138,87 @@ export function SkillRows({ skills, empty, selected, disabled, onSelect, onToggl
             aria-label={t(readOnly ? "View the files of {name}" : "Edit {name}", { name })} title={t(readOnly ? "Open in the code editor" : "Edit in the code editor")}
             onClick={() => onEdit({ id: skill.folder!, path: skill.path!, name: skill.name })} />}
           {onDelete && skillRemovable(skill.source) && <RemoveButton name={name} disabled={disabled} onRemove={() => onDelete(skill)} />}
-          {!projectSkillSource(skill.source) && skillToggleable(skill.name)
+          {!spacelessSkillSource(skill.source) && skillToggleable(skill.name)
             && <ResourceSpaceChip scope={spaceScope} kind="skill" resourceKey={skill.name} name={name} disabled={disabled} />}
           <Switch checked={skill.enabled} disabled={disabled || !skillToggleable(skill.name)} aria-label={t("Enable {name}", { name })} onChange={event => onToggle(skill, event.currentTarget.checked)} /></span>
       </Card>; })}
     {rows.windowed && <div className="row-window-spacer" style={{ height: after }} aria-hidden="true" />}
     {skills.length === 0 && <Card><span className="bp6-text-muted">{t(empty)}</span></Card>}
   </CardList>;
+}
+
+/** The space the window shows, whose added folders of skills the page lists and changes. */
+export type SkillsSpace = Readonly<{ id: string; name: string }> | null;
+
+/**
+ * The folders of skills the user added, for every space, for the space the window shows and for the selected project:
+ * a row each with where it is read, its path, how many skills it brings or why none, and the button that takes it out
+ * of the list (its files stay where they are). The button above adds one, typed or chosen in the folder dialog of the
+ * system.
+ */
+export function SkillFolderList({ folders, space, project, showSpace, disabled, onAdd, onRemove, pickFolder }: {
+  folders: readonly SkillsFolder[]; space: SkillsSpace; project: SettingsProject;
+  /** Whether the window has more than one space: only then is a folder added for a space. */
+  showSpace: boolean;
+  disabled: boolean;
+  /** Adds a folder; resolves to whether it was added. */
+  onAdd: (scope: SkillFolderScope, path: string) => Promise<boolean>;
+  onRemove: (folder: SkillsFolder) => void;
+  /** Shows the folder dialog of the system; without it, the path is typed. */
+  pickFolder?: (initialDirectory: string | null) => Promise<FolderPick>;
+}) {
+  const { t } = useShellLanguage();
+  const scopes = skillFolderScopes(showSpace && !!space, !!project);
+  const [draft, setDraft] = useState<{ scope: SkillFolderScope; path: string } | null>(null);
+  const scopeLabel = (scope: string) => scope === "Project" ? t("Project: {name}", { name: project?.name ?? "" })
+    : scope === "Space" ? t("Space: {name}", { name: space?.name ?? "" }) : t("Every space");
+  const shown = [...foldersOf(folders, "Project"), ...foldersOf(folders, "Space"), ...foldersOf(folders, "Global")];
+  async function browse() {
+    if (!pickFolder || !draft) return;
+    const picked = await pickFolder(draft.path.trim() || null);
+    if (picked.status === "ok") setDraft(current => current && { ...current, path: picked.path });
+  }
+  async function add() {
+    if (!draft || !draft.path.trim() || disabled) return;
+    if (await onAdd(draft.scope, draft.path.trim())) setDraft(null);
+  }
+  return <section className="skill-folders" aria-labelledby="skill-folders-title">
+    <header className="skill-folders-heading">
+      <div><h2 id="skill-folders-title">{t("Skill folders")}</h2>
+        <p className="bp6-text-muted">{t("Skills are read where they are, from the folders added here, besides the folders CodeAlta reads by itself. Sandboxed sessions read them and never write them.")}</p></div>
+      {/* A library shared by every space is the usual case: the popover starts there. */}
+      <PopoverNext placement="bottom-end" isOpen={!!draft} onInteraction={open => setDraft(open ? draft ?? { scope: "Global", path: "" } : null)}
+        content={<div className="settings-editor-popover skill-folders-popover">
+          <FormGroup label={t("Folder")} labelFor="skill-folder-path" helperText={t("A folder that holds skill folders, each with its SKILL.md.")}>
+            <InputGroup id="skill-folder-path" autoFocus value={draft?.path ?? ""} spellCheck={false} placeholder={t("Full path of a folder of skills")}
+              onChange={event => setDraft(current => current && { ...current, path: event.target.value })}
+              onKeyDown={event => { if (event.key === "Enter") { event.preventDefault(); void add(); } }}
+              rightElement={pickFolder && <Button variant="minimal" size="small" disabled={disabled} onClick={() => void browse()}>{t("Browse…")}</Button>} />
+          </FormGroup>
+          {scopes.length > 1 && <FormGroup label={t("Read for")}>
+            <SegmentedControl className="skill-folders-scope" size="small" disabled={disabled} value={draft?.scope ?? "Global"}
+              onValueChange={value => setDraft(current => current && { ...current, scope: value as SkillFolderScope })}
+              options={scopes.map(scope => ({ value: scope, label: scopeLabel(scope) }))} /></FormGroup>}
+          <Button intent="primary" disabled={disabled || !draft?.path.trim()} onClick={() => void add()}>{t("Add folder")}</Button>
+        </div>}>
+        <Button icon={<AppIcon name="plus" size={15} />} disabled={disabled} aria-label={t("Add a folder of skills")}>{t("Add folder")}</Button>
+      </PopoverNext>
+    </header>
+    {shown.length === 0 ? <p className="bp6-text-muted skill-folders-none">{t("No folder added.")}</p>
+      : <div className="settings-file-locations skill-folders-list" role="list" aria-label={t("Skill folders")}>
+        {shown.map(folder => { const state = skillFolderStateLabel(folder.state);
+          return <div key={`${folder.scope}:${folder.path}`} role="listitem" className="skill-folder" data-state={folder.state}>
+            <SettingsFileLocation path={folder.fullPath ?? folder.path} label={<Tag minimal round>{scopeLabel(folder.scope)}</Tag>} />
+            <span className="skill-folder-state">{state ? <Tag minimal round intent="warning" title={t(state.title)}>{t(state.label)}</Tag>
+              : <span className="bp6-text-muted">{folder.skills === 1 ? t("1 skill") : t("{count} skills", { count: folder.skills })}</span>}</span>
+            <PopoverNext placement="top-end" content={<div className="provider-settings-confirm"><p>{t("Remove {path} from the list? Its files stay where they are.", { path: folder.path })}</p>
+              <Button className="bp6-popover-dismiss" intent="danger" disabled={disabled} onClick={() => onRemove(folder)}>{t("Remove from the list")}</Button></div>}>
+              <Button variant="minimal" size="small" icon={<AppIcon name="close" size={14} />} disabled={disabled}
+                aria-label={`${t("Remove from the list")}: ${folder.path}`} title={t("Remove from the list")} />
+            </PopoverNext>
+          </div>; })}
+      </div>}
+  </section>;
 }
 
 /** The key of a skill of an MCP server in the selection of the page: its server and its address. */
@@ -246,8 +328,12 @@ export function McpSkillDetail({ skill, disabled, onForget, readContent }: {
  * skill creation. The folder of a skill is opened in the code editor, and so is the one of a skill that was created.
  * The skills of the MCP servers are listed below the local ones, read from their servers.
  */
-export function SkillSettings({ epoch, project, onEdit, onOpenFile, api = skills, reveal = projectFiles.reveal, filesApi, spaceScope = null }: {
+export function SkillSettings({ epoch, project, space = null, onEdit, onOpenFile, api = skills, reveal = projectFiles.reveal, filesApi, spaceScope = null, pickFolder }: {
   epoch: string | null; project: SettingsProject;
+  /** The space the window shows: the folders added for it are listed and changed here; null for the default space. */
+  space?: SkillsSpace;
+  /** Shows the folder dialog of the system to add a folder of skills; without it, the path is typed. */
+  pickFolder?: (initialDirectory: string | null) => Promise<FolderPick>;
   /** The spaces of the skills of the user, which each row shows and changes; null with the default space alone. */
   spaceScope?: ResourceSpaces;
   /** Opens the folder of a skill in the code editor. */
@@ -262,8 +348,9 @@ export function SkillSettings({ epoch, project, onEdit, onOpenFile, api = skills
 }) {
   const { t } = useShellLanguage();
   const projectId = project?.id ?? null;
+  const spaceId = space?.id ?? null;
   const { listing, loading, busy, notice, setNotice, reload, mutate } = useSettingsEditor(
-    options => api.list({ expectedEpoch: epoch, projectId }, options), `${epoch}:${projectId}`);
+    options => api.list({ expectedEpoch: epoch, projectId, spaceId }, options), `${epoch}:${projectId}:${spaceId}`);
   const [scope, setScope] = useState<SettingsScope>("Global");
   const [filter, setFilter] = useState("");
   const [draft, setDraft] = useState<{ name: string; description: string } | null>(null);
@@ -284,11 +371,11 @@ export function SkillSettings({ epoch, project, onEdit, onOpenFile, api = skills
   useEffect(() => {
     if (!id || !source) return;
     const abort = new AbortController();
-    void api.detail({ expectedEpoch: epoch, projectId, id, name: null, source }, { signal: abort.signal, timeoutMilliseconds: 15000 })
+    void api.detail({ expectedEpoch: epoch, projectId, id, name: null, source, spaceId }, { signal: abort.signal, timeoutMilliseconds: 15000 })
       .then(value => { if (!abort.signal.aborted) setDetail({ id, epoch, projectId, listing, value: value.status === "ok" ? value : null }); },
         () => { if (!abort.signal.aborted) setDetail({ id, epoch, projectId, listing, value: null }); });
     return () => abort.abort();
-  }, [api, epoch, projectId, id, source, listing]);
+  }, [api, epoch, projectId, spaceId, id, source, listing]);
   const shownDetail = selected && detail?.id === selected.id && detail.epoch === epoch && detail.projectId === projectId && detail.listing === listing ? detail : undefined;
   // The skills of the MCP servers are read beside the local listing, and again with it: a failure here leaves the local
   // list as it is.
@@ -297,7 +384,7 @@ export function SkillSettings({ epoch, project, onEdit, onOpenFile, api = skills
   useEffect(() => {
     if (!listing) return;
     const abort = new AbortController();
-    void api.listMcp({ expectedEpoch: epoch, projectId }, { signal: abort.signal, timeoutMilliseconds: 20000 })
+    void api.listMcp({ expectedEpoch: epoch, projectId, spaceId: null }, { signal: abort.signal, timeoutMilliseconds: 20000 })
       .then(value => { if (!abort.signal.aborted) setMcp({ key: mcpKey, value }); }, () => { if (!abort.signal.aborted) setMcp({ key: mcpKey, value: null }); });
     return () => abort.abort();
   }, [api, epoch, projectId, listing]);
@@ -326,9 +413,14 @@ export function SkillSettings({ epoch, project, onEdit, onOpenFile, api = skills
     if (skillToggleable(skill.name)) void mutate(() => api.setEnabled({ expectedEpoch: epoch, projectId, scope: writeScope, name: skill.name, enabled }, { timeoutMilliseconds: 30000 }));
   };
   const toggleAll = (enabled: boolean) => {
-    if (toggleNames.length || omitted) void mutate(() => api.setMatchingEnabled({ expectedEpoch: epoch, projectId, scope: writeScope, query: filter.trim(), enabled }, { timeoutMilliseconds: 30000 }));
+    if (toggleNames.length || omitted) void mutate(() => api.setMatchingEnabled({ expectedEpoch: epoch, projectId, scope: writeScope, query: filter.trim(), enabled, spaceId }, { timeoutMilliseconds: 30000 }));
   };
-  const remove = (skill: SkillsEntry) => void mutate(() => api.delete({ expectedEpoch: epoch, projectId, id: skill.id, name: null, source: skill.source }, { timeoutMilliseconds: 120000 }), "Removed.");
+  const remove = (skill: SkillsEntry) => void mutate(() => api.delete({ expectedEpoch: epoch, projectId, id: skill.id, name: null, source: skill.source, spaceId }, { timeoutMilliseconds: 120000 }), "Removed.");
+  // A folder of skills is added to or taken out of the list of its scope; nothing of it is changed on the disk.
+  const addFolder = (scope: SkillFolderScope, path: string) => mutate(() => api.addFolder({ expectedEpoch: epoch, projectId, spaceId, scope, path }, { timeoutMilliseconds: 30000 }),
+    "Folder added.", skillFolderNotice);
+  const removeFolder = (folder: SkillsFolder) => void mutate(() => api.removeFolder({ expectedEpoch: epoch, projectId, spaceId, scope: folder.scope, path: folder.path },
+    { timeoutMilliseconds: 30000 }), "Folder removed from the list.", skillFolderNotice);
   const draftProblem: MessageKey | null = !draft ? null : !/^[a-z0-9][a-z0-9-]{0,63}$/.test(draft.name.trim()) ? "Use lowercase letters, digits and dashes for the skill name."
     : all.some(skill => skill.name === draft.name.trim()) ? "A skill with this name already exists." : !draft.description.trim() ? "Describe when the skill should be used." : null;
   async function create() {
@@ -359,6 +451,8 @@ export function SkillSettings({ epoch, project, onEdit, onOpenFile, api = skills
       {/* A configuration file that could not be read: the skills are listed as if it disabled none. */}
       <PluginProblems problems={listing.problems ?? []} omitted={0} files={files} />
       <SettingsFileLocations files={files} disabled={busy} />
+      <SkillFolderList folders={listing.folders ?? []} space={space} project={project} showSpace={!!spaceScope} disabled={busy}
+        onAdd={addFolder} onRemove={removeFolder} pickFolder={pickFolder} />
       <div className="settings-editor-toolbar">
         <InputGroup className="settings-editor-filter" type="search" size="small" leftIcon={<AppIcon name="search" size={14} className="bp6-icon" />} value={filter}
           placeholder={t("Filter skills")} aria-label={t("Filter skills")} onChange={event => setFilter(event.target.value)} />

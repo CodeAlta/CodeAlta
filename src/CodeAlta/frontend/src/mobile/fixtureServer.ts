@@ -45,6 +45,10 @@ export async function startFixtureServer(files: Readonly<Record<string, Readonly
     approvals: new Map<string, ApprovalRequest[]>(),
     /** What the next answer to a permission request becomes; null: it goes. */
     approvalResult: null as ApprovalResult | null,
+    /** The messages a page of the latest events holds, as the plugin pages them; null: a page holds them all. */
+    messagesPerPage: null as number | null,
+    /** The reads of older events fail. */
+    olderFails: false,
     /**
      * The images of the sessions, by `<session>/<image id>` for a saved copy and `<session>/linked/<seq>/<position>` for a
      * picture of the disk an answer shows; any other image is not found.
@@ -158,7 +162,7 @@ export async function startFixtureServer(files: Readonly<Record<string, Readonly
       }
       return send(response, 200, { job, text: state.jobOutput.get(jobId) ?? "", truncated: false, error: null });
     }
-    const found = /^\/api\/sessions\/([^/]+)(?:\/(events|prompt|abort|archive|restore|choices|ask|ask\/answer|ask\/cancel|permissions|permissions\/resolve))?$/.exec(path);
+    const found = /^\/api\/sessions\/([^/]+)(?:\/(events\/latest|events|prompt|abort|archive|restore|choices|ask|ask\/answer|ask\/cancel|permissions|permissions\/resolve))?$/.exec(path);
     if (found) {
       const id = decodeURIComponent(found[1]), action = found[2];
       // An archived session is out of the list, and can still be restored.
@@ -176,6 +180,23 @@ export async function startFixtureServer(files: Readonly<Record<string, Readonly
         const since = Number(url.searchParams.get("since") ?? 0);
         const events = (state.events.get(id) ?? []).filter(e => e.seq > since);
         return send(response, 200, { since: Math.max(since, ...events.map(e => e.seq)), events, error: null });
+      }
+      if (action === "events/latest") {
+        const before = url.searchParams.get("before");
+        if (before !== null && state.olderFails) return send(response, 500, { error: "The journal cannot be read." });
+        const events = (state.events.get(id) ?? []).filter(e => before === null || e.seq < Number(before));
+        // As the plugin: back to the messages of a page, then forward to the first prompt.
+        let start = 0;
+        if (state.messagesPerPage !== null) {
+          let messages = 0;
+          for (let index = events.length - 1; index >= 0; index--) {
+            if ((events[index].kind === "user.message" || events[index].kind === "assistant.message") && ++messages >= state.messagesPerPage) { start = index; break; }
+          }
+          const prompt = events.findIndex((e, index) => index >= start && e.kind === "user.message");
+          if (prompt > 0) start = prompt;
+        }
+        const page = events.slice(start);
+        return send(response, 200, { since: page.at(-1)?.seq ?? 0, before: page[0]?.seq ?? null, hasMore: start > 0, events: page, error: null });
       }
       if (action === "choices") return send(response, 200, choicesOf(target));
       if (action === "permissions") return send(response, 200, { requests: state.approvals.get(id) ?? [], hasMore: false, error: null });

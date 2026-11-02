@@ -41,7 +41,8 @@ public sealed class SkillManagementService
         ValidateListing(scope, projectRoot);
         cancellationToken.ThrowIfCancellationRequested();
         return _catalog.ListAsync(
-            CreateQuery(scope, projectRoot, _config.LoadGlobalDisabledSkillNames(), _config.LoadProjectDisabledSkillNames(projectRoot)), cancellationToken);
+            CreateQuery(scope, projectRoot, _config.LoadGlobalDisabledSkillNames(), _config.LoadProjectDisabledSkillNames(projectRoot),
+                _config.LoadGlobalSkillFolders(), SkillFolderContext.None), cancellationToken);
     }
 
     /// <summary>
@@ -59,9 +60,29 @@ public sealed class SkillManagementService
     /// <exception cref="InvalidOperationException">A required root is absent.</exception>
     /// <exception cref="DirectoryNotFoundException">A supplied root is unavailable.</exception>
     /// <exception cref="OperationCanceledException">The operation was canceled.</exception>
-    public async Task<SkillListing> LoadListingAsync(
+    public Task<SkillListing> LoadListingAsync(
         SkillListingScope scope, string? projectRoot, CancellationToken cancellationToken = default)
+        => LoadListingAsync(scope, projectRoot, SkillFolderContext.None, cancellationToken);
+
+    /// <summary>
+    /// Lists management descriptors as <see cref="LoadListingAsync(SkillListingScope, string?, CancellationToken)"/> does,
+    /// with the skills of the folders the user added for a space and for the project besides those of every space.
+    /// </summary>
+    /// <param name="scope">Which skills to list.</param>
+    /// <param name="projectRoot">The folder of the project whose skills and configuration are read too, or null.</param>
+    /// <param name="folders">The folders added for the space and for the project.</param>
+    /// <param name="cancellationToken">Cancels the listing.</param>
+    /// <returns>The skills, and the configuration files that could not be read.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="folders"/> is null.</exception>
+    /// <exception cref="ArgumentOutOfRangeException">The scope is invalid.</exception>
+    /// <exception cref="ArgumentException">A supplied root is not an absolute valid path.</exception>
+    /// <exception cref="InvalidOperationException">A required root is absent.</exception>
+    /// <exception cref="DirectoryNotFoundException">A supplied root is unavailable.</exception>
+    /// <exception cref="OperationCanceledException">The operation was canceled.</exception>
+    public async Task<SkillListing> LoadListingAsync(
+        SkillListingScope scope, string? projectRoot, SkillFolderContext folders, CancellationToken cancellationToken = default)
     {
+        ArgumentNullException.ThrowIfNull(folders);
         ValidateListing(scope, projectRoot);
         cancellationToken.ThrowIfCancellationRequested();
         var problems = new List<SkillConfigurationProblem>();
@@ -69,7 +90,11 @@ public sealed class SkillManagementService
         var project = projectRoot is null
             ? []
             : ReadDisabled(() => _config.LoadProjectDisabledSkillNames(projectRoot), Path.Combine(projectRoot, ".alta", "config.toml"), isProject: true, problems);
-        var skills = await _catalog.ListAsync(CreateQuery(scope, projectRoot, global, project), cancellationToken).ConfigureAwait(false);
+        // The file that cannot be read is named once, by the reading of the disabled skills: it adds no folder.
+        IReadOnlyList<string> globalFolders;
+        try { globalFolders = _config.LoadGlobalSkillFolders(); }
+        catch (Exception exception) when (exception is InvalidDataException or IOException or UnauthorizedAccessException) { globalFolders = []; }
+        var skills = await _catalog.ListAsync(CreateQuery(scope, projectRoot, global, project, globalFolders, folders), cancellationToken).ConfigureAwait(false);
         return new SkillListing(skills, problems);
     }
 
@@ -112,16 +137,20 @@ public sealed class SkillManagementService
         }
     }
 
-    private SkillCatalogQuery CreateQuery(SkillListingScope scope, string? projectRoot, IReadOnlyCollection<string> globalDisabled, IReadOnlyCollection<string> projectDisabled)
+    private SkillCatalogQuery CreateQuery(SkillListingScope scope, string? projectRoot, IReadOnlyCollection<string> globalDisabled, IReadOnlyCollection<string> projectDisabled,
+        IReadOnlyList<string> globalFolders, SkillFolderContext folders)
     {
         var includeUser = scope is SkillListingScope.User or SkillListingScope.Combined;
+        var includeProject = scope != SkillListingScope.User && projectRoot is not null;
         return new SkillCatalogQuery
         {
             Discovery = new SkillDiscoveryContext
             {
-                ProjectRoots = scope != SkillListingScope.User && projectRoot is not null ? [projectRoot] : [],
+                ProjectRoots = includeProject ? [projectRoot!] : [],
                 UserCodeAltaRoot = includeUser ? _globalRoot : null,
                 UserProfileRoot = includeUser ? _userProfileRoot : null,
+                AdditionalRoots = AddedSkillFolders.Roots(includeUser ? globalFolders : null, folders.SpaceId, includeUser ? folders.SpaceFolders : null,
+                    includeProject ? folders.ProjectFolders : null, _userProfileRoot, _globalRoot),
             },
             GlobalDisabledSkillNames = globalDisabled,
             ProjectDisabledSkillNames = projectDisabled,
@@ -244,8 +273,23 @@ public sealed class SkillManagementService
     /// <exception cref="IOException">Discovery failed or the document has a linked path.</exception>
     /// <exception cref="UnauthorizedAccessException">Storage access is denied.</exception>
     /// <exception cref="OperationCanceledException">Cancellation was requested.</exception>
-    public async Task<TextFileDocument> GetFileDocumentAsync(string skillFilePath, string? relatedPath, string? projectRoot, CancellationToken cancellationToken = default)
+    public Task<TextFileDocument> GetFileDocumentAsync(string skillFilePath, string? relatedPath, string? projectRoot, CancellationToken cancellationToken = default)
+        => GetFileDocumentAsync(skillFilePath, relatedPath, projectRoot, SkillFolderContext.None, cancellationToken);
+
+    /// <summary>
+    /// Resolves a skill file or a related resource as <see cref="GetFileDocumentAsync(string, string?, string?, CancellationToken)"/>
+    /// does, among the skills of the folders the user added for a space and for the project too.
+    /// </summary>
+    /// <exception cref="ArgumentNullException"><paramref name="folders"/> is null.</exception>
+    /// <exception cref="ArgumentException">The skill is not discovered or the resource request is malformed/unlisted.</exception>
+    /// <exception cref="InvalidOperationException">A required discovery root is absent.</exception>
+    /// <exception cref="IOException">Discovery failed or the document has a linked path.</exception>
+    /// <exception cref="UnauthorizedAccessException">Storage access is denied.</exception>
+    /// <exception cref="OperationCanceledException">Cancellation was requested.</exception>
+    public async Task<TextFileDocument> GetFileDocumentAsync(string skillFilePath, string? relatedPath, string? projectRoot, SkillFolderContext folders,
+        CancellationToken cancellationToken = default)
     {
+        ArgumentNullException.ThrowIfNull(folders);
         ArgumentException.ThrowIfNullOrWhiteSpace(skillFilePath);
         if (relatedPath is not null && (relatedPath.Contains('\\') || relatedPath.Contains(':') ||
             relatedPath.Split('/').Any(static part => part is "" or "." or "..")))
@@ -256,7 +300,7 @@ public sealed class SkillManagementService
         var fullPath = Path.GetFullPath(skillFilePath);
         var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
         // Where a skill is does not depend on what a configuration file says of it.
-        var descriptors = (await LoadListingAsync(SkillListingScope.Combined, projectRoot, cancellationToken).ConfigureAwait(false)).Skills;
+        var descriptors = (await LoadListingAsync(SkillListingScope.Combined, projectRoot, folders, cancellationToken).ConfigureAwait(false)).Skills;
         var descriptor = descriptors.FirstOrDefault(candidate => string.Equals(candidate.SkillFilePath, fullPath, comparison))
             ?? throw new ArgumentException("The skill file is not available in this context.", nameof(skillFilePath));
         var path = relatedPath is null ? descriptor.SkillFilePath :
@@ -322,4 +366,17 @@ public sealed class SkillManagementService
 
         return changed;
     }
+}
+
+/// <summary>
+/// The folders of skills the user added that a page sees besides those of every space: the folders of the space it is
+/// about, and those of its project.
+/// </summary>
+/// <param name="SpaceId">The space whose folders are given; <see langword="null"/> for the default space.</param>
+/// <param name="SpaceFolders">The folders added for that space (<see cref="SpaceSkills.Folders"/>).</param>
+/// <param name="ProjectFolders">The folders added for the project (<see cref="ProjectDescriptor.SkillFolders"/>).</param>
+public sealed record SkillFolderContext(string? SpaceId, IReadOnlyList<string> SpaceFolders, IReadOnlyList<string> ProjectFolders)
+{
+    /// <summary>Gets the context without a space or a project folder: only the folders of every space are read.</summary>
+    public static SkillFolderContext None { get; } = new(null, [], []);
 }

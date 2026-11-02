@@ -223,7 +223,7 @@ public sealed partial class OwnedSessionCommandService : IAsyncDisposable
         lock (_gate)
         {
             if (!_closed && (_active.ContainsKey(sessionId) || _steering.Contains(sessionId) || _compacting.Contains(sessionId)
-                || _abortingRuns.Contains(sessionId)
+                || _abortingRuns.Contains(sessionId) || HasScheduledSwitch(sessionId)
                 || _operations.Values.Any(operation => !operation.Released && operation.SessionId == sessionId)))
                 return true;
         }
@@ -573,7 +573,8 @@ public sealed partial class OwnedSessionCommandService : IAsyncDisposable
                     return new(OwnedSessionCommandAdmissionKind.Capacity);
                 request = request with { Images = OwnedPromptImages.Freeze(request.Images) };
             }
-            if (_active.ContainsKey(request.SessionId)) return new(OwnedSessionCommandAdmissionKind.Busy);
+            // A session attached again for its queue after a change of its folder runs that queue first.
+            if (_active.ContainsKey(request.SessionId) || _attachingForQueue.Contains(request.SessionId)) return new(OwnedSessionCommandAdmissionKind.Busy);
             if (request.Selection is not null && (_compacting.Contains(request.SessionId)
                 || _steering.Contains(request.SessionId) || _abortingRuns.Contains(request.SessionId)))
                 return new(OwnedSessionCommandAdmissionKind.Busy);
@@ -1320,6 +1321,7 @@ public sealed partial class OwnedSessionCommandService : IAsyncDisposable
         {
             if (_disposeTask is not null) return new(_disposeTask);
             _closed = true;
+            CancelScheduledSwitches();
             operations = [.. _operations.Values];
             steers = [.. _steers];
             compacts = [.. _compacts];

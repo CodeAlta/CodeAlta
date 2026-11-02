@@ -22,7 +22,7 @@ public sealed class ProjectCodeAltaSkillRootProvider : ISkillRootProvider
                     SourceKind = SkillSourceKind.ProjectAlta,
                     SourceId = $"project-alta:{Path.GetFullPath(projectRoot)}",
                     Scope = SkillScopeKind.Project,
-                    Precedence = 0,
+                    Precedence = SkillRootPrecedence.ProjectAlta,
                 })
                 .ToArray());
     }
@@ -50,7 +50,7 @@ public sealed class ProjectCommonSkillRootProvider : ISkillRootProvider
                     SourceKind = SkillSourceKind.ProjectCommon,
                     SourceId = $"project-common:{Path.GetFullPath(projectRoot)}",
                     Scope = SkillScopeKind.Project,
-                    Precedence = 1,
+                    Precedence = SkillRootPrecedence.ProjectCommon,
                 })
                 .ToArray());
     }
@@ -81,7 +81,7 @@ public sealed class ProjectCopilotSkillRootProvider : ISkillRootProvider
                     SourceId = $"project-copilot:{Path.GetFullPath(projectRoot)}",
                     Scope = SkillScopeKind.Project,
                     // With the common root: of two skills of one name, the path decides, and `.agents` comes before `.github`.
-                    Precedence = 1,
+                    Precedence = SkillRootPrecedence.ProjectCommon,
                 })
                 .ToArray());
     }
@@ -114,7 +114,7 @@ public sealed class UserCopilotSkillRootProvider : ISkillRootProvider
                 SourceId = $"user-copilot:{Path.GetFullPath(context.UserProfileRoot)}",
                 Scope = SkillScopeKind.User,
                 // With the common root of the user, after it by its path.
-                Precedence = 3,
+                Precedence = SkillRootPrecedence.UserCommon,
             },
         ]);
     }
@@ -146,7 +146,7 @@ public sealed class UserCodeAltaSkillRootProvider : ISkillRootProvider
                 SourceKind = SkillSourceKind.UserAlta,
                 SourceId = $"user-alta:{Path.GetFullPath(context.UserCodeAltaRoot)}",
                 Scope = SkillScopeKind.User,
-                Precedence = 2,
+                Precedence = SkillRootPrecedence.UserAlta,
             },
         ]);
     }
@@ -178,7 +178,7 @@ public sealed class UserCommonSkillRootProvider : ISkillRootProvider
                 SourceKind = SkillSourceKind.UserCommon,
                 SourceId = $"user-common:{Path.GetFullPath(context.UserProfileRoot)}",
                 Scope = SkillScopeKind.User,
-                Precedence = 3,
+                Precedence = SkillRootPrecedence.UserCommon,
             },
         ]);
     }
@@ -224,7 +224,7 @@ public sealed class BuiltInCodeAltaSkillRootProvider : ISkillRootProvider
                 SourceKind = SkillSourceKind.Builtin,
                 SourceId = "builtin:codealta",
                 Scope = SkillScopeKind.Builtin,
-                Precedence = 4,
+                Precedence = SkillRootPrecedence.Builtin,
             },
         ]);
     }

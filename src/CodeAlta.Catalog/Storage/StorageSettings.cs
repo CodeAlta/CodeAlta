@@ -1,12 +1,21 @@
 namespace CodeAlta.Catalog.Storage;
 
 /// <summary>Automatic maintenance choices from the global <c>[storage]</c> table.</summary>
-/// <param name="ClearScratchpadOnStartup">Whether to clear only the owning instance's scratchpad before admitting sessions.</param>
+/// <param name="ClearScratchpadOnStartup">
+/// Whether to remove, before admitting sessions, the entries of the owning instance's scratchpad not changed for
+/// <see cref="ScratchpadMaxAge"/>.
+/// </param>
 /// <param name="SessionRetention">The inactive-session retention policy.</param>
 public sealed record StorageSettings(bool ClearScratchpadOnStartup, SessionRetentionSettings SessionRetention)
 {
     /// <summary>Gets the policy when configuration is absent: scratchpad clearing on, retention three months.</summary>
     public static StorageSettings Default { get; } = new(true, SessionRetentionSettings.Default);
+
+    /// <summary>
+    /// Gets how long a scratchpad entry is kept after it was created or last written: the startup cleanup removes only
+    /// older ones, so that a session that runs again after a restart still finds its files.
+    /// </summary>
+    public static TimeSpan ScratchpadMaxAge { get; } = TimeSpan.FromDays(7);
 
     /// <summary>Reads a global storage table without turning invalid values into destructive defaults.</summary>
     /// <exception cref="InvalidDataException">A duration is invalid.</exception>

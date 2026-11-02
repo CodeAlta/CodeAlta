@@ -30,14 +30,19 @@ export const MarkdownImagesContext = createContext<MarkdownImages | null>(null);
 const opensPicture = (event: MouseEvent | globalThis.KeyboardEvent) => !event.ctrlKey && !event.metaKey && !event.shiftKey
   && (event.type === "click" || event.type === "keydown");
 
-type ViewedPicture = Readonly<{ address: string; title: string; image: MarkdownImage; size: WindowSize | null; origin: HTMLElement }>;
+type ViewedPicture = Readonly<{ address: string; title: string; image: MarkdownImage; size: WindowSize | null; origin: HTMLElement; web: boolean }>;
 
 /**
  * A text of Markdown, rendered through the sanitizing boundary. A message breaks its lines where its text does;
  * a `document` (a file, the instructions of a skill) is wrapped in its source, and its lines follow each other.
  */
-export function MarkdownContent({ source, timelineCodeBlocks = false, document: asDocument = false, sourceLines = false, onOpenLink }: {
+export function MarkdownContent({ source, timelineCodeBlocks = false, document: asDocument = false, sourceLines = false, onOpenLink, webImages = null }: {
   source: string; timelineCodeBlocks?: boolean; document?: boolean;
+  /**
+   * What draws the images of the web the text shows (the text of a tracker, whose host reads them with its sign-in):
+   * they are links marked as pictures, drawn once read. Without it an image of the web is its alternative text.
+   */
+  webImages?: MarkdownImages | null;
   /** Each block says which lines of `source` it comes from, in `data-source-lines` (read with `sourceBlocks` of `markdownSourceLines`). */
   sourceLines?: boolean;
   /** What opens a link, instead of the opener of the window ({@link MarkdownLinksContext}); null leaves every link inert. */
@@ -58,8 +63,8 @@ export function MarkdownContent({ source, timelineCodeBlocks = false, document: 
   const [drawn, setDrawn] = useState(0);
   const rendered = useMemo(() => {
     const pending = markdownPending();
-    return { html: render(source, timelineCodeBlocks, pending, { document: asDocument, sourceLines }), pending };
-  }, [render, source, timelineCodeBlocks, asDocument, sourceLines, appearance, drawn]);
+    return { html: render(source, timelineCodeBlocks, pending, { document: asDocument, sourceLines, webImages: !!webImages }), pending };
+  }, [render, source, timelineCodeBlocks, asDocument, sourceLines, !!webImages, appearance, drawn]);
   const html = rendered.html;
   useEffect(() => {
     const { diagrams: undrawn, math } = rendered.pending;
@@ -87,11 +92,14 @@ export function MarkdownContent({ source, timelineCodeBlocks = false, document: 
   const [viewing, setViewing] = useState<ViewedPicture | null>(null);
   useLayoutEffect(() => {
     const element = content.current;
-    if (!images || !element) return;
+    const web = onOpenLink === null ? null : webImages;
+    if (!images && !web || !element) return;
     let current = true;
     for (const picture of Array.from(element.querySelectorAll<HTMLImageElement>(`a[href] > img.${localImageClass}`))) {
       const address = picture.parentElement!.getAttribute("href")!;
-      if (markdownHrefKind(address) !== "file") continue;
+      const kind = markdownHrefKind(address);
+      const reader = kind === "file" ? images : kind === "web" ? web : null;
+      if (!reader) continue;
       const draw = (image: MarkdownImage | null) => {
         if (!current || !image || !picture.isConnected) return;
         drawnPictures.current.set(picture, image);
@@ -99,12 +107,12 @@ export function MarkdownContent({ source, timelineCodeBlocks = false, document: 
         picture.onerror = () => { picture.removeAttribute("src"); drawnPictures.current.delete(picture); };
         picture.src = image.url;
       };
-      const known = images.peek(address, scope);
+      const known = reader.peek(address, scope);
       if (known !== undefined) draw(known);
-      else void images.load(address, scope).then(draw, () => { /* Not drawn: the link stays. */ });
+      else void reader.load(address, scope).then(draw, () => { /* Not drawn: the link stays. */ });
     }
     return () => { current = false; };
-  }, [codeMarkup, images, scope]);
+  }, [codeMarkup, images, webImages, onOpenLink, scope]);
   function closeViewer() {
     const origin = viewing?.origin;
     setViewing(null);
@@ -159,7 +167,7 @@ export function MarkdownContent({ source, timelineCodeBlocks = false, document: 
     const picture = link.querySelector<HTMLImageElement>(`:scope > img.${localImageClass}[src]`);
     const image = picture && drawnPictures.current.get(picture);
     if (picture && image && opensPicture(event.nativeEvent)) {
-      setViewing({ address, title: picture.alt || image.path, image, origin: link,
+      setViewing({ address, title: picture.alt || image.path, image, origin: link, web: markdownHrefKind(address) === "web",
         size: picture.naturalWidth ? { width: picture.naturalWidth, height: picture.naturalHeight } : null });
       return;
     }
@@ -189,7 +197,7 @@ export function MarkdownContent({ source, timelineCodeBlocks = false, document: 
     }} dangerouslySetInnerHTML={codeMarkup} />
     {viewing && <TimelineImageViewer images={[{ index: 0, title: viewing.title, mediaType: null }]}
       source={inlineImageSource(viewing.image.path, [viewing.image])} index={0} initialSize={viewing.size} onIndex={() => { /* One picture. */ }}
-      onClose={closeViewer} file={{ path: viewing.image.path, platform: images?.platform ?? null,
+      onClose={closeViewer} file={viewing.web ? undefined : { path: viewing.image.path, platform: images?.platform ?? null,
         onReveal: images ? () => images.reveal(viewing.address, scope) : undefined }} />}
   </>;
 }

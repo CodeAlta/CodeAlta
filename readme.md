@@ -50,13 +50,13 @@ CodeAlta Desktop brings together:
 - **Speech to prompt**: [dictate a prompt](https://codealta.github.io/docs/speech/) with a speech model that runs on your computer, downloaded the first time you use the microphone.
 - **Search your work**: `Ctrl+P` and [`alta search`](https://codealta.github.io/docs/search/) find the prompts and answers of your sessions, your plans, the guide, the skills and the tools from a local index; turn on search by meaning to find them by what they are about, with a model that runs on your computer.
 - **Code & Git**: search and edit files, run terminals and inspect diffs.
-- **Worktrees**: give sessions separate checkouts and branches; manage and clean them up.
+- **Worktrees**: give sessions separate checkouts and branches, move a session to another worktree with its conversation; manage and clean them up.
 - **Prompt suggestions**: after a turn, the model suggests the next prompt in the empty composer, with any provider; `Tab` or `→` takes it.
 - **Session titles**: a title you give stays; other sessions are titled from the first prompt, the last message or by the model, as you choose.
 - **Work items**: review agent-proposed tasks and plans; start, defer or dismiss them; follow the reviews in flight.
 - **[Reviews](https://codealta.github.io/docs/reviews/)**: comment on the lines of a plan, a file or an agent's changes, send them with a verdict, and have agents wait for your approval before they commit.
 - **Bookmarks**: mark a message or a whole session, jump between the bookmarks of a timeline, and find them all in one tab.
-- **Issues & pull requests**: browse issues and PRs on GitHub, GitLab, Azure DevOps or Bitbucket, plus Jira issues; start sessions and open PRs.
+- **Issues & pull requests**: browse issues and PRs on GitHub, GitLab, Azure DevOps or Bitbucket, plus Jira issues, with views of your filters (on Azure DevOps, the PRs that wait for your review, also through nested groups); start sessions and open PRs.
 - **Automations**: start sessions on a schedule, issue/PR events or on demand.
 - **On your phone**: [follow, answer, steer and start sessions from a phone, follow their background jobs, and answer the questions, permission requests and review requests of agents](https://codealta.github.io/docs/plugins/mobile/), on your own tailnet through Tailscale.
 - **Canvases**: use interactive boards, checklists, graphs and custom tools beside your conversations.

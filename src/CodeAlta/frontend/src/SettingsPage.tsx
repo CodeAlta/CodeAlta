@@ -35,13 +35,17 @@ export function useSettingsEditor<T extends { status: string }>(read: (options: 
     return () => controller.abort();
   }, [key, generation]);
   const reload = useCallback(() => setGeneration(value => value + 1), []);
-  /** Runs one write; returns whether it succeeded. `policy_failed` saved the item, so it also reloads. */
-  const mutate = useCallback(async (call: () => Promise<{ status: string; message?: string | null }>, success?: MessageKey) => {
+  /**
+   * Runs one write; returns whether it succeeded. `policy_failed` saved the item, so it also reloads. `describe` says
+   * what a status of the page's own means, before the statuses every page shares.
+   */
+  const mutate = useCallback(async (call: () => Promise<{ status: string; message?: string | null }>, success?: MessageKey,
+    describe?: (status: string, message?: string | null) => SettingsNotice | null | undefined) => {
     setBusy(true); setNotice(null);
     try {
       const result = await call();
       if (!alive.current) return false;
-      const failure = settingsFailure(result.status, result.message);
+      const failure = result.status === "ok" ? null : describe?.(result.status, result.message) ?? settingsFailure(result.status, result.message);
       setNotice(failure ?? (success ? { key: success, intent: "success" } : null));
       if (!failure || result.status === "policy_failed") setGeneration(value => value + 1);
       return !failure;

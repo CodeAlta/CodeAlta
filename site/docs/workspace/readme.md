@@ -4,7 +4,7 @@ title: Workspace
 
 # Workspace
 
-The CodeAlta window holds your projects, your sessions and the tools around them. It is keyboard-first: most popups close back to the prompt. The **Desktop / TUI** switch on a screenshot shows each app; [Desktop and TUI](../desktop-and-tui.md) lists the differences.
+The CodeAlta window holds your projects, your sessions and the tools around them. It is keyboard-first: most popups close back to the prompt. In CodeAlta Desktop, a character typed while nothing that takes text has the keyboard (after a click on the timeline, a button or a row, or `Esc`) is written in the prompt, which takes the keyboard. `/` there opens the search of the commands when the prompt is empty, as it does in the prompt. The **Desktop / TUI** switch on a screenshot shows each app; [Desktop and TUI](../desktop-and-tui.md) lists the differences.
 
 See also [the prompt and the timeline](prompt.md), [code, changes and terminals](code.md) and [Settings](settings.md).
 
@@ -47,7 +47,7 @@ The Explorer lists the projects of the space the window shows. **Chats**, at the
 - **Filter sessions**, at the top, keeps the sessions, chats, projects and Claude Code conversations whose title has every word you type. `Esc` or **×** clears it.
 - Click the arrow of a project to show or hide its sessions; **Collapse all** closes them all. Open projects stay open at the next start.
 - A project or a [label](../labels.md) shows a spinner while sessions run in it, with their number when there are several, and a yellow mark with the number of sessions that wait for you: a folded one tells it without being opened. A project with no session or terminal has no arrow.
-- Click a project to write the prompt of a new session in it. Click a session to look at it; double-click it to keep its tab (see [Tabs](#tabs)).
+- Click a project to write the prompt of a new session in it. Click a session to look at it; double-click it to keep its tab (see [Tabs](#tabs)). After a click, the prompt has the keyboard; `Enter` on a row keeps it in the Explorer, where the arrow keys go from row to row.
 - Point at a project for its buttons: the star (adds it to **Favorites**), its [changes](code.md#changes), its [code editor](code.md#code-editor) and a [terminal](code.md#terminals).
 - The `…` button or a right-click (`Ctrl`+click on macOS) opens the menu of a project or a session.
 - The `+` button adds a folder as a project (see [Open a project](#open-a-project)).

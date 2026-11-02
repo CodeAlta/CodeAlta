@@ -226,6 +226,78 @@ public sealed partial class ProjectCatalog
         return result.IsConflict ? ProjectSpacesStatus.Conflict : ProjectSpacesStatus.Updated;
     }
 
+    /// <summary>
+    /// Changes the folders of skills the user added for a project, in the user's own file of the project: only the
+    /// <c>skill_folders</c> entry of the front matter is written, added or removed, and every other byte of the file
+    /// stays as it is. The outcomes are those of <see cref="UpdateSpacesAsync"/>.
+    /// </summary>
+    /// <param name="projectId">The persisted project identifier.</param>
+    /// <param name="change">Gives the folders the project must have from the ones it has now.</param>
+    /// <param name="cancellationToken">Cancels before the save.</param>
+    /// <returns>What happened; nothing is written unless it is <see cref="ProjectSpacesStatus.Updated"/>.</returns>
+    /// <exception cref="ArgumentException">The identifier is empty.</exception>
+    /// <exception cref="ArgumentNullException"><paramref name="change"/> is <see langword="null"/>.</exception>
+    /// <exception cref="IOException">The catalog read or the conditional save failed.</exception>
+    /// <exception cref="OperationCanceledException">Cancelled before the save.</exception>
+    /// <exception cref="InvalidOperationException">The catalog is read-only (<see cref="IsReadOnly"/>).</exception>
+    public async Task<ProjectSpacesStatus> UpdateSkillFoldersAsync(string projectId, Func<IReadOnlyList<string>, IEnumerable<string>> change,
+        CancellationToken cancellationToken = default)
+    {
+        ThrowIfReadOnly();
+        ArgumentException.ThrowIfNullOrWhiteSpace(projectId);
+        ArgumentNullException.ThrowIfNull(change);
+        await _projectEditGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            for (var attempt = 0; ; attempt++)
+            {
+                var status = await UpdateSkillFoldersCoreAsync(projectId, change, cancellationToken).ConfigureAwait(false);
+                if (status != ProjectSpacesStatus.Conflict || attempt == 2) return status;
+            }
+        }
+        finally
+        {
+            _projectEditGate.Release();
+        }
+    }
+
+    private async Task<ProjectSpacesStatus> UpdateSkillFoldersCoreAsync(string projectId, Func<IReadOnlyList<string>, IEnumerable<string>> change,
+        CancellationToken cancellationToken)
+    {
+        var project = await GetByIdAsync(projectId, cancellationToken).ConfigureAwait(false);
+        if (project is null) return ProjectSpacesStatus.NotFound;
+        if (project.SourcePath is null) return ProjectSpacesStatus.Unsupported;
+        var sourcePath = Path.GetFullPath(project.SourcePath);
+        var projectsRoot = Path.GetFullPath(_options.ProjectsRoot);
+        if (sourcePath != Path.GetFullPath(Path.Combine(projectsRoot, $"{project.Slug}.md"))
+            && sourcePath != Path.GetFullPath(Path.Combine(projectsRoot, project.Slug, "readme.md")))
+            return ProjectSpacesStatus.Unsupported;
+        foreach (var path in new[] { _options.GlobalRoot, projectsRoot, Path.GetDirectoryName(sourcePath)!, sourcePath })
+            if ((File.GetAttributes(path) & FileAttributes.ReparsePoint) != 0) return ProjectSpacesStatus.Unsupported;
+        var snapshot = await _projectNameFiles.LoadAsync(sourcePath, cancellationToken).ConfigureAwait(false);
+        var current = _serializer.DeserializeProjectMarkdown(snapshot.Text);
+        if (!string.Equals(current.Id, project.Id, StringComparison.Ordinal)) return ProjectSpacesStatus.Conflict;
+        var next = ProjectDescriptor.NormalizeSkillFolders(change(current.SkillFolders.AsReadOnly()));
+        if (next.SequenceEqual(current.SkillFolders, StringComparer.Ordinal)) return ProjectSpacesStatus.Unchanged;
+        // Single quotes: a path of Windows holds backslashes, which a double-quoted YAML text reads as escapes.
+        if (ReplaceEntry(snapshot.Text, "skill_folders",
+                next.Count == 0 ? null : $"skill_folders: [{string.Join(", ", next.Select(static folder => $"'{folder.Replace("'", "''", StringComparison.Ordinal)}'"))}]")
+            is not { } updated)
+            return ProjectSpacesStatus.Unsupported;
+        ProjectDescriptor reread;
+        try { reread = _serializer.DeserializeProjectMarkdown(updated); }
+        catch (Exception ex) when (ex is YamlException or InvalidDataException) { return ProjectSpacesStatus.Unsupported; }
+        if (!reread.SkillFolders.SequenceEqual(next, StringComparer.Ordinal) || reread.Id != current.Id || reread.Slug != current.Slug
+            || reread.ProjectPath != current.ProjectPath || reread.DisplayName != current.DisplayName || reread.Name != current.Name
+            || reread.Archived != current.Archived || reread.Description != current.Description || !reread.Tags.SequenceEqual(current.Tags)
+            || !reread.Spaces.SequenceEqual(current.Spaces, StringComparer.Ordinal) || !reread.Labels.SequenceEqual(current.Labels, StringComparer.Ordinal)
+            || !string.Equals(reread.Sandbox, current.Sandbox, StringComparison.Ordinal))
+            return ProjectSpacesStatus.Unsupported;
+        var result = await SaveSourceAsync(new TextFileSaveRequest(sourcePath, updated, snapshot.Encoding, snapshot.HasByteOrderMark,
+            snapshot.Revision), cancellationToken).ConfigureAwait(false);
+        return result.IsConflict ? ProjectSpacesStatus.Conflict : ProjectSpacesStatus.Updated;
+    }
+
     // Writes the `spaces` entry of the front matter on one line, replaces the lines it took, or removes it
     // when the project is in no space. Null when the front matter has no single such entry to replace.
     private static string? ReplaceSpacesEntry(string text, IReadOnlyList<string> ids)

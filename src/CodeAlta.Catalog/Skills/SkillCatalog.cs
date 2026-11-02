@@ -323,7 +323,7 @@ public sealed class SkillCatalog
         return roots
             .Where(static root => !string.IsNullOrWhiteSpace(root.RootPath))
             .Select(static root => root with { RootPath = Path.GetFullPath(root.RootPath) })
-            .GroupBy(static root => root.RootPath, StringComparer.OrdinalIgnoreCase)
+            .GroupBy(static root => root.RootPath, AddedSkillFolders.PathComparer)
             .Select(static group => group.OrderBy(static root => root.Precedence).First())
             .OrderBy(static root => root.Precedence)
             .ThenBy(static root => root.RootPath, StringComparer.OrdinalIgnoreCase)
@@ -340,7 +340,19 @@ public sealed class SkillCatalog
             return [];
         }
 
-        var skillFilePaths = DiscoverSkillFilesOnce(root.RootPath, cancellationToken);
+        IReadOnlyList<string> skillFilePaths;
+        try
+        {
+            skillFilePaths = DiscoverSkillFilesOnce(root.RootPath, cancellationToken);
+        }
+        catch (Exception exception) when (root.SourceKind.IsAddedFolder() && exception is UnauthorizedAccessException or IOException or System.Security.SecurityException)
+        {
+            // A folder the user added that cannot be read brings no skill, and the others are read: the page that lists
+            // the folders says which one cannot be read.
+            _parsedSkillFiles.TryRemove(root, out _);
+            return [];
+        }
+
         _parsedSkillFiles.TryGetValue(root, out var previous);
         var current = new Dictionary<string, CachedSkillFile>(skillFilePaths.Count, StringComparer.Ordinal);
         var descriptors = new List<SkillDescriptor>(skillFilePaths.Count);
@@ -1016,8 +1028,8 @@ public sealed class SkillCatalog
     {
         return sourceKind switch
         {
-            SkillSourceKind.ProjectAlta or SkillSourceKind.ProjectCommon or SkillSourceKind.ProjectCopilot => "project",
-            SkillSourceKind.UserAlta or SkillSourceKind.UserCommon or SkillSourceKind.UserCopilot => "user",
+            SkillSourceKind.ProjectAlta or SkillSourceKind.ProjectCommon or SkillSourceKind.ProjectCopilot or SkillSourceKind.ProjectFolder => "project",
+            SkillSourceKind.UserAlta or SkillSourceKind.UserCommon or SkillSourceKind.UserCopilot or SkillSourceKind.UserFolder or SkillSourceKind.SpaceFolder => "user",
             SkillSourceKind.Plugin => "plugin",
             SkillSourceKind.Builtin => "builtin",
             _ => "temporary",

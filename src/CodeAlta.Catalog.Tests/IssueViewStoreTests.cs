@@ -299,4 +299,54 @@ public sealed class IssueViewStoreTests
         }
         finally { if (Directory.Exists(project)) Directory.Delete(project, true); }
     }
+
+    [TestMethod]
+    public void TheViewsOfThePullRequests_AreTheirOwn_InTheSameFiles_BesideThoseOfTheIssues()
+    {
+        var project = Path.Combine(Path.GetTempPath(), "alta-issue-views-pulls-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            Directory.CreateDirectory(Path.Combine(project, ".alta", "local"));
+            var local = Path.Combine(project, ".alta", "local", "issues.toml");
+            File.WriteAllText(local, """
+                [azure_devops]
+                current = "Mine"
+
+                [azure_devops.views.Mine.assigned_to]
+                value = "@me"
+                """);
+            var store = new IssueViewStore();
+
+            store.SaveView(IssueViewSource.Personal, "azure_devops", IssueViewKind.PullRequests, project, "Waiting for me",
+                new([new("scope", true, "@project", Pick: true), new("reviewer", true, "@me_groups"), new("vote", true, "@none\u001F-5")]));
+            store.SaveView(IssueViewSource.Team, "azure_devops", IssueViewKind.PullRequests, project, "Release", new([new("target_branch", true, "main")]));
+            store.SetCurrent("azure_devops", IssueViewKind.PullRequests, project, "Release");
+
+            CollectionAssert.AreEqual(new[] { "Mine" }, store.ReadViews("azure_devops", project).Select(static view => view.Name).ToArray(), "The issues keep their views alone.");
+            Assert.AreEqual("Mine", store.ReadCurrent("azure_devops", project)!.Name, "Each kind keeps its own choice.");
+            var pulls = store.ReadViews("azure_devops", IssueViewKind.PullRequests, project);
+            CollectionAssert.AreEqual(new[] { "Waiting for me:Personal", "Release:Team" }, pulls.Select(static view => $"{view.Name}:{view.Source}").ToArray());
+            Assert.AreEqual(new IssueFilterSetting("vote", true, "@none\u001F-5"), pulls[0].Filters.Find("vote"));
+            Assert.AreEqual((IssueViewSource.Team, "Release"), (store.ReadCurrent("azure_devops", IssueViewKind.PullRequests, project)!.Source, store.ReadCurrent("azure_devops", IssueViewKind.PullRequests, project)!.Name));
+
+            // The same name is free in the other kind: a name is one view of a kind.
+            store.SaveView(IssueViewSource.Personal, "azure_devops", IssueViewKind.PullRequests, project, "Mine", new([new("author", true, "@me")]));
+            Assert.ThrowsExactly<IssueViewNameTakenException>(() => store.SaveView(IssueViewSource.Personal, "azure_devops", IssueViewKind.PullRequests, project, "Release", IssueFilterSettings.Empty));
+
+            Assert.IsTrue(store.RenameView(IssueViewSource.Team, "azure_devops", IssueViewKind.PullRequests, project, "Release", "Main"));
+            Assert.AreEqual("Main", store.ReadCurrent("azure_devops", IssueViewKind.PullRequests, project)!.Name, "The choice follows a view of the team that is renamed.");
+            Assert.IsTrue(store.RemoveView(IssueViewSource.Team, "azure_devops", IssueViewKind.PullRequests, project, "Main"));
+            Assert.AreEqual("Waiting for me", store.ReadCurrent("azure_devops", IssueViewKind.PullRequests, project)!.Name, "The choice of a view that is gone is forgotten.");
+            Assert.IsFalse(store.RemoveView(IssueViewSource.Personal, "azure_devops", project, "Waiting for me"), "A view of the pull requests is not one of the issues.");
+
+            var file = (TomlTable)TomlSerializer.Deserialize<TomlTable>(File.ReadAllText(local))!["azure_devops"];
+            Assert.AreEqual("Mine", (string)file["current"]);
+            var pullTable = (TomlTable)file["pull_requests"];
+            Assert.IsFalse(pullTable.ContainsKey("current"));
+            CollectionAssert.AreEqual(new[] { "Waiting for me", "Mine" }, ((TomlTable)pullTable["views"]).Keys.ToArray());
+            CollectionAssert.AreEqual(new[] { "@none", "-5" }, ((TomlArray)((TomlTable)((TomlTable)((TomlTable)pullTable["views"])["Waiting for me"])["vote"])["value"]).OfType<string>().ToArray());
+            Assert.AreEqual(1, store.ReadViews("azure_devops", project).Count, "The views of the issues are untouched.");
+        }
+        finally { if (Directory.Exists(project)) Directory.Delete(project, true); }
+    }
 }

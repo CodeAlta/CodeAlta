@@ -281,6 +281,28 @@ public sealed class SessionSandboxTests
         Assert.HasCount(1, backend.Starts, "the same worker reads what was saved after it started");
     }
 
+    [TestMethod]
+    public async Task TheFoldersOfSkills_TheUsersAndTheAddedOnes_AreReadBySandboxedSessions_AndNeverWritten()
+    {
+        var backend = new InProcessBackend();
+        await using var f = await Fixture.CreateAsync(backend);
+        await f.CreateSessionAsync("s");
+        var userSkills = Directory.CreateDirectory(Path.Combine(f.Options.GlobalRoot, "skills")).FullName;
+        var library = Directory.CreateDirectory(Path.Combine(Path.GetDirectoryName(f.Options.GlobalRoot)!, "library")).FullName;
+        var ofProject = Directory.CreateDirectory(Path.Combine(Path.GetDirectoryName(f.Options.GlobalRoot)!, "project-library")).FullName;
+        Assert.AreEqual(ProjectSpacesStatus.Updated, await f.Projects.UpdateSkillFoldersAsync(f.Project.Id, current => [.. current, ofProject]));
+        f.WriteConfig($"[sandbox]\nall_sessions = \"workspace\"\n[skills]\nfolders = ['{library}']\n");
+        File.WriteAllText(Path.Combine(f.Project.ProjectPath, "a.txt"), "a");
+        var tools = f.RoutedTools("s");
+
+        Assert.IsTrue((await tools.CallAsync("read_file", new { path = "a.txt" })).Success);
+        var policy = backend.Starts.Single();
+        foreach (var folder in new[] { userSkills, library, ofProject }) CollectionAssert.Contains(policy.ReadOnly.ToList(), folder, folder);
+        Assert.IsFalse(policy.ReadWrite.Any(grant => IsInside(grant, library) || IsInside(grant, userSkills)), "a folder of skills is never written");
+        Assert.IsFalse(policy.ReadOnly.Concat(policy.ReadWrite).Any(grant => string.Equals(grant, f.Options.GlobalRoot, StringComparison.OrdinalIgnoreCase)),
+            "the folder of CodeAlta is not granted for its skills");
+    }
+
     private static bool IsInside(string root, string path)
     {
         var relative = Path.GetRelativePath(root, path);

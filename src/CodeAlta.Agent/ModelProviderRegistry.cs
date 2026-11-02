@@ -21,6 +21,13 @@ public sealed class ModelProviderRegistry : IModelProviderRegistry, IAsyncDispos
     public Runtime.IAgentExternalConversationHeaderStore? ExternalConversationHeaders { get; init; }
 
     /// <summary>
+    /// Gets or initializes the CodeAlta application the providers registered here serve: <c>desktop</c>, <c>tui</c> or
+    /// <c>cli</c>, or null when none is named. A provider names it to the services that ask an application to say what
+    /// it is, such as the categories of the app attribution of OpenRouter.
+    /// </summary>
+    public string? Application { get; init; }
+
+    /// <summary>
     /// Gets the processes the runtimes of the providers registered here started and still run. It outlives the
     /// registrations: a provider registered again knows the processes of the sessions that still run on its former runtime.
     /// </summary>

@@ -181,3 +181,11 @@ dialog.worktree-manager-dialog:has(> .app-window) .app-window-body .worktree-rev
   .worktree-checkout-branch { display: none; }
   .worktree-review-rows li, .worktree-results-rows li { flex-wrap: wrap; }
 }
+
+/* Another folder for a session that exists, in its Workspace popover: where it works next, and what stays behind. */
+.session-folder-choice { display: grid; gap: 8px; padding-top: 12px; border-top: 1px solid var(--line); }
+.session-folder-choice > p { margin: 0; font-size: 12px; }
+.session-folder-note { display: flex; align-items: flex-start; gap: 6px; color: var(--muted); }
+.session-folder-note svg { flex: none; margin-top: 1px; }
+.session-folder-error { color: var(--red); }
+.session-folder-choice > footer { display: flex; justify-content: flex-end; gap: 8px; }

@@ -183,6 +183,50 @@ public sealed class BrowserPluginTests
     }
 
     [TestMethod]
+    public void TheBrowsersOfCodeAlta_DoNotStartInGuestMode_WhichEndsTheConnectionAtANewContext()
+    {
+        var options = new CodeAlta.Browser.Launch.BrowserLaunchOptions { Executable = "chrome", ProfileDirectory = "profile" };
+        CollectionAssert.DoesNotContain(CodeAlta.Browser.Launch.ChromiumLauncher.Arguments(options).ToArray(), "--guest");
+    }
+
+    [TestMethod]
+    public void TheAnswerOfThePasswordCheck_IsInTheStateOfANewProfile_InTheSecondTheBrowserReads()
+    {
+        var folder = Directory.CreateDirectory(Path.Combine(Path.GetTempPath(), "codealta-browser-tests", Guid.NewGuid().ToString("N")[..8])).FullName;
+        try
+        {
+            // 2026-11-02 with the numbers of a measured start: the browser's own reading was 13421558444267046.
+            var now = new DateTime(1601, 1, 1, 0, 0, 0, DateTimeKind.Utc).AddSeconds(13421558443 + 16517224).AddMilliseconds(130);
+            CodeAlta.Browser.Launch.ChromiumPasswordCheck.Seed(folder, now, 16517224);
+            using var state = JsonDocument.Parse(File.ReadAllText(Path.Combine(folder, "Local State")));
+            var answer = state.RootElement.GetProperty("password_manager");
+            Assert.IsFalse(answer.GetProperty("os_password_blank").GetBoolean());
+            Assert.AreEqual("13421558444500000", answer.GetProperty("os_password_last_changed").GetString());
+        }
+        finally
+        {
+            Directory.Delete(folder, recursive: true);
+        }
+    }
+
+    [TestMethod]
+    public void TheAnswerOfThePasswordCheck_LeavesTheStateOfAProfileThatHasOne()
+    {
+        var folder = Directory.CreateDirectory(Path.Combine(Path.GetTempPath(), "codealta-browser-tests", Guid.NewGuid().ToString("N")[..8])).FullName;
+        try
+        {
+            var path = Path.Combine(folder, "Local State");
+            File.WriteAllText(path, "{\"kept\":true}");
+            CodeAlta.Browser.Launch.ChromiumPasswordCheck.Seed(folder, DateTime.UtcNow, 100);
+            Assert.AreEqual("{\"kept\":true}", File.ReadAllText(path));
+        }
+        finally
+        {
+            Directory.Delete(folder, recursive: true);
+        }
+    }
+
+    [TestMethod]
     public void ASandboxIsTheSameOnlyWithTheSameReach()
     {
         BrowserSandbox Sandbox(string fingerprint, string folder = "C:/work") => new("strict", [folder], [folder], null) { Fingerprint = fingerprint };

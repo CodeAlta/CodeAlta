@@ -142,7 +142,8 @@ export const isDiskFolderTab = (tab: FileTab) => tab.view === "editor" && tab.pr
 /** A tab of the code editor on a folder that is no project of the workspace: the one of a plugin, of a skill, or of a file a link named. */
 export const isFolderTab = (tab: FileTab) => isPluginTab(tab) || isSkillTab(tab) || isDiskFolderTab(tab);
 /** Whether the folder of a skill is only read: the skill is not one of the user or of a project. */
-export const skillReadOnly = (source: string) => !["ProjectAlta", "ProjectCommon", "UserAlta", "UserCommon", "ProjectCopilot", "UserCopilot"].includes(source);
+export const skillReadOnly = (source: string) => !["ProjectAlta", "ProjectCommon", "UserAlta", "UserCommon", "ProjectCopilot", "UserCopilot",
+  "UserFolder", "SpaceFolder", "ProjectFolder"].includes(source);
 /**
  * What the id of a folder of the disk starts with when the host gave it for one file (a configuration file whose
  * folder holds more than settings), and when it gave it to be only read (what ships with the application).
@@ -155,7 +156,7 @@ export const diskFilePrefix = "folder:file:", diskViewPrefix = "folder:view:";
 export function isReadOnlyTab(tab: FileTab) {
   if (isDiskFolderTab(tab)) return tab.projectId.startsWith(diskFilePrefix) || tab.projectId.startsWith(diskViewPrefix);
   if (!isSkillTab(tab)) return false;
-  const source = /^skill:(?:global|project:[^:]+):([A-Za-z]+):/.exec(tab.projectId);
+  const source = /^skill:(?:global|project:[^:]+|space:[^:]+):([A-Za-z]+):/.exec(tab.projectId);
   return !source || skillReadOnly(source[1]);
 }
 export const fileNodeId = (tab: FileTab) => `file:${fileTabKey(tab)}`;

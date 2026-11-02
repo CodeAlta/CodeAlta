@@ -231,7 +231,7 @@
     { "id": "mcp.servers", "page": "mcp", "section": "MCP Servers", "label": "MCP Servers", "keywords": ["mcp", "server", "tools"],
       "kind": "collection", "owner": "host", "agents": "read", "managedBy": "alta mcp server" },
 
-    { "id": "storage.clear_scratchpad_on_startup", "page": "storage", "section": "Automatic cleanup", "label": "Clear scratchpad on startup", "keywords": ["cleanup", "delete", "temp"],
+    { "id": "storage.clear_scratchpad_on_startup", "page": "storage", "section": "Automatic cleanup", "label": "Remove old scratchpad files on startup", "keywords": ["cleanup", "delete", "temp"],
       "kind": "boolean", "default": true, "owner": "host", "agents": "read", "applies": "nextStart" },
     { "id": "storage.session_retention.enabled", "page": "storage", "section": "Automatic cleanup", "label": "Delete inactive sessions", "keywords": ["retention", "cleanup", "old sessions"],
       "kind": "boolean", "default": true, "owner": "host", "agents": "read", "applies": "nextStart" },

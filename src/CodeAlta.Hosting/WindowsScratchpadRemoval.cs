@@ -12,6 +12,8 @@ namespace CodeAlta.Hosting;
 // read access and without write/delete sharing, checked through that handle, and retained
 // until child work stops. This blocks rename and reparse mutation, including path swaps
 // between enumeration and opening. The final entry itself is opened without following links.
+// Only entries older than the cutoff go: a file created or written since then is kept, and so is
+// a directory created or changed since then, or one that still holds a kept entry.
 [SupportedOSPlatform("windows")]
 internal static class WindowsScratchpadRemoval
 {
@@ -27,8 +29,8 @@ internal static class WindowsScratchpadRemoval
     private const uint DirectoryAttribute = 0x10;
     private const uint ReparseAttribute = 0x400;
 
-    internal static ScratchpadCleanupState Clear(CodeAltaInstanceProfile profile, SafeFileHandle ownership, ScratchpadRemovalResult result,
-        Action<string>? beforeOpen, Action<string>? beforeDelete, CancellationToken cancellationToken)
+    internal static ScratchpadCleanupState Clear(CodeAltaInstanceProfile profile, SafeFileHandle ownership, DateTimeOffset cutoff,
+        ScratchpadRemovalResult result, Action<string>? beforeOpen, Action<string>? beforeDelete, CancellationToken cancellationToken)
     {
         var pins = new List<SafeFileHandle>();
         FileStream? compatibilityGate = null;
@@ -67,7 +69,7 @@ internal static class WindowsScratchpadRemoval
                 return ScratchpadCleanupState.Completed;
             }
             pins.Add(root);
-            ClearContents(scratchpad, result, beforeOpen, beforeDelete, cancellationToken);
+            ClearContents(scratchpad, cutoff.UtcDateTime.ToFileTimeUtc(), result, beforeOpen, beforeDelete, cancellationToken);
             return result.SkippedEntries == 0 ? ScratchpadCleanupState.Completed : ScratchpadCleanupState.Partial;
         }
         finally
@@ -140,8 +142,8 @@ internal static class WindowsScratchpadRemoval
         }
     }
 
-    private static void ClearContents(string path, ScratchpadRemovalResult result, Action<string>? beforeOpen, Action<string>? beforeDelete,
-        CancellationToken cancellationToken)
+    private static void ClearContents(string path, long cutoff, ScratchpadRemovalResult result, Action<string>? beforeOpen,
+        Action<string>? beforeDelete, CancellationToken cancellationToken)
     {
         var frames = new Stack<DirectoryFrame>();
         frames.Push(new DirectoryFrame(path, null));
@@ -165,7 +167,12 @@ internal static class WindowsScratchpadRemoval
                     frames.Pop();
                     using (frame)
                     {
-                        if (frame.Handle is not null)
+                        if (frame.Keep)
+                        {
+                            // A directory that holds a kept entry is not empty: it is kept, not skipped.
+                            if (frames.TryPeek(out var parent)) parent.Keep = true;
+                        }
+                        else if (frame.Handle is not null)
                         {
                             try
                             {
@@ -193,10 +200,16 @@ internal static class WindowsScratchpadRemoval
                     handle = Open(discovered.Path, delete: true);
                     var attributes = Attributes(handle);
                     if ((attributes & ReparseAttribute) != 0) { result.Skip("linked-entry"); continue; }
+                    // Read before any child goes: removing a child changes the time of its directory.
+                    var recent = LastChanged(handle) >= cutoff;
                     if ((attributes & DirectoryAttribute) != 0)
                     {
-                        frames.Push(new DirectoryFrame(discovered.Path, handle));
+                        frames.Push(new DirectoryFrame(discovered.Path, handle) { Keep = recent });
                         handle = null;
+                    }
+                    else if (recent)
+                    {
+                        frame.Keep = true;
                     }
                     else
                     {
@@ -218,6 +231,7 @@ internal static class WindowsScratchpadRemoval
         internal string Path { get; } = path;
         internal SafeFileHandle? Handle { get; } = handle;
         internal IEnumerator<ScratchpadEntry>? Entries { get; set; }
+        internal bool Keep { get; set; }
         public void Dispose() { try { Entries?.Dispose(); } finally { Handle?.Dispose(); } }
     }
 
@@ -253,6 +267,15 @@ internal static class WindowsScratchpadRemoval
         return info.Attributes;
     }
 
+    // The latest of the creation and the last write, as a UTC file time. A copied file keeps the
+    // write time of its source but is created anew. Access and metadata-change times do not count.
+    private static long LastChanged(SafeFileHandle handle)
+    {
+        if (!GetFileBasicInformation(handle, 0 /* FileBasicInfo */, out var info, BasicInfo.Size))
+            throw new Win32Exception(Marshal.GetLastWin32Error());
+        return Math.Max(info.CreationTime, info.LastWriteTime);
+    }
+
     private static void MarkForDeletion(SafeFileHandle handle)
     {
         var delete = 1;
@@ -265,6 +288,19 @@ internal static class WindowsScratchpadRemoval
 
     [StructLayout(LayoutKind.Sequential)]
     private struct AttributeTagInfo { internal uint Attributes; internal uint ReparseTag; }
+
+    // FILE_BASIC_INFO: four LARGE_INTEGER times, then the attributes, padded to 8 bytes.
+    [StructLayout(LayoutKind.Sequential)]
+    private struct BasicInfo
+    {
+        internal const uint Size = 40;
+        internal long CreationTime;
+        internal long LastAccessTime;
+        internal long LastWriteTime;
+        internal long ChangeTime;
+        internal uint FileAttributes;
+        internal uint Padding;
+    }
 
     [DllImport("kernel32.dll", EntryPoint = "GetFinalPathNameByHandleW", CharSet = CharSet.Unicode, SetLastError = true)]
     private static extern uint GetFinalPathNameByHandle(SafeFileHandle handle, StringBuilder path, uint capacity, uint flags);
@@ -286,6 +322,11 @@ internal static class WindowsScratchpadRemoval
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool GetFileInformationByHandleEx(SafeFileHandle handle, int informationClass,
         out AttributeTagInfo information, uint size);
+
+    [DllImport("kernel32.dll", EntryPoint = "GetFileInformationByHandleEx", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool GetFileBasicInformation(SafeFileHandle handle, int informationClass,
+        out BasicInfo information, uint size);
 
     [DllImport("kernel32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]

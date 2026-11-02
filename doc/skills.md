@@ -15,12 +15,21 @@ are offered for reading. CodeAlta reads the Agent Skills format, so skills writt
 
 ## Roots and precedence
 
-Highest first:
+Highest first (`SkillRootPrecedence`):
 
 1. `<project>/.alta/skills/`, then `<project>/.agents/skills/` and `<project>/.github/skills/`
-2. `~/.alta/skills/`, then `~/.agents/skills/` and `~/.copilot/skills/`
-3. Skill roots of plugins (resource contributions), with the scope of their plugin
-4. Built-in skills
+2. Folders the user added for the project, then for the space of the session, each list in its order
+3. `~/.alta/skills/`, then `~/.agents/skills/` and `~/.copilot/skills/`
+4. Folders the user added for every space
+5. Skill roots of plugins (resource contributions), with the scope of their plugin
+6. Built-in skills
+
+Added folders (`AddedSkillFolders`) are read in place, as `~/.agents/skills` is: the closer to the work, the stronger,
+and a folder in two lists is read once, in the more specific one. Only the window writes their lists, in files of the
+user (`[skills] folders` of the global `config.toml`, `skills.folders` of the file of a space, `skill_folders` of the
+user's file of a project): a repository never names one, so it cannot make CodeAlta, or a sandbox, read outside of it.
+A folder that is gone or cannot be read brings no skill and hides none of the others; a disk, the home folder and the
+folder of CodeAlta are refused, since walking them would read everything.
 
 A skill with the name of a higher one is shadowed: it stays inspectable, and only the winner can be activated. Use
 `.alta/skills/` for skills that depend on CodeAlta; the `.agents` and GitHub Copilot folders are shared with other
@@ -42,8 +51,11 @@ unknown one). Skills that MCP servers publish are a separate origin, named by se
 Skills are enabled by default. `[skills] disabled = [...]` in the global `config.toml` disables names everywhere; a
 project's `config.toml` adds to it and cannot re-enable. `[skills.spaces]` in the global file assigns names to spaces;
 a skill outside the session's space is disabled whatever folder it comes from. `SkillCatalogQuery.ForSession` builds
-the one query a session uses for activation, instructions and `alta skill`, so what an agent sees is what it can
-activate.
+the one query a session uses for activation, instructions and `alta skill`, with the added folders of its space
+(`SpaceFilter.SkillFolders`) and of its project, so what an agent sees is what it can activate.
+
+A sandboxed session reads the folders of skills of the user and the added folders, never writes them (see
+[sandbox](sandbox.md#profiles-and-the-policy-of-a-session)): the agent reads the files of a skill it activates.
 
 ## The prompt
 

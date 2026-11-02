@@ -60,6 +60,7 @@ internal sealed partial class WorkspaceService
         _forkSession = host.Commands.ForkSessionAsync;
         _rewindSession = host.Commands.RewindSessionAsync;
         _moveSession = host.Commands.MoveSessionAsync;
+        _switchFolder = host.Commands.SwitchWorkFolderAsync;
         _moveToSpace = host.Commands.MoveSessionToSpaceAsync;
         _archiveSession = host.Commands.SetSessionArchivedAsync;
         _listExternalConversations = host.Commands.ListExternalConversationsAsync;

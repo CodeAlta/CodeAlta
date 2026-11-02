@@ -301,7 +301,7 @@ test("the prompt surface keeps one row above and one below the editor at every w
       buttons:[...popover.querySelectorAll('footer .bp6-button')].map(button=>button.textContent.trim())}})()`);
     for (const fact of ["CodeAlta", "mellow-chisel-pz93", "alta/mellow-chisel-pz93", "+94", "−32", "C:\\Users\\alexa\\.alta\\worktrees\\codealta\\mellow-chisel-pz93"])
       assert.ok(workspace.text.includes(fact), `the Workspace popover says ${fact}: ${workspace.text}`);
-    assert.deepEqual(workspace.buttons, ["View changes", "Open editor", "Open terminal"]);
+    assert.deepEqual(workspace.buttons, ["View changes", "Open editor", "Open terminal", "Change worktree…"]);
     // Beside the path, the editor the user chose (with its logo) and the file manager open the folder of the session.
     assert.equal(await wait("!!document.querySelector('.workspace-path [aria-label=\"Open in Visual Studio Code\"] [data-brand=\"vscode\"]')"), true);
     assert.equal(await evaluate("!!document.querySelector('.workspace-path [aria-label=\"Open in File Explorer\"]')"), true);
@@ -309,6 +309,29 @@ test("the prompt surface keeps one row above and one below the editor at every w
     await evaluate("document.querySelector('.workspace-path [aria-label=\"Open in Visual Studio Code\"]').click()");
     assert.equal(await wait("!document.querySelector('.workspace-popover')"), true);
     assert.deepEqual(await evaluate("fixture.opened()"), ["editor project-1 fixture-session"]);
+
+    // The session goes on in another checkout of the repository: the folder of the project or another worktree, not the one it works in.
+    await evaluate("document.querySelector('.workspace-chip-project').click()");
+    assert.equal(await wait("!!document.querySelector('.workspace-popover')"), true);
+    await evaluate("[...document.querySelectorAll('.workspace-popover footer .bp6-button')].find(button=>button.textContent.trim()==='Change worktree…').click()");
+    assert.equal(await wait("document.querySelectorAll('.session-folder-choice select option').length===4"), true, exceptions.join("\n"));
+    const chosen = `(()=>{const form=document.querySelector('.session-folder-choice');return {options:[...form.querySelectorAll('select option')].map(option=>option.textContent),
+      footer:!!document.querySelector('.workspace-popover > footer'),switchDisabled:[...form.querySelectorAll('footer .bp6-button')].find(button=>button.textContent.trim()==='Switch').disabled,
+      working:!!form.querySelector('.session-folder-note'),overflow:form.scrollWidth>form.clientWidth+1}})()`;
+    const options = ["Choose where the session works", "Project folder", "CodeAlta4 (feature/fleet)", "New worktree"];
+    const select = `(()=>{const select=document.querySelector('.session-folder-choice select');select.value='C:\\\\code\\\\CodeAlta4';select.dispatchEvent(new Event('change',{bubbles:true}))})()`;
+    // While the session works, it says so, and nothing can be switched.
+    await evaluate(select);
+    assert.deepEqual(await evaluate(chosen), { options, footer: false, switchDisabled: true, working: true, overflow: false });
+    await picture("workspace-change-worktree-1600-dark");
+    // Once it is idle, the checkout chosen is where it is sent.
+    await evaluate("fixture.idle()");
+    assert.equal(await wait("!document.querySelector('.session-folder-note')"), true);
+    assert.deepEqual(await evaluate(chosen), { options, footer: false, switchDisabled: false, working: false, overflow: false });
+    await evaluate("[...document.querySelectorAll('.session-folder-choice footer .bp6-button')].find(button=>button.textContent.trim()==='Switch').click()");
+    // The popover closes once the session works elsewhere: what is typed next goes to the prompt.
+    assert.equal(await wait("!document.querySelector('.session-folder-choice') && !document.querySelector('.workspace-popover')"), true);
+    assert.deepEqual(await evaluate("fixture.folderSwitches()"), [{ kind: "worktree", folder: "C:\\code\\CodeAlta4" }]);
 
     // A new session shows where it will work in the chip itself, the folder of the project until a new worktree is chosen there.
     await evaluate("fixture.draft(true)");

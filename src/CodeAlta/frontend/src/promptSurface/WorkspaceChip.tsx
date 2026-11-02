@@ -6,7 +6,10 @@ import { useShellLanguage } from "../shellLanguage";
 import { ExternalEditorIcon, openInFileManagerKey, useExternalOpener, type ExternalTarget } from "../externalEditors/externalEditors";
 import { BranchSwitcher, type BranchApi } from "../worktrees/BranchSwitcher";
 import { WorkPlaceChoice, type WorkPlaceApi } from "../worktrees/WorkPlaceChoice";
+import { SessionFolderChoice } from "../worktrees/SessionFolderChoice";
+import type { FolderSwitchResult, FolderTarget } from "../worktrees/sessionFolder";
 import type { WorkPlace } from "../worktrees/worktrees";
+import { worktrees as worktreesApi } from "#neoastra";
 
 /**
  * Where the session works, above its prompt: the project, the worktree or the branch, the lines changed against HEAD
@@ -14,9 +17,11 @@ import type { WorkPlace } from "../worktrees/worktrees";
  * branch open the Workspace popover: project, worktree, branch (which can be switched), changes, path with a copy
  * button and the ways to the external editor and the file manager, and the ways to the changes, the code editor, a
  * terminal and a pull request. A session in a worktree shows it in the tone of worktrees. Before a session exists, a part of
- * the chip of its own says where it will work, the folder of the project or a new worktree, and changes it.
+ * the chip of its own says where it will work, the folder of the project or a new worktree, and changes it. A session
+ * that exists can be sent to work elsewhere in the repository from the popover: another worktree, a new one, or the
+ * folder of the project.
  */
-export function WorkspaceChip({ epoch, project, sessionId = null, read, refreshKey, worktree = null, place, onWorktreeGone, onShowChanges, onOpenEditor, onOpenTerminal, branches, pullRequest }: {
+export function WorkspaceChip({ epoch, project, sessionId = null, read, refreshKey, worktree = null, place, folderSwitch, onWorktreeGone, onShowChanges, onOpenEditor, onOpenTerminal, branches, pullRequest }: {
   epoch: string | null; project: Readonly<{ id: string; name: string; path: string }>; read: ProjectGitRead; refreshKey?: unknown;
   /** The session the chip is about; null before it exists. The external editor and the file manager open the folder it works in. */
   sessionId?: string | null;
@@ -26,6 +31,8 @@ export function WorkspaceChip({ epoch, project, sessionId = null, read, refreshK
   place?: Readonly<{ value: WorkPlace; onChange: (place: WorkPlace) => void; onOpenSettings?: () => void; api?: WorkPlaceApi;
     /** Whether the session can run in the cloud. */
     cloud?: boolean }>;
+  /** Once a session exists: how it is sent to work elsewhere in the repository; without it, it stays where it is. */
+  folderSwitch?: Readonly<{ running: boolean; onSwitch: (target: FolderTarget) => Promise<FolderSwitchResult>; api?: WorkPlaceApi }>;
   onWorktreeGone?: () => void;
   /** Opens the changes of the folder; without it the counts are only shown. */
   onShowChanges?: () => void;
@@ -43,6 +50,9 @@ export function WorkspaceChip({ epoch, project, sessionId = null, read, refreshK
   // The popover opens below the part that was pressed: the project, or the worktree or the branch.
   const [open, setOpen] = useState<"project" | "place" | null>(null);
   const [copied, setCopied] = useState<boolean | null>(null);
+  // The popover shows the choice of another folder for the session, instead of its ways out.
+  const [changing, setChanging] = useState(false);
+  useEffect(() => { if (open === null) setChanging(false); }, [open]);
   // The editor the user chose and the file manager, beside the path: asked for when the popover opens.
   const external = useExternalOpener(open !== null);
   const openExternal = (target: ExternalTarget) => { setOpen(null); void external.opener?.openFolder(target, project.id, sessionId); };
@@ -82,12 +92,18 @@ export function WorkspaceChip({ epoch, project, sessionId = null, read, refreshK
         {external.opener && external.platform && <Button variant="minimal" size="small" icon={<AppIcon name="folder" size={14} />}
           aria-label={t(openInFileManagerKey(external.platform))} title={t(openInFileManagerKey(external.platform))} onClick={() => openExternal("explorer")} />}</dd>
     </dl>
+    {changing && folderSwitch && epoch && <SessionFolderChoice epoch={epoch} projectId={project.id} current={worktree?.path ?? null}
+      branch={view?.branch ?? null} running={folderSwitch.running} api={folderSwitch.api ?? worktreesApi} onSwitch={folderSwitch.onSwitch} onClose={() => setChanging(false)}
+      // Once the session works elsewhere the popover closes: what is typed next goes to the prompt.
+      onSwitched={() => { setChanging(false); setOpen(null); }} />}
     {/* The ways out of the popover, the work first (changes, pull request), then the folder (code editor, terminal). */}
-    {(onShowChanges || onOpenEditor || onOpenTerminal || (view && pullRequest)) && <footer>
+    {!changing && (onShowChanges || onOpenEditor || onOpenTerminal || (view && pullRequest) || (view && folderSwitch && epoch)) && <footer>
       {onShowChanges && <Button size="small" icon={<AppIcon name="changes" size={14} />} onClick={() => { setOpen(null); onShowChanges(); }}>{t("View changes")}</Button>}
       {view && pullRequest}
       {onOpenEditor && <Button size="small" icon={<AppIcon name="code" size={14} />} onClick={() => { setOpen(null); onOpenEditor(); }}>{t("Open editor")}</Button>}
       {onOpenTerminal && <Button size="small" icon={<AppIcon name="terminal" size={14} />} onClick={() => { setOpen(null); onOpenTerminal(); }}>{t("Open terminal")}</Button>}
+      {/* Elsewhere in the repository: a session sent to another worktree, a new one, or the folder of the project. */}
+      {view && folderSwitch && epoch && <Button size="small" icon={<AppIcon name="worktree" size={14} />} onClick={() => setChanging(true)}>{t("Change worktree…")}</Button>}
     </footer>}
   </div>;
   const opens = (part: "project" | "place") => (next: boolean) => setOpen(current => next ? part : current === part ? null : current);

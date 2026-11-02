@@ -193,7 +193,7 @@ A session never hands a tool it does without to another session, and does not ch
 
 **Automatic cleanup**:
 
-- **Clear scratchpad on startup**, on by default.
+- **Remove old scratchpad files on startup**, on by default: the files of the scratchpad not changed for a week. A session that runs again after a restart still finds its recent files.
 - **Delete inactive sessions**, **After 3 months** by default: a number and a unit (days, weeks, months, years), or **Never**. A session with a [bookmark](../bookmarks.md) is kept.
 
 Cleanup runs at the **next startup**, never at once. Session cleanup runs on local Windows storage only; elsewhere the card says why it did not run. A session is inactive since its file was last written (viewing it does not count). Open sessions, drafts and active work are kept, and a session goes only with the sessions it started or that continue it, once all are inactive; its [Statistics](../plugins/statistics.md) are saved first. Other files of the `sessions` folder older than the duration go too. The card shows the progress and result of the last cleanup.
@@ -237,6 +237,20 @@ A folder of skills can hold symbolic links, for example to a library of skills s
 - **Enable all** and **Disable all** act on the skills that match the filter.
 - With several spaces, a chip shows the [spaces](../spaces.md#what-a-space-has) a skill of yours is offered in.
 - The [skills of MCP servers](../plugins/mcp.md#skills-of-mcp-servers) come after yours, read-only, with a switch each.
+
+### Skill folders
+
+To use a library of skills you keep elsewhere, such as a repository shared with other agents, click **Add folder** under **Skill folders**, type its path or **Browse…**, and choose where it is read:
+
+- **Every space**: saved in `~/.alta/config.toml` (`[skills] folders`);
+- **Space:** the space the window shows, when you have several: only its sessions read it;
+- **Project:** the selected project, saved in your own file of the project under `~/.alta/projects/`, never in the repository.
+
+The folder holds skill folders, each with its `SKILL.md`, as `~/.agents/skills` does. Its skills are read where they are: they are listed, switched on or off, edited and used like the others, and a skill added, changed or removed there shows at the next **Reload**. Each folder says how many skills it brings, or **Not found** or **Cannot be read**; the other folders are read anyway. Its `×` button takes it out of the list and leaves its files where they are. A whole disk, your home folder and `~/.alta` cannot be added.
+
+Of two skills with the same name, the one closest to the work wins: the project's own folders (`.alta/skills`, `.agents/skills`, `.github/skills`), then the folders added for the project, those added for the space, your folders (`~/.alta/skills`, `~/.agents/skills`, `~/.copilot/skills`), those added for every space, then the skills of plugins and of CodeAlta. In one list, the first folder wins.
+
+A [sandboxed session](../sessions/sandbox.md) reads your skill folders and the ones you added, and never writes them.
 
 In `SKILL.md`, `disable-model-invocation: true` makes a skill manual: it is used only with `/` and its name. `argument-hint`, `user-invocable` and `context` are accepted and ignored; any other unknown field makes the skill **Invalid**, except in a [GitHub Copilot](../copilot-layout.md#skills) folder.
 

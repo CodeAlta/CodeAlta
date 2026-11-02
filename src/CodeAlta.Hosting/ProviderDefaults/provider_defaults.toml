@@ -58,6 +58,27 @@ supports_developer_role = false
 reasoning_input_field_name = "reasoning_content"
 
 [[rules]]
+id = "openrouter-attribution"
+display_name = "OpenRouter App Attribution"
+types = ["anthropic-messages", "openai-chat", "openai-responses"]
+provider_keys = ["openrouter"]
+host_suffixes = ["openrouter.ai"]
+
+[rules.headers]
+default = { "HTTP-Referer" = "https://codealta.github.io", "X-OpenRouter-Title" = "CodeAlta" }
+
+# The categories of OpenRouter (https://openrouter.ai/docs/app-attribution), at most two of its list, by application:
+# CodeAlta Desktop is a desktop application for programming, CodeAlta TUI and CLI coding agents of the terminal.
+[rules.headers.applications.desktop]
+"X-OpenRouter-Categories" = "programming-app"
+
+[rules.headers.applications.tui]
+"X-OpenRouter-Categories" = "cli-agent"
+
+[rules.headers.applications.cli]
+"X-OpenRouter-Categories" = "cli-agent"
+
+[[rules]]
 id = "xiaomi-openai-chat"
 display_name = "Xiaomi OpenAI Chat"
 types = ["openai-chat"]

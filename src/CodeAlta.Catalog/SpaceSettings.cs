@@ -15,18 +15,19 @@ namespace CodeAlta.Catalog;
 /// <param name="NewSessions">What the new sessions of the space start with; <see langword="null"/> for the usual.</param>
 /// <param name="Identity">The identity the sessions of the space work under; <see langword="null"/> for the usual.</param>
 /// <param name="Tools">The tools the sessions of the space do without; <see langword="null"/> for none.</param>
-public sealed record SpaceSettings(SpaceNewSessions? NewSessions = null, SpaceIdentity? Identity = null, SpaceTools? Tools = null)
+/// <param name="Skills">The folders of skills the sessions of the space read besides the others; <see langword="null"/> for none.</param>
+public sealed record SpaceSettings(SpaceNewSessions? NewSessions = null, SpaceIdentity? Identity = null, SpaceTools? Tools = null, SpaceSkills? Skills = null)
 {
     /// <summary>Gets settings that set nothing.</summary>
     public static SpaceSettings Empty { get; } = new();
 
     /// <summary>Gets whether nothing is set.</summary>
-    public bool IsEmpty => (NewSessions?.IsEmpty ?? true) && (Identity?.IsEmpty ?? true) && (Tools?.IsEmpty ?? true);
+    public bool IsEmpty => (NewSessions?.IsEmpty ?? true) && (Identity?.IsEmpty ?? true) && (Tools?.IsEmpty ?? true) && (Skills?.IsEmpty ?? true);
 
     /// <summary>Tells what is wrong with the settings.</summary>
     /// <returns>The first problem found, or <see langword="null"/> when they are valid.</returns>
     public string? Problem()
-        => NewSessions?.Problem() ?? Identity?.Problem() ?? Tools?.Problem();
+        => NewSessions?.Problem() ?? Identity?.Problem() ?? Tools?.Problem() ?? Skills?.Problem();
 
     /// <summary>
     /// Keeps what is valid of settings read from a file: a value that is not valid is left out, so that one wrong
@@ -34,7 +35,7 @@ public sealed record SpaceSettings(SpaceNewSessions? NewSessions = null, SpaceId
     /// </summary>
     /// <returns>The settings without their invalid values.</returns>
     public SpaceSettings Sanitized()
-        => new(NewSessions?.Sanitized(), Identity?.Sanitized(), Tools?.Sanitized());
+        => new(NewSessions?.Sanitized(), Identity?.Sanitized(), Tools?.Sanitized(), Skills?.Sanitized());
 
     // Text on one line, without control characters, of at most the length given.
     internal static bool IsLine([System.Diagnostics.CodeAnalysis.NotNullWhen(true)] string? value, int maximum)
@@ -663,4 +664,34 @@ public sealed record SpaceTools(IReadOnlyList<string> Disabled)
     /// <returns><see langword="true"/> for 1 to 128 letters, digits, <c>_</c>, <c>-</c>, <c>.</c> and <c>:</c>.</returns>
     public static bool IsToolName(string? name)
         => name is { Length: > 0 and <= 128 } && name.All(static ch => char.IsAsciiLetterOrDigit(ch) || ch is '_' or '-' or '.' or ':');
+}
+
+/// <summary>
+/// The folders of skills the sessions of a space read besides the folders of the user and of their project (see
+/// <see cref="Skills.AddedSkillFolders"/>), in the order of the list: of two skills of one name, the one of the first folder wins.
+/// </summary>
+/// <param name="Folders">The full paths of the folders; a leading <c>~</c> stands for the home folder.</param>
+public sealed record SpaceSkills(IReadOnlyList<string> Folders)
+{
+    /// <summary>Gets whether no folder is added.</summary>
+    public bool IsEmpty => Folders.Count == 0;
+
+    /// <summary>Tells what is wrong with the list.</summary>
+    /// <returns>The first problem found, or <see langword="null"/>.</returns>
+    public string? Problem()
+    {
+        if (Folders.Count > Skills.AddedSkillFolders.MaximumFolders) return $"A space adds at most {Skills.AddedSkillFolders.MaximumFolders} folders of skills.";
+        return Folders.FirstOrDefault(static folder => !SpaceSettings.IsLine(folder, Skills.AddedSkillFolders.MaximumPathLength)) is { } wrong
+            ? $"'{wrong}' is not the path of a folder."
+            : null;
+    }
+
+    /// <summary>Keeps what is valid: each path on one line, once.</summary>
+    /// <returns>The list, or <see langword="null"/> when no folder is left.</returns>
+    public SpaceSkills? Sanitized()
+    {
+        var kept = Folders.Where(static folder => SpaceSettings.IsLine(folder, Skills.AddedSkillFolders.MaximumPathLength))
+            .Distinct(StringComparer.Ordinal).Take(Skills.AddedSkillFolders.MaximumFolders).ToArray();
+        return kept.Length == 0 ? null : new SpaceSkills(kept);
+    }
 }

@@ -32,6 +32,8 @@ Open it with **Issues** in the title bar (in its **…** menu when the window is
 - **Open**, **Closed**, **Merged** and **All** are separate lists, most recently updated first.
 - Type words or a number to filter.
 - Select an item to read its description and comments. Double-click it, or use the expand button, for a larger window.
+- What the tab read is kept 5 minutes: going back to a list or an item shows it at once. *Read 3 min ago* says how old it is; the refresh beside it reads it again, and **Reload** in the header reads everything again.
+- The images of descriptions and comments are shown (Azure DevOps for now), read with the same sign-in. An image that cannot be read stays a link with its name; click a shown image to see it larger.
 
 When a service cannot be read, the tab says so in place of the list, and the log says why: see [An issue tracker shows an error](troubleshooting.md#an-issue-tracker-shows-an-error).
 
@@ -39,7 +41,7 @@ A project with its code on one service and its issues in Jira shows both: choose
 
 ## Filters
 
-On Azure DevOps, the tab can show only the work items of your team, a sprint, assigned to you, or with any field value. Filters are those of Azure DevOps for now; on other services the tab lists every issue.
+On Azure DevOps, the tab can show only the work items of your team, a sprint, assigned to you, or with any field value, and only the pull requests that wait for your review (see [Pull requests](#pull-requests)). Filters are those of Azure DevOps for now; on other services the tab lists every item.
 
 {.table}
 | Filter | Its values |
@@ -75,7 +77,8 @@ The chosen view is remembered for the project. Without a choice, the tab shows y
 - The list beside the project switches views.
 - The line under the toolbar shows the filters the view lets you change for a while (such as the sprint, with each sprint's dates). ↺ restores the view's value; the view itself is not changed.
 - The other filters are counted (**+ 5 filters**): hover to see them, click (or the gear) to open **Manage views**.
-- The text field still narrows by words or number. Pull requests have no filters.
+- The text field still narrows by words or number.
+- **Work items** and **Pull requests** each have their own views.
 
 ### Manage views
 
@@ -129,6 +132,52 @@ label = "Prio"
 - A file holds at most 64 views. An invalid file shows none of its views: the tab names it and lists every item.
 - When the repository ignores `.alta`, add an exception for `.alta/issues.toml` to share team views.
 
+### Pull requests
+
+On Azure DevOps, pull requests have their own views, in the same files, with these filters:
+
+{.table}
+| Filter | Its values |
+|---|---|
+| **Scope** | **This repository** (default), **This project** (every repository of the project), **Organization** (every project). |
+| **Reviewer** | **Me**, or **Me or my groups**: you, or a group or team you are in, also through groups in groups. |
+| **Required** | **Required** or **Optional**: the review of that reviewer, as a branch policy asks for it. |
+| **Vote** | **No vote yet**, **Approved**, **Approved with suggestions**, **Waiting for author**, **Rejected**. |
+| **Author** | **Me** or **Not me**. |
+| **Target branch** | The target branches of the open pull requests. |
+| **Drafts** | **Hide drafts** or **Only drafts**. |
+| **Order** | **Newest first** (default) or **Oldest first**. |
+
+- **Required** and **Vote** are those of your review: yours, or one of your groups. A required review of a group that a colleague already approved no longer waits.
+- Turn on **In the tab** for **Scope** to switch between the repository and the whole project under the toolbar.
+- A row shows your reviews, and the repository of a pull request of another one. The reviewers of a pull request are listed with their votes; `*` marks a required review.
+- A pull request of another repository is read and opened on Azure DevOps; no session is started on it from this project.
+- These filters search the 1,000 most recent pull requests of the list; the tab says when there are more.
+- Your groups are read with the same sign-in as the work items. When they cannot be read (a personal access token without *Identity (Read)*), the filter says so and lists nothing.
+
+A view that lists the pull requests that wait for your review, in every repository of the project:
+
+```toml
+# <project>/.alta/local/issues.toml
+[azure_devops.pull_requests]
+current = "Waiting for me"
+
+[azure_devops.pull_requests.views."Waiting for me".scope]
+value = "@project"
+pick = true
+
+[azure_devops.pull_requests.views."Waiting for me".reviewer]
+value = "@me_groups"
+
+[azure_devops.pull_requests.views."Waiting for me".required]
+value = "@required"
+
+[azure_devops.pull_requests.views."Waiting for me".vote]
+value = "@none"
+```
+
+Values: `@project`, `@organization` (scope); `@me`, `@me_groups` (reviewer); `@required`, `@optional`; `@none`, `@approved`, `@suggestions`, `@waiting`, `@rejected` (vote); `@me`, `@not_me` (author); `@hide`, `@only` (drafts); `@oldest` (order).
+
 ## Work on an item
 
 An open item has two buttons:
@@ -139,7 +188,7 @@ An open item has two buttons:
 | **Start in a new worktree** | A new session works on it in its own [worktree](worktrees.md), on a new branch. |
 | **Start in a new session** | A new session works on it in the project folder. |
 
-The session gets the item's title, link and description. For a pull request it is asked to review, not merge.
+The session gets the item's title, link and description. For a pull request it is asked to review, not merge; you can change what it is asked in its [start prompt](prompts.md#start-prompts).
 
 **Runs with**, above the buttons, is the [Agent chip](workspace/prompt.md#agent-and-model) of the new session. With **Use the defaults** on, it takes the [default provider](model-providers/readme.md) and your settings; turn it off to choose the agent prompt, the model, the permission mode, review before commit and the sandbox. **More options** turns [sub-sessions](sessions/delegation.md#sessions-without-sub-sessions) off for the new session.
 
@@ -187,6 +236,10 @@ In this project I only want to see the items assigned to me, of my team, in the 
 
 ```text
 Change the issue filter so that I only see Ready and Active items.
+```
+
+```text
+Make a pull request view "Waiting for me" with the pull requests of the whole project where I or one of my groups is a required reviewer and nobody voted yet.
 ```
 
 A value you changed under the toolbar stays until ↺, whatever an agent sets.

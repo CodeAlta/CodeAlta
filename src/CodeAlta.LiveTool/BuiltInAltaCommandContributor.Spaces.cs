@@ -276,7 +276,7 @@ internal sealed partial class BuiltInAltaCommandContributor
         var configStore = context.Services.Get<CodeAltaConfigStore>()
             ?? (catalogOptions is not null ? new CodeAltaConfigStore(catalogOptions) : null);
         var space = context.Services.Get<SpaceCatalog>() is { } spaces ? await CallerSpaceAsync(context, spaces).ConfigureAwait(false) : null;
-        return SpaceFilter.Load(configStore, space?.Id);
+        return SpaceFilter.Load(configStore, space?.Id, space is null ? null : [space]);
     }
 
     // How many sessions up its parent chain a session is looked for among the ancestors of another.

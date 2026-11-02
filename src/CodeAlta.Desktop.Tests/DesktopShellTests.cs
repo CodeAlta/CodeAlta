@@ -52,6 +52,8 @@ public sealed class DesktopShellTests
     [DataRow(NeoWindowCloseReason.User, true, DesktopCloseAction.ExitWhenIdle)]
     [DataRow(NeoWindowCloseReason.Programmatic, true, DesktopCloseAction.ExitWhenIdle)]
     [DataRow(NeoWindowCloseReason.ApplicationQuit, true, DesktopCloseAction.ExitWhenIdle)]
+    // NeoAstra sees --automated too, and reports the close of the user or of a quit as Automated.
+    [DataRow(NeoWindowCloseReason.Automated, true, DesktopCloseAction.ExitWhenIdle)]
     // What cannot wait still exits at once.
     [DataRow(NeoWindowCloseReason.SessionEnd, true, DesktopCloseAction.Exit)]
     [DataRow(NeoWindowCloseReason.System, true, DesktopCloseAction.Exit)]

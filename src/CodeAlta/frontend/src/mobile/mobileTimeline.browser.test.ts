@@ -199,8 +199,8 @@ test("the phone timeline shows what the host sent as what it is, images, and the
 
     // ---- A session whose timeline has the host's prompts, images and a run of a script ----
     await evaluate(`location.hash = "#/session/t1"`);
-    await waitFor(`document.querySelectorAll("#timeline > li").length === 7`, "the timeline of t1");
-    assert.deepEqual(await evaluate("[...document.querySelectorAll('#timeline > li')].map(li => li.dataset.host ? 'host:' + li.dataset.host : li.className)"),
+    await waitFor(`document.querySelectorAll("#timeline > li:not(.day-mark)").length === 7`, "the timeline of t1");
+    assert.deepEqual(await evaluate("[...document.querySelectorAll('#timeline > li:not(.day-mark)')].map(li => li.dataset.host ? 'host:' + li.dataset.host : li.className)"),
       ["msg msg-user", "activity", "msg msg-assistant", "host:job", "host:agent", "host:host", "host:workflow"]);
     assert.equal(await evaluate("document.querySelectorAll('.msg-user').length"), 1, "only the prompt the user typed is theirs");
     assert.ok(!(await evaluate<string>("[...document.querySelectorAll('.msg-user')].map(e => e.textContent).join()")).includes("[CodeAlta"), "no envelope as a prompt of the user");

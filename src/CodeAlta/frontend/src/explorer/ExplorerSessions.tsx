@@ -95,7 +95,8 @@ export function ExplorerSessions({ entries, global, projectId, more, extended, a
     "open-vs-code"?: boolean; "copy-resume-command"?: boolean; "run-in-terminal"?: boolean }>;
   /** What follows the title of a row: its marks and when it was updated. */
   marks: (session: WorkspaceSession) => ReactNode;
-  onAction: (session: WorkspaceSession, action: SessionAction) => void;
+  /** Pointer activation opens with the keyboard in the prompt; keys and menus keep the row's focus. */
+  onAction: (session: WorkspaceSession, action: SessionAction, focusPrompt?: boolean) => void;
   /** A row was double-clicked: its session is opened in a tab of its own, which stays. */
   onKeep?: (session: WorkspaceSession) => void;
   /** What the menu of a row has after its own lines and before those of plugins, for the session of that row. */
@@ -160,7 +161,7 @@ export function ExplorerSessions({ entries, global, projectId, more, extended, a
           show(session.id, event.currentTarget.querySelector<HTMLElement>(".session-actions-trigger"));
         }}>
         <button type="button" aria-pressed={false} aria-expanded={twist && !twist.collapsed} aria-describedby={`${tipId}-${index}`} title={tooltip} data-full-text={plainTitle(session.fullTitle || session.title)} style={{ paddingLeft: sessionRowIndent(depth) }}
-          onClick={() => onAction(session, "open")} onDoubleClick={() => onKeep?.(session)} onKeyDown={event => sessionTwistKey(event, twist)}>
+          onClick={event => onAction(session, "open", event.detail > 0)} onDoubleClick={() => onKeep?.(session)} onKeyDown={event => sessionTwistKey(event, twist)}>
           <SessionRowTitle session={session} depth={depth} diagnostic={diagnostic} subAgents={subAgents} twist={twist} parentElsewhere={parentElsewhere} childrenElsewhere={childrenElsewhere} />{marks(session)}
         </button>
         <span id={`${tipId}-${index}`} role="tooltip" className="session-tooltip">{tooltip}</span>

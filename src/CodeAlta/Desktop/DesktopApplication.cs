@@ -1038,6 +1038,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                         // The skills MCP servers publish, beside the local ones.
                         Mcp = () => host.PluginRuntime?.ActivePlugins.Select(static plugin => plugin.Instance).OfType<CodeAlta.Plugin.Mcp.McpPlugin>().FirstOrDefault(),
                         McpHome = roots.Home,
+                        Spaces = host.SpaceCatalog,
                     };
                     builder.AddSkillsService(skills);
                     builder.AddPluginsService(new PluginsService(host.ProjectCatalog, epoch, host.PluginRuntime)
@@ -1054,6 +1055,8 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                     builder.AddAutomationsService(new AutomationsService(automations, host.ProjectCatalog, epoch, host.CodeModeScripts));
                     var pullRequestPrompts = new CodeAlta.Catalog.PullRequests.PullRequestPromptCatalog(host.CatalogOptions);
                     builder.AddPullRequestPromptsService(new PullRequestPromptsService(pullRequestPrompts, host.ProjectCatalog, epoch));
+                    var startPrompts = new CodeAlta.Catalog.StartPrompts.StartPromptCatalog(host.CatalogOptions);
+                    builder.AddStartPromptsService(new StartPromptsService(startPrompts, host.ProjectCatalog, epoch));
                     builder.AddSpacesService(new SpacesService(host.SpaceCatalog, spaceView, host.RuntimeService.ListOverview, async () =>
                     {
                         // A question a session asked, a command to review, a form to fill, a conversation open elsewhere.
@@ -1114,6 +1117,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                         host.ProjectCatalog, sessionStarter, epoch)
                     {
                         Views = new CodeAlta.Catalog.Issues.IssueViewStore(),
+                        StartPrompts = startPrompts,
                     });
                     gitIssues = new GitIssuesService(host.ProjectCatalog, epoch,
                         async (projectId, token) => (await host.Identities.ResolveAsync(spaceView.ShownSpaceId ?? CodeAlta.Catalog.SpaceDescriptor.DefaultId, projectId, token)
@@ -1136,7 +1140,10 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                     };
                     builder.AddProjectFilesService(projectFiles);
                     // The files and the folders the pages of Settings read: the page names one, the host finds and opens it.
-                    builder.AddSettingsFilesService(new SettingsFilesService(host.ProjectCatalog, epoch, diskFolders, editorView, agentPrompts, skills, mcpServers, pullRequestPrompts));
+                    builder.AddSettingsFilesService(new SettingsFilesService(host.ProjectCatalog, epoch, diskFolders, editorView, agentPrompts, skills, mcpServers, pullRequestPrompts)
+                    {
+                        StartPrompts = startPrompts,
+                    });
                     // A link of the Markdown that the window shows: an address of the web for the system browser, a
                     // file for the code editor. A relative path starts from the folder the session works in.
                     builder.AddMarkdownLinksService(new MarkdownLinksService(epoch, DesktopLinks.Open, new DesktopFileLinks(host.ProjectCatalog, diskFolders, editorView,
@@ -1490,6 +1497,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
             builder.AddSessionRetentionProtectionService(new SessionRetentionProtectionService());
             builder.AddIssuesService(new IssuesService());
             builder.AddPullRequestPromptsService(new PullRequestPromptsService());
+            builder.AddStartPromptsService(new StartPromptsService());
             builder.AddSpacesService(new SpacesService());
             builder.AddLabelsService(new LabelsService());
             builder.AddSpaceIdentityService(new SpaceIdentityService());

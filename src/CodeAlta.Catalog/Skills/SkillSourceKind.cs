@@ -49,6 +49,21 @@ public enum SkillSourceKind
     /// User-level skill root of GitHub Copilot (<c>~/.copilot/skills</c>).
     /// </summary>
     UserCopilot,
+
+    /// <summary>
+    /// A folder of skills the user added for every space (<c>[skills] folders</c> of the global configuration).
+    /// </summary>
+    UserFolder,
+
+    /// <summary>
+    /// A folder of skills the user added for the sessions of one space (<c>skills.folders</c> of the space).
+    /// </summary>
+    SpaceFolder,
+
+    /// <summary>
+    /// A folder of skills the user added for one project (<c>skill_folders</c> of the user's file of the project).
+    /// </summary>
+    ProjectFolder,
 }
 
 /// <summary>What is said of a source of skills beyond its kind.</summary>
@@ -58,4 +73,9 @@ public static class SkillSourceKindExtensions
     /// <param name="kind">The source.</param>
     /// <returns>True for the Copilot folders of a project and of the user.</returns>
     public static bool IsCopilot(this SkillSourceKind kind) => kind is SkillSourceKind.ProjectCopilot or SkillSourceKind.UserCopilot;
+
+    /// <summary>Whether a source is a folder the user added, for every space, for a space or for a project.</summary>
+    /// <param name="kind">The source.</param>
+    /// <returns>True for <see cref="SkillSourceKind.UserFolder"/>, <see cref="SkillSourceKind.SpaceFolder"/> and <see cref="SkillSourceKind.ProjectFolder"/>.</returns>
+    public static bool IsAddedFolder(this SkillSourceKind kind) => kind is SkillSourceKind.UserFolder or SkillSourceKind.SpaceFolder or SkillSourceKind.ProjectFolder;
 }

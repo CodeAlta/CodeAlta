@@ -235,10 +235,38 @@ test("the toolbar switches between the views of a project, the line under it cha
     await page.until(`document.querySelector('.issues-toolbar').getBoundingClientRect().left > 100`, "the content, centred");
     assert.equal(await page.evaluate(`Math.round(document.querySelector('.issues-active-filters').getBoundingClientRect().left - document.querySelector('.issues-toolbar').getBoundingClientRect().left)`), 0);
 
-    // Pull requests have no filters.
+    // The pull requests have views of their own: the tab asks for their filters, lists by the current one, and says whose reviews they wait for.
+    await page.resize(1300, 800);
     await page.clickText('.issues-toolbar .bp6-segmented-control button', "Pull requests");
-    await page.until(`issuesFixture.state.lists.at(-1).kind === 'pull_request'`, "the pull requests");
-    assert.equal(await page.evaluate(`[document.querySelectorAll('.issues-views, .issues-active-filters').length, issuesFixture.state.lists.at(-1).filters]`).then(JSON.stringify), JSON.stringify([0, null]));
+    await page.until(`issuesFixture.state.lists.at(-1).kind === 'pull_request' && ${rows}.join() === '#7,#9'`, "the pull requests of the view");
+    assert.equal(await page.evaluate(`issuesFixture.state.filterAsks.at(-1).kind`), "pull_request");
+    assert.equal(await page.evaluate(asked), JSON.stringify({ reviewer: "@me_groups", scope: "@project", vote: "@none" }));
+    assert.deepEqual(await page.evaluate(`[...${view}.querySelectorAll('option')].map(option => option.textContent)`), ["Waiting for me"]);
+    assert.deepEqual(await page.evaluate(active), [["Scope: This project"], "+ 2 filters", "2 more filters. Reviewer: Me or my groups. Vote: No vote yet"]);
+    assert.deepEqual(await page.evaluate(`[...document.querySelectorAll('.issue-row-item')].map(row => [row.querySelector('.issue-place')?.textContent ?? null,
+      [...row.querySelectorAll('.issue-reviewer')].map(chip => chip.getAttribute('aria-label'))])`),
+      [[null, ["Core · Required review · No vote yet · Your review, or one of a group of yours"]], ["proj/other", ["Fields · Required review · Waiting for author · Your review, or one of a group of yours"]]],
+      "a row names the reviews of the user, and the repository of a pull request of another one");
+    // A pull request of the repository of the project is worked on here; one of another repository is opened where it is.
+    await page.until(`!!document.querySelector('.work-detail .work-starts')`, "the start of a session on #7");
+    assert.deepEqual(await page.evaluate(`[...document.querySelectorAll('.work-detail .issue-reviewers .issue-reviewer')].map(chip => [chip.textContent, chip.dataset.vote, chip.dataset.mine ?? null])`),
+      [["Core*", "none", "true"], ["Bo", "approved", null]]);
+    await page.clickText('.issue-row-item strong', "New fields");
+    await page.until(`!!document.querySelector('.work-detail .issue-elsewhere')`, "the pull request of another repository");
+    assert.equal(await page.evaluate(`!!document.querySelector('.work-detail .work-starts')`), false);
+    // The scope is changed in the line for a while, and the window manages the views of the pull requests.
+    await pickFromMenu("Organization");
+    await page.until(`JSON.parse(${asked}).scope === '@organization'`, "the pull requests of the organization");
+    await page.click('.issues-views-manage');
+    await page.until(`document.querySelector('.issue-views-window')?.textContent.includes('Pull request views of Platform') && ${rowsOfWindow}.length === 3`, "the views of the pull requests");
+    assert.deepEqual(await page.evaluate(rowsOfWindow), [["scope", true, true], ["reviewer", true, false], ["vote", true, false]]);
+    await page.click('.issue-views-window [aria-label="Close"]');
+    await page.until(`!document.querySelector('.issue-views-window')`, "the window closed again");
+    // The work items keep their own view.
+    await page.clickText('.issues-toolbar .bp6-segmented-control button', "Work items");
+    await page.until(`issuesFixture.state.lists.at(-1).kind === 'issue' && !!${view}`, "the views of the work items");
+    assert.deepEqual(await page.evaluate(`[${view}.selectedOptions[0].textContent, issuesFixture.state.current?.name, [...${view}.querySelectorAll('option')].some(option => option.textContent === 'Waiting for me')]`),
+      await page.evaluate(`[issuesFixture.state.current?.name, issuesFixture.state.current?.name, false]`));
     assert.deepEqual(page.problems, []);
   }, options);
 });
@@ -295,6 +323,45 @@ test("the window of the views keeps what is edited while the tab renders again",
     assert.equal(await page.evaluate(`issuesFixture.state.saved.length`), 0);
     assert.deepEqual(page.problems, []);
   }, options);
+});
+
+test("on a wide screen, the window of the views opens centered and can be moved over the whole tab", { skip: !edge, timeout: 120_000 }, async () => {
+  await withCanvas(async page => {
+    await page.until(`${rows}.join() === '#128'`, "the issues of the repository");
+    await page.evaluate(choose('.issues-toolbar select[aria-label="Project"]', "ado"));
+    await page.until(`${rows}.join() === '#41'`, "the work items of the view of the team");
+    await page.click('.issues-views-manage');
+    await page.until(`!!document.querySelector('.issue-views-window .app-window')`, "the window of the views");
+
+    // The page lays out its parts in a narrower column; the layer of the window still covers the viewport.
+    const [layer, surface, width, height] = await page.evaluate<[number[], number[], number, number]>(`(() => {
+      const box = element => { const rect = element.getBoundingClientRect(); return [rect.left, rect.top, rect.right, rect.bottom].map(Math.round); };
+      return [box(document.querySelector('.issue-views-window')), box(document.querySelector('.issue-views-window .app-window')), innerWidth, innerHeight];
+    })()`);
+    assert.deepEqual(layer, [0, 0, width, height], "the layer covers the viewport");
+    assert.ok(Math.abs(surface[0] - (width - surface[2])) <= 1, `the window is centered: ${surface.join()} in ${width}`);
+
+    // Dragged by its title bar far beyond each side, the window stops at the edge of the viewport, not of the column.
+    const windowBox = () => page.evaluate<number[]>(`(() => { const rect = document.querySelector('.issue-views-window .app-window').getBoundingClientRect(); return [rect.left, rect.top, rect.right, rect.bottom].map(Math.round); })()`);
+    const drag = async (dx: number) => {
+      const [x, y] = await page.evaluate<number[]>(`(() => { const rect = document.querySelector('.issue-views-window .app-window-titlebar h2').getBoundingClientRect(); return [rect.left + 20, rect.top + rect.height / 2]; })()`);
+      await page.command("Input.dispatchMouseEvent", { type: "mouseMoved", x, y });
+      await page.command("Input.dispatchMouseEvent", { type: "mousePressed", x, y, button: "left", buttons: 1, clickCount: 1 });
+      for (let step = 1; step <= 10; step++) await page.command("Input.dispatchMouseEvent", { type: "mouseMoved", x: x + dx * step / 10, y, button: "left", buttons: 1 });
+      await page.command("Input.dispatchMouseEvent", { type: "mouseReleased", x: x + dx, y, button: "left", buttons: 0, clickCount: 1 });
+    };
+    await drag(-width);
+    await page.until(`document.querySelector('.issue-views-window .app-window').getBoundingClientRect().left === 0`, "the window at the left edge");
+    await drag(width);
+    await page.until(`Math.round(document.querySelector('.issue-views-window .app-window').getBoundingClientRect().right) === innerWidth`, "the window at the right edge");
+
+    // The restore button of the title bar places it centered again.
+    const restore = `document.querySelector('.issue-views-window .app-window-titlebar button[aria-label="Restore default size and position"]')`;
+    await page.click(`.issue-views-window .app-window-titlebar button[aria-label="Restore default size and position"]`);
+    await page.until(`${restore}.disabled`, "the restored window");
+    assert.deepEqual(await windowBox(), surface, "the restored window is where it opened");
+    assert.deepEqual(page.problems, []);
+  }, { ...options, width: 1900, height: 900 });
 });
 
 test("values the host refuses or fails on are not asked again and again, and refused ones are forgotten", { skip: !edge, timeout: 120_000 }, async () => {
@@ -518,4 +585,55 @@ test("the window of the views says why a file of views cannot be read, also when
     assert.deepEqual(await page.evaluate(callouts), [problem]);
     assert.deepEqual(page.problems, []);
   }, options);
+});
+
+test("the tab says how old the list and the item are, and reads them again on demand", { skip: !edge, timeout: 120_000 }, async () => {
+  await withCanvas(async page => {
+    const ages = `[...document.querySelectorAll('.issues-read-at time')].map(time => time.textContent)`;
+    await page.until(`${rows}.join() === '#128' && document.querySelectorAll('.issues-read-at').length === 2`, "the list and the item with their age");
+    assert.deepEqual(await page.evaluate(ages), ["Read 3 min. ago", "Read 2 min. ago"]);
+    assert.equal(await page.evaluate(`issuesFixture.state.lists.at(-1).fresh ?? null`), null, "a list is asked as the host keeps it");
+
+    await page.click('.issues-stages [aria-label="Read the list again"]');
+    await page.until(`issuesFixture.state.lists.at(-1).fresh === true`, "the list read again");
+    await page.until(`${ages}[0] === 'Read now'`, "the list just read");
+
+    const reads = await page.evaluate<number>(`issuesFixture.state.reads.length`);
+    await page.click('.work-detail [aria-label="Read it again"]');
+    await page.until(`issuesFixture.state.reads.length > ${reads} && issuesFixture.state.reads.at(-1).fresh === true`, "the item read again");
+
+    await page.click('[aria-label="Reload"]');
+    await page.until(`issuesFixture.state.lists.at(-1).fresh === true && issuesFixture.state.reads.at(-1).fresh === true && issuesFixture.state.reads.length > ${reads + 1}`, "everything read again");
+    assert.deepEqual(page.problems, []);
+  }, options);
+});
+
+test("the images of a description and of its comments are read through the host and drawn; one that cannot be read stays a link", { skip: !edge, timeout: 120_000 }, async () => {
+  await withCanvas(async page => {
+    const pictures = `[...document.querySelectorAll('.work-detail .markdown-content a[href]')].filter(a => a.querySelector('img')).map(a => [a.textContent, a.querySelector('img').getAttribute('src')?.slice(0, 22) ?? null])`;
+    await page.evaluate(choose('.issues-toolbar select[aria-label="Project"]', "ado"));
+    await page.until(`${rows}.join() === '#41'`, "the work items");
+    await page.until(`${pictures}.length === 1 && ${pictures}[0][1] !== null`, "the image of the HTML of the work item");
+    assert.deepEqual(await page.evaluate(pictures), [["Image", "data:image/png;base64,"]], "an <img> of HTML is drawn in place of the link around it");
+    assert.equal(await page.evaluate(`document.querySelectorAll('.work-detail .markdown-content img:not(.markdown-local-image)').length`), 0, "no other image, and none of javascript:");
+
+    await page.clickText('.issues-toolbar .bp6-segmented-control button', "Pull requests");
+    await page.until(`${rows}[0] === '#7' && ${pictures}.length === 3 && ${pictures}.filter(picture => picture[1]).length === 2`, "the images of the pull request and of its comment");
+    assert.deepEqual(await page.evaluate(pictures), [["shot.png", "data:image/png;base64,"], ["missing", null], ["again", "data:image/png;base64,"]]);
+    assert.deepEqual(await page.evaluate(`[...new Set(issuesFixture.state.images.map(asked => asked.projectId + ' ' + asked.service))]`), ["ado azure_devops"]);
+
+    // Shown again, the item draws its images from what the window kept, without asking the host.
+    const asked = await page.evaluate<number>(`issuesFixture.state.images.length`);
+    await page.clickText('.issue-row-item strong', "New fields");
+    await page.clickText('.issue-row-item strong', "Cache the build");
+    await page.until(`${pictures}.filter(picture => picture[1]).length === 2`, "the images again");
+    assert.equal(await page.evaluate(`issuesFixture.state.images.length`), asked);
+
+    // Reload reads everything again: an image that could not be read is asked for again (a sign-in done meanwhile).
+    const gone = `issuesFixture.state.images.filter(image => image.address.includes('/gone')).length`;
+    const missed = await page.evaluate<number>(gone);
+    await page.click('[aria-label="Reload"]');
+    await page.until(`${gone} > ${missed}`, "the image that could not be read, asked for again");
+    assert.deepEqual(page.problems, []);
+  }, { ...options, styles: [...options.styles, "../style.css"] });
 });

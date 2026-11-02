@@ -17,6 +17,9 @@ internal sealed class FakeAlta : IPluginAltaService
     /// <summary>The options of each call, in the order of <see cref="Calls"/>.</summary>
     internal ConcurrentQueue<PluginAltaInvocationOptions?> Options { get; } = new();
 
+    /// <summary>Says of a call that the host cut its output.</summary>
+    internal Func<IReadOnlyList<string>, bool>? Cut { get; set; }
+
     /// <summary>Answers the commands that start with a prefix (such as <c>session list</c>) with records, one JSON object each.</summary>
     internal FakeAlta Answer(string prefix, params JsonObject[] records) => Answer(prefix, (_, _) => Transcript(0, records));
 
@@ -54,7 +57,7 @@ internal sealed class FakeAlta : IPluginAltaService
             if (!line.StartsWith(prefix, StringComparison.Ordinal)) continue;
             var transcript = await answer(args, stdin).ConfigureAwait(false);
             var failed = transcript.Contains("\"alta.error\"", StringComparison.Ordinal);
-            return new PluginAltaCommandResult { ExitCode = failed ? 1 : 0, TranscriptJsonl = transcript };
+            return new PluginAltaCommandResult { ExitCode = failed ? 1 : 0, TranscriptJsonl = transcript, Truncated = Cut?.Invoke(args) ?? false };
         }
 
         return new PluginAltaCommandResult { ExitCode = 0, TranscriptJsonl = Transcript(0) };

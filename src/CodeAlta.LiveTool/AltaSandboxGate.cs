@@ -28,6 +28,8 @@ internal static class AltaSandboxGate
         "session current", "session create", "session fork", "session send", "session queue", "session steer", "session request",
         "session message", "session tail", "session events", "session result", "session info", "session status", "session choices",
         "session abort", "session compact", "session title", "session metrics",
+        // To a new worktree, or the folder of its project: an existing checkout elsewhere is refused by the command itself.
+        "session set_worktree",
     }.ToFrozenSet(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>Gets the sandbox of a session, or null when it is not sandboxed.</summary>

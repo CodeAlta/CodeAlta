@@ -36,7 +36,8 @@ public interface IModelProviderInitializationService
     Task RefreshProviderAsync(ModelProviderId providerId, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Gets the cached model list for a provider, starting its first initialization when no state exists yet.
+    /// Gets the cached model list for a provider, starting its first initialization when no state exists yet, or a new
+    /// one when the provider was registered again since its state was prepared.
     /// </summary>
     /// <param name="providerId">The provider identifier.</param>
     /// <param name="cancellationToken">A token to cancel waiting for first initialization.</param>

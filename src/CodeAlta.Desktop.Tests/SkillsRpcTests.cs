@@ -394,9 +394,9 @@ public sealed class SkillsRpcTests
         // The skills of the user and of a project are written to; every other one is only read.
         foreach (var source in Enum.GetValues<SkillSourceKind>())
         {
-            // The folders of the user and of a project, those of the layout of GitHub Copilot included.
+            // The folders of the user and of a project, those of the layout of GitHub Copilot and those the user added included.
             var written = source is SkillSourceKind.ProjectAlta or SkillSourceKind.ProjectCommon or SkillSourceKind.UserAlta or SkillSourceKind.UserCommon
-                or SkillSourceKind.ProjectCopilot or SkillSourceKind.UserCopilot;
+                or SkillSourceKind.ProjectCopilot or SkillSourceKind.UserCopilot or SkillSourceKind.UserFolder or SkillSourceKind.SpaceFolder or SkillSourceKind.ProjectFolder;
             Assert.AreEqual(!written, new SkillFolder(null, source, "a").ReadOnly, source.ToString());
         }
 

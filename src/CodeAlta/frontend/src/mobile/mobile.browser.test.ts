@@ -158,8 +158,8 @@ test("the phone page signs in from its link, lists and follows sessions, opens, 
 
     // Open a session: its timeline, folded and rendered.
     await click('.row[data-id="s1"] .card-link');
-    await waitFor(`document.querySelectorAll("#timeline > li").length === 3`, "the timeline of the session");
-    assert.deepEqual(await evaluate("[...document.querySelectorAll('#timeline > li')].map(li => li.className)"), ["msg msg-user", "activity", "msg msg-assistant"]);
+    await waitFor(`document.querySelectorAll("#timeline > li:not(.day-mark)").length === 3`, "the timeline of the session");
+    assert.deepEqual(await evaluate("[...document.querySelectorAll('#timeline > li:not(.day-mark)')].map(li => li.className)"), ["msg msg-user", "activity", "msg msg-assistant"]);
     assert.equal(await evaluate("document.querySelector('.msg-assistant ol li strong')?.textContent"), "the grammar", "numbered lists and bold from the real renderer");
     assert.equal(await evaluate("document.querySelector('.msg-assistant pre code')?.textContent"), "const x = 1;\n");
     assert.equal(await evaluate("document.querySelector('#detail-title').textContent"), "Fix the parser");
@@ -234,7 +234,7 @@ test("the phone page signs in from its link, lists and follows sessions, opens, 
     server.state.events.get("s1")!.push(event("user.message", "Add a test"), event("activity.turn.started", "turn"), event("activity.tool.started", "shell", "c2"));
     server.push({ id: "s1", projectId: "p1", live: "running", kind: "activity", line: null, at: new Date().toISOString(), activity: null, canSteer: true });
     // The sent prompt was shown at once; the journal's message takes its place.
-    await waitFor(`document.querySelectorAll("#timeline > li").length === 5 && !document.querySelector("#timeline > li.pending, #timeline > li.working")`, "the new blocks");
+    await waitFor(`document.querySelectorAll("#timeline > li:not(.day-mark)").length === 5 && !document.querySelector("#timeline > li.pending, #timeline > li.working")`, "the new blocks");
     assert.equal(await evaluate("document.querySelector('#timeline > li').dataset.mark"), "kept");
     assert.equal(await evaluate("document.querySelector('#timeline > li:last-child').dataset.state"), "running");
     assert.equal(await evaluate("[...document.querySelectorAll('#timeline .tool-row strong')].map(e => e.textContent).includes('turn')"), false, "turns are not tool rows");

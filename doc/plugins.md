@@ -332,7 +332,8 @@ built-in lists of the hosts say the same.
 Two invariants of the integrations:
 
 - **Credentials go only to their own host.** Issue trackers resolve a token per provider host (environment, then the
-  provider's CLI) and send it nowhere else. Provider CLIs run with the identity of the session's space (its CLI
+  provider's CLI) and send it nowhere else; the one exception is the `vssps` host of the same Azure DevOps
+  organization, which alone answers the group memberships the filters of pull requests need. Provider CLIs run with the identity of the session's space (its CLI
   profile folders), and lookups are cached per profile, so one account never reads what another read. Jira signs in
   through `acli` with the token on standard input, never on its command line, and a project's shared file cannot
   choose which token goes to its site.

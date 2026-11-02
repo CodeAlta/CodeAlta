@@ -275,7 +275,7 @@ public sealed class AgentInstructionTemplateProvider
         var models = LoadModelSettings();
         var spaces = LoadSpaces();
         var spaceId = SpaceCatalog.ResolveSessionSpace(session.SpaceId, project, spaces);
-        var spaceResources = SpaceFilter.Load(_configStore, spaceId);
+        var spaceResources = SpaceFilter.Load(_configStore, spaceId, spaces);
         var space = spaces.First(space => string.Equals(space.Id, spaceId, StringComparison.Ordinal));
         return new PromptContext(models, spaces, space, spaceResources);
     }
@@ -452,7 +452,8 @@ public sealed class AgentInstructionTemplateProvider
             UserHomeRoot,
             project?.ProjectPath,
             otherProjectRoots: null,
-            space);
+            space,
+            project?.SkillFolders);
         return await _skillCatalog.ListAsync(
                 query with
                 {
@@ -597,6 +598,9 @@ public sealed class AgentInstructionTemplateProvider
             SkillSourceKind.UserCommon => "user ~/.agents/skills",
             SkillSourceKind.ProjectCopilot => "project .github/skills",
             SkillSourceKind.UserCopilot => "user ~/.copilot/skills",
+            SkillSourceKind.UserFolder => "user added folder",
+            SkillSourceKind.SpaceFolder => "space added folder",
+            SkillSourceKind.ProjectFolder => "project added folder",
             SkillSourceKind.Plugin => "plugin",
             SkillSourceKind.Builtin => "builtin",
             _ => "temporary",

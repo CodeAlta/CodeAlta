@@ -5,7 +5,9 @@ namespace CodeAlta.Desktop;
 /// <summary>
 /// Names the folder of a skill where a request of the page names a project, so that the code editor opens on a
 /// skill: <c>skill:global:&lt;source&gt;:&lt;name&gt;</c> for a skill that is found without a project,
-/// <c>skill:project:&lt;project id&gt;:&lt;source&gt;:&lt;name&gt;</c> for one that a project brings.
+/// <c>skill:project:&lt;project id&gt;:&lt;source&gt;:&lt;name&gt;</c> for one that a project brings, and
+/// <c>skill:space:&lt;space id&gt;:&lt;source&gt;:&lt;name&gt;</c> for one of a folder added for a space, whose name another
+/// space may give to another skill.
 /// </summary>
 /// <remarks>
 /// The page names this id and never a path: the host finds the folder among the skills it discovers
@@ -23,14 +25,19 @@ internal readonly record struct SkillFolder(string? ProjectId, SkillSourceKind S
 
     private const string GlobalPrefix = Prefix + "global:";
     private const string ProjectPrefix = Prefix + "project:";
+    private const string SpacePrefix = Prefix + "space:";
     private const int MaximumNameLength = 128;
 
+    /// <summary>The space of a skill of a folder added for a space; null for any other skill.</summary>
+    internal string? SpaceId { get; init; }
+
     /// <summary>The id the page names the folder with.</summary>
-    internal string Id => ProjectId is null ? $"{GlobalPrefix}{Source}:{Name}" : $"{ProjectPrefix}{ProjectId}:{Source}:{Name}";
+    internal string Id => SpaceId is not null ? $"{SpacePrefix}{SpaceId}:{Source}:{Name}"
+        : ProjectId is null ? $"{GlobalPrefix}{Source}:{Name}" : $"{ProjectPrefix}{ProjectId}:{Source}:{Name}";
 
     /// <summary>Whether nothing is changed in the folder: it is not one of the user or of a project.</summary>
     internal bool ReadOnly => Source is not (SkillSourceKind.ProjectAlta or SkillSourceKind.ProjectCommon or SkillSourceKind.UserAlta or SkillSourceKind.UserCommon
-        or SkillSourceKind.ProjectCopilot or SkillSourceKind.UserCopilot);
+        or SkillSourceKind.ProjectCopilot or SkillSourceKind.UserCopilot or SkillSourceKind.UserFolder or SkillSourceKind.SpaceFolder or SkillSourceKind.ProjectFolder);
 
     /// <summary>Reads an id of a skill folder; false for anything else, the id of a project included.</summary>
     internal static bool TryParse(string? id, out SkillFolder folder)
@@ -38,10 +45,19 @@ internal readonly record struct SkillFolder(string? ProjectId, SkillSourceKind S
         folder = default;
         if (id is null || id.Length > 512) return false;
         string? project = null;
+        string? space = null;
         ReadOnlySpan<char> rest;
         if (id.StartsWith(GlobalPrefix, StringComparison.Ordinal))
         {
             rest = id.AsSpan(GlobalPrefix.Length);
+        }
+        else if (id.StartsWith(SpacePrefix, StringComparison.Ordinal))
+        {
+            var end = id.IndexOf(':', SpacePrefix.Length);
+            if (end <= SpacePrefix.Length) return false;
+            space = id[SpacePrefix.Length..end];
+            if (!CodeAlta.Catalog.SpaceDescriptor.IsValidId(space)) return false;
+            rest = id.AsSpan(end + 1);
         }
         else if (id.StartsWith(ProjectPrefix, StringComparison.Ordinal))
         {
@@ -60,7 +76,9 @@ internal readonly record struct SkillFolder(string? ProjectId, SkillSourceKind S
         if (separator <= 0) return false;
         var name = rest[(separator + 1)..];
         if (!TryParseSource(rest[..separator], out var source) || !ValidName(name)) return false;
-        folder = new(project, source, name.ToString());
+        // Only a skill of a folder added for a space is named with its space.
+        if ((space is not null) != (source == SkillSourceKind.SpaceFolder)) return false;
+        folder = new(project, source, name.ToString()) { SpaceId = space };
         return true;
     }
 

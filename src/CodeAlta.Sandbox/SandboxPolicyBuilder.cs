@@ -103,6 +103,13 @@ public static class SandboxPolicyBuilder
         if (Directory.Exists(userPackages)) readOnly.Add(userPackages);
 
         var protectedEntries = folders.Protected.Select(Full).ToList();
+        // The folders of skills: read, never written. One inside what the session writes is protected, whether it exists
+        // or not: a skill the sandbox put there would be read later by sessions that are not sandboxed.
+        var (skillReads, skillProtected) = SkillFolderGrants(folders.SkillFolders, home, secrets,
+            [.. readWrite, .. folders.Repositories.Select(Full)], path => readWrite.Any(grant => IsInside(grant, path)));
+        readOnly.AddRange(skillReads);
+        protectedEntries.AddRange(skillProtected);
+
         var roots =readWrite.Take(1).Concat(folders.Writable.Select(Full)).Distinct(comparer).ToList();
         foreach (var root in roots)
         {
@@ -250,6 +257,137 @@ public static class SandboxPolicyBuilder
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
         {
             return [];
+        }
+    }
+
+    // The most entries of a folder of skills looked at for links to the folders of its skills.
+    private const int MaximumSkillEntries = 256;
+
+    // The folders of skills that are read, with the folders their links lead to, and those that are protected. A library
+    // of skills is often linked into a folder of skills, the folder itself or each skill: what a link leads to is checked
+    // where it is on the disk, never into a folder of secrets, and protected when the session writes there; the links of
+    // its skills are followed only outside the folders the session writes and its projects, where no repository and no
+    // sandbox made them. A folder of secrets is not granted whole, nor the home folder, a folder that holds it, or a disk:
+    // what such a folder grants would reach far more than skills.
+    internal static (IReadOnlyList<string> Read, IReadOnlyList<string> Protected) SkillFolderGrants(IEnumerable<string> folders, string home,
+        IReadOnlyList<string> secrets, IReadOnlyList<string> untrusted, Func<string, bool> written)
+    {
+        var read = new List<string>();
+        var protectedFolders = new List<string>();
+        // The folders of secrets and the home folder where they are on the disk too, for what a link leads to.
+        var homes = new[] { home, RealPath(home) ?? home };
+        var allSecrets = secrets.Concat(secrets.Select(static secret => RealPath(secret) ?? secret)).ToList();
+        foreach (var folder in folders)
+        {
+            string full;
+            try
+            {
+                full = Full(folder);
+            }
+            catch (Exception exception) when (exception is ArgumentException or NotSupportedException or PathTooLongException)
+            {
+                continue;
+            }
+
+            if (written(full))
+            {
+                Protect(full);
+                continue;
+            }
+
+            if (!Grantable(full) || !Directory.Exists(full) || RealPath(full) is not { } real) continue;
+            if (!PathComparer.Equals(real, full))
+            {
+                // The folder, or a folder above it, is a link: what it leads to is checked as the target of a link.
+                if (!Grantable(real) || InSecret(real)) continue;
+                if (written(real))
+                {
+                    Protect(real);
+                    continue;
+                }
+
+                Add(real);
+            }
+
+            Add(full);
+            if (untrusted.Any(root => IsInside(root, full) || IsInside(root, real))) continue;
+            foreach (var target in SkillLinkTargets(real))
+            {
+                // A link that leads into a folder of secrets reads none of it; one that leads where the session writes is protected.
+                if (!Grantable(target) || InSecret(target)) continue;
+                if (written(target)) Protect(target);
+                else Add(target);
+            }
+        }
+
+        return (read, protectedFolders);
+
+        void Add(string path)
+        {
+            if (!read.Contains(path, PathComparer)) read.Add(path);
+        }
+
+        void Protect(string path)
+        {
+            if (!protectedFolders.Contains(path, PathComparer)) protectedFolders.Add(path);
+        }
+
+        bool InSecret(string path) => allSecrets.Any(secret => IsInside(secret, path));
+
+        bool Grantable(string path)
+            => !homes.Any(value => IsInside(path, value)) && !allSecrets.Any(secret => PathComparer.Equals(secret, path))
+               && !(Path.GetPathRoot(path) is { Length: > 0 } root && PathComparer.Equals(Path.TrimEndingDirectorySeparator(root), path));
+    }
+
+    // Where the folders of the skills of a folder that are links are on the disk.
+    private static List<string> SkillLinkTargets(string folder)
+    {
+        var targets = new List<string>();
+        try
+        {
+            foreach (var entry in new DirectoryInfo(folder).EnumerateDirectories().Take(MaximumSkillEntries))
+            {
+                if (entry.LinkTarget is not null && RealPath(entry.FullName) is { } target && Directory.Exists(target)) targets.Add(target);
+            }
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or System.Security.SecurityException)
+        {
+            // What cannot be read is not granted.
+        }
+
+        return targets;
+    }
+
+    // Where a path is on the disk: each folder of it that is a link replaced by what it leads to. Null when a link cannot be
+    // followed (broken, a loop, unreadable).
+    internal static string? RealPath(string path, int depth = 0)
+    {
+        if (depth > 16) return null;
+        try
+        {
+            var full = Full(path);
+            var root = Path.GetPathRoot(full);
+            if (string.IsNullOrEmpty(root)) return full;
+            var current = root;
+            foreach (var part in full[root.Length..].Split([Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar], StringSplitOptions.RemoveEmptyEntries))
+            {
+                var next = Path.Combine(current, part);
+                var info = new DirectoryInfo(next);
+                if (info.Exists && info.LinkTarget is not null)
+                {
+                    if (info.ResolveLinkTarget(returnFinalTarget: true) is not { } target) return null;
+                    next = RealPath(target.FullName, depth + 1) ?? throw new IOException("A link cannot be followed.");
+                }
+
+                current = next;
+            }
+
+            return Full(current);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or System.Security.SecurityException or ArgumentException
+            or NotSupportedException)
+        {
+            return null;
         }
     }
 

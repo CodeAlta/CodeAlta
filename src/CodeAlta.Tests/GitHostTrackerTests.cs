@@ -162,6 +162,324 @@ public sealed class GitHostTrackerTests
     }
 
     [TestMethod]
+    public async Task AzureDevOps_PullRequests_WaitingForMyReview_AreFoundThroughNestedGroups()
+    {
+        var hosts = new List<string>();
+        var handler = new Handler(request =>
+        {
+            lock (hosts) hosts.Add(request.RequestUri!.Host + request.RequestUri.AbsolutePath);
+            return PullRequestAnswer(request);
+        });
+        var tracker = Tracker(handler, GitRepositoryReference.AzureDevOps("org", "proj", "app"));
+        static Dictionary<string, string> Chosen(params (string Id, string Value)[] values) => values.ToDictionary(static pair => pair.Id, static pair => pair.Value);
+        async Task<TrackedItemPage> List(Dictionary<string, string> filters, TrackedItemFilter state = TrackedItemFilter.Open)
+            => await tracker.ListAsync(new(TrackedItemKind.PullRequest, state, null, 50) { Filters = filters }, default);
+
+        var waiting = await List(Chosen(("scope", "@project"), ("reviewer", "@me_groups"), ("required", "@required"), ("vote", "@none")));
+        Assert.AreEqual("1 5", string.Join(' ', waiting.Items.Select(static item => item.Id)), "The required reviews of a group of the user, a nested one too, that no one gave.");
+        Assert.AreEqual("Required · through Core · No vote yet", waiting.Items[0].Match);
+        Assert.IsNull(waiting.Items[0].Place, "A pull request of the repository of the project is not elsewhere.");
+        var core = waiting.Items[0].Reviewers.Single(static reviewer => reviewer.Name == "Core");
+        Assert.AreEqual((true, true, true, TrackedVote.None), (core.IsGroup, core.Required, core.Mine, core.Vote));
+        Assert.IsFalse(waiting.Items[0].Reviewers.Single(static reviewer => reviewer.Name == "Security").Mine);
+        StringAssert.Contains(handler.Requests.Single(static request => request.Contains("/_apis/git/pullrequests?", StringComparison.Ordinal)), "/org/proj/_apis/git/pullrequests?searchCriteria.status=active&$top=200&$skip=0");
+        CollectionAssert.Contains(hosts, "vssps.dev.azure.com/org/_apis/identities", "The groups of the user are on the vssps host of the organization.");
+
+        var mine = await List(Chosen(("scope", "@project"), ("reviewer", "@me_groups"), ("vote", "@none"), ("author", "@not_me"), ("draft", "@hide")));
+        Assert.AreEqual("3 1", string.Join(' ', mine.Items.Select(static item => item.Id)), "Optional reviews too, the newest first; not the draft the user opened.");
+        Assert.AreEqual("Optional · No vote yet", mine.Items[0].Match, "A review asked of the user directly is not through a group.");
+
+        var approved = await List(Chosen(("scope", "@project"), ("reviewer", "@me_groups"), ("vote", "@approved\u001F@suggestions")));
+        var other = approved.Items.Single();
+        Assert.AreEqual(("2", "proj/other", "https://dev.azure.com/org/proj/_git/other/pullrequest/2"), (other.Id, other.Place, other.Url),
+            "A colleague approved for the group: the pull request no longer waits, and it is of another repository.");
+
+        Assert.AreEqual("3", string.Join(' ', (await List(Chosen(("reviewer", "@me")))).Items.Select(static item => item.Id)), "Me alone, in the repository of the project.");
+        StringAssert.Contains(handler.Requests[^1], "/org/proj/_apis/git/repositories/app/pullrequests?");
+        Assert.AreEqual("5", string.Join(' ', (await List(Chosen(("scope", "@organization"), ("author", "@me")))).Items.Select(static item => item.Id)));
+        StringAssert.Contains(handler.Requests.Last(static request => request.Contains("pullrequests?", StringComparison.Ordinal)), "/org/_apis/git/pullrequests?");
+        Assert.AreEqual("5 1", string.Join(' ', (await List(Chosen(("scope", "@project"), ("target_branch", "main\u001Frelease"), ("sort", "@oldest")))).Items.Select(static item => item.Id)));
+        Assert.IsEmpty((await List(Chosen(("reviewer", "@someone")))).Items, "A value the filter does not offer lists nothing.");
+
+        var filters = await tracker.GetFiltersAsync(new(Chosen(("scope", "@project")), []) { Kind = TrackedItemKind.PullRequest }, default);
+        CollectionAssert.AreEqual(new[] { "scope", "reviewer", "required", "vote", "author", "target_branch", "draft", "sort" }, filters.Select(static filter => filter.Id).ToArray());
+        Assert.IsNull(filters[1].Problem);
+        CollectionAssert.AreEqual(new[] { "develop", "main", "release" }, filters[5].Values.Select(static value => value.Id).ToArray(), "The target branches of the open pull requests of the scope.");
+        Assert.IsTrue(filters[3].Multiple && filters[5].Multiple);
+
+        var detail = await tracker.ReadAsync(TrackedItemKind.PullRequest, "2", default);
+        Assert.AreEqual(("proj/other", "Looks good."), (detail!.Item.Place, detail.Comments.Single().Body), "A pull request is read by its id, in whichever repository it is.");
+        CollectionAssert.Contains(handler.Requests, "/org/proj-id/_apis/git/repositories/other-id/pullrequests/2/threads?api-version=7.1");
+    }
+
+    [TestMethod]
+    public async Task AzureDevOps_PullRequestsOfMyGroups_AreNotListed_WhenTheGroupsCannotBeRead()
+    {
+        var handler = new Handler(request => request.RequestUri!.Host.StartsWith("vssps.", StringComparison.Ordinal) ? null : PullRequestAnswer(request), HttpStatusCode.Unauthorized);
+        var tracker = Tracker(handler, GitRepositoryReference.AzureDevOps("org", "proj", "app"));
+
+        var filters = await tracker.GetFiltersAsync(new(TrackedFilters.None, []) { Kind = TrackedItemKind.PullRequest }, default);
+        StringAssert.Contains(filters.Single(static filter => filter.Id == "reviewer").Problem, "Identity (Read)");
+        var page = await tracker.ListAsync(new(TrackedItemKind.PullRequest, TrackedItemFilter.Open, null, 50) { Filters = new Dictionary<string, string> { ["reviewer"] = "@me_groups" } }, default);
+        Assert.IsEmpty(page.Items, "A list that would miss the reviews of the groups is not given as whole.");
+        Assert.HasCount(3, (await tracker.ListAsync(new(TrackedItemKind.PullRequest, TrackedItemFilter.Open, null, 50), default)).Items, "Without those filters the pull requests of the repository are listed.");
+    }
+
+    [TestMethod]
+    public async Task AzureDevOps_PullRequests_PastTheMostThatAreRead_AreSaid_AndTheirTargetBranchesAreAllRead()
+    {
+        // Every page is full: 1,000 pull requests to main that wait for no one, and the one to release comes after the first page.
+        static string Page(int skip, int count, Func<int, string> target)
+            => """{"value":[""" + string.Join(',', Enumerable.Range(skip, count).Select(index => "{\"pullRequestId\":" + (index + 1).ToString(System.Globalization.CultureInfo.InvariantCulture)
+                + ",\"title\":\"Pull\",\"status\":\"active\",\"creationDate\":\"2026-10-01T10:00:00Z\",\"targetRefName\":\"refs/heads/" + target(index)
+                + "\",\"repository\":{\"id\":\"app-id\",\"name\":\"app\",\"project\":{\"id\":\"proj-id\",\"name\":\"proj\"}},\"reviewers\":[]}")) + "]}";
+        var handler = new Handler(request =>
+        {
+            var query = Uri.UnescapeDataString(request.RequestUri!.Query);
+            if (request.RequestUri.AbsolutePath != "/org/proj/_apis/git/pullrequests") return PullRequestAnswer(request);
+            var skip = int.Parse(query.Split("$skip=")[1].Split('&')[0], System.Globalization.CultureInfo.InvariantCulture);
+            return Page(skip, 200, index => index == 200 ? "release" : "main");
+        });
+        var tracker = Tracker(handler, GitRepositoryReference.AzureDevOps("org", "proj", "app"));
+
+        var page = await tracker.ListAsync(new(TrackedItemKind.PullRequest, TrackedItemFilter.Open, null, 50)
+        {
+            Filters = new Dictionary<string, string> { ["scope"] = "@project", ["reviewer"] = "@me_groups" },
+        }, default);
+        Assert.IsEmpty(page.Items);
+        StringAssert.Contains(page.Problem, "1000 most recent pull requests", "A listing that did not read them all says so.");
+
+        var filters = await tracker.GetFiltersAsync(new(new Dictionary<string, string> { ["scope"] = "@project" }, []) { Kind = TrackedItemKind.PullRequest }, default);
+        var branches = filters.Single(static filter => filter.Id == "target_branch");
+        CollectionAssert.AreEqual(new[] { "main", "release" }, branches.Values.Select(static value => value.Id).ToArray(), "The target branches past the first page are offered.");
+        StringAssert.Contains(branches.Problem, "1000 most recent open pull requests");
+    }
+
+    [TestMethod]
+    public async Task AzureDevOps_APullRequest_IsRead_WhenTheGroupsOfTheUserCannotBeReached()
+    {
+        var handler = new Handler(request => request.RequestUri!.Host.StartsWith("vssps.", StringComparison.Ordinal)
+            ? throw new HttpRequestException("no route to host") : PullRequestAnswer(request));
+        var tracker = Tracker(handler, GitRepositoryReference.AzureDevOps("org", "proj", "app"));
+
+        var detail = await tracker.ReadAsync(TrackedItemKind.PullRequest, "2", default);
+        Assert.AreEqual("New fields.", detail?.Body, "The groups only mark the reviews of the user.");
+        var filters = await tracker.GetFiltersAsync(new(TrackedFilters.None, []) { Kind = TrackedItemKind.PullRequest }, default);
+        StringAssert.Contains(filters.Single(static filter => filter.Id == "reviewer").Problem, "Identity (Read)", "The filters are still given, and say why the groups are missing.");
+        var page = await tracker.ListAsync(new(TrackedItemKind.PullRequest, TrackedItemFilter.Open, null, 50) { Filters = new Dictionary<string, string> { ["reviewer"] = "@me_groups" } }, default);
+        Assert.IsEmpty(page.Items);
+        StringAssert.Contains(page.Problem, "Identity (Read)", "A listing by the groups of the user says why it is empty.");
+    }
+
+    [TestMethod]
+    public async Task AzureDevOps_ARepositoryNamedByItsId_IsThatOfTheProject()
+    {
+        var tracker = Tracker(new Handler(PullRequestAnswer), GitRepositoryReference.AzureDevOps("org", "proj-id", "app-id"));
+
+        var page = await tracker.ListAsync(new(TrackedItemKind.PullRequest, TrackedItemFilter.Open, null, 50) { Filters = new Dictionary<string, string> { ["scope"] = "@organization" } }, default);
+
+        CollectionAssert.AreEqual(new[] { "1", "2", "3", "5" }, page.Items.Select(static item => item.Id).Order(StringComparer.Ordinal).ToArray());
+        CollectionAssert.AreEqual(new[] { "1", "3", "5" }, page.Items.Where(static item => item.Place is null).Select(static item => item.Id).Order(StringComparer.Ordinal).ToArray(),
+            "A remote that names the project and the repository by their ids is the repository of the pull requests that have them.");
+        Assert.AreEqual("proj/other", page.Items.Single(static item => item.Id == "2").Place);
+    }
+
+    [TestMethod]
+    public async Task AzureDevOps_ANumber_FindsItsWorkItemOrPullRequest_HoweverOld()
+    {
+        var handler = new Handler(request => request.RequestUri!.AbsolutePath switch
+        {
+            "/org/proj/_apis/wit/wiql" => """{"workItems":[]}""",
+            _ => PullRequestAnswer(request),
+        });
+        var tracker = Tracker(handler, GitRepositoryReference.AzureDevOps("org", "proj", "app"));
+
+        await tracker.ListAsync(new(TrackedItemKind.Issue, TrackedItemFilter.All, "#31", 10), default);
+        StringAssert.Contains(System.Text.Json.JsonDocument.Parse(handler.Bodies[^1]).RootElement.GetProperty("query").GetString(), "AND ([System.Title] CONTAINS '#31' OR [System.Id] = 31)");
+        await tracker.ListAsync(new(TrackedItemKind.Issue, TrackedItemFilter.All, "cache", 10), default);
+        Assert.IsFalse(System.Text.Json.JsonDocument.Parse(handler.Bodies[^1]).RootElement.GetProperty("query").GetString()!.Contains("OR [System.Id]", StringComparison.Ordinal));
+
+        var found = await tracker.ListAsync(new(TrackedItemKind.PullRequest, TrackedItemFilter.Open, "2", 10), default);
+        Assert.AreEqual(("2", "proj/other"), (found.Items.Single().Id, found.Items.Single().Place), "A pull request is found by its number, past the most recent ones and in another repository.");
+        Assert.IsEmpty((await tracker.ListAsync(new(TrackedItemKind.PullRequest, TrackedItemFilter.Merged, "2", 10), default)).Items, "Only in the list it belongs to.");
+        Assert.AreEqual("3", (await tracker.ListAsync(new(TrackedItemKind.PullRequest, TrackedItemFilter.Open, "3", 10), default)).Items.Single().Id, "One the list holds is not read twice.");
+        Assert.IsFalse(handler.Requests.Any(static request => request.StartsWith("/org/_apis/git/pullrequests/3", StringComparison.Ordinal)));
+    }
+
+    [TestMethod]
+    public async Task AzureDevOps_ReadsTheImagesOfItsAttachments_WithItsSignIn_AndNoOtherAddress()
+    {
+        byte[] png = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 1, 2, 3];
+        var asked = new List<(string Address, string? Authorization)>();
+        var answer = png;
+        var handler = new BytesHandler(request =>
+        {
+            asked.Add((request.RequestUri!.AbsoluteUri, request.Headers.Authorization?.ToString()));
+            return answer;
+        });
+        var tracker = Tracker(handler, GitRepositoryReference.AzureDevOps("org", "proj", "app"), GitRemoteCredential.Bearer("token"));
+        async Task<TrackedImage?> Read(string address) => await tracker.ReadImageAsync(new Uri(address), default);
+
+        var image = await Read("https://dev.azure.com/org/proj-id/_apis/wit/attachments/0f1e?fileName=image.png");
+        Assert.AreEqual("image/png", image?.MediaType);
+        CollectionAssert.AreEqual(png, image!.Bytes);
+        Assert.AreEqual("Bearer token", asked.Single().Authorization, "An attachment is read with the sign-in of the organization.");
+        Assert.IsNotNull(await Read("https://dev.azure.com/ORG/proj-id/_apis/git/repositories/repo-id/pullRequests/7/attachments/image.png"));
+
+        foreach (var elsewhere in new[]
+        {
+            "https://dev.azure.com/other/proj-id/_apis/wit/attachments/0f1e?fileName=image.png",
+            "https://example.com/org/proj-id/_apis/wit/attachments/0f1e?fileName=image.png",
+            "http://dev.azure.com/org/proj-id/_apis/wit/attachments/0f1e?fileName=image.png",
+            "https://dev.azure.com:8443/org/proj-id/_apis/wit/attachments/0f1e",
+            "https://dev.azure.com/org/proj-id/_apis/wit/workitems/12",
+            "https://dev.azure.com/org/proj-id/_apis/git/repositories/repo-id/pullRequests/seven/attachments/image.png",
+        })
+        {
+            Assert.IsNull(await Read(elsewhere), elsewhere);
+        }
+
+        Assert.HasCount(2, asked, "No request leaves for an address that is not an attachment of the organization.");
+        answer = "<svg xmlns=\"http://www.w3.org/2000/svg\"><script>alert(1)</script></svg>"u8.ToArray();
+        Assert.IsNull(await Read("https://dev.azure.com/org/proj-id/_apis/wit/attachments/0f1f"), "An SVG is never an image here.");
+        answer = new byte[TrackedImage.MaximumBytes + 1];
+        png.CopyTo(answer, 0);
+        Assert.IsNull(await Read("https://dev.azure.com/org/proj-id/_apis/wit/attachments/0f20"), "An image too large is not read.");
+
+        var github = Tracker(handler, GitRepositoryReference.GitHub("o", "r"));
+        Assert.IsNull(await github.ReadImageAsync(new Uri("https://github.com/user-attachments/assets/1"), default));
+        Assert.HasCount(4, asked, "GitHub reads no image yet.");
+    }
+
+    [TestMethod]
+    public async Task AzureDevOps_StopsReadingAnImage_PastTheLargestOne()
+    {
+        // An attachment the service sends without its length: the reading stops past the largest image, it does not
+        // take the whole body in memory first.
+        var body = new CountingStream([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A], 4L * TrackedImage.MaximumBytes);
+        var handler = new StreamHandler(body);
+        var tracker = Tracker(handler, GitRepositoryReference.AzureDevOps("org", "proj", "app"), GitRemoteCredential.Bearer("token"));
+
+        Assert.IsNull(await tracker.ReadImageAsync(new Uri("https://dev.azure.com/org/proj-id/_apis/wit/attachments/0f1e?fileName=big.png"), default));
+        Assert.IsLessThanOrEqualTo(TrackedImage.MaximumBytes + 1024L * 1024, body.Consumed, "At most a little more than the largest image is read.");
+    }
+
+    [TestMethod]
+    public async Task AzureDevOps_ReadsAnAttachmentOfTheOrganization_WrittenWithoutItsProject()
+    {
+        byte[] png = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 1];
+        var asked = new List<string>();
+        var tracker = Tracker(new BytesHandler(request => { asked.Add(request.RequestUri!.AbsoluteUri); return png; }),
+            GitRepositoryReference.AzureDevOps("org", "proj", "app"), GitRemoteCredential.Bearer("token"));
+
+        // The service answers an attachment it was given with the address of its organization, without a project.
+        Assert.AreEqual("image/png", (await tracker.ReadImageAsync(new Uri("https://dev.azure.com/org/_apis/wit/attachments/0f1e?fileName=image.png"), default))?.MediaType);
+        Assert.IsNull(await tracker.ReadImageAsync(new Uri("https://dev.azure.com/other/_apis/wit/attachments/0f1e?fileName=image.png"), default));
+        Assert.IsNull(await tracker.ReadImageAsync(new Uri("https://dev.azure.com/org/_apis/wit/workitems/0f1e"), default));
+        Assert.HasCount(1, asked, "Only the attachment of the organization is asked.");
+    }
+
+    [TestMethod]
+    public void AnImage_IsKnownByItsFirstBytes_NotByWhatTheServiceSays()
+    {
+        Assert.AreEqual("image/png", TrackedImage.Detect([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]));
+        Assert.AreEqual("image/jpeg", TrackedImage.Detect([0xFF, 0xD8, 0xFF, 0xE0]));
+        Assert.AreEqual("image/gif", TrackedImage.Detect("GIF89a.."u8));
+        Assert.AreEqual("image/webp", TrackedImage.Detect("RIFF\0\0\0\0WEBPVP8 "u8));
+        Assert.IsNull(TrackedImage.Detect("<svg/>"u8));
+        Assert.IsNull(TrackedImage.Detect("RIFF\0\0\0\0WAVE"u8));
+        Assert.IsNull(TrackedImage.Detect([]));
+    }
+
+    private sealed class BytesHandler(Func<HttpRequestMessage, byte[]> answer) : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+            => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent(answer(request)), RequestMessage = request });
+    }
+
+    // Answers a body of unknown length.
+    private sealed class StreamHandler(Stream body) : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+            => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StreamContent(body), RequestMessage = request });
+    }
+
+    // A body that starts with some bytes and then has zeros, that cannot seek and counts what was read of it.
+    private sealed class CountingStream(byte[] start, long length) : Stream
+    {
+        public long Consumed { get; private set; }
+
+        public override bool CanRead => true;
+        public override bool CanSeek => false;
+        public override bool CanWrite => false;
+        public override long Length => throw new NotSupportedException();
+        public override long Position { get => Consumed; set => throw new NotSupportedException(); }
+
+        public override int Read(byte[] buffer, int offset, int count) => Read(buffer.AsSpan(offset, count));
+
+        public override int Read(Span<byte> buffer)
+        {
+            var count = (int)Math.Min(buffer.Length, length - Consumed);
+            buffer[..count].Clear();
+            for (var index = 0; index < count && Consumed + index < start.Length; index++) buffer[index] = start[Consumed + index];
+            Consumed += count;
+            return count;
+        }
+
+        public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default) => ValueTask.FromResult(Read(buffer.Span));
+
+        public override Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken) => Task.FromResult(Read(buffer.AsSpan(offset, count)));
+
+        public override void Flush() { }
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+        public override void SetLength(long value) => throw new NotSupportedException();
+        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+    }
+
+    // An organization where the user is in Core directly and in Fields through Core, and the open pull requests of its project.
+    private static string? PullRequestAnswer(HttpRequestMessage request)
+    {
+        var path = request.RequestUri!.AbsolutePath;
+        var query = Uri.UnescapeDataString(request.RequestUri.Query);
+        const string Pulls = """
+            {"value":[
+              {"pullRequestId":1,"title":"Cache","status":"active","creationDate":"2026-10-03T10:00:00Z","createdBy":{"id":"ana-id","displayName":"Ana"},"targetRefName":"refs/heads/main",
+               "repository":{"id":"app-id","name":"app","project":{"id":"proj-id","name":"proj"}},
+               "reviewers":[{"id":"g-core","displayName":"[proj]\\Core","isContainer":true,"isRequired":true,"vote":0},{"id":"g-sec","displayName":"[proj]\\Security","isContainer":true,"isRequired":true,"vote":0}]},
+              {"pullRequestId":2,"title":"Fields","status":"active","creationDate":"2026-10-04T10:00:00Z","createdBy":{"id":"ana-id","displayName":"Ana"},"targetRefName":"refs/heads/develop",
+               "repository":{"id":"other-id","name":"other","project":{"id":"proj-id","name":"proj"}},
+               "reviewers":[{"id":"bo-id","displayName":"Bo","vote":10,"votedFor":[{"id":"g-fields"}]},{"id":"g-fields","displayName":"[proj]\\(CodeOwners) Fields","isContainer":true,"isRequired":true,"vote":10}]},
+              {"pullRequestId":3,"title":"Logs","status":"active","creationDate":"2026-10-05T10:00:00Z","createdBy":{"id":"bo-id","displayName":"Bo"},"targetRefName":"refs/heads/develop",
+               "repository":{"id":"app-id","name":"app","project":{"id":"proj-id","name":"proj"}},
+               "reviewers":[{"id":"me-id","displayName":"Me","vote":0},{"id":"g-sec","displayName":"[proj]\\Security","isContainer":true,"isRequired":true,"vote":0}]},
+              {"pullRequestId":5,"title":"Mine","status":"active","isDraft":true,"creationDate":"2026-10-01T10:00:00Z","createdBy":{"id":"me-id","displayName":"Me"},"targetRefName":"refs/heads/release",
+               "repository":{"id":"app-id","name":"app","project":{"id":"proj-id","name":"proj"}},
+               "reviewers":[{"id":"g-fields","displayName":"[proj]\\(CodeOwners) Fields","isContainer":true,"isRequired":true,"vote":0}]}]}
+            """;
+        return (request.RequestUri.Host, path) switch
+        {
+            ("dev.azure.com", "/org/_apis/connectionData") => """{"authenticatedUser":{"id":"me-id","subjectDescriptor":"aad.me"}}""",
+            ("vssps.dev.azure.com", "/org/_apis/identities") when query.Contains("identityIds=me-id&queryMembership=Expanded", StringComparison.Ordinal)
+                => """{"value":[{"id":"me-id","memberOf":["Microsoft.TeamFoundation.Identity;S-core","Microsoft.TeamFoundation.Identity;S-fields"]}]}""",
+            ("vssps.dev.azure.com", "/org/_apis/identities") when query.Contains("descriptors=Microsoft.TeamFoundation.Identity;S-core,Microsoft.TeamFoundation.Identity;S-fields", StringComparison.Ordinal)
+                => """{"value":[{"id":"g-core","providerDisplayName":"[proj]\\Core"},{"id":"g-fields","providerDisplayName":"[proj]\\(CodeOwners) Fields"}]}""",
+            ("dev.azure.com", "/org/proj/_apis/git/pullrequests" or "/org/_apis/git/pullrequests")
+                => query.Contains("$skip=0", StringComparison.Ordinal) || !query.Contains("$skip", StringComparison.Ordinal) ? Pulls : """{"value":[]}""",
+            ("dev.azure.com", "/org/proj/_apis/git/repositories/app/pullrequests") => query.Contains("$skip=0", StringComparison.Ordinal) || !query.Contains("$skip", StringComparison.Ordinal)
+                ? """{"value":[""" + string.Join(',', System.Text.Json.JsonDocument.Parse(Pulls).RootElement.GetProperty("value").EnumerateArray()
+                    .Where(static pull => pull.GetProperty("repository").GetProperty("name").GetString() == "app").Select(static pull => pull.GetRawText())) + "]}"
+                : """{"value":[]}""",
+            ("dev.azure.com", "/org/_apis/git/pullrequests/2") => """
+                {"pullRequestId":2,"title":"Fields","status":"active","description":"New fields.","repository":{"id":"other-id","name":"other","project":{"id":"proj-id","name":"proj"}},"reviewers":[]}
+                """,
+            ("dev.azure.com", "/org/proj-id/_apis/git/repositories/other-id/pullrequests/2/threads") => """
+                {"value":[{"comments":[{"commentType":"text","content":"Looks good.","author":{"displayName":"Bo"}},{"commentType":"system","content":"Bo voted 10"}]}]}
+                """,
+            _ => null,
+        };
+    }
+
+    [TestMethod]
     public async Task AzureDevOps_OffersTheTeamsTheirSprintsAndTheTypes_YourTeamsFirst()
     {
         var tracker = Tracker(AzureDevOpsHandler(), GitRepositoryReference.AzureDevOps("org", "proj", "app"));
@@ -606,7 +924,7 @@ public sealed class GitHostTrackerTests
         Assert.AreEqual(1, handler.Requests.Count(static request => request.Contains("/pulls?", StringComparison.Ordinal)), "The recent pull requests are listed once while typing.");
     }
 
-    private static IIssueTracker Tracker(Handler handler, GitRepositoryReference repository, GitRemoteCredential? credential = null)
+    private static IIssueTracker Tracker(HttpMessageHandler handler, GitRepositoryReference repository, GitRemoteCredential? credential = null)
     {
         var lookup = new GitIssueLookup(GitIssueLookup.CreateHttpClient(handler), new GitIssueLookupOptions
         {

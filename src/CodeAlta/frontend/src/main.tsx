@@ -118,6 +118,7 @@ import { UserInputPanel } from "./UserInputPanel";
 import { LiveSessionPanel } from "./LiveSessionPanel";
 import { createTimelineScrollMemory, useExplicitNewestHistory, useTimelinePosition, timelineNotice, type TimelineNotice, type MessageNavigation } from "./timelineScroll";
 import { workspaceEditingSelector, type ShortcutAction } from "./shortcuts";
+import { typeKeyIntoPrompt } from "./promptTyping";
 import { createDraftIndicators, createLocalDrafts, draftSendFacts, draftStorageKey, givePromptBack, persistDraft, restoreDraft, transferPromptDraft,
   type PromptBackComposer } from "./promptDraft";
 import type { UnsentPrompt } from "./timeline";
@@ -294,7 +295,8 @@ import { archivedInView, defaultSpaceId, findSpace, neighborSpace, persistShownS
 import { newFallbackNotices } from "./spaces/fallbackNotices";
 import { adaptiveChoice, adaptiveTier, composerAdaptiveEntry, composerTierEntries, tierLabels, tierStore } from "./modelTiers";
 import { AdaptiveSetupDialog } from "./AdaptiveSetup";
-import { cloudPlace, deletedSessionWorktree, persistWorkPlaces, projectFolder as inProjectFolder, restoreWorkPlaces, sessionWorktree, withWorkPlace, workPlacesKey, type WorkPlace } from "./worktrees/worktrees";
+import { cloudPlace, deletedSessionWorktree, folderName, persistWorkPlaces, projectFolder as inProjectFolder, restoreWorkPlaces, sessionWorktree, withWorkPlace, workPlacesKey, type WorkPlace } from "./worktrees/worktrees";
+import { createSessionFolderSwitch, type FolderSwitchResult, type FolderTarget } from "./worktrees/sessionFolder";
 import { bringBackCommand, cloudOf, inCloud, pendingCloudStartKey, providerHasCloudSessions, readPendingCloudStart, runCloudStart, type CloudStartState,
   type PendingCloudStart } from "./cloudSessions/cloudSessions";
 import { BringHereDialog, CloudAccountChoice, CloudReadiness, CloudStartProgress, type CloudAccount } from "./cloudSessions/CloudStart";
@@ -1452,14 +1454,14 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
   // The row of a scope in the Explorer shows the prompt of a new session of it. The prompt takes the transient tab:
   // a session that was only looked at leaves it. Kept (a double click), it has a tab of its own, as many scopes can.
   // With a single tab the prompt takes that tab once its scope is selected, and no prompt has a tab of its own.
-  function showScopeDraft(id: string | null, keep = false) {
+  function showScopeDraft(id: string | null, keep = false, focusPrompt = false) {
     const draft = snapshot && snapshot === currentSnapshot.current ? draftTabOf(snapshot, id) : null;
     if (draft && !singleTab) {
       const valid = reconcileSessionTabs(tabs, snapshot!);
       const next = keep ? openDraftTab(valid, draft) : hasDraftTab(valid, draft) ? valid : closePreviewTab(valid);
       if (next !== tabs) setTabs(next);
     }
-    selectProject(id);
+    selectProject(id, null, focusPrompt);
   }
   // The prompt of a new session that has a tab of its own is closed like any tab: the tab goes, what was typed stays
   // with its scope. When it was the one shown, a session is shown in its place if one is open.
@@ -1593,9 +1595,10 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
     if (creationAlive.current && intent === saveFollowUp.current) showSpace(leaving.spaceId, leaving.target, true);
   }
   // A session the shown space does not list: its own space is shown first.
-  function revealSession(session: WorkspaceSession) {
-    const target = { projectId: session.scopeKind === "project" ? session.projectId : null, sessionId: session.id };
-    if (currentSnapshot.current?.sessions.some(candidate => candidate.id === session.id)) selectProject(target.projectId, target.sessionId);
+  function revealSession(session: WorkspaceSession, focusPrompt = false) {
+    const target = { projectId: session.scopeKind === "project" ? session.projectId : null, sessionId: session.id,
+      then: focusPrompt ? focusPromptSoon : undefined };
+    if (currentSnapshot.current?.sessions.some(candidate => candidate.id === session.id)) selectProject(target.projectId, target.sessionId, focusPrompt);
     else showSpace(sessionHome(spacesHub.getSnapshot().spaces, { spaceId: session.spaceId, projectId: target.projectId }).id, target);
   }
   const revealSessionLatest = useRef(revealSession); revealSessionLatest.current = revealSession;
@@ -1801,6 +1804,21 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
   const [showProjectChanges] = useState(() => (project: Readonly<{ id: string; path: string }>, worktree?: string | null, review: "changes" | "branch" | null = null) =>
     showChangesLatest.current(project, null, worktree, review));
   const [refreshSessionList] = useState(() => () => readSessionList.current());
+  // A session sent to work elsewhere in its repository: its row says where once the list is read again.
+  const [switchSessionFolder] = useState(() => {
+    const switchFolder = createSessionFolderSwitch(workspace.switchSessionFolder);
+    return async (epoch: string, project: Readonly<{ id: string; path: string }>, sessionId: string, target: FolderTarget) => {
+      const result = await switchFolder(epoch, { projectId: project.id, projectPath: project.path }, sessionId, target);
+      if (result.kind === "switched" || result.code === "switch_unconfirmed") readSessionList.current();
+      if (result.kind === "switched") {
+        const where = result.worktreePath ? folderName(result.worktreePath) : null;
+        showToast({ message: where ? translate(shownLocale.current, "This session now works in {name}.", { name: where })
+          : translate(shownLocale.current, "This session now works in the folder of the project."), intent: "success", icon: "tick", timeout: 4000 });
+        if (result.warnings.length > 0) showToast({ message: result.warnings[0], intent: "warning", icon: "warning-sign", timeout: 12000 });
+      }
+      return result;
+    };
+  });
   // An agent asks for the changes of a project with `alta diff show`.
   useEffect(() => {
     const epoch = status?.hostEpoch;
@@ -3144,15 +3162,15 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
 
   // What was chosen in the search is opened once its modal dialog has closed (see the layout effect below).
   const skillEpoch = owned ? status?.hostEpoch ?? null : null;
-  const skillsKey = `${skillEpoch}:${projectId ?? ""}`;
+  const skillsKey = `${skillEpoch}:${projectId ?? ""}:${spaceId}`;
   useEffect(() => {
     if (!searchOpen || !skillEpoch) return;
     const controller = new AbortController();
-    void skillsApi.list({ expectedEpoch: skillEpoch, projectId: projectId ?? null }, { signal: controller.signal, timeoutMilliseconds: 8000 })
+    void skillsApi.list({ expectedEpoch: skillEpoch, projectId: projectId ?? null, spaceId }, { signal: controller.signal, timeoutMilliseconds: 8000 })
       .then(page => { if (!controller.signal.aborted && page.status === "ok") setSearchSkills({ key: skillsKey, skills: usableSkills(page.skills) }); },
         () => { /* The search goes on without the skills. */ });
     return () => controller.abort();
-  }, [searchOpen, skillEpoch, projectId]);
+  }, [searchOpen, skillEpoch, projectId, spaceId]);
 
   // A skill chosen in the search: the session in front is asked to use it, as a prompt it receives like any other.
   function askToUseSkill(name: string, args: string) {
@@ -3625,9 +3643,18 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
         || modalDialogOpen()) return;
       event.preventDefault(); runShortcut("escape");
     }
+    // Bubble phase, after what has the focus: a character typed where typing goes nowhere (the page after a click on
+    // the timeline, a button, a row of the Explorer, Escape) is the prompt's, which takes the keyboard and the
+    // character (#307). `/` does what it does in an empty prompt: it opens the search of the commands.
+    function typedKey(event: globalThis.KeyboardEvent) {
+      if (commandChord.current || currentView.current !== "workspace" || settingsVisible.current || dialog || searchOpen
+        || document.querySelector(".project-editor[data-active='true'], .terminal-panel[data-active='true']")) return;
+      typeKeyIntoPrompt(event, document, openCommandSearch);
+    }
     window.addEventListener("keydown", commandKey, true);
     window.addEventListener("keydown", escapeKey);
-    return () => { window.removeEventListener("keydown", commandKey, true); window.removeEventListener("keydown", escapeKey); };
+    window.addEventListener("keydown", typedKey);
+    return () => { window.removeEventListener("keydown", commandKey, true); window.removeEventListener("keydown", escapeKey); window.removeEventListener("keydown", typedKey); };
   });
 
   function runShortcut(action: ShortcutAction) {
@@ -3743,8 +3770,12 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
     toggleRail(narrow);
   }
 
-  function selectProject(nextProjectId: string | null, selectedId?: string | null) {
-    protectNavigation(selectedId ? [selectedId] : [], () => selectAdmittedProject(nextProjectId, selectedId));
+  function selectProject(nextProjectId: string | null, selectedId?: string | null, focusPrompt = false) {
+    protectNavigation(selectedId ? [selectedId] : [], () => {
+      selectAdmittedProject(nextProjectId, selectedId);
+      // A click on a row focuses only after navigation is admitted, never the old prompt while admission waits.
+      if (focusPrompt) focusPromptSoon();
+    });
   }
   function selectAdmittedProject(nextProjectId: string | null, selectedId?: string | null) {
     setMenuTarget(null);
@@ -3769,7 +3800,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
 
   // A session of an open scope that is not the selected one. Opening it makes its scope the selected one; renaming
   // and deleting act on the selected session, so they open it first and start once it is the one selected.
-  const pendingSessionAction = useRef<{ projectId: string | null; sessionId: string; action: SessionAction } | null>(null);
+  const pendingSessionAction = useRef<{ projectId: string | null; sessionId: string; action: SessionAction; focusPrompt: boolean } | null>(null);
   // The Actions menu of a session asks its composer to show its Remote Control: the session is selected, and its
   // panel opens it when it sees the request.
   const [remoteControlAsk, setRemoteControlAsk] = useState<{ sessionId: string; request: RemoteControlOpenRequest } | null>(null);
@@ -3823,9 +3854,9 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
       { resumeCommand, configDir: reply.configDirectory, windows: reply.windows, home: reply.home });
     return refusal ? say(refusal) : null;
   }
-  function openScopeSession(scope: string | null, session: WorkspaceSession, action: SessionAction) {
+  function openScopeSession(scope: string | null, session: WorkspaceSession, action: SessionAction, focusPrompt = false) {
     protectNavigation([session.id], () => {
-      pendingSessionAction.current = { projectId: scope, sessionId: session.id, action };
+      pendingSessionAction.current = { projectId: scope, sessionId: session.id, action, focusPrompt };
       selectProject(scope, session.id);
     });
   }
@@ -3835,9 +3866,9 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
     if (!pending || pending.projectId !== projectId || pending.sessionId !== sessionId) return;
     // The row that was used is gone with the list of its scope: the same session is now in the list of the selected one.
     const button = sessionRail.current?.querySelector<HTMLButtonElement>('.session-row > button[aria-pressed="true"]');
-    if (!modalDialogOpen()) button?.focus({ preventScroll: true });
+    if (!modalDialogOpen() && !pending.focusPrompt) button?.focus({ preventScroll: true });
     button?.scrollIntoView({ block: "nearest" });
-    if (pending.action === "open") return;
+    if (pending.action === "open") { if (pending.focusPrompt) focusPromptSoon(); return; }
     if (pending.action === "remote-control") { askRemoteControl(pending.sessionId); return; }
     const rows = snapshot?.sessions.filter(session => session.id === pending.sessionId) ?? [];
     if (rows.length !== 1) return;
@@ -3885,7 +3916,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
   // The family of a session listed in other scopes than its own: the links under a parent, and the origin of a child.
   const sessionFamily: SessionFamily = {
     scopeName: session => session.scopeKind === "project" ? snapshot?.projects.find(project => project.id === session.projectId)?.name ?? session.projectId ?? "" : t("Chats"),
-    open: session => revealSession(session),
+    open: revealSession,
     marks: session => sessionMarks(session, session.scopeKind === "project" ? session.projectId : null),
   };
   function scopeSessions(scope: string | null) {
@@ -3899,7 +3930,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
         currentHostEpoch.current ?? null, owned, mutation?.capability.canMutate() ?? false,
         batchDeletion.locked() || renamingBusy || deletingBusy || renamingPending.current || deletingPending.current,
         renameLocked || deleteLocked || !!uncertainRename.current || !!uncertainDelete.current)}
-      onAction={(session, action) => openScopeSession(scope, session, action)} onKeep={session => keepSession(scope, session)} menuEntries={session => sessionCanvasEntries(session, project)} actionEntries={session => [...sessionCloudEntries(session), ...sessionBookmarkEntries(session), ...sessionLineageEntries(session), ...sessionReviewEntries(session)]} deleteAsks={confirms.sessionDelete}
+      onAction={(session, action, focusPrompt) => openScopeSession(scope, session, action, focusPrompt)} onKeep={session => keepSession(scope, session)} menuEntries={session => sessionCanvasEntries(session, project)} actionEntries={session => [...sessionCloudEntries(session), ...sessionBookmarkEntries(session), ...sessionLineageEntries(session), ...sessionReviewEntries(session)]} deleteAsks={confirms.sessionDelete}
       archiveAsks={session => archivableDescendants(catalog.current?.sessions ?? [], session.id).length > 0}
       spaces={spacesState.available && spacesState.spaces.length > 1}
       drag={session => sessionDragSource(session, scope)}
@@ -5366,6 +5397,9 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
 
   // Settings pages also edit the selected project's settings when it can be written.
   const settingsProject = selectedProject && !selectedProject.archived ? { id: selectedProject.id, name: selectedProject.name } : null;
+  // The space the window shows: the Skills page lists and changes the folders of skills added for it.
+  const shownSpaceEntry = spacesState.spaces.find(space => space.id === spaceId);
+  const settingsSpace = shownSpaceEntry ? { id: shownSpaceEntry.id, name: shownSpaceEntry.name } : null;
   // The folder of the color schemes of the user, in the code editor: the host finds it, and the window leaves Settings.
   function openColorSchemeFolder() {
     const failed = () => showToast({ message: translate(shownLocale.current, "The file could not be opened."), intent: "danger", icon: "error", timeout: 8000 });
@@ -5401,7 +5435,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
   useEffect(() => {
     if (snapshot) pruneSessionPaneOwners(sessionPaneOwners, wholeCatalog ?? snapshot, status?.hostEpoch, [...tabView.open, ...backgroundTabs ?? []], paneRewinds);
   });
-  return <ShellLanguageContext.Provider value={language}><HostReadsContext.Provider value={hostReads}><SpeechContext.Provider value={speech}><ProviderBrandsContext.Provider value={providerLogos}><PluginUiContext.Provider value={pluginUiValue}><PluginHostBridgeContext.Provider value={pluginHostBridge}><PluginButtonsContext.Provider value={pluginButtonsHost}><PluginButtonsActiveContext.Provider value={fileTabs.active ?? null}><PullRequestSettingsContext.Provider value={owned ? openPullRequestSettings : null}><SessionLinksContext.Provider value={sessionLinks}><MessageLinksContext.Provider value={messageLinkEpoch ? openMessageLink : null}><MarkdownImagesContext.Provider value={markdownImages}><SessionWidthContext.Provider value={sessionWidthControl}><ShowChangesContext.Provider value={owned ? showProjectChanges : null}><OpenTerminalContext.Provider value={owned ? openSessionTerminal : null}><OpenEditorContext.Provider value={owned ? openSessionEditor : null}><OpenRunContext.Provider value={owned ? openRun : null}><ExternalOpenerContext.Provider value={owned ? externalOpener : null}><SessionListRefreshContext.Provider value={owned ? refreshSessionList : null}><LocalSearchContext.Provider value={owned ? localSearchHub : null}><ReviewsHubContext.Provider value={owned ? reviewsHub : null}><ReviewOpenerContext.Provider value={owned ? reviewOpener : null}><ReviewsListOpenerContext.Provider value={owned ? openReviewsList : null}><ShellAppearance appearance={appearance} preview={appearancePreview} /><div className={`app-shell ide-shell${secondary ? " secondary-window" : ""}`}
+  return <ShellLanguageContext.Provider value={language}><HostReadsContext.Provider value={hostReads}><SpeechContext.Provider value={speech}><ProviderBrandsContext.Provider value={providerLogos}><PluginUiContext.Provider value={pluginUiValue}><PluginHostBridgeContext.Provider value={pluginHostBridge}><PluginButtonsContext.Provider value={pluginButtonsHost}><PluginButtonsActiveContext.Provider value={fileTabs.active ?? null}><PullRequestSettingsContext.Provider value={owned ? openPullRequestSettings : null}><SessionLinksContext.Provider value={sessionLinks}><MessageLinksContext.Provider value={messageLinkEpoch ? openMessageLink : null}><MarkdownImagesContext.Provider value={markdownImages}><SessionWidthContext.Provider value={sessionWidthControl}><ShowChangesContext.Provider value={owned ? showProjectChanges : null}><OpenTerminalContext.Provider value={owned ? openSessionTerminal : null}><OpenEditorContext.Provider value={owned ? openSessionEditor : null}><OpenRunContext.Provider value={owned ? openRun : null}><ExternalOpenerContext.Provider value={owned ? externalOpener : null}><SessionListRefreshContext.Provider value={owned ? refreshSessionList : null}><SessionFolderSwitchContext.Provider value={owned ? switchSessionFolder : null}><LocalSearchContext.Provider value={owned ? localSearchHub : null}><ReviewsHubContext.Provider value={owned ? reviewsHub : null}><ReviewOpenerContext.Provider value={owned ? reviewOpener : null}><ReviewsListOpenerContext.Provider value={owned ? openReviewsList : null}><ShellAppearance appearance={appearance} preview={appearancePreview} /><div className={`app-shell ide-shell${secondary ? " secondary-window" : ""}`}
       style={secondary && windowsState.current?.color ? { "--window-color": windowsState.current.color } as CSSProperties : undefined}>
     {(closing || hostState.busy || linkLost || !widthSaved) && <div className="shell-notices" data-neoastra-no-drag>
       {closing ? <div className="shell-notice" role="alert">
@@ -5512,7 +5546,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
             {...sessionFamilyHover(() => currentSnapshot.current?.sessions ?? [])}><SessionFamilyContext.Provider value={sessionFamily}>
           <LabelDragGhost view={railDrag.view} />
           {!snapshot && railHead}
-          {snapshot && <ProjectRailRows head={railHead} projects={projectListing?.projects ?? []} favorites={projectListing?.favorites ?? 0} selectedId={projectId} onSelect={id => showScopeDraft(id)} onKeep={id => showScopeDraft(id, true)} children={sessions}
+          {snapshot && <ProjectRailRows head={railHead} projects={projectListing?.projects ?? []} favorites={projectListing?.favorites ?? 0} selectedId={projectId} onSelect={(id, focusPrompt) => showScopeDraft(id, false, focusPrompt)} onKeep={id => showScopeDraft(id, true)} children={sessions}
             drop={owned ? projectDropTarget : undefined} footer={claudeCodeConfigured ? claudeCodeGroup(null) : undefined}
             labels={labelsState.available ? {
               groups: railGroups,
@@ -5658,7 +5692,11 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
                 }}>
               <button type="button" aria-pressed={sessionId === session.id} aria-expanded={twist && !twist.collapsed} aria-describedby={`session-tooltip-${index}`} title={tooltip}
                 data-full-text={plainTitle(session.fullTitle || session.title)} style={{ paddingLeft: sessionRowIndent(depth) }} onKeyDown={event => sessionTwistKey(event, twist)}
-                onClick={() => protectNavigation([session.id], () => { setMenuTarget(null); setSessionId(session.id); setRenamingId(null); setRenamingMessage(""); setDeletingId(null); setDeletingMessage(""); })}
+                onClick={event => {
+                  const focusPrompt = event.detail > 0;
+                  protectNavigation([session.id], () => { setMenuTarget(null); setSessionId(session.id); setRenamingId(null); setRenamingMessage(""); setDeletingId(null); setDeletingMessage("");
+                    if (focusPrompt) focusPromptSoon(); });
+                }}
                 onDoubleClick={() => keepSession(projectId, session)}>
                 <SessionRowTitle session={session} depth={depth} diagnostic={diagnostic} subAgents={subAgents} twist={twist} parentElsewhere={parentElsewhere} childrenElsewhere={childrenElsewhere} />{sessionMarks(session, projectId)}
               </button>
@@ -6016,6 +6054,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
       : settingsSection === "storage" ? <StorageSettings api={storage} epoch={owned ? status!.hostEpoch : null} onOpenFile={owned ? closeSettings : undefined}
           maintenance={storageMaintenance.maintenance} retention={storageMaintenance.retention} />
       : settingsSection === "skills" ? <SkillSettings epoch={owned ? status!.hostEpoch : null} project={settingsProject} spaceScope={resourceScope}
+        space={settingsSpace} pickFolder={canPickFolder() ? initial => pickFolder(desktopShell.pickFolder, t("Choose a folder of skills"), initial) : undefined}
         onEdit={owned ? folder => { closeSettings(); openSkillEditor(folder); } : undefined} onOpenFile={owned ? closeSettings : undefined} />
       : settingsSection === "mcp" ? <McpServerSettings epoch={owned ? status!.hostEpoch : null} project={settingsProject} onOpenFile={owned ? closeSettings : undefined} spaceScope={resourceScope} />
       : settingsSection === "prompts" ? <AgentPromptSettings epoch={owned ? status!.hostEpoch : null} project={settingsProject} onOpenFile={owned ? closeSettings : undefined} spaceScope={resourceScope} />
@@ -6191,7 +6230,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
         return command.completion ?? command.result;
       }}
       onDraft={request => { askPluginComposer("draft", request.sessionId ?? null, request.text ?? ""); }} />
-  </div></ReviewsListOpenerContext.Provider></ReviewOpenerContext.Provider></ReviewsHubContext.Provider></LocalSearchContext.Provider></SessionListRefreshContext.Provider></ExternalOpenerContext.Provider></OpenRunContext.Provider></OpenEditorContext.Provider></OpenTerminalContext.Provider></ShowChangesContext.Provider></SessionWidthContext.Provider></MarkdownImagesContext.Provider></MessageLinksContext.Provider></SessionLinksContext.Provider></PullRequestSettingsContext.Provider></PluginButtonsActiveContext.Provider></PluginButtonsContext.Provider></PluginHostBridgeContext.Provider></PluginUiContext.Provider></ProviderBrandsContext.Provider></SpeechContext.Provider></HostReadsContext.Provider></ShellLanguageContext.Provider>;
+  </div></ReviewsListOpenerContext.Provider></ReviewOpenerContext.Provider></ReviewsHubContext.Provider></LocalSearchContext.Provider></SessionFolderSwitchContext.Provider></SessionListRefreshContext.Provider></ExternalOpenerContext.Provider></OpenRunContext.Provider></OpenEditorContext.Provider></OpenTerminalContext.Provider></ShowChangesContext.Provider></SessionWidthContext.Provider></MarkdownImagesContext.Provider></MessageLinksContext.Provider></SessionLinksContext.Provider></PullRequestSettingsContext.Provider></PluginButtonsActiveContext.Provider></PluginButtonsContext.Provider></PluginHostBridgeContext.Provider></PluginUiContext.Provider></ProviderBrandsContext.Provider></SpeechContext.Provider></HostReadsContext.Provider></ShellLanguageContext.Provider>;
 }
 
 /** The search of Settings: the query, the counts of the pages while one is typed (null otherwise), and the results that take the place of the page. */
@@ -6313,6 +6352,10 @@ const ShowChangesContext = createContext<((project: Readonly<{ id: string; path:
 /** Reads the list of sessions again: what a session records, such as its worktree, changed outside the window. */
 const SessionListRefreshContext = createContext<(() => void) | null>(null);
 
+/** Sends a session that exists to work elsewhere in the repository of its project; null where the window has no host. */
+const SessionFolderSwitchContext = createContext<((epoch: string, project: Readonly<{ id: string; path: string }>, sessionId: string,
+  target: FolderTarget) => Promise<FolderSwitchResult>) | null>(null);
+
 /** The mark of a session that works in a git worktree, in the lists of sessions. */
 function WorktreeBadge({ session }: { session: WorkspaceSession }) {
   const { t } = useShellLanguage();
@@ -6351,6 +6394,7 @@ function useComposerChrome(epoch: string | null, project: WorkspaceSnapshot["pro
   const openTerminal = useContext(OpenTerminalContext);
   const openEditor = useContext(OpenEditorContext);
   const refreshSessions = useContext(SessionListRefreshContext);
+  const switchFolder = useContext(SessionFolderSwitchContext);
   const openPullRequestSettings = useContext(PullRequestSettingsContext);
   const worktreePath = session?.worktreePath ?? null, worktreeName = session?.worktreeName ?? null, worktreeMissing = session?.worktreeMissing === true;
   const worktreeRoot = session?.worktreeRoot ?? null;
@@ -6360,6 +6404,8 @@ function useComposerChrome(epoch: string | null, project: WorkspaceSnapshot["pro
     const shown = worktree && !worktree.missing ? worktree.path : null;
     return ({ context: id !== undefined && name !== undefined && path !== undefined
     ? <WorkspaceChip epoch={epoch} project={{ id, name, path }} sessionId={sessionId} read={projectGit.status} worktree={worktree} place={place}
+      // A session that exists can be sent to another worktree, a new one or the folder of the project; a draft chooses its place itself.
+      folderSwitch={switchFolder && epoch && sessionId && !place && !archived ? { running, onSwitch: target => switchFolder(epoch, { id, path }, sessionId, target) } : undefined}
       onWorktreeGone={refreshSessions ?? undefined} branches={!!showChanges && !archived}
       onShowChanges={showChanges && !archived ? () => showChanges({ id, path }, shown) : undefined}
       onOpenTerminal={openTerminal && !archived ? () => openTerminal(id, sessionId) : undefined}
@@ -6372,7 +6418,7 @@ function useComposerChrome(epoch: string | null, project: WorkspaceSnapshot["pro
     {sessionId && !archived && <ReviewComposerStatus epoch={epoch} projectId={id ?? null} checkout={shown} sessionId={sessionId} running={running} />}
     <ComposerStatus epoch={epoch} projectId={id ?? null} sessionId={sessionId} read={composerStatus.read} readMcp={composerStatus.readMcp} /></> : undefined,
   footer: epoch && regions ? <PluginRegionSlot items={regionItems} projectId={id ?? null} sessionId={sessionId} region="footer" /> : undefined });
-  }, [epoch, id, name, path, archived, sessionId, regions, regionItems, showChanges, openTerminal, openEditor, refreshSessions, openPullRequestSettings, worktreePath, worktreeName, worktreeRoot, worktreeMissing, place, running]);
+  }, [epoch, id, name, path, archived, sessionId, regions, regionItems, showChanges, openTerminal, openEditor, refreshSessions, switchFolder, openPullRequestSettings, worktreePath, worktreeName, worktreeRoot, worktreeMissing, place, running]);
 }
 
 // The composer of a session, as a prompt given back to it sees it: the one shown, else the draft stored for the session.

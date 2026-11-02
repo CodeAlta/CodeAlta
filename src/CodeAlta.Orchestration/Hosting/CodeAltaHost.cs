@@ -518,7 +518,18 @@ public sealed class CodeAltaHost : IAsyncDisposable
             };
             // The providers that list the conversations of other programs keep what they read of their files in the
             // database, so that a start reads only the files that changed.
-            modelProviderRegistry = new ModelProviderRegistry { ExternalConversationHeaders = new ExternalConversationHeaderStore(applicationDatabase) };
+            modelProviderRegistry = new ModelProviderRegistry
+            {
+                ExternalConversationHeaders = new ExternalConversationHeaderStore(applicationDatabase),
+                // The providers say which CodeAlta calls them where a service asks (the categories of OpenRouter).
+                Application = options.PluginFrontend switch
+                {
+                    PluginFrontends.Desktop => "desktop",
+                    PluginFrontends.Terminal => "tui",
+                    PluginFrontends.Cli => "cli",
+                    _ => null,
+                },
+            };
             options.ConfigureModelProviders?.Invoke(modelProviderRegistry);
             options.ConfigurePluginModelProviders?.Invoke(modelProviderRegistry, pluginRuntime);
             var modelProviderInitializationService = new ModelProviderInitializationService(modelProviderRegistry, null, retentionProtection);

@@ -114,3 +114,15 @@ test("a link to a file is a link, and the parser marks the ones it wrote", () =>
   // Scripts are still no link.
   assert.doesNotMatch(createMarkdownParser()("[x](javascript:alert(1)) [y](data:text/html,x) [z](vbscript:x)"), /<a /);
 });
+
+test("an image of the web is its alternative text, unless the text asks for its images: then it is the link of a picture", () => {
+  const parse = createMarkdownParser({ fileLinkMark: "mark" });
+  const source = "![shot](https://dev.azure.com/org/proj/_apis/wit/attachments/1?fileName=image.png) ![](javascript:alert(1)) ![disk](out/chart.png)";
+  const plain = parse(source);
+  assert.doesNotMatch(plain, /href="https:/, "a text that does not ask keeps the images of the web as text");
+  assert.match(plain, /<a href="out\/chart.png" data-file-link="mark" data-file-image="mark">disk<\/a>/);
+  const tracker = parse(source, undefined, true);
+  assert.match(tracker, /<a href="https:\/\/dev.azure.com\/org\/proj\/_apis\/wit\/attachments\/1\?fileName=image.png" data-file-image="mark">shot<\/a>/);
+  assert.doesNotMatch(tracker, /href="javascript/, "only an address of the web is a picture");
+  assert.doesNotMatch(tracker, /data-file-link="mark"[^>]*>shot/, "a picture of the web is no file");
+});

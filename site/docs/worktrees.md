@@ -41,6 +41,29 @@ The form opened by **+** on the row of a project has the same choice: see [Start
 - In the Explorer, a session in a worktree has a tree mark.
 - **Session info** shows the folder of the worktree.
 
+## Move a session to another worktree
+
+A session you already started, to discuss or plan the work, can go on in another place of the same repository, with its conversation:
+
+1. Click the project or the worktree in the **Workspace** chip above its prompt.
+2. In the **Workspace** popover, click **Change worktree…**.
+3. In **Work in**, choose **Project folder**, a worktree of the repository, or **New worktree** with the branch to start from.
+4. Click **Switch**.
+
+- Any worktree git lists for the repository can be chosen, also one you made yourself outside CodeAlta's folder with `git worktree add`. A separate clone of the repository is another repository: it cannot be chosen.
+- No file moves. Changes you have not committed stay in the folder the session leaves: commit or stash them first if they should come along.
+- The next prompt tells the agent where it works now, so that it does not take what it saw in the old folder for the new one. The timeline of the session shows the change too.
+- A session that is working, has background commands running or waits for an answer cannot change: wait until it is idle.
+- A Claude Code session keeps its conversation: CodeAlta moves it where Claude Code looks for it in the new folder.
+
+You can also ask an agent, in your own words, to move a session, or itself, for example:
+
+```text
+Move this session to the worktree C:\code\MyProject-feature.
+```
+
+The agent runs `alta session set_worktree`. A session that moves itself changes folder when its turn ends.
+
 ## Manage worktrees
 
 Run `/worktree`, or right-click a project in the Explorer and choose **Worktrees…**. The window lists every worktree git knows for the project, also those whose session you deleted.

@@ -2,7 +2,7 @@ import createDOMPurify from "dompurify";
 import { highlightCode } from "./codeHighlight";
 import { diagramAppearance, diagrams, type DiagramAppearance } from "./diagrams";
 import { loadedMath } from "./math";
-import { createMarkdownParser, footnoteAttribute, frontMatterEntries, frontMatterLineCount, splitFrontMatter } from "./markdown";
+import { createMarkdownParser, fileName, footnoteAttribute, frontMatterEntries, frontMatterLineCount, splitFrontMatter } from "./markdown";
 import { markdownHrefTarget } from "./markdownLinks";
 import { displayMathAttribute, mathAttribute } from "./markdownMath";
 import { sourceLinesAttribute } from "./markdownSourceLines";
@@ -102,7 +102,9 @@ const fileImageAttribute = "data-file-image";
  * How a text is rendered: a document is a file or a text written as one, whose lines are wrapped in its source.
  * With `sourceLines`, each block says which lines of the text it comes from, in `data-source-lines` (see `markdownSourceLines`).
  */
-export type MarkdownRenderOptions = Readonly<{ document?: boolean; sourceLines?: boolean }>;
+export type MarkdownRenderOptions = Readonly<{ document?: boolean; sourceLines?: boolean;
+  /** Whether the images of the web are links marked as pictures, as those of the disk: the text of a tracker, whose host reads its images. */
+  webImages?: boolean }>;
 
 /**
  * Instance-owned browser boundary; parser output must never bypass this sanitizer. Its diagrams are those drawn
@@ -149,7 +151,8 @@ export function createMarkdownRenderer(view: Window & typeof globalThis, labels:
     if (link) data.forceKeepAttr = true;
     const lines = name === sourceLinesAttribute ? ownSourceLines(value) : null;
     if (lines !== null) data.attrValue = lines;
-    const image = name === fileImageAttribute && tag === "a" && fileLinks.has(node) && value === fileLinkMark;
+    // The mark is the parser's, which no text knows: a picture of the disk, or of the web where the render asks for it.
+    const image = name === fileImageAttribute && tag === "a" && value === fileLinkMark;
     if (image) data.attrValue = "";
     // A formula of the parser keeps its attribute, without the mark: one written in HTML is text.
     const formula = (name === mathAttribute || name === displayMathAttribute) && (tag === "span" || tag === "div") && value === placeholderMark;
@@ -432,6 +435,23 @@ export function createMarkdownRenderer(view: Window & typeof globalThis, labels:
       quote.setAttribute("data-alert", kind);
     }
   }
+  // The text of a tracker writes its images in HTML too (the work items of Azure DevOps): an `<img>` of the web becomes
+  // the link of a picture, as the parser writes one for Markdown, before the sanitizer, which removes every `<img>`.
+  // A link around the image gives way to it: links do not nest.
+  function webImageLinks(html: string): string {
+    if (!/<img\b/i.test(html)) return html;
+    const parsed = new view.DOMParser().parseFromString(html, "text/html");
+    for (const picture of Array.from(parsed.body.querySelectorAll("img[src]"))) {
+      const src = picture.getAttribute("src")!;
+      if (markdownHrefTarget(src) !== "web") continue;
+      const link = parsed.createElement("a");
+      link.setAttribute("href", src);
+      link.setAttribute(fileImageAttribute, fileLinkMark);
+      link.textContent = picture.getAttribute("alt")?.trim() || fileName(src.split("?", 1)[0]);
+      (picture.closest("a") ?? picture).replaceWith(link);
+    }
+    return parsed.body.innerHTML;
+  }
   // A picture of the disk stays a link to its file, which shows its alternative text, with an image of the renderer
   // in it that has no source: the window that can read the file draws it there (`MarkdownContent`). Authored HTML keeps
   // no `<img>` and no class, so such an image is always the renderer's.
@@ -472,7 +492,8 @@ export function createMarkdownRenderer(view: Window & typeof globalThis, labels:
       const frontMatterLines = frontMatterLineCount(source, body);
       const mark = options.sourceLines ? randomMark() : null;
       const parse = options.document ? parsers.document : parsers.message;
-      const html = mark === null ? parse(body) : parse(body, { mark, firstLine: frontMatterLines + 1 });
+      const parsed = mark === null ? parse(body, undefined, options.webImages) : parse(body, { mark, firstLine: frontMatterLines + 1 }, options.webImages);
+      const html = options.webImages ? webImageLinks(parsed) : parsed;
       let fragment: DocumentFragment;
       sourceLinesMark = mark;
       try {

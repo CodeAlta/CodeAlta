@@ -261,7 +261,9 @@ internal sealed partial class BuiltInAltaCommandContributor
                     var extra = ParseExtra(hit.Extra);
                     return hit.Kind switch
                     {
-                        SearchKind.Skill when extra.TryGetValue("name", out var name) => filter.Allows(SpaceResourceKind.Skill, name),
+                        // A skill of a folder added for a space is in that space alone.
+                        SearchKind.Skill when extra.TryGetValue("name", out var name) => filter.Allows(SpaceResourceKind.Skill, name)
+                            && (!extra.TryGetValue("space", out var skillSpace) || string.Equals(skillSpace, filter.SpaceId, StringComparison.Ordinal)),
                         SearchKind.Mcp when extra.TryGetValue("server", out var server) => filter.Allows(SpaceResourceKind.McpServer, server),
                         SearchKind.Plugin when extra.TryGetValue("id", out var id) => filter.Allows(SpaceResourceKind.Plugin, id),
                         // A setting of a plugin is in the spaces of its plugin.

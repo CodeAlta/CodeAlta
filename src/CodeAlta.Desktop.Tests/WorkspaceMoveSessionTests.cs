@@ -70,6 +70,68 @@ public sealed class WorkspaceMoveSessionTests
     }
 
     [TestMethod]
+    public async Task OwnedFolderSwitch_SendsAnAttachedSessionToAWorktreeOfItsRepository_AndAFreshReadListsItThere()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "codealta-session-folder-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            var global = Path.Combine(root, "global"); var projectPath = Path.Combine(root, "project");
+            var home = Path.Combine(root, "home"); var builtin = Path.Combine(root, "builtin");
+            foreach (var path in new[] { global, projectPath, home, builtin }) Directory.CreateDirectory(path);
+            // The project in the main checkout of a repository, and a worktree of it outside the folder of worktrees.
+            var linked = Directory.CreateDirectory(Path.Combine(projectPath, ".git", "worktrees", "elsewhere")).FullName;
+            File.WriteAllText(Path.Combine(linked, "commondir"), "../..");
+            var tree = Directory.CreateDirectory(Path.Combine(root, "elsewhere")).FullName;
+            File.WriteAllText(Path.Combine(tree, ".git"), $"gitdir: {linked}");
+            var clone = Directory.CreateDirectory(Path.Combine(root, "clone")).FullName;
+            Directory.CreateDirectory(Path.Combine(clone, ".git"));
+            await using var host = await CodeAltaHost.CreateAsync(new CodeAltaHostOptions
+            {
+                GlobalRoot = global, CurrentProjectPath = projectPath, DiscoveryScope = new(home, root), BuiltInSkillRoot = builtin,
+                PluginEnvironment = FrozenDictionary<string, string?>.Empty, StartPlugins = false, IsHeadless = true, OwnsLogging = false,
+                ConfigureModelProviders = registry => registry.RegisterOrReplace(Provider, () => new DraftRuntime()),
+            });
+            var project = await host.ProjectCatalog.UpsertFromPathAsync(projectPath);
+            // Draft creation attaches the session: the change retires that attachment.
+            var session = await host.Commands.CreateDraftSessionAsync(project, Provider, "Discussed first");
+            var rpc = new WorkspaceService(host, Epoch);
+            WorkspaceSwitchSessionFolderRequest Request(string target, string? folder) => new(Epoch, session.SessionId, project.Id, projectPath, target, folder, null);
+
+            Assert.AreEqual("stale_epoch", (await rpc.SwitchSessionFolderAsync(Request("worktree", tree) with { ExpectedHostEpoch = Guid.NewGuid().ToString("D") },
+                CancellationToken.None)).Status);
+            Assert.AreEqual("invalid_scope", (await rpc.SwitchSessionFolderAsync(Request("worktree", null), CancellationToken.None)).Status);
+            Assert.AreEqual("invalid_scope", (await rpc.SwitchSessionFolderAsync(Request("project", tree), CancellationToken.None)).Status);
+            Assert.AreEqual("invalid_scope", (await rpc.SwitchSessionFolderAsync(Request("elsewhere", null), CancellationToken.None)).Status);
+            Assert.AreEqual("invalid_scope", (await rpc.SwitchSessionFolderAsync(Request("worktree", tree) with { BaseBranch = "main" }, CancellationToken.None)).Status);
+            Assert.AreEqual("unconfigured", (await rpc.SwitchSessionFolderAsync(Request("new", null), CancellationToken.None)).Status,
+                "A window without worktrees makes none.");
+            Assert.AreEqual("scope_missing", (await rpc.SwitchSessionFolderAsync(Request("worktree", tree) with { ProjectPath = clone }, CancellationToken.None)).Status);
+            Assert.AreEqual("other_repository", (await rpc.SwitchSessionFolderAsync(Request("worktree", clone), CancellationToken.None)).Status);
+
+            var switched = await rpc.SwitchSessionFolderAsync(Request("worktree", tree), CancellationToken.None);
+            Assert.AreEqual("ok", switched.Status, string.Join(" | ", switched.Warnings));
+            Assert.AreEqual(tree, switched.WorktreePath);
+            Assert.AreEqual(switched.WorktreePath, JsonSerializer.Deserialize(JsonSerializer.Serialize(switched, DesktopJsonContext.Default.WorkspaceSwitchSessionFolderResponse),
+                DesktopJsonContext.Default.WorkspaceSwitchSessionFolderResponse)!.WorktreePath);
+
+            var fresh = await new WorkspaceService(global).SnapshotAsync(new(), CancellationToken.None);
+            var listed = fresh.Sessions.Single(value => value.Id == session.SessionId);
+            Assert.AreEqual(tree, listed.WorktreePath, "The row says where the session works now.");
+            Assert.AreEqual(project.Id, listed.ProjectId, "The session stays one of its project.");
+            Assert.AreEqual("Discussed first", listed.Title);
+
+            var back = await rpc.SwitchSessionFolderAsync(Request("project", null), CancellationToken.None);
+            Assert.AreEqual("ok", back.Status, string.Join(" | ", back.Warnings));
+            Assert.IsNull(back.WorktreePath);
+            Assert.IsNull((await new WorkspaceService(global).SnapshotAsync(new(), CancellationToken.None)).Sessions.Single(value => value.Id == session.SessionId).WorktreePath);
+            await rpc.CloseSessionsAsync();
+            await rpc.CloseImportsAsync();
+        }
+        finally { Directory.Delete(root, recursive: true); }
+    }
+
+    [TestMethod]
     public async Task OwnedMoveToAnotherSpace_ChangesOnlyItsSpace_AndDeletingASpaceSendsItsChatsToTheDefaultOne()
     {
         var root = Path.Combine(Path.GetTempPath(), "codealta-session-space-" + Guid.NewGuid().ToString("N"));

@@ -40,7 +40,7 @@ per-project provider preferences.
 | `data/alta.sqlite3`, `data/backups/`, `data/search.sqlite3` | `ApplicationDatabase` and its copies; the desktop search index (derived). |
 | `saved_statistics_after_deleted_sessions/` | `StatisticsArchiveStore`: statistics of retired sessions (see below). |
 | `ui-state.yaml`, `saved_prompts/` | `SessionViewCatalog` view state, `PromptDraftStore` unsent drafts. |
-| `scratchpad/` | Files where agents write down long instructions; named in the session context, cleared at startup. |
+| `scratchpad/` | Files where agents write down long instructions; named in the session context; files unchanged for a week are removed at startup. |
 | `automations.json`, `work_items.json` | Desktop automation state; links of tasks and plans to sessions. |
 | `alta.lock`, `mcp_url.txt` | The instance lock, the address of the desktop MCP server while it runs. |
 
@@ -52,7 +52,7 @@ tool output, paths and credentials: they are private user data.
 | Under `<project>/.alta/` | Content |
 | --- | --- |
 | `config.toml` | Project overrides, CLI profiles of its sessions (`[identity.cli.*]`), project automations, `[search] enabled`. |
-| `issues.toml`, `local/issues.toml` | Issue views and the Jira link of the team; the user's own on top (`local/` is git-ignored). |
+| `issues.toml`, `local/issues.toml` | Views of the issues and of the pull requests (`[<service>.pull_requests]`), and the Jira link of the team; the user's own on top (`local/` is git-ignored). |
 | `mcp.json`, `plugins/`, `plugin-data/`, `skills/`, `prompts/` | Project MCP servers, plugins, plugin data, skills, prompts. |
 | `plans/`, `tasks/` | Plans and follow-up tasks, Markdown with a front matter. |
 | `worktrees/` | Worktrees kept inside the repository when the user chose so (git-ignored). |
@@ -69,7 +69,7 @@ Skills are also read from `.agents/skills/` of the project and of the home folde
 | --- | --- |
 | `[chat]`, `[providers.<key>]` | Default provider; provider definitions (`type`, `enabled`, `model`, credentials by environment variable name). |
 | `[plugins.<id>]` | Enablement, the settings the plugin declares (one key each, written by `PluginSettingsStore`), plus plugin-owned policy (`[plugins.mcp]`, `[plugins.mcp.servers.*]`) the store does not model. |
-| `[skills]`, `[tools]` | Disabled skills; tools every session does without. |
+| `[skills]`, `[tools]` | Disabled skills and the folders of skills added for every space; tools every session does without. |
 | `[sessions]`, `[review]`, `[commits]`, `[work_items]` | Title mode and prompt suggestions; review before commit; co-author trailer; tasks and plans. |
 | `[worktrees]`, `[storage]`, `[speech]`, `[search]` | Where worktrees go; scratchpad and session retention; desktop speech and search. |
 | `[models]` | Model tiers and fallback (below). |
@@ -154,7 +154,8 @@ enabled = true
 ## Projects
 
 `ProjectCatalog` keeps one `<slug>.md` per project under `projects/` (legacy `<slug>/readme.md` is still read): a stable
-id, slug, name, path, archive state and the ids of its spaces besides the default one. The current directory at launch
+id, slug, name, path, archive state and the ids of its spaces besides the default one, and what the user chose for it
+alone and keeps out of its repository (its sandbox, its added folders of skills). The current directory at launch
 is offered as an in-memory project until a session is created for it. A filesystem root is a valid project.
 
 The working directory of a session ties it to its project; a session in a git worktree records the worktree beside it
@@ -169,7 +170,7 @@ project, comes first, cannot be deleted, and has a file only when it is customiz
 space is left out, never hiding the others; an invalid value written by hand is dropped with the rest kept.
 
 Space settings (`SpaceSettings`): `new_sessions` (agent prompt, tiers, fallback), `identity` (Git author and signing,
-SSH key, GitHub CLI profile, Jira, CLI profiles), and `tools.disabled`. Only paths and names of environment variables
+SSH key, GitHub CLI profile, Jira, CLI profiles), `tools.disabled` and `skills.folders`. Only paths and names of environment variables
 are stored, never a secret.
 
 - **The space of a session** is fixed at creation and recorded in the first line of its journal (`space_id`): the

@@ -624,6 +624,67 @@ public sealed partial class CodeAltaConfigStore
     }
 
     /// <summary>
+    /// Reads the folders of skills the user added for every space (<c>[skills] folders</c>), from the user's file only, as
+    /// it writes them: a project file never adds one.
+    /// </summary>
+    /// <returns>The folders, in the order of the list; empty when the file adds none.</returns>
+    /// <exception cref="InvalidDataException">The configuration file cannot be parsed.</exception>
+    /// <exception cref="IOException">The configuration file cannot be read.</exception>
+    public IReadOnlyList<string> LoadGlobalSkillFolders()
+        => ProjectDescriptor.NormalizeSkillFolders(ReadSharedGlobalDocument().Skills?.Folders ?? []);
+
+    /// <summary>Saves the folders of skills the user added for every space; an empty list removes the setting.</summary>
+    /// <param name="folders">The folders, in their order.</param>
+    /// <exception cref="ArgumentNullException"><paramref name="folders"/> is <see langword="null"/>.</exception>
+    /// <exception cref="ArgumentException">A path is not on one line, or there are too many.</exception>
+    /// <exception cref="InvalidDataException">The configuration file cannot be parsed.</exception>
+    /// <exception cref="IOException">The configuration file cannot be read or written.</exception>
+    /// <exception cref="InvalidOperationException">The store is read-only (<see cref="CodeAltaConfigOptions.ReadOnly"/>).</exception>
+    public void SaveGlobalSkillFolders(IEnumerable<string> folders)
+    {
+        ArgumentNullException.ThrowIfNull(folders);
+        var paths = folders.ToArray();
+        _ = UpdateGlobalSkillFolders(_ => paths);
+    }
+
+    /// <summary>
+    /// Changes the folders of skills the user added for every space in one read and write of the file, under its lock:
+    /// two windows that add a folder at once both keep theirs.
+    /// </summary>
+    /// <param name="change">Gives the folders from those the file has now; <see langword="null"/> to leave the file as it is.</param>
+    /// <returns><see langword="true"/> when the file was written.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="change"/> is <see langword="null"/>.</exception>
+    /// <exception cref="ArgumentException">A path is not on one line, or there are too many.</exception>
+    /// <exception cref="InvalidDataException">The configuration file cannot be parsed.</exception>
+    /// <exception cref="IOException">The configuration file cannot be read or written.</exception>
+    /// <exception cref="InvalidOperationException">The store is read-only (<see cref="CodeAltaConfigOptions.ReadOnly"/>).</exception>
+    public bool UpdateGlobalSkillFolders(Func<IReadOnlyList<string>, IEnumerable<string>?> change)
+    {
+        ArgumentNullException.ThrowIfNull(change);
+        ThrowIfReadOnly();
+        using var writing = ConfigFileLock.Acquire(_options.ConfigPath);
+        var document = LoadDocument(_options.ConfigPath);
+        NormalizeDocument(document);
+        var current = ProjectDescriptor.NormalizeSkillFolders(document.Skills?.Folders ?? []);
+        if (change(current) is not { } next) return false;
+        var paths = next.Select(static folder => folder?.Trim() ?? string.Empty).Distinct(StringComparer.Ordinal).ToList();
+        if (paths.FirstOrDefault(static folder => !SpaceSettings.IsLine(folder, Skills.AddedSkillFolders.MaximumPathLength)) is { } wrong)
+            throw new ArgumentException($"'{wrong}' is not the path of a folder.", nameof(change));
+        if (paths.Count > Skills.AddedSkillFolders.MaximumFolders)
+            throw new ArgumentException($"At most {Skills.AddedSkillFolders.MaximumFolders} folders of skills are added.", nameof(change));
+        if (paths.SequenceEqual(document.Skills?.Folders ?? [], StringComparer.Ordinal)) return false;
+        if (paths.Count > 0) (document.Skills ??= new CodeAltaSkillSettingsDocument()).Folders = paths;
+        else if (document.Skills is { } skills)
+        {
+            skills.Folders = null;
+            if (skills.Disabled is null) document.Skills = null;
+        }
+
+        Save(_options.ConfigPath, document);
+        return true;
+    }
+
+    /// <summary>
     /// Reads the tools every session does without (<c>[tools] disabled</c>), from the user's file only. A name that
     /// is not the name of a tool is left out.
     /// </summary>
@@ -2216,7 +2277,8 @@ public sealed partial class CodeAltaConfigStore
         if (document.Skills is not null)
         {
             document.Skills.Disabled = NormalizeSkillConfigNameList(document.Skills.Disabled ?? []);
-            if (document.Skills.Disabled is null)
+            if (document.Skills.Folders is { Count: 0 }) document.Skills.Folders = null;
+            if (document.Skills is { Disabled: null, Folders: null })
             {
                 document.Skills = null;
             }

@@ -19,6 +19,9 @@ public sealed class ModelProviderInitializationService : IModelProviderInitializ
     private readonly object _gate = new();
     private readonly Dictionary<string, ModelProviderStateSnapshot> _states = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, Task> _refreshTasks = new(StringComparer.OrdinalIgnoreCase);
+    // The registration of the registry each state was last prepared from: a provider registered again (its plugin
+    // reloaded, its settings applied) has another runtime, whose models are read again (#296).
+    private readonly Dictionary<string, long> _preparedRegistrations = new(StringComparer.OrdinalIgnoreCase);
     private Task? _drainTask;
     private bool _closed;
     private readonly Channel<ModelProviderStateChanged> _changes = Channel.CreateUnbounded<ModelProviderStateChanged>(
@@ -82,6 +85,7 @@ public sealed class ModelProviderInitializationService : IModelProviderInitializ
                 foreach (var key in _states.Keys.Where(key => !registeredKeys.Contains(key)).ToArray())
                 {
                     _states.Remove(key);
+                    _preparedRegistrations.Remove(key);
                 }
 
                 return _states.Values
@@ -217,7 +221,7 @@ public sealed class ModelProviderInitializationService : IModelProviderInitializ
         _ = GetProviderDescriptor(providerId);
         var key = ModelProviderId.NormalizeValue(providerId.Value);
         var state = TryGetState(key);
-        if (state is not null)
+        if (state is not null && IsPreparedFromCurrentRegistration(key, providerId))
         {
             if (state.Availability is ModelProviderAvailability.Ready or
                 ModelProviderAvailability.Failed or
@@ -352,6 +356,9 @@ public sealed class ModelProviderInitializationService : IModelProviderInitializ
         var probeTimeout = _options.DefaultProbeTimeout;
         try
         {
+            // Read before the runtime: a registration replaced meanwhile only makes the next read prepare it again.
+            var registration = (_registry as ModelProviderRegistry)?.GetRegistrationVersion(descriptor.ProviderId) ?? 0;
+            lock (_gate) _preparedRegistrations[ModelProviderId.NormalizeValue(descriptor.ProviderId.Value)] = registration;
             if (!descriptor.IsEnabled)
             {
                 PublishState(new ModelProviderStateSnapshot
@@ -480,6 +487,23 @@ public sealed class ModelProviderInitializationService : IModelProviderInitializ
 
         var key = ModelProviderId.NormalizeValue(providerId.Value);
         throw new KeyNotFoundException($"Model provider '{key}' is not registered.");
+    }
+
+    // Whether the state of a provider comes from its registration as it is now. A custom registry has no version of its
+    // registrations: its states are kept until a refresh.
+    private bool IsPreparedFromCurrentRegistration(string key, ModelProviderId providerId)
+    {
+        if (_registry is not ModelProviderRegistry registry)
+        {
+            return true;
+        }
+
+        // Never take the registry lock under _gate.
+        var current = registry.GetRegistrationVersion(providerId);
+        lock (_gate)
+        {
+            return _preparedRegistrations.TryGetValue(key, out var prepared) && prepared == current;
+        }
     }
 
     private ModelProviderStateSnapshot? TryGetState(string key)

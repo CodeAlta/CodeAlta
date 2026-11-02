@@ -246,6 +246,7 @@ public sealed partial class SessionRuntimeService
             Repositories = [.. projectRoots.Where(static root => !string.IsNullOrWhiteSpace(root)).Select(Path.GetFullPath)],
             Scratchpad = scratchpad,
             Readable = await ToolOutputGrantAsync(sessionId, cancellationToken).ConfigureAwait(false),
+            SkillFolders = await SkillFoldersOfAsync(sessionId, cancellationToken).ConfigureAwait(false),
         };
         return new SessionSandboxStart(sessionId, providerId, profile, folders, environment?.Variables ?? [], commandGuard);
     }
@@ -265,6 +266,36 @@ public sealed partial class SessionRuntimeService
         {
             return [];
         }
+    }
+
+    // The folders of skills the session sees outside of its project, which its sandbox reads (see
+    // SandboxSessionFolders.SkillFolders): those of the user, and those the user added for every space, for its space and for
+    // its project. Only the user adds a folder, in the window, and the sandbox cannot write the files that list them. They
+    // are read at each call, as the sandbox is: a folder added during a session is read from the next call.
+    private async Task<IReadOnlyList<string>> SkillFoldersOfAsync(string sessionId, CancellationToken cancellationToken)
+    {
+        var folders = new List<string> { Path.Combine(_catalogOptions.GlobalRoot, "skills") };
+        if (!string.IsNullOrWhiteSpace(UserHomeRoot))
+        {
+            folders.Add(Path.Combine(UserHomeRoot, ".agents", "skills"));
+            folders.Add(Path.Combine(UserHomeRoot, ".copilot", "skills"));
+        }
+
+        try
+        {
+            // The project and the space of a session never change: an attached session has them at hand.
+            var record = await GetSessionSpaceAsync(sessionId, cancellationToken).ConfigureAwait(false);
+            var project = record?.ProjectId is { } projectId ? await _projectCatalog.GetByIdAsync(projectId, cancellationToken).ConfigureAwait(false) : null;
+            var space = await GetSpaceFilterAsync(record?.SpaceId, project, cancellationToken).ConfigureAwait(false);
+            folders.AddRange(CodeAlta.Catalog.Skills.AddedSkillFolders.Roots(_configStore.LoadGlobalSkillFolders(), space.SpaceId, space.SkillFolders, project?.SkillFolders,
+                UserHomeRoot, _catalogOptions.GlobalRoot).Select(static root => root.RootPath));
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException or ArgumentException or InvalidOperationException)
+        {
+            // A configuration that cannot be read adds no folder: the folders of the user stay.
+        }
+
+        return folders;
     }
 
     // A session that goes away leaves no worker behind; none is created for a runtime that never sandboxed anything.

@@ -533,7 +533,7 @@ public static class CodeModeResultFormatter
         {
             var head = budget * 2 / 3;
             var tail = budget - head;
-            text = text[..head] + $"\n… {text.Length - budget:N0} characters of output left out …\n" + text[^tail..];
+            text = text[..head] + FormattableString.Invariant($"\n… {text.Length - budget:N0} characters of output left out …\n") + text[^tail..];
         }
 
         // In a block, so that the window shows it as written and the result after it is not taken for a part of it.

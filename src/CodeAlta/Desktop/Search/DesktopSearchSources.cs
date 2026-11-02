@@ -284,20 +284,27 @@ internal sealed class DesktopSearchSources
         Dictionary<string, (long Length, DateTime Written, string Body)> bodies;
         lock (_gate) bodies = new(_skillBodies, StringComparer.Ordinal);
         var seen = new Dictionary<string, (long Length, DateTime Written, string Body)>(StringComparer.Ordinal);
-        async Task AddAsync(SearchProjectInfo? project)
+        async Task AddAsync(SearchProjectInfo? project, SpaceDescriptor? space = null)
         {
             // The skills of the user, CodeAlta and the plugins are listed once, without a project; a project lists the roots of the
-            // project alone, whose skills the others never shadow.
-            var query = SkillCatalogQuery.ForSession(config, _host.CatalogOptions.GlobalRoot, _profile, project?.Path, otherProjectRoots: null, space: null)
-                with { IncludeInvalid = false, IncludeShadowed = false, IncludeUntrusted = true, Scopes = project is null ? NonProjectScopes : ProjectScopes };
+            // project alone, whose skills the others never shadow. The skills of the folders added for a space are listed once per
+            // space, and named with it: a session finds them in its space alone.
             IReadOnlyList<SkillDescriptor> skills;
-            try { skills = await _host.SkillCatalog.ListAsync(query, cancellationToken).ConfigureAwait(false); }
+            try
+            {
+                var projectFolders = project is null ? null : (await _host.ProjectCatalog.GetByIdAsync(project.ProjectId, cancellationToken).ConfigureAwait(false))?.SkillFolders;
+                var spaceFilter = space is null ? null : new SpaceFilter(SpaceAssignments.Empty, space.Id) { SkillFolders = space.Settings.Skills?.Folders ?? [] };
+                var query = SkillCatalogQuery.ForSession(config, _host.CatalogOptions.GlobalRoot, _profile, project?.Path, otherProjectRoots: null, spaceFilter, projectFolders)
+                    with { IncludeInvalid = false, IncludeShadowed = false, IncludeUntrusted = true, Scopes = project is null ? NonProjectScopes : ProjectScopes };
+                skills = await _host.SkillCatalog.ListAsync(query, cancellationToken).ConfigureAwait(false);
+            }
             catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException) { return; }
             foreach (var skill in skills)
             {
                 // The skills of the user come again with each project: they are indexed once, without a project.
                 if ((skill.Scope == SkillScopeKind.Project) != (project is not null)) continue;
-                var scope = skill.Scope switch
+                if ((skill.SourceKind == SkillSourceKind.SpaceFolder) != (space is not null)) continue;
+                var scope = space is not null ? $"space:{space.Id}" : skill.Scope switch
                 {
                     SkillScopeKind.Project => project!.ProjectId,
                     SkillScopeKind.User => "user",
@@ -326,13 +333,21 @@ internal sealed class DesktopSearchSources
                     skill.Title + "\n" + skill.Description + (body.Length > 0 ? "\n\n" + body : string.Empty), DateTimeOffset.UnixEpoch)
                 {
                     ProjectId = project?.ProjectId,
-                    Extra = Extra(("name", skill.Name), ("path", skill.SkillFilePath), ("scope", scope)),
+                    Extra = space is null ? Extra(("name", skill.Name), ("path", skill.SkillFilePath), ("scope", scope))
+                        : Extra(("name", skill.Name), ("path", skill.SkillFilePath), ("scope", scope), ("space", space.Id)),
                     EmbeddingTitle = skill.Name + " · " + skill.Description,
                 };
             }
         }
 
         await AddAsync(null).ConfigureAwait(false);
+        IReadOnlyList<SpaceDescriptor> spaces;
+        try { spaces = await _host.SpaceCatalog.LoadAsync(cancellationToken).ConfigureAwait(false); }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException) { spaces = []; }
+        foreach (var space in spaces.Where(static space => space.Settings.Skills is { IsEmpty: false }))
+        {
+            await AddAsync(null, space).ConfigureAwait(false);
+        }
         foreach (var project in await _searchHost.GetProjectsAsync(cancellationToken).ConfigureAwait(false))
         {
             if (!project.Archived && Directory.Exists(project.Path)) await AddAsync(project).ConfigureAwait(false);

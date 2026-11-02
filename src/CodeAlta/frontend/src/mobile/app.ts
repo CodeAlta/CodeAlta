@@ -25,7 +25,7 @@ import { topLevelCount } from "./sessionTree";
 import { createSheet } from "./sheet";
 import { ago, pageSize, readSizes, createSessionStore, type SessionView } from "./sessionStore";
 import {
-  activityFacts, appendEvents, blockVersion, foldEvents, liveBlock, pendingBlock, planTimeline, stillPending, type PendingPrompt, type TimelineBlock,
+  activityFacts, appendEvents, blockVersion, foldEvents, liveBlock, pendingBlock, planTimeline, prependEvents, stillPending, withDays, type DayBlock, type PendingPrompt, type TimelineBlock,
 } from "./timeline";
 import { createImageViewer } from "./imageViewer";
 import { createTimelineView } from "./timelineView";
@@ -316,8 +316,10 @@ export function startMobile(window: Window & typeof globalThis) {
   type Drawn = { element: HTMLLIElement; version: string; diagram: boolean };
   const timeline = $<HTMLOListElement>("timeline");
   const detail = {
-    id: null as string | null, generation: 0, since: 0, replace: false, events: [] as TimelineEvent[],
+    id: null as string | null, generation: 0, since: 0, replace: true, events: [] as TimelineEvent[],
     expanded: new Set<string>(), drawn: new Map<string, Drawn>(), loaded: false, blocks: [] as TimelineBlock[],
+    // The older events: the first sequence number held, whether events come before it, and whether a read of them runs.
+    before: null as number | null, hasOlder: false, readingOlder: false,
   };
   const pendingNotes = new Map<string, string>();
   // The prompts each session accepted that its timeline does not hold yet (a steered one reaches the journal later): shown at once.
@@ -342,14 +344,18 @@ export function startMobile(window: Window & typeof globalThis) {
     const busy = isBusy(view?.live?.live);
     const blocks = detail.blocks = foldEvents(detail.events);
     blocksView.know(blocks);
-    type Entry = { block: TimelineBlock; live: boolean; open: boolean; key: string; version: string; prompt?: PendingPrompt };
+    type Entry = { block: TimelineBlock | DayBlock; live: boolean; open: boolean; key: string; version: string; prompt?: PendingPrompt };
     const entries: Entry[] = blocks.map((block, index) => {
       const live = liveBlock(blocks, index, busy), open = detail.expanded.has(block.key);
       return { block, live, open, key: block.key, version: blockVersion(block, live, open) };
     });
     const pending = stillPending(pendingPrompts.get(detail.id) ?? [], detail.events, busy, Date.now());
     pendingPrompts.set(detail.id, pending);
-    const all: Entry[] = [...entries, ...pending.map(prompt => ({ block: pendingBlock(prompt), live: false, open: false, key: prompt.key, version: `${prompt.key}|${prompt.mode}`, prompt }))];
+    const held: Entry[] = [...entries, ...pending.map(prompt => ({ block: pendingBlock(prompt), live: false, open: false, key: prompt.key, version: `${prompt.key}|${prompt.mode}`, prompt }))];
+    const byBlock = new Map(held.map(entry => [entry.block, entry]));
+    // A day line says "Today" until midnight: its label is its version, so that it is drawn again after.
+    const all: Entry[] = withDays(held.map(entry => entry.block as TimelineBlock), new Date())
+      .map(block => block.kind === "day" ? { block, live: false, open: false, key: block.key, version: block.label } : byBlock.get(block)!);
     const follow = nearBottom();
     const plan = planTimeline(new Map([...detail.drawn].map(([key, drawn]) => [key, drawn.version])), all);
     for (const key of plan.removed) { detail.drawn.get(key)?.element.remove(); detail.drawn.delete(key); }
@@ -360,6 +366,11 @@ export function startMobile(window: Window & typeof globalThis) {
       if (step.action === "create" || !drawn) {
         if (entry.block.kind === "message") drawn = blocksView.messageBlock(entry.block, entry.prompt);
         else if (entry.block.kind === "workflow") drawn = { ...blocksView.workflowBlock(entry.block), version: entry.version };
+        else if (entry.block.kind === "day") {
+          const item = make("li", "day-mark", entry.block.label);
+          item.dataset.key = entry.key;
+          drawn = { element: item, version: entry.version, diagram: false };
+        }
         else {
           const item = make("li", "activity");
           item.dataset.key = entry.key;
@@ -372,6 +383,9 @@ export function startMobile(window: Window & typeof globalThis) {
         drawn.version = entry.version;
       } else if (step.action === "update" && entry.block.kind === "workflow") {
         blocksView.drawWorkflow(drawn.element, entry.block);
+        drawn.version = entry.version;
+      } else if (step.action === "update" && entry.block.kind === "day") {
+        drawn.element.textContent = entry.block.label;
         drawn.version = entry.version;
       }
       const expected: ChildNode | null = previous ? previous.nextSibling : timeline.firstChild;
@@ -418,20 +432,50 @@ export function startMobile(window: Window & typeof globalThis) {
     drawTimeline();
   });
 
-  // A read gives the events after the last one held; a refresh reads them all again and replaces them once they come,
-  // so the timeline is never drawn from half of them. A read of another generation (another session, a refresh since)
-  // is dropped.
+  // Keeps what the phone shows where it is while the timeline changes above it. The browser, which may do the same by
+  // itself, is kept out of it: not all do. What was on the screen may be gone (a refresh drops the older pages): then the
+  // page goes to the end of the timeline, as when it opens.
+  function keepPlace(draw: () => void) {
+    const anchor = Array.from(timeline.children).find(item => item.getBoundingClientRect().bottom > 0);
+    // At the end of the timeline, the page stays at its end: drawing it sees to that.
+    if (!anchor || nearBottom()) { draw(); return; }
+    const top = anchor.getBoundingClientRect().top;
+    timeline.style.overflowAnchor = "none";
+    draw();
+    if (anchor.isConnected) window.scrollBy(0, anchor.getBoundingClientRect().top - top); else toBottom();
+    window.requestAnimationFrame(() => { timeline.style.overflowAnchor = ""; });
+  }
+
+  // A session opens on a page of its latest events, and so does a refresh, which replaces what is held once it comes: the
+  // timeline is never drawn from half of them. Any other read gives the events after the last one held. A read of another
+  // generation (another session, a refresh since) is dropped.
   const readDetail = coalesce(async () => {
     const id = detail.id;
     if (!id || signedOut) return;
-    const generation = detail.generation, replace = detail.replace, since = replace ? 0 : detail.since;
+    const generation = detail.generation, since = detail.since;
     try {
+      if (detail.replace) {
+        const page = await api.latestEvents(id);
+        if (detail.id !== id || detail.generation !== generation) return;
+        keepPlace(() => {
+          detail.events = appendEvents([], page.events ?? []);
+          detail.since = Math.max(page.since ?? 0, detail.events.at(-1)?.seq ?? 0);
+          detail.before = page.before ?? null;
+          detail.hasOlder = !!page.hasMore && detail.before !== null;
+          // A read that failed is made again from the end: what came before it would all be read from the start.
+          detail.replace = !!page.error && !page.events?.length;
+          detail.loaded = true;
+          if (page.error) detailNote.textContent = page.error;
+          drawTimeline();
+          showOlder();
+        });
+        watchOlder();
+        return;
+      }
       const page = await api.events(id, since);
       if (detail.id !== id || detail.generation !== generation) return;
-      detail.events = replace ? appendEvents([], page.events ?? []) : appendEvents(detail.events, page.events ?? []);
-      detail.since = Math.max(replace ? 0 : detail.since, page.since ?? since, detail.events.at(-1)?.seq ?? 0);
-      detail.replace = false;
-      detail.loaded = true;
+      detail.events = appendEvents(detail.events, page.events ?? []);
+      detail.since = Math.max(detail.since, page.since ?? since, detail.events.at(-1)?.seq ?? 0);
       if (page.error) detailNote.textContent = page.error;
       drawTimeline();
     } catch (error) {
@@ -441,7 +485,49 @@ export function startMobile(window: Window & typeof globalThis) {
   });
   let detailTimer = 0;
   function scheduleDetailRead(ms: number) { window.clearTimeout(detailTimer); detailTimer = window.setTimeout(() => void readDetail(), ms); }
-  function refreshDetail() { if (!detail.id) return Promise.resolve(); detail.generation++; detail.replace = true; return readDetail(); }
+  function refreshDetail() { if (!detail.id) return Promise.resolve(); detail.generation++; detail.replace = true; detail.readingOlder = false; return readDetail(); }
+
+  // ---- The older events: a page more as the top of the timeline comes near, or on a tap ----
+  const older = $<HTMLButtonElement>("older");
+  function showOlder() {
+    older.hidden = !detail.id || !detail.hasOlder;
+    older.disabled = detail.readingOlder;
+    older.textContent = detail.readingOlder ? "Loading older messages…" : "Load older messages";
+  }
+  const olderWatch = new window.IntersectionObserver(items => {
+    if (!items.some(item => item.isIntersecting)) return;
+    olderWatch.unobserve(older);
+    void readOlder();
+  }, { rootMargin: "800px 0px 0px 0px" });
+  // Watching it again says at once whether it is near: a short page reads the next one by itself. A read that failed does
+  // not come here, so that it is not made again and again: a tap makes it again.
+  function watchOlder() { olderWatch.unobserve(older); if (detail.id && detail.hasOlder) olderWatch.observe(older); }
+  async function readOlder() {
+    const id = detail.id, generation = detail.generation, before = detail.before;
+    if (!id || signedOut || detail.readingOlder || !detail.hasOlder || before === null) return;
+    const current = () => detail.id === id && detail.generation === generation;
+    detail.readingOlder = true;
+    showOlder();
+    try {
+      const page = await api.latestEvents(id, before);
+      if (!current()) return;
+      detail.readingOlder = false;
+      keepPlace(() => {
+        detail.events = prependEvents(detail.events, page.events ?? []);
+        detail.before = page.before ?? before;
+        detail.hasOlder = !!page.hasMore;
+        drawTimeline();
+        showOlder();
+      });
+      if (page.error) detailNote.textContent = page.error; else watchOlder();
+    } catch (error) {
+      if (!current() || error instanceof SignedOutError) return;
+      detail.readingOlder = false;
+      showOlder();
+      detailNote.textContent = `Could not read the older messages: ${failureText(error, host)}`;
+    }
+  }
+  older.addEventListener("click", () => void readOlder());
 
   function showDetailHead() {
     if (!detail.id) return;
@@ -471,12 +557,17 @@ export function startMobile(window: Window & typeof globalThis) {
     detail.id = id;
     detail.generation++;
     detail.since = 0;
-    detail.replace = false;
+    detail.replace = true;
     detail.events = [];
     detail.blocks = [];
     detail.expanded = new Set();
     detail.drawn = new Map();
     detail.loaded = false;
+    detail.before = null;
+    detail.hasOlder = false;
+    detail.readingOlder = false;
+    showOlder();
+    watchOlder();
     blocksView.reset();
     timeline.replaceChildren();
     working = null;
@@ -496,6 +587,9 @@ export function startMobile(window: Window & typeof globalThis) {
     detail.generation++;
     detail.drawn = new Map();
     detail.blocks = [];
+    detail.hasOlder = false;
+    showOlder();
+    watchOlder();
     timeline.replaceChildren();
     working = null;
   }

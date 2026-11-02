@@ -45,6 +45,15 @@ internal sealed class GitIssueQuery(HttpClient client, GitRepositoryReference re
     /// <summary>Gets the values chosen for the filters of the tracker, by filter id; the provider applies those it knows.</summary>
     public IReadOnlyDictionary<string, string> Filters { get; init; } = CodeAlta.Plugins.Abstractions.TrackedFilters.None;
 
+    /// <summary>
+    /// Gets or sets why a listing is not whole although the provider answered what it was asked (it holds more than is
+    /// read, or a filter of the user could not be applied), in words for the user; null when it is whole.
+    /// </summary>
+    public string? Incomplete { get; set; }
+
+    /// <summary>Gets the kind of items the filters are of: the issues, or the pull requests.</summary>
+    public CodeAlta.Plugins.Abstractions.TrackedItemKind Kind { get; init; } = CodeAlta.Plugins.Abstractions.TrackedItemKind.Issue;
+
     /// <summary>Gets the ids of the filters made of fields (<c>field:&lt;name&gt;</c>) the configuration names.</summary>
     public IReadOnlyList<string> Fields { get; init; } = [];
 
@@ -63,15 +72,23 @@ internal sealed class GitIssueQuery(HttpClient client, GitRepositoryReference re
             : Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(authorization.Scheme + " " + authorization.Parameter)), 0, 16);
 
     /// <summary>Gets a query of the same repository with the same credentials, whose refusals are its own.</summary>
-    public GitIssueQuery Fork() => new(client, Repository, authorization) { Filters = Filters, Fields = Fields, Cache = Cache };
+    public GitIssueQuery Fork() => new(client, Repository, authorization) { Filters = Filters, Fields = Fields, Cache = Cache, Kind = Kind };
 
     public Task<HttpResponseMessage> GetAsync(string url, string accept, CancellationToken cancellationToken)
-        => SendAsync(new HttpRequestMessage(HttpMethod.Get, url), accept, cancellationToken);
+        => SendAsync(new HttpRequestMessage(HttpMethod.Get, url), accept, HttpCompletionOption.ResponseContentRead, cancellationToken);
+
+    /// <summary>
+    /// Sends a GET whose answer is returned once its headers are read: the caller reads its body and bounds it (an
+    /// image), instead of the client taking the whole body in memory first. The caller disposes the answer.
+    /// </summary>
+    public Task<HttpResponseMessage> GetUnbufferedAsync(string url, string accept, CancellationToken cancellationToken)
+        => SendAsync(new HttpRequestMessage(HttpMethod.Get, url), accept, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
 
     public Task<HttpResponseMessage> PostJsonAsync(string url, string json, CancellationToken cancellationToken)
-        => SendAsync(new HttpRequestMessage(HttpMethod.Post, url) { Content = new StringContent(json, Encoding.UTF8, "application/json") }, "application/json", cancellationToken);
+        => SendAsync(new HttpRequestMessage(HttpMethod.Post, url) { Content = new StringContent(json, Encoding.UTF8, "application/json") }, "application/json",
+            HttpCompletionOption.ResponseContentRead, cancellationToken);
 
-    private async Task<HttpResponseMessage> SendAsync(HttpRequestMessage message, string accept, CancellationToken cancellationToken)
+    private async Task<HttpResponseMessage> SendAsync(HttpRequestMessage message, string accept, HttpCompletionOption completion, CancellationToken cancellationToken)
     {
         using (message)
         {
@@ -82,7 +99,7 @@ internal sealed class GitIssueQuery(HttpClient client, GitRepositoryReference re
             }
 
             var started = Stopwatch.GetTimestamp();
-            var response = await client.SendAsync(message, cancellationToken).ConfigureAwait(false);
+            var response = await client.SendAsync(message, completion, cancellationToken).ConfigureAwait(false);
             var elapsed = (long)Stopwatch.GetElapsedTime(started).TotalMilliseconds;
             var log = GitIssueLog.Log;
             var address = GitIssueLog.Address(message.RequestUri);
