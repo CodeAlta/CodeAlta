@@ -3,6 +3,7 @@ using CodeAlta.Agent.Harness;
 using CodeAlta.Agent.ModelCatalog;
 using CodeAlta.Catalog;
 using CodeAlta.Hosting;
+using CodeAlta.LiveTool;
 using CodeAlta.Orchestration.Hosting;
 using CodeAlta.Plugins.Abstractions;
 using XenoAtom.Logging;
@@ -12,8 +13,8 @@ namespace CodeAlta.Node;
 /// <summary>
 /// CodeAlta Node: a <see cref="CodeAltaHost"/> without a window that owns its profile. It takes the lock of the state
 /// root (<c>alta.lock</c>) as CodeAlta Desktop and TUI do, so it is the one instance of its profile, and composes the
-/// host with the configured providers, the plugins made for hosts without a user interface, and the sessions other
-/// processes write followed.
+/// host with the configured providers, the plugins made for hosts without a user interface, the agent tools of CodeAlta
+/// CLI (the <c>alta</c> tool and Code Mode), and the sessions other processes write followed.
 /// </summary>
 /// <remarks>
 /// Permission requests of its sessions are never granted by the node itself: they wait in the runtime's permission
@@ -27,17 +28,19 @@ public sealed class NodeHost : IAsyncDisposable
     private readonly CodeAltaSingleInstanceGuard _guard;
     private readonly ModelsDevCatalogService _modelsDev;
     private readonly LoopbackHarnessToolEndpoints _toolEndpoints;
+    private readonly HeadlessAltaTools _alta;
     private readonly Logger _logger;
     private readonly object _gate = new();
     private Task? _stop;
     private int _acceptsWork = 1;
 
-    private NodeHost(NodeHostOptions options, CodeAltaSingleInstanceGuard guard, CodeAltaHost host,
+    private NodeHost(NodeHostOptions options, CodeAltaSingleInstanceGuard guard, CodeAltaHost host, HeadlessAltaTools alta,
         ModelsDevCatalogService modelsDev, LoopbackHarnessToolEndpoints toolEndpoints, Logger logger)
     {
         _options = options;
         _guard = guard;
         Host = host;
+        _alta = alta;
         _modelsDev = modelsDev;
         _toolEndpoints = toolEndpoints;
         _logger = logger;
@@ -45,6 +48,12 @@ public sealed class NodeHost : IAsyncDisposable
 
     /// <summary>Gets the runtime of the node.</summary>
     public CodeAltaHost Host { get; }
+
+    /// <summary>
+    /// Gets the dispatcher of the <c>alta</c> commands, the one of the <c>alta</c> tool of the sessions of the node
+    /// (<see cref="AltaCommandRegistryOptions.Node"/>).
+    /// </summary>
+    public AltaCommandDispatcher Alta => _alta.Dispatcher;
 
     /// <summary>Gets the profile the node owns.</summary>
     public CodeAltaInstanceProfile Profile => _options.Profile;
@@ -88,8 +97,9 @@ public sealed class NodeHost : IAsyncDisposable
             if (!options.Offline && options.ConfigureModelProviders is null) modelsDev.StartBackgroundRefresh();
             var pluginProviderTypes = new PluginModelProviderTypes(toolEndpoints) { ModelCatalog = modelsDev };
             host = await CodeAltaHost.CreateAsync(CreateHostOptions(options, guard, modelsDev, pluginProviderTypes), cancellationToken).ConfigureAwait(false);
+            var alta = HeadlessAltaTools.Attach(host, CreateAltaOptions(profile));
             logger.Info($"CodeAlta Node started on {profile.StateRoot} (PID {Environment.ProcessId}).");
-            return new NodeHost(options, guard, host, modelsDev, toolEndpoints, logger);
+            return new NodeHost(options, guard, host, alta, modelsDev, toolEndpoints, logger);
         }
         catch
         {
@@ -162,6 +172,25 @@ public sealed class NodeHost : IAsyncDisposable
     }
 
     /// <summary>
+    /// The agent tools of the sessions of a node, as CodeAlta CLI gives them, for a host that outlives their turns: the
+    /// <c>alta</c> commands of <see cref="AltaCommandRegistryOptions.Node"/> (reminders and automations, no <c>ask</c> nor
+    /// <c>review</c> until they reach people), and Code Mode as the configuration sets it, whose scripts keep their values
+    /// and their source in the profile the node owns. Nobody answers the questions of a script.
+    /// </summary>
+    internal static HeadlessAltaToolsOptions CreateAltaOptions(CodeAltaInstanceProfile profile)
+    {
+        ArgumentNullException.ThrowIfNull(profile);
+        return new HeadlessAltaToolsOptions
+        {
+            Registry = AltaCommandRegistryOptions.Node,
+            CodeModeScratchpadRoot = Path.Combine(profile.StateRoot, "scratchpad"),
+            KeepsScriptValues = true,
+            ReadsSessionSpaces = true,
+            OwnsReminders = true,
+        };
+    }
+
+    /// <summary>
     /// Stops the node: it accepts no more work, gives the sessions at work <see cref="NodeHostOptions.DrainLimit"/> to
     /// finish, disposes the host (which stops what still runs; an interrupted session is resumable), and releases the
     /// lock. Repeated calls share the first stop.
@@ -185,6 +214,16 @@ public sealed class NodeHost : IAsyncDisposable
         Volatile.Write(ref _acceptsWork, 0);
         try
         {
+            // No reminder fires once the node stops: it starts no more work by itself.
+            try
+            {
+                await _alta.DisposeAsync().ConfigureAwait(false);
+            }
+            catch (Exception failure)
+            {
+                _logger.Error(failure, "The reminders failed while they stopped.");
+            }
+
             await DrainAsync(drainCancellation).ConfigureAwait(false);
             try
             {
