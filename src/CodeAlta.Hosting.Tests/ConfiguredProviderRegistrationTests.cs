@@ -290,7 +290,26 @@ public sealed class ConfiguredProviderRegistrationTests
 
         Assert.AreEqual(attributed ? "https://codealta.github.io" : null, headers?.GetValueOrDefault("HTTP-Referer"));
         Assert.AreEqual(attributed ? "CodeAlta" : null, headers?.GetValueOrDefault("X-OpenRouter-Title"));
-        Assert.AreEqual(attributed ? "cli-agent,programming-app" : null, headers?.GetValueOrDefault("X-OpenRouter-Categories"));
+        Assert.IsNull(headers?.GetValueOrDefault("X-OpenRouter-Categories"), "Without an application, no category is named.");
+    }
+
+    // Each CodeAlta application names its own categories to OpenRouter: Desktop is a programming app, the TUI and the CLI
+    // are coding agents of the terminal.
+    [TestMethod]
+    [DataRow("desktop", "programming-app")]
+    [DataRow("tui", "cli-agent")]
+    [DataRow("cli", "cli-agent")]
+    [DataRow("unknown", null)]
+    public void ShippedHeaderDefaults_NameTheCategoriesOfTheApplication(string application, string? categories)
+    {
+        var headers = RawApiProviderDefaultsCatalog.CreateHeaderDefaults(
+            AgentTransportKind.OpenAIChatCompletions, "openrouter", new Uri("https://openrouter.ai/api/v1"), application);
+        var elsewhere = RawApiProviderDefaultsCatalog.CreateHeaderDefaults(
+            AgentTransportKind.OpenAIChatCompletions, "unrelated", new Uri("https://example.invalid/v1"), application);
+
+        Assert.AreEqual(categories, headers?.GetValueOrDefault("X-OpenRouter-Categories"));
+        Assert.AreEqual("CodeAlta", headers?.GetValueOrDefault("X-OpenRouter-Title"));
+        Assert.IsNull(elsewhere, "Another provider gets no header of OpenRouter.");
     }
 
     [TestMethod]

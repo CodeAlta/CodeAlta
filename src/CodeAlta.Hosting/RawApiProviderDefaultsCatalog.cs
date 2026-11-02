@@ -63,6 +63,15 @@ internal static class RawApiProviderDefaultsCatalog
         AgentTransportKind transportKind,
         string providerKey,
         Uri? baseUri)
+        => CreateHeaderDefaults(transportKind, providerKey, baseUri, application: null);
+
+    // application: the CodeAlta application (desktop, tui, cli) whose headers of a rule ([rules.headers.applications.<name>])
+    // are added to its default ones; null for none.
+    public static IReadOnlyDictionary<string, string>? CreateHeaderDefaults(
+        AgentTransportKind transportKind,
+        string providerKey,
+        Uri? baseUri,
+        string? application)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(providerKey);
 
@@ -73,6 +82,10 @@ internal static class RawApiProviderDefaultsCatalog
             if (IsMatch(rule, context) && rule.Headers is not null)
             {
                 headers = MergeHeaders(headers, rule.Headers.Default, rule.Headers.Remove);
+                if (application is not null && rule.Headers.Applications?.GetValueOrDefault(application) is { } own)
+                {
+                    headers = MergeHeaders(headers, own, null);
+                }
             }
         }
 
@@ -351,6 +364,10 @@ internal sealed class RawApiProviderDefaultsHeaders
 
     [JsonPropertyName("remove")]
     public List<string>? Remove { get; set; }
+
+    // The headers a CodeAlta application adds to the default ones, by the name of the application (desktop, tui, cli).
+    [JsonPropertyName("applications")]
+    public Dictionary<string, Dictionary<string, string>>? Applications { get; set; }
 }
 
 internal sealed class RawApiProviderDefaultsProfile

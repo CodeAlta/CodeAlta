@@ -97,7 +97,8 @@ public static class ConfiguredModelProviderRegistryBuilder
         foreach (var definition in configStore.LoadGlobalProviderDefinitions())
         {
             if (TryCreateProviderRegistration(definition, stateRootPath, modelCatalog, codexSubscriptionConcurrencyLimiter,
-                    modelProviderRegistry.ExternalConversationHeaders, modelProviderRegistry.ProviderProcesses, out var descriptor, out var createRuntime))
+                    modelProviderRegistry.ExternalConversationHeaders, modelProviderRegistry.ProviderProcesses, modelProviderRegistry.Application,
+                    out var descriptor, out var createRuntime))
             {
                 modelProviderRegistry.RegisterOrReplace(descriptor, createRuntime);
                 descriptors.Add(descriptor);
@@ -173,7 +174,8 @@ public static class ConfiguredModelProviderRegistryBuilder
         foreach (var definition in definitions)
         {
             if (!TryCreateProviderRegistration(definition, stateRootPath, modelCatalog, codexSubscriptionConcurrencyLimiter,
-                    modelProviderRegistry.ExternalConversationHeaders, modelProviderRegistry.ProviderProcesses, out var descriptor, out var createRuntime))
+                    modelProviderRegistry.ExternalConversationHeaders, modelProviderRegistry.ProviderProcesses, modelProviderRegistry.Application,
+                    out var descriptor, out var createRuntime))
             {
                 continue;
             }
@@ -231,11 +233,13 @@ public static class ConfiguredModelProviderRegistryBuilder
             new CodexSubscriptionConcurrencyLimiter(),
             externalConversationHeaders: null,
             providerProcesses: null,
+            application: null,
             out descriptor,
             out createRuntime);
 
     // externalConversationHeaders: the store of the registry, where the providers that list the conversations of other
-    // programs keep what they read of their files; providerProcesses: the processes the runtimes of the registry started.
+    // programs keep what they read of their files; providerProcesses: the processes the runtimes of the registry started;
+    // application: the CodeAlta application of the registry (ModelProviderRegistry.Application), named in default headers.
     private static bool TryCreateProviderRegistration(
         CodeAltaProviderDocument definition,
         string stateRootPath,
@@ -243,6 +247,7 @@ public static class ConfiguredModelProviderRegistryBuilder
         CodexSubscriptionConcurrencyLimiter codexSubscriptionConcurrencyLimiter,
         IAgentExternalConversationHeaderStore? externalConversationHeaders,
         AgentProviderProcesses? providerProcesses,
+        string? application,
         out ModelProviderDescriptor descriptor,
         out Func<IModelProviderRuntime> createRuntime)
     {
@@ -253,9 +258,9 @@ public static class ConfiguredModelProviderRegistryBuilder
         switch (definition.ProviderType)
         {
             case "openai-chat":
-                return TryCreateOpenAIChatProvider(definition, stateRootPath, modelCatalog, out descriptor, out createRuntime);
+                return TryCreateOpenAIChatProvider(definition, stateRootPath, modelCatalog, application, out descriptor, out createRuntime);
             case "openai-responses":
-                return TryCreateOpenAIResponsesProvider(definition, stateRootPath, modelCatalog, out descriptor, out createRuntime);
+                return TryCreateOpenAIResponsesProvider(definition, stateRootPath, modelCatalog, application, out descriptor, out createRuntime);
             case "azure-openai":
                 return TryCreateAzureOpenAIProvider(definition, stateRootPath, modelCatalog, out descriptor, out createRuntime);
             case "codex":
@@ -263,20 +268,20 @@ public static class ConfiguredModelProviderRegistryBuilder
             case "copilot":
                 return TryCreateCopilotDirectProvider(definition, stateRootPath, modelCatalog, out descriptor, out createRuntime);
             case "xai":
-                return TryCreateXaiProvider(definition, stateRootPath, modelCatalog, out descriptor, out createRuntime);
+                return TryCreateXaiProvider(definition, stateRootPath, modelCatalog, application, out descriptor, out createRuntime);
             case "anthropic":
-                return TryCreateAnthropicProvider(definition, stateRootPath, modelCatalog, out descriptor, out createRuntime);
+                return TryCreateAnthropicProvider(definition, stateRootPath, modelCatalog, application, out descriptor, out createRuntime);
             case "google-genai":
-                return TryCreateGoogleGenAIProvider(definition, stateRootPath, modelCatalog, out descriptor, out createRuntime);
+                return TryCreateGoogleGenAIProvider(definition, stateRootPath, modelCatalog, application, out descriptor, out createRuntime);
             case "vertex-ai":
-                return TryCreateVertexAIProvider(definition, stateRootPath, modelCatalog, out descriptor, out createRuntime);
+                return TryCreateVertexAIProvider(definition, stateRootPath, modelCatalog, application, out descriptor, out createRuntime);
             case "mistral":
             case "mistral-vibe":
-                return TryCreateMistralProvider(definition, stateRootPath, modelCatalog, out descriptor, out createRuntime);
+                return TryCreateMistralProvider(definition, stateRootPath, modelCatalog, application, out descriptor, out createRuntime);
             case ClaudeCodeModelProviderRuntime.ProviderType:
                 return TryCreateClaudeCodeProvider(definition, stateRootPath, modelCatalog, externalConversationHeaders, providerProcesses, out descriptor, out createRuntime);
             case LlamaCppProviderType:
-                return TryCreateLlamaCppProvider(definition, stateRootPath, modelCatalog, out descriptor, out createRuntime);
+                return TryCreateLlamaCppProvider(definition, stateRootPath, modelCatalog, application, out descriptor, out createRuntime);
             default:
                 descriptor = null!;
                 createRuntime = null!;
@@ -288,6 +293,7 @@ public static class ConfiguredModelProviderRegistryBuilder
         CodeAltaProviderDocument definition,
         string stateRootPath,
         ModelsDevCatalogService? modelCatalog,
+        string? application,
         out ModelProviderDescriptor descriptor,
         out Func<IModelProviderRuntime> createRuntime)
     {
@@ -335,7 +341,8 @@ public static class ConfiguredModelProviderRegistryBuilder
                         AgentTransportKind.OpenAIChatCompletions,
                         definition.ProviderKey,
                         baseUri,
-                        definition.Request),
+                        definition.Request,
+                        application),
                     ExtraBody = CreateOpenAIExtraBody(
                         AgentTransportKind.OpenAIChatCompletions,
                         definition.ProviderKey,
@@ -360,6 +367,7 @@ public static class ConfiguredModelProviderRegistryBuilder
         CodeAltaProviderDocument definition,
         string stateRootPath,
         ModelsDevCatalogService? modelCatalog,
+        string? application,
         out ModelProviderDescriptor descriptor,
         out Func<IModelProviderRuntime> createRuntime)
     {
@@ -407,7 +415,8 @@ public static class ConfiguredModelProviderRegistryBuilder
                         AgentTransportKind.OpenAIResponses,
                         definition.ProviderKey,
                         baseUri,
-                        definition.Request),
+                        definition.Request,
+                        application),
                     ExtraBody = CreateOpenAIExtraBody(
                         AgentTransportKind.OpenAIResponses,
                         definition.ProviderKey,
@@ -438,6 +447,7 @@ public static class ConfiguredModelProviderRegistryBuilder
         CodeAltaProviderDocument definition,
         string stateRootPath,
         ModelsDevCatalogService? modelCatalog,
+        string? application,
         out ModelProviderDescriptor descriptor,
         out Func<IModelProviderRuntime> createRuntime)
     {
@@ -464,7 +474,7 @@ public static class ConfiguredModelProviderRegistryBuilder
             ModelsDevProviderId = modelsDevProviderId,
             SingleModelId = NormalizeText(definition.SingleModelId),
             ModelsIncludeRegex = NormalizeText(definition.ModelsIncludeRegex),
-            ExtraHeaders = CreateRequestHeaders(transportKind, definition.ProviderKey, baseUri, definition.Request),
+            ExtraHeaders = CreateRequestHeaders(transportKind, definition.ProviderKey, baseUri, definition.Request, application),
             ExtraBody = CreateOpenAIExtraBody(transportKind, definition.ProviderKey, baseUri, definition),
             ModelOverrides = CreateModelOverrides(definition.ModelOverrides),
             ModelRequestOverrides = CreateModelRequestOverrides(definition.ModelRequest),
@@ -710,6 +720,7 @@ public static class ConfiguredModelProviderRegistryBuilder
         CodeAltaProviderDocument definition,
         string stateRootPath,
         ModelsDevCatalogService? modelCatalog,
+        string? application,
         out ModelProviderDescriptor descriptor,
         out Func<IModelProviderRuntime> createRuntime)
     {
@@ -751,7 +762,8 @@ public static class ConfiguredModelProviderRegistryBuilder
                 AgentTransportKind.OpenAIResponses,
                 definition.ProviderKey,
                 baseUri,
-                definition.Request),
+                definition.Request,
+                application),
             ExtraBody = CreateOpenAIExtraBody(
                 AgentTransportKind.OpenAIResponses,
                 definition.ProviderKey,
@@ -846,6 +858,7 @@ public static class ConfiguredModelProviderRegistryBuilder
         CodeAltaProviderDocument definition,
         string stateRootPath,
         ModelsDevCatalogService? modelCatalog,
+        string? application,
         out ModelProviderDescriptor descriptor,
         out Func<IModelProviderRuntime> createRuntime)
     {
@@ -890,7 +903,8 @@ public static class ConfiguredModelProviderRegistryBuilder
                         AgentTransportKind.AnthropicMessages,
                         definition.ProviderKey,
                         baseUri,
-                        definition.Request),
+                        definition.Request,
+                        application),
                     ModelOverrides = CreateModelOverrides(definition.ModelOverrides),
                     ModelCatalog = modelCatalog,
                     RefusalFallback = definition.RefusalFallback != false,
@@ -926,6 +940,7 @@ public static class ConfiguredModelProviderRegistryBuilder
         CodeAltaProviderDocument definition,
         string stateRootPath,
         ModelsDevCatalogService? modelCatalog,
+        string? application,
         out ModelProviderDescriptor descriptor,
         out Func<IModelProviderRuntime> createRuntime)
     {
@@ -943,6 +958,7 @@ public static class ConfiguredModelProviderRegistryBuilder
             definition,
             stateRootPath,
             modelCatalog,
+            application,
             useVertexAI: false,
             apiKey,
             out descriptor,
@@ -953,6 +969,7 @@ public static class ConfiguredModelProviderRegistryBuilder
         CodeAltaProviderDocument definition,
         string stateRootPath,
         ModelsDevCatalogService? modelCatalog,
+        string? application,
         out ModelProviderDescriptor descriptor,
         out Func<IModelProviderRuntime> createRuntime)
     {
@@ -960,6 +977,7 @@ public static class ConfiguredModelProviderRegistryBuilder
             definition,
             stateRootPath,
             modelCatalog,
+            application,
             useVertexAI: true,
             apiKey: null,
             out descriptor,
@@ -970,6 +988,7 @@ public static class ConfiguredModelProviderRegistryBuilder
         CodeAltaProviderDocument definition,
         string stateRootPath,
         ModelsDevCatalogService? modelCatalog,
+        string? application,
         bool useVertexAI,
         string? apiKey,
         out ModelProviderDescriptor descriptor,
@@ -1009,7 +1028,8 @@ public static class ConfiguredModelProviderRegistryBuilder
                         useVertexAI ? AgentTransportKind.GoogleVertexAI : AgentTransportKind.GoogleGeminiApi,
                         definition.ProviderKey,
                         baseUri,
-                        definition.Request),
+                        definition.Request,
+                        application),
                     ModelOverrides = CreateModelOverrides(definition.ModelOverrides),
                     ModelCatalog = modelCatalog,
                     // The SDK made a client for each request.
@@ -1029,6 +1049,7 @@ public static class ConfiguredModelProviderRegistryBuilder
         CodeAltaProviderDocument definition,
         string stateRootPath,
         ModelsDevCatalogService? modelCatalog,
+        string? application,
         out ModelProviderDescriptor descriptor,
         out Func<IModelProviderRuntime> createRuntime)
     {
@@ -1081,7 +1102,8 @@ public static class ConfiguredModelProviderRegistryBuilder
                         AgentTransportKind.MistralChat,
                         definition.ProviderKey,
                         baseUri,
-                        definition.Request),
+                        definition.Request,
+                        application),
                     ModelOverrides = CreateModelOverrides(definition.ModelOverrides),
                     ModelCatalog = modelCatalog,
                     // The chat client and the model listing made a client for each request.
@@ -1502,12 +1524,14 @@ public static class ConfiguredModelProviderRegistryBuilder
         AgentTransportKind transportKind,
         string providerKey,
         Uri? baseUri,
-        CodeAltaProviderRequestDocument? request)
+        CodeAltaProviderRequestDocument? request,
+        string? application)
     {
         var headers = ToMutableHeaders(RawApiProviderDefaultsCatalog.CreateHeaderDefaults(
             transportKind,
             providerKey,
-            baseUri));
+            baseUri,
+            application));
 
         if (request?.RemoveHeaders is { Count: > 0 })
         {
