@@ -15,10 +15,13 @@ public sealed record SessionLeaseOwner
     /// <summary>The kind of CodeAlta TUI.</summary>
     public const string TuiKind = "tui";
 
+    /// <summary>The kind of CodeAlta Node, the headless host <c>altanode</c>.</summary>
+    public const string NodeKind = "node";
+
     private const int MaximumLength = 128;
 
     /// <summary>Initializes an owner.</summary>
-    /// <param name="kind"><see cref="CliKind"/>, <see cref="DesktopKind"/>, <see cref="TuiKind"/> or another short name.</param>
+    /// <param name="kind"><see cref="CliKind"/>, <see cref="DesktopKind"/>, <see cref="TuiKind"/>, <see cref="NodeKind"/> or another short name.</param>
     /// <param name="instanceId">What tells this instance from the others of its kind, such as an id made at its start.</param>
     /// <exception cref="ArgumentException">A value is empty, longer than 128 characters or holds a control character.</exception>
     public SessionLeaseOwner(string kind, string instanceId)
