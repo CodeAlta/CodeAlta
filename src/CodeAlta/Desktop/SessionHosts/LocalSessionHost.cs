@@ -28,6 +28,14 @@ internal sealed class LocalSessionHost : ISessionHost
     /// <inheritdoc />
     public string? MachineId => null;
 
+    /// <inheritdoc />
+    /// <remarks>The host of this process is the one of every session no other host lists: it answers true.</remarks>
+    public bool Lists(string sessionId) => true;
+
+    /// <inheritdoc />
+    /// <remarks>The host of this process is the one of every operation no other host admitted: it answers true.</remarks>
+    public bool Admitted(Guid operationId) => true;
+
     private OwnedSessionWorkspace Reads => Host.WorkspaceReads;
 
     private OwnedSessionCommandService Commands => Host.Commands;

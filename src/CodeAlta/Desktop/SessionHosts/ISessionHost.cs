@@ -52,6 +52,17 @@ internal interface ISessionHost
     /// <summary>Gets the machine of the host; null for the host of this process.</summary>
     string? MachineId { get; }
 
+    /// <summary>
+    /// Gets whether the host lists a session, as its last list said: the registry gives a session to the host of a
+    /// machine that lists it, and to the host of this process otherwise.
+    /// </summary>
+    /// <param name="sessionId">The session.</param>
+    bool Lists(string sessionId);
+
+    /// <summary>Gets whether the host admitted an operation and still keeps its receipt, for the abort of that operation.</summary>
+    /// <param name="operationId">The operation.</param>
+    bool Admitted(Guid operationId);
+
     /// <summary>Reads the projects and sessions of the host.</summary>
     Task<OwnedWorkspaceSnapshot> ReadSnapshotAsync(CancellationToken cancellationToken);
 
