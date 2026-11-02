@@ -162,7 +162,8 @@ test("zoom takes the keys of a browser, with or without Shift for the plus key",
     assert.equal(resolveCommandKey(ctrl("0"), false, focus).command, "resetZoom");
   }
   assert.equal(resolveCommandKey(key("="), false, "none").command, null);
-  assert.equal(resolveCommandKey(ctrl("=", { altKey: true }), false, "none").command, null);
+  // Not on macOS, where Ctrl+Alt+= opens the equation editor.
+  assert.equal(resolveCommandKey(ctrl("=", { altKey: true }), false, "none", false).command, null);
 });
 
 test("the equation editor opens with Word's key from the prompt, Ctrl+Alt+= on macOS, and is found by what it writes", () => {
