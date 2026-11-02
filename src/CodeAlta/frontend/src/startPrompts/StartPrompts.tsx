@@ -44,7 +44,7 @@ export function startPromptForm(item: StartPromptItem, copy: SettingsScope | nul
  * is selected. The page owns the selection; a key of a start prompt is one `isStartPromptKey` recognizes. What ships
  * with CodeAlta is shown as it is, and a copy of the user's or of the project takes its place.
  */
-export function useStartPrompts({ api, epoch, project, selected, select, setNotice, files, editor, disabled }: {
+export function useStartPrompts({ api, epoch, project, selected, select, setNotice, files, editor, disabled, onWritten }: {
   api: StartPromptsApi; epoch: string | null; project: SettingsProject;
   editor: StartPromptEditor;
   selected: string | null; select: (key: string | null) => void;
@@ -53,6 +53,8 @@ export function useStartPrompts({ api, epoch, project, selected, select, setNoti
   files: Pick<SettingsFiles, "open" | "reveal" | "platform">;
   /** The page is busy with something else. */
   disabled: boolean;
+  /** Called once a text was saved or removed. */
+  onWritten?: () => void;
 }): { rows: ReactNode; detail: ReactNode; busy: boolean; reload: () => void } {
   const [items, setItems] = useState<readonly StartPromptItem[]>([]);
   const [form, setForm] = useState<Form | null>(null);
@@ -87,7 +89,7 @@ export function useStartPrompts({ api, epoch, project, selected, select, setNoti
     setBusy(true); setNotice(null);
     try {
       const reply = await action();
-      if (reply.status === "ok") { selectAfter.current = after; setGeneration(value => value + 1); setNotice({ key: done, intent: "success" }); }
+      if (reply.status === "ok") { selectAfter.current = after; setGeneration(value => value + 1); setNotice({ key: done, intent: "success" }); onWritten?.(); }
       else setNotice({ key: "The operation did not complete.", intent: "danger", detail: reply.message ?? undefined });
     } catch { setNotice({ key: "The operation did not complete.", intent: "danger" }); }
     finally { setBusy(false); }

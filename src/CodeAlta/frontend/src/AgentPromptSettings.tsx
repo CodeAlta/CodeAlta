@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Button, Card, CardList, Checkbox, FormGroup, HTMLSelect, InputGroup, Menu, MenuItem, PopoverNext, Section, SectionCard, Tag } from "@blueprintjs/core";
 import { agentPrompts, startPrompts, type AgentPromptDocument, type AgentPromptEntry } from "#neoastra";
 import { ActivitySpinner } from "./ActivitySpinner";
@@ -56,8 +56,12 @@ export function AgentPromptSettings({ epoch, project, onOpenFile, api = agentPro
   const prompts = listing?.prompts ?? [];
   const entry = selected && selected !== added ? prompts.find(prompt => identity(prompt) === selected) ?? null : null;
   const entryKey = entry ? identity(entry) : null;
-  const files = useSettingsFiles({ page: "prompts", epoch, projectId, revision: listing, onOpened: onOpenFile, setNotice, api: filesApi });
+  // The folders of the page are listed again after a write of a start prompt too: the first one creates them.
+  const [startWrites, setStartWrites] = useState(0);
+  const filesRevision = useMemo(() => [listing, startWrites], [listing, startWrites]);
+  const files = useSettingsFiles({ page: "prompts", epoch, projectId, revision: filesRevision, onOpened: onOpenFile, setNotice, api: filesApi });
   const start = useStartPrompts({ api: startApi, epoch, project, selected, select: setSelected, setNotice, files, disabled: busy,
+    onWritten: () => setStartWrites(value => value + 1),
     editor: text => <CodeEditor language="markdown" wrap label={t("Prompt text")} value={text.value} readOnly={text.readOnly} onChange={text.onChange} /> });
 
   // Keep the selection across reloads; otherwise open the first prompt.
