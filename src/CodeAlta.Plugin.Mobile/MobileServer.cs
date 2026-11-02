@@ -95,8 +95,11 @@ internal sealed partial class MobileServer : IAsyncDisposable
             kestrel.Limits.MaxRequestBodySize = MaximumDiagram;
         });
         builder.Services.AddSingleton<IHostLifetime, QuietLifetime>();
+        // A page of a timeline is many times smaller compressed, on a phone that may be far from this computer. The live stream is not compressed.
+        builder.Services.AddResponseCompression(compression => compression.MimeTypes = ["application/json"]);
         var app = builder.Build();
         app.Use(GuardAsync);
+        app.UseResponseCompression();
         app.Use(AllowPromptBodyAsync);
         Map(app);
         await app.StartAsync(cancellationToken).ConfigureAwait(false);
@@ -136,6 +139,9 @@ internal sealed partial class MobileServer : IAsyncDisposable
         api.MapGet("/sessions/{id}", async (string id, CancellationToken ct) => Json(await _options.Sessions.GetAsync(id, ct).ConfigureAwait(false)));
         api.MapGet("/sessions/{id}/events", async (string id, long? since, CancellationToken ct) =>
             Json(await _options.Sessions.EventsAsync(id, Math.Max(0, since ?? 0), ct).ConfigureAwait(false)));
+        // The timeline from its end: the phone opens a session on its latest events, and reads older ones as it scrolls up.
+        api.MapGet("/sessions/{id}/events/latest", async (string id, long? before, CancellationToken ct) =>
+            Json(await _options.Sessions.LatestEventsAsync(id, before is > 0 ? before : null, ct).ConfigureAwait(false)));
         // The images of a timeline, by an id the server finds in the records of the session, never by a path: a saved copy of
         // the session, or a picture of the disk that an answer shows. They never change: the phone keeps them.
         api.MapGet("/sessions/{id}/images/{imageId}", async (string id, string imageId, HttpContext context, CancellationToken ct) =>
