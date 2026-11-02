@@ -13,8 +13,8 @@ import { sessionRowIndent } from "./ExplorerSessions";
 export type SessionFamily = Readonly<{
   /** The name of the project of a session, or of the chats. */
   scopeName: (session: WorkspaceSession) => string;
-  /** Opens a session in its own scope, which is selected. */
-  open: (session: WorkspaceSession) => void;
+  /** Opens a session in its own scope; pointer activation hands the keyboard to its prompt. */
+  open: (session: WorkspaceSession, focusPrompt?: boolean) => void;
   /** What follows the title of the row of a session in its own list. */
   marks: (session: WorkspaceSession) => ReactNode;
 }>;
@@ -35,7 +35,7 @@ export function SessionLinkRow({ entry }: { entry: Extract<SessionListEntry, { k
   const label = t("Open {title}, listed in {scope}", { title: plainTitle(session.title), scope });
   return <div className="session-row session-link-row" data-link-id={session.id} data-parent-id={parentId}>
     <button type="button" title={label} aria-label={label} data-full-text={plainTitle(session.fullTitle || session.title)}
-      style={{ paddingLeft: sessionRowIndent(depth) }} onClick={() => family.open(session)}>
+      style={{ paddingLeft: sessionRowIndent(depth) }} onClick={event => family.open(session, event.detail > 0)}>
       <span className="session-icon" data-file-tone="teal"><AppIcon name="openExternal" size={12} /></span>
       <span className="session-title">{plainTitle(session.title)}</span>
       {family.marks(session)}
@@ -63,7 +63,7 @@ export function SessionOriginLine({ parent, depth }: { parent: WorkspaceSession 
   }
   const label = t("Started by {title}, in {scope}", { title, scope });
   return <button type="button" className="session-parent-line" title={label} aria-label={label} style={style}
-    onClick={event => { event.stopPropagation(); family.open(parent); }}>{content}</button>;
+    onClick={event => { event.stopPropagation(); family.open(parent, event.detail > 0); }}>{content}</button>;
 }
 
 /** The sessions related to a session in the Explorer, and the scopes they are listed in: its parent and its children, with itself. */

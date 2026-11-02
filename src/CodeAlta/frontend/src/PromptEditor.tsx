@@ -4,6 +4,7 @@ import { promptEditorMinimum } from "./composerHeight";
 import { equationKey, equationKeybinding, useEquationEditing } from "./equationEditing";
 import { followPageFont, followShellTheme, monaco, pageFontFamily } from "./monaco/monacoEnvironment";
 import { attachPromptMath } from "./promptMath";
+import { promptTypeEvent } from "./promptTyping";
 import { useShellLanguage } from "./shellLanguage";
 import { spokenInsertion } from "./speech/spokenText";
 
@@ -99,14 +100,28 @@ export function PromptEditor({ ref, value, onChange, disabled = false, expanded 
     // `selectionchange`, and Ctrl+C, Ctrl+X and Ctrl+V then did nothing. A key pressed in the editor puts the selection
     // back in what takes the keys, before the browser runs the command of the key.
     const page = node.ownerDocument;
-    const keepPageSelection = (event: Event) => {
-      const focused = event.target, current = page.getSelection();
+    const selectionIn = (focused: EventTarget | null) => {
+      const current = page.getSelection();
       if (!current || !(focused instanceof Element) || !(focused as Element & { editContext?: unknown }).editContext) return;
       if (current.anchorNode && focused.contains(current.anchorNode)) return;
       current.collapse(focused, 0);
     };
+    const keepPageSelection = (event: Event) => selectionIn(event.target);
     node.addEventListener("keydown", keepPageSelection, true);
-    return () => { node.removeEventListener("keydown", keepPageSelection, true);
+    // A key redirected from outside the editor types through Monaco, at its selection, and leaves Chromium's page
+    // selection in its EditContext too: the original keydown never passed through keepPageSelection.
+    const typed = (event: Event) => {
+      const text = (event as CustomEvent<unknown>).detail;
+      if (typeof text !== "string" || !text || latest.current.disabled) return;
+      event.preventDefault();
+      instance.focus();
+      selectionIn(page.activeElement);
+      instance.trigger("keyboard", "type", { text });
+      const caret = instance.getPosition();
+      if (caret) instance.revealPosition(caret);
+    };
+    node.addEventListener(promptTypeEvent, typed);
+    return () => { node.removeEventListener("keydown", keepPageSelection, true); node.removeEventListener(promptTypeEvent, typed);
       detachMath(); equationAction.dispose(); unfollowTheme(); unfollowFont(); changed.dispose(); selection.dispose(); resized.dispose(); instance.dispose(); model.dispose(); editor.current = null;
       interim.current = { text: "", shown: null }; node.removeAttribute("data-interim"); };
   }, [expanded]);
@@ -155,7 +170,7 @@ export function PromptEditor({ ref, value, onChange, disabled = false, expanded 
   return <><div id={id} ref={host} className={`prompt-editor${expanded ? " expanded" : ""}${covered ? " covered" : ""}`}
     tabIndex={-1} onFocus={event => { if (event.target === event.currentTarget) editor.current?.focus(); }}
     onKeyDownCapture={onKeyDown} onPasteCapture={event => { onPaste?.(event); if (event.defaultPrevented) event.stopPropagation(); }} onCompositionStart={onCompositionStart}
-    aria-label={label} data-placeholder={!value ? placeholder : undefined} data-suggested={!value && placeholder && suggested ? "" : undefined}
+    aria-label={label} aria-disabled={disabled || undefined} data-empty={!value ? "" : undefined} data-placeholder={!value ? placeholder : undefined} data-suggested={!value && placeholder && suggested ? "" : undefined}
     // The placeholder is drawn by a style: a suggested prompt is also said to who does not see it.
     aria-description={!value && placeholder && suggested ? placeholder : undefined}><div className="prompt-editor-surface" /></div>
     {equations.window}

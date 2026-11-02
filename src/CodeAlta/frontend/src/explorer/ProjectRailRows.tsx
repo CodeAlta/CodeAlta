@@ -81,7 +81,8 @@ export function ProjectRailRows({ projects, favorites = 0, selectedId, onSelect,
   favorites?: number;
   selectedId: string | null;
   /** A row was pressed: its scope is selected, and the prompt of a new session of it is shown. The row is not opened or closed: its chevron does that. */
-  onSelect: (id: string | null) => void;
+  /** Pointer activation hands the keyboard to the prompt; keyboard activation keeps it in the tree. */
+  onSelect: (id: string | null, focusPrompt: boolean) => void;
   /** A row was double-clicked: the prompt of a new session of its scope is given a tab of its own. */
   onKeep?: (id: string | null) => void;
   canRename: boolean;
@@ -127,9 +128,9 @@ export function ProjectRailRows({ projects, favorites = 0, selectedId, onSelect,
   }
   // A row selects its scope, as the row of a session with sub-agents selects the session: only the chevron and the
   // arrow keys open and close it. Without a tree the selected scope is the one open, so another one starts open.
-  function select(id: string | null) {
+  function select(id: string | null, focusPrompt: boolean) {
     if (id !== selectedId) setFolded(null);
-    onSelect(id);
+    onSelect(id, focusPrompt);
   }
   const twist = (id: string | null) => <span className="tree-twist" data-empty={id !== null && !open(id) && unfoldable && !unfoldable(id) ? "true" : undefined} onClick={event => { event.stopPropagation(); toggle(id); }} onDoubleClick={event => event.stopPropagation()}>
     <AppIcon name="chevronDown" size={12} className={open(id) ? "tree-chevron expanded" : "tree-chevron"} /></span>;
@@ -158,7 +159,7 @@ export function ProjectRailRows({ projects, favorites = 0, selectedId, onSelect,
     return <Fragment key={`${place}:${project.id}`}><ProjectRowActions project={project} authority={actions} drop={drop?.(project)} drag={labels?.drag?.(project, from)}
       favorite={tree ? { value: favorite, set: value => tree.setFavorite(project, value) } : undefined}>
       <button type="button" title={`${project.name}\n${project.path}`} aria-pressed={selectedId === project.id} aria-expanded={open(project.id)}
-        data-scope={project.id} onClick={() => select(project.id)} onDoubleClick={() => onKeep?.(project.id)}>
+        data-scope={project.id} onClick={event => select(project.id, event.detail > 0)} onDoubleClick={() => onKeep?.(project.id)}>
         {twist(project.id)}
         <span className="project-icon" data-file-tone={project.archived ? "muted" : "gold"}><AppIcon name={project.archived ? "archive" : open(project.id) ? "open" : "folder"} size={15} /></span>
         <strong>{project.name}</strong>{!labels?.groups.length && labels?.badges?.(project)}{activity?.(project.id)}{project.archived && <small>{t("Archived")}</small>}
@@ -219,7 +220,7 @@ export function ProjectRailRows({ projects, favorites = 0, selectedId, onSelect,
     {filter}
     <ul className="nav-list project-root-list" aria-label={t("Chats")} onKeyDown={event => rowKey(event, toggle)}>
       <li className="project-action-row" onContextMenu={event => { if (sessions) { event.preventDefault(); setOtherMenu(true); } }}>
-        <button type="button" aria-pressed={selectedId === null} aria-expanded={open(null)} data-scope="" onClick={() => select(null)} onDoubleClick={() => onKeep?.(null)}>
+        <button type="button" aria-pressed={selectedId === null} aria-expanded={open(null)} data-scope="" onClick={event => select(null, event.detail > 0)} onDoubleClick={() => onKeep?.(null)}>
           {twist(null)}<span className="project-icon" data-file-tone="teal"><AppIcon name="chat" size={15} /></span><strong>{t("Chats")}</strong>{activity?.(null)}
         </button>
         {newSession(null, t("New chat"), t("New chat"))}
