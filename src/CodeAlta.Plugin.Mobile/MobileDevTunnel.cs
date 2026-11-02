@@ -44,12 +44,7 @@ internal interface IMobileDevTunnelCli
     /// <summary>Starts a command that runs until it is disposed.</summary>
     IMobileHostedProcess Start(IReadOnlyList<string> args);
 
-    /// <summary>
-    /// Runs a command in a console window of its own, for what it shows to the person (the account picker of Windows needs a window), and
-    /// waits for its end, <paramref name="patience"/> at most.
-    /// </summary>
-    /// <returns>Its exit code; -1 when it did not end in time.</returns>
-    Task<int> RunInWindowAsync(IReadOnlyList<string> args, TimeSpan patience, CancellationToken cancellationToken);
+
 }
 
 /// <summary>
@@ -136,26 +131,17 @@ internal sealed partial class MobileDevTunnel(IMobileDevTunnelCli cli, Action<st
         => await cli.RunAsync(["port", "delete", tunnelId, "-p", port.ToString(CultureInfo.InvariantCulture)], Patience, cancellationToken).ConfigureAwait(false);
 
     /// <summary>
-    /// Signs in to Dev Tunnels, as <c>devtunnel user login</c> does in a terminal. With a Microsoft account on Windows, the command line
-    /// shows the account picker of Windows, which needs a window: it runs in a console of its own, which closes when the person signed in.
-    /// With GitHub, or elsewhere, it opens the browser. It ends when the person signed in, or after ten minutes.
+    /// Signs in to Dev Tunnels in the browser (<c>--use-browser-auth</c>), with a Microsoft account (<c>--entra</c>) or GitHub: the same
+    /// page on every system, whatever account the session of Windows has, and nothing that needs a window of the command line (the
+    /// account picker of Windows would). It ends when the person signed in, or after ten minutes.
     /// </summary>
     /// <returns>Whether the person is signed in now.</returns>
     internal async Task<bool> SignInAsync(bool github, CancellationToken cancellationToken)
     {
         if (!cli.IsInstalled) return false;
-        var patience = TimeSpan.FromMinutes(10);
-        if (!github && OperatingSystem.IsWindows())
-        {
-            var code = await cli.RunInWindowAsync(["user", "login"], patience, cancellationToken).ConfigureAwait(false);
-            log?.Invoke($"Mobile: devtunnel user login ended with {code}.");
-        }
-        else
-        {
-            var result = await cli.RunAsync(github ? ["user", "login", "-g"] : ["user", "login"], patience, cancellationToken).ConfigureAwait(false);
-            log?.Invoke($"Mobile: devtunnel user login ended with {result.ExitCode}: {result.Output.Trim()}");
-        }
-
+        string[] args = ["user", "login", github ? "--github" : "--entra", "--use-browser-auth"];
+        var result = await cli.RunAsync(args, TimeSpan.FromMinutes(10), cancellationToken).ConfigureAwait(false);
+        log?.Invoke($"Mobile: devtunnel user login ended with {result.ExitCode}: {result.Output.Trim()}");
         return IsSignedIn(await cli.RunAsync(["user", "show"], Patience, cancellationToken).ConfigureAwait(false));
     }
 
@@ -267,32 +253,6 @@ internal sealed class MobileDevTunnelCli : IMobileDevTunnelCli
 
         var text = await output.ConfigureAwait(false) + await errors.ConfigureAwait(false);
         return new(timedOut ? -1 : process.ExitCode, text, timedOut);
-    }
-
-    /// <inheritdoc />
-    public async Task<int> RunInWindowAsync(IReadOnlyList<string> args, TimeSpan patience, CancellationToken cancellationToken)
-    {
-        ArgumentNullException.ThrowIfNull(args);
-        if (Find() is not { } path) return -1;
-        // Not redirected and with a window: the command line has a console, which the account picker of Windows takes as its parent.
-        var info = new ProcessStartInfo(path) { UseShellExecute = false, CreateNoWindow = false };
-        foreach (var arg in args) info.ArgumentList.Add(arg);
-        using var process = Process.Start(info) ?? throw new InvalidOperationException("devtunnel did not start.");
-        using var wait = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        wait.CancelAfter(patience);
-        try
-        {
-            await process.WaitForExitAsync(wait.Token).ConfigureAwait(false);
-            return process.ExitCode;
-        }
-        catch (OperationCanceledException)
-        {
-            try { process.Kill(entireProcessTree: true); }
-            catch (InvalidOperationException) { }
-
-            if (cancellationToken.IsCancellationRequested) throw;
-            return -1;
-        }
     }
 
     /// <inheritdoc />

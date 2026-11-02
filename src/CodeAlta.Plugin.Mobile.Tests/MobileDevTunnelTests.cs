@@ -137,12 +137,6 @@ public sealed class MobileDevTunnelTests
             return Task.FromResult(line.StartsWith("port ", StringComparison.Ordinal) ? new MobileCliResult(0, "") : new MobileCliResult(1, "unknown command: " + line));
         }
 
-        public Task<int> RunInWindowAsync(IReadOnlyList<string> args, TimeSpan patience, CancellationToken cancellationToken)
-        {
-            lock (Calls) Calls.Add("window: " + string.Join(' ', args));
-            return Task.FromResult(0);
-        }
-
         public IMobileHostedProcess Start(IReadOnlyList<string> args)
         {
             var host = new FakeHost(string.Join(' ', args), HostLines ?? [
