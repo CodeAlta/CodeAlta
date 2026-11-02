@@ -136,6 +136,28 @@ public sealed record TrackedReviewer(string Name, TrackedVote Vote)
     public bool Mine { get; init; }
 }
 
+/// <summary>An image that the description or a comment of an item shows, as a tracker read it with its sign-in.</summary>
+/// <param name="MediaType">The type of the image: <c>image/png</c>, <c>image/jpeg</c>, <c>image/gif</c> or <c>image/webp</c>.</param>
+/// <param name="Bytes">The image.</param>
+public sealed record TrackedImage(string MediaType, byte[] Bytes)
+{
+    /// <summary>The largest image a tracker reads, in bytes.</summary>
+    public const int MaximumBytes = 10 * 1024 * 1024;
+
+    /// <summary>
+    /// Gets the type of an image from its first bytes: PNG, JPEG, GIF or WebP, the images a page draws safely. What a
+    /// service says of the type is not trusted, and SVG, which can hold scripts, is never an image here.
+    /// </summary>
+    /// <param name="bytes">The start of the image, or all of it.</param>
+    /// <returns>The media type, or null when the bytes are none of these images.</returns>
+    public static string? Detect(ReadOnlySpan<byte> bytes)
+        => bytes.StartsWith((ReadOnlySpan<byte>)[0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]) ? "image/png"
+            : bytes.StartsWith((ReadOnlySpan<byte>)[0xFF, 0xD8, 0xFF]) ? "image/jpeg"
+            : bytes.StartsWith("GIF87a"u8) || bytes.StartsWith("GIF89a"u8) ? "image/gif"
+            : bytes.Length >= 12 && bytes.StartsWith("RIFF"u8) && bytes[8..12].SequenceEqual("WEBP"u8) ? "image/webp"
+            : null;
+}
+
 /// <summary>A comment of an item.</summary>
 /// <param name="Author">Who wrote it.</param>
 /// <param name="CreatedAt">When it was written.</param>
@@ -341,6 +363,17 @@ public interface IIssueTracker
     /// <param name="cancellationToken">A token to cancel the operation.</param>
     /// <returns>The item, or null when the tracker has none with this id or cannot be reached.</returns>
     ValueTask<TrackedItemDetail?> ReadAsync(TrackedItemKind kind, string id, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Reads an image that the description or a comment of an item shows, with the sign-in of the tracker: an attachment
+    /// of the tracker, at an address of its own. Any other address is answered null without a request, so that the
+    /// credentials of the tracker go nowhere else. A tracker that reads no image answers null.
+    /// </summary>
+    /// <param name="address">The address of the image, as the text of the item writes it.</param>
+    /// <param name="cancellationToken">A token to cancel the operation.</param>
+    /// <returns>The image, at most <see cref="TrackedImage.MaximumBytes"/> and of a type <see cref="TrackedImage.Detect"/> knows; null otherwise.</returns>
+    ValueTask<TrackedImage?> ReadImageAsync(Uri address, CancellationToken cancellationToken)
+        => ValueTask.FromResult<TrackedImage?>(null);
 }
 
 /// <summary>

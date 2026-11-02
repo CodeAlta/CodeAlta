@@ -284,6 +284,69 @@ public sealed class GitHostTrackerTests
         Assert.AreEqual("proj/other", page.Items.Single(static item => item.Id == "2").Place);
     }
 
+    [TestMethod]
+    public async Task AzureDevOps_ReadsTheImagesOfItsAttachments_WithItsSignIn_AndNoOtherAddress()
+    {
+        byte[] png = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 1, 2, 3];
+        var asked = new List<(string Address, string? Authorization)>();
+        var answer = png;
+        var handler = new BytesHandler(request =>
+        {
+            asked.Add((request.RequestUri!.AbsoluteUri, request.Headers.Authorization?.ToString()));
+            return answer;
+        });
+        var tracker = Tracker(handler, GitRepositoryReference.AzureDevOps("org", "proj", "app"), GitRemoteCredential.Bearer("token"));
+        async Task<TrackedImage?> Read(string address) => await tracker.ReadImageAsync(new Uri(address), default);
+
+        var image = await Read("https://dev.azure.com/org/proj-id/_apis/wit/attachments/0f1e?fileName=image.png");
+        Assert.AreEqual("image/png", image?.MediaType);
+        CollectionAssert.AreEqual(png, image!.Bytes);
+        Assert.AreEqual("Bearer token", asked.Single().Authorization, "An attachment is read with the sign-in of the organization.");
+        Assert.IsNotNull(await Read("https://dev.azure.com/ORG/proj-id/_apis/git/repositories/repo-id/pullRequests/7/attachments/image.png"));
+
+        foreach (var elsewhere in new[]
+        {
+            "https://dev.azure.com/other/proj-id/_apis/wit/attachments/0f1e?fileName=image.png",
+            "https://example.com/org/proj-id/_apis/wit/attachments/0f1e?fileName=image.png",
+            "http://dev.azure.com/org/proj-id/_apis/wit/attachments/0f1e?fileName=image.png",
+            "https://dev.azure.com:8443/org/proj-id/_apis/wit/attachments/0f1e",
+            "https://dev.azure.com/org/proj-id/_apis/wit/workitems/12",
+            "https://dev.azure.com/org/proj-id/_apis/git/repositories/repo-id/pullRequests/seven/attachments/image.png",
+        })
+        {
+            Assert.IsNull(await Read(elsewhere), elsewhere);
+        }
+
+        Assert.HasCount(2, asked, "No request leaves for an address that is not an attachment of the organization.");
+        answer = "<svg xmlns=\"http://www.w3.org/2000/svg\"><script>alert(1)</script></svg>"u8.ToArray();
+        Assert.IsNull(await Read("https://dev.azure.com/org/proj-id/_apis/wit/attachments/0f1f"), "An SVG is never an image here.");
+        answer = new byte[TrackedImage.MaximumBytes + 1];
+        png.CopyTo(answer, 0);
+        Assert.IsNull(await Read("https://dev.azure.com/org/proj-id/_apis/wit/attachments/0f20"), "An image too large is not read.");
+
+        var github = Tracker(handler, GitRepositoryReference.GitHub("o", "r"));
+        Assert.IsNull(await github.ReadImageAsync(new Uri("https://github.com/user-attachments/assets/1"), default));
+        Assert.HasCount(4, asked, "GitHub reads no image yet.");
+    }
+
+    [TestMethod]
+    public void AnImage_IsKnownByItsFirstBytes_NotByWhatTheServiceSays()
+    {
+        Assert.AreEqual("image/png", TrackedImage.Detect([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]));
+        Assert.AreEqual("image/jpeg", TrackedImage.Detect([0xFF, 0xD8, 0xFF, 0xE0]));
+        Assert.AreEqual("image/gif", TrackedImage.Detect("GIF89a.."u8));
+        Assert.AreEqual("image/webp", TrackedImage.Detect("RIFF\0\0\0\0WEBPVP8 "u8));
+        Assert.IsNull(TrackedImage.Detect("<svg/>"u8));
+        Assert.IsNull(TrackedImage.Detect("RIFF\0\0\0\0WAVE"u8));
+        Assert.IsNull(TrackedImage.Detect([]));
+    }
+
+    private sealed class BytesHandler(Func<HttpRequestMessage, byte[]> answer) : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+            => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent(answer(request)), RequestMessage = request });
+    }
+
     // An organization where the user is in Core directly and in Fields through Core, and the open pull requests of its project.
     private static string? PullRequestAnswer(HttpRequestMessage request)
     {
@@ -772,7 +835,7 @@ public sealed class GitHostTrackerTests
         Assert.AreEqual(1, handler.Requests.Count(static request => request.Contains("/pulls?", StringComparison.Ordinal)), "The recent pull requests are listed once while typing.");
     }
 
-    private static IIssueTracker Tracker(Handler handler, GitRepositoryReference repository, GitRemoteCredential? credential = null)
+    private static IIssueTracker Tracker(HttpMessageHandler handler, GitRepositoryReference repository, GitRemoteCredential? credential = null)
     {
         var lookup = new GitIssueLookup(GitIssueLookup.CreateHttpClient(handler), new GitIssueLookupOptions
         {

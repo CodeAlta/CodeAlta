@@ -144,6 +144,24 @@ internal sealed class GitHostTracker : IIssueTracker
         }
     }
 
+    /// <inheritdoc />
+    public async ValueTask<TrackedImage?> ReadImageAsync(Uri address, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(address);
+        if (!address.IsAbsoluteUri) return null;
+        try
+        {
+            var request = new GitIssueQuery(_client, _repository, await _authorization(cancellationToken).ConfigureAwait(false)) { Cache = Cache };
+            return await Api.ReadImageAsync(request, address, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is HttpRequestException or IOException or InvalidOperationException
+            || exception is OperationCanceledException && !cancellationToken.IsCancellationRequested)
+        {
+            LogFailure("reading an image", exception);
+            return null;
+        }
+    }
+
     private static string Kind(TrackedItemKind kind, bool one = false)
         => kind == TrackedItemKind.PullRequest ? one ? "the pull request" : "pull requests" : one ? "the issue" : "issues";
 
@@ -175,7 +193,7 @@ internal sealed class GitHostTracker : IIssueTracker
 }
 
 /// <summary>The REST API of one hosting service, as far as issues and pull requests go.</summary>
-internal abstract class GitHostApi
+internal abstract partial class GitHostApi
 {
     public static GitHostApi For(GitRemoteProvider provider)
         => provider switch
