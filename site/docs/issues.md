@@ -150,6 +150,7 @@ On Azure DevOps, pull requests have their own views, in the same files, with the
 - Turn on **In the tab** for **Scope** to switch between the repository and the whole project under the toolbar.
 - A row shows your reviews, and the repository of a pull request of another one. The reviewers of a pull request are listed with their votes; `*` marks a required review.
 - A pull request of another repository is read and opened on Azure DevOps; no session is started on it from this project.
+- These filters search the 1,000 most recent pull requests of the list; the tab says when there are more.
 - Your groups are read with the same sign-in as the work items. When they cannot be read (a personal access token without *Identity (Read)*), the filter says so and lists nothing.
 
 A view that lists the pull requests that wait for your review, in every repository of the project:
