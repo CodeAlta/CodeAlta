@@ -1,5 +1,6 @@
 using System.Globalization;
 using CodeAlta.Agent;
+using CodeAlta.Desktop.SessionHosts;
 using CodeAlta.Orchestration.Runtime;
 using NeoAstra.Rpc;
 
@@ -18,6 +19,15 @@ internal sealed class SessionUserInputService
     internal SessionUserInputService(SessionPermissionService owner, string epoch, bool enabled)
         : this(id => owner.ListOwnedUserInputsAsync(id, default), (handle, answers) => owner.ResolveOwnedUserInputAsync(handle, answers, default),
             handle => owner.CancelOwnedUserInputAsync(handle, default), epoch, enabled) { }
+
+    /// <summary>Creates the service over the hosts of the sessions: each request goes to the host of its session.</summary>
+    internal SessionUserInputService(SessionHostRegistry hosts, string epoch, bool enabled)
+        : this(id => hosts.Resolve(id).ListUserInputsAsync(id, default),
+            (handle, answers) => hosts.Resolve(handle.SessionId).ResolveUserInputAsync(handle, answers, default),
+            handle => hosts.Resolve(handle.SessionId).CancelUserInputAsync(handle, default), epoch, enabled)
+    {
+        ArgumentNullException.ThrowIfNull(hosts);
+    }
 
     internal SessionUserInputService(Func<string, ValueTask<SessionOwnedUserInputPage>> list,
         Func<SessionOwnedUserInputHandle, IReadOnlyList<SessionOwnedUserInputAnswer>, ValueTask<bool>> resolve,

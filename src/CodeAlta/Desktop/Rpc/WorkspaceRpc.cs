@@ -28,14 +28,18 @@ internal sealed partial class WorkspaceService
         _readTimelineTail = reads.ReadTimelineTailAsync;
         _readHistorySource = reads.ReadHistorySourceAsync;
         _readAllSessions = reads.ReadSnapshotAsync;
-        _read = async token =>
+        _read = ProjectedSnapshot(reads.ReadSnapshotAsync);
+    }
+
+    // The snapshot of the page from the one of a host: the sessions whose folder exists, with their worktrees.
+    private static Func<CancellationToken, Task<WorkspaceSnapshot>> ProjectedSnapshot(Func<CancellationToken, Task<CodeAlta.Orchestration.Runtime.OwnedWorkspaceSnapshot>> read)
+        => async token =>
         {
-            var actual = reads.ReadSnapshotAsync(token);
+            var actual = read(token);
             var snapshot = await actual.ConfigureAwait(false);
             var (projects, sessions) = WithExistingFolders(snapshot.Projects, snapshot.Sessions, Directory.Exists);
             return ProjectSnapshot(projects, sessions, snapshot.SessionHeaders, DescribeWorktreesOnce());
         };
-    }
 
     internal WorkspaceService(string? catalogRoot)
     {

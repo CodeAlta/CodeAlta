@@ -1,5 +1,6 @@
 using System.Globalization;
 using CodeAlta.Agent;
+using CodeAlta.Desktop.SessionHosts;
 using CodeAlta.Orchestration.Runtime;
 using NeoAstra.Rpc;
 
@@ -24,6 +25,14 @@ internal sealed class SessionPermissionsService
 
     internal SessionPermissionsService(SessionPermissionService permissions, string epoch, Func<bool> enabled)
         : this(permissions.ListOwnedCommandsAsync, permissions.ResolveOwnedCommandAsync, epoch, enabled) { }
+
+    /// <summary>Creates the service over the hosts of the sessions: each request goes to the host of its session.</summary>
+    internal SessionPermissionsService(SessionHostRegistry hosts, string epoch, Func<bool> enabled)
+        : this((sessionId, token) => hosts.Resolve(sessionId).ListPermissionsAsync(sessionId, token),
+            (handle, decision, token) => hosts.Resolve(handle.Attempt.SessionId).ResolvePermissionAsync(handle, decision, token), epoch, enabled)
+    {
+        ArgumentNullException.ThrowIfNull(hosts);
+    }
 
     // Mandatory inert transport-test adapters; never constructs a host, provider or native surface.
     internal SessionPermissionsService(Func<string, CancellationToken, ValueTask<SessionOwnedPermissionPage>> list,
