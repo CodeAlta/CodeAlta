@@ -365,6 +365,21 @@ public sealed class GitHostTrackerTests
     }
 
     [TestMethod]
+    public async Task AzureDevOps_ReadsAnAttachmentOfTheOrganization_WrittenWithoutItsProject()
+    {
+        byte[] png = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 1];
+        var asked = new List<string>();
+        var tracker = Tracker(new BytesHandler(request => { asked.Add(request.RequestUri!.AbsoluteUri); return png; }),
+            GitRepositoryReference.AzureDevOps("org", "proj", "app"), GitRemoteCredential.Bearer("token"));
+
+        // The service answers an attachment it was given with the address of its organization, without a project.
+        Assert.AreEqual("image/png", (await tracker.ReadImageAsync(new Uri("https://dev.azure.com/org/_apis/wit/attachments/0f1e?fileName=image.png"), default))?.MediaType);
+        Assert.IsNull(await tracker.ReadImageAsync(new Uri("https://dev.azure.com/other/_apis/wit/attachments/0f1e?fileName=image.png"), default));
+        Assert.IsNull(await tracker.ReadImageAsync(new Uri("https://dev.azure.com/org/_apis/wit/workitems/0f1e"), default));
+        Assert.HasCount(1, asked, "Only the attachment of the organization is asked.");
+    }
+
+    [TestMethod]
     public void AnImage_IsKnownByItsFirstBytes_NotByWhatTheServiceSays()
     {
         Assert.AreEqual("image/png", TrackedImage.Detect([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]));

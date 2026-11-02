@@ -23,6 +23,8 @@ internal sealed partial class AzureDevOpsApi
             || !string.Equals(address.Host, repository.Host, StringComparison.OrdinalIgnoreCase)) return false;
         var segments = address.AbsolutePath.Split('/', StringSplitOptions.RemoveEmptyEntries);
         if (segments.Length < 5 || !string.Equals(Uri.UnescapeDataString(segments[0]), repository.Owner, StringComparison.OrdinalIgnoreCase)) return false;
+        // {org}/_apis/wit/attachments/{id}: the address the service gives an attachment it was sent, without a project.
+        if (segments.Length == 5 && Is(segments[1], "_apis") && Is(segments[2], "wit") && Is(segments[3], "attachments")) return true;
         // {org}/{project}/_apis/wit/attachments/{id}
         if (segments.Length == 6 && Is(segments[2], "_apis") && Is(segments[3], "wit") && Is(segments[4], "attachments")) return true;
         // {org}/{project}/_apis/git/repositories/{repository}/pullRequests/{id}/attachments/{file}
