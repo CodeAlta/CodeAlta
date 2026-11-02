@@ -325,6 +325,45 @@ test("the window of the views keeps what is edited while the tab renders again",
   }, options);
 });
 
+test("on a wide screen, the window of the views opens centered and can be moved over the whole tab", { skip: !edge, timeout: 120_000 }, async () => {
+  await withCanvas(async page => {
+    await page.until(`${rows}.join() === '#128'`, "the issues of the repository");
+    await page.evaluate(choose('.issues-toolbar select[aria-label="Project"]', "ado"));
+    await page.until(`${rows}.join() === '#41'`, "the work items of the view of the team");
+    await page.click('.issues-views-manage');
+    await page.until(`!!document.querySelector('.issue-views-window .app-window')`, "the window of the views");
+
+    // The page lays out its parts in a narrower column; the layer of the window still covers the viewport.
+    const [layer, surface, width, height] = await page.evaluate<[number[], number[], number, number]>(`(() => {
+      const box = element => { const rect = element.getBoundingClientRect(); return [rect.left, rect.top, rect.right, rect.bottom].map(Math.round); };
+      return [box(document.querySelector('.issue-views-window')), box(document.querySelector('.issue-views-window .app-window')), innerWidth, innerHeight];
+    })()`);
+    assert.deepEqual(layer, [0, 0, width, height], "the layer covers the viewport");
+    assert.ok(Math.abs(surface[0] - (width - surface[2])) <= 1, `the window is centered: ${surface.join()} in ${width}`);
+
+    // Dragged by its title bar far beyond each side, the window stops at the edge of the viewport, not of the column.
+    const windowBox = () => page.evaluate<number[]>(`(() => { const rect = document.querySelector('.issue-views-window .app-window').getBoundingClientRect(); return [rect.left, rect.top, rect.right, rect.bottom].map(Math.round); })()`);
+    const drag = async (dx: number) => {
+      const [x, y] = await page.evaluate<number[]>(`(() => { const rect = document.querySelector('.issue-views-window .app-window-titlebar h2').getBoundingClientRect(); return [rect.left + 20, rect.top + rect.height / 2]; })()`);
+      await page.command("Input.dispatchMouseEvent", { type: "mouseMoved", x, y });
+      await page.command("Input.dispatchMouseEvent", { type: "mousePressed", x, y, button: "left", buttons: 1, clickCount: 1 });
+      for (let step = 1; step <= 10; step++) await page.command("Input.dispatchMouseEvent", { type: "mouseMoved", x: x + dx * step / 10, y, button: "left", buttons: 1 });
+      await page.command("Input.dispatchMouseEvent", { type: "mouseReleased", x: x + dx, y, button: "left", buttons: 0, clickCount: 1 });
+    };
+    await drag(-width);
+    await page.until(`document.querySelector('.issue-views-window .app-window').getBoundingClientRect().left === 0`, "the window at the left edge");
+    await drag(width);
+    await page.until(`Math.round(document.querySelector('.issue-views-window .app-window').getBoundingClientRect().right) === innerWidth`, "the window at the right edge");
+
+    // The restore button of the title bar places it centered again.
+    const restore = `document.querySelector('.issue-views-window .app-window-titlebar button[aria-label="Restore default size and position"]')`;
+    await page.click(`.issue-views-window .app-window-titlebar button[aria-label="Restore default size and position"]`);
+    await page.until(`${restore}.disabled`, "the restored window");
+    assert.deepEqual(await windowBox(), surface, "the restored window is where it opened");
+    assert.deepEqual(page.problems, []);
+  }, { ...options, width: 1900, height: 900 });
+});
+
 test("values the host refuses or fails on are not asked again and again, and refused ones are forgotten", { skip: !edge, timeout: 120_000 }, async () => {
   await withCanvas(async page => {
     const key = "ado\\nazure_devops\\nteam\\nSprint board";

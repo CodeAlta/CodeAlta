@@ -1210,8 +1210,9 @@ input.scheme-color-well:disabled { cursor: not-allowed; opacity: .6; }
 .session-running .activity-spinner, .flexlayout__tab_button_leading .activity-spinner { margin-inline: 2px; }
 /* The page behind a modal window is dimmed, never blurred: it stays readable. */
 dialog::backdrop { background: var(--scrim); }
-/* Desktop-style windows: a full-viewport modal layer hosting one movable, resizable surface (react-rnd). */
-.app-window-layer { position: fixed; inset: 0; width: 100vw; height: 100dvh; max-width: none; max-height: none; margin: 0; padding: 0; border: 0; overflow: hidden; color: var(--text); background: transparent; }
+/* Desktop-style windows: a full-viewport modal layer hosting one movable, resizable surface (react-rnd).
+   `dialog.` outweighs the column rules of the pages that host one (`.work-page > *`, `.workflows > *`): a narrower layer bounds the surface. */
+dialog.app-window-layer { position: fixed; inset: 0; width: 100vw; height: 100dvh; max-width: none; max-height: none; margin: 0; padding: 0; border: 0; overflow: hidden; color: var(--text); background: transparent; }
 .app-window { display: flex !important; flex-direction: column; overflow: hidden; border: 1px solid var(--line-strong); border-radius: 10px; background: var(--panel); box-shadow: var(--shadow), 0 0 0 1px color-mix(in srgb, var(--accent) 22%, transparent), 0 0 42px color-mix(in srgb, var(--accent) 10%, transparent); }
 .app-window-titlebar { flex: 0 0 auto; display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 40px; padding: 4px 8px 4px 16px; border-bottom: 1px solid var(--line); background: linear-gradient(180deg, color-mix(in srgb, var(--accent) 7%, var(--panel)), var(--panel)); cursor: move; user-select: none; }
 .app-window-titlebar h2 { min-width: 0; margin: 0; overflow: hidden; font-size: 14px; font-weight: 600; letter-spacing: .01em; text-overflow: ellipsis; white-space: nowrap; }
