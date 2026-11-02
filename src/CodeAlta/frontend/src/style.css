@@ -1875,9 +1875,10 @@ dialog.open-project-dialog:has(> .app-window) > .app-window > .app-window-body >
 /* In a very narrow window the mark ends where the actions of the title bar start: its buttons that have no room fold into its menu. */
 .ide-shell .workspace-shell { --brand-width: min(var(--brand-room), calc(100vw - var(--titlebar-inset-end) - var(--window-actions-width) - var(--space-switch-width, 0px) - var(--plugin-buttons-width, 0px))); }
 .window-brand { grid-area: brand; display: flex; align-items: center; gap: 9px; min-width: 0; padding: 0 6px 0 calc(11px + var(--neoastra-titlebar-inset-left, 0px)); overflow: hidden; background: var(--panel); white-space: nowrap; }
-/* The rail takes the room the mark leaves: what does not fit folds into its "…" menu (ActivityRail.tsx). */
+/* The box of the rail takes the room the mark leaves: what does not fit folds into its "…" menu (ActivityRail.tsx). */
 /* Nothing of the rail is clipped but by the mark itself: the focus ring of its buttons goes past their box. */
-.window-brand .activity-rail { flex: 1 1 0; display: flex; align-items: center; justify-content: flex-end; gap: 2px; min-width: 0; }
+.window-brand .activity-rail-room { flex: 1 1 0; display: flex; justify-content: flex-end; min-width: 0; }
+.window-brand .activity-rail { flex: 0 1 auto; display: flex; align-items: center; gap: 2px; min-width: 0; }
 .window-brand .activity-rail > .bp6-button, .window-brand .activity-rail > .bp6-popover-target > .bp6-button { flex: none; min-width: 26px; min-height: 28px; padding: 0; color: var(--muted); }
 .window-brand .activity-rail > .bp6-popover-target { display: flex; flex: none; }
 .window-brand .activity-rail > .bp6-button:hover, .window-brand .activity-rail > .bp6-button.bp6-active, .window-brand .activity-rail > .bp6-popover-open > .bp6-button { color: var(--text); }
@@ -1922,6 +1923,22 @@ dialog.open-project-dialog:has(> .app-window) > .app-window > .app-window-body >
 /* A toast is no region: it sits below the title bar, and each frame of a toast sliding in sent the regions to the
    window again, a window move in the kernel that the mouse of the whole desktop waits for. */
 .app-window, dialog[open]:not(.app-window-layer), .bp6-overlay-content:not(.bp6-toast), .session-tab-popup { app-region: no-drag; }
+/* `app-region` is inherited, and each box that has one goes to the window: Blueprint scaling a popover as it opens, or a
+   scroll in a dialog, sent them all again at each frame. Each of these is one box. `initial`, because Chromium takes
+   `none` for `no-drag`. */
+:is(.app-window, dialog[open]:not(.app-window-layer), .bp6-overlay-content:not(.bp6-toast), .session-tab-popup) *:not(.app-window, dialog[open], .bp6-overlay-content, .session-tab-popup) { app-region: initial; }
+/* The window has a child window per rectangle of the area that moves it, made again at each change of a region, on its UI
+   thread: what is clickable in the title bar is one hole in that area. The tabs that show are one, whatever their number:
+   between them, tabs cut it into five bands of 3px rectangles, and tabs scrolled out of the strip count there too, as they
+   are not clipped. The strip is as wide as its tabs, so that the bar after them, and the 6px above them, move the window;
+   the rail is as wide as its buttons, so that the room before them does. */
+.ide-shell .flexlayout__tabset_tabbar_outer_top[data-neoastra-drag-region] .flexlayout__mini_scrollbar_container { flex: 0 1 auto; min-width: 0; }
+.ide-shell .flexlayout__tabset_tabbar_outer_top[data-neoastra-drag-region] .flexlayout__tabset_tabbar_inner { flex: 0 1 auto; min-width: 0; app-region: no-drag; margin-top: 6px; }
+.ide-shell .flexlayout__tabset_tabbar_outer_top[data-neoastra-drag-region] .flexlayout__tab_toolbar { margin-left: auto; }
+.ide-shell .flexlayout__tabset_tabbar_outer_top[data-neoastra-drag-region] .flexlayout__tabset_tabbar_inner * { app-region: initial; }
+.ide-shell .flexlayout__tabset_tabbar_outer_top[data-neoastra-drag-region] .flexlayout__tab_button { height: 100%; }
+.ide-shell .flexlayout__tabset_tabbar_outer_top[data-neoastra-drag-region] .flexlayout__tabset_tab_divider { margin-bottom: 8px; }
+.ide-shell .flexlayout__tabset_tabbar_outer_top[data-neoastra-drag-region] .flexlayout__tab_toolbar, .window-brand .activity-rail { app-region: no-drag; }
 
 /* Session tabs: browser-style tabs resting on the content they select. */
 .ide-shell .flexlayout__tabset_tabbar_outer_top { height: 34px; padding: 0; align-items: stretch; border-bottom: 0; background: var(--panel); box-shadow: inset 0 -1px var(--line); font-size: 12px; }
@@ -1932,7 +1949,7 @@ dialog.open-project-dialog:has(> .app-window) > .app-window > .app-window-body >
 .ide-shell .flexlayout__tabset_tabbar_inner { align-items: stretch; }
 .ide-shell .flexlayout__tabset_tabbar_inner_tab_container { align-items: flex-end; padding: 0 6px; border-top: 0; }
 .ide-shell .flexlayout__tabset_tab_divider { align-self: center; width: 1px; height: 14px; margin: 0 1px 2px; background: var(--line); }
-.ide-shell .flexlayout__tab_button { app-region: no-drag; position: relative; height: calc(100% - 6px); min-width: 0; max-width: 240px; gap: 6px; padding: 0 6px 0 10px; border: 1px solid transparent; border-bottom: 0; border-radius: 8px 8px 0 0; background: transparent; }
+.ide-shell .flexlayout__tab_button { position: relative; height: calc(100% - 6px); min-width: 0; max-width: 240px; gap: 6px; padding: 0 6px 0 10px; border: 1px solid transparent; border-bottom: 0; border-radius: 8px 8px 0 0; background: transparent; }
 .ide-shell .flexlayout__tab_button--unselected:hover { background: color-mix(in srgb, var(--text) 7%, transparent); }
 .ide-shell .flexlayout__tab_button--selected { border-color: var(--line); background: var(--bg); }
 .ide-shell .flexlayout__tabset-selected .flexlayout__tab_button--selected::before { content: ""; position: absolute; top: -1px; left: 8px; right: 8px; height: 2px; border-radius: 0 0 2px 2px; background: var(--accent); }
