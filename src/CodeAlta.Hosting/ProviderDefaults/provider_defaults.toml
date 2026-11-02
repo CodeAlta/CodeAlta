@@ -58,6 +58,16 @@ supports_developer_role = false
 reasoning_input_field_name = "reasoning_content"
 
 [[rules]]
+id = "openrouter-attribution"
+display_name = "OpenRouter App Attribution"
+types = ["anthropic-messages", "openai-chat", "openai-responses"]
+provider_keys = ["openrouter"]
+host_suffixes = ["openrouter.ai"]
+
+[rules.headers]
+default = { "HTTP-Referer" = "https://codealta.github.io", "X-OpenRouter-Title" = "CodeAlta", "X-OpenRouter-Categories" = "cli-agent" }
+
+[[rules]]
 id = "xiaomi-openai-chat"
 display_name = "Xiaomi OpenAI Chat"
 types = ["openai-chat"]

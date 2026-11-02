@@ -273,6 +273,26 @@ public sealed class ConfiguredProviderRegistrationTests
         Assert.IsTrue(original.SupportsDeveloperRole);
     }
 
+    // OpenRouter's app attribution lists the app named by these headers in its rankings and analytics.
+    [TestMethod]
+    [DataRow("openrouter", "https://openrouter.ai/api/v1", AgentTransportKind.OpenAIChatCompletions, true)]
+    [DataRow("my-openrouter", "https://openrouter.ai/api/v1", AgentTransportKind.OpenAIResponses, true)]
+    [DataRow("unrelated", "https://openrouter.ai/api/v1", AgentTransportKind.OpenAIChatCompletions, true)]
+    [DataRow("openrouter", "https://openrouter.ai/api/v1", AgentTransportKind.AnthropicMessages, true)]
+    [DataRow("openrouter", "https://openrouter.ai/api/v1/", AgentTransportKind.GoogleGeminiApi, false)]
+    [DataRow("openrouter", "https://openrouter.ai/api/v1/", AgentTransportKind.GoogleVertexAI, false)]
+    [DataRow("unrelated", "https://notopenrouter.ai/api/v1", AgentTransportKind.OpenAIChatCompletions, false)]
+    [DataRow("unrelated", "https://example.invalid/v1", AgentTransportKind.OpenAIResponses, false)]
+    public void ShippedHeaderDefaults_AttributeTheAppOnlyToOpenRouter(
+        string providerKey, string uri, AgentTransportKind transportKind, bool attributed)
+    {
+        var headers = RawApiProviderDefaultsCatalog.CreateHeaderDefaults(transportKind, providerKey, new Uri(uri));
+
+        Assert.AreEqual(attributed ? "https://codealta.github.io" : null, headers?.GetValueOrDefault("HTTP-Referer"));
+        Assert.AreEqual(attributed ? "CodeAlta" : null, headers?.GetValueOrDefault("X-OpenRouter-Title"));
+        Assert.AreEqual(attributed ? "cli-agent" : null, headers?.GetValueOrDefault("X-OpenRouter-Categories"));
+    }
+
     [TestMethod]
     public void ShippedExtraBodyDefaults_PreserveExplicitOverridesWithoutMutatingInput()
     {
