@@ -70,8 +70,8 @@ public sealed class FleetNodeClient : IAsyncDisposable
     }
 
     /// <summary>
-    /// Connects to the node this process runs beside, with the node's own key: the owner's local control, which only
-    /// creates pairing offers (<c>altanode pair</c>).
+    /// Connects to the node this process runs beside, with the node's own key: the owner's local control, which manages
+    /// the pairing and the devices of the node (<c>altanode pair</c>, <c>status</c>, <c>devices</c>, <c>revoke</c>, <c>permissions</c>).
     /// </summary>
     /// <param name="addresses">The addresses the node listens on.</param>
     /// <param name="nodeIdentity">The key of the node, read from its profile.</param>
@@ -322,6 +322,47 @@ public sealed class FleetNodeClient : IAsyncDisposable
             .ConfigureAwait(false);
         return Read(result, FleetNodeJsonContext.Default.FleetPairingOutcome);
     }
+
+    /// <summary>The owner's local control: reads what the node does now.</summary>
+    /// <param name="cancellationToken">Cancels the call.</param>
+    /// <returns>The sessions at work, the open channels and the paired devices.</returns>
+    /// <exception cref="FleetException">The node refused the call.</exception>
+    public Task<FleetNodeStatus> GetStatusAsync(CancellationToken cancellationToken = default)
+        => CallAsync(FleetNodeMethods.ControlStatus, new FleetEmpty(), FleetNodeJsonContext.Default.FleetEmpty, FleetNodeJsonContext.Default.FleetNodeStatus, null,
+            cancellationToken);
+
+    /// <summary>The owner's local control: asks the node to stop gracefully; the channel closes as it stops.</summary>
+    /// <param name="cancellationToken">Cancels the call.</param>
+    /// <returns>A task that completes once the node accepted.</returns>
+    /// <exception cref="FleetException">The node refused the call (<see cref="FleetNodeErrorCodes.Unavailable"/>).</exception>
+    public Task StopNodeAsync(CancellationToken cancellationToken = default)
+        => CallAsync(FleetNodeMethods.ControlStop, new FleetEmpty(), FleetNodeJsonContext.Default.FleetEmpty, FleetNodeJsonContext.Default.FleetEmpty, null, cancellationToken);
+
+    /// <summary>The owner's local control: lists the paired devices, the revoked ones included.</summary>
+    /// <param name="cancellationToken">Cancels the call.</param>
+    /// <returns>The devices.</returns>
+    /// <exception cref="FleetException">The node refused the call.</exception>
+    public Task<FleetDeviceList> ListDevicesAsync(CancellationToken cancellationToken = default)
+        => CallAsync(FleetNodeMethods.ControlDevicesList, new FleetEmpty(), FleetNodeJsonContext.Default.FleetEmpty, FleetNodeJsonContext.Default.FleetDeviceList, null,
+            cancellationToken);
+
+    /// <summary>The owner's local control: revokes a device and closes its channels.</summary>
+    /// <param name="device">The device: its id, its name, or the start of its id.</param>
+    /// <param name="cancellationToken">Cancels the call.</param>
+    /// <returns>The device as it is now.</returns>
+    /// <exception cref="FleetException">The node refused the call (<see cref="FleetNodeErrorCodes.DeviceNotFound"/>, an ambiguous name).</exception>
+    public Task<FleetDeviceChange> RevokeDeviceAsync(string device, CancellationToken cancellationToken = default)
+        => CallAsync(FleetNodeMethods.ControlDevicesRevoke, new FleetDeviceRef(device), FleetNodeJsonContext.Default.FleetDeviceRef,
+            FleetNodeJsonContext.Default.FleetDeviceChange, null, cancellationToken);
+
+    /// <summary>The owner's local control: changes what a device may do.</summary>
+    /// <param name="parameters">The device, the permissions to add and those to remove.</param>
+    /// <param name="cancellationToken">Cancels the call.</param>
+    /// <returns>The device as it is now.</returns>
+    /// <exception cref="FleetException">The node refused the call.</exception>
+    public Task<FleetDeviceChange> SetDevicePermissionsAsync(FleetDevicePermissionsParams parameters, CancellationToken cancellationToken = default)
+        => CallAsync(FleetNodeMethods.ControlDevicesPermissions, parameters, FleetNodeJsonContext.Default.FleetDevicePermissionsParams,
+            FleetNodeJsonContext.Default.FleetDeviceChange, null, cancellationToken);
 
     /// <summary>Closes the channel.</summary>
     /// <param name="cancellationToken">Cancels the wait for the close.</param>

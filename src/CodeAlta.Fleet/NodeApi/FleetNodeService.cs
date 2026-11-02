@@ -38,13 +38,16 @@ public sealed class FleetNodeServiceOptions
 
     /// <summary>Gets the clock of the offers.</summary>
     public TimeProvider TimeProvider { get; init; } = TimeProvider.System;
+
+    /// <summary>Gets what stops the node gracefully when its owner asks (<c>control.stop</c>); null when the owner cannot stop it this way.</summary>
+    public Action? RequestStop { get; init; }
 }
 
 /// <summary>
 /// The node API over the runtime of a node (<see cref="CodeAltaHost"/>), served on session channels. Each call is checked
 /// against what the calling device may do (<see cref="DevicePermissions"/>), read again at every call so that a revocation
 /// or a change of permissions applies at once. An unpaired client may only redeem the open pairing offer; the node's own
-/// key, from this machine, is the owner's local control (<c>altanode pair</c>).
+/// key, from this machine, is the owner's local control (<c>altanode pair</c>, <c>status</c>, <c>devices</c>, <c>revoke</c>, <c>permissions</c>).
 /// </summary>
 public sealed partial class FleetNodeService : IAsyncDisposable
 {
@@ -189,6 +192,16 @@ public sealed partial class FleetNodeService : IAsyncDisposable
                 FleetNodeJsonContext.Default.FleetPairingOffer, CreatePairingOfferAsync, optionalParams: true);
             On(caller, FleetNodeMethods.ControlPairingWait, Access.Owner, FleetNodeJsonContext.Default.FleetEmpty,
                 FleetNodeJsonContext.Default.FleetPairingOutcome, WaitPairingAsync, optionalParams: true);
+            On(caller, FleetNodeMethods.ControlStop, Access.Owner, FleetNodeJsonContext.Default.FleetEmpty,
+                FleetNodeJsonContext.Default.FleetEmpty, ControlStopAsync, optionalParams: true);
+            On(caller, FleetNodeMethods.ControlStatus, Access.Owner, FleetNodeJsonContext.Default.FleetEmpty,
+                FleetNodeJsonContext.Default.FleetNodeStatus, ControlStatusAsync, optionalParams: true);
+            On(caller, FleetNodeMethods.ControlDevicesList, Access.Owner, FleetNodeJsonContext.Default.FleetEmpty,
+                FleetNodeJsonContext.Default.FleetDeviceList, ControlListDevicesAsync, optionalParams: true);
+            On(caller, FleetNodeMethods.ControlDevicesRevoke, Access.Owner, FleetNodeJsonContext.Default.FleetDeviceRef,
+                FleetNodeJsonContext.Default.FleetDeviceChange, ControlRevokeDeviceAsync);
+            On(caller, FleetNodeMethods.ControlDevicesPermissions, Access.Owner, FleetNodeJsonContext.Default.FleetDevicePermissionsParams,
+                FleetNodeJsonContext.Default.FleetDeviceChange, ControlSetPermissionsAsync);
             return;
         }
 
@@ -272,7 +285,7 @@ public sealed partial class FleetNodeService : IAsyncDisposable
         if (caller.IsOwner)
         {
             if (access.OwnerOnly) return null;
-            throw new FleetException(FleetErrorCodes.Forbidden, null, "The local control of the node only creates pairing offers.");
+            throw new FleetException(FleetErrorCodes.Forbidden, null, "The local control of the node only manages its pairing and its devices.");
         }
 
         if (access.OwnerOnly) throw new FleetException(FleetErrorCodes.Forbidden, null, "Only the node's owner, on its machine, may do this.");
@@ -291,15 +304,7 @@ public sealed partial class FleetNodeService : IAsyncDisposable
     }
 
     /// <summary>The permissions as the API names them.</summary>
-    internal static IReadOnlyList<string> Describe(DevicePermissions permissions)
-    {
-        var names = new List<string>(4);
-        if (permissions.HasFlag(DevicePermissions.View)) names.Add("view");
-        if (permissions.HasFlag(DevicePermissions.Drive)) names.Add("drive");
-        if (permissions.HasFlag(DevicePermissions.Start)) names.Add("start");
-        if (permissions.HasFlag(DevicePermissions.Move)) names.Add("move");
-        return names;
-    }
+    internal static IReadOnlyList<string> Describe(DevicePermissions permissions) => DevicePermissionNames.Format(permissions);
 
     private void RequireWork()
     {
