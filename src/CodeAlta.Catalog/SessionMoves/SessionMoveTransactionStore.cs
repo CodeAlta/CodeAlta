@@ -76,6 +76,10 @@ public sealed record SessionMoveTransaction
     [JsonPropertyName("projectId")]
     public string? ProjectId { get; init; }
 
+    /// <summary>Gets the folder of that project, on the target.</summary>
+    [JsonPropertyName("projectPath")]
+    public string? ProjectPath { get; init; }
+
     /// <summary>Gets the root of the worktree the target prepared.</summary>
     [JsonPropertyName("worktreeRoot")]
     public string? WorktreeRoot { get; init; }

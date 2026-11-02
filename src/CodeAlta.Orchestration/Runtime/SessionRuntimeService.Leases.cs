@@ -156,9 +156,14 @@ public sealed partial class SessionRuntimeService
     }
 
     // Holds a session while a change is written to it: a session another process runs is not changed, nor one whose lease
-    // cannot be taken. Throws SessionInUseException, SessionLeaseUnavailableException.
+    // cannot be taken, nor one frozen for a move or given to another machine. Throws SessionInUseException,
+    // SessionLeaseUnavailableException.
     private IDisposable HoldForWrite(string sessionId)
-        => Leases is null || string.IsNullOrWhiteSpace(sessionId) ? NoLease.Instance : Leases.Hold(sessionId.Trim());
+    {
+        if (string.IsNullOrWhiteSpace(sessionId)) return NoLease.Instance;
+        var id = sessionId.Trim();
+        return CheckNotRelinquished(id, Leases is null ? NoLease.Instance : Leases.Hold(id));
+    }
 
     // Holds a session while a change that reports a status is written to it; false when another process holds it. A lease
     // that cannot be taken throws SessionLeaseUnavailableException.
@@ -180,9 +185,15 @@ public sealed partial class SessionRuntimeService
     private string? RefuseIfHeldElsewhere(string sessionId)
         => Leases?.HeldElsewhere(sessionId) is not null ? "session_in_use" : null;
 
-    // The attachment of a session claims its lease before anything is written for it. Throws SessionInUseException,
-    // SessionLeaseUnavailableException.
-    private void ClaimEntryLease(string sessionId) => Leases?.ClaimEntry(sessionId);
+    // The attachment of a session claims its lease before anything is written for it; a session frozen for a move or
+    // given to another machine is not attached. Throws SessionInUseException, SessionLeaseUnavailableException.
+    private void ClaimEntryLease(string sessionId)
+    {
+        Leases?.ClaimEntry(sessionId);
+        if (RelinquishedRefusal(sessionId) is not { } refusal) return;
+        ReleaseEntryLeaseWithoutEntry(sessionId);
+        throw refusal;
+    }
 
     // Called where an attachment goes away for good (not where it is replaced). The sandbox worker of the session goes
     // with it, unless a background command still runs there.
