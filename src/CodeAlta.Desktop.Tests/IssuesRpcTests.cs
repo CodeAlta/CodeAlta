@@ -446,6 +446,46 @@ public sealed class IssuesRpcTests
     }
 
     [TestMethod]
+    public async Task AListAndAnItem_AreKeptFiveMinutes_WithWhenTheyWereRead_AndFreshReadsThemAgain()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var item = new TrackedItem(TrackedItemKind.Issue, "12", "Crash", "https://github.com/o/r/issues/12", TrackedItemState.Open);
+        fixture.Tracker.Page = new TrackedItemPage([item]);
+        fixture.Tracker.Detail = new TrackedItemDetail(item, "Body.", []);
+        var start = fixture.Clock.Now;
+        Task<IssueListResponse> List(bool? fresh = null, string filter = "open") => fixture.Rpc.ListAsync(new(Epoch, fixture.Project.Id, "github", "issue", filter, null, 50, Fresh: fresh), default);
+        Task<IssueReadResponse> Read(bool? fresh = null) => fixture.Rpc.ReadAsync(new(Epoch, fixture.Project.Id, "github", "issue", "12", fresh), default);
+
+        Assert.AreEqual(start, (await List()).ReadAt);
+        fixture.Clock.Now = start.AddMinutes(4);
+        var kept = await List();
+        Assert.AreEqual((1, start, "12"), (fixture.Tracker.Listings, kept.ReadAt, kept.Items.Single().Id), "Asked again within five minutes, the list is the one kept.");
+        Assert.AreEqual(start.AddMinutes(4), (await List(filter: "all")).ReadAt, "Another list is read.");
+        Assert.AreEqual((start.AddMinutes(4), 3), ((await List(fresh: true)).ReadAt, fixture.Tracker.Listings), "Fresh reads it again.");
+        fixture.Clock.Now = start.AddMinutes(9).AddSeconds(1);
+        await List();
+        Assert.AreEqual(4, fixture.Tracker.Listings, "Past five minutes, it is read again.");
+
+        fixture.Tracker.Page = new TrackedItemPage([item]) { Problem = "GitHub asks to sign in." };
+        fixture.Clock.Now = start.AddMinutes(15);
+        await List();
+        await List();
+        Assert.AreEqual(6, fixture.Tracker.Listings, "A list with a problem is not kept.");
+
+        Assert.AreEqual(start.AddMinutes(15), (await Read()).ReadAt);
+        fixture.Clock.Now = start.AddMinutes(18);
+        var read = await Read();
+        Assert.AreEqual((1, start.AddMinutes(15), "Body."), (fixture.Tracker.Reads, read.ReadAt, read.Body));
+        Assert.AreEqual(start.AddMinutes(18), (await Read(fresh: true)).ReadAt);
+        Assert.AreEqual(2, fixture.Tracker.Reads);
+        fixture.Tracker.Detail = null;
+        await Read(fresh: true);
+        await Read(fresh: true);
+        Assert.AreEqual(4, fixture.Tracker.Reads, "An item that is not found is not kept.");
+        StringAssert.Contains(JsonSerializer.Serialize(kept, DesktopJsonContext.Default.IssueListResponse), "\"readAt\":\"2026-11-02T08:00:00");
+    }
+
+    [TestMethod]
     public async Task ThePullRequests_HaveViewsOfTheirOwn_AndTheirListingPassesOnTheirFilters()
     {
         await using var fixture = await Fixture.CreateAsync();
@@ -616,13 +656,21 @@ public sealed class IssuesRpcTests
 
         public ValueTask<IReadOnlyList<TrackedField>> GetFieldsAsync(CancellationToken cancellationToken) => ValueTask.FromResult(Fields);
 
+        public int Listings { get; private set; }
+        public int Reads { get; private set; }
+
         public ValueTask<TrackedItemPage> ListAsync(TrackedItemQuery query, CancellationToken cancellationToken)
         {
+            Listings++;
             Asked = query;
             return Fails ? throw new HttpRequestException("GET https://api.github.com/secret failed") : ValueTask.FromResult(Page);
         }
 
-        public ValueTask<TrackedItemDetail?> ReadAsync(TrackedItemKind kind, string id, CancellationToken cancellationToken) => ValueTask.FromResult(Detail);
+        public ValueTask<TrackedItemDetail?> ReadAsync(TrackedItemKind kind, string id, CancellationToken cancellationToken)
+        {
+            Reads++;
+            return ValueTask.FromResult(Detail);
+        }
     }
 
     private sealed class FakeStarter : ISessionStarter
@@ -647,7 +695,7 @@ public sealed class IssuesRpcTests
             Sources.Add(new FakeSource(path => string.Equals(path, project.ProjectPath, StringComparison.Ordinal) ? [Tracker] : []));
             Rpc = new IssuesService(() => Sources, projects, Starter, Epoch, address => { Opened.Add(address); return true; })
             {
-                Views = new IssueViewStore(),
+                Views = new IssueViewStore(), Time = Clock,
             };
         }
 
@@ -655,6 +703,7 @@ public sealed class IssuesRpcTests
         public List<IIssueTrackerSource> Sources { get; } = [];
         public FakeTracker Tracker { get; } = new("github", "GitHub", "o/r") { WebUrl = "https://github.com/o/r" };
         public FakeStarter Starter { get; } = new();
+        public AutomationClock Clock { get; } = new() { Now = new DateTimeOffset(2026, 11, 2, 8, 0, 0, TimeSpan.Zero) };
         public List<string> Opened { get; } = [];
         public IssuesService Rpc { get; }
 

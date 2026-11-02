@@ -547,3 +547,24 @@ test("the window of the views says why a file of views cannot be read, also when
     assert.deepEqual(page.problems, []);
   }, options);
 });
+
+test("the tab says how old the list and the item are, and reads them again on demand", { skip: !edge, timeout: 120_000 }, async () => {
+  await withCanvas(async page => {
+    const ages = `[...document.querySelectorAll('.issues-read-at time')].map(time => time.textContent)`;
+    await page.until(`${rows}.join() === '#128' && document.querySelectorAll('.issues-read-at').length === 2`, "the list and the item with their age");
+    assert.deepEqual(await page.evaluate(ages), ["Read 3 min. ago", "Read 2 min. ago"]);
+    assert.equal(await page.evaluate(`issuesFixture.state.lists.at(-1).fresh ?? null`), null, "a list is asked as the host keeps it");
+
+    await page.click('.issues-stages [aria-label="Read the list again"]');
+    await page.until(`issuesFixture.state.lists.at(-1).fresh === true`, "the list read again");
+    await page.until(`${ages}[0] === 'Read now'`, "the list just read");
+
+    const reads = await page.evaluate<number>(`issuesFixture.state.reads.length`);
+    await page.click('.work-detail [aria-label="Read it again"]');
+    await page.until(`issuesFixture.state.reads.length > ${reads} && issuesFixture.state.reads.at(-1).fresh === true`, "the item read again");
+
+    await page.click('[aria-label="Reload"]');
+    await page.until(`issuesFixture.state.lists.at(-1).fresh === true && issuesFixture.state.reads.at(-1).fresh === true && issuesFixture.state.reads.length > ${reads + 1}`, "everything read again");
+    assert.deepEqual(page.problems, []);
+  }, options);
+});

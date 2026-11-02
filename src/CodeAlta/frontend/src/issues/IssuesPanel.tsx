@@ -28,7 +28,7 @@ const noProviders: readonly RunProvider[] = [];
 /** The part of the host the tab uses; a test gives its own. */
 export type IssuesApi = Pick<typeof issuesService, "sources" | "list" | "read" | "start" | "openLink"> & Partial<Pick<typeof issuesService, "filters" | "fields" | "views" | "saveView" | "renameView" | "removeView" | "selectView">>;
 
-type Listing = Readonly<{ key: IssueListKey; loading: boolean; items: readonly IssueRow[]; more: boolean; problem: string | null; needsSignIn: boolean }>;
+type Listing = Readonly<{ key: IssueListKey; loading: boolean; items: readonly IssueRow[]; more: boolean; problem: string | null; needsSignIn: boolean; readAt: string | null }>;
 type Sources = Readonly<{ projectId: string; loading: boolean; sources: readonly IssueSource[] }>;
 type Detail = Readonly<{ key: string; loading: boolean; value: IssueReadResponse | null }>;
 /**
@@ -89,6 +89,20 @@ export function IssuesPanel({ api, epoch, projects, projectId, visible, preferre
   // The same, as of now: two clicks before a render start the item once.
   const startingNow = useRef(new Set<string>());
   const [revision, setRevision] = useState(0);
+  // A list or an item read again on purpose: the host answers what it kept for five minutes otherwise.
+  const [listRevision, setListRevision] = useState(0);
+  const [itemRevision, setItemRevision] = useState(0);
+  const freshList = useRef(false);
+  const freshItem = useRef(false);
+  const reload = () => { freshList.current = true; freshItem.current = true; setRevision(value => value + 1); };
+  // The age of what is shown follows the minutes while the tab is shown.
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!visible) return;
+    setNow(Date.now());
+    const timer = setInterval(() => setNow(Date.now()), 30_000);
+    return () => clearInterval(timer);
+  }, [visible]);
   const windowTitle = useId();
   const project = projects.find(candidate => candidate.id === scope) ?? null;
   // The project of the window is followed until the user chooses another one in the tab.
@@ -248,15 +262,17 @@ export function IssuesPanel({ api, epoch, projects, projectId, visible, preferre
   useEffect(() => {
     if (!available || !visible || !wanted) return;
     const controller = new AbortController();
-    setListing(current => sameList(current?.key ?? null, wanted) ? { ...current!, loading: true } : { key: wanted, loading: true, items: [], more: false, problem: null, needsSignIn: false });
+    setListing(current => sameList(current?.key ?? null, wanted) ? { ...current!, loading: true } : { key: wanted, loading: true, items: [], more: false, problem: null, needsSignIn: false, readAt: null });
+    const fresh = freshList.current;
+    freshList.current = false;
     void api.list({ expectedEpoch: epoch, projectId: wanted.projectId, service: wanted.service, kind: wanted.kind, filter: wanted.filter, query: wanted.query || null, limit: 50, part: wanted.part,
-      filters: listed.text ? listed.values : null },
+      filters: listed.text ? listed.values : null, fresh: fresh || null },
       { signal: controller.signal, timeoutMilliseconds: 60_000 }).then(
       reply => { if (!controller.signal.aborted) setListing({ key: wanted, loading: false, items: reply.status === "ok" ? reply.items : [], more: reply.more,
-        problem: reply.status === "ok" ? reply.problem : t("The list could not be read."), needsSignIn: reply.needsSignIn }); },
-      () => { if (!controller.signal.aborted) setListing({ key: wanted, loading: false, items: [], more: false, problem: t("The list could not be read."), needsSignIn: false }); });
+        problem: reply.status === "ok" ? reply.problem : t("The list could not be read."), needsSignIn: reply.needsSignIn, readAt: reply.status === "ok" ? reply.readAt : null }); },
+      () => { if (!controller.signal.aborted) setListing({ key: wanted, loading: false, items: [], more: false, problem: t("The list could not be read."), needsSignIn: false, readAt: null }); });
     return () => controller.abort();
-  }, [api, epoch, available, visible, wanted, revision]);
+  }, [api, epoch, available, visible, wanted, revision, listRevision]);
 
   const shown = sameList(listing?.key ?? null, wanted) ? listing : null;
   const items = shown?.items ?? [];
@@ -265,12 +281,15 @@ export function IssuesPanel({ api, epoch, projects, projectId, visible, preferre
   useEffect(() => {
     if (!available || !visible || !current || !wanted || !currentKey) return;
     const controller = new AbortController();
-    setDetail(value => value?.key === currentKey ? value : { key: currentKey, loading: true, value: null });
-    void api.read({ expectedEpoch: epoch, projectId: wanted.projectId, service: wanted.service, kind: current.kind, id: current.id }, { signal: controller.signal, timeoutMilliseconds: 60_000 }).then(
+    setDetail(value => value?.key === currentKey ? { ...value, loading: true } : { key: currentKey, loading: true, value: null });
+    const fresh = freshItem.current;
+    freshItem.current = false;
+    void api.read({ expectedEpoch: epoch, projectId: wanted.projectId, service: wanted.service, kind: current.kind, id: current.id, fresh: fresh || null },
+      { signal: controller.signal, timeoutMilliseconds: 60_000 }).then(
       reply => { if (!controller.signal.aborted) setDetail({ key: currentKey, loading: false, value: reply }); },
       () => { if (!controller.signal.aborted) setDetail({ key: currentKey, loading: false, value: null }); });
     return () => controller.abort();
-  }, [api, epoch, available, visible, currentKey, revision]);
+  }, [api, epoch, available, visible, currentKey, revision, itemRevision]);
 
   const openLink = (address: string | null | undefined) => {
     if (!address || !available) return;
@@ -318,7 +337,7 @@ export function IssuesPanel({ api, epoch, projects, projectId, visible, preferre
       <div><h2>{t("Issues")}{(shown?.loading || sources?.loading) && <ActivitySpinner size={13} />}</h2><p>{t("The issues and the pull requests of your projects, from where they are kept.")}</p></div>
       {source?.url && <Button variant="minimal" icon={<AppIcon name="openExternal" size={16} />} aria-label={t("Open {service} in the browser", { service: source.name })}
         title={t("Open {service} in the browser", { service: source.name })} onClick={() => openLink(source.url)} />}
-      <Button variant="minimal" icon={<AppIcon name="refresh" size={16} />} aria-label={t("Reload")} title={t("Reload")} onClick={() => setRevision(value => value + 1)} />
+      <Button variant="minimal" icon={<AppIcon name="refresh" size={16} />} aria-label={t("Reload")} title={t("Reload")} onClick={reload} />
     </header>
     <div className="work-toolbar issues-toolbar">
       <HTMLSelect aria-label={t("Project")} value={project?.id ?? ""} onChange={event => { followed.current = false; setScope(event.target.value || null); setSelected(null); }}>
@@ -368,10 +387,15 @@ export function IssuesPanel({ api, epoch, projects, projectId, visible, preferre
           <p>{t("The folder of this project has no remote on GitHub, GitLab, Azure DevOps or Bitbucket, and no plugin gives it a tracker.")}</p>
         </section>
       : <>
-        <Tabs id="issue-filters" className="work-stages" selectedTabId={shownFilter} onChange={next => { setFilter(next as IssueFilter); setSelected(null); }}>
-          {filters.map(candidate => <Tab key={candidate} id={candidate} disabled={false} title={<>{t(issueFilterLabel(candidate))}
-            {candidate === shownFilter && shown && !shown.loading && <span className="work-count" data-zero={items.length === 0 || undefined}>{items.length}{shown.more ? "+" : ""}</span>}</>} />)}
-        </Tabs>
+        <div className="issues-stages">
+          <Tabs id="issue-filters" className="work-stages" selectedTabId={shownFilter} onChange={next => { setFilter(next as IssueFilter); setSelected(null); }}>
+            {filters.map(candidate => <Tab key={candidate} id={candidate} disabled={false} title={<>{t(issueFilterLabel(candidate))}
+              {candidate === shownFilter && shown && !shown.loading && <span className="work-count" data-zero={items.length === 0 || undefined}>{items.length}{shown.more ? "+" : ""}</span>}</>} />)}
+          </Tabs>
+          {/* How old the list is: the host keeps what it read five minutes; the refresh reads it again. */}
+          {shown?.readAt && <ReadAge readAt={shown.readAt} now={now} busy={shown.loading} label={t("Read the list again")}
+            onRefresh={() => { freshList.current = true; setListRevision(value => value + 1); }} />}
+        </div>
         {/* A file of views that does not parse leaves every item listed, and a tracker that did not give its filters leaves those the tab knew: the user is told why. */}
         {filtersProblem && <Callout intent="warning" compact className="work-notice issues-notice issues-filters-problem">{filtersProblem}</Callout>}
         {/* A list that came with a problem is incomplete, not missing: a Jira project the account does not see. */}
@@ -407,7 +431,11 @@ export function IssuesPanel({ api, epoch, projects, projectId, visible, preferre
           <aside className="work-detail">
             {current ? <section className="work-detail-card issue-detail" aria-label={current.title}>
                 <IssueHeading item={read?.value?.item ?? current} service={source.service} busy={!!read?.loading}
-                  action={<Button variant="minimal" size="small" icon={<AppIcon name="expand" size={14} />} aria-label={t("Open in a window")} title={t("Open in a window")} onClick={() => setExpanded(true)} />} />
+                  action={<>
+                    {read?.value?.readAt && <ReadAge readAt={read.value.readAt} now={now} busy={read.loading} label={t("Read it again")}
+                      onRefresh={() => { freshItem.current = true; setItemRevision(value => value + 1); }} />}
+                    <Button variant="minimal" size="small" icon={<AppIcon name="expand" size={14} />} aria-label={t("Open in a window")} title={t("Open in a window")} onClick={() => setExpanded(true)} />
+                  </>} />
                 <div className="work-detail-actions">{actions}</div>
                 <div className="work-detail-text">{body}</div>
               </section>
@@ -438,6 +466,16 @@ function ReviewerChip({ reviewer }: { reviewer: IssueReviewer }) {
   return <Tag minimal round role="listitem" className="issue-reviewer" data-vote={reviewer.vote} data-required={reviewer.required || undefined} data-mine={reviewer.mine || undefined}
     icon={<AppIcon name={reviewer.group ? "subAgents" : "user"} size={11} />} endIcon={<AppIcon name={voteIcon(reviewer.vote)} size={11} />} title={title} aria-label={title}>
     {reviewer.name}{reviewer.required && <span className="issue-reviewer-required" aria-hidden="true">*</span>}</Tag>;
+}
+
+/** How old what is shown is, as the host read it, and a button that reads it again. */
+function ReadAge({ readAt, now, busy, label, onRefresh }: { readAt: string; now: number; busy: boolean; label: string; onRefresh: () => void }) {
+  const { t, locale } = useShellLanguage();
+  const when = sessionTime(readAt, locale, Math.max(now, Date.parse(readAt)));
+  return <span className="issues-read-at">
+    <time dateTime={when.dateTime} title={when.title}>{t("Read {when}", { when: when.label })}</time>
+    <Button variant="minimal" size="small" icon={<AppIcon name="refresh" size={13} />} aria-label={label} title={label} disabled={busy} onClick={onRefresh} />
+  </span>;
 }
 
 function IssueLabelChip({ name, color }: { name: string; color: string | null }) {

@@ -80,7 +80,7 @@ const filtersOf = (request: IssueFiltersRequest) => {
   const active = [...pick, ...on.filter(entry => !entry.pick && selected[entry.id]).map(entry => entry.id)];
   return { status: "ok", problem: state.viewsProblem, views: kept.views.map(({ name, source }) => ({ name, source })), current: kept.current, filters, selected, active, pick };
 };
-const state = { lists: [] as IssueListRequest[], filterAsks: [] as IssueFiltersRequest[], views: [
+const state = { reads: [] as { id: string; fresh?: boolean | null }[], lists: [] as IssueListRequest[], filterAsks: [] as IssueFiltersRequest[], views: [
     { name: "Bugs", source: "personal", path: ".alta/local/issues.toml", filters: [{ id: "type", mode: "on", value: "Bug", label: null, pick: null }] },
     { name: "Sprint board", source: "team", path: ".alta/issues.toml", filters: [{ id: "team", mode: "on", value: "Platform", label: null, pick: null },
       { id: "sprint", mode: "on", value: "@current", label: null, pick: true }, { id: "type", mode: "on", value: "Task", label: null, pick: null }] }] as IssueViewDetail[],
@@ -100,7 +100,8 @@ const api = {
     state.lists.push(request);
     const all = request.service === "github" ? github : request.service === "azure_devops" ? request.kind === "pull_request" ? pulls : work.filter(row => (request.filters?.team === "t2") === row.title.startsWith("Mobile"))
       : request.projectId === "single" ? [item("DOCS-1", "Explain the Jira projects")] : jira;
-    return { status: "ok", items: all.filter(row => !request.part || row.id.startsWith(request.part + "-")), more: false, problem: state.problem, needsSignIn: false };
+    return { status: "ok", items: all.filter(row => !request.part || row.id.startsWith(request.part + "-")), more: false, problem: state.problem, needsSignIn: false,
+      readAt: new Date(Date.now() - (request.fresh ? 0 : 3 * 60_000)).toISOString() };
   },
   filters: async (request: IssueFiltersRequest) => {
     state.filterAsks.push(request);
@@ -136,7 +137,8 @@ const api = {
     kept.current = view ? { name: view.name, source: view.source } : null;
     return { status: "ok" };
   },
-  read: async (request: { id: string }) => ({ status: "ok", item: [...jira, ...github, ...work, ...pulls].find(row => row.id === request.id) ?? null, body: `Description of ${request.id}.`, comments: [], moreComments: false, truncated: false }),
+  read: async (request: { id: string; fresh?: boolean | null }) => (state.reads.push(request), { status: "ok", readAt: new Date(Date.now() - (request.fresh ? 0 : 2 * 60_000)).toISOString(),
+    item: [...jira, ...github, ...work, ...pulls].find(row => row.id === request.id) ?? null, body: `Description of ${request.id}.`, comments: [], moreComments: false, truncated: false }),
   start: (request: { id: string }) => new Promise(resolve => {
     state.starts.push(request.id);
     state.finish[request.id] = sessionId => resolve({ status: "ok", sessionId, reason: null, message: null });

@@ -45,6 +45,16 @@ internal sealed partial class IssuesService
     private readonly ISessionStarter? _starter;
     private readonly string? _epoch;
     private readonly Func<string, bool> _open = DesktopLinks.Open;
+    private IssueReadCache<IssueListResponse>? _lists;
+    private IssueReadCache<IssueReadResponse>? _items;
+
+    /// <summary>Gets the clock of what is kept (<see cref="IssueReadCache{T}.Duration"/>); tests give their own.</summary>
+    internal TimeProvider Time { get; init; } = TimeProvider.System;
+
+    // What the tab read, kept a while: lists and items asked again are answered at once, with when they were read.
+    private IssueReadCache<IssueListResponse> Lists => LazyInitializer.EnsureInitialized(ref _lists, () => new(Time, 64));
+
+    private IssueReadCache<IssueReadResponse> Items => LazyInitializer.EnsureInitialized(ref _items, () => new(Time, 200));
 
     /// <summary>Creates the service of a window whose host has no trackers: it answers <c>unavailable</c>.</summary>
     public IssuesService()
@@ -99,11 +109,20 @@ internal sealed partial class IssuesService
             // The values of the filters are ones the tracker gave: nothing else is passed on to it.
             var filters = await CheckedFiltersAsync(tracker, kind, request.Filters, request.Service, project, timeout.Token).ConfigureAwait(false);
             if (filters is null) return new("invalid_request", [], false, null, false);
-            var page = await tracker.ListAsync(new(kind, filter, string.IsNullOrWhiteSpace(request.Query) ? null : request.Query.Trim(), limit) { Part = request.Part, Filters = filters }, timeout.Token).ConfigureAwait(false);
+            var query = string.IsNullOrWhiteSpace(request.Query) ? null : request.Query.Trim();
+            // The key is what the tracker is asked: the values the view gives the filters are in it, so a view changed is another list.
+            var key = string.Join('\u001E', [project.Id, request.Service, KindName(kind), request.Filter, query ?? string.Empty, request.Part ?? string.Empty,
+                limit.ToString(CultureInfo.InvariantCulture), .. filters.OrderBy(static pair => pair.Key, StringComparer.Ordinal).Select(static pair => pair.Key + "=" + pair.Value)]);
+            if (request.Fresh != true && Lists.TryGet(key, out var kept, out var keptAt)) return kept with { ReadAt = keptAt };
+            var readAt = Lists.Now;
+            var page = await tracker.ListAsync(new(kind, filter, query, limit) { Part = request.Part, Filters = filters }, timeout.Token).ConfigureAwait(false);
             var problem = page.Problem is null ? null : GitIssuesService.Clean(page.Problem, MaximumTitle);
             // What the tab shows in its place is in the log too, with what the tracker wrote of it before.
             if (problem is not null) LogFailure(tracker, $"listing the {KindName(kind)} shows: {problem}{(page.NeedsSignIn ? " (sign-in asked)" : "")}", null);
-            return new("ok", [.. page.Items.Take(limit).Select(Row).OfType<IssueRow>()], page.More, problem, page.NeedsSignIn);
+            var listed = new IssueListResponse("ok", [.. page.Items.Take(limit).Select(Row).OfType<IssueRow>()], page.More, problem, page.NeedsSignIn) { ReadAt = readAt };
+            // A list the tracker did not give whole is asked again next time.
+            if (problem is null) Lists.Set(key, listed, readAt);
+            return listed;
         }
         catch (OperationCanceledException exception) when (!cancellationToken.IsCancellationRequested)
         {
@@ -131,6 +150,9 @@ internal sealed partial class IssuesService
         if ((await TrackersAsync(project, cancellationToken).ConfigureAwait(false)).FirstOrDefault(candidate => candidate.Service == request.Service) is not { } tracker)
             return new("no_tracker");
 
+        var key = string.Join('\u001E', project.Id, request.Service, KindName(kind), request.Id);
+        if (request.Fresh != true && Items.TryGet(key, out var kept, out var keptAt)) return kept with { ReadAt = keptAt };
+        var readAt = Items.Now;
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         timeout.CancelAfter(ListTimeout);
         try
@@ -147,7 +169,9 @@ internal sealed partial class IssuesService
                 comments.Add(new(Nullable(comment.Author), comment.CreatedAt, text.Text));
             }
 
-            return new("ok", row, body.Text, body.Cut, comments, detail.MoreComments || comments.Count < detail.Comments.Count);
+            var read = new IssueReadResponse("ok", row, body.Text, body.Cut, comments, detail.MoreComments || comments.Count < detail.Comments.Count) { ReadAt = readAt };
+            Items.Set(key, read, readAt);
+            return read;
         }
         catch (OperationCanceledException exception) when (!cancellationToken.IsCancellationRequested)
         {
@@ -405,14 +429,19 @@ internal sealed record IssueSource(string Service, string Name, string Location,
 /// <param name="Limit">The most items; 50 when null, 100 at most.</param>
 /// <param name="Part">One of the <see cref="IssueSource.Parts"/> of the tracker, to list it alone; null for all of them.</param>
 /// <param name="Filters">The values of the filters of the tracker for the kind listed (<see cref="IssuesService.FiltersAsync"/>), by filter id.</param>
+/// <param name="Fresh">Whether the tracker is asked again even when the list was read less than five minutes ago.</param>
 internal sealed record IssueListRequest(string ExpectedEpoch, string ProjectId, string Service, string Kind, string Filter, string? Query, int? Limit, string? Part = null,
-    Dictionary<string, string>? Filters = null);
+    Dictionary<string, string>? Filters = null, bool? Fresh = null);
 
 /// <summary>
 /// A listing. Status is <c>ok</c>, <c>unavailable</c>, <c>stale_epoch</c>, <c>invalid_request</c>,
 /// <c>not_found</c> or <c>no_tracker</c>. A tracker that could not answer is <c>ok</c> with a problem.
 /// </summary>
-internal sealed record IssueListResponse(string Status, IReadOnlyList<IssueRow> Items, bool More, string? Problem, bool NeedsSignIn);
+internal sealed record IssueListResponse(string Status, IReadOnlyList<IssueRow> Items, bool More, string? Problem, bool NeedsSignIn)
+{
+    /// <summary>Gets when the tracker was read: the list may be kept up to five minutes.</summary>
+    public DateTimeOffset? ReadAt { get; init; }
+}
 
 /// <summary>One issue or pull request; every text was written by other people and is rendered as text.</summary>
 /// <param name="Kind"><c>issue</c> or <c>pull_request</c>.</param>
@@ -462,8 +491,8 @@ internal sealed record IssueReviewer(string Name, string Vote)
 /// <summary>A label of an item, with its color as six hexadecimal digits when the tracker gives one.</summary>
 internal sealed record IssueLabel(string Name, string? Color);
 
-/// <summary>Names one item of a tracker of a project.</summary>
-internal sealed record IssueItemRequest(string ExpectedEpoch, string ProjectId, string Service, string Kind, string Id);
+/// <summary>Names one item of a tracker of a project; <paramref name="Fresh"/> reads it again even when it was read less than five minutes ago.</summary>
+internal sealed record IssueItemRequest(string ExpectedEpoch, string ProjectId, string Service, string Kind, string Id, bool? Fresh = null);
 
 /// <summary>
 /// One item with its description and comments. Status is <c>ok</c>, <c>unavailable</c>, <c>stale_epoch</c>,
@@ -475,7 +504,11 @@ internal sealed record IssueItemRequest(string ExpectedEpoch, string ProjectId, 
 /// <param name="Truncated">Whether the description is longer than what is sent.</param>
 /// <param name="Comments">Its comments, the oldest first.</param>
 /// <param name="MoreComments">Whether it has more comments than what is sent.</param>
-internal sealed record IssueReadResponse(string Status, IssueRow? Item = null, string? Body = null, bool Truncated = false, IReadOnlyList<IssueComment>? Comments = null, bool MoreComments = false);
+internal sealed record IssueReadResponse(string Status, IssueRow? Item = null, string? Body = null, bool Truncated = false, IReadOnlyList<IssueComment>? Comments = null, bool MoreComments = false)
+{
+    /// <summary>Gets when the tracker was read: the item may be kept up to five minutes.</summary>
+    public DateTimeOffset? ReadAt { get; init; }
+}
 
 /// <summary>A comment of an item.</summary>
 internal sealed record IssueComment(string? Author, DateTimeOffset? CreatedAt, string Body);
