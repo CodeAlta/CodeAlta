@@ -101,7 +101,7 @@ public sealed class CodeModeResultFormatterTests
         Assert.IsNotNull(kept);
         Assert.AreEqual(report, kept.Text);
         Assert.AreEqual(".md", kept.FileExtension);
-        StringAssert.Contains(text, $"Full result: C:\\session\\tool-output\\script-run-1-result.md (2,000 lines, {report.Length:N0} characters; shown below: lines 1–");
+        StringAssert.Contains(text, FormattableString.Invariant($"Full result: C:\\session\\tool-output\\script-run-1-result.md (2,000 lines, {report.Length:N0} characters; shown below: lines 1–"));
         StringAssert.Contains(text, "\nResult:\n- line 1 with `code`\n");
         StringAssert.Contains(text, " characters): they are in the full result …");
         StringAssert.EndsWith(text, "- line 2000 with `code`\n");

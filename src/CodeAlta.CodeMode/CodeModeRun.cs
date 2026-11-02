@@ -651,7 +651,7 @@ internal sealed partial class CodeModeRun
         if (markdown.Length > CodeModePresentation.MaxCharacters)
         {
             var keep = char.IsHighSurrogate(markdown[CodeModePresentation.MaxCharacters - 1]) ? CodeModePresentation.MaxCharacters - 1 : CodeModePresentation.MaxCharacters;
-            AppendOutput(CodeModeOutputKind.Warning, $"present: a part has {CodeModePresentation.MaxCharacters:N0} characters at most; {markdown.Length - keep:N0} were left out.", stepId);
+            AppendOutput(CodeModeOutputKind.Warning, FormattableString.Invariant($"present: a part has {CodeModePresentation.MaxCharacters:N0} characters at most; {markdown.Length - keep:N0} were left out."), stepId);
             markdown = markdown[..keep];
         }
 
@@ -684,7 +684,7 @@ internal sealed partial class CodeModeRun
         }
         else
         {
-            from.AppendOutput(CodeModeOutputKind.Warning, $"present: the part is not shown: a run presents {CodeModePresentation.MaxPerRun} parts and {CodeModePresentation.MaxCharactersPerRun:N0} characters at most.", part.StepId);
+            from.AppendOutput(CodeModeOutputKind.Warning, FormattableString.Invariant($"present: the part is not shown: a run presents {CodeModePresentation.MaxPerRun} parts and {CodeModePresentation.MaxCharactersPerRun:N0} characters at most."), part.StepId);
         }
     }
 
@@ -941,7 +941,7 @@ internal sealed partial class CodeModeRun
                 return FromJavaScript(thrown.Error, Location(thrown.Location.Start.Line, thrown.Location.Start.Column + 1));
             case StatementsCountOverflowException:
                 return new(CodeModeErrorKind.Statements, "StatementLimit",
-                    $"The script executed more than {_limits.MaxStatements:N0} statements without awaiting a call. Do less work per step, or let tools do it.");
+                    FormattableString.Invariant($"The script executed more than {_limits.MaxStatements:N0} statements without awaiting a call. Do less work per step, or let tools do it."));
             case MemoryLimitExceededException:
                 return new(CodeModeErrorKind.Memory, "MemoryLimit", $"The script allocated more than {_limits.MemoryBytes / (1024 * 1024)} MB at once.");
             case RecursionDepthOverflowException:
