@@ -130,4 +130,4 @@
 
 .issues-stages { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .issues-stages > .work-stages { flex: 1 1 auto; min-width: 0; }
-.issues-read-at { display: inline-flex; flex: 0 0 auto; align-items: center; gap: 2px; color: var(--muted); font-size: 11.5px; white-space: nowrap; }
+.issues-read-at { display: inline-flex; flex: 0 0 auto; align-items: center; gap: 2px; color: var(--muted); font-size: 11.5px; font-weight: 400; letter-spacing: normal; text-transform: none; white-space: nowrap; }
