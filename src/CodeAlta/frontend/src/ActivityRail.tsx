@@ -27,12 +27,13 @@ export function fittingRailItems(available: number, fixed: number, slot: number,
 export function ActivityRail({ label, moreLabel, first, items, last }: {
   label: string; moreLabel: string; first: ReactNode; items: readonly ActivityRailItem[]; last: ReactNode;
 }) {
+  const room = useRef<HTMLDivElement>(null);
   const nav = useRef<HTMLElement>(null);
   const [shown, setShown] = useState(items.length);
   const count = items.length;
   useLayoutEffect(() => {
-    const element = nav.current;
-    if (!element) return;
+    const box = room.current, element = nav.current;
+    if (!box || !element) return;
     // The menu button is in the target of its popover.
     const always = () => (Array.from(element.children) as HTMLElement[]).filter(child => !child.matches("[data-rail-item], [data-rail-more], :has([data-rail-more])"));
     const measure = () => {
@@ -40,11 +41,11 @@ export function ActivityRail({ label, moreLabel, first, items, last }: {
       const fixed = always().reduce((total, child) => total + child.offsetWidth + gap, -gap);
       // Every button of the rail has the width of the first one, the Explorer.
       const slot = ((element.firstElementChild as HTMLElement | null)?.offsetWidth ?? 0) + gap;
-      const fit = fittingRailItems(element.clientWidth, fixed, slot, count);
+      const fit = fittingRailItems(box.clientWidth, fixed, slot, count);
       setShown(current => current === fit ? current : fit);
     };
     const resized = new ResizeObserver(measure);
-    const observe = () => { resized.disconnect(); resized.observe(element); for (const child of always()) resized.observe(child); };
+    const observe = () => { resized.disconnect(); resized.observe(box); for (const child of always()) resized.observe(child); };
     // The buttons of plugins come and go after the rail is drawn.
     const changed = new MutationObserver(() => { observe(); measure(); });
     changed.observe(element, { childList: true });
@@ -53,7 +54,8 @@ export function ActivityRail({ label, moreLabel, first, items, last }: {
     return () => { resized.disconnect(); changed.disconnect(); };
   }, [count]);
   const inline = items.slice(0, shown), folded = items.slice(shown);
-  return <nav ref={nav} className="activity-rail" aria-label={label}>
+  // The rail is as wide as its buttons, as the room before them moves the window: the box around it is the room it has.
+  return <div ref={room} className="activity-rail-room"><nav ref={nav} className="activity-rail" aria-label={label}>
     {first}
     {inline.map(item => <Button key={item.key} data-rail-item variant="minimal" size="small" icon={<AppIcon name={item.icon} size={16} />} className={item.className}
       disabled={item.disabled} active={item.active} aria-label={item.label} title={item.title} onClick={item.onClick}>
@@ -69,5 +71,5 @@ export function ActivityRail({ label, moreLabel, first, items, last }: {
         {folded.some(item => item.dot) && <span className="activity-rail-dot" aria-hidden="true" />}</Button>
     </PopoverNext>}
     {last}
-  </nav>;
+  </nav></div>;
 }

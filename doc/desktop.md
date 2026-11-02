@@ -257,6 +257,12 @@ icons, localization, Markdown) stays at the root.
   whole desktop lags. What animates there changes opacity, color or paint only (a painted angle, `clip-path`), and
   `regionChurn.browser.test.ts` measures it. Toasts are no region: they sit below the title bar, and Blueprint slides
   each one in, the ones of every start included.
+- **The regions of the window stay few and plain.** `app-region` is inherited, and every box that has one goes to the
+  window, so a popover, a dialog or the tab strip is one box and what is inside takes `app-region: initial` (Chromium
+  takes `none` for `no-drag`). The window has a child window for each rectangle of the area that moves it, made again
+  at each change of a region: what is clickable in the title bar is one hole in that area, never one hole per
+  control. The number of windows is seen with `EnumChildWindows` on the window of the developer instance. Check a change
+  there with real mouse input: `WM_NCHITTEST` says `HTCAPTION` over buttons of the title bar that do take a click.
 - A performance change is measured in the developer instance before and after: the CPU of the `alta` process, and
   `regionChurnScript` run in the page over `codealta-dev`. A fix whose "before" was not seen to be bad is not a fix.
 
