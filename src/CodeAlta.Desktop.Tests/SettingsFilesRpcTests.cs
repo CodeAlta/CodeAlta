@@ -1,6 +1,7 @@
 using CodeAlta.Catalog;
 using CodeAlta.Catalog.PullRequests;
 using CodeAlta.Catalog.Skills;
+using CodeAlta.Catalog.StartPrompts;
 using CodeAlta.Desktop.Rpc;
 
 namespace CodeAlta.Desktop.Tests;
@@ -248,6 +249,28 @@ public sealed class SettingsFilesRpcTests
     }
 
     [TestMethod]
+    public async Task TheFileOfAStartPrompt_IsOpenedAndShown_OnceItIsWritten()
+    {
+        using var fixture = await Fixture.CreateAsync();
+        var project = fixture.Project.Id;
+        Assert.AreEqual("invalid", (await fixture.Service.OpenAsync(new(Epoch, null, "startPrompt", "global", StartPromptCatalog.PullRequestReviewId), default)).Status, "What ships with CodeAlta is no file.");
+
+        var mine = fixture.StartPrompts.Save(null, StartPromptCatalog.PullRequestReviewId, "Review {reference}.");
+        Assert.AreEqual("ok", (await fixture.Service.OpenAsync(new(Epoch, null, "startPrompt", "global", StartPromptCatalog.PullRequestReviewId), default)).Status);
+        Assert.AreEqual((Path.GetFileName(mine.Path), fixture.StartPrompts.GlobalFolder), (fixture.Shown.Single().Path, fixture.Shown.Single().Root));
+        Assert.AreEqual("ok", (await fixture.Service.RevealAsync(new(Epoch, null, "startPrompt", "global", StartPromptCatalog.PullRequestReviewId), default)).Status);
+        Assert.AreEqual(Path.GetFullPath(mine.Path!), fixture.Revealed.Single());
+
+        // A file of the project opens in the code editor of that project.
+        fixture.Shown.Clear();
+        fixture.StartPrompts.Save(fixture.ProjectPath, StartPromptCatalog.PullRequestReviewId, "The team's review.");
+        Assert.AreEqual("ok", (await fixture.Service.OpenAsync(new(Epoch, project, "startPrompt", "project", StartPromptCatalog.PullRequestReviewId), default)).Status);
+        Assert.AreEqual(new ProjectFileShowEvent(project, ".alta/prompts/start/pull-request-review.md", null, null), fixture.Shown.Single());
+        Assert.AreEqual("invalid", (await fixture.Service.OpenAsync(new(Epoch, null, "startPrompt", "project", StartPromptCatalog.PullRequestReviewId), default)).Status);
+        Assert.AreEqual("invalid", (await fixture.Service.OpenAsync(new(Epoch, project, "startPrompt", "global", "../config"), default)).Status);
+    }
+
+    [TestMethod]
     public async Task TheFilesOfTheViewsOfIssues_AreThoseOfTheProject_TheUsersFirst()
     {
         using var fixture = await Fixture.CreateAsync();
@@ -281,9 +304,13 @@ public sealed class SettingsFilesRpcTests
             Watching = view.Watch(Shown.Add);
             Prompts = new AgentPromptsService(projects, Epoch, Path.Combine(root, "app"), Home);
             PullRequests = new PullRequestPromptCatalog(projects.Options);
+            StartPrompts = new StartPromptCatalog(projects.Options);
             Files = new ProjectFilesService(projects, Epoch, view: view, reveal: path => { Revealed.Add(path); return true; }, folders: folders);
             Service = new SettingsFilesService(projects, Epoch, folders, view, Prompts, new SkillsService(projects, new SkillCatalog(), Home, Epoch),
-                new McpServersService(projects, Epoch, Home), PullRequests, path => { Revealed.Add(path); return true; });
+                new McpServersService(projects, Epoch, Home), PullRequests, path => { Revealed.Add(path); return true; })
+            {
+                StartPrompts = StartPrompts,
+            };
         }
 
         public static async Task<Fixture> CreateAsync()
@@ -302,6 +329,7 @@ public sealed class SettingsFilesRpcTests
         public ProjectFilesService Files { get; }
         public AgentPromptsService Prompts { get; }
         public PullRequestPromptCatalog PullRequests { get; }
+        public StartPromptCatalog StartPrompts { get; }
         public IDisposable Watching { get; }
         public List<ProjectFileShowEvent> Shown { get; } = [];
         public List<string> Revealed { get; } = [];

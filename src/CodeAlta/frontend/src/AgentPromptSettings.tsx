@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Button, Card, CardList, Checkbox, FormGroup, HTMLSelect, InputGroup, Menu, MenuItem, PopoverNext, Section, SectionCard, Tag } from "@blueprintjs/core";
-import { agentPrompts, type AgentPromptDocument, type AgentPromptEntry } from "#neoastra";
+import { agentPrompts, startPrompts, type AgentPromptDocument, type AgentPromptEntry } from "#neoastra";
 import { ActivitySpinner } from "./ActivitySpinner";
 import { AppIcon } from "./AppIcon";
 import { CopilotTag, copilotPromptScope } from "./CopilotTag";
@@ -16,6 +16,7 @@ import { ResourceSpaceChip, type ResourceSpaces } from "./spaces/SpaceChips";
 import { DisabledToolsField } from "./DisabledToolsField";
 import { PromptInheritance, usePromptComposition } from "./promptInheritance/PromptInheritance";
 import { ComposedPromptDialog } from "./promptInheritance/ComposedPromptDialog";
+import { isStartPromptKey, useStartPrompts, type StartPromptsApi } from "./startPrompts/StartPrompts";
 
 type Kind = "Agent" | "System";
 type PromptForm = Readonly<{ id: string; kind: Kind; scope: SettingsScope; name: string; description: string; body: string;
@@ -26,14 +27,19 @@ const formOf = (document: AgentPromptDocument): PromptForm => ({ id: document.id
   systemPromptId: document.systemPromptId ?? "", append: document.append, disabledTools: document.disabledTools ?? [], inherits: document.inherits ?? [],
   revision: document.revision });
 
-/** Settings page for agent and system prompts: the prompt files on the left, an editor on the right. */
-export function AgentPromptSettings({ epoch, project, onOpenFile, api = agentPrompts, filesApi, spaceScope = null }: {
+/**
+ * Settings page for agent and system prompts, and for the start prompts of the sessions CodeAlta starts on a piece of
+ * work: the prompts on the left, an editor on the right.
+ */
+export function AgentPromptSettings({ epoch, project, onOpenFile, api = agentPrompts, startApi = startPrompts, filesApi, spaceScope = null }: {
   epoch: string | null; project: SettingsProject;
   /** The spaces of the agent prompts of the user, which each row shows and changes; null with the default space alone. */
   spaceScope?: ResourceSpaces;
   /** Called once the code editor was asked to show a prompt file or a folder of prompts: the window leaves Settings. */
   onOpenFile?: () => void;
   api?: typeof agentPrompts;
+  /** Reads and writes the start prompts; the host by default. */
+  startApi?: StartPromptsApi;
   /** Says where the files of the page are and opens them; the host by default. */
   filesApi?: SettingsFilesApi;
 }) {
@@ -51,10 +57,12 @@ export function AgentPromptSettings({ epoch, project, onOpenFile, api = agentPro
   const entry = selected && selected !== added ? prompts.find(prompt => identity(prompt) === selected) ?? null : null;
   const entryKey = entry ? identity(entry) : null;
   const files = useSettingsFiles({ page: "prompts", epoch, projectId, revision: listing, onOpened: onOpenFile, setNotice, api: filesApi });
+  const start = useStartPrompts({ api: startApi, epoch, project, selected, select: setSelected, setNotice, files, disabled: busy,
+    editor: text => <CodeEditor language="markdown" wrap label={t("Prompt text")} value={text.value} readOnly={text.readOnly} onChange={text.onChange} /> });
 
   // Keep the selection across reloads; otherwise open the first prompt.
   useEffect(() => {
-    if (!listing || selected === added) return;
+    if (!listing || selected === added || isStartPromptKey(selected)) return;
     if (!listing.prompts.some(prompt => identity(prompt) === selected)) setSelected(listing.prompts[0] ? identity(listing.prompts[0]) : null);
   }, [listing]);
   // Read the selected prompt's text (again after every reload, which follows a save).
@@ -114,7 +122,7 @@ export function AgentPromptSettings({ epoch, project, onOpenFile, api = agentPro
     onOpen={files.open ? prompt => files.open!({ kind: "prompt", scope: prompt.scope, id: prompt.id, part: prompt.kind }) : undefined} />;
 
   return <SettingsPage className="prompt-settings" label={t("Agent prompts")} group="Agent & models" title="Agent prompts" description="Instructions that define how an agent behaves. Pick one per session from the prompt bar."
-    notice={notice} loading={loading} busy={busy} onReload={() => { reload(); spaceScope?.refresh?.(); }}
+    notice={notice} loading={loading} busy={busy || start.busy} onReload={() => { reload(); start.reload(); spaceScope?.refresh?.(); }}
     actions={<PopoverNext placement="bottom-end" content={<Menu>
       <MenuItem icon={<AppIcon name="assistant" size={15} />} text={t("Agent prompt")} onClick={() => create("Agent")} />
       <MenuItem icon={<AppIcon name="prompt" size={15} />} text={t("System prompt")} onClick={() => create("System")} /></Menu>}>
@@ -122,11 +130,11 @@ export function AgentPromptSettings({ epoch, project, onOpenFile, api = agentPro
     {!listing ? <SettingsUnavailable loading={loading} icon="assistant" title="Agent prompts unavailable" />
       : <><SettingsFileLocations files={files} disabled={busy} /><div className="settings-editor-layout settings-split">
         <CardList compact className="settings-editor-list settings-split-list" aria-label={t("Agent prompts")}>
-          {group("Agent", "Agent prompts")}{group("System", "System prompts")}
+          {group("Agent", "Agent prompts")}{group("System", "System prompts")}{start.rows}
           {selected === added && <Card interactive selected><span className="settings-editor-name"><strong>{form?.id || t("New prompt")}</strong></span>
             <Tag minimal round intent="warning">{t("Unsaved changes")}</Tag></Card>}
         </CardList>
-        {form ? <Section className="settings-editor-form prompt-settings-form settings-split-detail" title={selected === added ? t("New prompt") : entry?.name || form.id}
+        {start.detail ?? (form ? <Section className="settings-editor-form prompt-settings-form settings-split-detail" title={selected === added ? t("New prompt") : entry?.name || form.id}
           subtitle={`${t(form.kind === "System" ? "System prompt" : "Agent prompt")} · ${form.id || "…"}`}
           rightElement={reading ? <ActivitySpinner size={14} /> : readOnly ? copilotPromptScope(document?.scope ?? "") ? <CopilotTag /> : <Tag minimal round>{t("Built-in")}</Tag> : undefined}>
           {document?.file && selected !== added && <SectionCard className="settings-editor-file">
@@ -174,7 +182,7 @@ export function AgentPromptSettings({ epoch, project, onOpenFile, api = agentPro
             <span className="settings-editor-spacer" />
             {document && !readOnly && selected !== added && <RemoveButton text name={entry?.name || document.id} disabled={busy} onRemove={() => void remove()} />}
           </SectionCard>
-        </Section> : reading && <SettingsUnavailable loading icon="assistant" title="Agent prompts unavailable" />}
+        </Section> : reading && <SettingsUnavailable loading icon="assistant" title="Agent prompts unavailable" />)}
       </div></>}
   </SettingsPage>;
 }

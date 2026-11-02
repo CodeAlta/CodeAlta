@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Text;
 using CodeAlta.Catalog;
+using CodeAlta.Catalog.StartPrompts;
 using CodeAlta.Catalog.WorkItems;
 using CodeAlta.Desktop.WorkItems;
 using CodeAlta.Plugins.Abstractions;
@@ -79,6 +80,9 @@ internal sealed partial class IssuesService
         ArgumentException.ThrowIfNullOrWhiteSpace(epoch);
         (_sources, _projects, _starter, _epoch) = (sources, projects, starter, epoch);
     }
+
+    /// <summary>Gets the texts a session started on a pull request begins with; the ones that ship when null.</summary>
+    internal StartPromptCatalog? StartPrompts { get; init; }
 
     /// <summary>Lists the trackers of a project.</summary>
     [NeoRpcMethod("sources")]
@@ -220,7 +224,10 @@ internal sealed partial class IssuesService
         var asked = request.ProviderId is null ? null : new WorkItemSelection(request.ProviderId, request.ModelId, request.ReasoningEffort);
         var settings = SessionStartSettings.Of(request.AgentPromptId, request.PermissionMode, request.ReviewBeforeCommit, request.Sandbox, SessionOptionsChoice.Record(request.Options));
         var model = asked is null && settings is null ? null : settings?.Apply(new SessionStartModel(asked)) ?? new SessionStartModel(asked);
-        var started = await _starter.StartAsync(project, IssuePrompts.SessionTitle(row), _ => IssuePrompts.For(tracker.DisplayName, GitIssuesService.Clean(tracker.Location, MaximumTitle), row, detail.Body),
+        // The instruction of a review is the user's or the project's when one is written; what the item is follows it.
+        var review = kind == TrackedItemKind.PullRequest ? StartPrompts?.Text(StartPromptCatalog.PullRequestReviewId, project.ProjectPath) : null;
+        var started = await _starter.StartAsync(project, IssuePrompts.SessionTitle(row),
+            _ => IssuePrompts.For(tracker.DisplayName, GitIssuesService.Clean(tracker.Location, MaximumTitle), row, detail.Body, review),
             request.Worktree, request.SessionId, "issue", model).ConfigureAwait(false);
         return new(started.Problem is null ? "ok" : "refused", started.SessionId, started.Problem, started.Reason);
     }
@@ -400,12 +407,21 @@ internal static class IssuePrompts
     /// Gets the prompt: what to do with the item, then its text as data. The text was written by other people and
     /// is fenced as such, so that it informs the work without directing it.
     /// </summary>
-    internal static string For(string service, string location, IssueRow item, string? body)
+    /// <param name="service">The name of the tracker.</param>
+    /// <param name="location">The repository or the project of the item in its tracker.</param>
+    /// <param name="item">The item.</param>
+    /// <param name="body">Its description; null or empty for none.</param>
+    /// <param name="review">
+    /// The instruction for a pull request, with its placeholders <c>{reference}</c>, <c>{location}</c> and
+    /// <c>{service}</c>; null for the one that ships. It is the user's own text: what the item says is never put in it.
+    /// </param>
+    internal static string For(string service, string location, IssueRow item, string? body, string? review = null)
     {
         var pull = item.Kind == "pull_request";
         var text = new StringBuilder();
         text.Append(pull
-            ? $"Review the pull request {Reference(item)} of {location} on {service}: read its changes, check them out or fetch its branch if you need to, verify what it claims, and report what you found. Do not merge it, push to it or comment on it unless I ask."
+            ? StartPromptCatalog.Fill(review ?? StartPromptCatalog.BuiltIn(StartPromptCatalog.PullRequestReviewId),
+                new Dictionary<string, string>(StringComparer.Ordinal) { ["reference"] = Reference(item), ["location"] = location, ["service"] = service })
             : $"Work on the issue {Reference(item)} of {location} on {service}: understand it, find the cause in the code of this project, implement what it asks and verify it. Do not close it or comment on it unless I ask.");
         text.Append("\n\n").Append(CultureInfo.InvariantCulture, $"- Title: {item.Title}\n- Link: {item.Url}\n- State: {item.StateText ?? item.State}");
         if (item.Author is not null) text.Append(CultureInfo.InvariantCulture, $"\n- Opened by: {item.Author}");

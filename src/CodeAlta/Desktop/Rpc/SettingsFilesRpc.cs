@@ -2,6 +2,7 @@ using CodeAlta.Catalog;
 using CodeAlta.Catalog.Issues;
 using CodeAlta.Catalog.PullRequests;
 using CodeAlta.Catalog.Skills;
+using CodeAlta.Catalog.StartPrompts;
 using NeoAstra.Rpc;
 
 namespace CodeAlta.Desktop.Rpc;
@@ -13,7 +14,7 @@ namespace CodeAlta.Desktop.Rpc;
 /// <remarks>
 /// <para>
 /// The page never names a path. It names what it wants by kind (<c>config</c>, <c>mcp</c>, <c>prompts</c>,
-/// <c>prompt</c>, <c>skills</c>, <c>plugins</c>, <c>colorSchemes</c>, <c>pullRequests</c>, <c>pullRequest</c>), scope
+/// <c>prompt</c>, <c>startPrompt</c>, <c>skills</c>, <c>plugins</c>, <c>colorSchemes</c>, <c>pullRequests</c>, <c>pullRequest</c>), scope
 /// and id, and the host finds the path as the service of that page does. The path a listing returns is shown,
 /// never read back.
 /// </para>
@@ -74,6 +75,9 @@ internal sealed class SettingsFilesService
         (_projects, _epoch, _folders, _view, _prompts, _skills, _mcp, _pullRequests) = (projects, epoch, folders, view, prompts, skills, mcp, pullRequests);
         _reveal = reveal ?? DesktopFileReveal.Show;
     }
+
+    /// <summary>Gets the texts of the start prompts, whose files the page of prompts opens; null when it has none.</summary>
+    internal StartPromptCatalog? StartPrompts { get; init; }
 
     /// <summary>
     /// Lists the files and the folders a page reads: <c>config</c>, <c>mcp</c>, <c>prompts</c>, <c>skills</c>,
@@ -170,6 +174,7 @@ internal sealed class SettingsFilesService
             {
                 "prompt" => Prompt(request.Part, scope, request.Id, project.Root),
                 "pullRequest" => PullRequest(scope, request.Id, project.Root),
+                "startPrompt" => StartPromptFile(scope, request.Id, project.Root),
                 // "config" is a page and the kind of its files; the kind of the others is the name of their page.
                 _ => Page(kind, project.Root).Where(entry => entry.Kind == kind && entry.Scope == scope && string.Equals(entry.Id, request.Id, StringComparison.Ordinal))
                     .Select(static entry => (Entry?)entry).FirstOrDefault(),
@@ -253,6 +258,16 @@ internal sealed class SettingsFilesService
             ? new("pullRequest", scope, id, path, Folder: false, Root: project ? PullRequestPromptCatalog.ProjectFolder(projectRoot!) : _pullRequests.GlobalFolder) : null;
     }
 
+    // The file of a start prompt of the user or of a project, in the folder of those files.
+    private Entry? StartPromptFile(string scope, string? id, string? projectRoot)
+    {
+        if (StartPrompts is null || StartPromptCatalog.NormalizeId(id) is not { } key) return null;
+        var project = string.Equals(scope, "project", StringComparison.OrdinalIgnoreCase);
+        if (!project && !string.Equals(scope, "global", StringComparison.OrdinalIgnoreCase) || project && projectRoot is null) return null;
+        return StartPrompts.List(projectRoot).FirstOrDefault(prompt => prompt.Id == key && prompt.Source == (project ? StartPromptSource.Project : StartPromptSource.Global)) is { Path: { } path }
+            ? new("startPrompt", scope, key, path, Folder: false, Root: project ? StartPromptCatalog.ProjectFolder(projectRoot!) : StartPrompts.GlobalFolder) : null;
+    }
+
     private static SettingsFileLocation Location(Entry entry)
     {
         var exists = entry.Folder ? Directory.Exists(entry.Path) : File.Exists(entry.Path);
@@ -294,10 +309,10 @@ internal sealed record SettingsFilesListResponse(string Status, IReadOnlyList<Se
 /// <param name="ReadOnly">Whether it is only read: it ships with the application.</param>
 internal sealed record SettingsFileLocation(string Kind, string Scope, string? Id, string Path, bool Folder, bool Exists, bool CanOpen, bool ReadOnly = false);
 
-/// <summary>Names a file or a folder of a page; a prompt (<c>prompt</c>) and a kind of pull request (<c>pullRequest</c>) by their id.</summary>
+/// <summary>Names a file or a folder of a page; a prompt (<c>prompt</c>), a start prompt (<c>startPrompt</c>) and a kind of pull request (<c>pullRequest</c>) by their id.</summary>
 /// <param name="ExpectedEpoch">The host epoch the page believes it is talking to.</param>
 /// <param name="ProjectId">The selected project; required for what a project has.</param>
-/// <param name="Kind">The kind, as a listing gives it, or <c>prompt</c> or <c>pullRequest</c>.</param>
+/// <param name="Kind">The kind, as a listing gives it, or <c>prompt</c>, <c>startPrompt</c> or <c>pullRequest</c>.</param>
 /// <param name="Scope">The scope, as a listing gives it; the scope of the prompt or the source of the kind of pull request.</param>
 /// <param name="Id">The id, as a listing gives it; the id of the prompt or of the kind of pull request.</param>
 /// <param name="Part">For a prompt, <c>Agent</c> or <c>System</c>.</param>

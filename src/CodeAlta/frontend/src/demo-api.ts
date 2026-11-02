@@ -248,6 +248,7 @@ export const windows = Object.freeze({ current: async () => ({ status: "unavaila
   focusTab: unavailable, focus: unavailable, close: unavailable, open: unavailable, setIdentity: unavailable, forget: unavailable, setRestoreAtStartup: unavailable,
   displays: async () => ({ status: "unavailable", displays: [] }), dragOver: unavailable, drop: unavailable });
 export const pullRequestPrompts = Object.freeze({ list: async () => ({ status: "unavailable", items: [] }), save: unavailable, delete: unavailable });
+export const startPrompts = Object.freeze({ list: async () => ({ status: "unavailable", items: [] }), save: unavailable, delete: unavailable });
 export const promptImages = Object.freeze({ read: unavailable });
 export const toolCalls = Object.freeze({ read: unavailable, readJob: unavailable, observe: unavailable });
 // A browser preview runs no MCP server: no tool call has a view to open.
