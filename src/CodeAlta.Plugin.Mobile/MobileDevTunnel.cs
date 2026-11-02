@@ -12,8 +12,9 @@ namespace CodeAlta.Plugin.Mobile;
 /// </param>
 /// <param name="Url">The address of the view, while the tunnel serves it.</param>
 /// <param name="Detail">A line for people.</param>
-/// <param name="FixUrl">The page that fixes the state, when there is one.</param>
-internal sealed record MobileDevTunnelStatus(string State, string? Url, string Detail, string? FixUrl = null)
+/// <param name="FixUrl">The page that fixes the state, when there is one: while signing in, the page where the code is entered.</param>
+/// <param name="Code">While signing in, the code to enter on <paramref name="FixUrl"/>.</param>
+internal sealed record MobileDevTunnelStatus(string State, string? Url, string Detail, string? FixUrl = null, string? Code = null)
 {
     internal static MobileDevTunnelStatus Pending { get; } = new("pending", null, "Opening the Dev Tunnel…");
 
@@ -50,7 +51,7 @@ internal interface IMobileDevTunnelCli
 /// (so that its address, which phones keep, does not change), with the port of the view, hosted by <c>devtunnel host</c> while the plugin
 /// runs. The phone needs nothing but a browser; the pairing token of the QR code is what lets it in, as behind Tailscale.
 /// </summary>
-internal sealed partial class MobileDevTunnel(IMobileDevTunnelCli cli)
+internal sealed partial class MobileDevTunnel(IMobileDevTunnelCli cli, Action<string>? log = null)
 {
     /// <summary>The page that installs the command line.</summary>
     internal const string InstallUrl = "https://learn.microsoft.com/azure/developer/dev-tunnels/get-started";
@@ -73,48 +74,123 @@ internal sealed partial class MobileDevTunnel(IMobileDevTunnelCli cli)
         var user = await cli.RunAsync(["user", "show"], Patience, cancellationToken).ConfigureAwait(false);
         if (!IsSignedIn(user)) return new(NotSignedIn, tunnelId, null);
 
+        var made = false;
         if (tunnelId is null || await cli.RunAsync(["show", tunnelId], Patience, cancellationToken).ConfigureAwait(false) is not { ExitCode: 0, TimedOut: false })
         {
-            var created = await cli.RunAsync(["create", "--allow-anonymous"], Patience, cancellationToken).ConfigureAwait(false);
-            tunnelId = created is { ExitCode: 0, TimedOut: false } ? TunnelIdIn(created.Output) : null;
-            if (tunnelId is null) return new(Failed("devtunnel create", created), null, null);
+            (tunnelId, var failure) = await CreateAsync(cancellationToken).ConfigureAwait(false);
+            if (failure is not null) return new(failure, null, null);
+            made = true;
         }
 
-        var portText = port.ToString(CultureInfo.InvariantCulture);
-        var added = await cli.RunAsync(["port", "create", tunnelId, "-p", portText, "--protocol", "http"], Patience, cancellationToken).ConfigureAwait(false);
-        // A port the tunnel has already is fine.
-        if (added is not { ExitCode: 0, TimedOut: false } && !Regex.IsMatch(added.Output, "already exists|conflict", RegexOptions.IgnoreCase))
-            return new(Failed("devtunnel port create", added), tunnelId, null);
+        var added = await AddPortAsync(tunnelId!, port, cancellationToken).ConfigureAwait(false);
+        if (added is not null && !made)
+        {
+            // The tunnel kept may be one this account cannot change (made with another account, or expired): a new one is made, once.
+            log?.Invoke($"Mobile: the Dev Tunnel {tunnelId} refused the port; a new tunnel is made.");
+            (tunnelId, var failure) = await CreateAsync(cancellationToken).ConfigureAwait(false);
+            if (failure is not null) return new(failure, null, null);
+            added = await AddPortAsync(tunnelId!, port, cancellationToken).ConfigureAwait(false);
+        }
 
-        var host = cli.Start(["host", tunnelId]);
+        if (added is not null) return new(added, tunnelId, null);
+
+        var host = cli.Start(["host", tunnelId!]);
         var url = await UrlAsync(host, port, cancellationToken).ConfigureAwait(false);
         if (url.Url is null)
         {
             await host.DisposeAsync().ConfigureAwait(false);
             var output = url.Output.Trim();
             if (Regex.IsMatch(output, "not logged in|login required|unauthorized", RegexOptions.IgnoreCase)) return new(NotSignedIn, tunnelId, null);
-            return new(new("failed", null, "devtunnel host did not start" + (output.Length > 0 ? ": " + LastLine(output) : ".")), tunnelId, null);
+            log?.Invoke("Mobile: devtunnel host said: " + output);
+            return new(new("failed", null, "devtunnel host did not start" + (output.Length > 0 ? ": " + Summary(output) : ".")), tunnelId, null);
         }
 
         return new(new("serving", url.Url, $"Dev Tunnels serves {url.Url}"), tunnelId, host);
+    }
+
+    // Makes a tunnel with anonymous access: its id, or why there is none.
+    private async Task<(string? TunnelId, MobileDevTunnelStatus? Failure)> CreateAsync(CancellationToken cancellationToken)
+    {
+        var created = await cli.RunAsync(["create", "--allow-anonymous"], Patience, cancellationToken).ConfigureAwait(false);
+        var tunnelId = created is { ExitCode: 0, TimedOut: false } ? TunnelIdIn(created.Output) : null;
+        if (tunnelId is not null) return (tunnelId, null);
+        return (null, Failed("devtunnel create", created));
+    }
+
+    // Gives the tunnel the port of the view over HTTP; a port it has already is fine. Null when it has it, otherwise why not.
+    private async Task<MobileDevTunnelStatus?> AddPortAsync(string tunnelId, int port, CancellationToken cancellationToken)
+    {
+        var added = await cli.RunAsync(["port", "create", tunnelId, "-p", port.ToString(CultureInfo.InvariantCulture), "--protocol", "http"], Patience, cancellationToken).ConfigureAwait(false);
+        if (added is { ExitCode: 0, TimedOut: false } || Regex.IsMatch(added.Output, "already exists|conflict", RegexOptions.IgnoreCase)) return null;
+        return Failed("devtunnel port create", added);
     }
 
     /// <summary>Stops the old port of a tunnel when the view moves to another one; what fails is left, the tunnel serves the new one.</summary>
     internal async Task RemovePortAsync(string tunnelId, int port, CancellationToken cancellationToken)
         => await cli.RunAsync(["port", "delete", tunnelId, "-p", port.ToString(CultureInfo.InvariantCulture)], Patience, cancellationToken).ConfigureAwait(false);
 
+    /// <summary>What the sign-in asks of the person: the page where the code is entered, and the code; or the words of the command line.</summary>
+    internal sealed record SignInPrompt(string? Url, string? Code, string Text);
+
     /// <summary>
-    /// Signs in to Dev Tunnels: the command line opens the browser of this computer on the page of the account (Microsoft or GitHub) and
-    /// ends when the person signed in, or after a few minutes.
+    /// Signs in to Dev Tunnels with a code (Microsoft or GitHub): the command line gives a page and a code, which <paramref name="prompt"/>
+    /// hears for the tab to show, and ends when the person entered the code and signed in, or after a quarter of an hour. A code is used
+    /// rather than a browser the command line would open: run by CodeAlta, without a window, it may open none.
     /// </summary>
     /// <returns>Whether the person is signed in now.</returns>
-    internal async Task<bool> SignInAsync(bool github, CancellationToken cancellationToken)
+    internal async Task<bool> SignInAsync(bool github, Action<SignInPrompt> prompt, CancellationToken cancellationToken)
     {
+        ArgumentNullException.ThrowIfNull(prompt);
         if (!cli.IsInstalled) return false;
-        string[] args = github ? ["user", "login", "-g"] : ["user", "login"];
-        await cli.RunAsync(args, TimeSpan.FromMinutes(5), cancellationToken).ConfigureAwait(false);
+        string[] args = github ? ["user", "login", "-g", "-d"] : ["user", "login", "-d"];
+        await using (var login = cli.Start(args))
+        {
+            using var patience = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            patience.CancelAfter(TimeSpan.FromMinutes(15));
+            var text = new System.Text.StringBuilder();
+            var told = false;
+            // Words without a code are shown after a while: what the command line asks is then read by the person.
+            using var unparsed = new CancellationTokenSource(TimeSpan.FromSeconds(8));
+            using var tellRaw = unparsed.Token.Register(() =>
+            {
+                lock (text)
+                {
+                    if (!told && text.Length > 0) { told = true; prompt(new SignInPrompt(UrlInText(text.ToString()), null, text.ToString().Trim())); }
+                }
+            });
+            try
+            {
+                await foreach (var line in login.Lines.ReadAllAsync(patience.Token).ConfigureAwait(false))
+                {
+                    lock (text)
+                    {
+                        text.AppendLine(line);
+                        var all = text.ToString();
+                        if (!told && UrlInText(all) is { } url && CodeIn(all) is { } code)
+                        {
+                            told = true;
+                            prompt(new SignInPrompt(url, code, all.Trim()));
+                        }
+                    }
+                }
+            }
+            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+            {
+                // A quarter of an hour without a sign-in: the command line is stopped.
+            }
+        }
+
+        cancellationToken.ThrowIfCancellationRequested();
         return IsSignedIn(await cli.RunAsync(["user", "show"], Patience, cancellationToken).ConfigureAwait(false));
     }
+
+    /// <summary>The page of a sign-in by code in what the command line writes (<c>https://github.com/login/device</c>).</summary>
+    internal static string? UrlInText(string text)
+        => AnyUrl().Match(text) is { Success: true } match ? match.Value.TrimEnd('.', ',', ')', ';') : null;
+
+    /// <summary>The code of a sign-in in what the command line writes (<c>enter the code ABCD-1234</c>).</summary>
+    internal static string? CodeIn(string text)
+        => DeviceCode().Match(text) is { Success: true } match ? match.Groups[1].Value : null;
 
     private static MobileDevTunnelStatus NotSignedIn { get; } = new("not-signed-in", null, "Sign in to Dev Tunnels with a Microsoft or GitHub account: CodeAlta opens the page of the account.");
 
@@ -165,10 +241,32 @@ internal sealed partial class MobileDevTunnel(IMobileDevTunnelCli cli)
         return (url is not null && host.IsRunning ? url : null, output.ToString());
     }
 
-    private static MobileDevTunnelStatus Failed(string command, MobileCliResult result)
-        => new("failed", null, result.TimedOut ? $"{command} did not answer." : $"{command} failed: {LastLine(result.Output)}");
+    private MobileDevTunnelStatus Failed(string command, MobileCliResult result)
+    {
+        log?.Invoke($"Mobile: {command} ended with {result.ExitCode}: {result.Output.Trim()}");
+        return new("failed", null, result.TimedOut ? $"{command} did not answer." : $"{command} failed: {Summary(result.Output)}");
+    }
+
+    /// <summary>
+    /// What a person reads of an error of the command line: its lines without the request id and the greeting it adds, the first two.
+    /// </summary>
+    internal static string Summary(string output)
+    {
+        var lines = output.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Where(static line => !line.StartsWith("Request ID", StringComparison.OrdinalIgnoreCase) && !line.StartsWith("Welcome to dev tunnels", StringComparison.OrdinalIgnoreCase)
+                && !line.StartsWith("CLI version", StringComparison.OrdinalIgnoreCase))
+            .Take(2).ToArray();
+        return lines.Length > 0 ? string.Join(" ", lines) : LastLine(output);
+    }
 
     private static string LastLine(string text) => text.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).LastOrDefault() ?? "";
+
+    [GeneratedRegex(@"https://[^\s""'<>]+")]
+    private static partial Regex AnyUrl();
+
+    // "code ABCD-1234", "code: ABCD1234", "code ABC123XYZ": the word in any case, the code in capitals and digits.
+    [GeneratedRegex(@"(?i:\bcode\b)[\s:]+([A-Z0-9]{4,}(?:-[A-Z0-9]{3,})?)\b")]
+    private static partial Regex DeviceCode();
 
     [GeneratedRegex(@"Tunnel ID\s*:\s*(\S+)", RegexOptions.IgnoreCase)]
     private static partial Regex TunnelIdLine();

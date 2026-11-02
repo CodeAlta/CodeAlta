@@ -19,6 +19,26 @@ public sealed class MobileDevTunnelTests
         Assert.IsTrue(MobileDevTunnel.IsSignedIn(new MobileCliResult(0, "Logged in as someone using GitHub.")));
         Assert.IsFalse(MobileDevTunnel.IsSignedIn(new MobileCliResult(0, "Not logged in.")));
         Assert.IsFalse(MobileDevTunnel.IsSignedIn(new MobileCliResult(1, "")));
+        const string GitHub = "To sign in, use a web browser to open the page https://github.com/login/device and enter the code ABCD-1234 to authenticate.";
+        Assert.AreEqual(("https://github.com/login/device", "ABCD-1234"), (MobileDevTunnel.UrlInText(GitHub), MobileDevTunnel.CodeIn(GitHub)));
+        Assert.AreEqual("F7KQ2PXZM", MobileDevTunnel.CodeIn("open https://microsoft.com/devicelogin and enter the code F7KQ2PXZM to authenticate."));
+        Assert.IsNull(MobileDevTunnel.CodeIn("Logging in with the code of the tunnel"));
+        Assert.AreEqual("Error: Forbidden. The user is not allowed to change the tunnel.",
+            MobileDevTunnel.Summary("Welcome to dev tunnels!\nError: Forbidden. The user is not allowed to change the tunnel.\nRequest ID: 9f818614-208b-477d-9084-9a0a82e60a26"),
+            "the request id says nothing to a person");
+    }
+
+    [TestMethod]
+    public async Task ATunnelKeptThatRefusesThePort_IsReplacedByANewOne()
+    {
+        var cli = new FakeDevTunnelCli()
+            .Answer("port create old-tunnel.euw -p 2584 --protocol http", 1, "Error: Forbidden.\nRequest ID: 1")
+            .Answer("show old-tunnel.euw", 0, "Tunnel ID : old-tunnel.euw");
+
+        var published = await new MobileDevTunnel(cli).PublishAsync(2584, "old-tunnel.euw", CancellationToken.None);
+
+        Assert.AreEqual(("serving", "bold-tree-x1y2.euw"), (published.Status.State, published.TunnelId), published.Status.Detail);
+        CollectionAssert.Contains(cli.Calls.ToArray(), "create --allow-anonymous");
     }
 
     [TestMethod]

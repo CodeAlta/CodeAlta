@@ -66,6 +66,8 @@ public sealed class MobilePlugin : PluginBase
     // The host of the Dev Tunnel while it serves, and the port it serves: what is stopped when the mode or the port changes or the plugin stops.
     private IMobileHostedProcess? _tunnelHost;
     private int _tunnelPort;
+    // The sign-in to Dev Tunnels that runs: Try again or another sign-in drops it.
+    private CancellationTokenSource? _signIn;
     private bool _stopped;
     // Whether the last reading of the asks failed: it is logged once.
     private bool _askingFailed;
@@ -250,7 +252,7 @@ public sealed class MobilePlugin : PluginBase
         MobileDevTunnel.Published published;
         try
         {
-            published = await new MobileDevTunnel(_tunnelCli).PublishAsync(_settings.Port, _settings.TunnelId, cancellationToken).ConfigureAwait(false);
+            published = await new MobileDevTunnel(_tunnelCli, line => Logger.Info(line)).PublishAsync(_settings.Port, _settings.TunnelId, cancellationToken).ConfigureAwait(false);
         }
         catch (Exception exception) when (exception is InvalidOperationException or IOException or System.ComponentModel.Win32Exception)
         {
@@ -312,7 +314,7 @@ public sealed class MobilePlugin : PluginBase
         await host.DisposeAsync().ConfigureAwait(false);
         if (_tunnelPort != _settings.Port && _settings.TunnelId is { } tunnelId)
         {
-            try { await new MobileDevTunnel(_tunnelCli).RemovePortAsync(tunnelId, _tunnelPort, cancellationToken).ConfigureAwait(false); }
+            try { await new MobileDevTunnel(_tunnelCli, line => Logger.Info(line)).RemovePortAsync(tunnelId, _tunnelPort, cancellationToken).ConfigureAwait(false); }
             catch (Exception exception) when (exception is InvalidOperationException or IOException or System.ComponentModel.Win32Exception)
             {
                 Logger.Debug($"Mobile: the old port of the Dev Tunnel could not be removed: {exception.Message}");
@@ -321,17 +323,39 @@ public sealed class MobilePlugin : PluginBase
     }
 
     /// <summary>
-    /// Signs in to Dev Tunnels: the command line opens the page of the account in the browser of this computer. Once signed in, the
-    /// view is published again.
+    /// Starts the sign-in to Dev Tunnels and answers at once: the tab hears the page and the code to enter, then, once the person signed
+    /// in, the view published again. A sign-in of before that has not ended is dropped.
     /// </summary>
     internal async Task<MobileStatus> SignInAsync(bool github, CancellationToken cancellationToken)
     {
-        _state = _state with { DevTunnel = new MobileDevTunnelStatus("signing-in", null, "Sign in in the browser that opened, then come back here.") };
+        var run = new CancellationTokenSource();
+        if (Interlocked.Exchange(ref _signIn, run) is { } previous) await previous.CancelAsync().ConfigureAwait(false);
+        _state = _state with { DevTunnel = new MobileDevTunnelStatus("signing-in", null, "Starting the sign-in…") };
         await ChangedAsync().ConfigureAwait(false);
+        _ = Tasks.Run("mobile-devtunnel-signin", async _ => await RunSignInAsync(github, run).ConfigureAwait(false),
+            new PluginTaskOptions { SessionRetentionIndependent = true, Description = "Signs in to Dev Tunnels." });
+        return Status();
+    }
+
+    private async Task RunSignInAsync(bool github, CancellationTokenSource run)
+    {
         bool signedIn;
         try
         {
-            signedIn = await new MobileDevTunnel(_tunnelCli).SignInAsync(github, cancellationToken).ConfigureAwait(false);
+            signedIn = await new MobileDevTunnel(_tunnelCli, line => Logger.Info(line)).SignInAsync(github, prompt =>
+            {
+                Logger.Info($"Mobile: Dev Tunnels sign-in: {prompt.Text}");
+                if (run.IsCancellationRequested) return;
+                _state = _state with
+                {
+                    DevTunnel = new MobileDevTunnelStatus("signing-in", null, prompt.Code is null ? prompt.Text : "Enter the code on the page, then come back here.", prompt.Url, prompt.Code),
+                };
+                _ = ChangedAsync();
+            }, run.Token).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            return;
         }
         catch (Exception exception) when (exception is InvalidOperationException or IOException or System.ComponentModel.Win32Exception)
         {
@@ -339,14 +363,17 @@ public sealed class MobilePlugin : PluginBase
             signedIn = false;
         }
 
+        if (run.IsCancellationRequested) return;
+        Interlocked.CompareExchange(ref _signIn, null, run);
         if (!signedIn)
         {
             _state = _state with { DevTunnel = new MobileDevTunnelStatus("not-signed-in", null, "The sign-in did not end. Sign in again, or run devtunnel user login in a terminal.") };
             await ChangedAsync().ConfigureAwait(false);
-            return Status();
+            return;
         }
 
-        return await RetryAsync(cancellationToken).ConfigureAwait(false);
+        Logger.Info("Mobile: signed in to Dev Tunnels.");
+        await RetryAsync(CancellationToken.None).ConfigureAwait(false);
     }
 
     // Takes off the tailnet what this instance published, with the ports it was published with, and stops the host of the Dev Tunnel.
@@ -373,6 +400,7 @@ public sealed class MobilePlugin : PluginBase
         try
         {
             _stopped = true;
+            if (Interlocked.Exchange(ref _signIn, null) is { } signIn) await signIn.CancelAsync().ConfigureAwait(false);
             if (Interlocked.Exchange(ref _server, null) is { } server) await server.DisposeAsync().ConfigureAwait(false);
             // What this instance published on the tailnet goes with it; turning the plugin on again publishes it again.
             await UnpublishAsync(cancellationToken).ConfigureAwait(false);
@@ -387,6 +415,7 @@ public sealed class MobilePlugin : PluginBase
     // Asks Tailscale again: it was installed, signed in, or Serve was enabled since.
     private async Task<MobileStatus> RetryAsync(CancellationToken cancellationToken)
     {
+        if (Interlocked.Exchange(ref _signIn, null) is { } signIn) await signIn.CancelAsync().ConfigureAwait(false);
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
@@ -592,7 +621,7 @@ public sealed class MobilePlugin : PluginBase
             connect, connect is null ? null : url, connect is null ? null : MobileQr.Rows(connect))
         {
             Mode = _settings.Mode,
-            DevTunnel = new MobileTailscaleView(state.DevTunnel.State, state.DevTunnel.Url, state.DevTunnel.Detail, state.DevTunnel.FixUrl),
+            DevTunnel = new MobileDevTunnelView(state.DevTunnel.State, state.DevTunnel.Url, state.DevTunnel.Detail, state.DevTunnel.FixUrl, state.DevTunnel.Code),
         };
     }
 
@@ -798,9 +827,17 @@ internal sealed record MobileStatus(string Server, int Port, string? ServerDetai
     /// <summary>Gets how phones connect: <c>tailscale</c> or <c>devtunnel</c>.</summary>
     public string Mode { get; init; } = MobilePlugin.TailscaleMode;
 
-    /// <summary>Gets what the Dev Tunnel does, in the shape of what Tailscale does.</summary>
-    public MobileTailscaleView DevTunnel { get; init; } = new("unused", null, "", null);
+    /// <summary>Gets what the Dev Tunnel does.</summary>
+    public MobileDevTunnelView DevTunnel { get; init; } = new("unused", null, "", null, null);
 }
+
+/// <summary>What the Dev Tunnel does, as the Mobile tab shows it.</summary>
+/// <param name="State">The state, as <see cref="MobileDevTunnelStatus.State"/> says it.</param>
+/// <param name="Url">The address of the view, while the tunnel serves it.</param>
+/// <param name="Detail">A line for people.</param>
+/// <param name="FixUrl">The page that fixes the state: the install, or the page of the sign-in.</param>
+/// <param name="Code">While signing in, the code to enter on the page of <paramref name="FixUrl"/>.</param>
+internal sealed record MobileDevTunnelView(string State, string? Url, string Detail, string? FixUrl, string? Code);
 
 /// <summary>The ports the settings page asks for.</summary>
 /// <param name="Port">The port of the server on the loopback address.</param>

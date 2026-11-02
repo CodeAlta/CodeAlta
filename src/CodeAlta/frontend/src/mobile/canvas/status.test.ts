@@ -5,7 +5,7 @@ import { changedEvent, createMobileApi, type MobileWatchEvent } from "./api";
 import { mobileView, qrPath, quietZone, readStatus, type MobileStatus } from "./status";
 
 const serving = (overrides: Partial<MobileStatus> = {}, tailscale: Partial<MobileStatus["tailscale"]> = {}): MobileStatus => ({
-  mode: "tailscale", server: "listening", port: 51234, serverDetail: null, devTunnel: { state: "unused", url: null, detail: "", fixUrl: null },
+  mode: "tailscale", server: "listening", port: 51234, serverDetail: null, devTunnel: { state: "unused", url: null, detail: "", fixUrl: null, code: null },
   tailscale: { state: "serving", url: "https://pc.tail1.ts.net:8443", detail: "Published on the tailnet.", fixUrl: null, ...tailscale },
   connectUrl: "https://pc.tail1.ts.net:8443/#k=secret", address: "https://pc.tail1.ts.net:8443", qr: ["101", "010", "111"], ...overrides,
 });
@@ -28,7 +28,7 @@ test("a status is read as the plugin sends it, and what is not one is refused", 
 test("through Dev Tunnels: the code of the tunnel, no word of Tailscale, the sign-in offered, and each state said", () => {
   const tunnel = (overrides: Partial<MobileStatus> = {}, devTunnel: Partial<MobileStatus["devTunnel"]> = {}) => serving({
     mode: "devtunnel", connectUrl: "https://abc-2584.euw.devtunnels.ms/#k=secret", address: "https://abc-2584.euw.devtunnels.ms",
-    devTunnel: { state: "serving", url: "https://abc-2584.euw.devtunnels.ms", detail: "Dev Tunnels serves it.", fixUrl: null, ...devTunnel }, ...overrides },
+    devTunnel: { state: "serving", url: "https://abc-2584.euw.devtunnels.ms", detail: "Dev Tunnels serves it.", fixUrl: null, code: null, ...devTunnel }, ...overrides },
     { state: "unused", url: null, detail: "Phones connect through Dev Tunnels." });
   const read = readStatus(JSON.parse(JSON.stringify(tunnel())));
   assert.deepEqual([read?.mode, read?.devTunnel.state, read?.devTunnel.url], ["devtunnel", "serving", "https://abc-2584.euw.devtunnels.ms"]);
@@ -47,6 +47,12 @@ test("through Dev Tunnels: the code of the tunnel, no word of Tailscale, the sig
   assert.deepEqual(mobileView(tunnel(out, { state: "failed", url: null, detail: "devtunnel host did not start: boom" })).problems.map(problem => [problem.title, problem.detail]),
     [["The Dev Tunnel did not open.", "devtunnel host did not start: boom"]]);
   assert.equal(mobileView(tunnel(out, { state: "signing-in", url: null })).waiting, "Waiting for the sign-in in the browser…");
+  const code = mobileView(tunnel(out, { state: "signing-in", url: null, fixUrl: "https://github.com/login/device", code: "ABCD-1234" }));
+  assert.deepEqual(code.problems.map(problem => [problem.intent, problem.title, problem.parameters, problem.fix, problem.copy, problem.retry]),
+    [["primary", "Enter the code {code} on the sign-in page.", { code: "ABCD-1234" }, { label: "Open the sign-in page", url: "https://github.com/login/device" }, "ABCD-1234", false]]);
+  assert.equal(code.waiting, null);
+  assert.deepEqual(mobileView(tunnel(out, { state: "signing-in", url: null, fixUrl: "https://example.com/x", detail: "Some words of the CLI" })).problems.map(problem => [problem.title, problem.detail]),
+    [["Sign in to Dev Tunnels.", "Some words of the CLI"]], "words without a code are shown as they are");
   assert.equal(mobileView(tunnel(out, { state: "pending", url: null })).waiting, "Dev Tunnels is opening the tunnel.");
   assert.equal(mobileView(serving()).instruction, "Scan it with the camera of the phone. The phone must be signed in to the same tailnet.");
 });
