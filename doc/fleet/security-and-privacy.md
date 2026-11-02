@@ -50,8 +50,10 @@ so it is sealed by default; the person's own devices decrypt it, and an organiza
 dashboards.
 
 **Private sessions.** Any session can be marked Private: it is never published (no facts, no replica, no remote
-access, not listed). On a person's own machines this is always possible. Whether an organization may require the
-facts (never the content) of sessions on the machines it manages is an [open question](readme.md#open-questions).
+access, not listed). On a person's own machines this is always possible. On the machines an organization manages
+(enrolled as its machines), its policy may require the facts, never the content, of the sessions of its spaces: there
+a session of the organization's spaces cannot be Private towards the organization, and the machine says so. Personal
+spaces are never known to an organization, whatever the machine.
 
 ## Keys
 
@@ -69,7 +71,7 @@ snapshot never grants a whole space.
 | **Channel key**, with epochs | Seals the messages of one project's channel, for its members |
 | **Session replica key** (random 256 bits) | Encrypts one session's replica, in segments with derived sub-keys to stay far from AES-GCM nonce limits; wrapped only to the devices allowed to read that session |
 | **Snapshot key** (random, one per snapshot) | Encrypts one shared snapshot; it opens that snapshot and nothing later |
-| **Recovery key** (256 bits, shown once in base32) | Restores a person's keys on a new device when every device is lost, decrypting locally. Losing every device and this key loses the sealed data, which the UI says plainly |
+| **Recovery key** (256 bits, shown once in base32) | Restores a person's keys on a new device when every device is lost, decrypting locally. In a Private space, losing every device and this key loses the sealed data, which the UI says plainly; a Managed space may also escrow its members' keys with the organization (wrapped to its signers), which then restores a member's access |
 | **Organization key** (Managed spaces) | Encrypts shared content at rest on the server; held by the server or a KMS |
 | **Policy key** (ES256) | Signs policy bundles; held by the Owner's device at home, admin devices or an HSM in companies, never by the server |
 
@@ -219,8 +221,8 @@ Starting or driving a session on another machine is remote code execution, by de
 
 - **SOC 2** is an attestation by an independent auditor about an organization's controls (Type I: designed at a date;
   Type II: operating over 6 to 12 months). Software cannot "be SOC 2". A self-hosted CodeAlta Server is part of the
-  customer's own audit; CodeAlta ships what that audit needs. A hosted CodeAlta service would need its own SOC 2 Type
-  II and an organization behind it: not planned in 4.0.
+  customer's own audit; CodeAlta ships what that audit needs. CodeAlta offers no hosted service and will not: it is
+  self-hosted only, so no SOC 2 report of a CodeAlta service ever stands between a customer and their data.
 - **What CodeAlta ships**: the audit log above; SSO enforcement, SCIM deprovisioning and passkey policies; role
   reviews (who can do what, exported); encryption in transit and at rest; retention and deletion by space, deletion by
   destroying keys (crypto-shredding); a documented and tested backup and restore; `SECURITY.md`, a disclosure address

@@ -35,7 +35,7 @@ The fleet is mostly an extension of invariants the runtime already keeps. Each o
 | **CodeAlta Server** | `altaserver` (new) | The coordinator: a complete REST API (no administration interface of its own), identity and access control, devices, directory and presence, routing and relay, session ownership, automations' schedules and runs, statistics, what people share, policies, audit, notifications. It runs **no agent** and reads **no content** it was not given. |
 | Mobile page | served by Desktop today | The phone. Served by a node today (Mobile plugin); later also by the server, to reach the whole fleet. |
 
-Names are proposals ([readme](readme.md#naming)).
+The names are decided ([readme](readme.md#naming)).
 
 ## Three topologies
 

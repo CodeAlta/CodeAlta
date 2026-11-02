@@ -5,7 +5,7 @@ work with, without changing anything for someone who stays on one computer.
 
 > [!NOTE]
 > First round of the design (2026-11-01), for CodeAlta 4.0. It proposes a direction, takes the decisions it can, and
-> lists the questions left to the owner. It builds on research into about 30 products, open source and commercial,
+> records the owner's answers of 2026-11-02. It builds on research into about 30 products, open source and commercial,
 > summarized in [What others taught us](#what-others-taught-us). Issue
 > [#284](https://github.com/CodeAlta/CodeAlta/issues/284) asks for its first step. Unlike the rest of `doc/`, this
 > folder is a plan: once built, what it describes moves to the architecture documents and the user guide.
@@ -100,6 +100,8 @@ with no account and no network call.
 
 ### Naming
 
+Decided by the owner on 2026-11-02 (decision 23), for these reasons:
+
 - **Fleet** stays: it says many machines under one command, it is the word the field uses for agents and runners, and
   it fits machines and people alike. Considered: *mesh* (implies peer-to-peer, and there is a server), *swarm* and
   *hive* (autonomous AI, no humans), *network* (vague), *crew* (people only), *constellation* (long), the mountain
@@ -190,9 +192,10 @@ always-on machine; a vendor-neutral fleet across providers; home-scale deploymen
 
 Details, done criteria and risks: [roadmap](roadmap.md).
 
-## Decisions taken in this round
+## Decisions
 
-To confirm or overturn; each is argued in its document.
+Each is argued in its document. Decisions 1 to 22 were proposed by the first rounds and confirmed by the
+owner on 2026-11-02, whose answers also settled the questions that were open (23 to 30).
 
 1. **Paired machines before the server** (M1): it answers #284 soonest and builds the node API, the protocol and
    pairing that the server reuses.
@@ -235,41 +238,28 @@ To confirm or overturn; each is argued in its document.
     ([orchestration](orchestration.md#disconnects)).
 22. **The phone's page comes from a machine the person owns** in Private spaces, never from the server, which could
     otherwise serve code that reads what the phone decrypts.
+23. **Names**: Fleet, CodeAlta Server (`altaserver`), CodeAlta Node (`altanode`), and "machines" in the interface.
+24. **CodeAlta Server is open source**, under CodeAlta's licence (BSD-2-Clause), in one edition: every milestone, the
+    features of organizations included, is part of the open product. Its dependencies keep to licences compatible with
+    it (no AGPL or GPL inside), which already rules out embedding Zitadel and keeps OpenIddict.
+25. **Organizations may require facts on their machines**: on the machines an organization manages, its policy may
+    require the facts (never the content) of the sessions of its spaces. Private stays the person's choice everywhere
+    else, and personal spaces are never known to an organization.
+26. **The CodeAlta project registers and maintains public sign-in client ids** with Microsoft, Google and GitHub, and
+    publishes Google's consent screen, so that CodeAlta Desktop signs people in to any self-hosted server.
+27. **Scope**: 4.0 ships M0 to M3 and the part of M4 that the two cases of issue #292 need
+    ([roadmap](roadmap.md#what-40-contains)); replicas come in M3, as M3c; a signed mobile application, a remote code
+    editor and terminals, direct messages and the Slack and Teams mirrors come after 4.0.
+28. **No hosted service, ever**: CodeAlta is self-hosted only; nothing run by the project is in the path of a fleet.
+29. **Recovery**: the sealed data of Private spaces is unrecoverable without a device or the recovery key; Managed
+    spaces may escrow keys with their organization.
+30. **Confirmed as proposed**: paired machines before the server; titles sealed by default, with an opt-in for
+    organizations; remote starts off by default, one switch per machine; a person's subscriptions only for their own
+    runs on their own machine; the GitHub token broker as an opt-in of organizations; plugins may change the fleet once
+    the person accepted them, every change audited; client mode over an explicit local node for a desktop that must
+    stay reachable; statistics per person only with an explicit grant.
 
 ## Open questions
 
-For the owner, in order of how much they change the plan:
-
-1. **Names**: Fleet, CodeAlta Server (`altaserver`), CodeAlta Node (`altanode`), "machines" in the interface? Or a
-   `node` group of `altacli`?
-2. **Order**: paired machines (M1, M2) before the server (M3), as proposed?
-3. **Is CodeAlta Server open source**, under which licence, and is there an enterprise edition? It decides which
-   dependencies can be embedded and what M4 and M5 are.
-4. **Titles and descriptive metadata**: sealed by default also in organizations, with an opt-in to show them?
-5. **Private sessions on company machines**: may an organization require the facts (never the content) of sessions on
-   the machines it manages, or is Private always the person's choice?
-6. **Remote starts between a person's own machines**: off by default (as proposed), or on for the owner's own devices
-   at home?
-7. **Upstream sign-in clients**: may the CodeAlta project register and maintain public client ids with Microsoft,
-   Google and GitHub (and publish the Google consent screen)?
-8. **Replicas** (encrypted copies of journals on the server) in M3, or later?
-9. **A signed mobile application**: in Private spaces the phone's page comes from a person's own machine (decided
-   above); is a signed app (stores, notifications, keys in the Secure Enclave) worth it for 4.x?
-10. **Remote code editor and terminals** on other machines (like VS Code Remote): in 4.0, or after?
-11. **The GitHub token broker**: acceptable for organizations (the server could reach their repositories), or must
-    tokens always stay on nodes?
-12. **Recovery**: Private data unrecoverable by design without a device or the recovery key; key escrow for Managed
-    spaces?
-13. **Channels**: project channels only, or direct messages too? Mirrors to Slack and Teams in 4.0?
-14. **A desktop that stays reachable when closed**: is client mode over a local node enough, or should the desktop
-    install a node behind the scenes?
-15. **A hosted service** (a CodeAlta-run server or relay), ever? It would need its own SOC 2 Type II.
-16. **A person's automations on their own always-on machine** (a home Mac mini): may they use that person's
-    subscriptions, as their desktop does today, or must every automation off the desktop use API keys? The plan allows
-    subscriptions for a person's own runs on their own machines; an organization can forbid it.
-17. **Statistics per person**: off by default for managers and admins (as proposed), or a choice each organization
-    makes at setup?
-18. **Plugins and the fleet**: may a plugin change the fleet (create, grant, approve) once the person accepted it, as
-    proposed, or only read it?
-19. **What 4.0 contains**: M0 to M3 plus the part of M4 the two cases of issue #292 need, with channels, co-driving,
-    node pools and high availability in 4.x, as the roadmap proposes ([roadmap](roadmap.md#what-40-contains))?
+None at this point: the owner answered the questions of the first rounds on 2026-11-02 (decisions 23 to 30). New
+questions go here.

@@ -102,6 +102,8 @@ The coordinator, for one person or a household.
 - **`altaserver`**: identity (owner setup, devices, device codes, passkeys, linked Microsoft/Google/GitHub sign-in
   through the desktop, Tailscale identity), directory and presence, relay, deliveries, ownership and epochs,
   backups ([server](server.md)).
+- **The project's sign-in apps**: CodeAlta's public client ids registered with Microsoft, Google and GitHub, and
+  Google's consent screen published and verified, before M3a ships.
 - **Spaces linked to a server**; Private mode; the signed device list, the separated keys, recovery key; sealed metadata and
   blind indexes ([security](security-and-privacy.md)).
 - **The REST API v1** and its change feed, API-complete for what M3 offers ([protocol](protocol.md#the-servers-rest-api)).
@@ -186,7 +188,7 @@ ephemeral cloud machines for heavy tasks.
 
 ## What 4.0 contains
 
-A proposal for the owner to confirm ([open questions](readme.md#open-questions)): **4.0** ships M0 to M3 and the part
+Decided by the owner on 2026-11-02 ([decisions](readme.md#decisions)): **4.0** ships M0 to M3 and the part
 of M4 that the two cases of issue #292 need (ownership and access control, team automations with account credentials,
 triggers beyond Git, graduated autonomy, audit). Channels and co-driving, the rest of collaboration, takeover from
 replicas if M3c slips, node pools, cloud provisioning and high availability can follow in 4.x releases without changing

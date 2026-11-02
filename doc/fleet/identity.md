@@ -82,7 +82,7 @@ to it.
   id), **Google** (keyed on `sub`; `hd` names a Workspace domain), **GitHub** (OAuth only, no ID token: the server
   reads the numeric user id through the API with the token it is given), Apple later.
 - A self-hosted server has its own host name, so it cannot use a redirect address registered once for everyone. The
-  **desktop signs in natively** with public client ids owned by the CodeAlta project (system browser, PKCE,
+  **desktop signs in natively** with public client ids that the CodeAlta project registers and maintains (system browser, PKCE,
   loopback redirect, with a nonce from the server) and gives the server the ID token, which the server checks
   (issuer, audience, nonce, signature). No registration per server.
 - Sign-in on the server's own web pages (a browser, the phone) needs an application the admin registers with the

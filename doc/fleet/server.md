@@ -1,8 +1,8 @@
 # CodeAlta Server
 
 The coordinator of a fleet. It knows who is who, what is online and who may reach what; it routes and relays; it keeps
-what people share. It runs no agent and reads no content it was not given. Names (`CodeAlta Server`, `altaserver`)
-are proposals ([readme](readme.md#naming)).
+what people share. It runs no agent and reads no content it was not given. Its names (`CodeAlta Server`,
+`altaserver`) are decided ([readme](readme.md#naming)).
 
 ## What it does
 
@@ -145,5 +145,11 @@ Nodes are autonomous: a server that is down stops visibility, relay and sharing,
 ## One organization per server
 
 A server hosts one organization (a household, a company). It is not a multi-tenant service: organizations that must
-not trust each other run separate servers. A hosted CodeAlta service, if ever, is a separate decision
+not trust each other run separate servers. CodeAlta offers no hosted service: the server is self-hosted only
 ([security](security-and-privacy.md#compliance)).
+
+## Licence
+
+CodeAlta Server is open source under CodeAlta's licence (BSD-2-Clause), in one edition: the features of organizations
+(SSO, access control, SCIM, high availability, brokered credentials) are part of it. Its dependencies keep to
+licences compatible with that (MIT, Apache 2.0, BSD, PostgreSQL's): no AGPL or GPL component inside.

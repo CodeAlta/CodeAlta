@@ -1,8 +1,8 @@
 # CodeAlta Node
 
 The headless CodeAlta host: the always-on machine at home, the Mac that builds iOS, a cloud VM. It answers issue
-[#284](https://github.com/CodeAlta/CodeAlta/issues/284)'s "headless mode". Names (`CodeAlta Node`, `altanode`) are
-proposals ([readme](readme.md#naming)).
+[#284](https://github.com/CodeAlta/CodeAlta/issues/284)'s "headless mode". Its names (`CodeAlta Node`, `altanode`)
+are decided ([readme](readme.md#naming)).
 
 ## What it is
 

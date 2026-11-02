@@ -53,7 +53,8 @@ console queries them by scope.
 - **Deleted sessions** keep their published facts (as the local archive keeps them), until the organization's
   retention removes them.
 - **Private sessions** publish nothing ([security](security-and-privacy.md#what-the-server-sees)): their numbers stay
-  in the person's local statistics.
+  in the person's local statistics. On the machines an organization manages, its policy may require the facts of the
+  sessions of its spaces, which then cannot be Private towards it.
 
 ## Dimensions
 
