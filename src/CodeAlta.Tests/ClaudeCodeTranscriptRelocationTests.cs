@@ -169,6 +169,30 @@ public sealed class ClaudeCodeTranscriptRelocationTests
     }
 
     [TestMethod]
+    public async Task ProviderRuntime_CarriesTheTranscriptToAnotherMachine()
+    {
+        var source = WriteTranscript(OldDirectory, "conversation");
+        WriteFile(Path.Combine(Path.GetDirectoryName(source)!, SessionId, "tool-results", "one.txt"), "result");
+        var targetRoot = Path.Combine(_root, "target-profile");
+        var bundle = Path.Combine(_root, "bundle", "provider");
+        var state = new CodeAlta.Agent.Runtime.AgentSessionState { SessionId = "codealta-session", ProviderKey = "claude-code",
+            ProtocolFamily = "claude-code", ProviderState = new ClaudeCodeProviderState(SessionId, 2, 2).ToJson(), UpdatedAt = DateTimeOffset.UtcNow };
+        await using var sourceRuntime = new ClaudeCodeModelProviderRuntime(new ClaudeCodeModelProviderRuntimeOptions { ProviderKey = "claude-code", ConfigDirectory = _root });
+        await using var targetRuntime = new ClaudeCodeModelProviderRuntime(new ClaudeCodeModelProviderRuntimeOptions { ProviderKey = "claude-code", ConfigDirectory = targetRoot });
+
+        Assert.AreEqual((true, (string?)null), await sourceRuntime.ExportSessionAsync(state, OldDirectory, bundle));
+        Assert.IsTrue(File.Exists(source), "The source keeps its transcript: it is copied, not moved.");
+        Assert.IsNull(await targetRuntime.ImportSessionAsync(state, bundle, NewDirectory));
+
+        var placed = Path.Combine(ClaudeCodeProjectFolders.GetProjectFolder(targetRoot, NewDirectory), SessionId + ".jsonl");
+        Assert.AreEqual("conversation", File.ReadAllText(placed));
+        Assert.AreEqual("result", File.ReadAllText(Path.Combine(Path.GetDirectoryName(placed)!, SessionId, "tool-results", "one.txt")));
+        Assert.IsNull(await targetRuntime.ImportSessionAsync(state, bundle, NewDirectory), "Placed again, the same copy is kept.");
+        Assert.AreEqual((false, (string?)null), await sourceRuntime.ExportSessionAsync(state with { ProviderState = null }, OldDirectory, Path.Combine(_root, "none")));
+        Assert.IsFalse(Directory.Exists(Path.Combine(_root, "none")));
+    }
+
+    [TestMethod]
     public async Task ProviderRuntime_MovesTheTranscriptInTheConfigFolderOfTheProvider()
     {
         var source = WriteTranscript(OldDirectory, "conversation");
