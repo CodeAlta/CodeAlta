@@ -75,12 +75,20 @@ internal sealed class GitIssueQuery(HttpClient client, GitRepositoryReference re
     public GitIssueQuery Fork() => new(client, Repository, authorization) { Filters = Filters, Fields = Fields, Cache = Cache, Kind = Kind };
 
     public Task<HttpResponseMessage> GetAsync(string url, string accept, CancellationToken cancellationToken)
-        => SendAsync(new HttpRequestMessage(HttpMethod.Get, url), accept, cancellationToken);
+        => SendAsync(new HttpRequestMessage(HttpMethod.Get, url), accept, HttpCompletionOption.ResponseContentRead, cancellationToken);
+
+    /// <summary>
+    /// Sends a GET whose answer is returned once its headers are read: the caller reads its body and bounds it (an
+    /// image), instead of the client taking the whole body in memory first. The caller disposes the answer.
+    /// </summary>
+    public Task<HttpResponseMessage> GetUnbufferedAsync(string url, string accept, CancellationToken cancellationToken)
+        => SendAsync(new HttpRequestMessage(HttpMethod.Get, url), accept, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
 
     public Task<HttpResponseMessage> PostJsonAsync(string url, string json, CancellationToken cancellationToken)
-        => SendAsync(new HttpRequestMessage(HttpMethod.Post, url) { Content = new StringContent(json, Encoding.UTF8, "application/json") }, "application/json", cancellationToken);
+        => SendAsync(new HttpRequestMessage(HttpMethod.Post, url) { Content = new StringContent(json, Encoding.UTF8, "application/json") }, "application/json",
+            HttpCompletionOption.ResponseContentRead, cancellationToken);
 
-    private async Task<HttpResponseMessage> SendAsync(HttpRequestMessage message, string accept, CancellationToken cancellationToken)
+    private async Task<HttpResponseMessage> SendAsync(HttpRequestMessage message, string accept, HttpCompletionOption completion, CancellationToken cancellationToken)
     {
         using (message)
         {
@@ -91,7 +99,7 @@ internal sealed class GitIssueQuery(HttpClient client, GitRepositoryReference re
             }
 
             var started = Stopwatch.GetTimestamp();
-            var response = await client.SendAsync(message, cancellationToken).ConfigureAwait(false);
+            var response = await client.SendAsync(message, completion, cancellationToken).ConfigureAwait(false);
             var elapsed = (long)Stopwatch.GetElapsedTime(started).TotalMilliseconds;
             var log = GitIssueLog.Log;
             var address = GitIssueLog.Address(message.RequestUri);

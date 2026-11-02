@@ -352,6 +352,19 @@ public sealed class GitHostTrackerTests
     }
 
     [TestMethod]
+    public async Task AzureDevOps_StopsReadingAnImage_PastTheLargestOne()
+    {
+        // An attachment the service sends without its length: the reading stops past the largest image, it does not
+        // take the whole body in memory first.
+        var body = new CountingStream([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A], 4L * TrackedImage.MaximumBytes);
+        var handler = new StreamHandler(body);
+        var tracker = Tracker(handler, GitRepositoryReference.AzureDevOps("org", "proj", "app"), GitRemoteCredential.Bearer("token"));
+
+        Assert.IsNull(await tracker.ReadImageAsync(new Uri("https://dev.azure.com/org/proj-id/_apis/wit/attachments/0f1e?fileName=big.png"), default));
+        Assert.IsLessThanOrEqualTo(TrackedImage.MaximumBytes + 1024L * 1024, body.Consumed, "At most a little more than the largest image is read.");
+    }
+
+    [TestMethod]
     public void AnImage_IsKnownByItsFirstBytes_NotByWhatTheServiceSays()
     {
         Assert.AreEqual("image/png", TrackedImage.Detect([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]));
@@ -367,6 +380,45 @@ public sealed class GitHostTrackerTests
     {
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
             => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent(answer(request)), RequestMessage = request });
+    }
+
+    // Answers a body of unknown length.
+    private sealed class StreamHandler(Stream body) : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+            => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StreamContent(body), RequestMessage = request });
+    }
+
+    // A body that starts with some bytes and then has zeros, that cannot seek and counts what was read of it.
+    private sealed class CountingStream(byte[] start, long length) : Stream
+    {
+        public long Consumed { get; private set; }
+
+        public override bool CanRead => true;
+        public override bool CanSeek => false;
+        public override bool CanWrite => false;
+        public override long Length => throw new NotSupportedException();
+        public override long Position { get => Consumed; set => throw new NotSupportedException(); }
+
+        public override int Read(byte[] buffer, int offset, int count) => Read(buffer.AsSpan(offset, count));
+
+        public override int Read(Span<byte> buffer)
+        {
+            var count = (int)Math.Min(buffer.Length, length - Consumed);
+            buffer[..count].Clear();
+            for (var index = 0; index < count && Consumed + index < start.Length; index++) buffer[index] = start[Consumed + index];
+            Consumed += count;
+            return count;
+        }
+
+        public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default) => ValueTask.FromResult(Read(buffer.Span));
+
+        public override Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken) => Task.FromResult(Read(buffer.AsSpan(offset, count)));
+
+        public override void Flush() { }
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+        public override void SetLength(long value) => throw new NotSupportedException();
+        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
     }
 
     // An organization where the user is in Core directly and in Fields through Core, and the open pull requests of its project.

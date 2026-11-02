@@ -8,7 +8,8 @@ internal sealed partial class AzureDevOpsApi
     public override async Task<TrackedImage?> ReadImageAsync(GitIssueQuery query, Uri address, CancellationToken cancellationToken)
     {
         if (!IsAttachment(query.Repository, address)) return null;
-        using var response = await query.GetAsync(address.AbsoluteUri, "image/*", cancellationToken).ConfigureAwait(false);
+        // The body is read here, up to the largest image: an attachment of any size is never taken whole in memory.
+        using var response = await query.GetUnbufferedAsync(address.AbsoluteUri, "image/*", cancellationToken).ConfigureAwait(false);
         // An answer from elsewhere (a redirection the sign-in did not follow) is not the attachment.
         if (!response.IsSuccessStatusCode || !string.Equals(response.RequestMessage?.RequestUri?.Host, address.Host, StringComparison.OrdinalIgnoreCase)) return null;
         return await ReadImageAsync(response, cancellationToken).ConfigureAwait(false);
