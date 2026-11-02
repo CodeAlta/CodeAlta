@@ -81,7 +81,10 @@ Each node signs in by itself; the desktop drives the sign-ins so that nobody has
 
 **Readiness.** For each linked space, the desktop shows whether the node is ready to run its sessions: the identity
 **Check** of the space run on the node (who Git commits as, whether keys exist, which GitHub account), and the
-providers of the space that are ready there, with **Set up…** beside what is missing.
+providers of the space that are ready there, with **Set up…** beside what is missing. It also answers two questions
+a household asks: **Will this still run after a restart or a logout?** (the kind of service, automatic login,
+lingering) and, for an automation, **Why can't this machine run it?** (credential kind, tools, sandbox, project,
+labels, its local policy).
 
 ## Automations and statistics
 
@@ -92,6 +95,9 @@ providers of the space that are ready there, with **Set up…** beside what is m
   unreachable.
 - **Statistics are counted on nodes.** The statistics engine runs headless too (today only in the desktop); the node
   publishes its facts as versioned rows ([statistics](statistics.md)).
+- **The node's host can ask.** Unlike today's headless runs of `altacli`, which grant everything (`FullTrust`), a node
+  routes permission requests and questions to people, bound to their exact attempts, and refuses what nobody may
+  approve.
 
 ## Workspaces
 

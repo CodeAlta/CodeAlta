@@ -113,6 +113,23 @@ Nodes are autonomous: a server that is down stops visibility, relay and sharing,
   connected to different instances needs cross-instance routing (PostgreSQL `LISTEN/NOTIFY` for small fleets, a
   message bus beyond). Orleans would model it elegantly but is not worth its weight before then.
 
+## Restore and upgrades
+
+- **Upgrades** go from one minor version to the next (N-1 to N) directly. The server takes a backup, then runs its
+  numbered migrations at start under a migration lock, each in a transaction; a failed migration leaves the previous
+  version in place. Going back means restoring the backup taken before the upgrade.
+- **A backup is a consistent set**: the database, the blobs it references and the server's own keys (TLS, token
+  signing), the keys encrypted. The server holds no key that decrypts Private data, so a backup holds none either.
+- **Restore epochs**: a restored server starts a new epoch. Nodes notice that it is behind them and publish again what
+  it lacks (facts, inventories); revocations are signed device-list entries that devices also keep, so a restored
+  server cannot bring a revoked device back; nodes refuse a run they already recorded, so a restored queue does not
+  repeat work.
+- **Deletion**: unlinking a space removes its facts and sealed copies from the server; a published session made Private
+  later has its facts, sealed metadata and replica deleted there; retention deletes the same way, and backups expire
+  after the retention period so that deleted data does not live on in them. Deleting ciphertext at the server does not
+  take back copies that recipients already have.
+- **Restores are tested**: the release checks restore a backup into a fresh server and reconnect nodes to it.
+
 ## Administration
 
 - **From CodeAlta Desktop**: the console's canvases (Server, People and access, Machines, Policies and budgets, Audit)
@@ -120,7 +137,8 @@ Nodes are autonomous: a server that is down stops visibility, relay and sharing,
 - **The REST API** for everything else: `altacli fleet`, plugins, scripts and integrations reach every operation the
   console reaches.
 - **`altaserver` commands** on the machine: `run`, `install` (service), `status`, `backup`, `restore`,
-  `migrate --to postgres`, `audit export`, `recover-owner` (with the recovery key, on the server's own terminal only).
+  `migrate --to postgres`, `audit export`, `recover-owner` (on the server's own terminal only: it gives the Owner role
+  back, never needs the recovery key of encrypted data).
 - **Web pages**: setup, sign-in, device approval, the phone's page. No administration interface: that is a choice, not
   a gap ([console](console.md#why-the-desktop-and-what-it-costs)).
 

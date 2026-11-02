@@ -30,16 +30,20 @@ whatever a team needs on top of it.
 
 ## The server is API-complete
 
-Every operation of the console is an operation of the public REST API ([protocol](protocol.md#the-servers-rest-api)),
-with the same access rules ([access control](access-control.md)):
+Every operation of the console goes through public, documented protocols, with the same access rules
+([access control](access-control.md)):
 
-- the console has no private endpoint and no capability the API lacks;
-- `altacli fleet`, plugins, scripts and integrations reach everything the console reaches, under their own grants;
-- the API is described by an OpenAPI document published with each server version, and its clients are generated from
-  it.
+- **management** (machines, automations, runs, statistics, people, grants, policies, audit) through the REST API
+  ([protocol](protocol.md#the-servers-rest-api)), described by an OpenAPI document published with each server version;
+- **what reaches a session's content** (driving a session, a move, a setup terminal) through the session-channel
+  protocol, end to end with the node, documented as well and shipped as a client library;
+- the console has no private endpoint and no capability these lack; `altacli fleet`, plugins, scripts and integrations
+  reach everything the console reaches, under their own grants;
+- **actions that need a person's authority** (a remote start, an approval, enabling an automation) need a person's
+  device key whatever the client: an integration token can read and manage what it was granted, never act for a person.
 
-The rule is guarded by a test that lists the operations the console calls and fails when one is not in the published
-API.
+The rule is guarded by tests that play complete journeys (enroll a machine, publish and run an automation, answer an
+approval, read statistics) through the public client library alone.
 
 ## How it is built
 
@@ -90,8 +94,10 @@ flowchart LR
   person's grants: listing machines, querying statistics, creating an automation, answering an approval.
 - A plugin declares what it uses: reading the fleet is granted with the plugin; changing it (creating, deleting,
   granting, approving) needs the plugin to declare it and the person to accept, and every change it makes is audited as
-  made through that plugin.
-- An organization can distribute plugins to its members' desktops by policy, as it distributes skills and prompts.
+  made through that plugin. These declarations are **consent and audit, not confinement**: a plugin is code with the
+  person's rights in the desktop process ([plugins](../plugins.md)), so it can reach anything the person can.
+- An organization can **offer** plugins to its members; a person installs them knowingly, and a desktop that also
+  holds personal spaces never receives one by policy alone.
 - Examples the samples will show: a team dashboard, an incident board fed by a trigger source, a cost report.
 
 ## Agents and scripts
@@ -104,5 +110,6 @@ flowchart LR
 ## The phone and the TUI
 
 - **The phone** shows the Fleet view, what waits for its person (approvals, questions), runs, and **Run now**; it does
-  not administer.
+  not administer. In Private spaces its page comes from a machine the person owns, never from the server
+  ([security](security-and-privacy.md#channels)).
 - **CodeAlta TUI** gets no console (no new TUI feature): it is a node like the others when it runs.

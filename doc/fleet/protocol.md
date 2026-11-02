@@ -90,8 +90,8 @@ server/node → welcome { protocol, features, cursors, policy }  |  error { code
 | --- | --- |
 | Node to server: session facts | Each fact carries `(sessionId, epoch, version)`; the server keeps the highest version and refuses a stale epoch. The source is the journal and its projection, with a watermark per server: the journal is the outbox. |
 | Node to server: other facts (inventory, usage, audit events) | A small outbox table on the node, with a per-server sequence; the server acknowledges the highest contiguous sequence; the node resends from there after a reconnection. Duplicates are no-ops. |
-| Server to node: deliveries (child answers, cross-machine messages, chat, policy) | A per-node delivery sequence with acknowledgements and a time to live; queued while the node is offline. |
-| Replicas | `replica.append(sessionId, epoch, fromOffset, bytes)`; the server stores what follows the last acknowledged offset, refuses a gap (with the expected offset) or a stale epoch. |
+| Server to node: deliveries (child answers, cross-machine messages, chat, policy) | A per-node delivery sequence with acknowledgements and a time to live; queued while the node is offline. A delivery that carries content (an answer, a message) is sealed to the receiving device: the server routes it without reading it. |
+| Replicas | `replica.append(sessionId, epoch, generation, fromOffset, bytes)`; the server stores what follows the last acknowledged offset, refuses a gap (with the expected offset), a stale epoch or an older generation (a rewind starts a new one). |
 | Viewers | Display: full replacements with a revision and a gap flag (lossy by design). History: windows by journal cursor. After a reconnection: the current display, then the history after the viewer's cursor. |
 | Commands | The node keeps receipts by idempotency key (bounded); a retry returns the first receipt; an evicted receipt answers `expired`, never runs again. |
 

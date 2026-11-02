@@ -49,8 +49,8 @@ Invisible changes that make the rest small and safe. Nothing reaches the network
 - **A multi-host test harness**: two or three hosts with temporary roots in one test process, talking through the
   in-memory transport, as the base of every later integration test.
 - **Spikes**: our envelope vs StreamJsonRpc; TLS inside a relayed stream with pinned P-256 keys on the three OSes;
-  WebAuthn in WebView2 and WKWebView on a tailnet name; a PAKE (CPace or SPAKE2) in .NET; service installation per OS
-  (logon task, LaunchAgent, `systemd --user`).
+  WebAuthn in WebView2 and WKWebView on a tailnet name; a vetted PAKE implementation usable from .NET (CPace or
+  SPAKE2: chosen, not written); service installation per OS (logon task, LaunchAgent, `systemd --user`).
 
 Done when: every existing test passes, a session round-trips through a bundle on each OS, and the spikes have
 answers recorded in the M1 sub-plan.
@@ -102,7 +102,7 @@ The coordinator, for one person or a household.
 - **`altaserver`**: identity (owner setup, devices, device codes, passkeys, linked Microsoft/Google/GitHub sign-in
   through the desktop, Tailscale identity), directory and presence, relay, deliveries, ownership and epochs,
   backups ([server](server.md)).
-- **Spaces linked to a server**; Private mode; the signed device list, space keys, recovery key; sealed metadata and
+- **Spaces linked to a server**; Private mode; the signed device list, the separated keys, recovery key; sealed metadata and
   blind indexes ([security](security-and-privacy.md)).
 - **The REST API v1** and its change feed, API-complete for what M3 offers ([protocol](protocol.md#the-servers-rest-api)).
 - **The console** ([console](console.md)): the Fleet, Machines, Automations, Statistics and Server canvases, the Fleet
@@ -118,11 +118,19 @@ The coordinator, for one person or a household.
 - **Budgets and alerts**, **health** notifications, basic **audit**.
 - Setup assistant: **Create my server** (this computer, over SSH, a VM), Tailscale and domain recipes.
 
-Done when: S4 to S10 work; the server can be killed at any time without losing or duplicating a fact (S6); a
-compromised server cannot read a session or start one (tests with a hostile server in the harness).
+M3 ships as three releases, each usable on its own:
 
-Risks: key management UX (recovery, new devices); the browser channel for the phone; scope (split M3 into M3a
-coordinator and relay, M3b replicas and automations, M3c phone).
+| Release | Contents |
+| --- | --- |
+| **M3a** | `altaserver`, identity, the device list and keys, spaces linked to a server, the REST API v1, the console's Fleet, Machines and Server canvases, relayed channels |
+| **M3b** | Personal fleet automations, fleet statistics, cross-machine sub-agents and messages, budgets and alerts |
+| **M3c** | Replicas and takeover, the phone served by a person's own machine |
+
+Done when: S4 to S9 work, and S10 without sharing (shares come with M4); the server can be killed at any time without
+losing or duplicating a fact (S6); a compromised server cannot read a session or start one (tests with a hostile server
+in the harness).
+
+Risks: key management UX (recovery, new devices); the phone's trust model; the size of M3, hence its three releases.
 
 ## M4: Organizations and collaboration
 
@@ -170,6 +178,16 @@ ephemeral cloud machines for heavy tasks.
 - **S1 never regresses**: a test asserts no fleet network activity and no new prompt for a profile that never paired
   or linked anything.
 - **The TUI keeps working** (no new TUI feature, `AGENTS.md`): its host is a node like the others when it runs.
-- **Security reviews** at each milestone's end (a review session on another model, the threat model updated).
+- **Release gates** from M3 on: partition and crash tests (moves, runs, publications), hostile-server tests, revocation
+  tests, a restore of a backup into a fresh server; and before M3 and M4 ship, a review by a security specialist, beside
+  the review sessions on other models at each milestone's end and the threat model kept up to date.
 - **The user guide** follows each user-visible step (`site/docs`), and `doc/` describes the architecture once it is
   real; this folder is the plan.
+
+## What 4.0 contains
+
+A proposal for the owner to confirm ([open questions](readme.md#open-questions)): **4.0** ships M0 to M3 and the part
+of M4 that the two cases of issue #292 need (ownership and access control, team automations with account credentials,
+triggers beyond Git, graduated autonomy, audit). Channels and co-driving, the rest of collaboration, takeover from
+replicas if M3c slips, node pools, cloud provisioning and high availability can follow in 4.x releases without changing
+the protocol.

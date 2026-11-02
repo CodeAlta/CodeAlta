@@ -185,7 +185,7 @@ level, to the incident's timeline and Slack thread.
 
 ### S21. Someone leaves
 
-Bob leaves the company; SCIM suspends him.
+Bob leaves the company; an admin suspends him (SCIM does it by itself from milestone 5).
 
 - His devices and delegations are revoked at once; his sessions on team machines stop.
 - The team automations he owned go to the team, paused until a maintainer resumes them; nothing is orphaned, and the

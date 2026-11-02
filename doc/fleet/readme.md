@@ -200,8 +200,9 @@ To confirm or overturn; each is argued in its document.
    Coder Agents, which would end "the server never sees prompts".
 3. **Relayed by default with a server, direct when reachable**; no WebRTC.
 4. **Plain WebSocket with our own envelope**, sequences and epochs; not SignalR, gRPC or QUIC for nodes.
-5. **ECDSA/ECDH P-256 device keys and the .NET base library only** for cryptography: TLS between devices inside the
-   relay, envelope encryption for data at rest, algorithm ids for later curves.
+5. **ECDSA/ECDH P-256 device keys and the .NET base library** for the cryptographic primitives (a vetted library for
+   what it lacks, such as the PAKE): TLS between devices inside the relay, envelope encryption for data at rest with
+   one key per kind of thing and audience, algorithm ids for later curves.
 6. **Spaces link to servers**, one server per space, several servers per instance; **Private** by default, **Managed**
    for organizations that choose it.
 7. **The server is its own identity provider** (ASP.NET Core Identity, OpenIddict); Microsoft, Google and GitHub are
@@ -226,6 +227,14 @@ To confirm or overturn; each is argued in its document.
     version, never authorize; allowed autonomous actions are tools with typed parameters, not shell patterns.
 19. **Fleet statistics are the Statistics plugin's facts**, published by each machine as versioned rows; per-person
     numbers need an explicit grant ([statistics](statistics.md)).
+20. **Devices have classes**: controller devices (a person's desktop or phone) sign; execution nodes only act as
+    themselves; a small set of signers signs policies and team machines. Authority on a machine is a delegation signed
+    by a person's device, never a token of the server ([security](security-and-privacy.md#the-device-list)).
+21. **Two kinds of automations when disconnected**: offline-capable ones on one named machine, lease-bound ones on
+    pools; a run already under way follows its preset (continue, stop before replacement, manual recovery)
+    ([orchestration](orchestration.md#disconnects)).
+22. **The phone's page comes from a machine the person owns** in Private spaces, never from the server, which could
+    otherwise serve code that reads what the phone decrypts.
 
 ## Open questions
 
@@ -244,8 +253,8 @@ For the owner, in order of how much they change the plan:
 7. **Upstream sign-in clients**: may the CodeAlta project register and maintain public client ids with Microsoft,
    Google and GitHub (and publish the Google consent screen)?
 8. **Replicas** (encrypted copies of journals on the server) in M3, or later?
-9. **The phone through the server**: an application-level channel in the browser, or a node acting as the phone's
-   gateway?
+9. **A signed mobile application**: in Private spaces the phone's page comes from a person's own machine (decided
+   above); is a signed app (stores, notifications, keys in the Secure Enclave) worth it for 4.x?
 10. **Remote code editor and terminals** on other machines (like VS Code Remote): in 4.0, or after?
 11. **The GitHub token broker**: acceptable for organizations (the server could reach their repositories), or must
     tokens always stay on nodes?
@@ -262,3 +271,5 @@ For the owner, in order of how much they change the plan:
     makes at setup?
 18. **Plugins and the fleet**: may a plugin change the fleet (create, grant, approve) once the person accepted it, as
     proposed, or only read it?
+19. **What 4.0 contains**: M0 to M3 plus the part of M4 the two cases of issue #292 need, with channels, co-driving,
+    node pools and high availability in 4.x, as the roadmap proposes ([roadmap](roadmap.md#what-40-contains))?

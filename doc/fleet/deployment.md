@@ -42,7 +42,8 @@ becomes a session the person watches and approves.
 | **Windows PC** | A Windows service | A task at logon of the user (not a Session 0 service, which does not see the user's credentials) |
 | **Raspberry Pi** or small NAS (Linux Arm64) | Fine for the server alone | Fine for light nodes |
 
-On every OS: **one node per OS user**; the server and a node can share a machine, as two processes.
+On every OS: **one node per OS user**; the server and a node can share a machine, as two OS users, so that the node's
+sessions cannot read the server's data ([security](security-and-privacy.md#shared-machines)).
 
 ## How machines reach each other
 
@@ -92,7 +93,9 @@ machine) is set up for that one purpose, from the console:
    ([orchestration](orchestration.md#credentials-of-unattended-runs)); no person's subscription or login.
 3. **Scoped tool credentials**: read-only access to monitoring (Grafana, the logs, Kubernetes `view`) and only the
    narrow write roles its allowed remediations need, each behind a tool with typed parameters.
-4. **The sandbox** with a network profile that reaches only the services it uses.
+4. **The sandbox**, kept off the private networks: the agent never reaches the infrastructure from its shell; only the
+   host-side tools (MCP servers or plugin tools outside the sandbox) do, with their own credentials, and they check
+   their targets and limits themselves ([orchestration](orchestration.md#what-unattended-runs-support)).
 5. **Its trigger sources** (Slack Socket Mode, Jira or incident.io polling) configured on it with their own tokens,
    or the server's hooks ingress for the tools that only push.
 6. **A check**: the console runs the machine's readiness for each automation it should accept (providers of account

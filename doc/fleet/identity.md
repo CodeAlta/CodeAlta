@@ -122,7 +122,10 @@ authenticates only: what they may do is still CodeAlta's. Tailscale's free plan 
 - **Unattended** (a script, an image, a cloud pool): an **enrollment token**, single use, valid 10 minutes to 24 hours,
   bound to an owner, spaces and labels, shown once, optionally bound to the fingerprint of the server's key.
 - Then always: the node makes its key; the server records the node and gives it a short credential it renews by
-  proving possession of the key. No reusable secret remains.
+  proving possession of the key. No reusable secret remains. The node is a member of the fleet only once a controller
+  device signed its key into the device list: its owner's for a personal machine, a signer's for a team machine
+  ([security](security-and-privacy.md#the-device-list)). A node is an execution device: it never signs another device,
+  a delegation for others or a policy.
 - Revocation marks the node revoked **and** drops its connection. A node offline for longer than a set time needs a
   new approval.
 - At connection, a node declares its capabilities (sandbox, tools, providers); **hosting sessions for others** is a
@@ -142,10 +145,15 @@ fleet.
 
 ## Agents acting for people
 
-- A session acts for its person. When it reaches another machine (a child session, a message), it carries a
-  **delegated token** (RFC 8693 token exchange): subject the person, actor the session on its node, audience the target
-  node, the capabilities it needs, minutes of life, no refresh. A child's token is never wider than its parent's, and
-  chains have a maximum depth.
+- A session acts for its person. Its authority on another machine (a child session, a message) comes from a
+  **delegation signed by a controller device of that person**: a standing one, made when the person allows
+  agent-started sessions ("sessions of my Work space on the Windows PC may start sessions on machines labeled `macos`,
+  sandboxed, until this date"), presented with the request that the requesting node signs. The target node checks the
+  chain itself: the person's device in the signed device list, then the delegation's audience, capabilities, expiry
+  and revocation generation, then the requesting node's signature. A child's delegation is never wider than its
+  parent's, and chains have a maximum depth.
+- **Server tokens** (RFC 8693 token exchange, subject the person, actor the session) attribute calls to the server's
+  API and open server resources; they never carry the authority to run anything on a machine.
 - The audit log reads the chain: "session S on the Windows PC, for Alex, started session T on the Mac mini".
 - Agents never answer a permission request or a question for a person, and a message from an agent never changes a
   setting ([security](security-and-privacy.md#remote-execution)).

@@ -44,7 +44,7 @@ has a channel, visible to the people of the teams that have the project.
   the project in the Explorer for unread mentions.
 
 The server stores channel messages, since they are written for others: readable by the organization in a Managed
-space, sealed with the space key in a Private one (a household), where the server only relays and keeps them
+space, sealed with the channel's key in a Private one (a household), where the server only relays and keeps them
 ([security](security-and-privacy.md#what-the-server-sees)).
 
 ## Sharing a session

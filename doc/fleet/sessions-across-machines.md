@@ -58,7 +58,7 @@ key**: the normalized URL of its `origin` remote (or of its first remote).
   it (lower case for GitHub, GitLab, Bitbucket and Azure DevOps, which are case-insensitive); Azure DevOps
   `_git` forms unified.
 - Each node publishes the repository keys of its projects; the paths stay private to the owner's devices. In a
-  Private space the server sees only a blind index, `HMAC(space key, repository key)`: equal on every machine of the
+  Private space the server sees only a blind index, `HMAC(space metadata key, repository key)`: equal on every machine of the
   space, meaningless to the server ([security](security-and-privacy.md#what-the-server-sees)). A project without a
   remote has no key: it can be reached where it is, not matched elsewhere.
 - **Clone on demand.** A node asked to work on a repository it does not have offers to clone it into its workspace
@@ -102,6 +102,8 @@ sequenceDiagram
 - The target has the space linked, a ready provider for the session (or the person picks one), the identity the space
   requires (Git author, keys, GitHub profile: the existing identity **Check**), and the session's sandbox.
 - Background jobs, reminders and terminals do not move; the dialog lists them.
+- No Code Mode run of the session is unfinished (its replay state lives with its host, outside the journal) and no
+  delivery waits for it (a child's answer, a message): the move waits for them or offers to cancel them.
 - An agent may move its own session, as `set_worktree` allows today: the move happens when its turn ends, with its
   queue held and run on the target afterwards; nothing moves in the middle of a turn. A person's move of a working
   session waits for the end of its turn or stops it first.
@@ -147,8 +149,13 @@ only" after the person confirms.
 
 - The source keeps the journal read-only, listed as "moved to Mac mini", and opens the live session through the
   fleet; or deletes its copy after a confirmation (a setting).
-- A move that fails before the commit changes nothing: the source unfreezes the session; the target removes what it
-  prepared.
+- **A move is a recoverable transaction**, with states recorded durably on both machines: *offered*, *prepared* (the
+  target holds a verified copy), *committed* (the arbiter, the server or in paired mode the target, recorded the new
+  owner), *finished* (the source relinquished). A machine that crashes or loses its connection asks the arbiter for the
+  outcome before doing anything: a lost acknowledgement of the commit never makes the source take the session back.
+  Only a move that the arbiter never committed is undone (the source unfreezes, the target removes what it prepared).
+- **Relinquishment is persisted** next to the session's lease, so every writer of that machine honors it, `altacli`
+  included: a moved session cannot be resumed there by mistake.
 - Parent and children keep their links; a child that stays behind is a cross-machine child.
 
 ### Moves before sleep or shutdown
@@ -163,9 +170,13 @@ that are online.
 A laptop that dies, or one closed without a move, leaves its sessions out of reach. A **replica** keeps them
 recoverable:
 
-- The owner node ships each session's appended journal bytes to the server, **encrypted with a key the server does
-  not hold** (the person's devices share it). Append-only journals make this cheap: what was appended since the last
-  acknowledged offset, with the stamp; a rewind or a fork that rewrites a journal sends it again.
+- The owner node ships each session's appended journal bytes to the server, **encrypted with the session's replica
+  key**, which the server does not hold (it is wrapped to the person's devices). Append-only journals make this cheap:
+  what was appended since the last acknowledged offset, with the stamp. A rewind, which rewrites a journal, starts a
+  new **generation** of the replica (the header's rewind count), sent again whole; appends name their epoch and
+  generation, so neither a stale owner nor an old generation can overwrite a newer one.
+- A replica is recovered from an authenticated **checkpoint manifest** (the journal's length and hash, the attachments,
+  the git payload of that turn), so a recovery restores a consistent state, never a journal ahead of its files.
 - It also ships, at the end of each turn, the session's work in progress as an encrypted git payload (as in a move).
 - **Take over.** From any device, a person opens an offline session and chooses **Continue on…**: the target node
   fetches the replica, applies the payload over the pushed branch, imports, and the server commits a new epoch. The
@@ -183,6 +194,9 @@ recoverable:
 - Everything a node publishes about a session, and every replica append, carries the epoch; the server refuses a
   stale one.
 - A node that is offline keeps its epoch and keeps working: offline is normal. Only an explicit takeover fences it.
+- Fencing keeps a stale owner from writing the fleet's record (facts, replicas, deliveries); it cannot stop what an
+  isolated machine does meanwhile. A takeover may therefore diverge, and the dialog says so: the old machine may have
+  kept working, and what it did comes back as a fork when it reconnects.
 
 ## Messages between sessions across machines
 

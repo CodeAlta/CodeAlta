@@ -47,7 +47,7 @@ itself are in [security and privacy](security-and-privacy.md).
 | Channel and messages | The project's teams; a message by its author | Project | |
 | Automation | A person, a team or the organization | Personal, project, team or organization scope | Editors, operators and approvers are grants ([orchestration](orchestration.md)) |
 | Workflow script | A project (in its repository) or a library owner (person, team, organization) | Project or library | Versioned; a version is approved before unattended runs use it |
-| Run | The owner of its automation, or the person who started it by hand | Automation or session | Records its initiator and its trigger |
+| Run | The owner of its automation (a run started by hand stays the automation's, with the person as initiator); a session's ad hoc run is its session's | Automation or session | Records its initiator and its trigger |
 | Organization provider and its secret | A team or the organization | Organization | API keys or gateway keys for unattended work ([orchestration](orchestration.md#credentials-of-unattended-runs)) |
 | Budget | The owner of the scope it limits | Person, machine, project, team, organization | |
 | Policy bundle | The organization | Organization | Signed by the policy key ([security](security-and-privacy.md#policies-and-the-kill-switch)) |
@@ -55,6 +55,23 @@ itself are in [security and privacy](security-and-privacy.md).
 | Plugin distributed to the organization | The organization | Organization | Installed on members' instances by policy |
 | Enrollment token | Its creator | Organization | Single use |
 | Audit log | The organization | Organization | Read by auditors and owners |
+
+### Who is who on a resource
+
+"Owner" alone is not enough: credentials, visibility and cost follow different parties. Each resource that runs or
+spends records them separately, and keeps them as they were when it ran (a transfer later changes the owner, never the
+history):
+
+| Field | Meaning | Decides |
+| --- | --- | --- |
+| `owner` | Who answers for it now (person, team, organization) | Management, transfers, who is told |
+| `scope` | Where it lives (personal, project, team, organization) | Who may see it, which policies apply |
+| `executionPrincipal` | Who it runs as (the person, or a service identity) | Credentials, permissions on machines |
+| `initiator` | Who or what started this run (a person, an event, a schedule, a session) | Attribution, audit |
+| `author` | Who wrote it (a person, or an agent session for one); immutable | History |
+| `chargeScope` | Whose budget it spends | Budgets, cost reports |
+
+A project's access is a graph, not a tree: a project can be granted to several teams, each with its own capabilities.
 
 ## Roles and grants
 
@@ -93,9 +110,9 @@ A grant is `(subject, capability, scope)`. Scopes nest: organization, team, proj
 Management capabilities flow down the scopes (a team maintainer manages the team's automations); `view-content`
 never does: an Admin sees that a session exists, where it runs and what it costs, not what it says.
 
-**Content of team-owned work.** A session started by a team automation belongs to the team's service identity, so the
+**Content of team-owned work.** A session started by a team automation runs as the team's service identity, so the
 team's members see its content by their team role: in a Managed space through the server, in a Private space through
-the team's space key wrapped to their devices.
+that session's replica key wrapped to their devices.
 
 ## What the node decides
 
@@ -140,8 +157,9 @@ event that the signed definition accepts. The first start by a new person asks t
 
 In a Private space, access to sealed data is a key operation, not only a flag:
 
-- granting a person or a team `view-content` on sealed data wraps the needed keys to their devices; revoking it starts
-  a new key epoch;
+- granting a person or a team `view-content` on sealed data wraps exactly the keys of what is granted to their devices
+  (a session's replica key, a snapshot's key, a channel's key), never a key that opens more
+  ([keys](security-and-privacy.md#keys)); revoking it starts a new key epoch for what they held;
 - the server cannot do either: a device that holds the keys does it (the console, when an authorized person approves);
   a grant made while no such device is online stays **pending** and says so.
 

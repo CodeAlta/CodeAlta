@@ -35,9 +35,15 @@ The server's views come from the facts nodes publish ([protocol](protocol.md#dur
 
 Surprise bills are the first complaint of agent users. So budgets ship with the fleet, for homes too:
 
-- A budget is a limit of tokens or estimated cost per period, for a person, a machine, a project, a space or a team.
-- **Nodes enforce them**: they know their usage at once; the server sums across machines and pushes **budget reached**
-  as a stricter policy, which applies immediately ([security](security-and-privacy.md#policies-and-the-kill-switch)).
+- A budget is a limit of tokens or estimated cost per period, for a person, a machine, a project, a space, a team or an
+  automation (its `chargeScope`, [access control](access-control.md#who-is-who-on-a-resource)).
+- **Advisory or enforced.** An advisory budget warns from the facts as they arrive, so machines working at once or
+  offline can pass it before anyone is told. An **enforced** budget is split into **allowances**: the server gives each
+  machine a share it may spend without asking (also while offline), and a run is admitted only when its machine holds
+  enough of it; a machine that runs out asks for more, and the server never hands out more than the budget. The
+  console says which kind each budget is.
+- When a budget is reached, the server pushes **budget reached** as a stricter policy, which applies immediately
+  ([security](security-and-privacy.md#policies-and-the-kill-switch)).
 - At 80% and 100%: a notification; at 100%, new runs in that scope wait for a person's **Continue anyway** (or stop,
   per the budget).
 - Estimates come from the model catalog's prices (models.dev), as the Statistics plugin does; a subscription shows its
@@ -49,9 +55,10 @@ Surprise bills are the first complaint of agent users. So budgets ship with the 
   `invoke_agent` for a session's run, `execute_tool` for its tools, inference spans for model calls,
   `gen_ai.conversation.id` = the session id, token usage attributes. The conventions are still marked "Development":
   CodeAlta pins a version and maps names in one adapter.
-- **Content is off**: no prompt, message, tool argument or result in a span, as CodeAlta does today (the conventions
-  make these attributes opt-in, with `_ref` variants pointing to storage). An organization in a Managed space can turn
-  content on for its own collector; a person's Private space never.
+- **Content is off**: no prompt, message, tool argument or result in a span that leaves a machine, as CodeAlta does
+  today (the conventions make these attributes opt-in, with `_ref` variants pointing to storage). Telemetry is never a
+  way around "unshared content never leaves its machine": an organization that must keep prompts uses explicit shares
+  in a Managed space. A person may turn content on for a local diagnosis, to a collector on their own machine.
 - **One trace across machines**: every request carries `traceparent` ([protocol](protocol.md#envelopes)): a child
   session on another machine, a cross-machine message, a move, an automation started by the server's scheduler. A
   trace survives a move because the session's id stays.

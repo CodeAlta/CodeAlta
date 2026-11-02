@@ -32,13 +32,17 @@ the server does not hold).
 | Replica of a journal | The server | Encrypted, unreadable | Encrypted, unreadable |
 | Session facts: id, machine, state, times, provider type and model, token counts and cost estimate, numbers of turns and tool calls, sandbox profile, parent and children | The server | Readable | Readable |
 | Title, project name, branch, paths, pull request link | The node; a sealed copy at the server | Sealed | Readable if the organization chooses, sealed otherwise |
-| Repository identity (for matching across machines) | The server | A blind index, `HMAC(space key, repository key)` | Readable |
+| Repository identity (for matching across machines) | The server | A blind index, `HMAC(space metadata key, repository key)` | Readable |
 | A shared snapshot | The server | Sealed for its recipients | Readable |
 | A live share | Relayed | Ciphertext | Ciphertext |
-| Channel messages | The server | Sealed with the space key | Readable |
+| Channel messages | The server | Sealed with the channel's key | Readable |
+| Automation definitions: the prompt, the script's arguments | The server | Sealed for the owner's devices and the machines that may run it | Readable by the scope's members |
+| Deliveries: a child's answer, a message between agents, a queued command | Relayed and queued by the server | Sealed to the receiving device, always | Sealed to the receiving device, always |
+| Trigger events (an incident, a Jira version) | What the source pushed to the server's ingress, or nothing when machines poll | Readable when pushed to the ingress; machines re-fetch or verify them | Same |
 | Credentials | Each node | Never | Never |
+| Organization provider keys | The server stores copies sealed to each allowed machine | Never in clear | Never in clear |
 | Audit events | The server | Readable, no content | Readable, no content |
-| Traces | The collector the organization names | Spans without content | Spans without content |
+| Traces | The collector the organization names | Spans without content | Spans without content: content never leaves a machine through telemetry |
 | Push notifications | Apple, Google, Web Push services | A wake-up without content | Same |
 
 The session title answers the owner's question "what about titles?": it is descriptive metadata written from prompts,
@@ -51,17 +55,29 @@ facts (never the content) of sessions on the machines it manages is an [open que
 
 ## Keys
 
-All with the .NET 10 base library (`ECDsa`, `ECDiffieHellman`, `HKDF`, `AesGcm`): no third-party cryptography in the
-core, and keys that hardware can hold.
+The primitives come from the .NET 10 base library (`ECDsa`, `ECDiffieHellman`, `HKDF`, `AesGcm`), with keys that
+hardware can hold. What the library lacks is taken from a vetted implementation, never written here: the PAKE of
+pairing in particular.
+
+Keys follow access boundaries: a key opens one kind of thing for one audience, so granting a project, a session or a
+snapshot never grants a whole space.
 
 | Key | Purpose |
 | --- | --- |
-| **Device key** (ECDSA/ECDH P-256, non-exportable where possible) | Signs proofs, device-list entries and remote starts; receives wrapped keys (ECDH-ES, HKDF, AES-256-GCM) |
-| **Space key**, with epochs | Seals the space's metadata (titles, names), keys the blind index, wraps session keys. A new epoch when a member leaves; new data uses it |
-| **Session key** (random 256 bits) | Encrypts a session's replica and its sealed shares, in segments with derived sub-keys to stay far from AES-GCM nonce limits |
-| **Recovery key** (256 bits, shown once in base32) | Restores a person's keys when every device is lost. Losing every device and this key loses the sealed data, which the UI says plainly |
+| **Device key** (ECDSA/ECDH P-256, non-exportable where possible) | Signs proofs and requests; receives wrapped keys (ECDH-ES, HKDF, AES-256-GCM). Only controller devices sign device-list entries and delegations ([the device list](#the-device-list)) |
+| **Space metadata key**, with epochs | Seals the space's descriptive metadata (titles, project names) and keys the blind index. A new epoch when a member leaves; new data uses it |
+| **Channel key**, with epochs | Seals the messages of one project's channel, for its members |
+| **Session replica key** (random 256 bits) | Encrypts one session's replica, in segments with derived sub-keys to stay far from AES-GCM nonce limits; wrapped only to the devices allowed to read that session |
+| **Snapshot key** (random, one per snapshot) | Encrypts one shared snapshot; it opens that snapshot and nothing later |
+| **Recovery key** (256 bits, shown once in base32) | Restores a person's keys on a new device when every device is lost, decrypting locally. Losing every device and this key loses the sealed data, which the UI says plainly |
 | **Organization key** (Managed spaces) | Encrypts shared content at rest on the server; held by the server or a KMS |
 | **Policy key** (ES256) | Signs policy bundles; held by the Owner's device at home, admin devices or an HSM in companies, never by the server |
+
+- Revoking someone's access rotates the keys they held (a new epoch); what they already read cannot be taken back,
+  and deleting ciphertext at the server does not revoke copies a recipient made.
+- **Account recovery is not encryption recovery.** Regaining the Owner role on a server (`altaserver recover-owner`, on
+  the server's own terminal) never needs the recovery key of encrypted data, which never goes to the server; that key
+  restores keys on a device, locally.
 
 Every encrypted blob carries an algorithm id, so X25519 (in .NET 11) and post-quantum hybrids (ML-KEM is in .NET 10)
 can come later without a flag day. MLS (RFC 9420) suits large groups with constant membership change, but its only
@@ -72,12 +88,23 @@ can come later without a flag day. MLS (RFC 9420) suits large groups with consta
 The weak point of end-to-end encryption is not the cipher but who decides which devices get the keys (the 2023
 analysis of Matrix showed a malicious server exploiting exactly that).
 
-- A person's devices form a **signed list**: each new device is signed in by an existing device of the same person,
-  after both screens show the same short words. Team machines are signed in by an admin's device.
+- Devices have classes, and only some may vouch for others:
+
+  | Class | What it is | May sign |
+  | --- | --- | --- |
+  | **Controller device** | A person's desktop or phone, used by that person | New devices of the same person, delegations of that person, approvals, automation versions they edit |
+  | **Execution node** | A headless node, a team machine, a container node | Its own requests and publications only: never a device-list entry, a delegation for others, or a policy |
+  | **Signer** | A small designated set of controller devices (the Owner's at home, a few admins' in a company), shown with the initial trust state | Policy bundles, enrollment of team machines, the members of teams as nodes read them |
+
+  A compromised execution node therefore acts only as itself, and the server, which signs nothing, cannot widen anyone's
+  power (Tailnet Lock's signing nodes are the precedent).
+- A person's devices form a **signed list**: each new device is signed in by an existing controller device of the
+  same person, after both screens show the same short words. Team machines are signed in by a signer. An enrollment
+  token only lets a machine register its public key; it becomes a member when a signer signs that key.
 - Devices accept a new member only with a valid signature chain, so the server cannot add a device to receive keys
   (Tailscale's Tailnet Lock is the precedent).
 - Every device of the person shows **New device: …** until one of them confirms it.
-- Revocation is a signed removal, a new epoch of the space keys, and dropped connections.
+- Revocation is a signed removal, a new epoch of the keys the device held, and dropped connections.
 
 ## Channels
 
@@ -85,9 +112,11 @@ analysis of Matrix showed a malicious server exploiting exactly that).
 - **Between devices** (a viewer and a node, a move, a live share): TLS 1.3 inside the direct connection or the relay,
   the node's key pinned from pairing or from the signed device list, and the viewer's device proof bound to the
   channel. The relay sees ciphertext.
-- **The phone**: today, the Mobile plugin over Tailscale (unchanged). Through the server, a browser cannot run TLS
-  inside a relayed stream; the choice between an application-level channel built on WebCrypto (P-256, AES-GCM) and a
-  node serving as the phone's gateway is made in its own sub-plan.
+- **The phone**: today, the Mobile plugin over Tailscale (unchanged). A page served by the server would let a
+  compromised server serve code that reads decrypted content or uses the phone's keys, whatever the cryptography. So,
+  in Private spaces, the phone's page comes from a machine the person owns (a node serving it, as the desktop does
+  today), or from a signed mobile application if one comes; the server serves the phone's page only for Managed spaces,
+  where trusting the organization's server is stated. Approvals from the phone follow the same rule.
 
 ## Credentials
 
@@ -95,6 +124,8 @@ CodeAlta holds a credential only where it signs in itself, and never hands one t
 ([providers](../providers.md#credentials)). The fleet keeps that rule across machines:
 
 - **Never copied between machines.** No private SSH key, token or credential file travels from one node to another.
+  The one exception is deliberate: an organization provider's key, which an admin's console seals to the machines
+  allowed to use it ([orchestration](orchestration.md#credentials-of-unattended-runs)).
 - **Each node signs in by itself**: device code flows run on the node and show in the desktop
   ([node](node.md#credentials-on-a-node)).
 - **What a person types for a node** (an API key) travels sealed to that node's key; the server relays ciphertext.
@@ -103,7 +134,10 @@ CodeAlta holds a credential only where it signs in itself, and never hands one t
   project: a deliberate trust decision (the server can then reach those repositories), off by default.
 - **SSH**: a key per node by default; short-lived SSH certificates from an organization's SSH CA later; no agent
   forwarding by default (whoever is root on the remote machine can use a forwarded agent).
-- **Sandboxed sessions**: credentials never enter the sandbox. Later, the sandbox's network proxy can attach a
+- **Sandboxed sessions**: API providers' keys stay in CodeAlta, outside the sandbox. An agent with its own loop runs in
+  a container of its own with its account (its folder or its variables), as the sandbox does today
+  ([sandbox](../sandbox.md#the-worker-and-the-routing)): that credential is inside with the agent, which is why
+  unattended runs give such agents only keys of their scope. Later, the sandbox's network proxy can attach a
   short-lived token to requests for allowed hosts (github.com), so the agent never holds it (the pattern of Claude's
   GitHub proxy and Codex's domain-bound secrets).
 - **Model providers**: per node, as today. Organizations can point nodes at a model gateway (LiteLLM, Azure API
@@ -134,10 +168,11 @@ Starting or driving a session on another machine is remote code execution, by de
 6. **Messages between agents of different machines** cannot approve anything or change a setting, are held for the
    person when the receiving session bypasses permissions, are rate-limited and stopped when they loop, and a machine
    can refuse them altogether (the defaults of Claude Code's cross-machine messaging, a good precedent).
-7. **Automations run on signed authority.** A run is authorized by the version of its automation that an editor's
-   device signed; a trigger event (a schedule, a webhook received by the server, a message seen by a node) only selects
-   it. A node runs nothing the event's path asks for unless the signed version accepts that event
-   ([orchestration](orchestration.md#triggers)).
+7. **Automations run on signed authority, on authentic events.** A run is authorized by the version of its automation
+   that an editor's device signed; a trigger event (a schedule, a webhook received by the server, a message seen by a
+   node) only selects it, and the machine authenticates the event itself (re-fetched from its source with its own
+   credentials, or checked against the source's signature with a secret the server does not hold) before any of it
+   reaches a prompt ([orchestration](orchestration.md#triggers)).
 8. **Autonomy is a list of tools.** What an unattended run may do without a person is a list of tools with typed
    parameters, never shell patterns; everything else waits for an approval routed to a person
    ([orchestration](orchestration.md#autonomy-and-approvals)).
@@ -197,6 +232,11 @@ Starting or driving a session on another machine is remote code execution, by de
 
 - **One node per OS user.** A machine several people use runs one node per person (or one container each), never one
   privileged node acting for all.
+- **The server and a node on one machine run as two OS users**, so that what the node's sessions run cannot read the
+  server's database, blobs or keys; two processes of one user would not be a boundary.
+- **Plugins are code with the person's rights** in the desktop process ([plugins](../plugins.md)): what a plugin
+  declares it uses is consent and audit, not confinement. An organization offers plugins; a person installs them
+  knowingly, and a desktop that also holds personal spaces never receives one by policy alone.
 - **Team machines** run sessions under the team's credentials, with the sandbox required by policy; each person sees
   only their own sessions there. Per-person credentials on shared machines (short tokens brokered per session) come in
   milestone 5.
