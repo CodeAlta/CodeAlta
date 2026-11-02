@@ -376,6 +376,10 @@ its own database. Two rules keep one writer per session across processes:
   for good (after its retirement) and no hold is left. A frontend says what it shows (`SetShownSessions`); from then
   on a session it does not show is detached once it has had nothing to do for a while (no run, queue, job, background
   task, pending agent prompt or remote control), so a closed tab lets another process continue the session.
+- **Moves.** A session given to another machine (`SessionMoveService`) is frozen while it moves and relinquished once
+  the move is committed, by a file beside its lease (`<id>.moved`). The checks of the lease (`HoldForWrite`, the claim of
+  an attachment) read it once the lease is held, so every writer of the sessions folder, the command line included,
+  refuses the session (`session_in_use`) and it stays read-only here.
 - **Following.** A host that owns the database of its state root (`FollowExternalSessions`: Desktop, TUI) runs
   `ExternalSessionFollower`: it projects the sessions the command line names in markers, then deletes the markers;
   it follows the sessions another process holds, projecting their journals again as they grow (the head, the tail and
