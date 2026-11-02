@@ -36,7 +36,7 @@ test("nothing that animates in a region of the window moves a box", { skip: !edg
 });
 
 // Chromium gives the window one child window for each rectangle of the area that moves it, and makes them again at each
-// change of a region. Tabs cut that area between them, scrolled-out ones too: 27 tabs made 146 windows, and each popover
+// change of a region. Tabs cut that area between them, scrolled-out ones too: 27 tabs made 151 windows, and each popover
 // that opened stalled the UI thread for seconds. The tabs that show are one hole in it, whatever their number.
 test("the tab strip of the title bar is one region, whatever its tabs", { skip: !edge, timeout: 120_000 }, async () => {
   await withCanvas(async page => {
