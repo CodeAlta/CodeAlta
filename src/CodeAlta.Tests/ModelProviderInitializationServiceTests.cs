@@ -671,6 +671,34 @@ public sealed class ModelProviderInitializationServiceTests
     }
 
     [TestMethod]
+    public async Task GetModelsAsync_ReadsTheModelsAgain_OfAProviderRegisteredAgainAsync()
+    {
+        // A provider registered again (its plugin reloaded, its settings applied) lists the models of its new
+        // registration, not the ones its former runtime listed (#296).
+        await using var registry = new ModelProviderRegistry();
+        var descriptor = new ModelProviderDescriptor(new ModelProviderId("reloaded"), "Reloaded", "test");
+        var former = new TestRuntime(descriptor, [new AgentModelInfo("kept", DisplayName: "Kept"), new AgentModelInfo("dropped")]);
+        registry.RegisterOrReplace(descriptor, () => former);
+        var service = new ModelProviderInitializationService(registry);
+        await service.InitializeAllAsync(CancellationToken.None);
+        CollectionAssert.AreEqual(new[] { "kept", "dropped" }, (await service.GetModelsAsync(descriptor.ProviderId)).Select(static model => model.Id).ToArray());
+
+        var replaced = descriptor with { DisplayName = "Reloaded again" };
+        var current = new TestRuntime(replaced, [new AgentModelInfo("kept", DisplayName: "Kept, renamed")]);
+        registry.RegisterOrReplace(replaced, () => current);
+
+        var models = await service.GetModelsAsync(descriptor.ProviderId);
+        CollectionAssert.AreEqual(new[] { "kept" }, models.Select(static model => model.Id).ToArray());
+        Assert.AreEqual("Kept, renamed", models[0].DisplayName);
+        Assert.AreEqual("Reloaded again", service.CurrentStates.Single().Descriptor.DisplayName);
+        Assert.AreEqual((1, 1), (former.ProbeCount, current.ProbeCount));
+
+        // Once read from the new registration, the models are kept again.
+        Assert.AreSame(models, await service.GetModelsAsync(descriptor.ProviderId));
+        Assert.AreEqual(1, current.ProbeCount);
+    }
+
+    [TestMethod]
     public async Task SetModelOptionAsync_PublishesTheModelAsItIsNow_ForAProviderThatOffersOptions()
     {
         await using var registry = new ModelProviderRegistry();

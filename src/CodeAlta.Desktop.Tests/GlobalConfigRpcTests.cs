@@ -184,6 +184,57 @@ type = "fake-agent"
     }
 
     [TestMethod]
+    public async Task PluginReload_ListsTheModelsOfTheNewVersionOfItsProviders()
+    {
+        // A plugin built again registers its providers again: their list of models is the one of the new version, without
+        // a restart or a test of the provider (#296).
+        const string content = """
+[providers.agent-work]
+type = "fake-agent"
+""";
+        await using var fixture = new Fixture(content);
+        await using var endpoints = new CodeAlta.Agent.Harness.LoopbackHarnessToolEndpoints();
+        var types = new CodeAlta.Hosting.PluginModelProviderTypes(endpoints);
+        CodeAlta.Plugins.Abstractions.PluginModelProviderContribution Version(params string[] models) => new()
+        {
+            ProviderType = "fake-agent", DisplayName = "Fake agent",
+            CreateRuntime = context => new ListingRuntime(context.Descriptor, [.. models.Select(static id => new AgentModelInfo(id))]),
+        };
+        var running = Version("kept", "dropped");
+        types.Attach(() => [running]);
+        var service = new GlobalConfigService(fixture.Store, fixture.Registry, Path.GetDirectoryName(fixture.ConfigPath)!, Epoch) { PluginProviderTypes = types };
+        var initialization = new ModelProviderInitializationService(fixture.Registry);
+        await service.ApplyPluginProviderChangesAsync();
+        var provider = new ModelProviderId("agent-work");
+        CollectionAssert.AreEqual(new[] { "kept", "dropped" }, (await initialization.GetModelsAsync(provider)).Select(static model => model.Id).ToArray());
+
+        running = Version("kept");
+        await service.ApplyPluginProviderChangesAsync();
+
+        CollectionAssert.AreEqual(new[] { "kept" }, (await initialization.GetModelsAsync(provider)).Select(static model => model.Id).ToArray());
+        await initialization.DrainAsync();
+    }
+
+    // A provider runtime that lists models and runs nothing.
+    private sealed class ListingRuntime(ModelProviderDescriptor descriptor, IReadOnlyList<AgentModelInfo> models) : IAgentModelProviderRuntime
+    {
+        public ModelProviderDescriptor Descriptor => descriptor;
+        public CodeAlta.Agent.Runtime.ModelProviderRuntimeDescriptor RuntimeDescriptor { get; } = new()
+        {
+            ProtocolFamily = "fake-agent", ProviderKey = descriptor.ProviderId.Value, DisplayName = descriptor.DisplayName,
+            TransportKind = CodeAlta.Agent.Runtime.AgentTransportKind.OpenAIResponses,
+        };
+        public CodeAlta.Agent.Runtime.IModelProviderModelCatalog? ModelCatalog => null;
+        public CodeAlta.Agent.Runtime.AgentRuntimeProviderRegistration CreateProviderRegistration() => throw new NotSupportedException();
+        public Task StartAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+        public Task StopAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+        public Task<ModelProviderProbeResult> ProbeAsync(CancellationToken cancellationToken = default)
+            => Task.FromResult(new ModelProviderProbeResult { ProviderId = descriptor.ProviderId, Availability = ModelProviderAvailability.Ready, Models = models });
+        public IModelProviderTurnExecutor CreateTurnExecutor() => throw new NotSupportedException();
+        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+    }
+
+    [TestMethod]
     [DoNotParallelize]
     public async Task InstallPluginProvider_ShowsTheMessage_AndLogsTheWholeFailure()
     {
