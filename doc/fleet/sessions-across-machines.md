@@ -22,7 +22,7 @@ Who may see and drive the sessions of a machine:
 | Mode | Rule |
 | --- | --- |
 | Paired machines | The devices paired with the node, for the spaces the node allows (by default: every space it publishes). |
-| With a server | The owner of the node and the devices of the same person; others only through an explicit [share](collaboration.md#sharing-a-session); team nodes per their access list ([identity](identity-and-access.md#roles-and-permissions)). |
+| With a server | The owner of the node and the devices of the same person; others only through an explicit [share](collaboration.md#sharing-a-session); team nodes per their access list ([access control](access-control.md#what-the-node-decides)). |
 | Always | A session marked **Private** is never published: not listed, not reachable remotely. |
 
 ## Starting a session on another machine
@@ -71,6 +71,11 @@ key**: the normalized URL of its `origin` remote (or of its first remote).
 A move (the "teleport") gives a session to another machine: the conversation, its state and its work in progress.
 The source stops owning it; the target continues it, with the same session id.
 
+Within one machine, a session already changes folder with its conversation (**Change worktree…**,
+`alta session set_worktree`): the attachment is retired, Claude Code's transcript is relocated, the timeline records
+the change and the next prompt carries a note. A move to another machine is that change, plus the transfer of the
+journal and of the work in progress, plus a change of owner.
+
 ```mermaid
 sequenceDiagram
     participant U as Person (any device)
@@ -97,8 +102,9 @@ sequenceDiagram
 - The target has the space linked, a ready provider for the session (or the person picks one), the identity the space
   requires (Git author, keys, GitHub profile: the existing identity **Check**), and the session's sandbox.
 - Background jobs, reminders and terminals do not move; the dialog lists them.
-- A session never moves itself during its own turn: an agent cannot hand off the session that asks (Codex refuses
-  the same), and a person's move of a working session waits for the end of its turn or stops it first.
+- An agent may move its own session, as `set_worktree` allows today: the move happens when its turn ends, with its
+  queue held and run on the target afterwards; nothing moves in the middle of a turn. A person's move of a working
+  session waits for the end of its turn or stops it first.
 
 ### The bundle
 
@@ -127,10 +133,11 @@ only" after the person confirms.
 4. **Provider continuity.**
    - API providers continue from the journal. With the same account (same provider key and credentials on both
      machines), the provider's prompt cache usually still applies, since it is keyed by content, not by machine.
-   - Agents that keep their own conversation (Claude Code, Codex CLI, ACP agents) find no transcript on the target:
-     the harness starts a new conversation with the rendering of the recorded one, as after a provider switch
-     ([providers](../providers.md#agents-that-run-their-own-loop)). CodeAlta never copies another program's transcript
-     into its folders.
+   - Agents that keep their own conversation: for Claude Code with the same account on the target, the bundle carries
+     its transcript and the target relocates it into its provider folder under the new working folder, as a change of
+     worktree does, so the agent continues its own conversation. Otherwise (another account, Codex CLI, ACP agents
+     whose store CodeAlta does not manage) the harness starts a new conversation with the rendering of the recorded
+     one, as after a provider switch ([providers](../providers.md#agents-that-run-their-own-loop)).
    - When the target lacks the provider key, the person chooses another provider of the space, or the session's
      tier picks one.
 5. **Ownership** is committed: by the server in a fleet, by the source in paired mode. Only then does the session
@@ -185,17 +192,9 @@ node. Within the rules of the space, and audited.
 
 ## Automations on the fleet
 
-An automation gains **Runs on**:
-
-| Choice | Meaning |
-| --- | --- |
-| This machine | As today: runs while this CodeAlta runs. |
-| A named machine | The automation runs on that node, also while the other machines are off. |
-| Any machine that can | With a server: the server assigns it to an eligible node and reassigns it when that node is offline longer than the automation's tolerance; a run missed while no node could take it follows the automation's catch-up setting. |
-
-The assigned node evaluates the triggers itself (schedules, issues, pull requests, commands), with its own
-credentials, so the server never holds a token to poll a repository. Project automations (`.alta/config.toml`) travel
-with the repository; an automation that came with a project still waits for the node owner's **Allow**.
+Automations gain **Runs on** (this machine, a named machine, any machine that can), scopes (personal, project, team,
+organization), triggers from outside Git, credentials fit for unattended work and routed approvals: see
+[automations, workflows and runs](orchestration.md).
 
 ## What does not cross machines
 

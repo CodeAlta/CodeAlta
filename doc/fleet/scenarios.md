@@ -135,6 +135,62 @@ team.
   widen it.
 - A session that would break a policy is refused with the reason, before it runs.
 
+### S16. Organize automations by owner
+
+Alex's local automations (issue triage, a nightly dependency update) work today on Alex's desktop. The team wants the
+triage for the whole project, run on team machines.
+
+- Alex **publishes** the triage to the team: it becomes a team automation, owned by the team, edited by its maintainers,
+  running on the team's machines; Alex's personal ones stay personal.
+- On team machines it runs with the team's API key provider, never with Alex's subscription; a run that would need a
+  personal subscription is refused before it starts, with the reason.
+- The console lists automations by scope (mine, project, team, organization), with their owners and next runs.
+
+### S17. Release notes from Jira
+
+When a Jira version is released, a team automation on a release machine reads the version's tickets and linked pull
+requests, writes the release notes, opens a draft, and waits.
+
+- The release manager approves from the console or the phone; only then is anything published.
+- The run, the Jira version that started it and the approval are in the audit log.
+
+### S18. Diagnose an incident
+
+incident.io declares an incident. An organization automation on a machine labeled `infra-prod` reads the alert,
+queries Grafana and Kubernetes with read-only credentials, and posts its diagnosis, with evidence and a confidence
+level, to the incident's timeline and Slack thread.
+
+- When the diagnosis is confident and the fix is one of its allowed tools (restart a pod, roll back a deployment,
+  scale up), the run applies it and reports what it did.
+- Anything else asks the person on call, found from the rota; they approve from their phone, with the diagnosis
+  attached, or take over the session live.
+- The server received the webhook but could not have started the run: the machine checked the automation's signed
+  version.
+
+### S19. Statistics across the fleet
+
+- Alex sees all of Alex's own numbers across every machine, desktop and node, in the Statistics canvas with the scope
+  **My fleet**.
+- A team maintainer sees the team's cost by automation, machine and model, and each automation's runs and failures;
+  numbers per person only with the grant the organization gives and the audit log records.
+- After a machine was offline for a day, the totals are exact once it reconnects.
+
+### S20. Manage the fleet from the console
+
+- An admin enrolls a machine, grants a team's use of it, sets a budget and pauses an automation from the console's
+  canvases; each of these is a REST API call that a script could make too.
+- A team adds a plugin with its own incident board canvas, built on the same API through `Services.Fleet`.
+- An agent asked to "pause the night automations of the build Macs" does it with `alta fleet`, within its person's
+  access; asked to grant someone access, it proposes, and the person applies.
+
+### S21. Someone leaves
+
+Bob leaves the company; SCIM suspends him.
+
+- His devices and delegations are revoked at once; his sessions on team machines stop.
+- The team automations he owned go to the team, paused until a maintainer resumes them; nothing is orphaned, and the
+  audit log shows each transfer.
+
 ## What must hold everywhere
 
 - **Local-first**: every scenario but the sharing ones works on a node alone, and degrades gracefully without the

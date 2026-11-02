@@ -21,9 +21,9 @@ flowchart LR
 | M0 Foundations | What every later step needs, invisible to users | (S1 must hold) | M |
 | M1 Paired machines | Issue #284: a headless node, and a desktop that sees and drives other machines directly | S1, S2 | L |
 | M2 Moves | Move a session between paired machines, matched by Git remote | S3, S4 (paired) | M |
-| M3 CodeAlta Server for home | The coordinator: one fleet of all my machines, relayed, private, always-on automations, recovery, the phone | S4 to S10 | XL |
-| M4 Organizations and collaboration | SSO, teams, roles, shares, channels, handoffs, policies, audit | S11, S12, S14, S15 | XL |
-| M5 Enterprise operations | PostgreSQL, high availability, SCIM, brokered credentials, cloud templates, node pools, shared machines | S13 | XL |
+| M3 CodeAlta Server for home | The coordinator and its REST API: one fleet of all my machines, the console, relayed and private, always-on automations, fleet statistics, recovery, the phone | S4 to S10, S19 (personal) | XL |
+| M4 Organizations and collaboration | SSO, ownership and access control, team and organization automations with account credentials, triggers beyond Git, graduated autonomy, shares, channels, handoffs, policies, audit | S11, S12, S14 to S18, S20, S21 | XL |
+| M5 Enterprise operations | PostgreSQL, high availability, SCIM, brokered credentials, cloud templates, node pools, shared machines, statistics exports | S13 | XL |
 | M6 Beyond | Fleet search, overlap warnings, digests, remote editor and terminals, A2A | | ongoing |
 
 Sizes are relative (M < L < XL), for ordering, not estimates.
@@ -39,7 +39,13 @@ Invisible changes that make the rest small and safe. Nothing reaches the network
   kind.
 - **Ownership check** before attaching a session, beside the OS lease (always true until M2/M3 give it meaning).
 - **The local person**: a profile, and the person in prompt provenance.
-- **`CodeAlta.Fleet.Protocol`**: envelopes, handshake, errors, versions, generated TypeScript; an in-memory transport.
+- **Owners in the data model**: every resource the fleet will publish (sessions, automations, runs, facts) carries its
+  owner and its author from the start, so access control is designed in, not retrofitted
+  ([access control](access-control.md)).
+- **Engines out of the desktop**: the automation engine and the statistics engine become libraries any host runs,
+  with the desktop unchanged for the user ([architecture](architecture.md#inside-a-host)).
+- **`CodeAlta.Fleet.Protocol`**: envelopes, handshake, errors, versions, generated TypeScript; an in-memory transport;
+  the conventions of the REST API (OpenAPI document, generated clients, problem details).
 - **A multi-host test harness**: two or three hosts with temporary roots in one test process, talking through the
   in-memory transport, as the base of every later integration test.
 - **Spikes**: our envelope vs StreamJsonRpc; TLS inside a relayed stream with pinned P-256 keys on the three OSes;
@@ -58,10 +64,12 @@ The answer to [#284](https://github.com/CodeAlta/CodeAlta/issues/284), without a
   create, send, queue, steer, abort, asks, permissions, jobs), projects, providers' status and sign-in by device code,
   readiness per space ([protocol](protocol.md#node-api-over-a-session-channel)).
 - **Pairing**: QR code, typed code with a PAKE, or over SSH; **Paired machines** with what each may do and **Revoke**
-  ([identity](identity-and-access.md#paired-machines)).
-- **CodeAlta Desktop**: a list of machines (a client-side registry, as Hermes Desktop does, with a **Test** button);
-  remote sessions in the Explorer and in tabs, with a machine chip; **Run on** in the composer; **Add a machine…** over
-  SSH; a setup terminal on a node for the sign-ins of agent CLIs.
+  ([identity](identity.md#paired-machines)).
+- **CodeAlta Desktop**: the console's first canvas, **Machines** (a client-side registry of paired machines, as Hermes
+  Desktop does, with a **Test** button); remote sessions in the Explorer and in tabs, with a machine chip; **Run on** in
+  the composer; **Add a machine…** over SSH; a setup terminal on a node for the sign-ins of agent CLIs.
+- **Automations on a paired machine**: **Runs on** copies a personal automation to a paired node, which runs it while
+  the desktop is closed.
 - **Desktop as a node**: a desktop can be paired by another desktop, per space (**Allow my other devices to drive the
   sessions of this machine**).
 - **Client mode**: a desktop on a machine whose profile a node holds opens it over loopback.
@@ -96,9 +104,14 @@ The coordinator, for one person or a household.
   backups ([server](server.md)).
 - **Spaces linked to a server**; Private mode; the signed device list, space keys, recovery key; sealed metadata and
   blind indexes ([security](security-and-privacy.md)).
-- **The Fleet tab**: machines and sessions of the whole fleet, live, waiting ones first.
+- **The REST API v1** and its change feed, API-complete for what M3 offers ([protocol](protocol.md#the-servers-rest-api)).
+- **The console** ([console](console.md)): the Fleet, Machines, Automations, Statistics and Server canvases, the Fleet
+  button, `alta fleet` for agents.
 - **Relayed session channels** by default, direct ones when reachable.
-- **Fleet automations**: **Runs on** a machine or any capable one, assigned and reassigned by the server.
+- **Fleet automations** (personal scope): **Runs on** a machine or any capable one, schedules at the server with copies
+  on the assigned machines, runs with leases, the run records ([orchestration](orchestration.md)).
+- **Fleet statistics**: machines publish their facts as versioned rows; the Statistics canvas gains the **My fleet**
+  scope ([statistics](statistics.md)).
 - **Cross-machine sub-agents and messages**, with their safety rules.
 - **Replicas and takeover** for lost laptops (S8).
 - **The phone through the server** (the browser channel decided in its sub-plan).
@@ -114,14 +127,24 @@ coordinator and relay, M3b replicas and automations, M3c phone).
 ## M4: Organizations and collaboration
 
 - **Company SSO** (OpenID Connect), enforcement, break-glass owner, group-to-role mapping.
-- **Teams, roles, grants**; team machines; admin is not content access.
+- **Ownership and access control**: teams, roles, grants, service identities, transfers, team machines; admin is not
+  content access; the People and access canvas ([access control](access-control.md)).
+- **Team and organization automations**: scopes, signed versions, **Publish to…**, organization providers with account
+  credentials only, credential kinds checked by the scheduler and the node
+  ([orchestration](orchestration.md#credentials-of-unattended-runs)).
+- **Triggers beyond Git**: Jira versions and queries, incident.io, Slack (Socket Mode), the hooks ingress; replies to
+  the event's source.
+- **Graduated autonomy**: allowed tools per automation, approvals routed to owners, teams and on-call resolvers, taking
+  over a run from the phone.
+- **Team statistics** with the per-person rule ([statistics](statistics.md#who-sees-what)); `Services.Fleet` for plugins.
 - **Managed spaces**; **shares** (snapshot, live, co-drive, fork for), with authorship in co-driven sessions.
 - **Project channels**, mentions, cards, **handoffs** with notes written by the session's agent.
 - **Notifications** routed by presence (desktop, Web Push).
 - **Signed policies** and the kill switch; **audit** viewer and exports; profiles and avatars.
 
-Done when: S11, S12, S14 and S15 work; deprovisioning a person stops their work on team machines; an admin cannot read
-an unshared session (tests).
+Done when: S11, S12 and S14 to S21 work; deprovisioning a person stops their work on team machines and transfers what
+they owned; an admin cannot read an unshared session; a team automation never runs with a personal subscription; the
+server cannot make a machine run an automation version nobody signed (tests).
 
 ## M5: Enterprise operations
 
@@ -131,6 +154,7 @@ an unshared session (tests).
   sandbox's network proxy.
 - **Shared machines** with per-person credentials; **node pools** (host agents, cloud sandboxes).
 - **Cloud templates**: `azd`/Bicep for Azure, Terraform for AWS and GCP, a Helm chart.
+- **Statistics at scale**: exports (CSV, JSON, OpenTelemetry metrics), retention by the organization.
 - **Compliance pack**: hardening guide, shared-responsibility table, SBOM, provenance, a security whitepaper.
 
 ## M6: Beyond

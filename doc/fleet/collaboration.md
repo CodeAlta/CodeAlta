@@ -21,7 +21,7 @@ the tools teams already use.
 ## People and presence
 
 - A person has a profile: name, avatar (from the sign-in provider, an upload, Gravatar, or initials; see
-  [identity](identity-and-access.md#profiles-and-avatars)), and the teams they belong to.
+  [identity](identity.md#profiles-and-avatars)), and the teams they belong to.
 - **Presence** says who is online, on which machines, and, if they allow it, which project they are in. A person can be
   invisible; presence is never shown to someone who shares no project with them.
 - A session's card shows the person it works for, its machine and its state.
@@ -35,7 +35,9 @@ has a channel, visible to the people of the teams that have the project.
 - **Cards**: a session (with its live state for those who may see it), a handoff, a pull request, a commit, a CI run,
   an automation run, a plan or a task of `.alta/`. A card is a link with a live preview, not a copy.
 - **Activity**: sessions started and ended in the project (by those who publish them), pull requests opened by
-  sessions, automations' results, handoffs. Activity can be filtered out of the channel's view.
+  sessions, the runs of the project's and team's automations with their owner and outcome
+  ([orchestration](orchestration.md#outputs-and-reporting-back)), handoffs. Activity can be filtered out of the
+  channel's view.
 - **Offline**: a message written offline waits in the outbox and is sent on reconnection, in order.
 - **Retention**: set by the organization (forever, or N days); a deleted message is gone from the server.
 - **Where it shows in CodeAlta Desktop**: a **Channel** tab of the project (beside Work items and Issues), and a badge on

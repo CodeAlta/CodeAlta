@@ -9,14 +9,14 @@ who did what. Without content, unless a person shares it.
 | --- | --- | --- |
 | **Fleet** | Everyone, for what they may see | Machines (online, asleep, offline; busy; version; readiness), sessions by state (working, waiting for an answer or an approval, failed, idle), first the ones that wait for *me* |
 | **Activity** | Members of a project | Sessions started and ended, pull requests opened, automations' results, handoffs, moves ([collaboration](collaboration.md#activity-and-awareness)) |
-| **Usage and cost** | Each person for themselves; admins for teams and machines | Tokens and estimated cost by person, machine, project, model and period; budgets and their consumption |
+| **Usage and cost** | Each person for themselves; teams and admins as [statistics](statistics.md#who-sees-what) allows | Tokens, time and estimated cost by person, team, machine, project, automation, model and period; budgets and their consumption |
 | **Health** | Owners of machines; admins | A machine offline longer than usual, a provider's sign-in expiring or failed, disk space low, a version behind, an automation failing, a policy refusing runs |
 | **Audit** | Owners, admins, auditors | The audit log ([security](security-and-privacy.md#audit-log)), filtered and exported |
 | **A trace** | Whoever may see the sessions in it | One task across machines and sessions: a session, the children it started elsewhere, the moves, the tools, with their times and token counts |
 
-In CodeAlta Desktop these are the **Fleet** tab (machines and sessions, live), project activity in the project's
-**Channel** tab, and dashboards built like the Statistics canvas (ECharts, the same facts). The phone shows the Fleet
-view and what waits for its person.
+In CodeAlta Desktop these are canvases of the console ([console](console.md#the-canvases)): Fleet (machines and
+sessions, live), Statistics with a fleet scope, Automations, Audit; project activity is in the project's **Channel**
+tab. The phone shows the Fleet view and what waits for its person.
 
 ## Facts, not content
 
@@ -24,9 +24,9 @@ The server's views come from the facts nodes publish ([protocol](protocol.md#dur
 
 - **Session facts**: state, times, provider type and model, numbers of turns and tool calls, token counts, cost
   estimate, sandbox profile, parent and children, epoch.
-- **Usage facts**: additive counters per (person, machine, project, model, quarter hour): input, output and cache
-  tokens, estimated cost, runs, failures. They are the same facts the Statistics plugin already keeps per session
-  and quarter hour, so a fleet roll-up is a sum, and a replay after an outage is idempotent.
+- **Statistics facts**: the facts the Statistics plugin keeps per session and quarter hour, published by each machine
+  as versioned rows, so a fleet roll-up is a sum and a replay after an outage changes nothing
+  ([statistics](statistics.md)).
 - **Machine facts**: heartbeat state (in memory at the server), capabilities, readiness per space, version, free disk.
 - **Descriptive metadata** (titles, project names, branches) is sealed in Private spaces: the person's own devices
   decrypt it to draw the views; the server's own pages show ids and states.

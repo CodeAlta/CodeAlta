@@ -8,19 +8,23 @@ are proposals ([readme](readme.md#naming)).
 
 | Responsibility | Content |
 | --- | --- |
-| Identity | People, sign-in methods, devices and the signed device list, enrollment, tokens ([identity](identity-and-access.md)) |
+| REST API | The complete management API, its OpenAPI document and its change feed: everything the console does ([protocol](protocol.md#the-servers-rest-api), [console](console.md)) |
+| Identity | People, sign-in methods, devices and the signed device list, enrollment, tokens ([identity](identity.md)) |
+| Access control | Owners, roles, grants, service identities, transfers, enforced on every answer ([access control](access-control.md)) |
 | Directory and presence | Machines and their inventory, published sessions (facts and sealed metadata), people online. Presence lives in memory |
 | Routing and relay | Splices session channels between devices; delivers child answers, cross-machine messages and queued commands |
 | Ownership | Which node owns each published session, and its epoch ([sessions across machines](sessions-across-machines.md#ownership-and-fencing)) |
 | Replicas | Stores the encrypted replicas of journals it cannot read |
 | Collaboration | Project channels, shares, handoffs, notifications ([collaboration](collaboration.md)) |
 | Policies | Stores and distributes the signed policy bundles; enforces what is its own (who may reach whom) |
-| Scheduling | Assigns fleet automations to eligible nodes and reassigns them when a node stays offline |
+| Automations and runs | Stores automations and their signed versions, fires schedules, receives inbound events at its hooks ingress, places runs on eligible nodes, keeps the records of runs ([orchestration](orchestration.md)) |
+| Statistics | Keeps the facts machines publish, rolls them up, answers queries by scope ([statistics](statistics.md)) |
 | Audit | The append-only, chained audit log and its exports |
-| Web pages | Setup, sign-in (passkeys, SSO), device approval; later the phone's page for the whole fleet |
+| Web pages | Setup, sign-in (passkeys, SSO), device approval, the phone's page; no administration interface |
 
-What it does not do: run an agent, hold a model credential, read a journal, clone a repository (unless an
-organization turns on the GitHub token broker, which mints tokens and never clones).
+What it does not do: run an agent, hold a model credential in clear (organization providers' keys are sealed to the
+machines that use them), read a journal, clone a repository (unless an organization turns on the GitHub token broker,
+which mints tokens and never clones).
 
 ## Stack
 
@@ -53,7 +57,9 @@ organization turns on the GitHub token broker, which mints tokens and never clon
 | --- | --- |
 | `organizations`, `people`, `logins`, `passkeys` | Accounts and their sign-in methods (logins keyed on issuer and subject) |
 | `devices`, `device_list` | Devices, their public keys, status, and the signed list entries |
-| `teams`, `memberships`, `grants` | Teams and grants `(subject, capability, scope)` |
+| `teams`, `memberships`, `grants`, `service_identities` | Teams, grants `(subject, capability, scope)`, the identities of unattended work |
+| `automations`, `automation_versions`, `runs`, `trigger_events` | Automations, their signed versions, runs and the events that started them |
+| `providers` | Organization providers and their keys sealed to machines |
 | `machines`, `machine_inventory` | Node records (owner, labels, capabilities) and their last inventory |
 | `projects` | Repository keys or blind indexes, per space |
 | `sessions` | Published session facts and the sealed metadata blob |
@@ -62,7 +68,7 @@ organization turns on the GitHub token broker, which mints tokens and never clon
 | `replicas` | Per session: epoch, acknowledged offset, blob reference |
 | `channels`, `messages`, `shares` | Collaboration |
 | `policies`, `wrapped_keys` | Signed bundles; keys wrapped to devices |
-| `usage` | Additive usage facts per person, machine, project, model and quarter hour |
+| `facts`, `rollups` | Statistics rows published by machines (versioned, keyed by machine, session, quarter hour, family and dimension) and their roll-ups |
 | `audit` | The audit log, append-only, chained |
 
 Portable by construction: text ids (ULID or GUID), UTC timestamps as 64-bit integers, JSON as text, `ON CONFLICT`
@@ -109,11 +115,14 @@ Nodes are autonomous: a server that is down stops visibility, relay and sharing,
 
 ## Administration
 
-- **From CodeAlta Desktop**: **Settings > Fleet > Server** for the owner and admins: people, teams, machines,
-  policies, enrollment tokens, audit, backups, updates.
+- **From CodeAlta Desktop**: the console's canvases (Server, People and access, Machines, Policies and budgets, Audit)
+  for the owner and admins ([console](console.md)), through the REST API like any other client.
+- **The REST API** for everything else: `altacli fleet`, plugins, scripts and integrations reach every operation the
+  console reaches.
 - **`altaserver` commands** on the machine: `run`, `install` (service), `status`, `backup`, `restore`,
-  `migrate --to postgres`, `audit export`, `recover-owner` (with the recovery key, on the console only).
-- **Web pages**: setup, sign-in, device approval; nothing that needs the desktop's richness.
+  `migrate --to postgres`, `audit export`, `recover-owner` (with the recovery key, on the server's own terminal only).
+- **Web pages**: setup, sign-in, device approval, the phone's page. No administration interface: that is a choice, not
+  a gap ([console](console.md#why-the-desktop-and-what-it-costs)).
 
 ## One organization per server
 

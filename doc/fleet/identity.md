@@ -1,7 +1,8 @@
-# Identity and access
+# Identity
 
-Who is who in a fleet, how people and machines prove it, and what each may do. Security mechanisms behind it (keys,
-the device list, policies) are in [security and privacy](security-and-privacy.md).
+Who is who in a fleet, and how people and machines prove it. What each may do is in
+[access control](access-control.md); the keys, the device list and the policies behind both are in
+[security and privacy](security-and-privacy.md).
 
 ## Principles
 
@@ -11,9 +12,8 @@ the device list, policies) are in [security and privacy](security-and-privacy.md
   Enclave or the OS key store where it can), and proves possession of it on every request.
 - **The server is its own small identity provider.** Microsoft, Google, GitHub or the company's SSO are ways to
   sign in, linked to an account; never the account's key, and never required at home.
-- **The node decides what runs on it.** The server can ask; a node's local policy is the final authority.
-- **Few roles, scoped; administration is not reading.** An admin manages people and machines without reading their
-  sessions.
+- **Proof here, permission elsewhere.** This page says who is who; [access control](access-control.md) says what each
+  may do, and a node's own policy has the last word on what runs on it.
 
 ## Identities
 
@@ -25,7 +25,8 @@ the device list, policies) are in [security and privacy](security-and-privacy.md
 | Organization | The tenant of a server: a household or a company | |
 | Team | People of an organization who share projects and machines | |
 | Session | An agent acting for its person | Its node; across machines, a delegated token naming the person, the session and the node |
-| Service | An automation, an integration, a pool of cloud nodes | A service credential, scoped |
+| Service identity | A team's or the organization's identity for unattended work (team automations, node pools) | Grants and account credentials (API keys, gateway keys), never a password or a subscription |
+| Integration | A tool outside CodeAlta (a CI job, a script) | A scoped, expiring service token |
 
 ## Without a server
 
@@ -129,38 +130,9 @@ authenticates only: what they may do is still CodeAlta's. Tailscale's free plan 
 
 ## Roles and permissions
 
-### Organization roles
+Ownership, roles, grants and what each node decides are in [access control](access-control.md).
 
-| Role | Can | Cannot, unless granted |
-| --- | --- | --- |
-| **Owner** | Everything: people, roles, SSO, policies (with the policy key), the organization | Read sessions not shared with them |
-| **Admin** | People, teams, team machines, spaces, policies (signed by a policy device), audit | Read sessions not shared with them |
-| **Member** | Their devices and machines, their sessions, shares, the channels of their projects, sessions on the machines granted to them | Administer |
-| **Auditor** | Read the audit log and the fleet's metadata | Read content, change anything |
-| **Guest** | What is shared with them | Machines, channels they were not invited to |
-| **Service** | The scoped capabilities of an integration or a node pool | |
-
-### Grants
-
-A grant is `(subject, capability, scope)`, denied unless granted:
-
-- **Scopes**: organization, space, project, machine, session.
-- **Capabilities**: `view`, `interact` (send, steer, stop), `approve` (answer permission requests), `start` (a session on
-  a machine), `move`, `share`, `manage`.
-- A team machine grants `start` to teams; a person's machine grants nothing to others unless its owner says so.
-
-### What the node decides
-
-Each node keeps a local policy, which the server cannot loosen:
-
-- who may view and drive its sessions, and start sessions on it, per space;
-- the strictest sandbox a remote start must use, and whether `bypassPermissions` is ever allowed for one (never by
-  default);
-- whether agent-started sessions from other machines are accepted (off by default);
-- a remote start must be **signed by the device of the person who asks** (or by a delegation rooted in it): a server
-  token alone is not enough, and the first start by a new person asks the node's owner.
-
-### Confirming dangerous actions
+## Confirming dangerous actions
 
 Enrolling a machine, changing who may start sessions where, loosening a policy, adding a signing device, exporting
 the audit log, changing SSO, revoking everything: each asks for a fresh confirmation (a passkey with user verification,
@@ -168,7 +140,7 @@ or an approval on another of the person's devices), valid 10 to 15 minutes. A ho
 account: no separate administrator account, and a stolen browser session or a hijacked agent cannot reconfigure the
 fleet.
 
-### Agents acting for people
+## Agents acting for people
 
 - A session acts for its person. When it reaches another machine (a child session, a message), it carries a
   **delegated token** (RFC 8693 token exchange): subject the person, actor the session on its node, audience the target

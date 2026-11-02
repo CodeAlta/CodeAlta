@@ -77,10 +77,21 @@ Each node signs in by itself; the desktop drives the sign-ins so that nobody has
 | Git over SSH | A key made on the node; its public key added to the Git host (`gh ssh-key add`, or copied by the person); the space identity names it. Organizations can sign short-lived SSH certificates instead (milestone 5) |
 | GitHub | `gh auth login` with a device code, per space profile as today (`gh auth setup-git` for HTTPS); with a server, the CodeAlta GitHub App's device flow gives the node expiring user tokens (8 hours, refreshed for up to 6 months) |
 | Cloud CLIs | Their device flows (`az login --use-device-code`, `aws sso login --no-browser`, `gcloud auth login --no-browser`), per space CLI profile |
+| Organization providers (API keys or gateway keys for unattended runs) | Sealed by the server to this node's key when an admin allows the node to use them; kept in its protected store; lent only to runs of the scopes that may use them ([orchestration](orchestration.md#credentials-of-unattended-runs)) |
 
 **Readiness.** For each linked space, the desktop shows whether the node is ready to run its sessions: the identity
 **Check** of the space run on the node (who Git commits as, whether keys exist, which GitHub account), and the
 providers of the space that are ready there, with **Set up…** beside what is missing.
+
+## Automations and statistics
+
+- **Automations run on nodes.** The automation engine leaves the desktop (where it runs today) for a library every
+  host runs, so a node fires schedules, polls triggers with its credentials, claims runs with a lease, and checks each
+  run's signed automation version, its credential kind and its own local policy before starting it
+  ([orchestration](orchestration.md)). It keeps the schedules assigned to it, to fire them while the server is
+  unreachable.
+- **Statistics are counted on nodes.** The statistics engine runs headless too (today only in the desktop); the node
+  publishes its facts as versioned rows ([statistics](statistics.md)).
 
 ## Workspaces
 

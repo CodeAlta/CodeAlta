@@ -1,7 +1,7 @@
 # Security and privacy
 
-What the fleet protects, from whom, and how. Identities and roles are in [identity and access](identity-and-access.md);
-the wire in [protocol](protocol.md).
+What the fleet protects, from whom, and how. Identities are in [identity](identity.md), ownership and permissions in
+[access control](access-control.md), the wire in [protocol](protocol.md).
 
 ## Goals
 
@@ -108,14 +108,18 @@ CodeAlta holds a credential only where it signs in itself, and never hands one t
   GitHub proxy and Codex's domain-bound secrets).
 - **Model providers**: per node, as today. Organizations can point nodes at a model gateway (LiteLLM, Azure API
   Management...) with per-person virtual keys and budgets.
-- **Subscriptions are personal.** A machine shared by a team never runs one person's Claude or ChatGPT subscription for
-  others; team machines use the organization's API keys or gateway.
+- **Subscriptions are personal.** A run that is not a person's own run on their own machine (any run of a team or
+  organization automation, any run on a shared or cloud machine) uses account credentials only: API keys of the
+  organization or the team, or a model gateway. Providers declare their credential kind, and both the scheduler and
+  the node check it ([orchestration](orchestration.md#credentials-of-unattended-runs)).
+- **Organization providers** keep their keys sealed to the keys of the machines allowed to use them; the server relays
+  ciphertext and never holds a key in clear.
 
 ## Remote execution
 
 Starting or driving a session on another machine is remote code execution, by design. The rules:
 
-1. **The node's local policy is authoritative** ([identity](identity-and-access.md#what-the-node-decides)): who may
+1. **The node's local policy is authoritative** ([access control](access-control.md#what-the-node-decides)): who may
    start sessions, in which spaces, with which minimum sandbox; `bypassPermissions` never for a remote start unless
    the owner allows it.
 2. **Signed by a person's device.** A start, a prompt or an approval sent to a node is signed by the device of the
@@ -130,6 +134,13 @@ Starting or driving a session on another machine is remote code execution, by de
 6. **Messages between agents of different machines** cannot approve anything or change a setting, are held for the
    person when the receiving session bypasses permissions, are rate-limited and stopped when they loop, and a machine
    can refuse them altogether (the defaults of Claude Code's cross-machine messaging, a good precedent).
+7. **Automations run on signed authority.** A run is authorized by the version of its automation that an editor's
+   device signed; a trigger event (a schedule, a webhook received by the server, a message seen by a node) only selects
+   it. A node runs nothing the event's path asks for unless the signed version accepts that event
+   ([orchestration](orchestration.md#triggers)).
+8. **Autonomy is a list of tools.** What an unattended run may do without a person is a list of tools with typed
+   parameters, never shell patterns; everything else waits for an approval routed to a person
+   ([orchestration](orchestration.md#autonomy-and-approvals)).
 
 ## Policies and the kill switch
 

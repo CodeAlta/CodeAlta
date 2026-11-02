@@ -28,11 +28,11 @@ The fleet is mostly an extension of invariants the runtime already keeps. Each o
 
 | Component | Executable | Role in a fleet |
 | --- | --- | --- |
-| CodeAlta Desktop | `alta` | A node while it runs (its sessions are visible and drivable from other devices when its space allows it), and the **console of the fleet**: machines, sessions, people, setup, administration. |
+| CodeAlta Desktop | `alta` | A node while it runs (its sessions are visible and drivable from other devices when its space allows it), and the **console of the fleet**: canvases over the server's REST API for machines, automations and runs, statistics, people and access, policies, audit, the server itself, and the setup ([console](console.md)). |
 | CodeAlta TUI | `altatui` | A node while it runs. No fleet console (no new TUI features, see `AGENTS.md`); it keeps working beside the rest. |
 | CodeAlta CLI | `altacli` | Unchanged: runs beside an instance of its machine. Later, `altacli` may drive remote nodes for scripts. |
 | **CodeAlta Node** | `altanode` (new) | A headless CodeAlta host that runs as a service: the always-on machine, the build Mac, the cloud VM. Same runtime, providers, tools, plugins and sandbox, no window. |
-| **CodeAlta Server** | `altaserver` (new) | The coordinator: identity, devices, directory and presence, routing and relay, session ownership, what people share, policies, audit, notifications. It runs **no agent** and reads **no content** it was not given. |
+| **CodeAlta Server** | `altaserver` (new) | The coordinator: a complete REST API (no administration interface of its own), identity and access control, devices, directory and presence, routing and relay, session ownership, automations' schedules and runs, statistics, what people share, policies, audit, notifications. It runs **no agent** and reads **no content** it was not given. |
 | Mobile page | served by Desktop today | The phone. Served by a node today (Mobile plugin); later also by the server, to reach the whole fleet. |
 
 Names are proposals ([readme](readme.md#naming)).
@@ -106,13 +106,22 @@ merge, only facts to replay.
 | Which node owns a session, and its ownership epoch | The server (the source node in paired mode) | Nodes: their own sessions' epochs |
 | A node's inventory: projects, capabilities, providers' readiness | The node | The server: the last publication |
 | Presence (who and what is online) | The server, in memory | Clients: what they watch |
-| People, teams, roles, policies | The server (admins) | Nodes: the policies that apply to them |
+| People, teams, roles, grants, policies | The server (admins); policies signed by a policy device | Nodes: the policies that apply to them |
+| Automations, their signed versions, runs' records | The server (versions signed by their editors' devices) | Nodes: the automations assigned to them |
+| Statistics facts | The machine that counted them | The server: the latest version of each row |
 | Shares, project channels, messages | The server | Devices: caches |
 | A device's private key | The device, never exported | The server: the public key and status |
 | Model provider and Git credentials | Each node, for itself | Nobody |
 | Preferences of a person | Their devices (local storage, as today) | Optionally synced later |
 
+Writing a fact is not owning a resource: who owns an automation, a machine or a run, and who may act on it, is
+[access control](access-control.md).
+
 ## Connections
+
+- **The REST API.** The console, plugins, `altacli fleet` and integrations manage the fleet through the server's REST
+  API and follow its change feed; it carries resources and queries, never session content
+  ([protocol](protocol.md#the-servers-rest-api)).
 
 - **The control connection.** Every device that belongs to a fleet keeps one outbound WebSocket to the server:
   presence, publications from its outbox, the directory it watches, routing and relay. No device needs an inbound
@@ -149,11 +158,15 @@ New code, by layer (names to confirm in the first sub-plan):
 
 | Project | Owns | Depends on |
 | --- | --- | --- |
-| `CodeAlta.Fleet.Protocol` | Message contracts (source-generated JSON), framing, versions, error codes | nothing of CodeAlta |
-| `CodeAlta.Fleet` | Fleet connector, outbox, node API over the runtime, remote session hosts, session channels, session bundles | Orchestration, Catalog, Fleet.Protocol |
+| `CodeAlta.Fleet.Protocol` | Message contracts (source-generated JSON), framing, versions, error codes; the REST client generated from the server's OpenAPI document | nothing of CodeAlta |
+| `CodeAlta.Fleet` | Fleet connector, outbox, node API over the runtime, remote session hosts, session channels, session bundles, the fleet services the desktop and plugins use | Orchestration, Catalog, Fleet.Protocol |
 | `CodeAlta.Node` | The `altanode` executable: headless host, service integration, pairing and enrollment commands | Hosting, Fleet |
-| `CodeAlta.Server` (+ storage packages) | The `altaserver` executable: ASP.NET Core coordinator, identity, storage, relay, web pages | Fleet.Protocol only |
-| `src/CodeAlta/Desktop/Fleet`, `frontend/src/fleet` | Fleet console, remote sessions in the window, setup wizard | Fleet |
+| `CodeAlta.Server` (+ storage packages) | The `altaserver` executable: ASP.NET Core coordinator, REST API, identity, access control, scheduler, statistics store, relay, web pages | Fleet.Protocol only |
+| `CodeAlta.Plugin.Fleet` | The console: its canvases, buttons and landing card, as a built-in plugin of the desktop | Plugins.Abstractions, Fleet |
+| `src/CodeAlta/Desktop/Fleet`, `frontend/src/fleet` | Remote sessions in the window, the setup assistant, the host side of the console | Fleet |
+
+Two engines leave the desktop for libraries every host runs, so that nodes run them too: the **automation engine**
+(today desktop-only) and the **statistics engine** of the Statistics plugin.
 
 Two boundaries matter and get guardrail tests (`ArchitectureGuardrailTests`):
 

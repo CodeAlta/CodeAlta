@@ -17,8 +17,8 @@ cloud, with no Kubernetes.
 
 ## The setup assistant
 
-**Settings > Fleet**, the **Fleet** tab and the search (`Ctrl+P`) open it. Each flow is a short checklist that shows
-what it checks and what it changes.
+The assistant is part of the console ([console](console.md)): **Settings > Fleet**, the **Fleet** canvas and the
+search (`Ctrl+P`) open it. Each flow is a short checklist that shows what it checks and what it changes.
 
 | Flow | Steps |
 | --- | --- |
@@ -80,6 +80,23 @@ in preview and it has no AWS target).
   "provision a node" interface (milestone 5).
 - The OS sandbox of CodeAlta (`mxc`) is not a deployment tool: it confines what a session runs on a machine, and stays
   the floor for sessions that others start there.
+
+## Machines for unattended work
+
+A machine that runs a team's or the organization's automations (an SRE machine inside the infrastructure, a release
+machine) is set up for that one purpose, from the console:
+
+1. **Its own OS user and node**, enrolled as a team machine with labels (`infra-prod`, `release`), accepting the
+   automations of the scopes that own it and nothing else.
+2. **Account credentials only**: the organization provider or gateway key sealed to it
+   ([orchestration](orchestration.md#credentials-of-unattended-runs)); no person's subscription or login.
+3. **Scoped tool credentials**: read-only access to monitoring (Grafana, the logs, Kubernetes `view`) and only the
+   narrow write roles its allowed remediations need, each behind a tool with typed parameters.
+4. **The sandbox** with a network profile that reaches only the services it uses.
+5. **Its trigger sources** (Slack Socket Mode, Jira or incident.io polling) configured on it with their own tokens,
+   or the server's hooks ingress for the tools that only push.
+6. **A check**: the console runs the machine's readiness for each automation it should accept (providers of account
+   kind, tools, credentials, sandbox) before the first run.
 
 ## Packaging
 

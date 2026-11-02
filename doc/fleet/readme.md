@@ -16,9 +16,13 @@ work with, without changing anything for someone who stays on one computer.
 | --- | --- |
 | [Scenarios](scenarios.md) | The stories the fleet must make easy, from one person to an organization, with what must hold |
 | [Architecture](architecture.md) | What exists to build on, the components, the three topologies, who owns what, offline behavior |
-| [Sessions across machines](sessions-across-machines.md) | Remote sessions, starting a session elsewhere, project matching, moves, replicas, ownership, automations |
-| [Protocol](protocol.md) | Connections, handshake, envelopes, durability, versions, the services, and why WebSocket |
-| [Identity and access](identity-and-access.md) | People, devices, nodes; pairing, sign-in, enrollment; roles, grants, what the node decides |
+| [Sessions across machines](sessions-across-machines.md) | Remote sessions, starting a session elsewhere, project matching, moves, replicas, ownership of sessions |
+| [Automations, workflows and runs](orchestration.md) | Scopes (personal, project, team, organization), triggers beyond Git, placement, who a run acts as, account credentials for unattended runs, graduated autonomy, workflows across machines |
+| [Fleet statistics](statistics.md) | Every machine's facts published as versioned rows, dimensions, measures, who sees what, queries, the Statistics canvas by scope |
+| [Ownership and access control](access-control.md) | Owners of every resource, principals, roles and grants, what the node decides, transfers, agents, access and keys, where access matters |
+| [The console](console.md) | CodeAlta Desktop as the gateway of the fleet: why and at what cost, the API-complete server, canvases, plugins, agents |
+| [Protocol](protocol.md) | Three planes; connections, handshake, envelopes, durability, versions, the services, the REST API, and why WebSocket |
+| [Identity](identity.md) | People, devices, nodes, service identities; pairing, sign-in, enrollment, confirmations, agents acting for people |
 | [Security and privacy](security-and-privacy.md) | What the server sees, keys, the device list, credentials, remote execution, policies, threats, audit, SOC 2 |
 | [Collaboration](collaboration.md) | Presence, project channels, sharing, handoffs, notifications, questions across people |
 | [CodeAlta Server](server.md) | The coordinator: responsibilities, stack, data, SQLite or PostgreSQL, availability, administration |
@@ -34,7 +38,9 @@ work with, without changing anything for someone who stays on one computer.
 - Closing the laptop stops its sessions; nothing takes over, and automations wait for the desktop to be open.
 - A session cannot use another machine (run the macOS tests on the Mac).
 - Colleagues cannot hand each other a session, share one, or talk about a project next to its sessions.
-- Nobody can see, across machines and people, what agents do and what they cost.
+- Automations live on one person's desktop: they cannot belong to a team, a project or the organization, react to
+  events outside Git, or run with credentials fit for unattended work.
+- Nobody can see, across machines and people, what agents do and what they cost, or who owns what.
 
 ## Three steps
 
@@ -44,8 +50,8 @@ with no account and no network call.
 | Step | For | What it adds |
 | --- | --- | --- |
 | **1. Paired machines** | One person, two or more computers | A headless node (`altanode`) for always-on machines; a desktop that pairs with other machines and sees and drives their sessions directly (LAN, Tailscale, SSH); sessions moved from one machine to another |
-| **2. A fleet with a server** | One person or a household | CodeAlta Server on an always-on machine or a small VM: every machine and session in one view from anywhere, relayed channels, automations on the always-on machine, recovery of a lost laptop's sessions, the phone for the whole fleet, budgets. Private: the server cannot read sessions |
-| **3. An organization** | Teams | Company SSO, teams and roles, team machines, sharing and handoffs, project channels, policies, audit, PostgreSQL and high availability, cloud templates |
+| **2. A fleet with a server** | One person or a household | CodeAlta Server on an always-on machine or a small VM, managed from the console of CodeAlta Desktop: every machine and session in one view from anywhere, relayed channels, automations on the always-on machine, statistics of every machine, recovery of a lost laptop's sessions, the phone for the whole fleet, budgets. Private: the server cannot read sessions |
+| **3. An organization** | Teams | Company SSO, ownership and access control, team machines, team and organization automations with API keys, triggers beyond Git, graduated autonomy, team statistics, sharing and handoffs, project channels, policies, audit, PostgreSQL and high availability, cloud templates |
 
 ## Principles
 
@@ -65,7 +71,11 @@ with no account and no network call.
 8. **Offline is normal.** Sequences, epochs and cursors make reconnection a resume.
 9. **Attributable.** Every remote action names the person, the device, the machine and the session, in an audit log
    without content.
-10. **.NET, any OS, no Kubernetes, nothing hosted by us.** Single binaries and containers; self-hosting first.
+10. **Everything has an owner.** Every machine, session, automation, run and fact has one owner, recorded and
+    transferable, and access follows from it.
+11. **One console, a complete API.** CodeAlta Desktop is where the fleet is managed, in the same environment as the
+    rest; the server's REST API can do everything the console does, so plugins, scripts and agents can too.
+12. **.NET, any OS, no Kubernetes, nothing hosted by us.** Single binaries and containers; self-hosting first.
 
 ## Vocabulary
 
@@ -82,6 +92,10 @@ with no account and no network call.
 | **Space link** | A space connected to a server: what that server knows of this instance |
 | **Private**, **Managed** | Whether a space's shared content is sealed from the server or readable by its organization |
 | **Replica** | An encrypted copy of a journal on the server, to recover a lost machine's sessions |
+| **Console** | The canvases of CodeAlta Desktop that manage the fleet, over the server's REST API |
+| **Automation**, **run** | Work started without a person at the keyboard (personal, project, team or organization scope), and one execution of it |
+| **Service identity** | The identity a team or the organization runs unattended work as |
+| **Account credentials** | API keys or gateway keys of an organization or a team, as opposed to a person's subscription |
 | **Relay**, **direct** | The two paths of a session channel: through the server, or straight to the node |
 
 ### Naming
@@ -100,7 +114,7 @@ with no account and no network call.
 ```mermaid
 flowchart LR
     subgraph Fleet
-      S[CodeAlta Server<br/>identity, directory, relay,<br/>ownership, shares, audit]
+      S[CodeAlta Server<br/>REST API, identity, access,<br/>relay, automations, statistics]
       N1[CodeAlta Node<br/>Mac mini]
       N2[CodeAlta Node<br/>cloud VM]
       D1[CodeAlta Desktop<br/>Windows PC]
@@ -116,6 +130,11 @@ flowchart LR
 ```
 
 - Every device keeps one outbound connection to the server; nothing connects into a node.
+- Three planes: the **REST API** manages resources (machines, automations, runs, statistics, access); the **control**
+  connection keeps the fleet alive; **session channels** carry what only devices read
+  ([protocol](protocol.md)).
+- **CodeAlta Desktop is the console**: canvases over the REST API, extended by plugins, operated by agents through
+  `alta fleet` ([console](console.md)).
 - A viewer reaches a session through a channel to its owner node, end to end, relayed by default and direct when the
   node is reachable.
 - The desktop shows local and remote sessions through one **session host** abstraction, with the same components.
@@ -161,12 +180,12 @@ always-on machine; a vendor-neutral fleet across providers; home-scale deploymen
 
 | Milestone | Delivers |
 | --- | --- |
-| **M0 Foundations** | Session host abstraction, session bundles and the move record, the local person, the protocol package, a multi-host test harness, spikes |
-| **M1 Paired machines** | `altanode`, the node API, pairing, remote sessions in the desktop, **Run on**, client mode (issue #284) |
+| **M0 Foundations** | Session host abstraction, session bundles and the move record, the local person, owners in the data model, the automation and statistics engines out of the desktop, the protocol package, a multi-host test harness, spikes |
+| **M1 Paired machines** | `altanode`, the node API, pairing, the Machines canvas, remote sessions in the desktop, **Run on**, automations on a paired machine, client mode (issue #284) |
 | **M2 Moves** | Move to machine between paired machines, project matching, Git payloads, provider continuity |
-| **M3 CodeAlta Server for home** | The coordinator, Private spaces and keys, the Fleet tab, relay, fleet automations, cross-machine sub-agents, replicas, the phone, budgets |
-| **M4 Organizations and collaboration** | SSO, teams and roles, Managed spaces, shares, channels, handoffs, notifications, signed policies, audit |
-| **M5 Enterprise operations** | PostgreSQL and high availability, SCIM, brokered credentials, shared machines, node pools, cloud templates, compliance pack |
+| **M3 CodeAlta Server for home** | The coordinator and its REST API, the console, Private spaces and keys, relay, personal fleet automations, fleet statistics, cross-machine sub-agents, replicas, the phone, budgets |
+| **M4 Organizations and collaboration** | SSO, ownership and access control, team and organization automations with account credentials, triggers beyond Git, graduated autonomy, team statistics, Managed spaces, shares, channels, handoffs, notifications, signed policies, audit |
+| **M5 Enterprise operations** | PostgreSQL and high availability, SCIM, brokered credentials, shared machines, node pools, cloud templates, statistics exports, compliance pack |
 | **M6 Beyond** | Search across machines, overlap warnings, digests, remote editor and terminals, A2A |
 
 Details, done criteria and risks: [roadmap](roadmap.md).
@@ -195,6 +214,18 @@ To confirm or overturn; each is argued in its document.
 12. **Nodes as user-level services** (logon task, LaunchAgent, `systemd --user`); one node per OS user.
 13. **No hosted CodeAlta service in 4.0**; SOC 2 is the customers' audit, which CodeAlta equips.
 14. **Budgets and alerts in 4.0**, for households too.
+15. **CodeAlta Desktop is the console; the server has no administration interface** and an API-complete REST API, so
+    plugins, scripts and agents can do what the console does. A browser administration can be built later on the same
+    API ([console](console.md#why-the-desktop-and-what-it-costs)).
+16. **Every resource has one owner** (person, team or organization), authorship kept apart, management inherited and
+    content never; authority to run things is signed by a person's device ([access control](access-control.md)).
+17. **Unattended runs off a person's own machine use account credentials only** (API keys, gateway keys), never a
+    personal subscription, checked by the scheduler and the node
+    ([orchestration](orchestration.md#credentials-of-unattended-runs)).
+18. **Automations are organized by scope** (personal, project, team, organization); events only select a signed
+    version, never authorize; allowed autonomous actions are tools with typed parameters, not shell patterns.
+19. **Fleet statistics are the Statistics plugin's facts**, published by each machine as versioned rows; per-person
+    numbers need an explicit grant ([statistics](statistics.md)).
 
 ## Open questions
 
@@ -224,3 +255,10 @@ For the owner, in order of how much they change the plan:
 14. **A desktop that stays reachable when closed**: is client mode over a local node enough, or should the desktop
     install a node behind the scenes?
 15. **A hosted service** (a CodeAlta-run server or relay), ever? It would need its own SOC 2 Type II.
+16. **A person's automations on their own always-on machine** (a home Mac mini): may they use that person's
+    subscriptions, as their desktop does today, or must every automation off the desktop use API keys? The plan allows
+    subscriptions for a person's own runs on their own machines; an organization can forbid it.
+17. **Statistics per person**: off by default for managers and admins (as proposed), or a choice each organization
+    makes at setup?
+18. **Plugins and the fleet**: may a plugin change the fleet (create, grant, approve) once the person accepted it, as
+    proposed, or only read it?
