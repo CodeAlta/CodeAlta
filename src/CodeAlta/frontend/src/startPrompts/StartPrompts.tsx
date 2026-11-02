@@ -165,18 +165,16 @@ export function StartPromptDetail({ form, builtIn, project, files, editor, disab
     <SectionCard className="settings-editor-fields">
       {known && <p className="settings-editor-wide">{t(known.description)}</p>}
       {builtIn
-        ? <Callout compact icon={null} className="settings-editor-wide">
-            {t("This is the text CodeAlta ships. To change it, make a copy of your own: it takes its place.")}
-            <div className="pull-request-copy">
-              <Button size="small" disabled={disabled} onClick={() => onCopy(builtIn, "Global")}>{t("Customize for me")}</Button>
-              {project && <Button size="small" disabled={disabled} onClick={() => onCopy(builtIn, "Project")}>{t("Customize for {project}", { project: project.name })}</Button>}
-            </div>
-          </Callout>
+        ? <Callout compact icon={null} className="settings-editor-wide">{t("This is the text CodeAlta ships. To change it, make a copy of your own: it takes its place.")}</Callout>
         : !original && project && <FormGroup label={t("Stored in")}><ScopeChoice value={form.scope} project={project} disabled={disabled} onChange={scope => onChange({ scope })} /></FormGroup>}
       {known && <p className="bp6-form-helper-text settings-editor-wide">{t(known.help)}</p>}
     </SectionCard>
     <SectionCard className="prompt-settings-editor">{editor({ value: form.content, readOnly: disabled || !!builtIn, onChange: content => onChange({ content }) })}</SectionCard>
-    {!builtIn && <SectionCard className="settings-editor-footer settings-split-footer">
+    {/* The footer stays in view when the fields above the text scroll: the copy of what ships is made from it too. */}
+    {builtIn ? <SectionCard className="settings-editor-footer settings-split-footer">
+      <Button intent="primary" icon={<AppIcon name="copy" size={15} />} disabled={disabled} onClick={() => onCopy(builtIn, "Global")}>{t("Customize for me")}</Button>
+      {project && <Button icon={<AppIcon name="copy" size={15} />} disabled={disabled} onClick={() => onCopy(builtIn, "Project")}>{t("Customize for {project}", { project: project.name })}</Button>}
+    </SectionCard> : <SectionCard className="settings-editor-footer settings-split-footer">
       <Button intent="primary" disabled={!dirty || !valid || disabled} onClick={onSave}>{t("Save")}</Button>
       <Button disabled={!!original && !dirty || disabled} onClick={() => { if (original) onChange({ content: original.content }); else onCancel(); }}>
         {t(original ? "Revert" : "Cancel")}</Button>
