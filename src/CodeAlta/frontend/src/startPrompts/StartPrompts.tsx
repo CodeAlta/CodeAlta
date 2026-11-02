@@ -64,6 +64,12 @@ export function startPromptForm(item: StartPromptItem, copy: SettingsScope | nul
     : { original: item, id: item.id, scope: item.source === "project" ? "Project" : "Global", content: item.content };
 }
 
+/** The text a scope already keeps for a start prompt: a copy for that scope would replace it. */
+export function startPromptOfScope(items: readonly StartPromptItem[], id: string, scope: SettingsScope): StartPromptItem | null {
+  const source = scope === "Project" ? "project" : "global";
+  return items.find(item => item.id === id && item.source === source) ?? null;
+}
+
 /**
  * The start prompts on the page of agent prompts: their rows in the list of the page, and the form of the one that
  * is selected. The page owns the selection; a key of a start prompt is one `isStartPromptKey` recognizes. What ships
@@ -116,7 +122,13 @@ export function useStartPrompts({ api, epoch, project, selected, select, setNoti
 
   const lock = busy || disabled;
   function choose(item: StartPromptItem) { if (lock) return; setNotice(null); setForm(startPromptForm(item)); select(startPromptKey(item)); }
-  function copy(item: StartPromptItem, scope: SettingsScope) { if (lock) return; setNotice(null); setForm(startPromptForm(item, scope)); select(unsaved); }
+  // A scope that already keeps a text shows it: a copy saved there would replace it without a word.
+  function copy(item: StartPromptItem, scope: SettingsScope) {
+    if (lock) return;
+    const kept = startPromptOfScope(items, item.id, scope);
+    if (kept) { choose(kept); return; }
+    setNotice(null); setForm(startPromptForm(item, scope)); select(unsaved);
+  }
   async function run(action: () => Promise<{ status: string; message?: string | null }>, done: MessageKey, after: string) {
     if (!epoch || busy) return;
     setBusy(true); setNotice(null);
@@ -136,6 +148,7 @@ export function useStartPrompts({ api, epoch, project, selected, select, setNoti
   const rows = <StartPromptRows items={items} selected={selected} unsaved={selected === unsaved ? form : null} onChoose={choose} />;
   const detail = !shown || !form || (!current && selected !== unsaved) ? null
     : <StartPromptDetail form={form} builtIn={current?.source === "builtin" ? current : null} project={project} files={files} editor={editor} disabled={lock}
+      taken={!form.original && !!startPromptOfScope(items, form.id, form.scope)}
       onCopy={copy} onChange={change => setForm(value => value ? { ...value, ...change } : value)} onSave={() => void save(form)}
       onCancel={() => { const back = items.find(item => item.id === form.id && item.source === "builtin"); if (back) choose(back); }}
       onRemove={() => { if (form.original) void remove(form.original); }} />;
@@ -171,11 +184,13 @@ export function StartPromptRows({ items, selected, unsaved: copy, onChoose }: {
  * The form of a start prompt. The text that ships is only read, with the buttons that make a copy of it; a copy says
  * where it is kept until it is saved, and a saved text is changed, reverted or removed.
  */
-export function StartPromptDetail({ form, builtIn, project, files, editor, disabled, onCopy, onChange, onSave, onCancel, onRemove }: {
+export function StartPromptDetail({ form, builtIn, project, files, editor, disabled, taken = false, onCopy, onChange, onSave, onCancel, onRemove }: {
   form: Form;
   /** The text that ships, when it is the one shown; null for a copy or a text of the user or of a project. */
   builtIn: StartPromptItem | null;
   project: SettingsProject; files: Pick<SettingsFiles, "open" | "reveal" | "platform">; editor: StartPromptEditor; disabled: boolean;
+  /** A copy not saved yet whose scope already keeps a text: saving it would replace that text, so it is not saved. */
+  taken?: boolean;
   onCopy: (item: StartPromptItem, scope: SettingsScope) => void;
   onChange: (change: Partial<Pick<Form, "scope" | "content">>) => void;
   onSave: () => void;
@@ -186,7 +201,8 @@ export function StartPromptDetail({ form, builtIn, project, files, editor, disab
   const { t } = useShellLanguage();
   const known = names[form.id];
   const dirty = form.original ? form.content !== form.original.content : form.content.trim().length > 0;
-  const valid = form.content.trim().length > 0 && (form.scope === "Global" || !!project);
+  const replaces = !form.original && taken;
+  const valid = form.content.trim().length > 0 && (form.scope === "Global" || !!project) && !replaces;
   const original = form.original;
   return <Section className="settings-editor-form prompt-settings-form settings-split-detail" title={label(t, form.id)}
     subtitle={builtIn ? t("Ships with CodeAlta") : original ? t(sourceLabel(original.source)) : t("Not saved yet")}
@@ -200,6 +216,7 @@ export function StartPromptDetail({ form, builtIn, project, files, editor, disab
       {builtIn
         ? <Callout compact icon={null} className="settings-editor-wide">{t("This is the text CodeAlta ships. To change it, make a copy of your own: it takes its place.")}</Callout>
         : !original && project && <FormGroup label={t("Stored in")}><ScopeChoice value={form.scope} project={project} disabled={disabled} onChange={scope => onChange({ scope })} /></FormGroup>}
+      {!builtIn && replaces && <Callout compact intent="warning" icon={null} className="settings-editor-wide">{t("A prompt with this name already exists in that scope.")}</Callout>}
       {known && <p className="bp6-form-helper-text settings-editor-wide">{t(known.help)}</p>}
     </SectionCard>
     <SectionCard className="prompt-settings-editor">{editor({ value: form.content, readOnly: disabled || !!builtIn, onChange: content => onChange({ content }) })}</SectionCard>

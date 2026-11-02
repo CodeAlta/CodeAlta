@@ -4,7 +4,7 @@ import { createElement, type ReactElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import type { StartPromptItem } from "#neoastra";
 import { ShellLanguageContext } from "../shellLanguage";
-import { isStartPromptKey, reconcileStartPrompts, startPromptForm, startPromptKey, StartPromptDetail, StartPromptRows, unsavedStartPromptKey } from "./StartPrompts";
+import { isStartPromptKey, reconcileStartPrompts, startPromptForm, startPromptKey, startPromptOfScope, StartPromptDetail, StartPromptRows, unsavedStartPromptKey } from "./StartPrompts";
 
 const never = () => assert.fail("rendering must not act");
 const render = (element: ReactElement) => renderToStaticMarkup(createElement(ShellLanguageContext.Provider, { value: { locale: "en", choice: "en", setLanguage: never } }, element));
@@ -12,8 +12,8 @@ const shipped: StartPromptItem = { id: "pull-request-review", source: "builtin",
 const mine: StartPromptItem = { id: "pull-request-review", source: "global", overridden: false, content: "My review of {reference}.", file: "/home/me/.alta/prompts/start/pull-request-review.md" };
 const files = { open: undefined, reveal: never, platform: null };
 const editor = ({ value, readOnly }: { value: string; readOnly: boolean }) => createElement("textarea", { readOnly, value, onChange: never });
-const detail = (form: ReturnType<typeof startPromptForm>, builtIn: StartPromptItem | null) => render(createElement(StartPromptDetail, {
-  form, builtIn, project: { id: "p", name: "Alpha" }, files, editor, disabled: false, onCopy: never, onChange: never, onSave: never, onCancel: never, onRemove: never }));
+const detail = (form: ReturnType<typeof startPromptForm>, builtIn: StartPromptItem | null, taken = false) => render(createElement(StartPromptDetail, {
+  form, builtIn, project: { id: "p", name: "Alpha" }, files, editor, disabled: false, taken, onCopy: never, onChange: never, onSave: never, onCancel: never, onRemove: never }));
 
 test("a start prompt has a key of its own beside the agent prompts, and a form that keeps what ships apart", () => {
   assert.ok(isStartPromptKey(startPromptKey(mine)));
@@ -47,6 +47,20 @@ test("what ships is only read and copied; a text of the user is saved, reverted 
 
   const copy = detail(startPromptForm(shipped, "Global"), null);
   assert.ok(copy.includes("Not saved yet") && copy.includes("Stored in") && copy.includes(">Cancel<") && !copy.includes(">Remove<"));
+});
+
+test("a copy never replaces a text its scope already keeps", () => {
+  // Customize shows the text the scope keeps instead of a copy of what ships.
+  assert.equal(startPromptOfScope([shipped, mine], "pull-request-review", "Global"), mine);
+  assert.equal(startPromptOfScope([shipped, mine], "pull-request-review", "Project"), null);
+  assert.equal(startPromptOfScope([shipped], "pull-request-review", "Global"), null, "what ships is no text of a scope");
+  // A copy moved to a scope that keeps a text says so and is not saved.
+  const taken = detail(startPromptForm(shipped, "Global"), null, true);
+  assert.ok(taken.includes("A prompt with this name already exists in that scope."));
+  assert.match(taken, /<button[^>]*disabled=""[^>]*><span class="bp6-button-text">Save<\/span>/);
+  const free = detail(startPromptForm(shipped, "Global"), null, false);
+  assert.ok(!free.includes("already exists"));
+  assert.doesNotMatch(free, /<button[^>]*disabled=""[^>]*><span class="bp6-button-text">Save<\/span>/);
 });
 
 test("a list read again shows the text as it is now, and leaves the page alone when the user moved on", () => {
