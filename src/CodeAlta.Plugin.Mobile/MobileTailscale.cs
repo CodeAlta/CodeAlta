@@ -8,7 +8,7 @@ namespace CodeAlta.Plugin.Mobile;
 /// <param name="State">
 /// <c>pending</c>, <c>not-installed</c>, <c>not-running</c> (not signed in, or stopped), <c>serve-disabled</c> (Serve or HTTPS
 /// certificates are not enabled on the tailnet), <c>port-taken</c> (the HTTPS port of the plugin serves something else),
-/// <c>serving</c>, <c>failed</c> or <c>stopped</c>.
+/// <c>serving</c>, <c>failed</c>, <c>stopped</c> or <c>unused</c> (phones connect through Dev Tunnels).
 /// </param>
 /// <param name="Url">The address of the mobile view on the tailnet, while it is served.</param>
 /// <param name="Detail">A line for people.</param>
@@ -18,6 +18,9 @@ internal sealed record MobileTailscaleStatus(string State, string? Url, string D
     internal static MobileTailscaleStatus Pending { get; } = new("pending", null, "Checking Tailscale…");
 
     internal static MobileTailscaleStatus Stopped { get; } = new("stopped", null, "The mobile view is not served.");
+
+    /// <summary>Phones connect through Dev Tunnels: Tailscale is not asked.</summary>
+    internal static MobileTailscaleStatus Unused { get; } = new("unused", null, "Phones connect through Dev Tunnels.");
 }
 
 /// <summary>What a run of the Tailscale command line gave.</summary>

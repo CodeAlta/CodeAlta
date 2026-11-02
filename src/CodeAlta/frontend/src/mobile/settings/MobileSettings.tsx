@@ -1,17 +1,17 @@
 import { useEffect, useState } from "react";
-import { Button, Callout, Card, NumericInput, type Intent } from "@blueprintjs/core";
+import { Button, Callout, Card, NumericInput, Radio, RadioGroup, type Intent } from "@blueprintjs/core";
 import { ActivitySpinner } from "../../ActivitySpinner";
 import { AppIcon } from "../../AppIcon";
 import { ConfirmPopover } from "../../ConfirmPopover";
 import type { MessageKey } from "../../localization";
 import { SettingsField as Field } from "../../SettingsField";
 import { useShellLanguage } from "../../shellLanguage";
-import { changedPorts, maximumPort, minimumPort, readPort, type MobileSettingsView } from "./model";
+import { changedSettings, maximumPort, minimumPort, readPort, type MobileMode, type MobileSettingsChange, type MobileSettingsView } from "./model";
 
 /** The calls of the settings page to its plugin. Each answer is the settings of now, read as `readMobileSettings` reads them. */
 export type MobileSettingsApi = Readonly<{
   get: (signal: AbortSignal) => Promise<MobileSettingsView>;
-  set: (ports: Readonly<{ port: number; httpsPort: number }>) => Promise<MobileSettingsView>;
+  set: (change: MobileSettingsChange) => Promise<MobileSettingsView>;
   reset: () => Promise<MobileSettingsView>;
   /** Calls the listener with the settings each time the plugin says they changed; the function it gives stops it. */
   changes: (listener: (settings: MobileSettingsView) => void) => () => void;
@@ -27,8 +27,8 @@ export function MobileSettings({ api }: { api: MobileSettingsApi }) {
   const { t } = useShellLanguage();
   const [settings, setSettings] = useState<MobileSettingsView | null>(null);
   const [unread, setUnread] = useState(false);
-  // What is typed in the two fields, until it is applied; null follows what the plugin says.
-  const [draft, setDraft] = useState<Readonly<{ port: string; httpsPort: string }> | null>(null);
+  // What is chosen and typed, until it is applied; null follows what the plugin says.
+  const [draft, setDraft] = useState<Readonly<{ mode: MobileMode; port: string; httpsPort: string }> | null>(null);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<Notice | null>(null);
   const [confirming, setConfirming] = useState(false);
@@ -44,9 +44,10 @@ export function MobileSettings({ api }: { api: MobileSettingsApi }) {
     ? <Callout intent="danger" compact role="alert">{t("The settings could not be read.")}</Callout>
     : <div className="mobile-settings-loading" role="status" aria-busy="true"><ActivitySpinner size={18} label={t("Loading…")} /></div>;
 
-  const port = draft?.port ?? String(settings.port), httpsPort = draft?.httpsPort ?? String(settings.httpsPort);
-  const changed = changedPorts(settings, port, httpsPort);
-  const portProblem = readPort(port) === null, httpsProblem = readPort(httpsPort) === null;
+  const mode = draft?.mode ?? settings.mode, port = draft?.port ?? String(settings.port), httpsPort = draft?.httpsPort ?? String(settings.httpsPort);
+  const tunnel = mode === "devtunnel";
+  const changed = changedSettings(settings, mode, port, httpsPort);
+  const portProblem = readPort(port) === null, httpsProblem = !tunnel && readPort(httpsPort) === null;
   const say = (key: MessageKey, intent: Intent) => setNotice({ text: t(key), intent });
   async function apply() {
     if (!changed || busy) return;
@@ -56,7 +57,7 @@ export function MobileSettings({ api }: { api: MobileSettingsApi }) {
       setSettings(answer);
       if (answer.error) setNotice({ text: answer.error, intent: "danger" });
       else { setDraft(null); say("Saved.", "success"); }
-    } catch { say("The ports could not be changed.", "danger"); }
+    } catch { say("The settings could not be changed.", "danger"); }
     finally { setBusy(false); }
   }
   async function reset() {
@@ -73,25 +74,34 @@ export function MobileSettings({ api }: { api: MobileSettingsApi }) {
   return <div className="settings-grid mobile-settings">
     {notice && <Callout className="mobile-settings-notice" intent={notice.intent} compact role={notice.intent === "success" ? "status" : "alert"}>{notice.text}</Callout>}
     <Card className="appearance-settings" aria-labelledby="mobile-settings-ports">
-      <h2 id="mobile-settings-ports">{t("Ports")}</h2>
-      <Field label={t("Port on this computer")} htmlFor="mobile-settings-port">
-        {portField("mobile-settings-port", port, portProblem, text => setDraft({ port: text, httpsPort }))}
+      <h2 id="mobile-settings-ports">{t("Connection")}</h2>
+      <Field label={t("Phones connect through")}
+        notice={tunnel && <p className="settings-field-help">{t("A Dev Tunnel of Microsoft gives the page an HTTPS address any phone opens, without installing anything on it. This computer needs the Dev Tunnels command line and a Microsoft or GitHub account.")}</p>}>
+        <RadioGroup inline name="mobile-settings-mode" className="mobile-settings-mode" selectedValue={mode} disabled={busy}
+          onChange={event => setDraft({ mode: event.currentTarget.value as MobileMode, port, httpsPort })}>
+          <Radio value="tailscale" label="Tailscale" />
+          <Radio value="devtunnel" label="Dev Tunnels" />
+        </RadioGroup>
       </Field>
-      <Field label={t("Port on the tailnet")} htmlFor="mobile-settings-https-port"
+      <Field label={t("Port on this computer")} htmlFor="mobile-settings-port"
+        notice={tunnel && portProblem && <p id="mobile-settings-port-problem" className="settings-field-help" role="alert">{t("A port is a number from 1024 to 65535.")}</p>}>
+        {portField("mobile-settings-port", port, portProblem, text => setDraft({ mode, port: text, httpsPort }))}
+      </Field>
+      {!tunnel && <Field label={t("Port on the tailnet")} htmlFor="mobile-settings-https-port"
         notice={(portProblem || httpsProblem) && <p id="mobile-settings-port-problem" className="settings-field-help" role="alert">{t("A port is a number from 1024 to 65535.")}</p>}>
-        {portField("mobile-settings-https-port", httpsPort, httpsProblem, text => setDraft({ port, httpsPort: text }))}
-      </Field>
+        {portField("mobile-settings-https-port", httpsPort, httpsProblem, text => setDraft({ mode, port, httpsPort: text }))}
+      </Field>}
       <div className="mobile-settings-actions">
         {draft && <Button variant="minimal" text={t("Cancel")} disabled={busy} onClick={() => setDraft(null)} />}
         <Button intent="primary" text={t("Apply")} disabled={!changed || busy} loading={busy && !!changed} onClick={() => void apply()} />
       </div>
     </Card>
     <Card className="appearance-settings" aria-labelledby="mobile-settings-address">
-      <h2 id="mobile-settings-address">{t("Address on the tailnet")}</h2>
+      <h2 id="mobile-settings-address">{settings.mode === "devtunnel" ? t("Address of the Dev Tunnel") : t("Address on the tailnet")}</h2>
       {settings.address
         ? <p className="mobile-settings-address"><code>{settings.address}</code></p>
-        : <><p className="mobile-settings-address" data-unserved="true">{t("Not served on the tailnet")}</p>
-          <p className="settings-field-help">{settings.serverDetail ?? settings.tailscale.detail}</p></>}
+        : <><p className="mobile-settings-address" data-unserved="true">{settings.mode === "devtunnel" ? t("Not served through Dev Tunnels") : t("Not served on the tailnet")}</p>
+          <p className="settings-field-help">{settings.serverDetail ?? (settings.mode === "devtunnel" ? settings.devTunnel.detail : settings.tailscale.detail)}</p></>}
     </Card>
     <Card className="appearance-settings" aria-labelledby="mobile-settings-access">
       <h2 id="mobile-settings-access">{t("Access")}</h2>

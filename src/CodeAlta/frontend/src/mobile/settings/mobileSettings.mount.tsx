@@ -7,15 +7,17 @@ import { MobileSettings, type MobileSettingsApi } from "./MobileSettings";
 
 const root = createRoot(document.getElementById("root")!);
 const state = { calls: [] as string[], settings: {
-  port: 2584, httpsPort: 2584, address: "https://desk.tail1234.ts.net:2584", server: "listening", serverDetail: null, tailscale: { state: "serving", detail: "Tailscale serves it" }, error: null,
+  mode: "tailscale", devTunnel: { state: "unused", detail: "" }, port: 2584, httpsPort: 2584, address: "https://desk.tail1234.ts.net:2584", server: "listening", serverDetail: null, tailscale: { state: "serving", detail: "Tailscale serves it" }, error: null,
 } as MobileSettingsView, refuse: null as string | null };
 const listeners = new Set<(settings: MobileSettingsView) => void>();
 const api: MobileSettingsApi = {
   get: async () => { state.calls.push("get"); return state.settings; },
   set: async ports => {
-    state.calls.push(`set:${ports.port}:${ports.httpsPort}`);
+    state.calls.push(ports.mode === "devtunnel" ? `set:devtunnel:${ports.port}` : `set:${ports.port}:${ports.httpsPort}`);
     if (state.refuse) return { ...state.settings, error: state.refuse };
-    state.settings = { ...state.settings, ...ports, address: null, tailscale: { state: "pending", detail: "Checking Tailscale…" } };
+    state.settings = ports.mode === "devtunnel"
+      ? { ...state.settings, ...ports, address: null, tailscale: { state: "unused", detail: "" }, devTunnel: { state: "pending", detail: "Opening the Dev Tunnel…" } }
+      : { ...state.settings, ...ports, address: null, tailscale: { state: "pending", detail: "Checking Tailscale…" }, devTunnel: { state: "unused", detail: "" } };
     return state.settings;
   },
   reset: async () => { state.calls.push("reset"); return state.settings; },

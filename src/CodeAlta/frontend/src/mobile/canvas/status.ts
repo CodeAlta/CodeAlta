@@ -1,14 +1,21 @@
 // What the Mobile tab shows, from the status the Mobile plugin gives (`mobile.status`, `mobile.retry`, the event `mobile.changed`):
 // the QR code of the link, and what keeps a phone from connecting, with what fixes it. Plain functions, without the DOM.
 
+/** How phones connect: through Tailscale, or through a Dev Tunnel of Microsoft. */
+export type MobileMode = "tailscale" | "devtunnel";
+
 /** The state of the plugin's server on 127.0.0.1. */
 export type MobileServerState = "starting" | "listening" | "port-in-use" | "failed" | "stopped";
 
 /** The state of the page's publication on the tailnet, with `tailscale serve`. */
-export type MobileTailscaleState = "pending" | "not-installed" | "not-running" | "serve-disabled" | "port-taken" | "serving" | "failed" | "stopped";
+export type MobileTailscaleState = "pending" | "not-installed" | "not-running" | "serve-disabled" | "port-taken" | "serving" | "failed" | "stopped" | "unused";
+
+/** The state of the Dev Tunnel; `unused` behind Tailscale. */
+export type MobileDevTunnelState = "pending" | "not-installed" | "not-signed-in" | "signing-in" | "serving" | "failed" | "stopped" | "unused";
 
 /** The status of the Mobile plugin. */
 export type MobileStatus = Readonly<{
+  mode: MobileMode;
   server: MobileServerState;
   /** The local port, on 127.0.0.1. */
   port: number;
@@ -23,6 +30,15 @@ export type MobileStatus = Readonly<{
     /** The page that fixes it (the download of Tailscale, the page of the admin console that enables Serve and HTTPS). */
     fixUrl: string | null;
   }>;
+  devTunnel: Readonly<{
+    state: MobileDevTunnelState;
+    /** `https://<tunnel>-<port>.<region>.devtunnels.ms` while serving. */
+    url: string | null;
+    /** A line for people. */
+    detail: string;
+    /** The page that fixes it: the install of the command line. */
+    fixUrl: string | null;
+  }>;
   /** What the QR code holds: `<url>/#k=<token>`; null while nothing can be reached. */
   connectUrl: string | null;
   /** The same without the token, shown under the QR code. */
@@ -32,7 +48,8 @@ export type MobileStatus = Readonly<{
 }>;
 
 const serverStates: readonly MobileServerState[] = ["starting", "listening", "port-in-use", "failed", "stopped"];
-const tailscaleStates: readonly MobileTailscaleState[] = ["pending", "not-installed", "not-running", "serve-disabled", "port-taken", "serving", "failed", "stopped"];
+const tailscaleStates: readonly MobileTailscaleState[] = ["pending", "not-installed", "not-running", "serve-disabled", "port-taken", "serving", "failed", "stopped", "unused"];
+const devTunnelStates: readonly MobileDevTunnelState[] = ["pending", "not-installed", "not-signed-in", "signing-in", "serving", "failed", "stopped", "unused"];
 const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null && !Array.isArray(value);
 const text = (value: unknown): string | null => typeof value === "string" && value.length > 0 ? value : null;
 
@@ -45,7 +62,10 @@ export function readStatus(value: unknown): MobileStatus | null {
   const rows = Array.isArray(value.qr) && value.qr.length > 0 && value.qr.every(row => typeof row === "string" && row.length === (value.qr as unknown[]).length && /^[01]+$/.test(row))
     ? value.qr as string[] : null;
   const tailscale = value.tailscale;
+  const tunnel = isRecord(value.devTunnel) ? value.devTunnel : {};
   return {
+    mode: value.mode === "devtunnel" ? "devtunnel" : "tailscale",
+    devTunnel: { state: devTunnelStates.find(known => known === tunnel.state) ?? "unused", url: text(tunnel.url), detail: text(tunnel.detail) ?? "", fixUrl: text(tunnel.fixUrl) },
     server, port: typeof value.port === "number" ? value.port : 0, serverDetail: text(value.serverDetail),
     tailscale: { state, url: text(tailscale.url), detail: text(tailscale.detail) ?? "", fixUrl: text(tailscale.fixUrl) },
     connectUrl: text(value.connectUrl), address: text(value.address), qr: rows,
@@ -81,11 +101,16 @@ export type MobileText = "The phone page is starting." | "Tailscale is starting 
   | "Tailscale is not installed on this computer." | "Tailscale is not running on this computer."
   | "Tailscale Serve is not enabled for this tailnet." | "The port of Tailscale Serve is used by another service."
   | "Tailscale could not publish the page." | "The page is not published on the tailnet."
-  | "Download Tailscale" | "Enable it in the admin console" | "Open Tailscale" | "Open the page that fixes it";
+  | "Download Tailscale" | "Enable it in the admin console" | "Open Tailscale" | "Open the page that fixes it"
+  | "Scan it with the camera of the phone. The phone must be signed in to the same tailnet."
+  | "Scan it with the camera of the phone. The first time, the phone shows a page of Microsoft: choose Continue."
+  | "Dev Tunnels is opening the tunnel." | "Waiting for the sign-in in the browser…"
+  | "The Dev Tunnels command line is not installed." | "Sign in to Dev Tunnels." | "The Dev Tunnel did not open." | "The Dev Tunnel is closed."
+  | "Install Dev Tunnels";
 
 /** Something that keeps a phone from connecting: what it is, why (the plugin's own words), and what fixes it. */
 export type MobileProblem = Readonly<{
-  key: "server" | "tailscale";
+  key: "server" | "tailscale" | "devtunnel";
   /** Danger when nothing can work until it is fixed; warning otherwise. */
   intent: "danger" | "warning";
   title: MobileText;
@@ -98,6 +123,8 @@ export type MobileProblem = Readonly<{
   fix: Readonly<{ label: MobileText; url: string }> | null;
   /** Whether "Try again" asks Tailscale again: the states that can change by themselves once fixed. */
   retry: boolean;
+  /** Whether the buttons that sign in to Dev Tunnels (Microsoft, GitHub) are offered. */
+  signIn?: boolean;
 }>;
 
 /** What the tab shows: the code when there is one, what keeps a phone from connecting, and what is still starting. */
@@ -106,6 +133,8 @@ export type MobileView = Readonly<{
   problems: readonly MobileProblem[];
   /** A step that is not done yet and is nobody's fault, while there is no code. */
   waiting: MobileText | null;
+  /** The line under the code. */
+  instruction: MobileText;
 }>;
 
 const retryStates: readonly MobileTailscaleState[] = ["not-running", "serve-disabled", "port-taken", "failed"];
@@ -123,6 +152,13 @@ const tailscaleTitles: Readonly<Partial<Record<MobileTailscaleState, MobileText>
   "stopped": "The page is not published on the tailnet.",
 };
 
+const devTunnelTitles: Readonly<Partial<Record<MobileDevTunnelState, MobileText>>> = {
+  "not-installed": "The Dev Tunnels command line is not installed.",
+  "not-signed-in": "Sign in to Dev Tunnels.",
+  "failed": "The Dev Tunnel did not open.",
+  "stopped": "The Dev Tunnel is closed.",
+};
+
 /** What the tab shows for a status. */
 export function mobileView(status: MobileStatus): MobileView {
   const problems: MobileProblem[] = [];
@@ -134,8 +170,20 @@ export function mobileView(status: MobileStatus): MobileView {
     problems.push({ key: "server", intent: "danger", title: server === "failed" ? "The server of the phone page did not start." : "The server of the phone page is stopped.",
       detail: status.serverDetail, fix: null, retry: false });
   }
+  const tunnel = status.mode === "devtunnel";
+  const devTunnel = status.devTunnel;
+  const tunnelTitle = tunnel ? devTunnelTitles[devTunnel.state] : undefined;
+  if (tunnelTitle) {
+    problems.push({
+      key: "devtunnel", intent: devTunnel.state === "not-installed" ? "danger" : "warning", title: tunnelTitle,
+      // The title says it all for the sign-in: the buttons follow it.
+      detail: devTunnel.state === "not-signed-in" ? null : devTunnel.detail.trim() || null,
+      fix: devTunnel.state === "not-installed" && devTunnel.fixUrl ? { label: "Install Dev Tunnels", url: devTunnel.fixUrl } : null,
+      retry: devTunnel.state !== "not-signed-in", signIn: devTunnel.state === "not-signed-in",
+    });
+  }
   const tailscale = status.tailscale;
-  const title = tailscaleTitles[tailscale.state];
+  const title = tunnel ? undefined : tailscaleTitles[tailscale.state];
   if (title) {
     problems.push({
       key: "tailscale", intent: tailscale.state === "not-installed" || tailscale.state === "serve-disabled" ? "danger" : "warning", title,
@@ -146,7 +194,12 @@ export function mobileView(status: MobileStatus): MobileView {
   }
   const code = status.connectUrl && status.qr ? { ...qrPath(status.qr), address: status.address ?? status.connectUrl.replace(/#.*$/u, "") } : null;
   const waiting: MobileText | null = code || problems.some(problem => problem.key === "server") ? null
+    : tunnel && devTunnel.state === "signing-in" ? "Waiting for the sign-in in the browser…"
     : server === "starting" ? "The phone page is starting."
-    : tailscale.state === "pending" ? "Tailscale is starting to publish the page." : null;
-  return { code, problems, waiting };
+    : tunnel && devTunnel.state === "pending" ? "Dev Tunnels is opening the tunnel."
+    : !tunnel && tailscale.state === "pending" ? "Tailscale is starting to publish the page." : null;
+  const instruction: MobileText = tunnel
+    ? "Scan it with the camera of the phone. The first time, the phone shows a page of Microsoft: choose Continue."
+    : "Scan it with the camera of the phone. The phone must be signed in to the same tailnet.";
+  return { code, problems, waiting, instruction };
 }

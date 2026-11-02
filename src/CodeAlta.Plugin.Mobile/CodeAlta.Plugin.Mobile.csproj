@@ -4,7 +4,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
-    <Description>Built-in plugin of CodeAlta Desktop that serves the sessions of the computer to a phone, through Tailscale Serve.</Description>
+    <Description>Built-in plugin of CodeAlta Desktop that serves the sessions of the computer to a phone, through Tailscale Serve or Dev Tunnels.</Description>
     <Authors>Daniel Cazzulino, Alexandre Mutel</Authors>
     <PackageTags>codealta;plugin;mobile;agentic;ai</PackageTags>
     <PackageProjectUrl>https://github.com/xoofx/CodeAlta</PackageProjectUrl>

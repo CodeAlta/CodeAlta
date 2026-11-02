@@ -4,7 +4,7 @@ title: Mobile plugin
 
 # Mobile plugin
 
-The built-in Mobile plugin of CodeAlta Desktop shows the sessions of your computer on a phone. You follow a session as it runs, read its timeline, answer it, steer a turn that runs, stop it, and start a new session, from the phone. The phone reaches the computer through [Tailscale](https://tailscale.com), on your own tailnet.
+The built-in Mobile plugin of CodeAlta Desktop shows the sessions of your computer on a phone. You follow a session as it runs, read its timeline, answer it, steer a turn that runs, stop it, and start a new session, from the phone. The phone reaches the computer through [Tailscale](https://tailscale.com), on your own tailnet, or through a [Dev Tunnel](#without-tailscale-dev-tunnels) of Microsoft, with nothing to install on the phone.
 
 <figure class="alta-figure my-4">
   <img src="{{site.basepath}}/img/alta-desktop-mobile.webp" alt="Three phones showing the sessions of CodeAlta live, the timeline of a session with its prompt, and the choice of a model and its reasoning effort" loading="lazy">
@@ -14,7 +14,7 @@ The built-in Mobile plugin of CodeAlta Desktop shows the sessions of your comput
 ## What you need
 
 - CodeAlta Desktop on the computer.
-- Tailscale on the computer and on the phone, signed in to the same tailnet.
+- Tailscale on the computer and on the phone, signed in to the same tailnet. Without Tailscale, see [Dev Tunnels](#without-tailscale-dev-tunnels).
 - On the tailnet, **MagicDNS**, **HTTPS certificates** and **Tailscale Serve**. The [DNS page](https://login.tailscale.com/admin/dns) of the Tailscale admin console turns on the first two. The first time the plugin publishes the computer, Tailscale gives a link that turns on Serve: the Mobile tab shows it.
 
 ## Turn it on
@@ -63,6 +63,17 @@ When something keeps a phone from connecting, the Mobile tab says what it is and
   <figcaption class="small text-secondary mt-2">The background jobs of a session: their count above the prompt, the list, and the output of one.</figcaption>
 </figure>
 
+## Without Tailscale: Dev Tunnels
+
+A [Dev Tunnel](https://learn.microsoft.com/azure/developer/dev-tunnels/overview) of Microsoft gives the phone page an HTTPS address, such as `https://bold-tree-x1y2-2584.euw.devtunnels.ms`, that any phone opens: nothing to install on the phone, and nothing to change on your router.
+
+1. Install the [Dev Tunnels command line](https://learn.microsoft.com/azure/developer/dev-tunnels/get-started) (`devtunnel`) on the computer, for example with `winget install Microsoft.devtunnel` on Windows or `brew install --cask devtunnel` on macOS.
+2. In **Settings > Extensions > Mobile**, choose **Dev Tunnels** under **Phones connect through**, then **Apply**.
+3. The first time, the Mobile tab asks you to sign in: **Sign in with Microsoft** or **Sign in with GitHub** opens the page of the account in your browser.
+4. Scan the QR code. The first time, the phone shows a page of Microsoft that warns about the tunnel: choose **Continue**.
+
+CodeAlta makes the tunnel once, in your account, and keeps it: its address stays the same, and the phones connected stay connected. The tunnel serves while CodeAlta runs with the plugin on. Dev Tunnels has [limits](https://learn.microsoft.com/azure/developer/dev-tunnels/faq) on the use of a tunnel; the phone page is light.
+
 ## Spaces
 
 With more than the Default space, the **Mobile** row of **Settings > Plugins** has a chip with its [spaces](../spaces.md#what-a-space-has). The phone then lists, opens and acts on the sessions of those spaces only, and a new session goes to one of them. A plugin in every space shows every session.
@@ -75,6 +86,7 @@ With more than the Default space, the **Mobile** row of **Settings > Plugins** h
 - An image reaches the phone by an id, never by its path: a file of a prompt or an image of a tool is read from the files of its session only, and a picture of the disk is read only when an answer of that session shows it, the way CodeAlta Desktop shows it.
 - The plugin publishes one port of the computer on the tailnet, 2584 unless you change it, and nothing else. It never changes what you serve with Tailscale Serve on other ports, and when the port already serves something else, it leaves it and says so.
 - Turn the plugin off in **Settings > Plugins**: the page stops, and Tailscale no longer serves it.
+- Through Dev Tunnels, anyone who has the address of the tunnel reaches the page, but every request needs the key a phone gets with the QR code, as with Tailscale. The tunnel goes through the servers of Microsoft, over HTTPS. Going back to Tailscale, or turning the plugin off, stops the tunnel.
 
 ## Settings
 
@@ -85,9 +97,10 @@ With more than the Default space, the **Mobile** row of **Settings > Plugins** h
   <figcaption class="small text-secondary mt-2">The Mobile page of Settings.</figcaption>
 </figure>
 
+- **Phones connect through**: **Tailscale**, or **Dev Tunnels** (see [above](#without-tailscale-dev-tunnels)).
 - **Port on this computer**: the port of the page on `127.0.0.1`, 2584 at first.
-- **Port on the tailnet**: the HTTPS port Tailscale Serve publishes the page on, 2584 at first.
-- **Address on the tailnet**: the address of the page while Tailscale serves it.
+- **Port on the tailnet**: with Tailscale, the HTTPS port Tailscale Serve publishes the page on, 2584 at first.
+- **Address on the tailnet** or **Address of the Dev Tunnel**: the address of the page while it is served.
 - **Reset access**: disconnects every phone and makes a new code. Every phone has to scan it.
 
 **Apply** moves the page to the new ports at once: Tailscale stops serving the old port and publishes the new one, and phones scan the new QR code of the Mobile tab. A port is a number from 1024 to 65535.

@@ -10,7 +10,7 @@ import { browserBaseArgs, browserExecutable, endBrowser, waitForBrowserPort } fr
 
 const edge = browserExecutable;
 
-test("the settings page of Mobile shows its ports and its address, applies new ports, asks before it resets the access, and fits a narrow Settings", { skip: !edge, timeout: 180_000 }, async () => {
+test("the settings page of Mobile shows its ports and its address, applies new ports, switches to Dev Tunnels, asks before it resets the access, and fits a narrow Settings", { skip: !edge, timeout: 180_000 }, async () => {
   const root = await mkdtemp(join(tmpdir(), "codealta-mobile-settings-"));
   let browser: ReturnType<typeof spawn> | undefined;
   let socket: WebSocket | undefined;
@@ -81,6 +81,16 @@ test("the settings page of Mobile shows its ports and its address, applies new p
     assert.equal(await evaluate("document.getElementById('mobile-settings-https-port').value"), "2591");
     await evaluate(`${button("Cancel")}.click()`);
     assert.equal(await wait("document.getElementById('mobile-settings-https-port').value === '2584'"), true);
+    await evaluate("mobileSettingsFixture.state.refuse = null");
+
+    // Dev Tunnels: the port of the tailnet goes, a line says what it needs, and Apply sends the mode with the port of this computer.
+    await evaluate(`document.querySelector('input[name="mobile-settings-mode"][value="devtunnel"]').click()`);
+    assert.equal(await wait("!document.getElementById('mobile-settings-https-port')"), true);
+    assert.equal(await evaluate("[...document.querySelectorAll('.settings-field-help')].some(element => element.textContent.includes('Dev Tunnels command line'))"), true);
+    await evaluate(`${button("Apply")}.click()`);
+    assert.equal(await wait("mobileSettingsFixture.state.calls.includes('set:devtunnel:2590')"), true);
+    assert.equal(await wait("document.getElementById('mobile-settings-address')?.textContent === 'Address of the Dev Tunnel'"), true);
+    assert.equal(await evaluate("document.querySelector('.mobile-settings-address').textContent"), "Not served through Dev Tunnels");
 
     // Reset access asks first, in a popover beside its button; Cancel leaves the access as it is.
     await evaluate(`${button("Reset access")}.click()`);

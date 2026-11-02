@@ -126,12 +126,12 @@ internal static class DesktopPlugins
 
     /// <summary>
     /// The plugin that serves the sessions to a phone and the QR code a phone connects with. It is off until the user turns it
-    /// on: it publishes this computer on the tailnet.
+    /// on: it publishes this computer on the tailnet, or through a Dev Tunnel.
     /// </summary>
     internal static BuiltInPluginDefinition MobileDefinition { get; } = new()
     {
         Id = "mobile", DisplayName = "Mobile",
-        Description = "The sessions of this computer on a phone, through Tailscale.",
+        Description = "The sessions of this computer on a phone, through Tailscale or Dev Tunnels.",
         EnabledByDefault = false, Frontends = PluginFrontends.Desktop,
         PluginType = typeof(MobilePlugin), Factory = static () => new MobilePlugin(),
     };

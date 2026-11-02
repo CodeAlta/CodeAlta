@@ -32,7 +32,7 @@ public sealed class MobileSettingsTests
         var (tab, tabView) = await fixture.OpenAsync(MobilePlugin.CanvasId);
         var (page, pageView) = await fixture.OpenAsync(MobilePlugin.SettingsCanvasId);
 
-        CollectionAssert.AreEquivalent(new[] { "mobile.status", "mobile.retry" }, tab.Names.ToArray());
+        CollectionAssert.AreEquivalent(new[] { "mobile.status", "mobile.retry", "mobile.devtunnel.signin" }, tab.Names.ToArray());
         CollectionAssert.AreEquivalent(new[] { "mobile.settings.get", "mobile.settings.set", "mobile.reset" }, page.Names.ToArray());
         Assert.AreEqual(MobilePlugin.AppModule, tabView.Script?.AppModule);
         Assert.AreEqual(MobilePlugin.SettingsModule, pageView.Script?.AppModule);
@@ -258,7 +258,7 @@ public sealed class MobileSettingsTests
             .Replace("HTTPS", httpsPort.ToString(System.Globalization.CultureInfo.InvariantCulture), StringComparison.Ordinal)
             .Replace("LOCAL", localPort.ToString(System.Globalization.CultureInfo.InvariantCulture), StringComparison.Ordinal);
 
-    private static async Task WaitAsync(Func<bool> condition, string what)
+    internal static async Task WaitAsync(Func<bool> condition, string what)
     {
         var end = DateTime.UtcNow.AddSeconds(15);
         while (!condition())
@@ -283,9 +283,9 @@ public sealed class MobileSettingsTests
     }
 
     /// <summary>The plugin of a window, attached to services of the tests and started on the ports a test gives.</summary>
-    private sealed class Fixture(FakeTailscaleCli cli, MemoryState? state = null, IPluginAskService? asks = null) : IAsyncDisposable
+    internal sealed class Fixture(FakeTailscaleCli cli, MemoryState? state = null, IPluginAskService? asks = null, MobilePlugin? plugin = null) : IAsyncDisposable
     {
-        internal MobilePlugin Plugin { get; } = new(cli);
+        internal MobilePlugin Plugin { get; } = plugin ?? new(cli);
 
         internal MemoryState State { get; } = state ?? new();
 
@@ -318,7 +318,7 @@ public sealed class MobileSettingsTests
     }
 
     /// <summary>The services a window gives the plugin, with the state in memory.</summary>
-    private sealed class Services(MemoryState state) : IPluginServices
+    internal sealed class Services(MemoryState state) : IPluginServices
     {
         private readonly NoopPluginServices _inner = NoopPluginServices.Create();
 

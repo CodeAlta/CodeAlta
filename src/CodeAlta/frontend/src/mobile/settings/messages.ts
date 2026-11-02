@@ -1,13 +1,19 @@
 // The words of the settings page of the Mobile plugin, in the five languages after English (es, fr, de, ja, zh-CN), merged into the dictionary
 // of `localization.ts`. English is the key.
 export const mobileSettingsMessages = {
-  "Ports": ["Puertos", "Ports", "Ports", "ポート", "端口"],
+  "Phones connect through": ["Los teléfonos se conectan mediante", "Les téléphones se connectent via", "Telefone verbinden sich über", "スマートフォンの接続方法", "手机的连接方式"],
+  "A Dev Tunnel of Microsoft gives the page an HTTPS address any phone opens, without installing anything on it. This computer needs the Dev Tunnels command line and a Microsoft or GitHub account.": [
+    "Un Dev Tunnel de Microsoft da a la página una dirección HTTPS que cualquier teléfono abre, sin instalar nada en él. Este equipo necesita la línea de comandos de Dev Tunnels y una cuenta de Microsoft o GitHub.",
+    "Un Dev Tunnel de Microsoft donne à la page une adresse HTTPS que n’importe quel téléphone ouvre, sans rien y installer. Cet ordinateur a besoin de la ligne de commande Dev Tunnels et d’un compte Microsoft ou GitHub.",
+    "Ein Dev Tunnel von Microsoft gibt der Seite eine HTTPS-Adresse, die jedes Telefon öffnet, ohne dass etwas darauf installiert wird. Dieser Computer braucht die Befehlszeile von Dev Tunnels und ein Microsoft- oder GitHub-Konto.",
+    "Microsoft の Dev Tunnel は、何もインストールせずにどのスマートフォンでも開ける HTTPS アドレスをページに与えます。このコンピューターには Dev Tunnels のコマンド ラインと Microsoft または GitHub のアカウントが必要です。",
+    "Microsoft 的 Dev Tunnel 为页面提供一个任何手机都能打开的 HTTPS 地址，手机上无需安装任何东西。此计算机需要 Dev Tunnels 命令行以及 Microsoft 或 GitHub 帐户。"],
+  "Address of the Dev Tunnel": ["Dirección del Dev Tunnel", "Adresse du Dev Tunnel", "Adresse des Dev Tunnels", "Dev Tunnel のアドレス", "Dev Tunnel 的地址"],
+  "Not served through Dev Tunnels": ["No se sirve mediante Dev Tunnels", "Non servi via Dev Tunnels", "Nicht über Dev Tunnels bereitgestellt", "Dev Tunnels では提供されていません", "未通过 Dev Tunnels 提供"],
   "Port on this computer": ["Puerto en este equipo", "Port sur cet ordinateur", "Port auf diesem Computer", "このコンピューターのポート", "此计算机上的端口"],
   "Port on the tailnet": ["Puerto en la tailnet", "Port sur le tailnet", "Port im Tailnet", "tailnet のポート", "tailnet 上的端口"],
   "A port is a number from 1024 to 65535.": ["Un puerto es un número de 1024 a 65535.", "Un port est un nombre de 1024 à 65535.", "Ein Port ist eine Zahl von 1024 bis 65535.",
     "ポートは 1024 から 65535 までの数値です。", "端口是 1024 到 65535 之间的数字。"],
-  "The ports could not be changed.": ["No se pudieron cambiar los puertos.", "Les ports n’ont pas pu être changés.", "Die Ports konnten nicht geändert werden.",
-    "ポートを変更できませんでした。", "无法更改端口。"],
   "Address on the tailnet": ["Dirección en la tailnet", "Adresse sur le tailnet", "Adresse im Tailnet", "tailnet 上のアドレス", "tailnet 上的地址"],
   "Not served on the tailnet": ["No se sirve en la tailnet", "Non servi sur le tailnet", "Nicht im Tailnet bereitgestellt", "tailnet では提供されていません", "未在 tailnet 上提供"],
   "Access": ["Acceso", "Accès", "Zugriff", "アクセス", "访问"],

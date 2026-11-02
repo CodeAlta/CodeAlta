@@ -39,6 +39,10 @@ export default function Canvas() {
     },
     openLink: url => latest.current.alta.host.openLink(url),
     reload: () => setWatching(value => value + 1),
+    signIn: async github => {
+      try { setStatus(await api.signIn(github)); setFailure(null); }
+      catch (error) { setFailure(error instanceof Error ? error.message : String(error)); }
+    },
   }), [api]);
   return <MobileCanvas status={status} failure={failure} actions={actions} />;
 }
