@@ -783,6 +783,69 @@ public sealed class GitWorktreeService
         => FindCommonDirectory(first) is { } one && FindCommonDirectory(second) is { } other && one.Equals(other, PathComparison);
 
     /// <summary>
+    /// Finds where a session of a project works when it is sent to a checkout of the project's repository: the folder
+    /// of the project inside that checkout, as a worktree created for the project places it. No process is started.
+    /// </summary>
+    /// <remarks>
+    /// The checkout may be anywhere, inside the folder of worktrees or not, and may be named by any folder inside it.
+    /// It must share its repository with the folder of the project: a separate clone is another repository. The
+    /// checkout the project itself lives in is the folder of the project.
+    /// </remarks>
+    /// <param name="projectPath">The folder of the project.</param>
+    /// <param name="folder">A folder of the checkout, an absolute path.</param>
+    /// <returns>
+    /// The status, <see cref="Ok"/> or why the folder cannot be used: <c>invalid</c> (not an absolute path),
+    /// <c>not_found</c> (no such folder), <c>not_repository</c> (no checkout holds it, or the project is in none),
+    /// <c>other_repository</c> (a checkout of another repository, a separate clone included) or <c>project_missing</c>
+    /// (the checkout has no folder where the project is); with <see cref="Ok"/>, the folder the session works in, null
+    /// for the folder of the project.
+    /// </returns>
+    /// <exception cref="ArgumentException"><paramref name="projectPath"/> is blank.</exception>
+    public static (string Status, string? Folder) ResolveSessionCheckout(string projectPath, string? folder)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(projectPath);
+        string target;
+        try
+        {
+            if (string.IsNullOrWhiteSpace(folder) || folder.AsSpan().ContainsAnyInRange('\0', '\u001f') || !Path.IsPathFullyQualified(folder))
+            {
+                return ("invalid", null);
+            }
+
+            target = Normalize(folder);
+        }
+        catch (Exception exception) when (exception is ArgumentException or NotSupportedException or PathTooLongException)
+        {
+            return ("invalid", null);
+        }
+
+        if (!Directory.Exists(target))
+        {
+            return ("not_found", null);
+        }
+
+        if (FindCheckoutRoot(projectPath) is not { } projectCheckout || FindCheckoutRoot(target) is not { } targetCheckout)
+        {
+            return ("not_repository", null);
+        }
+
+        if (!SameRepository(projectCheckout, targetCheckout))
+        {
+            return ("other_repository", null);
+        }
+
+        if (targetCheckout.Equals(projectCheckout, PathComparison))
+        {
+            return (Ok, null);
+        }
+
+        // The folder of the project inside its checkout: the same one in the other checkout.
+        var below = Path.GetRelativePath(projectCheckout, Normalize(projectPath));
+        var place = below == "." ? targetCheckout : Path.Combine(targetCheckout, below);
+        return Directory.Exists(place) ? (Ok, place) : ("project_missing", null);
+    }
+
+    /// <summary>
     /// Answers whether a text can name a branch or a commit in a command: it holds no space and no character
     /// git forbids in a name, and it does not start with a hyphen, which would make it an option.
     /// </summary>

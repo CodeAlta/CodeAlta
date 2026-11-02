@@ -2629,11 +2629,15 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
                     sendOptions = sendOptions.WithInput(new AgentInput([.. sendOptions.Input.Items, new AgentInputItem.HostContext("sandbox", sandboxTold.Text)]));
                 }
 
+                // And the folder it works in, once it changed: what it read and ran before names the old one.
+                sendOptions = WithWorkFolderNote(session.SessionId, sendOptions, out var workFolderNoted);
+
                 Task<AgentRunId>? runOriginal = null;
                 runInvocation.Launch(() => runOriginal = RunCapturedAsync(sessionHandleId, sendOptions, execution.Token));
                 if (await runInvocation.Outcome.ConfigureAwait(false) is { } runFailure) System.Runtime.ExceptionServices.ExceptionDispatchInfo.Throw(runFailure);
                 runId = await runOriginal!.ConfigureAwait(false);
                 askSubmission?.RecordRunReturned(runId);
+                WorkFolderNoted(session.SessionId, workFolderNoted);
                 if (reviewNote is { } noted)
                 {
                     await RecordReviewNotedAsync(session, candidate, noted).ConfigureAwait(false);
@@ -4836,8 +4840,10 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
                 Provenance = SessionPromptProvenance.Of(work.Prompt.Kind, work.Prompt.SubmittedBy),
             };
             if (askExecution is not null) sendOptions = ComposeRunAsk(askExecution, work.Entry, sendOptions);
+            sendOptions = WithWorkFolderNote(sessionId, sendOptions, out var workFolderNoted);
             var runId = await _agentHub.RunAsync(work.SessionHandleId, sendOptions, work.Entry.Attachment.Cancellation.Token)
                 .ConfigureAwait(false);
+            WorkFolderNoted(sessionId, workFolderNoted);
             await MarkQueuedPromptSubmittedAsync(work.Entry, work.Prompt.QueueItemId, runId, runStartedAt, DateTimeOffset.UtcNow).ConfigureAwait(false);
         }
         catch (Exception ex)
@@ -4881,6 +4887,8 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
 
                     // An aborted tree starts nothing by itself: its queue waits for a prompt sent to the session again.
                     if (_abortHolds.ContainsKey(sessionId)) return null;
+                    // Nor does a session about to change folder: what waits runs in the new folder, after the change.
+                    if (HeldForWorkFolderSwitch(sessionId)) return null;
 
                     var localState = await ReadLatestLocalStateAsync(sessionId, entry.CreatedAt, actorCancellationToken).ConfigureAwait(false);
                     // Null also represents a failed read; it is not proof that legacy work is absent.

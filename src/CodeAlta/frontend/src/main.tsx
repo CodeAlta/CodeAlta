@@ -294,7 +294,8 @@ import { archivedInView, defaultSpaceId, findSpace, neighborSpace, persistShownS
 import { newFallbackNotices } from "./spaces/fallbackNotices";
 import { adaptiveChoice, adaptiveTier, composerAdaptiveEntry, composerTierEntries, tierLabels, tierStore } from "./modelTiers";
 import { AdaptiveSetupDialog } from "./AdaptiveSetup";
-import { cloudPlace, deletedSessionWorktree, persistWorkPlaces, projectFolder as inProjectFolder, restoreWorkPlaces, sessionWorktree, withWorkPlace, workPlacesKey, type WorkPlace } from "./worktrees/worktrees";
+import { cloudPlace, deletedSessionWorktree, folderName, persistWorkPlaces, projectFolder as inProjectFolder, restoreWorkPlaces, sessionWorktree, withWorkPlace, workPlacesKey, type WorkPlace } from "./worktrees/worktrees";
+import { createSessionFolderSwitch, type FolderSwitchResult, type FolderTarget } from "./worktrees/sessionFolder";
 import { bringBackCommand, cloudOf, inCloud, pendingCloudStartKey, providerHasCloudSessions, readPendingCloudStart, runCloudStart, type CloudStartState,
   type PendingCloudStart } from "./cloudSessions/cloudSessions";
 import { BringHereDialog, CloudAccountChoice, CloudReadiness, CloudStartProgress, type CloudAccount } from "./cloudSessions/CloudStart";
@@ -1801,6 +1802,21 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
   const [showProjectChanges] = useState(() => (project: Readonly<{ id: string; path: string }>, worktree?: string | null, review: "changes" | "branch" | null = null) =>
     showChangesLatest.current(project, null, worktree, review));
   const [refreshSessionList] = useState(() => () => readSessionList.current());
+  // A session sent to work elsewhere in its repository: its row says where once the list is read again.
+  const [switchSessionFolder] = useState(() => {
+    const switchFolder = createSessionFolderSwitch(workspace.switchSessionFolder);
+    return async (epoch: string, project: Readonly<{ id: string; path: string }>, sessionId: string, target: FolderTarget) => {
+      const result = await switchFolder(epoch, { projectId: project.id, projectPath: project.path }, sessionId, target);
+      if (result.kind === "switched" || result.code === "switch_unconfirmed") readSessionList.current();
+      if (result.kind === "switched") {
+        const where = result.worktreePath ? folderName(result.worktreePath) : null;
+        showToast({ message: where ? translate(shownLocale.current, "This session now works in {name}.", { name: where })
+          : translate(shownLocale.current, "This session now works in the folder of the project."), intent: "success", icon: "tick", timeout: 4000 });
+        if (result.warnings.length > 0) showToast({ message: result.warnings[0], intent: "warning", icon: "warning-sign", timeout: 12000 });
+      }
+      return result;
+    };
+  });
   // An agent asks for the changes of a project with `alta diff show`.
   useEffect(() => {
     const epoch = status?.hostEpoch;
@@ -5404,7 +5420,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
   useEffect(() => {
     if (snapshot) pruneSessionPaneOwners(sessionPaneOwners, wholeCatalog ?? snapshot, status?.hostEpoch, [...tabView.open, ...backgroundTabs ?? []], paneRewinds);
   });
-  return <ShellLanguageContext.Provider value={language}><HostReadsContext.Provider value={hostReads}><SpeechContext.Provider value={speech}><ProviderBrandsContext.Provider value={providerLogos}><PluginUiContext.Provider value={pluginUiValue}><PluginHostBridgeContext.Provider value={pluginHostBridge}><PluginButtonsContext.Provider value={pluginButtonsHost}><PluginButtonsActiveContext.Provider value={fileTabs.active ?? null}><PullRequestSettingsContext.Provider value={owned ? openPullRequestSettings : null}><SessionLinksContext.Provider value={sessionLinks}><MessageLinksContext.Provider value={messageLinkEpoch ? openMessageLink : null}><MarkdownImagesContext.Provider value={markdownImages}><SessionWidthContext.Provider value={sessionWidthControl}><ShowChangesContext.Provider value={owned ? showProjectChanges : null}><OpenTerminalContext.Provider value={owned ? openSessionTerminal : null}><OpenEditorContext.Provider value={owned ? openSessionEditor : null}><OpenRunContext.Provider value={owned ? openRun : null}><ExternalOpenerContext.Provider value={owned ? externalOpener : null}><SessionListRefreshContext.Provider value={owned ? refreshSessionList : null}><LocalSearchContext.Provider value={owned ? localSearchHub : null}><ReviewsHubContext.Provider value={owned ? reviewsHub : null}><ReviewOpenerContext.Provider value={owned ? reviewOpener : null}><ReviewsListOpenerContext.Provider value={owned ? openReviewsList : null}><ShellAppearance appearance={appearance} preview={appearancePreview} /><div className={`app-shell ide-shell${secondary ? " secondary-window" : ""}`}
+  return <ShellLanguageContext.Provider value={language}><HostReadsContext.Provider value={hostReads}><SpeechContext.Provider value={speech}><ProviderBrandsContext.Provider value={providerLogos}><PluginUiContext.Provider value={pluginUiValue}><PluginHostBridgeContext.Provider value={pluginHostBridge}><PluginButtonsContext.Provider value={pluginButtonsHost}><PluginButtonsActiveContext.Provider value={fileTabs.active ?? null}><PullRequestSettingsContext.Provider value={owned ? openPullRequestSettings : null}><SessionLinksContext.Provider value={sessionLinks}><MessageLinksContext.Provider value={messageLinkEpoch ? openMessageLink : null}><MarkdownImagesContext.Provider value={markdownImages}><SessionWidthContext.Provider value={sessionWidthControl}><ShowChangesContext.Provider value={owned ? showProjectChanges : null}><OpenTerminalContext.Provider value={owned ? openSessionTerminal : null}><OpenEditorContext.Provider value={owned ? openSessionEditor : null}><OpenRunContext.Provider value={owned ? openRun : null}><ExternalOpenerContext.Provider value={owned ? externalOpener : null}><SessionListRefreshContext.Provider value={owned ? refreshSessionList : null}><SessionFolderSwitchContext.Provider value={owned ? switchSessionFolder : null}><LocalSearchContext.Provider value={owned ? localSearchHub : null}><ReviewsHubContext.Provider value={owned ? reviewsHub : null}><ReviewOpenerContext.Provider value={owned ? reviewOpener : null}><ReviewsListOpenerContext.Provider value={owned ? openReviewsList : null}><ShellAppearance appearance={appearance} preview={appearancePreview} /><div className={`app-shell ide-shell${secondary ? " secondary-window" : ""}`}
       style={secondary && windowsState.current?.color ? { "--window-color": windowsState.current.color } as CSSProperties : undefined}>
     {(closing || hostState.busy || linkLost || !widthSaved) && <div className="shell-notices" data-neoastra-no-drag>
       {closing ? <div className="shell-notice" role="alert">
@@ -6195,7 +6211,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
         return command.completion ?? command.result;
       }}
       onDraft={request => { askPluginComposer("draft", request.sessionId ?? null, request.text ?? ""); }} />
-  </div></ReviewsListOpenerContext.Provider></ReviewOpenerContext.Provider></ReviewsHubContext.Provider></LocalSearchContext.Provider></SessionListRefreshContext.Provider></ExternalOpenerContext.Provider></OpenRunContext.Provider></OpenEditorContext.Provider></OpenTerminalContext.Provider></ShowChangesContext.Provider></SessionWidthContext.Provider></MarkdownImagesContext.Provider></MessageLinksContext.Provider></SessionLinksContext.Provider></PullRequestSettingsContext.Provider></PluginButtonsActiveContext.Provider></PluginButtonsContext.Provider></PluginHostBridgeContext.Provider></PluginUiContext.Provider></ProviderBrandsContext.Provider></SpeechContext.Provider></HostReadsContext.Provider></ShellLanguageContext.Provider>;
+  </div></ReviewsListOpenerContext.Provider></ReviewOpenerContext.Provider></ReviewsHubContext.Provider></LocalSearchContext.Provider></SessionFolderSwitchContext.Provider></SessionListRefreshContext.Provider></ExternalOpenerContext.Provider></OpenRunContext.Provider></OpenEditorContext.Provider></OpenTerminalContext.Provider></ShowChangesContext.Provider></SessionWidthContext.Provider></MarkdownImagesContext.Provider></MessageLinksContext.Provider></SessionLinksContext.Provider></PullRequestSettingsContext.Provider></PluginButtonsActiveContext.Provider></PluginButtonsContext.Provider></PluginHostBridgeContext.Provider></PluginUiContext.Provider></ProviderBrandsContext.Provider></SpeechContext.Provider></HostReadsContext.Provider></ShellLanguageContext.Provider>;
 }
 
 /** The search of Settings: the query, the counts of the pages while one is typed (null otherwise), and the results that take the place of the page. */
@@ -6317,6 +6333,10 @@ const ShowChangesContext = createContext<((project: Readonly<{ id: string; path:
 /** Reads the list of sessions again: what a session records, such as its worktree, changed outside the window. */
 const SessionListRefreshContext = createContext<(() => void) | null>(null);
 
+/** Sends a session that exists to work elsewhere in the repository of its project; null where the window has no host. */
+const SessionFolderSwitchContext = createContext<((epoch: string, project: Readonly<{ id: string; path: string }>, sessionId: string,
+  target: FolderTarget) => Promise<FolderSwitchResult>) | null>(null);
+
 /** The mark of a session that works in a git worktree, in the lists of sessions. */
 function WorktreeBadge({ session }: { session: WorkspaceSession }) {
   const { t } = useShellLanguage();
@@ -6355,6 +6375,7 @@ function useComposerChrome(epoch: string | null, project: WorkspaceSnapshot["pro
   const openTerminal = useContext(OpenTerminalContext);
   const openEditor = useContext(OpenEditorContext);
   const refreshSessions = useContext(SessionListRefreshContext);
+  const switchFolder = useContext(SessionFolderSwitchContext);
   const openPullRequestSettings = useContext(PullRequestSettingsContext);
   const worktreePath = session?.worktreePath ?? null, worktreeName = session?.worktreeName ?? null, worktreeMissing = session?.worktreeMissing === true;
   const worktreeRoot = session?.worktreeRoot ?? null;
@@ -6364,6 +6385,8 @@ function useComposerChrome(epoch: string | null, project: WorkspaceSnapshot["pro
     const shown = worktree && !worktree.missing ? worktree.path : null;
     return ({ context: id !== undefined && name !== undefined && path !== undefined
     ? <WorkspaceChip epoch={epoch} project={{ id, name, path }} sessionId={sessionId} read={projectGit.status} worktree={worktree} place={place}
+      // A session that exists can be sent to another worktree, a new one or the folder of the project; a draft chooses its place itself.
+      folderSwitch={switchFolder && epoch && sessionId && !place && !archived ? { running, onSwitch: target => switchFolder(epoch, { id, path }, sessionId, target) } : undefined}
       onWorktreeGone={refreshSessions ?? undefined} branches={!!showChanges && !archived}
       onShowChanges={showChanges && !archived ? () => showChanges({ id, path }, shown) : undefined}
       onOpenTerminal={openTerminal && !archived ? () => openTerminal(id, sessionId) : undefined}
@@ -6376,7 +6399,7 @@ function useComposerChrome(epoch: string | null, project: WorkspaceSnapshot["pro
     {sessionId && !archived && <ReviewComposerStatus epoch={epoch} projectId={id ?? null} checkout={shown} sessionId={sessionId} running={running} />}
     <ComposerStatus epoch={epoch} projectId={id ?? null} sessionId={sessionId} read={composerStatus.read} readMcp={composerStatus.readMcp} /></> : undefined,
   footer: epoch && regions ? <PluginRegionSlot items={regionItems} projectId={id ?? null} sessionId={sessionId} region="footer" /> : undefined });
-  }, [epoch, id, name, path, archived, sessionId, regions, regionItems, showChanges, openTerminal, openEditor, refreshSessions, openPullRequestSettings, worktreePath, worktreeName, worktreeRoot, worktreeMissing, place, running]);
+  }, [epoch, id, name, path, archived, sessionId, regions, regionItems, showChanges, openTerminal, openEditor, refreshSessions, switchFolder, openPullRequestSettings, worktreePath, worktreeName, worktreeRoot, worktreeMissing, place, running]);
 }
 
 // The composer of a session, as a prompt given back to it sees it: the one shown, else the draft stored for the session.

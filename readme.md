@@ -50,7 +50,7 @@ CodeAlta Desktop brings together:
 - **Speech to prompt**: [dictate a prompt](https://codealta.github.io/docs/speech/) with a speech model that runs on your computer, downloaded the first time you use the microphone.
 - **Search your work**: `Ctrl+P` and [`alta search`](https://codealta.github.io/docs/search/) find the prompts and answers of your sessions, your plans, the guide, the skills and the tools from a local index; turn on search by meaning to find them by what they are about, with a model that runs on your computer.
 - **Code & Git**: search and edit files, run terminals and inspect diffs.
-- **Worktrees**: give sessions separate checkouts and branches; manage and clean them up.
+- **Worktrees**: give sessions separate checkouts and branches, move a session to another worktree with its conversation; manage and clean them up.
 - **Prompt suggestions**: after a turn, the model suggests the next prompt in the empty composer, with any provider; `Tab` or `→` takes it.
 - **Session titles**: a title you give stays; other sessions are titled from the first prompt, the last message or by the model, as you choose.
 - **Work items**: review agent-proposed tasks and plans; start, defer or dismiss them; follow the reviews in flight.

@@ -587,6 +587,19 @@ test("the cards of Adaptive are shown and titled by what it did, other informati
   assert.equal(items[0].markdown, "The turn changed code: Haiku 5.5 checks the change against the request.");
 });
 
+test("a change of the folder of a session is a card of its own", () => {
+  const items = buildTimelineItems([
+    entry({ eventType: "sessionUpdate", kind: "Info", offset: "30", text: "This session now works in `C:\\code\\CodeAlta4`, and no longer in `C:\\code\\CodeAlta`.",
+      details: JSON.stringify({ workFolder: "C:\\code\\CodeAlta4" }) }),
+    entry({ eventType: "sessionUpdate", kind: "Warning", offset: "31", text: "This session could not change to `C:\\code\\gone` (not_found): it still works where it worked.",
+      details: JSON.stringify({ workFolder: "C:\\code\\gone" }) }),
+    entry({ eventType: "sessionUpdate", kind: "Info", offset: "32", text: "Something else.", details: JSON.stringify({ other: "C:\\code" }) }),
+  ]);
+  assert.deepEqual(items.map(item => [item.title, item.icon, item.category]),
+    [["Working folder changed", "worktree", "status"], ["Working folder not changed", "worktree", "error"]]);
+  assert.equal(items[0].markdown, "This session now works in `C:\\code\\CodeAlta4`, and no longer in `C:\\code\\CodeAlta`.");
+});
+
 test("raw persistence records are not rendered as unavailable provider cards", () => {
   const items = buildTimelineItems([
     entry({ eventType: "raw", text: null, details: null, bodyOmitted: true }),

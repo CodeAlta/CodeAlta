@@ -182,7 +182,7 @@ Agents use `alta session archive <id>` and `alta session restore <id>` (with `--
 
 ## Move a session
 
-In CodeAlta Desktop, a project session can move to another project, for example from one [worktree](../worktrees.md) of a repository, added as a project, to another one. To move it to another space, see [Move a session to another space](../spaces.md#move-a-session).
+In CodeAlta Desktop, a project session can move to another project, for example from one [worktree](../worktrees.md) of a repository, added as a project, to another one. To keep it in its project and only change the worktree it works in, see [Move a session to another worktree](../worktrees.md#move-a-session-to-another-worktree). To move it to another space, see [Move a session to another space](../spaces.md#move-a-session).
 
 <figure class="alta-figure my-4" style="max-width: 18rem;">
   <img src="{{site.basepath}}/img/alta-desktop-session-menu.webp" alt="The menu of a Claude Code session in the Explorer of CodeAlta Desktop, with Fork, Remote Control, Open in VS Code, the bookmark, Review changes, Move to project, Move to space, Archive, Delete and Statistics of this session" loading="lazy">

@@ -78,6 +78,6 @@ public sealed partial class OwnedSessionCommandService
     // Whether this owner has work of the session going on. The caller holds the gate.
     private bool IsOwnerBusy(string sessionId)
         => _active.ContainsKey(sessionId) || _steering.Contains(sessionId) || _compacting.Contains(sessionId)
-            || _abortingRuns.Contains(sessionId) || _remoteControlling.ContainsKey(sessionId)
+            || _abortingRuns.Contains(sessionId) || _remoteControlling.ContainsKey(sessionId) || _attachingForQueue.Contains(sessionId)
             || _operations.Values.Any(operation => !operation.Released && string.Equals(operation.SessionId, sessionId, StringComparison.OrdinalIgnoreCase));
 }

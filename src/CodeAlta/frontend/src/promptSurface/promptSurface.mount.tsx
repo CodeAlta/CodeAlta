@@ -28,6 +28,7 @@ import { useSpeechInstall } from "../speech/useSpeechInstall";
 import type { SubSessionAtWork } from "../spaces/spaces";
 import type { WorkPlaceApi } from "../worktrees/WorkPlaceChoice";
 import type { WorkPlace } from "../worktrees/worktrees";
+import type { FolderTarget } from "../worktrees/sessionFolder";
 import type { SessionAdmission, SessionRuntimeBackgroundTaskResponse, SessionRuntimeStateResponse } from "#neoastra";
 
 const unavailable = async (): Promise<never> => { throw new Error("The prompt surface fixture does not offer this operation"); };
@@ -78,6 +79,17 @@ const placeApi = {
   list: async ({ projectId }: { projectId: string }) => ({ status: "ok", projectId, worktrees: [], newFolder: "C:\\Users\\alexa\\.alta\\worktrees\\codealta" }),
 } as unknown as WorkPlaceApi;
 
+// The checkouts of the repository a session that exists can be sent to, and where it was sent.
+const folderApi = {
+  branches: placeApi.branches,
+  list: async ({ projectId }: { projectId: string }) => ({ status: "ok", projectId, newFolder: "C:\\Users\\alexa\\.alta\\worktrees\\codealta", worktrees: [
+    { path: "C:\\code\\CodeAlta", name: "CodeAlta", branch: "main", head: "abc1234", main: true, project: true, locked: false, missing: false, folder: "C:\\code\\CodeAlta", busy: false },
+    { path: project.path, name: "mellow-chisel-pz93", branch: "alta/mellow-chisel-pz93", head: "abc1234", main: false, project: false, locked: false, missing: false, folder: project.path, busy: true },
+    { path: "C:\\code\\CodeAlta4", name: "CodeAlta4", branch: "feature/fleet", head: "def5678", main: false, project: false, locked: false, missing: false, folder: "C:\\code\\CodeAlta4", busy: false },
+  ] }),
+} as unknown as WorkPlaceApi;
+const folderSwitches: FolderTarget[] = [];
+
 // The prompts of the new sessions, kept as the window keeps its local drafts.
 const drafts = new Map<string, string>();
 const draftListeners = new Set<() => void>();
@@ -109,7 +121,8 @@ function Pane({ sessionId }: { sessionId: string }) {
         place={{ value: state.place, onChange: place => change({ place }), onOpenSettings: () => { }, api: placeApi }} />
       : <WorkspaceChip epoch={epoch} project={project} sessionId={sessionId} read={readGit} branches={false}
         worktree={{ path: project.path, name: "mellow-chisel-pz93", missing: false }} onShowChanges={() => { changesShown++; }} onOpenEditor={() => { editorsOpened++; }}
-        onOpenTerminal={() => { }} />,
+        onOpenTerminal={() => { }} folderSwitch={{ running: run !== null, api: folderApi,
+          onSwitch: async target => { folderSwitches.push(target); return { kind: "switched", worktreePath: target.kind === "worktree" ? target.folder : null, branch: null, warnings: [] }; } }} />,
     status: <ComposerStatus epoch={epoch} projectId={project.id} sessionId={sessionId} read={readStatus} readMcp={readMcp} />,
     subAgents: state.subAgents.length ? <SubAgentsChip sessions={state.subAgents} /> : undefined };
   // The composer at the bottom of its pane, as in the window.
@@ -147,6 +160,8 @@ function Fixture() {
 const fixture = {
   startRun() { run = "run-1"; },
   finishRun() { run = null; },
+  /** Ends the run and draws the panes again: what depends on whether the session works shows it idle. */
+  idle() { run = null; change({}); },
   background(states: string[]) {
     background = states.map((value, index) => ({ taskId: `job-${index}`, kind: "command", description: `Background command ${index}`,
       toolCallId: null, startedAt: new Date(Date.now() - 5_000).toISOString(), state: value, isJob: true,
@@ -163,6 +178,8 @@ const fixture = {
   speech: null as Speech | null, speechHost, speechMicrophone,
   /** How many times the chip opened the changes, the code editor, and what it opened outside. */
   changesShown: () => changesShown, editorsOpened: () => editorsOpened, opened: () => [...opened],
+  /** Where the session was sent to work from its Workspace popover. */
+  folderSwitches: () => [...folderSwitches],
   /** How many times a new session was started. */
   starts: () => starts,
   /** How many times Archive was chosen in the `⋯` menu. */

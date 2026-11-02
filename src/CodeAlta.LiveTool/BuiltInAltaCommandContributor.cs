@@ -82,6 +82,7 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         Mutating("session steer"),
         Mutating("session queue"),
         Mutating("session set_agent"),
+        Mutating("session set_worktree"),
         Mutating("session title"),
         Disruptive("session abort"),
         Mutating("session compact"),
@@ -793,6 +794,7 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         group.Add(CreateSessionSteerCommand(context));
         group.Add(CreateSessionQueueCommand(context));
         group.Add(CreateSessionSetAgentCommand(context));
+        group.Add(CreateSessionSetWorktreeCommand(context));
         group.Add(CreateSessionTitleCommand(context));
         group.Add(CreateSessionAbortCommand(context));
         group.Add(CreateSessionCompactCommand(context));

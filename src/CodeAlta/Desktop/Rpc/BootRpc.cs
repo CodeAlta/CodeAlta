@@ -262,6 +262,8 @@ internal sealed record BootClosing(string? Step, int Seconds, bool CanForceExit)
 [JsonSerializable(typeof(WorkspaceDeleteProjectResponse))]
 [JsonSerializable(typeof(WorkspaceMoveSessionRequest))]
 [JsonSerializable(typeof(WorkspaceMoveSessionResponse))]
+[JsonSerializable(typeof(WorkspaceSwitchSessionFolderRequest))]
+[JsonSerializable(typeof(WorkspaceSwitchSessionFolderResponse))]
 [JsonSerializable(typeof(WorkspaceMoveToSpaceRequest))]
 [JsonSerializable(typeof(WorkspaceMoveToSpaceResponse))]
 [JsonSerializable(typeof(WorkspaceSessionChildrenRequest))]
