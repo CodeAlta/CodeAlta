@@ -93,7 +93,21 @@ export function PromptEditor({ ref, value, onChange, disabled = false, expanded 
       // What is being said follows the caret.
       if (interim.current.text) showInterim();
     });
-    return () => { detachMath(); equationAction.dispose(); unfollowTheme(); unfollowFont(); changed.dispose(); selection.dispose(); resized.dispose(); instance.dispose(); model.dispose(); editor.current = null;
+    // Chromium gives copy, cut and paste to the element that holds the selection of the page, not to the focused one, and
+    // the EditContext of the editor does not keep that selection: a modal window closed over the prompt (the `#` and `@`
+    // pickers) gives the focus back to the editor but leaves the selection where the window was removed, without a
+    // `selectionchange`, and Ctrl+C, Ctrl+X and Ctrl+V then did nothing. A key pressed in the editor puts the selection
+    // back in what takes the keys, before the browser runs the command of the key.
+    const page = node.ownerDocument;
+    const keepPageSelection = (event: Event) => {
+      const focused = event.target, current = page.getSelection();
+      if (!current || !(focused instanceof Element) || !(focused as Element & { editContext?: unknown }).editContext) return;
+      if (current.anchorNode && focused.contains(current.anchorNode)) return;
+      current.collapse(focused, 0);
+    };
+    node.addEventListener("keydown", keepPageSelection, true);
+    return () => { node.removeEventListener("keydown", keepPageSelection, true);
+      detachMath(); equationAction.dispose(); unfollowTheme(); unfollowFont(); changed.dispose(); selection.dispose(); resized.dispose(); instance.dispose(); model.dispose(); editor.current = null;
       interim.current = { text: "", shown: null }; node.removeAttribute("data-interim"); };
   }, [expanded]);
   useImperativeHandle(ref, () => ({
