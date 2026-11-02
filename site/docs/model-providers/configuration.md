@@ -178,7 +178,7 @@ The values apply in this order, the last winning:
 4. a top-level `extra_body`, which is still read;
 5. the authentication headers of the provider, which cannot be removed or replaced.
 
-A provider on `openrouter.ai`, or one keyed `openrouter`, also sends OpenRouter's app attribution headers by default (`HTTP-Referer: https://codealta.github.io`, `X-OpenRouter-Title: CodeAlta` and `X-OpenRouter-Categories: cli-agent`), over the OpenAI and Anthropic APIs, which list CodeAlta in OpenRouter's rankings and analytics. `request.remove_headers` turns them off.
+A provider on `openrouter.ai`, or one keyed `openrouter`, also sends OpenRouter's app attribution headers by default (`HTTP-Referer: https://codealta.github.io`, `X-OpenRouter-Title: CodeAlta` and `X-OpenRouter-Categories: cli-agent,programming-app`), over the OpenAI and Anthropic APIs, which list CodeAlta in OpenRouter's rankings and analytics. `request.remove_headers` turns them off.
 
 `Authorization`, `api-key` and `x-api-key` are reserved for authentication. Traces hide the headers whose names look like secrets (`Authorization`, `*-key`, `*token*`, `*secret*`).
 

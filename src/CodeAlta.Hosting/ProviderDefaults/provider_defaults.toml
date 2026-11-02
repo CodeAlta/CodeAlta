@@ -64,8 +64,10 @@ types = ["anthropic-messages", "openai-chat", "openai-responses"]
 provider_keys = ["openrouter"]
 host_suffixes = ["openrouter.ai"]
 
+# OpenRouter takes at most two categories of its list (https://openrouter.ai/docs/app-attribution): CodeAlta is a coding
+# agent of the terminal (cli-agent) and a desktop application for programming (programming-app).
 [rules.headers]
-default = { "HTTP-Referer" = "https://codealta.github.io", "X-OpenRouter-Title" = "CodeAlta", "X-OpenRouter-Categories" = "cli-agent" }
+default = { "HTTP-Referer" = "https://codealta.github.io", "X-OpenRouter-Title" = "CodeAlta", "X-OpenRouter-Categories" = "cli-agent,programming-app" }
 
 [[rules]]
 id = "xiaomi-openai-chat"

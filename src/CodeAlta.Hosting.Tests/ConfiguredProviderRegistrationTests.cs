@@ -290,7 +290,7 @@ public sealed class ConfiguredProviderRegistrationTests
 
         Assert.AreEqual(attributed ? "https://codealta.github.io" : null, headers?.GetValueOrDefault("HTTP-Referer"));
         Assert.AreEqual(attributed ? "CodeAlta" : null, headers?.GetValueOrDefault("X-OpenRouter-Title"));
-        Assert.AreEqual(attributed ? "cli-agent" : null, headers?.GetValueOrDefault("X-OpenRouter-Categories"));
+        Assert.AreEqual(attributed ? "cli-agent,programming-app" : null, headers?.GetValueOrDefault("X-OpenRouter-Categories"));
     }
 
     [TestMethod]
