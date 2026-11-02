@@ -34,6 +34,16 @@ public enum IssueViewSource
     Team,
 }
 
+/// <summary>What the views of a tracker list: its issues or its pull requests, each with views of their own.</summary>
+public enum IssueViewKind
+{
+    /// <summary>The issues, the work items: <c>[&lt;service&gt;]</c> of the files of views.</summary>
+    Issues,
+
+    /// <summary>The pull requests: <c>[&lt;service&gt;.pull_requests]</c> of the files of views.</summary>
+    PullRequests,
+}
+
 /// <summary>A view of the Issues tab: a named set of filters, the user's or the team's.</summary>
 /// <param name="Name">The name of the view, which names it in its file.</param>
 /// <param name="Source">Whose it is.</param>
@@ -69,7 +79,8 @@ public sealed class IssueViewLimitException : InvalidOperationException
 /// <c>.alta/local/issues.toml</c>, with the view the user chose. A view is <c>[&lt;service&gt;.views.&lt;name&gt;]</c> and each
 /// of its filters <c>[&lt;service&gt;.views.&lt;name&gt;.&lt;filter&gt;]</c> with <c>value</c>, <c>label</c>, <c>pick</c> and
 /// <c>mode = "off"</c> for a filter kept unused; a field of the tracker is written by its name (<c>"System.State"</c>) and read
-/// as <c>field:System.State</c>. A view keeps its place in its file when it is saved or renamed.
+/// as <c>field:System.State</c>. The views of the pull requests are the same tables under <c>[&lt;service&gt;.pull_requests]</c>.
+/// A view keeps its place in its file when it is saved or renamed.
 /// </summary>
 public sealed class IssueViewStore
 {
@@ -92,6 +103,9 @@ public sealed class IssueViewStore
     public const int MaximumText = 256;
 
     private const string FileName = "issues.toml";
+
+    // The table of the views of the pull requests, in the table of the service.
+    private const string PullRequestsKey = "pull_requests";
 
     /// <summary>Gets whether a text can be the id of a filter: letters, digits, <c>_ - . :</c>, 128 at most.</summary>
     /// <param name="value">The text.</param>
@@ -126,46 +140,80 @@ public sealed class IssueViewStore
         return source == IssueViewSource.Team ? System.IO.Path.Combine(projectRoot, ".alta", FileName) : System.IO.Path.Combine(projectRoot, ".alta", "local", FileName);
     }
 
-    /// <summary>Reads the views of a tracker of a project: the user's first, then the team's, each in the order of its file.</summary>
+    /// <summary>Reads the views of the issues of a tracker of a project: the user's first, then the team's, each in the order of its file.</summary>
     /// <param name="service">The service of the tracker: <c>azure_devops</c>, <c>jira</c>...</param>
     /// <param name="projectRoot">The folder of the project.</param>
-    /// <returns>The views; a file that is missing or cannot be read has none (<see cref="ReadProblem"/> says why).</returns>
+    /// <returns>The views; a file that is missing or cannot be read has none (<see cref="ReadProblem(string, string)"/> says why).</returns>
     /// <exception cref="ArgumentException">An argument is empty or not a plain name.</exception>
-    public IReadOnlyList<IssueView> ReadViews(string service, string projectRoot)
-        => [.. ReadFile(IssueViewSource.Personal, service, projectRoot).Views, .. ReadFile(IssueViewSource.Team, service, projectRoot).Views];
+    public IReadOnlyList<IssueView> ReadViews(string service, string projectRoot) => ReadViews(service, IssueViewKind.Issues, projectRoot);
+
+    /// <summary>Reads the views of a kind of items of a tracker of a project: the user's first, then the team's, each in the order of its file.</summary>
+    /// <param name="service">The service of the tracker: <c>azure_devops</c>, <c>jira</c>...</param>
+    /// <param name="kind">The items the views list.</param>
+    /// <param name="projectRoot">The folder of the project.</param>
+    /// <returns>The views; a file that is missing or cannot be read has none (<see cref="ReadProblem(string, IssueViewKind, string)"/> says why).</returns>
+    /// <exception cref="ArgumentException">An argument is empty or not a plain name.</exception>
+    public IReadOnlyList<IssueView> ReadViews(string service, IssueViewKind kind, string projectRoot)
+    {
+        var table = Table(service, kind);
+        return [.. ReadFile(IssueViewSource.Personal, table, projectRoot).Views, .. ReadFile(IssueViewSource.Team, table, projectRoot).Views];
+    }
 
     /// <summary>
-    /// Reads the view the tab uses: the one the user chose, the user's before the team's of the same name; else the
-    /// user's first view, else the team's first; null when there is none.
+    /// Reads the view the tab uses for the issues: the one the user chose, the user's before the team's of the same name;
+    /// else the user's first view, else the team's first; null when there is none.
     /// </summary>
     /// <param name="service">The service of the tracker.</param>
     /// <param name="projectRoot">The folder of the project.</param>
     /// <returns>The view, or null.</returns>
     /// <exception cref="ArgumentException">An argument is empty or not a plain name.</exception>
-    public IssueView? ReadCurrent(string service, string projectRoot)
+    public IssueView? ReadCurrent(string service, string projectRoot) => ReadCurrent(service, IssueViewKind.Issues, projectRoot);
+
+    /// <summary>
+    /// Reads the view the tab uses for a kind of items: the one the user chose, the user's before the team's of the same
+    /// name; else the user's first view, else the team's first; null when there is none.
+    /// </summary>
+    /// <param name="service">The service of the tracker.</param>
+    /// <param name="kind">The items the views list.</param>
+    /// <param name="projectRoot">The folder of the project.</param>
+    /// <returns>The view, or null.</returns>
+    /// <exception cref="ArgumentException">An argument is empty or not a plain name.</exception>
+    public IssueView? ReadCurrent(string service, IssueViewKind kind, string projectRoot)
     {
-        var personal = ReadFile(IssueViewSource.Personal, service, projectRoot);
-        var views = ReadViews(service, projectRoot);
+        var personal = ReadFile(IssueViewSource.Personal, Table(service, kind), projectRoot);
+        var views = ReadViews(service, kind, projectRoot);
         return (personal.Current is { } chosen ? views.FirstOrDefault(view => string.Equals(view.Name, chosen, StringComparison.Ordinal)) : null) ?? views.FirstOrDefault();
     }
 
     /// <summary>
-    /// Says why views of a tracker of a project are not shown: a file of views that cannot be read or is not valid TOML
-    /// (none of its views is read), or one that holds more than <see cref="MaximumViews"/> views.
+    /// Says why views of the issues of a tracker of a project are not shown: a file of views that cannot be read or is
+    /// not valid TOML (none of its views is read), or one that holds more than <see cref="MaximumViews"/> views.
     /// </summary>
     /// <param name="service">The service of the tracker.</param>
     /// <param name="projectRoot">The folder of the project.</param>
     /// <returns>What is wrong, in words for the user; null when every view is read.</returns>
     /// <exception cref="ArgumentException">An argument is empty or not a plain name.</exception>
-    public string? ReadProblem(string service, string projectRoot)
+    public string? ReadProblem(string service, string projectRoot) => ReadProblem(service, IssueViewKind.Issues, projectRoot);
+
+    /// <summary>
+    /// Says why views of a kind of items of a tracker of a project are not shown: a file of views that cannot be read or
+    /// is not valid TOML (none of its views is read), or one that holds more than <see cref="MaximumViews"/> views.
+    /// </summary>
+    /// <param name="service">The service of the tracker.</param>
+    /// <param name="kind">The items the views list.</param>
+    /// <param name="projectRoot">The folder of the project.</param>
+    /// <returns>What is wrong, in words for the user; null when every view is read.</returns>
+    /// <exception cref="ArgumentException">An argument is empty or not a plain name.</exception>
+    public string? ReadProblem(string service, IssueViewKind kind, string projectRoot)
     {
-        string[] problems = [.. new[] { ReadFile(IssueViewSource.Personal, service, projectRoot).Problem, ReadFile(IssueViewSource.Team, service, projectRoot).Problem }.OfType<string>()];
+        var table = Table(service, kind);
+        string[] problems = [.. new[] { ReadFile(IssueViewSource.Personal, table, projectRoot).Problem, ReadFile(IssueViewSource.Team, table, projectRoot).Problem }.OfType<string>()];
         return problems.Length == 0 ? null : string.Join(" ", problems);
     }
 
     /// <summary>
-    /// Writes the filters of a view, made when it is missing: what the view said before is replaced. A view of the other
-    /// source with the same name is refused, under the lock of the file written.
+    /// Writes the filters of a view of the issues, made when it is missing: what the view said before is replaced. A view
+    /// of the other source with the same name is refused, under the lock of the file written.
     /// </summary>
     /// <param name="source">Whose view.</param>
     /// <param name="service">The service of the tracker.</param>
@@ -180,16 +228,37 @@ public sealed class IssueViewStore
     /// <exception cref="IOException">The file cannot be read or written.</exception>
     /// <exception cref="UnauthorizedAccessException">Access to the file is denied.</exception>
     public void SaveView(IssueViewSource source, string service, string projectRoot, string name, IssueFilterSettings filters)
+        => SaveView(source, service, IssueViewKind.Issues, projectRoot, name, filters);
+
+    /// <summary>
+    /// Writes the filters of a view of a kind of items, made when it is missing: what the view said before is replaced. A
+    /// view of the other source with the same name is refused, under the lock of the file written.
+    /// </summary>
+    /// <param name="source">Whose view.</param>
+    /// <param name="service">The service of the tracker.</param>
+    /// <param name="kind">The items the view lists.</param>
+    /// <param name="projectRoot">The folder of the project.</param>
+    /// <param name="name">The name of the view.</param>
+    /// <param name="filters">Its filters.</param>
+    /// <exception cref="ArgumentException">An argument is empty, too long or not a plain name, or a filter is repeated.</exception>
+    /// <exception cref="ArgumentNullException"><paramref name="filters"/> is null.</exception>
+    /// <exception cref="IssueViewNameTakenException">A view of the other source has the name.</exception>
+    /// <exception cref="IssueViewLimitException">The view is missing and its file already holds <see cref="MaximumViews"/> views.</exception>
+    /// <exception cref="InvalidDataException">The file is not valid TOML, or writes the view in a form that is not edited here (an inline table, dotted keys).</exception>
+    /// <exception cref="IOException">The file cannot be read or written.</exception>
+    /// <exception cref="UnauthorizedAccessException">Access to the file is denied.</exception>
+    public void SaveView(IssueViewSource source, string service, IssueViewKind kind, string projectRoot, string name, IssueFilterSettings filters)
     {
         ArgumentNullException.ThrowIfNull(filters);
         CheckView(service, name);
         CheckFilters(filters);
-        EditView(source, service, projectRoot, name, _ => filters);
+        EditView(source, service, kind, projectRoot, name, _ => filters);
     }
 
     /// <summary>
-    /// Changes the filters of a view from those its file holds when it is written, under the lock of the file: what another
-    /// writer saved meanwhile is kept, not written over. A view of the other source with the same name is refused.
+    /// Changes the filters of a view of the issues from those its file holds when it is written, under the lock of the
+    /// file: what another writer saved meanwhile is kept, not written over. A view of the other source with the same name
+    /// is refused.
     /// </summary>
     /// <param name="source">Whose view.</param>
     /// <param name="service">The service of the tracker.</param>
@@ -208,29 +277,55 @@ public sealed class IssueViewStore
     /// <exception cref="IOException">The file cannot be read or written.</exception>
     /// <exception cref="UnauthorizedAccessException">Access to the file is denied.</exception>
     public IssueFilterSettings? EditView(IssueViewSource source, string service, string projectRoot, string name, Func<IssueFilterSettings?, IssueFilterSettings?> edit)
+        => EditView(source, service, IssueViewKind.Issues, projectRoot, name, edit);
+
+    /// <summary>
+    /// Changes the filters of a view of a kind of items from those its file holds when it is written, under the lock of the
+    /// file: what another writer saved meanwhile is kept, not written over. A view of the other source with the same name
+    /// is refused.
+    /// </summary>
+    /// <param name="source">Whose view.</param>
+    /// <param name="service">The service of the tracker.</param>
+    /// <param name="kind">The items the view lists.</param>
+    /// <param name="projectRoot">The folder of the project.</param>
+    /// <param name="name">The name of the view.</param>
+    /// <param name="edit">
+    /// Gets the filters of the view in its file, null when the file has no such view, and gives the filters to write (the
+    /// view is made when it is missing); null writes nothing. It is called once, while the lock is held.
+    /// </param>
+    /// <returns>The filters written; null when <paramref name="edit"/> gave none.</returns>
+    /// <exception cref="ArgumentException">An argument is empty, too long or not a plain name, or a filter <paramref name="edit"/> gives is repeated or too long.</exception>
+    /// <exception cref="ArgumentNullException"><paramref name="edit"/> is null.</exception>
+    /// <exception cref="IssueViewNameTakenException">A view of the other source has the name.</exception>
+    /// <exception cref="IssueViewLimitException">The view is missing and its file already holds <see cref="MaximumViews"/> views.</exception>
+    /// <exception cref="InvalidDataException">The file is not valid TOML, or writes the view in a form that is not edited here (an inline table, dotted keys).</exception>
+    /// <exception cref="IOException">The file cannot be read or written.</exception>
+    /// <exception cref="UnauthorizedAccessException">Access to the file is denied.</exception>
+    public IssueFilterSettings? EditView(IssueViewSource source, string service, IssueViewKind kind, string projectRoot, string name, Func<IssueFilterSettings?, IssueFilterSettings?> edit)
     {
         ArgumentNullException.ThrowIfNull(edit);
         CheckView(service, name);
+        var table = Table(service, kind);
         IssueFilterSettings? written = null;
         Edit(source, projectRoot, content =>
         {
-            var file = ParseFile(content, source, service);
+            var file = ParseFile(content, source, table);
             var view = file.Views.FirstOrDefault(candidate => candidate.Name == name);
             if (edit(view?.Filters) is not { } filters) return content;
             CheckFilters(filters);
-            if (ReadFile(source == IssueViewSource.Team ? IssueViewSource.Personal : IssueViewSource.Team, service, projectRoot).Views.Any(other => other.Name == name))
+            if (ReadFile(source == IssueViewSource.Team ? IssueViewSource.Personal : IssueViewSource.Team, table, projectRoot).Views.Any(other => other.Name == name))
                 throw new IssueViewNameTakenException(name);
             // A view past the most that are read would be written and never read back.
             if (view is null && file.Views.Count >= MaximumViews) throw new IssueViewLimitException(Locate(source, projectRoot));
             written = filters;
-            return ReplaceView(content, service, name, name, filters);
+            return ReplaceView(content, table, name, name, filters);
         });
         return written;
     }
 
     /// <summary>
-    /// Renames a view, keeping its filters as its file holds them under the lock; the user's choice follows it, in the
-    /// same write for a view of the user and in a second write of the user's file for a view of the team.
+    /// Renames a view of the issues, keeping its filters as its file holds them under the lock; the user's choice follows
+    /// it, in the same write for a view of the user and in a second write of the user's file for a view of the team.
     /// </summary>
     /// <param name="source">Whose view.</param>
     /// <param name="service">The service of the tracker.</param>
@@ -244,29 +339,49 @@ public sealed class IssueViewStore
     /// <exception cref="IOException">The file cannot be read or written.</exception>
     /// <exception cref="UnauthorizedAccessException">Access to the file is denied.</exception>
     public bool RenameView(IssueViewSource source, string service, string projectRoot, string name, string newName)
+        => RenameView(source, service, IssueViewKind.Issues, projectRoot, name, newName);
+
+    /// <summary>
+    /// Renames a view of a kind of items, keeping its filters as its file holds them under the lock; the user's choice
+    /// follows it, in the same write for a view of the user and in a second write of the user's file for a view of the team.
+    /// </summary>
+    /// <param name="source">Whose view.</param>
+    /// <param name="service">The service of the tracker.</param>
+    /// <param name="kind">The items the view lists.</param>
+    /// <param name="projectRoot">The folder of the project.</param>
+    /// <param name="name">Its name.</param>
+    /// <param name="newName">Its new name.</param>
+    /// <returns><see langword="false"/> when the view is missing.</returns>
+    /// <exception cref="ArgumentException">A name is empty, too long or not a plain name.</exception>
+    /// <exception cref="IssueViewNameTakenException">A view of either source has the new name.</exception>
+    /// <exception cref="InvalidDataException">The file is not valid TOML, or writes the view in a form that is not edited here (an inline table, dotted keys).</exception>
+    /// <exception cref="IOException">The file cannot be read or written.</exception>
+    /// <exception cref="UnauthorizedAccessException">Access to the file is denied.</exception>
+    public bool RenameView(IssueViewSource source, string service, IssueViewKind kind, string projectRoot, string name, string newName)
     {
         CheckView(service, name);
         CheckView(service, newName);
+        var table = Table(service, kind);
         var found = false;
         var followed = false;
         Edit(source, projectRoot, content =>
         {
             // The filters are those of the file under the lock: a save made meanwhile is renamed with the view.
-            var file = ParseFile(content, source, service);
+            var file = ParseFile(content, source, table);
             if (file.Views.FirstOrDefault(view => view.Name == name) is not { } view) return content;
             found = true;
             if (name == newName) return content;
             // The name is checked under the lock of the file written, against both files.
-            if (ReadViews(service, projectRoot).Any(other => other.Name == newName)) throw new IssueViewNameTakenException(newName);
-            followed = (source == IssueViewSource.Personal ? file.Current : ReadFile(IssueViewSource.Personal, service, projectRoot).Current) == name;
-            content = ReplaceView(content, service, name, newName, view.Filters);
-            return followed && source == IssueViewSource.Personal ? ConfigTableSyntax.SetText(content, [service], "current", newName) : content;
+            if (ReadViews(service, kind, projectRoot).Any(other => other.Name == newName)) throw new IssueViewNameTakenException(newName);
+            followed = (source == IssueViewSource.Personal ? file.Current : ReadFile(IssueViewSource.Personal, table, projectRoot).Current) == name;
+            content = ReplaceView(content, table, name, newName, view.Filters);
+            return followed && source == IssueViewSource.Personal ? ConfigTableSyntax.SetText(content, table, "current", newName) : content;
         });
-        if (followed && source == IssueViewSource.Team) SetCurrent(service, projectRoot, newName);
+        if (followed && source == IssueViewSource.Team) SetCurrent(service, kind, projectRoot, newName);
         return found;
     }
 
-    /// <summary>Removes a view and its filters.</summary>
+    /// <summary>Removes a view of the issues and its filters.</summary>
     /// <param name="source">Whose view.</param>
     /// <param name="service">The service of the tracker.</param>
     /// <param name="projectRoot">The folder of the project.</param>
@@ -277,23 +392,38 @@ public sealed class IssueViewStore
     /// <exception cref="IOException">The file cannot be read or written.</exception>
     /// <exception cref="UnauthorizedAccessException">Access to the file is denied.</exception>
     public bool RemoveView(IssueViewSource source, string service, string projectRoot, string name)
+        => RemoveView(source, service, IssueViewKind.Issues, projectRoot, name);
+
+    /// <summary>Removes a view of a kind of items and its filters.</summary>
+    /// <param name="source">Whose view.</param>
+    /// <param name="service">The service of the tracker.</param>
+    /// <param name="kind">The items the view lists.</param>
+    /// <param name="projectRoot">The folder of the project.</param>
+    /// <param name="name">Its name.</param>
+    /// <returns><see langword="false"/> when the view is missing.</returns>
+    /// <exception cref="ArgumentException">An argument is empty, too long or not a plain name.</exception>
+    /// <exception cref="InvalidDataException">The file is not valid TOML, or writes the view in a form that is not edited here (an inline table, dotted keys).</exception>
+    /// <exception cref="IOException">The file cannot be read or written.</exception>
+    /// <exception cref="UnauthorizedAccessException">Access to the file is denied.</exception>
+    public bool RemoveView(IssueViewSource source, string service, IssueViewKind kind, string projectRoot, string name)
     {
         CheckView(service, name);
+        var table = Table(service, kind);
         var found = false;
         Edit(source, projectRoot, content =>
         {
-            if (ParseFile(content, source, service).Views.All(view => view.Name != name)) return content;
+            if (ParseFile(content, source, table).Views.All(view => view.Name != name)) return content;
             found = true;
-            var removed = ConfigTableSyntax.RemoveTables(content, [service, "views", name]);
-            return HasView(removed, service, name) ? throw UneditedView(service, name) : removed;
+            var removed = ConfigTableSyntax.RemoveTables(content, [.. table, "views", name]);
+            return HasView(removed, table, name) ? throw UneditedView(table, name) : removed;
         });
         if (!found) return false;
         // The choice of a view that is gone is forgotten: the tab shows the first view.
-        if (ReadFile(IssueViewSource.Personal, service, projectRoot).Current == name && ReadViews(service, projectRoot).All(view => view.Name != name)) SetCurrent(service, projectRoot, null);
+        if (ReadFile(IssueViewSource.Personal, table, projectRoot).Current == name && ReadViews(service, kind, projectRoot).All(view => view.Name != name)) SetCurrent(service, kind, projectRoot, null);
         return true;
     }
 
-    /// <summary>Keeps the view the user chose, in the user's file; null forgets the choice.</summary>
+    /// <summary>Keeps the view of the issues the user chose, in the user's file; null forgets the choice.</summary>
     /// <param name="service">The service of the tracker.</param>
     /// <param name="projectRoot">The folder of the project.</param>
     /// <param name="name">The name of the view.</param>
@@ -301,26 +431,43 @@ public sealed class IssueViewStore
     /// <exception cref="InvalidDataException">The file is not valid TOML.</exception>
     /// <exception cref="IOException">The file cannot be read or written.</exception>
     /// <exception cref="UnauthorizedAccessException">Access to the file is denied.</exception>
-    public void SetCurrent(string service, string projectRoot, string? name)
+    public void SetCurrent(string service, string projectRoot, string? name) => SetCurrent(service, IssueViewKind.Issues, projectRoot, name);
+
+    /// <summary>Keeps the view of a kind of items the user chose, in the user's file; null forgets the choice.</summary>
+    /// <param name="service">The service of the tracker.</param>
+    /// <param name="kind">The items the view lists.</param>
+    /// <param name="projectRoot">The folder of the project.</param>
+    /// <param name="name">The name of the view.</param>
+    /// <exception cref="ArgumentException">An argument is empty, too long or not a plain name.</exception>
+    /// <exception cref="InvalidDataException">The file is not valid TOML.</exception>
+    /// <exception cref="IOException">The file cannot be read or written.</exception>
+    /// <exception cref="UnauthorizedAccessException">Access to the file is denied.</exception>
+    public void SetCurrent(string service, IssueViewKind kind, string projectRoot, string? name)
     {
         if (name is not null) CheckView(service, name);
-        else if (!IsKey(service)) throw new ArgumentException("The service is empty or not a plain name.", nameof(service));
+        var table = Table(service, kind);
         // The table of the service exists through its views alone: its header is written before its key.
-        Edit(IssueViewSource.Personal, projectRoot, content => ConfigTableSyntax.SetText(name is null ? content : ConfigTableSyntax.EnsureTable(content, [service]), [service], "current", name));
+        Edit(IssueViewSource.Personal, projectRoot, content => ConfigTableSyntax.SetText(name is null ? content : ConfigTableSyntax.EnsureTable(content, table), table, "current", name));
+    }
+
+    // The table the views of a kind are kept in: [<service>] for the issues, [<service>.pull_requests] for the pull requests.
+    private static string[] Table(string service, IssueViewKind kind)
+    {
+        if (!IsKey(service)) throw new ArgumentException("The service is empty or not a plain name.", nameof(service));
+        return kind == IssueViewKind.PullRequests ? [service, PullRequestsKey] : [service];
     }
 
     // The views of one file, the view the user chose when it is the user's file, and why views of it are not shown.
     private sealed record ViewFile(IReadOnlyList<IssueView> Views, string? Current, string? Problem = null);
 
     // A file that is missing has no views; one that cannot be read or does not parse has none either, and says why.
-    private static ViewFile ReadFile(IssueViewSource source, string service, string projectRoot)
+    private static ViewFile ReadFile(IssueViewSource source, string[] table, string projectRoot)
     {
-        if (!IsKey(service)) throw new ArgumentException("The service is empty or not a plain name.", nameof(service));
         var path = Locate(source, projectRoot);
         if (!File.Exists(path)) return new([], null);
         try
         {
-            var file = ParseFile(SharedTextFile.ReadAllText(path), source, service);
+            var file = ParseFile(SharedTextFile.ReadAllText(path), source, table);
             return file.Problem is null ? file : file with { Problem = $"'{path}' {file.Problem}" };
         }
         catch (InvalidDataException exception)
@@ -335,7 +482,7 @@ public sealed class IssueViewStore
     }
 
     // The views of the text of a file, the problem a part of the file says without its path.
-    private static ViewFile ParseFile(string content, IssueViewSource source, string service)
+    private static ViewFile ParseFile(string content, IssueViewSource source, string[] tableKeys)
     {
         TomlTable root;
         try
@@ -347,7 +494,7 @@ public sealed class IssueViewStore
             throw new InvalidDataException("The views are not valid TOML.", exception);
         }
 
-        if (!root.TryGetValue(service, out var found) || found is not TomlTable table) return new([], null);
+        if (Find(root, tableKeys) is not { } table) return new([], null);
         var current = source == IssueViewSource.Personal && table.TryGetValue("current", out var chosen) && chosen is string name && IsViewName(name) ? name : null;
         var views = new List<IssueView>();
         string? problem = null;
@@ -371,7 +518,7 @@ public sealed class IssueViewStore
 
     // Whether the text still defines a view, in whatever form: a removal of its tables leaves an inline one or dotted keys.
     // A text that does not parse is refused when it is written.
-    private static bool HasView(string content, string service, string name)
+    private static bool HasView(string content, string[] tableKeys, string name)
     {
         TomlTable root;
         try
@@ -383,12 +530,12 @@ public sealed class IssueViewStore
             return false;
         }
 
-        return root.TryGetValue(service, out var found) && found is TomlTable table && table.TryGetValue("views", out var listed) && listed is TomlTable views && views.ContainsKey(name);
+        return Find(root, tableKeys) is { } table && table.TryGetValue("views", out var listed) && listed is TomlTable views && views.ContainsKey(name);
     }
 
-    private static InvalidDataException UneditedView(string service, string name)
+    private static InvalidDataException UneditedView(string[] table, string name)
         => new($"The view '{name}' is written in a form CodeAlta does not edit (an inline table or dotted keys): change it by hand, "
-            + $"or write each of its filters as a table, [{string.Join('.', new[] { service, "views", name }.Select(ConfigTableSyntax.KeyText))}.<filter>].");
+            + $"or write each of its filters as a table, [{string.Join('.', table.Append("views").Append(name).Select(ConfigTableSyntax.KeyText))}.<filter>].");
 
     private static void CheckFilters(IssueFilterSettings filters)
     {
@@ -419,15 +566,15 @@ public sealed class IssueViewStore
     }
 
     // The text after a view is written: its tables are replaced where the first of them was, else added at the end.
-    private static string ReplaceView(string content, string service, string name, string newName, IssueFilterSettings filters)
+    private static string ReplaceView(string content, string[] table, string name, string newName, IssueFilterSettings filters)
     {
-        string[] old = [service, "views", name];
+        string[] old = [.. table, "views", name];
         var at = ConfigTableSyntax.TableStart(content, old);
         content = ConfigTableSyntax.RemoveTables(content, old);
         // A view its tables do not hold all would be kept beside the one written, or answered as renamed while it stays.
-        if (HasView(content, service, name)) throw UneditedView(service, name);
+        if (HasView(content, table, name)) throw UneditedView(table, name);
         var newline = content.Contains("\r\n", StringComparison.Ordinal) ? "\r\n" : "\n";
-        var tables = ViewText([service, "views", newName], filters).Replace("\n", newline, StringComparison.Ordinal);
+        var tables = ViewText([.. table, "views", newName], filters).Replace("\n", newline, StringComparison.Ordinal);
         if (at is not { } start) return content + (content.Length == 0 ? string.Empty : content.EndsWith('\n') ? newline : newline + newline) + tables;
         var rest = content[start..];
         return content[..start] + tables + (rest.Length == 0 ? string.Empty : newline) + rest;
@@ -491,6 +638,19 @@ public sealed class IssueViewStore
     {
         if (!IsKey(service)) throw new ArgumentException("The service is empty or not a plain name.", nameof(service));
         if (!IsViewName(name)) throw new ArgumentException("The name of a view is one line of 64 characters at most.", nameof(name));
+    }
+
+    // The table at a path of keys; null when one of them is missing or not a table.
+    private static TomlTable? Find(TomlTable root, string[] keys)
+    {
+        var table = root;
+        foreach (var key in keys)
+        {
+            if (!table.TryGetValue(key, out var found) || found is not TomlTable inner) return null;
+            table = inner;
+        }
+
+        return table;
     }
 
     private static string? Read(TomlTable table, string key)

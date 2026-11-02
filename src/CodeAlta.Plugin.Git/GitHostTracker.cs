@@ -55,16 +55,16 @@ internal sealed class GitHostTracker : IIssueTracker
         {
             var asked = new GitIssueQuery(_client, _repository, await _authorization(cancellationToken).ConfigureAwait(false))
             {
-                Filters = request.Selections, Fields = request.Fields, Cache = Cache,
+                Filters = request.Selections, Fields = request.Fields, Cache = Cache, Kind = request.Kind,
             };
             var filters = await Api.FiltersAsync(asked, cancellationToken).ConfigureAwait(false);
-            if (asked.FailureStatusCode is { } refused) LogRefusal("reading the filters of the issues", refused, asked);
+            if (asked.FailureStatusCode is { } refused) LogRefusal($"reading the filters of the {Kind(request.Kind)}", refused, asked);
             return filters;
         }
         catch (Exception exception) when (exception is HttpRequestException or JsonException or InvalidOperationException
             || exception is OperationCanceledException && !cancellationToken.IsCancellationRequested)
         {
-            LogFailure("reading the filters of the issues", exception);
+            LogFailure($"reading the filters of the {Kind(request.Kind)}", exception);
             return [];
         }
     }
@@ -108,7 +108,7 @@ internal sealed class GitHostTracker : IIssueTracker
         GitIssueQuery? request = null;
         try
         {
-            request = new GitIssueQuery(_client, _repository, await _authorization(cancellationToken).ConfigureAwait(false)) { Filters = query.Filters, Cache = Cache };
+            request = new GitIssueQuery(_client, _repository, await _authorization(cancellationToken).ConfigureAwait(false)) { Filters = query.Filters, Cache = Cache, Kind = query.Kind };
             var items = await Api.ListAsync(request, query.Kind, query.Filter, text, limit + 1, cancellationToken).ConfigureAwait(false);
             var page = new TrackedItemPage(items.Count > limit ? [.. items.Take(limit)] : items) { More = items.Count > limit };
             if (request.FailureStatusCode is not { } refused) return page;
@@ -131,7 +131,7 @@ internal sealed class GitHostTracker : IIssueTracker
         if (!int.TryParse(id, NumberStyles.None, CultureInfo.InvariantCulture, out var number) || number <= 0) return null;
         try
         {
-            var request = new GitIssueQuery(_client, _repository, await _authorization(cancellationToken).ConfigureAwait(false));
+            var request = new GitIssueQuery(_client, _repository, await _authorization(cancellationToken).ConfigureAwait(false)) { Cache = Cache, Kind = kind };
             var detail = await Api.ReadAsync(request, kind, number, cancellationToken).ConfigureAwait(false);
             if (detail is null && request.FailureStatusCode is { } refused) LogRefusal($"reading {Kind(kind, one: true)} {id}", refused, request);
             return detail;
@@ -195,7 +195,7 @@ internal abstract class GitHostApi
     /// <summary>Reads one item with its description and its comments; null when there is none.</summary>
     public abstract Task<TrackedItemDetail?> ReadAsync(GitIssueQuery query, TrackedItemKind kind, int number, CancellationToken cancellationToken);
 
-    /// <summary>Gets the filters of the issues of the service, for the values chosen in <see cref="GitIssueQuery.Filters"/>; none by default.</summary>
+    /// <summary>Gets the filters of the kind of items of <see cref="GitIssueQuery.Kind"/>, for the values chosen in <see cref="GitIssueQuery.Filters"/>; none by default.</summary>
     public virtual Task<IReadOnlyList<TrackedFilterDescriptor>> FiltersAsync(GitIssueQuery query, CancellationToken cancellationToken)
         => Task.FromResult<IReadOnlyList<TrackedFilterDescriptor>>([]);
 
@@ -425,17 +425,7 @@ internal sealed partial class AzureDevOpsApi : GitHostApi
     public override async Task<IReadOnlyList<TrackedItem>> ListAsync(GitIssueQuery query, TrackedItemKind kind, TrackedItemFilter filter, string? text, int limit, CancellationToken cancellationToken)
     {
         var repository = query.Repository;
-        if (kind == TrackedItemKind.PullRequest)
-        {
-            var status = filter switch { TrackedItemFilter.Open => "active", TrackedItemFilter.Closed => "abandoned", TrackedItemFilter.Merged => "completed", _ => "all" };
-            // The service has no search of pull requests: more are read, and the words are looked for in their titles.
-            var url = FormattableString.Invariant($"{Project(repository)}/_apis/git/repositories/{Escape(repository.Name)}/pullrequests?searchCriteria.status={status}&$top={(text is null ? limit : 100)}&api-version={ApiVersion}");
-            using var document = await GetAnswerAsync(query, url, cancellationToken).ConfigureAwait(false);
-            if (document is null) return [];
-            var pulls = Items(document.RootElement, "value").Select(element => ReadPull(element, repository)).OfType<TrackedItem>();
-            if (text is not null) pulls = pulls.Where(item => item.Title.Contains(text, StringComparison.OrdinalIgnoreCase) || item.Id == text.TrimStart('#', '!'));
-            return [.. pulls.OrderByDescending(static item => item.UpdatedAt).Take(limit)];
-        }
+        if (kind == TrackedItemKind.PullRequest) return await ListPullsAsync(query, filter, text, limit, cancellationToken).ConfigureAwait(false);
 
         // A value chosen for a filter that cannot be applied (the team has no current sprint) lists nothing rather than everything.
         if (await FilterClausesAsync(query, cancellationToken).ConfigureAwait(false) is not { } chosen) return [];
@@ -468,27 +458,9 @@ internal sealed partial class AzureDevOpsApi : GitHostApi
 
     public override async Task<TrackedItemDetail?> ReadAsync(GitIssueQuery query, TrackedItemKind kind, int number, CancellationToken cancellationToken)
     {
+        if (kind == TrackedItemKind.PullRequest) return await ReadPullAsync(query, number, cancellationToken).ConfigureAwait(false);
         var repository = query.Repository;
         var comments = new List<TrackedComment>();
-        if (kind == TrackedItemKind.PullRequest)
-        {
-            var root = FormattableString.Invariant($"{Project(repository)}/_apis/git/repositories/{Escape(repository.Name)}/pullrequests/{number}");
-            using var document = await GetAnswerAsync(query, $"{root}?api-version={ApiVersion}", cancellationToken).ConfigureAwait(false);
-            if (document is null || ReadPull(document.RootElement, repository) is not { } pull) return null;
-            using var threads = await GetAnswerAsync(query, $"{root}/threads?api-version={ApiVersion}", cancellationToken, report: false).ConfigureAwait(false);
-            if (threads is not null)
-            {
-                // A thread also holds what the service notes itself (a vote, a push): only what people wrote is kept.
-                comments.AddRange(Items(threads.RootElement, "value").SelectMany(static thread => Items(thread, "comments"))
-                    .Where(static comment => Text(comment, "commentType") == "text" && !Flag(comment, "isDeleted") && Text(comment, "content") is not null)
-                    .Select(static comment => new TrackedComment(Text(comment, "author", "displayName"), Date(comment, "publishedDate"), Text(comment, "content")!))
-                    .OrderBy(static comment => comment.CreatedAt));
-            }
-
-            var kept = comments.Count > GitHostTracker.MaximumComments;
-            return new(pull, Text(document.RootElement, "description") ?? string.Empty, kept ? [.. comments.Take(GitHostTracker.MaximumComments)] : comments) { MoreComments = kept };
-        }
-
         var itemUrl = FormattableString.Invariant($"{Project(repository)}/_apis/wit/workitems/{number}?fields={Fields},System.Description&api-version={ApiVersion}");
         using var item = await GetAnswerAsync(query, itemUrl, cancellationToken).ConfigureAwait(false);
         if (item is null || ReadWorkItem(item.RootElement, repository) is not { } work) return null;
@@ -545,23 +517,6 @@ internal sealed partial class AzureDevOpsApi : GitHostApi
             CreatedAt = Date(fields, "System.CreatedDate"),
             UpdatedAt = Date(fields, "System.ChangedDate"),
             CommentCount = Number(fields, "System.CommentCount"),
-        };
-    }
-
-    private static TrackedItem? ReadPull(JsonElement element, GitRepositoryReference repository)
-    {
-        if (Number(element, "pullRequestId") is not { } id || Text(element, "title") is not { } title) return null;
-        var status = Text(element, "status");
-        return new(TrackedItemKind.PullRequest, id.ToString(CultureInfo.InvariantCulture), title, FormattableString.Invariant($"{Instance.WebUrl(repository)}/pullrequest/{id}"),
-            status == "completed" ? TrackedItemState.Merged : status == "abandoned" ? TrackedItemState.Closed : Flag(element, "isDraft") ? TrackedItemState.Draft : TrackedItemState.Open)
-        {
-            Author = Text(element, "createdBy", "displayName"),
-            Assignees = [.. Items(element, "reviewers").Where(static reviewer => !Flag(reviewer, "isContainer")).Select(static reviewer => Text(reviewer, "displayName")).OfType<string>()],
-            Labels = [.. Items(element, "labels").Select(static label => Text(label, "name") is { } name ? new TrackedLabel(name) : null).OfType<TrackedLabel>()],
-            CreatedAt = Date(element, "creationDate"),
-            UpdatedAt = Date(element, "closedDate") ?? Date(element, "creationDate"),
-            SourceBranch = Branch(Text(element, "sourceRefName")),
-            TargetBranch = Branch(Text(element, "targetRefName")),
         };
     }
 }

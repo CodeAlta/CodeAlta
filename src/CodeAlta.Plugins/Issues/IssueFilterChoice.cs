@@ -3,7 +3,7 @@ using CodeAlta.Plugins.Abstractions;
 
 namespace CodeAlta.Plugins.Issues;
 
-/// <summary>The filters of a tracker with the value each one has, as <see cref="IssueFilterChoice.ChooseAsync"/> gives them.</summary>
+/// <summary>The filters of a tracker with the value each one has, as <see cref="O:CodeAlta.Plugins.Issues.IssueFilterChoice.ChooseAsync"/> gives them.</summary>
 /// <param name="Filters">The filters the tracker offers, its own and those of the fields asked for.</param>
 /// <param name="Selected">
 /// The value of each filter, by id: a value id, several joined with <see cref="TrackedFilters.Separator"/>, or empty for
@@ -32,7 +32,7 @@ public static class IssueFilterChoice
     /// <summary>The longest value of one filter, in UTF-16 units.</summary>
     public const int MaximumValue = 128;
 
-    /// <summary>Asks the tracker for its filters and gives each one its value.</summary>
+    /// <summary>Asks the tracker for the filters of its issues and gives each one its value.</summary>
     /// <param name="tracker">The tracker.</param>
     /// <param name="chosen">The values chosen, by filter id: value ids, several joined with <see cref="TrackedFilters.Separator"/>; empty for every item.</param>
     /// <param name="settings">The filters of the view; <see cref="IssueFilterSettings.Empty"/> for none.</param>
@@ -40,7 +40,20 @@ public static class IssueFilterChoice
     /// <param name="cancellationToken">A token to cancel the operation.</param>
     /// <returns>The filters and their values.</returns>
     /// <exception cref="ArgumentNullException">An argument is null.</exception>
-    public static async Task<IssueFilterSelection> ChooseAsync(IIssueTracker tracker, IReadOnlyDictionary<string, string> chosen, IssueFilterSettings settings,
+    public static Task<IssueFilterSelection> ChooseAsync(IIssueTracker tracker, IReadOnlyDictionary<string, string> chosen, IssueFilterSettings settings,
+        IReadOnlyList<string> include, CancellationToken cancellationToken)
+        => ChooseAsync(tracker, TrackedItemKind.Issue, chosen, settings, include, cancellationToken);
+
+    /// <summary>Asks the tracker for the filters of a kind of its items and gives each one its value.</summary>
+    /// <param name="tracker">The tracker.</param>
+    /// <param name="kind">The items listed: issues or pull requests.</param>
+    /// <param name="chosen">The values chosen, by filter id: value ids, several joined with <see cref="TrackedFilters.Separator"/>; empty for every item.</param>
+    /// <param name="settings">The filters of the view; <see cref="IssueFilterSettings.Empty"/> for none.</param>
+    /// <param name="include">The filters made of fields to describe besides those the view names.</param>
+    /// <param name="cancellationToken">A token to cancel the operation.</param>
+    /// <returns>The filters and their values.</returns>
+    /// <exception cref="ArgumentNullException">An argument is null.</exception>
+    public static async Task<IssueFilterSelection> ChooseAsync(IIssueTracker tracker, TrackedItemKind kind, IReadOnlyDictionary<string, string> chosen, IssueFilterSettings settings,
         IReadOnlyList<string> include, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(tracker);
@@ -55,7 +68,7 @@ public static class IssueFilterChoice
         var selected = new Dictionary<string, string>(StringComparer.Ordinal);
         for (var pass = 0; pass < 3; pass++)
         {
-            descriptors = [.. (await tracker.GetFiltersAsync(new(asked, fields), cancellationToken).ConfigureAwait(false))
+            descriptors = [.. (await tracker.GetFiltersAsync(new(asked, fields) { Kind = kind }, cancellationToken).ConfigureAwait(false))
                 .Where(static filter => IssueViewStore.IsFilterId(filter.Id)).Take(MaximumFilters)];
             selected.Clear();
             foreach (var descriptor in descriptors)

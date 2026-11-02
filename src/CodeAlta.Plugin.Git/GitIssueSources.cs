@@ -45,6 +45,9 @@ internal sealed class GitIssueQuery(HttpClient client, GitRepositoryReference re
     /// <summary>Gets the values chosen for the filters of the tracker, by filter id; the provider applies those it knows.</summary>
     public IReadOnlyDictionary<string, string> Filters { get; init; } = CodeAlta.Plugins.Abstractions.TrackedFilters.None;
 
+    /// <summary>Gets the kind of items the filters are of: the issues, or the pull requests.</summary>
+    public CodeAlta.Plugins.Abstractions.TrackedItemKind Kind { get; init; } = CodeAlta.Plugins.Abstractions.TrackedItemKind.Issue;
+
     /// <summary>Gets the ids of the filters made of fields (<c>field:&lt;name&gt;</c>) the configuration names.</summary>
     public IReadOnlyList<string> Fields { get; init; } = [];
 
@@ -63,7 +66,7 @@ internal sealed class GitIssueQuery(HttpClient client, GitRepositoryReference re
             : Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(authorization.Scheme + " " + authorization.Parameter)), 0, 16);
 
     /// <summary>Gets a query of the same repository with the same credentials, whose refusals are its own.</summary>
-    public GitIssueQuery Fork() => new(client, Repository, authorization) { Filters = Filters, Fields = Fields, Cache = Cache };
+    public GitIssueQuery Fork() => new(client, Repository, authorization) { Filters = Filters, Fields = Fields, Cache = Cache, Kind = Kind };
 
     public Task<HttpResponseMessage> GetAsync(string url, string accept, CancellationToken cancellationToken)
         => SendAsync(new HttpRequestMessage(HttpMethod.Get, url), accept, cancellationToken);
