@@ -757,6 +757,8 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
             if (!closeRequested.Task.IsCompleted)
             {
                 var epoch = Guid.NewGuid().ToString("D");
+                // The hosts of the sessions the window shows: the host of this process, for now the only one.
+                var sessionHosts = new SessionHosts.SessionHostRegistry(new SessionHosts.LocalSessionHost(host));
                 // The bookmarks of the sessions of this instance, in its database. A bookmarked session is kept by the
                 // retention of sessions, which deletes nothing before the bookmarks were read.
                 var bookmarks = new CodeAlta.Catalog.Bookmarks.BookmarkService(host.ApplicationDatabase,
@@ -766,7 +768,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                 // The git worktrees sessions can work in: created with a session, listed and removed from the changes of a project.
                 var worktreeConfig = new CodeAltaConfigStore(host.CatalogOptions);
                 var worktrees = new CodeAlta.Catalog.Worktrees.GitWorktreeService(host.CatalogOptions, worktreeConfig);
-                workspace = new WorkspaceService(host, epoch, worktrees);
+                workspace = new WorkspaceService(sessionHosts, host, epoch, worktrees);
                 // The work the first page does not need waits until the window shows the application.
                 var shown = new DesktopStartupGate();
                 workspace.Served = shown.WorkspaceServed;
@@ -778,14 +780,14 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                     journalStore.RebuildProgress = null;
                     Mark("application shown, the work after the start begins");
                 }, TaskScheduler.Default);
-                operations = new SessionOperationsService(host.Commands, epoch) { RemoteControlChanged = shell.NoteRemoteControl };
+                operations = new SessionOperationsService(sessionHosts, host.Commands, epoch) { RemoteControlChanged = shell.NoteRemoteControl };
                 if (shell.ReconnectRemoteControl) DesktopRemoteControl.Reconnect(host.Commands, shell);
                 // The reviews of the user: comments on plans, files and changes, kept per checkout in the state folder.
                 var reviewService = new CodeAlta.Catalog.Reviews.ReviewService(host.CatalogOptions.StateRoot);
                 workspace.ProjectDeleted = projectId => reviewService.DeleteProject(projectId);
                 // A session that reviews before commit may commit the work tree its last review approved.
                 host.RuntimeService.Reviews = reviewService;
-                asks = new SessionAsksService(host.Commands.Asks, epoch, reviewService, host.ProjectCatalog);
+                asks = new SessionAsksService(sessionHosts, epoch, reviewService, host.ProjectCatalog);
                 pluginAsks.Attach(host.Commands.Asks, asks, epoch);
                 pluginPermissions.Attach(host.RuntimeService.Permissions);
                 reminders = new ReminderService(host.WorkspaceReads, host.Commands, host.RuntimeService, epoch, host.RetentionProtection);
@@ -1168,7 +1170,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                         () => host.ModelProviderInitializationService.CurrentStates, terminals, worktrees, epoch));
                     builder.AddMcpHostService(new McpHostService(mcp, McpTools, epoch));
                     builder.AddPromptImagesService(new PromptImagesService(host.WorkspaceReads, epoch));
-                    builder.AddToolCallsService(new ToolCallsService(host.WorkspaceReads, host.RuntimeService.ToolOutput, epoch) { Jobs = host.RuntimeService.Jobs });
+                    builder.AddToolCallsService(new ToolCallsService(sessionHosts, epoch));
                     builder.AddMcpAppsService(new McpAppsService(host.WorkspaceReads.ReadHistoryRecordAsync,
                         () => host.PluginRuntime?.ActivePlugins.Select(static plugin => plugin.Instance).OfType<CodeAlta.Plugin.Mcp.McpPlugin>().FirstOrDefault(), mcpAppViews, epoch)
                     {
@@ -1191,13 +1193,13 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                     builder.AddPluginUiService(pluginCommands);
                     builder.AddCanvasesService(canvases is null ? new CanvasesService() : new CanvasesService(canvases, epoch));
                     builder.AddDocumentationService(new DocumentationService(documentation, epoch, documentationView, new DocumentationAsker(host, documentation, () => spaceView.ShownSpaceId), shell.NotifySessionsChanged));
-                    builder.AddSessionUserInputService(new SessionUserInputService(host.RuntimeService.Permissions, epoch, options.EnableOwnedUserInput));
-                    builder.AddSessionDisplayService(new SessionDisplayService(host.RuntimeService.Display, epoch));
-                    builder.AddSessionRuntimeStateService(new SessionRuntimeStateService(host.RuntimeService, epoch));
+                    builder.AddSessionUserInputService(new SessionUserInputService(sessionHosts, epoch, options.EnableOwnedUserInput));
+                    builder.AddSessionDisplayService(new SessionDisplayService(sessionHosts, epoch));
+                    builder.AddSessionRuntimeStateService(new SessionRuntimeStateService(sessionHosts, epoch));
                     builder.AddSessionUsageService(new SessionUsageService(host.RuntimeService, host.WorkspaceReads, epoch));
                     // A request exists only for a send that was reviewed: it stays readable and answerable after the
                     // setting is turned off, until that send ends.
-                    builder.AddSessionPermissionsService(new SessionPermissionsService(host.RuntimeService.Permissions, epoch, static () => true)
+                    builder.AddSessionPermissionsService(new SessionPermissionsService(sessionHosts, epoch, static () => true)
                     {
                         // The skill of an MCP server a session asks to load, read for the user on the connection of that session.
                         ReadSkill = async (sessionId, server, uri, token) =>

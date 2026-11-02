@@ -3,6 +3,7 @@ using System.Runtime.CompilerServices;
 using System.Text;
 using System.Text.Json;
 using CodeAlta.Agent;
+using CodeAlta.Desktop.SessionHosts;
 using CodeAlta.Orchestration.Jobs;
 using CodeAlta.Orchestration.Runtime;
 using NeoAstra.Rpc;
@@ -32,15 +33,27 @@ internal sealed partial class ToolCallsService
     internal const int MaximumPaths = 64;
 
     private readonly Func<string, long, CancellationToken, Task<AgentEvent?>>? _read;
-    private readonly RuntimeToolOutputProjection? _output;
+    // What a running call of a session writes (session, activity); null serves no live output.
+    private readonly Func<string, string, CancellationToken, IAsyncEnumerable<RuntimeToolOutputUpdate>>? _output;
+    // The job of a session (session, job), and what it writes; null serves no job.
+    private readonly Func<string, string, SessionJob?>? _findJob;
+    private readonly Func<string, string, CancellationToken, IAsyncEnumerable<RuntimeToolOutputUpdate>>? _observeJob;
     private readonly string? _epoch;
     private readonly TimeSpan _pace;
 
     /// <summary>
-    /// Gets the background jobs of the sessions, whose output is followed like the one of a running call, under
-    /// the identity of the job; null serves none.
+    /// Sets the background jobs of the sessions of this process, whose output is followed like the one of a running
+    /// call, under the identity of the job; null serves none. The service over the session hosts asks those hosts instead.
     /// </summary>
-    internal SessionJobService? Jobs { get; init; }
+    internal SessionJobService? Jobs
+    {
+        init
+        {
+            _findJob = value is null ? null : (sessionId, jobId) => value.Get(jobId) is { } job
+                && string.Equals(job.SessionId, sessionId, StringComparison.OrdinalIgnoreCase) ? job : null;
+            _observeJob = value is null ? null : (_, jobId, token) => value.ObserveOutputAsync(jobId, token);
+        }
+    }
 
     /// <summary>Creates an unavailable service for launches without an owned host.</summary>
     internal ToolCallsService()
@@ -59,6 +72,21 @@ internal sealed partial class ToolCallsService
         Prompts = reads.ReadSystemPromptAsync;
     }
 
+    /// <summary>Creates the service over the hosts of the sessions: each read and observation goes to the host of its session.</summary>
+    /// <param name="hosts">The hosts of the sessions.</param>
+    /// <param name="epoch">The host epoch that requests must name.</param>
+    /// <exception cref="ArgumentNullException"><paramref name="hosts"/> is null.</exception>
+    /// <exception cref="ArgumentException"><paramref name="epoch"/> is blank.</exception>
+    internal ToolCallsService(SessionHostRegistry hosts, string epoch)
+        : this((sessionId, offset, token) => hosts.Resolve(sessionId).ReadHistoryRecordAsync(sessionId, offset, token), (RuntimeToolOutputProjection?)null, epoch)
+    {
+        ArgumentNullException.ThrowIfNull(hosts);
+        Prompts = (sessionId, offset, token) => hosts.Resolve(sessionId).ReadSystemPromptAsync(sessionId, offset, token);
+        _output = (sessionId, activityId, token) => hosts.Resolve(sessionId).ObserveToolOutputAsync(sessionId, activityId, token);
+        _findJob = (sessionId, jobId) => hosts.Resolve(sessionId).FindJob(sessionId, jobId);
+        _observeJob = (sessionId, jobId, token) => hosts.Resolve(sessionId).ObserveJobOutputAsync(sessionId, jobId, token);
+    }
+
     /// <summary>Creates the service over a literal record read.</summary>
     /// <param name="read">Reads the event at (session, record offset).</param>
     /// <param name="output">The output of the running tool calls; null serves no live output.</param>
@@ -71,7 +99,7 @@ internal sealed partial class ToolCallsService
         ArgumentNullException.ThrowIfNull(read);
         ArgumentException.ThrowIfNullOrWhiteSpace(epoch);
         _read = read;
-        _output = output;
+        _output = output is null ? null : output.ObserveAsync;
         _epoch = epoch;
         _pace = pace ?? TimeSpan.FromMilliseconds(40);
     }
@@ -120,13 +148,13 @@ internal sealed partial class ToolCallsService
     public BackgroundJobDetailsResponse ReadJob(BackgroundJobDetailsRequest request, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
-        if (Jobs is null) return new("unavailable", null);
+        if (_findJob is null) return new("unavailable", null);
         if (!string.Equals(request.ExpectedEpoch, _epoch, StringComparison.Ordinal)) return new("stale_epoch", null);
         if (!Identity(request.SessionId) || !Identity(request.JobId) || !request.JobId.StartsWith(SessionJobService.IdPrefix, StringComparison.OrdinalIgnoreCase))
             return new("invalid", null);
         cancellationToken.ThrowIfCancellationRequested();
-        var job = Jobs.Get(request.JobId);
-        if (job is null || !string.Equals(job.SessionId, request.SessionId, StringComparison.OrdinalIgnoreCase)) return new("missing_job", null);
+        var job = _findJob(request.SessionId, request.JobId);
+        if (job is null) return new("missing_job", null);
         return new("ok", new(job.Id, job.Title, job.Command, job.Folder, job.Timeout is { } timeout ? (int)Math.Ceiling(timeout.TotalSeconds) : null));
     }
 
@@ -142,9 +170,9 @@ internal sealed partial class ToolCallsService
         if (!string.Equals(request.ExpectedEpoch, _epoch, StringComparison.Ordinal)) { yield return Ended("stale_epoch"); yield break; }
         cancellationToken.ThrowIfCancellationRequested();
         // A background job of the session is followed the same way: it writes outside any tool call, until its command ends.
-        var job = Jobs is not null && request.ActivityId.StartsWith(SessionJobService.IdPrefix, StringComparison.OrdinalIgnoreCase)
-            && Jobs.Get(request.ActivityId) is { } found && string.Equals(found.SessionId, request.SessionId, StringComparison.OrdinalIgnoreCase);
-        await using var observation = (job ? Jobs!.ObserveOutputAsync(request.ActivityId, cancellationToken) : _output.ObserveAsync(request.SessionId, request.ActivityId, cancellationToken))
+        var job = _findJob is not null && request.ActivityId.StartsWith(SessionJobService.IdPrefix, StringComparison.OrdinalIgnoreCase)
+            && _findJob(request.SessionId, request.ActivityId) is not null;
+        await using var observation = (job ? _observeJob!(request.SessionId, request.ActivityId, cancellationToken) : _output(request.SessionId, request.ActivityId, cancellationToken))
             .GetAsyncEnumerator(cancellationToken);
         while (true)
         {

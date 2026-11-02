@@ -2,13 +2,14 @@ using System.Runtime.CompilerServices;
 using CodeAlta.Agent;
 using CodeAlta.Agent.Runtime;
 using CodeAlta.Catalog;
+using CodeAlta.Desktop.Rpc;
 using CodeAlta.Desktop.SessionHosts;
 using CodeAlta.Orchestration.Jobs;
 using CodeAlta.Orchestration.Runtime;
 
 namespace CodeAlta.Desktop.Tests;
 
-// The registry of session hosts, over hosts that record what they are asked.
+// The registry of session hosts and the services of the page that go through it, over hosts that record what they are asked.
 [TestClass]
 public sealed class SessionHostRegistryTests
 {
@@ -50,6 +51,39 @@ public sealed class SessionHostRegistryTests
         Assert.ThrowsExactly<ArgumentException>(() => new SessionHostRegistry(new RecordingSessionHost(null), [new RecordingSessionHost(null)]));
         Assert.ThrowsExactly<ArgumentException>(() => new SessionHostRegistry(new RecordingSessionHost(null),
             [new RecordingSessionHost("mac-mini"), new RecordingSessionHost("mac-mini")]));
+    }
+
+    [TestMethod]
+    public async Task RoutedServices_AskTheHostOfTheSession()
+    {
+        var local = new RecordingSessionHost(null);
+        var hosts = new SessionHostRegistry(local);
+
+        await using (var display = new SessionDisplayService(hosts, Epoch).Observe(new SessionDisplayRequest(Epoch, SessionId), CancellationToken.None))
+        {
+            await foreach (var _ in display.Items) { }
+        }
+        var state = await new SessionRuntimeStateService(hosts, Epoch).CurrentAsync(new SessionRuntimeStateRequest(Epoch, SessionId), CancellationToken.None);
+        var asks = await new SessionAsksService(hosts, Epoch).ListAsync(new SessionAsksRequest(Epoch, SessionId), CancellationToken.None);
+        var permissions = await new SessionPermissionsService(hosts, Epoch, static () => true)
+            .ListAsync(new SessionPermissionsRequest(Epoch, SessionId), CancellationToken.None);
+        var inputs = await new SessionUserInputService(hosts, Epoch, enabled: true).ListAsync(new UserInputListRequest(Epoch, SessionId), CancellationToken.None);
+        var job = new ToolCallsService(hosts, Epoch).ReadJob(new BackgroundJobDetailsRequest(Epoch, SessionId, SessionJobService.IdPrefix + "1"), CancellationToken.None);
+
+        Assert.AreEqual("read_failed", state.Status);
+        Assert.AreEqual("ok", asks.Status);
+        Assert.AreEqual("ok", permissions.Status);
+        Assert.AreEqual("ok", inputs.Status);
+        Assert.AreEqual("missing_job", job.Status);
+        CollectionAssert.AreEqual(new[]
+        {
+            $"ObserveDisplay {SessionId}",
+            $"ReadRuntimeState {SessionId}",
+            $"ListAsks {SessionId}",
+            $"ListPermissions {SessionId}",
+            $"ListUserInputs {SessionId}",
+            $"FindJob {SessionId} {SessionJobService.IdPrefix}1",
+        }, local.Calls.ToArray());
     }
 
     // A host that records the calls the tests make and refuses the others.

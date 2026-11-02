@@ -2,6 +2,7 @@ using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 using CodeAlta.Catalog;
 using CodeAlta.Catalog.Reviews;
+using CodeAlta.Desktop.SessionHosts;
 using CodeAlta.LiveTool;
 using CodeAlta.Orchestration.Runtime;
 using NeoAstra.Rpc;
@@ -14,22 +15,62 @@ namespace CodeAlta.Desktop.Rpc;
 /// comments of the review store, and recorded once the session has it.
 /// </summary>
 [NeoRpcService("sessionAsks", Version = 1)]
-internal sealed class SessionAsksService(OwnedSessionAskService owner, string epoch, ReviewService? reviews = null, ProjectCatalog? projects = null)
+internal sealed class SessionAsksService
 {
     internal const int MaximumResponseBytes = 192 * 1024;
-    private readonly string _epoch = CanonicalEpoch(epoch) ? epoch : throw new ArgumentException("Canonical host epoch required.", nameof(epoch));
+    private readonly string _epoch;
+    // What the owner of the asks of a session says and does: the ask service of this process, or the host of the session.
+    private readonly AskOwner _owner;
+    private readonly ReviewService? reviews;
+    private readonly ProjectCatalog? projects;
     private int _closed;
+
+    internal SessionAsksService(OwnedSessionAskService owner, string epoch, ReviewService? reviews = null, ProjectCatalog? projects = null)
+        : this(OwnerOf(owner), epoch, reviews, projects) { }
+
+    /// <summary>Creates the service over the hosts of the sessions: each request goes to the host of its session.</summary>
+    internal SessionAsksService(SessionHostRegistry hosts, string epoch, ReviewService? reviews = null, ProjectCatalog? projects = null)
+        : this(OwnerOf(hosts), epoch, reviews, projects) { }
+
+    private SessionAsksService(AskOwner owner, string epoch, ReviewService? reviews, ProjectCatalog? projects)
+    {
+        _epoch = CanonicalEpoch(epoch) ? epoch : throw new ArgumentException("Canonical host epoch required.", nameof(epoch));
+        _owner = owner;
+        this.reviews = reviews;
+        this.projects = projects;
+    }
+
+    private sealed record AskOwner(Func<string?, bool> Enabled, Func<string, OwnedAskPage> List, Func<Guid, OwnedAskHandle, OwnedAskDisposition?> Observe,
+        Func<OwnedAskAction, CancellationToken, Task<OwnedAskDisposition>> AnswerAsync, Func<OwnedAskAction, CancellationToken, Task<OwnedAskDisposition>> CancelAsync);
+
+    private static AskOwner OwnerOf(OwnedSessionAskService owner)
+    {
+        ArgumentNullException.ThrowIfNull(owner);
+        return new(_ => owner.Enabled, owner.List, owner.Observe, owner.AnswerAsync, owner.CancelAsync);
+    }
+
+    private static AskOwner OwnerOf(SessionHostRegistry hosts)
+    {
+        ArgumentNullException.ThrowIfNull(hosts);
+        // A request without a valid session is refused before the owner acts; the local host says whether asks are on.
+        return new(sessionId => (sessionId is null ? hosts.Local : hosts.Resolve(sessionId)).AsksEnabled,
+            sessionId => hosts.Resolve(sessionId).ListAsks(sessionId),
+            (actionId, handle) => hosts.Resolve(handle.SessionId).ObserveAsk(actionId, handle),
+            (action, token) => hosts.Resolve(action.Handle.SessionId).AnswerAskAsync(action, token),
+            (action, token) => hosts.Resolve(action.Handle.SessionId).CancelAskAsync(action, token));
+    }
+
     internal void CloseAdmission() => Interlocked.Exchange(ref _closed, 1);
 
     [NeoRpcMethod("list")]
     public Task<SessionAsksPage> ListAsync(SessionAsksRequest request, CancellationToken cancellationToken)
     {
-        var error = Check(request?.ExpectedHostEpoch);
+        var error = Check(request?.ExpectedHostEpoch, request?.SessionId);
         var validSession = request is not null && OwnedSessionAskService.IsValidSessionId(request.SessionId);
         if (!validSession) error = "invalid_request";
         if (error is not null) return Task.FromResult(new SessionAsksPage(error, _epoch, validSession ? request!.SessionId : null, null, null, false));
         cancellationToken.ThrowIfCancellationRequested();
-        var page = owner.List(request!.SessionId);
+        var page = _owner.List(request!.SessionId);
         // One <=8192-unit request (plus a file path of at most 1000 units), at most 12 questions/240
         // choices, two scalar envelopes and one scalar disposition. Generated-serializer
         // escaping/framing is independently tested.
@@ -47,18 +88,18 @@ internal sealed class SessionAsksService(OwnedSessionAskService owner, string ep
     [NeoRpcMethod("observe")]
     public Task<SessionAskResult> ObserveAsync(SessionAskObservationRequest request, CancellationToken cancellationToken)
     {
-        var error = Check(request?.ExpectedHostEpoch);
+        var error = Check(request?.ExpectedHostEpoch, request?.Handle?.SessionId);
         if (request is null || request.ActionId == Guid.Empty || !TryHandle(request.Handle, out var handle))
             return Task.FromResult(new SessionAskResult("invalid_request", _epoch, null));
         if (error is not null) return Task.FromResult(new SessionAskResult(error, _epoch, null));
         cancellationToken.ThrowIfCancellationRequested();
-        var value = owner.Observe(request.ActionId, handle);
+        var value = _owner.Observe(request.ActionId, handle);
         return Task.FromResult(new SessionAskResult(value is null ? "not_found" : "ok", _epoch, ToWire(value)));
     }
 
     private async Task<SessionAskResult> ActAsync(SessionAskActionRequest request, bool cancel, CancellationToken token)
     {
-        var error = Check(request?.ExpectedHostEpoch);
+        var error = Check(request?.ExpectedHostEpoch, request?.Action?.Handle?.SessionId);
         if (request?.Action is not { } action || !TryHandle(action.Handle, out var handle))
             return new("invalid_request", _epoch, null);
         if (error is not null) return new(error, _epoch, null);
@@ -67,7 +108,7 @@ internal sealed class SessionAsksService(OwnedSessionAskService owner, string ep
         {
             // The review a request asks for: its round is composed from the user's comments, and recorded once the
             // session has it. An answer without its verdict, or a verdict for a plain question, is refused by the owner.
-            var target = owner.List(handle.SessionId).Head is { } head && head.Handle.AskId == handle.AskId ? head.Request.Review : null;
+            var target = _owner.List(handle.SessionId).Head is { } head && head.Handle.AskId == handle.AskId ? head.Request.Review : null;
             ReviewScope? scope = null;
             ReviewRoundDraft? round = null;
             if (target is not null)
@@ -95,7 +136,7 @@ internal sealed class SessionAsksService(OwnedSessionAskService owner, string ep
             OwnedAskDisposition result;
             try
             {
-                var original = cancel ? owner.CancelAsync(domain, token) : owner.AnswerAsync(domain, token);
+                var original = cancel ? _owner.CancelAsync(domain, token) : _owner.AnswerAsync(domain, token);
                 result = await original.WaitAsync(token).ConfigureAwait(false);
             }
             catch (Exception exception) when (record is not null && exception is not OperationCanceledException)
@@ -174,7 +215,8 @@ internal sealed class SessionAsksService(OwnedSessionAskService owner, string ep
         }
     }
 
-    private string? Check(string? expected) => expected != _epoch ? "stale_epoch" : Volatile.Read(ref _closed) != 0 ? "closed" : !owner.Enabled ? "disabled" : null;
+    private string? Check(string? expected, string? sessionId) => expected != _epoch ? "stale_epoch" : Volatile.Read(ref _closed) != 0 ? "closed"
+        : !_owner.Enabled(sessionId) ? "disabled" : null;
     private static bool CanonicalEpoch(string value) => Guid.TryParseExact(value, "D", out var parsed) && parsed != Guid.Empty && parsed.ToString("D") == value;
 
     internal static SessionAskHandle ToWire(OwnedAskHandle handle) => new(handle.OperationId, handle.RuntimeInstanceId,

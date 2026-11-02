@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Text.Json.Serialization;
 using CodeAlta.Agent;
+using CodeAlta.Desktop.SessionHosts;
 using CodeAlta.Orchestration.Runtime;
 using NeoAstra.Rpc;
 using XenoAtom.Logging;
@@ -26,6 +27,7 @@ internal sealed class SessionOperationsService
     private readonly int _capacity = 256;
     private bool _closed;
     private readonly Func<string, CancellationToken, Task<OwnedSelectionChoices?>>? _choices;
+    private readonly Func<string, string, CancellationToken, Task<string>>? _stopBackgroundTask;
     private readonly OwnedSessionCommandService? _commands;
     private readonly Func<string, Task<OwnedSharedConversationResult>>? _describeShared;
     private readonly Func<string, Task<OwnedSharedConversationResult>>? _releaseShared;
@@ -48,8 +50,30 @@ internal sealed class SessionOperationsService
         _compact = commands.AdmitCompact;
         _abortRun = commands.AdmitAbortRun;
         _choices = commands.GetObservedSelectionChoicesAsync;
+        _stopBackgroundTask = commands.StopBackgroundTaskAsync;
         _describeShared = commands.GetSharedConversationAsync;
         _releaseShared = commands.ReleaseSharedConversationAsync;
+    }
+
+    /// <summary>
+    /// Creates the service over the hosts of the sessions: the commands that run a session (send, steer, compact,
+    /// stop) go to the host of that session; the others still go to the command owner of this process.
+    /// </summary>
+    /// <param name="hosts">The hosts of the sessions.</param>
+    /// <param name="commands">The command owner of this process.</param>
+    /// <param name="epoch">The host epoch that requests must name.</param>
+    /// <exception cref="ArgumentNullException"><paramref name="hosts"/> or <paramref name="commands"/> is null.</exception>
+    internal SessionOperationsService(SessionHostRegistry hosts, OwnedSessionCommandService commands, string epoch)
+        : this(commands, epoch)
+    {
+        ArgumentNullException.ThrowIfNull(hosts);
+        _capacity = hosts.Local.ReceiptCapacity;
+        _send = (request, token) => hosts.Resolve(request.SessionId).AdmitSend(request, token);
+        _abort = (request, token) => hosts.ResolveOperation(request.TargetOperationId).AdmitAbort(request, token);
+        _steer = (request, token) => hosts.Resolve(request.SessionId).AdmitSteer(request, token);
+        _compact = (request, token) => hosts.Resolve(request.SessionId).AdmitCompact(request, token);
+        _abortRun = (request, token) => hosts.Resolve(request.SessionId).AdmitAbortRun(request, token);
+        _stopBackgroundTask = (sessionId, taskId, token) => hosts.Resolve(sessionId).StopBackgroundTaskAsync(sessionId, taskId, token);
     }
 
     // The seam of the conversation a session shares with VS Code and a terminal: what the host says of it, and what opens
@@ -308,9 +332,9 @@ internal sealed class SessionOperationsService
             var denied = CheckEpoch(request.ExpectedEpoch);
             if (denied is not null) return new(denied, _epoch, request.SessionId);
             if (!Identity(request.SessionId, 256) || !Identity(request.TaskId, 256)) return new("invalid_request", _epoch, request.SessionId);
-            if (_commands is null) return new("unavailable", _epoch, request.SessionId);
+            if (_stopBackgroundTask is null) return new("unavailable", _epoch, request.SessionId);
         }
-        return new(await _commands.StopBackgroundTaskAsync(request.SessionId, request.TaskId, cancellationToken).ConfigureAwait(false), _epoch, request.SessionId);
+        return new(await _stopBackgroundTask(request.SessionId, request.TaskId, cancellationToken).ConfigureAwait(false), _epoch, request.SessionId);
     }
 
     // The resume after a limit a session waits for, as its card shows it. It leaves no receipt: the cards of the session
