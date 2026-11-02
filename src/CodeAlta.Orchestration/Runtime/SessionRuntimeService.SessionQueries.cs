@@ -340,17 +340,36 @@ public sealed partial class SessionRuntimeService
     /// <exception cref="ArgumentNullException"><paramref name="session"/> or <paramref name="include"/> is null.</exception>
     /// <exception cref="ArgumentOutOfRangeException"><paramref name="limit"/> is not positive.</exception>
     /// <exception cref="OperationCanceledException">The read is canceled.</exception>
-    public async Task<StoredHistoryWindow?> TryReadStoredHistoryWindowAsync(SessionViewDescriptor session, long? since, int limit, bool fromTail,
+    public Task<StoredHistoryWindow?> TryReadStoredHistoryWindowAsync(SessionViewDescriptor session, long? since, int limit, bool fromTail,
+        Func<AgentEvent, bool> include, CancellationToken cancellationToken = default)
+        => TryReadStoredHistoryWindowAsync(session, since, before: null, limit, fromTail, include, cancellationToken);
+
+    /// <summary>
+    /// Reads a window of the persisted history of a session, between two event numbers, as
+    /// <see cref="TryReadStoredHistoryWindowAsync(SessionViewDescriptor, long?, int, bool, Func{AgentEvent, bool}, CancellationToken)"/> does.
+    /// </summary>
+    /// <param name="session">The session descriptor.</param>
+    /// <param name="since">The number of the last event already seen; null for none.</param>
+    /// <param name="before">The number of the first event already seen, which the window ends before; null for no end.</param>
+    /// <param name="limit">The most events to return.</param>
+    /// <param name="fromTail">True for the last events of the range, false for its first ones.</param>
+    /// <param name="include">Which events count.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The events with their numbers, in journal order, and whether more events than <paramref name="limit"/> count; null when the window cannot be read this way.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="session"/> or <paramref name="include"/> is null.</exception>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="limit"/> is not positive.</exception>
+    /// <exception cref="OperationCanceledException">The read is canceled.</exception>
+    public async Task<StoredHistoryWindow?> TryReadStoredHistoryWindowAsync(SessionViewDescriptor session, long? since, long? before, int limit, bool fromTail,
         Func<AgentEvent, bool> include, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(session);
         ArgumentNullException.ThrowIfNull(include);
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(limit);
-        return await AdmitAsync(() => TryReadStoredHistoryWindowOwnedBodyAsync(session, since ?? 0, limit, fromTail, include, cancellationToken), cancellationToken)
+        return await AdmitAsync(() => TryReadStoredHistoryWindowOwnedBodyAsync(session, since ?? 0, before ?? long.MaxValue, limit, fromTail, include, cancellationToken), cancellationToken)
             .WaitAsync(cancellationToken).ConfigureAwait(false);
     }
 
-    private async Task<StoredHistoryWindow?> TryReadStoredHistoryWindowOwnedBodyAsync(SessionViewDescriptor session, long since, int limit, bool fromTail,
+    private async Task<StoredHistoryWindow?> TryReadStoredHistoryWindowOwnedBodyAsync(SessionViewDescriptor session, long since, long before, int limit, bool fromTail,
         Func<AgentEvent, bool> include, CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(session.SessionId))
@@ -370,7 +389,7 @@ public sealed partial class SessionRuntimeService
                     return null;
                 }
 
-                return await ReadHistoryWindowAsync(store, turns, since, limit, fromTail, include, cancellationToken).ConfigureAwait(false);
+                return await ReadHistoryWindowAsync(store, turns, since, before, limit, fromTail, include, cancellationToken).ConfigureAwait(false);
             }
             catch (AgentSessionHistoryException error) when (error.Code == "history_changed")
             {
@@ -388,7 +407,7 @@ public sealed partial class SessionRuntimeService
     // The window, read a segment at a time: what precedes the first turn, then each turn, each with the number of events
     // before it; null when a segment does not hold the number of events its numbers say.
     private static async Task<StoredHistoryWindow?> ReadHistoryWindowAsync(FileSystemAgentSessionStore store, AgentSessionTurns turns,
-        long since, int limit, bool fromTail, Func<AgentEvent, bool> include, CancellationToken cancellationToken)
+        long since, long before, int limit, bool fromTail, Func<AgentEvent, bool> include, CancellationToken cancellationToken)
     {
         var segments = new List<(long Start, long End, long First, long Count)>(turns.Turns.Count + 1);
         var start = 0L;
@@ -413,6 +432,13 @@ public sealed partial class SessionRuntimeService
                 continue;
             }
 
+            // A segment whose events are all at or after the first one seen holds none of the window either.
+            if (segment.First + 1 >= before)
+            {
+                if (!fromTail) break;
+                continue;
+            }
+
             var events = await store.ReadHistoryRangeAsync(turns.Revision, segment.Start, segment.End, cancellationToken).ConfigureAwait(false);
             if (events.Count != segment.Count)
             {
@@ -423,7 +449,7 @@ public sealed partial class SessionRuntimeService
             for (var position = 0; position < events.Count; position++)
             {
                 var sequence = segment.First + position + 1;
-                if (sequence > since && include(events[position]))
+                if (sequence > since && sequence < before && include(events[position]))
                 {
                     kept.Add(new(events[position], sequence));
                 }

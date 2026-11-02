@@ -962,13 +962,15 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
     {
         string? sessionId = null;
         var last = 20;
+        long? before = null;
         var options = new SessionEventsOptions();
         var command = Leaf("tail", "Return a finite sanitized snapshot of recent session events.");
         command.Add("<session-id>", "CodeAlta session id.", value => sessionId = value);
         command.Add("last=", "Number of recent events to return.", (int value) => last = value);
+        command.Add("before=", "Return events before this sequence number, to page back through the history.", (long value) => before = value);
         AddSessionEventOptions(command, options);
-        command.Add(async (_, _) => await HandleSessionEventsAsync(context, sessionId, since: null, limit: last, options, fromTail: true).ConfigureAwait(false));
-        AddHelpText(command, "Examples: `alta session tail <session-id> --last 10`; add `--include user,assistant` or `--kind assistant.message` to narrow output.");
+        command.Add(async (_, _) => await HandleSessionEventsAsync(context, sessionId, since: null, before, limit: last, options, fromTail: true).ConfigureAwait(false));
+        AddHelpText(command, "Examples: `alta session tail <session-id> --last 10`; add `--include user,assistant` or `--kind assistant.message` to narrow output; `--before <sequence>` with the first number of a read gives the events before it.");
         return command;
     }
 
@@ -983,7 +985,7 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         command.Add("since=", "Return events after this sequence number.", (long value) => since = value);
         command.Add("limit=", "Maximum events to return.", (int value) => limit = value);
         AddSessionEventOptions(command, options);
-        command.Add(async (_, _) => await HandleSessionEventsAsync(context, sessionId, since, limit, options, fromTail: false).ConfigureAwait(false));
+        command.Add(async (_, _) => await HandleSessionEventsAsync(context, sessionId, since, before: null, limit, options, fromTail: false).ConfigureAwait(false));
         AddHelpText(command, "Examples: `alta session events <session-id> --since 120 --limit 50 --include assistant,tool`; `alta session events <session-id> --kind assistant.message --fields timestamp,kind,content`.");
         return command;
     }
@@ -2542,6 +2544,7 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         AltaCommandContext context,
         string? sessionId,
         long? since,
+        long? before,
         int limit,
         SessionEventsOptions options,
         bool fromTail)
@@ -2554,6 +2557,11 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         if (limit <= 0)
         {
             return UsageError(context, "usage.invalidLimit", fromTail ? "--last must be positive." : "--limit must be positive.", fromTail ? "alta session tail" : "alta session events");
+        }
+
+        if (before <= 0)
+        {
+            return UsageError(context, "usage.invalidBefore", "--before must be positive.", "alta session tail");
         }
 
         if (!context.TryGetRequired<SessionRuntimeService>(nameof(SessionRuntimeService), out var runtime))
@@ -2572,7 +2580,7 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         var kinds = ParseSet(options.Kind);
         var fields = ParseSet(options.Fields);
         // The turns the window spans are read, not the whole journal; the whole history only when that cannot be done.
-        var window = await runtime.TryReadStoredHistoryWindowAsync(info.Session, since, limit, fromTail,
+        var window = await runtime.TryReadStoredHistoryWindowAsync(info.Session, since, before, limit, fromTail,
             agentEvent => IncludesEvent(agentEvent, includes, kinds, options.NoToolOutput, options.ToolImages), context.CancellationToken).ConfigureAwait(false);
         if (window is not null)
         {
@@ -2596,6 +2604,7 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         var records = history
             .Select((agentEvent, index) => (Event: agentEvent, Sequence: (long)index + 1))
             .Where(item => since is null || item.Sequence > since.Value)
+            .Where(item => before is null || item.Sequence < before.Value)
             .Where(item => IncludesEvent(item.Event, includes, kinds, options.NoToolOutput, options.ToolImages))
             .ToArray();
         var selected = fromTail

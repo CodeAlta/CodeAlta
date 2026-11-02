@@ -469,6 +469,38 @@ public sealed partial class AltaLiveToolTests
             Assert.AreEqual(AltaExitCodes.Success, since.ExitCode, since.Stderr);
             CollectionAssert.AreEqual(new long[] { secondTurnFirst + 1, secondTurnFirst + 2 }, Sequences(since.Stdout), since.Stdout);
         }
+
+        // Before an event of the second turn: that turn alone is read, a page back from there, with the numbers of the whole history.
+        var secondTurnLast = full.ToList().FindLastIndex(item => item.RunId?.Value == turns[1].RunId) + 1;
+        using (var held = new FileStream(journal, FileMode.Open, FileAccess.ReadWrite, FileShare.ReadWrite | FileShare.Delete))
+        {
+            held.Lock(0, turns[1].StartOffset);
+            held.Lock(turns[2].StartOffset, length - turns[2].StartOffset);
+            var before = await dispatcher.InvokeAsync(["session", "tail", sessionId, "--before", secondTurnLast.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                "--last", "2"], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+            Assert.AreEqual(AltaExitCodes.Success, before.ExitCode, before.Stderr);
+            CollectionAssert.AreEqual(new long[] { secondTurnLast - 2, secondTurnLast - 1 }, Sequences(before.Stdout), before.Stdout);
+        }
+
+        // Paging back from the end gives every event once, in order, and says when none is left.
+        var paged = new List<long>();
+        long? first = null;
+        for (var page = 0; page <= full.Count; page++)
+        {
+            List<string> args = ["session", "tail", sessionId, "--last", "3"];
+            if (first is { } edge) args.AddRange(["--before", edge.ToString(System.Globalization.CultureInfo.InvariantCulture)]);
+            var read = await dispatcher.InvokeAsync(args, caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+            var numbers = Sequences(read.Stdout);
+            paged.InsertRange(0, numbers);
+            var truncated = ReadJsonLines(read.Stdout).Single(static line => line.GetProperty("type").GetString() == "alta.session.tail.summary").GetProperty("truncated").GetBoolean();
+            if (!truncated) break;
+            first = numbers[0];
+        }
+
+        CollectionAssert.AreEqual(Enumerable.Range(1, full.Count).Select(static number => (long)number).ToArray(), paged);
+
+        var refused = await dispatcher.InvokeAsync(["session", "tail", sessionId, "--before", "0"], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+        Assert.AreEqual(AltaExitCodes.Usage, refused.ExitCode, refused.Stdout);
     }
 
     [TestMethod]
