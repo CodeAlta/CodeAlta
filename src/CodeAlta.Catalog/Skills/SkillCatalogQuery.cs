@@ -86,6 +86,32 @@ public sealed record SkillCatalogQuery
         string? projectRoot,
         IEnumerable<string>? otherProjectRoots,
         SpaceFilter? space)
+        => ForSession(configStore, userCodeAltaRoot, userProfileRoot, projectRoot, otherProjectRoots, space, projectSkillFolders: null);
+
+    /// <summary>
+    /// Builds the query of the skills a session can see, as
+    /// <see cref="ForSession(CodeAltaConfigStore?, string?, string?, string?, IEnumerable{string}?, SpaceFilter?)"/> does,
+    /// with the folders of skills the user added: those of every space (<c>[skills] folders</c> of the global
+    /// configuration), those of the space (<see cref="SpaceFilter.SkillFolders"/>) and those of the project.
+    /// </summary>
+    /// <param name="configStore">The configuration store; <see langword="null"/> when the host keeps none, where nothing is disabled or added.</param>
+    /// <param name="userCodeAltaRoot">The CodeAlta folder of the user; <see langword="null"/> to omit its skills.</param>
+    /// <param name="userProfileRoot">The profile folder of the user; <see langword="null"/> to omit its common skills.</param>
+    /// <param name="projectRoot">The folder of the project of the session, whose configuration disables skills; <see langword="null"/> for none.</param>
+    /// <param name="otherProjectRoots">More folders whose skills the session sees; their configuration is not read.</param>
+    /// <param name="space">What the space of the session has; <see langword="null"/> to list the skills of every space, without the folders of a space.</param>
+    /// <param name="projectSkillFolders">The folders the user added for the project (<see cref="ProjectDescriptor.SkillFolders"/>); <see langword="null"/> for none.</param>
+    /// <returns>The query.</returns>
+    /// <exception cref="InvalidDataException">A configuration file cannot be parsed.</exception>
+    /// <exception cref="IOException">A configuration file cannot be read.</exception>
+    public static SkillCatalogQuery ForSession(
+        CodeAltaConfigStore? configStore,
+        string? userCodeAltaRoot,
+        string? userProfileRoot,
+        string? projectRoot,
+        IEnumerable<string>? otherProjectRoots,
+        SpaceFilter? space,
+        IEnumerable<string>? projectSkillFolders)
     {
         var roots = new List<string>();
         foreach (var root in (string.IsNullOrWhiteSpace(projectRoot) ? [] : new[] { projectRoot }).Concat(otherProjectRoots ?? []))
@@ -102,6 +128,8 @@ public sealed record SkillCatalogQuery
                 ProjectRoots = roots,
                 UserCodeAltaRoot = userCodeAltaRoot,
                 UserProfileRoot = userProfileRoot,
+                AdditionalRoots = AddedSkillFolders.Roots(configStore?.LoadGlobalSkillFolders(), space?.SpaceId, space?.SkillFolders,
+                    projectSkillFolders, userProfileRoot, userCodeAltaRoot),
             },
             Space = space,
             GlobalDisabledSkillNames = (IReadOnlyCollection<string>?)configStore?.LoadGlobalDisabledSkillNames() ?? [],

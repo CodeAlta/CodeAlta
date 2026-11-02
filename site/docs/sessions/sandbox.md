@@ -14,6 +14,7 @@ In a sandboxed session:
 
 - **Commands, file tools and background jobs** run in the container. They write in the folder of the session, its worktree, its scratchpad and a temporary folder, and read the system and your developer tools.
 - **Your home folder is out of reach**, except the developer tools. So are the files of CodeAlta (`~/.alta`), your SSH keys and the credentials of providers and clouds. The only files of CodeAlta a session reads are the long outputs of its own tools, saved with it, which it does not write.
+- **Skill folders are read-only**: your own (`~/.alta/skills`, `~/.agents/skills`, `~/.copilot/skills`) and the [folders you added](../workspace/settings.md#skill-folders), so that an agent reads the files of a skill it uses. One inside the folder the session works in stays as it is; a folder of secrets, your home folder or a whole disk is never opened this way.
 - **Files that run programs later stay read-only**, even inside the project: `.git/config`, git hooks, the `.alta` settings and plugins, the settings of editors and of other coding agents.
 - **The network** is what the profile says: the package registries only, nothing, or the internet. This computer and its local network are never reached.
 - **The environment** has no secret of yours, unless the profile names it.

@@ -373,6 +373,7 @@ internal sealed record BootClosing(string? Step, int Seconds, bool CanForceExit)
 [JsonSerializable(typeof(SkillsSetEnabledRequest))]
 [JsonSerializable(typeof(SkillsSetAllEnabledRequest))]
 [JsonSerializable(typeof(SkillsSetMatchingEnabledRequest))]
+[JsonSerializable(typeof(SkillsFolderRequest))]
 [JsonSerializable(typeof(SkillsMutationResponse))]
 [JsonSerializable(typeof(SkillsMcpListResponse))]
 [JsonSerializable(typeof(SkillsMcpSetEnabledRequest))]

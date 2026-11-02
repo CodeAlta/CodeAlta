@@ -60,6 +60,11 @@ public sealed class CatalogYamlSerializer
         [JsonPropertyName("sandbox")]
         [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
         public string? Sandbox { get; set; }
+
+        // The folders of skills the user added for the project: in the user's file, never in the repository.
+        [JsonPropertyName("skill_folders")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public List<string>? SkillFolders { get; set; }
     }
 
     private sealed class LabelFrontMatter
@@ -131,6 +136,10 @@ public sealed class CatalogYamlSerializer
         [JsonPropertyName("tools")]
         [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
         public SpaceToolsFrontMatter? Tools { get; set; }
+
+        [JsonPropertyName("skills")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public SpaceSkillsFrontMatter? Skills { get; set; }
     }
 
     private sealed class SpaceNewSessionsFrontMatter
@@ -272,6 +281,13 @@ public sealed class CatalogYamlSerializer
         public string? TokenEnv { get; set; }
     }
 
+    private sealed class SpaceSkillsFrontMatter
+    {
+        [JsonPropertyName("folders")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public List<string>? Folders { get; set; }
+    }
+
     private sealed class SpaceToolsFrontMatter
     {
         [JsonPropertyName("disabled")]
@@ -360,6 +376,7 @@ public sealed class CatalogYamlSerializer
             Labels = LabelDescriptor.NormalizeIds(frontMatter.Labels),
             Archived = frontMatter.Archived ?? false,
             Sandbox = SpaceNewSessions.IsSandboxName(frontMatter.Sandbox?.Trim()) ? frontMatter.Sandbox!.Trim() : null,
+            SkillFolders = [.. ProjectDescriptor.NormalizeSkillFolders(frontMatter.SkillFolders ?? [])],
             Checkout = new CheckoutRule
             {
                 PathTemplate = frontMatter.Checkout?.PathTemplate ?? string.Empty,
@@ -394,6 +411,7 @@ public sealed class CatalogYamlSerializer
             Spaces = SpaceDescriptor.NormalizeIds(descriptor.Spaces) is { Count: > 0 } spaces ? spaces : null,
             Labels = LabelDescriptor.NormalizeIds(descriptor.Labels) is { Count: > 0 } labels ? labels : null,
             Sandbox = SpaceNewSessions.IsSandboxName(descriptor.Sandbox?.Trim()) ? descriptor.Sandbox!.Trim() : null,
+            SkillFolders = ProjectDescriptor.NormalizeSkillFolders(descriptor.SkillFolders) is { Count: > 0 } skillFolders ? [.. skillFolders] : null,
         };
 
         return SerializeMarkdown(frontMatter, descriptor.MarkdownBody, descriptor.DisplayName);
@@ -459,7 +477,8 @@ public sealed class CatalogYamlSerializer
                         [.. (entry.Value?.Env ?? []).Select(static variable => new KeyValuePair<string, string>(variable.Key?.Trim() ?? string.Empty, variable.Value?.Trim() ?? string.Empty))],
                         Text(entry.Value?.Check), Text(entry.Value?.Login)))]
                     : null),
-            frontMatter.Tools is { } tools ? new SpaceTools([.. (tools.Disabled ?? []).Select(static name => name?.Trim() ?? string.Empty)]) : null);
+            frontMatter.Tools is { } tools ? new SpaceTools([.. (tools.Disabled ?? []).Select(static name => name?.Trim() ?? string.Empty)]) : null,
+            frontMatter.Skills is { } skills ? new SpaceSkills([.. (skills.Folders ?? []).Select(static folder => folder?.Trim() ?? string.Empty)]) : null);
     }
 
     // What the file writes of the settings: nothing for what is not set.
@@ -516,6 +535,11 @@ public sealed class CatalogYamlSerializer
         if (settings.Tools is { IsEmpty: false } tools)
         {
             frontMatter.Tools = new SpaceToolsFrontMatter { Disabled = [.. tools.Disabled] };
+        }
+
+        if (settings.Skills is { IsEmpty: false } skills)
+        {
+            frontMatter.Skills = new SpaceSkillsFrontMatter { Folders = [.. skills.Folders] };
         }
     }
 

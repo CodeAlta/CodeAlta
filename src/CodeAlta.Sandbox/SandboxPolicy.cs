@@ -30,6 +30,19 @@ public sealed record SandboxSessionFolders
     public IReadOnlyList<string> Readable { get; init; } = [];
 
     /// <summary>
+    /// Gets the folders of skills the session sees outside of its project: those of the user (<c>~/.alta/skills</c>,
+    /// <c>~/.agents/skills</c>...) and those the user added, so that the agent reads the files of a skill it activates.
+    /// They are read and never written: one inside what the session writes is protected, even before it exists, since a
+    /// skill planted there would be read later by sessions that are not sandboxed. The folders a link of a folder, or of
+    /// one of its skills, leads to are granted with it, unless the folder is inside what the session writes or one of its
+    /// repositories (where a repository or the sandbox could have made the link) or the link leads into a folder of
+    /// secrets. A folder of secrets, the home folder, a folder that holds it and a whole disk are never granted this way,
+    /// and the secrets inside a granted folder stay denied. A folder outside what the session writes that does not exist
+    /// as the sandbox starts is not granted.
+    /// </summary>
+    public IReadOnlyList<string> SkillFolders { get; init; } = [];
+
+    /// <summary>
     /// Gets the name of a home folder of its own, kept between sessions and profiles: the one of an agent that signs in
     /// there once and that no other process of a sandbox reaches; null for the home folder of the profile.
     /// </summary>

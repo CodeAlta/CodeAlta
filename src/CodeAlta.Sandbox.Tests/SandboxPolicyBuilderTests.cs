@@ -159,6 +159,132 @@ public sealed class SandboxPolicyBuilderTests
     }
 
     [TestMethod]
+    public void TheFoldersOfSkills_AreReadOnly_ProtectedInsideWhatTheSessionWrites_AndNeverAFolderOfSecretsOrTheHome()
+    {
+        using var temp = new TempTree();
+        var project = temp.Folder("project");
+        var userSkills = temp.Folder("home/.alta/skills");
+        var claudeSkills = temp.Folder("home/.claude/skills");
+        var library = temp.Folder("library");
+        var inProject = temp.Folder("project/tools/skills");
+        var secret = temp.Folder("home/.ssh");
+        temp.Folder("library/.aws");
+        var gone = Path.Combine(temp.Root, "gone");
+
+        var policy = SandboxPolicyBuilder.Build(SandboxProfiles.Resolve("strict", []),
+            new SandboxSessionFolders { WorkingDirectory = project, SkillFolders = [userSkills, claudeSkills, library, inProject, secret, temp.Folder("home"), temp.Root, gone, Path.GetPathRoot(project)!] },
+            new SandboxHost { DataRoot = temp.Folder("data"), HomeDirectory = temp.Folder("home"), Environment = new Dictionary<string, string>() }, [], "s1");
+
+        foreach (var folder in new[] { userSkills, claudeSkills, library }) CollectionAssert.Contains(policy.ReadOnly.ToList(), folder, folder);
+        Assert.IsFalse(policy.ReadWrite.Any(path => SandboxPolicyBuilder.IsInside(path, library)), "a folder of skills is never written");
+        CollectionAssert.Contains(policy.Protected.ToList(), inProject, "a folder of skills the session would write stays as it is");
+        CollectionAssert.DoesNotContain(policy.ReadOnly.ToList(), inProject);
+        var granted = policy.ReadWrite.Concat(policy.ReadOnly).ToList();
+        Assert.IsFalse(granted.Any(path => SandboxPolicyBuilder.IsInside(path, secret)), "a folder of secrets is not granted whole");
+        Assert.IsFalse(granted.Any(path => SandboxPolicyBuilder.IsInside(path, temp.Folder("home"))), "nor the home folder, a folder that holds it, or a disk");
+        Assert.IsFalse(granted.Contains(gone), "a folder that does not exist is not granted");
+        CollectionAssert.DoesNotContain(policy.Denied.ToList(), Path.Combine(temp.Root, "home", ".alta"), "a grant inside a folder of secrets does not deny it");
+    }
+
+    [TestMethod]
+    public void AFolderOfSkillsThatDoesNotExistYet_InsideWhatTheSessionWrites_IsProtected()
+    {
+        using var temp = new TempTree();
+        var project = temp.Folder("project");
+        var notYet = Path.Combine(project, "tools", "skills");
+
+        var policy = SandboxPolicyBuilder.Build(SandboxProfiles.Resolve("strict", []),
+            new SandboxSessionFolders { WorkingDirectory = project, SkillFolders = [notYet] },
+            new SandboxHost { DataRoot = temp.Folder("data"), HomeDirectory = temp.Folder("home"), Environment = new Dictionary<string, string>() }, [], "s1");
+        CollectionAssert.Contains(policy.Protected.ToList(), notYet, "the sandbox cannot create it and plant skills there");
+    }
+
+    [TestMethod]
+    public void ALinkOfAFolderOfSkills_ReachesNoSecret_AndOneInAProjectIsNotFollowed()
+    {
+        using var temp = new TempTree();
+        var project = temp.Folder("project");
+        var repository = temp.Folder("repository");
+        var library = temp.Folder("library");
+        var inRepository = temp.Folder("repository/tools/skills");
+        var credentials = temp.Folder("home/.alta/auth");
+        var privateFolder = temp.Folder("private");
+        try
+        {
+            Directory.CreateSymbolicLink(Path.Combine(library, "auth"), credentials);
+            Directory.CreateSymbolicLink(Path.Combine(inRepository, "planted"), privateFolder);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            Assert.Inconclusive("This system does not let the tests create a symbolic link.");
+            return;
+        }
+
+        var policy = SandboxPolicyBuilder.Build(SandboxProfiles.Resolve("strict", []),
+            new SandboxSessionFolders { WorkingDirectory = project, Repositories = [repository], SkillFolders = [library, inRepository] },
+            new SandboxHost { DataRoot = temp.Folder("data"), HomeDirectory = temp.Folder("home"), Environment = new Dictionary<string, string>() }, [], "s1");
+        var granted = policy.ReadWrite.Concat(policy.ReadOnly).ToList();
+        CollectionAssert.Contains(policy.ReadOnly.ToList(), library);
+        CollectionAssert.Contains(policy.ReadOnly.ToList(), inRepository);
+        Assert.IsFalse(granted.Any(path => SandboxPolicyBuilder.IsInside(path, credentials)), "a link into a folder of secrets reads none of it");
+        Assert.IsFalse(granted.Any(path => SandboxPolicyBuilder.IsInside(path, privateFolder)), "a link a repository holds is not followed");
+    }
+
+    [TestMethod]
+    public void AFolderOfSkillsThatIsALink_IsCheckedWhereItLeads_AndALinkIntoWhatTheSessionWritesIsProtected()
+    {
+        using var temp = new TempTree();
+        var project = temp.Folder("project");
+        var credentials = temp.Folder("home/.alta/auth");
+        var shared = temp.Folder("project/shared-skill");
+        var library = temp.Folder("library");
+        var aliasOfSecret = Path.Combine(temp.Root, "alias");
+        try
+        {
+            Directory.CreateSymbolicLink(aliasOfSecret, credentials);
+            Directory.CreateSymbolicLink(Path.Combine(library, "shared"), shared);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            Assert.Inconclusive("This system does not let the tests create a symbolic link.");
+            return;
+        }
+
+        var policy = SandboxPolicyBuilder.Build(SandboxProfiles.Resolve("strict", []),
+            new SandboxSessionFolders { WorkingDirectory = project, SkillFolders = [aliasOfSecret, library] },
+            new SandboxHost { DataRoot = temp.Folder("data"), HomeDirectory = temp.Folder("home"), Environment = new Dictionary<string, string>() }, [], "s1");
+        var granted = policy.ReadWrite.Concat(policy.ReadOnly).ToList();
+        Assert.IsFalse(policy.ReadOnly.Any(path => SandboxPolicyBuilder.IsInside(path, aliasOfSecret) || SandboxPolicyBuilder.IsInside(path, credentials)),
+            "a folder of skills that leads into a folder of secrets is not granted");
+        CollectionAssert.Contains(policy.ReadOnly.ToList(), library);
+        CollectionAssert.Contains(policy.Protected.ToList(), shared, "a skill linked from a library stays as it is in the folder the session writes");
+    }
+
+    [TestMethod]
+    public void TheFolderALinkOfAFolderOfSkillsLeadsTo_IsReadOnlyToo()
+    {
+        using var temp = new TempTree();
+        var project = temp.Folder("project");
+        var skills = temp.Folder("home/.agents/skills");
+        var library = temp.Folder("library/shared");
+        try
+        {
+            Directory.CreateSymbolicLink(Path.Combine(skills, "shared"), library);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            Assert.Inconclusive("This system does not let the tests create a symbolic link.");
+            return;
+        }
+
+        var policy = SandboxPolicyBuilder.Build(SandboxProfiles.Resolve("strict", []),
+            new SandboxSessionFolders { WorkingDirectory = project, SkillFolders = [skills] },
+            new SandboxHost { DataRoot = temp.Folder("data"), HomeDirectory = temp.Folder("home"), Environment = new Dictionary<string, string>() }, [], "s1");
+        CollectionAssert.Contains(policy.ReadOnly.ToList(), skills);
+        CollectionAssert.Contains(policy.ReadOnly.ToList(), library, "the skill the link leads to is read where it is");
+    }
+
+    [TestMethod]
     public void AProcessWithAHomeOfItsOwn_KeepsItBetweenProfiles_AndNotInTheHomeOfAProfile()
     {
         using var temp = new TempTree();

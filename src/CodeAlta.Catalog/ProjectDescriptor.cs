@@ -83,6 +83,14 @@ public sealed class ProjectDescriptor
     public string? Sandbox { get; set; }
 
     /// <summary>
+    /// Gets or sets the folders of skills the user added for the project, in the order of the list (see
+    /// <see cref="Skills.AddedSkillFolders"/>). Kept in the user's file of the project, never in the repository: a
+    /// repository cannot make CodeAlta read skills from outside of it.
+    /// </summary>
+    [JsonPropertyName("skill_folders")]
+    public List<string> SkillFolders { get; set; } = [];
+
+    /// <summary>
     /// Gets or sets checkout settings.
     /// </summary>
     [JsonPropertyName("checkout")]
@@ -123,6 +131,7 @@ public sealed class ProjectDescriptor
         Labels = [.. Labels],
         Archived = Archived,
         Sandbox = Sandbox,
+        SkillFolders = [.. SkillFolders],
         Checkout = new CheckoutRule
         {
             PathTemplate = Checkout.PathTemplate,
@@ -132,6 +141,20 @@ public sealed class ProjectDescriptor
         SourcePath = SourcePath,
         MarkdownBody = MarkdownBody,
     };
+
+    /// <summary>
+    /// Keeps what a list of folders of skills can hold: each path on one line, once, at most
+    /// <see cref="Skills.AddedSkillFolders.MaximumFolders"/> of them.
+    /// </summary>
+    /// <param name="folders">The folders, as a file writes them.</param>
+    /// <returns>The folders that are kept, in their order.</returns>
+    public static IReadOnlyList<string> NormalizeSkillFolders(IEnumerable<string?> folders)
+    {
+        ArgumentNullException.ThrowIfNull(folders);
+        return [.. folders.Select(static folder => folder?.Trim() ?? string.Empty)
+            .Where(static folder => SpaceSettings.IsLine(folder, Skills.AddedSkillFolders.MaximumPathLength))
+            .Distinct(StringComparer.Ordinal).Take(Skills.AddedSkillFolders.MaximumFolders)];
+    }
 
     /// <summary>
     /// Validates the descriptor.

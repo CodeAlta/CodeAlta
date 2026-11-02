@@ -4068,7 +4068,8 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
             UserHomeRoot,
             project?.ProjectPath,
             projectRoots,
-            space);
+            space,
+            project?.SkillFolders);
     }
 
     /// <summary>
@@ -4085,7 +4086,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
     public async Task<SpaceFilter> GetSpaceFilterAsync(string? recordedSpaceId, ProjectDescriptor? project, CancellationToken cancellationToken = default)
     {
         var spaces = await _spaceCatalog.LoadAsync(cancellationToken).ConfigureAwait(false);
-        return SpaceFilter.Load(_configStore, SpaceCatalog.ResolveSessionSpace(recordedSpaceId, project, spaces));
+        return SpaceFilter.Load(_configStore, SpaceCatalog.ResolveSessionSpace(recordedSpaceId, project, spaces), spaces);
     }
 
     /// <summary>
@@ -4100,7 +4101,10 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
     /// <exception cref="InvalidDataException">The global configuration cannot be parsed.</exception>
     /// <exception cref="IOException">The global configuration cannot be read.</exception>
     public async Task<SpaceFilter> GetSessionSpaceFilterAsync(string sessionId, CancellationToken cancellationToken = default)
-        => SpaceFilter.Load(_configStore, await GetSessionSpaceIdAsync(sessionId, cancellationToken).ConfigureAwait(false));
+    {
+        var spaceId = await GetSessionSpaceIdAsync(sessionId, cancellationToken).ConfigureAwait(false);
+        return SpaceFilter.Load(_configStore, spaceId, await _spaceCatalog.LoadAsync(cancellationToken).ConfigureAwait(false));
+    }
 
     /// <summary>
     /// Gets the built-in tools a session does without, as the settings of the user, of its space and of its agent

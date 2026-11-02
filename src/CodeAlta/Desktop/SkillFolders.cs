@@ -39,15 +39,26 @@ internal sealed class SkillFolders
     /// <param name="projectId">The project the skills were listed for, or null.</param>
     /// <param name="projectRoot">The folder of that project, or null.</param>
     /// <exception cref="ArgumentNullException"><paramref name="skill"/> is null.</exception>
-    internal static string? IdOf(SkillDescriptor skill, string? projectId, string? projectRoot)
+    internal static string? IdOf(SkillDescriptor skill, string? projectId, string? projectRoot, string? spaceId = null)
     {
         ArgumentNullException.ThrowIfNull(skill);
         // A skill that the project brings is only found with that project: one of its own, or one of a plugin of it.
         var ofProject = projectId is not null && projectRoot is not null
             && (skill.Scope == SkillScopeKind.Project || GitWorktreeService.IsWithin(skill.SkillFilePath, projectRoot));
-        var id = new SkillFolder(ofProject ? projectId : null, skill.SourceKind, skill.Name).Id;
+        // A skill of a folder added for a space is found in that space: another space may give its name to another skill.
+        if (skill.SourceKind == SkillSourceKind.SpaceFolder && string.IsNullOrWhiteSpace(spaceId)) return null;
+        var id = new SkillFolder(ofProject ? projectId : null, skill.SourceKind, skill.Name)
+        {
+            SpaceId = skill.SourceKind == SkillSourceKind.SpaceFolder ? spaceId : null,
+        }.Id;
         return SkillFolder.TryParse(id, out _) ? id : null;
     }
+
+    /// <summary>
+    /// Gets the folders of skills the user added, for the project of an id (its id and folder, or nulls) and for each
+    /// space; null to read only the folders of every space.
+    /// </summary>
+    internal Func<string?, string?, CancellationToken, Task<IReadOnlyList<SkillFolderContext>>>? Contexts { get; init; }
 
     /// <summary>
     /// Returns <c>ok</c> with the folder of the skill, or the refusal: the one of its project, or
@@ -67,11 +78,26 @@ internal sealed class SkillFolders
         if (_files.TryGetValue(id, out var known) && File.Exists(known)) return ("ok", Path.GetDirectoryName(known));
         try
         {
-            // The folder of a skill does not depend on what a configuration file says of it.
-            var skills = (await _management.LoadListingAsync(SkillListingScope.Combined, projectRoot, cancellationToken).ConfigureAwait(false)).Skills;
-            var skill = skills.FirstOrDefault(candidate => candidate.SourceKind == folder.Source && string.Equals(candidate.Name, folder.Name, StringComparison.Ordinal));
-            if (skill is null) return ("project_unavailable", null);
-            var file = Path.GetFullPath(skill.SkillFilePath);
+            // The folder of a skill does not depend on what a configuration file says of it. A skill of a folder added for a
+            // space is looked for in the space its id names, and must be found once.
+            IReadOnlyList<SkillFolderContext> contexts = Contexts is null ? [SkillFolderContext.None]
+                : await Contexts(folder.ProjectId, projectRoot, cancellationToken).ConfigureAwait(false);
+            contexts = folder.Source == SkillSourceKind.SpaceFolder
+                ? [.. contexts.Where(context => string.Equals(context.SpaceId, folder.SpaceId, StringComparison.Ordinal))]
+                : [.. contexts.Take(1)];
+            var files = new List<string>();
+            foreach (var context in contexts)
+            {
+                var skills = (await _management.LoadListingAsync(SkillListingScope.Combined, projectRoot, context, cancellationToken).ConfigureAwait(false)).Skills;
+                foreach (var candidate in skills.Where(candidate => candidate.SourceKind == folder.Source && string.Equals(candidate.Name, folder.Name, StringComparison.Ordinal)))
+                {
+                    var path = Path.GetFullPath(candidate.SkillFilePath);
+                    if (!files.Contains(path, StringComparer.OrdinalIgnoreCase)) files.Add(path);
+                }
+            }
+
+            if (files.Count != 1) return ("project_unavailable", null);
+            var file = files[0];
             if (!File.Exists(file) || Path.GetDirectoryName(file) is not { } root) return ("project_unavailable", null);
             if (_files.Count >= MaximumRemembered) _files.Clear();
             _files[id] = file;

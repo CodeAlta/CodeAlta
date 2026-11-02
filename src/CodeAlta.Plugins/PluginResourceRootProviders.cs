@@ -39,7 +39,7 @@ public sealed class PluginSkillRootProvider : ISkillRootProvider
                 Scope = resource.Handle.PluginRuntimeKey.StartsWith("builtin:", StringComparison.OrdinalIgnoreCase)
                     ? SkillScopeKind.Builtin
                     : SkillScopeKind.User,
-                Precedence = 4 + resource.Precedence + index,
+                Precedence = SkillRootPrecedence.Builtin + resource.Precedence + index,
                 IsTrusted = true,
             })
             .ToArray();

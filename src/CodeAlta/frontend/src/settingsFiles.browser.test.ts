@@ -197,7 +197,7 @@ test("a settings page says where its files are, and opens, copies and shows them
     await until(`${skillDetail}?.querySelector('.skill-detail-diagnostics')?.textContent.includes('Broken second: invalid YAML.')`, "the second unnamed skill has its own diagnostic");
     assert.equal(await evaluate(`${card("Broken second")}.getAttribute('aria-current')`), "true");
     assert.equal(await evaluate(`${card("Broken first")}.getAttribute('aria-current')`), null);
-    assert.deepEqual(await evaluate(`${calls("skills.detail")}.at(-1)`), { expectedEpoch: "epoch", projectId: "p", id: "broken-second", name: null, source: "ProjectAlta" });
+    assert.deepEqual(await evaluate(`${calls("skills.detail")}.at(-1)`), { expectedEpoch: "epoch", projectId: "p", id: "broken-second", name: null, source: "ProjectAlta", spaceId: null });
     await until(`${skillDetail}?.querySelector('.skill-detail-instructions')?.textContent.includes('Instructions for broken-second')`, "the right body is shown");
     assert.ok((await evaluate(`${skillDetail}.textContent`) as string).includes("C:\\skills\\broken-second\\SKILL.md"));
 
@@ -205,7 +205,7 @@ test("a settings page says where its files are, and opens, copies and shows them
     const bulk = (text: string) => `[...document.querySelectorAll('.settings-editor-toolbar button')].find(value => value.textContent === ${JSON.stringify(text)})`;
     await act(`${bulk("Disable all")}.click()`);
     await until(`${calls("skills.setMatchingEnabled")}.length === 1`);
-    assert.deepEqual(await evaluate(calls("skills.setMatchingEnabled")), [{ expectedEpoch: "epoch", projectId: "p", scope: "Global", query: "", enabled: false }]);
+    assert.deepEqual(await evaluate(calls("skills.setMatchingEnabled")), [{ expectedEpoch: "epoch", projectId: "p", scope: "Global", query: "", enabled: false, spaceId: null }]);
     assert.deepEqual(await evaluate(calls("skills.setAllEnabled")), []);
     assert.deepEqual(await evaluate(calls("skills.setEnabled")), []);
     const filter = (text: string) => `(() => { const input = document.querySelector('input[type=search]'); Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(input, ${JSON.stringify(text)}); input.dispatchEvent(new Event('input', { bubbles: true })); })()`;
@@ -231,7 +231,7 @@ test("a settings page says where its files are, and opens, copies and shows them
     assert.equal(await evaluate(`${confirm}.querySelector('p').textContent`), "Remove Broken second?");
     await act(`${confirm}.querySelector('button').click()`);
     await until(`${card("Broken second")} === undefined`);
-    assert.deepEqual(await evaluate(calls("skills.delete")), [{ expectedEpoch: "epoch", projectId: "p", id: "broken-second", name: null, source: "ProjectAlta" }]);
+    assert.deepEqual(await evaluate(calls("skills.delete")), [{ expectedEpoch: "epoch", projectId: "p", id: "broken-second", name: null, source: "ProjectAlta", spaceId: null }]);
     assert.equal(await evaluate(`${card("Broken first")} !== undefined`), true, "the first unnamed skill stays");
     await until(`${confirm} === null`, "the first confirmation has closed");
 
@@ -239,13 +239,13 @@ test("a settings page says where its files are, and opens, copies and shows them
     await act(`${card("Duplicate second")}.querySelector('strong').click()`);
     await until(`${skillDetail}?.querySelector('.skill-detail-instructions')?.textContent.includes('Instructions for duplicate-second')`);
     assert.equal(await evaluate(`${card("Duplicate second")}.getAttribute('aria-current')`), "true");
-    assert.deepEqual(await evaluate(`${calls("skills.detail")}.at(-1)`), { expectedEpoch: "epoch", projectId: "p", id: "duplicate-second", name: null, source: "ProjectAlta" });
+    assert.deepEqual(await evaluate(`${calls("skills.detail")}.at(-1)`), { expectedEpoch: "epoch", projectId: "p", id: "duplicate-second", name: null, source: "ProjectAlta", spaceId: null });
     await act(`${trash("Duplicate second")}.click()`);
     await until(`${confirm} !== null`);
     assert.equal(await evaluate(`${confirm}.querySelector('p').textContent`), "Remove Duplicate second?");
     await act(`${confirm}.querySelector('button').click()`);
     await until(`${card("Duplicate second")} === undefined`);
-    assert.deepEqual(await evaluate(`${calls("skills.delete")}.at(-1)`), { expectedEpoch: "epoch", projectId: "p", id: "duplicate-second", name: null, source: "ProjectAlta" });
+    assert.deepEqual(await evaluate(`${calls("skills.delete")}.at(-1)`), { expectedEpoch: "epoch", projectId: "p", id: "duplicate-second", name: null, source: "ProjectAlta", spaceId: null });
     assert.deepEqual(await evaluate(`${skillRows}.map(row => row.querySelector('strong').textContent)`), ["Broken first", "Duplicate first"]);
 
     // A thousand skills listed, and thirty the host left out, in a window of 900×650: the list draws only the rows in view, every
@@ -276,7 +276,7 @@ test("a settings page says where its files are, and opens, copies and shows them
     await until(`${skillRows}.length === 11`, "skill 12 and skills 120 to 129");
     await act(`${bulk("Disable all")}.click()`);
     await until(`${calls("skills.setMatchingEnabled")}.length === 1`);
-    assert.deepEqual(await evaluate(`${calls("skills.setMatchingEnabled")}.at(-1)`), { expectedEpoch: "epoch", projectId: "p", scope: "Global", query: "task 12", enabled: false });
+    assert.deepEqual(await evaluate(`${calls("skills.setMatchingEnabled")}.at(-1)`), { expectedEpoch: "epoch", projectId: "p", scope: "Global", query: "task 12", enabled: false, spaceId: null });
     assert.equal(await evaluate(`${fixture}.state.skills.filter(value => !value.enabled).length`), 11);
     // Without a filter, every skill: the thirty left out of the listing too.
     await act(filter(""));

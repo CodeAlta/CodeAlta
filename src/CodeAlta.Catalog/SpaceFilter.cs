@@ -16,6 +16,27 @@ public sealed record SpaceFilter(SpaceAssignments Assignments, string SpaceId)
     /// <exception cref="ArgumentException"><paramref name="key"/> is empty.</exception>
     public bool Allows(SpaceResourceKind kind, string key) => Assignments.IsAvailable(kind, key, SpaceId);
 
+    /// <summary>
+    /// Gets the folders of skills the user added for the space (<see cref="SpaceSkills.Folders"/>), as its file writes
+    /// them; empty when the filter was read without the space.
+    /// </summary>
+    public IReadOnlyList<string> SkillFolders { get; init; } = [];
+
+    /// <summary>Reads the assignments of the global configuration for a space, with what the space itself adds.</summary>
+    /// <param name="configStore">The configuration store; <see langword="null"/> when the host keeps none, where every resource is in every space.</param>
+    /// <param name="spaceId">The space of the session; <see langword="null"/> or empty for the default space.</param>
+    /// <param name="spaces">The spaces of the catalog, where the space is looked for; a space that is not among them adds nothing.</param>
+    /// <returns>The filter of the space.</returns>
+    /// <exception cref="InvalidDataException">The configuration file cannot be parsed.</exception>
+    /// <exception cref="IOException">The configuration file cannot be read.</exception>
+    public static SpaceFilter Load(CodeAltaConfigStore? configStore, string? spaceId, IEnumerable<SpaceDescriptor>? spaces)
+    {
+        var filter = Load(configStore, spaceId);
+        return spaces?.FirstOrDefault(space => string.Equals(space.Id, filter.SpaceId, StringComparison.Ordinal))?.Settings.Skills is { } skills
+            ? filter with { SkillFolders = skills.Folders }
+            : filter;
+    }
+
     /// <summary>Reads the assignments of the global configuration for a space.</summary>
     /// <param name="configStore">The configuration store; <see langword="null"/> when the host keeps none, where every resource is in every space.</param>
     /// <param name="spaceId">The space of the session; <see langword="null"/> or empty for the default space.</param>

@@ -33,7 +33,12 @@ folders of the session and the computer (`SandboxHost`) into a `SandboxPolicy`:
 - **Read-only**: the folders of the developer tools and of CodeAlta's own program, and the session's own tool output
   (`<session>.attachments/tool-output`): CodeAlta writes there, outside the sandbox, the whole of a result too long
   for the model (`exec`, a command run outside the sandbox) and gives the agent its path. The runtime creates it before
-  the sandbox starts, since a grant applies to a folder that exists then; nothing else of `~/.alta` is granted.
+  the sandbox starts, since a grant applies to a folder that exists then. The folders of skills of the user and those
+  the user added (`SkillFolders`) are read-only too, so that the agent reads the files of a skill it activates; one
+  inside what the session writes is protected instead, even before it exists. Their links are followed only outside
+  what the session writes and its repositories, never into a folder of secrets; a folder of secrets itself, the home
+  folder, a folder that holds it or a disk is never granted this way. Nothing else of `~/.alta` is
+  granted.
 - **Protected**: the entries of the working tree that other programs run later (git hooks and configuration, the
   `.alta` settings and plugins, the folders of editors and coding agents). One that exists is read-only, one that
   does not is denied, which keeps it from being created.

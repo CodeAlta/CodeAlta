@@ -8778,6 +8778,24 @@
   fr: "utilisateur ~/.copilot/skills (Copilot)"
   ja: "ユーザー ~/.copilot/skills (Copilot)"
   zh: "用户 ~/.copilot/skills (Copilot)"
+"user added folder":
+  de: "Benutzer, hinzugefügter Ordner"
+  es: "usuario, carpeta añadida"
+  fr: "utilisateur, dossier ajouté"
+  ja: "ユーザー、追加したフォルダー"
+  zh: "用户，添加的文件夹"
+"space added folder":
+  de: "Bereich, hinzugefügter Ordner"
+  es: "espacio, carpeta añadida"
+  fr: "espace, dossier ajouté"
+  ja: "スペース、追加したフォルダー"
+  zh: "空间，添加的文件夹"
+"project added folder":
+  de: "Projekt, hinzugefügter Ordner"
+  es: "proyecto, carpeta añadida"
+  fr: "projet, dossier ajouté"
+  ja: "プロジェクト、追加したフォルダー"
+  zh: "项目，添加的文件夹"
 "user ~/.alta/skills":
   de: "Benutzer ~/.alta/skills"
   es: "usuario ~/.alta/skills"

@@ -38,6 +38,7 @@ internal sealed partial class SkillsService
     private readonly SkillFolders? _folders;
     private readonly IDesktopFileTrash _trash;
     private readonly string? _epoch;
+    private readonly string? _home;
     private readonly SemaphoreSlim _gate = new(1, 1);
 
     /// <summary>Creates an unavailable service for launches without an owned host.</summary>
@@ -62,10 +63,17 @@ internal sealed partial class SkillsService
         ArgumentException.ThrowIfNullOrWhiteSpace(epoch);
         _projects = projects;
         // A platform without a profile folder reports it as empty: that omits the common root, it is not an error.
-        _management = new SkillManagementService(catalog, projects.Options.GlobalRoot, string.IsNullOrWhiteSpace(userProfileRoot) ? null : userProfileRoot);
-        _folders = new SkillFolders(projects, _management);
+        _home = string.IsNullOrWhiteSpace(userProfileRoot) ? null : userProfileRoot;
+        _management = new SkillManagementService(catalog, projects.Options.GlobalRoot, _home);
+        _folders = new SkillFolders(projects, _management) { Contexts = AllFolderContextsAsync };
         _epoch = epoch;
     }
+
+    /// <summary>
+    /// Gets the spaces of the host, whose files hold the folders of skills added for a space; null where the host keeps
+    /// none, where no folder is added for a space.
+    /// </summary>
+    internal SpaceCatalog? Spaces { get; init; }
 
     /// <summary>Finds the folders of the skills this service lists; null without an owned host.</summary>
     internal SkillFolders? Folders => _folders;
@@ -88,17 +96,19 @@ internal sealed partial class SkillsService
         {
             // A configuration file that cannot be read hides nothing: the skills are listed as if it disabled none,
             // and the file is named above the list.
-            var listing = await _management.LoadListingAsync(SkillListingScope.Combined, project.Root, cancellationToken).ConfigureAwait(false);
+            var context = await FolderContextAsync(request.ProjectId, project.Root, request.SpaceId, cancellationToken).ConfigureAwait(false);
+            var listing = await _management.LoadListingAsync(SkillListingScope.Combined, project.Root, context, cancellationToken).ConfigureAwait(false);
             var descriptors = listing.Skills;
             var skills = descriptors.Take(MaximumSkills).Select(skill => new SkillsEntry(
                 IdOf(skill), Bound(skill.Name, MaximumNameLength), Bound(skill.Title, MaximumNameLength), Bound(skill.Description, MaximumDescriptionLength),
                 skill.SourceKind.ToString(), skill.Scope.ToString(), !skill.IsDisabledGlobally, !skill.IsDisabledForProject,
                 skill.IsEnabled, skill.IsValid, skill.IsShadowed, skill.IsTrusted,
                 // The row opens the folder of its skill in the code editor: the id the editor names it by, and its path.
-                EditorFolderOf(skill, descriptors, request.ProjectId, project.Root), Bound(skill.SkillRootPath, MaximumPathLength))).ToArray();
+                EditorFolderOf(skill, descriptors, request.ProjectId, project.Root, context.SpaceId), Bound(skill.SkillRootPath, MaximumPathLength))).ToArray();
             return new("ok", request.ProjectId, skills, descriptors.Count - skills.Length)
             {
                 Problems = [.. listing.Problems.Select(static problem => new PluginsProblem("config", Bound(problem.Path, MaximumPathLength), Clean(problem.Message), problem.IsProject ? "Project" : "Global"))],
+                Folders = FoldersOf(context, project.Root is not null, descriptors),
             };
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
@@ -124,7 +134,8 @@ internal sealed partial class SkillsService
         if (project.Status != "ok") return Failed(project.Status);
         try
         {
-            var descriptors = (await _management.LoadListingAsync(SkillListingScope.Combined, project.Root, cancellationToken).ConfigureAwait(false)).Skills;
+            var context = await FolderContextAsync(request.ProjectId, project.Root, request.SpaceId, cancellationToken).ConfigureAwait(false);
+            var descriptors = (await _management.LoadListingAsync(SkillListingScope.Combined, project.Root, context, cancellationToken).ConfigureAwait(false)).Skills;
             var (status, skill) = FindSkill(descriptors, request, source);
             if (skill is null) return Failed(status);
             // A skill reached through a link (a library shared with other tools) is shown, read where the link leads; the
@@ -133,7 +144,7 @@ internal sealed partial class SkillsService
             string path;
             try
             {
-                path = (await _management.GetFileDocumentAsync(skill.SkillFilePath, null, project.Root, cancellationToken).ConfigureAwait(false)).FullPath;
+                path = (await _management.GetFileDocumentAsync(skill.SkillFilePath, null, project.Root, context, cancellationToken).ConfigureAwait(false)).FullPath;
             }
             catch (IOException)
             {
@@ -158,7 +169,7 @@ internal sealed partial class SkillsService
                 content, truncated || content is null && file.Exists,
                 [.. related.Take(MaximumRelatedFiles).Select(static item => new SkillsRelatedFile(Bound(item.Category, 64), Bound(item.RelativePath, 512)))],
                 [.. skill.Diagnostics.Take(MaximumDiagnostics).Select(static item => new SkillsDiagnostic(item.Severity.ToString(), Bound(item.Code, 64), Bound(item.Message, MaximumMessageLength)))],
-                Math.Max(0, related.Count - MaximumRelatedFiles), linked ? null : EditorFolderOf(skill, descriptors, request.ProjectId, project.Root)) { Linked = linked };
+                Math.Max(0, related.Count - MaximumRelatedFiles), linked ? null : EditorFolderOf(skill, descriptors, request.ProjectId, project.Root, context.SpaceId)) { Linked = linked };
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
@@ -203,7 +214,8 @@ internal sealed partial class SkillsService
         string[] names;
         try
         {
-            var descriptors = (await _management.LoadListingAsync(SkillListingScope.Combined, project.Root, cancellationToken).ConfigureAwait(false)).Skills;
+            var context = await FolderContextAsync(request.ProjectId, project.Root, request.SpaceId, cancellationToken).ConfigureAwait(false);
+            var descriptors = (await _management.LoadListingAsync(SkillListingScope.Combined, project.Root, context, cancellationToken).ConfigureAwait(false)).Skills;
             var query = request.Query?.Trim() ?? string.Empty;
             names = [.. descriptors.Where(skill => MatchesFilter(skill, query) && Toggleable(skill.Name)).Select(static skill => skill.Name).Distinct(StringComparer.Ordinal)];
         }
@@ -314,6 +326,172 @@ internal sealed partial class SkillsService
         return await _trash.MoveAsync(folder, CancellationToken.None).ConfigureAwait(false) ? new("ok", 1, null) : new("trash_failed", 0, null);
     }
 
+    /// <summary>
+    /// Adds a folder of skills for every space (<c>Global</c>), for a space (<c>Space</c>, the one the request names, the
+    /// default space without one) or for the project of the request (<c>Project</c>): its skills are read where they are.
+    /// The folder must exist; a disk, the home folder or the folder of CodeAlta is refused (<c>folder_refused</c>, with
+    /// the reason as its message), and so is a folder the list has already (<c>folder_listed</c>).
+    /// </summary>
+    [NeoRpcMethod("addFolder")]
+    public Task<SkillsMutationResponse> AddFolderAsync(SkillsFolderRequest request, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        return ChangeFolderAsync(request, add: true, cancellationToken);
+    }
+
+    /// <summary>
+    /// Removes a folder of skills from the list of its scope, as <c>addFolder</c> names it. Nothing of the folder is
+    /// changed on the disk: its skills are no longer read, and stay where they are.
+    /// </summary>
+    [NeoRpcMethod("removeFolder")]
+    public Task<SkillsMutationResponse> RemoveFolderAsync(SkillsFolderRequest request, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        return ChangeFolderAsync(request, add: false, cancellationToken);
+    }
+
+    private async Task<SkillsMutationResponse> ChangeFolderAsync(SkillsFolderRequest request, bool add, CancellationToken cancellationToken)
+    {
+        if (_projects is null || _management is null) return new("unavailable", 0, null);
+        if (!string.Equals(request.ExpectedEpoch, _epoch, StringComparison.Ordinal)) return new("stale_epoch", 0, null);
+        var scope = request.Scope;
+        if (scope is not ("Global" or "Space" or "Project")) return new("invalid", 0, "The scope must be Global, Space or Project.");
+        if (request.Path is not { Length: > 0 and <= AddedSkillFolders.MaximumPathLength } path || path.Any(char.IsControl))
+            return new("invalid", 0, "The path of a folder is required.");
+        if (scope == "Space" && (Spaces is null || request.SpaceId is { Length: > 128 })) return new(Spaces is null ? "unavailable" : "invalid", 0, null);
+        var project = await SettingsProjectScope.ResolveAsync(_projects, request.ProjectId, cancellationToken).ConfigureAwait(false);
+        if (project.Status != "ok") return new(project.Status, 0, null);
+        if (scope == "Project" && (project.Root is null || request.ProjectId is null)) return new("invalid", 0, ProjectRequired);
+        var globalRoot = _projects.Options.GlobalRoot;
+        if (add)
+        {
+            var problem = AddedSkillFolders.Check(path, _home, globalRoot);
+            if (problem != AddedSkillFolderProblem.None) return new("folder_refused", 0, problem.ToString());
+            if (!Directory.Exists(AddedSkillFolders.Resolve(path, _home))) return new("folder_missing", 0, null);
+        }
+
+        // The answer when the list does not change: a folder added twice, or one removed that is not there.
+        string? unchanged = null;
+        IReadOnlyList<string> Changed(IReadOnlyList<string> current)
+        {
+            var next = AddedSkillFolders.Change(current, path, add, _home);
+            if (add && next.Count == current.Count) unchanged = "folder_listed";
+            else if (add && next.Count > AddedSkillFolders.MaximumFolders) unchanged = "folder_limit";
+            else if (!add && next.Count == current.Count) unchanged = "not_found";
+            return unchanged is null ? next : current;
+        }
+
+        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            switch (scope)
+            {
+                case "Global":
+                {
+                    // One read and write under the lock of the file: another window that adds a folder meanwhile keeps it.
+                    _ = new CodeAltaConfigStore(_projects.Options).UpdateGlobalSkillFolders(current =>
+                    {
+                        var next = Changed(current);
+                        return unchanged is null ? next : null;
+                    });
+                    return unchanged is not null ? new(unchanged, 0, null) : new("ok", 1, null);
+                }
+
+                case "Space":
+                {
+                    var spaceId = string.IsNullOrWhiteSpace(request.SpaceId) ? SpaceDescriptor.DefaultId : request.SpaceId.Trim();
+                    var change = await Spaces!.UpdateSettingsAsync(spaceId, settings =>
+                    {
+                        var next = Changed(settings.Skills?.Folders ?? []);
+                        return unchanged is not null ? settings : settings with { Skills = next.Count == 0 ? null : new SpaceSkills(next) };
+                    }, cancellationToken).ConfigureAwait(false);
+                    if (unchanged is not null) return new(unchanged, 0, null);
+                    return change.Status switch
+                    {
+                        SpaceChangeStatus.Ok => new("ok", 1, null),
+                        SpaceChangeStatus.NotFound => new("not_found", 0, null),
+                        SpaceChangeStatus.Conflict => new("conflict", 0, null),
+                        _ => new("invalid", 0, change.Message),
+                    };
+                }
+
+                default:
+                {
+                    var status = await _projects.UpdateSkillFoldersAsync(request.ProjectId!, Changed, cancellationToken).ConfigureAwait(false);
+                    if (unchanged is not null) return new(unchanged, 0, null);
+                    return status switch
+                    {
+                        ProjectSpacesStatus.Updated => new("ok", 1, null),
+                        ProjectSpacesStatus.Unchanged => new("ok", 0, null),
+                        ProjectSpacesStatus.NotFound => new("not_found", 0, null),
+                        ProjectSpacesStatus.Conflict => new("conflict", 0, null),
+                        _ => new("write_failed", 0, null),
+                    };
+                }
+            }
+        }
+        catch (InvalidDataException)
+        {
+            return new("config_invalid", 0, null); // The configuration file does not parse and is left as it is.
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException or ArgumentException)
+        {
+            Log(exception, "A folder of skills could not be saved.");
+            return new("write_failed", 0, null);
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
+    // The folders added for the space the page shows and for its project. A space that is not known adds none.
+    private async Task<SkillFolderContext> FolderContextAsync(string? projectId, string? projectRoot, string? spaceId, CancellationToken cancellationToken)
+    {
+        var spaceKey = string.IsNullOrWhiteSpace(spaceId) ? SpaceDescriptor.DefaultId : spaceId.Trim();
+        var project = projectId is null || projectRoot is null || _projects is null ? null : await _projects.GetByIdAsync(projectId, cancellationToken).ConfigureAwait(false);
+        var space = Spaces is null ? null
+            : (await Spaces.LoadAsync(cancellationToken).ConfigureAwait(false)).FirstOrDefault(candidate => string.Equals(candidate.Id, spaceKey, StringComparison.Ordinal));
+        return new SkillFolderContext(spaceKey, space?.Settings.Skills?.Folders ?? [], project?.SkillFolders ?? []);
+    }
+
+    // The contexts of every space, for a folder of the code editor, whose id does not name the space of its skill.
+    private async Task<IReadOnlyList<SkillFolderContext>> AllFolderContextsAsync(string? projectId, string? projectRoot, CancellationToken cancellationToken)
+    {
+        var project = projectId is null || projectRoot is null || _projects is null ? null : await _projects.GetByIdAsync(projectId, cancellationToken).ConfigureAwait(false);
+        IReadOnlyList<SpaceDescriptor> spaces = Spaces is null ? [] : await Spaces.LoadAsync(cancellationToken).ConfigureAwait(false);
+        return spaces.Count == 0
+            ? [new SkillFolderContext(null, [], project?.SkillFolders ?? [])]
+            : [.. spaces.Select(space => new SkillFolderContext(space.Id, space.Settings.Skills?.Folders ?? [], project?.SkillFolders ?? []))];
+    }
+
+    // The folders added for every space, for the space and for the project, with what each is on the disk and how many
+    // skills it brings: most specific first, as they are read.
+    private IReadOnlyList<SkillsFolder> FoldersOf(SkillFolderContext context, bool hasProject, IReadOnlyList<SkillDescriptor> skills)
+    {
+        IReadOnlyList<string> global;
+        try { global = new CodeAltaConfigStore(_projects!.Options).LoadGlobalSkillFolders(); }
+        catch (Exception exception) when (exception is InvalidDataException or IOException or UnauthorizedAccessException) { global = []; }
+        var globalRoot = _projects!.Options.GlobalRoot;
+        var folders = new List<SkillsFolder>();
+        void Add(string scope, IEnumerable<string> written, SkillSourceKind kind)
+        {
+            foreach (var path in written.Take(AddedSkillFolders.MaximumFolders))
+            {
+                var (state, full) = AddedSkillFolders.Inspect(path, _home, globalRoot);
+                var sourceId = full is null ? null : AddedSkillFolders.SourceIdOf(kind, context.SpaceId, full);
+                var count = sourceId is null ? 0 : skills.Count(skill => skill.SourceKind == kind && AddedSkillFolders.PathComparer.Equals(skill.SourceId, sourceId));
+                folders.Add(new SkillsFolder(scope, Bound(path, MaximumPathLength), full is null ? null : Bound(full, MaximumPathLength),
+                    state.ToString().ToLowerInvariant(), count));
+            }
+        }
+
+        if (hasProject) Add("Project", context.ProjectFolders, SkillSourceKind.ProjectFolder);
+        Add("Space", context.SpaceFolders, SkillSourceKind.SpaceFolder);
+        Add("Global", global, SkillSourceKind.UserFolder);
+        return folders;
+    }
+
     private async Task<SkillsMutationResponse> SetAsync(string? expectedEpoch, string? projectId, string? scope, IReadOnlyList<string>? names,
         bool enabled, CancellationToken cancellationToken, int maximum = MaximumSkills)
     {
@@ -402,10 +580,10 @@ internal sealed partial class SkillsService
         return found is null ? ("not_found", null) : ("ok", found);
     }
 
-    private static string? EditorFolderOf(SkillDescriptor skill, IReadOnlyList<SkillDescriptor> descriptors, string? projectId, string? projectRoot)
+    private static string? EditorFolderOf(SkillDescriptor skill, IReadOnlyList<SkillDescriptor> descriptors, string? projectId, string? projectRoot, string? spaceId)
         // Editor folder handles are still name-based: do not offer a handle that could open another row's files.
         => descriptors.Count(candidate => candidate.SourceKind == skill.SourceKind && string.Equals(candidate.Name, skill.Name, StringComparison.Ordinal)) == 1
-            ? SkillFolders.IdOf(skill, projectId, projectRoot) : null;
+            ? SkillFolders.IdOf(skill, projectId, projectRoot, spaceId) : null;
 
     // What a parser or the system said, on one line.
     private static string Clean(string message)
@@ -436,7 +614,8 @@ internal sealed partial class SkillsService
     }
 }
 
-internal sealed record SkillsListRequest(string? ExpectedEpoch, string? ProjectId);
+/// <param name="SpaceId">The space the page shows, whose added folders are read too; null for the default space.</param>
+internal sealed record SkillsListRequest(string? ExpectedEpoch, string? ProjectId, string? SpaceId = null);
 internal sealed record SkillsListResponse(string Status, string? ProjectId, IReadOnlyList<SkillsEntry> Skills, int Omitted)
 {
     /// <summary>
@@ -444,7 +623,27 @@ internal sealed record SkillsListResponse(string Status, string? ProjectId, IRea
     /// skills are listed as if such a file disabled none, so a skill it disables is shown as enabled.
     /// </summary>
     public IReadOnlyList<PluginsProblem> Problems { get; init; } = [];
+
+    /// <summary>
+    /// The folders of skills the user added that the listing read: those of the project, of the space, then of every
+    /// space, each in the order of its list.
+    /// </summary>
+    public IReadOnlyList<SkillsFolder> Folders { get; init; } = [];
 }
+
+/// <summary>A folder of skills the user added.</summary>
+/// <param name="Scope"><c>Global</c> for every space, <c>Space</c> for the space of the listing, <c>Project</c> for its project.</param>
+/// <param name="Path">The folder as its list writes it: what <c>removeFolder</c> names.</param>
+/// <param name="FullPath">The full path it is read at; null when it is not a full path.</param>
+/// <param name="State"><c>ready</c>, <c>missing</c> (nothing there, or a file), <c>unreadable</c>, or <c>invalid</c> (a path that is not read).</param>
+/// <param name="Skills">How many skills of the listing it brings.</param>
+internal sealed record SkillsFolder(string Scope, string Path, string? FullPath, string State, int Skills);
+
+/// <summary>Names a folder of skills to add or remove.</summary>
+/// <param name="Scope"><c>Global</c>, <c>Space</c> or <c>Project</c>.</param>
+/// <param name="SpaceId">The space of a <c>Space</c> folder; null for the default space.</param>
+/// <param name="Path">The folder: a full path, or one that starts with <c>~</c>.</param>
+internal sealed record SkillsFolderRequest(string? ExpectedEpoch, string? ProjectId, string? SpaceId, string? Scope, string? Path);
 
 /// <summary>
 /// One discovered skill. The source is <c>ProjectAlta</c>, <c>ProjectCommon</c>, <c>UserAlta</c>, <c>UserCommon</c>,
@@ -457,7 +656,8 @@ internal sealed record SkillsEntry(string Id, string Name, string Title, string 
     bool EnabledProject, bool Enabled, bool Valid, bool Shadowed, bool Trusted, string? Folder = null, string? Path = null);
 /// <summary>Names one listed skill by its id and source. Without an id, a legacy name must match exactly one skill.</summary>
 /// <param name="Id">The id returned by the listing; when supplied, the name is ignored and is never a fallback.</param>
-internal sealed record SkillsDetailRequest(string? ExpectedEpoch, string? ProjectId, string? Name, string? Source, string? Id = null);
+/// <param name="SpaceId">The space the page shows, whose added folders are read too; null for the default space.</param>
+internal sealed record SkillsDetailRequest(string? ExpectedEpoch, string? ProjectId, string? Name, string? Source, string? Id = null, string? SpaceId = null);
 
 /// <summary>
 /// The detail of one skill. <c>Content</c> is the <c>SKILL.md</c> text, cut at 64 Ki characters
@@ -477,7 +677,8 @@ internal sealed record SkillsDiagnostic(string Severity, string Code, string Mes
 internal sealed record SkillsSetEnabledRequest(string? ExpectedEpoch, string? ProjectId, string? Scope, string? Name, bool Enabled);
 internal sealed record SkillsSetAllEnabledRequest(string? ExpectedEpoch, string? ProjectId, string? Scope, IReadOnlyList<string>? Names, bool Enabled);
 /// <summary>Names the skills a bulk switch acts on by the text of the filter of the page; empty or null for every skill.</summary>
-internal sealed record SkillsSetMatchingEnabledRequest(string? ExpectedEpoch, string? ProjectId, string? Scope, string? Query, bool Enabled);
+/// <param name="SpaceId">The space the page shows, whose added folders are read too; null for the default space.</param>
+internal sealed record SkillsSetMatchingEnabledRequest(string? ExpectedEpoch, string? ProjectId, string? Scope, string? Query, bool Enabled, string? SpaceId = null);
 internal sealed record SkillsMutationResponse(string Status, int Changed, string? Message);
 internal sealed record SkillsCreateRequest(string? ExpectedEpoch, string? ProjectId, string? Scope, string? Name, string? Description);
 /// <summary>The skill that was created: its name, and the id and the path of its folder for the code editor.</summary>

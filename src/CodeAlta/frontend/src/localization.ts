@@ -24,6 +24,7 @@ import { spaceSettingsMessages } from "./spaces/spaceSettingsMessages";
 import { providerSpaceMessages } from "./providerSpaces/messages";
 import { spaceIdentityMessages } from "./spaces/spaceIdentityMessages";
 import { disabledToolMessages } from "./disabledToolMessages";
+import { skillFolderMessages } from "./skillFolderMessages";
 import { promptSurfaceMessages } from "./promptSurface/messages";
 import { externalEditorMessages } from "./externalEditors/messages";
 import { windowMessages } from "./windows/messages";
@@ -2872,6 +2873,7 @@ export const messages = dictionary({
   ...providerSpaceMessages,
   ...spaceIdentityMessages,
   ...disabledToolMessages,
+  ...skillFolderMessages,
   ...promptSurfaceMessages,
   ...externalEditorMessages,
   ...windowMessages,

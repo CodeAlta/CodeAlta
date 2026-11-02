@@ -1038,6 +1038,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                         // The skills MCP servers publish, beside the local ones.
                         Mcp = () => host.PluginRuntime?.ActivePlugins.Select(static plugin => plugin.Instance).OfType<CodeAlta.Plugin.Mcp.McpPlugin>().FirstOrDefault(),
                         McpHome = roots.Home,
+                        Spaces = host.SpaceCatalog,
                     };
                     builder.AddSkillsService(skills);
                     builder.AddPluginsService(new PluginsService(host.ProjectCatalog, epoch, host.PluginRuntime)

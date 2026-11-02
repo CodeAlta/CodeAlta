@@ -3144,15 +3144,15 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
 
   // What was chosen in the search is opened once its modal dialog has closed (see the layout effect below).
   const skillEpoch = owned ? status?.hostEpoch ?? null : null;
-  const skillsKey = `${skillEpoch}:${projectId ?? ""}`;
+  const skillsKey = `${skillEpoch}:${projectId ?? ""}:${spaceId}`;
   useEffect(() => {
     if (!searchOpen || !skillEpoch) return;
     const controller = new AbortController();
-    void skillsApi.list({ expectedEpoch: skillEpoch, projectId: projectId ?? null }, { signal: controller.signal, timeoutMilliseconds: 8000 })
+    void skillsApi.list({ expectedEpoch: skillEpoch, projectId: projectId ?? null, spaceId }, { signal: controller.signal, timeoutMilliseconds: 8000 })
       .then(page => { if (!controller.signal.aborted && page.status === "ok") setSearchSkills({ key: skillsKey, skills: usableSkills(page.skills) }); },
         () => { /* The search goes on without the skills. */ });
     return () => controller.abort();
-  }, [searchOpen, skillEpoch, projectId]);
+  }, [searchOpen, skillEpoch, projectId, spaceId]);
 
   // A skill chosen in the search: the session in front is asked to use it, as a prompt it receives like any other.
   function askToUseSkill(name: string, args: string) {
@@ -5366,6 +5366,9 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
 
   // Settings pages also edit the selected project's settings when it can be written.
   const settingsProject = selectedProject && !selectedProject.archived ? { id: selectedProject.id, name: selectedProject.name } : null;
+  // The space the window shows: the Skills page lists and changes the folders of skills added for it.
+  const shownSpaceEntry = spacesState.spaces.find(space => space.id === spaceId);
+  const settingsSpace = shownSpaceEntry ? { id: shownSpaceEntry.id, name: shownSpaceEntry.name } : null;
   // The folder of the color schemes of the user, in the code editor: the host finds it, and the window leaves Settings.
   function openColorSchemeFolder() {
     const failed = () => showToast({ message: translate(shownLocale.current, "The file could not be opened."), intent: "danger", icon: "error", timeout: 8000 });
@@ -6016,6 +6019,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
       : settingsSection === "storage" ? <StorageSettings api={storage} epoch={owned ? status!.hostEpoch : null} onOpenFile={owned ? closeSettings : undefined}
           maintenance={storageMaintenance.maintenance} retention={storageMaintenance.retention} />
       : settingsSection === "skills" ? <SkillSettings epoch={owned ? status!.hostEpoch : null} project={settingsProject} spaceScope={resourceScope}
+        space={settingsSpace} pickFolder={canPickFolder() ? initial => pickFolder(desktopShell.pickFolder, t("Choose a folder of skills"), initial) : undefined}
         onEdit={owned ? folder => { closeSettings(); openSkillEditor(folder); } : undefined} onOpenFile={owned ? closeSettings : undefined} />
       : settingsSection === "mcp" ? <McpServerSettings epoch={owned ? status!.hostEpoch : null} project={settingsProject} onOpenFile={owned ? closeSettings : undefined} spaceScope={resourceScope} />
       : settingsSection === "prompts" ? <AgentPromptSettings epoch={owned ? status!.hostEpoch : null} project={settingsProject} onOpenFile={owned ? closeSettings : undefined} spaceScope={resourceScope} />

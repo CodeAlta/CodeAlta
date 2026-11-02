@@ -37,7 +37,7 @@ export const readResources: ReadResources = async (epoch, t) => {
   const [providers, servers, skillList, prompts, pluginList] = await Promise.all([
     read(() => globalConfig.providers({ expectedEpoch: epoch }, options)),
     read(() => mcpServers.list({ expectedEpoch: epoch, projectId: null }, options)),
-    read(() => skills.list({ expectedEpoch: epoch, projectId: null }, options)),
+    read(() => skills.list({ expectedEpoch: epoch, projectId: null, spaceId: null }, options)),
     read(() => agentPrompts.list({ expectedEpoch: epoch, projectId: null }, options)),
     read(() => plugins.list({ expectedEpoch: epoch, projectId: null }, options)),
   ]);

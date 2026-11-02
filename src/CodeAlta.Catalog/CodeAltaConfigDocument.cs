@@ -355,6 +355,13 @@ public sealed class CodeAltaSkillSettingsDocument
     /// </summary>
     [JsonPropertyName("disabled")]
     public List<string>? Disabled { get; set; }
+
+    /// <summary>
+    /// Gets or sets the folders of skills the user added for every space (global configuration only), in the order of
+    /// the list: full paths, in which a leading <c>~</c> stands for the home folder.
+    /// </summary>
+    [JsonPropertyName("folders")]
+    public List<string>? Folders { get; set; }
 }
 
 /// <summary>

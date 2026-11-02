@@ -238,6 +238,20 @@ A folder of skills can hold symbolic links, for example to a library of skills s
 - With several spaces, a chip shows the [spaces](../spaces.md#what-a-space-has) a skill of yours is offered in.
 - The [skills of MCP servers](../plugins/mcp.md#skills-of-mcp-servers) come after yours, read-only, with a switch each.
 
+### Skill folders
+
+To use a library of skills you keep elsewhere, such as a repository shared with other agents, click **Add folder** under **Skill folders**, type its path or **Browse…**, and choose where it is read:
+
+- **Every space**: saved in `~/.alta/config.toml` (`[skills] folders`);
+- **Space:** the space the window shows, when you have several: only its sessions read it;
+- **Project:** the selected project, saved in your own file of the project under `~/.alta/projects/`, never in the repository.
+
+The folder holds skill folders, each with its `SKILL.md`, as `~/.agents/skills` does. Its skills are read where they are: they are listed, switched on or off, edited and used like the others, and a skill added, changed or removed there shows at the next **Reload**. Each folder says how many skills it brings, or **Not found** or **Cannot be read**; the other folders are read anyway. Its `×` button takes it out of the list and leaves its files where they are. A whole disk, your home folder and `~/.alta` cannot be added.
+
+Of two skills with the same name, the one closest to the work wins: the project's own folders (`.alta/skills`, `.agents/skills`, `.github/skills`), then the folders added for the project, those added for the space, your folders (`~/.alta/skills`, `~/.agents/skills`, `~/.copilot/skills`), those added for every space, then the skills of plugins and of CodeAlta. In one list, the first folder wins.
+
+A [sandboxed session](../sessions/sandbox.md) reads your skill folders and the ones you added, and never writes them.
+
 In `SKILL.md`, `disable-model-invocation: true` makes a skill manual: it is used only with `/` and its name. `argument-hint`, `user-invocable` and `context` are accepted and ignored; any other unknown field makes the skill **Invalid**, except in a [GitHub Copilot](../copilot-layout.md#skills) folder.
 
 The prompt of a session lists the skills of CodeAlta first, then those used most in the project lately; agents find the others with [`alta search`](../search.md).

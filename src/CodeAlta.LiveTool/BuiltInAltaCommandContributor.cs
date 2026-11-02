@@ -5931,7 +5931,8 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
             UserHomeOf(context),
             project?.ProjectPath,
             otherProjectRoots: null,
-            space);
+            space,
+            project?.SkillFolders);
         return SkillQueryResult.Success(query);
     }
 

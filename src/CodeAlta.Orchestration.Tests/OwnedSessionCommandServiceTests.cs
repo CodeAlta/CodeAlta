@@ -1149,7 +1149,7 @@ public sealed class OwnedSessionCommandServiceTests
         Assert.AreEqual("builtin:codealta", roots[0].SourceId);
         Assert.AreEqual(SkillSourceKind.Builtin, roots[0].SourceKind);
         Assert.AreEqual(SkillScopeKind.Builtin, roots[0].Scope);
-        Assert.AreEqual(4, roots[0].Precedence);
+        Assert.AreEqual(SkillRootPrecedence.Builtin, roots[0].Precedence);
     }
 
     [TestMethod]

@@ -1988,6 +1988,19 @@ dialog .copy-value, .copy-value { display: grid; place-items: center; width: 26p
 
 /* Skills: the list beside the selected skill's details. */
 .settings-dialog-content > .skill-settings.configuration-page { height: 100%; min-height: 0; box-sizing: border-box; }
+/* The folders of skills the user added: a heading with its button, then a row each. */
+.skill-folders { display: grid; gap: 6px; }
+.skill-folders-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.skill-folders-heading h2 { margin: 0; font-size: 14px; }
+.skill-folders-heading p { margin: 2px 0 0; font-size: 12.5px; }
+.skill-folders-heading > .bp6-popover-target, .skill-folders-heading > .bp6-button { flex: none; }
+.skill-folders-none { margin: 0; font-size: 12.5px; }
+.skill-folder { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.skill-folder > .settings-file-location { flex: 1 1 auto; }
+/* The count of skills, or why none is read, in a column of its own: the buttons of the rows stay aligned. */
+.skill-folder-state { flex: none; display: inline-flex; justify-content: flex-end; min-width: 96px; font-size: 12px; white-space: nowrap; }
+.skill-folders-popover { width: 380px; }
+.skill-folders-scope { flex-wrap: wrap; }
 .skill-settings-layout { flex: 1 1 0; grid-template-columns: minmax(280px, 2fr) minmax(0, 3fr); align-items: stretch; }
 /* The local skills, then the skills of the MCP servers: the column scrolls as one. */
 .skill-settings-layout > .skill-settings-lists { display: flex; flex-direction: column; gap: 12px; align-self: start; min-width: 0; max-height: 100%; overflow: auto; }
