@@ -58,6 +58,19 @@ public sealed class MobileDevTunnelTests
     }
 
     [TestMethod]
+    public async Task ASignInTheAccountNoLongerAccepts_AsksForTheSignInAgain()
+    {
+        // GitHub revoked the token, while the command line still says it is signed in.
+        var cli = new FakeDevTunnelCli().Answer("create --allow-anonymous", 1, "GitHub login required.\nRequest ID: 42");
+
+        var published = await new MobileDevTunnel(cli).PublishAsync(2584, null, CancellationToken.None);
+
+        Assert.AreEqual("not-signed-in", published.Status.State, published.Status.Detail);
+        Assert.IsTrue(MobileDevTunnel.NeedsSignIn("Error: Unauthorized"));
+        Assert.IsFalse(MobileDevTunnel.NeedsSignIn("Error: Forbidden. Quota exceeded."));
+    }
+
+    [TestMethod]
     public async Task WhatKeepsTheTunnelFromServing_IsSaid()
     {
         var missing = await new MobileDevTunnel(new FakeDevTunnelCli { Installed = false }).PublishAsync(2584, null, CancellationToken.None);

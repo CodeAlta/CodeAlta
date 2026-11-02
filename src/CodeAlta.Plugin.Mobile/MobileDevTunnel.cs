@@ -101,7 +101,7 @@ internal sealed partial class MobileDevTunnel(IMobileDevTunnelCli cli, Action<st
         {
             await host.DisposeAsync().ConfigureAwait(false);
             var output = url.Output.Trim();
-            if (Regex.IsMatch(output, "not logged in|login required|unauthorized", RegexOptions.IgnoreCase)) return new(NotSignedIn, tunnelId, null);
+            if (NeedsSignIn(output)) return new(NotSignedIn, tunnelId, null);
             log?.Invoke("Mobile: devtunnel host said: " + output);
             return new(new("failed", null, "devtunnel host did not start" + (output.Length > 0 ? ": " + Summary(output) : ".")), tunnelId, null);
         }
@@ -146,6 +146,10 @@ internal sealed partial class MobileDevTunnel(IMobileDevTunnelCli cli, Action<st
     }
 
     private static MobileDevTunnelStatus NotSignedIn { get; } = new("not-signed-in", null, "Sign in to Dev Tunnels with a Microsoft or GitHub account: CodeAlta opens the page of the account.");
+
+    /// <summary>Whether a command of the command line failed because the sign-in is missing or no longer accepted.</summary>
+    internal static bool NeedsSignIn(string output)
+        => Regex.IsMatch(output, @"login required|not logged in|unauthorized|\b401\b|token (?:is )?(?:expired|revoked|invalid)|sign in again", RegexOptions.IgnoreCase);
 
     /// <summary>Whether <c>devtunnel user show</c> says a user is signed in.</summary>
     internal static bool IsSignedIn(MobileCliResult result)
@@ -197,6 +201,8 @@ internal sealed partial class MobileDevTunnel(IMobileDevTunnelCli cli, Action<st
     private MobileDevTunnelStatus Failed(string command, MobileCliResult result)
     {
         log?.Invoke($"Mobile: {command} ended with {result.ExitCode}: {result.Output.Trim()}");
+        // A sign-in that the account no longer accepts (revoked, expired) while the command line still keeps it: the person signs in again.
+        if (!result.TimedOut && NeedsSignIn(result.Output)) return NotSignedIn;
         return new("failed", null, result.TimedOut ? $"{command} did not answer." : $"{command} failed: {Summary(result.Output)}");
     }
 
