@@ -8,6 +8,7 @@ import { serviceBrand } from "../brands";
 import { AppWindow } from "../AppWindow";
 import type { MessageKey } from "../localization";
 import { MarkdownContent } from "../MarkdownContent";
+import { createMarkdownImageCache, markdownImageRequest, type MarkdownImages } from "../markdownImages";
 import { sessionTime } from "../sessionTime";
 import { useShellLanguage } from "../shellLanguage";
 import { SessionSettingsChip, useSessionSettingsChoices } from "../sessionSettings/SessionSettingsChip";
@@ -26,7 +27,7 @@ import { MultiChoice } from "./MultiChoice";
 const noProviders: readonly RunProvider[] = [];
 
 /** The part of the host the tab uses; a test gives its own. */
-export type IssuesApi = Pick<typeof issuesService, "sources" | "list" | "read" | "start" | "openLink"> & Partial<Pick<typeof issuesService, "filters" | "fields" | "views" | "saveView" | "renameView" | "removeView" | "selectView">>;
+export type IssuesApi = Pick<typeof issuesService, "sources" | "list" | "read" | "start" | "openLink"> & Partial<Pick<typeof issuesService, "filters" | "fields" | "views" | "saveView" | "renameView" | "removeView" | "selectView" | "image">>;
 
 type Listing = Readonly<{ key: IssueListKey; loading: boolean; items: readonly IssueRow[]; more: boolean; problem: string | null; needsSignIn: boolean; readAt: string | null }>;
 type Sources = Readonly<{ projectId: string; loading: boolean; sources: readonly IssueSource[] }>;
@@ -291,6 +292,18 @@ export function IssuesPanel({ api, epoch, projects, projectId, visible, preferre
     return () => controller.abort();
   }, [api, epoch, available, visible, currentKey, revision, itemRevision]);
 
+  // The images of the descriptions and the comments: the host reads them with the sign-in of the tracker and keeps
+  // them; the window keeps those it drew, so that an item shown again draws them at once.
+  const trackerImages = useMemo<MarkdownImages | null>(() => {
+    if (!available || !project || !source || !api.image) return null;
+    const read = api.image, projectId = project.id, service = source.service;
+    const cache = createMarkdownImageCache(async (request, options) => {
+      const reply = await read({ expectedEpoch: request.expectedHostEpoch, projectId, service, address: request.address }, options);
+      return { status: reply.status, hostEpoch: request.expectedHostEpoch, mediaType: reply.mediaType, base64: reply.data, fullPath: request.address };
+    });
+    const request = (address: string) => markdownImageRequest(epoch, address, null);
+    return { peek: address => cache.peek(request(address)), load: address => cache.load(request(address)), reveal: () => { /* An image of the web has no file. */ }, platform: null };
+  }, [api, epoch, available, project?.id, source?.service]);
   const openLink = (address: string | null | undefined) => {
     if (!address || !available) return;
     void api.openLink({ expectedEpoch: epoch, address }).then(reply => { if (reply.status !== "ok") onNotice(t("The page could not be opened.")); }, () => onNotice(t("The page could not be opened.")));
@@ -323,7 +336,7 @@ export function IssuesPanel({ api, epoch, projects, projectId, visible, preferre
   const noun = kindLabel(shownKind, source?.service, true);
   const command = source ? signInCommand(source.service) : null;
   const read = detail?.key === currentKey ? detail : null;
-  const body = current && <IssueBody item={read?.value?.item ?? current} read={read} service={source?.service ?? null} />;
+  const body = current && <IssueBody item={read?.value?.item ?? current} read={read} service={source?.service ?? null} images={trackerImages} />;
   const runsWith = runChoices.provider && <div className="work-runs-with" role="group" aria-label={t("Runs with")}>
     <span className="work-runs-with-label">{t("Runs with")}</span>
     <SessionSettingsChip id="issue" providers={providers} choices={runChoices} value={runSettings} onChange={setRunSettings} />
@@ -533,7 +546,7 @@ function IssueActions({ item, service, preferredStart, starting, runsWith, onSta
 }
 
 /** The description of an item and its comments, as their authors wrote them. */
-function IssueBody({ item, read, service }: { item: IssueRow; read: Detail | null; service: string | null }) {
+function IssueBody({ item, read, service, images }: { item: IssueRow; read: Detail | null; service: string | null; images: MarkdownImages | null }) {
   const { t, locale } = useShellLanguage();
   if (!read || read.loading) return <p className="work-text-state"><ActivitySpinner size={16} /></p>;
   const value = read.value;
@@ -541,7 +554,7 @@ function IssueBody({ item, read, service }: { item: IssueRow; read: Detail | nul
   const comments = value.comments ?? [];
   const missing: MessageKey = item.kind === "pull_request" ? "No description was written." : "No description was written.";
   return <div className="work-text issue-text" data-service={service ?? undefined}>
-    {value.body?.trim() ? <MarkdownContent source={value.body} document /> : <p className="issue-nothing">{t(missing)}</p>}
+    {value.body?.trim() ? <MarkdownContent source={value.body} document webImages={images} /> : <p className="issue-nothing">{t(missing)}</p>}
     {value.truncated && <p className="work-text-more">{t("The description is longer than what is shown here. Open it on the web to read the rest.")}</p>}
     {comments.length > 0 && <section className="issue-comments-list" aria-label={t("Comments")}>
       <h4>{t("Comments")}<span className="work-count">{comments.length}{value.moreComments ? "+" : ""}</span></h4>
@@ -549,7 +562,7 @@ function IssueBody({ item, read, service }: { item: IssueRow; read: Detail | nul
         const when = sessionTime(comment.createdAt, locale);
         return <article key={index} className="issue-comment">
           <header><AppIcon name="user" size={12} /><strong>{comment.author ?? t("Someone")}</strong>{when.label && <time dateTime={when.dateTime} title={when.title}>{when.label}</time>}</header>
-          <MarkdownContent source={comment.body} document />
+          <MarkdownContent source={comment.body} document webImages={images} />
         </article>;
       })}
       {value.moreComments && <p className="work-text-more">{t("There are more comments. Open it on the web to read them all.")}</p>}

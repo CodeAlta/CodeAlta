@@ -87,13 +87,16 @@ export function createMarkdownParser(options: Readonly<{ breaks?: boolean;
     return renderer.renderToken(tokens, index, options);
   };
   // The parser draws no picture. One of the disk, such as a chart a script made, is a link to its file, marked as a
-  // picture as well: the window may draw it there (see `markdownBoundary`), or open the file. Another is its
-  // alternative text.
-  md.renderer.rules.image = (tokens, index) => {
+  // picture as well: the window may draw it there (see `markdownBoundary`), or open the file. One of the web is such
+  // a link too when the text asks for it (`webImages`: the text of a tracker, whose images its host reads). Another is
+  // its alternative text.
+  md.renderer.rules.image = (tokens, index, _options, env) => {
     const token = tokens[index];
     const src = token.attrGet("src");
-    if (!options.fileLinkMark || typeof src !== "string" || !fileMarkdownHref(src)) return escape(token.content);
+    if (!options.fileLinkMark || typeof src !== "string") return escape(token.content);
     const mark = escape(options.fileLinkMark);
+    if ((env as { webImages?: boolean } | undefined)?.webImages && markdownHrefTarget(src) === "web") return `<a href="${escape(src)}" data-file-image="${mark}">${escape(token.content || fileName(src))}</a>`;
+    if (!fileMarkdownHref(src)) return escape(token.content);
     return `<a href="${escape(src)}" data-file-link="${mark}" data-file-image="${mark}">${escape(token.content || fileName(src))}</a>`;
   };
   if (options.fileLinkMark) md.renderer.rules.link_open = (tokens, index, rendering, _env, renderer) => {
@@ -102,11 +105,11 @@ export function createMarkdownParser(options: Readonly<{ breaks?: boolean;
     if (typeof href === "string" && markdownHrefTarget(href) === "file") token.attrSet("data-file-link", options.fileLinkMark!);
     return renderer.renderToken(tokens, index, rendering);
   };
-  return (source: string, sourceLines?: MarkdownSourceLines) => md.render(source, sourceLines ? { sourceLines } : {});
+  return (source: string, sourceLines?: MarkdownSourceLines, webImages?: boolean) => md.render(source, { ...(sourceLines ? { sourceLines } : {}), ...(webImages ? { webImages } : {}) });
 }
 
 // The name of the file a target names, without its folder and the place in the file; the target itself when it has none.
-function fileName(target: string): string {
+export function fileName(target: string): string {
   let path = target.split("#", 1)[0];
   try { path = decodeURIComponent(path); } catch { /* Not escapes: the path is as it is written. */ }
   return path.replaceAll("\\", "/").split("/").filter(Boolean).at(-1) || target;

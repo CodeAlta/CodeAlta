@@ -80,7 +80,13 @@ const filtersOf = (request: IssueFiltersRequest) => {
   const active = [...pick, ...on.filter(entry => !entry.pick && selected[entry.id]).map(entry => entry.id)];
   return { status: "ok", problem: state.viewsProblem, views: kept.views.map(({ name, source }) => ({ name, source })), current: kept.current, filters, selected, active, pick };
 };
-const state = { reads: [] as { id: string; fresh?: boolean | null }[], lists: [] as IssueListRequest[], filterAsks: [] as IssueFiltersRequest[], views: [
+// The descriptions with images: Markdown in a pull request, HTML in a work item; one image cannot be read.
+const pixel = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";
+const bodies: Record<string, string> = {
+  "7": "A cache.\n\n![shot.png](https://dev.azure.com/org/proj/_apis/git/repositories/app/pullRequests/7/attachments/shot.png)\n\n![missing](https://dev.azure.com/org/proj/_apis/wit/attachments/gone)",
+  "41": '<div>Steps:</div><div><a href="https://dev.azure.com/org/proj/_apis/wit/attachments/1?fileName=big.png"><img src="https://dev.azure.com/org/proj/_apis/wit/attachments/1?fileName=image.png" alt="Image"></a></div><img src="javascript:alert(1)">',
+};
+const state = { images: [] as { address: string; projectId: string; service: string }[], reads: [] as { id: string; fresh?: boolean | null }[], lists: [] as IssueListRequest[], filterAsks: [] as IssueFiltersRequest[], views: [
     { name: "Bugs", source: "personal", path: ".alta/local/issues.toml", filters: [{ id: "type", mode: "on", value: "Bug", label: null, pick: null }] },
     { name: "Sprint board", source: "team", path: ".alta/issues.toml", filters: [{ id: "team", mode: "on", value: "Platform", label: null, pick: null },
       { id: "sprint", mode: "on", value: "@current", label: null, pick: true }, { id: "type", mode: "on", value: "Task", label: null, pick: null }] }] as IssueViewDetail[],
@@ -138,7 +144,11 @@ const api = {
     return { status: "ok" };
   },
   read: async (request: { id: string; fresh?: boolean | null }) => (state.reads.push(request), { status: "ok", readAt: new Date(Date.now() - (request.fresh ? 0 : 2 * 60_000)).toISOString(),
-    item: [...jira, ...github, ...work, ...pulls].find(row => row.id === request.id) ?? null, body: `Description of ${request.id}.`, comments: [], moreComments: false, truncated: false }),
+    item: [...jira, ...github, ...work, ...pulls].find(row => row.id === request.id) ?? null, body: bodies[request.id] ?? `Description of ${request.id}.`,
+    comments: request.id === "7" ? [{ author: "Bo", createdAt: null, body: "See ![again](https://dev.azure.com/org/proj/_apis/git/repositories/app/pullRequests/7/attachments/shot.png)" }] : [],
+    moreComments: false, truncated: false }),
+  image: async (request: { address: string; projectId: string; service: string }) => (state.images.push(request),
+    request.address.includes("/gone") ? { status: "not_found", mediaType: null, data: null } : { status: "ok", mediaType: "image/png", data: pixel }),
   start: (request: { id: string }) => new Promise(resolve => {
     state.starts.push(request.id);
     state.finish[request.id] = sessionId => resolve({ status: "ok", sessionId, reason: null, message: null });

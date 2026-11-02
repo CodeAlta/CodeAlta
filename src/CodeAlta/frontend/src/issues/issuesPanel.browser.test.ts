@@ -568,3 +568,27 @@ test("the tab says how old the list and the item are, and reads them again on de
     assert.deepEqual(page.problems, []);
   }, options);
 });
+
+test("the images of a description and of its comments are read through the host and drawn; one that cannot be read stays a link", { skip: !edge, timeout: 120_000 }, async () => {
+  await withCanvas(async page => {
+    const pictures = `[...document.querySelectorAll('.work-detail .markdown-content a[href]')].filter(a => a.querySelector('img')).map(a => [a.textContent, a.querySelector('img').getAttribute('src')?.slice(0, 22) ?? null])`;
+    await page.evaluate(choose('.issues-toolbar select[aria-label="Project"]', "ado"));
+    await page.until(`${rows}.join() === '#41'`, "the work items");
+    await page.until(`${pictures}.length === 1 && ${pictures}[0][1] !== null`, "the image of the HTML of the work item");
+    assert.deepEqual(await page.evaluate(pictures), [["Image", "data:image/png;base64,"]], "an <img> of HTML is drawn in place of the link around it");
+    assert.equal(await page.evaluate(`document.querySelectorAll('.work-detail .markdown-content img:not(.markdown-local-image)').length`), 0, "no other image, and none of javascript:");
+
+    await page.clickText('.issues-toolbar .bp6-segmented-control button', "Pull requests");
+    await page.until(`${rows}[0] === '#7' && ${pictures}.length === 3 && ${pictures}.filter(picture => picture[1]).length === 2`, "the images of the pull request and of its comment");
+    assert.deepEqual(await page.evaluate(pictures), [["shot.png", "data:image/png;base64,"], ["missing", null], ["again", "data:image/png;base64,"]]);
+    assert.deepEqual(await page.evaluate(`[...new Set(issuesFixture.state.images.map(asked => asked.projectId + ' ' + asked.service))]`), ["ado azure_devops"]);
+
+    // Shown again, the item draws its images from what the window kept, without asking the host.
+    const asked = await page.evaluate<number>(`issuesFixture.state.images.length`);
+    await page.clickText('.issue-row-item strong', "New fields");
+    await page.clickText('.issue-row-item strong', "Cache the build");
+    await page.until(`${pictures}.filter(picture => picture[1]).length === 2`, "the images again");
+    assert.equal(await page.evaluate(`issuesFixture.state.images.length`), asked);
+    assert.deepEqual(page.problems, []);
+  }, { ...options, styles: [...options.styles, "../style.css"] });
+});
