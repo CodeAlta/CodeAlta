@@ -13,14 +13,7 @@ namespace CodeAlta.Plugin.Mobile;
 /// <param name="Url">The address of the view, while the tunnel serves it.</param>
 /// <param name="Detail">A line for people.</param>
 /// <param name="FixUrl">The page that fixes the state, when there is one.</param>
-internal sealed record MobileDevTunnelStatus(string State, string? Url, string Detail, string? FixUrl = null)
-{
-    internal static MobileDevTunnelStatus Pending { get; } = new("pending", null, "Opening the Dev Tunnel…");
-
-    internal static MobileDevTunnelStatus Unused { get; } = new("unused", null, "Phones connect through Tailscale.");
-
-    internal static MobileDevTunnelStatus Stopped { get; } = new("stopped", null, "The mobile view is not served.");
-}
+internal sealed record MobileDevTunnelStatus(string State, string? Url, string Detail, string? FixUrl = null);
 
 /// <summary>A command of the Dev Tunnels command line that runs until it is stopped: <c>devtunnel host</c>.</summary>
 internal interface IMobileHostedProcess : IAsyncDisposable
@@ -400,4 +393,151 @@ internal sealed class MobileDevTunnelCli : IMobileDevTunnelCli
             _lines.Writer.TryComplete();
         }
     }
+}
+
+/// <summary>
+/// The provider of Dev Tunnels: the server listens on the loopback address, and a Dev Tunnel of the user (made once, kept in the
+/// settings so that its address does not change) publishes it at an HTTPS address any phone opens, hosted while the plugin runs.
+/// </summary>
+internal sealed class MobileDevTunnelProvider(IMobileDevTunnelCli cli, IMobileProviderHost host) : IMobileProvider
+{
+    /// <summary>The id of the provider in the settings.</summary>
+    internal const string ProviderId = "devtunnel";
+
+    // The host of the tunnel while it serves, and the port it serves; the sign-in that runs.
+    private IMobileHostedProcess? _host;
+    private int _hostedPort;
+    private CancellationTokenSource? _signIn;
+
+    /// <inheritdoc />
+    public string Id => ProviderId;
+
+    /// <inheritdoc />
+    public MobileListen Listen(MobileSettings settings) => new(settings.Port, null);
+
+    /// <inheritdoc />
+    public string? Refusal(MobileSettings settings) => null;
+
+    private MobileDevTunnel Tunnel => new(cli, host.Log);
+
+    /// <inheritdoc />
+    public async Task<MobileProviderStatus> PublishAsync(CancellationToken cancellationToken)
+    {
+        // Try again drops a sign-in that has not ended.
+        if (Interlocked.Exchange(ref _signIn, null) is { } signIn) await signIn.CancelAsync().ConfigureAwait(false);
+        await StopHostAsync(cancellationToken).ConfigureAwait(false);
+        var settings = host.Settings;
+        MobileDevTunnel.Published published;
+        try
+        {
+            published = await Tunnel.PublishAsync(settings.Port, settings.TunnelId, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is InvalidOperationException or IOException or System.ComponentModel.Win32Exception)
+        {
+            published = new(new MobileDevTunnelStatus("failed", null, "Dev Tunnels could not be asked: " + exception.Message), settings.TunnelId, null);
+        }
+
+        // The tunnel made now is kept: its address, which phones keep, stays the same at the next start.
+        if (published.TunnelId != settings.TunnelId) await host.SaveAsync(kept => kept with { TunnelId = published.TunnelId }).ConfigureAwait(false);
+        host.Log($"Mobile: {published.Status.Detail}");
+        if (published.Host is { } hosted)
+        {
+            _host = hosted;
+            _hostedPort = settings.Port;
+            host.Run("mobile-tunnel", "Watches the Dev Tunnel of the mobile view.", ct => WatchAsync(hosted, ct));
+        }
+
+        var status = published.Status;
+        return new MobileProviderStatus(status.State, status.Url, status.Detail, status.FixUrl);
+    }
+
+    /// <inheritdoc />
+    public async Task UnpublishAsync(CancellationToken cancellationToken)
+    {
+        if (Interlocked.Exchange(ref _signIn, null) is { } signIn) await signIn.CancelAsync().ConfigureAwait(false);
+        await StopHostAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <inheritdoc />
+    public Task<bool> ActAsync(string action, CancellationToken cancellationToken)
+    {
+        if (action is not ("signin-github" or "signin-microsoft")) return Task.FromResult(false);
+        var github = action == "signin-github";
+        var run = new CancellationTokenSource();
+        Interlocked.Exchange(ref _signIn, run)?.Cancel();
+        _ = host.ReportAsync(new MobileProviderStatus("signing-in", null, !github && OperatingSystem.IsWindows()
+            ? "Choose your account in the window of Windows that opens, then come back here."
+            : "Sign in in the browser that opens, then come back here."));
+        host.Run("mobile-devtunnel-signin", "Signs in to Dev Tunnels.", async _ => await SignInAsync(github, run).ConfigureAwait(false));
+        return Task.FromResult(true);
+    }
+
+    private async Task SignInAsync(bool github, CancellationTokenSource run)
+    {
+        bool signedIn;
+        try
+        {
+            signedIn = await Tunnel.SignInAsync(github, run.Token).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            return;
+        }
+        catch (Exception exception) when (exception is InvalidOperationException or IOException or System.ComponentModel.Win32Exception)
+        {
+            host.Log($"Mobile: the sign-in of Dev Tunnels could not start: {exception.Message}");
+            signedIn = false;
+        }
+
+        if (run.IsCancellationRequested) return;
+        Interlocked.CompareExchange(ref _signIn, null, run);
+        if (!signedIn)
+        {
+            await host.ReportAsync(new MobileProviderStatus("not-signed-in", null, "The sign-in did not end. Sign in again, or run devtunnel user login in a terminal.")).ConfigureAwait(false);
+            return;
+        }
+
+        host.Log("Mobile: signed in to Dev Tunnels.");
+        await host.RepublishAsync().ConfigureAwait(false);
+    }
+
+    // Reads what the host writes until it exits. A host that exits while it is the one of now (not stopped here) is said stopped.
+    private async ValueTask WatchAsync(IMobileHostedProcess hosted, CancellationToken cancellationToken)
+    {
+        var last = "";
+        try
+        {
+            await foreach (var line in hosted.Lines.ReadAllAsync(cancellationToken).ConfigureAwait(false))
+            {
+                if (!string.IsNullOrWhiteSpace(line)) last = line.Trim();
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            return;
+        }
+
+        if (Interlocked.CompareExchange(ref _host, null, hosted) != hosted) return;
+        await hosted.DisposeAsync().ConfigureAwait(false);
+        host.Log($"Mobile: the Dev Tunnel stopped: {last}");
+        await host.ReportAsync(new MobileProviderStatus("failed", null, "The Dev Tunnel stopped" + (last.Length > 0 ? ": " + last : "."))).ConfigureAwait(false);
+    }
+
+    // Stops the host; the tunnel and its address stay in the account, for the next start. A port the view left is taken off it.
+    private async Task StopHostAsync(CancellationToken cancellationToken)
+    {
+        if (Interlocked.Exchange(ref _host, null) is not { } hosted) return;
+        await hosted.DisposeAsync().ConfigureAwait(false);
+        if (_hostedPort != host.Settings.Port && host.Settings.TunnelId is { } tunnelId)
+        {
+            try { await Tunnel.RemovePortAsync(tunnelId, _hostedPort, cancellationToken).ConfigureAwait(false); }
+            catch (Exception exception) when (exception is InvalidOperationException or IOException or System.ComponentModel.Win32Exception)
+            {
+                host.Log($"Mobile: the old port of the Dev Tunnel could not be removed: {exception.Message}");
+            }
+        }
+    }
+
+    /// <inheritdoc />
+    public async ValueTask DisposeAsync() => await UnpublishAsync(CancellationToken.None).ConfigureAwait(false);
 }

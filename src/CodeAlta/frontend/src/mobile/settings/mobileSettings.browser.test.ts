@@ -71,7 +71,7 @@ test("the settings page of Mobile shows its ports and its address, applies new p
     assert.equal(await wait("document.querySelector('.mobile-settings-notice')?.textContent === 'Saved.'"), true);
     assert.equal(await evaluate("document.querySelector('.mobile-settings-address').textContent"), "Not served on the tailnet");
     // The plugin says it serves the new port: the page follows it.
-    await evaluate("mobileSettingsFixture.change({ address: 'https://desk.tail1234.ts.net:2584', tailscale: { state: 'serving', detail: 'Tailscale serves it' } })");
+    await evaluate("mobileSettingsFixture.change({ address: 'https://desk.tail1234.ts.net:2584', provider: { id: 'tailscale', state: 'serving', detail: 'Tailscale serves it' } })");
     assert.equal(await wait("document.querySelector('.mobile-settings-address code')?.textContent === 'https://desk.tail1234.ts.net:2584'"), true);
     // A refusal of the plugin is said with its words, and the field keeps what was typed.
     await evaluate("mobileSettingsFixture.state.refuse = 'Port 2591 is not allowed.'");

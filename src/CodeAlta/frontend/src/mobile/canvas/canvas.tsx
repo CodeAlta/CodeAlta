@@ -39,8 +39,8 @@ export default function Canvas() {
     },
     openLink: url => latest.current.alta.host.openLink(url),
     reload: () => setWatching(value => value + 1),
-    signIn: async github => {
-      try { setStatus(await api.signIn(github)); setFailure(null); }
+    act: async action => {
+      try { setStatus(await api.act(action)); setFailure(null); }
       catch (error) { setFailure(error instanceof Error ? error.message : String(error)); }
     },
   }), [api]);

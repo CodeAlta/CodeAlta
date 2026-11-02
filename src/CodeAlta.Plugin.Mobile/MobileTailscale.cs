@@ -8,7 +8,7 @@ namespace CodeAlta.Plugin.Mobile;
 /// <param name="State">
 /// <c>pending</c>, <c>not-installed</c>, <c>not-running</c> (not signed in, or stopped), <c>serve-disabled</c> (Serve or HTTPS
 /// certificates are not enabled on the tailnet), <c>port-taken</c> (the HTTPS port of the plugin serves something else),
-/// <c>serving</c>, <c>failed</c>, <c>stopped</c> or <c>unused</c> (phones connect through Dev Tunnels).
+/// <c>serving</c>, <c>failed</c> or <c>stopped</c>.
 /// </param>
 /// <param name="Url">The address of the mobile view on the tailnet, while it is served.</param>
 /// <param name="Detail">A line for people.</param>
@@ -18,9 +18,6 @@ internal sealed record MobileTailscaleStatus(string State, string? Url, string D
     internal static MobileTailscaleStatus Pending { get; } = new("pending", null, "Checking Tailscale…");
 
     internal static MobileTailscaleStatus Stopped { get; } = new("stopped", null, "The mobile view is not served.");
-
-    /// <summary>Phones connect through Dev Tunnels: Tailscale is not asked.</summary>
-    internal static MobileTailscaleStatus Unused { get; } = new("unused", null, "Phones connect through Dev Tunnels.");
 }
 
 /// <summary>What a run of the Tailscale command line gave.</summary>
@@ -230,4 +227,70 @@ internal sealed class MobileTailscaleCli : IMobileTailscaleCli
                 : ["/usr/bin/tailscale", "/usr/local/bin/tailscale"];
         return usual.FirstOrDefault(File.Exists);
     }
+}
+
+/// <summary>
+/// The provider of Tailscale: the server listens on the loopback address, and Tailscale Serve publishes it on the tailnet, on an HTTPS
+/// port of its own. What it published is taken off with the ports it was published with.
+/// </summary>
+internal sealed class MobileTailscaleProvider(IMobileTailscaleCli cli, IMobileProviderHost host) : IMobileProvider
+{
+    /// <summary>The id of the provider in the settings.</summary>
+    internal const string ProviderId = "tailscale";
+
+    // The ports Tailscale serves the view with now, as this instance published them.
+    private (int Port, int HttpsPort)? _published;
+
+    /// <inheritdoc />
+    public string Id => ProviderId;
+
+    /// <inheritdoc />
+    public MobileListen Listen(MobileSettings settings) => new(settings.Port, null);
+
+    /// <inheritdoc />
+    public string? Refusal(MobileSettings settings)
+        => MobilePlugin.IsPort(settings.HttpsPort) ? null : $"The port on the tailnet must be a number from {MobilePlugin.MinimumPort} to {MobilePlugin.MaximumPort}.";
+
+    /// <inheritdoc />
+    public async Task<MobileProviderStatus> PublishAsync(CancellationToken cancellationToken)
+    {
+        var settings = host.Settings;
+        // What was published with other ports goes first.
+        if (_published is { } published && published != (settings.Port, settings.HttpsPort)) await UnpublishAsync(cancellationToken).ConfigureAwait(false);
+        MobileTailscaleStatus status;
+        try
+        {
+            status = await new MobileTailscale(cli).PublishAsync(settings.Port, settings.HttpsPort, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is InvalidOperationException or IOException or System.ComponentModel.Win32Exception)
+        {
+            status = new("failed", null, "Tailscale could not be asked: " + exception.Message);
+        }
+
+        if (status.State == "serving") _published = (settings.Port, settings.HttpsPort);
+        host.Log($"Mobile: {status.Detail}");
+        return new MobileProviderStatus(status.State, status.Url, status.Detail, status.FixUrl);
+    }
+
+    /// <inheritdoc />
+    public async Task UnpublishAsync(CancellationToken cancellationToken)
+    {
+        if (_published is not { } published) return;
+        try
+        {
+            host.Log("Mobile: " + await new MobileTailscale(cli).UnpublishAsync(published.Port, published.HttpsPort, cancellationToken).ConfigureAwait(false));
+        }
+        catch (Exception exception) when (exception is InvalidOperationException or IOException or System.ComponentModel.Win32Exception)
+        {
+            host.Log($"Mobile: Tailscale could not be asked to stop serving: {exception.Message}");
+        }
+
+        _published = null;
+    }
+
+    /// <inheritdoc />
+    public Task<bool> ActAsync(string action, CancellationToken cancellationToken) => Task.FromResult(false);
+
+    /// <inheritdoc />
+    public ValueTask DisposeAsync() => ValueTask.CompletedTask;
 }

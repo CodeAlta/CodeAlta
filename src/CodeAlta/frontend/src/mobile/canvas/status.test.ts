@@ -4,9 +4,9 @@ import type { AltaRpc } from "../../pluginScript/alta";
 import { changedEvent, createMobileApi, type MobileWatchEvent } from "./api";
 import { mobileView, qrPath, quietZone, readStatus, type MobileStatus } from "./status";
 
-const serving = (overrides: Partial<MobileStatus> = {}, tailscale: Partial<MobileStatus["tailscale"]> = {}): MobileStatus => ({
-  mode: "tailscale", server: "listening", port: 51234, serverDetail: null, devTunnel: { state: "unused", url: null, detail: "", fixUrl: null },
-  tailscale: { state: "serving", url: "https://pc.tail1.ts.net:8443", detail: "Published on the tailnet.", fixUrl: null, ...tailscale },
+const serving = (overrides: Partial<MobileStatus> = {}, provider: Partial<MobileStatus["provider"]> = {}): MobileStatus => ({
+  server: "listening", port: 51234, serverDetail: null,
+  provider: { id: "tailscale", state: "serving", url: "https://pc.tail1.ts.net:8443", detail: "Published on the tailnet.", fixUrl: null, ...provider },
   connectUrl: "https://pc.tail1.ts.net:8443/#k=secret", address: "https://pc.tail1.ts.net:8443", qr: ["101", "010", "111"], ...overrides,
 });
 
@@ -19,29 +19,27 @@ test("the QR rows become one path of dark runs inside the quiet zone", () => {
 
 test("a status is read as the plugin sends it, and what is not one is refused", () => {
   assert.deepEqual(readStatus(JSON.parse(JSON.stringify(serving()))), serving());
-  assert.equal(readStatus({ server: "dancing", tailscale: { state: "serving" } }), null);
+  assert.equal(readStatus({ server: "dancing", provider: { id: "tailscale", state: "serving" } }), null);
+  assert.equal(readStatus({ ...serving(), provider: { state: "serving" } }), null, "a provider without its id");
   assert.equal(readStatus(null), null);
   assert.equal(readStatus({ ...serving(), qr: ["10", "1"] })?.qr, null, "a code that is not square is left out");
   assert.equal(readStatus({ ...serving(), qr: ["1x", "01"] })?.qr, null);
 });
 
 test("through Dev Tunnels: the code of the tunnel, no word of Tailscale, the sign-in offered, and each state said", () => {
-  const tunnel = (overrides: Partial<MobileStatus> = {}, devTunnel: Partial<MobileStatus["devTunnel"]> = {}) => serving({
-    mode: "devtunnel", connectUrl: "https://abc-2584.euw.devtunnels.ms/#k=secret", address: "https://abc-2584.euw.devtunnels.ms",
-    devTunnel: { state: "serving", url: "https://abc-2584.euw.devtunnels.ms", detail: "Dev Tunnels serves it.", fixUrl: null, ...devTunnel }, ...overrides },
-    { state: "unused", url: null, detail: "Phones connect through Dev Tunnels." });
+  const tunnel = (overrides: Partial<MobileStatus> = {}, provider: Partial<MobileStatus["provider"]> = {}) => serving({
+    connectUrl: "https://abc-2584.euw.devtunnels.ms/#k=secret", address: "https://abc-2584.euw.devtunnels.ms", ...overrides },
+    { id: "devtunnel", state: "serving", url: "https://abc-2584.euw.devtunnels.ms", detail: "Dev Tunnels serves it.", ...provider });
   const read = readStatus(JSON.parse(JSON.stringify(tunnel())));
-  assert.deepEqual([read?.mode, read?.devTunnel.state, read?.devTunnel.url], ["devtunnel", "serving", "https://abc-2584.euw.devtunnels.ms"]);
-  assert.deepEqual([readStatus({ ...serving(), mode: undefined, devTunnel: undefined })?.mode, readStatus({ ...serving(), devTunnel: undefined })?.devTunnel.state],
-    ["tailscale", "unused"], "a status of before is of Tailscale");
+  assert.deepEqual([read?.provider.id, read?.provider.state, read?.provider.url], ["devtunnel", "serving", "https://abc-2584.euw.devtunnels.ms"]);
   const served = mobileView(tunnel());
   assert.deepEqual([served.code?.address, served.problems], ["https://abc-2584.euw.devtunnels.ms", []]);
   assert.equal(served.instruction, "Scan it with the camera of the phone. The first time, the phone shows a page of Microsoft: choose Continue.");
 
   const out = { connectUrl: null, address: null, qr: null };
   const signIn = mobileView(tunnel(out, { state: "not-signed-in", url: null, detail: "Sign in." })).problems;
-  assert.deepEqual(signIn.map(problem => [problem.key, problem.title, problem.detail, problem.signIn, problem.retry]),
-    [["devtunnel", "Sign in to Dev Tunnels.", null, true, false]], "the title says it, the buttons follow");
+  assert.deepEqual(signIn.map(problem => [problem.key, problem.title, problem.detail, problem.actions.map(action => action.action), problem.retry]),
+    [["provider", "Sign in to Dev Tunnels.", null, ["signin-microsoft", "signin-github"], false]], "the title says it, the buttons of the provider follow");
   const missing = mobileView(tunnel(out, { state: "not-installed", url: null, detail: "Install it.", fixUrl: "https://learn.microsoft.com/dev-tunnels" })).problems[0];
   assert.deepEqual([missing.intent, missing.fix, missing.retry], ["danger", { label: "Install Dev Tunnels", url: "https://learn.microsoft.com/dev-tunnels" }, true]);
   assert.deepEqual(mobileView(tunnel(out, { state: "failed", url: null, detail: "devtunnel host did not start: boom" })).problems.map(problem => [problem.title, problem.detail]),
@@ -49,6 +47,15 @@ test("through Dev Tunnels: the code of the tunnel, no word of Tailscale, the sig
   assert.equal(mobileView(tunnel(out, { state: "signing-in", url: null })).waiting, "Waiting for the sign-in in the browser…");
   assert.equal(mobileView(tunnel(out, { state: "pending", url: null })).waiting, "Dev Tunnels is opening the tunnel.");
   assert.equal(mobileView(serving()).instruction, "Scan it with the camera of the phone. The phone must be signed in to the same tailnet.");
+});
+
+test("a provider or a state the tab has no words for: the plugin's line under a general title, and its code when it serves", () => {
+  const other = mobileView(serving({ connectUrl: null, address: null, qr: null }, { id: "pigeons", state: "lost", url: null, detail: "The pigeon got lost." }));
+  assert.deepEqual(other.problems.map(problem => [problem.key, problem.title, problem.detail, problem.retry]),
+    [["provider", "The phone page could not be published.", "The pigeon got lost.", true]]);
+  assert.deepEqual(mobileView(serving({}, { id: "pigeons" })).problems, []);
+  assert.equal(mobileView(serving({}, { id: "pigeons" })).instruction, "Scan it with the camera of the phone.");
+  assert.equal(mobileView(serving({ connectUrl: null, address: null, qr: null }, { id: "pigeons", state: "pending" })).waiting, "The phone page is starting.");
 });
 
 test("served: the code, the address and nothing wrong", () => {
@@ -76,7 +83,7 @@ test("a port in use says which, and why when the plugin knows it", () => {
 });
 
 test("each Tailscale state that keeps a phone out says what fixes it, and Try again only where the state can change", () => {
-  const problem = (state: MobileStatus["tailscale"]["state"], fixUrl: string | null = null) =>
+  const problem = (state: string, fixUrl: string | null = null) =>
     mobileView(serving({ connectUrl: null, address: null, qr: null }, { state, fixUrl, detail: "line of the plugin" })).problems[0];
   const notInstalled = problem("not-installed", "https://tailscale.com/download");
   assert.deepEqual([notInstalled.intent, notInstalled.fix, notInstalled.retry], ["danger", { label: "Download Tailscale", url: "https://tailscale.com/download" }, false]);
@@ -143,12 +150,16 @@ test("a plugin that does not answer is told, and asked again when it may answer 
   stop();
 });
 
-test("Try again asks Tailscale again and gives the new status", async () => {
+test("Try again asks the provider again and gives the new status, and an action of the provider goes with its name", async () => {
   const fake = plugin();
   fake.answer(serving({}, { state: "serving" }));
   const status = await createMobileApi(fake.rpc).retry();
   assert.deepEqual(fake.calls, ["mobile.retry"]);
-  assert.equal(status.tailscale.state, "serving");
+  assert.equal(status.provider.state, "serving");
+  fake.answer(serving({}, { id: "devtunnel", state: "signing-in" }));
+  const acted = await createMobileApi(fake.rpc).act("signin-github");
+  assert.deepEqual(fake.calls, ["mobile.retry", "mobile.act"], "an action of the provider goes through mobile.act");
+  assert.equal(acted.provider.state, "signing-in");
   fake.answer({ wrong: true });
   await assert.rejects(createMobileApi(fake.rpc).status(), /cannot read/);
 });

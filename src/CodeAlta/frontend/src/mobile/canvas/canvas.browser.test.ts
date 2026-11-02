@@ -16,9 +16,9 @@ const shots = process.env.CODEALTA_SHOTS ?? "";
 
 // A QR code of 25 modules, as the plugin sends it: a pattern is enough to draw.
 const rows = Array.from({ length: 25 }, (_, y) => Array.from({ length: 25 }, (_, x) => ((x * 7 + y * 3) % 5 < 2) || (x < 7 && y < 7) ? "1" : "0").join(""));
-const status = (overrides: Partial<MobileStatus> = {}, tailscale: Partial<MobileStatus["tailscale"]> = {}): MobileStatus => ({
-  mode: "tailscale", server: "listening", port: 51234, serverDetail: null, devTunnel: { state: "unused", url: null, detail: "", fixUrl: null },
-  tailscale: { state: "serving", url: "https://workstation.tail1234.ts.net:8443", detail: "Published on the tailnet.", fixUrl: null, ...tailscale },
+const status = (overrides: Partial<MobileStatus> = {}, provider: Partial<MobileStatus["provider"]> = {}): MobileStatus => ({
+  server: "listening", port: 51234, serverDetail: null,
+  provider: { id: "tailscale", state: "serving", url: "https://workstation.tail1234.ts.net:8443", detail: "Published on the tailnet.", fixUrl: null, ...provider },
   connectUrl: "https://workstation.tail1234.ts.net:8443/#k=secret", address: "https://workstation.tail1234.ts.net:8443", qr: rows, ...overrides,
 });
 const unreachable = { connectUrl: null, address: null, qr: null };
@@ -106,7 +106,7 @@ test("the Mobile tab shows the code of the phone page, and what keeps a phone ou
 
     // Tailscale is not installed: the page that fixes it opens in the browser; no Try again for a state that does not change by itself.
     await publish(status(unreachable, { state: "not-installed", detail: "tailscale was not found on this computer.", fixUrl: "https://tailscale.com/download" }));
-    await wait("document.querySelector('.mobile-problem[data-problem=tailscale]')", "the Tailscale problem");
+    await wait("document.querySelector('.mobile-problem[data-problem=provider]')", "the Tailscale problem");
     assert.equal(await evaluate("document.querySelectorAll('.mobile-qr').length"), 0);
     assert.deepEqual(await text(".mobile-problem .bp6-heading"), ["Tailscale is not installed on this computer."]);
     assert.deepEqual(await text(".mobile-problem p"), ["tailscale was not found on this computer."]);

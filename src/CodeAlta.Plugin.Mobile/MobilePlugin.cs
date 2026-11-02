@@ -9,10 +9,11 @@ using XenoAtom.Logging;
 namespace CodeAlta.Plugin.Mobile;
 
 /// <summary>
-/// Serves a mobile view of CodeAlta (the recent sessions, their timelines and a composer) from an in-process server on the
-/// loopback address, publishes it on the tailnet with Tailscale Serve on an HTTPS port of its own, or through a Dev Tunnel of
-/// Microsoft, and shows the address as a QR code in the Mobile tab. It runs while it is turned on in Settings &gt; Plugins, which is off until the user turns it on; its
-/// ports and the access of the phones are on its settings page, Settings &gt; Extensions &gt; Mobile.
+/// Serves a mobile view of CodeAlta (the recent sessions, their timelines and a composer) from an in-process server, and shows its
+/// address as a QR code in the Mobile tab. A provider of the settings makes the view reachable: Tailscale Serve on the tailnet, or a Dev
+/// Tunnel of Microsoft; the plugin starts the server as the provider says, asks it to publish the view, and shows what it says. It runs
+/// while it is turned on in Settings &gt; Plugins, which is off until the user turns it on; the provider, its ports and the access of the
+/// phones are on its settings page, Settings &gt; Extensions &gt; Mobile.
 /// </summary>
 [Plugin("mobile", DisplayName = "Mobile", Description = "The sessions of this computer on a phone, through Tailscale or Dev Tunnels.", Frontends = PluginFrontends.Desktop)]
 public sealed class MobilePlugin : PluginBase
@@ -29,17 +30,11 @@ public sealed class MobilePlugin : PluginBase
     /// <summary>The name of the module of the application's build that draws the settings page.</summary>
     internal const string SettingsModule = "mobile-settings";
 
-    /// <summary>The port of the server on the loopback address, unless the state of the plugin says another.</summary>
+    /// <summary>The port of the server on this computer, unless the state of the plugin says another.</summary>
     internal const int DefaultPort = 2584;
 
     /// <summary>The HTTPS port of this computer on the tailnet, unless the state of the plugin says another.</summary>
     internal const int DefaultHttpsPort = 2584;
-
-    /// <summary>The mode where Tailscale Serve publishes the view on the tailnet.</summary>
-    internal const string TailscaleMode = "tailscale";
-
-    /// <summary>The mode where a Dev Tunnel of Microsoft publishes the view at an HTTPS address any phone opens.</summary>
-    internal const string DevTunnelMode = "devtunnel";
 
     /// <summary>The lowest port the settings page accepts: the ones below are the system's.</summary>
     internal const int MinimumPort = 1024;
@@ -50,24 +45,20 @@ public sealed class MobilePlugin : PluginBase
     private const string SettingsName = "mobile.json";
     private static readonly TimeSpan FlushPeriod = TimeSpan.FromMilliseconds(250);
 
-    private readonly IMobileTailscaleCli _cli;
-    private readonly IMobileDevTunnelCli _tunnelCli;
+    private readonly Func<string, IMobileProviderHost, IMobileProvider?> _providers;
     private readonly MobileLive _live;
     private readonly SemaphoreSlim _gate = new(1, 1);
     private readonly Lock _canvases = new();
     private readonly List<IPluginCanvasRpc> _open = [];
     private readonly List<IPluginCanvasRpc> _settingsPages = [];
+    private readonly Host _host;
     private volatile MobileSettings _settings = new();
     private volatile MobileAccess? _access;
     private MobileServer? _server;
+    // How the server listens now: a change of the provider or of its settings that changes it starts the server again.
+    private MobileListen? _listening;
+    private IMobileProvider? _provider;
     private volatile MobileState _state = MobileState.Starting;
-    // The ports Tailscale serves the view with now, as this instance published them: what is taken off when the ports change or the plugin stops.
-    private (int Port, int HttpsPort)? _published;
-    // The host of the Dev Tunnel while it serves, and the port it serves: what is stopped when the mode or the port changes or the plugin stops.
-    private IMobileHostedProcess? _tunnelHost;
-    private int _tunnelPort;
-    // The sign-in to Dev Tunnels that runs: Try again or another sign-in drops it.
-    private CancellationTokenSource? _signIn;
     private bool _stopped;
     // Whether the last reading of the asks failed: it is logged once.
     private bool _askingFailed;
@@ -88,11 +79,27 @@ public sealed class MobilePlugin : PluginBase
 
     /// <summary>Creates the plugin with command lines of the tests.</summary>
     internal MobilePlugin(IMobileTailscaleCli cli, IMobileDevTunnelCli tunnelCli)
+        : this((id, host) => id switch
+        {
+            MobileTailscaleProvider.ProviderId => new MobileTailscaleProvider(cli, host),
+            MobileDevTunnelProvider.ProviderId => new MobileDevTunnelProvider(tunnelCli, host),
+            _ => null,
+        })
     {
-        _cli = cli ?? throw new ArgumentNullException(nameof(cli));
-        _tunnelCli = tunnelCli ?? throw new ArgumentNullException(nameof(tunnelCli));
-        _live = new MobileLive { SteerProbe = CanSteerAsync };
+        ArgumentNullException.ThrowIfNull(cli);
+        ArgumentNullException.ThrowIfNull(tunnelCli);
     }
+
+    /// <summary>Creates the plugin with the providers a factory makes by their id; null for an id it does not know.</summary>
+    internal MobilePlugin(Func<string, IMobileProviderHost, IMobileProvider?> providers)
+    {
+        _providers = providers ?? throw new ArgumentNullException(nameof(providers));
+        _live = new MobileLive { SteerProbe = CanSteerAsync };
+        _host = new Host(this);
+    }
+
+    /// <summary>The ids of the providers, in the order the settings page offers them.</summary>
+    internal static IReadOnlyList<string> ProviderIds { get; } = [MobileTailscaleProvider.ProviderId, MobileDevTunnelProvider.ProviderId];
 
     /// <summary>Gets what the plugin serves now.</summary>
     internal MobileState State => _state;
@@ -111,7 +118,7 @@ public sealed class MobilePlugin : PluginBase
     public override async ValueTask OnActivatedAsync(CancellationToken cancellationToken = default)
     {
         if (Context.Host.Frontend != PluginFrontends.Desktop) return;
-        // The server starts in the background: the window does not wait for Tailscale.
+        // The server starts in the background: the window does not wait for the provider.
         _ = Tasks.Run("mobile-start", StartAsync, new PluginTaskOptions { SessionRetentionIndependent = true, Description = "Starts the mobile view." });
         Tasks.Run("mobile-live", FlushAsync, new PluginTaskOptions { LongRunning = true, SessionRetentionIndependent = true, Description = "Pushes the state of the sessions to the phones." });
         await base.OnActivatedAsync(cancellationToken).ConfigureAwait(false);
@@ -139,7 +146,7 @@ public sealed class MobilePlugin : PluginBase
         await base.DisposeAsync().ConfigureAwait(false);
     }
 
-    /// <summary>Reads the settings, starts the server and publishes it: what activation runs in the background.</summary>
+    /// <summary>Reads the settings, starts the server and has the provider publish it: what activation runs in the background.</summary>
     internal async ValueTask StartAsync(CancellationToken cancellationToken)
     {
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
@@ -148,6 +155,7 @@ public sealed class MobilePlugin : PluginBase
             // A plugin turned off before its start ran starts nothing.
             if (_stopped) return;
             _settings = await ReadSettingsAsync(cancellationToken).ConfigureAwait(false);
+            _provider = _providers(_settings.Mode, _host) ?? _providers(MobileTailscaleProvider.ProviderId, _host)!;
             await StartServerAsync(cancellationToken).ConfigureAwait(false);
             if (_server is not null) await PublishAsync(cancellationToken).ConfigureAwait(false);
         }
@@ -172,12 +180,13 @@ public sealed class MobilePlugin : PluginBase
             Token = null,
             Port = IsPort(settings.Port) ? settings.Port : DefaultPort,
             HttpsPort = IsPort(settings.HttpsPort) ? settings.HttpsPort : DefaultHttpsPort,
-            Mode = settings.Mode is DevTunnelMode ? DevTunnelMode : TailscaleMode,
+            Mode = ProviderIds.Contains(settings.Mode) ? settings.Mode : MobileTailscaleProvider.ProviderId,
         };
         if (valid != settings) await Services.State.WriteJsonAsync(PluginStateScope.User, SettingsName, valid, cancellationToken).ConfigureAwait(false);
         return valid;
     }
 
+    // Starts the server as the provider says: on the loopback address, or with HTTPS on every address.
     private async Task StartServerAsync(CancellationToken cancellationToken)
     {
         if (!Services.AppFiles.HasFiles)
@@ -186,13 +195,14 @@ public sealed class MobilePlugin : PluginBase
             return;
         }
 
+        var listen = _provider!.Listen(_settings);
         var sessions = new MobileSessions(Services.Alta, Services.Spaces, _live);
         var attachments = Path.Combine(Context.Host.UserDataDirectory, "plugin-data", "mobile");
         Directory.CreateDirectory(attachments);
         MobileApi.RemoveStaleAttachments(attachments);
         var server = new MobileServer(new MobileServerOptions
         {
-            Port = _settings.Port, Access = _access!, Hosts = () => _state.PublicHost is { } host ? [host] : [],
+            Port = listen.Port, Tls = listen.Tls, Access = _access!, Hosts = () => _state.PublicHost is { } host ? [host] : [],
             Files = Services.AppFiles, Sessions = sessions, Api = new MobileApi(Services.Alta, sessions, attachments),
             Asks = new MobileAsks(Services.Asks, sessions), Permissions = new MobilePermissions(Services.Permissions, sessions), Live = _live, Logger = Logger,
         });
@@ -200,14 +210,15 @@ public sealed class MobilePlugin : PluginBase
         {
             await server.StartAsync(cancellationToken).ConfigureAwait(false);
             _server = server;
+            _listening = listen;
             _state = _state with { Server = "listening", ServerDetail = null };
-            Logger.Info($"Mobile: the mobile view listens on http://127.0.0.1:{_settings.Port}");
+            Logger.Info(listen.Tls is null ? $"Mobile: the mobile view listens on http://127.0.0.1:{listen.Port}" : $"Mobile: the mobile view serves HTTPS on port {listen.Port} of every address");
         }
         catch (Exception exception) when (exception is IOException { InnerException: SocketException { SocketErrorCode: SocketError.AddressAlreadyInUse } } or SocketException { SocketErrorCode: SocketError.AddressAlreadyInUse })
         {
             await server.DisposeAsync().ConfigureAwait(false);
-            _state = _state with { Server = "port-in-use", ServerDetail = $"Port {_settings.Port} of this computer is used by another program, such as another CodeAlta that serves the mobile view." };
-            Logger.Warn($"Mobile: port {_settings.Port} is used by another program.");
+            _state = _state with { Server = "port-in-use", ServerDetail = $"Port {listen.Port} of this computer is used by another program, such as another CodeAlta that serves the mobile view." };
+            Logger.Warn($"Mobile: port {listen.Port} is used by another program.");
         }
         catch (Exception exception) when (exception is IOException or SocketException or InvalidOperationException)
         {
@@ -217,177 +228,30 @@ public sealed class MobilePlugin : PluginBase
         }
     }
 
-    // Tailscale publishes the server on the tailnet, or a Dev Tunnel on the Internet; without it the view is reachable on this computer only.
+    private async Task StopServerAsync()
+    {
+        _listening = null;
+        if (Interlocked.Exchange(ref _server, null) is { } server) await server.DisposeAsync().ConfigureAwait(false);
+    }
+
+    // Has the provider publish the view the server serves; with the gate held.
     private async Task PublishAsync(CancellationToken cancellationToken)
     {
-        if (_settings.Mode == DevTunnelMode)
-        {
-            await PublishTunnelAsync(cancellationToken).ConfigureAwait(false);
-            return;
-        }
-
-        _state = _state with { Tailscale = MobileTailscaleStatus.Pending, DevTunnel = MobileDevTunnelStatus.Unused };
+        var provider = _provider!;
+        _state = _state with { Provider = MobileProviderStatus.Pending("Publishing the mobile view…") };
         await ChangedAsync().ConfigureAwait(false);
-        MobileTailscaleStatus status;
+        MobileProviderStatus status;
         try
         {
-            status = await new MobileTailscale(_cli).PublishAsync(_settings.Port, _settings.HttpsPort, cancellationToken).ConfigureAwait(false);
+            status = await provider.PublishAsync(cancellationToken).ConfigureAwait(false);
         }
-        catch (Exception exception) when (exception is InvalidOperationException or IOException or System.ComponentModel.Win32Exception)
+        catch (Exception exception) when (exception is InvalidOperationException or IOException or HttpRequestException or System.ComponentModel.Win32Exception)
         {
-            status = new("failed", null, "Tailscale could not be asked: " + exception.Message);
-        }
-
-        _state = _state with { Tailscale = status };
-        if (status.State == "serving") _published = (_settings.Port, _settings.HttpsPort);
-        Logger.Info($"Mobile: {status.Detail}");
-    }
-
-    // Makes the Dev Tunnel of the settings serve the port of the server, and watches its host: a host that stops says so.
-    private async Task PublishTunnelAsync(CancellationToken cancellationToken)
-    {
-        _state = _state with { Tailscale = MobileTailscaleStatus.Unused, DevTunnel = MobileDevTunnelStatus.Pending };
-        await ChangedAsync().ConfigureAwait(false);
-        await StopTunnelAsync(CancellationToken.None).ConfigureAwait(false);
-        MobileDevTunnel.Published published;
-        try
-        {
-            published = await new MobileDevTunnel(_tunnelCli, line => Logger.Info(line)).PublishAsync(_settings.Port, _settings.TunnelId, cancellationToken).ConfigureAwait(false);
-        }
-        catch (Exception exception) when (exception is InvalidOperationException or IOException or System.ComponentModel.Win32Exception)
-        {
-            published = new(new MobileDevTunnelStatus("failed", null, "Dev Tunnels could not be asked: " + exception.Message), _settings.TunnelId, null);
+            Logger.Warn(exception, "Mobile: the mobile view could not be published.");
+            status = new MobileProviderStatus("failed", null, exception.Message);
         }
 
-        if (published.TunnelId != _settings.TunnelId)
-        {
-            // The tunnel made now is kept: its address, which phones keep, stays the same at the next start.
-            _settings = _settings with { TunnelId = published.TunnelId };
-            await Services.State.WriteJsonAsync(PluginStateScope.User, SettingsName, _settings, CancellationToken.None).ConfigureAwait(false);
-        }
-
-        _state = _state with { DevTunnel = published.Status };
-        Logger.Info($"Mobile: {published.Status.Detail}");
-        if (published.Host is not { } host) return;
-        _tunnelHost = host;
-        _tunnelPort = _settings.Port;
-        _ = Tasks.Run("mobile-tunnel", ct => WatchTunnelAsync(host, ct), new PluginTaskOptions { SessionRetentionIndependent = true, Description = "Watches the Dev Tunnel of the mobile view." });
-    }
-
-    // Reads what the host writes until it exits. A host that exits while it is the one of now (not stopped by the plugin) is said stopped.
-    private async ValueTask WatchTunnelAsync(IMobileHostedProcess host, CancellationToken cancellationToken)
-    {
-        var last = "";
-        try
-        {
-            await foreach (var line in host.Lines.ReadAllAsync(cancellationToken).ConfigureAwait(false))
-            {
-                if (!string.IsNullOrWhiteSpace(line)) last = line.Trim();
-            }
-        }
-        catch (OperationCanceledException)
-        {
-            return;
-        }
-
-        await _gate.WaitAsync(CancellationToken.None).ConfigureAwait(false);
-        try
-        {
-            if (!ReferenceEquals(_tunnelHost, host)) return;
-            _tunnelHost = null;
-            await host.DisposeAsync().ConfigureAwait(false);
-            _state = _state with { DevTunnel = new MobileDevTunnelStatus("failed", null, "The Dev Tunnel stopped" + (last.Length > 0 ? ": " + last : ".")) };
-            Logger.Warn($"Mobile: the Dev Tunnel stopped: {last}");
-        }
-        finally
-        {
-            _gate.Release();
-        }
-
-        await ChangedAsync().ConfigureAwait(false);
-    }
-
-    // Stops the host of the Dev Tunnel; the tunnel and its address stay in the account, for the next start.
-    private async Task StopTunnelAsync(CancellationToken cancellationToken)
-    {
-        if (Interlocked.Exchange(ref _tunnelHost, null) is not { } host) return;
-        await host.DisposeAsync().ConfigureAwait(false);
-        if (_tunnelPort != _settings.Port && _settings.TunnelId is { } tunnelId)
-        {
-            try { await new MobileDevTunnel(_tunnelCli, line => Logger.Info(line)).RemovePortAsync(tunnelId, _tunnelPort, cancellationToken).ConfigureAwait(false); }
-            catch (Exception exception) when (exception is InvalidOperationException or IOException or System.ComponentModel.Win32Exception)
-            {
-                Logger.Debug($"Mobile: the old port of the Dev Tunnel could not be removed: {exception.Message}");
-            }
-        }
-    }
-
-    /// <summary>
-    /// Starts the sign-in to Dev Tunnels and answers at once: the tab hears, once the person signed in, the view published again. A
-    /// sign-in of before that has not ended is dropped.
-    /// </summary>
-    internal async Task<MobileStatus> SignInAsync(bool github, CancellationToken cancellationToken)
-    {
-        var run = new CancellationTokenSource();
-        if (Interlocked.Exchange(ref _signIn, run) is { } previous) await previous.CancelAsync().ConfigureAwait(false);
-        _state = _state with
-        {
-            DevTunnel = new MobileDevTunnelStatus("signing-in", null, !github && OperatingSystem.IsWindows()
-                ? "Choose your account in the window of Windows that opens, then come back here."
-                : "Sign in in the browser that opens, then come back here."),
-        };
-        await ChangedAsync().ConfigureAwait(false);
-        _ = Tasks.Run("mobile-devtunnel-signin", async _ => await RunSignInAsync(github, run).ConfigureAwait(false),
-            new PluginTaskOptions { SessionRetentionIndependent = true, Description = "Signs in to Dev Tunnels." });
-        return Status();
-    }
-
-    private async Task RunSignInAsync(bool github, CancellationTokenSource run)
-    {
-        bool signedIn;
-        try
-        {
-            signedIn = await new MobileDevTunnel(_tunnelCli, line => Logger.Info(line)).SignInAsync(github, run.Token).ConfigureAwait(false);
-        }
-        catch (OperationCanceledException)
-        {
-            return;
-        }
-        catch (Exception exception) when (exception is InvalidOperationException or IOException or System.ComponentModel.Win32Exception)
-        {
-            Logger.Warn($"Mobile: the sign-in of Dev Tunnels could not start: {exception.Message}");
-            signedIn = false;
-        }
-
-        if (run.IsCancellationRequested) return;
-        Interlocked.CompareExchange(ref _signIn, null, run);
-        if (!signedIn)
-        {
-            _state = _state with { DevTunnel = new MobileDevTunnelStatus("not-signed-in", null, "The sign-in did not end. Sign in again, or run devtunnel user login in a terminal.") };
-            await ChangedAsync().ConfigureAwait(false);
-            return;
-        }
-
-        Logger.Info("Mobile: signed in to Dev Tunnels.");
-        await RetryAsync(CancellationToken.None).ConfigureAwait(false);
-    }
-
-    // Takes off the tailnet what this instance published, with the ports it was published with, and stops the host of the Dev Tunnel.
-    private async Task UnpublishAsync(CancellationToken cancellationToken)
-    {
-        await StopTunnelAsync(cancellationToken).ConfigureAwait(false);
-        if (_published is not { } published) return;
-        try
-        {
-            var outcome = await new MobileTailscale(_cli).UnpublishAsync(published.Port, published.HttpsPort, cancellationToken).ConfigureAwait(false);
-            Logger.Info($"Mobile: {outcome}");
-        }
-        catch (Exception exception) when (exception is InvalidOperationException or IOException or System.ComponentModel.Win32Exception)
-        {
-            Logger.Warn($"Mobile: Tailscale could not be asked to stop serving: {exception.Message}");
-        }
-
-        _published = null;
+        if (ReferenceEquals(provider, _provider)) _state = _state with { Provider = status };
     }
 
     private async Task StopAsync(CancellationToken cancellationToken)
@@ -396,10 +260,14 @@ public sealed class MobilePlugin : PluginBase
         try
         {
             _stopped = true;
-            if (Interlocked.Exchange(ref _signIn, null) is { } signIn) await signIn.CancelAsync().ConfigureAwait(false);
-            if (Interlocked.Exchange(ref _server, null) is { } server) await server.DisposeAsync().ConfigureAwait(false);
-            // What this instance published on the tailnet goes with it; turning the plugin on again publishes it again.
-            await UnpublishAsync(cancellationToken).ConfigureAwait(false);
+            await StopServerAsync().ConfigureAwait(false);
+            // What the provider published goes with the plugin; turning the plugin on again publishes it again.
+            if (Interlocked.Exchange(ref _provider, null) is { } provider)
+            {
+                await provider.UnpublishAsync(cancellationToken).ConfigureAwait(false);
+                await provider.DisposeAsync().ConfigureAwait(false);
+            }
+
             _state = MobileState.Stopped;
         }
         finally
@@ -408,14 +276,13 @@ public sealed class MobilePlugin : PluginBase
         }
     }
 
-    // Asks Tailscale again: it was installed, signed in, or Serve was enabled since.
+    // Has the provider publish again: it was installed, signed in, or what kept phones out was fixed since.
     private async Task<MobileStatus> RetryAsync(CancellationToken cancellationToken)
     {
-        if (Interlocked.Exchange(ref _signIn, null) is { } signIn) await signIn.CancelAsync().ConfigureAwait(false);
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            if (_stopped) return Status();
+            if (_stopped || _provider is null) return Status();
             if (_server is null) await StartServerAsync(cancellationToken).ConfigureAwait(false);
             if (_server is not null) await PublishAsync(cancellationToken).ConfigureAwait(false);
         }
@@ -425,6 +292,14 @@ public sealed class MobilePlugin : PluginBase
         }
 
         await ChangedAsync().ConfigureAwait(false);
+        return Status();
+    }
+
+    // Runs an action of the provider the tab offers (a sign-in): its outcome comes with the changes it reports.
+    private async Task<MobileStatus> ActAsync(string action, CancellationToken cancellationToken)
+    {
+        if (_provider is { } provider && !await provider.ActAsync(action, cancellationToken).ConfigureAwait(false))
+            Logger.Warn($"Mobile: the provider {provider.Id} knows no action {action}.");
         return Status();
     }
 
@@ -452,43 +327,53 @@ public sealed class MobilePlugin : PluginBase
     internal static bool IsPort(int? port) => port is >= MinimumPort and <= MaximumPort;
 
     /// <summary>
-    /// Changes the ports: they are saved, the server listens on its new port, and what Tailscale served with the old ports is taken off before
-    /// the view is published with the new ones. The server answers at once; Tailscale is asked in the background, and the settings page
-    /// hears the outcome with <c>mobile.settings.changed</c>.
+    /// Changes the settings: they are saved, the provider of before takes off what it published, the server listens as the provider of now
+    /// says, and the provider publishes the view in the background; the settings page hears the outcome with <c>mobile.settings.changed</c>.
     /// </summary>
-    /// <returns>The settings now, with <see cref="MobileSettingsView.Error"/> when the ports are refused.</returns>
-    internal async Task<MobileSettingsView> SetPortsAsync(MobilePorts request, CancellationToken cancellationToken)
+    /// <returns>The settings now, with <see cref="MobileSettingsView.Error"/> when the change is refused.</returns>
+    internal async Task<MobileSettingsView> SetAsync(MobileSettingsChange request, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
         if (!IsPort(request.Port)) return Settings() with { Error = $"The port on this computer must be a number from {MinimumPort} to {MaximumPort}." };
-        if (!IsPort(request.HttpsPort)) return Settings() with { Error = $"The port on the tailnet must be a number from {MinimumPort} to {MaximumPort}." };
-        if (request.Mode is not (null or TailscaleMode or DevTunnelMode)) return Settings() with { Error = "Phones connect through Tailscale or Dev Tunnels." };
+        var id = request.Provider ?? _settings.Mode;
+        if (!ProviderIds.Contains(id)) return Settings() with { Error = "Phones connect through " + string.Join(" or ", ProviderIds) + "." };
         MobileSettingsView view;
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            if (_stopped) return Settings() with { Error = "The plugin is stopped." };
+            if (_stopped || _provider is null) return Settings() with { Error = "The plugin is stopped." };
             var old = _settings;
-            var mode = request.Mode ?? old.Mode;
-            if (old.Port == request.Port && old.HttpsPort == request.HttpsPort && old.Mode == mode) return Settings();
-            _settings = old with { Port = request.Port!.Value, HttpsPort = request.HttpsPort!.Value, Mode = mode };
+            var next = old with
+            {
+                Mode = id, Port = request.Port!.Value, HttpsPort = request.HttpsPort ?? old.HttpsPort,
+                Host = request.Host is null ? old.Host : string.IsNullOrWhiteSpace(request.Host) ? null : request.Host.Trim().TrimEnd('.').ToLowerInvariant(),
+            };
+            if (next == old) return Settings();
+            var provider = id == _provider.Id ? _provider : _providers(id, _host)!;
+            if (provider.Refusal(next) is { } refusal)
+            {
+                if (!ReferenceEquals(provider, _provider)) await provider.DisposeAsync().ConfigureAwait(false);
+                return Settings() with { Error = refusal };
+            }
+
+            // What was published goes first, with the settings it was published with; then the settings of now.
+            await _provider.UnpublishAsync(CancellationToken.None).ConfigureAwait(false);
+            if (!ReferenceEquals(provider, _provider)) await _provider.DisposeAsync().ConfigureAwait(false);
+            _provider = provider;
+            _settings = next;
             await Services.State.WriteJsonAsync(PluginStateScope.User, SettingsName, _settings, CancellationToken.None).ConfigureAwait(false);
-            Logger.Info(mode == DevTunnelMode
-                ? $"Mobile: phones now connect through Dev Tunnels, to port {_settings.Port} of this computer."
-                : $"Mobile: the ports are now {_settings.Port} on this computer and {_settings.HttpsPort} on the tailnet.");
-            if (old.Port != _settings.Port || _server is null)
+            Logger.Info($"Mobile: phones now connect through {id}, to port {next.Port} of this computer.");
+            if (_server is null || provider.Listen(next) != _listening)
             {
                 // The phones that were connected reconnect to the new address once they scan it.
-                if (Interlocked.Exchange(ref _server, null) is { } server) await server.DisposeAsync().ConfigureAwait(false);
+                await StopServerAsync().ConfigureAwait(false);
                 _state = _state with { Server = "starting", ServerDetail = null };
                 await StartServerAsync(CancellationToken.None).ConfigureAwait(false);
             }
 
-            _state = mode == DevTunnelMode
-                ? _state with { Tailscale = MobileTailscaleStatus.Unused, DevTunnel = MobileDevTunnelStatus.Pending }
-                : _state with { Tailscale = MobileTailscaleStatus.Pending, DevTunnel = MobileDevTunnelStatus.Unused };
-            // The answer is the state of the change itself, read before Tailscale or Dev Tunnels are asked: one that answers at once would
-            // otherwise give the outcome of the publication to some calls and not to others.
+            _state = _state with { Provider = MobileProviderStatus.Pending("Publishing the mobile view…") };
+            // The answer is the state of the change itself, read before the provider publishes: one that answers at once would otherwise
+            // give the outcome of the publication to some calls and not to others.
             view = Settings();
         }
         finally
@@ -496,32 +381,20 @@ public sealed class MobilePlugin : PluginBase
             _gate.Release();
         }
 
-        _ = Tasks.Run("mobile-publish", RepublishAsync, new PluginTaskOptions { SessionRetentionIndependent = true, Description = "Publishes the mobile view on its new port." });
+        _ = Tasks.Run("mobile-publish", RepublishAsync, new PluginTaskOptions { SessionRetentionIndependent = true, Description = "Publishes the mobile view." });
         await ChangedAsync().ConfigureAwait(false);
         return view;
     }
 
-    // Takes off what was published with the old ports, then publishes with the ports of now. Two changes in a row each run it: the second finds the
-    // view published with the ports of the first, or nothing published, and ends on the ports of now.
+    // Has the provider of now publish the view, once the settings changed or a provider asked for it.
     private async ValueTask RepublishAsync(CancellationToken cancellationToken)
     {
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            if (_stopped) return;
-            // What the other mode published goes first: the tailnet or the tunnel, not both.
-            if (_settings.Mode == DevTunnelMode)
-            {
-                if (_published is not null) await UnpublishAsync(cancellationToken).ConfigureAwait(false);
-            }
-            else
-            {
-                await StopTunnelAsync(cancellationToken).ConfigureAwait(false);
-                if (_published is { } published && published != (_settings.Port, _settings.HttpsPort)) await UnpublishAsync(cancellationToken).ConfigureAwait(false);
-            }
-
+            if (_stopped || _provider is null) return;
             if (_server is not null) await PublishAsync(cancellationToken).ConfigureAwait(false);
-            else _state = _state with { Tailscale = new MobileTailscaleStatus("failed", null, "The mobile view does not listen on this computer, so Tailscale does not publish it.") };
+            else _state = _state with { Provider = new MobileProviderStatus("failed", null, "The mobile view does not listen on this computer, so it is not published.") };
         }
         finally
         {
@@ -612,31 +485,24 @@ public sealed class MobilePlugin : PluginBase
         var state = _state;
         var url = ServedUrl(state);
         var connect = url is not null && _access?.PairingToken is { } token ? $"{url}/#k={token}" : null;
-        return new MobileStatus(state.Server, _settings.Port, state.ServerDetail,
-            new MobileTailscaleView(state.Tailscale.State, state.Tailscale.Url, state.Tailscale.Detail, state.Tailscale.FixUrl),
-            connect, connect is null ? null : url, connect is null ? null : MobileQr.Rows(connect))
-        {
-            Mode = _settings.Mode,
-            DevTunnel = new MobileDevTunnelView(state.DevTunnel.State, state.DevTunnel.Url, state.DevTunnel.Detail, state.DevTunnel.FixUrl),
-        };
+        return new MobileStatus(state.Server, _listening?.Port ?? _settings.Port, state.ServerDetail, View(state), connect, connect is null ? null : url,
+            connect is null ? null : MobileQr.Rows(connect));
     }
 
-    /// <summary>What the settings page shows: the ports, and the address while the view is served.</summary>
+    /// <summary>What the settings page shows: the provider and its settings, and the address while the view is served.</summary>
     internal MobileSettingsView Settings()
     {
         var state = _state;
         var settings = _settings;
-        return new MobileSettingsView(settings.Port, settings.HttpsPort, ServedUrl(state), state.Server, state.ServerDetail, new MobileSettingsTailscale(state.Tailscale.State, state.Tailscale.Detail))
-        {
-            Mode = settings.Mode, DevTunnel = new MobileSettingsTailscale(state.DevTunnel.State, state.DevTunnel.Detail),
-        };
+        return new MobileSettingsView(settings.Port, settings.HttpsPort, settings.Host, ServedUrl(state), state.Server, state.ServerDetail, View(state));
     }
 
-    // The address phones open while the view is served: the one of the tailnet, or of the Dev Tunnel.
-    private string? ServedUrl(MobileState state)
-        => state.Server != "listening" ? null
-            : _settings.Mode == DevTunnelMode ? (state.DevTunnel.State == "serving" ? state.DevTunnel.Url : null)
-            : state.Tailscale.State == "serving" ? state.Tailscale.Url : null;
+    private MobileProviderView View(MobileState state)
+        => new(_provider?.Id ?? _settings.Mode, state.Provider.State, state.Provider.Url, state.Provider.Detail, state.Provider.FixUrl);
+
+    // The address phones open while the view is served.
+    private static string? ServedUrl(MobileState state)
+        => state is { Server: "listening", Provider.State: "serving" } ? state.Provider.Url : null;
 
     private async Task ChangedAsync()
     {
@@ -665,11 +531,8 @@ public sealed class MobilePlugin : PluginBase
             Canvas = CanvasId,
             GetState = _ => _state switch
             {
-                var state when ServedUrl(state) is not null => new PluginButtonState
-                {
-                    Tone = PluginStatusTone.Success, Tooltip = _settings.Mode == DevTunnelMode ? "Mobile: served through Dev Tunnels" : "Mobile: served on the tailnet",
-                },
-                { Server: "starting" } or { Tailscale.State: "pending" } or { DevTunnel.State: "pending" or "signing-in" } => new PluginButtonState { Badge = PluginButtonBadge.Busy, Tooltip = "Mobile: starting" },
+                var state when ServedUrl(state) is not null => new PluginButtonState { Tone = PluginStatusTone.Success, Tooltip = $"Mobile: served at {state.Provider.Url}" },
+                { Server: "starting" } or { Provider.State: "pending" or "signing-in" } => new PluginButtonState { Badge = PluginButtonBadge.Busy, Tooltip = "Mobile: starting" },
                 _ => new PluginButtonState { Badge = PluginButtonBadge.Dot, Tooltip = "Mobile: phones cannot connect" },
             },
         };
@@ -707,9 +570,8 @@ public sealed class MobilePlugin : PluginBase
                 // The tab shows the QR code: it makes the pairing token of this run when there is none yet.
                 canvas.Rpc.Handle<MobileEmpty, MobileStatus>("mobile.status", async (_, ct) => await PairedAsync(Status, ct).ConfigureAwait(false));
                 canvas.Rpc.Handle<MobileEmpty, MobileStatus>("mobile.retry", async (_, ct) => await PairedAsync(() => RetryAsync(ct), ct).ConfigureAwait(false));
-                // Dev Tunnels asks for an account once: the tab signs in with Microsoft or GitHub, in the browser of this computer.
-                canvas.Rpc.Handle<MobileSignIn, MobileStatus>("mobile.devtunnel.signin", async (request, ct) =>
-                    await PairedAsync(() => SignInAsync(request.Github, ct), ct).ConfigureAwait(false));
+                // The actions a state of the provider offers (a sign-in); their outcome comes with the changes.
+                canvas.Rpc.Handle<MobileAction, MobileStatus>("mobile.act", async (request, ct) => await PairedAsync(() => ActAsync(request.Action, ct), ct).ConfigureAwait(false));
                 Track(canvas, _open);
                 return ValueTask.FromResult(new PluginCanvasView { Script = PluginScript.App(AppModule) });
             },
@@ -727,7 +589,7 @@ public sealed class MobilePlugin : PluginBase
             {
                 canvas.Rpc.JsonOptions = new JsonSerializerOptions(JsonSerializerDefaults.Web) { TypeInfoResolver = MobileJsonContext.Default };
                 canvas.Rpc.Handle<MobileEmpty, MobileSettingsView>("mobile.settings.get", (_, _) => ValueTask.FromResult(Settings()));
-                canvas.Rpc.Handle<MobilePorts, MobileSettingsView>("mobile.settings.set", async (request, ct) => await SetPortsAsync(request, ct).ConfigureAwait(false));
+                canvas.Rpc.Handle<MobileSettingsChange, MobileSettingsView>("mobile.settings.set", async (request, ct) => await SetAsync(request, ct).ConfigureAwait(false));
                 canvas.Rpc.Handle<MobileEmpty, MobileSettingsView>("mobile.reset", async (_, ct) => await ResetAsync(ct).ConfigureAwait(false));
                 Track(canvas, _settingsPages);
                 return ValueTask.FromResult(new PluginCanvasView { Script = PluginScript.App(SettingsModule) });
@@ -747,33 +609,55 @@ public sealed class MobilePlugin : PluginBase
     private string DescribeTab()
     {
         var state = _state;
-        var tunnel = _settings.Mode == DevTunnelMode;
-        var text = new StringBuilder(tunnel
-            ? "# Mobile\n\nThe sessions of this computer on a phone: a page served on 127.0.0.1 and published through a Dev Tunnel of Microsoft.\n\n"
-            : "# Mobile\n\nThe sessions of this computer on a phone: a page served on 127.0.0.1 and published on the tailnet with Tailscale Serve.\n\n");
-        text.Append(CultureInfo.InvariantCulture, $"- Server: {state.Server} on 127.0.0.1:{_settings.Port}{(state.ServerDetail is { } detail ? $" ({detail})" : "")}\n");
-        if (tunnel) text.Append(CultureInfo.InvariantCulture, $"- Dev Tunnel: {state.DevTunnel.State}: {state.DevTunnel.Detail}\n");
-        else text.Append(CultureInfo.InvariantCulture, $"- Tailscale: {state.Tailscale.State}: {state.Tailscale.Detail}\n");
+        var text = new StringBuilder($"# Mobile\n\nThe sessions of this computer on a phone: a page served by CodeAlta and published by the provider {_provider?.Id ?? _settings.Mode}.\n\n");
+        text.Append(CultureInfo.InvariantCulture, $"- Server: {state.Server} on port {_listening?.Port ?? _settings.Port}{(state.ServerDetail is { } detail ? $" ({detail})" : "")}\n");
+        text.Append(CultureInfo.InvariantCulture, $"- Provider: {state.Provider.State}: {state.Provider.Detail}\n");
         if (ServedUrl(state) is { } url) text.Append(CultureInfo.InvariantCulture, $"- Address: {url} (the QR code adds the access token)\n");
         return text.ToString();
     }
 
-    /// <summary>What the plugin serves: its server, and what Tailscale does with it.</summary>
+    /// <summary>What the plugin serves: its server, and what the provider does with it.</summary>
     /// <param name="Server"><c>starting</c>, <c>listening</c>, <c>port-in-use</c>, <c>failed</c> or <c>stopped</c>.</param>
     /// <param name="ServerDetail">Why the server does not listen.</param>
-    /// <param name="Tailscale">What Tailscale does.</param>
-    /// <param name="DevTunnel">What the Dev Tunnel does.</param>
-    internal sealed record MobileState(string Server, string? ServerDetail, MobileTailscaleStatus Tailscale, MobileDevTunnelStatus DevTunnel)
+    /// <param name="Provider">What the provider does.</param>
+    internal sealed record MobileState(string Server, string? ServerDetail, MobileProviderStatus Provider)
     {
-        internal static MobileState Starting { get; } = new("starting", null, MobileTailscaleStatus.Pending, MobileDevTunnelStatus.Unused);
+        internal static MobileState Starting { get; } = new("starting", null, MobileProviderStatus.Pending("Starting…"));
 
-        internal static MobileState Stopped { get; } = new("stopped", null, MobileTailscaleStatus.Stopped, MobileDevTunnelStatus.Stopped);
+        internal static MobileState Stopped { get; } = new("stopped", null, MobileProviderStatus.Stopped);
 
         /// <summary>
-        /// The host the requests that come from outside name: the name of this computer on the tailnet, or the one of the Dev Tunnel, with
-        /// the port. A tunnel that names the loopback address instead is let in by the server as a request of this computer.
+        /// The host the requests that come from outside name: the name of the address the provider gives, with its port. A provider that
+        /// names the loopback address instead (a tunnel) is let in by the server as a request of this computer.
         /// </summary>
-        internal string? PublicHost => (DevTunnel.Url ?? Tailscale.Url) is { } url && Uri.TryCreate(url, UriKind.Absolute, out var uri) ? uri.Authority : null;
+        internal string? PublicHost => Provider.Url is { } url && Uri.TryCreate(url, UriKind.Absolute, out var uri) ? uri.Authority : null;
+    }
+
+    // What the plugin gives its provider: its settings, its folder, its log, its background, and a way to say what changed.
+    private sealed class Host(MobilePlugin plugin) : IMobileProviderHost
+    {
+        public MobileSettings Settings => plugin._settings;
+
+        public string Folder => Path.Combine(plugin.Services.State.GetDirectory(PluginStateScope.User), "provider");
+
+        public async Task SaveAsync(Func<MobileSettings, MobileSettings> change)
+        {
+            plugin._settings = change(plugin._settings);
+            await plugin.Services.State.WriteJsonAsync(PluginStateScope.User, SettingsName, plugin._settings, CancellationToken.None).ConfigureAwait(false);
+        }
+
+        public async Task ReportAsync(MobileProviderStatus status)
+        {
+            plugin._state = plugin._state with { Provider = status };
+            await plugin.ChangedAsync().ConfigureAwait(false);
+        }
+
+        public Task RepublishAsync() => plugin.RetryAsync(CancellationToken.None);
+
+        public void Run(string name, string description, Func<CancellationToken, ValueTask> work)
+            => _ = plugin.Tasks.Run(name, work, new PluginTaskOptions { SessionRetentionIndependent = true, Description = description });
+
+        public void Log(string line) => plugin.Logger.Info(line);
     }
 }
 
@@ -787,91 +671,76 @@ internal sealed record MobileSettings
     [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
     public string? Token { get; init; }
 
-    /// <summary>Gets the port of the server on the loopback address.</summary>
+    /// <summary>Gets the port of the server on this computer.</summary>
     public int Port { get; init; } = MobilePlugin.DefaultPort;
 
-    /// <summary>Gets the HTTPS port of this computer on the tailnet.</summary>
+    /// <summary>Gets the HTTPS port of this computer on the tailnet, for Tailscale.</summary>
     public int HttpsPort { get; init; } = MobilePlugin.DefaultHttpsPort;
 
-    /// <summary>Gets how phones connect: <see cref="MobilePlugin.TailscaleMode"/> or <see cref="MobilePlugin.DevTunnelMode"/>.</summary>
-    public string Mode { get; init; } = MobilePlugin.TailscaleMode;
+    /// <summary>Gets the id of the provider phones connect through: <c>tailscale</c>, <c>devtunnel</c>…</summary>
+    public string Mode { get; init; } = MobileTailscaleProvider.ProviderId;
 
     /// <summary>Gets the Dev Tunnel the plugin made, kept so that its address does not change; null until one is made.</summary>
     public string? TunnelId { get; init; }
+
+    /// <summary>Gets the domain name phones open, for a provider that needs one; null otherwise.</summary>
+    public string? Host { get; init; }
 }
 
-/// <summary>How the tab signs in to Dev Tunnels.</summary>
-/// <param name="Github">Whether with a GitHub account rather than a Microsoft one.</param>
-internal sealed record MobileSignIn(bool Github);
+/// <summary>An action of the provider the tab asks for.</summary>
+/// <param name="Action">Its name, such as <c>signin-github</c>.</param>
+internal sealed record MobileAction(string Action);
 
 /// <summary>The input of a call that takes none.</summary>
 internal sealed record MobileEmpty;
 
-/// <summary>What Tailscale does, as the Mobile tab shows it.</summary>
-internal sealed record MobileTailscaleView(string State, string? Url, string Detail, string? FixUrl);
+/// <summary>What the provider does, as the pages show it.</summary>
+/// <param name="Id">The id of the provider.</param>
+/// <param name="State">Its state, as <see cref="MobileProviderStatus.State"/> says it.</param>
+/// <param name="Url">The address phones open, while the view is served.</param>
+/// <param name="Detail">A line for people.</param>
+/// <param name="FixUrl">The page that fixes the state, when there is one.</param>
+internal sealed record MobileProviderView(string Id, string State, string? Url, string Detail, string? FixUrl);
 
 /// <summary>What the Mobile tab shows.</summary>
 /// <param name="Server">What the server does.</param>
-/// <param name="Port">Its port on the loopback address.</param>
+/// <param name="Port">Its port on this computer.</param>
 /// <param name="ServerDetail">Why it does not listen.</param>
-/// <param name="Tailscale">What Tailscale does.</param>
+/// <param name="Provider">What the provider does.</param>
 /// <param name="ConnectUrl">The address a phone opens, with the access token; null while no phone can connect.</param>
 /// <param name="Address">The same without the token.</param>
 /// <param name="Qr">The QR code of <paramref name="ConnectUrl"/>, one string of <c>0</c> and <c>1</c> per row.</param>
-internal sealed record MobileStatus(string Server, int Port, string? ServerDetail, MobileTailscaleView Tailscale, string? ConnectUrl, string? Address, IReadOnlyList<string>? Qr)
-{
-    /// <summary>Gets how phones connect: <c>tailscale</c> or <c>devtunnel</c>.</summary>
-    public string Mode { get; init; } = MobilePlugin.TailscaleMode;
+internal sealed record MobileStatus(string Server, int Port, string? ServerDetail, MobileProviderView Provider, string? ConnectUrl, string? Address, IReadOnlyList<string>? Qr);
 
-    /// <summary>Gets what the Dev Tunnel does.</summary>
-    public MobileDevTunnelView DevTunnel { get; init; } = new("unused", null, "", null);
-}
-
-/// <summary>What the Dev Tunnel does, as the Mobile tab shows it.</summary>
-/// <param name="State">The state, as <see cref="MobileDevTunnelStatus.State"/> says it.</param>
-/// <param name="Url">The address of the view, while the tunnel serves it.</param>
-/// <param name="Detail">A line for people.</param>
-/// <param name="FixUrl">The page that fixes the state: the install of the command line.</param>
-internal sealed record MobileDevTunnelView(string State, string? Url, string Detail, string? FixUrl);
-
-/// <summary>The ports the settings page asks for.</summary>
-/// <param name="Port">The port of the server on the loopback address.</param>
-/// <param name="HttpsPort">The HTTPS port of this computer on the tailnet.</param>
-internal sealed record MobilePorts(int? Port, int? HttpsPort)
-{
-    /// <summary>Gets how phones connect: <c>tailscale</c> or <c>devtunnel</c>; null keeps the mode of now.</summary>
-    public string? Mode { get; init; }
-}
-
-/// <summary>What Tailscale does, as the settings page shows it.</summary>
-/// <param name="State">The state, as <see cref="MobileTailscaleStatus.State"/> says it.</param>
-/// <param name="Detail">A line for people.</param>
-internal sealed record MobileSettingsTailscale(string State, string Detail);
+/// <summary>The settings the settings page asks for.</summary>
+/// <param name="Provider">The id of the provider; null keeps the one of now.</param>
+/// <param name="Port">The port of the server on this computer.</param>
+/// <param name="HttpsPort">The HTTPS port on the tailnet, for Tailscale; null keeps the one of now.</param>
+/// <param name="Host">The domain name, for a provider that needs one; null keeps the one of now, empty clears it.</param>
+internal sealed record MobileSettingsChange(string? Provider, int? Port, int? HttpsPort, string? Host);
 
 /// <summary>What the settings page shows.</summary>
-/// <param name="Port">The port of the server on the loopback address.</param>
-/// <param name="HttpsPort">The HTTPS port of this computer on the tailnet.</param>
-/// <param name="Address">The address of the view on the tailnet while it is served, without the access token; null otherwise.</param>
+/// <param name="Port">The port of the server on this computer.</param>
+/// <param name="HttpsPort">The HTTPS port on the tailnet, for Tailscale.</param>
+/// <param name="Host">The domain name, for a provider that needs one.</param>
+/// <param name="Address">The address of the view while it is served, without the access token; null otherwise.</param>
 /// <param name="Server">What the server does: <c>starting</c>, <c>listening</c>, <c>port-in-use</c>, <c>failed</c> or <c>stopped</c>.</param>
 /// <param name="ServerDetail">Why it does not listen.</param>
-/// <param name="Tailscale">What Tailscale does.</param>
-internal sealed record MobileSettingsView(int Port, int HttpsPort, string? Address, string Server, string? ServerDetail, MobileSettingsTailscale Tailscale)
+/// <param name="Provider">What the provider does.</param>
+internal sealed record MobileSettingsView(int Port, int HttpsPort, string? Host, string? Address, string Server, string? ServerDetail, MobileProviderView Provider)
 {
     /// <summary>Gets why the settings that were asked for are refused, or null.</summary>
     public string? Error { get; init; }
 
-    /// <summary>Gets how phones connect: <c>tailscale</c> or <c>devtunnel</c>.</summary>
-    public string Mode { get; init; } = MobilePlugin.TailscaleMode;
-
-    /// <summary>Gets what the Dev Tunnel does.</summary>
-    public MobileSettingsTailscale DevTunnel { get; init; } = new("unused", "");
+    /// <summary>Gets the ids of the providers, in the order the page offers them.</summary>
+    public IReadOnlyList<string> Providers { get; init; } = MobilePlugin.ProviderIds;
 }
 
 [System.Text.Json.Serialization.JsonSerializable(typeof(MobileEmpty))]
 [System.Text.Json.Serialization.JsonSerializable(typeof(MobileStatus))]
 [System.Text.Json.Serialization.JsonSerializable(typeof(MobileSettings))]
 [System.Text.Json.Serialization.JsonSerializable(typeof(MobileAccessFile))]
-[System.Text.Json.Serialization.JsonSerializable(typeof(MobilePorts))]
-[System.Text.Json.Serialization.JsonSerializable(typeof(MobileSignIn))]
+[System.Text.Json.Serialization.JsonSerializable(typeof(MobileSettingsChange))]
+[System.Text.Json.Serialization.JsonSerializable(typeof(MobileAction))]
 [System.Text.Json.Serialization.JsonSerializable(typeof(MobileSettingsView))]
 internal sealed partial class MobileJsonContext : System.Text.Json.Serialization.JsonSerializerContext;

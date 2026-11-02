@@ -96,19 +96,19 @@ public sealed class MobileDevTunnelTests
         var (page, _) = await fixture.OpenAsync(MobilePlugin.SettingsCanvasId);
         var (tab, _) = await fixture.OpenAsync(MobilePlugin.CanvasId);
 
-        var answer = await page.InvokeAsync<MobilePorts, MobileSettingsView>("mobile.settings.set", new MobilePorts(port, 4443) { Mode = MobilePlugin.DevTunnelMode });
-        Assert.AreEqual(("devtunnel", "pending"), (answer.Mode, answer.DevTunnel.State));
-        await WaitAsync(() => fixture.Plugin.Settings().DevTunnel.State != "pending", "the tunnel opens");
+        var answer = await page.InvokeAsync<MobileSettingsChange, MobileSettingsView>("mobile.settings.set", new MobileSettingsChange("devtunnel", port, 4443, null));
+        Assert.AreEqual(("devtunnel", "pending"), (answer.Provider.Id, answer.Provider.State));
+        await WaitAsync(() => fixture.Plugin.Settings().Provider.State != "pending", "the tunnel opens");
 
         var url = $"https://bold-tree-x1y2-{port}.euw.devtunnels.ms";
         Assert.AreEqual(url, fixture.Plugin.Settings().Address);
         var status = await tab.InvokeAsync<MobileEmpty, MobileStatus>("mobile.status", new MobileEmpty());
-        Assert.AreEqual("devtunnel", status.Mode);
+        Assert.AreEqual("devtunnel", status.Provider.Id);
         StringAssert.StartsWith(status.ConnectUrl, url + "/#k=", "the code holds the address of the tunnel and the pairing token");
         Assert.AreEqual(("devtunnel", "bold-tree-x1y2.euw"), (fixture.State.Read().Mode, fixture.State.Read().TunnelId), "the tunnel is kept for the next start");
 
-        await page.InvokeAsync<MobilePorts, MobileSettingsView>("mobile.settings.set", new MobilePorts(port, 4443) { Mode = MobilePlugin.TailscaleMode });
-        await WaitAsync(() => fixture.Plugin.Settings().Tailscale.State != "pending", "Tailscale is asked");
+        await page.InvokeAsync<MobileSettingsChange, MobileSettingsView>("mobile.settings.set", new MobileSettingsChange("tailscale", port, 4443, null));
+        await WaitAsync(() => fixture.Plugin.Settings().Provider.State != "pending", "Tailscale is asked");
         Assert.IsTrue(tunnel.Hosts.Single().Disposed, "the host of the tunnel stops");
         Assert.IsNull(fixture.Plugin.Settings().Address);
     }

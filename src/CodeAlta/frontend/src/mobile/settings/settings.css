@@ -11,3 +11,4 @@
 .mobile-settings-loading { display: grid; place-items: center; min-height: 160px; }
 .mobile-settings .mobile-settings-mode { margin: 0; display: flex; flex-wrap: wrap; gap: 4px 20px; }
 .mobile-settings .mobile-settings-mode .bp6-control.bp6-inline { margin: 0; }
+.mobile-settings .mobile-settings-text { width: min(100%, 320px); }

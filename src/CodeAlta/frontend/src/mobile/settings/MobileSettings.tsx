@@ -1,12 +1,12 @@
-import { useEffect, useState } from "react";
-import { Button, Callout, Card, NumericInput, Radio, RadioGroup, type Intent } from "@blueprintjs/core";
+import { useEffect, useState, type KeyboardEvent } from "react";
+import { Button, Callout, Card, InputGroup, NumericInput, Radio, RadioGroup, type Intent } from "@blueprintjs/core";
 import { ActivitySpinner } from "../../ActivitySpinner";
 import { AppIcon } from "../../AppIcon";
 import { ConfirmPopover } from "../../ConfirmPopover";
 import type { MessageKey } from "../../localization";
 import { SettingsField as Field } from "../../SettingsField";
 import { useShellLanguage } from "../../shellLanguage";
-import { changedSettings, maximumPort, minimumPort, readPort, type MobileMode, type MobileSettingsChange, type MobileSettingsView } from "./model";
+import { changedSettings, draftOf, fieldsOf, maximumPort, minimumPort, readPort, type MobileSettingsChange, type MobileSettingsDraft, type MobileSettingsView } from "./model";
 
 /** The calls of the settings page to its plugin. Each answer is the settings of now, read as `readMobileSettings` reads them. */
 export type MobileSettingsApi = Readonly<{
@@ -19,16 +19,38 @@ export type MobileSettingsApi = Readonly<{
 
 type Notice = Readonly<{ text: string; intent: Intent }>;
 
+/** How the page speaks of a provider: its name in the choice, a line on it, and its address card. */
+type ProviderPage = Readonly<{
+  /** Its name: a brand as it is, or words of the page. */
+  name: string;
+  translated?: boolean;
+  help?: MessageKey;
+  address: MessageKey;
+  unserved: MessageKey;
+  apply: MessageKey;
+}>;
+
+/** The words of each provider. A provider the page does not know is named by its id, with general words. */
+const pages: Readonly<Record<string, ProviderPage>> = {
+  tailscale: { name: "Tailscale", address: "Address on the tailnet", unserved: "Not served on the tailnet", apply: "Apply to publish the page on the tailnet." },
+  devtunnel: {
+    name: "Dev Tunnels", address: "Address of the Dev Tunnel", unserved: "Not served through Dev Tunnels", apply: "Apply to open the Dev Tunnel.",
+    help: "A Dev Tunnel of Microsoft gives the page an HTTPS address any phone opens, without installing anything on it. This computer needs the Dev Tunnels command line and a Microsoft or GitHub account.",
+  },
+};
+
+const pageOf = (provider: string): ProviderPage => pages[provider] ?? { name: provider, address: "Address of the page", unserved: "Not served", apply: "Apply to publish the page." };
+
 /**
- * The settings page of the Mobile plugin, in Settings > Extensions > Mobile: the port of the view on this computer and its port on the
- * tailnet, the address while it is served, and Reset access, which gives the phones a new code to scan.
+ * The settings page of the Mobile plugin, in Settings > Extensions > Mobile: the provider phones connect through and its fields, the port
+ * of the view on this computer, the address while it is served, and Reset access, which gives the phones a new code to scan.
  */
 export function MobileSettings({ api }: { api: MobileSettingsApi }) {
   const { t } = useShellLanguage();
   const [settings, setSettings] = useState<MobileSettingsView | null>(null);
   const [unread, setUnread] = useState(false);
   // What is chosen and typed, until it is applied; null follows what the plugin says.
-  const [draft, setDraft] = useState<Readonly<{ mode: MobileMode; port: string; httpsPort: string }> | null>(null);
+  const [draft, setDraft] = useState<MobileSettingsDraft | null>(null);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<Notice | null>(null);
   const [confirming, setConfirming] = useState(false);
@@ -44,10 +66,11 @@ export function MobileSettings({ api }: { api: MobileSettingsApi }) {
     ? <Callout intent="danger" compact role="alert">{t("The settings could not be read.")}</Callout>
     : <div className="mobile-settings-loading" role="status" aria-busy="true"><ActivitySpinner size={18} label={t("Loading…")} /></div>;
 
-  const mode = draft?.mode ?? settings.mode, port = draft?.port ?? String(settings.port), httpsPort = draft?.httpsPort ?? String(settings.httpsPort);
-  const tunnel = mode === "devtunnel";
-  const changed = changedSettings(settings, mode, port, httpsPort);
-  const portProblem = readPort(port) === null, httpsProblem = !tunnel && readPort(httpsPort) === null;
+  const fields = draft ?? draftOf(settings);
+  const provider = fields.provider, page = pageOf(provider), shown = fieldsOf(provider);
+  const edit = (change: Partial<MobileSettingsDraft>) => setDraft({ ...fields, ...change });
+  const changed = changedSettings(settings, fields);
+  const portProblem = readPort(fields.port) === null, httpsProblem = shown.includes("httpsPort") && readPort(fields.httpsPort) === null;
   const say = (key: MessageKey, intent: Intent) => setNotice({ text: t(key), intent });
   async function apply() {
     if (!changed || busy) return;
@@ -66,30 +89,35 @@ export function MobileSettings({ api }: { api: MobileSettingsApi }) {
     catch { setConfirming(false); say("The access could not be reset.", "danger"); }
     finally { setBusy(false); }
   }
-  const portField = (id: string, value: string, problem: boolean, edit: (text: string) => void) =>
+  const enter = (event: KeyboardEvent) => { if (event.key === "Enter") void apply(); };
+  const portField = (id: string, value: string, problem: boolean, onEdit: (text: string) => void) =>
     <NumericInput id={id} value={value} min={minimumPort} max={maximumPort} stepSize={1} minorStepSize={null} majorStepSize={10} clampValueOnBlur={false}
       allowNumericCharactersOnly buttonPosition="none" disabled={busy} intent={problem ? "danger" : "none"} aria-invalid={problem}
       aria-describedby={problem ? "mobile-settings-port-problem" : undefined} inputClassName="mobile-settings-port"
-      onValueChange={(_value, text) => edit(text)} onKeyDown={event => { if (event.key === "Enter") void apply(); }} />;
+      onValueChange={(_value, text) => onEdit(text)} onKeyDown={enter} />;
+  const portNotice = (portProblem || httpsProblem) && <p id="mobile-settings-port-problem" className="settings-field-help" role="alert">{t("A port is a number from 1024 to 65535.")}</p>;
+  const name = (id: string) => { const of = pageOf(id); return of.translated ? t(of.name as MessageKey) : of.name; };
+  // The address card follows the provider chosen on the page; until it is applied, the address of the other provider is not this one.
+  const applied = provider === settings.provider.id;
   return <div className="settings-grid mobile-settings">
     {notice && <Callout className="mobile-settings-notice" intent={notice.intent} compact role={notice.intent === "success" ? "status" : "alert"}>{notice.text}</Callout>}
     <Card className="appearance-settings" aria-labelledby="mobile-settings-ports">
       <h2 id="mobile-settings-ports">{t("Connection")}</h2>
-      <Field label={t("Phones connect through")}
-        notice={tunnel && <p className="settings-field-help">{t("A Dev Tunnel of Microsoft gives the page an HTTPS address any phone opens, without installing anything on it. This computer needs the Dev Tunnels command line and a Microsoft or GitHub account.")}</p>}>
-        <RadioGroup inline name="mobile-settings-mode" className="mobile-settings-mode" selectedValue={mode} disabled={busy}
-          onChange={event => setDraft({ mode: event.currentTarget.value as MobileMode, port, httpsPort })}>
-          <Radio value="tailscale" label="Tailscale" />
-          <Radio value="devtunnel" label="Dev Tunnels" />
+      <Field label={t("Phones connect through")} notice={page.help && <p className="settings-field-help">{t(page.help)}</p>}>
+        <RadioGroup inline name="mobile-settings-mode" className="mobile-settings-mode" selectedValue={provider} disabled={busy}
+          onChange={event => edit({ provider: event.currentTarget.value })}>
+          {settings.providers.map(id => <Radio key={id} value={id} label={name(id)} />)}
         </RadioGroup>
       </Field>
-      <Field label={t("Port on this computer")} htmlFor="mobile-settings-port"
-        notice={tunnel && portProblem && <p id="mobile-settings-port-problem" className="settings-field-help" role="alert">{t("A port is a number from 1024 to 65535.")}</p>}>
-        {portField("mobile-settings-port", port, portProblem, text => setDraft({ mode, port: text, httpsPort }))}
+      {shown.includes("host") && <Field label={t("Domain name")} htmlFor="mobile-settings-host">
+        <InputGroup id="mobile-settings-host" className="mobile-settings-text" value={fields.host} placeholder="pulsar.example.com" disabled={busy}
+          spellCheck={false} autoComplete="off" onValueChange={host => edit({ host })} onKeyDown={enter} />
+      </Field>}
+      <Field label={t("Port on this computer")} htmlFor="mobile-settings-port" notice={!shown.includes("httpsPort") && portNotice}>
+        {portField("mobile-settings-port", fields.port, portProblem, text => edit({ port: text }))}
       </Field>
-      {!tunnel && <Field label={t("Port on the tailnet")} htmlFor="mobile-settings-https-port"
-        notice={(portProblem || httpsProblem) && <p id="mobile-settings-port-problem" className="settings-field-help" role="alert">{t("A port is a number from 1024 to 65535.")}</p>}>
-        {portField("mobile-settings-https-port", httpsPort, httpsProblem, text => setDraft({ mode, port, httpsPort: text }))}
+      {shown.includes("httpsPort") && <Field label={t("Port on the tailnet")} htmlFor="mobile-settings-https-port" notice={portNotice}>
+        {portField("mobile-settings-https-port", fields.httpsPort, httpsProblem, text => edit({ httpsPort: text }))}
       </Field>}
       <div className="mobile-settings-actions">
         {draft && <Button variant="minimal" text={t("Cancel")} disabled={busy} onClick={() => setDraft(null)} />}
@@ -97,15 +125,14 @@ export function MobileSettings({ api }: { api: MobileSettingsApi }) {
       </div>
     </Card>
     <Card className="appearance-settings" aria-labelledby="mobile-settings-address">
-      {/* The card follows the mode chosen on the page; until it is applied, the address of the other mode is not this one. */}
-      <h2 id="mobile-settings-address">{tunnel ? t("Address of the Dev Tunnel") : t("Address on the tailnet")}</h2>
-      {mode !== settings.mode
-        ? <><p className="mobile-settings-address" data-unserved="true">{tunnel ? t("Not served through Dev Tunnels") : t("Not served on the tailnet")}</p>
-          <p className="settings-field-help">{tunnel ? t("Apply to open the Dev Tunnel.") : t("Apply to publish the page on the tailnet.")}</p></>
+      <h2 id="mobile-settings-address">{t(page.address)}</h2>
+      {!applied
+        ? <><p className="mobile-settings-address" data-unserved="true">{t(page.unserved)}</p>
+          <p className="settings-field-help">{t(page.apply)}</p></>
         : settings.address
           ? <p className="mobile-settings-address"><code>{settings.address}</code></p>
-          : <><p className="mobile-settings-address" data-unserved="true">{tunnel ? t("Not served through Dev Tunnels") : t("Not served on the tailnet")}</p>
-            <p className="settings-field-help">{settings.serverDetail ?? (tunnel ? settings.devTunnel.detail : settings.tailscale.detail)}</p></>}
+          : <><p className="mobile-settings-address" data-unserved="true">{t(page.unserved)}</p>
+            <p className="settings-field-help">{settings.serverDetail ?? settings.provider.detail}</p></>}
     </Card>
     <Card className="appearance-settings" aria-labelledby="mobile-settings-access">
       <h2 id="mobile-settings-access">{t("Access")}</h2>
