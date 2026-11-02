@@ -8,7 +8,7 @@ import { activityLine, el, icon } from "./dom";
 import { previewLine, type HostPrompt } from "./hostPrompt";
 import { linkedImageUrl, matchLinkedImages, savedImageUrl, splitFiles, type ImageItem } from "./imageModel";
 import type { ImageViewer } from "./imageViewer";
-import { activityFacts, type ActivityBlock, type MessageBlock, type PendingPrompt, type ToolRow, type WorkflowBlock } from "./timeline";
+import { activityFacts, clockTime, type ActivityBlock, type MessageBlock, type PendingPrompt, type ToolRow, type WorkflowBlock } from "./timeline";
 import { timelineIcon, type TimelineIconName } from "./timelineIcons";
 import type { WorkflowCall, WorkflowRun, WorkflowState } from "./workflowRun";
 
@@ -126,7 +126,14 @@ export function createTimelineView(options: TimelineViewOptions) {
     if (block.host && !pending) return hostBlock(block, block.host);
     const item = make("li", `msg msg-${block.role}${pending ? " pending" : ""}`);
     item.dataset.key = block.key;
-    item.append(make("div", "msg-label", pending ? pendingLabels[pending.mode] : block.role === "user" ? "You" : block.role === "assistant" ? "Agent" : "Error"));
+    const label = make("div", "msg-label", pending ? pendingLabels[pending.mode] : block.role === "user" ? "You" : block.role === "assistant" ? "Agent" : "Error");
+    const clock = pending ? null : clockTime(block.at);
+    if (clock) {
+      const time = make("time", "msg-time", ` · ${clock}`);
+      time.dateTime = block.at!;
+      label.append(time);
+    }
+    item.append(label);
     const content = make("div", "markdown-content");
     const diagram = fillMessage(content, block, block.text);
     if (block.text.trim()) item.append(content);

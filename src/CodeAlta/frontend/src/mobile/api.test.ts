@@ -110,7 +110,10 @@ test("the paths of a session are encoded, and the project filter is a query of e
   await api.prompt("a/b", "x", "steer").catch(() => { });
   await api.sessions(6, 12, ["p 1", "p2"]).catch(() => { });
   await api.events("a/b", 42).catch(() => { });
-  assert.deepEqual(calls.map(c => c.url), ["/api/sessions/a%2Fb/prompt", "/api/sessions?offset=6&limit=12&project=p+1&project=p2", "/api/sessions/a%2Fb/events?since=42"]);
+  await api.latestEvents("a/b").catch(() => { });
+  await api.latestEvents("a/b", 42).catch(() => { });
+  assert.deepEqual(calls.map(c => c.url), ["/api/sessions/a%2Fb/prompt", "/api/sessions?offset=6&limit=12&project=p+1&project=p2", "/api/sessions/a%2Fb/events?since=42",
+    "/api/sessions/a%2Fb/events/latest", "/api/sessions/a%2Fb/events/latest?before=42"]);
   assert.deepEqual(calls[0].body, { text: "x", mode: "steer" });
 });
 
