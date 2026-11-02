@@ -126,8 +126,9 @@ internal sealed partial class AzureDevOpsApi
             if ((membership = await MembershipAsync(query, cancellationToken).ConfigureAwait(false)) is null) return [];
         }
 
-        // Without a filter the service gives the most recent ones itself; the words are looked for in their titles.
-        var wanted = filtered || text is not null ? MaximumScanned : limit;
+        // Without a filter the service gives the most recent ones itself; words alone are looked for in the titles of the
+        // last hundred, as before there were filters.
+        var wanted = filtered ? MaximumScanned : text is not null ? Math.Max(limit, 100) : limit;
         var pulls = new List<TrackedItem>();
         for (var skip = 0; skip < wanted; skip += ScanPage)
         {
