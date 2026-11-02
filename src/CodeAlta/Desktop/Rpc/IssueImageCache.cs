@@ -6,11 +6,20 @@ namespace CodeAlta.Desktop.Rpc;
 /// The images of issues and pull requests the Issues tab showed: an attachment does not change, so it is kept half an
 /// hour, and one that could not be read a minute, so that a broken image is not asked again on every render.
 /// </summary>
-/// <remarks>Owned by one <see cref="IssuesService"/>; the oldest images leave first past <see cref="MaximumBytes"/>.</remarks>
+/// <remarks>
+/// Owned by one <see cref="IssuesService"/>; past <see cref="MaximumBytes"/> or <see cref="MaximumEntries"/>, those that
+/// expire first leave first.
+/// </remarks>
 internal sealed class IssueImageCache
 {
     /// <summary>The most bytes of images kept.</summary>
     public const long MaximumBytes = 64L * 1024 * 1024;
+
+    /// <summary>
+    /// The most entries kept: an image that could not be read holds no bytes, and a tracker that reads none (GitHub)
+    /// gives one for every image it shows.
+    /// </summary>
+    public const int MaximumEntries = 512;
 
     private static readonly TimeSpan Kept = TimeSpan.FromMinutes(30);
     private static readonly TimeSpan Missing = TimeSpan.FromMinutes(1);
@@ -55,9 +64,25 @@ internal sealed class IssueImageCache
         lock (_gate)
         {
             Remove(key);
-            _entries[key] = (_time.GetUtcNow() + (image is null ? Missing : Kept), image);
+            var now = _time.GetUtcNow();
+            _entries[key] = (now + (image is null ? Missing : Kept), image);
             _bytes += image?.Bytes.Length ?? 0;
-            while (_bytes > MaximumBytes) Remove(_entries.MinBy(static pair => pair.Value.Until).Key);
+            // What expired is only removed when it is asked again: it leaves first once the cache is full.
+            if (_entries.Count > MaximumEntries)
+            {
+                foreach (var expired in _entries.Where(pair => pair.Value.Until <= now).Select(static pair => pair.Key).ToArray()) Remove(expired);
+            }
+
+            while (_bytes > MaximumBytes || _entries.Count > MaximumEntries) Remove(_entries.MinBy(static pair => pair.Value.Until).Key);
+        }
+    }
+
+    /// <summary>Gets the number of entries kept, expired ones included.</summary>
+    internal int Count
+    {
+        get
+        {
+            lock (_gate) return _entries.Count;
         }
     }
 

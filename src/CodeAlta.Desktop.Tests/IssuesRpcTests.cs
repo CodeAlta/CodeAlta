@@ -519,6 +519,24 @@ public sealed class IssuesRpcTests
     }
 
     [TestMethod]
+    public void TheImagesThatCouldNotBeRead_AreKeptInABoundedNumber()
+    {
+        // Every image of a tracker that reads none (GitHub) is kept as one that could not be read: a long session that
+        // shows many such items does not keep them all.
+        var clock = new AutomationClock { Now = new DateTimeOffset(2026, 11, 2, 8, 0, 0, TimeSpan.Zero) };
+        var cache = new IssueImageCache(clock);
+        for (var index = 0; index < 3 * IssueImageCache.MaximumEntries; index++) cache.Set($"https://github.com/user-attachments/assets/{index}", null);
+        Assert.IsLessThanOrEqualTo(IssueImageCache.MaximumEntries, cache.Count);
+
+        var image = new TrackedImage("image/png", [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]);
+        cache.Set("kept", image);
+        clock.Now = clock.Now.AddMinutes(2);
+        cache.Set("other", null);
+        Assert.IsTrue(cache.TryGet("kept", out var kept) && ReferenceEquals(image, kept), "An image read is kept while those that could not be read leave.");
+        Assert.IsLessThanOrEqualTo(3, cache.Count, "The ones past their minute leave when the cache is full.");
+    }
+
+    [TestMethod]
     public async Task ThePullRequests_HaveViewsOfTheirOwn_AndTheirListingPassesOnTheirFilters()
     {
         await using var fixture = await Fixture.CreateAsync();
