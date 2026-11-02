@@ -59,6 +59,21 @@ public static class FleetNodeMethods
     /// <summary>The owner's local control: waits until the open offer is redeemed, expires or is replaced.</summary>
     public const string ControlPairingWait = "control.pairing.wait";
 
+    /// <summary>The owner's local control: what the node does now (sessions at work, open channels, paired devices).</summary>
+    public const string ControlStatus = "control.status";
+
+    /// <summary>The owner's local control: stops the node gracefully (as Ctrl+C does), when it was started with a way to stop.</summary>
+    public const string ControlStop = "control.stop";
+
+    /// <summary>The owner's local control: the paired devices, the revoked ones included.</summary>
+    public const string ControlDevicesList = "control.devices.list";
+
+    /// <summary>The owner's local control: revokes a device and closes its channels.</summary>
+    public const string ControlDevicesRevoke = "control.devices.revoke";
+
+    /// <summary>The owner's local control: changes what a device may do.</summary>
+    public const string ControlDevicesPermissions = "control.devices.permissions";
+
     /// <summary>The event of a live display replacement of a watched session (<see cref="FleetSessionDisplay"/>).</summary>
     public const string SessionDisplayEvent = "session.display";
 
@@ -71,6 +86,9 @@ public static class FleetNodeErrorCodes
 {
     /// <summary>No session of the node has that id.</summary>
     public const string SessionNotFound = "session.not_found";
+
+    /// <summary>No paired device has that id or name.</summary>
+    public const string DeviceNotFound = "device.not_found";
 
     /// <summary>The pairing secret was wrong, expired, or no offer is open.</summary>
     public const string PairingRefused = "pair.refused";
@@ -395,6 +413,49 @@ public sealed record FleetPairingOffer(string Link, DateTimeOffset ExpiresAt, IR
 /// <param name="DeviceId">Its device id.</param>
 public sealed record FleetPairingOutcome(string Status, string? DeviceName = null, string? DeviceId = null);
 
+/// <summary>The result of <c>control.status</c>.</summary>
+/// <param name="Name">The name of the node.</param>
+/// <param name="DeviceId">Its device id.</param>
+/// <param name="Version">The version of CodeAlta it runs.</param>
+/// <param name="AcceptsWork">Whether it accepts new work (false once it stops).</param>
+/// <param name="SessionsAtWork">How many sessions work now (a turn, a script, a job).</param>
+/// <param name="Channels">How many channels of paired devices are open.</param>
+/// <param name="TrustedDevices">How many devices are paired and not revoked.</param>
+/// <param name="RevokedDevices">How many devices were revoked.</param>
+public sealed record FleetNodeStatus(string Name, string DeviceId, string Version, bool AcceptsWork, int SessionsAtWork, int Channels,
+    int TrustedDevices, int RevokedDevices);
+
+/// <summary>A paired device as the owner's local control shows it.</summary>
+/// <param name="DeviceId">Its device id.</param>
+/// <param name="Name">The name it gave itself at pairing.</param>
+/// <param name="Fingerprint">The fingerprint of its key, as people read it.</param>
+/// <param name="Permissions">What it may do (<c>view</c>, <c>drive</c>, <c>start</c>, <c>move</c>).</param>
+/// <param name="PairedAt">When it was paired.</param>
+/// <param name="RevokedAt">When it was revoked; null while it is trusted.</param>
+/// <param name="Channels">How many channels it has open now.</param>
+public sealed record FleetDeviceInfo(string DeviceId, string Name, string Fingerprint, IReadOnlyList<string> Permissions, DateTimeOffset PairedAt,
+    DateTimeOffset? RevokedAt, int Channels);
+
+/// <summary>The result of <c>control.devices.list</c>.</summary>
+/// <param name="Devices">The devices, in the order they were paired.</param>
+public sealed record FleetDeviceList(IReadOnlyList<FleetDeviceInfo> Devices);
+
+/// <summary>The parameters of <c>control.devices.revoke</c>.</summary>
+/// <param name="Device">The device: its id, its name, or the start of its id.</param>
+public sealed record FleetDeviceRef(string Device);
+
+/// <summary>The parameters of <c>control.devices.permissions</c>: what is denied wins over what is allowed.</summary>
+/// <param name="Device">The device: its id, its name, or the start of its id.</param>
+/// <param name="Allow">The permissions to add.</param>
+/// <param name="Deny">The permissions to remove.</param>
+public sealed record FleetDevicePermissionsParams(string Device, IReadOnlyList<string> Allow, IReadOnlyList<string> Deny);
+
+/// <summary>The result of <c>control.devices.revoke</c> and <c>control.devices.permissions</c>.</summary>
+/// <param name="Device">The device as it is now.</param>
+/// <param name="Changed">Whether anything changed.</param>
+/// <param name="ClosedChannels">How many of its channels were closed: a revoked device, or one that lost a permission, reconnects to go on.</param>
+public sealed record FleetDeviceChange(FleetDeviceInfo Device, bool Changed, int ClosedChannels);
+
 /// <summary>An empty result.</summary>
 public sealed record FleetEmpty;
 
@@ -431,5 +492,10 @@ public sealed record FleetEmpty;
 [JsonSerializable(typeof(FleetPairingCreateParams))]
 [JsonSerializable(typeof(FleetPairingOffer))]
 [JsonSerializable(typeof(FleetPairingOutcome))]
+[JsonSerializable(typeof(FleetNodeStatus))]
+[JsonSerializable(typeof(FleetDeviceList))]
+[JsonSerializable(typeof(FleetDeviceRef))]
+[JsonSerializable(typeof(FleetDevicePermissionsParams))]
+[JsonSerializable(typeof(FleetDeviceChange))]
 [JsonSerializable(typeof(FleetEmpty))]
 public sealed partial class FleetNodeJsonContext : JsonSerializerContext;

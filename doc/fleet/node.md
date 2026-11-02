@@ -23,20 +23,21 @@ What it is not:
 | Command | What it does |
 | --- | --- |
 | `altanode run [--port <n>] [--bind <address> \| --listen-all \| --no-listen]` | Runs in the foreground (logs to the console). What a service starts. Listens for paired devices on port 2585 of loopback by default. |
-| `altanode install [--user \| --system --account <name>]` | Installs and starts the service of this OS (below). |
-| `altanode uninstall` | Stops and removes the service; keeps the profile. |
+| `altanode install [--user \| --system --account <name>] [run options] [--dry-run]` | Installs and starts the service of this OS (below), which runs `altanode run` with the options given. `--dry-run` prints the definition and the commands. |
+| `altanode uninstall [--system --account <name>]` | Stops and removes the service; keeps the profile. |
 | `altanode pair` | Shows a pairing code and QR code (in the terminal) for a desktop to scan. The first slice prints the `codealta-pair://` link only, and waits until a device redeems it or it expires. |
 | `altanode join <server-url> [--token <enrollment>]` | Enrolls in a fleet: with an enrollment token, or by a device code a person approves. |
-| `altanode status` | The service, the fleet connections, the sessions at work, the providers' readiness. |
-| `altanode logs [--follow]` | The node's log. |
+| `altanode status` | Where the node listens, its paired devices, the sessions at work, the service, and whether it will still run after a restart or a logout. Later: the fleet connections, the providers' readiness. |
+| `altanode logs [--follow] [--lines <n>]` | The node's log (`logs/altanode.log`), followed across its daily rolls. |
+| `altanode devices`, `revoke <device>`, `permissions <device> [--allow <list>] [--deny <list>]` | The devices paired with the node: name, short fingerprint, permissions (`view`, `drive`, `start`, `move`), paired and revoked dates. A revoked device is disconnected at once; one that loses a permission is disconnected and reconnects with what it may do. Without a running node, they change `fleet/trusted-devices.json`. |
 | `altanode update` | Updates to the version the fleet recommends, when idle. |
 | `altanode machines`, `connect <link>`, `remote <machine> info\|sessions\|history\|send\|create\|watch` | The client side, for testing until the desktop does it: the machines this profile paired with, pairing with a node from its link, and its sessions. They read only the device key and `fleet/paired-machines.json` (written under a lock file), so they run beside a desktop or a node on the same profile. |
 
-`altanode pair` talks to the node that runs on the same profile as its owner: the node writes where it listens in
-`fleet/node-listener.json` of its state root, and `pair` opens a session channel to it with the node's own device key,
-read from the profile. The node accepts its own key only from this machine, and only for pairing offers
-(`control.pairing.create`, `control.pairing.wait`): the key file, which only the owner of the profile can read, is the
-credential, with no token or second endpoint.
+`altanode pair`, `status`, `devices`, `revoke`, `permissions` and `uninstall` are the owner's local control of the node
+that runs on the same profile: the node writes where it listens in `fleet/node-listener.json` of its state root, and
+they open a session channel to it with the node's own device key, read from the profile. The node accepts its own key
+only from this machine, and only for the `control.*` methods (pairing offers, status, devices, a graceful stop): the key
+file, which only the owner of the profile can read, is the credential, with no token or second endpoint.
 
 ## Running as a service
 
@@ -53,7 +54,13 @@ LocalSystem.
 **One node per OS user.** A machine several people use runs one node per person, never one privileged node acting
 for everyone. A dedicated machine gets its own OS user (`codealta`) with its own logins, set up from the desktop.
 
-- The installer writes the unit with restart on failure, and a bounded log under the state root.
+- The installer writes the unit with restart on failure, and a bounded log under the state root. It starts the
+  executable from a stable path: a .NET tool from its shim (`~/.dotnet/tools/altanode`), which `dotnet tool update`
+  keeps. launchd and systemd units get the installer's `PATH` and `DOTNET_ROOT`, since they start with almost none.
+- On Windows the task runs `conhost.exe --headless` (no console window) at logon, with a time trigger that starts the
+  node again within 5 minutes if it stopped (`conhost` hides the node's exit code from Task Scheduler). `uninstall`
+  deletes the task, then stops the node through its local control. `--system` is refused on Windows until the node
+  runs as a Windows service.
 - A node keeps the machine awake while sessions work (as `DesktopKeepAwake` does), and lets it sleep when idle
   unless the owner says it is always on.
 - Exit is graceful: admission closes, running turns finish or stop after a bound, journals are flushed; a session

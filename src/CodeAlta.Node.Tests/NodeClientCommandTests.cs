@@ -112,7 +112,7 @@ public sealed partial class NodeClientCommandTests
     }
 
     private NodeApplication Client(TextWriter output, TextWriter error)
-        => new(output, error) { InitializeLogging = false, ClientStop = TestContext.CancellationToken };
+        => new(output, error) { InitializeLogging = false, ClientStop = TestContext.CancellationToken, ServiceEnvironment = static () => null };
 
     private async Task<(int Code, string Output, string Error)> RunAsync(string[] args)
     {

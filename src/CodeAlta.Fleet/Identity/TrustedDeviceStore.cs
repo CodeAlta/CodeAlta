@@ -122,6 +122,47 @@ public sealed class TrustedDeviceStore : IDeviceTrustPolicy
         }
     }
 
+    /// <summary>Changes what a trusted device may do.</summary>
+    /// <param name="deviceId">The device id.</param>
+    /// <param name="permissions">What it may do from now on.</param>
+    /// <returns>The device as it is now, or null when it is unknown or revoked.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="deviceId"/> is <see langword="null"/>.</exception>
+    /// <exception cref="IOException">The file cannot be written.</exception>
+    public TrustedDevice? SetPermissions(string deviceId, DevicePermissions permissions)
+    {
+        ArgumentNullException.ThrowIfNull(deviceId);
+        lock (_gate)
+        {
+            var index = _devices.FindIndex(device => string.Equals(device.DeviceId, deviceId, StringComparison.Ordinal));
+            if (index < 0 || _devices[index].IsRevoked) return null;
+            if (_devices[index].Permissions == permissions) return _devices[index];
+            var updated = new List<TrustedDevice>(_devices);
+            updated[index] = updated[index] with { Permissions = permissions };
+            Save(updated);
+            return updated[index];
+        }
+    }
+
+    /// <summary>
+    /// Finds the devices a person names: by device id, by name (ignoring case), or by the start of a device id (at least
+    /// four characters). An exact device id or name wins over a prefix.
+    /// </summary>
+    /// <param name="text">The device id, the name or the start of the device id.</param>
+    /// <param name="includeRevoked">Whether revoked devices may match.</param>
+    /// <returns>The matching devices: one when the text names a device, several when it is ambiguous, none when unknown.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="text"/> is <see langword="null"/>.</exception>
+    public IReadOnlyList<TrustedDevice> Match(string text, bool includeRevoked)
+    {
+        ArgumentNullException.ThrowIfNull(text);
+        var wanted = text.Trim();
+        if (wanted.Length == 0) return [];
+        var devices = List(includeRevoked);
+        var exact = devices.Where(device => string.Equals(device.DeviceId, wanted, StringComparison.OrdinalIgnoreCase)
+            || string.Equals(device.Name, wanted, StringComparison.OrdinalIgnoreCase)).ToArray();
+        if (exact.Length > 0 || wanted.Length < 4) return exact;
+        return devices.Where(device => device.DeviceId.StartsWith(wanted, StringComparison.OrdinalIgnoreCase)).ToArray();
+    }
+
     /// <inheritdoc />
     public TrustedDevice? FindTrusted(DeviceFingerprint fingerprint)
     {

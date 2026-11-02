@@ -1,0 +1,134 @@
+using System.Text;
+using CodeAlta.Node.Service;
+
+namespace CodeAlta.Node.Tests;
+
+/// <summary>
+/// A machine for <see cref="NodeServiceManager"/> that installs nothing: its folders are temporary, and the commands of
+/// its service managers (<c>schtasks</c>, <c>launchctl</c>, <c>systemctl</c>, <c>loginctl</c>) are recorded and answered
+/// from a small state of their own.
+/// </summary>
+internal sealed class FakeServiceMachine : IDisposable
+{
+    private readonly Lock _gate = new();
+    private readonly HashSet<string> _registered = new(StringComparer.Ordinal);
+
+    public FakeServiceMachine(NodeServicePlatform platform)
+    {
+        Platform = platform;
+        Root = Path.Combine(Path.GetTempPath(), "CodeAlta-service-" + Guid.NewGuid().ToString("N"));
+        Home = Path.Combine(Root, "home", "alice");
+        foreach (var directory in new[] { Home, LingerDirectory, SystemUnitDirectory, LaunchDaemonDirectory, TempDirectory }) Directory.CreateDirectory(directory);
+    }
+
+    public NodeServicePlatform Platform { get; }
+
+    public string Root { get; }
+
+    public string Home { get; }
+
+    public string LingerDirectory => Path.Combine(Root, "linger");
+
+    public string SystemUnitDirectory => Path.Combine(Root, "etc", "systemd", "system");
+
+    public string LaunchDaemonDirectory => Path.Combine(Root, "Library", "LaunchDaemons");
+
+    public string TempDirectory => Path.Combine(Root, "tmp");
+
+    /// <summary>Gets or sets whether the process runs as root.</summary>
+    public bool IsRoot { get; set; }
+
+    /// <summary>Gets or sets whether <c>loginctl enable-linger</c> succeeds without privileges.</summary>
+    public bool LingerAllowed { get; set; } = true;
+
+    /// <summary>Gets or sets the user the machine signs in automatically.</summary>
+    public string? AutoLoginUser { get; set; }
+
+    /// <summary>Gets the commands run, as typed.</summary>
+    public List<string> Commands { get; } = [];
+
+    /// <summary>Gets the task XML files <c>schtasks /Create</c> was given, with the encoding they were written in.</summary>
+    public List<(string Text, Encoding Encoding)> TaskFiles { get; } = [];
+
+    public NodeServiceEnvironment Environment => new()
+    {
+        Platform = Platform,
+        Home = Home,
+        UserName = "alice",
+        UserDisplayName = Platform == NodeServicePlatform.Windows ? @"PC\alice" : "alice",
+        UserId = Platform == NodeServicePlatform.Windows ? "S-1-5-21-1-2-3-1001" : IsRoot ? "0" : "501",
+        IsRoot = IsRoot,
+        ConfigHome = Path.Combine(Home, ".config"),
+        LingerDirectory = LingerDirectory,
+        SystemUnitDirectory = SystemUnitDirectory,
+        LaunchDaemonDirectory = LaunchDaemonDirectory,
+        WindowsDirectory = @"C:\Windows",
+        TempDirectory = TempDirectory,
+        ServiceVariables = Platform == NodeServicePlatform.Windows
+            ? new Dictionary<string, string>()
+            : new Dictionary<string, string> { ["PATH"] = "/home/alice/.dotnet/tools:/usr/bin:/bin", ["DOTNET_ROOT"] = "/home/alice/.dotnet" },
+        Now = static () => new DateTime(2026, 11, 3, 9, 30, 42, DateTimeKind.Local),
+        Run = Run,
+        AutoLoginUser = () => AutoLoginUser,
+        HomeOfAccount = account => account == "codealta" ? Path.Combine(Root, "home", "codealta") : null,
+    };
+
+    public bool IsRegistered(string name)
+    {
+        lock (_gate) return _registered.Contains(name);
+    }
+
+    private NodeCommandResult Run(string fileName, IReadOnlyList<string> arguments)
+    {
+        lock (_gate)
+        {
+            Commands.Add(string.Join(' ', new[] { fileName }.Concat(arguments)));
+            switch (fileName, arguments.FirstOrDefault(static argument => !argument.StartsWith("--", StringComparison.Ordinal)))
+            {
+                case ("schtasks", "/Create"):
+                {
+                    var file = arguments[4];
+                    var bytes = File.ReadAllBytes(file);
+                    var encoding = bytes is [0xFF, 0xFE, ..] ? Encoding.Unicode : Encoding.UTF8;
+                    TaskFiles.Add((encoding.GetString(bytes).TrimStart('\uFEFF'), encoding));
+                    _registered.Add(arguments[2]);
+                    return new(0, "SUCCESS");
+                }
+                case ("schtasks", "/Query"):
+                    return _registered.Contains(arguments[2])
+                        ? new(0, "<?xml version=\"1.0\"?><Task xmlns=\"http://schemas.microsoft.com/windows/2004/02/mit/task\"><Settings><Enabled>true</Enabled></Settings></Task>")
+                        : new(1, "ERROR: The system cannot find the file specified.");
+                case ("schtasks", "/Delete"):
+                    return _registered.Remove(arguments[2]) ? new(0, "SUCCESS") : new(1, "ERROR");
+                case ("launchctl", "bootstrap"):
+                    _registered.Add(Path.GetFileNameWithoutExtension(arguments[2]));
+                    return new(0, "");
+                case ("launchctl", "bootout"):
+                    return _registered.Remove(arguments[1][(arguments[1].LastIndexOf('/') + 1)..]) ? new(0, "") : new(113, "Could not find service");
+                case ("launchctl", "print"):
+                    return _registered.Contains(arguments[1][(arguments[1].LastIndexOf('/') + 1)..]) ? new(0, "state = running") : new(113, "Could not find service");
+                case ("systemctl", "enable"):
+                    _registered.Add(arguments[^1]);
+                    return new(0, "");
+                case ("systemctl", "disable"):
+                    _registered.Remove(arguments[^1]);
+                    return new(0, "");
+                case ("systemctl", "is-enabled"):
+                    return _registered.Contains(arguments[^1]) ? new(0, "enabled\n") : new(1, "disabled\n");
+                case ("loginctl", "enable-linger"):
+                    if (!LingerAllowed) return new(1, "Could not enable linger: Access denied");
+                    File.WriteAllText(Path.Combine(LingerDirectory, arguments[1]), "");
+                    return new(0, "");
+                default:
+                    return new(0, "");
+            }
+        }
+    }
+
+    public void Dispose()
+    {
+        try { Directory.Delete(Root, recursive: true); }
+        catch (IOException) { }
+        catch (UnauthorizedAccessException) { }
+    }
+}

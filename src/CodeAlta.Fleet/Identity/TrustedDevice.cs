@@ -20,6 +20,55 @@ public enum DevicePermissions
     Move = 8,
 }
 
+/// <summary>The names of <see cref="DevicePermissions"/> as people and the node API write them: <c>view</c>, <c>drive</c>, <c>start</c>, <c>move</c>.</summary>
+public static class DevicePermissionNames
+{
+    /// <summary>Gets the names of the permissions, in their order.</summary>
+    public static IReadOnlyList<string> All { get; } = ["view", "drive", "start", "move"];
+
+    /// <summary>Names the permissions of a set, in their order.</summary>
+    /// <param name="permissions">The set.</param>
+    /// <returns>The names; empty for <see cref="DevicePermissions.None"/>.</returns>
+    public static IReadOnlyList<string> Format(DevicePermissions permissions)
+    {
+        var names = new List<string>(4);
+        if (permissions.HasFlag(DevicePermissions.View)) names.Add("view");
+        if (permissions.HasFlag(DevicePermissions.Drive)) names.Add("drive");
+        if (permissions.HasFlag(DevicePermissions.Start)) names.Add("start");
+        if (permissions.HasFlag(DevicePermissions.Move)) names.Add("move");
+        return names;
+    }
+
+    /// <summary>Reads names of permissions, separated by commas or given one by one, ignoring case.</summary>
+    /// <param name="names">The names; each may hold several separated by commas.</param>
+    /// <param name="permissions">The permissions they name.</param>
+    /// <param name="unknown">The first name that is no permission, or null.</param>
+    /// <returns>Whether every name is a permission.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="names"/> is null.</exception>
+    public static bool TryParse(IEnumerable<string> names, out DevicePermissions permissions, out string? unknown)
+    {
+        ArgumentNullException.ThrowIfNull(names);
+        permissions = DevicePermissions.None;
+        unknown = null;
+        foreach (var part in names.SelectMany(static name => (name ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)))
+        {
+            switch (part.ToLowerInvariant())
+            {
+                case "view": permissions |= DevicePermissions.View; break;
+                case "drive": permissions |= DevicePermissions.Drive; break;
+                case "start": permissions |= DevicePermissions.Start; break;
+                case "move": permissions |= DevicePermissions.Move; break;
+                default:
+                    unknown = part;
+                    permissions = DevicePermissions.None;
+                    return false;
+            }
+        }
+
+        return true;
+    }
+}
+
 /// <summary>A device paired with this instance.</summary>
 /// <param name="DeviceId">The device id, derived from its key (<see cref="DeviceIdentity.DeviceIdOf"/>).</param>
 /// <param name="Name">The name the device gave itself at pairing.</param>

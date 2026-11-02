@@ -94,5 +94,54 @@ public sealed class TrustedDeviceStoreTests
         Assert.ThrowsExactly<InvalidDataException>(() => new TrustedDeviceStore(folder.Path, TimeProvider.System));
     }
 
+    [TestMethod]
+    public void SetPermissions_ChangesATrustedDevice_AndNeverARevokedOne()
+    {
+        using var folder = new TestFolder();
+        var store = new TrustedDeviceStore(folder.Path, new ManualTimeProvider(Now));
+        var laptop = store.Add("Laptop", NewFingerprint(), DevicePermissions.View | DevicePermissions.Drive);
+        var phone = store.Add("Phone", NewFingerprint(), DevicePermissions.View);
+
+        var changed = store.SetPermissions(laptop.DeviceId, DevicePermissions.View | DevicePermissions.Move);
+        Assert.AreEqual(DevicePermissions.View | DevicePermissions.Move, changed!.Permissions);
+        Assert.AreEqual(laptop.PairedAt, changed.PairedAt);
+        Assert.AreEqual(changed, new TrustedDeviceStore(folder.Path, TimeProvider.System).List().First());
+
+        store.Revoke(phone.DeviceId);
+        Assert.IsNull(store.SetPermissions(phone.DeviceId, DevicePermissions.View));
+        Assert.IsNull(store.SetPermissions("unknown", DevicePermissions.View));
+    }
+
+    [TestMethod]
+    public void Match_FindsADeviceByIdNameOrIdPrefix()
+    {
+        using var folder = new TestFolder();
+        var store = new TrustedDeviceStore(folder.Path, new ManualTimeProvider(Now));
+        var laptop = store.Add("Laptop", NewFingerprint(), DevicePermissions.View);
+        var phone = store.Add("Phone", NewFingerprint(), DevicePermissions.View);
+        store.Revoke(phone.DeviceId);
+
+        Assert.AreEqual(laptop.DeviceId, store.Match("laptop", includeRevoked: false).Single().DeviceId);
+        Assert.AreEqual(laptop.DeviceId, store.Match(laptop.DeviceId.ToUpperInvariant(), includeRevoked: false).Single().DeviceId);
+        Assert.AreEqual(laptop.DeviceId, store.Match(laptop.DeviceId[..6], includeRevoked: false).Single().DeviceId);
+        Assert.IsEmpty(store.Match(laptop.DeviceId[..3], includeRevoked: false), "A prefix has four characters at least.");
+        Assert.IsEmpty(store.Match("Phone", includeRevoked: false));
+        Assert.AreEqual(phone.DeviceId, store.Match("Phone", includeRevoked: true).Single().DeviceId);
+        Assert.IsEmpty(store.Match("  ", includeRevoked: true));
+    }
+
+    [TestMethod]
+    public void PermissionNames_ReadAndWriteTheNamesOfTheApi()
+    {
+        Assert.IsTrue(DevicePermissionNames.TryParse(["view,Drive", " move "], out var permissions, out var unknown));
+        Assert.AreEqual(DevicePermissions.View | DevicePermissions.Drive | DevicePermissions.Move, permissions);
+        Assert.IsNull(unknown);
+        CollectionAssert.AreEqual(new[] { "view", "drive", "move" }, DevicePermissionNames.Format(permissions).ToArray());
+        Assert.IsFalse(DevicePermissionNames.TryParse(["view,fly"], out _, out unknown));
+        Assert.AreEqual("fly", unknown);
+        Assert.IsTrue(DevicePermissionNames.TryParse([], out permissions, out _));
+        Assert.AreEqual(DevicePermissions.None, permissions);
+    }
+
     private static DeviceFingerprint NewFingerprint() => DeviceFingerprint.FromBytes(RandomNumberGenerator.GetBytes(32));
 }
