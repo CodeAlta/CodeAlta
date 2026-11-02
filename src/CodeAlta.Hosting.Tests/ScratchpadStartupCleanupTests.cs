@@ -19,6 +19,7 @@ public sealed class ScratchpadStartupCleanupTests
         var opened = 0;
         var cleanup = new ScratchpadStartupCleanup(fixture.Profile, fixture.Guard)
         {
+            MaxAge = TimeSpan.Zero,
             BeforeEntryOpen = _ =>
             {
                 if (++opened != 2) return;
@@ -74,6 +75,57 @@ public sealed class ScratchpadStartupCleanupTests
     }
 
     [TestMethod]
+    public async Task KeepsEntriesChangedWithinTheRetentionAndRemovesOlderOnes()
+    {
+        RequireWindows();
+        using var fixture = new Fixture(false);
+        var old = DateTime.UtcNow - StorageSettings.ScratchpadMaxAge - TimeSpan.FromDays(1);
+        fixture.Write("scratchpad/old.md", "remove");
+        fixture.Write("scratchpad/recent.md", "keep");
+        fixture.Write("scratchpad/old-folder/note.md", "remove");
+        fixture.Write("scratchpad/mixed/old.md", "remove");
+        fixture.Write("scratchpad/mixed/recent.md", "keep");
+        fixture.Write("scratchpad/mixed/inner/recent.md", "keep");
+        fixture.Write("scratchpad/copied.md", "keep");
+        Directory.CreateDirectory(Path.Combine(fixture.Scratchpad, "recent-empty"));
+        Age(Path.Combine(fixture.Scratchpad, "old.md"), old);
+        Age(Path.Combine(fixture.Scratchpad, "old-folder", "note.md"), old);
+        Age(Path.Combine(fixture.Scratchpad, "mixed", "old.md"), old);
+        // A copy keeps the write time of its source, but it was created now: it is recent.
+        File.SetLastWriteTimeUtc(Path.Combine(fixture.Scratchpad, "copied.md"), old);
+        // Directory times last: writing an entry in a directory changes its time.
+        Age(Path.Combine(fixture.Scratchpad, "mixed", "inner"), old);
+        Age(Path.Combine(fixture.Scratchpad, "mixed"), old);
+        Age(Path.Combine(fixture.Scratchpad, "old-folder"), old);
+
+        var cleanup = new ScratchpadStartupCleanup(fixture.Profile, fixture.Guard);
+        await cleanup.RunAsync(true, true, CancellationToken.None);
+
+        Assert.AreEqual(ScratchpadCleanupState.Completed, cleanup.Snapshot.State, string.Join(",", cleanup.Snapshot.Reasons));
+        Assert.AreEqual(0L, cleanup.Snapshot.SkippedEntries);
+        Assert.AreEqual(3L, cleanup.Snapshot.RemovedFiles);
+        Assert.AreEqual(1L, cleanup.Snapshot.RemovedDirectories);
+        CollectionAssert.AreEquivalent(
+            new[] { "copied.md", "mixed", "mixed/inner", "mixed/inner/recent.md", "mixed/recent.md", "recent-empty", "recent.md" },
+            Directory.GetFileSystemEntries(fixture.Scratchpad, "*", SearchOption.AllDirectories)
+                .Select(path => Path.GetRelativePath(fixture.Scratchpad, path).Replace('\\', '/')).ToArray());
+
+        static void Age(string path, DateTime time)
+        {
+            if (Directory.Exists(path))
+            {
+                Directory.SetCreationTimeUtc(path, time);
+                Directory.SetLastWriteTimeUtc(path, time);
+            }
+            else
+            {
+                File.SetCreationTimeUtc(path, time);
+                File.SetLastWriteTimeUtc(path, time);
+            }
+        }
+    }
+
+    [TestMethod]
     [DataRow(false, true, "disabled")]
     [DataRow(true, false, "invalid-configuration")]
     public async Task DisabledOrInvalidSettingNeverDeletes(bool enabled, bool valid, string reason)
@@ -110,6 +162,7 @@ public sealed class ScratchpadStartupCleanupTests
         var attempts = 0;
         var cleanup = new ScratchpadStartupCleanup(fixture.Profile, fixture.Guard)
         {
+            MaxAge = TimeSpan.Zero,
             BeforeEntryDelete = _ =>
             {
                 if (attempts++ == filesBeforeFault) throw new InvalidOperationException("Sensitive unexpected failure details");
@@ -172,7 +225,7 @@ public sealed class ScratchpadStartupCleanupTests
         fixture.Write("scratchpad/normal.md", "keep");
         fixture.Write("dev/scratchpad/dev.md", "remove");
         var normal = fixture.Cleanup();
-        var isolated = new ScratchpadStartupCleanup(developer, peer);
+        var isolated = new ScratchpadStartupCleanup(developer, peer) { MaxAge = TimeSpan.Zero };
         await Task.WhenAll(normal.RunAsync(true, true, CancellationToken.None), isolated.RunAsync(true, true, CancellationToken.None));
         Assert.AreEqual(ScratchpadCleanupState.Skipped, normal.Snapshot.State);
         Assert.AreEqual(ScratchpadCleanupState.Completed, isolated.Snapshot.State);
@@ -190,6 +243,7 @@ public sealed class ScratchpadStartupCleanupTests
         var checkedGate = false;
         var cleanup = new ScratchpadStartupCleanup(fixture.Profile, fixture.Guard)
         {
+            MaxAge = TimeSpan.Zero,
             BeforeEntryDelete = _ =>
             {
                 // Delete-pending names fail before even the legacy PID-reader fallback.
@@ -278,6 +332,7 @@ public sealed class ScratchpadStartupCleanupTests
         Exception? swapFailure = null;
         var cleanup = new ScratchpadStartupCleanup(fixture.Profile, fixture.Guard)
         {
+            MaxAge = TimeSpan.Zero,
             BeforeEntryOpen = entry =>
             {
                 if (Path.GetFileName(entry) != "child" || swapped) return;
@@ -316,6 +371,7 @@ public sealed class ScratchpadStartupCleanupTests
         var checkedSwap = false;
         var cleanup = new ScratchpadStartupCleanup(fixture.Profile, fixture.Guard)
         {
+            MaxAge = TimeSpan.Zero,
             BeforeEntryDelete = entry =>
             {
                 Assert.Throws<IOException>(() => Directory.Move(fixture.Root, fixture.Root + "-swapped"));
@@ -340,6 +396,7 @@ public sealed class ScratchpadStartupCleanupTests
         using var releaseWorker = new ManualResetEventSlim();
         var cleanup = new ScratchpadStartupCleanup(fixture.Profile, fixture.Guard)
         {
+            MaxAge = TimeSpan.Zero,
             WorkerStarted = _ => { workerEntered.Set(); Assert.IsTrue(releaseWorker.Wait(TimeSpan.FromSeconds(10))); },
         };
         var observed = new List<ScratchpadCleanupState>();
@@ -425,6 +482,7 @@ public sealed class ScratchpadStartupCleanupTests
         using var release = new ManualResetEventSlim();
         var cleanup = new ScratchpadStartupCleanup(fixture.Profile, fixture.Guard)
         {
+            MaxAge = TimeSpan.Zero,
             BeforeEntryDelete = _ => { entered.Set(); Assert.IsTrue(release.Wait(TimeSpan.FromSeconds(10))); },
         };
         var worker = cleanup.RunAsync(true, true, cancellation.Token);
@@ -467,6 +525,7 @@ public sealed class ScratchpadStartupCleanupTests
         var attemptedMutation = false;
         var cleanup = new ScratchpadStartupCleanup(fixture.Profile, fixture.Guard)
         {
+            MaxAge = TimeSpan.Zero,
             BeforeEntryDelete = _ =>
             {
                 // A reparse-data mutation needs a writable handle; it cannot be acquired after pinning.
@@ -495,6 +554,7 @@ public sealed class ScratchpadStartupCleanupTests
         var attemptedMove = false;
         var cleanup = new ScratchpadStartupCleanup(fixture.Profile, fixture.Guard)
         {
+            MaxAge = TimeSpan.Zero,
             BeforeEntryDelete = _ =>
             {
                 // MoveFileEx opens the destination directory for writing. A shared ancestor
@@ -568,7 +628,8 @@ public sealed class ScratchpadStartupCleanupTests
         internal CodeAltaInstanceProfile Profile { get; }
         internal CodeAltaSingleInstanceGuard Guard { get; }
         internal string Scratchpad => Path.Combine(Profile.StateRoot, "scratchpad");
-        internal ScratchpadStartupCleanup Cleanup() => new(Profile, Guard);
+        // Entries the tests write are new: they all count as old unless a test keeps the default age.
+        internal ScratchpadStartupCleanup Cleanup() => new(Profile, Guard) { MaxAge = TimeSpan.Zero };
         internal void Write(string path, string content)
         {
             var full = Path.Combine(Root, path);

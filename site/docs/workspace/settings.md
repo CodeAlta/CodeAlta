@@ -193,7 +193,7 @@ A session never hands a tool it does without to another session, and does not ch
 
 **Automatic cleanup**:
 
-- **Clear scratchpad on startup**, on by default.
+- **Remove old scratchpad files on startup**, on by default: the files of the scratchpad not changed for a week. A session that runs again after a restart still finds its recent files.
 - **Delete inactive sessions**, **After 3 months** by default: a number and a unit (days, weeks, months, years), or **Never**. A session with a [bookmark](../bookmarks.md) is kept.
 
 Cleanup runs at the **next startup**, never at once. Session cleanup runs on local Windows storage only; elsewhere the card says why it did not run. A session is inactive since its file was last written (viewing it does not count). Open sessions, drafts and active work are kept, and a session goes only with the sessions it started or that continue it, once all are inactive; its [Statistics](../plugins/statistics.md) are saved first. Other files of the `sessions` folder older than the duration go too. The card shows the progress and result of the last cleanup.

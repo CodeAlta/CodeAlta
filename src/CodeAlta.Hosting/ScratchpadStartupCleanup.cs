@@ -38,6 +38,9 @@ public sealed class ScratchpadStartupCleanup : IStartupScratchpadCleanup
     /// <summary>Gets the shared resource root, which is not the developer scratchpad root.</summary>
     public string GlobalRoot => _profile.GlobalRoot;
 
+    /// <summary>Gets how long a scratchpad entry is kept after it was created or last written.</summary>
+    internal TimeSpan MaxAge { get; init; } = StorageSettings.ScratchpadMaxAge;
+
     internal Action<CancellationToken>? WorkerStarted { get; init; }
     internal Action<string>? BeforeEntryOpen { get; init; }
     internal Action<string>? BeforeEntryDelete { get; init; }
@@ -93,7 +96,7 @@ public sealed class ScratchpadStartupCleanup : IStartupScratchpadCleanup
                 Publish(new(ScratchpadCleanupState.Running, 0, 0, 0, [], started, null));
                 WorkerStarted?.Invoke(cancellationToken);
                 cancellationToken.ThrowIfCancellationRequested();
-                state = WindowsScratchpadRemoval.Clear(_profile, ownership.Handle, result, BeforeEntryOpen, BeforeEntryDelete, cancellationToken);
+                state = WindowsScratchpadRemoval.Clear(_profile, ownership.Handle, started - MaxAge, result, BeforeEntryOpen, BeforeEntryDelete, cancellationToken);
             }
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)

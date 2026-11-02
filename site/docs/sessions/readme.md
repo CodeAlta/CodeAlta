@@ -253,4 +253,4 @@ When you give an agent many instructions at once, such as a list of tasks, it fi
 
 - The file is the agent's own record: it is not part of your project and is never committed.
 - A developer instance (`--dev`) uses `~/.alta/dev/scratchpad/` instead.
-- Scratchpads are temporary: CodeAlta clears them at startup by default. See [Storage](../workspace/settings.md#storage) for this cleanup and for the deletion of inactive sessions.
+- Scratchpads are temporary: by default, CodeAlta removes at startup the files of the scratchpad not changed for a week. See [Storage](../workspace/settings.md#storage) for this cleanup and for the deletion of inactive sessions.

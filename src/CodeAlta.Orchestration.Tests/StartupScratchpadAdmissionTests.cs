@@ -62,7 +62,7 @@ public sealed class StartupScratchpadAdmissionTests
         using var ownership = CodeAltaSingleInstanceGuard.Acquire(fixture.Profile.LockFilePath);
         var scratchpad = Path.Combine(fixture.Profile.StateRoot, "scratchpad");
         Directory.CreateDirectory(scratchpad);
-        File.WriteAllText(Path.Combine(scratchpad, "old.md"), "remove");
+        WriteOld(Path.Combine(scratchpad, "old.md"), "remove");
         var cleanup = new ScratchpadStartupCleanup(fixture.Profile, ownership);
         await using var host = await CodeAltaHost.CreateAsync(new CodeAltaHostOptions
         {
@@ -99,7 +99,7 @@ public sealed class StartupScratchpadAdmissionTests
         var config = System.Text.Encoding.UTF8.GetBytes(content);
         File.WriteAllBytes(configPath, config);
         var scratchpad = Directory.CreateDirectory(Path.Combine(fixture.Profile.StateRoot, "scratchpad")).FullName;
-        File.WriteAllText(Path.Combine(scratchpad, "note.md"), "scratchpad");
+        WriteOld(Path.Combine(scratchpad, "note.md"), "scratchpad");
         var cleanup = new ScratchpadStartupCleanup(fixture.Profile, ownership);
         await using (var host = await CodeAltaHost.CreateAsync(new CodeAltaHostOptions
         {
@@ -132,7 +132,7 @@ public sealed class StartupScratchpadAdmissionTests
         var config = System.Text.Encoding.UTF8.GetBytes("# Shared user configuration must not be rewritten by developer startup.\r\n");
         File.WriteAllBytes(configPath, config);
         var scratchpad = Directory.CreateDirectory(Path.Combine(fixture.Profile.StateRoot, "scratchpad")).FullName;
-        File.WriteAllText(Path.Combine(scratchpad, "keep.md"), "keep");
+        WriteOld(Path.Combine(scratchpad, "keep.md"), "keep");
         var faultInjected = false;
         var cleanup = new ScratchpadStartupCleanup(fixture.Profile, ownership)
         {
@@ -198,6 +198,15 @@ public sealed class StartupScratchpadAdmissionTests
         StringAssert.Contains(instructions.SessionInstructions!, Path.Combine(profile.StateRoot, "scratchpad", $"<yyyy-mm-dd>-<short-name>-{hash}.md"));
         StringAssert.Contains(instructions.DeveloperInstructions!, "Shared resource marker.");
         Assert.IsFalse(Directory.Exists(Path.Combine(profile.StateRoot, "scratchpad")), "Prompt composition must not migrate or create scratchpads.");
+    }
+
+    // The startup cleanup removes only what was not created or written for a while: these files are as old as that.
+    private static void WriteOld(string path, string content)
+    {
+        File.WriteAllText(path, content);
+        var old = DateTime.UtcNow - StorageSettings.ScratchpadMaxAge - TimeSpan.FromDays(1);
+        File.SetCreationTimeUtc(path, old);
+        File.SetLastWriteTimeUtc(path, old);
     }
 
     private sealed class Fixture : IDisposable

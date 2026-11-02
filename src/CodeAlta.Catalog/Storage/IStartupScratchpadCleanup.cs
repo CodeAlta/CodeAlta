@@ -9,7 +9,7 @@ public enum ScratchpadCleanupState
     NotStarted,
     /// <summary>The actual filesystem worker is running.</summary>
     Running,
-    /// <summary>All ordinary scratchpad contents were removed, or the root was absent.</summary>
+    /// <summary>All ordinary scratchpad entries older than the retention were removed, or the root was absent.</summary>
     Completed,
     /// <summary>Some entries could not safely be removed.</summary>
     Partial,

@@ -119,14 +119,14 @@ export function StorageSettings({ epoch, api, filesApi, onOpenFile, maintenance,
         <div className="storage-card-heading">
           <h2 id="storage-cleanup-title">{t("Automatic cleanup")}</h2>
           <StorageHelp label={t("About automatic cleanup")}>
-            <p>{t("Only this instance's scratchpad and sessions inactive for longer than the set time are removed.")}</p>
+            <p>{t("Only scratchpad files of this instance not changed for a week, and sessions inactive for longer than the set time, are removed.")}</p>
             <p>{t("Open sessions, drafts and active work are kept, and Statistics are saved first.")}</p>
           </StorageHelp>
           <span className="storage-hint">{t("Applies at next startup")}</span>
         </div>
         {!settings ? <p className="storage-hint" role="status">{t(loading ? "Loading…" : "Storage settings unavailable")}</p> : <>
           <div className="settings-field storage-field" data-setting="storage.clear_scratchpad_on_startup">
-            <label htmlFor="storage-scratchpad">{t("Clear scratchpad on startup")}</label>
+            <label htmlFor="storage-scratchpad">{t("Remove old scratchpad files on startup")}</label>
             <div className="settings-field-control">
               <Switch id="storage-scratchpad" checked={settings.clearScratchpadOnStartup} disabled={busy}
                 onChange={event => void save({ ...settings, clearScratchpadOnStartup: event.currentTarget.checked })} />

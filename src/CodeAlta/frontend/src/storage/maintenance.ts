@@ -78,8 +78,8 @@ export function maintenanceNotice(kind: "scratchpad" | "retention", value: { sta
   if (value.state === "not_started" || value.state === "notstarted") return undefined;
   if (kind === "scratchpad") {
     switch (value.state) {
-      case "running": return { key: "Clearing scratchpad…", intent: "primary" };
-      case "completed": return { key: "Scratchpad cleared.", intent: "success" };
+      case "running": return { key: "Scratchpad cleanup is running…", intent: "primary" };
+      case "completed": return { key: "Scratchpad cleanup completed.", intent: "success" };
       case "partial": return { key: "Scratchpad cleanup was partial.", intent: "warning" };
       case "skipped": return { key: "Scratchpad cleanup was skipped.", intent: "none" };
       case "canceled": return { key: "Scratchpad cleanup was canceled.", intent: "warning" };
