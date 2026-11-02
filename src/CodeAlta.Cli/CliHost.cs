@@ -211,23 +211,14 @@ internal sealed class CliHost : IAsyncDisposable
                 }
                 : null;
             browser.ReservedPorts = static () => [2582, 2583];
-            var alta = ComposeAlta(host, request.ListsSkills);
-            // --code-mode wins over the settings, for every session; without it, each session has the mode of its provider and model.
-            var codeModeOptions = new CodeModeToolOptions
+            // The alta commands without those of a user (ask, review), of a window, of a host that outlives the run (reminders,
+            // automations) and of search; --code-mode wins over the settings, for every session.
+            var alta = HeadlessAltaTools.Attach(host, new HeadlessAltaToolsOptions
             {
-                Runs = host.CodeModeRuns,
-                Agents = new CodeAlta.Orchestration.Runtime.Scripts.DeferredCodeModeAgents(() => host.CodeModeAgents),
-                Library = host.CodeModeScripts,
-                Cache = new CodeAlta.CodeMode.CodeModeScriptCache(),
-                SourceFolder = sessionId => Path.Combine(storage.GlobalRoot, "scratchpad", "codemode", sessionId),
-            };
-            var store = new CodeAltaConfigStore(catalog);
-            host.Commands.SessionTools = CreateSessionTools(alta, request.CodeMode switch
-            {
-                null => new CodeModeSessionTools(codeModeOptions, (providerKey, modelId) => CodeModeSessionTools.ResolveMode(store, providerKey, modelId)),
-                CodeModeScopes.Off => null,
-                { } fixedMode => new CodeModeSessionTools(codeModeOptions, () => fixedMode),
-            });
+                Registry = request.ListsSkills ? AltaCommandRegistryOptions.Cli : WithoutSkills(AltaCommandRegistryOptions.Cli),
+                CodeMode = request.CodeMode,
+                CodeModeScratchpadRoot = Path.Combine(storage.GlobalRoot, "scratchpad"),
+            }).Dispatcher;
             // The MCP plugin that runs: one that was created but did not start is not used.
             var started = Volatile.Read(ref mcp) is { } created && host.PluginRuntime.ActivePlugins.Any(plugin => ReferenceEquals(plugin.Instance, created)) ? created : null;
             if (request.ChecksRequired && await CheckRequiredAsync(host, started, request, catalog, cancellationToken).ConfigureAwait(false) is { } missing)
@@ -417,92 +408,12 @@ internal sealed class CliHost : IAsyncDisposable
         => plugin.SourcePackage?.PackageId
             ?? (plugin.Descriptor.RuntimeKey.StartsWith("builtin:", StringComparison.Ordinal) ? plugin.Descriptor.RuntimeKey["builtin:".Length..] : plugin.Descriptor.RuntimeKey);
 
-    // The alta commands over the services of the host, as the desktop composes them, minus those of a user (ask, review), of a
-    // window (views, windows, terminals, canvases), of a host that outlives the run (reminders, automations) and of search.
-    private static AltaCommandDispatcher ComposeAlta(CodeAltaHost host, bool listsSkills)
-    {
-        var permissions = host.RuntimeService.Permissions;
-        var configStore = new CodeAltaConfigStore(host.CatalogOptions);
-        var services = new AltaServiceCollection()
-            .Add<ISessionRetentionAdmission>(host.RetentionProtection)
-            .Add(host.CatalogOptions)
-            .Add(host.SessionViewCatalog.TextFiles)
-            .Add(host.ProjectCatalog)
-            .Add(host.SpaceCatalog)
-            .Add(host.SessionViewCatalog)
-            .Add(host.RuntimeService)
-            .Add(host.RuntimeService.SkillCatalog)
-            .Add(host.AgentHub)
-            .Add(host.ModelProviderInitializationService)
-            .Add(host.ModelProviderRegistry)
-            .Add(host.ProjectFileSearchService)
-            .Add<ISessionArchive>(host.Commands)
-            .Add(host.Commands)
-            .Add<IAltaNotesService>(new RuntimeAltaNotesService(host.RuntimeService))
-            .Add<IReadOnlyList<ModelProviderDescriptor>>(new RegisteredProviders(host.ModelProviderRegistry))
-            .Add<IAltaSessionToolProviderPolicy>(new AltaSessionToolProviderPolicy())
-            .Add<IAltaSessionInteractionDefaults>(new AltaSessionInteractionDefaults(
-                permissions.OwnedDefaultPermissionHandler, permissions.OwnedDefaultUserInputHandler))
-            // The tasks and the plans of the projects.
-            .Add(new CodeAlta.Catalog.WorkItems.WorkItemService(configStore, host.CatalogOptions.StateRoot))
-            // The bookmarks of the sessions, in the private database and the journals.
-            .Add(new CodeAlta.Catalog.Bookmarks.BookmarkService(host.SessionViewCatalog.JournalStore.ApplicationDatabase,
-                new CodeAlta.Catalog.Bookmarks.SessionJournalBookmarks(host.SessionViewCatalog.JournalStore.CreateSessionStore())))
-            .Add<IAltaPluginCatalog>(new RuntimeAltaPluginCatalog(host.PluginRuntime))
-            .Add(host.PluginRuntime)
-            // The runs of the scripts of Code Mode, for `alta workflow`.
-            .Add(host.CodeModeRuns)
-            .Add(host.CodeModeScripts)
-            .AddPluginRuntimeHooks(host.Commands.Plugins ?? new PluginOrchestrationBridge(host.PluginRuntime.Adapter, () => host.PluginRuntime.ActivePlugins));
-        var registry = new AltaCommandRegistry(listsSkills ? AltaCommandRegistryOptions.Cli : WithoutSkills(AltaCommandRegistryOptions.Cli));
-        var dispatcher = new AltaCommandDispatcher(registry, services);
-        // The registry is a service too: alta tool list and alta tool capability list read it.
-        services.Add(registry).Add(dispatcher);
-        return dispatcher;
-    }
-
     // --no-skills: the agents are offered no command that lists or loads a skill.
     private static AltaCommandRegistryOptions WithoutSkills(AltaCommandRegistryOptions options)
         => options with
         {
             AllowedBuiltInRoots = options.AllowedBuiltInRoots!.Where(static root => root is not ("skill" or "skills" or "skills_activate"))
                 .ToHashSet(StringComparer.Ordinal),
-        };
-
-    // One alta tool per session, as the desktop gives them, without the tool search of an index the command line has not;
-    // with --code-mode, the exec and wait tools of Code Mode beside it.
-    private static Func<OwnedSessionToolRequest, IReadOnlyList<AgentToolDefinition>> CreateSessionTools(AltaCommandDispatcher dispatcher, CodeModeSessionTools? codeMode)
-        => request =>
-        {
-            // A session being created has no id yet: its tool learns it from its first call.
-            var session = request.SessionId;
-            var caller = new AltaSessionToolOptions
-            {
-                SourceSessionIdProvider = () => Volatile.Read(ref session),
-                SourceProjectId = request.ProjectId,
-                WorkingDirectory = request.WorkingDirectory,
-                WorkingDirectoryProvider = request.ProjectDirectory is { } projectDirectory
-                    ? () => Directory.Exists(request.WorkingDirectory) ? request.WorkingDirectory : projectDirectory
-                    : null,
-                DefaultMaxOutputRecords = 200,
-                DefaultMaxOutputBytes = 64 * 1024,
-                DefaultTimeout = TimeSpan.FromSeconds(120),
-                Spaces = request.Spaces,
-                SessionOptions = request.Options,
-            };
-            var tool = AltaSessionToolFactory.Create(dispatcher, caller);
-            AgentToolDefinition[] tools =
-            [
-                tool with
-                {
-                    Handler = (invocation, cancellationToken) =>
-                    {
-                        Interlocked.CompareExchange(ref session, invocation.SessionId, null);
-                        return tool.Handler(invocation, cancellationToken);
-                    },
-                },
-            ];
-            return codeMode?.Create(dispatcher, caller, tools, request.ProviderKey, request.ModelId) ?? tools;
         };
 
     /// <summary>
@@ -527,17 +438,5 @@ internal sealed class CliHost : IAsyncDisposable
             await _database.DisposeAsync().ConfigureAwait(false);
             Storage.DeleteEphemeralState();
         }
-    }
-
-    // The providers as the registry lists them now.
-    private sealed class RegisteredProviders(ModelProviderRegistry registry) : IReadOnlyList<ModelProviderDescriptor>
-    {
-        public int Count => registry.ListProviders().Count;
-
-        public ModelProviderDescriptor this[int index] => registry.ListProviders()[index];
-
-        public IEnumerator<ModelProviderDescriptor> GetEnumerator() => registry.ListProviders().GetEnumerator();
-
-        IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
     }
 }
