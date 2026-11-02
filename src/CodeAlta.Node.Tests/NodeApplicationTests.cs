@@ -19,7 +19,7 @@ public sealed class NodeApplicationTests
             stop();
         });
 
-        var code = await app.RunAsync(["run", "--data-root", root.DataRoot]);
+        var code = await app.RunAsync(["run", "--data-root", root.DataRoot, "--port", "0"]);
 
         Assert.AreEqual(NodeExitCodes.Success, code, error.ToString());
         Assert.IsNotNull(started);
@@ -79,7 +79,6 @@ public sealed class NodeApplicationTests
     [DataRow("install")]
     [DataRow("install", "--user")]
     [DataRow("uninstall")]
-    [DataRow("pair")]
     [DataRow("join", "https://fleet.example", "--token", "abc")]
     [DataRow("logs", "--follow")]
     [DataRow("update")]
@@ -97,6 +96,13 @@ public sealed class NodeApplicationTests
     [DataRow("unknown")]
     [DataRow("run", "--unknown")]
     [DataRow("status", "--data-root", "relative/path")]
+    [DataRow("run", "--no-listen", "--port", "2585")]
+    [DataRow("run", "--no-listen", "--listen-all")]
+    [DataRow("run", "--bind", "127.0.0.1", "--listen-all")]
+    [DataRow("run", "--port", "70000")]
+    [DataRow("run", "--bind", "not-an-address")]
+    [DataRow("remote", "machine")]
+    [DataRow("connect")]
     public async Task InvalidCommandLines_ExitWithTwo(params string[] args)
     {
         using var root = new NodeTestRoot();
@@ -112,7 +118,7 @@ public sealed class NodeApplicationTests
         var app = Application(root, out var output, out _);
 
         Assert.AreEqual(NodeExitCodes.Success, await app.RunAsync(["--help"]));
-        foreach (var command in new[] { "run", "status", "install", "uninstall", "pair", "join", "logs", "update" })
+        foreach (var command in new[] { "run", "status", "install", "uninstall", "pair", "join", "machines", "connect", "remote", "logs", "update" })
         {
             StringAssert.Contains(output.ToString(), "  " + command + " ");
         }

@@ -1,0 +1,199 @@
+using System.Net;
+using System.Net.NetworkInformation;
+using System.Net.Sockets;
+using System.Text.Json;
+using System.Text.Json.Serialization;
+using CodeAlta.Catalog;
+using CodeAlta.Fleet.Channels;
+using CodeAlta.Fleet.Identity;
+using CodeAlta.Fleet.NodeApi;
+
+namespace CodeAlta.Node;
+
+/// <summary>Where <c>altanode run</c> listens for direct session channels.</summary>
+internal sealed record NodeListenOptions
+{
+    /// <summary>Gets whether the node listens at all. A node that does not listen has no pairing either.</summary>
+    public bool Enabled { get; init; } = true;
+
+    /// <summary>Gets the address the listener binds: loopback by default, so that nothing is reachable from the network unasked.</summary>
+    public IPAddress Address { get; init; } = IPAddress.Loopback;
+
+    /// <summary>Gets the port (<see cref="FleetChannelProtocol.DefaultPort"/>; 0 picks a free one).</summary>
+    public int Port { get; init; } = FleetChannelProtocol.DefaultPort;
+}
+
+/// <summary>
+/// The fleet part of a running node: its device key, the devices it trusts, the node API over its runtime and the TCP
+/// listener of direct channels. While it runs, <c>fleet/node-listener.json</c> of the state root tells the commands of the
+/// same profile (<c>altanode pair</c>) where it listens.
+/// </summary>
+/// <remarks>
+/// <c>altanode pair</c> is the owner's local control: it reads the node's device key from the profile (only the owner of
+/// the profile can) and opens a channel to the node with it, from this machine; the node accepts its own key from this
+/// machine only, and only for pairing offers. No token or second endpoint is needed: the key file is the credential.
+/// </remarks>
+internal sealed class NodeFleet : IAsyncDisposable
+{
+    /// <summary>The name of the file that says where a running node listens, in the fleet folder of its state root.</summary>
+    public const string ListenerFileName = "node-listener.json";
+
+    private readonly DeviceIdentity _identity;
+    private readonly FleetDirectListener _listener;
+    private readonly string _listenerFile;
+
+    private NodeFleet(DeviceIdentity identity, FleetNodeService service, FleetDirectListener listener, IReadOnlyList<string> addresses, string listenerFile)
+    {
+        _identity = identity;
+        Service = service;
+        _listener = listener;
+        Addresses = addresses;
+        _listenerFile = listenerFile;
+    }
+
+    /// <summary>Gets the node API.</summary>
+    public FleetNodeService Service { get; }
+
+    /// <summary>Gets the device id of the node.</summary>
+    public string DeviceId => _identity.DeviceId;
+
+    /// <summary>Gets the end point the listener is bound to.</summary>
+    public IPEndPoint EndPoint => _listener.LocalEndPoint;
+
+    /// <summary>Gets the addresses a pairing code names, those of this machine first.</summary>
+    public IReadOnlyList<string> Addresses { get; }
+
+    /// <summary>Starts the node API and its listener.</summary>
+    /// <param name="node">The running node.</param>
+    /// <param name="listen">Where to listen.</param>
+    /// <param name="name">The name of the node.</param>
+    /// <param name="version">The version of CodeAlta it runs.</param>
+    /// <returns>The fleet part of the node.</returns>
+    /// <exception cref="SocketException">The address cannot be bound.</exception>
+    public static NodeFleet Start(NodeHost node, NodeListenOptions listen, string name, string version)
+    {
+        ArgumentNullException.ThrowIfNull(node);
+        ArgumentNullException.ThrowIfNull(listen);
+        var catalog = node.Host.CatalogOptions;
+        var identity = DeviceIdentity.LoadOrCreate(catalog);
+        FleetNodeService? service = null;
+        FleetDirectListener? listener = null;
+        try
+        {
+            IReadOnlyList<string> addresses = [];
+            service = new FleetNodeService(new FleetNodeServiceOptions
+            {
+                Host = node.Host, Identity = identity, TrustedDevices = new TrustedDeviceStore(catalog), Name = name, Version = version,
+                AcceptsWork = () => node.AcceptsWork, PairingAddresses = () => addresses,
+            });
+            listener = FleetDirectListener.Start(new IPEndPoint(listen.Address, listen.Port), service.ServeAsync);
+            addresses = DescribeAddresses(listener.LocalEndPoint);
+            var file = Path.Combine(catalog.FleetRoot, ListenerFileName);
+            WriteListenerFile(file, new NodeListenerFile { ProcessId = Environment.ProcessId, DeviceId = identity.DeviceId, Port = listener.LocalEndPoint.Port, Addresses = [.. addresses] });
+            return new NodeFleet(identity, service, listener, addresses, file);
+        }
+        catch
+        {
+            listener?.DisposeAsync().AsTask().GetAwaiter().GetResult();
+            service?.DisposeAsync().AsTask().GetAwaiter().GetResult();
+            identity.Dispose();
+            throw;
+        }
+    }
+
+    /// <summary>Reads where the node of a profile listens, as it wrote it.</summary>
+    /// <param name="catalog">The catalog of the profile.</param>
+    /// <returns>The listener, or null when no node wrote one.</returns>
+    public static NodeListenerFile? ReadListenerFile(CatalogOptions catalog)
+    {
+        ArgumentNullException.ThrowIfNull(catalog);
+        try
+        {
+            return JsonSerializer.Deserialize(File.ReadAllBytes(Path.Combine(catalog.FleetRoot, ListenerFileName)), NodeFleetJsonContext.Default.NodeListenerFile);
+        }
+        catch (Exception exception) when (exception is FileNotFoundException or DirectoryNotFoundException or JsonException)
+        {
+            return null;
+        }
+    }
+
+    // The addresses of a pairing code: loopback when the node listens there; otherwise this machine's name and its
+    // addresses on the networks that are up, then loopback, for the owner's local control.
+    internal static IReadOnlyList<string> DescribeAddresses(IPEndPoint endPoint)
+    {
+        var port = endPoint.Port;
+        var bound = endPoint.Address.IsIPv4MappedToIPv6 ? endPoint.Address.MapToIPv4() : endPoint.Address;
+        if (IPAddress.IsLoopback(bound)) return [FleetDirectConnector.Format(bound, port)];
+        var addresses = new List<string>();
+        if (bound.Equals(IPAddress.Any) || bound.Equals(IPAddress.IPv6Any))
+        {
+            try
+            {
+                foreach (var network in NetworkInterface.GetAllNetworkInterfaces())
+                {
+                    if (network.OperationalStatus != OperationalStatus.Up || network.NetworkInterfaceType == NetworkInterfaceType.Loopback) continue;
+                    foreach (var unicast in network.GetIPProperties().UnicastAddresses)
+                    {
+                        var address = unicast.Address;
+                        if (address.AddressFamily == AddressFamily.InterNetwork
+                            || address.AddressFamily == AddressFamily.InterNetworkV6 && bound.Equals(IPAddress.IPv6Any) && !address.IsIPv6LinkLocal)
+                            addresses.Add(FleetDirectConnector.Format(address, port));
+                    }
+                }
+            }
+            catch (NetworkInformationException)
+            {
+                // Without the list of networks, the name of the machine stays.
+            }
+
+            var host = Dns.GetHostName();
+            if (PairingPayload.IsValidAddress($"{host}:{port}")) addresses.Insert(0, $"{host}:{port}");
+            addresses.Add(FleetDirectConnector.Format(IPAddress.Loopback, port));
+        }
+        else
+        {
+            addresses.Add(FleetDirectConnector.Format(bound, port));
+        }
+
+        return [.. addresses.Distinct(StringComparer.OrdinalIgnoreCase).Where(PairingPayload.IsValidAddress).Take(PairingPayload.MaxAddresses)];
+    }
+
+    private static void WriteListenerFile(string path, NodeListenerFile file)
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        var staging = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
+        File.WriteAllBytes(staging, JsonSerializer.SerializeToUtf8Bytes(file, NodeFleetJsonContext.Default.NodeListenerFile));
+        File.Move(staging, path, overwrite: true);
+    }
+
+    /// <summary>Stops the listener and the node API, and removes the listener file.</summary>
+    /// <returns>A task that completes once they stopped.</returns>
+    public async ValueTask DisposeAsync()
+    {
+        try { File.Delete(_listenerFile); }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException) { }
+        await _listener.DisposeAsync().ConfigureAwait(false);
+        await Service.DisposeAsync().ConfigureAwait(false);
+        _identity.Dispose();
+    }
+}
+
+/// <summary>Where a running node listens (<see cref="NodeFleet.ListenerFileName"/>).</summary>
+internal sealed class NodeListenerFile
+{
+    /// <summary>Gets or sets the process of the node.</summary>
+    public int ProcessId { get; set; }
+
+    /// <summary>Gets or sets the device id of the node.</summary>
+    public string? DeviceId { get; set; }
+
+    /// <summary>Gets or sets the port.</summary>
+    public int Port { get; set; }
+
+    /// <summary>Gets or sets the addresses of its pairing codes.</summary>
+    public List<string> Addresses { get; set; } = [];
+}
+
+[JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase, WriteIndented = true)]
+[JsonSerializable(typeof(NodeListenerFile))]
+internal sealed partial class NodeFleetJsonContext : JsonSerializerContext;

@@ -140,6 +140,13 @@ public sealed class TrustedDeviceStore : IDeviceTrustPolicy
         }
     }
 
+    /// <summary>Checks the name of a device and trims it: 1 to 64 characters, no control character.</summary>
+    /// <param name="name">The name.</param>
+    /// <returns>The trimmed name.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="name"/> is null.</exception>
+    /// <exception cref="ArgumentException">The name is empty, too long or has a control character.</exception>
+    public static string NormalizeName(string name) => ValidateName(name);
+
     internal static string ValidateName(string name, string parameterName = "name")
     {
         ArgumentNullException.ThrowIfNull(name, parameterName);

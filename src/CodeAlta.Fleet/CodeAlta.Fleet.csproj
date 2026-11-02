@@ -10,10 +10,13 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="CodeAlta.Fleet.Tests" />
+    <InternalsVisibleTo Include="CodeAlta.Node.Tests" />
   </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\CodeAlta.Catalog\CodeAlta.Catalog.csproj" />
+    <ProjectReference Include="..\CodeAlta.Fleet.Protocol\CodeAlta.Fleet.Protocol.csproj" />
+    <ProjectReference Include="..\CodeAlta.Orchestration\CodeAlta.Orchestration.csproj" />
   </ItemGroup>
 
 </Project>

@@ -40,16 +40,39 @@ internal sealed class NodeRunOptions
 
     /// <summary>Gets or sets whether no plugin starts.</summary>
     public bool NoPlugins { get; set; }
+
+    /// <summary>Gets or sets the port of the listener, as typed; null for 2585.</summary>
+    public string? Port { get; set; }
+
+    /// <summary>Gets or sets the address the listener binds, as typed; null for loopback.</summary>
+    public string? Bind { get; set; }
+
+    /// <summary>Gets or sets whether the listener binds every interface.</summary>
+    public bool ListenAll { get; set; }
+
+    /// <summary>Gets or sets whether the node listens for no device.</summary>
+    public bool NoListen { get; set; }
+
+    /// <summary>Gets or sets the name of the node shown to the devices that pair with it; null for the name of the machine.</summary>
+    public string? Name { get; set; }
 }
 
 /// <summary>What the commands of <c>altanode</c> do once parsed.</summary>
 /// <param name="Run">Runs the node in the foreground.</param>
 /// <param name="Status">Tells whether an instance holds the profile.</param>
 /// <param name="NotImplemented">A command of the surface that does not work yet, by its name.</param>
+/// <param name="Pair">Makes a pairing link on the running node and waits for a device to use it.</param>
+/// <param name="Machines">Lists the machines this profile paired with.</param>
+/// <param name="Connect">Pairs this profile with a node from its pairing link.</param>
+/// <param name="Remote">Reads or drives the sessions of a paired machine.</param>
 internal sealed record NodeCommandHandlers(
     Func<NodeRunOptions, ValueTask<int>> Run,
     Func<NodeProfileOptions, ValueTask<int>> Status,
-    Func<string, ValueTask<int>> NotImplemented);
+    Func<string, ValueTask<int>> NotImplemented,
+    Func<NodePairOptions, ValueTask<int>> Pair,
+    Func<NodeProfileOptions, ValueTask<int>> Machines,
+    Func<NodeConnectOptions, ValueTask<int>> Connect,
+    Func<NodeRemoteOptions, ValueTask<int>> Remote);
 
 /// <summary>The command tree of <c>altanode</c> (<c>doc/fleet/node.md</c>).</summary>
 internal static class NodeCommandLine
@@ -73,9 +96,17 @@ internal static class NodeCommandLine
             "the console. Ctrl+C or SIGTERM stops it: no new work, running turns get a",
             "bound to finish; a second one stops them at once, a third exits.",
             _,
+            "Listens for the devices paired with it (altanode pair) on port 2585 of",
+            "the loopback address only, unless --bind or --listen-all says otherwise.",
+            _,
             "Options:",
             { "offline", "Do not refresh the catalog of models.dev", v => run.Offline = v is not null },
             { "no-plugins", "Start no plugin", v => run.NoPlugins = v is not null },
+            { "port=", "The {PORT} of the listener (default 2585; 0 picks a free one)", v => run.Port = v },
+            { "bind=", "The {ADDRESS} the listener binds (default 127.0.0.1)", v => run.Bind = v },
+            { "listen-all", "Listen on every interface (the LAN, a tailnet)", v => run.ListenAll = v is not null },
+            { "no-listen", "Listen for no device: no pairing, no remote session", v => run.NoListen = v is not null },
+            { "name=", "The {NAME} paired devices see (default: the machine name)", v => run.Name = v },
         };
         AddProfile(runCommand, run.Profile);
         runCommand.Add((_, _) => handlers.Run(run));
@@ -103,8 +134,84 @@ internal static class NodeCommandLine
         var uninstallCommand = Stub(handlers, "uninstall", "Stop and remove the service; keep the profile", "Usage: {NAME}");
         uninstallCommand.Add(new HelpOption());
 
-        var pairCommand = Stub(handlers, "pair", "Show a pairing code for a desktop to scan", "Usage: {NAME}");
-        pairCommand.Add(new HelpOption());
+        var pair = new NodePairOptions();
+        var pairCommand = new Command("pair", "Show a pairing link of the running node and wait for a device")
+        {
+            new CommandUsage("Usage: {NAME} [options]"),
+            _,
+            "Asks the node that runs on the profile for a one-time pairing link (a",
+            "codealta-pair:// link with its key, its addresses and a secret), prints",
+            "it, and waits until a device uses it (altanode connect <link>) or it",
+            "expires. The device then may view, drive and start sessions here; moving",
+            "sessions here stays off. Runs beside the node, as its owner: it reads the",
+            "device key of the node from the profile and talks to it on this machine.",
+            _,
+            "Options:",
+            { "minutes=", "How many {MINUTES} the link is valid (default 10)", v => pair.Minutes = v },
+        };
+        AddProfile(pairCommand, pair.Profile);
+        pairCommand.Add((_, _) => handlers.Pair(pair));
+
+        var machines = new NodeProfileOptions();
+        var machinesCommand = new Command("machines", "List the machines this profile paired with")
+        {
+            new CommandUsage("Usage: {NAME} [options]"),
+            _,
+            "Reads fleet/paired-machines.json of the profile; runs beside CodeAlta",
+            "Desktop or a node on the same profile.",
+            _,
+            "Options:",
+        };
+        AddProfile(machinesCommand, machines);
+        machinesCommand.Add((_, _) => handlers.Machines(machines));
+
+        var connect = new NodeConnectOptions();
+        var connectCommand = new Command("connect", "Pair this profile with a node from its pairing link")
+        {
+            new CommandUsage("Usage: {NAME} <link> [options]"),
+            _,
+            "Connects to the node the link names (refusing any other key), redeems",
+            "its secret and records the machine for altanode remote. Runs beside",
+            "CodeAlta Desktop or a node on the same profile.",
+            _,
+            "Options:",
+            { "name=", "The {NAME} the node shows for this device (default: the machine name)", v => connect.Name = v },
+        };
+        AddProfile(connectCommand, connect.Profile);
+        connectCommand.Add("<>", "The pairing link");
+        connectCommand.Add((_, words) =>
+        {
+            connect.Words.AddRange(words);
+            return handlers.Connect(connect);
+        });
+
+        var remote = new NodeRemoteOptions();
+        var remoteCommand = new Command("remote", "Read and drive the sessions of a paired machine")
+        {
+            new CommandUsage("Usage: {NAME} <machine> info"),
+            new CommandUsage("       {NAME} <machine> sessions [--limit <n>]"),
+            new CommandUsage("       {NAME} <machine> history <session> [--cursor <c>] [--forward]"),
+            new CommandUsage("       {NAME} <machine> send <session> <prompt...>"),
+            new CommandUsage("       {NAME} <machine> create [--project <id>] <prompt...>"),
+            new CommandUsage("       {NAME} <machine> watch <session> [--count <n>]"),
+            _,
+            "The machine is the name or the device id altanode machines shows. Runs",
+            "beside CodeAlta Desktop or a node on the same profile.",
+            _,
+            "Options:",
+            { "limit=", "The most sessions {N} a list shows (default 50)", v => remote.Limit = v },
+            { "cursor=", "The {CURSOR} of the history window to read", v => remote.Cursor = v },
+            { "forward", "Read the history from its start", v => remote.Forward = v is not null },
+            { "count=", "Stop watching after {N} updates", v => remote.Count = v },
+            { "project=", "The project {ID} of a new session", v => remote.Project = v },
+        };
+        AddProfile(remoteCommand, remote.Profile);
+        remoteCommand.Add("<>", "The machine, the command and its arguments");
+        remoteCommand.Add((_, words) =>
+        {
+            remote.Words.AddRange(words);
+            return handlers.Remote(remote);
+        });
 
         var joinCommand = Stub(handlers, "join", "Enroll in a fleet", "Usage: {NAME} <server-url> [--token <enrollment>]");
         joinCommand.Add("token=", "The enrollment {TOKEN}", static _ => { });
@@ -133,6 +240,9 @@ internal static class NodeCommandLine
             uninstallCommand,
             pairCommand,
             joinCommand,
+            machinesCommand,
+            connectCommand,
+            remoteCommand,
             logsCommand,
             updateCommand,
             _,
