@@ -333,3 +333,19 @@ publishing.
 ```
 
 For the built-in **Default** or **Plan** modes to use it, create a global or project `default.prompt.md` or `plan.prompt.md`, appended or replacing, with the `system` field. That changes every session of that mode in its scope.
+
+## Start prompts
+
+A start prompt is the first message of a session CodeAlta starts on a piece of work. **Pull request review** is the one of a pull request you start from the [Issues tab](issues.md#work-on-an-item).
+
+1. Open **Settings > Agent prompts** and select **Pull request review** under **Start prompts**.
+2. Select **Customize for me**, or **Customize for** the selected project, then edit the text and **Save**.
+
+{.table}
+| Placeholder | Replaced by |
+|---|---|
+| `{reference}` | The number of the pull request, such as `#30`. |
+| `{location}` | Its repository, such as `owner/repo`. |
+| `{service}` | Its service, such as GitHub. |
+
+The text is the instruction alone: CodeAlta adds the title, the link, the branch and the description of the pull request after it. Your copy is `~/.alta/prompts/start/pull-request-review.md`, the project's `<project>/.alta/prompts/start/pull-request-review.md`; the project's replaces yours, which replaces the built-in text. **Remove** goes back to the next one.

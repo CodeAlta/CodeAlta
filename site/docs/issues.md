@@ -188,7 +188,7 @@ An open item has two buttons:
 | **Start in a new worktree** | A new session works on it in its own [worktree](worktrees.md), on a new branch. |
 | **Start in a new session** | A new session works on it in the project folder. |
 
-The session gets the item's title, link and description. For a pull request it is asked to review, not merge.
+The session gets the item's title, link and description. For a pull request it is asked to review, not merge; you can change what it is asked in its [start prompt](prompts.md#start-prompts).
 
 **Runs with**, above the buttons, is the [Agent chip](workspace/prompt.md#agent-and-model) of the new session. With **Use the defaults** on, it takes the [default provider](model-providers/readme.md) and your settings; turn it off to choose the agent prompt, the model, the permission mode, review before commit and the sandbox. **More options** turns [sub-sessions](sessions/delegation.md#sessions-without-sub-sessions) off for the new session.
 
