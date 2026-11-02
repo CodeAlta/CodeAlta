@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Globalization;
 using System.Text.Json;
 using CodeAlta.CodeMode;
 
@@ -432,10 +433,21 @@ public sealed class CodeModeRunTests
     [TestMethod]
     public async Task Present_BeyondItsLimits_KeepsTheStart_AndWarns()
     {
-        var result = await RunAsync($$"""
-            present("x".repeat({{CodeModePresentation.MaxCharacters + 10}}));
-            for (let i = 0; i < {{CodeModePresentation.MaxPerRun + 2}}; i++) present(`part ${i}`);
-            """);
+        // The warnings go to the model: their numbers do not take the culture of the computer.
+        var previousCulture = CultureInfo.CurrentCulture;
+        CodeModeRunResult result;
+        try
+        {
+            CultureInfo.CurrentCulture = CultureInfo.GetCultureInfo("de-AT");
+            result = await RunAsync($$"""
+                present("x".repeat({{CodeModePresentation.MaxCharacters + 10}}));
+                for (let i = 0; i < {{CodeModePresentation.MaxPerRun + 2}}; i++) present(`part ${i}`);
+                """);
+        }
+        finally
+        {
+            CultureInfo.CurrentCulture = previousCulture;
+        }
 
         Assert.HasCount(CodeModePresentation.MaxPerRun, result.Presented);
         Assert.AreEqual(CodeModePresentation.MaxCharacters, result.Presented[0].Markdown.Length);
