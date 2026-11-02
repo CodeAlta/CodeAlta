@@ -97,11 +97,15 @@ export function MobileSettings({ api }: { api: MobileSettingsApi }) {
       </div>
     </Card>
     <Card className="appearance-settings" aria-labelledby="mobile-settings-address">
-      <h2 id="mobile-settings-address">{settings.mode === "devtunnel" ? t("Address of the Dev Tunnel") : t("Address on the tailnet")}</h2>
-      {settings.address
-        ? <p className="mobile-settings-address"><code>{settings.address}</code></p>
-        : <><p className="mobile-settings-address" data-unserved="true">{settings.mode === "devtunnel" ? t("Not served through Dev Tunnels") : t("Not served on the tailnet")}</p>
-          <p className="settings-field-help">{settings.serverDetail ?? (settings.mode === "devtunnel" ? settings.devTunnel.detail : settings.tailscale.detail)}</p></>}
+      {/* The card follows the mode chosen on the page; until it is applied, the address of the other mode is not this one. */}
+      <h2 id="mobile-settings-address">{tunnel ? t("Address of the Dev Tunnel") : t("Address on the tailnet")}</h2>
+      {mode !== settings.mode
+        ? <><p className="mobile-settings-address" data-unserved="true">{tunnel ? t("Not served through Dev Tunnels") : t("Not served on the tailnet")}</p>
+          <p className="settings-field-help">{tunnel ? t("Apply to open the Dev Tunnel.") : t("Apply to publish the page on the tailnet.")}</p></>
+        : settings.address
+          ? <p className="mobile-settings-address"><code>{settings.address}</code></p>
+          : <><p className="mobile-settings-address" data-unserved="true">{tunnel ? t("Not served through Dev Tunnels") : t("Not served on the tailnet")}</p>
+            <p className="settings-field-help">{settings.serverDetail ?? (tunnel ? settings.devTunnel.detail : settings.tailscale.detail)}</p></>}
     </Card>
     <Card className="appearance-settings" aria-labelledby="mobile-settings-access">
       <h2 id="mobile-settings-access">{t("Access")}</h2>

@@ -86,6 +86,14 @@ test("the settings page of Mobile shows its ports and its address, applies new p
     // Dev Tunnels: the port of the tailnet goes, a line says what it needs, and Apply sends the mode with the port of this computer.
     await evaluate(`document.querySelector('input[name="mobile-settings-mode"][value="devtunnel"]').click()`);
     assert.equal(await wait("!document.getElementById('mobile-settings-https-port')"), true);
+    assert.equal(await wait("document.getElementById('mobile-settings-address')?.textContent === 'Address of the Dev Tunnel'"), true, "the address card follows the choice at once");
+    assert.equal(await evaluate("document.querySelector('.mobile-settings-address + .settings-field-help').textContent"), "Apply to open the Dev Tunnel.");
+    // Cancel goes back to Tailscale, its card and its address.
+    await evaluate(`${button("Cancel")}.click()`);
+    assert.equal(await wait("document.getElementById('mobile-settings-address')?.textContent === 'Address on the tailnet'"), true);
+    assert.equal(await evaluate("document.querySelector('.mobile-settings-address code')?.textContent"), "https://desk.tail1234.ts.net:2584");
+    await evaluate(`document.querySelector('input[name="mobile-settings-mode"][value="devtunnel"]').click()`);
+    assert.equal(await wait("!document.getElementById('mobile-settings-https-port')"), true);
     assert.equal(await evaluate("[...document.querySelectorAll('.settings-field-help')].some(element => element.textContent.includes('Dev Tunnels command line'))"), true);
     await evaluate(`${button("Apply")}.click()`);
     assert.equal(await wait("mobileSettingsFixture.state.calls.includes('set:devtunnel:2590')"), true);
