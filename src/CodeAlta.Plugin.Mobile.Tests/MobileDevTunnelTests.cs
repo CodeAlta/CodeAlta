@@ -19,10 +19,6 @@ public sealed class MobileDevTunnelTests
         Assert.IsTrue(MobileDevTunnel.IsSignedIn(new MobileCliResult(0, "Logged in as someone using GitHub.")));
         Assert.IsFalse(MobileDevTunnel.IsSignedIn(new MobileCliResult(0, "Not logged in.")));
         Assert.IsFalse(MobileDevTunnel.IsSignedIn(new MobileCliResult(1, "")));
-        const string GitHub = "To sign in, use a web browser to open the page https://github.com/login/device and enter the code ABCD-1234 to authenticate.";
-        Assert.AreEqual(("https://github.com/login/device", "ABCD-1234"), (MobileDevTunnel.UrlInText(GitHub), MobileDevTunnel.CodeIn(GitHub)));
-        Assert.AreEqual("F7KQ2PXZM", MobileDevTunnel.CodeIn("open https://microsoft.com/devicelogin and enter the code F7KQ2PXZM to authenticate."));
-        Assert.IsNull(MobileDevTunnel.CodeIn("Logging in with the code of the tunnel"));
         Assert.AreEqual("Error: Forbidden. The user is not allowed to change the tunnel.",
             MobileDevTunnel.Summary("Welcome to dev tunnels!\nError: Forbidden. The user is not allowed to change the tunnel.\nRequest ID: 9f818614-208b-477d-9084-9a0a82e60a26"),
             "the request id says nothing to a person");
@@ -139,6 +135,12 @@ public sealed class MobileDevTunnelTests
             lock (Calls) Calls.Add(line);
             if (_answers.TryGetValue(line, out var answer)) return Task.FromResult(answer);
             return Task.FromResult(line.StartsWith("port ", StringComparison.Ordinal) ? new MobileCliResult(0, "") : new MobileCliResult(1, "unknown command: " + line));
+        }
+
+        public Task<int> RunInWindowAsync(IReadOnlyList<string> args, TimeSpan patience, CancellationToken cancellationToken)
+        {
+            lock (Calls) Calls.Add("window: " + string.Join(' ', args));
+            return Task.FromResult(0);
         }
 
         public IMobileHostedProcess Start(IReadOnlyList<string> args)

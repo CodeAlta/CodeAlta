@@ -36,10 +36,8 @@ export type MobileStatus = Readonly<{
     url: string | null;
     /** A line for people. */
     detail: string;
-    /** The page that fixes it: the install of the command line, or the page where the code of the sign-in is entered. */
+    /** The page that fixes it: the install of the command line. */
     fixUrl: string | null;
-    /** While signing in, the code to enter on `fixUrl`. */
-    code: string | null;
   }>;
   /** What the QR code holds: `<url>/#k=<token>`; null while nothing can be reached. */
   connectUrl: string | null;
@@ -67,7 +65,7 @@ export function readStatus(value: unknown): MobileStatus | null {
   const tunnel = isRecord(value.devTunnel) ? value.devTunnel : {};
   return {
     mode: value.mode === "devtunnel" ? "devtunnel" : "tailscale",
-    devTunnel: { state: devTunnelStates.find(known => known === tunnel.state) ?? "unused", url: text(tunnel.url), detail: text(tunnel.detail) ?? "", fixUrl: text(tunnel.fixUrl), code: text(tunnel.code) },
+    devTunnel: { state: devTunnelStates.find(known => known === tunnel.state) ?? "unused", url: text(tunnel.url), detail: text(tunnel.detail) ?? "", fixUrl: text(tunnel.fixUrl) },
     server, port: typeof value.port === "number" ? value.port : 0, serverDetail: text(value.serverDetail),
     tailscale: { state, url: text(tailscale.url), detail: text(tailscale.detail) ?? "", fixUrl: text(tailscale.fixUrl) },
     connectUrl: text(value.connectUrl), address: text(value.address), qr: rows,
@@ -108,13 +106,13 @@ export type MobileText = "The phone page is starting." | "Tailscale is starting 
   | "Scan it with the camera of the phone. The first time, the phone shows a page of Microsoft: choose Continue."
   | "Dev Tunnels is opening the tunnel." | "Waiting for the sign-in in the browser…"
   | "The Dev Tunnels command line is not installed." | "Sign in to Dev Tunnels." | "The Dev Tunnel did not open." | "The Dev Tunnel is closed."
-  | "Install Dev Tunnels" | "Enter the code {code} on the sign-in page." | "Open the sign-in page";
+  | "Install Dev Tunnels";
 
 /** Something that keeps a phone from connecting: what it is, why (the plugin's own words), and what fixes it. */
 export type MobileProblem = Readonly<{
   key: "server" | "tailscale" | "devtunnel";
-  /** Danger when nothing can work until it is fixed; warning otherwise; primary for a step the person takes (the code of a sign-in). */
-  intent: "danger" | "warning" | "primary";
+  /** Danger when nothing can work until it is fixed; warning otherwise. */
+  intent: "danger" | "warning";
   title: MobileText;
   parameters?: Readonly<Record<string, string | number>>;
   /** The plugin's line, when it says more than the title. */
@@ -127,8 +125,6 @@ export type MobileProblem = Readonly<{
   retry: boolean;
   /** Whether the buttons that sign in to Dev Tunnels (Microsoft, GitHub) are offered. */
   signIn?: boolean;
-  /** A text the tab offers to copy: the code of the sign-in. */
-  copy?: string;
 }>;
 
 /** What the tab shows: the code when there is one, what keeps a phone from connecting, and what is still starting. */
@@ -176,15 +172,6 @@ export function mobileView(status: MobileStatus): MobileView {
   }
   const tunnel = status.mode === "devtunnel";
   const devTunnel = status.devTunnel;
-  // While signing in, the page and the code the command line gave; its own words when the code could not be read.
-  if (tunnel && devTunnel.state === "signing-in" && (devTunnel.code || devTunnel.fixUrl)) {
-    problems.push({
-      key: "devtunnel", intent: "primary",
-      title: devTunnel.code ? "Enter the code {code} on the sign-in page." : "Sign in to Dev Tunnels.", parameters: devTunnel.code ? { code: devTunnel.code } : undefined,
-      detail: devTunnel.code ? null : devTunnel.detail.trim() || null,
-      fix: devTunnel.fixUrl ? { label: "Open the sign-in page", url: devTunnel.fixUrl } : null, retry: false, copy: devTunnel.code ?? undefined,
-    });
-  }
   const tunnelTitle = tunnel ? devTunnelTitles[devTunnel.state] : undefined;
   if (tunnelTitle) {
     problems.push({
@@ -206,7 +193,7 @@ export function mobileView(status: MobileStatus): MobileView {
     });
   }
   const code = status.connectUrl && status.qr ? { ...qrPath(status.qr), address: status.address ?? status.connectUrl.replace(/#.*$/u, "") } : null;
-  const waiting: MobileText | null = code || problems.some(problem => problem.key === "server" || problem.key === "devtunnel") ? null
+  const waiting: MobileText | null = code || problems.some(problem => problem.key === "server") ? null
     : tunnel && devTunnel.state === "signing-in" ? "Waiting for the sign-in in the browser…"
     : server === "starting" ? "The phone page is starting."
     : tunnel && devTunnel.state === "pending" ? "Dev Tunnels is opening the tunnel."

@@ -323,14 +323,19 @@ public sealed class MobilePlugin : PluginBase
     }
 
     /// <summary>
-    /// Starts the sign-in to Dev Tunnels and answers at once: the tab hears the page and the code to enter, then, once the person signed
-    /// in, the view published again. A sign-in of before that has not ended is dropped.
+    /// Starts the sign-in to Dev Tunnels and answers at once: the tab hears, once the person signed in, the view published again. A
+    /// sign-in of before that has not ended is dropped.
     /// </summary>
     internal async Task<MobileStatus> SignInAsync(bool github, CancellationToken cancellationToken)
     {
         var run = new CancellationTokenSource();
         if (Interlocked.Exchange(ref _signIn, run) is { } previous) await previous.CancelAsync().ConfigureAwait(false);
-        _state = _state with { DevTunnel = new MobileDevTunnelStatus("signing-in", null, "Starting the sign-in…") };
+        _state = _state with
+        {
+            DevTunnel = new MobileDevTunnelStatus("signing-in", null, !github && OperatingSystem.IsWindows()
+                ? "Choose your account in the window of Windows that opens, then come back here."
+                : "Sign in in the browser that opens, then come back here."),
+        };
         await ChangedAsync().ConfigureAwait(false);
         _ = Tasks.Run("mobile-devtunnel-signin", async _ => await RunSignInAsync(github, run).ConfigureAwait(false),
             new PluginTaskOptions { SessionRetentionIndependent = true, Description = "Signs in to Dev Tunnels." });
@@ -342,16 +347,7 @@ public sealed class MobilePlugin : PluginBase
         bool signedIn;
         try
         {
-            signedIn = await new MobileDevTunnel(_tunnelCli, line => Logger.Info(line)).SignInAsync(github, prompt =>
-            {
-                Logger.Info($"Mobile: Dev Tunnels sign-in: {prompt.Text}");
-                if (run.IsCancellationRequested) return;
-                _state = _state with
-                {
-                    DevTunnel = new MobileDevTunnelStatus("signing-in", null, prompt.Code is null ? prompt.Text : "Enter the code on the page, then come back here.", prompt.Url, prompt.Code),
-                };
-                _ = ChangedAsync();
-            }, run.Token).ConfigureAwait(false);
+            signedIn = await new MobileDevTunnel(_tunnelCli, line => Logger.Info(line)).SignInAsync(github, run.Token).ConfigureAwait(false);
         }
         catch (OperationCanceledException)
         {
@@ -621,7 +617,7 @@ public sealed class MobilePlugin : PluginBase
             connect, connect is null ? null : url, connect is null ? null : MobileQr.Rows(connect))
         {
             Mode = _settings.Mode,
-            DevTunnel = new MobileDevTunnelView(state.DevTunnel.State, state.DevTunnel.Url, state.DevTunnel.Detail, state.DevTunnel.FixUrl, state.DevTunnel.Code),
+            DevTunnel = new MobileDevTunnelView(state.DevTunnel.State, state.DevTunnel.Url, state.DevTunnel.Detail, state.DevTunnel.FixUrl),
         };
     }
 
@@ -828,16 +824,15 @@ internal sealed record MobileStatus(string Server, int Port, string? ServerDetai
     public string Mode { get; init; } = MobilePlugin.TailscaleMode;
 
     /// <summary>Gets what the Dev Tunnel does.</summary>
-    public MobileDevTunnelView DevTunnel { get; init; } = new("unused", null, "", null, null);
+    public MobileDevTunnelView DevTunnel { get; init; } = new("unused", null, "", null);
 }
 
 /// <summary>What the Dev Tunnel does, as the Mobile tab shows it.</summary>
 /// <param name="State">The state, as <see cref="MobileDevTunnelStatus.State"/> says it.</param>
 /// <param name="Url">The address of the view, while the tunnel serves it.</param>
 /// <param name="Detail">A line for people.</param>
-/// <param name="FixUrl">The page that fixes the state: the install, or the page of the sign-in.</param>
-/// <param name="Code">While signing in, the code to enter on the page of <paramref name="FixUrl"/>.</param>
-internal sealed record MobileDevTunnelView(string State, string? Url, string Detail, string? FixUrl, string? Code);
+/// <param name="FixUrl">The page that fixes the state: the install of the command line.</param>
+internal sealed record MobileDevTunnelView(string State, string? Url, string Detail, string? FixUrl);
 
 /// <summary>The ports the settings page asks for.</summary>
 /// <param name="Port">The port of the server on the loopback address.</param>

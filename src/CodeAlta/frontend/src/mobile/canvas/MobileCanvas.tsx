@@ -57,13 +57,12 @@ export function MobileCanvas({ status, failure, actions }: { status: MobileStatu
     const detail = item.detail ?? (item.hint ? t(item.hint) : null);
     return <Callout key={item.key} className="mobile-problem" intent={item.intent} title={t(item.title, item.parameters)} data-problem={item.key}>
       {detail && <p>{detail}</p>}
-      {(item.fix || item.retry || item.signIn || item.copy) && <div className="mobile-problem-actions">
+      {(item.fix || item.retry || item.signIn) && <div className="mobile-problem-actions">
         {item.signIn && <>
           <Button size="small" intent="primary" onClick={() => void actions.signIn(false)}>{t("Sign in with Microsoft")}</Button>
           <Button size="small" onClick={() => void actions.signIn(true)}>{t("Sign in with GitHub")}</Button>
         </>}
         {item.fix && <Button size="small" intent="primary" icon={<AppIcon name="openExternal" size={14} />} onClick={() => actions.openLink(item.fix!.url)}>{t(item.fix.label)}</Button>}
-        {item.copy && <Button size="small" icon={<AppIcon name="copy" size={14} />} onClick={() => void actions.copy(item.copy!)}>{t("Copy the code")}</Button>}
         {item.retry && <Button size="small" icon={<AppIcon name="refresh" size={14} />} loading={retrying} onClick={() => void retry()}>{t("Try again")}</Button>}
       </div>}
     </Callout>;

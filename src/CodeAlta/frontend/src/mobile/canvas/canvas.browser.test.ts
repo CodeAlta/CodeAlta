@@ -17,7 +17,7 @@ const shots = process.env.CODEALTA_SHOTS ?? "";
 // A QR code of 25 modules, as the plugin sends it: a pattern is enough to draw.
 const rows = Array.from({ length: 25 }, (_, y) => Array.from({ length: 25 }, (_, x) => ((x * 7 + y * 3) % 5 < 2) || (x < 7 && y < 7) ? "1" : "0").join(""));
 const status = (overrides: Partial<MobileStatus> = {}, tailscale: Partial<MobileStatus["tailscale"]> = {}): MobileStatus => ({
-  mode: "tailscale", server: "listening", port: 51234, serverDetail: null, devTunnel: { state: "unused", url: null, detail: "", fixUrl: null, code: null },
+  mode: "tailscale", server: "listening", port: 51234, serverDetail: null, devTunnel: { state: "unused", url: null, detail: "", fixUrl: null },
   tailscale: { state: "serving", url: "https://workstation.tail1234.ts.net:8443", detail: "Published on the tailnet.", fixUrl: null, ...tailscale },
   connectUrl: "https://workstation.tail1234.ts.net:8443/#k=secret", address: "https://workstation.tail1234.ts.net:8443", qr: rows, ...overrides,
 });
