@@ -58,6 +58,7 @@ internal static class ChromiumLauncher
     {
         ArgumentNullException.ThrowIfNull(options);
         Directory.CreateDirectory(options.ProfileDirectory);
+        ChromiumPasswordCheck.Seed(options.ProfileDirectory);
         var portFile = Path.Combine(options.ProfileDirectory, "DevToolsActivePort");
         // A file left by an earlier run would give the port of a browser that is gone.
         TryDelete(portFile);
