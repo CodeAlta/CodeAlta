@@ -22,14 +22,21 @@ What it is not:
 
 | Command | What it does |
 | --- | --- |
-| `altanode run` | Runs in the foreground (logs to the console). What a service starts. |
+| `altanode run [--port <n>] [--bind <address> \| --listen-all \| --no-listen]` | Runs in the foreground (logs to the console). What a service starts. Listens for paired devices on port 2585 of loopback by default. |
 | `altanode install [--user \| --system --account <name>]` | Installs and starts the service of this OS (below). |
 | `altanode uninstall` | Stops and removes the service; keeps the profile. |
-| `altanode pair` | Shows a pairing code and QR code (in the terminal) for a desktop to scan. |
+| `altanode pair` | Shows a pairing code and QR code (in the terminal) for a desktop to scan. The first slice prints the `codealta-pair://` link only, and waits until a device redeems it or it expires. |
 | `altanode join <server-url> [--token <enrollment>]` | Enrolls in a fleet: with an enrollment token, or by a device code a person approves. |
 | `altanode status` | The service, the fleet connections, the sessions at work, the providers' readiness. |
 | `altanode logs [--follow]` | The node's log. |
 | `altanode update` | Updates to the version the fleet recommends, when idle. |
+| `altanode machines`, `connect <link>`, `remote <machine> info\|sessions\|history\|send\|create\|watch` | The client side, for testing until the desktop does it: the machines this profile paired with, pairing with a node from its link, and its sessions. They read only the device key and `fleet/paired-machines.json` (written under a lock file), so they run beside a desktop or a node on the same profile. |
+
+`altanode pair` talks to the node that runs on the same profile as its owner: the node writes where it listens in
+`fleet/node-listener.json` of its state root, and `pair` opens a session channel to it with the node's own device key,
+read from the profile. The node accepts its own key only from this machine, and only for pairing offers
+(`control.pairing.create`, `control.pairing.wait`): the key file, which only the owner of the profile can read, is the
+credential, with no token or second endpoint.
 
 ## Running as a service
 

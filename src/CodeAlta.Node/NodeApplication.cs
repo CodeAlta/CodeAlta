@@ -1,3 +1,8 @@
+using System.Net;
+using System.Net.Sockets;
+using System.Reflection;
+using CodeAlta.Fleet.Channels;
+using CodeAlta.Fleet.Identity;
 using CodeAlta.Hosting;
 using XenoAtom.CommandLine;
 
@@ -32,6 +37,9 @@ internal sealed class NodeApplication
     /// <summary>Gets or sets what a test is told once <c>run</c> started its node, to stop it; null for nothing.</summary>
     public Action<NodeHost, Action>? Started { get; init; }
 
+    /// <summary>Gets or sets what stops the commands that wait (<c>pair</c>, <c>remote watch</c>), for tests; none by default.</summary>
+    public CancellationToken ClientStop { get; init; }
+
     /// <summary>Runs a command line.</summary>
     /// <param name="args">The arguments.</param>
     /// <returns>The exit code (<see cref="NodeExitCodes"/>).</returns>
@@ -56,12 +64,14 @@ internal sealed class NodeApplication
 
         try
         {
-            return await Create(new NodeCommandHandlers(RunNodeAsync, StatusAsync, NotImplementedAsync))
+            var client = new NodeClientCommands(_output, _error) { Stop = ClientStop };
+            return await Create(new NodeCommandHandlers(RunNodeAsync, StatusAsync, NotImplementedAsync, client.PairAsync, client.MachinesAsync,
+                    client.ConnectAsync, client.RemoteAsync))
                 .RunAsync(args, new CommandRunConfig { Out = _output, Error = _error }).ConfigureAwait(false);
         }
         catch (Exception exception)
         {
-            await _error.WriteLineAsync("altanode: " + exception.Message).ConfigureAwait(false);
+            await _error.WriteLineAsync("altanode: " + NodeClientCommands.Describe(exception)).ConfigureAwait(false);
             return NodeExitCodes.Failure;
         }
     }
@@ -69,7 +79,63 @@ internal sealed class NodeApplication
     private static CommandApp Create(NodeCommandHandlers handlers) => NodeCommandLine.Create(handlers);
 
     private static NodeCommandHandlers Placeholders()
-        => new(static _ => ValueTask.FromResult(0), static _ => ValueTask.FromResult(0), static _ => ValueTask.FromResult(0));
+        => new(static _ => ValueTask.FromResult(0), static _ => ValueTask.FromResult(0), static _ => ValueTask.FromResult(0),
+            static _ => ValueTask.FromResult(0), static _ => ValueTask.FromResult(0), static _ => ValueTask.FromResult(0), static _ => ValueTask.FromResult(0));
+
+    /// <summary>The version of CodeAlta this executable is.</summary>
+    internal static string Version
+        => typeof(NodeApplication).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion.Split('+')[0] ?? "0.0.0";
+
+    // Where run listens: loopback by default; nowhere with --no-listen, which takes no other listening option.
+    private static NodeListenOptions? ResolveListen(NodeRunOptions options, out string? error)
+    {
+        error = null;
+        if (options.NoListen)
+        {
+            if (options.Port is not null || options.Bind is not null || options.ListenAll)
+            {
+                error = "--no-listen disables listening: --port, --bind and --listen-all cannot go with it.";
+                return null;
+            }
+
+            return new NodeListenOptions { Enabled = false };
+        }
+
+        if (options.Bind is not null && options.ListenAll)
+        {
+            error = "--bind and --listen-all cannot go together.";
+            return null;
+        }
+
+        var listen = new NodeListenOptions();
+        if (options.Port is { } port)
+        {
+            if (!int.TryParse(port, System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out var number) || number > 65535)
+            {
+                error = $"--port takes 0 to 65535: '{port}'.";
+                return null;
+            }
+
+            listen = listen with { Port = number };
+        }
+
+        if (options.Bind is { } bind)
+        {
+            if (!IPAddress.TryParse(bind, out var address))
+            {
+                error = $"--bind takes an IP address of this machine: '{bind}'.";
+                return null;
+            }
+
+            listen = listen with { Address = address };
+        }
+        else if (options.ListenAll)
+        {
+            listen = listen with { Address = Socket.OSSupportsIPv6 ? IPAddress.IPv6Any : IPAddress.Any };
+        }
+
+        return listen;
+    }
 
     private async ValueTask<int> StatusAsync(NodeProfileOptions options)
     {
@@ -95,6 +161,17 @@ internal sealed class NodeApplication
     private async ValueTask<int> RunNodeAsync(NodeRunOptions options)
     {
         if (options.Profile.Resolve(out var invalid) is not { } profile) return await UsageAsync(invalid!).ConfigureAwait(false);
+        if (ResolveListen(options, out var listenError) is not { } listen) return await UsageAsync(listenError!).ConfigureAwait(false);
+        var name = options.Name ?? Environment.MachineName;
+        try
+        {
+            name = TrustedDeviceStore.NormalizeName(name);
+        }
+        catch (ArgumentException exception)
+        {
+            return await UsageAsync("--name: " + exception.Message).ConfigureAwait(false);
+        }
+
         var ownsLogging = false;
         try
         {
@@ -130,9 +207,28 @@ internal sealed class NodeApplication
 
             await using (node.ConfigureAwait(false))
             {
+                NodeFleet? fleet = null;
+                if (listen.Enabled)
+                {
+                    try
+                    {
+                        fleet = NodeFleet.Start(node, listen, name, Version);
+                    }
+                    catch (SocketException exception)
+                    {
+                        await _error.WriteLineAsync($"altanode: cannot listen on {FleetDirectConnector.Format(listen.Address, listen.Port)}: {exception.Message}").ConfigureAwait(false);
+                        await node.StopAsync(hurry.Token).ConfigureAwait(false);
+                        return NodeExitCodes.Failure;
+                    }
+                }
+
+                using var fleetLifetime = new FleetLifetime(fleet);
                 using var signals = new NodeSignals(stopRequested.Cancel, hurry.Cancel, static () => Environment.Exit(NodeExitCodes.Failure));
                 Started?.Invoke(node, stopRequested.Cancel);
                 await _output.WriteLineAsync($"CodeAlta Node runs on {profile.StateRoot}. Ctrl+C stops it.").ConfigureAwait(false);
+                await _output.WriteLineAsync(fleet is null
+                    ? "It listens for no device (--no-listen)."
+                    : $"{name} ({fleet.DeviceId}) listens for paired devices on {fleet.EndPoint}; altanode pair makes a pairing link.").ConfigureAwait(false);
                 try
                 {
                     await Task.Delay(Timeout.Infinite, stopRequested.Token).ConfigureAwait(false);
@@ -142,6 +238,8 @@ internal sealed class NodeApplication
                 }
 
                 await _output.WriteLineAsync("Stopping CodeAlta Node...").ConfigureAwait(false);
+                // The channels close first: no remote call reaches a runtime that stops.
+                await fleetLifetime.StopAsync().ConfigureAwait(false);
                 await node.StopAsync(hurry.Token).ConfigureAwait(false);
             }
 
@@ -151,5 +249,18 @@ internal sealed class NodeApplication
         {
             if (ownsLogging) NodeLogging.Shutdown();
         }
+    }
+
+    // Stops the fleet part of the node before the node, and on any way out of run.
+    private sealed class FleetLifetime(NodeFleet? fleet) : IDisposable
+    {
+        private NodeFleet? _fleet = fleet;
+
+        public async Task StopAsync()
+        {
+            if (Interlocked.Exchange(ref _fleet, null) is { } running) await running.DisposeAsync().ConfigureAwait(false);
+        }
+
+        public void Dispose() => StopAsync().GetAwaiter().GetResult();
     }
 }
