@@ -218,6 +218,32 @@ public sealed class OwnedSessionCommandReceipt
         TargetOperationId = targetOperationId;
     }
 
+    /// <summary>
+    /// Creates the receipt of a command that another owner admits, such as the node of the fleet that owns the session: it
+    /// completes with what that owner reports, and never faults.
+    /// </summary>
+    /// <param name="clientRequestId">The retry key of the command.</param>
+    /// <param name="kind">The kind of the command.</param>
+    /// <param name="sessionId">The session.</param>
+    /// <param name="targetOperationId">The send an abort targets; null for any other command.</param>
+    /// <param name="completion">The outcome the other owner reports; a fault or a cancellation completes the receipt as failed.</param>
+    /// <returns>The receipt, with an operation identity of its own.</returns>
+    /// <exception cref="ArgumentException"><paramref name="clientRequestId"/> or <paramref name="sessionId"/> is blank.</exception>
+    /// <exception cref="ArgumentNullException"><paramref name="completion"/> is null.</exception>
+    public static OwnedSessionCommandReceipt CreateForwarded(string clientRequestId, OwnedSessionCommandKind kind, string sessionId, Guid? targetOperationId,
+        Task<OwnedSessionCommandResult> completion)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(clientRequestId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
+        ArgumentNullException.ThrowIfNull(completion);
+        var receipt = new OwnedSessionCommandReceipt(clientRequestId, kind, sessionId, targetOperationId);
+        completion.ContinueWith(static (task, state) => ((OwnedSessionCommandReceipt)state!).Complete(task.IsCompletedSuccessfully
+                ? task.Result
+                : new OwnedSessionCommandResult(task.IsCanceled ? OwnedSessionCommandOutcome.Cancelled : OwnedSessionCommandOutcome.Failed, null, "forward_failed")),
+            receipt, CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
+        return receipt;
+    }
+
     /// <summary>Gets the stable operation identity.</summary>
     public Guid OperationId { get; }
     /// <summary>Gets the exact ordinal retry key.</summary>
