@@ -1,0 +1,308 @@
+using CodeAlta.Fleet.Identity;
+using CodeAlta.Hosting;
+using CodeAlta.Node.Service;
+
+namespace CodeAlta.Node;
+
+/// <summary>The options of <c>altanode install</c> and <c>uninstall</c>.</summary>
+internal sealed class NodeInstallOptions
+{
+    /// <summary>Gets the options of the <c>run</c> the service starts: the profile, where it listens, its name.</summary>
+    public NodeRunOptions Run { get; } = new();
+
+    /// <summary>Gets or sets whether a service of the current user was asked for (the default).</summary>
+    public bool User { get; set; }
+
+    /// <summary>Gets or sets whether a system service was asked for.</summary>
+    public bool System { get; set; }
+
+    /// <summary>Gets or sets the account of a system service.</summary>
+    public string? Account { get; set; }
+
+    /// <summary>Gets or sets whether the plan is printed and nothing changes.</summary>
+    public bool DryRun { get; set; }
+}
+
+/// <summary>
+/// <c>altanode install</c> and <c>uninstall</c>: the service of the OS that runs <c>altanode run</c> for a profile, as
+/// the user whose logins it uses (<c>doc/fleet/node.md</c>, "Running as a service"); and <c>altanode status</c>, which
+/// tells what the node of a profile does and whether it will still run after a restart or a logout.
+/// </summary>
+internal sealed class NodeServiceCommands(TextWriter output, TextWriter error, Func<NodeServiceEnvironment?> environment, Func<NodeExecutable?> executable)
+{
+    /// <summary>Gets or sets what stops a call to the node, for tests; none by default.</summary>
+    public CancellationToken Stop { get; init; }
+
+    public async ValueTask<int> InstallAsync(NodeInstallOptions options)
+    {
+        var (manager, plan, failure) = await PlanAsync(options, "install").ConfigureAwait(false);
+        if (manager is null || plan is null) return failure;
+        if (options.DryRun)
+        {
+            await WritePlanAsync(plan, install: true).ConfigureAwait(false);
+            return NodeExitCodes.Success;
+        }
+
+        var held = NodeProfileStatus.Read(options.Run.Profile.Resolve(out _)!);
+        var code = manager.Install(plan, output, error);
+        if (code == NodeExitCodes.Success)
+        {
+            await output.WriteLineAsync(NodeExecutableLocator.Describe(executable()!)).ConfigureAwait(false);
+            if (held.IsHeld && plan.Spec.Scope == NodeServiceScope.User)
+            {
+                await output.WriteLineAsync($"{held.Describe()} The service's node starts once that instance exits (one instance runs per profile).")
+                    .ConfigureAwait(false);
+            }
+
+            await output.WriteLineAsync("altanode status tells whether it runs; altanode logs shows its log.").ConfigureAwait(false);
+        }
+
+        return code;
+    }
+
+    public async ValueTask<int> UninstallAsync(NodeInstallOptions options)
+    {
+        var (manager, plan, failure) = await PlanAsync(options, "uninstall").ConfigureAwait(false);
+        if (manager is null || plan is null) return failure;
+        if (options.DryRun)
+        {
+            await WritePlanAsync(plan, install: false).ConfigureAwait(false);
+            return NodeExitCodes.Success;
+        }
+
+        var installed = manager.Query(plan).Installed;
+        var code = manager.Uninstall(plan, output, error);
+        if (code != NodeExitCodes.Success || !installed || !plan.LeavesNodeRunning) return code;
+        return await StopNodeAsync(options.Run.Profile.Resolve(out _)!).ConfigureAwait(false);
+    }
+
+    /// <summary>How long <c>uninstall</c> waits for the node to drain its turns and release the profile.</summary>
+    internal static readonly TimeSpan StopPatience = TimeSpan.FromSeconds(75);
+
+    // Stops the node of a profile the service manager leaves running: gracefully through its local control, at once when
+    // it does not listen. An instance that is not a node (CodeAlta Desktop, TUI) is left alone.
+    private async Task<int> StopNodeAsync(CodeAltaInstanceProfile profile)
+    {
+        var control = NodeLocalControl.Read(profile);
+        if (!control.Status.IsHeld) return NodeExitCodes.Success;
+        if (!string.Equals(control.Status.ProcessName, "altanode", StringComparison.OrdinalIgnoreCase))
+        {
+            await output.WriteLineAsync($"{control.Status.Describe()} It is not a node: it keeps running.").ConfigureAwait(false);
+            return NodeExitCodes.Success;
+        }
+
+        if (control.NodeListens)
+        {
+            await output.WriteLineAsync($"Stopping the node of this profile (PID {control.Status.ProcessId}): running turns get a bound to finish...").ConfigureAwait(false);
+            try
+            {
+                using var timeout = CancellationTokenSource.CreateLinkedTokenSource(Stop);
+                timeout.CancelAfter(TimeSpan.FromSeconds(15));
+                var (client, identity) = await control.ConnectAsync(timeout.Token).ConfigureAwait(false);
+                using (identity)
+                await using (client.ConfigureAwait(false))
+                {
+                    await client.StopNodeAsync(timeout.Token).ConfigureAwait(false);
+                }
+            }
+            catch (Exception exception) when (exception is not OperationCanceledException || !Stop.IsCancellationRequested)
+            {
+                await error.WriteLineAsync($"altanode uninstall: the node did not take the request to stop ({NodeClientCommands.Describe(exception)}).").ConfigureAwait(false);
+            }
+        }
+        else if (control.Status.ProcessId is { } processId)
+        {
+            // A node that does not listen has no local control: it is stopped at once, as the service manager would.
+            await output.WriteLineAsync($"Stopping the node of this profile (PID {processId}) at once: it does not listen, so it cannot be asked.").ConfigureAwait(false);
+            try
+            {
+                using var process = System.Diagnostics.Process.GetProcessById(processId);
+                process.Kill();
+            }
+            catch (Exception exception) when (exception is ArgumentException or InvalidOperationException or System.ComponentModel.Win32Exception)
+            {
+            }
+        }
+
+        var deadline = DateTime.UtcNow + StopPatience;
+        while (NodeProfileStatus.Read(profile).IsHeld)
+        {
+            if (DateTime.UtcNow > deadline)
+            {
+                await error.WriteLineAsync($"altanode uninstall: the node still runs after {StopPatience.TotalSeconds} s (PID {control.Status.ProcessId}).").ConfigureAwait(false);
+                return NodeExitCodes.Failure;
+            }
+
+            await Task.Delay(TimeSpan.FromMilliseconds(250), Stop).ConfigureAwait(false);
+        }
+
+        await output.WriteLineAsync("The node stopped.").ConfigureAwait(false);
+        return NodeExitCodes.Success;
+    }
+
+    public async ValueTask<int> StatusAsync(NodeProfileOptions options)
+    {
+        if (options.Resolve(out var invalid) is not { } profile) return await UsageAsync(invalid!).ConfigureAwait(false);
+        var control = NodeLocalControl.Read(profile);
+        await output.WriteLineAsync($"Profile: {profile.StateRoot}").ConfigureAwait(false);
+        await output.WriteLineAsync(control.Status.Describe()).ConfigureAwait(false);
+        var reached = false;
+        if (control.NodeListens)
+        {
+            try
+            {
+                using var timeout = CancellationTokenSource.CreateLinkedTokenSource(Stop);
+                timeout.CancelAfter(TimeSpan.FromSeconds(15));
+                var (client, identity) = await control.ConnectAsync(timeout.Token).ConfigureAwait(false);
+                using (identity)
+                await using (client.ConfigureAwait(false))
+                {
+                    var status = await client.GetStatusAsync(timeout.Token).ConfigureAwait(false);
+                    await output.WriteLineAsync($"Node: {status.Name} ({status.DeviceId}), CodeAlta {status.Version}{(status.AcceptsWork ? "" : ", stopping")}.").ConfigureAwait(false);
+                    await output.WriteLineAsync($"Listening on: {string.Join(", ", control.Listener!.Addresses)}").ConfigureAwait(false);
+                    await output.WriteLineAsync($"Paired devices: {status.TrustedDevices}{(status.RevokedDevices > 0 ? $" ({status.RevokedDevices} revoked)" : "")}; connected now: {status.Channels}.")
+                        .ConfigureAwait(false);
+                    await output.WriteLineAsync($"Sessions at work: {status.SessionsAtWork}.").ConfigureAwait(false);
+                    reached = true;
+                }
+            }
+            catch (Exception exception) when (exception is not OperationCanceledException || !Stop.IsCancellationRequested)
+            {
+                await output.WriteLineAsync($"Listening on: {string.Join(", ", control.Listener!.Addresses)}, but the node did not answer: {NodeClientCommands.Describe(exception)}")
+                    .ConfigureAwait(false);
+            }
+        }
+        else if (control.Status.IsHeld)
+        {
+            await output.WriteLineAsync("Listening: no (a node that is still starting or was started with --no-listen, or CodeAlta Desktop).").ConfigureAwait(false);
+        }
+
+        if (!reached)
+        {
+            try
+            {
+                var devices = new TrustedDeviceStore(control.Catalog).List(includeRevoked: true);
+                var revoked = devices.Count(static device => device.IsRevoked);
+                await output.WriteLineAsync($"Paired devices: {devices.Count - revoked}{(revoked > 0 ? $" ({revoked} revoked)" : "")}.").ConfigureAwait(false);
+            }
+            catch (InvalidDataException exception)
+            {
+                await output.WriteLineAsync($"Paired devices: unreadable ({exception.Message}).").ConfigureAwait(false);
+            }
+        }
+
+        if (environment() is { } env)
+        {
+            var manager = new NodeServiceManager(env);
+            try
+            {
+                var plan = manager.Plan(Request(profile, options, new NodeRunOptions(), NodeServiceScope.User, null, executable() ?? new NodeExecutable(NodeExecutableKind.Executable, "altanode", [])));
+                foreach (var line in NodeServiceManager.Describe(manager.Query(plan))) await output.WriteLineAsync(line).ConfigureAwait(false);
+            }
+            catch (NodeServiceException exception)
+            {
+                await output.WriteLineAsync("Service: " + exception.Message).ConfigureAwait(false);
+            }
+        }
+        else
+        {
+            await output.WriteLineAsync("Service: altanode install does not know the service manager of this OS.").ConfigureAwait(false);
+        }
+
+        return control.Status.IsHeld ? NodeExitCodes.Success : NodeExitCodes.Failure;
+    }
+
+    // The manager and the plan of the service the options name, or the exit code of what was reported instead.
+    private async Task<(NodeServiceManager? Manager, NodeServicePlan? Plan, int Failure)> PlanAsync(NodeInstallOptions options, string command)
+    {
+        var run = options.Run;
+        if (run.Profile.Resolve(out var invalid) is not { } profile) return (null, null, await UsageAsync(invalid!).ConfigureAwait(false));
+        if (options.User && options.System) return (null, null, await UsageAsync("--user and --system cannot go together.").ConfigureAwait(false));
+        if (options.System && options.Account is null) return (null, null, await UsageAsync("--system needs --account <name>, the account the node runs as.").ConfigureAwait(false));
+        if (!options.System && options.Account is not null) return (null, null, await UsageAsync("--account goes with --system only.").ConfigureAwait(false));
+        if (NodeApplication.ResolveListen(run, out var listenError) is null) return (null, null, await UsageAsync(listenError!).ConfigureAwait(false));
+        if (run.Name is { } name)
+        {
+            try
+            {
+                run.Name = TrustedDeviceStore.NormalizeName(name);
+            }
+            catch (ArgumentException exception)
+            {
+                return (null, null, await UsageAsync("--name: " + exception.Message).ConfigureAwait(false));
+            }
+        }
+
+        if (environment() is not { } env)
+        {
+            await error.WriteLineAsync($"altanode {command}: this OS has no service manager altanode knows (Windows, macOS and Linux with systemd).").ConfigureAwait(false);
+            return (null, null, NodeExitCodes.Failure);
+        }
+
+        if (executable() is not { } path)
+        {
+            await error.WriteLineAsync($"altanode {command}: the executable of this process cannot be found: run altanode from its installed path.").ConfigureAwait(false);
+            return (null, null, NodeExitCodes.Failure);
+        }
+
+        var manager = new NodeServiceManager(env);
+        try
+        {
+            var scope = options.System ? NodeServiceScope.System : NodeServiceScope.User;
+            return (manager, manager.Plan(Request(profile, run.Profile, run, scope, options.Account, path)), NodeExitCodes.Success);
+        }
+        catch (NodeServiceException exception)
+        {
+            await error.WriteLineAsync($"altanode {command}: {exception.Message}").ConfigureAwait(false);
+            return (null, null, NodeExitCodes.Failure);
+        }
+    }
+
+    /// <summary>The service a profile and the options of its <c>run</c> ask for.</summary>
+    internal static NodeServiceRequest Request(CodeAltaInstanceProfile profile, NodeProfileOptions profileOptions, NodeRunOptions run, NodeServiceScope scope,
+        string? account, NodeExecutable executable)
+    {
+        var name = NodeServiceDefinition.ServiceName(profile.StateRoot, profileOptions.DataRoot is null, profileOptions.Developer);
+        var arguments = new List<string> { "run" };
+        if (profileOptions.Developer) arguments.Add("--dev");
+        if (profileOptions.DataRoot is not null) arguments.AddRange(["--data-root", profile.GlobalRoot]);
+        if (run.NoListen) arguments.Add("--no-listen");
+        if (run.Port is { } port) arguments.AddRange(["--port", port]);
+        if (run.Bind is { } bind) arguments.AddRange(["--bind", bind]);
+        if (run.ListenAll) arguments.Add("--listen-all");
+        if (run.Name is { } nodeName) arguments.AddRange(["--name", nodeName]);
+        if (run.Offline) arguments.Add("--offline");
+        if (run.NoPlugins) arguments.Add("--no-plugins");
+        var system = scope == NodeServiceScope.System;
+        return new NodeServiceRequest
+        {
+            Name = name, Scope = scope, Account = account, Executable = executable, RunArguments = arguments,
+            StateRoot = !system || profileOptions.DataRoot is not null ? profile.StateRoot : null,
+            StateRootInHome = profileOptions.Developer ? Path.Combine(".alta", CodeAltaInstanceProfile.DeveloperStateDirectoryName) : ".alta",
+        };
+    }
+
+    private async Task WritePlanAsync(NodeServicePlan plan, bool install)
+    {
+        await output.WriteLineAsync($"altanode {(install ? "install" : "uninstall")} would {(install ? "install" : "remove")} {plan.Kind}: {plan.Location}.").ConfigureAwait(false);
+        if (install)
+        {
+            await output.WriteLineAsync().ConfigureAwait(false);
+            await output.WriteLineAsync($"{plan.DefinitionPath}{(plan.DefinitionIsTemporary ? " (given to the service manager, then deleted)" : "")}:").ConfigureAwait(false);
+            await output.WriteLineAsync(plan.Definition.TrimEnd()).ConfigureAwait(false);
+            await output.WriteLineAsync().ConfigureAwait(false);
+        }
+
+        await output.WriteLineAsync("Commands:").ConfigureAwait(false);
+        foreach (var command in install ? plan.Install : plan.Uninstall) await output.WriteLineAsync("  " + command).ConfigureAwait(false);
+        if (!install && !plan.DefinitionIsTemporary) await output.WriteLineAsync($"  (then deletes {plan.DefinitionPath})").ConfigureAwait(false);
+        if (install && plan.LingerUser is { } user) await output.WriteLineAsync($"  loginctl enable-linger {user} (when lingering is off)").ConfigureAwait(false);
+        foreach (var note in plan.Notes) await output.WriteLineAsync("Note: " + note).ConfigureAwait(false);
+    }
+
+    private async ValueTask<int> UsageAsync(string message)
+    {
+        await error.WriteLineAsync("altanode: " + message).ConfigureAwait(false);
+        return NodeExitCodes.InvalidUsage;
+    }
+}

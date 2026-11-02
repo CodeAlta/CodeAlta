@@ -70,7 +70,17 @@ internal sealed class NodeFleet : IAsyncDisposable
     /// <param name="version">The version of CodeAlta it runs.</param>
     /// <returns>The fleet part of the node.</returns>
     /// <exception cref="SocketException">The address cannot be bound.</exception>
-    public static NodeFleet Start(NodeHost node, NodeListenOptions listen, string name, string version)
+    public static NodeFleet Start(NodeHost node, NodeListenOptions listen, string name, string version) => Start(node, listen, name, version, null);
+
+    /// <summary>Starts the node API and its listener, with a way for the owner's local control to stop the node.</summary>
+    /// <param name="node">The running node.</param>
+    /// <param name="listen">Where to listen.</param>
+    /// <param name="name">The name of the node.</param>
+    /// <param name="version">The version of CodeAlta it runs.</param>
+    /// <param name="requestStop">What stops the node gracefully (<c>altanode uninstall</c> on Windows); null for none.</param>
+    /// <returns>The fleet part of the node.</returns>
+    /// <exception cref="SocketException">The address cannot be bound.</exception>
+    public static NodeFleet Start(NodeHost node, NodeListenOptions listen, string name, string version, Action? requestStop)
     {
         ArgumentNullException.ThrowIfNull(node);
         ArgumentNullException.ThrowIfNull(listen);
@@ -84,7 +94,7 @@ internal sealed class NodeFleet : IAsyncDisposable
             service = new FleetNodeService(new FleetNodeServiceOptions
             {
                 Host = node.Host, Identity = identity, TrustedDevices = new TrustedDeviceStore(catalog), Name = name, Version = version,
-                AcceptsWork = () => node.AcceptsWork, PairingAddresses = () => addresses,
+                AcceptsWork = () => node.AcceptsWork, PairingAddresses = () => addresses, RequestStop = requestStop,
             });
             listener = FleetDirectListener.Start(new IPEndPoint(listen.Address, listen.Port), service.ServeAsync);
             addresses = DescribeAddresses(listener.LocalEndPoint);

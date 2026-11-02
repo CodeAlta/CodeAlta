@@ -65,6 +65,12 @@ internal sealed class NodeRunOptions
 /// <param name="Machines">Lists the machines this profile paired with.</param>
 /// <param name="Connect">Pairs this profile with a node from its pairing link.</param>
 /// <param name="Remote">Reads or drives the sessions of a paired machine.</param>
+/// <param name="Install">Installs and starts the service of the node.</param>
+/// <param name="Uninstall">Stops and removes the service of the node.</param>
+/// <param name="Logs">Prints the log of the node.</param>
+/// <param name="Devices">Lists the devices paired with the node.</param>
+/// <param name="Revoke">Revokes a paired device.</param>
+/// <param name="Permissions">Shows or changes what a paired device may do.</param>
 internal sealed record NodeCommandHandlers(
     Func<NodeRunOptions, ValueTask<int>> Run,
     Func<NodeProfileOptions, ValueTask<int>> Status,
@@ -72,7 +78,20 @@ internal sealed record NodeCommandHandlers(
     Func<NodePairOptions, ValueTask<int>> Pair,
     Func<NodeProfileOptions, ValueTask<int>> Machines,
     Func<NodeConnectOptions, ValueTask<int>> Connect,
-    Func<NodeRemoteOptions, ValueTask<int>> Remote);
+    Func<NodeRemoteOptions, ValueTask<int>> Remote,
+    Func<NodeInstallOptions, ValueTask<int>> Install,
+    Func<NodeInstallOptions, ValueTask<int>> Uninstall,
+    Func<NodeLogOptions, ValueTask<int>> Logs,
+    Func<NodeDeviceOptions, ValueTask<int>> Devices,
+    Func<NodeDeviceOptions, ValueTask<int>> Revoke,
+    Func<NodeDeviceOptions, ValueTask<int>> Permissions)
+{
+    /// <summary>Handlers that do nothing, for a tree that only parses.</summary>
+    public static NodeCommandHandlers Placeholders { get; } = new(static _ => ValueTask.FromResult(0), static _ => ValueTask.FromResult(0),
+        static _ => ValueTask.FromResult(0), static _ => ValueTask.FromResult(0), static _ => ValueTask.FromResult(0), static _ => ValueTask.FromResult(0),
+        static _ => ValueTask.FromResult(0), static _ => ValueTask.FromResult(0), static _ => ValueTask.FromResult(0), static _ => ValueTask.FromResult(0),
+        static _ => ValueTask.FromResult(0), static _ => ValueTask.FromResult(0), static _ => ValueTask.FromResult(0));
+}
 
 /// <summary>The command tree of <c>altanode</c> (<c>doc/fleet/node.md</c>).</summary>
 internal static class NodeCommandLine
@@ -100,39 +119,132 @@ internal static class NodeCommandLine
             "the loopback address only, unless --bind or --listen-all says otherwise.",
             _,
             "Options:",
-            { "offline", "Do not refresh the catalog of models.dev", v => run.Offline = v is not null },
-            { "no-plugins", "Start no plugin", v => run.NoPlugins = v is not null },
-            { "port=", "The {PORT} of the listener (default 2585; 0 picks a free one)", v => run.Port = v },
-            { "bind=", "The {ADDRESS} the listener binds (default 127.0.0.1)", v => run.Bind = v },
-            { "listen-all", "Listen on every interface (the LAN, a tailnet)", v => run.ListenAll = v is not null },
-            { "no-listen", "Listen for no device: no pairing, no remote session", v => run.NoListen = v is not null },
-            { "name=", "The {NAME} paired devices see (default: the machine name)", v => run.Name = v },
         };
+        AddRunOptions(runCommand, run);
         AddProfile(runCommand, run.Profile);
         runCommand.Add((_, _) => handlers.Run(run));
 
         var status = new NodeProfileOptions();
-        var statusCommand = new Command("status", "Tell whether an instance holds the profile (exit 0 or 1)")
+        var statusCommand = new Command("status", "Tell what the node of the profile does and whether it will still run after a restart")
         {
             new CommandUsage("Usage: {NAME} [options]"),
             _,
             "Reads the lock of the profile: exit 0 when a CodeAlta instance (a node,",
-            "CodeAlta Desktop or TUI) holds it, 1 when none does.",
+            "CodeAlta Desktop or TUI) holds it, 1 when none does. For a node that",
+            "listens: where, its paired devices and its sessions at work. Then the",
+            "service of the profile (altanode install), and whether the node will",
+            "still run after a restart of the machine or a logout of the user.",
             _,
             "Options:",
         };
         AddProfile(statusCommand, status);
         statusCommand.Add((_, _) => handlers.Status(status));
 
-        var installCommand = Stub(handlers, "install", "Install and start the service of this OS",
-            "Usage: {NAME} [--user | --system --account <name>]");
-        installCommand.Add("user", "A service of the current user", static _ => { });
-        installCommand.Add("system", "A system service", static _ => { });
-        installCommand.Add("account=", "The {ACCOUNT} a system service runs as", static _ => { });
-        installCommand.Add(new HelpOption());
+        var install = new NodeInstallOptions();
+        var installCommand = new Command("install", "Install and start the service of this OS")
+        {
+            new CommandUsage("Usage: {NAME} [--user] [run options] [options]"),
+            new CommandUsage("       {NAME} --system --account <name> [run options] [options]"),
+            _,
+            "Registers a service that runs altanode run with the options given here,",
+            "and starts it. --user (the default) runs it as you, with your logins:",
+            "  Windows  a Task Scheduler task at your logon (no elevation needed)",
+            "  macOS    a LaunchAgent in ~/Library/LaunchAgents",
+            "  Linux    a systemd --user unit, with lingering so that it runs",
+            "           without a login (loginctl enable-linger)",
+            "--system runs it at boot as a dedicated account, for machines that use",
+            "deploy keys and tokens only (a LaunchDaemon, a system unit; with sudo).",
+            "A .NET tool is started from its shim (~/.dotnet/tools/altanode), so",
+            "dotnet tool update changes the version the service runs. Run install",
+            "again to change the options; altanode uninstall removes the service.",
+            _,
+            "Options:",
+            { "user", "A service of the current user (the default)", v => install.User = v is not null },
+            { "system", "A system service, started at boot without a login", v => install.System = v is not null },
+            { "account=", "The {ACCOUNT} a system service runs as", v => install.Account = v },
+            { "dry-run", "Print the service and the commands; change nothing", v => install.DryRun = v is not null },
+        };
+        AddRunOptions(installCommand, install.Run);
+        AddProfile(installCommand, install.Run.Profile);
+        installCommand.Add((_, _) => handlers.Install(install));
 
-        var uninstallCommand = Stub(handlers, "uninstall", "Stop and remove the service; keep the profile", "Usage: {NAME}");
-        uninstallCommand.Add(new HelpOption());
+        var uninstall = new NodeInstallOptions();
+        var uninstallCommand = new Command("uninstall", "Stop and remove the service; keep the profile")
+        {
+            new CommandUsage("Usage: {NAME} [--system --account <name>] [options]"),
+            _,
+            "Stops the service of the profile and removes it; the profile, its",
+            "sessions and its paired devices stay.",
+            _,
+            "Options:",
+            { "system", "The system service", v => uninstall.System = v is not null },
+            { "account=", "The {ACCOUNT} the system service runs as", v => uninstall.Account = v },
+            { "dry-run", "Print the commands; change nothing", v => uninstall.DryRun = v is not null },
+        };
+        AddProfile(uninstallCommand, uninstall.Run.Profile);
+        uninstallCommand.Add((_, _) => handlers.Uninstall(uninstall));
+
+        var devices = new NodeDeviceOptions();
+        var devicesCommand = new Command("devices", "List the devices paired with the node")
+        {
+            new CommandUsage("Usage: {NAME} [options]"),
+            _,
+            "Lists the devices paired with the node of the profile, the revoked ones",
+            "too: name, device id, the start of the fingerprint of its key, what it",
+            "may do, when it was paired, and whether it is connected or revoked.",
+            _,
+            "Options:",
+        };
+        AddProfile(devicesCommand, devices.Profile);
+        devicesCommand.Add("<>", "No argument");
+        devicesCommand.Add((_, words) =>
+        {
+            devices.Words.AddRange(words);
+            return handlers.Devices(devices);
+        });
+
+        var revoke = new NodeDeviceOptions();
+        var revokeCommand = new Command("revoke", "Revoke a paired device and disconnect it")
+        {
+            new CommandUsage("Usage: {NAME} <device> [options]"),
+            _,
+            "The device is its name, its device id, or the start of the id (at least",
+            "four characters), as altanode devices shows them. The node refuses its",
+            "key from now on and closes its open channels; pairing it again trusts it",
+            "again. Without a running node, the change waits in the profile.",
+            _,
+            "Options:",
+        };
+        AddProfile(revokeCommand, revoke.Profile);
+        revokeCommand.Add("<>", "The device");
+        revokeCommand.Add((_, words) =>
+        {
+            revoke.Words.AddRange(words);
+            return handlers.Revoke(revoke);
+        });
+
+        var permissions = new NodeDeviceOptions();
+        var permissionsCommand = new Command("permissions", "Show or change what a paired device may do")
+        {
+            new CommandUsage("Usage: {NAME} <device> [--allow <list>] [--deny <list>] [options]"),
+            _,
+            "The permissions are view (see the sessions), drive (send prompts, answer",
+            "questions and permission requests), start (start sessions here) and move",
+            "(move sessions here). Lists are separated by commas: --allow view,drive.",
+            "Without --allow or --deny, shows what the device may do. A device that",
+            "loses a permission is disconnected and reconnects with what it may do.",
+            _,
+            "Options:",
+            { "allow=", "The permissions to give ({LIST}: view,drive,start,move)", v => permissions.Allow.Add(v!) },
+            { "deny=", "The permissions to take away ({LIST})", v => permissions.Deny.Add(v!) },
+        };
+        AddProfile(permissionsCommand, permissions.Profile);
+        permissionsCommand.Add("<>", "The device");
+        permissionsCommand.Add((_, words) =>
+        {
+            permissions.Words.AddRange(words);
+            return handlers.Permissions(permissions);
+        });
 
         var pair = new NodePairOptions();
         var pairCommand = new Command("pair", "Show a pairing link of the running node and wait for a device")
@@ -218,9 +330,21 @@ internal static class NodeCommandLine
         joinCommand.Add("<>", "The URL of the server");
         joinCommand.Add(new HelpOption());
 
-        var logsCommand = Stub(handlers, "logs", "Show the node's log", "Usage: {NAME} [--follow]");
-        logsCommand.Add("follow", "Follow the log as it grows", static _ => { });
-        logsCommand.Add(new HelpOption());
+        var logs = new NodeLogOptions();
+        var logsCommand = new Command("logs", "Show the node's log")
+        {
+            new CommandUsage("Usage: {NAME} [--follow] [--lines <n>] [options]"),
+            _,
+            "Prints the last lines of logs/altanode.log of the state root, the log the",
+            "node writes (rolled daily and bounded); with --follow, what it writes",
+            "next until Ctrl+C.",
+            _,
+            "Options:",
+            { "f|follow", "Follow the log as it grows", v => logs.Follow = v is not null },
+            { "n|lines=", "How many of the last {N} lines (default 50)", v => logs.Lines = v },
+        };
+        AddProfile(logsCommand, logs.Profile);
+        logsCommand.Add((_, _) => handlers.Logs(logs));
 
         var updateCommand = Stub(handlers, "update", "Update to the version the fleet recommends, when idle", "Usage: {NAME}");
         updateCommand.Add(new HelpOption());
@@ -238,12 +362,15 @@ internal static class NodeCommandLine
             statusCommand,
             installCommand,
             uninstallCommand,
+            logsCommand,
             pairCommand,
+            devicesCommand,
+            revokeCommand,
+            permissionsCommand,
             joinCommand,
             machinesCommand,
             connectCommand,
             remoteCommand,
-            logsCommand,
             updateCommand,
             _,
             "Exit codes:",
@@ -267,6 +394,17 @@ internal static class NodeCommandLine
         };
         command.Add((_, _) => handlers.NotImplemented(name));
         return command;
+    }
+
+    private static void AddRunOptions(Command command, NodeRunOptions run)
+    {
+        command.Add("offline", "Do not refresh the catalog of models.dev", v => run.Offline = v is not null);
+        command.Add("no-plugins", "Start no plugin", v => run.NoPlugins = v is not null);
+        command.Add("port=", "The {PORT} of the listener (default 2585; 0 picks a free one)", v => run.Port = v);
+        command.Add("bind=", "The {ADDRESS} the listener binds (default 127.0.0.1)", v => run.Bind = v);
+        command.Add("listen-all", "Listen on every interface (the LAN, a tailnet)", v => run.ListenAll = v is not null);
+        command.Add("no-listen", "Listen for no device: no pairing, no remote session", v => run.NoListen = v is not null);
+        command.Add("name=", "The {NAME} paired devices see (default: the machine name)", v => run.Name = v);
     }
 
     private static void AddProfile(Command command, NodeProfileOptions options)

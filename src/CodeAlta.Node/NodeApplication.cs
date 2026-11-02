@@ -4,6 +4,7 @@ using System.Reflection;
 using CodeAlta.Fleet.Channels;
 using CodeAlta.Fleet.Identity;
 using CodeAlta.Hosting;
+using CodeAlta.Node.Service;
 using XenoAtom.CommandLine;
 
 namespace CodeAlta.Node;
@@ -37,8 +38,17 @@ internal sealed class NodeApplication
     /// <summary>Gets or sets what a test is told once <c>run</c> started its node, to stop it; null for nothing.</summary>
     public Action<NodeHost, Action>? Started { get; init; }
 
-    /// <summary>Gets or sets what stops the commands that wait (<c>pair</c>, <c>remote watch</c>), for tests; none by default.</summary>
+    /// <summary>Gets or sets what stops the commands that wait (<c>pair</c>, <c>remote watch</c>, <c>logs --follow</c>), for tests; none by default.</summary>
     public CancellationToken ClientStop { get; init; }
+
+    /// <summary>
+    /// Gets or sets what reads the machine <c>install</c>, <c>uninstall</c> and <c>status</c> work on, for tests (temporary
+    /// folders, recorded commands); null for this machine.
+    /// </summary>
+    internal Func<NodeServiceEnvironment?>? ServiceEnvironment { get; init; }
+
+    /// <summary>Gets or sets what finds the executable a service starts, for tests; null for the one of this process.</summary>
+    internal Func<NodeExecutable?>? ServiceExecutable { get; init; }
 
     /// <summary>Runs a command line.</summary>
     /// <param name="args">The arguments.</param>
@@ -48,13 +58,13 @@ internal sealed class NodeApplication
         ArgumentNullException.ThrowIfNull(args);
         if (args.Length == 0)
         {
-            await Create(Placeholders()).RunAsync(["--help"], new CommandRunConfig { Out = _output, Error = _error }).ConfigureAwait(false);
+            await Create(NodeCommandHandlers.Placeholders).RunAsync(["--help"], new CommandRunConfig { Out = _output, Error = _error }).ConfigureAwait(false);
             return NodeExitCodes.InvalidUsage;
         }
 
         // Parsed first by a tree of its own (its callbacks fill options that are thrown away): an invalid command line has
         // its exit code, 2.
-        var parse = Create(Placeholders()).Parse(args, new CommandRunConfig { Out = TextWriter.Null, Error = TextWriter.Null });
+        var parse = Create(NodeCommandHandlers.Placeholders).Parse(args, new CommandRunConfig { Out = TextWriter.Null, Error = TextWriter.Null });
         if (parse.HasErrors)
         {
             foreach (var error in parse.Errors) await _error.WriteLineAsync("altanode: " + error.Message).ConfigureAwait(false);
@@ -65,8 +75,15 @@ internal sealed class NodeApplication
         try
         {
             var client = new NodeClientCommands(_output, _error) { Stop = ClientStop };
-            return await Create(new NodeCommandHandlers(RunNodeAsync, StatusAsync, NotImplementedAsync, client.PairAsync, client.MachinesAsync,
-                    client.ConnectAsync, client.RemoteAsync))
+            var service = new NodeServiceCommands(_output, _error, ServiceEnvironment ?? NodeServiceEnvironment.Current, ServiceExecutable ?? LocateExecutable)
+            {
+                Stop = ClientStop,
+            };
+            var devices = new NodeDeviceCommands(_output, _error) { Stop = ClientStop };
+            var logs = new NodeLogCommand(_output, _error) { Stop = ClientStop };
+            return await Create(new NodeCommandHandlers(RunNodeAsync, service.StatusAsync, NotImplementedAsync, client.PairAsync, client.MachinesAsync,
+                    client.ConnectAsync, client.RemoteAsync, service.InstallAsync, service.UninstallAsync, logs.RunAsync, devices.DevicesAsync,
+                    devices.RevokeAsync, devices.PermissionsAsync))
                 .RunAsync(args, new CommandRunConfig { Out = _output, Error = _error }).ConfigureAwait(false);
         }
         catch (Exception exception)
@@ -78,16 +95,15 @@ internal sealed class NodeApplication
 
     private static CommandApp Create(NodeCommandHandlers handlers) => NodeCommandLine.Create(handlers);
 
-    private static NodeCommandHandlers Placeholders()
-        => new(static _ => ValueTask.FromResult(0), static _ => ValueTask.FromResult(0), static _ => ValueTask.FromResult(0),
-            static _ => ValueTask.FromResult(0), static _ => ValueTask.FromResult(0), static _ => ValueTask.FromResult(0), static _ => ValueTask.FromResult(0));
+    private static NodeExecutable? LocateExecutable()
+        => NodeExecutableLocator.Locate(Environment.ProcessPath, Path.Combine(AppContext.BaseDirectory, "altanode.dll"), static path => File.Exists(path) || Directory.Exists(path));
 
     /// <summary>The version of CodeAlta this executable is.</summary>
     internal static string Version
         => typeof(NodeApplication).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion.Split('+')[0] ?? "0.0.0";
 
     // Where run listens: loopback by default; nowhere with --no-listen, which takes no other listening option.
-    private static NodeListenOptions? ResolveListen(NodeRunOptions options, out string? error)
+    internal static NodeListenOptions? ResolveListen(NodeRunOptions options, out string? error)
     {
         error = null;
         if (options.NoListen)
@@ -135,15 +151,6 @@ internal sealed class NodeApplication
         }
 
         return listen;
-    }
-
-    private async ValueTask<int> StatusAsync(NodeProfileOptions options)
-    {
-        if (options.Resolve(out var invalid) is not { } profile) return await UsageAsync(invalid!).ConfigureAwait(false);
-        var status = NodeProfileStatus.Read(profile);
-        await _output.WriteLineAsync($"Profile: {profile.StateRoot}").ConfigureAwait(false);
-        await _output.WriteLineAsync(status.Describe()).ConfigureAwait(false);
-        return status.IsHeld ? NodeExitCodes.Success : NodeExitCodes.Failure;
     }
 
     private async ValueTask<int> NotImplementedAsync(string command)
@@ -212,7 +219,7 @@ internal sealed class NodeApplication
                 {
                     try
                     {
-                        fleet = NodeFleet.Start(node, listen, name, Version);
+                        fleet = NodeFleet.Start(node, listen, name, Version, stopRequested.Cancel);
                     }
                     catch (SocketException exception)
                     {

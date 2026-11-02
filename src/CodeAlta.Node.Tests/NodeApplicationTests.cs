@@ -76,11 +76,7 @@ public sealed class NodeApplicationTests
     }
 
     [TestMethod]
-    [DataRow("install")]
-    [DataRow("install", "--user")]
-    [DataRow("uninstall")]
     [DataRow("join", "https://fleet.example", "--token", "abc")]
-    [DataRow("logs", "--follow")]
     [DataRow("update")]
     public async Task CommandsOfTheSurface_SayTheyAreNotImplementedYet(params string[] args)
     {
@@ -118,7 +114,7 @@ public sealed class NodeApplicationTests
         var app = Application(root, out var output, out _);
 
         Assert.AreEqual(NodeExitCodes.Success, await app.RunAsync(["--help"]));
-        foreach (var command in new[] { "run", "status", "install", "uninstall", "pair", "join", "machines", "connect", "remote", "logs", "update" })
+        foreach (var command in new[] { "run", "status", "install", "uninstall", "logs", "pair", "devices", "revoke", "permissions", "join", "machines", "connect", "remote", "update" })
         {
             StringAssert.Contains(output.ToString(), "  " + command + " ");
         }
@@ -133,6 +129,8 @@ public sealed class NodeApplicationTests
             InitializeLogging = false,
             ConfigureHost = root.Isolate,
             Started = started,
+            // Status reads no service manager of this machine.
+            ServiceEnvironment = static () => null,
         };
     }
 }

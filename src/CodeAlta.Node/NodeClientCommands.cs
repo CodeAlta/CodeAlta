@@ -1,7 +1,5 @@
 using System.Globalization;
-using System.Net;
 using CodeAlta.Catalog;
-using CodeAlta.Fleet.Channels;
 using CodeAlta.Fleet.Client;
 using CodeAlta.Fleet.Identity;
 using CodeAlta.Fleet.NodeApi;
@@ -80,30 +78,24 @@ internal sealed class NodeClientCommands(TextWriter output, TextWriter error)
             lifetime = TimeSpan.FromMinutes(minutes);
         }
 
-        var catalog = Catalog(profile);
-        var status = NodeProfileStatus.Read(profile);
-        var listener = NodeFleet.ReadListenerFile(catalog);
-        if (!status.IsHeld || listener is null || listener.ProcessId != status.ProcessId)
+        var control = NodeLocalControl.Read(profile);
+        if (!control.NodeListens)
         {
-            await error.WriteLineAsync(status.IsHeld
-                ? $"altanode pair: the instance that holds {profile.StateRoot} does not listen for other devices (a node started with --no-listen, or CodeAlta Desktop)."
-                : $"altanode pair: no node runs on {profile.StateRoot}. Start it with altanode run.").ConfigureAwait(false);
+            await error.WriteLineAsync(NotListening("pair", control)).ConfigureAwait(false);
             return NodeExitCodes.Failure;
         }
 
-        if (!File.Exists(Path.Combine(catalog.FleetRoot, DeviceIdentity.KeyFileName)))
+        if (!control.HasNodeKey)
         {
             await error.WriteLineAsync("altanode pair: the node has no device key yet.").ConfigureAwait(false);
             return NodeExitCodes.Failure;
         }
 
-        using var identity = DeviceIdentity.LoadOrCreate(catalog);
         using var stop = CancellationTokenSource.CreateLinkedTokenSource(Stop);
         using var signals = new NodeSignals(stop.Cancel, stop.Cancel, static () => Environment.Exit(NodeExitCodes.Failure));
-        // This machine's own addresses first: the node takes its own key from this machine only.
-        var addresses = listener.Addresses.OrderBy(static address => FleetDirectConnector.TrySplit(address, out var host, out _)
-            && IPAddress.TryParse(host, out var ip) && IPAddress.IsLoopback(ip) ? 0 : 1).ToArray();
-        await using var client = await FleetNodeClient.ConnectAsOwnerAsync(addresses, identity, stop.Token).ConfigureAwait(false);
+        var (client, identity) = await control.ConnectAsync(stop.Token).ConfigureAwait(false);
+        using var ownedIdentity = identity;
+        await using var ownedClient = client;
         var offer = await client.CreatePairingOfferAsync(lifetime, stop.Token).ConfigureAwait(false);
         await output.WriteLineAsync("Give this pairing link to the device to pair (altanode connect <link>, or Pair a machine in CodeAlta Desktop):").ConfigureAwait(false);
         await output.WriteLineAsync().ConfigureAwait(false);
@@ -330,6 +322,11 @@ internal sealed class NodeClientCommands(TextWriter output, TextWriter error)
         FleetException fleet => fleet.Error.Message is { } message ? $"{message} ({fleet.Error.Code})" : fleet.Error.Code,
         _ => exception.Message,
     };
+
+    /// <summary>Says why a command of the local control cannot reach the node of a profile.</summary>
+    internal static string NotListening(string command, NodeLocalControl control) => control.Status.IsHeld
+        ? $"altanode {command}: the instance that holds {control.Profile.StateRoot} does not listen for other devices (a node started with --no-listen, or CodeAlta Desktop)."
+        : $"altanode {command}: no node runs on {control.Profile.StateRoot}. Start it with altanode run.";
 
     private static CatalogOptions Catalog(CodeAltaInstanceProfile profile) => new() { GlobalRoot = profile.GlobalRoot, StateRoot = profile.StateRoot };
 
