@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Globalization;
+using System.Text.Json;
 using System.Text.RegularExpressions;
 using System.Threading.Channels;
 
@@ -91,6 +92,7 @@ internal sealed partial class MobileDevTunnel(IMobileDevTunnelCli cli, Action<st
         }
 
         if (added is not null) return new(added, tunnelId, true, null);
+        if (await DenyAnonymousAsync(tunnelId!, port, cancellationToken).ConfigureAwait(false) is { } open) return new(open, tunnelId, true, null, HasPort: true);
 
         var host = cli.Start(["host", tunnelId!]);
         var url = await UrlAsync(host, port, cancellationToken).ConfigureAwait(false);
@@ -121,6 +123,76 @@ internal sealed partial class MobileDevTunnel(IMobileDevTunnelCli cli, Action<st
         var reset = await cli.RunAsync(["access", "reset", tunnelId], Patience, cancellationToken).ConfigureAwait(false);
         if (reset is { ExitCode: 0, TimedOut: false }) return true;
         log?.Invoke($"Mobile: devtunnel access reset ended with {reset.ExitCode}: {reset.Output.Trim()}");
+        return false;
+    }
+
+    // Makes sure no one reaches the port of the view without the account of the tunnel: what the access of the port says, and when it may
+    // let anyone in (an allow of the tunnel it inherits, of a CodeAlta of before), a deny of anonymous access on the port, which wins over
+    // any allow. Null once it is closed; otherwise why it is not served.
+    private async Task<MobileProviderStatus?> DenyAnonymousAsync(string tunnelId, int port, CancellationToken cancellationToken)
+    {
+        var number = port.ToString(CultureInfo.InvariantCulture);
+        var listed = await cli.RunAsync(["access", "list", tunnelId, "--port-number", number, "--json", "--nologo"], Patience, cancellationToken).ConfigureAwait(false);
+        if (listed is { ExitCode: 0, TimedOut: false } && AnonymousIsDenied(listed.Output) == true) return null;
+        log?.Invoke($"Mobile: the port {number} of the Dev Tunnel {tunnelId} may let anyone in: {listed.Output.Trim()}");
+        var denied = await cli.RunAsync(["access", "create", tunnelId, "--port-number", number, "--anonymous", "--deny", "--nologo"], Patience, cancellationToken).ConfigureAwait(false);
+        if (denied is { ExitCode: 0, TimedOut: false }) return null;
+        var failed = Failed("devtunnel access create", denied);
+        return failed.State == "failed" ? failed with { Detail = "The Dev Tunnel may let anyone in, so it does not serve the page. " + failed.Detail } : failed;
+    }
+
+    /// <summary>
+    /// Whether what <c>devtunnel access list --json</c> says keeps anonymous visitors out: true when no allow of anonymous access holds or
+    /// a deny of it does (a deny wins); false when one lets them in; null when it cannot be read.
+    /// </summary>
+    internal static bool? AnonymousIsDenied(string output)
+    {
+        var start = output.IndexOf('{', StringComparison.Ordinal);
+        var end = output.LastIndexOf('}');
+        if (start < 0 || end < start) return null;
+        try
+        {
+            using var document = JsonDocument.Parse(output.AsMemory(start, end - start + 1));
+            if (!TryProperty(document.RootElement, "accessControlEntries", out var entries) || entries.ValueKind != JsonValueKind.Array) return null;
+            bool allowed = false, denied = false;
+            foreach (var entry in entries.EnumerateArray())
+            {
+                if (!IsAnonymousConnect(entry)) continue;
+                if (TryProperty(entry, "isDeny", out var deny) && deny.ValueKind == JsonValueKind.True) denied = true;
+                else allowed = true;
+            }
+
+            return denied || !allowed;
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    // An entry of anonymous access to connect, permanent or not yet expired; an inverse one is about the users who signed in.
+    private static bool IsAnonymousConnect(JsonElement entry)
+    {
+        if (entry.ValueKind != JsonValueKind.Object) return false;
+        if (!TryProperty(entry, "type", out var type) || !string.Equals(type.GetString(), "Anonymous", StringComparison.OrdinalIgnoreCase)) return false;
+        if (TryProperty(entry, "isInverse", out var inverse) && inverse.ValueKind == JsonValueKind.True) return false;
+        if (TryProperty(entry, "expiration", out var expiration) && expiration.ValueKind == JsonValueKind.String
+            && expiration.TryGetDateTimeOffset(out var ends) && ends <= DateTimeOffset.UtcNow) return false;
+        return TryProperty(entry, "scopes", out var scopes) && scopes.ValueKind == JsonValueKind.Array
+            && scopes.EnumerateArray().Any(static scope => string.Equals(scope.GetString(), "connect", StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static bool TryProperty(JsonElement element, string name, out JsonElement value)
+    {
+        value = default;
+        if (element.ValueKind != JsonValueKind.Object) return false;
+        foreach (var property in element.EnumerateObject())
+        {
+            if (!string.Equals(property.Name, name, StringComparison.OrdinalIgnoreCase)) continue;
+            value = property.Value;
+            return true;
+        }
+
         return false;
     }
 
