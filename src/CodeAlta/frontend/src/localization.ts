@@ -56,6 +56,7 @@ import { machineMessages } from "./machines/messages";
 import { machineManageMessages } from "./machines/manageMessages";
 import { addMachineMessages } from "./machines/addMachineMessages";
 import { createServerMessages } from "./fleet/createServerMessages";
+import { secretMessages } from "./secrets/messages";
 import { fleetMessages } from "./fleet/messages";
 // English source keys follow SR's fallback convention. Order: es, fr, de, ja, zh-CN.
 type Row = readonly [string, string, string, string, string];
@@ -2863,6 +2864,7 @@ export const messages = dictionary({
   ...machineManageMessages,
   ...addMachineMessages,
   ...createServerMessages,
+  ...secretMessages,
   ...fleetMessages,
   ...documentationMessages,
   ...storageMessages,

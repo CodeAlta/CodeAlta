@@ -22,6 +22,12 @@ public sealed class AgentRuntimeOptions
     /// </summary>
     public IAgentSessionProjectionCache? SessionProjectionCache { get; init; }
 
+    /// <summary>
+    /// Gets or initializes what masks the secrets of the machine in the tool results and events of the sessions of this
+    /// runtime, before they are journaled, published or traced; null masks nothing.
+    /// </summary>
+    public AgentSecretMasker? SecretMasker { get; init; }
+
     // The locks of the journals, shared with the other writers of the process; null for locks of the runtime alone.
     internal AgentSessionJournalFile? JournalFile { get; init; }
 

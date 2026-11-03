@@ -60,7 +60,8 @@ internal static class AutomationCredentials
                 return configuration is null ? AutomationCredentialKind.Unknown : AutomationCredentialKind.Account;
             case var type when KeyTypes.Contains(type):
                 if (configuration is null) return AutomationCredentialKind.Unknown;
-                if (!string.IsNullOrWhiteSpace(configuration.ApiKey)) return AutomationCredentialKind.Account;
+                // A key of the configuration, or of a secret of the machine, is the key of an account.
+                if (!string.IsNullOrWhiteSpace(configuration.ApiKey) || !string.IsNullOrWhiteSpace(configuration.ApiKeySecret)) return AutomationCredentialKind.Account;
                 return configuration.ApiKeyEnv is { } variable && !string.IsNullOrWhiteSpace(environment(variable.Trim()))
                     ? AutomationCredentialKind.Account : AutomationCredentialKind.Unknown;
             default:

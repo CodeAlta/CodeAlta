@@ -78,6 +78,18 @@ public static class FleetNodeMethods
     /// <summary>The owner's local control: the projects of the node's catalog, archived ones included.</summary>
     public const string ControlProjectsList = "control.projects.list";
 
+    /// <summary>The owner's local control: the secrets of the machine by name, and its variables.</summary>
+    public const string ControlSecretsList = "control.secrets.list";
+
+    /// <summary>The owner's local control: sets a secret or a variable of the machine, or gives it a new version.</summary>
+    public const string ControlSecretsSet = "control.secrets.set";
+
+    /// <summary>The owner's local control: gives a secret of the machine a new value and a new version; it must be set.</summary>
+    public const string ControlSecretsRotate = "control.secrets.rotate";
+
+    /// <summary>The owner's local control: deletes a secret or a variable of the machine.</summary>
+    public const string ControlSecretsDelete = "control.secrets.delete";
+
     /// <summary>The owner's local control: adds a folder of the node to its catalog, and to a space.</summary>
     public const string ControlProjectsAdd = "control.projects.add";
 
@@ -186,6 +198,12 @@ public static class FleetNodeErrorCodes
 
     /// <summary>The node runs no automation for other devices (its host has no automation engine).</summary>
     public const string AutomationsUnavailable = "automation.unavailable";
+
+    /// <summary>No secret or variable of the machine has that name.</summary>
+    public const string SecretNotFound = "secret.not_found";
+
+    /// <summary>The secrets of the machine cannot be read or written (what failed is in the message).</summary>
+    public const string SecretsUnavailable = "secret.unavailable";
 }
 
 /// <summary>The parameters of <c>pair.redeem</c>.</summary>
@@ -617,6 +635,36 @@ public sealed record FleetNodeStatus(string Name, string DeviceId, string Versio
 public sealed record FleetDeviceInfo(string DeviceId, string Name, string Fingerprint, IReadOnlyList<string> Permissions, DateTimeOffset PairedAt,
     DateTimeOffset? RevokedAt, int Channels);
 
+/// <summary>A secret or a variable of the machine as its owner's local control shows it: never the value of a secret.</summary>
+/// <param name="Name">Its name.</param>
+/// <param name="Version">Its version: 1 when set, one more at each change.</param>
+/// <param name="SetBy">Who set its current value.</param>
+/// <param name="SetAt">When its current value was set.</param>
+/// <param name="Value">The value of a variable; null for a secret.</param>
+public sealed record FleetSecretInfo(string Name, int Version, string SetBy, DateTimeOffset SetAt, string? Value);
+
+/// <summary>The result of <c>control.secrets.list</c>.</summary>
+/// <param name="Secrets">The secrets, by name, without their values.</param>
+/// <param name="Variables">The variables, with their values.</param>
+/// <param name="Protection">What protects the values of the secrets (<c>dpapi</c>, <c>keychain</c>, <c>libsecret</c>, <c>file</c>); null while none is set.</param>
+public sealed record FleetSecretList(IReadOnlyList<FleetSecretInfo> Secrets, IReadOnlyList<FleetSecretInfo> Variables, string? Protection);
+
+/// <summary>The parameters of <c>control.secrets.set</c> and <c>control.secrets.rotate</c>.</summary>
+/// <param name="Name">The name.</param>
+/// <param name="Value">The value: written, never sent back.</param>
+/// <param name="Variable">Whether it is a variable rather than a secret.</param>
+public sealed record FleetSecretSetParams(string Name, string Value, bool Variable = false);
+
+/// <summary>The parameters of <c>control.secrets.delete</c>.</summary>
+/// <param name="Name">The name.</param>
+/// <param name="Variable">Whether it is a variable rather than a secret.</param>
+public sealed record FleetSecretRef(string Name, bool Variable = false);
+
+/// <summary>The result of a change of a secret or a variable.</summary>
+/// <param name="Secret">What is known of it now; null once deleted.</param>
+/// <param name="Changed">Whether something changed.</param>
+public sealed record FleetSecretChange(FleetSecretInfo? Secret, bool Changed);
+
 /// <summary>The result of <c>control.devices.list</c>.</summary>
 /// <param name="Devices">The devices, in the order they were paired.</param>
 public sealed record FleetDeviceList(IReadOnlyList<FleetDeviceInfo> Devices);
@@ -700,6 +748,10 @@ public sealed record FleetEmpty;
 [JsonSerializable(typeof(FleetPairingOutcome))]
 [JsonSerializable(typeof(FleetNodeStatus))]
 [JsonSerializable(typeof(FleetDeviceList))]
+[JsonSerializable(typeof(FleetSecretList))]
+[JsonSerializable(typeof(FleetSecretSetParams))]
+[JsonSerializable(typeof(FleetSecretRef))]
+[JsonSerializable(typeof(FleetSecretChange))]
 [JsonSerializable(typeof(FleetDeviceRef))]
 [JsonSerializable(typeof(FleetDevicePermissionsParams))]
 [JsonSerializable(typeof(FleetDeviceChange))]

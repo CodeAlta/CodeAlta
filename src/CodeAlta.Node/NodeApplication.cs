@@ -114,7 +114,8 @@ internal sealed class NodeApplication
             var automations = new NodeAutomationCommands(_output, _error);
             return await Create(new NodeCommandHandlers(RunNodeAsync, service.StatusAsync, NotImplementedAsync, client.PairAsync, client.MachinesAsync,
                     client.ConnectAsync, client.RemoteAsync, service.InstallAsync, service.UninstallAsync, logs.RunAsync, devices.DevicesAsync,
-                    devices.RevokeAsync, devices.PermissionsAsync, client.MovesAsync, projects.RunAsync, servers.JoinAsync, update.UpdateAsync, automations.RunAsync))
+                    devices.RevokeAsync, devices.PermissionsAsync, client.MovesAsync, projects.RunAsync, servers.JoinAsync, update.UpdateAsync, automations.RunAsync)
+                { Secrets = new NodeSecretCommands(_output, _error, Console.In).RunAsync })
                 .RunAsync(args, new CommandRunConfig { Out = _output, Error = _error }).ConfigureAwait(false);
         }
         catch (Exception exception)
@@ -323,7 +324,8 @@ internal sealed class NodeApplication
                 Admitted = () =>
                 {
                     telemetry = StartTelemetry(profile, () => running, () => listening, () => linked);
-                    ownsLogging = InitializeLogging && NodeLogging.Initialize(profile.StateRoot, console: true, telemetry.LogWriter);
+                    ownsLogging = InitializeLogging && NodeLogging.Initialize(profile.StateRoot, console: true, telemetry.LogWriter,
+                        new CodeAlta.Agent.Runtime.AgentSecretMasker(new CodeAlta.Catalog.Secrets.LocalSecretStore(profile.GlobalRoot).GetSecretValues));
                 },
             };
             if (ConfigureHost is not null) hostOptions = ConfigureHost(hostOptions);

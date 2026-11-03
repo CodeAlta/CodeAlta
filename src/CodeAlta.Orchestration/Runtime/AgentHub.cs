@@ -38,6 +38,12 @@ public sealed partial class AgentHub : IAsyncDisposable
     // locks of their own append at the same offset, and the second record overwrites the first.
     internal AgentSessionJournalFile JournalFile { get; init; } = new();
 
+    /// <summary>
+    /// Gets or initializes what masks the secrets of the machine in the tool results and events of the sessions of the
+    /// hub, before they are journaled, published or traced; null masks nothing.
+    /// </summary>
+    public AgentSecretMasker? SecretMasker { get; init; }
+
     /// <summary>The version of the registration of a provider (<see cref="ModelProviderRegistry.GetRegistrationVersion"/>); 0 when it is not registered.</summary>
     internal long GetProviderRegistrationVersion(string? providerKey)
         => string.IsNullOrWhiteSpace(providerKey) ? 0 : _modelProviderRegistry.GetRegistrationVersion(new ModelProviderId(providerKey.Trim()));
@@ -823,6 +829,7 @@ public sealed partial class AgentHub : IAsyncDisposable
                     StateRootPath = _stateRootPath,
                     SessionProjectionCache = _sessionProjectionCache,
                     JournalFile = JournalFile,
+                    SecretMasker = SecretMasker,
                     Providers = [agentProviderRuntime.CreateProviderRegistration()],
                 });
             await InvokeOriginalAsync(() => providerRuntime.StartAsync(cancellationToken)).ConfigureAwait(false);

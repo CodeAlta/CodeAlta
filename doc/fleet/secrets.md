@@ -34,10 +34,13 @@ never by the server.
 
 ## Where values live
 
-- **On every host**, a local store under the state root, in the OS protected store (DPAPI on Windows, the Keychain on
-  macOS, libsecret on Linux, a file only its user can read where none is available). It is what the desktop's
-  **Settings > Secrets** page, `altanode secrets` and `alta secret` manage, on that machine and on a paired machine its
-  owner manages from the desktop.
+- **On every host**, a local store under the root of the profile (`~/.alta/secrets`, shared by its developer instance
+  as the configuration that names the secrets is): names and metadata in a file, values encrypted per value by DPAPI on
+  Windows, or with a key the OS protected store keeps (the Keychain on macOS, libsecret on Linux, a file only its user
+  can read where none is available). It is what the desktop's **Settings > Secrets** page, `altanode secrets` and
+  `alta secret` manage, on that machine and on a paired machine its owner manages from the desktop. Resolution asks a
+  chain of sources, the narrowest scope first: the machine's store is the last of them, and the only one until the
+  fleet distributes values.
 - **In a fleet**, values are sealed end to end: the desktop of the person who sets a secret encrypts it to the keys of
   the machines allowed to use it (taken from the signed device list, as metadata keys are) and to the devices of the
   people who manage it. The server stores and relays only these sealed copies and their metadata: a server, or a

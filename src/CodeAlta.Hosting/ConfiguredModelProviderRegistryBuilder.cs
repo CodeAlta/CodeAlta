@@ -11,6 +11,7 @@ using CodeAlta.Agent.ModelCatalog;
 using CodeAlta.Agent.OpenAI;
 using CodeAlta.Agent.OpenAI.Codex;
 using CodeAlta.Catalog;
+using CodeAlta.Catalog.Secrets;
 using Tomlyn.Model;
 using XenoAtom.Logging;
 
@@ -297,7 +298,7 @@ public static class ConfiguredModelProviderRegistryBuilder
         out ModelProviderDescriptor descriptor,
         out Func<IModelProviderRuntime> createRuntime)
     {
-        var apiKey = ResolveSecret(definition.ApiKey, definition.ApiKeyEnv);
+        var apiKey = ResolveSecret(definition, stateRootPath);
         if (string.IsNullOrWhiteSpace(apiKey))
         {
             LogInfo(
@@ -371,7 +372,7 @@ public static class ConfiguredModelProviderRegistryBuilder
         out ModelProviderDescriptor descriptor,
         out Func<IModelProviderRuntime> createRuntime)
     {
-        var apiKey = ResolveSecret(definition.ApiKey, definition.ApiKeyEnv);
+        var apiKey = ResolveSecret(definition, stateRootPath);
         if (string.IsNullOrWhiteSpace(apiKey))
         {
             LogInfo(
@@ -465,7 +466,7 @@ public static class ConfiguredModelProviderRegistryBuilder
             ProviderKey = definition.ProviderKey,
             DisplayName = displayName,
             // The OpenAI client sends a key in any case: a server started without --api-key ignores it.
-            ApiKey = NormalizeText(ResolveSecret(definition.ApiKey, definition.ApiKeyEnv)) ?? LlamaCppNoApiKey,
+            ApiKey = NormalizeText(ResolveSecret(definition, stateRootPath)) ?? LlamaCppNoApiKey,
             BaseUri = baseUri,
             NetworkTimeout = CreateNetworkTimeout(definition),
             IsDefault = true,
@@ -511,7 +512,7 @@ public static class ConfiguredModelProviderRegistryBuilder
         out ModelProviderDescriptor descriptor,
         out Func<IModelProviderRuntime> createRuntime)
     {
-        var apiKey = ResolveSecret(definition.ApiKey, definition.ApiKeyEnv);
+        var apiKey = ResolveSecret(definition, stateRootPath);
         if (string.IsNullOrWhiteSpace(apiKey))
         {
             LogInfo(
@@ -819,6 +820,13 @@ public static class ConfiguredModelProviderRegistryBuilder
         out ModelProviderDescriptor descriptor,
         out Func<IModelProviderRuntime> createRuntime)
     {
+        if (ResolveEnvironment(definition, stateRootPath) is not { } environmentVariables)
+        {
+            descriptor = null!;
+            createRuntime = null!;
+            return false;
+        }
+
         var options = new ClaudeCodeModelProviderRuntimeOptions
         {
             // The listing of the conversations started in VS Code or a terminal reads only the transcripts that changed.
@@ -829,7 +837,7 @@ public static class ConfiguredModelProviderRegistryBuilder
             DisplayName = ResolveProviderDisplayName(definition),
             Command = NormalizeText(definition.Command),
             ConfigDirectory = NormalizeText(definition.ConfigDir),
-            EnvironmentVariables = definition.Env is { Count: > 0 } variables ? new Dictionary<string, string>(variables, StringComparer.Ordinal) : new Dictionary<string, string>(StringComparer.Ordinal),
+            EnvironmentVariables = environmentVariables,
             // The state root of the providers is the global root: the CLI CodeAlta pins is in its cache.
             PinnedCliRoot = new CatalogOptions { GlobalRoot = stateRootPath }.ClaudeCodeRoot,
             ExtraArguments = definition.Arguments is { Count: > 0 } arguments ? [.. arguments] : [],
@@ -862,7 +870,7 @@ public static class ConfiguredModelProviderRegistryBuilder
         out ModelProviderDescriptor descriptor,
         out Func<IModelProviderRuntime> createRuntime)
     {
-        var apiKey = ResolveSecret(definition.ApiKey, definition.ApiKeyEnv);
+        var apiKey = ResolveSecret(definition, stateRootPath);
         if (string.IsNullOrWhiteSpace(apiKey))
         {
             LogInfo(
@@ -944,7 +952,7 @@ public static class ConfiguredModelProviderRegistryBuilder
         out ModelProviderDescriptor descriptor,
         out Func<IModelProviderRuntime> createRuntime)
     {
-        var apiKey = ResolveSecret(definition.ApiKey, definition.ApiKeyEnv);
+        var apiKey = ResolveSecret(definition, stateRootPath);
         if (string.IsNullOrWhiteSpace(apiKey))
         {
             LogInfo(
@@ -1056,7 +1064,7 @@ public static class ConfiguredModelProviderRegistryBuilder
         // Mistral Vibe takes the key its sign-in stored, read for each request: a provider signed out is registered,
         // and signs in from its form.
         var vibe = string.Equals(definition.ProviderType, "mistral-vibe", StringComparison.Ordinal);
-        var apiKey = vibe ? null : ResolveSecret(definition.ApiKey, definition.ApiKeyEnv);
+        var apiKey = vibe ? null : ResolveSecret(definition, stateRootPath);
         if (!vibe && string.IsNullOrWhiteSpace(apiKey))
         {
             LogInfo(
@@ -1158,21 +1166,60 @@ public static class ConfiguredModelProviderRegistryBuilder
         };
     }
 
-    private static string? ResolveSecret(string? literal, string? environmentVariableName)
+    // The key of a provider: api_key as written (or the value of the one reference it is, ${secret:NAME}), then the secret
+    // of this machine api_key_secret names, then the variable api_key_env names. A secret that is named but not set leaves
+    // the provider out with a warning that names it: never an empty key, never a key of another source.
+    private static string? ResolveSecret(CodeAltaProviderDocument definition, string stateRootPath)
     {
-        var normalizedLiteral = NormalizeText(literal);
-        if (!string.IsNullOrWhiteSpace(normalizedLiteral))
+        var literal = NormalizeText(definition.ApiKey);
+        try
         {
-            return normalizedLiteral;
+            if (!string.IsNullOrWhiteSpace(literal))
+            {
+                return SecretReferences.TryParseLone(literal, out var reference)
+                    ? NormalizeText(SecretReferenceResolver.ForMachine(stateRootPath).Get(reference))
+                    : literal;
+            }
+
+            if (NormalizeText(definition.ApiKeySecret) is { } secret)
+            {
+                return NormalizeText(SecretReferenceResolver.ForMachine(stateRootPath).Get(new SecretReference(SecretReferenceKind.Secret, secret)));
+            }
+        }
+        catch (SecretReferenceException exception)
+        {
+            Logger.Warn($"Skipped model provider key={definition.ProviderKey} type={definition.ProviderType ?? "?"}: {exception.Message}");
+            return null;
         }
 
-        var normalizedEnvironmentVariableName = NormalizeText(environmentVariableName);
+        var normalizedEnvironmentVariableName = NormalizeText(definition.ApiKeyEnv);
         if (string.IsNullOrWhiteSpace(normalizedEnvironmentVariableName))
         {
             return null;
         }
 
         return NormalizeText(Environment.GetEnvironmentVariable(normalizedEnvironmentVariableName));
+    }
+
+    // The variables a provider starts its CLI with, their references (${secret:NAME}, ${var:NAME}, ${env:NAME}) resolved;
+    // null with a warning that names what is not set.
+    private static Dictionary<string, string>? ResolveEnvironment(CodeAltaProviderDocument definition, string stateRootPath)
+    {
+        var variables = new Dictionary<string, string>(StringComparer.Ordinal);
+        if (definition.Env is not { Count: > 0 } written) return variables;
+        var resolver = SecretReferenceResolver.ForMachine(stateRootPath);
+        foreach (var (name, value) in written)
+        {
+            if (!resolver.TryResolve(value, out var resolved, out var problem))
+            {
+                Logger.Warn($"Skipped model provider key={definition.ProviderKey} type={definition.ProviderType ?? "?"}: env.{name}: {problem}");
+                return null;
+            }
+
+            variables[name] = resolved;
+        }
+
+        return variables;
     }
 
     private static AgentProviderProfile CreateOpenAIResponsesProfile(
