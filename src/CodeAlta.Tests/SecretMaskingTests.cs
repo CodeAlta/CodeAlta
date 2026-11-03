@@ -306,6 +306,21 @@ public sealed class SecretMaskingTests
         AssertNoSecret(run);
     }
 
+    [TestMethod]
+    public async Task ASuggestedNextPrompt_IsToldMasked()
+    {
+        var executor = new ScriptedTurnExecutor((_, _) => Task.FromResult(new AgentTurnResponse
+        {
+            AssistantMessage = new AgentConversationMessage(AgentConversationRole.Assistant,
+                [new AgentMessagePart.Text($"Done.\n<next_prompt>check with {Secret}</next_prompt>")]),
+        }));
+
+        var run = await RunSessionAsync(executor, [], "Check Grafana.", suggestions: true);
+
+        Assert.AreEqual("check with ***", run.Published.OfType<AgentPromptSuggestionEvent>().Single().Suggestion, "A suggestion is told, never recorded: it is masked as it is told.");
+        AssertNoSecret(run);
+    }
+
     private static void AssertNoSecret(SessionRun run)
     {
         foreach (var (path, text) in run.Files)

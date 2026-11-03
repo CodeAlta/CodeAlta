@@ -603,7 +603,7 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
     {
         if (!_disposed && AgentPromptSuggestionEvent.Normalize(suggestion) is { } text)
         {
-            Publish(new AgentPromptSuggestionEvent(ProviderId, SessionId, DateTimeOffset.UtcNow, text));
+            Publish(Masked(new AgentPromptSuggestionEvent(ProviderId, SessionId, DateTimeOffset.UtcNow, text)));
         }
     }
 
@@ -611,9 +611,13 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
     {
         if (!_disposed)
         {
-            Publish(new AgentBackgroundTasksEvent(ProviderId, SessionId, DateTimeOffset.UtcNow, tasks, ended));
+            // The description and the summary of a task are what the agent wrote of the command it runs.
+            Publish(Masked(new AgentBackgroundTasksEvent(ProviderId, SessionId, DateTimeOffset.UtcNow, tasks, ended)));
         }
     }
+
+    // An event told and never recorded is masked as those the journal keeps: it is shown, and watched from other machines.
+    private AgentEvent Masked(AgentEvent @event) => SecretMasker is { } masker ? masker.MaskEvents([@event])[0] : @event;
 
     private void Publish(AgentEvent @event)
     {
