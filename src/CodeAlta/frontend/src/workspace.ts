@@ -1,4 +1,5 @@
 import type { WorkspaceRequest, WorkspaceSession, WorkspaceSnapshot } from "#neoastra";
+import { translate } from "./localization";
 
 export type WorkspaceState =
   | { kind: "loading" }
@@ -60,6 +61,15 @@ export function withoutArchived(snapshot: WorkspaceSnapshot): WorkspaceSnapshot 
 export function archivedSessions(snapshot: WorkspaceSnapshot): WorkspaceSession[] {
   const time = (session: WorkspaceSession) => Date.parse(session.archivedAt ?? session.updatedAt) || 0;
   return snapshot.sessions.filter(session => session.archived).sort((left, right) => time(right) - time(left));
+}
+
+/** What the window says of the project files of the catalog it could not read, whose projects are not listed; null when there is none. */
+export function unreadableProjectsNotice(snapshot: WorkspaceSnapshot, locale: string): string | null {
+  const files = snapshot.unreadableProjectFiles ?? [];
+  if (files.length === 0) return null;
+  return files.length === 1
+    ? translate(locale, "The project file {file} cannot be read, so its project is not listed.", { file: files[0] })
+    : translate(locale, "These project files cannot be read, so their projects are not listed: {files}", { files: files.join(", ") });
 }
 
 export function workspaceNotice(snapshot: WorkspaceSnapshot): string | null {

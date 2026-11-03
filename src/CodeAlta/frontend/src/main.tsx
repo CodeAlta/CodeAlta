@@ -39,7 +39,7 @@ import {
   skills as skillsApi,
 } from "#neoastra";
 import { skillPrompt, usableSkills, type SkillChoice } from "./search/skillResults";
-import { archivedSessions, loadWorkspace, sessionListSignature, sessionsForProject, withoutArchived, workspaceNotice, type WorkspaceState } from "./workspace";
+import { archivedSessions, loadWorkspace, sessionListSignature, sessionsForProject, unreadableProjectsNotice, withoutArchived, workspaceNotice, type WorkspaceState } from "./workspace";
 import { History } from "./HistoryPanel";
 import { BackgroundCallsContext } from "./BackgroundTaskViews";
 import { backgroundCalls, runningBackgroundTasks, type BackgroundCallState } from "./backgroundTasks";
@@ -1234,6 +1234,17 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
   }
 
   const snapshot = workspaceState.kind === "ready" ? workspaceState.snapshot : undefined;
+  // A project file of the catalog that cannot be read leaves its project out of the lists: the main window says so once,
+  // and again when the files change.
+  const unreadableProjects = snapshot?.unreadableProjectFiles?.join("\n") ?? "";
+  const toldUnreadableProjects = useRef("");
+  useEffect(() => {
+    if (secondary || !snapshot || unreadableProjects === toldUnreadableProjects.current) return;
+    toldUnreadableProjects.current = unreadableProjects;
+    const message = unreadableProjectsNotice(snapshot, language.locale);
+    if (message) showToast({ intent: "warning", icon: "warning-sign", timeout: 20_000, message });
+    // Told when the files change, not when another snapshot or the language does.
+  }, [secondary, unreadableProjects]);
   // The filter at the top of the sidebar: while something is typed, the sidebar shows only the sessions, the projects
   // and the Claude Code sessions started elsewhere whose title has every word, open. Nothing of the tree is changed.
   const [sidebarText, setSidebarText] = useState("");

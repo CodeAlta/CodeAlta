@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { WorkspaceSnapshot } from "#neoastra";
-import { archivedSessions, loadWorkspace, sessionListSignature, sessionsForProject, withoutArchived, workspaceNotice, type WorkspaceState } from "./workspace";
+import { archivedSessions, loadWorkspace, sessionListSignature, sessionsForProject, unreadableProjectsNotice, withoutArchived, workspaceNotice, type WorkspaceState } from "./workspace";
 
 const empty: WorkspaceSnapshot = {
   configured: true, projects: [], sessions: [], projectsTruncated: false,
@@ -81,6 +81,16 @@ test("workspace shows truncation without implying paging", () => {
   assert.match(workspaceNotice({ ...empty, projectsTruncated: true })!, /not paging/i);
   assert.match(workspaceNotice({ ...empty, sessionsTruncated: true })!, /whole catalog/i);
   assert.match(workspaceNotice({ ...empty, displayTextTruncated: true })!, /shortened/i);
+});
+
+test("workspace names the project files it could not read", () => {
+  assert.equal(unreadableProjectsNotice(empty, "en"), null);
+  assert.equal(unreadableProjectsNotice({ ...empty, unreadableProjectFiles: [] }, "en"), null);
+  assert.equal(unreadableProjectsNotice({ ...empty, unreadableProjectFiles: ["C:\\alta\\projects\\broken.md"] }, "en"),
+    "The project file C:\\alta\\projects\\broken.md cannot be read, so its project is not listed.");
+  const two = unreadableProjectsNotice({ ...empty, unreadableProjectFiles: ["/a.md", "/b.md"] }, "fr")!;
+  assert.match(two, /\/a\.md, \/b\.md/);
+  assert.doesNotMatch(two, /cannot be read/, "the notice is translated");
 });
 
 test("session list signature changes with the sessions shown, not with their activity", () => {
