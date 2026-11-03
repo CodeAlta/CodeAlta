@@ -50,6 +50,12 @@ internal sealed class NodeApplication
     /// <summary>Gets or sets what finds the executable a service starts, for tests; null for the one of this process.</summary>
     internal Func<NodeExecutable?>? ServiceExecutable { get; init; }
 
+    /// <summary>Gets the HTTP handler of the calls to a CodeAlta Server (<c>join</c>), for tests; null for the usual one.</summary>
+    internal HttpMessageHandler? ServerHandler { get; init; }
+
+    /// <summary>Gets what changes the options of the connectors of the servers of <c>run</c>, for tests; null for none.</summary>
+    internal Func<CodeAlta.Fleet.Server.FleetConnectorOptions, CodeAlta.Fleet.Server.FleetConnectorOptions>? ConfigureConnector { get; init; }
+
     /// <summary>Runs a command line.</summary>
     /// <param name="args">The arguments.</param>
     /// <returns>The exit code (<see cref="NodeExitCodes"/>).</returns>
@@ -82,9 +88,10 @@ internal sealed class NodeApplication
             var devices = new NodeDeviceCommands(_output, _error) { Stop = ClientStop };
             var logs = new NodeLogCommand(_output, _error) { Stop = ClientStop };
             var projects = new NodeProjectCommands(_output, _error, CloneRootOf) { Stop = ClientStop };
+            var servers = new NodeServerCommands(_output, _error) { Stop = ClientStop, Handler = ServerHandler };
             return await Create(new NodeCommandHandlers(RunNodeAsync, service.StatusAsync, NotImplementedAsync, client.PairAsync, client.MachinesAsync,
                     client.ConnectAsync, client.RemoteAsync, service.InstallAsync, service.UninstallAsync, logs.RunAsync, devices.DevicesAsync,
-                    devices.RevokeAsync, devices.PermissionsAsync, client.MovesAsync, projects.RunAsync))
+                    devices.RevokeAsync, devices.PermissionsAsync, client.MovesAsync, projects.RunAsync, servers.JoinAsync))
                 .RunAsync(args, new CommandRunConfig { Out = _output, Error = _error }).ConfigureAwait(false);
         }
         catch (Exception exception)
@@ -238,6 +245,8 @@ internal sealed class NodeApplication
                 }
 
                 using var fleetLifetime = new FleetLifetime(fleet);
+                // The servers the node joined (altanode join): one control connection each, beside the listener or without it.
+                await using var servers = NodeServers.Start(node, name, Version, ConfigureConnector);
                 using var signals = new NodeSignals(stopRequested.Cancel, hurry.Cancel, static () => Environment.Exit(NodeExitCodes.Failure));
                 Started?.Invoke(node, stopRequested.Cancel);
                 await _output.WriteLineAsync($"CodeAlta Node runs on {profile.StateRoot}. Ctrl+C stops it.").ConfigureAwait(false);
@@ -255,6 +264,7 @@ internal sealed class NodeApplication
                 await _output.WriteLineAsync("Stopping CodeAlta Node...").ConfigureAwait(false);
                 // The channels close first: no remote call reaches a runtime that stops.
                 await fleetLifetime.StopAsync().ConfigureAwait(false);
+                await servers.DisposeAsync().ConfigureAwait(false);
                 await node.StopAsync(hurry.Token).ConfigureAwait(false);
             }
 

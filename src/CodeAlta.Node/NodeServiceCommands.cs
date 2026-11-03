@@ -191,6 +191,7 @@ internal sealed class NodeServiceCommands(TextWriter output, TextWriter error, F
             }
         }
 
+        await new NodeServerCommands(output, error).WriteStatusAsync(control.Catalog, control.Status.IsHeld).ConfigureAwait(false);
         if (environment() is { } env)
         {
             var manager = new NodeServiceManager(env);
