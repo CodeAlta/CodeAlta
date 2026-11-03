@@ -214,6 +214,7 @@ In **Settings** > **Fleet** > **Machines**, click the name of a machine to open 
 | **Devices** | Each computer paired with the machine, with a switch per permission: **View**, **Drive**, **Start**, **Move**, **Automate** and **Manage**. **Revoke** (the cross at the end of the row, then **Revoke**) refuses that computer there at once. |
 | **Projects** | Clone a repository there, add a folder, remove a project |
 | **Providers** | The providers ready on the machine, and its default model. A machine without one cannot start sessions: sign in to a provider on it |
+| **Secrets** | Its [secrets and variables](secrets.md), as **Settings** > **Secrets** shows those of this computer: **Add a secret…**, **Rotate** and **Delete** a secret, edit or delete a variable. A value goes to the machine and is never shown back |
 | **Updates** | The version it runs. **Check for updates**, then **Update to** the version found: it switches once no session works |
 | **Log** | **Show the log** reads its last lines |
 

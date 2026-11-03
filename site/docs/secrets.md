@@ -56,6 +56,8 @@ altanode secrets delete-var GRAFANA_URL
 
 The value of a secret comes from the standard input or the prompt, never from an argument, which other processes of the machine can read. A node that runs uses a new value at its next use.
 
+From CodeAlta Desktop, a computer paired with the machine that manages it changes the same secrets and variables in the **Secrets** section of the page of the machine (see [Manage a machine from CodeAlta Desktop](fleet.md#manage-a-machine-from-codealta-desktop)). A computer that reaches the machine only through a CodeAlta Server never does.
+
 ## Agents
 
 Agents list the names with `alta secret list`, to write `${secret:NAME}` in a configuration. They never read a value, and `alta secret set` is refused: ask the user to set it.

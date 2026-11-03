@@ -38,7 +38,9 @@ never by the server.
   as the configuration that names the secrets is): names and metadata in a file, values encrypted per value by DPAPI on
   Windows, or with a key the OS protected store keeps (the Keychain on macOS, libsecret on Linux, a file only its user
   can read where none is available). It is what the desktop's **Settings > Secrets** page, `altanode secrets` and
-  `alta secret` manage, on that machine and on a paired machine its owner manages from the desktop. Resolution asks a
+  `alta secret` manage, on that machine and on a paired machine its owner manages from the desktop (the node API's
+  `control.secrets.*`: the owner's local control, and a device the node trusts by its own pairing with the `manage`
+  permission; never a device trusted only through an organization's device list). Resolution asks a
   chain of sources, the narrowest scope first: the machine's store is the last of them, and the only one until the
   fleet distributes values.
 - **In a fleet**, values are sealed end to end: the desktop of the person who sets a secret encrypts it to the keys of

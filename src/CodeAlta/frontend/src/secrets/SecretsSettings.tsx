@@ -45,32 +45,48 @@ export function SecretsSettings({ epoch, api = secrets }: { epoch: string | null
   </SettingsPage>;
 }
 
-/** The secrets and the variables of a listing, with their forms. */
-export function SecretsBody({ listing, busy, adding = false, onAdded = () => { }, run, actions }: {
+/**
+ * The secrets and the variables of a listing, with their forms: two cards of a settings page, or, `flat`, two parts of a
+ * section of another page (the page of a machine).
+ */
+export function SecretsBody({ listing, busy, adding = false, onAdded = () => { }, run, actions, flat = false }: {
   listing: SecretsList; busy: boolean; adding?: boolean; onAdded?: () => void;
-  run: (call: () => Result) => Promise<boolean>; actions: SecretsActions;
+  run: (call: () => Result) => Promise<boolean>; actions: SecretsActions; flat?: boolean;
 }) {
   const { t, locale } = useShellLanguage();
   const date = (value: string) => new Date(value).toLocaleString(locale, { dateStyle: "medium", timeStyle: "short" });
   const names = listing.secrets.map(secret => secret.name);
+  const secretsPart = <>
+    {adding && <NewValueForm kind="secret" taken={names} busy={busy} onCancel={onAdded}
+      onSave={async (name, value) => { if (await run(() => actions.setSecret(name, value))) onAdded(); }} />}
+    {listing.secrets.length === 0 && !adding
+      ? <NonIdealState className="secrets-empty" icon={<AppIcon name="secret" size={28} />} title={t("No secret on this machine.")} />
+      : <ul className="secret-list" aria-label={t("Secrets")}>
+        {listing.secrets.map(secret => <SecretRow key={secret.name} secret={secret} busy={busy} date={date} run={run} actions={actions} />)}
+      </ul>}
+  </>;
+  const variablesPart = <>
+    {listing.variables.length > 0 && <ul className="secret-list" aria-label={t("Variables")}>
+      {listing.variables.map(variable => <VariableRow key={variable.name} variable={variable} busy={busy} run={run} actions={actions} />)}
+    </ul>}
+    <NewValueForm kind="var" taken={listing.variables.map(variable => variable.name)} busy={busy}
+      onSave={(name, value) => run(() => actions.setVariable(name, value)).then(() => { })} />
+  </>;
+  if (flat) {
+    return <div className="secrets-body secrets-body-flat">
+      <div className="secrets-part">{secretsPart}</div>
+      <div className="secrets-part" role="group" aria-label={t("Variables")}><h3>{t("Variables")}</h3>{variablesPart}</div>
+    </div>;
+  }
+
   return <div className="settings-grid secrets-body">
     <Card className="appearance-settings" aria-labelledby="secrets-title">
       <h2 id="secrets-title">{t("Secrets")}</h2>
-      {adding && <NewValueForm kind="secret" taken={names} busy={busy} onCancel={onAdded}
-        onSave={async (name, value) => { if (await run(() => actions.setSecret(name, value))) onAdded(); }} />}
-      {listing.secrets.length === 0 && !adding
-        ? <NonIdealState className="secrets-empty" icon={<AppIcon name="secret" size={28} />} title={t("No secret on this machine.")} />
-        : <ul className="secret-list" aria-label={t("Secrets")}>
-          {listing.secrets.map(secret => <SecretRow key={secret.name} secret={secret} busy={busy} date={date} run={run} actions={actions} />)}
-        </ul>}
+      {secretsPart}
     </Card>
     <Card className="appearance-settings" aria-labelledby="secret-variables-title">
       <h2 id="secret-variables-title">{t("Variables")}</h2>
-      {listing.variables.length > 0 && <ul className="secret-list" aria-label={t("Variables")}>
-        {listing.variables.map(variable => <VariableRow key={variable.name} variable={variable} busy={busy} run={run} actions={actions} />)}
-      </ul>}
-      <NewValueForm kind="var" taken={listing.variables.map(variable => variable.name)} busy={busy}
-        onSave={(name, value) => run(() => actions.setVariable(name, value)).then(() => { })} />
+      {variablesPart}
     </Card>
   </div>;
 }

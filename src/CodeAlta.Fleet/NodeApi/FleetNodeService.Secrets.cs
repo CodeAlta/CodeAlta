@@ -3,22 +3,26 @@ using CodeAlta.Fleet.Protocol;
 
 namespace CodeAlta.Fleet.NodeApi;
 
-// The secrets and variables of the machine of the node (~/.alta/secrets), for its owner's local control only: a paired
-// device manages them once a permission to manage the machine exists. A secret is set, rotated and deleted, and listed by
-// name: its value never leaves the machine.
+// The secrets and variables of the machine of the node (~/.alta/secrets): its owner's local control, and a device paired
+// with the node that manages it (DevicePermissions.Manage, given by the owner). A device trusted only through the device
+// list of an organization never does, whatever the list says. A secret is set, rotated and deleted, and listed by name:
+// its value never leaves the machine.
 public sealed partial class FleetNodeService
 {
-    private void RegisterSecrets(FleetNodeCaller caller)
+    private void RegisterSecrets(FleetNodeCaller caller, Access access)
     {
-        On(caller, FleetNodeMethods.ControlSecretsList, Access.Owner, FleetNodeJsonContext.Default.FleetEmpty,
+        On(caller, FleetNodeMethods.ControlSecretsList, access, FleetNodeJsonContext.Default.FleetEmpty,
             FleetNodeJsonContext.Default.FleetSecretList, ControlListSecretsAsync, optionalParams: true);
-        On(caller, FleetNodeMethods.ControlSecretsSet, Access.Owner, FleetNodeJsonContext.Default.FleetSecretSetParams,
+        On(caller, FleetNodeMethods.ControlSecretsSet, access, FleetNodeJsonContext.Default.FleetSecretSetParams,
             FleetNodeJsonContext.Default.FleetSecretChange, (call, parameters, token) => ControlSetSecretAsync(call, parameters, rotate: false));
-        On(caller, FleetNodeMethods.ControlSecretsRotate, Access.Owner, FleetNodeJsonContext.Default.FleetSecretSetParams,
+        On(caller, FleetNodeMethods.ControlSecretsRotate, access, FleetNodeJsonContext.Default.FleetSecretSetParams,
             FleetNodeJsonContext.Default.FleetSecretChange, (call, parameters, token) => ControlSetSecretAsync(call, parameters, rotate: true));
-        On(caller, FleetNodeMethods.ControlSecretsDelete, Access.Owner, FleetNodeJsonContext.Default.FleetSecretRef,
+        On(caller, FleetNodeMethods.ControlSecretsDelete, access, FleetNodeJsonContext.Default.FleetSecretRef,
             FleetNodeJsonContext.Default.FleetSecretChange, ControlDeleteSecretAsync);
     }
+
+    // Who changed a value, as the store records it and the log says it: the owner on the machine, or the managing device by its name.
+    private string SecretsActor(FleetNodeCall call) => call.Device is { } device ? $"{device.Name} (manage)" : $"{_options.Name} owner";
 
     private LocalSecretStore Secrets => new(_host.CatalogOptions.GlobalRoot);
 
@@ -31,7 +35,7 @@ public sealed partial class FleetNodeService
     private Task<FleetSecretChange> ControlSetSecretAsync(FleetNodeCall call, FleetSecretSetParams parameters, bool rotate)
     {
         if (rotate && parameters.Variable) throw new FleetException(FleetErrorCodes.InvalidParams, null, "A variable is set, not rotated.");
-        var setBy = $"{_options.Name} owner";
+        var setBy = SecretsActor(call);
         var change = OnSecrets(store =>
         {
             if (parameters.Variable)
@@ -45,7 +49,7 @@ public sealed partial class FleetNodeService
         });
         // The sessions of the node mask the new value at once.
         _host.AgentHub.SecretMasker?.Refresh();
-        LogInfo($"The owner {(rotate ? "rotated" : "set")} the {(parameters.Variable ? "variable" : "secret")} {parameters.Name}.");
+        LogInfo($"{setBy} {(rotate ? "rotated" : "set")} the {(parameters.Variable ? "variable" : "secret")} {parameters.Name}.");
         return Task.FromResult(change);
     }
 
@@ -54,7 +58,7 @@ public sealed partial class FleetNodeService
         var deleted = OnSecrets(store => parameters.Variable ? store.DeleteVariable(parameters.Name) : store.DeleteSecret(parameters.Name));
         if (!deleted) throw new FleetException(FleetNodeErrorCodes.SecretNotFound, null, $"No {(parameters.Variable ? "variable" : "secret")} is named {parameters.Name} on this machine.");
         _host.AgentHub.SecretMasker?.Refresh();
-        LogInfo($"The owner deleted the {(parameters.Variable ? "variable" : "secret")} {parameters.Name}.");
+        LogInfo($"{SecretsActor(call)} deleted the {(parameters.Variable ? "variable" : "secret")} {parameters.Name}.");
         return Task.FromResult(new FleetSecretChange(null, true));
     }
 

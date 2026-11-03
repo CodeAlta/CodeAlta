@@ -510,7 +510,7 @@ public sealed class FleetNodeClient : IAsyncDisposable
         => CallAsync(FleetNodeMethods.ControlDevicesList, new FleetEmpty(), FleetNodeJsonContext.Default.FleetEmpty, FleetNodeJsonContext.Default.FleetDeviceList, null,
             cancellationToken);
 
-    /// <summary>The owner's local control: lists the secrets of the machine by name, and its variables.</summary>
+    /// <summary>The owner's local control, or a paired device that manages the machine: lists the secrets of the machine by name, and its variables.</summary>
     /// <param name="cancellationToken">Cancels the call.</param>
     /// <returns>The secrets and the variables.</returns>
     /// <exception cref="FleetException">The node refused the call.</exception>
@@ -518,7 +518,7 @@ public sealed class FleetNodeClient : IAsyncDisposable
         => CallAsync(FleetNodeMethods.ControlSecretsList, new FleetEmpty(), FleetNodeJsonContext.Default.FleetEmpty, FleetNodeJsonContext.Default.FleetSecretList, null,
             cancellationToken);
 
-    /// <summary>The owner's local control: sets a secret or a variable of the machine, or rotates a secret that is set.</summary>
+    /// <summary>The owner's local control, or a paired device that manages the machine: sets a secret or a variable of the machine, or rotates a secret that is set.</summary>
     /// <param name="parameters">The name, the value, and whether it is a variable.</param>
     /// <param name="rotate">Whether the secret must be set already.</param>
     /// <param name="cancellationToken">Cancels the call.</param>
@@ -528,7 +528,7 @@ public sealed class FleetNodeClient : IAsyncDisposable
         => CallAsync(rotate ? FleetNodeMethods.ControlSecretsRotate : FleetNodeMethods.ControlSecretsSet, parameters, FleetNodeJsonContext.Default.FleetSecretSetParams,
             FleetNodeJsonContext.Default.FleetSecretChange, null, cancellationToken);
 
-    /// <summary>The owner's local control: deletes a secret or a variable of the machine.</summary>
+    /// <summary>The owner's local control, or a paired device that manages the machine: deletes a secret or a variable of the machine.</summary>
     /// <param name="parameters">The name, and whether it is a variable.</param>
     /// <param name="cancellationToken">Cancels the call.</param>
     /// <returns>Whether it was set.</returns>
