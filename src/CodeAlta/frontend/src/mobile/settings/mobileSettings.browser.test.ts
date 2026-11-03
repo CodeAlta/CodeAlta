@@ -82,6 +82,8 @@ test("the settings page of Mobile shows its ports and its address, applies new p
     await evaluate(`${button("Cancel")}.click()`);
     assert.equal(await wait("document.getElementById('mobile-settings-https-port').value === '2584'"), true);
     await evaluate("mobileSettingsFixture.state.refuse = null");
+    assert.equal(await evaluate("[...document.querySelectorAll('.settings-field-help')].some(element => element.textContent.includes('This computer and the phone need Tailscale.'))"), true,
+      "a line says what Tailscale needs");
 
     // Dev Tunnels: the port of the tailnet goes, a line says what it needs, and Apply sends the mode with the port of this computer.
     await evaluate(`document.querySelector('input[name="mobile-settings-mode"][value="devtunnel"]').click()`);

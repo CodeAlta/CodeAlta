@@ -2,6 +2,12 @@
 // of `localization.ts`. English is the key.
 export const mobileSettingsMessages = {
   "Phones connect through": ["Los teléfonos se conectan mediante", "Les téléphones se connectent via", "Telefone verbinden sich über", "スマートフォンの接続方法", "手机的连接方式"],
+  "Phones on your tailnet open the page, signed in to Tailscale with your account. This computer and the phone need Tailscale.": [
+    "Los teléfonos de tu tailnet abren la página, con sesión iniciada en Tailscale con tu cuenta. Este equipo y el teléfono necesitan Tailscale.",
+    "Les téléphones de votre tailnet ouvrent la page, connectés à Tailscale avec votre compte. Cet ordinateur et le téléphone ont besoin de Tailscale.",
+    "Telefone in Ihrem Tailnet öffnen die Seite, mit Ihrem Konto bei Tailscale angemeldet. Dieser Computer und das Telefon brauchen Tailscale.",
+    "tailnet 上のスマートフォンは、あなたのアカウントで Tailscale にサインインしてページを開きます。このコンピューターとスマートフォンには Tailscale が必要です。",
+    "tailnet 中的手机使用你的帐户登录 Tailscale 后即可打开页面。此计算机和手机都需要 Tailscale。"],
   "Any phone opens the page through a Dev Tunnel, signed in with your GitHub account. This computer needs the devtunnel command line.": [
     "Cualquier teléfono abre la página a través de un Dev Tunnel, con tu cuenta de GitHub. Este equipo necesita la línea de comandos devtunnel.",
     "N’importe quel téléphone ouvre la page par un Dev Tunnel, connecté avec votre compte GitHub. Cet ordinateur a besoin de la ligne de commande devtunnel.",

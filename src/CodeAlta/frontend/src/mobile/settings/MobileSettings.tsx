@@ -32,7 +32,10 @@ type ProviderPage = Readonly<{
 
 /** The words of each provider. A provider the page does not know is named by its id, with general words. */
 const pages: Readonly<Record<string, ProviderPage>> = {
-  tailscale: { name: "Tailscale", address: "Address on the tailnet", unserved: "Not served on the tailnet", apply: "Apply to publish the page on the tailnet." },
+  tailscale: {
+    name: "Tailscale", address: "Address on the tailnet", unserved: "Not served on the tailnet", apply: "Apply to publish the page on the tailnet.",
+    help: "Phones on your tailnet open the page, signed in to Tailscale with your account. This computer and the phone need Tailscale.",
+  },
   devtunnel: {
     name: "Dev Tunnels", address: "Address of the Dev Tunnel", unserved: "Not served through Dev Tunnels", apply: "Apply to open the Dev Tunnel.",
     help: "Any phone opens the page through a Dev Tunnel, signed in with your GitHub account. This computer needs the devtunnel command line.",
