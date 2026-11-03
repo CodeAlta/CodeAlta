@@ -224,13 +224,66 @@ public sealed class NodeServerAutomationTests
             "the version replayed later is refused");
     }
 
-    // A version signed by a controller for a machine, its definition sealed for the machine and the person's controllers.
-    private static FleetSignedAutomationVersion Sign(DeviceIdentity signer, FleetDeviceListState list, string organization, string machine, long number)
+    [TestMethod]
+    public async Task TheSchedulesReportedLeaveOutWhatWasRemoved_AndGoInBatchesTheServerTakes()
     {
-        var sealedText = FleetAutomationSigning.Seal(new FleetAutomationContent(Definition, null), Id, number, machine, list, signer);
-        return FleetAutomationSigning.Sign(signer, new FleetAutomationVersion(FleetAutomationVersion.CurrentVersion, organization, Id, number, machine, false, true, ["hourly"],
+        var token = TestContext.CancellationToken;
+        using var root = new NodeTestRoot();
+        await using var node = await NodeHost.StartAsync(root.Options() with
+        {
+            Automations = new NodeAutomationOptions
+            {
+                TimeProvider = new NodeClock { Now = Noon }, TimeZone = TimeZoneInfo.Utc, WatchRepositories = false, CredentialKind = static _ => AutomationCredentialKind.Account,
+            },
+        }, token);
+        using var laptop = DeviceIdentity.LoadOrCreate(Path.Combine(root.Root, "laptop"));
+        using var tablet = DeviceIdentity.LoadOrCreate(Path.Combine(root.Root, "tablet"));
+        using var self = DeviceIdentity.LoadOrCreate(Path.Combine(root.Root, "self"));
+        var automations = node.Automations!;
+        automations.DeviceId = self.DeviceId;
+        var list = DeviceList(laptop, tablet, self, removeTablet: false);
+        (FleetAutomationContent?, string?) Open(FleetAutomationVersion version)
+            => FleetAutomationSigning.TryOpen(version.Sealed, version.AutomationId, version.Number, version.MachineId, self, list, out var content, out var reason) ? (content, null) : (null, reason);
+
+        // More automations given and taken away again than one report holds: their tombstones stay on the node.
+        var ids = Enumerable.Range(0, 110).Select(static _ => Guid.CreateVersion7().ToString()).ToArray();
+        var removed = ids.Take(104).ToHashSet(StringComparer.Ordinal);
+        foreach (var id in ids)
+        {
+            var given = await automations.AcceptFromServerAsync("link-1", list, "org", Sign(tablet, list, "org", self.DeviceId, 1, id), Open, token);
+            Assert.IsTrue(given.Applied, given.Message);
+            if (!removed.Contains(id)) continue;
+            var taken = await automations.AcceptFromServerAsync("link-1", list, "org", SignRemoval(tablet, "org", self.DeviceId, 2, id), Open, token);
+            Assert.IsTrue(taken.Applied, taken.Message);
+        }
+
+        var reports = new List<FleetAutomationRunFacts>();
+        automations.ServerReport = (_, facts, _) =>
+        {
+            lock (reports) reports.Add(facts);
+            return Task.FromResult(true);
+        };
+        await automations.ReportRunsAsync("link-1", all: true, token);
+
+        Assert.IsTrue(reports.Count > 0);
+        foreach (var report in reports) Assert.IsTrue(report.Schedules is { Count: > 0 and <= 100 }, "a report holds what the server takes");
+        var reported = reports.SelectMany(static report => report.Schedules!).Select(static schedule => schedule.AutomationId).ToList();
+        CollectionAssert.AreEquivalent(ids.Where(id => !removed.Contains(id)).ToArray(), reported, "every automation held, once; none taken away");
+    }
+
+    // A version signed by a controller for a machine, its definition sealed for the machine and the person's controllers.
+    private static FleetSignedAutomationVersion Sign(DeviceIdentity signer, FleetDeviceListState list, string organization, string machine, long number, string id = Id)
+    {
+        var definition = Definition.Replace(Id, id, StringComparison.Ordinal);
+        var sealedText = FleetAutomationSigning.Seal(new FleetAutomationContent(definition, null), id, number, machine, list, signer);
+        return FleetAutomationSigning.Sign(signer, new FleetAutomationVersion(FleetAutomationVersion.CurrentVersion, organization, id, number, machine, false, true, ["hourly"],
             null, null, sealedText, string.Empty, string.Empty, DateTimeOffset.UtcNow));
     }
+
+    // A version that takes an automation away from a machine.
+    private static FleetSignedAutomationVersion SignRemoval(DeviceIdentity signer, string organization, string machine, long number, string id)
+        => FleetAutomationSigning.Sign(signer, new FleetAutomationVersion(FleetAutomationVersion.CurrentVersion, organization, id, number, machine, true, false, [],
+            null, null, null, string.Empty, string.Empty, DateTimeOffset.UtcNow));
 
     // The laptop (the first controller, of person p1), the tablet (another controller of p1) and the node of p1.
     private static FleetDeviceListState DeviceList(DeviceIdentity laptop, DeviceIdentity tablet, DeviceIdentity node, bool removeTablet)
