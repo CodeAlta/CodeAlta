@@ -1,0 +1,51 @@
+/* Settings > Fleet > Server, the server of a space, and the Fleet canvas. */
+.fleet-server-list { display: grid; gap: 10px; max-width: 820px; }
+.fleet-server-card { border: 1px solid var(--line); border-radius: 6px; background: var(--panel); padding: 8px 10px; display: grid; gap: 8px; }
+.fleet-server-head { display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; align-items: center; gap: 10px; }
+.fleet-server-icon { color: var(--muted); display: inline-flex; }
+.fleet-server-card[data-connection="online"] .fleet-server-icon { color: var(--green); }
+.fleet-server-main { min-width: 0; display: grid; gap: 2px; }
+.fleet-server-title { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.fleet-server-title strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fleet-server-details, .fleet-server-problem { font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fleet-server-confirm { max-width: 300px; padding: 10px 12px; display: grid; gap: 6px; }
+.fleet-server-confirm p { margin: 0; }
+.fleet-server-empty { margin-top: 32px; }
+.fleet-server-key { max-width: 820px; margin-top: 12px; font-size: 12px; }
+.fleet-server-devices { display: grid; gap: 6px; padding-left: 28px; }
+.fleet-device-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+.fleet-device-row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 8px; padding: 4px 0; color: var(--muted); }
+.fleet-device-row[data-status="pending"] { color: inherit; }
+.fleet-device-main { min-width: 0; display: grid; gap: 4px; }
+.fleet-device-title { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.fleet-device-title strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
+.fleet-device-words { display: flex; flex-wrap: wrap; gap: 4px; }
+.fleet-device-actions { display: inline-flex; gap: 6px; }
+.fleet-server-form { display: grid; gap: 12px; }
+.fleet-server-form label { display: grid; gap: 4px; }
+.fleet-token-dialog p { margin: 0 0 8px; }
+
+.fleet-canvas { height: 100%; overflow: auto; padding: 20px 24px; display: grid; align-content: start; gap: 16px; }
+.fleet-canvas-head { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 24px; }
+.fleet-canvas-title { display: flex; align-items: baseline; gap: 10px; min-width: 0; }
+.fleet-canvas-title h1 { margin: 0; font-size: 20px; font-weight: 600; }
+.fleet-canvas-title .muted-text { font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fleet-canvas-summary { display: flex; gap: 16px; font-size: 13px; color: var(--muted); }
+.fleet-canvas-summary strong { color: var(--text); font-weight: 600; }
+.fleet-canvas-waiting { color: var(--text); }
+.fleet-canvas-archived { margin: 0 0 0 auto; }
+.fleet-canvas-machines { display: grid; grid-template-columns: repeat(auto-fill, minmax(380px, 1fr)); gap: 12px; }
+.fleet-machine { border: 1px solid var(--line); border-radius: 6px; background: var(--panel); padding: 10px 12px; display: grid; gap: 8px; align-content: start; }
+.fleet-machine[data-online="false"] { opacity: 0.8; }
+.fleet-machine-head { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 10px; }
+.fleet-machine-icon { color: var(--muted); display: inline-flex; }
+.fleet-machine[data-online="true"] .fleet-machine-icon { color: var(--green); }
+.fleet-machine-main { min-width: 0; display: grid; gap: 2px; }
+.fleet-machine-title { display: flex; align-items: center; gap: 6px; min-width: 0; flex-wrap: wrap; }
+.fleet-machine-details, .fleet-machine-count { font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fleet-sessions { width: 100%; border-collapse: collapse; font-size: 12px; table-layout: fixed; }
+.fleet-sessions td { padding: 3px 4px; border-top: 1px solid var(--line); vertical-align: middle; }
+.fleet-sessions td:first-child { width: 110px; }
+.fleet-session-model { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fleet-session-time { width: 120px; white-space: nowrap; }
+.fleet-session-open { width: 72px; text-align: right; }
