@@ -6,7 +6,7 @@ namespace CodeAlta.Desktop.Fleet;
 /// <summary>
 /// The console of the fleet, as a plugin of the window (<c>doc/fleet/console.md</c>): its first canvas, Fleet, shows the
 /// machines of the organization of the server this computer is linked to, with their presence and the sessions they
-/// publish, live from the directory of the control connection.
+/// publish, live from the directory of the control connection; without a server, the machines paired with this computer.
 /// </summary>
 /// <remarks>
 /// The plugin declares the canvas and the command that opens it; the canvas is drawn by a module of the application's own
@@ -25,7 +25,7 @@ internal sealed class DesktopFleetPlugin : PluginBase
     /// <summary>The name of the module of the application's build that draws the canvas.</summary>
     internal const string AppModule = "fleet";
 
-    private const string Summary = "The console of the fleet in CodeAlta Desktop: the machines of the organization of a CodeAlta Server and the sessions they publish.";
+    private const string Summary = "The console of the fleet in CodeAlta Desktop: the machines of the organization of a CodeAlta Server, or the machines paired with this computer, and their sessions.";
 
     /// <summary>The definition a window lists among its built-in plugins.</summary>
     internal static BuiltInPluginDefinition Definition()

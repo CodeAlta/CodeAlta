@@ -61,6 +61,9 @@
 .fleet-machine[data-online="true"] .fleet-machine-icon { color: var(--green); }
 .fleet-machine-main { min-width: 0; display: grid; gap: 2px; }
 .fleet-machine-title { display: flex; align-items: center; gap: 6px; min-width: 0; flex-wrap: wrap; }
+.fleet-machine-open { all: unset; cursor: pointer; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fleet-machine-open:hover strong, .fleet-machine-open:focus-visible strong { text-decoration: underline; }
+.fleet-machine-open:focus-visible { outline: 2px solid var(--accent, #2d72d2); outline-offset: 2px; border-radius: 3px; }
 .fleet-machine-details, .fleet-machine-count { font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .fleet-sessions { width: 100%; border-collapse: collapse; font-size: 12px; table-layout: fixed; }
 .fleet-sessions td { padding: 3px 4px; border-top: 1px solid var(--line); vertical-align: middle; }

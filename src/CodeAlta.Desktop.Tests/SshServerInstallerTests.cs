@@ -33,9 +33,11 @@ public sealed class SshServerInstallerTests
             "the link keeps the address of the machines; the setup goes through the forward, from the loopback of the server");
         Assert.AreEqual(1, ssh.Forwards);
         StringAssert.Contains(ssh.Scripts[1], "tool update --tool-path \"$TOOLS\" CodeAlta.Server --version '4.0.0' --allow-downgrade");
-        StringAssert.Contains(ssh.Scripts[2], "URLS=http://0.0.0.0:2693");
-        StringAssert.Contains(ssh.Scripts[2], "systemctl --user enable --now \"$UNIT\"");
-        StringAssert.Contains(ssh.Scripts[2], "loginctl enable-linger");
+        // The service is altaserver install's, as the owner would install it there: the desktop writes no unit of its own.
+        StringAssert.Contains(ssh.Scripts[2], "\"$TOOLS/altaserver\" install --data-root \"$ROOT\" --urls http://0.0.0.0:2693 1>&2\n");
+        Assert.IsFalse(ssh.Scripts[2].Contains("[Service]", StringComparison.Ordinal), ssh.Scripts[2]);
+        Assert.IsFalse(ssh.Scripts[2].Contains("systemctl --user enable", StringComparison.Ordinal), ssh.Scripts[2]);
+        StringAssert.Contains(ssh.Scripts[2], "status --data-root \"$ROOT\" 2>/dev/null | grep -q '^Health: ok'", "it waits until the server answers, not until status prints a health line");
         StringAssert.Contains(ssh.Scripts[3], "setup-code --data-root \"$ROOT\"");
         CollectionAssert.AreEqual(new[] { "connect", "check", "install", "service", "reach", "claim" },
             steps.Where(static step => step.State == "done").Select(static step => step.Step).ToArray());
@@ -67,7 +69,7 @@ public sealed class SshServerInstallerTests
         var failure = await Assert.ThrowsExactlyAsync<SshSetupException>(() => new SshServerInstaller(ssh, "4.0.0").RunAsync(
             new SshServerSetupRequest { Target = new SshTarget("me", "box", null), Address = new Uri("https://fleet.example.com") }, (_, _) => Task.FromResult(false),
             (_, _, _, _) => Task.FromResult("x"), static _ => { }, TestContext.CancellationToken));
-        StringAssert.Contains(ssh.Scripts[2], "URLS=http://127.0.0.1:2586");
+        StringAssert.Contains(ssh.Scripts[2], "\"$TOOLS/altaserver\" install --urls http://127.0.0.1:2586 1>&2\n", "the default data root: the service of ~/.altaserver");
         Assert.AreEqual("server_proxy_unreachable", failure.Code, "what stands in front of the server does not answer");
     }
 }

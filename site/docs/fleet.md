@@ -259,7 +259,7 @@ A CodeAlta Server shows the machines of all your computers, whether they are onl
 
 In CodeAlta Desktop, open **Settings** > **Fleet** > **Server** and click **Create my server…**. Choose where it runs:
 
-- **On a machine over SSH**, the usual place: an always-on Linux or macOS machine you reach with `ssh`. Give it as `user@host`, and how your machines reach it: **The local network** (`http://host:2586`, the server listens on every network of the machine), or **An address I put in front of it**, a domain or Tailscale Serve that forwards to the server, which then stays on the machine's own loopback. CodeAlta checks the system and .NET there, installs CodeAlta Server, starts it as a service (a `systemd --user` unit with lingering, or a LaunchAgent), checks that it answers from this computer at that address, then reads its setup code over SSH and makes you its owner. Nothing to copy.
+- **On a machine over SSH**, the usual place: an always-on Linux or macOS machine you reach with `ssh`. Give it as `user@host`, and how your machines reach it: **The local network** (`http://host:2586`, the server listens on every network of the machine), or **An address I put in front of it**, a domain or Tailscale Serve that forwards to the server, which then stays on the machine's own loopback. CodeAlta checks the system and .NET there, installs CodeAlta Server, starts it as a service with `altaserver install` (a `systemd --user` unit with lingering, or a LaunchAgent), checks that it answers from this computer at that address, then reads its setup code over SSH and makes you its owner. Nothing to copy.
 - **On this computer**: CodeAlta installs CodeAlta Server here, starts it and makes you its owner.
 - **It runs already**: a server you started with `altaserver run`; give its address, its setup code (`altaserver setup-code` prints it on its machine) and your name.
 
@@ -268,6 +268,24 @@ Give **Your name** and an **Organization** (**Home** by default). **Advanced** s
 When the server runs but does not answer from here, the step says what blocks it: a firewall (on Ubuntu, `sudo ufw allow 2586/tcp` on the machine), a name that does not reach it, or a proxy that does not forward to it. **Try again** goes on from there.
 
 Once you are its owner, **Add your machines** lists the machines this computer manages: **Add** has each join the server from itself, and approves it at once. The six words of each are shown.
+
+### Run a server as a service
+
+A server you installed yourself (`dotnet tool install -g CodeAlta.Server`) starts again after a restart once it runs as a service:
+
+```sh
+altaserver install --urls http://0.0.0.0:2586
+```
+
+It takes the options of `altaserver run` (`--port`, `--urls`, `--data-root`, `--certificate`) and sets up one service per data root:
+
+| System | What `altaserver install` sets up |
+| --- | --- |
+| Windows | A task at your sign-in that runs the server without a window and starts it again if it stops |
+| macOS | A LaunchAgent of your account |
+| Linux | A `systemd --user` unit, with lingering turned on so that it starts at boot |
+
+`altaserver status` tells whether it runs and whether it will start again after a restart. `altaserver install --dry-run` prints what it would set up, `altaserver uninstall` stops the server and removes the service: the data root stays. `--system --account <name>` starts it at boot under an account of its own, with `sudo` on macOS and Linux. `altaserver update` keeps working under the service.
 
 ### Add machines and computers
 
@@ -286,7 +304,7 @@ To join the server of your company, open **Settings** > **Fleet** > **Server** a
 
 A space publishes to a server only when you choose it: **Settings** > **Spaces** > the space > **General** > **Server**. `altanode join` links the default space of the node (`--space` chooses others). A session made **Private** in its options (the Agent chip, **More options**) is never published; one made Private later, or whose space you unlink, is removed from the server.
 
-The **Fleet** canvas (`/fleet`) shows the machines of the server and their sessions, with their titles, as they change. A session of this computer, of a paired machine or of a node of the server opens with **Open**; the others are shown only. `altanode status` says whether the node is connected to its server.
+The **Fleet** canvas (`/fleet`) shows the machines of the server and their sessions, with their titles, as they change; without a server, it shows the machines paired with this computer. A session of this computer, of a paired machine or of a node of the server opens with **Open**; the others are shown only. The name of a paired machine opens its page. `altanode status` says whether the node is connected to its server.
 
 ### Reach machines through the server
 

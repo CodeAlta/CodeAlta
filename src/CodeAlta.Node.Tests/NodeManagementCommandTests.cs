@@ -1,5 +1,6 @@
 using System.Text;
-using CodeAlta.Node.Service;
+using CodeAlta.Fleet.Update.Service;
+using CodeAlta.Fleet.Update.Tests;
 
 namespace CodeAlta.Node.Tests;
 
@@ -10,7 +11,7 @@ namespace CodeAlta.Node.Tests;
 [TestClass]
 public sealed class NodeManagementCommandTests
 {
-    private static readonly NodeExecutable Shim = new(NodeExecutableKind.ToolShim, "/home/alice/.dotnet/tools/altanode", []);
+    private static readonly ServiceExecutable Shim = new(ServiceExecutableKind.ToolShim, "/home/alice/.dotnet/tools/altanode", []);
 
     public TestContext TestContext { get; set; } = null!;
 
@@ -18,7 +19,7 @@ public sealed class NodeManagementCommandTests
     public async Task Install_DryRun_PrintsTheUnitAndTheCommands_AndChangesNothing()
     {
         using var root = new NodeTestRoot();
-        using var machine = new FakeServiceMachine(NodeServicePlatform.Linux);
+        using var machine = new FakeServiceMachine(ServicePlatform.Linux);
         var (code, output, error) = await RunAsync(machine, ["install", "--dry-run", "--data-root", root.DataRoot, "--listen-all", "--port", "2600", "--name", "home server"]);
 
         Assert.AreEqual(NodeExitCodes.Success, code, error);
@@ -35,7 +36,7 @@ public sealed class NodeManagementCommandTests
     public async Task Install_Status_Uninstall_AnswerWhetherTheNodeWillStillRun()
     {
         using var root = new NodeTestRoot();
-        using var machine = new FakeServiceMachine(NodeServicePlatform.MacOS);
+        using var machine = new FakeServiceMachine(ServicePlatform.MacOS);
         var (code, output, error) = await RunAsync(machine, ["install", "--data-root", root.DataRoot, "--offline"]);
         Assert.AreEqual(NodeExitCodes.Success, code, error);
         StringAssert.Contains(output, "Installed a LaunchAgent of alice");
@@ -66,7 +67,7 @@ public sealed class NodeManagementCommandTests
     public async Task Install_RefusesWhatTheOsCannotDo_WithExitOne()
     {
         using var root = new NodeTestRoot();
-        using var machine = new FakeServiceMachine(NodeServicePlatform.Windows);
+        using var machine = new FakeServiceMachine(ServicePlatform.Windows);
         var (code, _, error) = await RunAsync(machine, ["install", "--system", "--account", "codealta", "--data-root", root.DataRoot]);
 
         Assert.AreEqual(NodeExitCodes.Failure, code);
@@ -91,7 +92,7 @@ public sealed class NodeManagementCommandTests
     public async Task InvalidManagementCommandLines_ExitWithTwo(params string[] args)
     {
         using var root = new NodeTestRoot();
-        using var machine = new FakeServiceMachine(NodeServicePlatform.Linux);
+        using var machine = new FakeServiceMachine(ServicePlatform.Linux);
         var withRoot = args.Contains("--data-root") ? args : [.. args, "--data-root", root.DataRoot];
 
         var (code, _, error) = await RunAsync(machine, withRoot);
@@ -104,7 +105,7 @@ public sealed class NodeManagementCommandTests
     public async Task Logs_PrintsTheLastLines_AndSaysWhenThereIsNoLog()
     {
         using var root = new NodeTestRoot();
-        using var machine = new FakeServiceMachine(NodeServicePlatform.Linux);
+        using var machine = new FakeServiceMachine(ServicePlatform.Linux);
         var (code, _, error) = await RunAsync(machine, ["logs", "--data-root", root.DataRoot]);
         Assert.AreEqual(NodeExitCodes.Failure, code);
         StringAssert.Contains(error, "no log yet");

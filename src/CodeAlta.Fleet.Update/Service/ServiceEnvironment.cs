@@ -1,27 +1,28 @@
 using System.Diagnostics;
 using System.Runtime.Versioning;
 
-namespace CodeAlta.Node.Service;
+namespace CodeAlta.Fleet.Update.Service;
 
 /// <summary>How a command of the service manager ended.</summary>
 /// <param name="ExitCode">Its exit code; -1 when it could not start.</param>
 /// <param name="Output">What it wrote, standard output then standard error.</param>
-internal sealed record NodeCommandResult(int ExitCode, string Output)
+public sealed record ServiceCommandResult(int ExitCode, string Output)
 {
     /// <summary>Gets whether it succeeded.</summary>
     public bool Succeeded => ExitCode == 0;
 }
 
 /// <summary>
-/// The machine <c>altanode install</c> works on: the OS, the user, the folders the service managers read, and how their
-/// commands run. Tests give one of their own, with temporary folders and recorded commands, so that nothing is installed.
+/// The machine <c>altanode install</c> and <c>altaserver install</c> work on: the OS, the user, the folders the service
+/// managers read, and how their commands run. Tests give one of their own, with temporary folders and recorded commands,
+/// so that nothing is installed.
 /// </summary>
-internal sealed class NodeServiceEnvironment
+public sealed class ServiceEnvironment
 {
     private static readonly TimeSpan CommandTimeout = TimeSpan.FromSeconds(60);
 
     /// <summary>Gets the OS.</summary>
-    public required NodeServicePlatform Platform { get; init; }
+    public required ServicePlatform Platform { get; init; }
 
     /// <summary>Gets the home folder of the user.</summary>
     public required string Home { get; init; }
@@ -63,7 +64,7 @@ internal sealed class NodeServiceEnvironment
     public Func<DateTime> Now { get; init; } = static () => DateTime.Now;
 
     /// <summary>Gets what runs a command of the service manager and waits for it.</summary>
-    public required Func<string, IReadOnlyList<string>, NodeCommandResult> Run { get; init; }
+    public required Func<string, IReadOnlyList<string>, ServiceCommandResult> Run { get; init; }
 
     /// <summary>Gets what reads the user the machine signs in automatically at startup, or null.</summary>
     public Func<string?> AutoLoginUser { get; init; } = static () => null;
@@ -73,7 +74,7 @@ internal sealed class NodeServiceEnvironment
 
     /// <summary>Reads the machine this process runs on.</summary>
     /// <returns>The environment, or null on an OS without a known service manager.</returns>
-    public static NodeServiceEnvironment? Current()
+    public static ServiceEnvironment? Current()
     {
         var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
         var variables = new Dictionary<string, string>(StringComparer.Ordinal);
@@ -85,9 +86,9 @@ internal sealed class NodeServiceEnvironment
         if (OperatingSystem.IsWindows())
         {
             var identity = System.Security.Principal.WindowsIdentity.GetCurrent();
-            return new NodeServiceEnvironment
+            return new ServiceEnvironment
             {
-                Platform = NodeServicePlatform.Windows, Home = home, UserName = Environment.UserName, UserDisplayName = identity.Name,
+                Platform = ServicePlatform.Windows, Home = home, UserName = Environment.UserName, UserDisplayName = identity.Name,
                 UserId = identity.User?.Value, WindowsDirectory = Environment.GetFolderPath(Environment.SpecialFolder.Windows),
                 // The task gets the environment of the user's logon: nothing to copy.
                 Run = RunProcess, AutoLoginUser = ReadWindowsAutoLogin,
@@ -97,9 +98,9 @@ internal sealed class NodeServiceEnvironment
         if (!OperatingSystem.IsMacOS() && !OperatingSystem.IsLinux()) return null;
         var uid = RunProcess("id", ["-u"]) is { Succeeded: true } id ? id.Output.Trim() : null;
         var configHome = Environment.GetEnvironmentVariable("XDG_CONFIG_HOME") is { Length: > 0 } xdg && Path.IsPathFullyQualified(xdg) ? xdg : Path.Combine(home, ".config");
-        return new NodeServiceEnvironment
+        return new ServiceEnvironment
         {
-            Platform = OperatingSystem.IsMacOS() ? NodeServicePlatform.MacOS : NodeServicePlatform.Linux, Home = home, UserName = Environment.UserName,
+            Platform = OperatingSystem.IsMacOS() ? ServicePlatform.MacOS : ServicePlatform.Linux, Home = home, UserName = Environment.UserName,
             UserId = uid, IsRoot = uid == "0", ConfigHome = configHome, ServiceVariables = variables, Run = RunProcess,
             AutoLoginUser = OperatingSystem.IsMacOS() ? ReadMacAutoLogin : static () => null,
             HomeOfAccount = OperatingSystem.IsMacOS() ? ReadMacHome : ReadLinuxHome,
@@ -110,7 +111,7 @@ internal sealed class NodeServiceEnvironment
     /// <param name="fileName">The command.</param>
     /// <param name="arguments">Its arguments.</param>
     /// <returns>How it ended.</returns>
-    public static NodeCommandResult RunProcess(string fileName, IReadOnlyList<string> arguments)
+    public static ServiceCommandResult RunProcess(string fileName, IReadOnlyList<string> arguments)
     {
         var start = new ProcessStartInfo(fileName)
         {
@@ -120,7 +121,7 @@ internal sealed class NodeServiceEnvironment
         try
         {
             using var process = Process.Start(start);
-            if (process is null) return new NodeCommandResult(-1, $"{fileName} did not start.");
+            if (process is null) return new ServiceCommandResult(-1, $"{fileName} did not start.");
             process.StandardInput.Close();
             var output = process.StandardOutput.ReadToEndAsync();
             var error = process.StandardError.ReadToEndAsync();
@@ -128,15 +129,15 @@ internal sealed class NodeServiceEnvironment
             {
                 try { process.Kill(entireProcessTree: true); }
                 catch (InvalidOperationException) { }
-                return new NodeCommandResult(-1, $"{fileName} did not end within {CommandTimeout.TotalSeconds} s.");
+                return new ServiceCommandResult(-1, $"{fileName} did not end within {CommandTimeout.TotalSeconds} s.");
             }
 
             process.WaitForExit();
-            return new NodeCommandResult(process.ExitCode, (output.GetAwaiter().GetResult() + error.GetAwaiter().GetResult()).Trim());
+            return new ServiceCommandResult(process.ExitCode, (output.GetAwaiter().GetResult() + error.GetAwaiter().GetResult()).Trim());
         }
         catch (Exception exception) when (exception is System.ComponentModel.Win32Exception or InvalidOperationException)
         {
-            return new NodeCommandResult(-1, $"{fileName} could not start: {exception.Message}");
+            return new ServiceCommandResult(-1, $"{fileName} could not start: {exception.Message}");
         }
     }
 

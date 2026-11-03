@@ -238,7 +238,7 @@ public sealed class UpdateVersionStore
     {
         ArgumentNullException.ThrowIfNull(version);
         var at = _time.GetUtcNow();
-        return Change(state => Selected(state, version, at, backup));
+        return Change(state => Selected(state, version, at, backup, state.Pending is { } pending && Same(pending.Version, version) ? pending.RequestedBy : null));
     }
 
     /// <summary>
@@ -263,7 +263,7 @@ public sealed class UpdateVersionStore
         {
             if (!SameRequest(state.Pending, expected)) return state;
             selected = true;
-            return Selected(state, version, at, backup);
+            return Selected(state, version, at, backup, expected.RequestedBy);
         });
         return selected;
     }
@@ -291,11 +291,12 @@ public sealed class UpdateVersionStore
         return dropped;
     }
 
-    private static UpdateState Selected(UpdateState state, UpdateVersion version, DateTimeOffset at, string? backup)
+    private static UpdateState Selected(UpdateState state, UpdateVersion version, DateTimeOffset at, string? backup, string? selectedBy)
         => state with
         {
             Previous = Same(state.Current, version) ? state.Previous : state.Current,
             Current = version.ToString(),
+            SelectedBy = selectedBy,
             Trial = new UpdateTrial(version.ToString(), at, 0, backup),
             Pending = null,
         };
@@ -328,7 +329,7 @@ public sealed class UpdateVersionStore
             if (current.Installed is not null && UpdateVersion.TryParse(current.Current, out var selected) && installed > selected)
             {
                 dropped = current.Current;
-                return current with { Current = null, Previous = null, Trial = null, Installed = installed.ToString() };
+                return current with { Current = null, SelectedBy = null, Previous = null, Trial = null, Installed = installed.ToString() };
             }
 
             return current with { Installed = installed.ToString() };
@@ -482,6 +483,7 @@ public sealed class UpdateVersionStore
             return state with
             {
                 Current = state.Previous,
+                SelectedBy = null,
                 Previous = null,
                 Trial = null,
                 RollingBack = trial.Backup is null ? state.RollingBack : new UpdateRollback(trial, at, reason),

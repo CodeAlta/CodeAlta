@@ -44,8 +44,8 @@ becomes a session the person watches and approves.
 | Machine | Server | Node |
 | --- | --- | --- |
 | **Mac mini** (always on) | `altaserver install` as a LaunchDaemon, or as a LaunchAgent of the user | A LaunchAgent of the user who owns the credentials. The user must stay logged in (automatic login conflicts with FileVault: the guide explains the choice) |
-| **Ubuntu server** | A systemd unit (`Type=notify`) as user `codealta`, behind Tailscale Serve or Caddy | `systemd --user` of the user who owns the credentials, with lingering on (`loginctl enable-linger`) |
-| **Windows PC** | A Windows service | A task at logon of the user (not a Session 0 service, which does not see the user's credentials) |
+| **Ubuntu server** | `altaserver install`: `systemd --user` with lingering, or a system unit as user `codealta` (`--system`), behind Tailscale Serve or Caddy | `systemd --user` of the user who owns the credentials, with lingering on (`loginctl enable-linger`) |
+| **Windows PC** | `altaserver install`: a task at logon of the user (a Windows service later) | A task at logon of the user (not a Session 0 service, which does not see the user's credentials) |
 | **Raspberry Pi** or small NAS (Linux Arm64) | Fine for the server alone | Fine for light nodes |
 
 On every OS: **one node per OS user**; the server and a node can share a machine, as two OS users, so that the node's
