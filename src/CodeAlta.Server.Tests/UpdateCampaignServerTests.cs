@@ -36,6 +36,32 @@ public sealed class UpdateCampaignServerTests
         Assert.AreEqual(1, (await fleet.Store.ListUpdateCampaignsAsync(fleet.Organization, 100)).Count(static campaign => FleetUpdateCampaignStates.IsActive(campaign.State)));
     }
 
+    [TestMethod]
+    public async Task ANodeOfflineIsAskedWhenItReconnectsAfterManyNewerCampaigns()
+    {
+        await using var fleet = await TestFleet.StartAsync(nodes: 1);
+        var campaign = await fleet.CreateCampaignAsync("4.0.2");
+        await fleet.TickAsync();
+        await fleet.TickAsync();
+        Assert.AreEqual(FleetUpdateCampaignStates.PartlyDone, (await fleet.CampaignAsync(campaign.Id)).State, "the server updated; the node offline is pending");
+
+        // More newer campaigns than the history the desktop reads, none for this node.
+        var record = await fleet.Store.GetUpdateCampaignAsync(campaign.Id) ?? throw new InvalidOperationException("No campaign.");
+        for (var i = 1; i <= 25; i++)
+        {
+            fleet.Clock.Advance(TimeSpan.FromMinutes(1));
+            Assert.IsTrue(await fleet.Store.CreateUpdateCampaignAsync(record with
+            {
+                Id = $"later-{i}", Sequence = 100 + i, State = FleetUpdateCampaignStates.Cancelled, ServerState = FleetUpdateMachineStates.Cancelled,
+                CreatedAt = fleet.Clock.Now, UpdatedAt = fleet.Clock.Now,
+            }, [], null));
+        }
+
+        var node = await fleet.ConnectAsync(0);
+        await fleet.TickAsync();
+        Assert.AreEqual(campaign.Id, (await node.NextAsync(FleetServerMethods.UpdateInstruction, FleetServerJsonContext.Default.FleetUpdateInstruction)).CampaignId);
+    }
+
     /// <summary>The self-update of the server, faked: it records what it was asked, and runs the version, fails, or rolls back.</summary>
     private sealed class FakeServer(TestClock clock)
     {

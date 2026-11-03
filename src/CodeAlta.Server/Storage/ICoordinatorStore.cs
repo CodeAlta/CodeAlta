@@ -214,6 +214,16 @@ public interface ICoordinatorStore : IAsyncDisposable
     /// <returns>The campaigns.</returns>
     ValueTask<IReadOnlyList<UpdateCampaignRecord>> ListUpdateCampaignsAsync(string organizationId, int limit, CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// Lists the update campaigns of an organization that still have work, however old, the newest first: the active ones
+    /// (scheduled or updating), and the partly done ones with a machine not done with them or whose machines all run the
+    /// version (their next step makes them done).
+    /// </summary>
+    /// <param name="organizationId">The organization.</param>
+    /// <param name="cancellationToken">Cancels the operation.</param>
+    /// <returns>The campaigns.</returns>
+    ValueTask<IReadOnlyList<UpdateCampaignRecord>> ListOutstandingUpdateCampaignsAsync(string organizationId, CancellationToken cancellationToken = default);
+
     /// <summary>Gets an update campaign.</summary>
     /// <param name="campaignId">The campaign.</param>
     /// <param name="cancellationToken">Cancels the operation.</param>

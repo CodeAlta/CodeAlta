@@ -583,6 +583,19 @@ public sealed class SqliteCoordinatorStore : ICoordinatorStore
     }
 
     /// <inheritdoc />
+    public ValueTask<IReadOnlyList<UpdateCampaignRecord>> ListOutstandingUpdateCampaignsAsync(string organizationId, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(organizationId);
+        // A partly done campaign has work while a machine is not done with it, or once every machine runs the version (its
+        // next step makes it done).
+        return ReadAsync(connection => QueryList(connection, null, CampaignColumns + " FROM update_campaigns WHERE organization_id = $org " +
+            "AND (state IN ('scheduled', 'updating_nodes', 'updating_server') OR state = 'partly_done' AND (" +
+            "EXISTS (SELECT 1 FROM update_campaign_machines AS m WHERE m.campaign_id = update_campaigns.id AND m.state IN ('pending', 'instructed', 'waiting', 'downloading', 'switching')) " +
+            "OR NOT EXISTS (SELECT 1 FROM update_campaign_machines AS m WHERE m.campaign_id = update_campaigns.id AND m.state NOT IN ('updated', 'superseded')))) " +
+            "ORDER BY created_at DESC, id DESC", ReadCampaign, ("$org", organizationId)), cancellationToken);
+    }
+
+    /// <inheritdoc />
     public ValueTask<UpdateCampaignRecord?> GetUpdateCampaignAsync(string campaignId, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrEmpty(campaignId);
