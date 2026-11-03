@@ -43,7 +43,8 @@ internal static class NodeExecutableLocator
         ArgumentNullException.ThrowIfNull(exists);
         if (string.IsNullOrWhiteSpace(processPath)) return null;
         // The name after the last separator, '/' or '\', as FindStore reads a path whatever the OS.
-        var fileName = System.IO.Path.GetFileNameWithoutExtension(processPath[(processPath.LastIndexOfAny(['/', '\\']) + 1)..]);
+        var leaf = processPath[(processPath.LastIndexOfAny(['/', '\\']) + 1)..];
+        var fileName = System.IO.Path.GetFileNameWithoutExtension(leaf);
         if (string.Equals(fileName, "dotnet", StringComparison.OrdinalIgnoreCase))
         {
             return string.IsNullOrWhiteSpace(assemblyPath) ? null : new NodeExecutable(NodeExecutableKind.DotnetHost, processPath, [assemblyPath]);
@@ -52,7 +53,7 @@ internal static class NodeExecutableLocator
         var directory = System.IO.Path.GetDirectoryName(processPath);
         if (directory is not null && FindStore(processPath) is { } toolsRoot)
         {
-            var shim = System.IO.Path.Combine(toolsRoot, System.IO.Path.GetFileName(processPath));
+            var shim = System.IO.Path.Combine(toolsRoot, leaf);
             if (exists(shim)) return new NodeExecutable(NodeExecutableKind.ToolShim, shim, []);
             // .NET 10 writes the shim of a RID-specific tool on Windows as a batch file, with no app host beside it.
             if (processPath.EndsWith(".exe", StringComparison.OrdinalIgnoreCase))
