@@ -67,4 +67,13 @@ public interface IFleetPublicationSource
     /// <param name="cancellationToken">Cancels the read.</param>
     /// <returns>The sessions.</returns>
     ValueTask<IReadOnlyList<FleetLocalSession>> ReadSessionsAsync(CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Reads the sessions this instance gave away (moved to another machine): it no longer publishes their facts, but it
+    /// keeps publishing the statistics it counted of them while it owned them, which the machine that has them now leaves
+    /// out of its own. Their space, privacy, epoch and project are as they were here.
+    /// </summary>
+    /// <param name="cancellationToken">Cancels the read.</param>
+    /// <returns>The sessions; empty for an instance that moves none.</returns>
+    ValueTask<IReadOnlyList<FleetLocalSession>> ReadRetainedSessionsAsync(CancellationToken cancellationToken);
 }

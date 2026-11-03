@@ -669,5 +669,7 @@ public sealed partial class FleetConnectorTests
             => ValueTask.FromResult(new FleetMachineInventory("Mac mini", "macos", "arm64", "4.0.0", ["moves"], null, ["anthropic"]));
 
         public ValueTask<IReadOnlyList<FleetLocalSession>> ReadSessionsAsync(CancellationToken cancellationToken) => ValueTask.FromResult(Volatile.Read(ref _sessions));
+
+        public ValueTask<IReadOnlyList<FleetLocalSession>> ReadRetainedSessionsAsync(CancellationToken cancellationToken) => ValueTask.FromResult<IReadOnlyList<FleetLocalSession>>([]);
     }
 }
