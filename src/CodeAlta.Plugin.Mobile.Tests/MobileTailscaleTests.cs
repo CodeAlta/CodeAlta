@@ -81,5 +81,5 @@ public sealed class MobileTailscaleTests
         Assert.IsFalse(more.Calls.Contains("serve --https=2584 off"), "The user added a handler to the port: it is theirs too.");
     }
 
-    private static (string State, string? FixUrl) Of(MobileTailscaleStatus status) => (status.State, status.FixUrl);
+    private static (string State, string? FixUrl) Of(MobileProviderStatus status) => (status.State, status.FixUrl);
 }

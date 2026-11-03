@@ -21,10 +21,6 @@ internal sealed record MobileProviderStatus(string State, string? Url, string De
     internal static MobileProviderStatus Stopped { get; } = new("stopped", null, "The mobile view is not served.");
 }
 
-/// <summary>How the server of the view listens for a provider: on the loopback address, for a provider that publishes it.</summary>
-/// <param name="Port">The port of this computer.</param>
-internal sealed record MobileListen(int Port);
-
 /// <summary>What the plugin gives a provider.</summary>
 internal interface IMobileProviderHost
 {
@@ -53,20 +49,17 @@ internal interface IMobileProviderHost
 
 /// <summary>
 /// A way phones reach the view: Tailscale Serve, a Dev Tunnel. The plugin knows only the provider of the settings: it
-/// starts the server as the provider says, asks it to publish the view, and shows what it says.
+/// starts the server on the loopback address, asks the provider to publish it, and shows what it says.
 /// </summary>
 internal interface IMobileProvider : IAsyncDisposable
 {
     /// <summary>Gets the id of the provider, as the settings keep it: <c>tailscale</c>, <c>devtunnel</c>.</summary>
     string Id { get; }
 
-    /// <summary>How the server listens for the settings.</summary>
-    MobileListen Listen(MobileSettings settings);
-
     /// <summary>Why settings cannot work with this provider, or null: checked before they are saved.</summary>
     string? Refusal(MobileSettings settings) => null;
 
-    /// <summary>Publishes the view the server serves; called with the server listening as <see cref="Listen"/> says.</summary>
+    /// <summary>Publishes the view the server serves on the loopback address, at the port of the settings.</summary>
     /// <returns>What the provider does now.</returns>
     Task<MobileProviderStatus> PublishAsync(CancellationToken cancellationToken);
 

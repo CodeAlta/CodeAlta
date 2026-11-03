@@ -119,5 +119,5 @@ test("the paths of a session are encoded, and the project filter is a query of e
 
 test("a failure is told with the server's words, or with what to check when the computer was not reached", () => {
   assert.equal(failureText(new ApiError(400, "Bad."), "pc.ts.net"), "Bad.");
-  assert.match(failureText(new TypeError("Failed to fetch"), "pc.ts.net"), /connection to pc\.ts\.net failed.*Tailscale/);
+  assert.match(failureText(new TypeError("Failed to fetch"), "pc.ts.net"), /connection to pc\.ts\.net failed.*network of this phone/);
 });

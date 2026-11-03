@@ -23,7 +23,6 @@ type Notice = Readonly<{ text: string; intent: Intent }>;
 type ProviderPage = Readonly<{
   /** Its name: a brand as it is, or words of the page. */
   name: string;
-  translated?: boolean;
   help?: MessageKey;
   address: MessageKey;
   unserved: MessageKey;
@@ -99,7 +98,7 @@ export function MobileSettings({ api }: { api: MobileSettingsApi }) {
       aria-describedby={problem ? "mobile-settings-port-problem" : undefined} inputClassName="mobile-settings-port"
       onValueChange={(_value, text) => onEdit(text)} onKeyDown={enter} />;
   const portNotice = (portProblem || httpsProblem) && <p id="mobile-settings-port-problem" className="settings-field-help" role="alert">{t("A port is a number from 1024 to 65535.")}</p>;
-  const name = (id: string) => { const of = pageOf(id); return of.translated ? t(of.name as MessageKey) : of.name; };
+  const name = (id: string) => pageOf(id).name;
   // The address card follows the provider chosen on the page; until it is applied, the address of the other provider is not this one.
   const applied = provider === settings.provider.id;
   return <div className="settings-grid mobile-settings">

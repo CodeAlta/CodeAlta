@@ -32,7 +32,7 @@ public sealed class MobileDevTunnelTests
             .Answer("port create old-tunnel.euw -p 2584 --protocol http", 1, "Error: Forbidden.\nRequest ID: 1")
             .Answer("show old-tunnel.euw", 0, "Tunnel ID : old-tunnel.euw");
 
-        var published = await new MobileDevTunnel(cli).PublishAsync(2584, "old-tunnel.euw", true, CancellationToken.None);
+        var published = await new MobileDevTunnel(cli).PublishAsync(2584, "old-tunnel.euw", CancellationToken.None);
 
         Assert.AreEqual(("serving", "bold-tree-x1y2.euw"), (published.Status.State, published.TunnelId), published.Status.Detail);
         CollectionAssert.Contains(cli.Calls.ToArray(), "create");
@@ -43,38 +43,20 @@ public sealed class MobileDevTunnelTests
     {
         var cli = new FakeDevTunnelCli();
 
-        var published = await new MobileDevTunnel(cli).PublishAsync(2584, null, true, CancellationToken.None);
+        var published = await new MobileDevTunnel(cli).PublishAsync(2584, null, CancellationToken.None);
 
         Assert.AreEqual(("serving", "https://bold-tree-x1y2-2584.euw.devtunnels.ms"), (published.Status.State, published.Status.Url), published.Status.Detail);
         Assert.AreEqual("bold-tree-x1y2.euw", published.TunnelId);
-        CollectionAssert.AreEqual(new[] { "user show", "create", "port create bold-tree-x1y2.euw -p 2584 --protocol http", "access list bold-tree-x1y2.euw --port-number 2584 --json --nologo" }, cli.Calls.ToArray());
+        CollectionAssert.AreEqual(new[] { "user show", "create", "port create bold-tree-x1y2.euw -p 2584 --protocol http" }, cli.Calls.ToArray(),
+            "a tunnel made now lets in its account alone: its access is not read");
         Assert.AreEqual("host bold-tree-x1y2.euw", cli.Hosts.Single().Args);
 
         // The tunnel kept is used again: its address does not change.
         cli.Calls.Clear();
         cli.Answer("port create bold-tree-x1y2.euw -p 2584 --protocol http", 1, "Conflict: the port already exists.");
-        var again = await new MobileDevTunnel(cli).PublishAsync(2584, "bold-tree-x1y2.euw", true, CancellationToken.None);
+        var again = await new MobileDevTunnel(cli).PublishAsync(2584, "bold-tree-x1y2.euw", CancellationToken.None);
         Assert.AreEqual("serving", again.Status.State, again.Status.Detail);
         CollectionAssert.DoesNotContain(cli.Calls.ToArray(), "create");
-    }
-
-    [TestMethod]
-    public async Task ATunnelOfBefore_ThatLetAnyoneIn_LetsItsAccountAloneIn()
-    {
-        var cli = new FakeDevTunnelCli().Answer("access reset bold-tree-x1y2.euw", 0, "Access control entries reset.");
-
-        var published = await new MobileDevTunnel(cli).PublishAsync(2584, "bold-tree-x1y2.euw", false, CancellationToken.None);
-
-        Assert.AreEqual(("serving", "bold-tree-x1y2.euw", true), (published.Status.State, published.TunnelId, published.Private), published.Status.Detail);
-        var calls = cli.Calls.ToList();
-        Assert.IsTrue(calls.IndexOf("access reset bold-tree-x1y2.euw") is >= 0 and var reset && reset < calls.IndexOf("port create bold-tree-x1y2.euw -p 2584 --protocol http"),
-            "the access is reset before the view is published");
-        CollectionAssert.DoesNotContain(calls, "create");
-
-        // A tunnel already reset is not reset again.
-        cli.Calls.Clear();
-        await new MobileDevTunnel(cli).PublishAsync(2584, "bold-tree-x1y2.euw", true, CancellationToken.None);
-        CollectionAssert.DoesNotContain(cli.Calls.ToArray(), "access reset bold-tree-x1y2.euw");
     }
 
     [TestMethod]
@@ -88,6 +70,9 @@ public sealed class MobileDevTunnelTests
         Assert.IsTrue(MobileDevTunnel.AnonymousIsDenied("""{"accessControlEntries":[{"type":"Anonymous","isInverse":true,"scopes":["connect"]}]}"""), "an inverse entry is about the users who signed in");
         Assert.IsTrue(MobileDevTunnel.AnonymousIsDenied("""{"accessControlEntries":[{"type":"Anonymous","scopes":["connect"],"expiration":"2001-01-01T00:00:00Z"}]}"""), "an expired allow");
         Assert.IsNull(MobileDevTunnel.AnonymousIsDenied("Error: unauthorized"));
+        Assert.IsFalse(MobileDevTunnel.AnonymousIsDenied("""{"accessControlEntries":[{"type":"Anonymous","isInherited":true,"scopes":["connect"]},{"type":"Anonymous","isDeny":true,"scopes":["connect"],"expiration":"2999-01-01T00:00:00Z"}]}"""),
+            "a deny that ends is not a closed port");
+        Assert.IsTrue(MobileDevTunnel.AnonymousIsDenied("""{"accessControlEntries":[]}""" + "\nA new version {1.2} is available."), "what the command line writes after the JSON is left");
     }
 
     [TestMethod]
@@ -98,35 +83,29 @@ public sealed class MobileDevTunnelTests
         var open = """{"accessControlEntries":[{"type":"Anonymous","isDeny":false,"isInherited":true,"subjects":[],"scopes":["connect"]}]}""";
         var cli = new FakeDevTunnelCli().Answer(list, 0, open);
 
-        var published = await new MobileDevTunnel(cli).PublishAsync(2584, "bold-tree-x1y2.euw", true, CancellationToken.None);
+        var published = await new MobileDevTunnel(cli).PublishAsync(2584, "bold-tree-x1y2.euw", CancellationToken.None);
 
         Assert.AreEqual("serving", published.Status.State, published.Status.Detail);
         CollectionAssert.Contains(cli.Calls.ToArray(), deny, "anonymous visitors are denied on the port before it is hosted");
         Assert.AreEqual(1, cli.Hosts.Count);
 
+        // A deny that does not close the port: it is not served.
+        cli = new FakeDevTunnelCli { DenyIgnored = true }.Answer(list, 0, open);
+        var still = await new MobileDevTunnel(cli).PublishAsync(2584, "bold-tree-x1y2.euw", CancellationToken.None);
+        Assert.AreEqual(("failed", 0), (still.Status.State, cli.Hosts.Count), still.Status.Detail);
+        StringAssert.Contains(still.Status.Detail, "did not close it");
+
         // A port that stays open is not served.
         cli = new FakeDevTunnelCli().Answer(list, 0, open).Answer(deny, 1, "Error: Forbidden.");
-        var refused = await new MobileDevTunnel(cli).PublishAsync(2584, "bold-tree-x1y2.euw", true, CancellationToken.None);
+        var refused = await new MobileDevTunnel(cli).PublishAsync(2584, "bold-tree-x1y2.euw", CancellationToken.None);
         Assert.AreEqual("failed", refused.Status.State);
         StringAssert.Contains(refused.Status.Detail, "may let anyone in");
         Assert.AreEqual(0, cli.Hosts.Count, "nothing is hosted");
 
         // A port closed already is left as it is.
         cli = new FakeDevTunnelCli();
-        await new MobileDevTunnel(cli).PublishAsync(2584, "bold-tree-x1y2.euw", true, CancellationToken.None);
+        await new MobileDevTunnel(cli).PublishAsync(2584, "bold-tree-x1y2.euw", CancellationToken.None);
         CollectionAssert.DoesNotContain(cli.Calls.ToArray(), deny);
-    }
-
-    [TestMethod]
-    public async Task ATunnelOfBefore_WhoseAccessCannotBeReset_IsReplacedByANewOne()
-    {
-        var cli = new FakeDevTunnelCli().Answer("access reset old-tunnel.euw", 1, "Error: Forbidden.");
-
-        var published = await new MobileDevTunnel(cli).PublishAsync(2584, "old-tunnel.euw", false, CancellationToken.None);
-
-        Assert.AreEqual(("serving", "bold-tree-x1y2.euw", true), (published.Status.State, published.TunnelId, published.Private), published.Status.Detail);
-        CollectionAssert.Contains(cli.Calls.ToArray(), "create");
-        CollectionAssert.DoesNotContain(cli.Calls.ToArray(), "port create old-tunnel.euw -p 2584 --protocol http", "a tunnel that may let anyone in serves nothing");
     }
 
     [TestMethod]
@@ -135,7 +114,7 @@ public sealed class MobileDevTunnelTests
         // GitHub revoked the token, while the command line still says it is signed in.
         var cli = new FakeDevTunnelCli().Answer("create", 1, "GitHub login required.\nRequest ID: 42");
 
-        var published = await new MobileDevTunnel(cli).PublishAsync(2584, null, true, CancellationToken.None);
+        var published = await new MobileDevTunnel(cli).PublishAsync(2584, null, CancellationToken.None);
 
         Assert.AreEqual("not-signed-in", published.Status.State, published.Status.Detail);
         Assert.IsTrue(MobileDevTunnel.NeedsSignIn("Error: Unauthorized"));
@@ -145,14 +124,14 @@ public sealed class MobileDevTunnelTests
     [TestMethod]
     public async Task WhatKeepsTheTunnelFromServing_IsSaid()
     {
-        var missing = await new MobileDevTunnel(new FakeDevTunnelCli { Installed = false }).PublishAsync(2584, null, true, CancellationToken.None);
+        var missing = await new MobileDevTunnel(new FakeDevTunnelCli { Installed = false }).PublishAsync(2584, null, CancellationToken.None);
         Assert.AreEqual(("not-installed", MobileDevTunnel.InstallUrl), (missing.Status.State, missing.Status.FixUrl));
 
         var cli = new FakeDevTunnelCli().Answer("user show", 0, "Not logged in.");
-        Assert.AreEqual("not-signed-in", (await new MobileDevTunnel(cli).PublishAsync(2584, null, true, CancellationToken.None)).Status.State);
+        Assert.AreEqual("not-signed-in", (await new MobileDevTunnel(cli).PublishAsync(2584, null, CancellationToken.None)).Status.State);
 
         cli = new FakeDevTunnelCli { HostLines = ["Error: the tunnel host failed: quota exceeded"] };
-        var failed = await new MobileDevTunnel(cli).PublishAsync(2584, null, true, CancellationToken.None);
+        var failed = await new MobileDevTunnel(cli).PublishAsync(2584, null, CancellationToken.None);
         Assert.AreEqual("failed", failed.Status.State);
         StringAssert.Contains(failed.Status.Detail, "quota exceeded");
         Assert.IsTrue(cli.Hosts.Single().Disposed, "a host that did not start is ended");
@@ -177,8 +156,7 @@ public sealed class MobileDevTunnelTests
         var status = await tab.InvokeAsync<MobileEmpty, MobileStatus>("mobile.status", new MobileEmpty());
         Assert.AreEqual("devtunnel", status.Provider.Id);
         StringAssert.StartsWith(status.ConnectUrl, url + "/#k=", "the code holds the address of the tunnel and the pairing token");
-        Assert.AreEqual(("devtunnel", "bold-tree-x1y2.euw", true), (fixture.State.Read().Mode, fixture.State.Read().TunnelId, fixture.State.Read().TunnelPrivate),
-            "the tunnel is kept for the next start, known to let its account alone in");
+        Assert.AreEqual(("devtunnel", "bold-tree-x1y2.euw"), (fixture.State.Read().Mode, fixture.State.Read().TunnelId), "the tunnel is kept for the next start");
 
         await page.InvokeAsync<MobileSettingsChange, MobileSettingsView>("mobile.settings.set", new MobileSettingsChange("tailscale", port, 4443));
         await WaitAsync(() => fixture.Plugin.Settings().Provider.State != "pending", "Tailscale is asked");
@@ -250,8 +228,6 @@ public sealed class MobileDevTunnelTests
     {
         public string Id => MobileDevTunnelProvider.ProviderId;
 
-        public MobileListen Listen(MobileSettings settings) => new(settings.Port);
-
         public Task<MobileProviderStatus> PublishAsync(CancellationToken cancellationToken) => Task.FromResult(new MobileProviderStatus("not-signed-in", null, host.Settings.Mode));
 
         public Task UnpublishAsync(CancellationToken cancellationToken) => Task.CompletedTask;
@@ -308,6 +284,12 @@ public sealed class MobileDevTunnelTests
 
         internal List<FakeHost> Hosts { get; } = [];
 
+        /// <summary>Whether a deny of anonymous access leaves the access of the port as it was.</summary>
+        internal bool DenyIgnored { get; init; }
+
+        // The access lists a deny closed.
+        private readonly HashSet<string> _denied = new(StringComparer.Ordinal);
+
         public bool IsInstalled => Installed;
 
         internal FakeDevTunnelCli Answer(string args, int exitCode, string output)
@@ -320,7 +302,16 @@ public sealed class MobileDevTunnelTests
         {
             var line = string.Join(' ', args);
             lock (Calls) Calls.Add(line);
-            if (_answers.TryGetValue(line, out var answer)) return Task.FromResult(answer);
+            if (_denied.Contains(line)) return Task.FromResult(new MobileCliResult(0, """{"accessControlEntries":[{"type":"Anonymous","isDeny":true,"scopes":["connect"]}]}"""));
+            if (_answers.TryGetValue(line, out var answer))
+            {
+                if (answer.ExitCode == 0 && !DenyIgnored && line.StartsWith("access create ", StringComparison.Ordinal) && line.EndsWith("--anonymous --deny --nologo", StringComparison.Ordinal))
+                    _denied.Add(line.Replace("access create", "access list", StringComparison.Ordinal).Replace("--anonymous --deny --nologo", "--json --nologo", StringComparison.Ordinal));
+                return Task.FromResult(answer);
+            }
+
+            if (!DenyIgnored && line.StartsWith("access create ", StringComparison.Ordinal) && line.EndsWith("--anonymous --deny --nologo", StringComparison.Ordinal))
+                _denied.Add(line.Replace("access create", "access list", StringComparison.Ordinal).Replace("--anonymous --deny --nologo", "--json --nologo", StringComparison.Ordinal));
             if (line.StartsWith("access list ", StringComparison.Ordinal)) return Task.FromResult(new MobileCliResult(0, """{"accessControlEntries":[]}"""));
             return Task.FromResult(line.StartsWith("port ", StringComparison.Ordinal) || line.StartsWith("access create ", StringComparison.Ordinal)
                 ? new MobileCliResult(0, "") : new MobileCliResult(1, "unknown command: " + line));

@@ -45,54 +45,39 @@ internal sealed partial class MobileDevTunnel(IMobileDevTunnelCli cli, Action<st
     private static readonly TimeSpan Patience = TimeSpan.FromSeconds(30);
 
     /// <summary>
-    /// What a publication gave: the state, the tunnel to keep in the settings and whether it lets in its account alone, the host process
-    /// that serves it, and whether the tunnel was given the port (to take it off when the view moves to another one, even when the host
-    /// did not start).
+    /// What a publication gave: the state, the tunnel to keep in the settings, the host process that serves it, and whether the tunnel
+    /// was given the port (to take it off when the view moves to another one, even when the host did not start).
     /// </summary>
-    internal sealed record Published(MobileProviderStatus Status, string? TunnelId, bool Private, IMobileHostedProcess? Host, bool HasPort = false);
+    internal sealed record Published(MobileProviderStatus Status, string? TunnelId, IMobileHostedProcess? Host, bool HasPort = false);
 
     /// <summary>
-    /// Publishes <c>http://127.0.0.1:{port}</c>: checks the command line and the sign-in, makes the tunnel when there is none, takes the
-    /// anonymous access off a tunnel kept that may have it, gives it the port (a tunnel kept that is gone, or that this account cannot
-    /// change, refuses it: a new one is made), and hosts it until the process of the outcome is disposed.
+    /// Publishes <c>http://127.0.0.1:{port}</c>: checks the command line and the sign-in, gives the port to the tunnel kept (one that is
+    /// gone, or that this account cannot change, refuses it), or else to a new one, keeps anonymous visitors out of the port, and hosts the
+    /// tunnel until the process of the outcome is disposed.
     /// </summary>
     /// <param name="port">The port of the plugin's server on the loopback address.</param>
     /// <param name="tunnelId">The tunnel the settings keep, or null.</param>
-    /// <param name="tunnelPrivate">Whether that tunnel is known to let in its account alone.</param>
     /// <param name="cancellationToken">Stops the work.</param>
-    internal async Task<Published> PublishAsync(int port, string? tunnelId, bool tunnelPrivate, CancellationToken cancellationToken)
+    internal async Task<Published> PublishAsync(int port, string? tunnelId, CancellationToken cancellationToken)
     {
-        if (!cli.IsInstalled) return new(new("not-installed", null, "Install the Dev Tunnels command line (devtunnel) on this computer.", InstallUrl), tunnelId, tunnelPrivate, null);
+        if (!cli.IsInstalled) return new(new("not-installed", null, "Install the Dev Tunnels command line (devtunnel) on this computer.", InstallUrl), tunnelId, null);
         var user = await cli.RunAsync(["user", "show"], Patience, cancellationToken).ConfigureAwait(false);
-        if (!IsSignedIn(user)) return new(NotSignedIn, tunnelId, tunnelPrivate, null);
+        if (!IsSignedIn(user)) return new(NotSignedIn, tunnelId, null);
 
-        var made = false;
-        if (tunnelId is not null && !tunnelPrivate && !await MakePrivateAsync(tunnelId, cancellationToken).ConfigureAwait(false))
+        var added = tunnelId is null ? null : await AddPortAsync(tunnelId, port, cancellationToken).ConfigureAwait(false);
+        var made = tunnelId is null || added is not null;
+        if (made)
         {
-            // A tunnel of before that let anyone in, and whose access cannot be changed: it is left, and a new one is made.
-            log?.Invoke($"Mobile: the access of the Dev Tunnel {tunnelId} could not be reset; a new tunnel is made.");
-            tunnelId = null;
-        }
-
-        if (tunnelId is null)
-        {
+            // No tunnel yet, or the one kept refused the port (gone, or made with another account): a new one is made, once.
+            if (tunnelId is not null) log?.Invoke($"Mobile: the Dev Tunnel {tunnelId} refused the port; a new tunnel is made.");
             (tunnelId, var failure) = await CreateAsync(cancellationToken).ConfigureAwait(false);
-            if (failure is not null) return new(failure, null, false, null);
-            made = true;
-        }
-
-        var added = await AddPortAsync(tunnelId!, port, cancellationToken).ConfigureAwait(false);
-        if (added is not null && !made)
-        {
-            // The tunnel kept may be gone, or one this account cannot change (made with another account): a new one is made, once.
-            log?.Invoke($"Mobile: the Dev Tunnel {tunnelId} refused the port; a new tunnel is made.");
-            (tunnelId, var failure) = await CreateAsync(cancellationToken).ConfigureAwait(false);
-            if (failure is not null) return new(failure, null, false, null);
+            if (failure is not null) return new(failure, null, null);
             added = await AddPortAsync(tunnelId!, port, cancellationToken).ConfigureAwait(false);
         }
 
-        if (added is not null) return new(added, tunnelId, true, null);
-        if (await DenyAnonymousAsync(tunnelId!, port, cancellationToken).ConfigureAwait(false) is { } open) return new(open, tunnelId, true, null, HasPort: true);
+        if (added is not null) return new(added, tunnelId, null);
+        // A tunnel made now lets in its account alone; a tunnel kept may let anyone in (made by a CodeAlta of before).
+        if (!made && await DenyAnonymousAsync(tunnelId!, port, cancellationToken).ConfigureAwait(false) is { } open) return new(open, tunnelId, null, HasPort: true);
 
         var host = cli.Start(["host", tunnelId!]);
         var url = await UrlAsync(host, port, cancellationToken).ConfigureAwait(false);
@@ -100,12 +85,12 @@ internal sealed partial class MobileDevTunnel(IMobileDevTunnelCli cli, Action<st
         {
             await host.DisposeAsync().ConfigureAwait(false);
             var output = url.Output.Trim();
-            if (NeedsSignIn(output)) return new(NotSignedIn, tunnelId, true, null, HasPort: true);
+            if (NeedsSignIn(output)) return new(NotSignedIn, tunnelId, null, HasPort: true);
             log?.Invoke("Mobile: devtunnel host said: " + output);
-            return new(new("failed", null, "devtunnel host did not start" + (output.Length > 0 ? ": " + Summary(output) : ".")), tunnelId, true, null, HasPort: true);
+            return new(new("failed", null, "devtunnel host did not start" + (output.Length > 0 ? ": " + Summary(output) : ".")), tunnelId, null, HasPort: true);
         }
 
-        return new(new("serving", url.Url, $"Dev Tunnels serves {url.Url} to the account signed in on this computer"), tunnelId, true, host, HasPort: true);
+        return new(new("serving", url.Url, $"Dev Tunnels serves {url.Url} to the account signed in on this computer"), tunnelId, host, HasPort: true);
     }
 
     // Makes a tunnel, which lets in its account alone: its id, or why there is none.
@@ -117,49 +102,51 @@ internal sealed partial class MobileDevTunnel(IMobileDevTunnelCli cli, Action<st
         return (null, Failed("devtunnel create", created));
     }
 
-    // Resets the access of a tunnel to its default, its account alone: a tunnel made by a CodeAlta of before let anyone in.
-    private async Task<bool> MakePrivateAsync(string tunnelId, CancellationToken cancellationToken)
-    {
-        var reset = await cli.RunAsync(["access", "reset", tunnelId], Patience, cancellationToken).ConfigureAwait(false);
-        if (reset is { ExitCode: 0, TimedOut: false }) return true;
-        log?.Invoke($"Mobile: devtunnel access reset ended with {reset.ExitCode}: {reset.Output.Trim()}");
-        return false;
-    }
-
     // Makes sure no one reaches the port of the view without the account of the tunnel: what the access of the port says, and when it may
     // let anyone in (an allow of the tunnel it inherits, of a CodeAlta of before), a deny of anonymous access on the port, which wins over
-    // any allow. Null once it is closed; otherwise why it is not served.
+    // any allow, read again to be sure. Null once it is closed; otherwise why it is not served.
     private async Task<MobileProviderStatus?> DenyAnonymousAsync(string tunnelId, int port, CancellationToken cancellationToken)
     {
         var number = port.ToString(CultureInfo.InvariantCulture);
-        var listed = await cli.RunAsync(["access", "list", tunnelId, "--port-number", number, "--json", "--nologo"], Patience, cancellationToken).ConfigureAwait(false);
+        string[] list = ["access", "list", tunnelId, "--port-number", number, "--json", "--nologo"];
+        var listed = await cli.RunAsync(list, Patience, cancellationToken).ConfigureAwait(false);
         if (listed is { ExitCode: 0, TimedOut: false } && AnonymousIsDenied(listed.Output) == true) return null;
         log?.Invoke($"Mobile: the port {number} of the Dev Tunnel {tunnelId} may let anyone in: {listed.Output.Trim()}");
         var denied = await cli.RunAsync(["access", "create", tunnelId, "--port-number", number, "--anonymous", "--deny", "--nologo"], Patience, cancellationToken).ConfigureAwait(false);
-        if (denied is { ExitCode: 0, TimedOut: false }) return null;
-        var failed = Failed("devtunnel access create", denied);
-        return failed.State == "failed" ? failed with { Detail = "The Dev Tunnel may let anyone in, so it does not serve the page. " + failed.Detail } : failed;
+        const string Open = "The Dev Tunnel may let anyone in, so it does not serve the page.";
+        if (denied is not { ExitCode: 0, TimedOut: false })
+        {
+            var failed = Failed("devtunnel access create", denied);
+            return failed.State == "failed" ? failed with { Detail = Open + " " + failed.Detail } : failed;
+        }
+
+        var again = await cli.RunAsync(list, Patience, cancellationToken).ConfigureAwait(false);
+        if (again is { ExitCode: 0, TimedOut: false } && AnonymousIsDenied(again.Output) == true) return null;
+        log?.Invoke($"Mobile: the port {number} of the Dev Tunnel {tunnelId} is still open after the deny: {again.Output.Trim()}");
+        return new MobileProviderStatus("failed", null, Open + " devtunnel access create did not close it.");
     }
 
     /// <summary>
     /// Whether what <c>devtunnel access list --json</c> says keeps anonymous visitors out: true when no allow of anonymous access holds or
-    /// a deny of it does (a deny wins); false when one lets them in; null when it cannot be read.
+    /// a permanent deny of it does (a deny wins); false when one lets them in; null when it cannot be read. The JSON is the first value
+    /// of the output: what the command line writes after it (its errors) is left.
     /// </summary>
     internal static bool? AnonymousIsDenied(string output)
     {
         var start = output.IndexOf('{', StringComparison.Ordinal);
-        var end = output.LastIndexOf('}');
-        if (start < 0 || end < start) return null;
+        if (start < 0) return null;
         try
         {
-            using var document = JsonDocument.Parse(output.AsMemory(start, end - start + 1));
+            var reader = new Utf8JsonReader(System.Text.Encoding.UTF8.GetBytes(output[start..]), new JsonReaderOptions { AllowTrailingCommas = true });
+            using var document = JsonDocument.ParseValue(ref reader);
             if (!TryProperty(document.RootElement, "accessControlEntries", out var entries) || entries.ValueKind != JsonValueKind.Array) return null;
             bool allowed = false, denied = false;
             foreach (var entry in entries.EnumerateArray())
             {
                 if (!IsAnonymousConnect(entry)) continue;
-                if (TryProperty(entry, "isDeny", out var deny) && deny.ValueKind == JsonValueKind.True) denied = true;
-                else allowed = true;
+                if (!TryProperty(entry, "isDeny", out var deny) || deny.ValueKind != JsonValueKind.True) allowed = true;
+                // A deny that ends lets the allows in again then: only a permanent one closes the port.
+                else if (!TryProperty(entry, "expiration", out var ends) || ends.ValueKind == JsonValueKind.Null) denied = true;
             }
 
             return denied || !allowed;
@@ -417,9 +404,6 @@ internal sealed class MobileDevTunnelProvider(IMobileDevTunnelCli cli, IMobilePr
     /// <inheritdoc />
     public string Id => ProviderId;
 
-    /// <inheritdoc />
-    public MobileListen Listen(MobileSettings settings) => new(settings.Port);
-
     private MobileDevTunnel Tunnel => new(cli, host.Log);
 
     /// <inheritdoc />
@@ -429,20 +413,10 @@ internal sealed class MobileDevTunnelProvider(IMobileDevTunnelCli cli, IMobilePr
         await UnpublishAsync(cancellationToken).ConfigureAwait(false);
         var settings = host.Settings;
         if (_published is { } before && before.Port != settings.Port) await RemovePortAsync(before, cancellationToken).ConfigureAwait(false);
-        MobileDevTunnel.Published published;
-        try
-        {
-            published = await Tunnel.PublishAsync(settings.Port, settings.TunnelId, settings.TunnelPrivate, cancellationToken).ConfigureAwait(false);
-        }
-        catch (Exception exception) when (exception is InvalidOperationException or IOException or System.ComponentModel.Win32Exception)
-        {
-            published = new(new MobileProviderStatus("failed", null, "Dev Tunnels could not be asked: " + exception.Message), settings.TunnelId, settings.TunnelPrivate, null);
-        }
+        var published = await Tunnel.PublishAsync(settings.Port, settings.TunnelId, cancellationToken).ConfigureAwait(false);
 
         // The tunnel made now is kept: its address, which phones keep, stays the same at the next start.
-        if (published.TunnelId != settings.TunnelId || published.Private != settings.TunnelPrivate)
-            await host.SaveAsync(kept => kept with { TunnelId = published.TunnelId, TunnelPrivate = published.Private }).ConfigureAwait(false);
-        host.Log($"Mobile: {published.Status.Detail}");
+        if (published.TunnelId != settings.TunnelId) await host.SaveAsync(kept => kept with { TunnelId = published.TunnelId }).ConfigureAwait(false);
         if (published.HasPort) _published = (published.TunnelId!, settings.Port);
         if (published.Host is { } hosted)
         {

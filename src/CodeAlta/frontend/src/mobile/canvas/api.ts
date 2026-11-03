@@ -26,7 +26,7 @@ export function createMobileApi(rpc: AltaRpc, options: Readonly<{ retryMilliseco
   };
   return {
     status: () => status("mobile.status"),
-    /** Asks Tailscale again. */
+    /** Asks the provider again. */
     retry: () => status("mobile.retry"),
     /** Runs an action of the provider (a sign-in): the status of now; what it does comes with the changes. */
     act: (action: string) => status("mobile.act", { action }),

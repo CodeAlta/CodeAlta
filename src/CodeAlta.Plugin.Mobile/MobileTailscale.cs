@@ -3,23 +3,7 @@ using System.Text.Json;
 
 namespace CodeAlta.Plugin.Mobile;
 
-/// <summary>What the plugin knows of Tailscale on this computer.</summary>
-/// <param name="State">
-/// <c>pending</c>, <c>not-installed</c>, <c>not-running</c> (not signed in, or stopped), <c>serve-disabled</c> (Serve or HTTPS
-/// certificates are not enabled on the tailnet), <c>port-taken</c> (the HTTPS port of the plugin serves something else),
-/// <c>serving</c>, <c>failed</c> or <c>stopped</c>.
-/// </param>
-/// <param name="Url">The address of the mobile view on the tailnet, while it is served.</param>
-/// <param name="Detail">A line for people.</param>
-/// <param name="FixUrl">The page that fixes the state, when there is one.</param>
-internal sealed record MobileTailscaleStatus(string State, string? Url, string Detail, string? FixUrl = null)
-{
-    internal static MobileTailscaleStatus Pending { get; } = new("pending", null, "Checking Tailscale…");
-
-    internal static MobileTailscaleStatus Stopped { get; } = new("stopped", null, "The mobile view is not served.");
-}
-
-/// <summary>What a run of the Tailscale command line gave.</summary>
+/// <summary>What a run of a command line gave.</summary>
 /// <param name="ExitCode">Its exit code.</param>
 /// <param name="Output">What it wrote, its errors after its output.</param>
 /// <param name="TimedOut">Whether it was stopped because it did not end in time: it waits for an answer then.</param>
@@ -40,7 +24,9 @@ internal interface IMobileTailscaleCli
 
 /// <summary>
 /// Publishes the mobile view on the tailnet with Tailscale Serve, on an HTTPS port of its own, and takes it off again. It
-/// never changes what is served on the other ports, and takes off only the handler that points at the plugin's server.
+/// never changes what is served on the other ports, and takes off only the handler that points at the plugin's server. Its states:
+/// <c>not-installed</c>, <c>not-running</c> (not signed in, or stopped), <c>serve-disabled</c> (Serve or HTTPS certificates are not
+/// enabled on the tailnet), <c>port-taken</c> (the HTTPS port serves something else), <c>serving</c> and <c>failed</c>.
 /// </summary>
 internal sealed class MobileTailscale(IMobileTailscaleCli cli)
 {
@@ -52,7 +38,7 @@ internal sealed class MobileTailscale(IMobileTailscaleCli cli)
     /// <param name="httpsPort">The HTTPS port of this computer on the tailnet.</param>
     /// <param name="cancellationToken">Stops the work.</param>
     /// <returns>What Tailscale did.</returns>
-    internal async Task<MobileTailscaleStatus> PublishAsync(int localPort, int httpsPort, CancellationToken cancellationToken)
+    internal async Task<MobileProviderStatus> PublishAsync(int localPort, int httpsPort, CancellationToken cancellationToken)
     {
         if (!cli.IsInstalled) return new("not-installed", null, "Install it on this computer and on the phone, and sign in to the same tailnet on both.", DownloadUrl);
         var (dnsName, notRunning) = await NodeAsync(cancellationToken).ConfigureAwait(false);
@@ -92,14 +78,14 @@ internal sealed class MobileTailscale(IMobileTailscaleCli cli)
 
     private static string HttpsOption(int httpsPort) => string.Create(CultureInfo.InvariantCulture, $"--https={httpsPort}");
 
-    private static MobileTailscaleStatus Serving(string dnsName, int httpsPort)
+    private static MobileProviderStatus Serving(string dnsName, int httpsPort)
     {
         var url = string.Create(CultureInfo.InvariantCulture, $"https://{dnsName}:{httpsPort}");
         return new("serving", url, $"Tailscale serves {url}");
     }
 
     // The name of this computer on the tailnet, or why there is none.
-    private async Task<(string? DnsName, MobileTailscaleStatus? NotRunning)> NodeAsync(CancellationToken cancellationToken)
+    private async Task<(string? DnsName, MobileProviderStatus? NotRunning)> NodeAsync(CancellationToken cancellationToken)
     {
         var result = await cli.RunAsync(["status", "--json"], cancellationToken).ConfigureAwait(false);
         if (result.TimedOut) return (null, new("failed", null, "tailscale status did not answer."));
@@ -121,7 +107,7 @@ internal sealed class MobileTailscale(IMobileTailscaleCli cli)
     }
 
     // What the HTTPS port serves now: the proxy of its root when it serves nothing else, and whether anything is configured on it.
-    private async Task<(string? Proxy, bool Used, MobileTailscaleStatus? Unread)> ServedAsync(int httpsPort, CancellationToken cancellationToken)
+    private async Task<(string? Proxy, bool Used, MobileProviderStatus? Unread)> ServedAsync(int httpsPort, CancellationToken cancellationToken)
     {
         var result = await cli.RunAsync(["serve", "status", "--json"], cancellationToken).ConfigureAwait(false);
         if (result.ExitCode != 0 || result.TimedOut) return (null, false, new("failed", null, $"tailscale serve status failed: {FirstLine(result.Output)}"));
@@ -200,9 +186,6 @@ internal sealed class MobileTailscaleProvider(IMobileTailscaleCli cli, IMobilePr
     public string Id => ProviderId;
 
     /// <inheritdoc />
-    public MobileListen Listen(MobileSettings settings) => new(settings.Port);
-
-    /// <inheritdoc />
     public string? Refusal(MobileSettings settings)
         => MobilePlugin.IsPort(settings.HttpsPort) ? null : $"The port on the tailnet must be a number from {MobilePlugin.MinimumPort} to {MobilePlugin.MaximumPort}.";
 
@@ -212,19 +195,9 @@ internal sealed class MobileTailscaleProvider(IMobileTailscaleCli cli, IMobilePr
         var settings = host.Settings;
         // What was published with other ports goes first.
         if (_published is { } published && published != (settings.Port, settings.HttpsPort)) await UnpublishAsync(cancellationToken).ConfigureAwait(false);
-        MobileTailscaleStatus status;
-        try
-        {
-            status = await new MobileTailscale(cli).PublishAsync(settings.Port, settings.HttpsPort, cancellationToken).ConfigureAwait(false);
-        }
-        catch (Exception exception) when (exception is InvalidOperationException or IOException or System.ComponentModel.Win32Exception)
-        {
-            status = new("failed", null, "Tailscale could not be asked: " + exception.Message);
-        }
-
+        var status = await new MobileTailscale(cli).PublishAsync(settings.Port, settings.HttpsPort, cancellationToken).ConfigureAwait(false);
         if (status.State == "serving") _published = (settings.Port, settings.HttpsPort);
-        host.Log($"Mobile: {status.Detail}");
-        return new MobileProviderStatus(status.State, status.Url, status.Detail, status.FixUrl);
+        return status;
     }
 
     /// <inheritdoc />

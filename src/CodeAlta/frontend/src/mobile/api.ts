@@ -48,7 +48,7 @@ export class SignedOutError extends Error {
 
 /** What the page tells of a failed call: its message, or what to check when the computer was not reached. */
 export function failureText(error: unknown, host: string): string {
-  if (error instanceof TypeError) return `the connection to ${host} failed. Check that this phone is on Tailscale, then try again.`;
+  if (error instanceof TypeError) return `the connection to ${host} failed. Check the network of this phone, then try again.`;
   return error instanceof Error ? error.message : String(error);
 }
 

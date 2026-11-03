@@ -28,21 +28,22 @@ export default function Canvas() {
   // What the actions reach is read when they run.
   const latest = useRef({ alta, t });
   latest.current = { alta, t };
-  const actions = useMemo<MobileCanvasActions>(() => ({
-    retry: async () => {
-      try { setStatus(await api.retry()); setFailure(null); }
+  const actions = useMemo<MobileCanvasActions>(() => {
+    // A call that answers with the status: the status shown, or why it failed.
+    const run = async (call: () => Promise<MobileStatus>) => {
+      try { setStatus(await call()); setFailure(null); }
       catch (error) { setFailure(error instanceof Error ? error.message : String(error)); }
-    },
-    copy: async text => {
-      try { await navigator.clipboard.writeText(text); return true; }
-      catch { latest.current.alta.host.notify(latest.current.t("The address could not be copied."), { tone: "warning" }); return false; }
-    },
-    openLink: url => latest.current.alta.host.openLink(url),
-    reload: () => setWatching(value => value + 1),
-    act: async action => {
-      try { setStatus(await api.act(action)); setFailure(null); }
-      catch (error) { setFailure(error instanceof Error ? error.message : String(error)); }
-    },
-  }), [api]);
+    };
+    return {
+      retry: () => run(api.retry),
+      copy: async text => {
+        try { await navigator.clipboard.writeText(text); return true; }
+        catch { latest.current.alta.host.notify(latest.current.t("The address could not be copied."), { tone: "warning" }); return false; }
+      },
+      openLink: url => latest.current.alta.host.openLink(url),
+      reload: () => setWatching(value => value + 1),
+      act: action => run(() => api.act(action)),
+    };
+  }, [api]);
   return <MobileCanvas status={status} failure={failure} actions={actions} />;
 }
