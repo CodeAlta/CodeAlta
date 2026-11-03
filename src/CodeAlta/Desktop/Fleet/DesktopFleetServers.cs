@@ -172,9 +172,10 @@ internal sealed class DesktopFleetServers : IAsyncDisposable
     /// <param name="ownerName">The name of the owner.</param>
     /// <param name="organizationName">The name of the organization; null for the server's default.</param>
     /// <param name="cancellationToken">Cancels the setup.</param>
-    /// <returns>The link, approved.</returns>
+    /// <returns>The link, approved, its device list pinned to the first entry this desktop signed.</returns>
     /// <exception cref="FleetServerException">The server refused the setup.</exception>
     /// <exception cref="HttpRequestException">The server does not answer.</exception>
+    /// <exception cref="IOException">The pin of the device list cannot be written: no link is made.</exception>
     public async Task<FleetServerLink> CreateServerAsync(Uri address, Uri setupAddress, string code, string ownerName, string? organizationName, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(setupAddress);
@@ -184,10 +185,26 @@ internal sealed class DesktopFleetServers : IAsyncDisposable
             ObjectDisposedException.ThrowIf(_disposed, this);
             RequireNoLink(address);
             var identity = Identity();
-            using var client = new FleetServerClient(setupAddress, identity, Handler);
-            var setup = await client.SetUpAsync(code, ownerName, _deviceName, organizationName, cancellationToken).ConfigureAwait(false);
+            var id = FleetServerLinkStore.NewId();
+            var folder = _store.LinkFolder(id);
+            SetupResponse setup;
+            try
+            {
+                // The first entry this desktop signs, and the organization the setup made, anchor the link before it exists:
+                // the connector then refuses a list of the server's making, from its first read on.
+                using var client = new FleetServerClient(setupAddress, identity, Handler);
+                setup = await client.SetUpAsync(code, ownerName, _deviceName, organizationName, Path.Combine(folder, FleetOrganizationDevices.PinFileName), cancellationToken)
+                    .ConfigureAwait(false);
+            }
+            catch
+            {
+                try { if (Directory.Exists(folder)) Directory.Delete(folder, recursive: true); }
+                catch (Exception exception) when (exception is IOException or UnauthorizedAccessException) { /* Nothing reads a folder without its link. */ }
+                throw;
+            }
+
             var now = DateTimeOffset.UtcNow;
-            var link = new FleetServerLink(FleetServerLinkStore.NewId(), FleetServerAddress.Format(address), setup.Organization.Id, setup.Organization.Name, identity.DeviceId,
+            var link = new FleetServerLink(id, FleetServerAddress.Format(address), setup.Organization.Id, setup.Organization.Name, identity.DeviceId,
                 FleetDeviceKinds.Controller, FleetServerLinkStates.Approved, now, now);
             _store.Save(link);
             await EnsureConnectionsAsync(cancellationToken).ConfigureAwait(false);

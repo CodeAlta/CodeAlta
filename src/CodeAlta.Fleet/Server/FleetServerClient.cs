@@ -135,7 +135,40 @@ public sealed partial class FleetServerClient : IDisposable
     /// <exception cref="ArgumentException">A name or the code is empty.</exception>
     /// <exception cref="FleetServerException">The server refused the setup: wrong or expired code, not from its machine, already set up.</exception>
     /// <exception cref="HttpRequestException">The server does not answer.</exception>
-    public Task<SetupResponse> SetUpAsync(string code, string ownerName, string deviceName, string? organizationName = null, CancellationToken cancellationToken = default)
+    public async Task<SetupResponse> SetUpAsync(string code, string ownerName, string deviceName, string? organizationName = null, CancellationToken cancellationToken = default)
+        => (await SetUpCoreAsync(code, ownerName, deviceName, organizationName, cancellationToken).ConfigureAwait(false)).Response;
+
+    /// <summary>
+    /// Sets a server up with its one-time code (<see cref="SetUpAsync(string, string, string, string?, CancellationToken)"/>), then pins
+    /// the device list of the link to the first entry this device signed and to the organization the setup made
+    /// (<see cref="FleetOrganizationDevices.Anchor"/>) before it returns: no list the server gives later, the first one
+    /// this device reads included, can start with another entry or name another organization.
+    /// </summary>
+    /// <param name="code">The setup code (<c>altaserver setup-code</c>).</param>
+    /// <param name="ownerName">The name of the owner.</param>
+    /// <param name="deviceName">The name of this device.</param>
+    /// <param name="organizationName">The name of the organization; null for the owner's name.</param>
+    /// <param name="pinPath">The file of the pin in the folder of the link (<see cref="FleetOrganizationDevices.PinFileName"/>).</param>
+    /// <param name="cancellationToken">Cancels the call.</param>
+    /// <returns>The organization, the owner and this device.</returns>
+    /// <exception cref="ArgumentException">A name, the code or the path is empty.</exception>
+    /// <exception cref="FleetServerException">The server refused the setup, or answered another device than this one.</exception>
+    /// <exception cref="FleetDeviceListException">The link pinned another first entry already.</exception>
+    /// <exception cref="IOException">The pin cannot be written.</exception>
+    /// <exception cref="HttpRequestException">The server does not answer.</exception>
+    public async Task<SetupResponse> SetUpAsync(string code, string ownerName, string deviceName, string? organizationName, string pinPath, CancellationToken cancellationToken)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(pinPath);
+        var (entry, response) = await SetUpCoreAsync(code, ownerName, deviceName, organizationName, cancellationToken).ConfigureAwait(false);
+        if (response.Device.Id != DeviceId || string.IsNullOrEmpty(response.Organization.Id))
+            throw new FleetServerException(HttpStatusCode.OK, FleetServerException.HttpErrorCode, null, "The server answered the setup of another device, or no organization.");
+        // The root is the entry signed here, never one the server gives: its first list is checked against it like every later one.
+        FleetOrganizationDevices.Anchor(pinPath, FleetDeviceListEntries.Hash(entry), response.Organization.Id);
+        return response;
+    }
+
+    private async Task<(FleetSignedDeviceListEntry Entry, SetupResponse Response)> SetUpCoreAsync(string code, string ownerName, string deviceName, string? organizationName,
+        CancellationToken cancellationToken)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(code);
         ArgumentException.ThrowIfNullOrWhiteSpace(ownerName);
@@ -143,8 +176,9 @@ public sealed partial class FleetServerClient : IDisposable
         var key = PublicKey;
         var entry = Sign(new FleetDeviceListEntryPayload(FleetDeviceListEntryPayload.CurrentVersion, null, 1, null, FleetDeviceListOperations.Add, DeviceId, key,
             FleetDeviceKinds.Controller, null, DeviceId, Now()));
-        return SendAsync(HttpMethod.Post, "api/v1/setup", Body(new SetupRequest(code.Trim(), ownerName.Trim(), deviceName.Trim(), key, entry, organizationName?.Trim()),
-            ServerApiJsonContext.Default.SetupRequest), ServerApiJsonContext.Default.SetupResponse, cancellationToken);
+        var response = await SendAsync(HttpMethod.Post, "api/v1/setup", Body(new SetupRequest(code.Trim(), ownerName.Trim(), deviceName.Trim(), key, entry, organizationName?.Trim()),
+            ServerApiJsonContext.Default.SetupRequest), ServerApiJsonContext.Default.SetupResponse, cancellationToken).ConfigureAwait(false);
+        return (entry, response);
     }
 
     /// <summary>Makes an enrollment token for a machine; only a controller device may.</summary>
