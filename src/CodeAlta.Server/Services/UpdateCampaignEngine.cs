@@ -179,12 +179,13 @@ internal sealed class UpdateCampaignEngine(UpdateCampaignLimits limits)
     {
         ArgumentNullException.ThrowIfNull(machine);
         ArgumentNullException.ThrowIfNull(report);
+        // A node updated that rolled back after all (it went back to its previous version) is recorded so.
+        if (report.State == FleetUpdateMachineStates.RolledBack && machine.State == FleetUpdateMachineStates.Updated && report.CampaignId == machine.CampaignId)
+            return machine with { State = report.State, Running = report.Running, Message = Trim(report.Message), UpdatedAt = now };
+
         if (!FleetUpdateMachineStates.IsReported(report.State) || report.CampaignId != machine.CampaignId) return machine;
-        // A machine done with the campaign stays so; one that switched before a cancellation reached it is updated still,
-        // and one updated that rolled back after all is recorded so.
-        if (FleetUpdateMachineStates.IsTerminal(machine.State)
-            && !(report.State == FleetUpdateMachineStates.Updated && machine.State == FleetUpdateMachineStates.Cancelled)
-            && !(report.State == FleetUpdateMachineStates.RolledBack && machine.State == FleetUpdateMachineStates.Updated))
+        // A machine done with the campaign stays so; one that switched before a cancellation reached it is updated still.
+        if (FleetUpdateMachineStates.IsTerminal(machine.State) && !(report.State == FleetUpdateMachineStates.Updated && machine.State == FleetUpdateMachineStates.Cancelled))
             return machine;
         if (machine.State == report.State && machine.Running == report.Running && machine.Message == report.Message) return machine;
         return machine with { State = report.State, Running = report.Running, Message = Trim(report.Message), UpdatedAt = now };

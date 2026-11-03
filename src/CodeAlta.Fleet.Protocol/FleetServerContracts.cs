@@ -75,16 +75,15 @@ public static class FleetServerMethods
     /// <summary>The event of a campaign cancelled before the node switched (<see cref="FleetUpdateCancel"/>).</summary>
     public const string UpdateCancel = "update.cancel";
 
-    /// <summary>
-    /// The event of the update policy of the fleet (<see cref="FleetSignedUpdateDocument"/>: the signed
-    /// <see cref="FleetUpdatePolicy"/> as the server stores it and a controller device signed it, whatever its mode): sent
-    /// once a node connects, when the organization has one, and to every node online when an owner changes it. A node
-    /// keeps the latest it verified (by its sequence) and refuses what a policy it replaced would have allowed.
-    /// </summary>
-    public const string UpdatePolicy = "update.policy";
-
     /// <summary>Where the node stands in a campaign (<see cref="FleetUpdateReport"/>); the server records it for the campaign.</summary>
     public const string UpdateReport = "update.report";
+
+    /// <summary>
+    /// The event of the update policy of the fleet (<see cref="FleetSignedUpdateDocument"/>, the policy as its controller
+    /// device signed it, whatever its mode): sent to the nodes online when an owner changes it, and to each node that
+    /// connects. A node keeps the newest it accepted, by sequence, and refuses what a policy it superseded would allow.
+    /// </summary>
+    public const string UpdatePolicy = "update.policy";
 
     /// <summary>The kinds of <see cref="FleetDirectoryChange"/>.</summary>
     public static class ChangeKinds
