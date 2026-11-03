@@ -232,7 +232,7 @@ internal sealed class NodeApplication
                 await _error.WriteLineAsync($"altanode: the versions of {store.Root} could not be read: {exception.Message}").ConfigureAwait(false);
             }
 
-            if (store.Read().Current is not null) return await RunLauncherAsync(store).ConfigureAwait(false);
+            if (store.Read() is { } selected && (selected.Current is not null || selected.RollingBack is not null)) return await RunLauncherAsync(store).ConfigureAwait(false);
         }
 
         var (exitCode, restart) = await RunInProcessAsync(options, profile, listen, name, store).ConfigureAwait(false);

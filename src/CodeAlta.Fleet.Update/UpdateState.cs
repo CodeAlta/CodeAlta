@@ -21,6 +21,12 @@ public sealed record UpdateState
     /// <summary>Gets the switch to a staged version that waits (for an idle moment, a backup); null when none waits.</summary>
     public UpdatePending? Pending { get; init; }
 
+    /// <summary>
+    /// Gets the rollback whose backup is not restored yet: a launcher restores it before it starts any version, and starts
+    /// none while it cannot; null when none waits.
+    /// </summary>
+    public UpdateRollback? RollingBack { get; init; }
+
     /// <summary>Gets the versions rolled back on this machine, which an update skips unless it names them.</summary>
     public IReadOnlyList<UpdateBadVersion> Bad { get; init; } = [];
 
@@ -54,6 +60,16 @@ public sealed record UpdateTrial(string Version, DateTimeOffset SelectedAt, int 
 /// <param name="RequestedBy">Who asked: <c>local</c> (the owner on the machine) or what the fleet names.</param>
 public sealed record UpdatePending(string Version, DateTimeOffset RequestedAt, bool Now, string Phase, DateTimeOffset PhaseSince, int SessionsAtWork = 0,
     string? RequestedBy = null);
+
+/// <summary>
+/// A rollback whose backup is not restored yet. It is recorded with the move of the pointer and kept until the restore
+/// succeeds, so that a crash or a failed restore in between is taken up again at the next start.
+/// </summary>
+/// <param name="Trial">The trial rolled back, with its backup.</param>
+/// <param name="At">When it was rolled back.</param>
+/// <param name="Reason">Why, for a person.</param>
+/// <param name="Error">Why the last restore failed; null before a restore failed.</param>
+public sealed record UpdateRollback(UpdateTrial Trial, DateTimeOffset At, string Reason, string? Error = null);
 
 /// <summary>A version rolled back on this machine.</summary>
 /// <param name="Version">The version.</param>

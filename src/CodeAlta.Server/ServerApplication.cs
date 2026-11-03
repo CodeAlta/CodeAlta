@@ -225,7 +225,8 @@ public sealed class ServerApplication
                 await _error.WriteLineAsync($"altaserver: the versions of {store.Root} could not be read: {exception.Message}").ConfigureAwait(false);
             }
 
-            if (store.Read().Current is not null) return await RunLauncherAsync(paths, store).ConfigureAwait(false);
+            // A rollback whose database is not restored yet goes through the launcher too: it restores first, or starts nothing.
+            if (store.Read() is { } selected && (selected.Current is not null || selected.RollingBack is not null)) return await RunLauncherAsync(paths, store).ConfigureAwait(false);
         }
 
         CoordinatorServer server;
@@ -423,6 +424,12 @@ public sealed class ServerApplication
     private async Task WriteVersionsAsync(ServerPaths paths, string? runningVersion)
     {
         var state = new UpdateVersionStore(paths.VersionsRoot).Read();
+        if (state.RollingBack is { } rollback)
+        {
+            await _output.WriteLineAsync($"{rollback.Trial.Version} was rolled back, but the database copied before it ({rollback.Trial.Backup}) is not restored yet"
+                + $"{(rollback.Error is { } error ? ": " + error : "")}. altaserver run restores it before it starts the server.").ConfigureAwait(false);
+        }
+
         var installed = InstalledVersion();
         var running = runningVersion ?? state.Current ?? installed;
         if (running is null) return;

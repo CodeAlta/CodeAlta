@@ -111,6 +111,34 @@ public sealed class ServerUpdateTests
     }
 
     [TestMethod]
+    public async Task ARollbackWhoseBackupCannotBeRestoredDoesNotStartThePreviousVersion()
+    {
+        using var root = new TempDirectory();
+        var paths = new ServerPaths(Path.Combine(root.Path, "data"));
+        Directory.CreateDirectory(paths.DataRoot);
+        File.WriteAllText(paths.DatabasePath, "migrated by 99.0.0");
+        var store = new UpdateVersionStore(paths.VersionsRoot);
+        var target = UpdateVersion.Parse("99.0.0");
+        Stage(store, target);
+        store.Select(target, Path.Combine(root.Path, "missing.sqlite3"));
+        var runner = new RecordingRunner(0, crashFirst: true);
+        var app = Application(runner, out _, out var error);
+
+        Assert.AreNotEqual(0, await app.RunAsync(["run", "--data-root", paths.DataRoot]), error.ToString());
+
+        Assert.AreEqual(1, runner.Started.Count, "the previous version is not started on a database it may not read");
+        Assert.AreEqual("migrated by 99.0.0", File.ReadAllText(paths.DatabasePath));
+        StringAssert.Contains(error.ToString(), "could not be restored");
+        Assert.IsTrue(store.Read().IsBad(target));
+        Assert.AreEqual(UpdateLauncher.RestoreFailedExitCode, await app.RunAsync(["run", "--data-root", paths.DataRoot]), "the next run restores first, and still cannot");
+        Assert.AreEqual(1, runner.Started.Count, error.ToString());
+
+        var output = new StringWriter();
+        Assert.AreEqual(ServerExitCodes.Failure, await new ServerApplication(output, new StringWriter()).RunAsync(["status", "--data-root", paths.DataRoot]));
+        StringAssert.Contains(output.ToString(), "is not restored yet");
+    }
+
+    [TestMethod]
     public async Task Run_DoesNotHandOverWhileAnotherServerHoldsTheDataRoot()
     {
         using var root = new TempDirectory();

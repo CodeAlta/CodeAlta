@@ -175,14 +175,15 @@ public sealed class UpdateVersionStore
     /// <summary>
     /// Takes the switch that waits, when no process of the product runs (at start, or in a launcher between two
     /// versions): a staged version is selected on trial at once, since nothing has to drain; one that is not staged, or
-    /// already selected, is dropped.
+    /// already selected, is dropped. Nothing is taken while a rollback waits for its restore.
     /// </summary>
     /// <param name="product">The product.</param>
     /// <returns>The version selected, or null when none was.</returns>
     public UpdateVersion? TakePending(UpdateProduct product)
     {
         ArgumentNullException.ThrowIfNull(product);
-        if (Read().Pending is not { } pending) return null;
+        var state = Read();
+        if (state.Pending is not { } pending || state.RollingBack is not null) return null;
         if (!UpdateVersion.TryParse(pending.Version, out var version) || !IsStaged(version, product))
         {
             CancelPending($"{pending.Version} is not staged in {Root}.");
@@ -220,9 +221,13 @@ public sealed class UpdateVersionStore
         return confirmed;
     }
 
-    /// <summary>Rolls the version on trial back: the pointer returns to the previous version and the trial is marked bad.</summary>
+    /// <summary>
+    /// Rolls the version on trial back: the pointer returns to the previous version and the trial is marked bad. A trial
+    /// with a backup is recorded as <see cref="UpdateState.RollingBack"/> in the same write, until
+    /// <see cref="CompleteRollback"/> says that the backup is restored.
+    /// </summary>
     /// <param name="reason">Why, for a person.</param>
-    /// <returns>The trial rolled back (its backup is restored by the caller), or null when no version was on trial.</returns>
+    /// <returns>The trial rolled back, or null when no version was on trial.</returns>
     public UpdateTrial? RollBack(string reason)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(reason);
@@ -237,11 +242,38 @@ public sealed class UpdateVersionStore
                 Current = state.Previous,
                 Previous = null,
                 Trial = null,
+                RollingBack = trial.Backup is null ? state.RollingBack : new UpdateRollback(trial, at, reason),
                 Bad = [.. state.Bad.Where(bad => !string.Equals(bad.Version, trial.Version, StringComparison.OrdinalIgnoreCase)), new UpdateBadVersion(trial.Version, at, reason)],
                 LastOutcome = new UpdateOutcome(trial.Version, UpdateOutcomes.RolledBack, at, reason),
             };
         });
         return rolledBack;
+    }
+
+    /// <summary>Records why the restore of a rollback failed; the rollback stays, to be restored at the next start.</summary>
+    /// <param name="error">Why, for a person.</param>
+    /// <returns>The state.</returns>
+    public UpdateState RecordRestoreFailure(string error)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(error);
+        return Change(state => state.RollingBack is not { } rollback ? state : state with { RollingBack = rollback with { Error = error } });
+    }
+
+    /// <summary>Ends a rollback once its backup is restored.</summary>
+    /// <param name="trial">The trial of the rollback restored.</param>
+    /// <returns>Whether it was the rollback that waited.</returns>
+    public bool CompleteRollback(UpdateTrial trial)
+    {
+        ArgumentNullException.ThrowIfNull(trial);
+        var completed = false;
+        Change(state =>
+        {
+            if (state.RollingBack is not { } rollback || !string.Equals(rollback.Trial.Version, trial.Version, StringComparison.OrdinalIgnoreCase)
+                || rollback.Trial.SelectedAt != trial.SelectedAt) return state;
+            completed = true;
+            return state with { RollingBack = null };
+        });
+        return completed;
     }
 
     /// <summary>
