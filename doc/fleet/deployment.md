@@ -157,6 +157,11 @@ All signed (Authenticode, Apple notarization, NuGet signatures, cosign for image
   switches holds the server for ten minutes. A campaign is cancelled until the server's step; a node already asked is
   told, again at each connection, until it reports the campaign done (any final state). The node keeps the
   cancellation before it acknowledges it, also one that comes before the instruction, which then never starts there.
+  A cancellation is not signed, so it carries the signed manifest (or automatic policy) of its campaign: the node keeps
+  the cancellation of a campaign it never took until it accepts a newer manifest (or policy) from that server, which
+  makes that one impossible to take, and for good without a document that verifies. It never forgets one it
+  acknowledged: past its bounds (64 cancellations per server without a signed manifest, 256 with one), it neither keeps
+  nor acknowledges a new one.
   The server's own step is done only once its new version confirmed its trial (it ends as rolled back otherwise), and
   the campaign stays active until then: one campaign at a time is active, whoever starts it. A server stopped during
   its own step takes that step again at its start unless its self-update holds the switch.

@@ -122,6 +122,74 @@ public sealed class FleetUpdateAgentTests
     }
 
     [TestMethod]
+    public async Task AnAcknowledgedCancellationIsNeverPushedOutByOthers()
+    {
+        using var harness = new AgentHarness();
+        var agent = harness.Start();
+        var c1 = harness.Instruction(harness.Manifest(1, "c1", "4.0.2"));
+        Assert.AreEqual(FleetUpdateMachineStates.Cancelled, agent.CancelAndReport(LinkA, new FleetUpdateCancel("c1"))?.State, "acknowledged before its instruction");
+
+        // A server that turned hostile sends the cancellations of campaigns that never existed, to push that one out.
+        var acknowledged = 0;
+        for (var i = 0; i < 2 * FleetUpdateAgentLink.MaxCancelled; i++)
+        {
+            if (agent.CancelAndReport(LinkA, new FleetUpdateCancel($"made-up-{i}")) is not null) acknowledged++;
+        }
+
+        // Then it replays the signed manifest of the campaign cancelled: it never starts.
+        agent = harness.Restart(agent);
+        await harness.AcceptAsync(agent, LinkA, c1);
+        Assert.IsNull(agent.Current, "the cancellation acknowledged holds");
+        StringAssert.Contains(agent.Report(LinkA)?.Message, "cancelled");
+        Assert.AreEqual(0, harness.Applied.Count);
+        Assert.AreEqual(FleetUpdateAgentLink.MaxCancelled - 1, acknowledged, "past the bound, a cancellation is neither kept nor acknowledged");
+    }
+
+    [TestMethod]
+    public async Task ACancellationWithItsSignedDocumentIsKeptUntilANewerOneIsTaken()
+    {
+        using var harness = new AgentHarness();
+        var agent = harness.Start();
+        var c2 = harness.Instruction(harness.Manifest(2, "c2", "4.0.2"));
+        Assert.AreEqual(FleetUpdateMachineStates.Cancelled, agent.CancelAndReport(LinkA, null, new FleetUpdateCancel("c2", c2.Manifest), harness.DeviceList)?.State);
+        agent = harness.Restart(agent);
+        await harness.AcceptAsync(agent, LinkA, c2);
+        Assert.IsNull(agent.Current, "it never starts");
+        CollectionAssert.AreEqual(new[] { "c2" }, agent.CancellationsOf(LinkA).ToArray());
+
+        // Once a newer manifest is taken, that of c2 can no longer be: its cancellation is no longer kept.
+        await harness.AcceptAsync(agent, LinkA, harness.Instruction(harness.Manifest(3, "c3", "4.0.2")));
+        Assert.AreEqual(("c3", FleetUpdateMachineStates.Waiting), (agent.Current?.CampaignId, agent.Current?.State));
+        Assert.AreEqual(0, agent.CancellationsOf(LinkA).Count);
+        await harness.AcceptAsync(agent, LinkA, c2);
+        Assert.AreEqual("c3", agent.Current?.CampaignId);
+        StringAssert.Contains(harness.Said.Last(said => said.Report.CampaignId == "c2").Report.Message, "older than campaign 3");
+
+        // The cancellation of a campaign already behind takes no room.
+        Assert.IsNotNull(agent.CancelAndReport(LinkA, null, new FleetUpdateCancel("c1", harness.Instruction(harness.Manifest(1, "c1", "4.0.2")).Manifest), harness.DeviceList));
+        Assert.AreEqual(0, agent.CancellationsOf(LinkA).Count);
+
+        // An automatic campaign is kept with the sequence of its policy, until a newer policy is taken.
+        var automatic = harness.Automatic("auto-9", harness.Policy(7, FleetUpdateModes.Automatic), "4.1.0");
+        Assert.IsNotNull(agent.CancelAndReport(LinkA, null, new FleetUpdateCancel("auto-9", null, automatic.Policy), harness.DeviceList));
+        CollectionAssert.Contains(agent.CancellationsOf(LinkA).ToArray(), "auto-9");
+        await harness.AcceptPolicyAsync(agent, LinkA, harness.Owner.Sign(harness.Policy(8, FleetUpdateModes.Manual)));
+        Assert.AreEqual(0, agent.CancellationsOf(LinkA).Count);
+
+        // Cancellations without a document that verifies fill their own room, not the room of signed manifests.
+        using var stranger = new UpdateSigner();
+        var forged = harness.Instruction(harness.Manifest(9, "c9", "4.0.2"), stranger);
+        Assert.IsNotNull(agent.CancelAndReport(LinkA, null, new FleetUpdateCancel("c9", forged.Manifest), harness.DeviceList), "kept for good");
+        for (var i = 1; i < FleetUpdateAgentLink.MaxCancelled; i++) Assert.IsNotNull(agent.CancelAndReport(LinkA, new FleetUpdateCancel($"made-up-{i}")));
+        Assert.IsNull(agent.CancelAndReport(LinkA, new FleetUpdateCancel("made-up-more")), "full: neither kept nor acknowledged");
+        var c5 = harness.Instruction(harness.Manifest(5, "c5", "4.0.2"));
+        Assert.AreEqual(FleetUpdateMachineStates.Cancelled, agent.CancelAndReport(LinkA, null, new FleetUpdateCancel("c5", c5.Manifest), harness.DeviceList)?.State);
+        await harness.AcceptAsync(agent, LinkA, c5);
+        Assert.AreEqual("c3", agent.Current?.CampaignId, "c5 never starts");
+        Assert.AreEqual(FleetUpdateAgentLink.MaxCancelled + 1, harness.Restart(agent).CancellationsOf(LinkA).Count, "kept across a restart");
+    }
+
+    [TestMethod]
     public async Task ACancellationThatCannotBeKeptIsNotAcknowledged()
     {
         using var harness = new AgentHarness();

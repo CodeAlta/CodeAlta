@@ -345,10 +345,11 @@ public sealed class FleetUpdateAgent : IAsyncDisposable
                     links[previousLink] = (links.GetValueOrDefault(previousLink) ?? new FleetUpdateAgentLink()) with { Receipt = previous };
                 }
                 var current = links.GetValueOrDefault(linkId) ?? new FleetUpdateAgentLink();
-                // An automatic update brings its policy, the latest this node knows once verified.
-                links[linkId] = update.Automatic
+                // An automatic update brings its policy, the latest this node knows once verified. The cancellations of
+                // campaigns whose signed document can no longer be accepted are no longer needed.
+                links[linkId] = (update.Automatic
                     ? current with { PolicySequence = update.Sequence, Policy = instruction.Policy }
-                    : current with { Sequence = update.Sequence, CampaignId = update.CampaignId };
+                    : current with { Sequence = update.Sequence, CampaignId = update.CampaignId }).Pruned();
                 next = Accepted(links);
                 // The checkpoint is on disk before anything runs: one that is not kept would let this manifest, or an
                 // older one, through again after a restart.
@@ -470,7 +471,7 @@ public sealed class FleetUpdateAgent : IAsyncDisposable
 
             var links = new Dictionary<string, FleetUpdateAgentLink>(_state.Links, StringComparer.Ordinal)
             {
-                [linkId] = link with { Policy = signed, PolicySequence = policy.Sequence },
+                [linkId] = (link with { Policy = signed, PolicySequence = policy.Sequence }).Pruned(),
             };
             next = _state with { Links = links };
             // What the new policy no longer allows stops: an automatic update under a manual or pinned policy, another
@@ -551,19 +552,49 @@ public sealed class FleetUpdateAgent : IAsyncDisposable
     /// <summary>Takes the cancellation of a campaign: an update that waits is dropped, a switch that waits is withdrawn.</summary>
     /// <param name="link">The link of the server.</param>
     /// <param name="cancel">The cancellation.</param>
-    /// <param name="cancellationToken">Unused.</param>
+    /// <param name="cancellationToken">Cancels the read of the device list, which checks the document the cancellation carries.</param>
     /// <returns>A task that completes once it is taken.</returns>
-    public Task CancelAsync(FleetServerLink link, FleetUpdateCancel cancel, CancellationToken cancellationToken)
+    public async Task CancelAsync(FleetServerLink link, FleetUpdateCancel cancel, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(link);
-        Cancel(link.Id, cancel);
-        return Task.CompletedTask;
+        ArgumentNullException.ThrowIfNull(cancel);
+        FleetDeviceListState? devices = null;
+        FleetConnector? connector = null;
+        bool verify;
+        lock (_gate)
+        {
+            // Only the cancellation of a campaign never taken needs its document: the work of one that runs stops at once.
+            verify = (cancel.Manifest is not null || cancel.Policy is not null) && _loaded && ReceiptOf(link.Id, cancel.CampaignId) is null
+                && (_state.Links.GetValueOrDefault(link.Id)?.CancelledSigned.All(cancelled => cancelled.CampaignId != cancel.CampaignId) ?? true);
+            if (verify) connector = _connectors.GetValueOrDefault(link.Id);
+        }
+
+        if (verify)
+        {
+            connector ??= _options.Connector?.Invoke(link.Id);
+            try
+            {
+                devices = connector is null ? null : await ReadDevicesAsync(connector, cancellationToken).ConfigureAwait(false);
+            }
+            catch (FleetDeviceListException)
+            {
+                // Not verified: the cancellation is kept for good, within its bound.
+            }
+        }
+
+        CancelAndReport(link.Id, link.OrganizationId, cancel, devices);
     }
 
-    /// <summary>Takes the cancellation of a campaign.</summary>
+    /// <summary>Takes the cancellation of a campaign, without checking the document it carries.</summary>
     /// <param name="linkId">The link of the server.</param>
     /// <param name="cancel">The cancellation.</param>
     public void Cancel(string linkId, FleetUpdateCancel cancel) => CancelAndReport(linkId, cancel);
+
+    /// <summary>Takes the cancellation of a campaign without checking the document it carries; tests call it directly.</summary>
+    /// <param name="linkId">The link of the server.</param>
+    /// <param name="cancel">The cancellation.</param>
+    /// <returns>The report sent to the server, or null (see the other overload).</returns>
+    internal FleetUpdateReport? CancelAndReport(string linkId, FleetUpdateCancel cancel) => CancelAndReport(linkId, null, cancel, null);
 
     /// <summary>
     /// Takes the cancellation of a campaign, and acknowledges it to its server with a final state: cancelled, or how the
@@ -571,20 +602,32 @@ public sealed class FleetUpdateAgent : IAsyncDisposable
     /// campaign this node never took. The cancellation is kept on disk before it is acknowledged, also for a campaign
     /// this node has not taken (its instruction may come after it): that campaign never starts here. Tests call it directly.
     /// </summary>
+    /// <remarks>
+    /// A cancellation is not signed, so what the node keeps of it is bounded, and never forgotten once acknowledged. A
+    /// campaign this node accepted needs nothing more: the sequence of its manifest is behind the ones accepted, and its
+    /// receipt answers a replay (an automatic campaign's id is not signed: a server may send its policy under any id, and
+    /// only a newer policy stops that). A campaign never taken is kept with the sequence of its signed manifest or
+    /// automatic policy when the cancellation carries one that verifies, until a newer manifest or policy of that server
+    /// is accepted (none is needed when one was already); otherwise for good. Past the bounds of
+    /// <see cref="FleetUpdateAgentLink"/>, the cancellation is neither kept nor acknowledged: the server sends it again.
+    /// </remarks>
     /// <param name="linkId">The link of the server.</param>
+    /// <param name="organizationId">The organization of the server; null for the one of its device list.</param>
     /// <param name="cancel">The cancellation.</param>
+    /// <param name="devices">The device list of the server, to check the document the cancellation carries; null for none.</param>
     /// <returns>
     /// The report sent to the server; null while the checkpoint does not read or the cancellation could not be kept (the
     /// server sends it again: the work of the campaign stops meanwhile all the same).
     /// </returns>
-    internal FleetUpdateReport? CancelAndReport(string linkId, FleetUpdateCancel cancel)
+    internal FleetUpdateReport? CancelAndReport(string linkId, string? organizationId, FleetUpdateCancel cancel, FleetDeviceListState? devices)
     {
         ArgumentNullException.ThrowIfNull(linkId);
         ArgumentNullException.ThrowIfNull(cancel);
+        var signed = Verified(cancel, devices, organizationId);
         FleetUpdateAgentState next;
         StopWork? work = null;
         FleetUpdateReport? done = null;
-        bool active, kept;
+        bool active, kept, full = false;
         lock (_gate)
         {
             if (!Readable())
@@ -593,10 +636,7 @@ public sealed class FleetUpdateAgent : IAsyncDisposable
                 return null;
             }
 
-            var links = new Dictionary<string, FleetUpdateAgentLink>(_state.Links, StringComparer.Ordinal);
-            var link = links.GetValueOrDefault(linkId) ?? new FleetUpdateAgentLink();
-            links[linkId] = link.WithCancelled(cancel.CampaignId);
-            next = _state with { Links = links };
+            next = _state;
             active = _state.LinkId == linkId && _state.CampaignId == cancel.CampaignId && !FleetUpdateMachineStates.IsTerminal(_state.State);
             if (active)
             {
@@ -607,21 +647,39 @@ public sealed class FleetUpdateAgent : IAsyncDisposable
             }
             else
             {
-                done = ReceiptOf(linkId, cancel.CampaignId) is { } receipt && FleetUpdateMachineStates.IsTerminal(receipt.State) ? receipt
+                var receipt = ReceiptOf(linkId, cancel.CampaignId);
+                var link = _state.Links.GetValueOrDefault(linkId) ?? new FleetUpdateAgentLink();
+                done = receipt is not null && FleetUpdateMachineStates.IsTerminal(receipt.State) ? receipt
                     : link.Refusal is { } refusal && refusal.CampaignId == cancel.CampaignId ? refusal
                     : new FleetUpdateReport(cancel.CampaignId, FleetUpdateMachineStates.Cancelled, "", _options.Running.ToString(), "This machine had not taken the campaign.",
                         _options.Time.GetUtcNow());
                 // Sent again until the server hears it: kept once.
-                if (!link.Cancelled.Contains(cancel.CampaignId, StringComparer.Ordinal)) Commit(next);
+                if (receipt is null)
+                {
+                    var cancelled = link.WithCancelled(cancel.CampaignId, signed);
+                    full = cancelled is null;
+                    if (cancelled is not null && !ReferenceEquals(cancelled, link))
+                    {
+                        next = _state with { Links = new Dictionary<string, FleetUpdateAgentLink>(_state.Links, StringComparer.Ordinal) { [linkId] = cancelled } };
+                        Commit(next);
+                    }
+                }
             }
 
-            kept = Persisted();
+            kept = !full && Persisted();
             if (kept) _unkept.Remove((linkId, cancel.CampaignId));
-            else Unkept(linkId, cancel.CampaignId, inMemory: true);
+            else Unkept(linkId, cancel.CampaignId, inMemory: !full);
         }
 
         work?.Run(_options);
         if (active) _options.Log($"Campaign {cancel.CampaignId} was cancelled.");
+        if (full)
+        {
+            _options.Log($"The cancellation of campaign {cancel.CampaignId} is not kept, nor acknowledged: this node keeps as many cancellations of campaigns it never "
+                + "took from this server as it may, and forgets none of them.");
+            return null;
+        }
+
         if (!kept)
         {
             // No acknowledgement: the server keeps the cancellation due and sends it again.
@@ -641,9 +699,40 @@ public sealed class FleetUpdateAgent : IAsyncDisposable
 
     // Why an instruction of a campaign this node kept the cancellation of is refused, or null.
     private string? CancelledBefore(string linkId, string campaignId)
-        => _state.Links.GetValueOrDefault(linkId)?.Cancelled.Contains(campaignId, StringComparer.Ordinal) == true
-            ? $"campaign {campaignId} was cancelled before this machine took it"
+        => _state.Links.GetValueOrDefault(linkId)?.HasCancelled(campaignId) == true ? $"campaign {campaignId} was cancelled before this machine took it" : null;
+
+    // The sequence a controller signed for a cancelled campaign, from the document the cancellation carries, once it
+    // verifies against the device list of the server (as its instruction would); null otherwise.
+    private static FleetUpdateCancelledCampaign? Verified(FleetUpdateCancel cancel, FleetDeviceListState? devices, string? organizationId)
+    {
+        if (devices is null) return null;
+        var organization = organizationId ?? devices.OrganizationId;
+        if (cancel.Manifest is { } manifest)
+        {
+            return FleetUpdateDocuments.TryParseManifest(manifest.Payload, out var parsed, out _) && parsed.CampaignId == cancel.CampaignId
+                && FleetUpdateDocuments.TryVerifySigner(manifest, FleetUpdateDocuments.GetManifestSignedBytes(manifest.Payload), parsed.OrganizationId, parsed.SignerDeviceId, devices,
+                    organization, out _)
+                ? new FleetUpdateCancelledCampaign(cancel.CampaignId, parsed.Sequence, Automatic: false)
+                : null;
+        }
+
+        return cancel.Policy is { } policy && FleetUpdateDocuments.TryParsePolicy(policy.Payload, out var automatic, out _) && automatic.Mode == FleetUpdateModes.Automatic
+            && FleetUpdateDocuments.TryVerifySigner(policy, FleetUpdateDocuments.GetPolicySignedBytes(policy.Payload), automatic.OrganizationId, automatic.SignerDeviceId, devices,
+                organization, out _)
+            ? new FleetUpdateCancelledCampaign(cancel.CampaignId, automatic.Sequence, Automatic: true)
             : null;
+    }
+
+    /// <summary>Gets the campaigns of a server whose cancellation this node keeps; tests read it.</summary>
+    /// <param name="linkId">The link of the server.</param>
+    /// <returns>The campaigns.</returns>
+    internal IReadOnlyList<string> CancellationsOf(string linkId)
+    {
+        lock (_gate)
+        {
+            return _state.Links.GetValueOrDefault(linkId) is { } link ? [.. link.Cancelled, .. link.CancelledSigned.Select(static cancelled => cancelled.CampaignId)] : [];
+        }
+    }
 
     /// <summary>Looks at the instruction once: notes a switch that ended, or starts the update when its time came. The loop calls it; tests call it directly.</summary>
     /// <returns>The update started, or null.</returns>
@@ -1132,20 +1221,73 @@ internal sealed record FleetUpdateAgentLink
     public FleetUpdateReport? Refusal { get; init; }
 
     /// <summary>
-    /// Gets the campaigns of this server whose cancellation the node received, the last <see cref="MaxCancelled"/>: kept
-    /// before the cancellation is acknowledged, so that none of them starts, even one whose instruction comes after it.
+    /// Gets the campaigns of this server, never taken, whose cancellation the node acknowledged without a signed document
+    /// that verifies (<see cref="FleetUpdateCancel"/>): nothing says when their instruction could no longer be accepted, so
+    /// they are kept for good, at most <see cref="MaxCancelled"/> with the automatic ones of <see cref="CancelledSigned"/>.
+    /// Kept before the cancellation is acknowledged, so that none of them starts, even one whose instruction comes after it.
     /// </summary>
     public IReadOnlyList<string> Cancelled { get; init; } = [];
 
-    /// <summary>The most cancelled campaigns kept for one server.</summary>
+    /// <summary>
+    /// Gets the campaigns of this server, never taken, whose cancellation came with the signed manifest or automatic policy
+    /// of the campaign, verified: each is kept until that sequence can no longer be accepted (<see cref="Consumed"/>).
+    /// </summary>
+    public IReadOnlyList<FleetUpdateCancelledCampaign> CancelledSigned { get; init; } = [];
+
+    /// <summary>
+    /// The most cancellations kept for one server without a signed manifest: those of <see cref="Cancelled"/>, and those
+    /// of automatic campaigns (a server names an automatic campaign as it likes: the policy it carries does not sign its id).
+    /// </summary>
     public const int MaxCancelled = 64;
 
-    /// <summary>Gets this link with the cancellation of a campaign kept.</summary>
+    /// <summary>The most cancellations kept for one server with the signed manifest of their campaign.</summary>
+    public const int MaxCancelledManifests = 256;
+
+    /// <summary>Gets whether the node keeps the cancellation of a campaign.</summary>
     /// <param name="campaignId">The campaign.</param>
-    /// <returns>The link; this one when it keeps it already.</returns>
-    public FleetUpdateAgentLink WithCancelled(string campaignId)
-        => Cancelled.Contains(campaignId, StringComparer.Ordinal) ? this : this with { Cancelled = [.. Cancelled.Append(campaignId).TakeLast(MaxCancelled)] };
+    /// <returns>Whether it does.</returns>
+    public bool HasCancelled(string campaignId)
+        => Cancelled.Contains(campaignId, StringComparer.Ordinal) || CancelledSigned.Any(cancelled => cancelled.CampaignId == campaignId);
+
+    /// <summary>Gets whether the signed document of a campaign can no longer be accepted from this server: a newer one was.</summary>
+    /// <param name="cancelled">The campaign.</param>
+    /// <returns>Whether its sequence is behind the ones accepted.</returns>
+    public bool Consumed(FleetUpdateCancelledCampaign cancelled)
+    {
+        ArgumentNullException.ThrowIfNull(cancelled);
+        return cancelled.Automatic ? cancelled.Sequence < PolicySequence : cancelled.Sequence <= Sequence;
+    }
+
+    /// <summary>
+    /// Gets this link with the cancellation of a campaign kept: with the sequence of its signed document when it verified,
+    /// or for good. None is ever dropped to make room: past the bounds the cancellation is not kept.
+    /// </summary>
+    /// <param name="campaignId">The campaign.</param>
+    /// <param name="signed">What its verified document says; null when it came without one, or one that does not verify.</param>
+    /// <returns>The link (this one when nothing changes), or null when there is no room for it.</returns>
+    public FleetUpdateAgentLink? WithCancelled(string campaignId, FleetUpdateCancelledCampaign? signed)
+    {
+        if (signed is null) return HasCancelled(campaignId) ? this : Weak(this) < MaxCancelled ? this with { Cancelled = [.. Cancelled, campaignId] } : null;
+        if (CancelledSigned.Any(cancelled => cancelled.CampaignId == campaignId)) return this;
+        // A cancellation kept for good, now with its sequence, moves (a campaign id names one manifest).
+        var link = this with { Cancelled = [.. Cancelled.Where(id => id != campaignId)] };
+        if (link.Consumed(signed)) return link;
+        var room = signed.Automatic ? Weak(link) < MaxCancelled : link.CancelledSigned.Count(static cancelled => !cancelled.Automatic) < MaxCancelledManifests;
+        return room ? link with { CancelledSigned = [.. link.CancelledSigned, signed] } : null;
+
+        static int Weak(FleetUpdateAgentLink link) => link.Cancelled.Count + link.CancelledSigned.Count(static cancelled => cancelled.Automatic);
+    }
+
+    /// <summary>Gets this link without the cancellations whose signed document can no longer be accepted.</summary>
+    /// <returns>The link; this one when it keeps none of them.</returns>
+    public FleetUpdateAgentLink Pruned() => CancelledSigned.Any(Consumed) ? this with { CancelledSigned = [.. CancelledSigned.Where(cancelled => !Consumed(cancelled))] } : this;
 }
+
+/// <summary>A campaign whose cancellation a node keeps with the sequence a controller signed for it.</summary>
+/// <param name="CampaignId">The campaign.</param>
+/// <param name="Sequence">The sequence of its manifest, or of its automatic policy.</param>
+/// <param name="Automatic">Whether it is an automatic campaign.</param>
+internal sealed record FleetUpdateCancelledCampaign(string CampaignId, long Sequence, bool Automatic);
 
 /// <summary>What the agent keeps: the instruction it accepted, where it stands, and the sequences of each server.</summary>
 internal sealed record FleetUpdateAgentState
