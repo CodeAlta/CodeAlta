@@ -121,7 +121,7 @@ their own use, under their vendor's terms. So:
   its children, a change of provider, model tiers and fallbacks resolve only to account providers. An organization's
   policy can require account credentials for every automation, personal ones included.
 - **Organization providers**: an admin or a team maintainer defines a provider once (type, endpoint, models, budget).
-  Its key is the one secret the fleet distributes on purpose: the admin's console seals it to the keys of the machines
+  Its key is a secret of the organization ([secrets](secrets.md)): the admin's console seals it to the keys of the machines
   allowed to use it (taken from the signed device list); the server stores and relays only these sealed copies, and
   the machines keep them in their protected store. Rotation is a console action. With a gateway, each scope or
   automation gets its own virtual key, so costs and limits follow ownership.

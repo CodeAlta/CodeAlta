@@ -18,7 +18,7 @@ public sealed class SessionMoveFactsTests
 
     // The journal a session has on the machine it moved to, as the install writes it: its header written again for the project
     // of that machine, the records it had, a new state, then the move record and the note of the new folder.
-    private static JournalBuilder MovedTo(JournalBuilder journal, string moveId, string? from, string? to, DateTimeOffset at)
+    private static JournalBuilder MovedTo(JournalBuilder journal, string moveId, string? from, string? to, DateTimeOffset at, string? fromDevice = null, string? toDevice = null)
     {
         var moved = new JournalBuilder(journal.SessionId, journal.Provider);
         moved.Header(Time(0), projectRef: TargetProject, title: "A source");
@@ -28,14 +28,16 @@ public sealed class SessionMoveFactsTests
         }
 
         moved.State(at);
-        return Move(moved, moveId, from, to, at);
+        return Move(moved, moveId, from, to, at, fromDevice, toDevice);
     }
 
-    private static JournalBuilder Move(JournalBuilder journal, string moveId, string? from, string? to, DateTimeOffset at)
+    // The record the install writes: the machines by name for the people, and by device id for the machines.
+    private static JournalBuilder Move(JournalBuilder journal, string moveId, string? from, string? to, DateTimeOffset at, string? fromDevice = null, string? toDevice = null)
     {
         static string Name(string? name) => name is null ? "null" : JournalBuilder.Text(name);
+        var devices = (fromDevice is null ? "" : $"\"fromDevice\":{Name(fromDevice)},") + (toDevice is null ? "" : $"\"toDevice\":{Name(toDevice)},");
         return journal.AddRaw("codealta.sessionMoved",
-                $"{{\"moveId\":\"{moveId}\",\"from\":{Name(from)},\"to\":{Name(to)},\"oldWorkingFolder\":\"C:\\\\a\",\"newWorkingFolder\":\"C:\\\\b\",\"epoch\":2,\"time\":\"{JournalBuilder.Json(at)}\"}}",
+                $"{{\"moveId\":\"{moveId}\",\"from\":{Name(from)},\"to\":{Name(to)},{devices}\"oldWorkingFolder\":\"C:\\\\a\",\"newWorkingFolder\":\"C:\\\\b\",\"epoch\":2,\"time\":\"{JournalBuilder.Json(at)}\"}}",
                 at)
             .Add($"{{\"$type\":\"sessionUpdate\",\"kind\":\"Info\",\"message\":\"moved\",{journal.Envelope(at.AddSeconds(1), null)}");
     }
@@ -133,6 +135,82 @@ public sealed class SessionMoveFactsTests
         var onStudio = MovedTo(onMac, "m2", "Mac", "Studio", Time(50));
         SessionForkFactsTests.Turn(onStudio, "c1", 60, 16000, 4);
         CollectionAssert.AreEqual(new[] { "c1" }, SessionFactsReducerTests.Reduce(onStudio).Runs.Keys.ToArray());
+    }
+
+    [TestMethod]
+    public void ASessionThatComesBackToARenamedMachine_CountsThereWhatThatMachineDidBeforeItLeft()
+    {
+        // The desk is "Desk" when the session leaves it and "Studio" when it comes back: the device is the same.
+        var source = SessionForkFactsTests.Source();
+        var onDesk = SessionFactsReducerTests.CatchUp(source);
+        var onMac = MovedTo(source, "m1", "Desk", "Mac", Time(30), "desk-device", "mac-device");
+        SessionForkFactsTests.Turn(onMac, "b1", 40, 8000, 2);
+        var back = MovedTo(onMac, "m2", "Mac", "Studio", Time(50), "mac-device", "desk-device");
+        SessionForkFactsTests.Turn(back, "a4", 60, 16000, 4);
+
+        using var catchUp = new SessionCatchUp();
+        using var stream = back.ToStream();
+        var again = catchUp.CatchUp(back.SessionId, stream, onDesk.Cursor, long.MaxValue, CancellationToken.None);
+
+        Assert.IsTrue(again.Restarted);
+        CollectionAssert.AreEqual(new[] { "a4", "r1", "r2", "r3" }, again.Batch.Runs.Keys.Order().ToArray(), "What it did before it left is still its own, whatever it was called.");
+        Assert.AreEqual(1, Origins(again.Batch), "The session was created there.");
+        CollectionAssert.AreEqual(new[] { "b1" }, SessionFactsReducerTests.Reduce(onMac).Runs.Keys.ToArray());
+    }
+
+    [TestMethod]
+    public void AMachineRenamedBetweenTwoMoves_StillCountsOnlyItsOwnParts()
+    {
+        // Desk -> Mac -> Studio, and the Mac is renamed before it gives the session away: the Studio counts its own turn only.
+        var onMac = MovedTo(SessionForkFactsTests.Source(), "m1", "Desk", "Mac", Time(30), "desk-device", "mac-device");
+        SessionForkFactsTests.Turn(onMac, "b1", 40, 8000, 2);
+        var onStudio = MovedTo(onMac, "m2", "Mac mini", "Studio", Time(50), "mac-device", "studio-device");
+        SessionForkFactsTests.Turn(onStudio, "c1", 60, 16000, 4);
+        CollectionAssert.AreEqual(new[] { "c1" }, SessionFactsReducerTests.Reduce(onStudio).Runs.Keys.ToArray());
+
+        // And back on the Mac, under the name it has now: its turn counts, the Desk's and the Studio's do not.
+        var backOnMac = MovedTo(onStudio, "m3", "Studio", "Mac mini", Time(70), "studio-device", "mac-device");
+        SessionForkFactsTests.Turn(backOnMac, "b2", 80, 8000, 2);
+        CollectionAssert.AreEqual(new[] { "b1", "b2" }, SessionFactsReducerTests.Reduce(backOnMac).Runs.Keys.Order().ToArray());
+    }
+
+    [TestMethod]
+    public void MovesThatNameTheMachinesOnlyByName_AreReadAsTheyWere()
+    {
+        // A journal written before the device ids were recorded: names still tell the parts apart.
+        var onMac = MovedTo(SessionForkFactsTests.Source(), "m1", "Desk", "Mac", Time(30));
+        SessionForkFactsTests.Turn(onMac, "b1", 40, 8000, 2);
+        // The next move was written by a build that records the ids: the first one's names are all there is to follow.
+        var back = MovedTo(onMac, "m2", "Mac", "Desk", Time(50), "mac-device", "desk-device");
+        SessionForkFactsTests.Turn(back, "a4", 60, 16000, 4);
+
+        CollectionAssert.AreEqual(new[] { "a4", "r1", "r2", "r3" }, SessionFactsReducerTests.Reduce(back).Runs.Keys.Order().ToArray());
+        CollectionAssert.AreEqual(new[] { "b1" }, SessionFactsReducerTests.Reduce(onMac).Runs.Keys.ToArray());
+    }
+
+    [TestMethod]
+    public void ASessionMovedMoreThanTwoHundredAndFiftySixTimes_StillCountsOnlyTheLastMachinesParts()
+    {
+        // Two machines pass the session to each other 300 times; each part holds a turn. The Desk holds it at the end (an even count).
+        var journal = SessionForkFactsTests.Source();
+        const int moves = 300;
+        for (var move = 1; move <= moves; move++)
+        {
+            var toMac = move % 2 == 1;
+            journal = MovedTo(journal, "m" + move, toMac ? "Desk" : "Mac", toMac ? "Mac" : "Desk", Time(30 + move), toMac ? "desk-device" : "mac-device", toMac ? "mac-device" : "desk-device");
+            SessionForkFactsTests.Turn(journal, "t" + move, 30 + move, 1000, 0.1);
+        }
+
+        var runs = SessionFactsReducerTests.Reduce(journal).Runs.Keys.ToHashSet();
+
+        // The Desk wrote the turns before the first move and those after the even moves; the Mac wrote the others.
+        var expected = new HashSet<string> { "r1", "r2", "r3" };
+        for (var move = 2; move <= moves; move += 2)
+        {
+            expected.Add("t" + move);
+        }
+
+        CollectionAssert.AreEquivalent(expected.ToArray(), runs.ToArray());
     }
 
     [TestMethod]

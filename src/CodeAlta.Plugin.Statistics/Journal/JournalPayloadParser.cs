@@ -1581,7 +1581,7 @@ internal sealed class JournalPayloadParser
         return record;
     }
 
-    // The move of a session to another machine: its identifier and the names of the two machines.
+    // The move of a session to another machine: its identifier, and the two machines by name and by device id.
     private MoveRecord? ParseMoved(ref Utf8JsonReader reader)
     {
         var record = new MoveRecord();
@@ -1604,7 +1604,8 @@ internal sealed class JournalPayloadParser
 
             while (reader.Read() && reader.TokenType == JsonTokenType.PropertyName)
             {
-                var field = reader.ValueTextEquals("moveId"u8) ? 1 : reader.ValueTextEquals("from"u8) ? 2 : reader.ValueTextEquals("to"u8) ? 3 : 0;
+                var field = reader.ValueTextEquals("moveId"u8) ? 1 : reader.ValueTextEquals("from"u8) ? 2 : reader.ValueTextEquals("to"u8) ? 3
+                    : reader.ValueTextEquals("fromDevice"u8) ? 4 : reader.ValueTextEquals("toDevice"u8) ? 5 : 0;
                 if (field == 0)
                 {
                     if (!SkipValue(ref reader))
@@ -1630,7 +1631,9 @@ internal sealed class JournalPayloadParser
                 {
                     case 1: record.MoveId = value; break;
                     case 2: record.From = value; break;
-                    default: record.To = value; break;
+                    case 3: record.To = value; break;
+                    case 4: record.FromDevice = value; break;
+                    default: record.ToDevice = value; break;
                 }
             }
 

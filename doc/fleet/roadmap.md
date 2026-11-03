@@ -118,6 +118,8 @@ The coordinator, for one person or a household.
 - **Replicas and takeover** for lost laptops (S8).
 - **The phone through the server** (the browser channel decided in its sub-plan).
 - **Budgets and alerts**, **health** notifications, basic **audit**.
+- **Secrets and variables** ([secrets](secrets.md)): the local store on every host and `${secret:NAME}` references in
+  the configuration, a person's secrets sealed to their machines, masking, **Settings > Secrets**.
 - Setup assistant: **Create my server** (this computer, over SSH, a VM), Tailscale and domain recipes.
 
 M3 ships as three releases, each usable on its own:
@@ -150,6 +152,8 @@ Risks: key management UX (recovery, new devices); the phone's trust model; the s
 - **Managed spaces**; **shares** (snapshot, live, co-drive, fork for), with authorship in co-driven sessions.
 - **Project channels**, mentions, cards, **handoffs** with notes written by the session's agent.
 - **Notifications** routed by presence (desktop, Web Push).
+- **Secrets of teams and the organization** and **environments** with their approvals, host-only secrets, audit of
+  their use ([secrets](secrets.md)).
 - **Signed policies** and the kill switch; **audit** viewer and exports; profiles and avatars.
 
 Done when: S11, S12 and S14 to S21 work; deprovisioning a person stops their work on team machines and transfers what

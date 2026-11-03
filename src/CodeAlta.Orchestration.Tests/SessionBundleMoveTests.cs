@@ -38,7 +38,7 @@ public sealed class SessionBundleMoveTests
             machines.Write(machines.SourceProject, "notes.md", "untracked\n");
             machines.Write(machines.SourceProject, ".env", "TOKEN=secret\n");
 
-            var moves = new SessionMoveService(source, "Windows PC");
+            var moves = new SessionMoveService(source, "Windows PC") { DeviceIdSource = static () => "pcdevice" };
             offered = await moves.OfferAsync(sessionId, moveId, "Mac mini");
             Assert.AreEqual(SessionMoveState.Offered, offered.Status, string.Join(" ", offered.Warnings));
             Assert.AreEqual(SessionRelinquishment.Frozen, source.RuntimeService.Relinquishments.Read(sessionId)!.State);
@@ -52,13 +52,14 @@ public sealed class SessionBundleMoveTests
         Assert.AreEqual(1, manifest.Repository.Payload.UnpushedCommits);
         Assert.IsTrue(manifest.Repository.Dirty);
         Assert.AreEqual(machines.SourceProject, manifest.WorkingFolder);
+        Assert.AreEqual(("Windows PC", "pcdevice"), (manifest.FromMachine, manifest.FromDeviceId), "The source is named by its device id too: a rename does not change it.");
         Assert.AreEqual(sourceProvider.Descriptor.ProviderId.Value, manifest.ProviderKey);
         Assert.IsNull(manifest.ProviderSession, "An API provider continues from the journal: nothing of its own travels.");
         CollectionAssert.Contains(manifest.Repository.Payload.LeftBehind.ToList(), new SessionMoveLeftBehind(".env", SessionMoveLeftBehind.Secret));
 
         await using (var target = await machines.CreateTargetHostAsync(targetProvider))
         {
-            var moves = new SessionMoveService(target, "Mac mini");
+            var moves = new SessionMoveService(target, "Mac mini") { DeviceIdSource = static () => "macdevice" };
             var received = await machines.TransferAsync(offered.Transaction!.BundleFolder!, moves.GetBundleFolder(moveId, SessionMoveRole.Target));
             var prepared = await moves.PrepareAsync(received, CancellationToken.None);
             Assert.AreEqual(SessionMoveState.Prepared, prepared.Status, string.Join(" ", prepared.Warnings));
@@ -85,6 +86,8 @@ public sealed class SessionBundleMoveTests
             var journal = File.ReadAllText(Directory.EnumerateFiles(machines.TargetGlobal, sessionId + ".jsonl", SearchOption.AllDirectories).Single());
             StringAssert.Contains(journal, SessionMovedRecord.EventType);
             StringAssert.Contains(journal, "This session moved from Windows PC");
+            // The statistics tell the machines that wrote the parts of the journal apart by these ids, whatever the machines are called later.
+            StringAssert.Matches(journal, new System.Text.RegularExpressions.Regex("\"from\"\\s*:\\s*\"Windows PC\"\\s*,\\s*\"to\"\\s*:\\s*\"Mac mini\"\\s*,\\s*\"fromDevice\"\\s*:\\s*\"pcdevice\"\\s*,\\s*\"toDevice\"\\s*:\\s*\"macdevice\""));
         }
 
         // The source learns the outcome: it keeps its copy read-only.

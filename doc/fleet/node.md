@@ -92,7 +92,7 @@ Each node signs in by itself; the desktop drives the sign-ins so that nobody has
 | Need | How the node gets it |
 | --- | --- |
 | Providers CodeAlta signs in (Codex subscription, Copilot, xAI) | The device code flow runs on the node; the desktop shows the code and the link; tokens stay in the node's `~/.alta/auth/` |
-| Providers with an API key | Typed by the person in the node's settings from the desktop, sent over the end-to-end channel, kept in the node's protected store (DPAPI, Keychain, libsecret) or named as an environment variable of the service |
+| Providers with an API key, and any other token a run needs | A secret of the node's store ([secrets](secrets.md)): typed by the person from the desktop and sent over the end-to-end channel, or a secret of a space, a team or the organization sealed to the node; kept in its protected store (DPAPI, Keychain, libsecret), or named as an environment variable of the service |
 | Claude Code, Codex CLI, ACP agents | Their own login on that machine, done in a setup terminal of the node opened from the desktop (owner only, audited), or over SSH |
 | Git over SSH | A key made on the node; its public key added to the Git host (`gh ssh-key add`, or copied by the person); the space identity names it. Organizations can sign short-lived SSH certificates instead (milestone 5) |
 | GitHub | `gh auth login` with a device code, per space profile as today (`gh auth setup-git` for HTTPS); with a server, the CodeAlta GitHub App's device flow gives the node expiring user tokens (8 hours, refreshed for up to 6 months) |

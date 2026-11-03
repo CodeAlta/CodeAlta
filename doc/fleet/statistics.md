@@ -30,7 +30,9 @@ console queries them by scope.
 - **A machine is the single writer of its facts.** After a move, the new owner counts the session's work from the move
   record on (as a fork counts from `counted_from`), so the journal it imported is never counted again; the facts the
   old machine counted stay its own, and a session that comes back counts there again what that machine did before. The
-  move records name the machines, so each part of a journal is counted by the machine that wrote it. Facts are keyed by
+  move records name the machines by device id (and by name, for people), so each part of a journal is counted by the
+  machine that wrote it, whatever the machines are called by then; a record written before the ids were recorded is
+  read by names. Facts are keyed by
   machine as well, so a quarter hour split by a move is the merge of both.
 
 ## Publication: rows, not increments
