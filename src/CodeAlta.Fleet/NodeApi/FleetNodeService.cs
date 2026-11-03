@@ -280,6 +280,8 @@ public sealed partial class FleetNodeService : IAsyncDisposable
                 FleetNodeJsonContext.Default.FleetProjectChange, ControlCloneProjectAsync);
             On(caller, FleetNodeMethods.ControlProjectsRemove, Access.Owner, FleetNodeJsonContext.Default.FleetProjectRef,
                 FleetNodeJsonContext.Default.FleetProjectChange, ControlRemoveProjectAsync);
+            // The secrets of the machine: only its owner, on the machine, manages them.
+            RegisterSecrets(caller);
             // The owner may bring a session to its own node (altanode remote <machine> move), and read its moves.
             RegisterMoves(caller, Access.Owner);
             On(caller, FleetNodeMethods.MovesList, Access.Owner, FleetNodeJsonContext.Default.FleetEmpty, FleetNodeJsonContext.Default.FleetMoveList,

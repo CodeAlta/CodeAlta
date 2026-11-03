@@ -466,6 +466,33 @@ public sealed class FleetNodeClient : IAsyncDisposable
         => CallAsync(FleetNodeMethods.ControlDevicesList, new FleetEmpty(), FleetNodeJsonContext.Default.FleetEmpty, FleetNodeJsonContext.Default.FleetDeviceList, null,
             cancellationToken);
 
+    /// <summary>The owner's local control: lists the secrets of the machine by name, and its variables.</summary>
+    /// <param name="cancellationToken">Cancels the call.</param>
+    /// <returns>The secrets and the variables.</returns>
+    /// <exception cref="FleetException">The node refused the call.</exception>
+    public Task<FleetSecretList> ListSecretsAsync(CancellationToken cancellationToken = default)
+        => CallAsync(FleetNodeMethods.ControlSecretsList, new FleetEmpty(), FleetNodeJsonContext.Default.FleetEmpty, FleetNodeJsonContext.Default.FleetSecretList, null,
+            cancellationToken);
+
+    /// <summary>The owner's local control: sets a secret or a variable of the machine, or rotates a secret that is set.</summary>
+    /// <param name="parameters">The name, the value, and whether it is a variable.</param>
+    /// <param name="rotate">Whether the secret must be set already.</param>
+    /// <param name="cancellationToken">Cancels the call.</param>
+    /// <returns>What is known of it now.</returns>
+    /// <exception cref="FleetException">The node refused the call (<see cref="FleetNodeErrorCodes.SecretNotFound"/> for a rotation of a missing secret).</exception>
+    public Task<FleetSecretChange> SetSecretAsync(FleetSecretSetParams parameters, bool rotate = false, CancellationToken cancellationToken = default)
+        => CallAsync(rotate ? FleetNodeMethods.ControlSecretsRotate : FleetNodeMethods.ControlSecretsSet, parameters, FleetNodeJsonContext.Default.FleetSecretSetParams,
+            FleetNodeJsonContext.Default.FleetSecretChange, null, cancellationToken);
+
+    /// <summary>The owner's local control: deletes a secret or a variable of the machine.</summary>
+    /// <param name="parameters">The name, and whether it is a variable.</param>
+    /// <param name="cancellationToken">Cancels the call.</param>
+    /// <returns>Whether it was set.</returns>
+    /// <exception cref="FleetException">The node refused the call.</exception>
+    public Task<FleetSecretChange> DeleteSecretAsync(FleetSecretRef parameters, CancellationToken cancellationToken = default)
+        => CallAsync(FleetNodeMethods.ControlSecretsDelete, parameters, FleetNodeJsonContext.Default.FleetSecretRef, FleetNodeJsonContext.Default.FleetSecretChange, null,
+            cancellationToken);
+
     /// <summary>The owner's local control: revokes a device and closes its channels.</summary>
     /// <param name="device">The device: its id, its name, or the start of its id.</param>
     /// <param name="cancellationToken">Cancels the call.</param>
