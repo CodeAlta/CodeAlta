@@ -121,7 +121,8 @@ Nodes are autonomous: a server that is down stops visibility, relay and sharing,
   version in place. Going back means restoring the backup taken before the upgrade. `altaserver update` does both: the
   running server copies its database to `backups/` (SQLite's backup API, the last five kept), then switches; a new
   version that does not serve within its trial is rolled back and that copy restored
-  ([deployment](deployment.md#updates)). Until `altaserver install` exists, the switch works for a server run in the
+  ([deployment](deployment.md#updates)). In a campaign of the fleet the server takes this step last, after its nodes,
+  and a campaign that a stop interrupted goes on at the next start. Until `altaserver install` exists, the switch works for a server run in the
   foreground: the process stays and runs the new version as its child.
 - **A backup is a consistent set**: the database, the blobs it references and the server's own keys (TLS, token
   signing), the keys encrypted. The server holds no key that decrypts Private data, so a backup holds none either.

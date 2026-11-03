@@ -114,8 +114,8 @@ All signed (Authenticode, Apple notarization, NuGet signatures, cosign for image
 
 ## Updates
 
-- **Server first, then nodes**: a node one minor version behind keeps working (N-1 window,
-  [protocol](protocol.md#versions)).
+- **Nodes first, then the server**, as a campaign of the fleet (below). Any 4.x desktop, node and server talk to each
+  other ([protocol](protocol.md#versions)), so machines that update at different times keep working.
 - **Self-update, no SDK.** `altanode update` and `altaserver update` (`CodeAlta.Fleet.Update`, which references the
   protocol only, so the server keeps clear of the agent runtime) download the runtime package of the tool
   (`CodeAlta.Node.win-x64`...) from a NuGet v3 feed (nuget.org, a mirror, or a folder), check it against the feed's
@@ -141,11 +141,30 @@ All signed (Authenticode, Apple notarization, NuGet signatures, cosign for image
   running turns stop and stay resumable). The server copies its database first (SQLite's backup API, `backups/`); a
   rollback restores that copy, losing what the new version wrote meanwhile. A switch asked while nothing runs is taken
   at the next start.
-- **The fleet update** (next): the desktop asks the server, the server asks its nodes over the control connection,
-  checks their versions (`node.info`, the inventory) and updates itself last, possibly at a set time. Each machine
-  runs the same self-update (`ApplyAsync` with the hash a controller device signed). Nodes follow the fleet's update
-  policy (**automatic**, **pinned** or **manual**), and an offline node updates when it reconnects. The desktop shows
-  versions and offers **Update all machines**.
+- **The campaign.** An owner's controller device asks the server for an update of the fleet: a version (the latest
+  both tool packages list, by default), a feed, now or a time (kept in UTC, with the time zone it was chosen in), the
+  nodes (all by default). The server keeps it (`update_campaigns`), and at its time asks its nodes over the control
+  connection (`update.instruction`), two at a time; it waits until each node online runs the version, failed or rolled
+  back, then updates itself, last, with the same self-update. A node offline does not hold the campaign: it is pending,
+  asked when it reconnects, and the campaign ends **partly done** until it is. A node that goes offline while it
+  switches holds the server for ten minutes. A campaign is cancelled until the server's step; one at a time runs.
+  States: scheduled, updating nodes, updating server, done, partly done, failed (the server did not update, or every
+  node that tried failed), cancelled. Nodes report where they stand (`update.report`, and in their presence); the REST
+  API (`/api/v1/updates`) and the change feed give the campaign to the desktop.
+- **Trust.** The server alone cannot make a machine install anything. The controller device reads the feed and signs
+  a manifest: organization, campaign and sequence, version, feed, schedule, machines, and the SHA-512 of the runtime
+  package of each published runtime of each product. A node takes it only when a controller of the device list it
+  anchored signed it, its sequence is not older than the last one it accepted from that server, it names the node,
+  the version is newer than the one that runs (an older one only when the manifest says a person chose a rollback),
+  and its download matches the hash signed for its runtime. The server checks the same against the device list it
+  holds before its own step. The machine's `update.json` wins: its feeds, or `"fleet": false`, which refuses every
+  update of the fleet. A node keeps the instruction it accepted (`fleet/update-campaign.json`) and waits for its time
+  itself, across restarts.
+- **Policy.** Signed the same way: **manual** (campaigns only), **pinned** (no campaign to another version), or
+  **automatic**: the server reads the policy's feed daily and starts a campaign to its latest stable version at the
+  maintenance window (a time of day in a time zone). No person signs the hash of that version, so each machine checks
+  the feed itself: the version must be the latest stable one the feed lists, newer than the one it runs, and the
+  package must match the feed's own hash.
 - Containers update by image tag.
 
 ## Backup, restore, leave

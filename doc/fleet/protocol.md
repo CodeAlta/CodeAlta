@@ -122,11 +122,11 @@ follows carries the state.
 
 ## Versions
 
-- `protocol {min, max}` in the handshake; a node one minor version behind the server keeps working (N-1 window);
-  features are announced (`features`), never inferred from a version.
-- Fields are added, never repurposed; unknown fields are ignored; an unknown method answers `method_not_found`.
-- Old versions are removed on a schedule, announced in the release notes, so the protocol does not accumulate
-  dialects.
+- Until 4.0 ships, the protocol may change. From 4.0 on, any desktop, node or server of version 4.x keeps talking to
+  any other 4.x, because machines update at different times (a campaign updates the nodes before the server).
+- Within 4.x, fields are only added, never repurposed or removed; unknown fields and events are ignored; an unknown
+  method answers `method_not_found`. Features are announced (`features` in the welcome), never inferred from a version.
+- `protocol {min, max}` in the handshake; a breaking change is a new major version, announced in the release notes.
 
 ## Services
 
@@ -153,6 +153,7 @@ windows, asks, permissions, jobs); the node API is that surface, made remote, pl
 | `facts` | `publish`, `ack` (session facts, usage, audit events) |
 | `relay` | `open`, `incoming`, `accept`, `close` |
 | `telemetry` | `settings`: the fleet's telemetry setting, signed by a controller device, sent when a device connects and when an owner changes it ([observability](observability.md#where-telemetry-goes)) |
+| `update` | `instruction` (a campaign's signed manifest, or the signed automatic policy and its version), `cancel`, `report` (where the node stands) ([deployment](deployment.md#updates)) |
 | `ownership` | `commit` (a move), `takeover`, `changed` |
 | `replica` | `append`, `read`, `status` |
 | `deliveries` | `push`, `ack` |
@@ -190,6 +191,9 @@ The management plane, and the whole surface of the console ([console](console.md
 - **Change feed**: the control connection (or server-sent events for a client without one) tells a client which
   resources it may see have changed (kind, id, version); the client reads them again. Canvases stay live without
   polling.
+- **Updates**: `GET /api/v1/updates` (the server's versions, the policy, the recent campaigns), `POST
+  /api/v1/updates/campaigns` (a manifest an owner's controller device signed), `GET .../campaigns/{id}`, `POST
+  .../campaigns/{id}/cancel`, `PUT /api/v1/updates/policy` ([deployment](deployment.md#updates)).
 - **Telemetry**: `GET`/`PUT /api/v1/telemetry` reads and sets the fleet's signed telemetry setting (an owner's controller
   device only); `POST /otlp/v1/{traces,metrics,logs}` takes the OTLP of approved devices, signed as the API's calls are,
   and forwards it to the collector ([observability](observability.md#where-telemetry-goes)).
