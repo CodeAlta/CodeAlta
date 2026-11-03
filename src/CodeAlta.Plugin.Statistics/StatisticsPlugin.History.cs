@@ -96,6 +96,12 @@ public sealed partial class StatisticsPlugin
     /// </summary>
     public IStatisticsService? Statistics => _engine;
 
+    /// <summary>
+    /// Gets what a host that publishes the statistics of its sessions (a machine of a fleet) reads of the store: the revisions of the
+    /// sessions and their rows; null when the plugin does not read the sessions.
+    /// </summary>
+    public IStatisticsPublication? Publication => _engine;
+
     /// <summary>Gets the active engine's source-bound archive capability; null when disabled, unloaded or not composed with durable storage.</summary>
     public ISessionStatisticsRetirementArchive? RetirementArchive => _archives is null ? null : _engine;
 

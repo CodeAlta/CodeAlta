@@ -273,12 +273,15 @@ internal sealed class NodeServers : IAsyncDisposable
     private readonly DeviceIdentity _identity;
     private readonly Fleet.Server.FleetHostPublicationSource _source;
     private readonly Fleet.Server.FleetServerConnections _connections;
+    private readonly Fleet.Server.FleetHostStatisticsSource _statistics;
 
-    private NodeServers(DeviceIdentity identity, Fleet.Server.FleetHostPublicationSource source, Fleet.Server.FleetServerConnections connections)
+    private NodeServers(DeviceIdentity identity, Fleet.Server.FleetHostPublicationSource source, Fleet.Server.FleetServerConnections connections,
+        Fleet.Server.FleetHostStatisticsSource statistics)
     {
         _identity = identity;
         _source = source;
         _connections = connections;
+        _statistics = statistics;
     }
 
     /// <summary>Gets the connections to the servers.</summary>
@@ -334,6 +337,8 @@ internal sealed class NodeServers : IAsyncDisposable
         var catalog = node.Host.CatalogOptions;
         var identity = DeviceIdentity.LoadOrCreate(catalog);
         var source = new Fleet.Server.FleetHostPublicationSource(node.Host, name, version, ["sessions", "moves"]);
+        // The statistics the node counts (its Statistics plugin), published with the facts of its sessions.
+        var statistics = Fleet.Server.FleetHostStatisticsSource.ForHost(node.Host);
         var connections = new Fleet.Server.FleetServerConnections(new Fleet.Server.FleetServerConnectionsOptions
         {
             FleetRoot = catalog.FleetRoot,
@@ -341,6 +346,7 @@ internal sealed class NodeServers : IAsyncDisposable
             Client = new CodeAlta.Fleet.Protocol.FleetClientInfo("node", version, FleetChannelProtocol.OperatingSystemName),
             Spaces = node.Host.SpaceCatalog,
             Source = source,
+            Statistics = statistics,
             Configure = configure,
             AcceptRelay = service is null ? null : (connector, _, stream, token) => ServeRelayAsync(service, connector, stream, token),
             TelemetrySettings = telemetry is null ? null : telemetry.AcceptAsync,
@@ -348,7 +354,7 @@ internal sealed class NodeServers : IAsyncDisposable
             Updates = updates,
         });
         connections.Start();
-        return new NodeServers(identity, source, connections);
+        return new NodeServers(identity, source, connections, statistics);
     }
 
     // The device list is read again for each relay, so that a device removed from it is refused at once; when the server
@@ -379,6 +385,7 @@ internal sealed class NodeServers : IAsyncDisposable
     {
         await _connections.DisposeAsync().ConfigureAwait(false);
         await _source.DisposeAsync().ConfigureAwait(false);
+        _statistics.Dispose();
         _identity.Dispose();
     }
 }

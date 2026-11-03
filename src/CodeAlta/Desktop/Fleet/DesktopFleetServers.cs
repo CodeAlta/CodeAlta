@@ -29,6 +29,7 @@ internal sealed class DesktopFleetServers : IAsyncDisposable
     private readonly Func<FleetConnectorOptions, FleetConnectorOptions>? _configure;
     private DeviceIdentity? _identity;
     private FleetHostPublicationSource? _source;
+    private FleetHostStatisticsSource? _statistics;
     private FleetServerConnections? _connections;
     private bool _disposed;
 
@@ -425,6 +426,7 @@ internal sealed class DesktopFleetServers : IAsyncDisposable
             }
 
             if (_source is { } source) await source.DisposeAsync().ConfigureAwait(false);
+            _statistics?.Dispose();
             _identity?.Dispose();
         }
         finally
@@ -444,6 +446,7 @@ internal sealed class DesktopFleetServers : IAsyncDisposable
 
         var identity = Identity();
         _source = new FleetHostPublicationSource(_host, _deviceName, _version, ["sessions", "moves", "console"]);
+        _statistics = FleetHostStatisticsSource.ForHost(_host);
         var connections = new FleetServerConnections(new FleetServerConnectionsOptions
         {
             FleetRoot = _fleetRoot,
@@ -451,6 +454,7 @@ internal sealed class DesktopFleetServers : IAsyncDisposable
             Client = new FleetClientInfo("desktop", _version, CodeAlta.Fleet.Channels.FleetChannelProtocol.OperatingSystemName),
             Spaces = _host.SpaceCatalog,
             Source = _source,
+            Statistics = _statistics,
             WatchDirectory = true,
             Configure = _configure,
         });
