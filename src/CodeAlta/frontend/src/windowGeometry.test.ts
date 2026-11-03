@@ -7,8 +7,24 @@ const minimum = { width: 480, height: 320 };
 test("a window opens centered at its preferred size and never exceeds its bounds", () => {
   assert.deepEqual(centeredWindowGeometry({ width: 2000, height: 1000 }, { width: 1600, height: 800 }, minimum),
     { x: 200, y: 100, width: 1600, height: 800 });
+  // A small screen: the window opens at a share of it, not at its whole size, and the window behind stays in sight.
   assert.deepEqual(centeredWindowGeometry({ width: 900, height: 600 }, { width: 1600, height: 800 }, minimum),
-    { x: 0, y: 0, width: 900, height: 600 });
+    { x: 45, y: 30, width: 810, height: 540 });
+  assert.deepEqual(centeredWindowGeometry({ width: 500, height: 300 }, { width: 1600, height: 800 }, minimum),
+    { x: 20, y: 0, width: 480, height: 300 }, "the minimum size wins over the share where it fits");
+});
+
+test("a window keeps out of the native title bar, whose controls would cover its own (#310)", () => {
+  // 1920×1080 at 150%: a window that asks for nearly all the room opens below the title bar of 38 px.
+  const opened = centeredWindowGeometry({ width: 1280, height: 720 }, { width: 1240, height: 642 }, minimum, 38);
+  assert.deepEqual(opened, { x: 64, y: 72, width: 1152, height: 614 });
+  // A stored window, from a larger screen or moved up, is brought below the title bar and fits the room there.
+  const bounds = { width: 1280, height: 720 };
+  assert.deepEqual(clampWindowGeometry({ x: 0, y: 0, width: 1600, height: 1000 }, bounds, minimum, 38), { x: 0, y: 38, width: 1280, height: 682 });
+  assert.deepEqual(clampWindowGeometry({ x: 100, y: 10, width: 600, height: 400 }, bounds, minimum, 38), { x: 100, y: 38, width: 600, height: 400 });
+  assert.deepEqual(clampWindowGeometry({ x: 100, y: 500, width: 600, height: 400 }, bounds, minimum, 38), { x: 100, y: 320, width: 600, height: 400 });
+  // Too short a window for its minimum height below the title bar: the window goes over it, to stay whole.
+  assert.deepEqual(clampWindowGeometry({ x: 0, y: 0, width: 600, height: 400 }, { width: 1280, height: 340 }, minimum, 38), { x: 0, y: 20, width: 600, height: 320 });
 });
 
 test("a stored geometry is pulled back inside smaller bounds and keeps the minimum size where it fits", () => {

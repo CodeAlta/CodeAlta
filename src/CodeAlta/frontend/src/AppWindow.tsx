@@ -26,6 +26,18 @@ function viewportSize(): WindowSize {
   return typeof window === "undefined" ? { width: 1280, height: 800 } : { width: window.innerWidth, height: window.innerHeight };
 }
 
+/**
+ * The height of the native title bar when its controls (the caption buttons of Windows, the traffic lights of macOS)
+ * are drawn over the page, as NeoAstra gives it on the document element; 0 without them (fullscreen, a browser).
+ * A window kept out of it never has its own buttons under those of the main window.
+ */
+export function nativeTitleBarHeight(): number {
+  if (typeof document === "undefined") return 0;
+  const style = getComputedStyle(document.documentElement);
+  const pixels = (name: string) => Number.parseFloat(style.getPropertyValue(name)) || 0;
+  return pixels("--neoastra-titlebar-inset-left") > 0 || pixels("--neoastra-titlebar-inset-right") > 0 ? pixels("--neoastra-titlebar-height") : 0;
+}
+
 type SurfaceProps = {
   storageKey: string; title: ReactNode; titleId?: string;
   preferredSize: (viewport: WindowSize) => WindowSize; minimumSize?: WindowSize;
@@ -44,15 +56,21 @@ export function AppWindowSurface({ storageKey, title, titleId, preferredSize, mi
   onClose, closeLabel, headerActions, children, closeRef }: SurfaceProps) {
   const { t } = useShellLanguage();
   const [viewport, setViewport] = useState(viewportSize);
+  const [titleBar, setTitleBar] = useState(nativeTitleBarHeight);
   const [stored, setStored] = useState<WindowGeometry | null>(() => loadWindowGeometry(storageKey));
   const preferred = useRef(preferredSize); preferred.current = preferredSize;
   useEffect(() => {
-    const resized = () => setViewport(viewportSize());
+    const resized = () => { setViewport(viewportSize()); setTitleBar(nativeTitleBarHeight()); };
     window.addEventListener("resize", resized);
-    return () => window.removeEventListener("resize", resized);
+    // The title bar changes without a resize too: its controls go and come back with fullscreen, its style can change.
+    const titleBarChanged = new MutationObserver(() => setTitleBar(nativeTitleBarHeight()));
+    titleBarChanged.observe(document.documentElement, { attributes: true, attributeFilter: ["style", "data-neoastra-titlebar", "data-neoastra-window-state"] });
+    return () => { window.removeEventListener("resize", resized); titleBarChanged.disconnect(); };
   }, []);
   const update = useCallback((value: WindowGeometry | null) => { setStored(value); saveWindowGeometry(storageKey, value); }, [storageKey]);
-  const geometry = stored ? clampWindowGeometry(stored, viewport, minimumSize) : centeredWindowGeometry(viewport, preferred.current(viewport), minimumSize);
+  // The window keeps out of the native title bar: its size is chosen for the room below it.
+  const geometry = stored ? clampWindowGeometry(stored, viewport, minimumSize, titleBar)
+    : centeredWindowGeometry(viewport, preferred.current({ width: viewport.width, height: Math.max(viewport.height - titleBar, 0) }), minimumSize, titleBar);
   // react-rnd measures its offset from the parent when it mounts. The hosting dialog is usually not open yet
   // (its showModal runs in a parent layout effect), so every rectangle is empty and a real position would be
   // recorded as an offset. Mount at the origin, then place the window before the first paint.
