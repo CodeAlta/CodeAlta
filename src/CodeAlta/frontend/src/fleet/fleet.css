@@ -22,8 +22,17 @@
 .fleet-device-words { display: flex; flex-wrap: wrap; gap: 4px; }
 .fleet-device-actions { display: inline-flex; gap: 6px; }
 .fleet-server-form { display: grid; gap: 12px; }
-.fleet-server-form label { display: grid; gap: 4px; }
+.fleet-server-form > label:not(.bp6-control) { display: grid; gap: 4px; }
 .fleet-token-dialog p { margin: 0 0 8px; }
+.fleet-server-telemetry { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 8px; padding-left: 28px; color: var(--muted); }
+.fleet-telemetry-main { min-width: 0; display: flex; align-items: baseline; gap: 8px; }
+.fleet-telemetry-main strong { color: var(--text); font-weight: 500; }
+.fleet-telemetry-summary { font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fleet-telemetry-dialog { width: min(600px, calc(100vw - 32px)); }
+.fleet-telemetry-choices { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 2fr); gap: 12px; }
+.fleet-telemetry-choices label { display: grid; gap: 4px; }
+.fleet-telemetry-signals, .fleet-telemetry-headers { display: grid; gap: 4px; justify-items: start; }
+.fleet-telemetry-header { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.5fr) auto; gap: 6px; width: 100%; }
 
 .fleet-canvas { height: 100%; overflow: auto; padding: 20px 24px; display: grid; align-content: start; gap: 16px; }
 .fleet-canvas-head { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 24px; }

@@ -1,6 +1,6 @@
 // The state of the CodeAlta Servers of this computer (Settings > Fleet > Server, the server of a space) and of the directory of the
 // Fleet canvas, as words and orders: the host says states and codes, these functions say what the page shows of them.
-import type { FleetDeviceView, FleetMachineView, FleetServerView, FleetSessionView } from "#neoastra";
+import type { FleetDeviceView, FleetMachineView, FleetServerView, FleetSessionView, FleetTelemetryView } from "#neoastra";
 import type { MessageKey } from "../localization";
 
 /** How the control connection of a server stands, as the host reports it; an unknown value is offline. */
@@ -61,6 +61,8 @@ export function serverProblem(status: string): MessageKey | null {
     case "forbidden": return "Only the owner's computer can do this.";
     case "pending_approval": return "This computer waits for its approval.";
     case "device_list.conflict": return "Another device changed the list meanwhile: try again.";
+    case "telemetry.conflict": return "Another owner changed the telemetry meanwhile: try again.";
+    case "telemetry.invalid": case "invalid_request": return "The server refused this telemetry setting.";
     default: return "The operation did not complete.";
   }
 }
@@ -134,4 +136,66 @@ export function sessionModel(session: Pick<FleetSessionView, "model" | "provider
 /** The server a space publishes to, among the servers of this computer; null when none. */
 export function serverOfSpace(servers: readonly FleetServerView[], spaceId: string): FleetServerView | null {
   return servers.find(server => server.spaces.includes(spaceId)) ?? null;
+}
+
+/** A signal the fleet's telemetry sends. */
+export type TelemetrySignal = "traces" | "metrics" | "logs";
+
+/** The signals, in the order the page shows them. */
+export const telemetrySignals: readonly TelemetrySignal[] = ["traces", "metrics", "logs"];
+
+/** A header of the collector as the page edits it: one held by the server shows masked and keeps its value until a new one is typed. */
+export type TelemetryHeaderDraft = Readonly<{ name: string; value: string; masked: string | null }>;
+
+/** The telemetry of a fleet as the page edits it. */
+export type TelemetryDraft = Readonly<{
+  enabled: boolean;
+  endpoint: string;
+  protocol: "http/protobuf" | "grpc";
+  route: "direct" | "server";
+  signals: readonly TelemetrySignal[];
+  headers: readonly TelemetryHeaderDraft[];
+  environment: string;
+}>;
+
+/** The draft of the telemetry the host gave: its values, the headers masked. */
+export function telemetryDraft(view: FleetTelemetryView): TelemetryDraft {
+  return {
+    enabled: view.enabled,
+    endpoint: view.endpoint ?? "",
+    protocol: view.protocol === "grpc" ? "grpc" : "http/protobuf",
+    route: view.route === "server" ? "server" : "direct",
+    signals: telemetrySignals.filter(signal => view.signals.includes(signal)),
+    headers: view.headers.map(header => ({ name: header.name, value: "", masked: header.masked })),
+    environment: view.environment ?? "",
+  };
+}
+
+const headerName = /^[A-Za-z0-9!#$%&'*+.^_`|~-]+$/u;
+
+/** What is wrong with a draft, in words; null when the host can sign it. */
+export function telemetryProblem(draft: TelemetryDraft): MessageKey | null {
+  if (draft.enabled && !serverAddressOf(draft.endpoint)) return "This is not the address of a collector.";
+  if (draft.enabled && draft.signals.length === 0) return "Choose at least one signal.";
+  if (draft.route === "server" && draft.protocol === "grpc") return "The server forwards OTLP over HTTP only.";
+  const names = new Set<string>();
+  for (const header of draft.headers) {
+    const name = header.name.trim().toLowerCase();
+    const value = header.value.trim();
+    if (!headerName.test(name) || names.has(name) || (!value && !header.masked) || /[,\r\n]/u.test(value)) return "A header needs a name and a value, without a comma.";
+    names.add(name);
+  }
+  return null;
+}
+
+/** The headers the host is sent: a header whose masked value was left as it was goes without a value, so that the host keeps it. */
+export function telemetryHeaderEdits(draft: TelemetryDraft): { name: string; value: string | null }[] {
+  return draft.headers.map(header => ({ name: header.name.trim(), value: header.value.trim() ? header.value.trim() : null }));
+}
+
+/** How the telemetry of a fleet reads in one line: off, or its signals and where they go. */
+export function telemetrySummary(view: FleetTelemetryView): Readonly<{ key: MessageKey; detail: string | null }> {
+  if (!view.enabled) return { key: "Off", detail: null };
+  const signals = telemetrySignals.filter(signal => view.signals.includes(signal)).join(", ");
+  return { key: view.route === "server" ? "Machines send through this server" : "Each machine sends to the collector", detail: `${signals} → ${view.endpoint ?? ""}` };
 }

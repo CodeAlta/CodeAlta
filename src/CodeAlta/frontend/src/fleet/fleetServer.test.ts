@@ -1,8 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import type { FleetDeviceView, FleetMachineView, FleetServerView, FleetSessionView } from "#neoastra";
+import type { FleetDeviceView, FleetMachineView, FleetServerView, FleetSessionView, FleetTelemetryView } from "#neoastra";
 import { fleetGroups, fleetSummary, joinCommand, keyWords, orderedDevices, serverAddressOf, serverConnection, serverConnectionIntent, serverConnectionLabel, serverOfSpace,
-  serverProblem, sessionModel, sessionState, sessionStateLabel } from "./fleetServer";
+  serverProblem, sessionModel, sessionState, sessionStateLabel, telemetryDraft, telemetryHeaderEdits, telemetryProblem, telemetrySummary } from "./fleetServer";
 import { changedSessionOptions, storedSessionOptions } from "../sessionSettings/sessionOptions";
 
 const machine = (id: string, look: Partial<FleetMachineView> = {}): FleetMachineView => ({ id, name: id, kind: "node", os: "macos", version: "4.0.0", online: true,
@@ -67,6 +67,38 @@ test("a session reads its state and model in words; an unknown state is idle", (
   assert.equal(sessionModel({ model: "gpt-6.1", providerType: "openai" }), "gpt-6.1 · openai");
   assert.equal(sessionModel({ model: null, providerType: "openai" }), "openai");
   assert.equal(sessionModel({ model: null, providerType: null }), "");
+});
+
+const telemetry = (look: Partial<FleetTelemetryView> = {}): FleetTelemetryView => ({ enabled: true, endpoint: "https://otlp.example:4318", protocol: "http/protobuf",
+  route: "server", signals: ["metrics", "traces"], headers: [{ name: "x-api-key", masked: "••••3f2a" }], environment: null, updatedAt: null, ...look });
+
+test("the telemetry of a fleet reads in one line: off, or its signals and where they go", () => {
+  assert.deepEqual(telemetrySummary(telemetry({ enabled: false })), { key: "Off", detail: null });
+  assert.deepEqual(telemetrySummary(telemetry()), { key: "Machines send through this server", detail: "traces, metrics → https://otlp.example:4318" });
+  assert.equal(telemetrySummary(telemetry({ route: "direct" })).key, "Each machine sends to the collector");
+});
+
+test("a header held by the server stays masked and keeps its value until a new one is typed", () => {
+  const draft = telemetryDraft(telemetry());
+  assert.deepEqual(draft.signals, ["traces", "metrics"], "the signals in their order");
+  assert.deepEqual(draft.headers, [{ name: "x-api-key", value: "", masked: "••••3f2a" }], "the page never holds the secret");
+  assert.deepEqual(telemetryHeaderEdits(draft), [{ name: "x-api-key", value: null }], "an untouched header is sent without a value: the host keeps it");
+  assert.deepEqual(telemetryHeaderEdits({ ...draft, headers: [{ name: " x-api-key ", value: " new ", masked: "••••3f2a" }] }), [{ name: "x-api-key", value: "new" }]);
+});
+
+test("a telemetry setting names a collector and a signal, the server route speaks HTTP, and headers are names and values", () => {
+  const draft = telemetryDraft(telemetry());
+  assert.equal(telemetryProblem(draft), null);
+  assert.equal(telemetryProblem({ ...draft, enabled: false, endpoint: "" }), null, "a setting that is off needs no collector");
+  assert.equal(telemetryProblem({ ...draft, endpoint: "otlp.example:4318" }), "This is not the address of a collector.");
+  assert.equal(telemetryProblem({ ...draft, signals: [] }), "Choose at least one signal.");
+  assert.equal(telemetryProblem({ ...draft, protocol: "grpc" }), "The server forwards OTLP over HTTP only.");
+  assert.equal(telemetryProblem({ ...draft, route: "direct", protocol: "grpc" }), null);
+  for (const header of [{ name: "", value: "v", masked: null }, { name: "x key", value: "v", masked: null }, { name: "x-key", value: "", masked: null },
+    { name: "x-key", value: "a,b", masked: null }]) assert.equal(telemetryProblem({ ...draft, headers: [header] }), "A header needs a name and a value, without a comma.");
+  assert.equal(telemetryProblem({ ...draft, headers: [{ name: "x-key", value: "a", masked: null }, { name: "X-Key", value: "b", masked: null }] }),
+    "A header needs a name and a value, without a comma.", "a name is there once");
+  assert.equal(serverProblem("telemetry.conflict"), "Another owner changed the telemetry meanwhile: try again.");
 });
 
 test("a space publishes to the server that lists it", () => {
