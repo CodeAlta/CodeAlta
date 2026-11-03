@@ -36,6 +36,9 @@ internal sealed record NodeTelemetryOptions
 
     /// <summary>Gets how many servers the node is connected to now; null for none.</summary>
     public Func<int>? ServersOnline { get; init; }
+
+    /// <summary>Gets what masks the secrets of the machine in the log records exported, as in the log file; null for nothing.</summary>
+    public CodeAlta.Agent.Runtime.AgentSecretMasker? SecretMasker { get; init; }
 }
 
 /// <summary>
@@ -87,7 +90,7 @@ internal sealed class NodeTelemetry : IDisposable
         if (options.ServersOnline is { } servers)
             _meter.CreateObservableGauge("codealta.node.servers.online", servers, "{server}", "The servers the node holds a control connection to now.");
         Runtime = new FleetTelemetryRuntime(PipelineOptions, message => Log(XenoLogLevel.Warn, message));
-        LogWriter = new NodeOtlpLogWriter(Runtime);
+        LogWriter = new NodeOtlpLogWriter(Runtime, options.SecretMasker);
         _log = Runtime.CreateLogger("CodeAlta.Node.Telemetry");
         LoadAccepted();
         Reapply();
@@ -346,16 +349,23 @@ internal sealed class NodeTelemetry : IDisposable
 
 /// <summary>
 /// A writer of the log of the node (XenoAtom.Logging) whose records also go to the OTLP export, when it sends logs:
-/// the category, the level, the text and the exception of each record the node's log keeps.
+/// the category, the level, the text and the exception of each record the node's log keeps, with the secrets of the
+/// machine masked as the log file has them.
 /// </summary>
 internal sealed class NodeOtlpLogWriter : XenoAtom.Logging.LogWriter
 {
     private readonly ConcurrentDictionary<string, ILogger> _loggers = new(StringComparer.Ordinal);
+    private readonly CodeAlta.Agent.Runtime.AgentSecretMasker? _masker;
     private FleetTelemetryRuntime? _runtime;
 
     /// <summary>Initializes a new instance of the <see cref="NodeOtlpLogWriter"/> class.</summary>
     /// <param name="runtime">The export the records go to.</param>
-    public NodeOtlpLogWriter(FleetTelemetryRuntime runtime) => _runtime = runtime;
+    /// <param name="masker">Masks the secrets of the machine in the text and the exception of each record; null for nothing.</param>
+    public NodeOtlpLogWriter(FleetTelemetryRuntime runtime, CodeAlta.Agent.Runtime.AgentSecretMasker? masker = null)
+    {
+        _runtime = runtime;
+        _masker = masker;
+    }
 
     /// <summary>Stops sending records: the export ends.</summary>
     public void Detach() => Volatile.Write(ref _runtime, null);
@@ -370,6 +380,13 @@ internal sealed class NodeOtlpLogWriter : XenoAtom.Logging.LogWriter
         if (Volatile.Read(ref _runtime) is not { } runtime) return;
         var logger = _loggers.GetOrAdd(category, static (name, export) => export.CreateLogger(name), runtime);
         if (!logger.IsEnabled(level)) return;
+        // The exporter writes the message, the type and the text of the exception (its stack and inner exceptions included).
+        if (_masker is { } masker)
+        {
+            text = masker.MaskText(text);
+            exception = masker.MaskException(exception);
+        }
+
         logger.Log(level, default, text, exception, static (state, _) => state);
     }
 

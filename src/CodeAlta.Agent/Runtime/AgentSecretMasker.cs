@@ -68,6 +68,32 @@ public sealed class AgentSecretMasker
     /// <returns>The masking of the text, which belongs to its caller.</returns>
     public AgentSecretTextStream CreateStream() => new(this);
 
+    /// <summary>
+    /// Replaces each secret of an exception by <see cref="Mask"/> before it goes where the masking of the logs does not
+    /// reach (an export of telemetry): its message, its stack and its inner exceptions, which its text holds.
+    /// </summary>
+    /// <param name="exception">The exception, or <see langword="null"/>.</param>
+    /// <returns>The exception, the same instance when it holds no secret; else an <see cref="AgentMaskedException"/> that tells the same, masked.</returns>
+    [return: System.Diagnostics.CodeAnalysis.NotNullIfNotNull(nameof(exception))]
+    public Exception? MaskException(Exception? exception)
+    {
+        if (exception is null) return null;
+        string text;
+        try
+        {
+            text = exception.ToString();
+        }
+        catch (Exception failure) when (failure is not OutOfMemoryException)
+        {
+            // An exception whose text cannot be made is told by its type and its message alone.
+            text = $"{exception.GetType().FullName}: {exception.Message}";
+        }
+
+        if (!Contains(text) && !Contains(exception.Message)) return exception;
+        return new AgentMaskedException(exception.GetType().FullName ?? exception.GetType().Name, MaskText(exception.Message), MaskText(text),
+            MaskException(exception.InnerException));
+    }
+
     /// <summary>Tells whether a text holds a secret.</summary>
     /// <param name="text">The text.</param>
     /// <returns><see langword="true"/> when it holds one.</returns>

@@ -151,6 +151,34 @@ public sealed class SecretMaskingTests
     }
 
     [TestMethod]
+    public void AnException_IsMaskedInItsMessageStackAndInnerExceptions_OrLeftAsItIs()
+    {
+        var masker = new AgentSecretMasker(() => [Secret]);
+        Exception thrown;
+        try
+        {
+            throw new InvalidOperationException($"failed with {Secret}", new IOException($"inner {Secret}"));
+        }
+        catch (InvalidOperationException exception)
+        {
+            thrown = exception;
+        }
+
+        var masked = masker.MaskException(thrown);
+
+        var replaced = Assert.IsInstanceOfType<AgentMaskedException>(masked);
+        Assert.AreEqual("failed with ***", replaced.Message);
+        Assert.AreEqual(typeof(InvalidOperationException).FullName, replaced.OriginalType);
+        Assert.IsFalse(replaced.ToString().Contains(Secret, StringComparison.Ordinal));
+        StringAssert.Contains(replaced.ToString(), "System.InvalidOperationException: failed with ***");
+        StringAssert.Contains(replaced.ToString(), "inner ***");
+        StringAssert.Contains(replaced.ToString(), nameof(AnException_IsMaskedInItsMessageStackAndInnerExceptions_OrLeftAsItIs), "The stack stays.");
+        Assert.AreEqual("inner ***", replaced.InnerException!.Message);
+        var clean = new InvalidOperationException("fine");
+        Assert.AreSame(clean, masker.MaskException(clean));
+    }
+
+    [TestMethod]
     public async Task ASecretSplitBetweenDeltas_IsNeverShown_WhereverItIsSplit()
     {
         const string prefix = "token ";

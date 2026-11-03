@@ -325,9 +325,10 @@ internal sealed class NodeApplication
                 // The log and the telemetry of the state root start once its lock is held: a refused start leaves them to its instance.
                 Admitted = () =>
                 {
-                    telemetry = StartTelemetry(profile, () => running, () => listening, () => linked);
-                    ownsLogging = InitializeLogging && NodeLogging.Initialize(profile.StateRoot, console: true, telemetry.LogWriter,
-                        new CodeAlta.Agent.Runtime.AgentSecretMasker(new CodeAlta.Catalog.Secrets.LocalSecretStore(profile.GlobalRoot).GetSecretValues));
+                    // One masking for the log file, standard output and the records the telemetry exports.
+                    var masker = new CodeAlta.Agent.Runtime.AgentSecretMasker(new CodeAlta.Catalog.Secrets.LocalSecretStore(profile.GlobalRoot).GetSecretValues);
+                    telemetry = StartTelemetry(profile, masker, () => running, () => listening, () => linked);
+                    ownsLogging = InitializeLogging && NodeLogging.Initialize(profile.StateRoot, console: true, telemetry.LogWriter, masker);
                 },
             };
             if (ConfigureHost is not null) hostOptions = ConfigureHost(hostOptions);
@@ -451,10 +452,12 @@ internal sealed class NodeApplication
     }
 
     // The telemetry of the node: its own file, its variables and the settings its servers pushed, with the gauges of what it runs.
-    private NodeTelemetry StartTelemetry(CodeAltaInstanceProfile profile, Func<NodeHost?> node, Func<NodeFleet?> fleet, Func<NodeServers?> servers)
+    private NodeTelemetry StartTelemetry(CodeAltaInstanceProfile profile, CodeAlta.Agent.Runtime.AgentSecretMasker masker, Func<NodeHost?> node, Func<NodeFleet?> fleet,
+        Func<NodeServers?> servers)
     {
         var options = new NodeTelemetryOptions
         {
+            SecretMasker = masker,
             FleetRoot = new CodeAlta.Catalog.CatalogOptions { GlobalRoot = profile.GlobalRoot, StateRoot = profile.StateRoot }.FleetRoot,
             Version = Version,
             SessionsWorking = () => node()?.Host.RuntimeService.CountSessionsAtWork() ?? 0,
