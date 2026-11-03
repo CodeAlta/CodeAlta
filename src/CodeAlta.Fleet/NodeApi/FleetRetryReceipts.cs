@@ -17,9 +17,13 @@ namespace CodeAlta.Fleet.NodeApi;
 /// </summary>
 /// <remarks>
 /// Kept in <c>fleet/retry-receipts.json</c>, written at the start and at the end of each call, so that a restart forgets
-/// nothing: the results of the latest calls (<c>resultCapacity</c>), and every key for <see cref="Lifetime"/> (at most
-/// <c>keyCapacity</c>), the lifetime of a retry token. A call still running is never evicted. Keys and parameters are
-/// kept as digests only.
+/// nothing: the results of the latest calls (<c>resultCapacity</c>), and every key for <see cref="Lifetime"/>, the
+/// lifetime of a retry token. A key is never forgotten within its lifetime: once its result is evicted it stays as a
+/// tombstone, the digest of the key and its time. When <c>keyCapacity</c> keys are within their lifetime, a new key is
+/// refused (<see cref="FleetErrorCodes.ServerBusy"/>, retry after the oldest expires) rather than forget one a client may
+/// still retry. The file holds at most <c>keyCapacity</c> entries, of about 80 bytes each without a result, and
+/// <c>resultCapacity</c> results of at most 16 KiB: with the defaults, about 1.3 MiB of keys and 4 MiB of results. Keys
+/// and parameters are kept as digests only.
 /// </remarks>
 internal sealed class FleetRetryReceipts
 {
@@ -29,8 +33,8 @@ internal sealed class FleetRetryReceipts
     /// <summary>How many results are kept by default.</summary>
     public const int DefaultResultCapacity = 256;
 
-    /// <summary>How many keys are kept by default, with or without their result.</summary>
-    public const int DefaultKeyCapacity = 4096;
+    /// <summary>How many keys are kept by default, with or without their result: the most calls with a key in <see cref="Lifetime"/>.</summary>
+    public const int DefaultKeyCapacity = 16_384;
 
     /// <summary>How long a key is remembered: a client never retries a key older than this.</summary>
     public static readonly TimeSpan Lifetime = TimeSpan.FromDays(7);
@@ -55,7 +59,7 @@ internal sealed class FleetRetryReceipts
     /// <param name="fleetRoot">The fleet folder.</param>
     /// <param name="time">The clock of the lifetime of the keys.</param>
     /// <param name="resultCapacity">How many results are kept.</param>
-    /// <param name="keyCapacity">How many keys are kept, at least as many as results.</param>
+    /// <param name="keyCapacity">How many keys within their lifetime are kept, at least as many as results; past it, new keys are refused.</param>
     /// <param name="warn">Told when the file cannot be read or written; null for nothing.</param>
     public FleetRetryReceipts(string fleetRoot, TimeProvider time, int resultCapacity = DefaultResultCapacity, int keyCapacity = DefaultKeyCapacity,
         Action<string>? warn = null)
@@ -79,7 +83,10 @@ internal sealed class FleetRetryReceipts
     /// <param name="type">How the result is kept.</param>
     /// <param name="run">The side effect.</param>
     /// <returns>The result of the first call of the key.</returns>
-    /// <exception cref="FleetException">The key was used for other parameters, or its receipt expired.</exception>
+    /// <exception cref="FleetException">
+    /// The key was used for other parameters, or its receipt expired; or the node holds as many keys within their lifetime
+    /// as it keeps (<see cref="FleetErrorCodes.ServerBusy"/>, with when to retry).
+    /// </exception>
     public Task<T> RunOnceAsync<T>(string key, string parameters, JsonTypeInfo<T> type, Func<Task<T>> run) where T : class
     {
         ArgumentNullException.ThrowIfNull(key);
@@ -95,7 +102,8 @@ internal sealed class FleetRetryReceipts
             Prune(now);
             if (_receipts.TryGetValue(digest, out var kept))
             {
-                if (kept.Fingerprint != fingerprint)
+                // A tombstone no longer knows its parameters: whatever they are, it never runs again.
+                if (kept.Fingerprint is not null && kept.Fingerprint != fingerprint)
                     throw new FleetException(FleetErrorCodes.InvalidRequest, null, "The idempotency key was already used for another request.");
                 if (kept.Work is { } shared && !shared.IsFaulted && !shared.IsCanceled) return Replay(shared);
                 if (kept.Work is null)
@@ -108,6 +116,7 @@ internal sealed class FleetRetryReceipts
                 Remove(kept);
             }
 
+            if (_receipts.Count >= _keyCapacity) throw Full(now);
             receipt = new Receipt(digest, fingerprint, now);
             receipt.Node = _order.AddLast(receipt);
             _receipts.Add(digest, receipt);
@@ -159,7 +168,7 @@ internal sealed class FleetRetryReceipts
             {
                 var json = JsonSerializer.SerializeToElement(result, type);
                 receipt.Result = json.GetRawText().Length <= MaxResultBytes ? json : null;
-                if (receipt.Result is null) receipt.Work = null;
+                if (receipt.Result is null) receipt.Bury();
                 else _results++;
                 receipt.Settled = true;
                 Evict();
@@ -169,24 +178,26 @@ internal sealed class FleetRetryReceipts
         }
     }
 
-    // The results past capacity become keys without a result (a retry answers expired), the keys past their lifetime or
-    // past capacity are forgotten; a call still running keeps its receipt.
+    // The results past capacity become tombstones (a retry answers expired). Keys are forgotten only past their lifetime
+    // (Prune), never for room: a full store refuses new keys instead (Full).
     private void Evict()
     {
         for (var node = _order.First; node is not null && _results > _resultCapacity; node = node.Next)
         {
             if (node.Value.Result is null) continue;
             node.Value.Result = null;
-            node.Value.Work = null;
+            node.Value.Bury();
             _results--;
         }
+    }
 
-        for (var node = _order.First; node is not null && _receipts.Count > _keyCapacity;)
-        {
-            var next = node.Next;
-            if (!node.Value.IsRunning) Remove(node.Value);
-            node = next;
-        }
+    // A new key while the store holds as many keys within their lifetime as it keeps: retried once the oldest expires.
+    private FleetException Full(DateTimeOffset now)
+    {
+        var oldest = _order.FirstOrDefault(static receipt => !receipt.IsRunning)?.At ?? now;
+        var wait = Math.Clamp(Math.Ceiling((oldest + Lifetime - now).TotalSeconds), 1, int.MaxValue);
+        return new FleetException(new FleetError(FleetErrorCodes.ServerBusy, FleetErrorHints.Retry,
+            $"The node holds the {_keyCapacity} idempotency keys it keeps for their lifetime: the request was not run, retry it later.", (int)wait));
     }
 
     private void Prune(DateTimeOffset now)
@@ -259,12 +270,11 @@ internal sealed class FleetRetryReceipts
 
         foreach (var entry in file.Receipts.OrderBy(static entry => entry.At))
         {
-            if (string.IsNullOrEmpty(entry.Key) || string.IsNullOrEmpty(entry.Fingerprint) || _receipts.ContainsKey(entry.Key)) continue;
-            var receipt = new Receipt(entry.Key, entry.Fingerprint, entry.At)
-            {
-                Result = entry.Running == true || entry.Result is not { ValueKind: JsonValueKind.Object } ? null : entry.Result,
-                Settled = true,
-            };
+            if (string.IsNullOrEmpty(entry.Key) || _receipts.ContainsKey(entry.Key)) continue;
+            var result = entry.Running == true || string.IsNullOrEmpty(entry.Fingerprint) || entry.Result is not { ValueKind: JsonValueKind.Object } ? null : entry.Result;
+            var receipt = new Receipt(entry.Key, string.IsNullOrEmpty(entry.Fingerprint) ? null : entry.Fingerprint, entry.At) { Result = result, Settled = true };
+            // A call a stop interrupted, or a key whose result was evicted: a tombstone.
+            if (result is null) receipt.Bury();
             receipt.Node = _order.AddLast(receipt);
             _receipts.Add(receipt.Key, receipt);
             if (receipt.Result is not null) _results++;
@@ -293,11 +303,12 @@ internal sealed class FleetRetryReceipts
         return Convert.ToBase64String(hash[..18]);
     }
 
-    private sealed class Receipt(string key, string fingerprint, DateTimeOffset at)
+    private sealed class Receipt(string key, string? fingerprint, DateTimeOffset at)
     {
         public string Key { get; } = key;
 
-        public string Fingerprint { get; } = fingerprint;
+        // The digest of the parameters; null for a tombstone, which never runs again whatever they are.
+        public string? Fingerprint { get; private set; } = fingerprint;
 
         public DateTimeOffset At { get; } = at;
 
@@ -312,6 +323,13 @@ internal sealed class FleetRetryReceipts
         public bool Settled { get; set; }
 
         public bool IsRunning => !Settled;
+
+        // Keeps only what makes a retry answer expired until the key's lifetime ends: its digest and its time.
+        public void Bury()
+        {
+            Work = null;
+            Fingerprint = null;
+        }
     }
 }
 
@@ -334,9 +352,10 @@ internal sealed class RetryReceiptEntry
     [JsonPropertyName("key")]
     public string Key { get; set; } = "";
 
-    /// <summary>Gets or sets the digest of the parameters.</summary>
+    /// <summary>Gets or sets the digest of the parameters; null for a tombstone, a key kept without its result.</summary>
     [JsonPropertyName("params")]
-    public string Fingerprint { get; set; } = "";
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Fingerprint { get; set; }
 
     /// <summary>Gets or sets when the call came.</summary>
     [JsonPropertyName("at")]
