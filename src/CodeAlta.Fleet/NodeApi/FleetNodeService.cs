@@ -72,6 +72,9 @@ public sealed partial class FleetNodeService : IAsyncDisposable
     private readonly Logger _logger = LogManager.GetLogger("CodeAlta.Fleet.Node");
     // The repository of each project, which node.info publishes: read with git once in a while, not at every call.
     private readonly CodeAlta.Catalog.SessionMoves.RepositoryLocationCache _locations = new();
+    // The unreadable project files already logged, so that each is logged once while it stays as it is.
+    private readonly Lock _unreadableGate = new();
+    private readonly HashSet<string> _warnedUnreadable = new(StringComparer.Ordinal);
     private int _disposed;
 
     /// <summary>Initializes a new instance of the <see cref="FleetNodeService"/> class.</summary>
@@ -297,7 +300,18 @@ public sealed partial class FleetNodeService : IAsyncDisposable
                 parameters = JsonSerializer.Deserialize("{}", parametersType)!;
             }
 
-            var result = await handler(new FleetNodeCall(caller, device, context), parameters, cancellationToken).ConfigureAwait(false);
+            TResult result;
+            try
+            {
+                result = await handler(new FleetNodeCall(caller, device, context), parameters, cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception exception) when (exception is not FleetException && !(exception is OperationCanceledException && cancellationToken.IsCancellationRequested))
+            {
+                // The caller gets an internal error without the details: the owner finds them in the log of the node.
+                LogError($"'{method}' failed for {caller.DeviceId}: {exception}");
+                throw;
+            }
+
             return JsonSerializer.SerializeToElement(result, resultType);
         });
     }
@@ -380,6 +394,11 @@ public sealed partial class FleetNodeService : IAsyncDisposable
     private void LogWarn(string message)
     {
         if (LogManager.IsInitialized) _logger.Warn(message);
+    }
+
+    private void LogError(string message)
+    {
+        if (LogManager.IsInitialized) _logger.Error(message);
     }
 
     private void LogDebug(string message)

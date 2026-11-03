@@ -26,7 +26,12 @@ public sealed partial class FleetNodeService
     private async Task<FleetNodeInfo> NodeInfoAsync(FleetNodeCall call, FleetEmpty parameters, CancellationToken cancellationToken)
     {
         var spaces = await _host.SpaceCatalog.LoadAsync(cancellationToken).ConfigureAwait(false);
-        var projects = (await _host.ProjectCatalog.LoadAsync(cancellationToken).ConfigureAwait(false)).Where(static project => !project.Archived).ToArray();
+        // A project file the node cannot read leaves that project out, not the node: the others are listed, and the owner is told.
+        var load = await _host.ProjectCatalog.LoadReadableAsync(cancellationToken).ConfigureAwait(false);
+        var projects = load.Projects.Where(static project => !project.Archived).ToArray();
+        var diagnostics = load.Unreadable.Select(file => new FleetNodeDiagnostic(FleetNodeDiagnostic.UnreadableProject,
+            $"The project file {file.SourcePath} cannot be read, and its project is not listed: {file.Message}", file.SourcePath)).ToArray();
+        WarnUnreadableProjects(load.Unreadable);
         // The repository of each project, so that another machine recognizes its own checkout of it; a few at a time.
         var locations = new RepositoryLocation?[projects.Length];
         await Parallel.ForEachAsync(Enumerable.Range(0, projects.Length), new ParallelOptions { MaxDegreeOfParallelism = 4, CancellationToken = cancellationToken },
@@ -43,7 +48,25 @@ public sealed partial class FleetNodeService
             Describe(call.Device!.Permissions))
         {
             Providers = await ReadyProvidersAsync(cancellationToken).ConfigureAwait(false),
+            Diagnostics = diagnostics,
         };
+    }
+
+    // Each unreadable file once while it stays as it is: node.info is called again and again by the devices that watch the node.
+    private void WarnUnreadableProjects(IReadOnlyList<UnreadableProjectFile> unreadable)
+    {
+        lock (_unreadableGate)
+        {
+            var now = unreadable.Select(static file => file.SourcePath + "\n" + file.Message).ToHashSet(StringComparer.Ordinal);
+            foreach (var file in unreadable)
+            {
+                if (_warnedUnreadable.Contains(file.SourcePath + "\n" + file.Message)) continue;
+                LogWarn($"The project file {file.SourcePath} cannot be read; its project is left out of node.info: {file.Message}");
+            }
+
+            _warnedUnreadable.Clear();
+            _warnedUnreadable.UnionWith(now);
+        }
     }
 
     /// <summary>The most providers, and models of a provider, <c>node.info</c> lists.</summary>

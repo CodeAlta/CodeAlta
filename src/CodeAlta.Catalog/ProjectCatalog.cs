@@ -73,7 +73,26 @@ public sealed partial class ProjectCatalog
     /// The folder is listed at each call, and a project file is read and parsed again only when it changed since this
     /// catalog last did (see "Reads and the cache of the parsed files" in <c>doc/catalog-and-config.md</c>).
     /// </remarks>
-    public async Task<IReadOnlyList<ProjectDescriptor>> LoadAsync(CancellationToken cancellationToken = default)
+    public Task<IReadOnlyList<ProjectDescriptor>> LoadAsync(CancellationToken cancellationToken = default)
+        => LoadCoreAsync(unreadable: null, cancellationToken);
+
+    /// <summary>
+    /// Loads the known projects as <see cref="LoadAsync"/> does, but skips a project file that cannot be read or is not a
+    /// valid project, and says which, where <see cref="LoadAsync"/> fails: for a host that must answer with the other
+    /// projects (a node that describes itself to the devices paired with it).
+    /// </summary>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The projects that could be read, and the files that could not.</returns>
+    /// <exception cref="OperationCanceledException">The load was canceled.</exception>
+    public async Task<ProjectCatalogLoad> LoadReadableAsync(CancellationToken cancellationToken = default)
+    {
+        var unreadable = new List<UnreadableProjectFile>();
+        var projects = await LoadCoreAsync(unreadable, cancellationToken).ConfigureAwait(false);
+        return new ProjectCatalogLoad(projects, unreadable);
+    }
+
+    // Null unreadable: a file that cannot be read or parsed fails the load, as it always did.
+    private async Task<IReadOnlyList<ProjectDescriptor>> LoadCoreAsync(List<UnreadableProjectFile>? unreadable, CancellationToken cancellationToken)
     {
         var projectsRoot = _options.ProjectsRoot;
         var results = new List<ProjectDescriptor>();
@@ -82,9 +101,17 @@ public sealed partial class ProjectCatalog
             foreach (var markdownPath in EnumerateProjectMarkdownPaths(projectsRoot))
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                var source = await _sources.ReadAsync(markdownPath, _parseSource, cancellationToken).ConfigureAwait(false);
-                // A relative path is resolved against the current folder of the process, as each load always did.
-                results.Add(source.Relative ? ParseProject(markdownPath, source.Markdown, out _) : Copy(source.Descriptor));
+                try
+                {
+                    var source = await _sources.ReadAsync(markdownPath, _parseSource, cancellationToken).ConfigureAwait(false);
+                    // A relative path is resolved against the current folder of the process, as each load always did.
+                    results.Add(source.Relative ? ParseProject(markdownPath, source.Markdown, out _) : Copy(source.Descriptor));
+                }
+                catch (Exception exception) when (unreadable is not null && exception is IOException or UnauthorizedAccessException
+                    or SharpYaml.YamlException or InvalidDataException or ArgumentException or FormatException)
+                {
+                    unreadable.Add(new UnreadableProjectFile(markdownPath, exception.Message));
+                }
             }
         }
 

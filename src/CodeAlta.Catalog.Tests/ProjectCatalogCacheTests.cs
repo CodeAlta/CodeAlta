@@ -141,6 +141,24 @@ public sealed class ProjectCatalogCacheTests
     }
 
     [TestMethod]
+    public async Task LoadReadable_SkipsTheFilesThatCannotBeRead_AndNamesThem()
+    {
+        using var fixture = await Fixture.CreateAsync(3);
+        var projects = await fixture.Catalog.LoadAsync();
+        var invalid = projects[1].SourcePath!;
+        await File.WriteAllTextAsync(invalid, (await File.ReadAllTextAsync(invalid)).Replace("id: ", "id: not-an-id-", StringComparison.Ordinal));
+        var unparsable = Path.Combine(fixture.Options.ProjectsRoot, "broken.md");
+        await File.WriteAllTextAsync(unparsable, "---\nid: [unclosed\npath: {\n---\n");
+
+        var load = await fixture.Catalog.LoadReadableAsync();
+
+        CollectionAssert.AreEqual(new[] { projects[0].Id, projects[2].Id }, load.Projects.Select(static project => project.Id).ToArray());
+        CollectionAssert.AreEquivalent(new[] { invalid, unparsable }, load.Unreadable.Select(static file => file.SourcePath).ToArray());
+        Assert.IsTrue(load.Unreadable.All(static file => file.Message.Length > 0));
+        await Assert.ThrowsAsync<Exception>(() => fixture.Catalog.LoadAsync(), "LoadAsync still fails on a file it cannot read.");
+    }
+
+    [TestMethod]
     [DoNotParallelize] // It changes the current folder of the process.
     public async Task ARelativeProjectPath_IsResolvedAgainstTheCurrentFolderAtEachLoad()
     {

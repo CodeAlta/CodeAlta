@@ -255,6 +255,7 @@ internal sealed class NodeClientCommands(TextWriter output, TextWriter error)
                 await output.WriteLineAsync($"{info.Name} ({info.DeviceId}), {info.Os}, CodeAlta {info.Version}; this device may {string.Join(", ", info.Permissions)}.").ConfigureAwait(false);
                 foreach (var space in info.Spaces) await output.WriteLineAsync($"space    {space.Id}  {space.Name}").ConfigureAwait(false);
                 foreach (var project in info.Projects) await output.WriteLineAsync($"project  {project.Id}  {project.Name}  {project.Path}").ConfigureAwait(false);
+                foreach (var diagnostic in info.Diagnostics) await output.WriteLineAsync($"warning  {diagnostic.Message}").ConfigureAwait(false);
                 return NodeExitCodes.Success;
             }
             case "sessions":

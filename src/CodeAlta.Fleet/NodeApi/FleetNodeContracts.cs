@@ -186,6 +186,19 @@ public sealed record FleetNodeInfo(string Name, string DeviceId, string Os, stri
 {
     /// <summary>Gets the providers of the node that are ready to run sessions; empty for a node that does not say (an older one).</summary>
     public IReadOnlyList<FleetProviderInfo> Providers { get; init; } = [];
+
+    /// <summary>Gets what the node could not describe (a project file it cannot read, left out of <see cref="Projects"/>); empty when all is well.</summary>
+    public IReadOnlyList<FleetNodeDiagnostic> Diagnostics { get; init; } = [];
+}
+
+/// <summary>Something the node could not describe in <c>node.info</c>, which its owner can fix.</summary>
+/// <param name="Code">What it is: <see cref="FleetNodeDiagnostic.UnreadableProject"/>.</param>
+/// <param name="Message">What is wrong, for people.</param>
+/// <param name="Path">The file on the node, when it is about one.</param>
+public sealed record FleetNodeDiagnostic(string Code, string Message, string? Path = null)
+{
+    /// <summary>A project file the node cannot read or that is not a valid project: the project is not listed.</summary>
+    public const string UnreadableProject = "project.unreadable";
 }
 
 /// <summary>The parameters of <c>sessions.list</c>.</summary>
