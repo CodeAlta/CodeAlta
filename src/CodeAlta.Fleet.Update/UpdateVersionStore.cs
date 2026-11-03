@@ -260,7 +260,7 @@ public sealed class UpdateVersionStore
         {
             var name = Path.GetFileName(folder);
             if (!UpdateVersion.TryParse(name, out var version) || keep.Any(kept => Same(kept, version))) continue;
-            if (TryDeleteDirectory(folder)) removed.Add(name);
+            if (TryRemoveVersion(folder)) removed.Add(name);
         }
 
         var staging = Path.Combine(Root, StagingFolderName);
@@ -301,6 +301,32 @@ public sealed class UpdateVersionStore
                 throw new UpdateException(UpdateErrorCodes.StateUnavailable, $"{path} stays locked: {exception.Message}", exception);
             }
         }
+    }
+
+    /// <summary>
+    /// Removes the folder of a version so that it is never left half deleted: it is moved out of the folder of versions
+    /// first (which Windows refuses while a process runs from it), then deleted; what cannot be deleted yet stays in the
+    /// staging folder, cleaned later.
+    /// </summary>
+    /// <param name="folder">The folder of the version.</param>
+    /// <returns>Whether the version is gone.</returns>
+    public bool TryRemoveVersion(string folder)
+    {
+        ArgumentNullException.ThrowIfNull(folder);
+        if (!Directory.Exists(folder)) return true;
+        var trash = Path.Combine(Root, StagingFolderName, "removed-" + Path.GetFileName(folder) + "-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(trash)!);
+            Directory.Move(folder, trash);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            return false;
+        }
+
+        TryDeleteDirectory(trash);
+        return true;
     }
 
     private static bool TryDeleteDirectory(string folder)

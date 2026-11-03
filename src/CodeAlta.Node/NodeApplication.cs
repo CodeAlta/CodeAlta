@@ -214,13 +214,15 @@ internal sealed class NodeApplication
         }
 
         // The installed entry point (the tool, what the service starts) hands over to the version altanode update
-        // selected, and passes its exit code through; a switch that waited for the next start is taken first.
+        // selected, and passes its exit code through; a switch that waited for the next start is taken first. Not while
+        // another instance holds the profile: this run is refused below as before, and the version on trial of the
+        // running node is neither started twice nor blamed for that refusal.
         var store = NodeUpdatePaths.Store(profile);
-        if (!UpdateLauncher.IsSupervised && !store.Contains(ApplicationDirectory ?? AppContext.BaseDirectory))
+        if (!UpdateLauncher.IsSupervised && !store.Contains(ApplicationDirectory ?? AppContext.BaseDirectory) && !NodeProfileStatus.Read(profile).IsHeld)
         {
             try
             {
-                if (!NodeProfileStatus.Read(profile).IsHeld) store.TakePending(UpdateProduct.Node);
+                store.TakePending(UpdateProduct.Node);
             }
             catch (UpdateException exception)
             {

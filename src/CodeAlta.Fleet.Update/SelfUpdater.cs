@@ -215,7 +215,8 @@ public sealed class SelfUpdater
                 _ => "local folder",
             };
 
-            if (store.IsStaged(version, product))
+            // A folder of an earlier update is taken only when it holds this very package.
+            if (store.IsStaged(version, product) && StagedHash(target) == actual.Base64)
                 return new StagedUpdate(version, target, actual, checkedBy, AlreadyStaged: true);
 
             var files = Path.Combine(stagingRoot, "files");
@@ -224,8 +225,9 @@ public sealed class SelfUpdater
             {
                 PackageId = check.PackageId, Version = version.ToString(), Source = check.Source, Sha512 = actual.Base64, StagedAt = store.Time.GetUtcNow(),
             }, UpdateJsonContext.Default.StagedVersionInfo));
-            // A folder left by an interrupted earlier attempt holds no entry assembly: it is replaced.
-            if (Directory.Exists(target)) Directory.Delete(target, recursive: true);
+            // A folder of another package of the same version (or one an earlier attempt left) is replaced, unless it runs.
+            if (Directory.Exists(target) && !store.TryRemoveVersion(target))
+                throw new UpdateException(UpdateErrorCodes.StateUnavailable, $"{target} holds another package of {version} and is in use: it was not replaced.");
             Directory.Move(files, target);
             return new StagedUpdate(version, target, actual, checkedBy, AlreadyStaged: false);
         }
@@ -233,6 +235,19 @@ public sealed class SelfUpdater
         {
             try { Directory.Delete(stagingRoot, recursive: true); }
             catch (Exception exception) when (exception is IOException or UnauthorizedAccessException) { }
+        }
+    }
+
+    // The SHA-512 of the package a staged folder was unpacked from, as its .package.json records it; null when unknown.
+    private static string? StagedHash(string folder)
+    {
+        try
+        {
+            return System.Text.Json.JsonSerializer.Deserialize(File.ReadAllBytes(Path.Combine(folder, ".package.json")), UpdateJsonContext.Default.StagedVersionInfo)?.Sha512;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or System.Text.Json.JsonException)
+        {
+            return null;
         }
     }
 

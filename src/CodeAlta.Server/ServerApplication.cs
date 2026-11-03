@@ -211,13 +211,14 @@ public sealed class ServerApplication
         }
 
         // The installed entry point (the tool) hands over to the version altaserver update selected, and passes its exit
-        // code through; a switch that waited for the next start is taken first.
+        // code through; a switch that waited for the next start is taken first. Not while another server holds the data
+        // root: this run is refused below as before, and the version on trial is not blamed for that refusal.
         var store = new UpdateVersionStore(paths!.VersionsRoot);
-        if (!UpdateLauncher.IsSupervised && !store.Contains(ApplicationDirectory ?? AppContext.BaseDirectory))
+        if (!UpdateLauncher.IsSupervised && !store.Contains(ApplicationDirectory ?? AppContext.BaseDirectory) && !CoordinatorServer.IsRunning(paths))
         {
             try
             {
-                if (!CoordinatorServer.IsRunning(paths)) store.TakePending(UpdateProduct.Server);
+                store.TakePending(UpdateProduct.Server);
             }
             catch (UpdateException exception)
             {

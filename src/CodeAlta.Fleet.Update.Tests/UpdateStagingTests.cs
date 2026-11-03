@@ -74,6 +74,13 @@ public sealed class UpdateStagingTests
 
         var again = await updater.StageAsync(check, request, CancellationToken.None);
         Assert.IsTrue(again.AlreadyStaged);
+
+        // A folder of another package of the same version (an earlier, different build) is not taken: it is replaced.
+        File.WriteAllText(Path.Combine(staged.Path, "altanode.dll"), "another build");
+        File.WriteAllText(Path.Combine(staged.Path, ".package.json"), """{ "sha512": "another" }""");
+        var replaced = await updater.StageAsync(check, request, CancellationToken.None);
+        Assert.IsFalse(replaced.AlreadyStaged);
+        Assert.AreEqual("assembly 4.0.0-alpha.902", File.ReadAllText(Path.Combine(replaced.Path, "altanode.dll")));
     }
 
     [TestMethod]

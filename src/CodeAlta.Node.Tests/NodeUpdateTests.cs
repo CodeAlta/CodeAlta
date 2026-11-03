@@ -79,6 +79,25 @@ public sealed class NodeUpdateTests
     }
 
     [TestMethod]
+    public async Task Run_DoesNotHandOverWhileAnotherInstanceHoldsTheProfile()
+    {
+        using var root = new NodeTestRoot();
+        var store = NodeUpdatePaths.Store(root.Profile());
+        var target = UpdateVersion.Parse("99.0.0");
+        Stage(store, target);
+        store.Select(target);
+        await using var running = await NodeHost.StartAsync(root.Options(), TestContext.CancellationToken);
+        var runner = new RecordingRunner(exitCode: NodeExitCodes.ProfileInUse);
+        var app = Application(root, out _, out var error, runner);
+
+        // A second run by mistake is refused as before; it never starts the version on trial, which would fail and be rolled back.
+        Assert.AreEqual(NodeExitCodes.ProfileInUse, await app.RunAsync(["run", "--data-root", root.DataRoot, "--port", "0"]));
+        Assert.AreEqual(0, runner.Started.Count, error.ToString());
+        Assert.AreEqual("99.0.0", store.Read().Trial?.Version);
+        Assert.AreEqual(0, store.Read().Bad.Count);
+    }
+
+    [TestMethod]
     public async Task Run_SwitchesWhenIdle_ThenBecomesTheLauncherOfTheNewVersion()
     {
         using var root = new NodeTestRoot();

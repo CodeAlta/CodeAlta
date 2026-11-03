@@ -111,6 +111,25 @@ public sealed class ServerUpdateTests
     }
 
     [TestMethod]
+    public async Task Run_DoesNotHandOverWhileAnotherServerHoldsTheDataRoot()
+    {
+        using var root = new TempDirectory();
+        await using var running = await ServerFixture.StartAsync(root);
+        var paths = new ServerPaths(root.Path);
+        var store = new UpdateVersionStore(paths.VersionsRoot);
+        var target = UpdateVersion.Parse("99.0.0");
+        Stage(store, target);
+        store.Select(target);
+        var runner = new RecordingRunner(1);
+        var app = Application(runner, out _, out var error);
+
+        Assert.AreEqual(ServerExitCodes.Failure, await app.RunAsync(["run", "--urls", "http://127.0.0.1:0", "--data-root", paths.DataRoot]));
+        StringAssert.Contains(error.ToString(), "Another CodeAlta Server uses the data root");
+        Assert.AreEqual(0, runner.Started.Count);
+        Assert.AreEqual(0, store.Read().Bad.Count, "the version on trial is not blamed for a server that was already running");
+    }
+
+    [TestMethod]
     public async Task AFailedBackupDropsTheSwitch()
     {
         using var root = new TempDirectory();
