@@ -53,6 +53,13 @@ public sealed record UpdateLauncherOptions
     /// </summary>
     public Func<UpdateTrial, CancellationToken, Task>? RolledBack { get; init; }
 
+    /// <summary>
+    /// Gets what copies the data a new version may change (the server's database) before a switch that waited is taken
+    /// between two versions, as <see cref="UpdateVersionStore.TakePending(UpdateProduct, Func{UpdateVersion, string?})"/>
+    /// describes; null when the product needs no copy.
+    /// </summary>
+    public Func<UpdateVersion, string?>? Backup { get; init; }
+
     /// <summary>Gets whether the launcher handles SIGTERM and SIGINT itself (true for a process; false in tests).</summary>
     public bool HandleSignals { get; init; } = true;
 
@@ -165,7 +172,7 @@ public sealed class UpdateLauncher
             if (store.Read().RollingBack is { } rollback && !await RestoreAsync(rollback).ConfigureAwait(false)) return RestoreFailedExitCode;
 
             // Between two versions nothing runs: a switch that waits is taken at once.
-            if (store.TakePending(_options.Product) is { } taken) Log($"Switching to {taken}, which waited for the next start.");
+            if (store.TakePending(_options.Product, _options.Backup) is { } taken) Log($"Switching to {taken}, which waited for the next start.");
             var state = store.Read();
             var trial = state.Trial is { } selected && UpdateVersion.TryParse(selected.Version, out var trialVersion) && UpdateVersionStore.Same(state.Current, trialVersion)
                 ? selected : null;

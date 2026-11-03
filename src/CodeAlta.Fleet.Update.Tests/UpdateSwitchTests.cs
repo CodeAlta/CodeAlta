@@ -367,6 +367,48 @@ public sealed class UpdateSwitchTests
     }
 
     [TestMethod]
+    public async Task ASwitchTakenBetweenTwoVersionsIsCopiedFirst_AndDroppedWhenTheCopyFails()
+    {
+        using var temp = new TempFolder();
+        var store = StoreWith(temp, V1, V2);
+        store.Select(V1);
+        store.Confirm(V1);
+        string? backupOfTrial = null;
+        var runner = new FakeRunner(async (process, count) =>
+        {
+            await Task.Delay(20);
+            if (count == 1)
+            {
+                // 4.0.1 runs; a switch is asked for meanwhile and 4.0.1 stops for it, without selecting it itself.
+                store.RequestSwitch(V2, now: true, "local");
+                process.Exit(UpdateLauncher.RestartExitCode);
+                return;
+            }
+
+            backupOfTrial = store.Read().Trial?.Backup;
+            store.Confirm(V2);
+            await Task.Delay(20);
+            process.Exit(0);
+        });
+        var launcher = new UpdateLauncher(new UpdateLauncherOptions
+        {
+            Store = store, Product = UpdateProduct.Node, Arguments = ["run"], Installed = new UpdateCommand("installed-altanode", []), Runner = runner,
+            PollInterval = TimeSpan.FromMilliseconds(10), RestartDelay = TimeSpan.Zero, DotnetRoot = null, HandleSignals = false,
+            Backup = version => $"before-{version}.sqlite3",
+        });
+        Assert.AreEqual(0, await launcher.RunAsync());
+        CollectionAssert.AreEqual(new[] { "4.0.1", "4.0.2" }, runner.Started.Select(VersionOf).ToArray());
+        Assert.AreEqual("before-4.0.2.sqlite3", backupOfTrial);
+
+        store.RequestSwitch(V1, now: false, "local");
+        Assert.IsNull(store.TakePending(UpdateProduct.Node, static _ => throw new IOException("disk full")), "no switch without its copy");
+        var state = store.Read();
+        Assert.AreEqual("4.0.2", state.Current);
+        Assert.IsNull(state.Pending);
+        StringAssert.Contains(state.LastOutcome?.Message, "disk full");
+    }
+
+    [TestMethod]
     public void ANodeDrainsThenWaitsForTheNextIdleMoment()
     {
         var start = DateTimeOffset.UnixEpoch;

@@ -111,6 +111,33 @@ public sealed class ServerUpdateTests
     }
 
     [TestMethod]
+    public async Task Update_WhileStopped_CopiesTheDatabaseBeforeRunStartsTheNewVersion()
+    {
+        using var root = new TempDirectory();
+        await (await ServerFixture.StartAsync(root)).DisposeAsync();
+        var paths = new ServerPaths(root.Path);
+        Assert.IsTrue(File.Exists(paths.DatabasePath), "the server ran once and left its database");
+        var feed = Feed(root, "99.0.0");
+        var store = new UpdateVersionStore(paths.VersionsRoot);
+        var target = UpdateVersion.Parse("99.0.0");
+        string? backupOfTrial = null;
+        var runner = new RecordingRunner(0, () =>
+        {
+            backupOfTrial ??= store.Read().Trial?.Backup ?? "";
+            store.Confirm(target);
+        });
+        var app = Application(runner, out var output, out var error);
+
+        Assert.AreEqual(ServerExitCodes.Success, await app.RunAsync(["update", "--source", feed, "--data-root", paths.DataRoot]), error.ToString());
+        StringAssert.Contains(output.ToString(), "No server runs on");
+        Assert.AreEqual(0, await app.RunAsync(["run", "--port", "45998", "--data-root", paths.DataRoot]), error.ToString());
+
+        Assert.IsFalse(string.IsNullOrEmpty(backupOfTrial), "the version on trial has a copy of the database a rollback restores: " + error);
+        Assert.IsTrue(File.Exists(backupOfTrial) && new FileInfo(backupOfTrial).Length > 0, backupOfTrial);
+        StringAssert.StartsWith(backupOfTrial, paths.BackupsRoot);
+    }
+
+    [TestMethod]
     public async Task ARollbackWhoseBackupCannotBeRestoredDoesNotStartThePreviousVersion()
     {
         using var root = new TempDirectory();

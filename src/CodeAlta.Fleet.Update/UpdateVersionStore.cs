@@ -179,7 +179,21 @@ public sealed class UpdateVersionStore
     /// </summary>
     /// <param name="product">The product.</param>
     /// <returns>The version selected, or null when none was.</returns>
-    public UpdateVersion? TakePending(UpdateProduct product)
+    public UpdateVersion? TakePending(UpdateProduct product) => TakePending(product, null);
+
+    /// <summary>
+    /// Takes the switch that waits, as <see cref="TakePending(UpdateProduct)"/>, after a copy of what the new version may
+    /// change (the server's database): the trial records the copy, which a rollback restores. A copy that fails drops the
+    /// switch, since without it there is no way back.
+    /// </summary>
+    /// <param name="product">The product.</param>
+    /// <param name="backup">
+    /// Copies the data before the switch to a version and gives the path of the copy, or null when there is nothing to
+    /// copy; it throws <see cref="UpdateException"/>, <see cref="IOException"/> or <see cref="UnauthorizedAccessException"/>
+    /// when it fails. Null when the product needs no copy.
+    /// </param>
+    /// <returns>The version selected, or null when none was.</returns>
+    public UpdateVersion? TakePending(UpdateProduct product, Func<UpdateVersion, string?>? backup)
     {
         ArgumentNullException.ThrowIfNull(product);
         var state = Read();
@@ -196,7 +210,22 @@ public sealed class UpdateVersionStore
             return null;
         }
 
-        Select(version);
+        string? copy = null;
+        if (backup is not null)
+        {
+            SetPhase(version, UpdatePhases.BackingUp);
+            try
+            {
+                copy = backup(version);
+            }
+            catch (Exception exception) when (exception is UpdateException or IOException or UnauthorizedAccessException)
+            {
+                CancelPending($"The data could not be copied before the switch: {exception.Message}");
+                return null;
+            }
+        }
+
+        Select(version, copy);
         return version;
     }
 

@@ -218,7 +218,8 @@ public sealed class ServerApplication
         {
             try
             {
-                store.TakePending(UpdateProduct.Server);
+                // Without a running server to copy it, the database is copied here: a switch is never selected without it.
+                store.TakePending(UpdateProduct.Server, target => ServerUpdates.BackupStopped(paths, target));
             }
             catch (UpdateException exception)
             {
@@ -299,6 +300,7 @@ public sealed class ServerApplication
         {
             Store = store, Product = UpdateProduct.Server, Arguments = _args, Installed = InstalledCommand(), InstalledVersion = InstalledVersion(),
             Log = message => _error.WriteLine("altaserver: " + message),
+            Backup = target => ServerUpdates.BackupStopped(paths, target),
             RolledBack = (trial, _) =>
             {
                 if (trial.Backup is { } backup)
