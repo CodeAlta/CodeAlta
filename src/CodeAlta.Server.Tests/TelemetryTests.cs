@@ -4,6 +4,10 @@ using System.Threading.Channels;
 using CodeAlta.Fleet.Protocol;
 using CodeAlta.Fleet.Protocol.Api;
 using CodeAlta.Fleet.Tests.Otlp;
+using CodeAlta.Server.Api;
+using CodeAlta.Server.Identity;
+using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace CodeAlta.Server.Tests;
 
@@ -201,6 +205,123 @@ public sealed class TelemetryTests
         // The collector's refusal comes back to the machine, whose exporter retries.
         receiver.Status = 503;
         Assert.AreEqual(HttpStatusCode.ServiceUnavailable, await fixture.PostBytesAsync(node, "/otlp/v1/metrics", body));
+    }
+
+    [TestMethod]
+    public async Task TheServerReadsAtMostTheLimitOfACollectorsAnswer_AndGivesUpOnOneThatStalls()
+    {
+        await using var fixture = await ServerFixture.StartAsync(telemetryInterval: Interval);
+        using var owner = new TestDevice("Desktop");
+        using var node = new TestDevice("Mac mini");
+        var (setup, _) = await fixture.SetUpWithNodeAsync(owner, node);
+        var signed = owner.SignTelemetry(Settings(owner, setup.Organization.Id, 1, new Uri("http://127.0.0.1:9"), FleetTelemetryRoutes.Server, [FleetTelemetrySignals.Traces]));
+        var set = await fixture.SendAsync(owner, HttpMethod.Put, "/api/v1/telemetry", new SetTelemetrySettingsRequest(signed));
+        Assert.AreEqual(HttpStatusCode.OK, set.Status, set.Body.ToString());
+
+        // A collector whose answer never ends: the server stops reading past the limit and relays no body.
+        var endless = new AnswerStream(stall: false);
+        using (var collector = new CollectorHandler(endless))
+        using (var forwarder = new OtlpForwarder(fixture.Server.Telemetry, fixture.GetService<RequestAuthenticator>(), NullLogger.Instance, collector, TimeSpan.FromSeconds(10)))
+        {
+            var (context, aborted) = SignedOtlpContext(fixture, node, [0x0A, 0x01]);
+            using var _ = aborted;
+            await forwarder.HandleAsync(context, FleetTelemetrySignals.Traces).WaitAsync(Waits.Hang);
+            Assert.AreEqual(StatusCodes.Status200OK, context.Response.StatusCode);
+            Assert.AreEqual(0L, context.Response.Body.Length, "an answer past the limit is not relayed");
+            Assert.IsTrue(endless.BytesRead <= 128 * 1024, $"the server read {endless.BytesRead} bytes of an answer limited to 64 KiB");
+        }
+
+        // A collector that sends its headers, then nothing: the timeout covers the body too, and the machine gets a 502 to retry.
+        var stalled = new AnswerStream(stall: true);
+        using (var collector = new CollectorHandler(stalled))
+        using (var forwarder = new OtlpForwarder(fixture.Server.Telemetry, fixture.GetService<RequestAuthenticator>(), NullLogger.Instance, collector, TimeSpan.FromMilliseconds(500)))
+        {
+            var (context, aborted) = SignedOtlpContext(fixture, node, [0x0A, 0x02]);
+            using var _ = aborted;
+            try
+            {
+                await forwarder.HandleAsync(context, FleetTelemetrySignals.Traces).WaitAsync(TimeSpan.FromSeconds(10));
+            }
+            finally
+            {
+                // Ends the request of a forwarder that would still wait.
+                await aborted.CancelAsync();
+            }
+
+            Assert.AreEqual(StatusCodes.Status502BadGateway, context.Response.StatusCode);
+            Assert.AreEqual(0L, context.Response.Body.Length);
+        }
+    }
+
+    // A request of the OTLP endpoint, signed by a device as its exporter signs them, with a response body the test reads.
+    private static (DefaultHttpContext Context, CancellationTokenSource Aborted) SignedOtlpContext(ServerFixture fixture, TestDevice device, byte[] body)
+    {
+        const string Path = "/otlp/v1/traces";
+        var aborted = new CancellationTokenSource();
+        var context = new DefaultHttpContext { RequestAborted = aborted.Token };
+        context.Request.Method = "POST";
+        context.Request.Path = Path;
+        context.Request.ContentType = "application/x-protobuf";
+        context.Request.Body = new MemoryStream(body);
+        context.Request.ContentLength = body.Length;
+        context.Response.Body = new MemoryStream();
+        var time = fixture.Clock.Now.ToUnixTimeMilliseconds();
+        var nonce = FleetSignedRequest.CreateNonce();
+        context.Request.Headers[FleetSignedRequest.DeviceHeader] = device.DeviceId;
+        context.Request.Headers[FleetSignedRequest.TimestampHeader] = time.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        context.Request.Headers[FleetSignedRequest.NonceHeader] = nonce;
+        context.Request.Headers[FleetSignedRequest.SignatureHeader] = device.Sign(FleetSignedRequest.GetSignedBytes("POST", Path, time, nonce, FleetSignedRequest.HashBody(body), device.DeviceId));
+        return (context, aborted);
+    }
+
+    // A collector that answers 200 with the stream of the test as its body.
+    private sealed class CollectorHandler(AnswerStream answer) : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+            => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StreamContent(answer) });
+    }
+
+    // The body of a collector's answer: 32 MiB of zeros, or nothing at all until it is cancelled. Counts what was read.
+    private sealed class AnswerStream(bool stall) : Stream
+    {
+        private const long Size = 32L * 1024 * 1024;
+        private long _read;
+
+        public long BytesRead => Interlocked.Read(ref _read);
+
+        public override bool CanRead => true;
+
+        public override bool CanSeek => false;
+
+        public override bool CanWrite => false;
+
+        public override long Length => throw new NotSupportedException();
+
+        public override long Position { get => throw new NotSupportedException(); set => throw new NotSupportedException(); }
+
+        public override int Read(byte[] buffer, int offset, int count) => ReadAsync(buffer.AsMemory(offset, count)).AsTask().GetAwaiter().GetResult();
+
+        public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
+        {
+            if (stall) await Task.Delay(Timeout.Infinite, cancellationToken);
+            var count = (int)Math.Min(buffer.Length, Size - BytesRead);
+            buffer.Span[..count].Clear();
+            Interlocked.Add(ref _read, count);
+            return count;
+        }
+
+        public override Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken)
+            => ReadAsync(buffer.AsMemory(offset, count), cancellationToken).AsTask();
+
+        public override void Flush()
+        {
+        }
+
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+
+        public override void SetLength(long value) => throw new NotSupportedException();
+
+        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
     }
 
     private static FleetTelemetrySettings Settings(TestDevice signer, string organizationId, long sequence, Uri endpoint, string route = FleetTelemetryRoutes.Direct,
