@@ -301,6 +301,36 @@ internal static partial class NodeServiceDefinition
         return needsQuotes ? "\"" + escaped + "\"" : escaped.ToString();
     }
 
+    /// <summary>Gets whether a Windows executable is a batch file (<c>.cmd</c>, <c>.bat</c>), which Windows runs through <c>cmd.exe /c</c>.</summary>
+    /// <param name="path">The path of the executable.</param>
+    /// <returns>Whether it is a batch file.</returns>
+    public static bool IsWindowsBatchFile(string path)
+    {
+        ArgumentNullException.ThrowIfNull(path);
+        return path.EndsWith(".cmd", StringComparison.OrdinalIgnoreCase) || path.EndsWith(".bat", StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// Finds a character <c>cmd.exe</c> would not pass as it is in a word of the command line of a batch file started
+    /// by the task: <c>"</c> (its quotes are not escaped as <c>CommandLineToArgvW</c> escapes them), <c>%</c> (it
+    /// expands variables) and control characters anywhere, and <c>^ &amp; | &lt; &gt;</c> in a word without a space,
+    /// which <c>conhost.exe</c> passes without quotes.
+    /// </summary>
+    /// <param name="word">The word: the path of the batch file or one of its arguments.</param>
+    /// <returns>The character, or null when <c>cmd.exe</c> passes the word as it is.</returns>
+    public static char? WindowsBatchUnsafeCharacter(string word)
+    {
+        ArgumentNullException.ThrowIfNull(word);
+        var quoted = word.Contains(' ', StringComparison.Ordinal);
+        foreach (var c in word)
+        {
+            if (c is '"' or '%' || char.IsControl(c)) return c;
+            if (!quoted && c is '^' or '&' or '|' or '<' or '>') return c;
+        }
+
+        return null;
+    }
+
     /// <summary>Joins arguments into a Windows command line, as <c>CommandLineToArgvW</c> splits it.</summary>
     /// <param name="arguments">The arguments.</param>
     /// <returns>The command line.</returns>

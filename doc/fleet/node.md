@@ -57,11 +57,14 @@ LocalSystem.
 for everyone. A dedicated machine gets its own OS user (`codealta`) with its own logins, set up from the desktop.
 
 - The installer writes the unit with restart on failure, and a bounded log under the state root. It starts the
-  executable from a stable path: a .NET tool from its shim (`~/.dotnet/tools/altanode`), which `dotnet tool update`
-  keeps. That entry point runs the version `altanode update` selected as its child, so an update never rewrites the
-  service ([deployment](deployment.md#updates)). launchd and systemd units get the installer's `PATH` and `DOTNET_ROOT`, since they start with almost none.
+  executable from a stable path: a .NET tool from its shim (`~/.dotnet/tools/altanode`, a symbolic link on macOS and
+  Linux, `altanode.cmd` on Windows), which `dotnet tool update` points at the new version, never from its versioned
+  folder under `.store`, which the update deletes. That entry point runs the version `altanode update` selected as
+  its child, so an update never rewrites the service ([deployment](deployment.md#updates)). launchd and systemd units get the installer's `PATH` and `DOTNET_ROOT`, since they start with almost none.
 - On Windows the task runs `conhost.exe --headless` (no console window) at logon, with a time trigger that starts the
-  node again within 5 minutes if it stopped (`conhost` hides the node's exit code from Task Scheduler). `uninstall`
+  node again within 5 minutes if it stopped (`conhost` hides the node's exit code from Task Scheduler). Windows runs
+  the `.cmd` shim through `cmd.exe`, so `install` refuses an option `cmd.exe` would change (`"`, `%`, `&` outside a
+  quoted value). `uninstall`
   deletes the task, then stops the node through its local control. `--system` is refused on Windows until the node
   runs as a Windows service.
 - A node keeps the machine awake while sessions work (as `DesktopKeepAwake` does), and lets it sleep when idle
