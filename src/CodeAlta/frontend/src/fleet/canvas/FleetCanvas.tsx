@@ -89,7 +89,8 @@ function MachineCard({ machine, sessions, time, onOpen }: { machine: FleetMachin
         <div className="fleet-machine-title"><strong>{machine.name}</strong>
           <Tag minimal round intent={machine.online ? "success" : "none"}>{t(machine.online ? "Online" : "Offline")}</Tag>
           {machine.isThisComputer && <Tag minimal round>{t("This computer")}</Tag>}
-          {machine.isPaired && <Tag minimal round>{t("Paired")}</Tag>}</div>
+          {machine.isPaired ? <Tag minimal round>{t("Paired")}</Tag>
+            : machine.isReachable && <Tag minimal round title={t("Through the server, encrypted from end to end")}>{t("Relayed")}</Tag>}</div>
         <div className="muted-text fleet-machine-details">{details}</div>
       </div>
       <span className="muted-text fleet-machine-count">{t(sessions.length === 1 ? "{count} session" : "{count} sessions", { count: sessions.length })}</span>

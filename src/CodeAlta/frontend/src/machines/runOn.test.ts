@@ -5,7 +5,7 @@ import { canStartOn, newSessionProblem, noRemoteSelection, remoteSelection, remo
 
 const machine = (change: Partial<MachineView> = {}): MachineView => ({ id: "m1", name: "mac-mini", state: "online", os: "macos", version: "4.0.0",
   address: "mac-mini:2585", fingerprint: "ABCD EFGH", words: "apple river stone cloud amber tiger", sessions: 2, lastSeen: null, problem: null,
-  permissions: ["view", "drive", "start"], pairedAt: "2026-11-03T00:00:00Z", ...change });
+  permissions: ["view", "drive", "start"], pairedAt: "2026-11-03T00:00:00Z", paired: true, channel: null, ...change });
 
 const choices = (change: Partial<MachineNewSessionChoices> = {}): MachineNewSessionChoices => ({
   status: "ok", machineName: "mac-mini", message: null, suggestedProjectId: "p-alta",

@@ -41,9 +41,10 @@ export function MachinesSettings({ epoch, api = machines }: { epoch: string | nu
     notice={notice} loading={loading} busy={busy} onReload={reload}
     actions={<Button intent="primary" icon={<AppIcon name="plus" size={15} />} disabled={!epoch || !listing} onClick={() => setPairing(true)}>{t("Pair a machine…")}</Button>}>
     {!listing ? <SettingsUnavailable loading={loading} icon="remote" title="Machines unavailable" />
-      : listing.machines.length === 0 ? <NonIdealState className="machines-empty" icon={<AppIcon name="remote" size={36} />} title={t("No paired machine.")} />
+      // The machines of a server reached through its relay are its own business: only the paired ones are here.
+      : !listing.machines.some(machine => machine.paired) ? <NonIdealState className="machines-empty" icon={<AppIcon name="remote" size={36} />} title={t("No paired machine.")} />
       : <><ul className="machine-list" aria-label={t("Machines")}>
-        {orderedMachines(listing.machines).map(machine => <MachineRow key={machine.id} machine={machine} busy={busy}
+        {orderedMachines(listing.machines.filter(machine => machine.paired)).map(machine => <MachineRow key={machine.id} machine={machine} busy={busy}
           onForget={() => void mutate(async () => api.forget({ expectedEpoch: epoch ?? "", machineId: machine.id }, { timeoutMilliseconds: 30_000 }))} />)}
       </ul>
       {receive !== null && <div className="machine-receive">

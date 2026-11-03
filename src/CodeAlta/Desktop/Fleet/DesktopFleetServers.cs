@@ -67,6 +67,35 @@ internal sealed class DesktopFleetServers : IAsyncDisposable
         }
     }
 
+    /// <summary>
+    /// Finds the connection to a server whose relay reaches a machine: one online that lists it, online itself first.
+    /// </summary>
+    /// <param name="machineId">The device of the machine.</param>
+    /// <returns>The connector, or null when no server this computer is connected to lists it.</returns>
+    public FleetConnector? FindRoute(string machineId)
+    {
+        var listing = Connections.Select(static connection => connection.Connector)
+            .Where(connector => connector is { State: FleetConnectorState.Online } && connector.Directory.Machines.ContainsKey(machineId))
+            .ToArray();
+        return listing.FirstOrDefault(connector => connector!.Directory.IsOnline(machineId)) ?? listing.FirstOrDefault();
+    }
+
+    /// <summary>Lists the nodes of the organizations of the servers this computer is connected to, but this computer.</summary>
+    /// <returns>Their device ids and names, once each.</returns>
+    public IReadOnlyList<(string Id, string Name)> OrganizationMachines()
+    {
+        var self = DeviceId;
+        var machines = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var connector in Connections.Select(static connection => connection.Connector))
+        {
+            if (connector is not { State: FleetConnectorState.Online }) continue;
+            foreach (var machine in connector.Directory.Machines.Values)
+                if (machine.Kind == FleetDeviceKinds.Node && machine.DeviceId != self) machines.TryAdd(machine.DeviceId, machine.Inventory.Name);
+        }
+
+        return [.. machines.Select(static pair => (pair.Key, pair.Value))];
+    }
+
     /// <summary>Gets the id of this device, once its key exists.</summary>
     public string? DeviceId => Volatile.Read(ref _identity)?.DeviceId;
 

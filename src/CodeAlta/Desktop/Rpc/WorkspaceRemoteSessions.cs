@@ -50,6 +50,12 @@ internal sealed partial class WorkspaceService
             var machineName = Bounded(listing.Info?.Name ?? host.Machine.Name);
             var remoteProjects = (listing.Info?.Projects ?? []).ToDictionary(static project => project.Id, StringComparer.Ordinal);
             var scope = MachineScopePrefix + machineId;
+            var channel = host.ChannelPath switch
+            {
+                CodeAlta.Fleet.Server.FleetChannelPath.Relayed => "relayed",
+                CodeAlta.Fleet.Server.FleetChannelPath.Direct => "direct",
+                _ => null,
+            };
             foreach (var session in listing.Sessions)
             {
                 if (session.State == "archived") continue;
@@ -69,6 +75,7 @@ internal sealed partial class WorkspaceService
                 {
                     MachineId = machineId,
                     MachineName = machineName,
+                    MachineChannel = channel,
                     RemoteState = session.State,
                     RemoteProject = remoteProject is null ? null : Bounded(remoteProject.Name),
                 });

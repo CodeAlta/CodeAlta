@@ -374,6 +374,10 @@ internal sealed record WorkspaceSession(string Id, string Title, string? Workspa
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? MachineName { get; init; }
 
+    // Where the channel to that machine goes while it is online: direct, or relayed by a server.
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? MachineChannel { get; init; }
+
     // What the session of that machine did when it was listed: working, waiting or idle.
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? RemoteState { get; init; }

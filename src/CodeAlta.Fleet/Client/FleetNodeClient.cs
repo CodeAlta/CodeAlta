@@ -71,8 +71,28 @@ public sealed class FleetNodeClient : IAsyncDisposable
     /// <exception cref="FleetException">The server refused the relay, or the connection to it is not open.</exception>
     /// <exception cref="FleetHandshakeException">The node refused the handshake.</exception>
     /// <exception cref="System.Net.WebSockets.WebSocketException">The relay did not open.</exception>
+    public static Task<FleetNodeClient> ConnectRelayedAsync(Server.FleetConnector connector, string nodeDeviceId, DeviceIdentity identity, Action<FleetConnection>? serve,
+        CancellationToken cancellationToken) => ConnectRelayedAsync(connector, nodeDeviceId, identity, serve, default, cancellationToken);
+
+    /// <summary>
+    /// Connects to a node through the relay of a server (see the other overload), for a machine this device also paired
+    /// with: the key the signed device list names must be the one pinned at pairing.
+    /// </summary>
+    /// <param name="connector">The control connection to the server, which opens the relay and verifies the device list.</param>
+    /// <param name="nodeDeviceId">The device of the node.</param>
+    /// <param name="identity">The key of this device.</param>
+    /// <param name="serve">Registers the methods this device serves on the channel, before it starts; null for none.</param>
+    /// <param name="pinned">The key pinned at pairing; the default value for a machine never paired.</param>
+    /// <param name="cancellationToken">Cancels the connection.</param>
+    /// <returns>The connected client, whose <see cref="Path"/> is <see cref="Server.FleetChannelPath.Relayed"/>.</returns>
+    /// <exception cref="ArgumentNullException">An argument is null.</exception>
+    /// <exception cref="DeviceAuthenticationException">The node is not a member of the signed device list, its key there is not the pinned one, it presented another key, or it refused this device.</exception>
+    /// <exception cref="InvalidDataException">The device list of the server does not verify.</exception>
+    /// <exception cref="FleetException">The server refused the relay, or the connection to it is not open.</exception>
+    /// <exception cref="FleetHandshakeException">The node refused the handshake.</exception>
+    /// <exception cref="System.Net.WebSockets.WebSocketException">The relay did not open.</exception>
     public static async Task<FleetNodeClient> ConnectRelayedAsync(Server.FleetConnector connector, string nodeDeviceId, DeviceIdentity identity, Action<FleetConnection>? serve,
-        CancellationToken cancellationToken)
+        DeviceFingerprint pinned, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(connector);
         ArgumentNullException.ThrowIfNull(nodeDeviceId);
@@ -81,6 +101,8 @@ public sealed class FleetNodeClient : IAsyncDisposable
         var list = await connector.Devices.RefreshAsync(cancellationToken).ConfigureAwait(false);
         if (!list.Members.TryGetValue(nodeDeviceId, out var node))
             throw new DeviceAuthenticationException(DeviceAuthenticationFailure.ServerNotTrusted, "The machine is not a member of the signed device list of the organization.");
+        if (!pinned.IsEmpty && pinned != node.Fingerprint)
+            throw new DeviceAuthenticationException(DeviceAuthenticationFailure.ServerKeyMismatch, "The signed device list names another key for the machine than the one paired with it.");
         var stream = await connector.OpenRelayAsync(nodeDeviceId, cancellationToken).ConfigureAwait(false);
         var channel = await FleetChannelStack.ConnectAsync(stream, new FleetChannelClientOptions { Identity = identity, NodeFingerprint = node.Fingerprint },
             cancellationToken).ConfigureAwait(false);

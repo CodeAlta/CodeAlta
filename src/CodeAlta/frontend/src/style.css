@@ -1964,6 +1964,8 @@ dialog.open-project-dialog:has(> .app-window) > .app-window > .app-window-body >
 /* The new-session prompt of a scope, in a tab of its own that is not the one written in: showing the tab selects its scope. */
 .session-draft-placeholder { display: grid; place-content: center; justify-items: center; gap: 10px; height: 100%; color: var(--muted); font-size: 14px; }
 .session-tab-dirty { flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--accent); }
+/* Where the channel of a remote session goes: a quiet word after its title. */
+.session-tab-channel { flex: none; color: var(--muted); font-size: 10px; line-height: 1; letter-spacing: .02em; opacity: .8; }
 .ide-shell .flexlayout__tab_button_trailing { display: grid; place-items: center; width: 18px; height: 18px; border-radius: 4px; color: var(--muted); }
 .ide-shell .flexlayout__tab_button_trailing:hover { color: var(--text); background: color-mix(in srgb, var(--text) 12%, transparent); }
 .ide-shell .flexlayout__tab_toolbar { align-self: center; padding: 0 6px; }
