@@ -933,7 +933,9 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                     },
                     // The tabs plugins provide: only a host that started its plugins has them.
                     canvases is null ? null : new DesktopAltaCanvases(canvases), documentation, documentationView, bookmarks, search, reviewService,
-                    new RuntimeAltaReviewPolicy(host.RuntimeService), new Windows.DesktopAltaWindows(windows), desktopSettings);
+                    new RuntimeAltaReviewPolicy(host.RuntimeService), new Windows.DesktopAltaWindows(windows), desktopSettings,
+                    // `alta session move`: the sessions of this computer and of its paired machines go from one to another.
+                    fleet?.Moves is { } fleetMoves ? new Fleet.DesktopAltaMachineMoves(fleetMoves, fleet, host) : null);
                 search.AttachCommands(altaCommands);
                 search.AttachSettings(desktopSettings);
                 projectOpening.Attach(async arguments => await altaCommands.InvokeAsync(arguments).ConfigureAwait(false));
