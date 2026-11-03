@@ -96,6 +96,12 @@ public sealed class FleetConnectorOptions
     /// <summary>Gets the file that pins the first entry of the device list of the server (<see cref="FleetOrganizationDevices"/>); null pins it in memory.</summary>
     public string? DeviceListPinPath { get; init; }
 
+    /// <summary>
+    /// Gets the anchored device list of the server, shared with <see cref="MetadataKeys"/> so that trust, signatures and
+    /// keys follow one verifier; null makes one on <see cref="DeviceListPinPath"/>.
+    /// </summary>
+    public FleetOrganizationDevices? Devices { get; init; }
+
     /// <summary>Gets what wraps the stream of each relay, for tests that look at the bytes the server pipes; null for none.</summary>
     public Func<Stream, Stream>? WrapRelayStream { get; init; }
 }
@@ -150,7 +156,7 @@ public sealed class FleetConnector : IAsyncDisposable
         ArgumentNullException.ThrowIfNull(options.Identity);
         _options = options;
         _outbox = FleetPublicationOutbox.Load(options.OutboxPath);
-        Devices = new FleetOrganizationDevices(options.ServerAddress, options.Identity, options.DeviceListPinPath);
+        Devices = options.Devices ?? options.MetadataKeys?.Devices ?? new FleetOrganizationDevices(options.ServerAddress, options.Identity, options.DeviceListPinPath);
     }
 
     /// <summary>Gets the devices of the organization of the server, as this device verified its signed device list.</summary>

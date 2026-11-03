@@ -235,6 +235,8 @@ public sealed class FleetServerConnections : IAsyncDisposable
         var linked = new LinkedSpaces(link.Url, _options.Spaces);
         var source = _options.Source is null ? null : new LinkedSource(_options.Source, linked);
         FleetConnector? created = null;
+        // One anchored verifier of the server's device list for the link: the trust of relays, the keys and the signatures follow it.
+        var devices = new FleetOrganizationDevices(link.Address, _options.Identity, Path.Combine(_store.LinkFolder(link.Id), FleetOrganizationDevices.PinFileName));
         var options = new FleetConnectorOptions
         {
             ServerAddress = link.Address,
@@ -244,7 +246,8 @@ public sealed class FleetServerConnections : IAsyncDisposable
             Source = source,
             PublishesSpace = linked.Contains,
             WatchDirectory = _options.WatchDirectory,
-            MetadataKeys = new FleetMetadataKeyring(link.Address, _options.Identity),
+            Devices = devices,
+            MetadataKeys = new FleetMetadataKeyring(devices),
             DeviceListPinPath = Path.Combine(_store.LinkFolder(link.Id), FleetOrganizationDevices.PinFileName),
             AcceptRelay = _options.AcceptRelay is { } accept ? (incoming, stream, token) => accept(created!, incoming, stream, token) : null,
         };

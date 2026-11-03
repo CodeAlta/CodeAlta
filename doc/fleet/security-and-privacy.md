@@ -105,6 +105,10 @@ analysis of Matrix showed a malicious server exploiting exactly that).
   token only lets a machine register its public key; it becomes a member when a signer signs that key.
 - Devices accept a new member only with a valid signature chain, so the server cannot add a device to receive keys
   (Tailscale's Tailnet Lock is the precedent).
+- Each device anchors the list of each server: it pins the first entry and keeps a checkpoint, the sequence and hash
+  of the last entry it accepted, which a later list must hold at the same place. A server can neither swap the
+  organization under a device nor answer an older list that takes back a removal. What a device trusts, the entries
+  it signs and the devices it wraps keys to all come from that one anchored list.
 - Every device of the person shows **New device: …** until one of them confirms it.
 - Revocation is a signed removal, a new epoch of the keys the device held, and dropped connections.
 

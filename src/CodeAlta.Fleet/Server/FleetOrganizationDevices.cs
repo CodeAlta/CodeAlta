@@ -75,14 +75,14 @@ public sealed class FleetOrganizationDevices
         await _refresh.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            var anchor = Newer(ReadPin(), _checkpoint);
+            var anchor = Newer(await ReadPinAsync(cancellationToken).ConfigureAwait(false), _checkpoint);
             using var client = new FleetServerClient(ServerAddress, Identity, Handler);
             var organization = anchor?.Organization ?? (await client.GetOrganizationAsync(cancellationToken).ConfigureAwait(false)).Id;
             var entries = await client.GetDeviceListAsync(cancellationToken).ConfigureAwait(false);
             var list = FleetServerClient.VerifyDeviceList(entries, organization);
             if (anchor is not null) Extends(anchor, entries, list);
             var accepted = new FleetDeviceListPin(list.FirstHash!, list.OrganizationId ?? organization, list.Sequence, list.LastHash);
-            if (anchor is null || accepted.Sequence > anchor.Sequence) WritePin(accepted);
+            WritePin(accepted);
             Volatile.Write(ref _current, list);
             return list;
         }
@@ -107,6 +107,24 @@ public sealed class FleetOrganizationDevices
     private static FleetDeviceListPin? Newer(FleetDeviceListPin? stored, FleetDeviceListPin? held)
         => stored is null ? held : held is null || stored.Sequence >= held.Sequence ? stored : held;
 
+    // A pin that cannot be read now (another instance replaces it) is read again; one that stays unreadable refuses
+    // the list rather than trust it from its first entry again.
+    private async Task<FleetDeviceListPin?> ReadPinAsync(CancellationToken cancellationToken)
+    {
+        for (var attempt = 0; ; attempt++)
+        {
+            try
+            {
+                return ReadPin();
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException && exception is not (FileNotFoundException or DirectoryNotFoundException))
+            {
+                if (attempt >= 4) throw new FleetDeviceListException(0, $"the anchor of the device list of this server cannot be read ({exception.Message})");
+                await Task.Delay(TimeSpan.FromMilliseconds(20 * (attempt + 1)), cancellationToken).ConfigureAwait(false);
+            }
+        }
+    }
+
     private FleetDeviceListPin? ReadPin()
     {
         if (_pinPath is null) return null;
@@ -124,9 +142,19 @@ public sealed class FleetOrganizationDevices
     private void WritePin(FleetDeviceListPin pin)
     {
         _checkpoint = pin;
-        if (_pinPath is null || ReadPin() is { } stored && stored.Sequence >= pin.Sequence) return;
-        Directory.CreateDirectory(Path.GetDirectoryName(_pinPath)!);
-        FleetFiles.WriteAtomically(_pinPath, JsonSerializer.SerializeToUtf8Bytes(pin, FleetOrganizationJson.Default.FleetDeviceListPin));
+        FleetDeviceListPin? stored;
+        try { stored = _pinPath is null ? null : ReadPin(); }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException) { return; }
+        if (_pinPath is null || stored is not null && stored.Sequence >= pin.Sequence) return;
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(_pinPath)!);
+            FleetFiles.WriteAtomically(_pinPath, JsonSerializer.SerializeToUtf8Bytes(pin, FleetOrganizationJson.Default.FleetDeviceListPin));
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            // Held in memory meanwhile; the next accepted read writes it.
+        }
     }
 }
 

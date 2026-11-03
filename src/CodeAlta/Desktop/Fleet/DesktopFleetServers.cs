@@ -375,7 +375,13 @@ internal sealed class DesktopFleetServers : IAsyncDisposable
     private FleetServerClient Client(string linkId)
     {
         var link = _store.List().FirstOrDefault(candidate => candidate.Id == linkId) ?? throw new KeyNotFoundException($"No server link has the id '{linkId}'.");
-        return new FleetServerClient(link.Address, Identity(), Handler);
+        // The entries this computer signs follow the device list as the anchor of the link (its pin and checkpoint) verified
+        // it: the one of the connector of the link while it runs, so that one verifier holds the checkpoint.
+        var identity = Identity();
+        var devices = Volatile.Read(ref _connections)?.Find(linkId)?.Connector?.Devices is { } running && running.ServerAddress == link.Address && Handler is null
+            ? running
+            : new FleetOrganizationDevices(link.Address, identity, Path.Combine(_store.LinkFolder(link.Id), FleetOrganizationDevices.PinFileName), Handler);
+        return new FleetServerClient(link.Address, identity, Handler) { DeviceList = devices };
     }
 
     // The key of this device: the one of pairing, made on first use.

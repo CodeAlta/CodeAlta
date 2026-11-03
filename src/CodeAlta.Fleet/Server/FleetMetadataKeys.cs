@@ -240,29 +240,29 @@ public static class FleetKeyWrap
 /// <summary>
 /// The metadata key of this device's person at one server: it reads the copy wrapped to this device, and, on a
 /// controller device, makes the key (the person's first controller device does) and wraps it to the person's devices
-/// that lack it, taking their keys from the signed device list it verified, never from the server's tables.
+/// that lack it, taking their keys from the device list as the anchor of the link verified it
+/// (<see cref="FleetOrganizationDevices"/>), never from the server's tables nor from a list that does not extend the
+/// one this device verified before.
 /// </summary>
 /// <remarks>One caller at a time: the loop of a <see cref="FleetConnector"/>; <see cref="Current"/> is read from any thread.</remarks>
 public sealed class FleetMetadataKeyring
 {
-    private readonly Uri _serverAddress;
+    private readonly FleetOrganizationDevices _devices;
     private readonly DeviceIdentity _identity;
-    private readonly HttpMessageHandler? _handler;
     private FleetMetadataKey? _current;
 
     /// <summary>Initializes a new instance of the <see cref="FleetMetadataKeyring"/> class.</summary>
-    /// <param name="serverAddress">The address of the server.</param>
-    /// <param name="identity">The key of this device; the caller keeps and disposes it.</param>
-    /// <param name="handler">The HTTP handler of the calls, for tests; null for the usual one.</param>
-    /// <exception cref="ArgumentNullException">An argument is <see langword="null"/>.</exception>
-    public FleetMetadataKeyring(Uri serverAddress, DeviceIdentity identity, HttpMessageHandler? handler = null)
+    /// <param name="devices">The anchored device list of the server, whose key and HTTP handler the calls use too.</param>
+    /// <exception cref="ArgumentNullException"><paramref name="devices"/> is <see langword="null"/>.</exception>
+    public FleetMetadataKeyring(FleetOrganizationDevices devices)
     {
-        ArgumentNullException.ThrowIfNull(serverAddress);
-        ArgumentNullException.ThrowIfNull(identity);
-        _serverAddress = serverAddress;
-        _identity = identity;
-        _handler = handler;
+        ArgumentNullException.ThrowIfNull(devices);
+        _devices = devices;
+        _identity = devices.Identity;
     }
+
+    /// <summary>Gets the anchored device list the keyring wraps by.</summary>
+    public FleetOrganizationDevices Devices => _devices;
 
     /// <summary>Gets the key of this device's person, once read; null before, or when none was given to this device yet.</summary>
     public FleetMetadataKey? Current => Volatile.Read(ref _current);
@@ -273,17 +273,18 @@ public sealed class FleetMetadataKeyring
     /// </summary>
     /// <param name="cancellationToken">Cancels the calls.</param>
     /// <returns>The key, or null when this device has none yet.</returns>
-    /// <exception cref="FleetDeviceListException">The device list does not verify: nothing is wrapped.</exception>
+    /// <exception cref="FleetDeviceListException">The device list does not verify, or does not extend the one this device verified: nothing is wrapped.</exception>
     /// <exception cref="InvalidDataException">The copy of this device does not open.</exception>
     /// <exception cref="FleetServerException">The server refused a call.</exception>
     /// <exception cref="HttpRequestException">The server does not answer.</exception>
     public async Task<FleetMetadataKey?> RefreshAsync(CancellationToken cancellationToken)
     {
-        using var client = new FleetServerClient(_serverAddress, _identity, _handler);
+        // The list first: nothing is read or wrapped through a server whose list does not extend the anchored one.
+        var list = await _devices.RefreshAsync(cancellationToken).ConfigureAwait(false);
+        using var client = new FleetServerClient(_devices.ServerAddress, _identity, _devices.Handler) { DeviceList = _devices };
         var latest = (await client.ListMetadataKeysAsync(cancellationToken).ConfigureAwait(false)).MaxBy(static key => key.Epoch);
         var key = latest?.Wrapped is { } wrapped ? FleetKeyWrap.Unwrap(wrapped, latest.Id, _identity) : null;
         var me = _identity.DeviceId;
-        var list = await client.ReadVerifiedDeviceListAsync(null, cancellationToken).ConfigureAwait(false);
         if (list.IsController(me))
         {
             var person = list.Members[me].OwnerId;
