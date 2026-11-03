@@ -11,8 +11,7 @@ namespace CodeAlta.LiveTool;
 // The fleet is never a way out of a sandbox (doc/fleet/security-and-privacy.md, rule 8): the read commands are open to a
 // sandboxed session (AltaSandboxGate), every command that starts or changes work on another machine is refused to it at
 // the host, and a session moves only what asks a person at least as much as it does.
-// TODO(fleet secrets): `alta fleet secret list` (names only, never values) once the secrets store of the fleet is on this
-// branch; `alta secret` does not exist yet.
+// Secrets are names only: `alta fleet secret list` never shows a value, and no command of an agent sets one.
 internal sealed partial class BuiltInAltaCommandContributor
 {
     private const int DefaultFleetSessions = 50;
@@ -39,6 +38,7 @@ internal sealed partial class BuiltInAltaCommandContributor
         // Refused: a person starts a campaign.
         Mutating("fleet update start"),
         Read("fleet health"),
+        Read("fleet secret list"),
     ];
 
     private static Command CreateFleetCommand(AltaCommandContext context)
@@ -66,6 +66,9 @@ internal sealed partial class BuiltInAltaCommandContributor
         update.Add(CreateFleetUpdateStartCommand(context));
         group.Add(update);
         group.Add(CreateFleetHealthCommand(context));
+        var secret = Group("secret", "List the secrets and variables of this computer or of a machine it manages, by name: never a value.");
+        secret.Add(CreateFleetSecretListCommand(context));
+        group.Add(secret);
         AddHelpText(
             group,
             "The fleet is this computer and the machines it is paired with or reaches through a CodeAlta Server. Every command works with the access of the person of this computer, never more.",
@@ -271,6 +274,46 @@ internal sealed partial class BuiltInAltaCommandContributor
         command.Add((_, _) => ValueTask.FromResult(HandleFleetHealth(context)));
         AddHelpText(command, "The summary `alta.fleet.health` counts the servers online and the machines ready. A machine that is offline or unauthorized needs its owner; one `not_allowed` needs the `start` permission from its owner.");
         return command;
+    }
+
+    private static Command CreateFleetSecretListCommand(AltaCommandContext context)
+    {
+        string? machine = null;
+        var command = Leaf("list", "List the secrets and variables of this computer, or of a machine this computer manages, by name: never a value.");
+        command.Add("<machine>?", "The machine: its name or its id. Defaults to this computer.", value => machine = value);
+        command.Add(async (_, _) => await HandleFleetSecretListAsync(context, machine).ConfigureAwait(false));
+        AddHelpText(
+            command,
+            "A session on a machine names a secret of that machine in its configuration as `${secret:NAME}` or `${var:NAME}`: check that the machine has it before you start work there. A machine answers only when it gives this computer the `manage` permission.",
+            "An agent never reads nor sets a value: the user sets it in Settings > Secrets, in the page of the machine, or with `altanode secrets set <name>` there.",
+            "Examples: `alta fleet secret list`; `alta fleet secret list mac-mini`.");
+        return command;
+    }
+
+    private static async ValueTask<int> HandleFleetSecretListAsync(AltaCommandContext context, string? machine)
+    {
+        if (!context.TryGetRequired<IAltaFleet>(nameof(IAltaFleet), out var fleet)) return AltaExitCodes.ServiceUnavailable;
+        var target = NormalizeOptionalText(machine);
+        var secrets = await fleet.ListSecretsAsync(target, context.CancellationToken).ConfigureAwait(false);
+        if (secrets.Status != "ok") return FleetFailure(context, secrets.Status, secrets.Message, target);
+        foreach (var secret in secrets.Items)
+        {
+            AltaJsonlWriter.WriteRecord(context.Stdout, new
+            {
+                type = "alta.fleet.secret",
+                version = 1,
+                correlationId = context.CorrelationId,
+                machine = secrets.Machine,
+                kind = secret.Kind,
+                name = secret.Name,
+                reference = secret.Kind == "variable" ? $"${{var:{secret.Name}}}" : $"${{secret:{secret.Name}}}",
+                secretVersion = secret.Version,
+                setAt = secret.SetAt,
+            });
+        }
+
+        WriteSummary(context, "alta.fleet.secret.summary", secrets.Items.Count, truncated: false);
+        return AltaExitCodes.Success;
     }
 
     private static int HandleFleetMachineList(AltaCommandContext context, bool online, bool ready, IReadOnlyList<string> labels, IReadOnlyList<string> capabilities, string? provider)

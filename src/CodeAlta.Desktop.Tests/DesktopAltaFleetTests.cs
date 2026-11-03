@@ -62,6 +62,12 @@ public sealed class DesktopAltaFleetTests
         Assert.IsEmpty(alta.ListServers());
         Assert.AreEqual("unavailable", (await alta.PlaceAutomationAsync("a", "test-node", token)).Status);
         Assert.AreEqual("session_missing", (await alta.GetMoveStatusAsync("no-such-session", "test-node", token)).Status);
+
+        // The secrets of the machine it manages, by name; this computer without its runtime keeps none here.
+        var secrets = await alta.ListSecretsAsync("test-node", token);
+        Assert.AreEqual(("ok", "test-node"), (secrets.Status, secrets.Machine), secrets.Message);
+        Assert.AreEqual("unavailable", (await alta.ListSecretsAsync(null, token)).Status);
+        Assert.AreEqual("not_found", (await alta.ListSecretsAsync("nowhere", token)).Status);
     }
 
     [TestMethod]

@@ -402,6 +402,7 @@ Ask an agent of CodeAlta Desktop to work with your machines: "run the iOS tests 
 | Says where your automations run, places one, runs one now | `alta fleet automation list`, `place`, `run`, `runs` |
 | Reads the statistics, the updates and the health of the fleet | `alta fleet statistics`, `alta fleet update status`, `alta fleet health` |
 | Reads the devices of a machine you manage | `alta fleet machine devices <machine>` |
+| Checks which secrets a machine has, by name only | `alta fleet secret list <machine>` |
 
 An agent works with your access and never more:
 

@@ -70,7 +70,27 @@ public interface IAltaFleet
     /// <summary>Lists the servers this computer is linked to and how each connection stands.</summary>
     /// <returns>The servers.</returns>
     IReadOnlyList<AltaFleetServer> ListServers();
+
+    /// <summary>Lists the secrets and variables of this computer, or of a machine it manages, by name: never a value.</summary>
+    /// <param name="machine">The machine, by name or id; null for this computer.</param>
+    /// <param name="cancellationToken">Stops waiting for the machine.</param>
+    /// <returns>The names, or why they could not be read (<c>not_manager</c>, <c>not_found</c>, <c>offline</c>...).</returns>
+    Task<AltaFleetSecrets> ListSecretsAsync(string? machine, CancellationToken cancellationToken);
 }
+
+/// <summary>The secrets and variables of a machine, by name.</summary>
+/// <param name="Status"><c>ok</c>, <c>not_manager</c>, <c>not_found</c>, the state of a machine that is not online, or the code the machine answered.</param>
+/// <param name="Message">What was said of a failure.</param>
+/// <param name="Machine">The name of the machine.</param>
+/// <param name="Items">The secrets and the variables.</param>
+public sealed record AltaFleetSecrets(string Status, string? Message, string? Machine, IReadOnlyList<AltaFleetSecret> Items);
+
+/// <summary>A secret or a variable of a machine, without its value.</summary>
+/// <param name="Kind"><c>secret</c> or <c>variable</c>.</param>
+/// <param name="Name">Its name, which the configuration names as <c>${secret:NAME}</c> or <c>${var:NAME}</c>.</param>
+/// <param name="Version">Its version, which a rotation increases.</param>
+/// <param name="SetAt">When it was set.</param>
+public sealed record AltaFleetSecret(string Kind, string Name, int Version, DateTimeOffset SetAt);
 
 /// <summary>A machine of the fleet.</summary>
 /// <param name="Id">Its device id; empty for this computer when it has none yet.</param>

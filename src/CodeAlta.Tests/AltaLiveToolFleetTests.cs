@@ -223,6 +223,25 @@ public sealed partial class AltaLiveToolTests
     }
 
     [TestMethod]
+    public async Task FleetSecrets_AreListedByName_HereAndOnAMachineThisComputerManages()
+    {
+        var dispatcher = CreateDispatcher(new AltaServiceCollection().Add<IAltaFleet>(new FakeFleet()));
+
+        var here = await dispatcher.InvokeAsync(["fleet", "secret", "list"], caller: FleetAgent);
+        Assert.AreEqual(AltaExitCodes.Success, here.ExitCode, here.Transcript);
+        var records = Records(here, "alta.fleet.secret");
+        CollectionAssert.AreEqual(new[] { "${secret:GITHUB_TOKEN}", "${var:REGION}" }, records.Select(static line => line.GetProperty("reference").GetString()).ToArray());
+        Assert.IsFalse(records.Any(static line => line.TryGetProperty("value", out _)), "Names only: never a value.");
+
+        var machine = await dispatcher.InvokeAsync(["fleet", "secret", "list", "mac-mini"], caller: FleetAgent);
+        Assert.AreEqual("APPLE_ID_PASSWORD", Records(machine, "alta.fleet.secret").Single().GetProperty("name").GetString());
+        var notManaged = await dispatcher.InvokeAsync(["fleet", "secret", "list", "build-box"], caller: FleetAgent);
+        Assert.AreEqual(AltaExitCodes.PolicyDenied, notManaged.ExitCode);
+        StringAssert.Contains(notManaged.Transcript, "fleet.notAllowed");
+        Assert.IsFalse(AltaSandboxGate.Allows("alta fleet secret list"), "as `alta secret list`, not from a sandbox");
+    }
+
+    [TestMethod]
     public void FleetCommands_ThatStartOrChangeWorkElsewhere_AreRefusedToASandboxedSession_TheReadsAreNot()
     {
         foreach (var read in new[] { "machine list", "machine show", "machine sessions", "machine devices", "move status", "automation list", "automation runs", "statistics", "update status", "health" })
@@ -240,7 +259,7 @@ public sealed partial class AltaLiveToolTests
         var dispatcher = new AltaCommandDispatcher(registry, new AltaServiceCollection().Add(new CatalogOptions { GlobalRoot = root.Path }).Add(registry)
             .Add<IAltaFleet>(new FakeFleet()).Add<IAltaAutomations>(new FakeAutomations()).Add<IAltaSessionMachineMoves>(new RecordingMachineMoves()));
         var commands = dispatcher.Describe(AltaCallerIdentity.Cli, root.Path).Where(static command => command.Path.StartsWith("fleet ", StringComparison.Ordinal)).ToArray();
-        Assert.HasCount(14, commands);
+        Assert.HasCount(15, commands);
         foreach (var command in commands)
         {
             Assert.IsNotNull(command.Policy, command.Path);
@@ -344,6 +363,14 @@ public sealed partial class AltaLiveToolTests
             });
 
         public IReadOnlyList<AltaFleetServer> ListServers() => [new("link-1", "https://fleet.example", "Contoso", "online", null)];
+
+        public Task<AltaFleetSecrets> ListSecretsAsync(string? machine, CancellationToken cancellationToken)
+            => Task.FromResult(machine switch
+            {
+                null => new AltaFleetSecrets("ok", null, "pc", [new("secret", "GITHUB_TOKEN", 2, DateTimeOffset.UnixEpoch), new("variable", "REGION", 1, DateTimeOffset.UnixEpoch)]),
+                "mac-mini" => new AltaFleetSecrets("ok", null, "mac-mini", [new("secret", "APPLE_ID_PASSWORD", 1, DateTimeOffset.UnixEpoch)]),
+                _ => new AltaFleetSecrets("not_manager", null, machine, []),
+            });
     }
 
     private sealed class FakeAutomations : IAltaAutomations

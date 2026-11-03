@@ -261,6 +261,39 @@ internal sealed class DesktopAltaFleet(DesktopFleet fleet, string machineName, s
         => Servers is not { } servers ? [] : [.. servers.Connections.Select(static connection => FleetServerService.View(connection, []))
             .Select(static view => new AltaFleetServer(view.Id, view.Url, view.Organization, view.Connection, view.Problem))];
 
+    /// <inheritdoc />
+    public async Task<AltaFleetSecrets> ListSecretsAsync(string? machine, CancellationToken cancellationToken)
+    {
+        if (machine is null || IsThisComputer(machine))
+        {
+            if (Host is not { } local) return new("unavailable", "This computer keeps no secrets here.", machineName, []);
+            try
+            {
+                var store = new CodeAlta.Catalog.Secrets.LocalSecretStore(local.CatalogOptions.GlobalRoot);
+                return new("ok", null, machineName, [.. store.ListSecrets().Select(static secret => new AltaFleetSecret("secret", secret.Name, secret.Version, secret.SetAt)),
+                    .. store.ListVariables().Select(static variable => new AltaFleetSecret("variable", variable.Name, variable.Version, variable.SetAt))]);
+            }
+            catch (Exception exception) when (exception is InvalidDataException or IOException or UnauthorizedAccessException)
+            {
+                return new("unreadable", exception.Message, machineName, []);
+            }
+        }
+
+        if (Resolve(machine) is not { } host) return new("not_found", null, null, []);
+        try
+        {
+            var list = await host.ManageAsync((client, token) => client.ListSecretsAsync(token), changes: false, cancellationToken).ConfigureAwait(false);
+            // The values of the variables come with the list: they stay here.
+            return new("ok", null, Name(host), [.. list.Secrets.OrderBy(static secret => secret.Name, StringComparer.OrdinalIgnoreCase)
+                    .Select(static secret => new AltaFleetSecret("secret", secret.Name, secret.Version, secret.SetAt)),
+                .. list.Variables.OrderBy(static variable => variable.Name, StringComparer.OrdinalIgnoreCase)
+                    .Select(static variable => new AltaFleetSecret("variable", variable.Name, variable.Version, variable.SetAt))]);
+        }
+        catch (ObjectDisposedException) { return new(RemoteSessionHost.Describe(host.State), host.Problem, Name(host), []); }
+        catch (FleetException exception) { return new(exception.Error.Code == FleetErrorCodes.Forbidden ? "not_manager" : exception.Error.Code, exception.Error.Message, Name(host), []); }
+        catch (Exception exception) when (exception is IOException or TimeoutException) { return new(RemoteSessionHost.MachineOfflineCode, exception.Message, Name(host), []); }
+    }
+
     /// <summary>Says whether a machine takes a new session from this computer now.</summary>
     /// <param name="state">Its connection state.</param>
     /// <param name="permissions">What this computer may do there.</param>

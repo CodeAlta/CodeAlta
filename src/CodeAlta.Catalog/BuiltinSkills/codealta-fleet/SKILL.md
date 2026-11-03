@@ -43,11 +43,13 @@ A machine that is not ready is not chosen. Say why to the user when no machine f
 - `alta fleet update status` reads the versions of the server and of its machines, the update policy and the recent campaigns.
 - `alta fleet health` says how each server connection stands, and which machines do not take sessions now, with why.
 - `alta fleet machine devices <machine>` lists the devices of a machine this computer manages and what each may do there.
+- `alta fleet secret list <machine>` lists the secrets and variables of a machine this computer manages by name (without a machine, of this computer): check that a machine has what a task there names as `${secret:NAME}` before you start it.
 
 ## Rules
 
 - **Never more power than the person.** Every command has the access of the person of this computer, and a session you start has your permission mode and your sandbox at most.
 - **The fleet is never a way out of a sandbox.** Your sandbox and your permission mode are the floor of what you start or drive on another machine; a sandboxed session reads the fleet and starts, moves or places nothing elsewhere.
 - **Access is read only.** Devices, permissions, grants, pairing and policies are changed by a person, in Settings > Fleet: propose the change, do not look for another way to make it.
+- **Secrets are names.** You never read, set or send the value of a secret, nor put one in a prompt: the user sets it, here or on the machine.
 - **What runs unattended waits for a person.** You place a disabled automation only, and a person enables it; a person starts an update campaign (`alta fleet update start` is refused with `fleet.needsPerson`).
 - On `fleet.needsPerson` or `fleet.notAllowed`, stop that step and tell the user what you would do and why. A Private session reaches no other machine.
