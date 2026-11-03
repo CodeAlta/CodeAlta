@@ -96,6 +96,7 @@ server/node → welcome { protocol, features, cursors, policy }  |  error { code
 | Flow | Rule |
 | --- | --- |
 | Node to server: session facts | Each fact carries `(sessionId, epoch, version)`; the server keeps the highest version and refuses a stale epoch. The source is the journal and its projection, with a watermark per server: the journal is the outbox. |
+| Node to server: statistics facts | One set of rows per session with `(sessionId, epoch, version)` and a generation of the machine's outbox (`statistics.publish`); the server keeps the highest version per machine and session, refuses an older epoch, and replaces everything of a machine that starts a new generation. A batch carries a sequence, acknowledged as for the other facts and given back in the welcome, so a server restored from a backup gets every set again. `statistics.withdraw` takes back the sets of sessions no longer published. Announced by the feature `statistics`. |
 | Node to server: other facts (inventory, usage, audit events) | A small outbox table on the node, with a per-server sequence; the server acknowledges the highest contiguous sequence; the node resends from there after a reconnection. Duplicates are no-ops. |
 | Server to node: deliveries (child answers, cross-machine messages, chat, policy) | A per-node delivery sequence with acknowledgements and a time to live; queued while the node is offline. A delivery that carries content (an answer, a message) is sealed to the receiving device: the server routes it without reading it. |
 | Replicas | `replica.append(sessionId, epoch, generation, fromOffset, bytes)`; the server stores what follows the last acknowledged offset, refuses a gap (with the expected offset), a stale epoch or an older generation (a rewind starts a new one). |
@@ -151,6 +152,7 @@ windows, asks, permissions, jobs); the node API is that surface, made remote, pl
 | `presence` | `update` (in the heartbeat), `watch` |
 | `directory` | `watch` (machines, published sessions, people, projects) |
 | `facts` | `publish`, `ack` (session facts, usage, audit events) |
+| `statistics` | `publish`, `withdraw` (statistics sets, [statistics](statistics.md#publication-rows-not-increments)) |
 | `relay` | `open`, `incoming`, `accept`, `close` |
 | `telemetry` | `settings`: the fleet's telemetry setting, signed by a controller device, sent when a device connects and when an owner changes it ([observability](observability.md#where-telemetry-goes)) |
 | `update` | `instruction` (a campaign's signed manifest, or the signed automatic policy and its version), `cancel`, `policy` (the fleet's signed update policy, any mode, sent on each connection and each change), `report` (where the node stands; `updated` once its trial confirmed) ([deployment](deployment.md#updates)) |

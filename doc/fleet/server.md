@@ -69,7 +69,7 @@ which mints tokens and never clones).
 | `replicas` | Per session: epoch, acknowledged offset, blob reference |
 | `channels`, `messages`, `shares` | Collaboration |
 | `policies`, `wrapped_keys` | Signed bundles; keys wrapped to devices |
-| `facts`, `rollups` | Statistics rows published by machines (versioned, keyed by machine, session, quarter hour, family and dimension) and their roll-ups |
+| `statistics_publishers`, `statistics_sets`, `statistics_rows` | Statistics published by machines: the generation of each machine, the set of the highest version per machine and session (epoch, version, project key), its rows per quarter hour, family, dimension and measure; roll-ups to come |
 | `audit` | The audit log, append-only, chained |
 
 Portable by construction: text ids (ULID or GUID), UTC timestamps as 64-bit integers, JSON as text, `ON CONFLICT`

@@ -113,8 +113,8 @@ labels, its local policy).
   run's signed automation version, its credential kind and its own local policy before starting it
   ([orchestration](orchestration.md)). It keeps the schedules assigned to it, to fire them while the server is
   unreachable.
-- **Statistics are counted on nodes.** The statistics engine runs headless too (today only in the desktop); the node
-  publishes its facts as versioned rows ([statistics](statistics.md)).
+- **Statistics are counted on nodes.** The statistics engine runs headless too, from the node's first day; the node
+  publishes its facts as a versioned set per session ([statistics](statistics.md)).
 - **The node's host can ask.** Unlike today's headless runs of `altacli`, which grant everything (`FullTrust`), a node
   routes permission requests and questions to people, bound to their exact attempts, and refuses what nobody may
   approve.

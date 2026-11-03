@@ -13,6 +13,7 @@ canvas in CodeAlta Desktop only.
 | `SessionCatchUp` | `Facts/` | Scanner + reducer from a cursor to a new cursor: the one operation of the history and of the flow |
 | `StatisticsStore` | `Store/` | The plugin's tables in the application database: facts, roll-ups, runs, sessions, cursors |
 | `StatisticsEngine` (`IStatisticsService`) | `History/` | The history job, the flow, the status and controls |
+| `IStatisticsPublication` | `History/` | For a host that publishes its facts to a fleet: a revision per session and its rows, read from the store ([fleet statistics](fleet/statistics.md)) |
 | `StatisticsQueries` | `Query/` | Every question, in plain C#, independent of any transport |
 | `alta statistics` | `StatisticsCommands.cs` | The same questions as JSONL commands |
 | Canvas | `Canvas/`, `src/CodeAlta/frontend/src/statistics/` | The calls of the tab and the React canvas |
