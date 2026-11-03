@@ -38,8 +38,15 @@ internal sealed partial class WorkspaceService
             var actual = read(token);
             var snapshot = await actual.ConfigureAwait(false);
             var (projects, sessions) = WithExistingFolders(snapshot.Projects, snapshot.Sessions, Directory.Exists);
-            return ProjectSnapshot(projects, sessions, snapshot.SessionHeaders, DescribeWorktreesOnce());
+            return ProjectSnapshot(projects, sessions, snapshot.SessionHeaders, DescribeWorktreesOnce())
+                with { UnreadableProjectFiles = UnreadableFiles(snapshot.UnreadableProjects) };
         };
+
+    // The project files the snapshot skipped, for the window to say so; a few, each path bounded as the others.
+    internal static string[]? UnreadableFiles(IReadOnlyList<UnreadableProjectFile> unreadable)
+        => unreadable.Count == 0 ? null
+            : [.. unreadable.Select(static file => file.SourcePath).Where(static path => path.Length <= 4096 && !path.Any(char.IsControl))
+                .Order(StringComparer.Ordinal).Take(20)];
 
     internal WorkspaceService(string? catalogRoot)
     {
@@ -317,7 +324,12 @@ internal sealed partial class WorkspaceService
 
 internal sealed record WorkspaceRequest;
 internal sealed record WorkspaceSnapshot(bool Configured, WorkspaceProject[] Projects, WorkspaceSession[] Sessions,
-    bool ProjectsTruncated, bool SessionsTruncated, bool DisplayTextTruncated);
+    bool ProjectsTruncated, bool SessionsTruncated, bool DisplayTextTruncated)
+{
+    // The project files of the catalog that could not be read, so their projects are not listed; absent when there is none.
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string[]? UnreadableProjectFiles { get; init; }
+}
 internal sealed record WorkspaceProject(string Id, string Name, string Path, bool Archived)
 {
     // The machine a project that stands for a paired machine groups the sessions of (its sessions of no project of this

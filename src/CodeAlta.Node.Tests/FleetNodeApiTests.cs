@@ -109,26 +109,32 @@ public sealed class FleetNodeApiTests
     }
 
     [TestMethod]
-    public async Task NodeInfo_LeavesOutAProjectFileItCannotRead_AndSaysWhich()
+    public async Task NodeInfoAndSessionsList_LeaveOutAProjectFileTheNodeCannotRead_AndSayWhich()
     {
         await using var fixture = await NodeFixture.StartAsync(TestContext.CancellationToken);
         var token = TestContext.CancellationToken;
         var catalog = fixture.Node.Host.ProjectCatalog;
         var good = await catalog.UpsertFromPathAsync(Path.Combine(Path.GetTempPath(), "fleet-good-" + Guid.NewGuid().ToString("N")), token);
-        var broken = Path.Combine(catalog.Options.ProjectsRoot, "broken.md");
-        await File.WriteAllTextAsync(broken, "---\nid: [unclosed\npath: {\n---\n", token);
         var machine = await fixture.PairViewerAsync(token);
         await using var client = await FleetNodeClient.ConnectAsync(machine, fixture.ViewerIdentity, token);
+        var created = await client.CreateSessionAsync(new FleetCreateSessionParams(Title: "Listed session"), "create-unreadable", token);
+        var broken = Path.Combine(catalog.Options.ProjectsRoot, "broken.md");
+        await File.WriteAllTextAsync(broken, "---\nid: [unclosed\npath: {\n---\n", token);
+        // A Windows path written by hand between double quotes: its single backslashes are invalid YAML escapes.
+        var handWritten = Path.Combine(catalog.Options.ProjectsRoot, "hand-written.md");
+        await File.WriteAllTextAsync(handWritten, "---\nid: 019a0000-0000-7000-8000-000000000001\nname: hand\npath: \"C:\\Users\\someone\\code\"\n---\n", token);
 
         var info = await client.GetInfoAsync(token);
 
         Assert.IsTrue(info.Projects.Any(project => project.Id == good.Id), "The projects the node can read are listed.");
-        var diagnostic = info.Diagnostics.Single();
-        Assert.AreEqual(FleetNodeDiagnostic.UnreadableProject, diagnostic.Code);
-        Assert.AreEqual(broken, diagnostic.Path);
-        StringAssert.Contains(diagnostic.Message, broken);
+        Assert.IsTrue(info.Diagnostics.All(static diagnostic => diagnostic.Code == FleetNodeDiagnostic.UnreadableProject));
+        CollectionAssert.AreEquivalent(new[] { broken, handWritten }, info.Diagnostics.Select(static diagnostic => diagnostic.Path).ToArray());
+        Assert.IsTrue(info.Diagnostics.All(static diagnostic => diagnostic.Message.Contains(diagnostic.Path!, StringComparison.Ordinal)));
+        var sessions = await client.ListSessionsAsync(cancellationToken: token);
+        Assert.IsTrue(sessions.Sessions.Any(session => session.Id == created.SessionId), "The sessions are listed beside a project file the node cannot read.");
 
         File.Delete(broken);
+        File.Delete(handWritten);
         Assert.AreEqual(0, (await client.GetInfoAsync(token)).Diagnostics.Count, "A fixed catalog has nothing to say.");
     }
 
