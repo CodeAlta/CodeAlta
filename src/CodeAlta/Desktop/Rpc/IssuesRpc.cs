@@ -345,6 +345,7 @@ internal sealed partial class IssuesService
         {
             Place = Nullable(item.Place),
             Match = Nullable(item.Match),
+            StateColor = Color(item.StateColor),
             Reviewers = [.. item.Reviewers.Take(MaximumLabels).Select(static reviewer => new IssueReviewer(GitIssuesService.Clean(reviewer.Name, MaximumName), Vote(reviewer.Vote))
                 {
                     Group = reviewer.IsGroup ? true : null, Required = reviewer.Required ? true : null, Mine = reviewer.Mine ? true : null,
@@ -519,6 +520,9 @@ internal sealed record IssueListResponse(string Status, IReadOnlyList<IssueRow> 
 internal sealed record IssueRow(string Kind, string Id, string Title, string Url, string State, string? StateText, string? Type, string? Priority, string? Author,
     IReadOnlyList<string> Assignees, IReadOnlyList<IssueLabel> Labels, DateTimeOffset? CreatedAt, DateTimeOffset? UpdatedAt, int? Comments, string? SourceBranch, string? TargetBranch)
 {
+    /// <summary>Gets the color the tracker gives its state, as six hexadecimal digits without <c>#</c>; null when it gives none.</summary>
+    public string? StateColor { get; init; }
+
     /// <summary>Gets where the item is kept when not in the repository of the project (<c>project/repository</c>): no session is started on it here.</summary>
     public string? Place { get; init; }
 

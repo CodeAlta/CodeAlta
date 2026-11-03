@@ -2437,6 +2437,7 @@ export const messages = dictionary({
   "Team": ["Equipo", "Équipe", "Team", "チーム", "团队"],
   "Sprint": ["Sprint", "Sprint", "Sprint", "スプリント", "冲刺"],
   "Assigned to": ["Asignado a", "Assigné à", "Zugewiesen an", "担当者", "分配给"],
+  "Assigned to {name}": ["Asignado a {name}", "Assigné à {name}", "Zugewiesen an {name}", "担当者: {name}", "分配给 {name}"],
   "Current sprint": ["Sprint actual", "Sprint en cours", "Aktueller Sprint", "現在のスプリント", "当前冲刺"],
   "Next sprint": ["Siguiente sprint", "Sprint suivant", "Nächster Sprint", "次のスプリント", "下一个冲刺"],
   "Previous sprint": ["Sprint anterior", "Sprint précédent", "Vorheriger Sprint", "前のスプリント", "上一个冲刺"],

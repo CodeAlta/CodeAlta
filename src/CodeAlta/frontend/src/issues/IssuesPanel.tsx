@@ -1,4 +1,4 @@
-import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useId, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { Button, Callout, HTMLSelect, InputGroup, Menu, MenuItem, PopoverNext, SegmentedControl, Tab, Tabs, Tag } from "@blueprintjs/core";
 import type { issues as issuesService, IssueFilterField, IssueFiltersResponse, IssueReadResponse, IssueReviewer, IssueRow, IssueSource, WorkspaceProject } from "#neoastra";
 import { ActivitySpinner } from "../ActivitySpinner";
@@ -425,18 +425,24 @@ export function IssuesPanel({ api, epoch, projects, projectId, visible, preferre
               const updated = sessionTime(item.updatedAt ?? item.createdAt, locale);
               return <button type="button" key={key} role="option" aria-selected={on} className="work-row issue-row-item" data-selected={on || undefined} data-tone={issueTone(item)}
                 onClick={() => setSelected(key)} onDoubleClick={() => { setSelected(key); setExpanded(true); }}>
-                <span className="work-row-glyph issue-glyph"><AppIcon name={issueIcon(item)} size={16} /></span>
+                <span className="work-row-glyph issue-glyph" data-icon={issueIcon(item)}><AppIcon name={issueIcon(item)} size={16} /></span>
                 <span className="work-row-text"><strong>{item.title}</strong>
                   <small className="issue-row-line"><span className="issue-row-facts"><span className="issue-ref">{issueReference(item)}</span>{item.place && <> · <span className="issue-place">{item.place}</span></>}
                     {item.type && <> · {item.type}</>}{item.author && <> · {item.author}</>}
+                    {!!item.comments && <> · <span className="issue-comments" title={t("{count} comments", { count: item.comments })}><AppIcon name="chat" size={12} />{item.comments}</span></>}
                     {updated.label && <> · <time dateTime={updated.dateTime} title={updated.title}>{updated.label}</time></>}</span>
                     {item.reviewers.filter(reviewer => reviewer.mine).slice(0, 2).map(reviewer => <ReviewerChip key={`r:${reviewer.name}`} reviewer={reviewer} />)}
                     {item.labels.slice(0, 3).map(label => <IssueLabelChip key={label.name} name={label.name} color={label.color} />)}
                     {item.labels.length > 3 && <span className="issue-more">+{item.labels.length - 3}</span>}</small></span>
-                <span className="work-row-meta">
-                  {starting.has(startingKey(item) ?? "") && <span className="work-row-starting"><ActivitySpinner size={11} />{t("Starting…")}</span>}
-                  {!!item.comments && <span className="issue-comments" title={t("{count} comments", { count: item.comments })}><AppIcon name="chat" size={12} />{item.comments}</span>}
-                  {(item.stateText || item.state !== shownFilter) && <Tag minimal round className="issue-state" data-tone={issueTone(item)}>{item.stateText ?? t(issueStateLabel(item))}</Tag>}
+                {/* Two lines beside the two of the title: the state above, the comments and the people below. */}
+                <span className="work-row-meta issue-row-meta">
+                  <span className="issue-row-meta-line">
+                    {starting.has(startingKey(item) ?? "") && <span className="work-row-starting"><ActivitySpinner size={11} />{t("Starting…")}</span>}
+                    {(item.stateText || item.state !== shownFilter) && <StateTag item={item} />}
+                  </span>
+                  <span className="issue-row-meta-line">
+                    {item.kind === "issue" && <AssigneeNames names={item.assignees} />}
+                  </span>
                 </span>
               </button>;
             })}
@@ -492,6 +498,28 @@ function ReadAge({ readAt, now, busy, label, onRefresh }: { readAt: string; now:
   </span>;
 }
 
+/** The state of an item, in the color its tracker gives it (Azure DevOps), otherwise in the color of its tone. */
+export function StateTag({ item }: { item: IssueRow }) {
+  const { t } = useShellLanguage();
+  // The color of the tracker is the color of the text; the tag tints its background with it, as the icons of the rows.
+  const color = item.stateColor && /^[0-9a-f]{6}$/i.test(item.stateColor) ? `#${item.stateColor}` : null;
+  return <Tag minimal round className="issue-state" data-tone={issueTone(item)} data-colored={color ? true : undefined}
+    style={color ? { "--issue-state-color": color } as CSSProperties : undefined}>{item.stateText ?? t(issueStateLabel(item))}</Tag>;
+}
+
+/**
+ * The people an issue is assigned to, by their names; the tooltip says that they are its assignees, not who opened it.
+ * A pull request is left out: its people are reviewers, which the row already shows.
+ */
+export function AssigneeNames({ names }: { names: readonly string[] }) {
+  const { t } = useShellLanguage();
+  if (names.length === 0) return null;
+  const label = t("Assigned to {name}", { name: names.join(", ") });
+  return <span className="issue-assignees" title={label} aria-label={label}>
+    <AppIcon name="user" size={11} /><span className="issue-assignees-names">{names.slice(0, 2).join(", ")}</span>{names.length > 2 && <span>+{names.length - 2}</span>}
+  </span>;
+}
+
 function IssueLabelChip({ name, color }: { name: string; color: string | null }) {
   const colors = labelColors(color);
   return <span className="issue-label" style={colors ?? undefined} data-plain={!colors || undefined} title={name}>{name}</span>;
@@ -503,7 +531,7 @@ function IssueHeading({ item, service, busy, action }: { item: IssueRow; service
   const created = sessionTime(item.createdAt, locale), updated = sessionTime(item.updatedAt, locale);
   return <header className="issue-heading">
     <div className="work-detail-kind"><AppIcon name={issueIcon(item)} size={14} />{t(kindLabel(item.kind as IssueKind, service, false))}
-      <Tag minimal round className="issue-state" data-tone={issueTone(item)}>{item.stateText ?? t(issueStateLabel(item))}</Tag>
+      <StateTag item={item} />
       {item.type && <Tag minimal round>{item.type}</Tag>}{item.priority && <Tag minimal round>{item.priority}</Tag>}
       {busy && <ActivitySpinner size={13} />}<span className="work-detail-spacer" />{action}</div>
     <h3><span className="issue-ref">{issueReference(item)}</span> {item.title}</h3>
