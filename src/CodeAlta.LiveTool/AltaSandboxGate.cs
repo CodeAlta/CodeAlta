@@ -30,6 +30,8 @@ internal static class AltaSandboxGate
         "session abort", "session compact", "session title", "session metrics",
         // To a new worktree, or the folder of its project: an existing checkout elsewhere is refused by the command itself.
         "session set_worktree",
+        // The fleet is read; what starts or changes work on another machine is refused (doc/fleet/security-and-privacy.md, rule 8).
+        "fleet machine", "fleet move status", "fleet automation list", "fleet automation runs", "fleet statistics", "fleet update status", "fleet health",
     }.ToFrozenSet(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>Gets the sandbox of a session, or null when it is not sandboxed.</summary>

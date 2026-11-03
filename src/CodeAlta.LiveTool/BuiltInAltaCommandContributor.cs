@@ -227,6 +227,12 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
             yield return CreateAutomationCommand(context.Invocation);
         }
 
+        // The fleet: the machines this computer reaches, their sessions, the moves, where the automations run.
+        if (context.Invocation.Services.Get<IAltaFleet>() is not null)
+        {
+            yield return CreateFleetCommand(context.Invocation);
+        }
+
         // The tasks and the plans of projects, in a host that keeps them.
         if (context.Invocation.Services.Get<CodeAlta.Catalog.WorkItems.WorkItemService>() is not null)
         {
@@ -297,7 +303,8 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         var search = context.Services.Get<CodeAlta.Search.SearchService>() is not null;
         var windows = context.Services.Get<IAltaWindows>() is not null;
         var settings = context.Services.Get<IAltaSettings>() is not null;
-        if (!changes && !editor && !terminals && !automations && !workItems && !bookmarks && !reviews && !issues && !appearance && !spaces && !canvases && !documentation && !search && !windows && !settings && workshop is null) return Policies;
+        var fleet = context.Services.Get<IAltaFleet>() is not null;
+        if (!changes && !editor && !terminals && !automations && !workItems && !bookmarks && !reviews && !issues && !appearance && !spaces && !canvases && !documentation && !search && !windows && !settings && !fleet && workshop is null) return Policies;
         var policies = new List<AltaCommandPolicy>(Policies);
         if (spaces) policies.AddRange(SpacePolicies);
         if (spaces) policies.AddRange(LabelPolicies);
@@ -320,6 +327,7 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         if (automations) policies.AddRange(AutomationPolicies);
         if (windows) policies.AddRange(WindowPolicies);
         if (settings) policies.AddRange(SettingsPolicies);
+        if (fleet) policies.AddRange(FleetPolicies);
         return policies;
     }
 
