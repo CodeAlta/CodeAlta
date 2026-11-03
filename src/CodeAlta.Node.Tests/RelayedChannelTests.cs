@@ -84,6 +84,23 @@ public sealed class RelayedChannelTests
     }
 
     [TestMethod]
+    public async Task APrivateSession_IsNeitherListedNorReadNorDriven_ThroughTheRelay()
+    {
+        var token = TestContext.CancellationToken;
+        await using var rig = await RelayRig.StartAsync(token);
+        await using var viewer = rig.Connector(rig.DesktopIdentity, "desktop", null);
+        viewer.Start();
+        await WaitForAsync(() => viewer.Directory.IsOnline(rig.NodeIdentity.DeviceId), token);
+        await using var client = await FleetNodeClient.ConnectRelayedAsync(viewer, rig.NodeIdentity.DeviceId, rig.DesktopIdentity, null, token);
+        var shared = await client.CreateSessionAsync(new FleetCreateSessionParams(Title: "Shared"), "create-shared", token);
+        var hidden = await client.CreateSessionAsync(new FleetCreateSessionParams(Title: "Hidden"), "create-hidden", token);
+
+        await FleetNodePrivateSessionTests.MarkPrivateAsync(rig.Node, hidden.SessionId, token);
+
+        await FleetNodePrivateSessionTests.AssertPrivateAsync(client, hidden.SessionId, shared.SessionId, token);
+    }
+
+    [TestMethod]
     public async Task AnotherDeviceOfTheOrganizationMayDoNothing_AndOnceRevokedItIsCutAndRefused()
     {
         var token = TestContext.CancellationToken;
@@ -155,6 +172,8 @@ public sealed class RelayedChannelTests
         }
 
         public NodeTestRoot Root { get; }
+
+        public NodeHost Node => _node;
 
         public Uri Address => _server.Addresses.First(static uri => uri.Scheme == "http");
 

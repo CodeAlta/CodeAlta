@@ -387,7 +387,7 @@ public sealed record FleetSessionDisplay(string WatchId, string SessionId, long 
 
 /// <summary>The payload of a <c>session.watch.ended</c> event.</summary>
 /// <param name="WatchId">The watch.</param>
-/// <param name="Reason">Why: <c>closed</c>, <c>failed</c> or <c>unwatched</c>.</param>
+/// <param name="Reason">Why: <c>closed</c>, <c>failed</c>, <c>unwatched</c>, or <c>private</c> when the session became Private.</param>
 public sealed record FleetWatchEnded(string WatchId, string Reason);
 
 /// <summary>The model a prompt asks for; null fields keep the session's.</summary>

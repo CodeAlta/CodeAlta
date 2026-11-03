@@ -10,12 +10,16 @@ public sealed partial class FleetNodeService
     /// <summary>The shortest time between two display events of one watch: replacements in between are coalesced.</summary>
     internal static readonly TimeSpan MinimumDisplayInterval = TimeSpan.FromMilliseconds(100);
 
+    /// <summary>How often a watch looks again whether its session became Private, which ends it, while nothing is sent.</summary>
+    internal static readonly TimeSpan PrivacyCheckInterval = TimeSpan.FromSeconds(1);
+
     private async Task<FleetWatchResult> WatchAsync(FleetNodeCall call, FleetWatchParams parameters, CancellationToken cancellationToken)
     {
         if (parameters.WatchId is { } named && (named.Length is 0 or > 64 || !named.All(static c => char.IsAsciiLetterOrDigit(c) || c is '-' or '_')))
             throw new FleetException(FleetErrorCodes.InvalidParams, null, "A watch id has 1 to 64 letters, digits, '-' or '_'.");
         var session = await RequireViewedSessionAsync(parameters.SessionId, cancellationToken).ConfigureAwait(false);
-        var watch = new FleetNodeWatch(parameters.WatchId ?? Guid.NewGuid().ToString("N"), session.SessionId, call.Caller.Connection);
+        var watch = new FleetNodeWatch(parameters.WatchId ?? Guid.NewGuid().ToString("N"), session.SessionId, call.Caller.Connection,
+            token => IsPrivateAsync(session.SessionId, token));
         if (!call.Caller.TryAddWatch(watch))
             throw new FleetException(FleetErrorCodes.ServerBusy, null, $"A channel watches at most {FleetNodeCaller.MaxWatches} sessions at a time, each with its own id.");
         watch.Start(_host.RuntimeService.Display, () => call.Caller.RemoveWatch(watch.WatchId));
@@ -33,9 +37,10 @@ public sealed partial class FleetNodeService
 /// The live display of one session for one channel: full replacements of <see cref="RuntimeDisplayProjection"/> sent as
 /// <c>session.display</c> events, at most one per <see cref="FleetNodeService.MinimumDisplayInterval"/>. The projection
 /// gives a slow observer the latest replacement only, and the send queue of the connection is bounded: a slow reader
-/// costs updates, never memory.
+/// costs updates, never memory. The watch ends (<c>private</c>) once its session becomes Private: checked before each
+/// event and every <see cref="FleetNodeService.PrivacyCheckInterval"/>.
 /// </summary>
-internal sealed class FleetNodeWatch(string watchId, string sessionId, FleetConnection connection)
+internal sealed class FleetNodeWatch(string watchId, string sessionId, FleetConnection connection, Func<CancellationToken, Task<bool>> isPrivate)
 {
     private readonly CancellationTokenSource _stop = new();
     private Task _work = Task.CompletedTask;
@@ -55,7 +60,11 @@ internal sealed class FleetNodeWatch(string watchId, string sessionId, FleetConn
 
     private async Task RunAsync(RuntimeDisplayProjection display, Action ended)
     {
-        var token = _stop.Token;
+        var stop = _stop.Token;
+        using var hidden = new CancellationTokenSource();
+        using var watching = CancellationTokenSource.CreateLinkedTokenSource(stop, hidden.Token);
+        var token = watching.Token;
+        var guard = GuardPrivacyAsync(hidden, token);
         var reason = "closed";
         try
         {
@@ -69,6 +78,12 @@ internal sealed class FleetNodeWatch(string watchId, string sessionId, FleetConn
                 if (sentRevision is not null && !snapshot.IsClosed && session?.Revision == sentSession) continue;
                 var wait = FleetNodeService.MinimumDisplayInterval - Stopwatch.GetElapsedTime(sentAt);
                 if (sentRevision is not null && wait > TimeSpan.Zero) await Task.Delay(wait, token).ConfigureAwait(false);
+                if (await isPrivate(token).ConfigureAwait(false))
+                {
+                    await hidden.CancelAsync().ConfigureAwait(false);
+                    break;
+                }
+
                 var payload = Project(snapshot, session, sentRevision);
                 await connection.SendEventAsync(new FleetEvent(FleetNodeMethods.SessionDisplayEvent,
                     JsonSerializer.SerializeToElement(payload, FleetNodeJsonContext.Default.FleetSessionDisplay)), token).ConfigureAwait(false);
@@ -76,9 +91,12 @@ internal sealed class FleetNodeWatch(string watchId, string sessionId, FleetConn
                 if (snapshot.IsClosed) break;
             }
         }
-        catch (OperationCanceledException) when (token.IsCancellationRequested)
+        catch (OperationCanceledException) when (stop.IsCancellationRequested)
         {
             reason = "unwatched";
+        }
+        catch (OperationCanceledException) when (hidden.IsCancellationRequested)
+        {
         }
         catch (Exception exception) when (exception is FleetException or InvalidOperationException or IOException or ObjectDisposedException)
         {
@@ -86,6 +104,9 @@ internal sealed class FleetNodeWatch(string watchId, string sessionId, FleetConn
         }
         finally
         {
+            if (hidden.IsCancellationRequested && !stop.IsCancellationRequested) reason = "private";
+            await watching.CancelAsync().ConfigureAwait(false);
+            await guard.ConfigureAwait(false);
             ended();
         }
 
@@ -98,6 +119,30 @@ internal sealed class FleetNodeWatch(string watchId, string sessionId, FleetConn
         catch (Exception exception) when (exception is FleetException or InvalidOperationException or IOException or ObjectDisposedException)
         {
             // The channel closed meanwhile: its reader learns it from the channel.
+        }
+    }
+
+    // Ends the watch once its session became Private, while no replacement comes to check it.
+    private async Task GuardPrivacyAsync(CancellationTokenSource hidden, CancellationToken token)
+    {
+        try
+        {
+            while (true)
+            {
+                await Task.Delay(FleetNodeService.PrivacyCheckInterval, token).ConfigureAwait(false);
+                if (await isPrivate(token).ConfigureAwait(false))
+                {
+                    await hidden.CancelAsync().ConfigureAwait(false);
+                    return;
+                }
+            }
+        }
+        catch (OperationCanceledException) when (token.IsCancellationRequested)
+        {
+        }
+        catch (Exception exception) when (exception is FleetException or InvalidOperationException or IOException)
+        {
+            // Looked at again before the next event.
         }
     }
 

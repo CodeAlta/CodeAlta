@@ -607,7 +607,7 @@ public sealed class FleetSessionWatch : IAsyncDisposable
     /// <summary>Gets the session.</summary>
     public string SessionId { get; }
 
-    /// <summary>Gets why the node ended the watch (<c>closed</c>, <c>failed</c>), or null while it runs or when it was disposed.</summary>
+    /// <summary>Gets why the node ended the watch (<c>closed</c>, <c>failed</c>, <c>private</c>), or null while it runs or when it was disposed.</summary>
     public string? EndReason { get; private set; }
 
     /// <summary>Gets the replacements, until the watch ends.</summary>

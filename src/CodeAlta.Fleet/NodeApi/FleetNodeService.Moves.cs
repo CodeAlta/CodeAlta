@@ -37,7 +37,8 @@ public sealed partial class FleetNodeService
     // (a desktop that receives moves), and forwards them when it names another machine (Via).
     private async Task<FleetMoveResult> StartMoveAsync(FleetNodeCall call, FleetMoveStartParams parameters, CancellationToken cancellationToken)
     {
-        var sessionId = RequireSessionId(parameters.SessionId);
+        // A Private session is never given away from another machine.
+        var sessionId = await RequireRemoteSessionAsync(parameters.SessionId, cancellationToken).ConfigureAwait(false);
         var moveId = RequireMoveId(parameters.MoveId);
         if (parameters.Probe)
         {

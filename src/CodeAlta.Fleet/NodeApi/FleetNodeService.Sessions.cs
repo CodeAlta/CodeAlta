@@ -132,11 +132,12 @@ public sealed partial class FleetNodeService
         }
 
         var listed = new List<(AgentSessionMetadata Session, string? ProjectId, string? SpaceId, string Title, bool Archived)>();
-        // A session this node gave to another machine runs there: its read-only copy here is not listed.
+        // A session this node gave to another machine runs there: its read-only copy here is not listed. A Private
+        // session is never listed to another machine.
         var movedAway = _host.RuntimeService.Relinquishments.ListRelinquished();
         foreach (var session in snapshot.Sessions.OrderByDescending(static value => value.UpdatedAt).ThenByDescending(static value => value.SessionId, StringComparer.Ordinal))
         {
-            if (movedAway.Contains(session.SessionId)) continue;
+            if (movedAway.Contains(session.SessionId) || session.ViewState?.Options?.Private == true) continue;
             var archived = session.ViewState?.Archived == true;
             if (archived && !parameters.IncludeArchived) continue;
             var (kind, project, space) = Scope(session, snapshot);
@@ -172,7 +173,7 @@ public sealed partial class FleetNodeService
 
     private async Task<FleetSessionState> SessionStateAsync(FleetNodeCall call, FleetSessionRef parameters, CancellationToken cancellationToken)
     {
-        var sessionId = RequireSessionId(parameters.SessionId);
+        var sessionId = await RequireRemoteSessionAsync(parameters.SessionId, cancellationToken).ConfigureAwait(false);
         var state = await _host.RuntimeService.GetCurrentStateAsync(sessionId, cancellationToken).ConfigureAwait(false);
         return new FleetSessionState(sessionId, state.RuntimeInstanceId, state.Entry?.AttachmentGeneration, state.Entry?.ActiveRunId,
             state.Entry?.QueueDrainInProgress ?? false);
@@ -182,7 +183,7 @@ public sealed partial class FleetNodeService
     // (ReadHistoryTailPageAsync backward, ReadHistoryPageAsync forward), each record projected and cut to a bound.
     private async Task<FleetHistoryResult> HistoryAsync(FleetNodeCall call, FleetHistoryParams parameters, CancellationToken cancellationToken)
     {
-        var sessionId = RequireSessionId(parameters.SessionId);
+        var sessionId = await RequireRemoteSessionAsync(parameters.SessionId, cancellationToken).ConfigureAwait(false);
         var backward = parameters.Direction switch
         {
             null or "backward" => true,
@@ -379,14 +380,40 @@ public sealed partial class FleetNodeService
     // A session the node has, to drive: found as a resume finds it (which may add a transient project for its folder).
     private async Task<SessionViewDescriptor> RequireSessionAsync(string? sessionId, CancellationToken cancellationToken)
     {
-        var id = RequireSessionId(sessionId);
+        var id = await RequireRemoteSessionAsync(sessionId, cancellationToken).ConfigureAwait(false);
         return await _host.RuntimeService.TryGetResumableSessionAsync(id, cancellationToken).ConfigureAwait(false) ?? throw SessionNotFound(id);
     }
 
     // A session the node has, to look at: found without changing anything of the node.
     private async Task<SessionViewDescriptor> RequireViewedSessionAsync(string? sessionId, CancellationToken cancellationToken)
     {
-        var id = RequireSessionId(sessionId);
+        var id = await RequireRemoteSessionAsync(sessionId, cancellationToken).ConfigureAwait(false);
         return await _host.RuntimeService.TryGetRecoverableSessionAsync(id, cancellationToken).ConfigureAwait(false) ?? throw SessionNotFound(id);
+    }
+
+    // The one check of every call that names a session (the list filters the same way): a Private session is never
+    // reachable from another machine (doc/fleet/sessions-across-machines.md), and it answers as a session the node does
+    // not have, so that its existence is not told either.
+    private async Task<string> RequireRemoteSessionAsync(string? sessionId, CancellationToken cancellationToken)
+    {
+        var id = RequireSessionId(sessionId);
+        if (await IsPrivateAsync(id, cancellationToken).ConfigureAwait(false)) throw SessionNotFound(id);
+        return id;
+    }
+
+    // Private by the options its journal records (whatever its folder), or by those of its live entry.
+    private async Task<bool> IsPrivateAsync(string sessionId, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var metadata = await _host.SessionViewCatalog.JournalStore.CreateSessionStore().GetSessionAsync(sessionId, cancellationToken).ConfigureAwait(false);
+            if (metadata is null) return false;
+            if (metadata.ViewState?.Options?.Private == true) return true;
+            return (await _host.RuntimeService.GetSessionOptionsAsync(metadata.SessionId, cancellationToken).ConfigureAwait(false)).Private;
+        }
+        catch (ObjectDisposedException)
+        {
+            throw new FleetException(FleetNodeErrorCodes.NodeStopping, FleetErrorHints.Retry, "The node is stopping.");
+        }
     }
 }
