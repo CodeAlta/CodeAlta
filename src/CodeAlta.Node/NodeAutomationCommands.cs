@@ -116,6 +116,8 @@ internal sealed class NodeAutomationCommands(TextWriter output, TextWriter error
         {
             try
             {
+                // What the owner sets replaces a file that could not be read.
+                policy = policy with { Problem = null };
                 NodeAutomationPolicy.Save(fleetRoot, policy);
             }
             catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
@@ -125,7 +127,9 @@ internal sealed class NodeAutomationCommands(TextWriter output, TextWriter error
             }
         }
 
-        await output.WriteLineAsync(policy.Enabled ? "This machine runs the automations given to it." : "This machine runs no automations: they are off.").ConfigureAwait(false);
+        await output.WriteLineAsync(policy.Problem is { } problem
+            ? $"This machine runs no automations: its policy cannot be read ({problem}). Set it again with: altanode automations policy on|off."
+            : policy.Enabled ? "This machine runs the automations given to it." : "This machine runs no automations: they are off.").ConfigureAwait(false);
         await output.WriteLineAsync(policy.Credentials == NodeAutomationPolicy.AccountCredentials
             ? "Credentials: accounts only (API keys and local models, never a personal plan)."
             : "Credentials: any the machine has, its personal plans included.").ConfigureAwait(false);
