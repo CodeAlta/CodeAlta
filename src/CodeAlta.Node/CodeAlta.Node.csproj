@@ -77,5 +77,6 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="CodeAlta.Node.Tests" />
+    <InternalsVisibleTo Include="CodeAlta.Desktop.Tests" />
   </ItemGroup>
 </Project>

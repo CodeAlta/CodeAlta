@@ -30,6 +30,7 @@ internal sealed class DesktopFleetServers : IAsyncDisposable
     private DeviceIdentity? _identity;
     private FleetHostPublicationSource? _source;
     private FleetHostStatisticsSource? _statistics;
+    private readonly CodeAlta.Catalog.SessionMoves.RepositoryLocationCache _repositories = new();
     private FleetServerConnections? _connections;
     private bool _disposed;
 
@@ -295,6 +296,36 @@ internal sealed class DesktopFleetServers : IAsyncDisposable
         using var client = Client(linkId);
         var updates = await client.GetUpdatesAsync(cancellationToken).ConfigureAwait(false);
         return (updates, await client.ListMachinesAsync(cancellationToken).ConfigureAwait(false));
+    }
+
+    /// <summary>
+    /// Sums the statistics the machines of this computer's person published to a server, with the names only this computer can
+    /// give: the projects whose key (a blind index of the person's metadata key) it computes for its own projects.
+    /// </summary>
+    /// <param name="linkId">The link.</param>
+    /// <param name="request">The query.</param>
+    /// <param name="cancellationToken">Cancels the calls.</param>
+    /// <returns>The sums, and the names of the project keys this computer knows.</returns>
+    /// <exception cref="KeyNotFoundException">No such link.</exception>
+    /// <exception cref="FleetServerException">The server refused the query.</exception>
+    /// <exception cref="HttpRequestException">The server does not answer.</exception>
+    public async Task<(StatisticsQueryResponse Response, IReadOnlyDictionary<string, string> ProjectNames)> QueryStatisticsAsync(string linkId, StatisticsQueryRequest request,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        using var client = Client(linkId);
+        var response = await client.QueryStatisticsAsync(request, cancellationToken).ConfigureAwait(false);
+        var names = new Dictionary<string, string>(StringComparer.Ordinal);
+        if (Volatile.Read(ref _connections)?.Find(linkId)?.Connector?.MetadataKey is { } key)
+        {
+            foreach (var project in await _host.ProjectCatalog.LoadAsync(cancellationToken).ConfigureAwait(false))
+            {
+                if (await FleetProjectKeys.IdentityAsync(project, _repositories, cancellationToken).ConfigureAwait(false) is not { } identity) continue;
+                names.TryAdd(FleetProjectKeys.Of(key, identity), string.IsNullOrWhiteSpace(project.DisplayName) ? project.Name : project.DisplayName);
+            }
+        }
+
+        return (response, names);
     }
 
     /// <summary>Starts an update campaign: this device reads the hashes of the feed and signs the manifest.</summary>
