@@ -328,6 +328,14 @@ public sealed class CodeAltaProviderDocument
     public string? ApiKeyEnv { get; set; }
 
     /// <summary>
+    /// Gets or sets the name of the secret of this machine that holds the API key (Settings &gt; Secrets,
+    /// <c>altanode secrets set</c>). It comes before <see cref="ApiKeyEnv"/>; a secret that is not set is an error
+    /// that names it, never an empty key.
+    /// </summary>
+    [JsonPropertyName("api_key_secret")]
+    public string? ApiKeySecret { get; set; }
+
+    /// <summary>
     /// Gets or sets the API endpoint override.
     /// </summary>
     [JsonPropertyName("api_url")]

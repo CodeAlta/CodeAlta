@@ -61,6 +61,8 @@ export function serverProblem(status: string): MessageKey | null {
     case "forbidden": return "Only the owner's computer can do this.";
     case "pending_approval": return "This computer waits for its approval.";
     case "device_list.conflict": return "Another device changed the list meanwhile: try again.";
+    case "device_list.broken": return "The device list of the server does not verify: nothing was signed.";
+    case "recovery.refused": return "These words are not a recovery key of this server.";
     case "telemetry.conflict": return "Another owner changed the telemetry meanwhile: try again.";
     case "telemetry.invalid": case "invalid_request": return "The server refused this telemetry setting.";
     case "update.conflict": return "A campaign runs, or the fleet is pinned: read the updates again.";
@@ -85,6 +87,25 @@ export function joinCommand(url: string, token: string): string {
 /** The words of the key of a device, cut in two lines of three, as the device prints them on one. */
 export function keyWords(words: string | null | undefined): string[] {
   return (words ?? "").split(/\s+/u).filter(Boolean);
+}
+
+/** How many words a recovery key has. */
+export const recoveryWordCount = 32;
+
+/** Two different positions (from 1, in order) of the words of a recovery key the person types back, to show they kept them. */
+export function recoveryCheckPositions(count: number = recoveryWordCount, random: () => number = Math.random): readonly [number, number] {
+  const first = 1 + Math.min(count - 1, Math.floor(random() * count));
+  let second = 1 + Math.min(count - 2, Math.floor(random() * (count - 1)));
+  if (second >= first) second += 1;
+  return first < second ? [first, second] : [second, first];
+}
+
+/** Whether the words typed back are the words of the key at those positions: in any case, spaces around ignored. */
+export function recoveryCheckPasses(words: readonly string[], positions: readonly number[], answers: readonly string[]): boolean {
+  return positions.length > 0 && positions.every((position, index) => {
+    const expected = words[position - 1];
+    return !!expected && (answers[index] ?? "").trim().toLowerCase() === expected.toLowerCase();
+  });
 }
 
 /** The state of a published session, as a session list says it. */

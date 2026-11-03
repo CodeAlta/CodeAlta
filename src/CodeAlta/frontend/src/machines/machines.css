@@ -23,6 +23,9 @@
   display: grid; gap: 8px; }
 .machine-section > h2 { margin: 0; font-size: 14px; font-weight: 600; letter-spacing: .02em; }
 .machine-section > p { margin: 0; }
+/* A heading with the action of its section at the end of the line (Secrets: Add a secret…). */
+.machine-section-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.machine-section-head > h2 { margin: 0; font-size: 14px; font-weight: 600; letter-spacing: .02em; }
 .machine-devices { display: grid; gap: 2px; overflow-x: auto; }
 .machine-device { display: grid; grid-template-columns: minmax(180px, 1fr) repeat(6, 72px) 36px; align-items: center; gap: 4px; padding: 4px 2px;
   border-radius: 6px; min-width: 660px; }

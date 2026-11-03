@@ -465,6 +465,9 @@ internal sealed partial class GlobalConfigService
                         { Icon = Bound(definition?.Icon), Color = Bound(definition?.Color), AnthropicApiKey = Bound(definition?.AnthropicApiKey), PermissionMode = Bound(definition?.PermissionMode),
                           ConfigDir = Bound(definition?.ConfigDir), Command = Bound(definition?.Command), ModelsOrder = ConfiguredModelsOrder(definition?.ModelsOrder, definition?.SortModels),
                           ContextSize = ContextSizeContract.Of(definition?.ContextSize),
+                          ApiKeySecret = Bound(definition?.ApiKeySecret),
+                          ApiKeySecretSet = definition?.ApiKeySecret is { } secretName ? IsSecretSet(secretName) : null,
+                          KeyInEnvironment = definition?.ApiKeyEnv is { } variable && !string.IsNullOrWhiteSpace(System.Environment.GetEnvironmentVariable(variable.Trim())) ? true : null,
                           Environment = definition?.Env is { Count: > 0 } variables ? [.. variables.Take(MaximumEnvironmentVariables).Select(static pair => new GlobalConfigPluginMapEntry(Bound(pair.Key)!, Bound(pair.Value)!))] : null };
                     }).Concat(ListPluginProviders(document)).ToArray();
                 var pluginTypes = DescribePluginTypes();
@@ -624,6 +627,57 @@ internal sealed partial class GlobalConfigService
     /// adapter type, its endpoint, the variable of its key and what its service needs. It is added disabled: the user
     /// gives it a credential, or signs in, and enables it.
     /// </summary>
+    [NeoRpcMethod("keepKeyAsSecret")]
+    public GlobalConfigSaveResponse KeepKeyAsSecret(GlobalConfigKeepKeyRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        var key = request.Key?.Trim();
+        var name = request.SecretName?.Trim();
+        if (string.IsNullOrEmpty(key) || key.Length > 64) return new("invalid", null, "A provider key is required.", null, null, 0);
+        if (!CodeAlta.Catalog.Secrets.LocalSecretStore.IsName(name)) return new("invalid", null, "A name is letters, digits and _, not starting with a digit.", null, null, 0);
+        return Mutate(request.ExpectedEpoch, request.ExpectedRevision, applyProviders: true, (store, definitions) =>
+        {
+            if (definitions.FirstOrDefault(value => string.Equals(value.ProviderKey, key, StringComparison.OrdinalIgnoreCase)) is not { } definition)
+                return "The provider no longer exists in the configuration.";
+            // The key the provider uses now: the one the file holds, else the one of its variable.
+            var value = definition.ApiKey is { Length: > 0 } literal && !CodeAlta.Catalog.Secrets.SecretReferences.TryParseLone(literal.Trim(), out _) ? literal.Trim()
+                : definition.ApiKeyEnv is { } variable ? System.Environment.GetEnvironmentVariable(variable.Trim()) : null;
+            if (string.IsNullOrEmpty(value)) return "The provider has no key to keep: it holds none, and its variable is not set.";
+            try
+            {
+                Secrets.SetSecret(name, value, $"{System.Environment.UserName} (CodeAlta Desktop)");
+            }
+            catch (CodeAlta.Catalog.Secrets.SecretStoreUnavailableException exception)
+            {
+                return exception.Message;
+            }
+
+            SecretChanged?.Invoke();
+            definition.ApiKeySecret = name;
+            definition.ApiKey = null;
+            store.SaveGlobalProviderDefinitions(definitions);
+            return null;
+        });
+    }
+
+    /// <summary>Gets what is called after a secret is set here, so that the sessions mask it at once; null for nothing.</summary>
+    internal Action? SecretChanged { get; init; }
+
+    // The secrets of this machine: the global root is the state root of the providers.
+    private CodeAlta.Catalog.Secrets.LocalSecretStore Secrets => new(_stateRoot!);
+
+    private bool IsSecretSet(string name)
+    {
+        try
+        {
+            return _stateRoot is not null && Secrets.ListSecrets().Any(secret => string.Equals(secret.Name, name.Trim(), StringComparison.OrdinalIgnoreCase));
+        }
+        catch (Exception exception) when (exception is InvalidDataException or IOException or UnauthorizedAccessException)
+        {
+            return false;
+        }
+    }
+
     [NeoRpcMethod("addBuiltInProvider")]
     public GlobalConfigSaveResponse AddBuiltInProvider(GlobalConfigAddBuiltInProviderRequest request)
     {
@@ -1149,6 +1203,13 @@ internal sealed record GlobalConfigBuiltInProvider(string Key, string Type, stri
 /// <summary>Asks to add a built-in provider by its key; the revision is the one of the listing it was chosen from.</summary>
 internal sealed record GlobalConfigAddBuiltInProviderRequest(string? ExpectedEpoch, string? ExpectedRevision, string? Key);
 
+/// <summary>Moves the key of a provider into a secret of this machine, which the provider then names (<c>api_key_secret</c>).</summary>
+/// <param name="ExpectedEpoch">The host epoch the page knows.</param>
+/// <param name="ExpectedRevision">The revision of the configuration the page read.</param>
+/// <param name="Key">The key of the provider.</param>
+/// <param name="SecretName">The name of the secret.</param>
+internal sealed record GlobalConfigKeepKeyRequest(string? ExpectedEpoch, string? ExpectedRevision, string? Key, string? SecretName);
+
 /// <summary>One configured provider: values as written (null when the file leaves them to defaults) plus effective display values.</summary>
 internal sealed record GlobalConfigProvider(string Key, string Type, bool Enabled, string? DisplayName, string EffectiveName,
     string? Model, string? ReasoningEffort, string? ApiUrl, string? EffectiveApiUrl, string? ApiKeyEnv, bool HasApiKey,
@@ -1195,6 +1256,18 @@ internal sealed record GlobalConfigProvider(string Key, string Type, bool Enable
     /// The variables a <c>claude-code</c> provider starts its CLI with (<c>env</c>), as the file writes them; null for none.
     /// </summary>
     public IReadOnlyList<GlobalConfigPluginMapEntry>? Environment { get; init; }
+
+    /// <summary>The name of the secret of this machine that holds the key (<c>api_key_secret</c>); null for none.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? ApiKeySecret { get; init; }
+
+    /// <summary>Whether the secret <see cref="ApiKeySecret"/> names is set on this machine; null without such a secret.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? ApiKeySecretSet { get; init; }
+
+    /// <summary>True when the variable <c>api_key_env</c> names gives a key in the environment of CodeAlta; null otherwise.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? KeyInEnvironment { get; init; }
 
     /// <summary>The settings of a provider whose type a plugin contributes; absent for a built-in type.</summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]

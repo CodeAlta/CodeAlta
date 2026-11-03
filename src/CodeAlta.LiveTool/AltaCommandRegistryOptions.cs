@@ -39,7 +39,8 @@ public sealed record AltaCommandRegistryOptions
         "issue",
         "issues",
         "notes",
-        "note");
+        "note",
+        "secret");
 
     // Declared after the set it reads: static initializers run in the order of the source.
     /// <summary>

@@ -64,4 +64,34 @@ public sealed class MetadataKeyTests
             ("metadata_key.wrap", CoordinatorErrorCodes.MetadataKeyNotFound, null),
         }, audit, "a wrap that adds nothing is not recorded as a change; no key material is in the log");
     }
+
+    [TestMethod]
+    public async Task EachSpaceHasItsOwnEpochsAndItsSealedDescriptor()
+    {
+        await using var server = await ServerFixture.StartAsync();
+        using var owner = new TestDevice("Desktop");
+        using var mac = new TestDevice("Mac mini");
+        await server.SetUpWithNodeAsync(owner, mac);
+
+        // A key of a space carries its sealed descriptor; a key of the person (older devices) needs none.
+        var bare = await server.SendAsync(owner, HttpMethod.Post, "/api/v1/metadata-keys", new CreateMetadataKeyRequest("k-work", 1, [new(owner.DeviceId, "w")], "space-work"));
+        Assert.AreEqual((HttpStatusCode.BadRequest, CoordinatorErrorCodes.MetadataKeyInvalid), (bare.Status, bare.Code));
+        var badId = await server.SendAsync(owner, HttpMethod.Post, "/api/v1/metadata-keys", new CreateMetadataKeyRequest("k-work", 1, [new(owner.DeviceId, "w")], "a/b", "sealed"));
+        Assert.AreEqual(CoordinatorErrorCodes.MetadataKeyInvalid, badId.Code);
+        Assert.AreEqual(HttpStatusCode.Created,
+            (await server.SendAsync(owner, HttpMethod.Post, "/api/v1/metadata-keys", new CreateMetadataKeyRequest("k-person", 1, [new(owner.DeviceId, "p")]))).Status);
+        Assert.AreEqual(HttpStatusCode.Created,
+            (await server.SendAsync(owner, HttpMethod.Post, "/api/v1/metadata-keys", new CreateMetadataKeyRequest("k-work", 1, [new(owner.DeviceId, "w")], "space-work", "sealed-work"))).Status);
+        Assert.AreEqual(HttpStatusCode.Created,
+            (await server.SendAsync(owner, HttpMethod.Post, "/api/v1/metadata-keys", new CreateMetadataKeyRequest("k-home", 1, [new(owner.DeviceId, "h")], "space-home", "sealed-home"))).Status,
+            "epoch 1 of another space");
+        var twice = await server.SendAsync(owner, HttpMethod.Post, "/api/v1/metadata-keys", new CreateMetadataKeyRequest("k-work-b", 1, [new(owner.DeviceId, "w")], "space-work", "sealed-work"));
+        Assert.AreEqual((HttpStatusCode.Conflict, CoordinatorErrorCodes.MetadataKeyExists), (twice.Status, twice.Code));
+        Assert.AreEqual(HttpStatusCode.Created,
+            (await server.SendAsync(owner, HttpMethod.Post, "/api/v1/metadata-keys", new CreateMetadataKeyRequest("k-work-2", 2, [new(owner.DeviceId, "w2")], "space-work", "sealed-work-2"))).Status);
+
+        var listed = (await server.SendAsync(owner, HttpMethod.Get, "/api/v1/metadata-keys")).Read<ListResponse<MetadataKeyDto>>().Items;
+        CollectionAssert.AreEquivalent(new[] { ("k-person", 1, (string?)null, (string?)null), ("k-work", 1, "space-work", "sealed-work"), ("k-work-2", 2, "space-work", "sealed-work-2"),
+            ("k-home", 1, "space-home", "sealed-home") }, listed.Select(static key => (key.Id, key.Epoch, key.Space, key.SealedDescriptor)).ToArray());
+    }
 }

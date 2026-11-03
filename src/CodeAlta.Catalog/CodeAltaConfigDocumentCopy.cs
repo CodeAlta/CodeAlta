@@ -131,6 +131,7 @@ internal static class CodeAltaConfigDocumentCopy
         ContextSize = provider.ContextSize,
         ApiKey = provider.ApiKey,
         ApiKeyEnv = provider.ApiKeyEnv,
+        ApiKeySecret = provider.ApiKeySecret,
         ApiUrl = provider.ApiUrl,
         NetworkTimeoutSeconds = provider.NetworkTimeoutSeconds,
         Command = provider.Command,

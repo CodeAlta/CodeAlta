@@ -2309,6 +2309,7 @@ public sealed partial class CodeAltaConfigStore
         definition.ReasoningEffort = NormalizeReasoningEffortText(definition.ReasoningEffort);
         definition.ApiKey = NormalizeText(definition.ApiKey);
         definition.ApiKeyEnv = NormalizeText(definition.ApiKeyEnv);
+        definition.ApiKeySecret = NormalizeText(definition.ApiKeySecret);
         definition.ApiUrl = NormalizeText(definition.ApiUrl);
         definition.Sandbox = NormalizeText(definition.Sandbox);
         definition.CodeMode = NormalizeText(definition.CodeMode);
@@ -2919,6 +2920,7 @@ public sealed partial class CodeAltaConfigStore
                 // The key comes from the sign-in to Mistral Vibe, kept by CodeAlta: the configuration holds none.
                 RejectUnsupportedField(definition, "api_key", definition.ApiKey);
                 RejectUnsupportedField(definition, "api_key_env", definition.ApiKeyEnv);
+                RejectUnsupportedField(definition, "api_key_secret", definition.ApiKeySecret);
                 goto case MistralProviderType;
 
             case MistralProviderType:
@@ -2934,6 +2936,7 @@ public sealed partial class CodeAltaConfigStore
             case "vertex-ai":
                 RejectUnsupportedField(definition, "api_key", definition.ApiKey);
                 RejectUnsupportedField(definition, "api_key_env", definition.ApiKeyEnv);
+                RejectUnsupportedField(definition, "api_key_secret", definition.ApiKeySecret);
                 RejectUnsupportedField(definition, "organization_id", definition.OrganizationId);
                 RejectUnsupportedField(definition, "project_id", definition.ProjectId);
                 RejectUnsupportedField(definition, "extra_body", definition.ExtraBody);
@@ -2956,6 +2959,7 @@ public sealed partial class CodeAltaConfigStore
                 // and names no endpoint for it.
                 RejectUnsupportedField(definition, "api_key", definition.ApiKey);
                 RejectUnsupportedField(definition, "api_key_env", definition.ApiKeyEnv);
+                RejectUnsupportedField(definition, "api_key_secret", definition.ApiKeySecret);
                 RejectUnsupportedField(definition, "api_url", definition.ApiUrl);
                 RejectUnsupportedField(definition, "organization_id", definition.OrganizationId);
                 RejectUnsupportedField(definition, "project_id", definition.ProjectId);
@@ -3003,6 +3007,7 @@ public sealed partial class CodeAltaConfigStore
                 RejectUnsupportedField(definition, "extra_body", definition.ExtraBody);
                 RejectUnsupportedField(definition, "api_key", definition.ApiKey);
                 RejectUnsupportedField(definition, "api_key_env", definition.ApiKeyEnv);
+                RejectUnsupportedField(definition, "api_key_secret", definition.ApiKeySecret);
                 ValidateXaiDirectFields(definition);
                 break;
         }
@@ -3070,10 +3075,10 @@ public sealed partial class CodeAltaConfigStore
 
     private static void RejectCodexSubscriptionApiKeyFields(CodeAltaProviderDocument definition)
     {
-        if (!string.IsNullOrWhiteSpace(definition.ApiKey) || !string.IsNullOrWhiteSpace(definition.ApiKeyEnv))
+        if (!string.IsNullOrWhiteSpace(definition.ApiKey) || !string.IsNullOrWhiteSpace(definition.ApiKeyEnv) || !string.IsNullOrWhiteSpace(definition.ApiKeySecret))
         {
             throw new InvalidOperationException(
-                $"providers.{definition.ProviderKey} uses ChatGPT OAuth; api_key and api_key_env are not supported for type '{CodexSubscriptionProviderType}'.");
+                $"providers.{definition.ProviderKey} uses ChatGPT OAuth; api_key, api_key_env and api_key_secret are not supported for type '{CodexSubscriptionProviderType}'.");
         }
     }
 
@@ -3473,6 +3478,7 @@ public sealed partial class CodeAltaConfigStore
                definition.ContextSize is not null ||
                !string.IsNullOrWhiteSpace(definition.ApiKey) ||
                !string.IsNullOrWhiteSpace(definition.ApiKeyEnv) ||
+               !string.IsNullOrWhiteSpace(definition.ApiKeySecret) ||
                !string.IsNullOrWhiteSpace(definition.ApiUrl) ||
                definition.NetworkTimeoutSeconds is not null ||
                !string.IsNullOrWhiteSpace(definition.Command) ||
@@ -3553,9 +3559,10 @@ public sealed partial class CodeAltaConfigStore
             case "anthropic":
             case "google-genai":
                 if (string.IsNullOrWhiteSpace(definition.ApiKey) &&
-                    string.IsNullOrWhiteSpace(definition.ApiKeyEnv))
+                    string.IsNullOrWhiteSpace(definition.ApiKeyEnv) &&
+                    string.IsNullOrWhiteSpace(definition.ApiKeySecret))
                 {
-                    throw new InvalidOperationException($"providers.{definition.ProviderKey} requires api_key or api_key_env when enabled.");
+                    throw new InvalidOperationException($"providers.{definition.ProviderKey} requires api_key, api_key_secret or api_key_env when enabled.");
                 }
 
                 break;
@@ -3585,6 +3592,7 @@ public sealed partial class CodeAltaConfigStore
             ContextSize = definition.ContextSize,
             ApiKey = definition.ApiKey,
             ApiKeyEnv = definition.ApiKeyEnv,
+            ApiKeySecret = definition.ApiKeySecret,
             ApiUrl = definition.ApiUrl,
             NetworkTimeoutSeconds = definition.NetworkTimeoutSeconds,
             Command = definition.Command,

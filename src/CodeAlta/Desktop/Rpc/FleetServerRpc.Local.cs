@@ -66,7 +66,7 @@ internal sealed partial class FleetServerService
                         throw new SshSetupException(LocalServerSteps.Claim, "claim_refused", exception.Message);
                     }
                 }, step => events.Writer.TryWrite(new MachineSetupEvent(step.Step, step.State, step.Detail, step.Code, null, null, null)), cancellationToken).ConfigureAwait(false);
-                events.Writer.TryWrite(new MachineSetupEvent("finished", "done", null, null, linkId, null, null));
+                events.Writer.TryWrite(Finished(linkId, await TryCreateRecoveryKeyAsync(linkId, cancellationToken).ConfigureAwait(false)));
             }
             catch (SshSetupException exception)
             {
@@ -136,7 +136,7 @@ internal sealed partial class FleetServerService
                         throw new SshSetupException(SshServerSteps.Claim, "claim_refused", exception.Message);
                     }
                 }, step => events.Writer.TryWrite(new MachineSetupEvent(step.Step, step.State, step.Detail, step.Code, null, null, null)), cancellationToken).ConfigureAwait(false);
-                events.Writer.TryWrite(new MachineSetupEvent("finished", "done", null, null, linkId, null, null));
+                events.Writer.TryWrite(Finished(linkId, await TryCreateRecoveryKeyAsync(linkId, cancellationToken).ConfigureAwait(false)));
             }
             catch (SshSetupException exception)
             {
@@ -157,6 +157,9 @@ internal sealed partial class FleetServerService
         await foreach (var value in events.Reader.ReadAllAsync(cancellationToken).ConfigureAwait(false)) yield return value;
         await run.ConfigureAwait(false);
     }
+
+    // The server is claimed: its link, and the words of the owner's recovery key made with it, which the page shows once.
+    private static MachineSetupEvent Finished(string linkId, string? recoveryWords) => new("finished", "done", null, null, linkId, null, null, recoveryWords);
 
     // The health request of the server, from this computer, as the machines will reach it.
     private static async Task<bool> AnswersAsync(Uri address, CancellationToken cancellationToken)

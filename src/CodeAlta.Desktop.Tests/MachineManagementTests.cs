@@ -72,6 +72,57 @@ public sealed class MachineManagementTests
         Assert.IsNull(fixture.Service.TrustedDevices.FindTrusted(DeviceFingerprintOf(fixture, second.DeviceId)));
     }
 
+    [TestMethod]
+    public async Task TheComputerThatManagesAMachine_ChangesItsSecretsFromItsPage_AndOneThatDoesNotIsRefused()
+    {
+        var token = TestContext.CancellationToken;
+        await using var fixture = await FleetNodeFixture.StartAsync(token);
+        var store = new CodeAlta.Catalog.Secrets.LocalSecretStore(fixture.Host.CatalogOptions.GlobalRoot);
+        try
+        {
+            await using var firstComputer = await PairAsync(fixture, "first", token);
+            await using var secondComputer = await PairAsync(fixture, "second", token);
+            var (first, firstService, firstEpoch) = firstComputer;
+            var (second, secondService, secondEpoch) = secondComputer;
+            var firstMachine = first.Hosts.Single().MachineId!;
+            var secondMachine = second.Hosts.Single().MachineId!;
+
+            Assert.AreEqual("ok", (await firstService.SetSecretAsync(new MachineSecretWriteRequest(firstEpoch, firstMachine, "GRAFANA_TOKEN", "glsa_first_1"), token)).Status);
+            Assert.AreEqual("ok", (await firstService.RotateSecretAsync(new MachineSecretWriteRequest(firstEpoch, firstMachine, "GRAFANA_TOKEN", "glsa_first_2"), token)).Status);
+            Assert.AreEqual("ok", (await firstService.SetVariableAsync(new MachineSecretWriteRequest(firstEpoch, firstMachine, "GRAFANA_URL", "https://grafana.example"), token)).Status);
+            var listed = await firstService.SecretsAsync(new MachineRequest(firstEpoch, firstMachine), token);
+            Assert.AreEqual("ok", listed.Status);
+            Assert.AreEqual(("GRAFANA_TOKEN", 2, "first (manage)"), (listed.Secrets.Single().Name, listed.Secrets.Single().Version, listed.Secrets.Single().SetBy),
+                "the secret by name and version, set by this computer as the machine knows it");
+            Assert.AreEqual("https://grafana.example", listed.Variables.Single().Value);
+            Assert.IsTrue(store.TryGetSecret("GRAFANA_TOKEN", out var value));
+            Assert.AreEqual("glsa_first_2", value, "the value is on the machine");
+
+            // What the page refuses before the machine does, and what the machine refuses.
+            Assert.AreEqual("invalid_params", (await firstService.SetSecretAsync(new MachineSecretWriteRequest(firstEpoch, firstMachine, "not-a-name", "x"), token)).Status);
+            Assert.AreEqual("invalid_params", (await firstService.SetSecretAsync(new MachineSecretWriteRequest(firstEpoch, firstMachine, "EMPTY", ""), token)).Status);
+            Assert.AreEqual(CodeAlta.Fleet.NodeApi.FleetNodeErrorCodes.SecretNotFound,
+                (await firstService.RotateSecretAsync(new MachineSecretWriteRequest(firstEpoch, firstMachine, "MISSING", "x"), token)).Status);
+            Assert.AreEqual("stale_epoch", (await firstService.SecretsAsync(new MachineRequest("other", firstMachine), token)).Status);
+
+            // A computer that does not manage the machine reads and changes nothing there.
+            Assert.AreEqual("not_manager", (await secondService.SecretsAsync(new MachineRequest(secondEpoch, secondMachine), token)).Status);
+            Assert.AreEqual("not_manager", (await secondService.SetSecretAsync(new MachineSecretWriteRequest(secondEpoch, secondMachine, "GRAFANA_TOKEN", "stolen"), token)).Status);
+            Assert.AreEqual("not_manager", (await secondService.DeleteSecretAsync(new MachineSecretNameRequest(secondEpoch, secondMachine, "GRAFANA_TOKEN"), token)).Status);
+            Assert.IsTrue(store.TryGetSecret("GRAFANA_TOKEN", out value));
+            Assert.AreEqual("glsa_first_2", value);
+
+            Assert.AreEqual("ok", (await firstService.DeleteSecretAsync(new MachineSecretNameRequest(firstEpoch, firstMachine, "GRAFANA_TOKEN"), token)).Status);
+            Assert.AreEqual("ok", (await firstService.DeleteVariableAsync(new MachineSecretNameRequest(firstEpoch, firstMachine, "GRAFANA_URL"), token)).Status);
+            var empty = await firstService.SecretsAsync(new MachineRequest(firstEpoch, firstMachine), token);
+            Assert.AreEqual((0, 0), (empty.Secrets.Length, empty.Variables.Length));
+        }
+        finally
+        {
+            store.Delete();
+        }
+    }
+
     private static DeviceFingerprint DeviceFingerprintOf(FleetNodeFixture fixture, string deviceId)
         => fixture.Service.TrustedDevices.List(includeRevoked: true).Single(device => device.DeviceId == deviceId).Fingerprint;
 

@@ -226,7 +226,7 @@ function ServerJoin({ epoch, server, api, onBusy, onBack, onClose }: {
         if (abort.signal.aborted || value.status !== "ok") return;
         const fresh = value.devices.filter(device => device.status === "pending" && device.kind === "node" && !known.current?.has(device.id));
         if (fresh.length === 1) {
-          const approved = await api.approve({ expectedEpoch: epoch, linkId: server.id, deviceId: fresh[0].id }, { timeoutMilliseconds: 30_000 });
+          const approved = await api.approve({ expectedEpoch: epoch, linkId: server.id, deviceId: fresh[0].id, words: null }, { timeoutMilliseconds: 30_000 });
           if (approved.status === "ok") setJoined(approved.device ?? fresh[0]);
           else setProblem({ key: "The server refused the approval.", detail: approved.message });
         } else if (fresh.length > 1) setSeveral(fresh);

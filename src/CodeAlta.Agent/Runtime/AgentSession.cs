@@ -169,6 +169,12 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
     /// </summary>
     internal IModelProviderModelCatalog? ModelCatalog { get; init; }
 
+    /// <summary>
+    /// Masks the secrets of the machine in the results of the tools and the events of the session, before the model,
+    /// the journal, the telemetry or the user see them; null masks nothing.
+    /// </summary>
+    internal AgentSecretMasker? SecretMasker { get; init; }
+
     // earlierHistory: what the journal holds before history, for a session read again without all of it.
     internal AgentSession(
         ModelProviderId providerId,
@@ -1167,6 +1173,9 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
             result = CreateToolExecutionFailureResult(toolCall.Name, ex);
         }
 
+        // A secret of the machine a tool wrote is masked before the model, the journal or the user see it.
+        result = SecretMasker?.MaskResult(result) ?? result;
+
         // The calls its script made are in the journal before the call itself ends there.
         await WriteNestedRecordsAsync().ConfigureAwait(false);
         await gate.WaitAsync(cancellationToken).ConfigureAwait(false);
@@ -1391,6 +1400,7 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
             result = CreateToolExecutionFailureResult(name, ex);
         }
 
+        result = SecretMasker?.MaskResult(result) ?? result;
         string? diff = null;
         if (callChanges is not null)
         {
@@ -3354,6 +3364,12 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
         if (events.Count == 0)
         {
             return;
+        }
+
+        // What a tool or an agent that runs its own tools wrote, what the model answered: no secret is kept, journaled or shown.
+        if (SecretMasker is { } masker)
+        {
+            events = masker.MaskEvents(events);
         }
 
         // Whatever compacts the conversation (the session or its provider), the model no longer has the files it read.

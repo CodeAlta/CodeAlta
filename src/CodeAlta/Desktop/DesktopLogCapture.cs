@@ -97,11 +97,13 @@ internal sealed record DesktopLogLine(string Timestamp, string Level, string Log
 
 internal sealed class DesktopCaptureLogWriter(DesktopLogCapture capture) : LogWriter
 {
+    // Masks the secrets of the machine in the rows; null masks nothing.
+    public CodeAlta.Agent.Runtime.AgentSecretMasker? Masker { get; init; }
+
     protected override void Log(LogMessage message)
     {
         // The exception follows the message on the same row, as in the terminal log view.
-        if (message.Exception is { } exception)
-            capture.Append(message.Timestamp.ToString("O"), message.Level.ToString(), message.Logger.Name, $"{message.Text} | {exception}");
-        else capture.Append(message.Timestamp.ToString("O"), message.Level.ToString(), message.Logger.Name, message.Text);
+        var text = message.Exception is { } exception ? $"{message.Text} | {exception}" : message.Text.ToString();
+        capture.Append(message.Timestamp.ToString("O"), message.Level.ToString(), message.Logger.Name, Masker?.MaskText(text) ?? text);
     }
 }

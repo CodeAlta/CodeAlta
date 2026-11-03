@@ -233,24 +233,43 @@ internal sealed class DesktopFleetServers : IAsyncDisposable
         }
     }
 
-    /// <summary>Leaves a server: the link and its outbox go, and the spaces linked to it are unlinked. The server keeps what it was given.</summary>
+    /// <summary>
+    /// Leaves a server: the spaces linked to it are unlinked, the server withdraws what this computer published there
+    /// (facts and sealed metadata, statistics, inventory), its copies of keys and the automations given to it, and the
+    /// link goes with its outbox and the anchor of its device list. A server that does not answer keeps what it holds.
+    /// </summary>
     /// <param name="linkId">The link.</param>
     /// <param name="cancellationToken">Cancels the wait.</param>
-    /// <returns>Whether there was such a link.</returns>
-    public async Task<bool> LeaveAsync(string linkId, CancellationToken cancellationToken)
+    /// <returns>Whether there was such a link, and what the server withdrew; null when it did not answer or refused.</returns>
+    public async Task<(bool Removed, LeaveResponse? Withdrawn)> LeaveAsync(string linkId, CancellationToken cancellationToken)
     {
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         bool removed;
+        LeaveResponse? withdrawn = null;
         try
         {
             var link = _store.List().FirstOrDefault(candidate => candidate.Id == linkId);
-            if (link is null) return false;
+            if (link is null) return (false, null);
             foreach (var space in await _host.SpaceCatalog.LoadAsync(cancellationToken).ConfigureAwait(false))
             {
                 if (link.IsServer(space.Settings.Fleet?.Server))
                     await _host.SpaceCatalog.UpdateSettingsAsync(space.Id, settings => settings with { Fleet = null }, cancellationToken).ConfigureAwait(false);
             }
 
+            if (link.State != FleetServerLinkStates.Revoked)
+            {
+                try
+                {
+                    using var client = Client(linkId);
+                    withdrawn = await client.LeaveAsync(cancellationToken).ConfigureAwait(false);
+                }
+                catch (Exception exception) when (exception is FleetServerException or HttpRequestException or TaskCanceledException && !cancellationToken.IsCancellationRequested)
+                {
+                    Log(exception, $"{link.Url} did not withdraw what this computer published there");
+                }
+            }
+
+            // The connector and its keys go with the link, and the folder of the link with its anchor.
             removed = _connections is { } connections ? await connections.RemoveAsync(linkId, cancellationToken).ConfigureAwait(false) : _store.Remove(linkId);
         }
         finally
@@ -259,7 +278,7 @@ internal sealed class DesktopFleetServers : IAsyncDisposable
         }
 
         Changed?.Invoke();
-        return removed;
+        return (removed, withdrawn);
     }
 
     /// <summary>Makes an enrollment token for a machine (<c>altanode join</c>); only a controller device may.</summary>
@@ -353,12 +372,13 @@ internal sealed class DesktopFleetServers : IAsyncDisposable
         using var client = Client(linkId);
         var response = await client.QueryStatisticsAsync(request, cancellationToken).ConfigureAwait(false);
         var names = new Dictionary<string, string>(StringComparer.Ordinal);
-        if (Volatile.Read(ref _connections)?.Find(linkId)?.Connector?.MetadataKey is { } key)
+        // A project key is the blind index of the key of its space: every key this computer holds may name one of its projects.
+        if (Volatile.Read(ref _connections)?.Find(linkId)?.Connector?.MetadataKeys?.Held is { Count: > 0 } keys)
         {
             foreach (var project in await _host.ProjectCatalog.LoadAsync(cancellationToken).ConfigureAwait(false))
             {
                 if (await FleetProjectKeys.IdentityAsync(project, _repositories, cancellationToken).ConfigureAwait(false) is not { } identity) continue;
-                names.TryAdd(FleetProjectKeys.Of(key, identity), string.IsNullOrWhiteSpace(project.DisplayName) ? project.Name : project.DisplayName);
+                foreach (var key in keys) names.TryAdd(FleetProjectKeys.Of(key, identity), string.IsNullOrWhiteSpace(project.DisplayName) ? project.Name : project.DisplayName);
             }
         }
 
@@ -411,21 +431,110 @@ internal sealed class DesktopFleetServers : IAsyncDisposable
         return await client.SetUpdatePolicyAsync(change, cancellationToken).ConfigureAwait(false);
     }
 
-    /// <summary>Approves a pending device of a server, signing the entry of the device list that adds it with this device's key.</summary>
+    /// <summary>
+    /// Approves a pending device of a server once the person confirmed it shows the same words, signing the entry of the
+    /// device list that adds its key with this device's key; it gets the keys of the person only then.
+    /// </summary>
     /// <param name="linkId">The link.</param>
     /// <param name="deviceId">The device.</param>
+    /// <param name="confirmedWords">The words of its key the person compared; null when none were compared.</param>
     /// <param name="cancellationToken">Cancels the call.</param>
     /// <returns>The device.</returns>
     /// <exception cref="KeyNotFoundException">No such link.</exception>
+    /// <exception cref="FleetDeviceListException">The list does not verify, or the key is not the one whose words were confirmed: nothing was signed.</exception>
     /// <exception cref="FleetServerException">The server refused.</exception>
     /// <exception cref="HttpRequestException">The server does not answer.</exception>
-    public async Task<DeviceDto> ApproveAsync(string linkId, string deviceId, CancellationToken cancellationToken)
+    public async Task<DeviceDto> ApproveAsync(string linkId, string deviceId, string? confirmedWords, CancellationToken cancellationToken)
     {
         using var client = Client(linkId);
-        var approved = await client.ApproveAsync(deviceId, cancellationToken).ConfigureAwait(false);
+        var approved = await client.ApproveAsync(deviceId, confirmedWords, cancellationToken).ConfigureAwait(false);
         // The approved device gets its copy of the metadata key at the next publication of this computer.
         Volatile.Read(ref _connections)?.Find(linkId)?.Connector?.RefreshKeys();
         return approved;
+    }
+
+    /// <summary>
+    /// Makes the recovery key of this computer's person at a server (<c>doc/fleet/security-and-privacy.md</c>, keys): its
+    /// words are given once, to be shown to the person, and never kept. One the person had before stops working.
+    /// </summary>
+    /// <param name="linkId">The link.</param>
+    /// <param name="cancellationToken">Cancels the calls.</param>
+    /// <returns>The words of the recovery key.</returns>
+    /// <exception cref="KeyNotFoundException">No such link.</exception>
+    /// <exception cref="FleetDeviceListException">This device is not a controller device of the verified device list.</exception>
+    /// <exception cref="FleetServerException">The server refused.</exception>
+    /// <exception cref="HttpRequestException">The server does not answer.</exception>
+    public async Task<string> CreateRecoveryKeyAsync(string linkId, CancellationToken cancellationToken)
+    {
+        using var key = FleetRecoveryKey.Generate();
+        using (var client = Client(linkId)) await client.AddRecoveryKeyAsync(key, cancellationToken).ConfigureAwait(false);
+        // The recovery key gets its copy of the keys at the next publication of this computer.
+        Volatile.Read(ref _connections)?.Find(linkId)?.Connector?.RefreshKeys();
+        Changed?.Invoke();
+        return key.Words;
+    }
+
+    /// <summary>Gets whether the person of this computer has a recovery key at a server, as its verified device list says; null before the list was read.</summary>
+    /// <param name="link">The link.</param>
+    /// <returns>Whether a recovery key of this computer's person is in the list.</returns>
+    public static bool? HasRecoveryKey(FleetServerConnection link)
+    {
+        ArgumentNullException.ThrowIfNull(link);
+        if (link.Connector?.Devices.Current is not { } list || !list.Members.TryGetValue(link.Link.DeviceId, out var self)) return null;
+        // The first device names its person by the first entry it signs: before any, the list holds no recovery key of its person.
+        return self.OwnerId is { } owner && list.Members.Values.Any(member => member.Kind == FleetDeviceKinds.Recovery && member.OwnerId == owner);
+    }
+
+    /// <summary>
+    /// Recovers a server with the recovery key of a person whose devices are all lost: the key signs this computer in as a
+    /// controller device of that person and gives it their keys; the link is made, approved.
+    /// </summary>
+    /// <param name="address">The address of the server.</param>
+    /// <param name="words">The words of the recovery key.</param>
+    /// <param name="cancellationToken">Cancels the calls.</param>
+    /// <returns>The link.</returns>
+    /// <exception cref="ArgumentException">The words are not 32 words of the list.</exception>
+    /// <exception cref="FleetRecoveryException">The words are not the recovery key of a person of the server.</exception>
+    /// <exception cref="FleetDeviceListException">The device list does not start with the anchor the recovery key sealed.</exception>
+    /// <exception cref="FleetServerException">The server refused.</exception>
+    /// <exception cref="HttpRequestException">The server does not answer.</exception>
+    /// <exception cref="InvalidOperationException">This instance is linked to that server already.</exception>
+    public async Task<FleetServerLink> RecoverAsync(Uri address, string words, CancellationToken cancellationToken)
+    {
+        if (!FleetRecoveryKey.TryParse(words, out var key)) throw new ArgumentException("A recovery key is 32 words of its list.", nameof(words));
+        using var recovery = key;
+        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            RequireNoLink(address);
+            var identity = Identity();
+            var id = FleetServerLinkStore.NewId();
+            var folder = _store.LinkFolder(id);
+            FleetRecoveryResult result;
+            try
+            {
+                result = await FleetRecovery.RecoverAsync(address, recovery, identity, _deviceName, Path.Combine(folder, FleetOrganizationDevices.PinFileName), Handler, cancellationToken)
+                    .ConfigureAwait(false);
+            }
+            catch
+            {
+                try { if (Directory.Exists(folder)) Directory.Delete(folder, recursive: true); }
+                catch (Exception exception) when (exception is IOException or UnauthorizedAccessException) { /* Nothing reads a folder without its link. */ }
+                throw;
+            }
+
+            var now = DateTimeOffset.UtcNow;
+            var link = new FleetServerLink(id, FleetServerAddress.Format(address), result.OrganizationId, result.OrganizationName, identity.DeviceId, FleetDeviceKinds.Controller,
+                FleetServerLinkStates.Approved, now, now);
+            _store.Save(link);
+            await EnsureConnectionsAsync(cancellationToken).ConfigureAwait(false);
+            return link;
+        }
+        finally
+        {
+            _gate.Release();
+        }
     }
 
     /// <summary>Revokes a device of a server, or refuses a pending one.</summary>

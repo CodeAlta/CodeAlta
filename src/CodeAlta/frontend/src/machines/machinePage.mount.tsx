@@ -2,7 +2,7 @@
 // machinePage.browser.test.ts through `machineFixture`: what the page asks is recorded.
 import { StrictMode, useState } from "react";
 import { createRoot } from "react-dom/client";
-import type { MachineDeviceView, MachineManagement, MachineView } from "#neoastra";
+import type { MachineDeviceView, MachineManagement, MachineView, SecretView, VariableView } from "#neoastra";
 import { ShellLanguageContext } from "../shellLanguage";
 import { MachinePage, type MachinePageApi } from "./MachinePage";
 
@@ -53,7 +53,28 @@ const api: MachinePageApi = {
     return request.check ? { status: "available", running: "4.0.0", latest: "4.0.1", target: "4.0.1", message: null }
       : { status: "staged", running: "4.0.0", latest: "4.0.1", target: "4.0.1", message: null };
   },
+  // The secrets of the machine: by name, never their values; a rotation of one that is gone is refused as the machine does.
+  secrets: async () => ({ status: "ok", protection: "libsecret", secrets: [...secrets.values()].map(secret => ({ name: secret.name, version: secret.version, setBy: secret.setBy, setAt: secret.setAt })), variables: [...variables.values()] }),
+  setSecret: async request => { calls.push(JSON.stringify({ setSecret: request.name, machine: request.machineId })); setSecret(request.name, request.value); return { status: "ok", message: null }; },
+  rotateSecret: async request => {
+    calls.push(JSON.stringify({ rotateSecret: request.name }));
+    if (!secrets.has(request.name)) return { status: "secret.not_found", message: `No secret is named ${request.name} on this machine.` };
+    setSecret(request.name, request.value);
+    return { status: "ok", message: null };
+  },
+  deleteSecret: async request => { calls.push(JSON.stringify({ deleteSecret: request.name })); secrets.delete(request.name); return { status: "ok", message: null }; },
+  setVariable: async request => {
+    calls.push(JSON.stringify({ setVariable: request.name, value: request.value }));
+    variables.set(request.name, { name: request.name, value: request.value, version: (variables.get(request.name)?.version ?? 0) + 1, setBy: "desktop (manage)", setAt: "2026-11-03T09:00:00Z" });
+    return { status: "ok", message: null };
+  },
+  deleteVariable: async request => { calls.push(JSON.stringify({ deleteVariable: request.name })); variables.delete(request.name); return { status: "ok", message: null }; },
 };
+const secrets = new Map<string, SecretView & { value: string }>();
+const variables = new Map<string, VariableView>([["GRAFANA_URL", { name: "GRAFANA_URL", value: "https://grafana.example", version: 1, setBy: "build-box owner", setAt: "2026-11-02T09:00:00Z" }]]);
+function setSecret(name: string, value: string) {
+  secrets.set(name, { name, value, version: (secrets.get(name)?.version ?? 0) + 1, setBy: "desktop (manage)", setAt: "2026-11-03T09:00:00Z" });
+}
 
 function Fixture() {
   const [shown, setShown] = useState("managed");

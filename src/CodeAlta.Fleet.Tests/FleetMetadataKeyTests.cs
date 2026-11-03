@@ -117,6 +117,37 @@ public sealed class FleetMetadataKeyTests
         Assert.AreEqual(0L, list.LastRemovalSequence);
     }
 
+    [TestMethod]
+    public void TheKeyOfASpaceIsBoundToItsSpace_InItsDescriptorAndItsGrant()
+    {
+        var key = FleetMetadataKey.Generate();
+        var descriptor = key.SealSpace("space-a", "work");
+        Assert.IsFalse(descriptor.Contains("work", StringComparison.Ordinal), "the server never reads which space it is");
+        Assert.IsTrue(key.TryOpenSpace("space-a", descriptor, out var local));
+        Assert.AreEqual("work", local);
+        Assert.IsFalse(key.TryOpenSpace("space-b", descriptor, out _), "moved to another space by the server");
+        Assert.IsFalse(FleetMetadataKey.Generate().TryOpenSpace("space-a", descriptor, out _));
+        Assert.IsFalse(key.TryOpen("space-a", descriptor, out _), "a descriptor never reads as the title of a session");
+        Assert.AreEqual(key.Id, FleetMetadataKey.KeyIdOf(key.Seal("s1", new FleetSessionMetadata("t"))));
+        Assert.IsNull(FleetMetadataKey.KeyIdOf("not json"));
+
+        using var devices = new Devices();
+        var list = devices.List();
+        var node = PublicKey(devices.Node);
+        var grant = new FleetKeyGrant("org", "p1", 1, list.Sequence) { SpaceId = "space-a" };
+        var wrapped = FleetKeyWrap.Wrap(key, node, grant, devices.Laptop);
+        Assert.AreEqual("space-a", FleetKeyWrap.Unwrap(wrapped, key.Id, 1, "space-a", devices.Node, list).Grant!.SpaceId);
+        // Listed by the server for another space, relabelled, or as a key of the person: refused.
+        Assert.ThrowsExactly<InvalidDataException>(() => FleetKeyWrap.Unwrap(wrapped, key.Id, 1, "space-b", devices.Node, list));
+        Assert.ThrowsExactly<InvalidDataException>(() => FleetKeyWrap.Unwrap(wrapped.Replace("\"space-a\"", "\"space-b\"", StringComparison.Ordinal), key.Id, 1, "space-b", devices.Node, list));
+        Assert.ThrowsExactly<InvalidDataException>(() => FleetKeyWrap.Unwrap(wrapped, key.Id, 1, devices.Node, list));
+        Assert.ThrowsExactly<InvalidDataException>(() => FleetKeyWrap.Unwrap(Without(wrapped, "space"), key.Id, 1, devices.Node, list), "the signature names the space");
+        // A key of the person does not open as the key of a space either.
+        var personal = FleetKeyWrap.Wrap(key, node, grant with { SpaceId = null }, devices.Laptop);
+        Assert.ThrowsExactly<InvalidDataException>(() => FleetKeyWrap.Unwrap(personal, key.Id, 1, "space-a", devices.Node, list));
+        Assert.IsNull(FleetKeyWrap.Unwrap(personal, key.Id, 1, devices.Node, list).Grant!.SpaceId);
+    }
+
     // Removes fields of a JSON object.
     private static string Without(string json, params string[] fields)
     {

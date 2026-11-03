@@ -280,6 +280,7 @@ import { WorktreeManager } from "./worktrees/WorktreeManager";
 import { WorktreeSettings } from "./worktrees/WorktreeSettings";
 import { McpHostSettings } from "./mcpHost/McpHostSettings";
 import { MachinesSettings } from "./machines/MachinesSettings";
+import { SecretsSettings } from "./secrets/SecretsSettings";
 import { readMachinePageLink } from "./machines/machines";
 import { FleetServerSettings } from "./fleet/FleetServerSettings";
 import { FleetApprovals } from "./fleet/FleetApprovals";
@@ -371,6 +372,7 @@ import "./worktrees/worktrees.css";
 import "./cloudSessions/cloudSessions.css";
 import "./mcpHost/mcpHost.css";
 import "./machines/machines.css";
+import "./secrets/secrets.css";
 import "./fleet/fleet.css";
 import "./spaces/spaces.css";
 import "./canvases/canvases.css";
@@ -6174,6 +6176,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
           project={selectedProject && !selectedProject.archived ? { id: selectedProject.id, name: selectedProject.name } : null}
           onOpenFile={owned ? closeSettings : undefined} />
       : settingsSection === "mcpHost" ? <McpHostSettings epoch={owned ? status!.hostEpoch : null} developer={status?.developerMode ?? false} />
+      : settingsSection === "secrets" ? <SecretsSettings epoch={owned ? status!.hostEpoch : null} />
       : settingsSection === "machines" ? <MachinesSettings key={machineFocus ? `${machineFocus.id}:${machineFocus.ticket}` : ""} epoch={owned ? status!.hostEpoch : null}
         initialMachine={machineFocus?.id ?? null} />
       : settingsSection === "fleetServer" ? <FleetServerSettings epoch={owned ? status!.hostEpoch : null} />
