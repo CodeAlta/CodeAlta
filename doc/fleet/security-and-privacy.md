@@ -110,7 +110,12 @@ analysis of Matrix showed a malicious server exploiting exactly that).
   organization under a device nor answer an older list that takes back a removal. What a device trusts, the entries
   it signs and the devices it wraps keys to all come from that one anchored list.
 - Every device of the person shows **New device: …** until one of them confirms it.
-- Revocation is a signed removal, a new epoch of the keys the device held, and dropped connections.
+- A wrapped key carries a grant signed by the controller device that gave it: the organization, the person, the
+  epoch, the sequence of the list it was given by, and the recipient. A device takes a key only from a controller
+  device of its own person in its anchored list, so a server cannot give it a key of its own nor relabel a copy.
+- Revocation is a signed removal, a new epoch of the keys the device held, and dropped connections. A key given
+  before the last removal seals nothing more; a controller device of the person makes the next epoch for the devices
+  that remain, and publishers wait for it rather than go back to the old one.
 
 ## Channels
 

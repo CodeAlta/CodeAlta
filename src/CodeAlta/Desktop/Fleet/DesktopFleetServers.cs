@@ -279,7 +279,10 @@ internal sealed class DesktopFleetServers : IAsyncDisposable
     public async Task<DeviceDto> RevokeAsync(string linkId, string deviceId, CancellationToken cancellationToken)
     {
         using var client = Client(linkId);
-        return await client.RevokeAsync(deviceId, cancellationToken).ConfigureAwait(false);
+        var revoked = await client.RevokeAsync(deviceId, cancellationToken).ConfigureAwait(false);
+        // A removal from the device list gives the person a new metadata key at the next publication, which the revoked device never gets.
+        Volatile.Read(ref _connections)?.Find(linkId)?.Connector?.RefreshKeys();
+        return revoked;
     }
 
     /// <summary>Links a space to a server, or unlinks it: its sessions that are not Private publish their facts there.</summary>

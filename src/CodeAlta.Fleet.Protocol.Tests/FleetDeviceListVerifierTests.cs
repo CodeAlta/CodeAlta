@@ -34,6 +34,8 @@ public sealed class FleetDeviceListVerifierTests
         Assert.AreEqual(Owner, state.Members[desktop.Id].OwnerId, "the first device's person is the one its first entry names");
         Assert.AreEqual(laptop.PublicKey, state.Members[laptop.Id].Key.Text);
         Assert.AreEqual(FleetDeviceListEntries.Hash(chain.Entries[^1]), state.LastHash);
+        Assert.AreEqual(4L, state.LastRemovalSequence, "the list knows when it last removed a device");
+        Assert.AreEqual(0L, FleetDeviceListVerifier.VerifyOrThrow(chain.Entries.Take(3), Organization).LastRemovalSequence);
     }
 
     [TestMethod]
