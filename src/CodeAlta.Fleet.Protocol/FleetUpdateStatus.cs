@@ -12,6 +12,10 @@ namespace CodeAlta.Fleet.Protocol;
 /// <param name="Pending">The switch that waits; null when none waits.</param>
 /// <param name="Bad">The versions rolled back on this machine.</param>
 /// <param name="LastOutcome">How the last switch ended; null before the first.</param>
+/// <param name="SelectedBy">
+/// Who asked for the selected version: <c>local</c> (the owner on the machine), a device that manages it, or a campaign of
+/// the fleet; null when unknown or when nothing is selected.
+/// </param>
 public sealed record FleetUpdateStatus(
     string Running,
     string? Installed,
@@ -20,7 +24,8 @@ public sealed record FleetUpdateStatus(
     FleetUpdateTrial? Trial,
     FleetUpdatePending? Pending,
     IReadOnlyList<FleetUpdateBadVersion> Bad,
-    FleetUpdateOutcome? LastOutcome);
+    FleetUpdateOutcome? LastOutcome,
+    string? SelectedBy = null);
 
 /// <summary>A version on trial.</summary>
 /// <param name="Version">The version.</param>

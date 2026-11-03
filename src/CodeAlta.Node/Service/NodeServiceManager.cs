@@ -336,8 +336,9 @@ internal sealed class NodeServiceManager(NodeServiceEnvironment environment)
         if (plan.Platform == NodeServicePlatform.Linux)
             Environment.Run("systemctl", plan.Spec.Scope == NodeServiceScope.System ? ["daemon-reload"] : ["--user", "daemon-reload"]);
         output.WriteLine($"Removed {plan.Kind}: {plan.Location}. The profile stays.");
+        // Lingering of one's own account is turned off without privileges, as install turned it on.
         if (plan.LingerUser is { } user && IsLingering(user))
-            output.WriteLine($"Lingering stays on for {user} (other services may need it): sudo loginctl disable-linger {user} turns it off.");
+            output.WriteLine($"Lingering stays on for {user} (other services may need it): loginctl disable-linger {user} turns it off.");
         return NodeExitCodes.Success;
     }
 

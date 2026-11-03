@@ -19,7 +19,8 @@ public static class UpdateStatusReport
             state.Trial is { } trial ? new FleetUpdateTrial(trial.Version, trial.SelectedAt, trial.Starts) : null,
             state.Pending is { } pending ? new FleetUpdatePending(pending.Version, pending.Phase, pending.PhaseSince, pending.SessionsAtWork, pending.Now, pending.RequestedBy) : null,
             [.. state.Bad.Select(static bad => new FleetUpdateBadVersion(bad.Version, bad.At, bad.Reason))],
-            state.LastOutcome is { } outcome ? new FleetUpdateOutcome(outcome.Version, outcome.Outcome, outcome.At, outcome.Message) : null);
+            state.LastOutcome is { } outcome ? new FleetUpdateOutcome(outcome.Version, outcome.Outcome, outcome.At, outcome.Message) : null,
+            state.Current is null ? null : state.SelectedBy);
     }
 
     /// <summary>Describes the status for a person, a few lines.</summary>
@@ -32,7 +33,7 @@ public static class UpdateStatusReport
         var lines = new List<string>();
         var origin = status.Selected is null
             ? "the installed entry point"
-            : $"selected by {command} update{(status.Installed is { } installed ? $", installed {installed}" : "")}{(status.Previous is { } previous ? $", previous {previous}" : "")}";
+            : $"selected by {Selector(status.SelectedBy, command)}{(status.Installed is { } installed ? $", installed {installed}" : "")}{(status.Previous is { } previous ? $", previous {previous}" : "")}";
         lines.Add($"Version: {status.Running} ({origin}).");
         if (status.Trial is { } trial)
             lines.Add($"Update: {trial.Version} is on trial since {Local(trial.SelectedAt)} ({trial.Starts} start(s)); it is rolled back if it does not confirm that it works.");
@@ -63,6 +64,15 @@ public static class UpdateStatusReport
         if (status.Bad.Count > 0) lines.Add($"Rolled back on this machine: {string.Join(", ", status.Bad.Select(static bad => bad.Version))} (skipped unless named with --version).");
         return lines;
     }
+
+    // Who asked for the selected version, for a person: the owner's command, a managing device, or what the fleet names (its campaign).
+    private static string Selector(string? selectedBy, string command) => selectedBy switch
+    {
+        null or "" => "an update",
+        "local" => $"{command} update",
+        _ when selectedBy.StartsWith("manage:", StringComparison.Ordinal) => $"the managing device {selectedBy["manage:".Length..]}",
+        _ => selectedBy,
+    };
 
     private static string Local(DateTimeOffset at) => at.ToLocalTime().ToString("g", CultureInfo.CurrentCulture);
 }

@@ -245,7 +245,8 @@ public sealed class NodeServiceTests
         Assert.IsFalse(File.Exists(unitPath));
         CollectionAssert.Contains(machine.Commands, "systemctl --user disable --now altanode.service");
         CollectionAssert.Contains(machine.Commands, "systemctl --user daemon-reload");
-        StringAssert.Contains(output.ToString(), "Lingering stays on for alice");
+        StringAssert.Contains(output.ToString(), "Lingering stays on for alice (other services may need it): loginctl disable-linger alice turns it off.");
+        Assert.IsFalse(output.ToString().Contains("sudo", StringComparison.Ordinal), "turned on without privileges, it is turned off without them");
         Assert.IsFalse(manager.Query(plan).Installed);
     }
 

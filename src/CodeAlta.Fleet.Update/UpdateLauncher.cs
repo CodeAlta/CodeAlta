@@ -232,7 +232,7 @@ public sealed class UpdateLauncher
                 else
                 {
                     Log($"The selected version {state.Current} is missing from {store.Root}: the installed entry point runs.");
-                    store.Change(s => s with { Current = null, Previous = null });
+                    store.Change(s => s with { Current = null, SelectedBy = null, Previous = null });
                 }
 
                 continue;
