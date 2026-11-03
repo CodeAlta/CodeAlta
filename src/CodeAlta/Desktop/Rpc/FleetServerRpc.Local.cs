@@ -19,9 +19,12 @@ internal sealed partial class FleetServerService
     /// Sets up CodeAlta Server on this computer and makes this computer its owner, saying where each step stands: find,
     /// install, start, claim; then <c>finished</c> with the link of the server, or <c>failed</c> with the step and why.
     /// </summary>
-    [NeoRpcMethod("createOnThisComputer")]
-    public NeoRpcChannel<MachineSetupEvent> CreateOnThisComputer(FleetServerLocalRequest request, CancellationToken cancellationToken)
-        => new(CreateOnThisComputerAsync(request, cancellationToken), DesktopJsonContext.Default.MachineSetupEvent);
+    [NeoRpcMethod("createServer")]
+    public NeoRpcChannel<MachineSetupEvent> CreateServer(FleetServerSetupRequest request, CancellationToken cancellationToken)
+        => new(string.IsNullOrWhiteSpace(request?.Target)
+            ? CreateOnThisComputerAsync(request is null ? null! : new FleetServerLocalRequest(request.ExpectedEpoch, request.OwnerName, request.OrganizationName, request.Port,
+                request.DataRoot, request.ToolPath, request.PackageFolder), cancellationToken)
+            : CreateOverSshAsync(request!, cancellationToken), DesktopJsonContext.Default.MachineSetupEvent);
 
     internal async IAsyncEnumerable<MachineSetupEvent> CreateOnThisComputerAsync(FleetServerLocalRequest request, [EnumeratorCancellation] CancellationToken cancellationToken)
     {
@@ -95,11 +98,7 @@ internal sealed partial class FleetServerService
     /// Sets up CodeAlta Server on a computer reached over SSH and makes this computer its owner, saying where each step
     /// stands: connect, check, install, service, reach, claim; then <c>finished</c> with the link, or <c>failed</c> with why.
     /// </summary>
-    [NeoRpcMethod("createOverSsh")]
-    public NeoRpcChannel<MachineSetupEvent> CreateOverSsh(FleetServerSshRequest request, CancellationToken cancellationToken)
-        => new(CreateOverSshAsync(request, cancellationToken), DesktopJsonContext.Default.MachineSetupEvent);
-
-    internal async IAsyncEnumerable<MachineSetupEvent> CreateOverSshAsync(FleetServerSshRequest request, [EnumeratorCancellation] CancellationToken cancellationToken)
+    internal async IAsyncEnumerable<MachineSetupEvent> CreateOverSshAsync(FleetServerSetupRequest request, [EnumeratorCancellation] CancellationToken cancellationToken)
     {
         if (Refuse(request?.ExpectedEpoch) is { } refused)
         {
@@ -200,9 +199,9 @@ internal sealed partial class FleetServerService
 internal sealed record FleetServerLocalRequest(string ExpectedEpoch, string OwnerName, string? OrganizationName, int? Port, string? DataRoot, string? ToolPath,
     string? PackageFolder);
 
-/// <summary>CodeAlta Server to set up on a computer reached over SSH.</summary>
+/// <summary>CodeAlta Server to set up on a computer reached over SSH, or on this computer.</summary>
 /// <param name="ExpectedEpoch">The host epoch the page knows.</param>
-/// <param name="Target"><c>user@host</c>, <c>user@host:port</c>, or a host of the SSH configuration.</param>
+/// <param name="Target"><c>user@host</c>, <c>user@host:port</c>, or a host of the SSH configuration; null for this computer.</param>
 /// <param name="OwnerName">The name of the owner.</param>
 /// <param name="OrganizationName">The name of the organization; null for the server's default.</param>
 /// <param name="Address">The address the machines reach it at (a domain, a Tailscale name) when something stands in front of it; null for the local network.</param>
@@ -211,5 +210,5 @@ internal sealed record FleetServerLocalRequest(string ExpectedEpoch, string Owne
 /// <param name="ToolPath">The folder of the tool there; null for <c>~/.dotnet/tools</c>.</param>
 /// <param name="PackageFolder">A folder of this computer with its packages; null for nuget.org.</param>
 /// <param name="AcceptNewHostKey">Whether a host key ssh does not know yet is accepted.</param>
-internal sealed record FleetServerSshRequest(string ExpectedEpoch, string Target, string OwnerName, string? OrganizationName, string? Address, int? Port, string? DataRoot,
+internal sealed record FleetServerSetupRequest(string ExpectedEpoch, string? Target, string OwnerName, string? OrganizationName, string? Address, int? Port, string? DataRoot,
     string? ToolPath, string? PackageFolder, bool AcceptNewHostKey);

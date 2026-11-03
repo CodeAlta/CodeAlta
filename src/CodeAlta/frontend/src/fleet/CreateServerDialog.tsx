@@ -11,7 +11,7 @@ import { sshTargetOf } from "../machines/addMachine";
 import { localServerSteps, organizationUrlOf, serverSetupProblem, serverStepTitle, sshServerSteps } from "./createServer";
 
 /** The calls of the dialog on the servers. */
-export type CreateServerApi = Pick<typeof fleetServer, "createOnThisComputer" | "createOverSsh">;
+export type CreateServerApi = Pick<typeof fleetServer, "createServer">;
 
 /** The calls of the dialog on the machines, to add them to the new server. */
 export type CreateServerMachinesApi = Pick<typeof machines, "list" | "joinServer">;
@@ -61,8 +61,8 @@ export function CreateServerDialog({ epoch, api = fleetServer, machinesApi = mac
     const common = { expectedEpoch: epoch, ownerName: owner.trim(), organizationName: organization.trim() || null, port, dataRoot: dataRoot.trim() || null,
       toolPath: toolPath.trim() || null, packageFolder: packages.trim() || null };
     try {
-      const events = where === "local" ? await api.createOnThisComputer(common, { signal: controller.signal })
-        : await api.createOverSsh({ ...common, target: computer, address: reach === "address" ? url : null, acceptNewHostKey }, { signal: controller.signal });
+      const events = await api.createServer(where === "local" ? { ...common, target: null, address: null, acceptNewHostKey: false }
+        : { ...common, target: computer, address: reach === "address" ? url : null, acceptNewHostKey }, { signal: controller.signal });
       for await (const event of events) {
         if (controller.signal.aborted) return;
         apply(event);
