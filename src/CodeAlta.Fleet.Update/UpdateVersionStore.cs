@@ -127,6 +127,32 @@ public sealed class UpdateVersionStore
         return Change(state => state with { Pending = new UpdatePending(version.ToString(), at, now, UpdatePhases.Requested, at, 0, requestedBy) });
     }
 
+    /// <summary>
+    /// Asks for a switch only when a condition holds under the lock of the state, atomically: the fleet's switch does not
+    /// replace one the owner asked for, and is not published once its campaign was cancelled.
+    /// </summary>
+    /// <param name="version">The staged version.</param>
+    /// <param name="now">Whether the switch does not wait for running work.</param>
+    /// <param name="requestedBy">Who asks.</param>
+    /// <param name="mayReplace">Whether the switch may be asked for, given the one that waits (null for none).</param>
+    /// <returns>Whether it was asked for.</returns>
+    /// <exception cref="UpdateException">The lock could not be taken, or the state could not be written.</exception>
+    public bool TryRequestSwitch(UpdateVersion version, bool now, string requestedBy, Func<UpdatePending?, bool> mayReplace)
+    {
+        ArgumentNullException.ThrowIfNull(version);
+        ArgumentNullException.ThrowIfNull(requestedBy);
+        ArgumentNullException.ThrowIfNull(mayReplace);
+        var at = _time.GetUtcNow();
+        var requested = false;
+        Change(state =>
+        {
+            if (!mayReplace(state.Pending)) return state;
+            requested = true;
+            return state with { Pending = new UpdatePending(version.ToString(), at, now, UpdatePhases.Requested, at, 0, requestedBy) };
+        });
+        return requested;
+    }
+
     /// <summary>Records where a pending switch stands, if it is still the one of that version.</summary>
     /// <param name="version">The version of the pending switch.</param>
     /// <param name="phase">Its phase (<see cref="UpdatePhases"/>).</param>
@@ -152,6 +178,28 @@ public sealed class UpdateVersionStore
             Pending = null,
             LastOutcome = message is null ? state.LastOutcome : new UpdateOutcome(pending.Version, UpdateOutcomes.Failed, _time.GetUtcNow(), message),
         });
+
+    /// <summary>Drops the pending switch only when it is the one a requester asked for (a cancelled campaign), atomically.</summary>
+    /// <param name="message">Why it did not happen; null to drop it without an outcome.</param>
+    /// <param name="requestedBy">Who asked for the switch to drop (<see cref="UpdatePending.RequestedBy"/>).</param>
+    /// <returns>Whether that switch waited and was dropped.</returns>
+    /// <exception cref="UpdateException">The lock could not be taken, or the state could not be written.</exception>
+    public bool CancelPending(string? message, string requestedBy)
+    {
+        ArgumentNullException.ThrowIfNull(requestedBy);
+        var dropped = false;
+        Change(state =>
+        {
+            if (state.Pending is not { } pending || !string.Equals(pending.RequestedBy, requestedBy, StringComparison.Ordinal)) return state;
+            dropped = true;
+            return state with
+            {
+                Pending = null,
+                LastOutcome = message is null ? state.LastOutcome : new UpdateOutcome(pending.Version, UpdateOutcomes.Failed, _time.GetUtcNow(), message),
+            };
+        });
+        return dropped;
+    }
 
     /// <summary>
     /// Selects a staged version on trial: the pointer moves to it, the version it replaces becomes the one a rollback goes

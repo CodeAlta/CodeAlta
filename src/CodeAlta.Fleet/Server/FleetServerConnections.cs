@@ -266,6 +266,7 @@ public sealed class FleetServerConnections : IAsyncDisposable
             Metrics = _options.Metrics,
             UpdateInstruction = _options.Updates is { } updates ? (instruction, token) => updates.AcceptAsync(created!, link, instruction, token) : null,
             UpdateCancel = _options.Updates is { } cancels ? (cancel, token) => cancels.CancelAsync(link, cancel, token) : null,
+            UpdatePolicy = _options.Updates is { } policies ? (policy, token) => policies.AcceptPolicyAsync(created!, link, policy, token) : null,
             UpdateReport = _options.Updates is { } reports ? () => reports.Report(link.Id) : null,
         };
         if (_options.Configure is { } configure) options = configure(options);

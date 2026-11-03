@@ -66,16 +66,17 @@ public sealed class UpdateInstructionTests
     }
 
     [TestMethod]
-    public void AReplayedManifestIsRefusedAndTheSameCampaignSentAgainIsNot()
+    public void AReplayedManifestIsRefusedEvenTheOneAccepted()
     {
         using var owner = new Signer();
         var context = Context(owner, running: "4.0.0") with { LastSequence = 5, LastCampaignId = "c5" };
 
         Refused(new FleetUpdateInstruction("c4", owner.Sign(Manifest(owner, "4.0.1", sequence: 4, campaign: "c4"))), context, "older than campaign 5");
         Refused(new FleetUpdateInstruction("other", owner.Sign(Manifest(owner, "4.0.1", sequence: 5, campaign: "other"))), context, "older than campaign 5");
-        Assert.IsTrue(UpdateInstructions.TryVerify(new FleetUpdateInstruction("c5", owner.Sign(Manifest(owner, "4.0.1", sequence: 5, campaign: "c5"))), context, out _, out var reason),
-            reason);
-        Assert.IsTrue(UpdateInstructions.TryVerify(new FleetUpdateInstruction("c6", owner.Sign(Manifest(owner, "4.0.1", sequence: 6, campaign: "c6"))), context, out _, out reason),
+        // The campaign accepted never starts again (a cancelled one, or a rollback done before a later upgrade): the
+        // machine answers it with what it kept of it.
+        Refused(new FleetUpdateInstruction("c5", owner.Sign(Manifest(owner, "4.0.1", sequence: 5, campaign: "c5"))), context, "accepted already");
+        Assert.IsTrue(UpdateInstructions.TryVerify(new FleetUpdateInstruction("c6", owner.Sign(Manifest(owner, "4.0.1", sequence: 6, campaign: "c6"))), context, out _, out var reason),
             reason);
     }
 
@@ -187,6 +188,56 @@ public sealed class UpdateInstructionTests
         Assert.AreEqual(new DateTimeOffset(2026, 11, 3, 17, 30, 0, TimeSpan.Zero), FleetUpdateDocuments.NextWindow(tokyo, new DateTimeOffset(2026, 11, 3, 10, 0, 0, TimeSpan.Zero)));
         var now = new DateTimeOffset(2026, 11, 3, 10, 0, 0, TimeSpan.Zero);
         Assert.AreEqual(now, FleetUpdateDocuments.NextWindow(policy with { Window = null }, now), "no window: at once");
+    }
+
+    [TestMethod]
+    public void TheMaintenanceWindowStaysOpenForItsLengthAndFollowsDaylightSavingTime()
+    {
+        var paris = new FleetUpdatePolicy(1, Organization, 1, FleetUpdateModes.Automatic, null, null, "02:30", "Europe/Paris", "d", DateTimeOffset.UnixEpoch);
+        // In November Paris is UTC+1: the window is 01:30 to 05:30 UTC.
+        var noon = new DateTimeOffset(2026, 11, 3, 12, 0, 0, TimeSpan.Zero);
+        Assert.AreEqual(new DateTimeOffset(2026, 11, 4, 1, 30, 0, TimeSpan.Zero), FleetUpdateDocuments.WindowOpening(paris, noon), "noon waits for the next window");
+        var inside = new DateTimeOffset(2026, 11, 4, 3, 0, 0, TimeSpan.Zero);
+        Assert.AreEqual(inside, FleetUpdateDocuments.WindowOpening(paris, inside), "open: at once");
+        Assert.AreEqual(new DateTimeOffset(2026, 11, 5, 1, 30, 0, TimeSpan.Zero), FleetUpdateDocuments.WindowOpening(paris, new DateTimeOffset(2026, 11, 4, 5, 30, 0, TimeSpan.Zero)),
+            "closed once its length passed");
+        // In July Paris is UTC+2.
+        Assert.AreEqual(new DateTimeOffset(2026, 7, 2, 0, 30, 0, TimeSpan.Zero), FleetUpdateDocuments.WindowOpening(paris, new DateTimeOffset(2026, 7, 1, 12, 0, 0, TimeSpan.Zero)));
+        // 02:30 does not exist on 29 March 2026 in Paris (02:00 becomes 03:00): the window opens an hour later, 03:30 CEST.
+        Assert.AreEqual(new DateTimeOffset(2026, 3, 29, 1, 30, 0, TimeSpan.Zero), FleetUpdateDocuments.WindowOpening(paris, new DateTimeOffset(2026, 3, 28, 12, 0, 0, TimeSpan.Zero)));
+        var now = new DateTimeOffset(2026, 11, 3, 10, 0, 0, TimeSpan.Zero);
+        Assert.AreEqual(now, FleetUpdateDocuments.WindowOpening(paris with { Window = null }, now), "no window: at once");
+    }
+
+    [TestMethod]
+    public void AnAutomaticUpdateStartsAtTheWindowOfItsSignedPolicy()
+    {
+        using var owner = new Signer();
+        var noon = new DateTimeOffset(2026, 11, 3, 12, 0, 0, TimeSpan.Zero);
+        var context = Context(owner, running: "4.0.0") with { Now = noon };
+        var automatic = new FleetUpdatePolicy(1, Organization, 1, FleetUpdateModes.Automatic, null, null, "02:00", "Europe/Paris", owner.DeviceId, DateTimeOffset.UnixEpoch);
+
+        Assert.IsTrue(UpdateInstructions.TryVerify(new FleetUpdateInstruction("auto-1", null, owner.Sign(automatic), "4.1.0"), context, out var update, out var reason), reason);
+        Assert.AreEqual(new DateTimeOffset(2026, 11, 4, 1, 0, 0, TimeSpan.Zero), update.NotBefore, "not at noon, whatever the server says");
+        Assert.AreEqual(automatic, update.Policy);
+    }
+
+    [TestMethod]
+    public void ThePolicyAMachineKeptRefusesWhatItNoLongerAllows()
+    {
+        using var owner = new Signer();
+        var pinned = new FleetUpdatePolicy(1, Organization, 3, FleetUpdateModes.Pinned, "4.0.1", null, null, null, owner.DeviceId, DateTimeOffset.UnixEpoch);
+        var context = Context(owner, running: "4.0.0") with { Policy = pinned, LastPolicySequence = 3 };
+
+        // A manifest signed before the fleet was pinned, delivered after it.
+        Refused(new FleetUpdateInstruction("c1", owner.Sign(Manifest(owner, "4.0.2"))), context, "pinned to 4.0.1");
+        Assert.IsTrue(UpdateInstructions.TryVerify(new FleetUpdateInstruction("c1", owner.Sign(Manifest(owner, "4.0.1"))), context, out _, out var reason), reason);
+
+        // An automatic policy the pinned one replaced, and another one under the same number.
+        var automatic = pinned with { Mode = FleetUpdateModes.Automatic, PinnedVersion = null, Sequence = 2 };
+        Refused(new FleetUpdateInstruction("auto-1", null, owner.Sign(automatic), "4.1.0"), context, "older than policy 3");
+        Refused(new FleetUpdateInstruction("auto-1", null, owner.Sign(automatic with { Sequence = 3 }), "4.1.0"), context, "another policy");
+        Assert.IsTrue(UpdateInstructions.TryVerify(new FleetUpdateInstruction("auto-1", null, owner.Sign(automatic with { Sequence = 4 }), "4.1.0"), context, out _, out reason), reason);
     }
 
     private static void Refused(FleetUpdateInstruction instruction, UpdateInstructionContext context, string expected)

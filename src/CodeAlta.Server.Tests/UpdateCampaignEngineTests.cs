@@ -111,9 +111,32 @@ public sealed class UpdateCampaignEngineTests
         Assert.AreEqual(FleetUpdateCampaignStates.PartlyDone, fleet.Campaign.State);
 
         fleet.Online["a"] = true;
-        fleet.Running["a"] = Target;
+        fleet.Switched("a");
         fleet.Step();
         Assert.AreEqual((FleetUpdateCampaignStates.Done, FleetUpdateMachineStates.Updated), (fleet.Campaign.State, fleet.Machine("a").State));
+    }
+
+    [TestMethod]
+    public void ANodeThatRunsTheVersionIsUpdatedOnlyOnceItReportsItsTrialConfirmed()
+    {
+        var clock = new TestClock(Start);
+        var fleet = new Fleet(clock, "a");
+        fleet.Step();
+        fleet.Report("a", FleetUpdateMachineStates.Switching);
+
+        // It runs the version on trial: its inventory says so, but it may still roll back.
+        fleet.Running["a"] = Target;
+        var step = fleet.Step();
+        Assert.AreEqual(FleetUpdateMachineStates.Switching, fleet.Machine("a").State, "a version that runs is not a version confirmed");
+        Assert.IsFalse(step.UpdateServer, "the server waits");
+
+        fleet.Report("a", FleetUpdateMachineStates.Updated);
+        Assert.IsTrue(fleet.Step().UpdateServer);
+
+        // A rollback after the report is recorded.
+        fleet.Running["a"] = "4.0.1";
+        fleet.Report("a", FleetUpdateMachineStates.RolledBack, "It crashed.");
+        Assert.AreEqual(FleetUpdateMachineStates.RolledBack, fleet.Machine("a").State);
     }
 
     [TestMethod]
@@ -232,6 +255,11 @@ public sealed class UpdateCampaignEngineTests
             Machines[index] = UpdateCampaignEngine.Apply(Machines[index], new FleetUpdateReport("c1", state, Target, Running[id], message, _clock.Now), _clock.Now);
         }
 
-        public void Switched(string id) => Running[id] = Target;
+        /// <summary>The node runs the version and reports that its trial confirmed.</summary>
+        public void Switched(string id)
+        {
+            Running[id] = Target;
+            Report(id, FleetUpdateMachineStates.Updated);
+        }
     }
 }

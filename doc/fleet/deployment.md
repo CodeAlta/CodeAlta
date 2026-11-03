@@ -151,8 +151,8 @@ All signed (Authenticode, Apple notarization, NuGet signatures, cosign for image
 - **The campaign.** An owner's controller device asks the server for an update of the fleet: a version (the latest
   both tool packages list, by default), a feed, now or a time (kept in UTC, with the time zone it was chosen in), the
   nodes (all by default). The server keeps it (`update_campaigns`), and at its time asks its nodes over the control
-  connection (`update.instruction`), two at a time; it waits until each node online runs the version, failed or rolled
-  back, then updates itself, last, with the same self-update. A node offline does not hold the campaign: it is pending,
+  connection (`update.instruction`), two at a time; it waits until each node online reports the version confirmed (one
+  that runs it on trial may still roll back, and reports that too), failed or rolled back, then updates itself, last, with the same self-update. A node offline does not hold the campaign: it is pending,
   asked when it reconnects, and the campaign ends **partly done** until it is. A node that goes offline while it
   switches holds the server for ten minutes. A campaign is cancelled until the server's step; a node already asked is
   told, again at each connection, until it reports the campaign done. One campaign at a time is active, whoever starts
@@ -163,12 +163,19 @@ All signed (Authenticode, Apple notarization, NuGet signatures, cosign for image
 - **Trust.** The server alone cannot make a machine install anything. The controller device reads the feed and signs
   a manifest: organization, campaign and sequence, version, feed, schedule, machines, and the SHA-512 of the runtime
   package of each published runtime of each product. A node takes it only when a controller of the device list it
-  anchored signed it, its sequence is not older than the last one it accepted from that server, it names the node,
-  the version is newer than the one that runs (an older one only when the manifest says a person chose a rollback),
-  and its download matches the hash signed for its runtime. The server checks the same against the device list it
-  holds before its own step. The machine's `update.json` wins: its feeds, or `"fleet": false`, which refuses every
-  update of the fleet. A node keeps the instruction it accepted (`fleet/update-campaign.json`) and waits for its time
-  itself, across restarts.
+  anchored signed it, its sequence is newer than the last one it accepted from that server, it names the node, the
+  version is newer than the one that runs (an older one only when the manifest says a person chose a rollback), the
+  fleet's latest policy allows it, and its download matches the hash signed for its runtime. The server checks the
+  same against the device list it holds before its own step. The machine's `update.json` wins: its feeds, or
+  `"fleet": false`, which refuses every update of the fleet; so does a switch its owner asked for (`altanode update`),
+  which a campaign never replaces nor withdraws. A node keeps the instruction it accepted
+  (`fleet/update-campaign.json`) and waits for its time itself, across restarts; nothing runs until that file is
+  written, and while it does not read, the node refuses every update of the fleet (the owner fixes it, or deletes it to
+  start again as a new node). A campaign it accepted never starts again: sent again, even after a refusal, it only gets
+  where the node stands. A node follows one fleet at a time: another server's instruction is refused while a campaign
+  runs, and each server keeps reading how its own last campaign ended. An automatic update waits on the machine for the
+  signed maintenance window (its time zone, daylight saving time included; open four hours), whenever the server sends
+  it; a newer policy drops a campaign that waits for what it no longer allows.
 - **Policy.** Signed the same way: **manual** (campaigns only), **pinned** (no campaign to another version), or
   **automatic**: the server reads the policy's feed daily and starts a campaign to its latest stable version at the
   maintenance window (a time of day in a time zone). No person signs the hash of that version, so each machine checks

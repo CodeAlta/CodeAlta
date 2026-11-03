@@ -41,6 +41,9 @@ public static class UpdateErrorCodes
 
     /// <summary>The owner of the machine turned off the updates of the fleet (<c>"fleet": false</c> in <c>update.json</c>).</summary>
     public const string FleetRefused = "update.fleet_refused";
+
+    /// <summary>A switch someone else asked for (the owner, with <c>update</c>) waits on the machine: the fleet does not replace it.</summary>
+    public const string SwitchWaits = "update.switch_waits";
 }
 
 /// <summary>An update that could not be done, with a stable code (<see cref="UpdateErrorCodes"/>).</summary>

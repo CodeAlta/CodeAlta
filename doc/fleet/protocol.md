@@ -153,7 +153,7 @@ windows, asks, permissions, jobs); the node API is that surface, made remote, pl
 | `facts` | `publish`, `ack` (session facts, usage, audit events) |
 | `relay` | `open`, `incoming`, `accept`, `close` |
 | `telemetry` | `settings`: the fleet's telemetry setting, signed by a controller device, sent when a device connects and when an owner changes it ([observability](observability.md#where-telemetry-goes)) |
-| `update` | `instruction` (a campaign's signed manifest, or the signed automatic policy and its version), `cancel`, `report` (where the node stands) ([deployment](deployment.md#updates)) |
+| `update` | `instruction` (a campaign's signed manifest, or the signed automatic policy and its version), `cancel`, `policy` (the fleet's signed update policy, any mode, sent on each connection and each change), `report` (where the node stands; `updated` once its trial confirmed) ([deployment](deployment.md#updates)) |
 | `ownership` | `commit` (a move), `takeover`, `changed` |
 | `replica` | `append`, `read`, `status` |
 | `deliveries` | `push`, `ack` |

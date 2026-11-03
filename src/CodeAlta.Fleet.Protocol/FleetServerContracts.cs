@@ -313,5 +313,6 @@ public sealed record FleetRelayClose(string RelayId, string? Reason = null);
 [JsonSerializable(typeof(FleetSignedTelemetrySettings))]
 [JsonSerializable(typeof(FleetUpdateInstruction))]
 [JsonSerializable(typeof(FleetUpdateCancel))]
+[JsonSerializable(typeof(FleetSignedUpdateDocument))]
 [JsonSerializable(typeof(FleetUpdateReport))]
 public sealed partial class FleetServerJsonContext : JsonSerializerContext;
