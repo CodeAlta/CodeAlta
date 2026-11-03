@@ -109,6 +109,30 @@ public sealed class FleetNodeApiTests
     }
 
     [TestMethod]
+    public async Task NodeInfo_LeavesOutAProjectFileItCannotRead_AndSaysWhich()
+    {
+        await using var fixture = await NodeFixture.StartAsync(TestContext.CancellationToken);
+        var token = TestContext.CancellationToken;
+        var catalog = fixture.Node.Host.ProjectCatalog;
+        var good = await catalog.UpsertFromPathAsync(Path.Combine(Path.GetTempPath(), "fleet-good-" + Guid.NewGuid().ToString("N")), token);
+        var broken = Path.Combine(catalog.Options.ProjectsRoot, "broken.md");
+        await File.WriteAllTextAsync(broken, "---\nid: [unclosed\npath: {\n---\n", token);
+        var machine = await fixture.PairViewerAsync(token);
+        await using var client = await FleetNodeClient.ConnectAsync(machine, fixture.ViewerIdentity, token);
+
+        var info = await client.GetInfoAsync(token);
+
+        Assert.IsTrue(info.Projects.Any(project => project.Id == good.Id), "The projects the node can read are listed.");
+        var diagnostic = info.Diagnostics.Single();
+        Assert.AreEqual(FleetNodeDiagnostic.UnreadableProject, diagnostic.Code);
+        Assert.AreEqual(broken, diagnostic.Path);
+        StringAssert.Contains(diagnostic.Message, broken);
+
+        File.Delete(broken);
+        Assert.AreEqual(0, (await client.GetInfoAsync(token)).Diagnostics.Count, "A fixed catalog has nothing to say.");
+    }
+
+    [TestMethod]
     public async Task UnpairedDevice_IsRefused_AndMayOnlyRedeemAnOpenOffer()
     {
         await using var fixture = await NodeFixture.StartAsync(TestContext.CancellationToken);
@@ -229,12 +253,11 @@ public sealed class FleetNodeApiTests
 internal sealed class NodeFixture : IAsyncDisposable
 {
     private readonly NodeTestRoot _root;
-    private readonly NodeHost _node;
 
     private NodeFixture(NodeTestRoot root, NodeHost node, NodeFleet fleet, ScriptedNodeProvider provider)
     {
         _root = root;
-        _node = node;
+        Node = node;
         Fleet = fleet;
         Provider = provider;
         NodeIdentity = DeviceIdentity.LoadOrCreate(node.Host.CatalogOptions);
@@ -242,6 +265,8 @@ internal sealed class NodeFixture : IAsyncDisposable
         ViewerIdentity = DeviceIdentity.LoadOrCreate(viewerFleet);
         ViewerMachines = new PairedMachineStore(viewerFleet);
     }
+
+    public NodeHost Node { get; }
 
     public NodeFleet Fleet { get; }
 
@@ -280,7 +305,7 @@ internal sealed class NodeFixture : IAsyncDisposable
     public async ValueTask DisposeAsync()
     {
         await Fleet.DisposeAsync();
-        await _node.DisposeAsync();
+        await Node.DisposeAsync();
         NodeIdentity.Dispose();
         ViewerIdentity.Dispose();
         _root.Dispose();

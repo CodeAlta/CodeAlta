@@ -95,7 +95,7 @@ internal sealed class NodeFleet : IAsyncDisposable
             service = new FleetNodeService(new FleetNodeServiceOptions
             {
                 Host = node.Host, Identity = identity, TrustedDevices = new TrustedDeviceStore(catalog), Name = name, Version = version,
-                AcceptsWork = () => node.AcceptsWork, PairingAddresses = () => addresses, RequestStop = requestStop,
+                AcceptsWork = () => node.AcceptsWork, PairingAddresses = () => addresses, RequestStop = requestStop, CloneRoot = node.Options.CloneRoot,
             });
             listener = FleetDirectListener.Start(new IPEndPoint(listen.Address, listen.Port), service.ServeAsync);
             addresses = DescribeAddresses(listener.LocalEndPoint);

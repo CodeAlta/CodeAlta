@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { MachineMovePreview, MachineView } from "#neoastra";
-import { isMachineProject, isRemoteSession, machineIntent, machineState, machineStateLabel, moveProblem, moveReady, moveTargets, orderedMachines, pairingLinkOf,
+import { isMachineProject, isRemoteSession, machineIntent, machineRowState, machineState, machineStateLabel, moveProblem, moveReady, moveTargets, orderedMachines, pairingLinkOf,
   pairingProblem, pairingWords, sessionMachineState } from "./machines";
 
 const machine = (change: Partial<MachineView> = {}): MachineView => ({ id: "m1", name: "mac-mini", state: "online", os: "macos", version: "4.0.0",
@@ -82,4 +82,10 @@ test("Each refusal of a move has its words", () => {
   assert.equal(moveProblem("aborted", "project_missing"), "The machine has no project of this repository.");
   assert.equal(moveProblem("offered", "unreachable"), "The machine does not answer: the move goes on when it is back, and the session stays read-only meanwhile.");
   assert.equal(moveProblem("refused", "something new"), "The session could not move.");
+});
+
+test("The row of a machine in the Explorer has the state of its machine, offline when it says none", () => {
+  assert.equal(machineRowState({ machineState: "online" }), "online");
+  assert.equal(machineRowState({ machineState: "connecting" }), "connecting");
+  assert.equal(machineRowState({ machineState: undefined }), "offline");
 });

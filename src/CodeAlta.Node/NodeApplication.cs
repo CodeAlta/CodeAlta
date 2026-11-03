@@ -81,9 +81,10 @@ internal sealed class NodeApplication
             };
             var devices = new NodeDeviceCommands(_output, _error) { Stop = ClientStop };
             var logs = new NodeLogCommand(_output, _error) { Stop = ClientStop };
+            var projects = new NodeProjectCommands(_output, _error, CloneRootOf) { Stop = ClientStop };
             return await Create(new NodeCommandHandlers(RunNodeAsync, service.StatusAsync, NotImplementedAsync, client.PairAsync, client.MachinesAsync,
                     client.ConnectAsync, client.RemoteAsync, service.InstallAsync, service.UninstallAsync, logs.RunAsync, devices.DevicesAsync,
-                    devices.RevokeAsync, devices.PermissionsAsync, client.MovesAsync))
+                    devices.RevokeAsync, devices.PermissionsAsync, client.MovesAsync, projects.RunAsync))
                 .RunAsync(args, new CommandRunConfig { Out = _output, Error = _error }).ConfigureAwait(false);
         }
         catch (Exception exception)
@@ -94,6 +95,13 @@ internal sealed class NodeApplication
     }
 
     private static CommandApp Create(NodeCommandHandlers handlers) => NodeCommandLine.Create(handlers);
+
+    // The clone root a node of the profile runs with: the one of its options, as run would start it.
+    private string? CloneRootOf(CodeAltaInstanceProfile profile)
+    {
+        var options = new NodeHostOptions { Profile = profile };
+        return (ConfigureHost?.Invoke(options) ?? options).CloneRoot;
+    }
 
     private static NodeExecutable? LocateExecutable()
         => NodeExecutableLocator.Locate(Environment.ProcessPath, Path.Combine(AppContext.BaseDirectory, "altanode.dll"), static path => File.Exists(path) || Directory.Exists(path));

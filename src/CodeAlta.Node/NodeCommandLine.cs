@@ -72,6 +72,7 @@ internal sealed class NodeRunOptions
 /// <param name="Revoke">Revokes a paired device.</param>
 /// <param name="Permissions">Shows or changes what a paired device may do.</param>
 /// <param name="Moves">Lists the moves of sessions this profile recorded.</param>
+/// <param name="Projects">Lists, adds, clones and removes the projects of the node.</param>
 internal sealed record NodeCommandHandlers(
     Func<NodeRunOptions, ValueTask<int>> Run,
     Func<NodeProfileOptions, ValueTask<int>> Status,
@@ -86,13 +87,15 @@ internal sealed record NodeCommandHandlers(
     Func<NodeDeviceOptions, ValueTask<int>> Devices,
     Func<NodeDeviceOptions, ValueTask<int>> Revoke,
     Func<NodeDeviceOptions, ValueTask<int>> Permissions,
-    Func<NodeProfileOptions, ValueTask<int>> Moves)
+    Func<NodeProfileOptions, ValueTask<int>> Moves,
+    Func<NodeProjectOptions, ValueTask<int>> Projects)
 {
     /// <summary>Handlers that do nothing, for a tree that only parses.</summary>
     public static NodeCommandHandlers Placeholders { get; } = new(static _ => ValueTask.FromResult(0), static _ => ValueTask.FromResult(0),
         static _ => ValueTask.FromResult(0), static _ => ValueTask.FromResult(0), static _ => ValueTask.FromResult(0), static _ => ValueTask.FromResult(0),
         static _ => ValueTask.FromResult(0), static _ => ValueTask.FromResult(0), static _ => ValueTask.FromResult(0), static _ => ValueTask.FromResult(0),
-        static _ => ValueTask.FromResult(0), static _ => ValueTask.FromResult(0), static _ => ValueTask.FromResult(0), static _ => ValueTask.FromResult(0));
+        static _ => ValueTask.FromResult(0), static _ => ValueTask.FromResult(0), static _ => ValueTask.FromResult(0), static _ => ValueTask.FromResult(0),
+        static _ => ValueTask.FromResult(0));
 }
 
 /// <summary>The command tree of <c>altanode</c> (<c>doc/fleet/node.md</c>).</summary>
@@ -349,6 +352,37 @@ internal static class NodeCommandLine
         AddProfile(movesCommand, moves);
         movesCommand.Add((_, _) => handlers.Moves(moves));
 
+        var projects = new NodeProjectOptions();
+        var projectsCommand = new Command("projects", "List, add, clone and remove the projects of the node")
+        {
+            new CommandUsage("Usage: {NAME} [list] [options]"),
+            new CommandUsage("       {NAME} add <path> [--space <space>] [options]"),
+            new CommandUsage("       {NAME} clone <url> [--space <space>] [options]"),
+            new CommandUsage("       {NAME} remove <project> [options]"),
+            _,
+            "The projects of the node are those its sessions run in, and those the",
+            "devices paired with it see and start sessions in.",
+            "  list    the projects of the catalog, archived ones included",
+            "  add     adds an existing folder of this machine",
+            "  clone   clones a repository into ~/code/<host>/<owner>/<repo> and adds",
+            "          it; a checkout of it already there is added as it is",
+            "  remove  removes a project from the catalog (its id, slug or name);",
+            "          its folder and files stay",
+            "While a node runs on the profile, it makes the change, and does not",
+            "remove a project that has sessions; otherwise the catalog files of the",
+            "profile are changed directly. --space adds the project to a space too.",
+            _,
+            "Options:",
+            { "space=", "The {SPACE} the project joins too, by id or name", v => projects.Space = v },
+        };
+        AddProfile(projectsCommand, projects.Profile);
+        projectsCommand.Add("<>", "The command and its argument");
+        projectsCommand.Add((_, words) =>
+        {
+            projects.Words.AddRange(words);
+            return handlers.Projects(projects);
+        });
+
         var joinCommand = Stub(handlers, "join", "Enroll in a fleet", "Usage: {NAME} <server-url> [--token <enrollment>]");
         joinCommand.Add("token=", "The enrollment {TOKEN}", static _ => { });
         joinCommand.Add("<>", "The URL of the server");
@@ -391,6 +425,7 @@ internal static class NodeCommandLine
             devicesCommand,
             revokeCommand,
             permissionsCommand,
+            projectsCommand,
             joinCommand,
             machinesCommand,
             connectCommand,

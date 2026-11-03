@@ -54,7 +54,7 @@ public sealed class FleetNodeServiceOptions
 /// The node API over the runtime of a node (<see cref="CodeAltaHost"/>), served on session channels. Each call is checked
 /// against what the calling device may do (<see cref="DevicePermissions"/>), read again at every call so that a revocation
 /// or a change of permissions applies at once. An unpaired client may only redeem the open pairing offer; the node's own
-/// key, from this machine, is the owner's local control (<c>altanode pair</c>, <c>status</c>, <c>devices</c>, <c>revoke</c>, <c>permissions</c>).
+/// key, from this machine, is the owner's local control (<c>altanode pair</c>, <c>status</c>, <c>devices</c>, <c>revoke</c>, <c>permissions</c>, <c>projects</c>).
 /// </summary>
 public sealed partial class FleetNodeService : IAsyncDisposable
 {
@@ -72,6 +72,10 @@ public sealed partial class FleetNodeService : IAsyncDisposable
     private readonly Logger _logger = LogManager.GetLogger("CodeAlta.Fleet.Node");
     // The repository of each project, which node.info publishes: read with git once in a while, not at every call.
     private readonly CodeAlta.Catalog.SessionMoves.RepositoryLocationCache _locations = new();
+    // The unreadable project files already logged, so that each is logged once while it stays as it is.
+    private readonly Lock _unreadableGate = new();
+    private readonly FleetProjectEditor _projectEditor;
+    private readonly HashSet<string> _warnedUnreadable = new(StringComparer.Ordinal);
     private int _disposed;
 
     /// <summary>Initializes a new instance of the <see cref="FleetNodeService"/> class.</summary>
@@ -90,6 +94,7 @@ public sealed partial class FleetNodeService : IAsyncDisposable
         var moves = new SessionMoveService(options.Host, options.Name);
         MoveReceiver = new Moves.FleetMoveReceiver(options.Host, moves, options.CloneRoot);
         MoveSender = new Moves.FleetMoveSender(options.Host, moves);
+        _projectEditor = new FleetProjectEditor(options.Host.SpaceCatalog, options.CloneRoot);
     }
 
     /// <summary>Gets the pairing of the node.</summary>
@@ -214,6 +219,14 @@ public sealed partial class FleetNodeService : IAsyncDisposable
                 FleetNodeJsonContext.Default.FleetDeviceChange, ControlRevokeDeviceAsync);
             On(caller, FleetNodeMethods.ControlDevicesPermissions, Access.Owner, FleetNodeJsonContext.Default.FleetDevicePermissionsParams,
                 FleetNodeJsonContext.Default.FleetDeviceChange, ControlSetPermissionsAsync);
+            On(caller, FleetNodeMethods.ControlProjectsList, Access.Owner, FleetNodeJsonContext.Default.FleetEmpty,
+                FleetNodeJsonContext.Default.FleetProjectList, ControlListProjectsAsync, optionalParams: true);
+            On(caller, FleetNodeMethods.ControlProjectsAdd, Access.Owner, FleetNodeJsonContext.Default.FleetProjectAddParams,
+                FleetNodeJsonContext.Default.FleetProjectChange, ControlAddProjectAsync);
+            On(caller, FleetNodeMethods.ControlProjectsClone, Access.Owner, FleetNodeJsonContext.Default.FleetProjectCloneParams,
+                FleetNodeJsonContext.Default.FleetProjectChange, ControlCloneProjectAsync);
+            On(caller, FleetNodeMethods.ControlProjectsRemove, Access.Owner, FleetNodeJsonContext.Default.FleetProjectRef,
+                FleetNodeJsonContext.Default.FleetProjectChange, ControlRemoveProjectAsync);
             // The owner may bring a session to its own node (altanode remote <machine> move), and read its moves.
             RegisterMoves(caller, Access.Owner);
             On(caller, FleetNodeMethods.MovesList, Access.Owner, FleetNodeJsonContext.Default.FleetEmpty, FleetNodeJsonContext.Default.FleetMoveList,
@@ -297,7 +310,18 @@ public sealed partial class FleetNodeService : IAsyncDisposable
                 parameters = JsonSerializer.Deserialize("{}", parametersType)!;
             }
 
-            var result = await handler(new FleetNodeCall(caller, device, context), parameters, cancellationToken).ConfigureAwait(false);
+            TResult result;
+            try
+            {
+                result = await handler(new FleetNodeCall(caller, device, context), parameters, cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception exception) when (exception is not FleetException && !(exception is OperationCanceledException && cancellationToken.IsCancellationRequested))
+            {
+                // The caller gets an internal error without the details: the owner finds them in the log of the node.
+                LogError($"'{method}' failed for {caller.DeviceId}: {exception}");
+                throw;
+            }
+
             return JsonSerializer.SerializeToElement(result, resultType);
         });
     }
@@ -308,7 +332,7 @@ public sealed partial class FleetNodeService : IAsyncDisposable
         if (caller.IsOwner)
         {
             if (access.OwnerOnly) return null;
-            throw new FleetException(FleetErrorCodes.Forbidden, null, "The local control of the node only manages its pairing and its devices.");
+            throw new FleetException(FleetErrorCodes.Forbidden, null, "The local control of the node only manages its pairing, its devices, its projects and its moves.");
         }
 
         if (access.OwnerOnly) throw new FleetException(FleetErrorCodes.Forbidden, null, "Only the node's owner, on its machine, may do this.");
@@ -380,6 +404,11 @@ public sealed partial class FleetNodeService : IAsyncDisposable
     private void LogWarn(string message)
     {
         if (LogManager.IsInitialized) _logger.Warn(message);
+    }
+
+    private void LogError(string message)
+    {
+        if (LogManager.IsInitialized) _logger.Error(message);
     }
 
     private void LogDebug(string message)

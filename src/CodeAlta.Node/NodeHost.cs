@@ -58,6 +58,9 @@ public sealed class NodeHost : IAsyncDisposable
     /// <summary>Gets the profile the node owns.</summary>
     public CodeAltaInstanceProfile Profile => _options.Profile;
 
+    /// <summary>Gets the options the node started with.</summary>
+    public NodeHostOptions Options => _options;
+
     /// <summary>Gets the lock the node holds while it runs.</summary>
     public string LockFilePath => _guard.LockFilePath;
 

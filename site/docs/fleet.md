@@ -17,9 +17,9 @@ dotnet tool install -g CodeAlta.Node
 altanode --help
 ```
 
-`dotnet tool update -g CodeAlta.Node` updates it.
+The package runs on Windows, macOS and Linux (x64 and Arm64, Alpine included). `dotnet tool update -g CodeAlta.Node` updates it.
 
-On a machine without the .NET SDK, publish a self-contained `altanode` from a checkout of CodeAlta on a computer that has it, for the system of that machine (`win-x64`, `win-arm64`, `osx-arm64`, `osx-x64`, `linux-x64`, `linux-arm64`), and copy the folder:
+On a machine without the .NET SDK, publish a self-contained `altanode` from a checkout of CodeAlta on a computer that has it, for the system of that machine (`win-x64`, `win-arm64`, `osx-arm64`, `osx-x64`, `linux-x64`, `linux-arm64`, `linux-musl-x64`, `linux-musl-arm64`), and copy the folder:
 
 ```sh
 dotnet publish src/CodeAlta.Node -c Release -r linux-x64 --self-contained -o altanode-linux-x64
@@ -27,7 +27,7 @@ dotnet publish src/CodeAlta.Node -c Release -r linux-x64 --self-contained -o alt
 
 The node uses the same profile as CodeAlta Desktop and TUI, `~/.alta`: its providers, prompts, skills and projects. Set up its providers as you would for the desktop app (see [Model Providers](model-providers/readme.md)): the sessions of a machine run with the accounts of that machine. Only one CodeAlta runs on a profile at a time, so on a computer where you also use CodeAlta Desktop, run the node only while the desktop app is closed, or give it a profile of its own with `--data-root <folder>` (a full path).
 
-The projects a session can start in on the machine are the projects of that profile. To add one, open its folder once with CodeAlta Desktop (`alta <folder>`) or CodeAlta TUI on that machine, while the node is stopped.
+The projects a session can start in on the machine are the projects of that profile: add them with `altanode projects` (see [Give it projects](#give-it-projects)).
 
 ## Run it
 
@@ -67,6 +67,19 @@ The service runs as you, with your sign-ins. Run `altanode install` again to cha
 
 For a machine that should start the node at boot under an account of its own (one that uses deploy keys and tokens only), use `altanode install --system --account <name>`, with `sudo` on macOS and Linux.
 
+## Give it projects
+
+The sessions of a node run in the projects of its catalog. On the machine of the node:
+
+| Command | What it does |
+| --- | --- |
+| `altanode projects` | Lists its projects |
+| `altanode projects add <path>` | Adds a folder of the machine |
+| `altanode projects clone <url>` | Clones a repository into `~/code/<host>/<owner>/<repo>` and adds it; a checkout already there is added as it is |
+| `altanode projects remove <project>` | Removes a project (its id, slug or name) from the catalog; its files stay |
+
+`--space <space>` with `add` or `clone` puts the project in a space too. While the node runs, it makes the change, and keeps a project that still has sessions; otherwise the commands change the catalog of the profile directly.
+
 ## Pair it with CodeAlta Desktop
 
 1. On the machine of the node, while it runs, type `altanode pair`. It prints a pairing link, `codealta-pair://…`, and six words, then waits.
@@ -83,7 +96,7 @@ A paired computer may see the sessions of the machine, drive them and start new 
 The sessions of a paired machine are listed in the Explorer with your own, with a chip that names their machine:
 
 - A session in a project you also have here, a checkout of the same git repository, is listed under that project, whatever its folder and its name on each computer.
-- The other sessions of the machine are listed under a row named after the machine.
+- The other sessions of the machine are listed under a row named after the machine. That row is there as soon as the machine is paired, sessions or none, and is dimmed while the machine is offline; its tooltip says its state.
 
 Open one: its tab is the tab of any session. You read its timeline as it works, answer its questions and permission requests, send it prompts, steer it and stop it. The provider and the model are the ones the machine gives it.
 

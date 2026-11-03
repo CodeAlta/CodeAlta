@@ -16,7 +16,7 @@ internal sealed partial class WorkspaceService
     /// <summary>Adds the sessions the paired machines last listed to the snapshot of this process, knowing no repository of its projects and no move.</summary>
     /// <param name="local">The snapshot of this process.</param>
     /// <param name="remotes">The hosts of the paired machines.</param>
-    /// <returns>The snapshot with the remote sessions; <paramref name="local"/> when no machine lists any.</returns>
+    /// <returns>The snapshot with the rows of the machines and their sessions; <paramref name="local"/> when no machine is paired.</returns>
     internal static WorkspaceSnapshot WithRemoteSessions(WorkspaceSnapshot local, IReadOnlyList<RemoteSessionHost> remotes)
         => WithRemoteSessions(local, remotes, static _ => null);
 
@@ -24,20 +24,21 @@ internal sealed partial class WorkspaceService
     /// Adds the sessions the paired machines last listed to the snapshot of this process. A remote session goes under the
     /// project of this catalog it belongs to (<see cref="MatchProject"/>), or else under a project that stands for its
     /// machine (<see cref="MachineScopePrefix"/>); each one names its machine. A session this process lists itself keeps
-    /// its row, unless this process gave it to the machine that lists it (a move).
+    /// its row, unless this process gave it to the machine that lists it (a move). The project of a machine is listed for
+    /// every paired machine, with its state, sessions or none: its row starts a session there.
     /// </summary>
     /// <param name="local">The snapshot of this process.</param>
     /// <param name="remotes">The hosts of the paired machines.</param>
     /// <param name="localLocation">The repository of a project of this catalog; null when it has none or it is not known.</param>
     /// <param name="movedAway">Whether this process gave a session to another machine; null for none.</param>
-    /// <returns>The snapshot with the remote sessions; <paramref name="local"/> when no machine lists any.</returns>
+    /// <returns>The snapshot with the rows of the machines and their sessions; <paramref name="local"/> when no machine is paired.</returns>
     internal static WorkspaceSnapshot WithRemoteSessions(WorkspaceSnapshot local, IReadOnlyList<RemoteSessionHost> remotes,
         Func<WorkspaceProject, RepositoryLocation?> localLocation, Func<string, bool>? movedAway = null)
     {
         ArgumentNullException.ThrowIfNull(local);
         ArgumentNullException.ThrowIfNull(remotes);
         ArgumentNullException.ThrowIfNull(localLocation);
-        if (remotes.All(static host => host.Listing.Sessions.Count == 0)) return local;
+        if (remotes.Count == 0) return local;
         var projects = local.Projects.ToList();
         var sessions = local.Sessions.ToList();
         var known = sessions.Select(static session => session.Id).ToHashSet(StringComparer.OrdinalIgnoreCase);
@@ -45,12 +46,10 @@ internal sealed partial class WorkspaceService
         foreach (var host in remotes)
         {
             var listing = host.Listing;
-            if (listing.Sessions.Count == 0) continue;
             var machineId = host.MachineId!;
             var machineName = Bounded(listing.Info?.Name ?? host.Machine.Name);
             var remoteProjects = (listing.Info?.Projects ?? []).ToDictionary(static project => project.Id, StringComparer.Ordinal);
             var scope = MachineScopePrefix + machineId;
-            var grouped = false;
             foreach (var session in listing.Sessions)
             {
                 if (session.State == "archived") continue;
@@ -64,7 +63,6 @@ internal sealed partial class WorkspaceService
 
                 var remoteProject = session.ProjectId is { } id && remoteProjects.TryGetValue(id, out var found) ? found : null;
                 var match = MatchProject(session.ProjectId, remoteProject, localProjects, localLocation);
-                if (match is null) grouped = true;
                 var title = Bounded(string.IsNullOrWhiteSpace(session.Title) ? "Session" : session.Title);
                 sessions.Add(new WorkspaceSession(session.Id, title, match?.Path ?? scope, session.ProviderKey, session.UpdatedAt, title, session.Title.Length > RemoteTitleLength,
                     session.ParentSessionId, "project", match?.Id ?? scope, null, session.CreatedAt)
@@ -76,7 +74,8 @@ internal sealed partial class WorkspaceService
                 });
             }
 
-            if (grouped) projects.Add(new WorkspaceProject(scope, machineName, scope, false) { MachineId = machineId });
+            // Listed while the machine is paired, whatever it lists: a machine with no session yet is where one starts.
+            projects.Add(new WorkspaceProject(scope, machineName, scope, false) { MachineId = machineId, MachineState = RemoteSessionHost.Describe(host.State) });
         }
 
         return local with { Projects = [.. projects], Sessions = [.. sessions] };

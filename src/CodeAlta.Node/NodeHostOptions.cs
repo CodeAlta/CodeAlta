@@ -1,4 +1,5 @@
 using CodeAlta.Agent;
+using CodeAlta.Fleet.Moves;
 using CodeAlta.Hosting;
 using CodeAlta.Orchestration.Runtime;
 
@@ -48,4 +49,10 @@ public sealed record NodeHostOptions
 
     /// <summary>Gets how long the host is waited for once the remaining work is stopped (<see cref="DefaultShutdownLimit"/>).</summary>
     public TimeSpan ShutdownLimit { get; init; } = DefaultShutdownLimit;
+
+    /// <summary>
+    /// Gets where the node clones a repository (<c>altanode projects clone</c>, a moved session whose repository it lacks):
+    /// <c>&lt;root&gt;/&lt;host&gt;/&lt;owner&gt;/&lt;repo&gt;</c>, <c>~/code</c> by default; null clones nothing.
+    /// </summary>
+    public string? CloneRoot { get; init; } = FleetMoveReceiver.DefaultCloneRoot;
 }

@@ -25,6 +25,9 @@ export const isRemoteSession = (session: Pick<WorkspaceSession, "machineId"> | n
 /** Whether a row of the Explorer stands for a paired machine (its sessions of no project of this catalog). */
 export const isMachineProject = (project: Pick<WorkspaceProject, "machineId"> | null | undefined): boolean => !!project?.machineId;
 
+/** The state of the machine a row of the Explorer stands for; offline when the host does not say. */
+export const machineRowState = (project: Pick<WorkspaceProject, "machineState">): MachineState => machineState({ state: project.machineState ?? "offline" });
+
 /** What a pasted text is as a pairing link: trimmed, and empty when it cannot be one. */
 export function pairingLinkOf(text: string): string {
   const value = text.trim();
