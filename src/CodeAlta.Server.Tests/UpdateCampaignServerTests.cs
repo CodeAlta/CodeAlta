@@ -25,6 +25,33 @@ public sealed class UpdateCampaignServerTests
     private const string Runtime = "win-x64";
 
     [TestMethod]
+    public async Task ACancellationReachesANodeThatWasOfflineWhenItReconnects()
+    {
+        await using var fleet = await TestFleet.StartAsync(nodes: 1);
+        var node = await fleet.ConnectAsync(0);
+        var campaign = await fleet.CreateCampaignAsync("4.0.2");
+        await fleet.TickAsync();
+        Assert.AreEqual(campaign.Id, (await node.NextAsync(FleetServerMethods.UpdateInstruction, FleetServerJsonContext.Default.FleetUpdateInstruction)).CampaignId);
+        await node.ReportAsync(campaign.Id, FleetUpdateMachineStates.Downloading);
+        await fleet.WaitForAsync(async () => (await fleet.CampaignAsync(campaign.Id)).Machines.Single().State == FleetUpdateMachineStates.Downloading);
+
+        // Offline while it downloads: the cancellation cannot reach it now.
+        await fleet.DisconnectAsync(node);
+        Assert.AreEqual(FleetUpdateCampaignStates.Cancelled, (await fleet.CancelAsync(campaign.Id)).State);
+
+        var back = await fleet.ConnectAsync(0);
+        Assert.AreEqual(campaign.Id, (await back.NextAsync(FleetServerMethods.UpdateCancel, FleetServerJsonContext.Default.FleetUpdateCancel)).CampaignId,
+            "the cancellation waits for the node");
+        await back.ReportAsync(campaign.Id, FleetUpdateMachineStates.Cancelled);
+        await fleet.WaitForAsync(async () => !(await fleet.MachinesAsync(campaign.Id)).Single().CancelPending);
+
+        await fleet.DisconnectAsync(back);
+        var later = await fleet.ConnectAsync(0);
+        await fleet.TickAsync();
+        Assert.IsFalse(later.Received(FleetServerMethods.UpdateCancel), "once acknowledged, it is not sent again");
+    }
+
+    [TestMethod]
     public async Task TheStoreHoldsOneActiveCampaignPerOrganization()
     {
         await using var fleet = await TestFleet.StartAsync();

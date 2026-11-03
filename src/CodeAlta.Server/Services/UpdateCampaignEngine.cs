@@ -185,6 +185,13 @@ internal sealed class UpdateCampaignEngine(UpdateCampaignLimits limits)
         ArgumentNullException.ThrowIfNull(machine);
         ArgumentNullException.ThrowIfNull(report);
         if (!FleetUpdateMachineStates.IsReported(report.State) || report.CampaignId != machine.CampaignId) return machine;
+        // A node that reports the cancelled campaign done (cancelled, or ended otherwise) acknowledged its cancellation.
+        if (machine.CancelPending && FleetUpdateMachineStates.IsTerminal(report.State))
+        {
+            var state = report.State == FleetUpdateMachineStates.Updated ? FleetUpdateMachineStates.Updated : machine.State;
+            return machine with { State = state, CancelPending = false, Running = report.Running, Message = Trim(report.Message), UpdatedAt = now };
+        }
+
         // A machine done with the campaign stays so; one that switched before a cancellation reached it is updated still.
         if (FleetUpdateMachineStates.IsTerminal(machine.State) && !(report.State == FleetUpdateMachineStates.Updated && machine.State == FleetUpdateMachineStates.Cancelled))
             return machine;
@@ -192,7 +199,10 @@ internal sealed class UpdateCampaignEngine(UpdateCampaignLimits limits)
         return machine with { State = report.State, Running = report.Running, Message = Trim(report.Message), UpdatedAt = now };
     }
 
-    /// <summary>Cancels a campaign before the server's step: the machines not done with it are cancelled.</summary>
+    /// <summary>
+    /// Cancels a campaign before the server's step: the machines not done with it are cancelled, and those that were asked
+    /// already keep the cancellation due until they acknowledge it (<see cref="UpdateCampaignMachineRecord.CancelPending"/>).
+    /// </summary>
     /// <param name="campaign">The campaign.</param>
     /// <param name="machines">Its machines.</param>
     /// <param name="now">The time.</param>
@@ -203,10 +213,19 @@ internal sealed class UpdateCampaignEngine(UpdateCampaignLimits limits)
         ArgumentNullException.ThrowIfNull(campaign);
         ArgumentNullException.ThrowIfNull(machines);
         if (campaign.State is not (FleetUpdateCampaignStates.Scheduled or FleetUpdateCampaignStates.UpdatingNodes)) return null;
-        var cancelled = machines.Where(static machine => !FleetUpdateMachineStates.IsTerminal(machine.State))
-            .Select(machine => machine with { State = FleetUpdateMachineStates.Cancelled, UpdatedAt = now }).ToArray();
-        var asked = machines.Where(static machine => InProgress.Contains(machine.State)).Select(static machine => machine.DeviceId).ToArray();
+        var (cancelled, asked) = CancelMachines(machines, now, null);
         return (campaign with { State = FleetUpdateCampaignStates.Cancelled, ServerState = FleetUpdateMachineStates.Cancelled, UpdatedAt = now }, cancelled, asked);
+    }
+
+    private static (UpdateCampaignMachineRecord[] Cancelled, string[] Asked) CancelMachines(IReadOnlyList<UpdateCampaignMachineRecord> machines, DateTimeOffset now,
+        string? message)
+    {
+        var cancelled = machines.Where(static machine => !FleetUpdateMachineStates.IsTerminal(machine.State))
+            .Select(machine => machine with
+            {
+                State = FleetUpdateMachineStates.Cancelled, CancelPending = InProgress.Contains(machine.State), Message = message ?? machine.Message, UpdatedAt = now,
+            }).ToArray();
+        return (cancelled, [.. cancelled.Where(static machine => machine.CancelPending).Select(static machine => machine.DeviceId)]);
     }
 
     /// <summary>Gets whether two versions are the same, once normalized.</summary>

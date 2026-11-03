@@ -607,9 +607,20 @@ public sealed class SqliteCoordinatorStore : ICoordinatorStore
     {
         ArgumentException.ThrowIfNullOrEmpty(campaignId);
         return ReadAsync(connection => QueryList(connection, null,
-            "SELECT campaign_id, device_id, state, running, message, instructed_at, updated_at FROM update_campaign_machines WHERE campaign_id = $id ORDER BY device_id",
+            "SELECT campaign_id, device_id, state, running, message, instructed_at, updated_at, cancel_pending FROM update_campaign_machines WHERE campaign_id = $id ORDER BY device_id",
             static reader => new UpdateCampaignMachineRecord(reader.GetString(0), reader.GetString(1), reader.GetString(2), GetNullableString(reader, 3), GetNullableString(reader, 4),
-                GetNullableTime(reader, 5), FromTime(reader.GetInt64(6))), ("$id", campaignId)), cancellationToken);
+                GetNullableTime(reader, 5), FromTime(reader.GetInt64(6)), reader.GetInt64(7) != 0), ("$id", campaignId)), cancellationToken);
+    }
+
+    /// <inheritdoc />
+    public ValueTask<IReadOnlyList<string>> ListUpdateCancellationsAsync(string organizationId, string deviceId, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(organizationId);
+        ArgumentException.ThrowIfNullOrEmpty(deviceId);
+        return ReadAsync(connection => QueryList(connection, null,
+            "SELECT m.campaign_id FROM update_campaign_machines AS m JOIN update_campaigns AS c ON c.id = m.campaign_id " +
+            "WHERE m.device_id = $device AND m.cancel_pending = 1 AND c.organization_id = $org ORDER BY c.created_at, c.id",
+            static reader => reader.GetString(0), ("$device", deviceId), ("$org", organizationId)), cancellationToken);
     }
 
     /// <inheritdoc />
@@ -732,11 +743,12 @@ public sealed class SqliteCoordinatorStore : ICoordinatorStore
 
     private static void WriteCampaignMachine(SqliteConnection connection, SqliteTransaction transaction, UpdateCampaignMachineRecord machine)
         => Execute(connection, transaction,
-            "INSERT INTO update_campaign_machines (campaign_id, device_id, state, running, message, instructed_at, updated_at) " +
-            "VALUES ($campaign, $device, $state, $running, $message, $instructed, $updated) ON CONFLICT (campaign_id, device_id) DO UPDATE SET " +
-            "state = excluded.state, running = excluded.running, message = excluded.message, instructed_at = excluded.instructed_at, updated_at = excluded.updated_at",
+            "INSERT INTO update_campaign_machines (campaign_id, device_id, state, running, message, instructed_at, updated_at, cancel_pending) " +
+            "VALUES ($campaign, $device, $state, $running, $message, $instructed, $updated, $cancel) ON CONFLICT (campaign_id, device_id) DO UPDATE SET " +
+            "state = excluded.state, running = excluded.running, message = excluded.message, instructed_at = excluded.instructed_at, updated_at = excluded.updated_at, " +
+            "cancel_pending = excluded.cancel_pending",
             ("$campaign", machine.CampaignId), ("$device", machine.DeviceId), ("$state", machine.State), ("$running", machine.Running), ("$message", machine.Message),
-            ("$instructed", ToNullableTime(machine.InstructedAt)), ("$updated", ToTime(machine.UpdatedAt)));
+            ("$instructed", ToNullableTime(machine.InstructedAt)), ("$updated", ToTime(machine.UpdatedAt)), ("$cancel", machine.CancelPending ? 1 : 0));
 
     private static UpdateCampaignRecord ReadCampaign(SqliteDataReader reader)
         => new(reader.GetString(0), reader.GetString(1), reader.GetInt64(2), reader.GetInt64(3) != 0, reader.GetString(4), reader.GetString(5), reader.GetInt64(6) != 0,
