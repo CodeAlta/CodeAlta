@@ -1,6 +1,6 @@
 ---
 title: Fleet automations through CodeAlta Server (M3b, personal scope)
-status: todo
+status: in-progress
 created: 2026-11-03
 summary: What is left after the first part of fleet automations (engine library, automations on altanode, Runs on a paired machine): the server stores each signed automation version and assigns it to a machine linked to it, nodes verify the signature and keep their copies, runs are reported as facts, and the desktop places automations on machines it reaches only through a server.
 ---
@@ -24,10 +24,14 @@ The authority of an assignment is the authenticated, paired device on a direct c
 
 ## What is left
 
-- [ ] **Signed versions.** The desktop signs each version it places (the canonical TOML of the table, its id, a version
+- [x] **Signed versions.** The desktop signs each version it places (the canonical TOML of the table, its id, a version
   number, the device id; ECDSA P-256 with the device key, as `FleetSignedRequest` signs REST calls). The node stores the
   signature beside the definition (`assigned-automations.json`) and checks it, not only the channel, before a run: the
   fingerprint check of `NodeAutomations.Check` becomes a signature check.
+  - Done as `FleetAutomationVersion` (Protocol) and `FleetAutomationSigning` (Server: sign, seal for the machine and
+    the person's controllers with `FleetKeyWrap`, open). The node keeps the highest number per automation, removals
+    included, so a replayed or older version is refused; an unsigned `automations.put` is refused. The desktop numbers
+    versions from the time in milliseconds, so a lost placement record still numbers after what a machine holds.
 - [ ] **Server resources.** `automations` and `runs` in the REST API v1 (`doc/fleet/protocol.md`): `PUT
   /api/v1/automations/{id}` stores a signed version (the content sealed to the owner's devices and the assigned machine
   in a Private space, so the server sees only the facts: id, owner, version, machine, schedule kinds, enabled), `GET` lists

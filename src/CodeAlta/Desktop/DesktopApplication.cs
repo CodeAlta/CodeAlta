@@ -879,7 +879,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                 // An automation of the user can run on a paired machine: it is copied there, and runs there while this
                 // computer is closed. A profile that placed none makes no call and creates no key.
                 var placedFleet = fleet;
-                placement = new Fleet.DesktopAutomationPlacement(automations, fleet.Find, host.CatalogOptions.FleetRoot, () => placedFleet.DeviceId);
+                placement = new Fleet.DesktopAutomationPlacement(automations, fleet.Find, host.CatalogOptions.FleetRoot, () => placedFleet.DeviceId, placedFleet.SignAutomation);
                 automations.Placement = placement;
                 fleet.Changed += placement.Poke;
                 // A host that has the user review the commands of its sessions lets no session type in a terminal, nor

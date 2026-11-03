@@ -34,7 +34,7 @@ public sealed class NodeAutomationTests
             var machine = await fixture.PairAsync(DevicePermissions.View | DevicePermissions.Start | DevicePermissions.Automate, token);
             deviceId = fixture.ViewerIdentity.DeviceId;
             await using var client = await FleetNodeClient.ConnectAsync(machine, fixture.ViewerIdentity, token);
-            var put = await client.PutAutomationAsync(new FleetAutomationPutParams(Definition("Half past", "Say hello."), null), "put-1", token);
+            var put = await client.PutAutomationAsync(fixture.Signed(Definition("Half past", "Say hello."), 1), "put-1", token);
             Assert.AreEqual((Id, "Half past", true, deviceId, "viewer"), (put.Id, put.Name, put.Enabled, put.AssignedBy, put.AssignedByName));
             Assert.AreEqual(Noon.AddMinutes(30), put.NextDue, "The node fires its schedule.");
             Assert.AreEqual(Id, (await client.ListAutomationsAsync(token)).Automations.Single().Id);
@@ -86,7 +86,7 @@ public sealed class NodeAutomationTests
         await using var fixture = await AutomationFixture.StartAsync(root, new ScriptedNodeProvider(), new NodeClock { Now = Noon }, token, _ => kind);
         var machine = await fixture.PairAsync(DevicePermissions.View | DevicePermissions.Start | DevicePermissions.Automate, token);
         await using var client = await FleetNodeClient.ConnectAsync(machine, fixture.ViewerIdentity, token);
-        await client.PutAutomationAsync(new FleetAutomationPutParams(Definition("Guarded", "Hello."), null), cancellationToken: token);
+        await client.PutAutomationAsync(fixture.Signed(Definition("Guarded", "Hello."), 1), cancellationToken: token);
 
         async Task<FleetAutomationRunInfo> RunAsync() => await client.RunAutomationAsync(Id, cancellationToken: token);
 
@@ -107,7 +107,7 @@ public sealed class NodeAutomationTests
         File.WriteAllText(assigned, File.ReadAllText(assigned).Replace("Hello.", "Do something else.", StringComparison.Ordinal));
         await fixture.Node.Automations!.Engine.RefreshAsync();
         StringAssert.Contains((await RunAsync()).Message, "changed on this machine");
-        await client.PutAutomationAsync(new FleetAutomationPutParams(Definition("Guarded", "Hello."), null), cancellationToken: token);
+        await client.PutAutomationAsync(fixture.Signed(Definition("Guarded", "Hello."), 2), cancellationToken: token);
         var allowed = await RunAsync();
         Assert.AreNotEqual(AutomationRun.Failed, allowed.Status, allowed.Message);
 
@@ -115,7 +115,7 @@ public sealed class NodeAutomationTests
         fixture.Fleet.Service.TrustedDevices.SetPermissions(fixture.ViewerIdentity.DeviceId, DevicePermissions.View | DevicePermissions.Start);
         StringAssert.Contains(fixture.Node.Automations.Check(fixture.Node.Automations.Engine.Snapshot.Find(Id)!, new CodeAlta.Agent.ModelProviderDescriptor(new("scripted"), "Scripted")),
             "may no longer give automations");
-        var forbidden = await Assert.ThrowsExactlyAsync<FleetException>(() => client.PutAutomationAsync(new FleetAutomationPutParams(Definition("Again", "x"), null), cancellationToken: token));
+        var forbidden = await Assert.ThrowsExactlyAsync<FleetException>(() => client.PutAutomationAsync(fixture.Signed(Definition("Again", "x"), 3), cancellationToken: token));
         Assert.AreEqual(FleetErrorCodes.Forbidden, forbidden.Error.Code);
         StringAssert.Contains(forbidden.Message, "automate");
     }
@@ -129,26 +129,73 @@ public sealed class NodeAutomationTests
         var machine = await fixture.PairAsync(DevicePermissions.View | DevicePermissions.Start | DevicePermissions.Automate, token);
         await using var client = await FleetNodeClient.ConnectAsync(machine, fixture.ViewerIdentity, token);
 
-        var command = await Assert.ThrowsExactlyAsync<FleetException>(() => client.PutAutomationAsync(new FleetAutomationPutParams($$"""
+        var command = await Assert.ThrowsExactlyAsync<FleetException>(() => client.PutAutomationAsync(fixture.Signed($$"""
             [automations.{{Id}}]
             name = "Watcher"
             prompt = "x"
             triggers = [{ type = "command", command = "echo hi" }]
-            """, null), cancellationToken: token));
+            """, 1), cancellationToken: token));
         Assert.AreEqual(FleetNodeErrorCodes.AutomationInvalid, command.Error.Code);
         StringAssert.Contains(command.Message, "command");
 
         var project = await Assert.ThrowsExactlyAsync<FleetException>(() => client.PutAutomationAsync(
-            new FleetAutomationPutParams(Definition("Somewhere", "x"), "github.com/nobody/nothing"), cancellationToken: token));
+            fixture.Signed(Definition("Somewhere", "x"), 2, "github.com/nobody/nothing"), cancellationToken: token));
         Assert.AreEqual(FleetNodeErrorCodes.ProjectNotFound, project.Error.Code);
 
-        var invalid = await Assert.ThrowsExactlyAsync<FleetException>(() => client.PutAutomationAsync(new FleetAutomationPutParams("name = 1", null), cancellationToken: token));
+        var invalid = await Assert.ThrowsExactlyAsync<FleetException>(() => client.PutAutomationAsync(fixture.Signed("name = 1", 3), cancellationToken: token));
         Assert.AreEqual(FleetNodeErrorCodes.AutomationInvalid, invalid.Error.Code);
 
         var missing = await Assert.ThrowsExactlyAsync<FleetException>(() => client.RunAutomationAsync(Id, cancellationToken: token));
         Assert.AreEqual(FleetNodeErrorCodes.AutomationNotFound, missing.Error.Code);
         Assert.AreEqual(0, (await client.ListAutomationsAsync(token)).Automations.Count);
         Assert.IsFalse((await client.RemoveAutomationAsync(Id, cancellationToken: token)).Removed);
+    }
+
+    [TestMethod]
+    public async Task Put_TakesOnlyANewerVersion_SignedForThisNode_ByTheDeviceOnTheChannel()
+    {
+        var token = TestContext.CancellationToken;
+        using var root = new NodeTestRoot();
+        await using var fixture = await AutomationFixture.StartAsync(root, new ScriptedNodeProvider(), new NodeClock { Now = Noon }, token);
+        var machine = await fixture.PairAsync(DevicePermissions.View | DevicePermissions.Start | DevicePermissions.Automate, token);
+        await using var client = await FleetNodeClient.ConnectAsync(machine, fixture.ViewerIdentity, token);
+        using var outsider = DeviceIdentity.LoadOrCreate(Path.Combine(root.Root, "outsider", "fleet"));
+
+        async Task<string> RefusedAsync(FleetAutomationPutParams parameters)
+        {
+            var refused = await Assert.ThrowsExactlyAsync<FleetException>(() => client.PutAutomationAsync(parameters, cancellationToken: token));
+            Assert.AreEqual(FleetNodeErrorCodes.AutomationInvalid, refused.Error.Code);
+            return refused.Message;
+        }
+
+        StringAssert.Contains(await RefusedAsync(new FleetAutomationPutParams(Definition("Unsigned", "x"), null)), "signed automations only");
+        StringAssert.Contains(await RefusedAsync(fixture.Signed(Definition("Theirs", "x"), 1, signer: outsider)), "another device than the one that gives it");
+        StringAssert.Contains(await RefusedAsync(fixture.Signed(Definition("Elsewhere", "x"), 1, machine: outsider.DeviceId)), "another machine");
+        var genuine = fixture.Signed(Definition("Mine", "Hello."), 5);
+        var altered = genuine with { Signed = genuine.Signed! with { Payload = genuine.Signed.Payload.Replace("Hello.", "Delete it all.", StringComparison.Ordinal) } };
+        StringAssert.Contains(await RefusedAsync(altered), "signature does not verify");
+        Assert.AreEqual(0, (await client.ListAutomationsAsync(token)).Automations.Count, "Nothing refused was written.");
+
+        Assert.AreEqual("Mine", (await client.PutAutomationAsync(genuine, cancellationToken: token)).Name);
+        Assert.AreEqual("Mine", (await client.PutAutomationAsync(genuine, cancellationToken: token)).Name, "The same version given again is taken as it is.");
+        StringAssert.Contains(await RefusedAsync(fixture.Signed(Definition("Older", "x"), 4)), "never replaced by one that is not newer");
+        Assert.AreEqual("Newer", (await client.PutAutomationAsync(fixture.Signed(Definition("Newer", "Hello."), 6), cancellationToken: token)).Name);
+        Assert.AreEqual(6, fixture.Node.Automations!.AssignmentOf(Id)!.Number);
+
+        // Taken away: a version older than the one removed stays refused.
+        Assert.IsTrue((await client.RemoveAutomationAsync(Id, cancellationToken: token)).Removed);
+        StringAssert.Contains(await RefusedAsync(genuine), "never replaced");
+        Assert.AreEqual("Back", (await client.PutAutomationAsync(fixture.Signed(Definition("Back", "Hello."), 7), cancellationToken: token)).Name);
+
+        // The run checks the signature again: a version stored without one, or whose signature was changed, does not run.
+        var entry = fixture.Node.Automations.Engine.Snapshot.Find(Id)!;
+        var provider = new CodeAlta.Agent.ModelProviderDescriptor(new("scripted"), "Scripted");
+        Assert.IsNull(fixture.Node.Automations.Check(entry, provider));
+        var file = Path.Combine(fixture.Node.Host.CatalogOptions.FleetRoot, NodeAutomations.AssignmentsFileName);
+        var kept = File.ReadAllText(file);
+        File.WriteAllText(file, kept.Replace("\"sig\": \"", "\"sig\": \"AAAA", StringComparison.Ordinal));
+        await using (var restarted = new NodeAutomations(fixture.Node.Host, new NodeAutomationOptions { WatchRepositories = false }) { DeviceId = fixture.Fleet.DeviceId })
+            StringAssert.Contains(restarted.Check(entry, provider), "signature of this automation no longer holds");
     }
 
     [TestMethod]
@@ -233,6 +280,14 @@ public sealed class NodeAutomationTests
             }, cancellationToken);
             var fleet = NodeFleet.Start(node, new NodeListenOptions { Port = 0 }, "test-node", "1.0.0");
             return new AutomationFixture(node, fleet, Path.Combine(root.Root, "viewer", "fleet"));
+        }
+
+        /// <summary>The parameters of automations.put with a version of the automation the viewer signed for the node.</summary>
+        public FleetAutomationPutParams Signed(string definition, long number, string? repository = null, DeviceIdentity? signer = null, string? machine = null)
+        {
+            var version = new FleetAutomationVersion(FleetAutomationVersion.CurrentVersion, null, Id, number, machine ?? Fleet.DeviceId, false, true, ["hourly"], definition,
+                repository, null, string.Empty, string.Empty, DateTimeOffset.UtcNow);
+            return new FleetAutomationPutParams(definition, repository) { Signed = CodeAlta.Fleet.Server.FleetAutomationSigning.Sign(signer ?? ViewerIdentity, version) };
         }
 
         /// <summary>Pairs the viewer, then gives it the permissions asked; null keeps those of a pairing.</summary>

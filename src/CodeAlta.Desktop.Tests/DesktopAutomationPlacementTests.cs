@@ -56,7 +56,7 @@ public sealed class DesktopAutomationPlacementTests
         await using var automations = new AutomationService(global, _ => Task.FromResult<IReadOnlyList<ProjectDescriptor>>([]),
             new AutomationStateStore(Path.Combine(fixture.Root, "desktop-state", "automations.json"), false), runner, TimeProvider.System, TimeZoneInfo.Utc);
         await automations.RefreshAsync();
-        var placement = new DesktopAutomationPlacement(automations, fleet.Find, desktopFleetRoot, () => fleet.DeviceId);
+        var placement = new DesktopAutomationPlacement(automations, fleet.Find, desktopFleetRoot, () => fleet.DeviceId, fleet.SignAutomation);
         automations.Placement = placement;
         await using (placement)
         {
@@ -80,7 +80,7 @@ public sealed class DesktopAutomationPlacementTests
 
             // Unchanged, it is not copied again, even by a placement that starts anew; changed, it is.
             await placement.SyncAsync(token);
-            await using (var again = new DesktopAutomationPlacement(automations, fleet.Find, desktopFleetRoot, () => fleet.DeviceId)) await again.SyncAsync(token);
+            await using (var again = new DesktopAutomationPlacement(automations, fleet.Find, desktopFleetRoot, () => fleet.DeviceId, fleet.SignAutomation)) await again.SyncAsync(token);
             Assert.AreEqual(1, node.Puts.Count);
             var definition = automations.Snapshot.Find(Id)!.Definition;
             Assert.IsNull(await automations.SaveAsync(definition with { Prompt = "Summarize the week." }, null, token));

@@ -42,11 +42,13 @@ internal sealed class DesktopAutomationPlacement : IAutomationPlacement, IAsyncD
     private readonly string _path;
     private readonly Func<string, CancellationToken, Task<string?>> _repositoryOf;
     private readonly Func<string> _deviceId;
+    private readonly Func<FleetAutomationVersion, FleetSignedAutomationVersion> _sign;
     private readonly Lock _gate = new();
     private readonly Dictionary<string, PlacedAutomation> _placed;
     private readonly Dictionary<string, AutomationPlacementStatus> _status = new(StringComparer.Ordinal);
     private readonly Dictionary<string, IReadOnlyList<AutomationRun>> _runs = new(StringComparer.Ordinal);
     private readonly Dictionary<string, DateTimeOffset> _runsReadAt = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, long> _numbers = new(StringComparer.Ordinal);
     private readonly SemaphoreSlim _signal = new(0, 1);
     private readonly SemaphoreSlim _work = new(1, 1);
     private readonly CancellationTokenSource _stop = new();
@@ -57,16 +59,18 @@ internal sealed class DesktopAutomationPlacement : IAutomationPlacement, IAsyncD
     /// <param name="automations">The automations of the user.</param>
     /// <param name="machines">Finds the host of a paired machine by its id.</param>
     /// <param name="fleetRoot">The fleet folder of the state root, where the record is kept.</param>
-    /// <param name="deviceId">Gives the device id of this computer, as the machines know it; read only when a machine refuses it.</param>
+    /// <param name="deviceId">Gives the device id of this computer, as the machines know it.</param>
+    /// <param name="sign">Signs a version of an automation with the key of this computer, which the machine checks before it runs it.</param>
     /// <param name="repositoryOf">Reads the repository key of a project folder; null for its git remote.</param>
     internal DesktopAutomationPlacement(AutomationService automations, Func<string, RemoteSessionHost?> machines, string fleetRoot, Func<string> deviceId,
-        Func<string, CancellationToken, Task<string?>>? repositoryOf = null)
+        Func<FleetAutomationVersion, FleetSignedAutomationVersion> sign, Func<string, CancellationToken, Task<string?>>? repositoryOf = null)
     {
         ArgumentNullException.ThrowIfNull(automations);
         ArgumentNullException.ThrowIfNull(machines);
         ArgumentException.ThrowIfNullOrWhiteSpace(fleetRoot);
         ArgumentNullException.ThrowIfNull(deviceId);
-        (_automations, _machines, _deviceId) = (automations, machines, deviceId);
+        ArgumentNullException.ThrowIfNull(sign);
+        (_automations, _machines, _deviceId, _sign) = (automations, machines, deviceId, sign);
         _path = Path.Combine(fleetRoot, FileName);
         _repositoryOf = repositoryOf ?? RepositoryKey.ReadAsync;
         _placed = Load(_path);
@@ -265,10 +269,19 @@ internal sealed class DesktopAutomationPlacement : IAutomationPlacement, IAsyncD
 
         try
         {
+            // The machine runs what this computer signed for it, numbered after every version it signed of this automation.
+            var definition = AutomationConfig.Write(string.Empty, copy);
+            var number = NextNumber(entry.Id);
+            var signed = _sign(new FleetAutomationVersion(FleetAutomationVersion.CurrentVersion, null, entry.Id, number, machineId, false, copy.Enabled, TriggerKinds(copy),
+                definition, repository, null, _deviceId(), string.Empty, DateTimeOffset.UtcNow));
             // A copy is the same whatever the number of times it is made: each attempt has a key of its own, so that one
             // made again after a removal is made, not answered from the receipt of the first.
-            await client.PutAutomationAsync(new FleetAutomationPutParams(AutomationConfig.Write(string.Empty, copy), repository),
-                cancellationToken: cancellationToken).ConfigureAwait(false);
+            await client.PutAutomationAsync(new FleetAutomationPutParams(definition, repository) { Signed = signed }, cancellationToken: cancellationToken).ConfigureAwait(false);
+            lock (_gate) _numbers[entry.Id] = number;
+        }
+        catch (ArgumentException exception)
+        {
+            return SetStatus(entry.Id, new(machineId, machineName, "failed", exception.Message, null));
         }
         catch (FleetException exception)
         {
@@ -284,7 +297,7 @@ internal sealed class DesktopAutomationPlacement : IAutomationPlacement, IAsyncD
         var copiedAt = DateTimeOffset.UtcNow;
         lock (_gate)
         {
-            _placed[entry.Id] = new PlacedAutomation(machineId, key, copiedAt);
+            _placed[entry.Id] = new PlacedAutomation(machineId, key, copiedAt) { Number = _numbers.GetValueOrDefault(entry.Id) };
             Save();
         }
 
@@ -351,10 +364,24 @@ internal sealed class DesktopAutomationPlacement : IAutomationPlacement, IAsyncD
             Name = run.Name, SessionId = run.SessionId, Detail = run.Detail, Status = run.Status, Message = run.Message, EndedAt = run.EndedAt,
         };
 
-    // What the machine was given: the definition, whether it is enabled, and the repository of its project.
+    // What the machine was given: the definition, whether it is enabled, and the repository of its project, as a signed version.
     private static string Key(AutomationDefinition copy, string? repository)
         => Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(
-            copy.Fingerprint() + "\n" + (copy.Enabled ? "1" : "0") + "\n" + repository)))[..32];
+            "signed\n" + copy.Fingerprint() + "\n" + (copy.Enabled ? "1" : "0") + "\n" + repository)))[..32];
+
+    /// <summary>The kinds of the triggers of an automation, the facts a version says in clear.</summary>
+    internal static IReadOnlyList<string> TriggerKinds(AutomationDefinition definition)
+        => [.. definition.Triggers.Select(static trigger => trigger.Kind.ToString().ToLowerInvariant()).Distinct(StringComparer.Ordinal).Take(FleetAutomationVersionDocuments.MaxTriggers)];
+
+    // A number above every one this computer signed for the automation, and above the time: a record lost here still numbers after what the machine holds.
+    private long NextNumber(string id)
+    {
+        lock (_gate)
+        {
+            var held = Math.Max(_numbers.GetValueOrDefault(id), _placed.TryGetValue(id, out var record) ? record.Number : 0);
+            return Math.Max(held + 1, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
+        }
+    }
 
     private static Dictionary<string, PlacedAutomation> Load(string path)
     {
@@ -398,7 +425,11 @@ internal sealed class DesktopAutomationPlacement : IAutomationPlacement, IAsyncD
 /// <param name="MachineId">The machine.</param>
 /// <param name="Key">What it was given (the definition, whether enabled, the repository of its project), hashed.</param>
 /// <param name="CopiedAt">When.</param>
-internal sealed record PlacedAutomation(string MachineId, string Key, DateTimeOffset CopiedAt);
+internal sealed record PlacedAutomation(string MachineId, string Key, DateTimeOffset CopiedAt)
+{
+    /// <summary>Gets the number of the version signed for it.</summary>
+    public long Number { get; init; }
+}
 
 [JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase)]
 [JsonSerializable(typeof(Dictionary<string, PlacedAutomation>))]

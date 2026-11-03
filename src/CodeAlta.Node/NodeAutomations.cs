@@ -7,6 +7,7 @@ using CodeAlta.Catalog.SessionMoves;
 using CodeAlta.Fleet.Identity;
 using CodeAlta.Fleet.NodeApi;
 using CodeAlta.Fleet.Protocol;
+using CodeAlta.Fleet.Server;
 using CodeAlta.Orchestration.Hosting;
 using XenoAtom.Logging;
 
@@ -68,7 +69,25 @@ internal sealed record NodeAutomationPolicy
 /// <param name="DeviceName">Its name at that time.</param>
 /// <param name="Fingerprint">The fingerprint of the definition it assigned: what the node runs, and nothing else.</param>
 /// <param name="AssignedAt">When it was assigned.</param>
-internal sealed record NodeAutomationAssignment(string DeviceId, string DeviceName, string Fingerprint, DateTimeOffset AssignedAt);
+internal sealed record NodeAutomationAssignment(string DeviceId, string DeviceName, string Fingerprint, DateTimeOffset AssignedAt)
+{
+    /// <summary>Gets the number of the version held; a version that is not newer is refused, after a removal too.</summary>
+    public long Number { get; init; }
+
+    /// <summary>Gets the version as its device signed it; null for an assignment made before versions were signed, which does not run.</summary>
+    public FleetSignedAutomationVersion? Signed { get; init; }
+
+    /// <summary>Gets the server link it came through; null for a paired device on a direct channel.</summary>
+    public string? Via { get; init; }
+
+    /// <summary>Gets whether the automation was taken away: nothing runs, and the number stays so that an older version stays refused.</summary>
+    public bool Removed { get; init; }
+}
+
+/// <summary>What a node answers to a version of an automation a server delivers.</summary>
+/// <param name="Applied">Whether the node holds that version now (or a newer one).</param>
+/// <param name="Message">Why it refused it, or null.</param>
+internal sealed record NodeAutomationOutcome(bool Applied, string? Message);
 
 /// <summary>What <see cref="NodeAutomations"/> starts with.</summary>
 internal sealed record NodeAutomationOptions
@@ -115,6 +134,8 @@ internal sealed class NodeAutomations : IFleetNodeAutomations, IAutomationRunGat
     private readonly NodeAutomationOptions _options;
     private readonly string _fleetRoot;
     private readonly Lock _gate = new();
+    // One version applied at a time, from the check of the number held to the write: two at once could both pass it.
+    private readonly SemaphoreSlim _applies = new(1, 1);
     private readonly Dictionary<string, NodeAutomationAssignment> _assignments;
     private readonly Logger _logger = LogManager.GetLogger("CodeAlta.Node.Automations");
     private int _disposed;
@@ -151,13 +172,29 @@ internal sealed class NodeAutomations : IFleetNodeAutomations, IAutomationRunGat
     /// </summary>
     internal Func<string, TrustedDevice?>? Devices { get; set; }
 
+    /// <summary>Gets or sets the device id of this node, which the versions it runs must name; null until the fleet part of the node starts.</summary>
+    internal string? DeviceId { get; set; }
+
+    /// <summary>
+    /// Gets or sets what gives the device list of a server link as this node last verified it, to refuse what a device
+    /// removed from it signed; null, or a null list (not read since the node started), keeps the check made when the
+    /// version was accepted.
+    /// </summary>
+    internal Func<string, FleetDeviceListState?>? ServerDevices { get; set; }
+
     /// <summary>Starts reading the automations and firing their triggers.</summary>
     internal void Start() => Engine.Start();
 
-    /// <summary>Gets who assigned an automation; null for one the node was not assigned.</summary>
+    /// <summary>Gets who assigned an automation; null for one the node was not assigned, or that was taken away.</summary>
     internal NodeAutomationAssignment? AssignmentOf(string id)
     {
-        lock (_gate) return _assignments.GetValueOrDefault(id);
+        lock (_gate) return _assignments.GetValueOrDefault(id) is { Removed: false } assignment ? assignment : null;
+    }
+
+    /// <summary>Gets the number of the version of an automation this node holds or last removed; 0 for none.</summary>
+    internal long NumberOf(string id)
+    {
+        lock (_gate) return _assignments.GetValueOrDefault(id)?.Number ?? 0;
     }
 
     /// <inheritdoc />
@@ -167,16 +204,7 @@ internal sealed class NodeAutomations : IFleetNodeAutomations, IAutomationRunGat
         ArgumentNullException.ThrowIfNull(provider);
         var policy = NodeAutomationPolicy.Load(_fleetRoot);
         if (!policy.Enabled) return "This machine runs no automations: its owner turned them off.";
-        if (entry.Source.IsAssigned)
-        {
-            if (AssignmentOf(entry.Id) is not { } assignment) return "No device of yours assigned this automation to this machine.";
-            if (!string.Equals(assignment.Fingerprint, entry.Definition.Fingerprint(), StringComparison.Ordinal))
-                return "This automation changed on this machine since it was assigned: it runs only as its device assigned it.";
-            if (Devices?.Invoke(assignment.DeviceId) is not { } device)
-                return $"The device that assigned this automation ({assignment.DeviceName}) is no longer paired with this machine.";
-            if (!device.Permissions.HasFlag(DevicePermissions.Automate))
-                return $"The device that assigned this automation ({device.Name}) may no longer give automations to this machine.";
-        }
+        if (entry.Source.IsAssigned && CheckAssignment(entry) is { } refused) return refused;
 
         var kind = _options.CredentialKind?.Invoke(provider) ?? Classify(provider);
         if (kind == AutomationCredentialKind.Unknown)
@@ -191,36 +219,66 @@ internal sealed class NodeAutomations : IFleetNodeAutomations, IAutomationRunGat
     {
         ArgumentNullException.ThrowIfNull(caller);
         ArgumentNullException.ThrowIfNull(parameters);
-        if (parameters.Definition is not { Length: > 0 and <= AutomationConfig.MaximumContentLength } text)
-            throw Invalid("The automation is one table of a configuration file.");
-        var (definitions, faults) = AutomationConfig.Read(text, new AutomationSource("automations.put", null, null) { IsAssigned = true });
-        if (faults.Count > 0) throw Invalid(faults[0].Message);
-        if (definitions.Count != 1) throw Invalid("The automation is one table of a configuration file.");
-        var definition = definitions[0];
-        // A command of a trigger runs on this machine without anybody to approve it: only its owner writes one here.
-        if (definition.Triggers.Any(static trigger => trigger.IsCommand))
-            throw Invalid("A command trigger runs a command on this machine: it is not taken from another device.");
-        string? project = null;
-        if (parameters.Repository is { } repository)
-        {
-            project = await FindProjectAsync(repository, cancellationToken).ConfigureAwait(false)
-                ?? throw new FleetException(FleetNodeErrorCodes.ProjectNotFound, null,
-                    $"This machine has no project of the repository {repository}: clone it there first (altanode projects clone).");
-        }
-
-        if (Engine.Snapshot.Find(definition.Id) is { Source.IsAssigned: false })
-            throw Invalid("An automation of this machine has the identifier of this one.");
-        if (await Engine.SaveAssignedAsync(definition with { Project = project }, cancellationToken).ConfigureAwait(false) is { } refused) throw Invalid(refused);
-        if (Engine.Snapshot.Find(definition.Id) is not { Source.IsAssigned: true } saved) throw Invalid("The automation was not read back on this machine.");
-        var assignment = new NodeAutomationAssignment(caller.DeviceId, caller.Name, saved.Definition.Fingerprint(), _options.TimeProvider.GetUtcNow());
-        lock (_gate)
-        {
-            _assignments[saved.Id] = assignment;
-            SaveAssignments();
-        }
-
-        Log($"{caller.Name} ({caller.DeviceId}) assigned the automation '{saved.Definition.Name}' ({saved.Id}).");
+        if (parameters.Signed is not { } signed)
+            throw Invalid("This machine runs signed automations only: update CodeAlta on the computer that gives it this one.");
+        if (DeviceId is not { } self) throw Invalid("This machine does not know its own device yet: try again in a moment.");
+        if (!FleetAutomationVersionDocuments.TryVerify(signed, self, out var version, out var key, out var reason))
+            throw Invalid($"The signature of the automation does not hold: {reason}.");
+        // The device that signs is the one on the channel, with the key it paired with.
+        if (!string.Equals(key.DeviceId, caller.DeviceId, StringComparison.Ordinal) || !string.Equals(key.Fingerprint, caller.Fingerprint, StringComparison.Ordinal))
+            throw Invalid("The automation is signed by another device than the one that gives it.");
+        if (version.Removed || version.Definition is not { } text) throw Invalid("On a direct channel, an automation is given with its definition in clear.");
+        var (outcome, saved, assignment) = await ApplyAsync(caller.DeviceId, caller.Name, signed, version, new FleetAutomationContent(text, version.Repository), null,
+            cancellationToken).ConfigureAwait(false);
+        if (!outcome.Applied || saved is null) throw Invalid(outcome.Message ?? "The automation was not taken.");
         return Describe(saved, assignment);
+    }
+
+    /// <summary>
+    /// Takes a version of an automation a server delivered: its signature verified against the device list of that server
+    /// (signed by a controller device of the person who owns this machine, for this machine and organization), newer than
+    /// the one held, and what it does opened with the key of this machine; a removal takes the automation away.
+    /// </summary>
+    /// <param name="linkId">The server link it came through.</param>
+    /// <param name="devices">The device list of that server, as this node verified it now.</param>
+    /// <param name="organizationId">The organization of that server.</param>
+    /// <param name="signed">The signed version.</param>
+    /// <param name="open">Opens the sealed content of a version, or says why it does not open.</param>
+    /// <param name="cancellationToken">Cancels before the automation is written.</param>
+    /// <returns>Whether the node holds that version now, or why it refused it.</returns>
+    internal async Task<NodeAutomationOutcome> AcceptFromServerAsync(string linkId, FleetDeviceListState devices, string? organizationId, FleetSignedAutomationVersion signed,
+        Func<FleetAutomationVersion, (FleetAutomationContent? Content, string? Reason)> open, CancellationToken cancellationToken)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(linkId);
+        ArgumentNullException.ThrowIfNull(devices);
+        ArgumentNullException.ThrowIfNull(signed);
+        ArgumentNullException.ThrowIfNull(open);
+        if (DeviceId is not { } self) return new(false, "This machine does not know its own device yet.");
+        if (!FleetAutomationVersionDocuments.TryVerify(signed, devices, organizationId, self, out var version, out var reason))
+        {
+            Log($"A version of an automation delivered by the server was refused: {reason}.");
+            return new(false, $"The signature of the version does not hold: {reason}.");
+        }
+
+        var signer = devices.Members[version.SignerDeviceId];
+        if (version.Removed)
+        {
+            var removed = await RemoveVersionAsync(version, cancellationToken).ConfigureAwait(false);
+            if (removed.Applied) Log($"The automation {version.AutomationId} was taken away by {signer.DeviceId} (version {version.Number}).");
+            return removed;
+        }
+
+        var (content, closed) = open(version);
+        if (content is null) return new(false, $"The definition does not open on this machine: {closed}.");
+        try
+        {
+            var (outcome, _, _) = await ApplyAsync(signer.DeviceId, signer.DeviceId, signed, version, content, linkId, cancellationToken).ConfigureAwait(false);
+            return outcome;
+        }
+        catch (FleetException exception)
+        {
+            return new(false, exception.Message);
+        }
     }
 
     /// <inheritdoc />
@@ -235,9 +293,14 @@ internal sealed class NodeAutomations : IFleetNodeAutomations, IAutomationRunGat
             removed = true;
         }
 
+        // The number stays: a version a channel or a server replays later is older, and refused.
         lock (_gate)
         {
-            if (_assignments.Remove(id)) SaveAssignments();
+            if (_assignments.TryGetValue(id, out var known) && !known.Removed)
+            {
+                _assignments[id] = known with { Removed = true, Signed = null };
+                SaveAssignments();
+            }
         }
 
         if (removed) Log($"{caller.Name} ({caller.DeviceId}) removed the automation {id}.");
@@ -249,6 +312,121 @@ internal sealed class NodeAutomations : IFleetNodeAutomations, IAutomationRunGat
     {
         ArgumentNullException.ThrowIfNull(caller);
         return [.. Engine.Snapshot.Entries.Where(static entry => entry.Source.IsAssigned).Select(entry => Describe(entry, AssignmentOf(entry.Id)))];
+    }
+
+    // Checks an assigned automation before a run: a version signed by the device that gave it, whose signature still
+    // verifies, read as it was given, from a device that may still give it.
+    private string? CheckAssignment(AutomationEntry entry)
+    {
+        if (AssignmentOf(entry.Id) is not { } assignment) return "No device of yours assigned this automation to this machine.";
+        if (assignment.Signed is not { } signed) return "This automation was given to this machine before its versions were signed: give it to this machine again.";
+        if (!string.Equals(assignment.Fingerprint, entry.Definition.Fingerprint(), StringComparison.Ordinal))
+            return "This automation changed on this machine since it was assigned: it runs only as its device assigned it.";
+        if (!FleetAutomationVersionDocuments.TryVerify(signed, DeviceId, out var version, out var key, out var reason) || version.Number != assignment.Number)
+            return $"The signature of this automation no longer holds on this machine ({reason ?? "another version"}): give it to this machine again.";
+        if (assignment.Via is { } link)
+        {
+            // Through a server: the signer stays a controller device of the organization, as this node last verified its list.
+            if (ServerDevices?.Invoke(link) is { } devices
+                && (!devices.Members.TryGetValue(key.DeviceId, out var member) || member.Kind != FleetDeviceKinds.Controller || devices.Removed.Contains(key.DeviceId)
+                    || !string.Equals(member.Key.Text, key.Text, StringComparison.Ordinal)))
+                return "The device that gave this automation is no longer a controller device of the organization.";
+            return null;
+        }
+
+        if (Devices?.Invoke(assignment.DeviceId) is not { } device)
+            return $"The device that assigned this automation ({assignment.DeviceName}) is no longer paired with this machine.";
+        if (!string.Equals(device.Fingerprint.ToString(), key.Fingerprint, StringComparison.Ordinal))
+            return $"The device that assigned this automation ({device.Name}) is paired now with another key.";
+        if (!device.Permissions.HasFlag(DevicePermissions.Automate))
+            return $"The device that assigned this automation ({device.Name}) may no longer give automations to this machine.";
+        return null;
+    }
+
+    // Writes a verified version as the one this machine runs. The same version given again changes nothing; an older one is refused.
+    private async Task<(NodeAutomationOutcome Outcome, AutomationEntry? Saved, NodeAutomationAssignment? Assignment)> ApplyAsync(string deviceId, string deviceName,
+        FleetSignedAutomationVersion signed, FleetAutomationVersion version, FleetAutomationContent content, string? via, CancellationToken cancellationToken)
+    {
+        await _applies.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            NodeAutomationAssignment? held;
+            lock (_gate) held = _assignments.GetValueOrDefault(version.AutomationId);
+            if (held is { Removed: false, Signed: { } same } && version.Number == held.Number && same.Payload == signed.Payload
+                && Engine.Snapshot.Find(version.AutomationId) is { Source.IsAssigned: true } current)
+                return (new(true, null), current, held);
+            if (held is not null && version.Number <= held.Number)
+                return (new(false, $"This machine holds version {held.Number} of this automation: a version is never replaced by one that is not newer."), null, null);
+
+            var text = content.Definition;
+            if (text.Length is 0 or > AutomationConfig.MaximumContentLength) throw Invalid("The automation is one table of a configuration file.");
+            var (definitions, faults) = AutomationConfig.Read(text, new AutomationSource("automations.put", null, null) { IsAssigned = true });
+            if (faults.Count > 0) throw Invalid(faults[0].Message);
+            if (definitions.Count != 1) throw Invalid("The automation is one table of a configuration file.");
+            var definition = definitions[0];
+            if (!string.Equals(definition.Id, version.AutomationId, StringComparison.Ordinal)) throw Invalid("The signed version names another automation than its definition.");
+            if (definition.Enabled != version.Enabled) throw Invalid("The signed version says another state than its definition.");
+            // A command of a trigger runs on this machine without anybody to approve it: only its owner writes one here.
+            if (definition.Triggers.Any(static trigger => trigger.IsCommand))
+                throw Invalid("A command trigger runs a command on this machine: it is not taken from another device.");
+            string? project = null;
+            if (content.Repository is { } repository)
+            {
+                project = await FindProjectAsync(repository, cancellationToken).ConfigureAwait(false)
+                    ?? throw new FleetException(FleetNodeErrorCodes.ProjectNotFound, null,
+                        $"This machine has no project of the repository {repository}: clone it there first (altanode projects clone).");
+            }
+
+            if (Engine.Snapshot.Find(definition.Id) is { Source.IsAssigned: false })
+                throw Invalid("An automation of this machine has the identifier of this one.");
+            if (await Engine.SaveAssignedAsync(definition with { Project = project }, cancellationToken).ConfigureAwait(false) is { } refused) throw Invalid(refused);
+            if (Engine.Snapshot.Find(definition.Id) is not { Source.IsAssigned: true } saved) throw Invalid("The automation was not read back on this machine.");
+            var assignment = new NodeAutomationAssignment(deviceId, deviceName, saved.Definition.Fingerprint(), _options.TimeProvider.GetUtcNow())
+            {
+                Number = version.Number, Signed = signed, Via = via,
+            };
+            lock (_gate)
+            {
+                _assignments[saved.Id] = assignment;
+                SaveAssignments();
+            }
+
+            Log($"{deviceName} ({deviceId}) assigned the automation '{saved.Definition.Name}' ({saved.Id}), version {version.Number}" + (via is null ? "." : " through a server."));
+            return (new(true, null), saved, assignment);
+        }
+        finally
+        {
+            _applies.Release();
+        }
+    }
+
+    // Takes an automation away by a signed removal newer than what the node holds.
+    private async Task<NodeAutomationOutcome> RemoveVersionAsync(FleetAutomationVersion version, CancellationToken cancellationToken)
+    {
+        await _applies.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            NodeAutomationAssignment? held;
+            lock (_gate) held = _assignments.GetValueOrDefault(version.AutomationId);
+            if (held is { Removed: true } && held.Number >= version.Number) return new(true, null);
+            if (held is not null && version.Number <= held.Number)
+                return new(false, $"This machine holds version {held.Number} of this automation: a removal older than it changes nothing.");
+            if (Engine.Snapshot.Find(version.AutomationId) is { Source.IsAssigned: true }
+                && await Engine.DeleteAsync(version.AutomationId, cancellationToken).ConfigureAwait(false) is { } refused)
+                return new(false, refused);
+            lock (_gate)
+            {
+                _assignments[version.AutomationId] = (held ?? new NodeAutomationAssignment(version.SignerDeviceId, version.SignerDeviceId, string.Empty, _options.TimeProvider.GetUtcNow()))
+                    with { Number = version.Number, Removed = true, Signed = null };
+                SaveAssignments();
+            }
+
+            return new(true, null);
+        }
+        finally
+        {
+            _applies.Release();
+        }
     }
 
     /// <inheritdoc />
@@ -337,7 +515,8 @@ internal sealed class NodeAutomations : IFleetNodeAutomations, IAutomationRunGat
             if (!File.Exists(path)) return new(StringComparer.Ordinal);
             using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
             var read = JsonSerializer.Deserialize(stream, NodeAutomationJsonContext.Default.DictionaryStringNodeAutomationAssignment);
-            return new((read ?? []).Where(static pair => pair.Value is { DeviceId.Length: > 0, Fingerprint.Length: > 0 }), StringComparer.Ordinal);
+            return new((read ?? []).Where(static pair => pair.Value is { DeviceId.Length: > 0, Fingerprint.Length: > 0 } or { DeviceId.Length: > 0, Removed: true }),
+                StringComparer.Ordinal);
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or JsonException or NotSupportedException)
         {

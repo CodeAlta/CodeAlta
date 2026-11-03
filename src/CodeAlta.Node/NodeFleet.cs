@@ -117,7 +117,10 @@ internal sealed class NodeFleet : IAsyncDisposable
             });
             // An assigned automation runs while the device that assigned it is still paired, with the automate permission.
             if (node.Automations is { } automations)
+            {
                 automations.Devices = deviceId => trusted.List().FirstOrDefault(device => string.Equals(device.DeviceId, deviceId, StringComparison.Ordinal));
+                automations.DeviceId = identity.DeviceId;
+            }
             string? file = null;
             // Without a listener the node API still serves the channels its servers relay.
             if (listen.Enabled)
