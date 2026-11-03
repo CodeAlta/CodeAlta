@@ -41,7 +41,8 @@ internal static class NodeExecutableLocator
     {
         ArgumentNullException.ThrowIfNull(exists);
         if (string.IsNullOrWhiteSpace(processPath)) return null;
-        var fileName = System.IO.Path.GetFileNameWithoutExtension(processPath);
+        // The name after the last separator, '/' or '\', as FindStore reads a path whatever the OS.
+        var fileName = System.IO.Path.GetFileNameWithoutExtension(processPath[(processPath.LastIndexOfAny(['/', '\\']) + 1)..]);
         if (string.Equals(fileName, "dotnet", StringComparison.OrdinalIgnoreCase))
         {
             return string.IsNullOrWhiteSpace(assemblyPath) ? null : new NodeExecutable(NodeExecutableKind.DotnetHost, processPath, [assemblyPath]);
