@@ -124,8 +124,8 @@ public interface IAutomationStore
     ValueTask<bool> DeleteAutomationAsync(string organizationId, string automationId, string machineId, AuditEntry audit, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Claims a due time of an automation for a run: granted when nobody claimed it, or when this run did already; a due
-    /// time claimed by another run, on any machine, stays its.
+    /// Claims a due time of an automation for a run: granted when nobody claimed it, or when this run did already, whose
+    /// lease is then renewed while it has not ended; a due time claimed by another run, on any machine, stays its.
     /// </summary>
     /// <param name="claim">The run that claims, with its occurrence and lease.</param>
     /// <param name="cancellationToken">Cancels the operation.</param>

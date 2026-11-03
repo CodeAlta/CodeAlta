@@ -108,7 +108,14 @@ public sealed partial class SqliteCoordinatorStore
             var held = QuerySingle(connection, transaction, AutomationRunColumns + " WHERE organization_id = $org AND automation_id = $id AND occurrence = $occurrence",
                 ReadAutomationRun, ("$org", claim.OrganizationId), ("$id", claim.AutomationId), ("$occurrence", claim.Occurrence));
             if (held is not null)
-                return held.RunId == claim.RunId && held.MachineId == claim.MachineId ? new AutomationClaimOutcome(true, null) : new AutomationClaimOutcome(false, held);
+            {
+                if (held.RunId != claim.RunId || held.MachineId != claim.MachineId) return new AutomationClaimOutcome(false, held);
+                // The same run claims again while it works: its lease is renewed, never once it ended.
+                if (held.EndedAt is null)
+                    Execute(connection, transaction, "UPDATE automation_runs SET lease_until = $lease, updated_at = $at WHERE organization_id = $org AND run_id = $run",
+                        ("$org", claim.OrganizationId), ("$run", claim.RunId), ("$lease", ToNullableTime(claim.LeaseUntil)), ("$at", ToTime(claim.UpdatedAt)));
+                return new AutomationClaimOutcome(true, null);
+            }
             // A run id is the machine's: one reported already for this run, without its due time, takes it now.
             if (QuerySingle(connection, transaction, AutomationRunColumns + " WHERE organization_id = $org AND run_id = $run", ReadAutomationRun,
                     ("$org", claim.OrganizationId), ("$run", claim.RunId)) is { } known)

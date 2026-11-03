@@ -18,6 +18,9 @@ internal sealed partial class NodeAutomations
     private readonly CancellationTokenSource _reportsStop = new();
     private int _reportQueued;
     private Task _reportTask = Task.CompletedTask;
+    // The due times claimed with a server for the runs still at work: their leases are renewed there while they run.
+    private readonly Dictionary<string, (string Link, FleetAutomationClaimRequest Claim)> _serverClaims = new(StringComparer.Ordinal);
+    private DateTimeOffset _serverClaimsRenewedAt;
 
     /// <summary>
     /// Gets or sets what claims a due time with the server of a link (<see cref="FleetAutomationMethods.Claim"/>); its
@@ -56,7 +59,50 @@ internal sealed partial class NodeAutomations
             return null;
         }
 
-        return result.Granted ? null : result.Message ?? "This due time was already taken by another run.";
+        if (!result.Granted) return result.Message ?? "This due time was already taken by another run.";
+        lock (_gate) _serverClaims[runId] = (link, new FleetAutomationClaimRequest(automationId, assignment.Number, occurrence, runId, default));
+        return null;
+    }
+
+    /// <summary>
+    /// Renews with their servers the leases of the due times this node claimed there for the runs still at work, at most
+    /// once a minute of <paramref name="now"/>: a run longer than its lease stays known as at work, and the server does
+    /// not take it for lost. A server that does not answer renews nothing; the run goes on.
+    /// </summary>
+    /// <param name="now">The time of the renewal.</param>
+    internal void RenewServerClaims(DateTimeOffset now)
+    {
+        if (ServerClaim is not { } claim) return;
+        (string Link, FleetAutomationClaimRequest Claim)[] renewals;
+        lock (_gate)
+        {
+            if (_serverClaims.Count == 0 || now - _serverClaimsRenewedAt < TimeSpan.FromMinutes(1) && now >= _serverClaimsRenewedAt) return;
+            _serverClaimsRenewedAt = now;
+            renewals = [.. _serverClaims.Values.Select(item => (item.Link, item.Claim with { LeaseUntil = now + AutomationClaimStore.LeaseDuration }))];
+        }
+
+        foreach (var (link, request) in renewals)
+        {
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    using var timeout = new CancellationTokenSource(ClaimTimeout);
+                    await claim(link, request, timeout.Token).ConfigureAwait(false);
+                }
+                catch (Exception exception) when (exception is not OutOfMemoryException)
+                {
+                    Log($"The lease of {request.Occurrence} of the automation {request.AutomationId} was not renewed with its server: {exception.Message}");
+                }
+            });
+        }
+    }
+
+    /// <summary>Forgets the claim a server holds for a run that ended: its lease is no longer renewed, and its end is reported.</summary>
+    /// <param name="runId">The run.</param>
+    internal void ReleaseServerClaim(string runId)
+    {
+        lock (_gate) _serverClaims.Remove(runId);
     }
 
     /// <summary>
@@ -195,10 +241,18 @@ internal sealed class NodeAutomationClaims(AutomationClaimStore local, NodeAutom
     public bool TryClaim(string automationId, string occurrence, string runId, DateTimeOffset now) => local.TryClaim(automationId, occurrence, runId, now);
 
     /// <inheritdoc />
-    public void Renew(DateTimeOffset now) => local.Renew(now);
+    public void Renew(DateTimeOffset now)
+    {
+        local.Renew(now);
+        automations.RenewServerClaims(now);
+    }
 
     /// <inheritdoc />
-    public void Release(string runId, DateTimeOffset now) => local.Release(runId, now);
+    public void Release(string runId, DateTimeOffset now)
+    {
+        local.Release(runId, now);
+        automations.ReleaseServerClaim(runId);
+    }
 
     /// <inheritdoc />
     public ValueTask<string?> ConfirmAsync(string automationId, string occurrence, string runId, CancellationToken cancellationToken)

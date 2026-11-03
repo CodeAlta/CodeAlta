@@ -57,7 +57,8 @@ The authority of an assignment is the authenticated, paired device on a direct c
   records the claims it learns and refuses a second run of the same occurrence after a takeover; `AutomationClaim.LeaseUntil`
   is the lease it reads.
   - Done with `automations.claim` before the run starts (`IAutomationClaims.ConfirmAsync`), with a lease; a server that
-    does not answer leaves the node's own claim in force. Leases are not renewed with the server; the reported end closes them.
+    does not answer leaves the node's own claim in force. While a run works, the node claims its due time again about
+    once a minute, which renews its lease on the server; the reported end closes it.
 - [x] **Desktop.** **Runs on** offers the machines of the linked server (`DesktopFleet.SyncOrganizationMachinesAsync`
   hosts, `IsPaired == false`), placed through the server rather than `automations.put` on a direct channel.
   - Done: `DesktopAutomationPlacement.ServerRoute` (`DesktopFleetServers.AutomationRoute`) seals each version with the

@@ -111,12 +111,30 @@ public sealed class NodeServerAutomationTests
             var otherRun = request with { Payload = request.Payload.Replace(runId, Guid.CreateVersion7().ToString("N"), StringComparison.Ordinal) };
             StringAssert.Contains((await automations.RunFromServerAsync(link, list, setup.Organization.Id, otherRun, token)).Refused, "signature");
 
+            // A long run: while it works, the node renews the lease of its due time with the server.
+            var gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var working = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            provider.Turns.Enqueue(ScriptedNodeProvider.WaitThenReply(gate.Task, "Done.", working));
+            var longOccurrence = AutomationService.Occurrence(entry.Definition.Triggers[0], Noon.AddHours(1).AddMinutes(30));
+            clock.Now = Noon.AddHours(1).AddMinutes(30).AddSeconds(5);
+            automations.Engine.Tick(clock.Now);
+            await working.Task.WaitAsync(Patience, token);
+            var claimed = await WaitForAsync(async () => (await desktop.ListAutomationRunsAsync(Id, null, token)).Runs.FirstOrDefault(run => run.Occurrence == longOccurrence), token);
+            await Task.Delay(50, token);
+            clock.Now = clock.Now.AddMinutes(2);
+            automations.Engine.Tick(clock.Now);
+            await WaitForAsync(async () => (await desktop.ListAutomationRunsAsync(Id, null, token)).Runs
+                .FirstOrDefault(run => run.Occurrence == longOccurrence && run.LeaseUntil > claimed.LeaseUntil), token);
+            gate.SetResult();
+            await WaitForAsync(async () => (await desktop.ListAutomationRunsAsync(Id, null, token)).Runs
+                .FirstOrDefault(run => run.Occurrence == longOccurrence && run.Status == AutomationRun.Completed), token);
+
             // The server is away when the next time comes: the node runs it alone.
             await server.DisposeAsync();
             server = null;
-            clock.Now = Noon.AddHours(1).AddMinutes(30).AddSeconds(5);
+            clock.Now = Noon.AddHours(2).AddMinutes(30).AddSeconds(5);
             automations.Engine.Tick(clock.Now);
-            await WaitForAsync(() => Task.FromResult(automations.Engine.Runs(Id, 10).FirstOrDefault(static run => run is { Status: AutomationRun.Completed, StartedAt.Hour: 13 })), token);
+            await WaitForAsync(() => Task.FromResult(automations.Engine.Runs(Id, 10).FirstOrDefault(static run => run is { Status: AutomationRun.Completed, StartedAt.Hour: 14 })), token);
         }
         finally
         {
