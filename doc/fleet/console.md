@@ -114,6 +114,11 @@ flowchart LR
   their person's access and the agent rules of [access control](access-control.md#agents-and-access): changing access is
   read-only for agents, and what would run unattended stays disabled until a person enables it.
 - `altacli fleet` gives the same commands to scripts and CI jobs, with an integration token or the person's device.
+- **A built-in `codealta-fleet` skill** teaches agents to use the fleet well: which machine fits a task (capabilities,
+  labels, readiness, load), starting and steering work elsewhere (`--machine`, Run on, moves), placing and checking
+  automations, reading statistics, updates and health, managing machines a person owns, and the rules agents keep
+  (what needs a person, what stays read-only). It names the exact `alta fleet` commands for each job, so an agent does a
+  fleet operation in a few calls instead of exploring the API.
 
 ## The phone and the TUI
 
