@@ -5,6 +5,8 @@ using CodeAlta.Catalog.SessionMoves;
 using CodeAlta.Fleet.Client;
 using CodeAlta.Fleet.NodeApi;
 using CodeAlta.Fleet.Protocol;
+using CodeAlta.Fleet.Protocol.Api;
+using CodeAlta.Fleet.Server;
 using XenoAtom.Logging;
 
 namespace CodeAlta.Desktop.Fleet;
@@ -79,6 +81,15 @@ internal sealed class DesktopAutomationPlacement : IAutomationPlacement, IAsyncD
     /// <summary>Raised, on any thread, when where an automation stands on its machine, or its runs there, changed.</summary>
     internal event Action? Changed;
 
+    /// <summary>
+    /// Gets what finds the way to a machine this computer is not paired with, through a server that lists it; null for
+    /// none. The automation is then given to the server, signed and sealed for the machine, which takes it when it connects.
+    /// </summary>
+    internal Func<string, DesktopServerAutomationRoute?>? ServerRoute { get; init; }
+
+    /// <summary>Gets how often the runs of a placed automation, and where it stands, are read again from its machine or server; tests shorten it.</summary>
+    internal TimeSpan RunsReadInterval { get; init; } = RunsReadEvery;
+
     /// <summary>Starts copying, and keeps the automations and their runs up to date.</summary>
     internal void Start()
     {
@@ -104,7 +115,7 @@ internal sealed class DesktopAutomationPlacement : IAutomationPlacement, IAsyncD
             if (_status.TryGetValue(entry.Id, out var status) && status.MachineId == machine) return status;
         }
 
-        return new(machine, _machines(machine)?.Machine.Name, "pending", "It is copied to the machine in a moment.", null);
+        return new(machine, _machines(machine)?.Machine.Name ?? Route(machine, static route => route.MachineName), "pending", "It is copied to the machine in a moment.", null);
     }
 
     /// <summary>The latest runs the machine of an automation reported, newest first.</summary>
@@ -121,6 +132,8 @@ internal sealed class DesktopAutomationPlacement : IAutomationPlacement, IAsyncD
         AutomationRun Failed(string message) => new(Guid.CreateVersion7().ToString("N"), entry.Id, now, "manual")
             { Name = entry.Definition.Name, Status = AutomationRun.Failed, Message = message, EndedAt = now };
         if (entry.Definition.RunsOn is not { } machineId) return Failed("It runs on this computer.");
+        if (_machines(machineId) is not { IsPaired: true } && Route(machineId, static route => route.MachineName) is { } reached)
+            return Failed($"{reached} is reached through a server: it runs this automation by its triggers. Pair it with this computer to run it by hand.");
         if (_machines(machineId) is not { } host) return Failed("No paired machine has the id " + machineId + ".");
         if (host.CurrentClient is not { } client) return Failed($"The machine {host.Machine.Name} is {RemoteSessionHost.Describe(host.State)}: it cannot run it now.");
         try
@@ -174,7 +187,13 @@ internal sealed class DesktopAutomationPlacement : IAutomationPlacement, IAsyncD
             lock (_gate) records = [.. _placed];
             foreach (var (id, record) in records)
             {
-                if (placed.TryGetValue(id, out var entry) && entry.Definition.RunsOn == record.MachineId) continue;
+                if (placed.TryGetValue(id, out var entry) && entry.Definition.RunsOn == record.MachineId && (record.Via is null || !IsPaired(record.MachineId))) continue;
+                if (record.Via is not null)
+                {
+                    changed |= await RemoveThroughServerAsync(id, record, placed.ContainsKey(id), cancellationToken).ConfigureAwait(false);
+                    continue;
+                }
+
                 if (_machines(record.MachineId) is not { CurrentClient: { } client }) continue;
                 try
                 {
@@ -198,6 +217,17 @@ internal sealed class DesktopAutomationPlacement : IAutomationPlacement, IAsyncD
             {
                 var machineId = entry.Definition.RunsOn!;
                 var host = _machines(machineId);
+                if (host is not { IsPaired: true } && ServerRoute?.Invoke(machineId) is { } route)
+                {
+                    using (route)
+                    {
+                        changed |= await CopyThroughServerAsync(entry, machineId, route, cancellationToken).ConfigureAwait(false);
+                        changed |= await ReadThroughServerAsync(entry.Id, machineId, route, cancellationToken).ConfigureAwait(false);
+                    }
+
+                    continue;
+                }
+
                 if (host?.CurrentClient is not { } client)
                 {
                     changed |= SetStatus(entry.Id, PendingStatus(entry, machineId, host));
@@ -263,7 +293,7 @@ internal sealed class DesktopAutomationPlacement : IAutomationPlacement, IAsyncD
         var key = Key(copy, repository);
         lock (_gate)
         {
-            if (_placed.TryGetValue(entry.Id, out var record) && record.MachineId == machineId && record.Key == key)
+            if (_placed.TryGetValue(entry.Id, out var record) && record.MachineId == machineId && record.Key == key && record.Via is null)
                 return SetStatus(entry.Id, new(machineId, machineName, "copied", null, record.CopiedAt));
         }
 
@@ -312,7 +342,7 @@ internal sealed class DesktopAutomationPlacement : IAutomationPlacement, IAsyncD
         var now = DateTimeOffset.UtcNow;
         lock (_gate)
         {
-            if (_runsReadAt.TryGetValue(id, out var readAt) && now - readAt < RunsReadEvery && now >= readAt) return false;
+            if (_runsReadAt.TryGetValue(id, out var readAt) && now - readAt < RunsReadInterval && now >= readAt) return false;
             _runsReadAt[id] = now;
         }
 
@@ -336,9 +366,178 @@ internal sealed class DesktopAutomationPlacement : IAutomationPlacement, IAsyncD
         }
     }
 
+    // Under _work. Gives an automation to the server of a machine this computer is not paired with, signed and sealed for
+    // that machine, unless the server holds it as it is now. Returns whether its state changed.
+    private async Task<bool> CopyThroughServerAsync(AutomationEntry entry, string machineId, DesktopServerAutomationRoute route, CancellationToken cancellationToken)
+    {
+        var machineName = route.MachineName;
+        if (entry.Problem is { } problem) return SetStatus(entry.Id, new(machineId, machineName, "failed", problem, null));
+        string? repository = null;
+        if (entry.ProjectPath is { } folder)
+        {
+            repository = await _repositoryOf(folder, cancellationToken).ConfigureAwait(false);
+            if (repository is null)
+                return SetStatus(entry.Id, new(machineId, machineName, "failed", "Its project has no remote repository that the other machine could find.", null));
+        }
+
+        var copy = entry.Definition with { RunsOn = null, Project = null };
+        var key = Key(copy, repository);
+        lock (_gate)
+        {
+            // Given already: where it stands is what the server last said (read with the runs).
+            if (_placed.TryGetValue(entry.Id, out var record) && record.MachineId == machineId && record.Key == key && record.Via == route.LinkId)
+                return _status.TryGetValue(entry.Id, out var known) && known.MachineId == machineId
+                    ? false
+                    : SetStatus(entry.Id, new(machineId, machineName, "pending", $"Given to the server: {machineName} takes it when it connects.", null));
+        }
+
+        var number = NextNumber(entry.Id);
+        try
+        {
+            // The server reads only the facts beside it: what it does is sealed for the machine and this person's controllers.
+            var sealedText = await route.SealAsync(new FleetAutomationContent(AutomationConfig.Write(string.Empty, copy), repository), entry.Id, number, machineId,
+                cancellationToken).ConfigureAwait(false);
+            var signed = _sign(new FleetAutomationVersion(FleetAutomationVersion.CurrentVersion, route.OrganizationId, entry.Id, number, machineId, false, copy.Enabled,
+                TriggerKinds(copy), null, null, sealedText, _deviceId(), string.Empty, DateTimeOffset.UtcNow));
+            await route.PutAsync(signed, cancellationToken).ConfigureAwait(false);
+            lock (_gate) _numbers[entry.Id] = number;
+        }
+        catch (ArgumentException exception)
+        {
+            return SetStatus(entry.Id, new(machineId, machineName, "failed", exception.Message, null));
+        }
+        catch (FleetServerException exception) when (exception.Status is System.Net.HttpStatusCode.Forbidden)
+        {
+            return SetStatus(entry.Id, new(machineId, machineName, "failed", $"{machineName} is not one of your machines: you give automations to the machines you own.", null));
+        }
+        catch (FleetServerException exception) when ((int)exception.Status is >= 400 and < 500)
+        {
+            return SetStatus(entry.Id, new(machineId, machineName, "failed", exception.Message, null));
+        }
+        catch (Exception exception) when (exception is FleetServerException or HttpRequestException or IOException or FleetDeviceListException or TaskCanceledException
+            && !cancellationToken.IsCancellationRequested)
+        {
+            return SetStatus(entry.Id, new(machineId, machineName, "pending", "The server did not answer: it is given when it does.", null));
+        }
+
+        lock (_gate)
+        {
+            _placed[entry.Id] = new PlacedAutomation(machineId, key, DateTimeOffset.UtcNow) { Number = number, Via = route.LinkId };
+            _runsReadAt.Remove(entry.Id);
+            Save();
+        }
+
+        Log($"The automation '{entry.Definition.Name}' ({entry.Id}) was given to {machineName} through its server.");
+        SetStatus(entry.Id, new(machineId, machineName, "pending", $"Given to the server: {machineName} takes it when it connects.", null));
+        return true;
+    }
+
+    // Under _work. Reads where an automation given through a server stands (taken, waiting, refused by the machine) and its runs, at most every so often.
+    private async Task<bool> ReadThroughServerAsync(string id, string machineId, DesktopServerAutomationRoute route, CancellationToken cancellationToken)
+    {
+        var now = DateTimeOffset.UtcNow;
+        PlacedAutomation? record;
+        lock (_gate)
+        {
+            if (!_placed.TryGetValue(id, out record) || record.Via != route.LinkId || record.MachineId != machineId) return false;
+            if (_runsReadAt.TryGetValue(id, out var readAt) && now - readAt < RunsReadInterval && now >= readAt) return false;
+            _runsReadAt[id] = now;
+        }
+
+        AutomationDto? held;
+        IReadOnlyList<AutomationRun> runs;
+        try
+        {
+            held = (await route.ListAsync(cancellationToken).ConfigureAwait(false)).Automations.FirstOrDefault(item => item.Id == id && item.MachineId == machineId);
+            runs = [.. (await route.ListRunsAsync(id, RunsKept, cancellationToken).ConfigureAwait(false)).Runs.Select(run => new AutomationRun(run.RunId, run.AutomationId, run.StartedAt,
+                run.Trigger)
+            {
+                Name = _automations.Snapshot.Find(id)?.Definition.Name, SessionId = run.SessionId, Status = run.Status == "claimed" ? AutomationRun.Running : run.Status,
+                Message = run.Message, EndedAt = run.EndedAt,
+            })];
+        }
+        catch (Exception exception) when (exception is FleetServerException or HttpRequestException or IOException or TaskCanceledException && !cancellationToken.IsCancellationRequested)
+        {
+            lock (_gate) _runsReadAt.Remove(id);
+            return false;
+        }
+
+        var name = route.MachineName;
+        var status = held switch
+        {
+            { Number: var number, State: "applied" } when number == record.Number => new AutomationPlacementStatus(machineId, name, "copied", null, record.CopiedAt),
+            { Number: var number, State: "refused" } when number == record.Number => new AutomationPlacementStatus(machineId, name, "failed",
+                $"{name} refused it: {held.Message ?? "no reason given"}.", null),
+            null => new AutomationPlacementStatus(machineId, name, "pending", "The server no longer holds it: it is given again.", null),
+            _ => new AutomationPlacementStatus(machineId, name, "pending", $"Given to the server: {name} takes it when it connects.", null),
+        };
+        if (held is null)
+        {
+            lock (_gate)
+            {
+                _placed.Remove(id);
+                Save();
+            }
+        }
+
+        var changed = SetStatus(id, status);
+        lock (_gate)
+        {
+            if (_runs.TryGetValue(id, out var known) && known.SequenceEqual(runs)) return changed;
+            _runs[id] = runs;
+            return true;
+        }
+    }
+
+    // Under _work. Takes an automation away from a machine it was given through a server: a signed removal, newer than the version given.
+    private async Task<bool> RemoveThroughServerAsync(string id, PlacedAutomation record, bool stillPlaced, CancellationToken cancellationToken)
+    {
+        if (ServerRoute?.Invoke(record.MachineId) is not { } route) return false;
+        using (route)
+        {
+            var number = NextNumber(id);
+            try
+            {
+                var removal = _sign(new FleetAutomationVersion(FleetAutomationVersion.CurrentVersion, route.OrganizationId, id, number, record.MachineId, true, false, [], null, null,
+                    null, _deviceId(), string.Empty, DateTimeOffset.UtcNow));
+                await route.PutAsync(removal, cancellationToken).ConfigureAwait(false);
+            }
+            catch (FleetServerException exception) when (exception.Status is System.Net.HttpStatusCode.Conflict or System.Net.HttpStatusCode.NotFound
+                or System.Net.HttpStatusCode.Forbidden)
+            {
+                // The server holds a newer version, or none: nothing of this computer is left to take away there.
+                Log($"The automation {id} was not taken away from {route.MachineName} through its server: {exception.Message}");
+            }
+            catch (Exception exception) when (exception is FleetServerException or HttpRequestException or IOException or ArgumentException or TaskCanceledException
+                && !cancellationToken.IsCancellationRequested)
+            {
+                Log($"The automation {id} could not be taken away from {route.MachineName} through its server: {exception.Message}");
+                return false;
+            }
+
+            lock (_gate)
+            {
+                _numbers[id] = number;
+                _placed.Remove(id);
+                if (!stillPlaced) { _status.Remove(id); _runs.Remove(id); }
+                Save();
+            }
+
+            return true;
+        }
+    }
+
+    private bool IsPaired(string machineId) => _machines(machineId) is { IsPaired: true };
+
+    private T? Route<T>(string machineId, Func<DesktopServerAutomationRoute, T> read) where T : class
+    {
+        if (ServerRoute?.Invoke(machineId) is not { } route) return null;
+        using (route) return read(route);
+    }
+
     private AutomationPlacementStatus PendingStatus(AutomationEntry entry, string machineId, RemoteSessionHost? host)
     {
-        if (host is null) return new(machineId, null, "failed", "No paired machine has this id: choose another machine, or This computer.", null);
+        if (host is null) return new(machineId, null, "failed", "No machine this computer reaches has this id: choose another machine, or This computer.", null);
         lock (_gate)
         {
             var copiedAt = _placed.TryGetValue(entry.Id, out var record) && record.MachineId == machineId ? record.CopiedAt : (DateTimeOffset?)null;
@@ -429,6 +628,9 @@ internal sealed record PlacedAutomation(string MachineId, string Key, DateTimeOf
 {
     /// <summary>Gets the number of the version signed for it.</summary>
     public long Number { get; init; }
+
+    /// <summary>Gets the server link it was given through; null for a paired machine on a direct channel.</summary>
+    public string? Via { get; init; }
 }
 
 [JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase)]

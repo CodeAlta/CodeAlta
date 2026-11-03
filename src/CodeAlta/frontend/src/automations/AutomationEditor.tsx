@@ -150,7 +150,8 @@ export function AutomationEditor({ hub, initial, projects, providers, epoch, onC
   const name = useRef<HTMLInputElement>(null);
   const edit = (change: Partial<AutomationForm>) => { setForm(current => ({ ...current, ...change })); setProblem(null); };
   const project = projects.find(candidate => candidate.id === form.projectId);
-  const paired = useMachines(epoch).filter(machine => machine.paired);
+  // The machines this computer reaches: paired ones, and those of a linked server, which gets the automation sealed for them.
+  const reachable = useMachines(epoch);
   // An automation runs in the space of its project when it is in one, else in the default space: the host reads its catalogs there.
   const api = useMemo(() => epoch ? sessionSettingsApi(epoch, project?.id ?? null, project?.path ?? null, null) : null, [epoch, project?.id, project?.path]);
   const settings = sessionSettingsOf(form);
@@ -209,12 +210,12 @@ export function AutomationEditor({ hub, initial, projects, providers, epoch, onC
             <SegmentedControl size="small" value={form.storeInProject ? "project" : "user"} disabled={busy} onValueChange={value => edit({ storeInProject: value === "project" })}
               options={[{ value: "user", label: t("My configuration") }, { value: "project", label: t("The project") }]} />
           </FormGroup>}
-          {/* A paired machine runs it while this computer is closed: offered once a machine is paired, for an automation of yours. */}
-          {!form.storeInProject && (paired.length > 0 || form.runsOn) && <FormGroup label={t("Runs on")} labelFor="automation-machine">
+          {/* Another machine runs it while this computer is closed: offered once one is paired or listed by a server, for an automation of yours. */}
+          {!form.storeInProject && (reachable.length > 0 || form.runsOn) && <FormGroup label={t("Runs on")} labelFor="automation-machine">
             <HTMLSelect id="automation-machine" fill value={form.runsOn ?? ""} disabled={busy} onChange={event => edit({ runsOn: event.target.value || null })}>
               <option value="">{t("This computer")}</option>
-              {form.runsOn && !paired.some(machine => machine.id === form.runsOn) && <option value={form.runsOn}>{t("Unavailable machine")}</option>}
-              {paired.map(machine => <option key={machine.id} value={machine.id}>
+              {form.runsOn && !reachable.some(machine => machine.id === form.runsOn) && <option value={form.runsOn}>{t("Unavailable machine")}</option>}
+              {reachable.map(machine => <option key={machine.id} value={machine.id}>
                 {machineState(machine) === "online" ? machine.name : t("{machine} (offline)", { machine: machine.name })}</option>)}
             </HTMLSelect>
           </FormGroup>}

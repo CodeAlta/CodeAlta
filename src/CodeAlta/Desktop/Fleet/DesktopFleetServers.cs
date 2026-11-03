@@ -96,6 +96,26 @@ internal sealed class DesktopFleetServers : IAsyncDisposable
         return [.. machines.Select(static pair => (pair.Key, pair.Value))];
     }
 
+    /// <summary>
+    /// Finds the way to give automations to a machine through a server that lists it: a connection online to a server
+    /// of an organization this computer belongs to; the caller disposes it.
+    /// </summary>
+    /// <param name="machineId">The device of the machine.</param>
+    /// <returns>The route, or null when no server this computer is connected to lists the machine.</returns>
+    public DesktopServerAutomationRoute? AutomationRoute(string machineId)
+    {
+        foreach (var connection in Connections)
+        {
+            if (connection.Connector is not { State: FleetConnectorState.Online } connector || !connector.Directory.Machines.TryGetValue(machineId, out var machine)
+                || machine.Kind != FleetDeviceKinds.Node)
+                continue;
+            if ((connection.Link.OrganizationId ?? connector.Devices.Current?.OrganizationId) is not { } organization) continue;
+            return new DesktopServerAutomationRoute(connection.Link.Id, organization, machine.Inventory.Name, connector.Devices, Identity(), Client(connection.Link.Id));
+        }
+
+        return null;
+    }
+
     /// <summary>Gets the id of this device, once its key exists.</summary>
     public string? DeviceId => Volatile.Read(ref _identity)?.DeviceId;
 

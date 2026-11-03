@@ -59,8 +59,12 @@ The authority of an assignment is the authenticated, paired device on a direct c
   is the lease it reads.
   - Done with `automations.claim` before the run starts (`IAutomationClaims.ConfirmAsync`), with a lease; a server that
     does not answer leaves the node's own claim in force. Leases are not renewed with the server; the reported end closes them.
-- [ ] **Desktop.** **Runs on** offers the machines of the linked server (`DesktopFleet.SyncOrganizationMachinesAsync`
+- [x] **Desktop.** **Runs on** offers the machines of the linked server (`DesktopFleet.SyncOrganizationMachinesAsync`
   hosts, `IsPaired == false`), placed through the server rather than `automations.put` on a direct channel.
+  - Done: `DesktopAutomationPlacement.ServerRoute` (`DesktopFleetServers.AutomationRoute`) seals each version with the
+    server's anchored device list and `PUT`s it; where it stands (pending, taken, refused) and its runs come from the
+    server; leaving the machine sends a signed removal. Not done: a run by hand on a machine reached only through a
+    server (it says to pair the machine); the server's tombstone of a removal is not forgotten (`DELETE`) by the desktop.
 - [ ] **Tests.** The multi-host harness: desktop, server and node in one process; a server that is down while a
   schedule fires (the node fires it), a hostile server that alters a version (the node refuses it), a revoked device.
 
