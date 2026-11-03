@@ -1,6 +1,6 @@
 ---
 title: Fleet automations through CodeAlta Server (M3b, personal scope)
-status: in-progress
+status: done
 created: 2026-11-03
 summary: What is left after the first part of fleet automations (engine library, automations on altanode, Runs on a paired machine): the server stores each signed automation version and assigns it to a machine linked to it, nodes verify the signature and keep their copies, runs are reported as facts, and the desktop places automations on machines it reaches only through a server.
 ---
@@ -84,4 +84,5 @@ The authority of an assignment is the authenticated, paired device on a direct c
 - [x] Pausing all automations on the desktop does not pause those placed on machines; decide whether it should.
   - Decided: it does. While paused, the copies are given disabled (a new signed version), and enabled again once
     resumed. A developer instance, which starts paused, leaves the machines as they are.
-- [ ] `altanode automations` (list, runs, policy) for the owner on the node, instead of editing the policy file.
+- [x] `altanode automations` (list, runs, policy) for the owner on the node, instead of editing the policy file.
+  - Done on the files of the profile: `list`, `runs [<automation>]`, `policy [on|off|credentials any|account]`.

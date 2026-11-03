@@ -157,7 +157,7 @@ The machine fires its schedules and starts its sessions; **Run now** runs it the
 
 A machine of your server that is not paired with this computer gets the automation through the server, with no permission to give on the machine: it must be one of your machines. The server keeps it sealed, so it cannot read nor change it, and the machine gets it when it connects. Its details say whether the machine took it or refused it, and why. **Run now** asks the machine through the server while it is online; its triggers run it either way, also while the server is away.
 
-On the machine, what it runs is up to it: `fleet/automation-policy.json` in its state root turns automations off (`"enabled": false`) or limits them to account credentials (`"credentials": "account"`: API keys and local models, never a personal plan). A run the machine refuses is listed with its reason. A computer that loses the permission, or is revoked, no longer gets its automations run.
+On the machine, what it runs is up to it: `altanode automations policy off` turns automations off (`on` again), and `altanode automations policy credentials account` limits them to account credentials (API keys and local models, never a personal plan; `any` again). A node that runs applies the change at its next run. `altanode automations` lists what the devices gave the machine, and `altanode automations runs` their latest runs. A run the machine refuses is listed with its reason. A computer that loses the permission, or is revoked, no longer gets its automations run.
 
 ## Move a session
 
