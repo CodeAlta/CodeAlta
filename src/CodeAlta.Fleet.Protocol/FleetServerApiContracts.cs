@@ -211,6 +211,21 @@ public sealed record CreateMetadataKeyRequest(string Id, int Epoch, IReadOnlyLis
 /// <param name="Wraps">The copies.</param>
 public sealed record AddMetadataKeyWrapsRequest(IReadOnlyList<MetadataKeyWrapDto> Wraps);
 
+/// <summary>
+/// The telemetry setting of the fleet as the server holds it (<c>GET /api/v1/telemetry</c>, for the owner's controller
+/// devices): the setting a controller device signed, and the headers of the collector only the server holds (those of
+/// the server route).
+/// </summary>
+/// <param name="Settings">The signed setting, or null when the fleet has none.</param>
+/// <param name="ServerHeaders">The headers the server sends to the collector on the server route, or null.</param>
+/// <param name="UpdatedAt">When it was last set, or null.</param>
+public sealed record TelemetrySettingsDto(FleetSignedTelemetrySettings? Settings, IReadOnlyDictionary<string, string>? ServerHeaders, DateTimeOffset? UpdatedAt);
+
+/// <summary>The body of <c>PUT /api/v1/telemetry</c>: a setting the calling controller device signed, numbered after the one held.</summary>
+/// <param name="Settings">The signed setting.</param>
+/// <param name="ServerHeaders">The headers the server sends to the collector on the server route (API keys); never pushed to machines.</param>
+public sealed record SetTelemetrySettingsRequest(FleetSignedTelemetrySettings Settings, IReadOnlyDictionary<string, string>? ServerHeaders = null);
+
 /// <summary>The source-generated contracts of the REST API.</summary>
 [JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase, DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull)]
 [JsonSerializable(typeof(SetupRequest))]
@@ -240,4 +255,6 @@ public sealed record AddMetadataKeyWrapsRequest(IReadOnlyList<MetadataKeyWrapDto
 [JsonSerializable(typeof(ListResponse<MetadataKeyDto>))]
 [JsonSerializable(typeof(CreateMetadataKeyRequest))]
 [JsonSerializable(typeof(AddMetadataKeyWrapsRequest))]
+[JsonSerializable(typeof(TelemetrySettingsDto))]
+[JsonSerializable(typeof(SetTelemetrySettingsRequest))]
 public sealed partial class ServerApiJsonContext : JsonSerializerContext;

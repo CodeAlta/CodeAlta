@@ -58,6 +58,13 @@ public static class FleetServerMethods
     /// </summary>
     public const string RelayPath = "/fleet/v1/relay";
 
+    /// <summary>
+    /// The event of the telemetry setting of the fleet (<see cref="FleetSignedTelemetrySettings"/>): sent once a device
+    /// connects, when the organization has one, and to every device online when an owner changes it. A device applies it
+    /// only once it verified the signature of a controller device of its organization.
+    /// </summary>
+    public const string TelemetrySettings = "telemetry.settings";
+
     /// <summary>The kinds of <see cref="FleetDirectoryChange"/>.</summary>
     public static class ChangeKinds
     {
@@ -278,4 +285,5 @@ public sealed record FleetRelayClose(string RelayId, string? Reason = null);
 [JsonSerializable(typeof(FleetRelayIncoming))]
 [JsonSerializable(typeof(FleetRelayRef))]
 [JsonSerializable(typeof(FleetRelayClose))]
+[JsonSerializable(typeof(FleetSignedTelemetrySettings))]
 public sealed partial class FleetServerJsonContext : JsonSerializerContext;
