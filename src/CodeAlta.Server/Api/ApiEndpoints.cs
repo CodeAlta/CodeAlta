@@ -90,6 +90,28 @@ internal static class ApiEndpoints
             .Produces<DeviceDto>()
             .WithSummary("Revokes a device: an approved one with the signed entry that removes it, a pending one without. Its connection is closed.");
 
+        api.MapPost("/devices/self/leave", (LeaveRequest? request, HttpContext context, DeviceService devices) =>
+                AuditedAsync(context, "device.leave", null, actor => devices.LeaveAsync(actor, request, Origin(context), context.RequestAborted)))
+            .Produces<LeaveResponse>()
+            .WithSummary("The calling device leaves the server: what it published, its copies of keys and the automations given to it are withdrawn.");
+
+        api.MapPost("/recovery-keys", (CreateRecoveryKeyRequest? request, HttpContext context, DeviceService devices) =>
+                AuditedAsync(context, "recovery_key.create", null, actor => devices.AddRecoveryKeyAsync(actor, request, Origin(context), context.RequestAborted),
+                    StatusCodes.Status201Created))
+            .Produces<DeviceDto>(StatusCodes.Status201Created)
+            .WithSummary("Records the recovery key of the calling controller device's person: the entry that adds it, signed by that device, and its sealed anchor.");
+
+        api.MapGet("/recovery-keys/self", (HttpContext context, DeviceService devices) =>
+                devices.GetRecoveryAnchorAsync(DeviceAuthenticationMiddleware.GetDevice(context), context.RequestAborted))
+            .WithSummary("The anchor of the device list a recovery key sealed, for that recovery key only.");
+
+        api.MapPost("/recover", async (RecoverRequest? request, HttpContext context, DeviceService devices) =>
+                Results.Json(await devices.RecoverAsync(request, DeviceAuthenticationMiddleware.GetSigned(context), Origin(context), context.RequestAborted).ConfigureAwait(false),
+                    ServerApiJsonContext.Default.DeviceDto, statusCode: StatusCodes.Status201Created))
+            .WithMetadata(new AllowUnknownDeviceAttribute())
+            .Produces<DeviceDto>(StatusCodes.Status201Created)
+            .WithSummary("Signs a new device in as a controller device of a person with the entry the person's recovery key signed; the request is signed by the new device's key.");
+
         api.MapGet("/device-list", async (HttpContext context, ICoordinatorStore store) =>
             {
                 var actor = DeviceAuthenticationMiddleware.GetDevice(context);

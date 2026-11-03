@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
 import { Button, Callout, InputGroup, PopoverNext, Switch, Tag } from "@blueprintjs/core";
-import { machines, type MachineDeviceView, type MachineManagement, type MachineUpdateView, type MachineView } from "#neoastra";
+import { machines, type MachineDeviceView, type MachineManagement, type MachineUpdateView, type MachineView, type SecretsList } from "#neoastra";
 import { AppIcon } from "../AppIcon";
+import { SecretsBody, type SecretsActions } from "../secrets/SecretsSettings";
 import { ActivitySpinner } from "../ActivitySpinner";
 import { RemoveButton } from "../SettingsPage";
 import { useShellLanguage } from "../shellLanguage";
@@ -12,7 +13,7 @@ import { confirmsLoss, devicePermissions, hasPermission, managementProblem, orde
 
 /** The calls of the page of a machine. */
 export type MachinePageApi = Pick<typeof machines, "management" | "setDevicePermission" | "revokeDevice" | "addProject" | "cloneProject" | "removeProject"
-  | "readLog" | "updateMachine">;
+  | "readLog" | "updateMachine" | "secrets" | "setSecret" | "rotateSecret" | "deleteSecret" | "setVariable" | "deleteVariable">;
 
 type Problem = { key: MessageKey; detail?: string | null } | null;
 
@@ -89,6 +90,7 @@ export function MachinePage({ epoch, machine, api = machines, onBack }: { epoch:
     </>}
     {view && (view.status === "ok" || view.status === "not_manager") && <ProvidersSection view={view} machine={machine} />}
     {view?.status === "ok" && <>
+      <SecretsSection epoch={epoch} machine={machine} api={api} />
       <UpdatesSection epoch={epoch} machine={machine} view={view} api={api} onChanged={reload} />
       <LogSection epoch={epoch} machine={machine} api={api} />
     </>}
@@ -203,6 +205,62 @@ function ProvidersSection({ view, machine }: { view: MachineManagement; machine:
         {provider.isDefault && <Tag minimal round>{t("Default")}</Tag>}
         <span className="muted-text">{[provider.defaultModel, t(provider.models === 1 ? "{count} model" : "{count} models", { count: provider.models })].filter(Boolean).join(" · ")}</span>
       </li>)}</ul>}
+  </section>;
+}
+
+/**
+ * The secrets and variables of the machine, as Settings > Secrets shows those of this computer: secrets by name (Add,
+ * Rotate, Delete), variables with their values. Each change goes to the machine, which checks that this computer manages it.
+ */
+function SecretsSection({ epoch, machine, api }: { epoch: string; machine: MachineView; api: MachinePageApi }) {
+  const { t } = useShellLanguage();
+  const [listing, setListing] = useState<SecretsList | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [adding, setAdding] = useState(false);
+  const [problem, setProblem] = useState<Problem>(null);
+  const [generation, setGeneration] = useState(0);
+  useEffect(() => {
+    const abort = new AbortController();
+    api.secrets({ expectedEpoch: epoch, machineId: machine.id }, { signal: abort.signal, timeoutMilliseconds: 30_000 }).then(value => {
+      if (abort.signal.aborted) return;
+      const failed = managementProblem(value.status);
+      if (failed) setProblem({ key: failed }); else setListing(value);
+    }, () => { if (!abort.signal.aborted) setProblem({ key: "The machine does not answer: it is offline." }); });
+    return () => abort.abort();
+  }, [api, epoch, machine.id, generation]);
+  // One change on the machine, then the list read again; what went wrong stays above the list.
+  const run = async (call: () => Promise<{ status: string; message?: string | null }>) => {
+    setBusy(true);
+    setProblem(null);
+    try {
+      const result = await call();
+      const failed = managementProblem(result.status);
+      if (failed) { setProblem({ key: failed, detail: result.message }); return false; }
+      return true;
+    } catch {
+      setProblem({ key: "The machine does not answer: it is offline." });
+      return false;
+    } finally {
+      setBusy(false);
+      setGeneration(value => value + 1);
+    }
+  };
+  const target = { expectedEpoch: epoch, machineId: machine.id };
+  const actions: SecretsActions = {
+    setSecret: (name, value) => api.setSecret({ ...target, name, value }),
+    rotateSecret: (name, value) => api.rotateSecret({ ...target, name, value }),
+    deleteSecret: name => api.deleteSecret({ ...target, name }),
+    setVariable: (name, value) => api.setVariable({ ...target, name, value }),
+    deleteVariable: name => api.deleteVariable({ ...target, name }),
+  };
+  return <section className="machine-section machine-secrets" aria-label={t("Secrets")}>
+    <div className="machine-section-head">
+      <h2>{t("Secrets")}</h2>
+      <Button size="small" icon={<AppIcon name="plus" size={14} />} disabled={!listing || busy || adding} onClick={() => setAdding(true)}>{t("Add a secret…")}</Button>
+    </div>
+    <p className="muted-text">{t("Named values of the machine. Its configuration refers to them as ${secret:NAME} and ${var:NAME}; the value of a secret never comes back here.")}</p>
+    {problem && <Callout compact intent="warning" role="alert">{t(problem.key)}{problem.detail && <div className="muted-text">{problem.detail}</div>}</Callout>}
+    {listing && <SecretsBody flat listing={listing} busy={busy} adding={adding} onAdded={() => setAdding(false)} run={run} actions={actions} />}
   </section>;
 }
 

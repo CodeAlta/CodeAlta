@@ -78,7 +78,9 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
 
     private static int RunWithCapture(DesktopLaunchOptions options, Func<DesktopLaunchOptions, DesktopLogCapture?, int> run)
     {
-        var capture = DesktopLogging.Initialize(options.DataRoot, LoggingSettingsOf(options), out var flushPending);
+        // The secrets of the machine never land in the log: their values are masked in its file and its rows.
+        var masker = options.CatalogRoot is { } secretsRoot ? new CodeAlta.Agent.Runtime.AgentSecretMasker(new CodeAlta.Catalog.Secrets.LocalSecretStore(secretsRoot).GetSecretValues) : null;
+        var capture = DesktopLogging.Initialize(options.DataRoot, LoggingSettingsOf(options), masker, out var flushPending);
         var result = 1;
         try
         {
@@ -1051,10 +1053,13 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                         machinesService.ServerAddress = linkId => fleetServers.Connections.FirstOrDefault(connection => connection.Link.Id == linkId)?.Link.Url;
                         machinesService.CreateJoinCode = async (linkId, token) => (await fleetServers.CreateEnrollmentTokenAsync(linkId, TimeSpan.FromMinutes(10),
                             "Added from CodeAlta Desktop", token).ConfigureAwait(false)).Token;
-                        machinesService.ApproveDevice = async (linkId, deviceId, token) => await fleetServers.ApproveAsync(linkId, deviceId, token).ConfigureAwait(false);
+                        machinesService.ApproveDevice = async (linkId, deviceId, words, token) => await fleetServers.ApproveAsync(linkId, deviceId, words, token).ConfigureAwait(false);
                     }
 
                     builder.AddMachinesService(machinesService);
+                    // A secret set here is masked at once in the sessions of the host.
+                    builder.AddSecretsService(new SecretsService(new CodeAlta.Catalog.Secrets.LocalSecretStore(host.CatalogOptions.GlobalRoot), epoch,
+                        () => host.AgentHub.SecretMasker?.Refresh()));
                     builder.AddFleetServerService(fleetServers is null ? new FleetServerService() : new FleetServerService(fleetServers, epoch)
                     {
                         Spaces = host.SpaceCatalog, IsPaired = machineId => fleet?.Find(machineId) is { IsPaired: true },
@@ -1071,6 +1076,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                     {
                         // The file may change the levels of the log: they are taken at once.
                         Saved = applicationLogs.Reload,
+                        SecretChanged = () => host.AgentHub.SecretMasker?.Refresh(),
                         ProviderStates = () => host.ModelProviderInitializationService.CurrentStates,
                         Spaces = host.SpaceCatalog,
                         SessionSpace = (sessionId, token) => host.RuntimeService.GetSessionSpaceAsync(sessionId, token),
@@ -1578,6 +1584,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
             builder.AddSpacesService(new SpacesService());
             builder.AddLabelsService(new LabelsService());
             builder.AddSpaceIdentityService(new SpaceIdentityService());
+            builder.AddSecretsService(new SecretsService());
             builder.AddPromptImagesService(new PromptImagesService());
             builder.AddToolCallsService(new ToolCallsService());
             builder.AddMcpAppsService(new McpAppsService());

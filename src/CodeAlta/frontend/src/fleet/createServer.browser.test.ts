@@ -31,6 +31,12 @@ test("Create my server leads with a machine over SSH, says what blocks it from h
     await page.shot("create-server-done");
     assert.deepEqual((await calls(page)).filter(call => call.ssh || call.join), [{ ssh: "me@box", address: null, port: 2586 }, { ssh: "me@box", address: null, port: 2586 },
       { join: "mac", link: "link-1" }]);
+    // The owner's recovery key came with the server: Done gives its words to the page, which shows them once.
+    assert.equal(await page.evaluate(`document.querySelector('.create-server-dialog .create-server-recovery-note')?.textContent`), "Done shows your recovery key next, once.");
+    await page.clickText(".create-server-dialog .bp6-button", "Done");
+    const closed = (await calls(page)).find(call => "close" in call);
+    assert.equal(closed?.close, true);
+    assert.equal((closed?.recoveryWords as string).split(" ").length, 32, "the 32 words of the recovery key");
     assert.deepEqual(page.problems, []);
   }, options);
 });
@@ -62,6 +68,7 @@ test("A device that waits comes as a toast with its words, and the Fleet button 
     assert.equal(await page.evaluate(`document.querySelector('.fleet-approval-toast strong').textContent`), "build-box asks to join Home as a machine.");
     await page.clickText(".fleet-approval-toast .bp6-button", "Approve");
     await page.until(`document.querySelector('.fleet-approvals-button')?.getAttribute('aria-label') === 'Fleet'`, "nothing waits");
-    assert.ok((await calls(page)).some(call => call.approve === "box"));
+    assert.deepEqual((await calls(page)).filter(call => call.approve), [{ approve: "box", words: "ruby scarf apple ember camera finch" }],
+      "the approval names the words the toast showed: the host signs the key of those words only");
   }, options);
 });

@@ -10,6 +10,9 @@ internal sealed partial class ModelProviderEditorItemViewModel
     private Action? _editedCallback;
     private bool _isInitialized;
 
+    // The name of the secret of this machine that holds the key, as the file has it: not edited here.
+    public string? ApiKeySecret => _source.ApiKeySecret;
+
     private ModelProviderEditorItemViewModel(CodeAltaProviderDocument source)
     {
         ArgumentNullException.ThrowIfNull(source);
@@ -247,6 +250,8 @@ internal sealed partial class ModelProviderEditorItemViewModel
         var supportsApiKeyField = ProviderType is "openai-chat" or "openai-responses" or "azure-openai" or "anthropic" or "google-genai" or "mistral";
         definition.ApiKey = supportsApiKeyField && !UseDefaultApiKey ? NormalizeText(ApiKey) : null;
         definition.ApiKeyEnv = supportsApiKeyField && !UseDefaultApiKeyEnv ? NormalizeText(ApiKeyEnv) : null;
+        // The secret of the key is set in CodeAlta Desktop or the TOML of the provider: kept as the file has it.
+        definition.ApiKeySecret = supportsApiKeyField ? definition.ApiKeySecret : null;
         definition.ApiUrl = UseDefaultApiUrl ? null : NormalizeText(ApiUrl);
         definition.GitHubEnterpriseUrl = ProviderType == "copilot" && !UseDefaultGitHubEnterpriseUrl ? NormalizeText(GitHubEnterpriseUrl) : null;
         // The settings of a provider that runs a CLI: the arguments, anthropic_api_key, config_dir and env are edited in the TOML of the provider.
@@ -384,6 +389,7 @@ internal sealed partial class ModelProviderEditorItemViewModel
             ReasoningEffort = definition.ReasoningEffort,
             ApiKey = definition.ApiKey,
             ApiKeyEnv = definition.ApiKeyEnv,
+            ApiKeySecret = definition.ApiKeySecret,
             ApiUrl = definition.ApiUrl,
             NetworkTimeoutSeconds = definition.NetworkTimeoutSeconds,
             Command = definition.Command,

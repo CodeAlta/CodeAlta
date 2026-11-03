@@ -160,6 +160,12 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         }
 
         yield return CreateSessionCommand(context.Invocation);
+        // The names of the secrets of the machine, for the configuration: never a value.
+        if (context.Invocation.Services.Get<ProjectCatalog>() is not null)
+        {
+            yield return CreateSecretCommand(context.Invocation);
+        }
+
         yield return CreateSandboxCommand(context.Invocation);
         yield return CreateReminderCommand(context.Invocation);
         yield return CreateJobCommand(context.Invocation);
@@ -304,7 +310,8 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         var windows = context.Services.Get<IAltaWindows>() is not null;
         var settings = context.Services.Get<IAltaSettings>() is not null;
         var fleet = context.Services.Get<IAltaFleet>() is not null;
-        if (!changes && !editor && !terminals && !automations && !workItems && !bookmarks && !reviews && !issues && !appearance && !spaces && !canvases && !documentation && !search && !windows && !settings && !fleet && workshop is null) return Policies;
+        var secrets = context.Services.Get<ProjectCatalog>() is not null;
+        if (!secrets && !changes && !editor && !terminals && !automations && !workItems && !bookmarks && !reviews && !issues && !appearance && !spaces && !canvases && !documentation && !search && !windows && !settings && !fleet && workshop is null) return Policies;
         var policies = new List<AltaCommandPolicy>(Policies);
         if (spaces) policies.AddRange(SpacePolicies);
         if (spaces) policies.AddRange(LabelPolicies);
@@ -328,6 +335,7 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         if (windows) policies.AddRange(WindowPolicies);
         if (settings) policies.AddRange(SettingsPolicies);
         if (fleet) policies.AddRange(FleetPolicies);
+        if (secrets) policies.AddRange(SecretPolicies);
         return policies;
     }
 
@@ -1711,7 +1719,7 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         }
 
         var plugins = catalog.ListPlugins();
-        var builtInPolicyPaths = new HashSet<string>(Policies.Select(static policy => policy.Path), StringComparer.OrdinalIgnoreCase);
+        var builtInPolicyPaths = new HashSet<string>(PoliciesFor(context).Select(static policy => policy.Path), StringComparer.OrdinalIgnoreCase);
         var pluginCommandCount = policies.Count(policy => !builtInPolicyPaths.Contains(policy.Path));
         return new PluginCapability(true, plugins.Count, pluginCommandCount);
     }

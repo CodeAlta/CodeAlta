@@ -17,10 +17,11 @@ export type JoinOrganizationSpacesApi = Pick<typeof spacesApi, "list" | "create"
 /**
  * Join an organization: the address of the company's server, then signing in to it — with the one-time enrollment code
  * an administrator gives, the way the server lets a computer in today — then the space whose sessions it sees (a new
- * Work space by default), and the approval this computer waits for, with the six words of its key.
+ * Work space by default), and the approval this computer waits for, with the six words of its key. A person whose
+ * computers are all lost starts from here too: `onRecover` goes to the recovery key instead.
  */
-export function JoinOrganizationDialog({ epoch, api = fleetServer, spaces = spacesApi, onClose }: {
-  epoch: string; api?: JoinOrganizationApi; spaces?: JoinOrganizationSpacesApi; onClose: (joined: boolean) => void;
+export function JoinOrganizationDialog({ epoch, api = fleetServer, spaces = spacesApi, onRecover, onClose }: {
+  epoch: string; api?: JoinOrganizationApi; spaces?: JoinOrganizationSpacesApi; onRecover?: () => void; onClose: (joined: boolean) => void;
 }) {
   const { t } = useShellLanguage();
   const [step, setStep] = useState<JoinStep>("address");
@@ -119,6 +120,9 @@ export function JoinOrganizationDialog({ epoch, api = fleetServer, spaces = spac
         <Button intent="primary" disabled={busy || !code.trim()} icon={busy ? <ActivitySpinner size={14} /> : undefined} text={t("Sign in")} onClick={() => void signIn()} /></>}
       {step === "space" && <Button intent="primary" disabled={busy} icon={busy ? <ActivitySpinner size={14} /> : undefined} text={t("Link the space")} onClick={() => void linkSpace()} />}
       {step === "approval" && <Button intent="primary" text={t("Done")} onClick={() => onClose(true)} />}
-    </>} />
+    </>}>
+      {step === "address" && onRecover && <Button variant="minimal" size="small" icon={<AppIcon name="shield" size={14} />} text={t("Recover with the recovery key…")}
+        onClick={onRecover} />}
+    </DialogFooter>
   </Dialog>;
 }

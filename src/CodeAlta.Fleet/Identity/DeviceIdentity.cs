@@ -120,6 +120,27 @@ public sealed class DeviceIdentity : IDisposable
         return Load(path, timeProvider);
     }
 
+    /// <summary>
+    /// Makes the identity of a P-256 private key held in memory only, such as the key a recovery key derives: nothing is
+    /// written, and <see cref="KeyPath"/> is empty.
+    /// </summary>
+    /// <param name="privateKey">The 32 bytes of the private scalar, from 1 to the order of the curve.</param>
+    /// <returns>The identity; dispose it when done.</returns>
+    /// <exception cref="CryptographicException">The scalar is not a private key of P-256.</exception>
+    internal static DeviceIdentity FromPrivateKey(ReadOnlySpan<byte> privateKey)
+    {
+        var parameters = new ECParameters { Curve = ECCurve.NamedCurves.nistP256, D = privateKey.ToArray() };
+        try
+        {
+            var key = ECDsa.Create(parameters);
+            return new DeviceIdentity(key, DateTimeOffset.UnixEpoch, string.Empty, TimeProvider.System);
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(parameters.D);
+        }
+    }
+
     /// <summary>Gets the device id of a key from its fingerprint.</summary>
     /// <param name="fingerprint">The fingerprint of the key.</param>
     /// <returns>The device id: 26 characters of lower-case base32.</returns>

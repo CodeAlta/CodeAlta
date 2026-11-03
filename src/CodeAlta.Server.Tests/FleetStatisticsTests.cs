@@ -128,27 +128,31 @@ public sealed class FleetStatisticsTests
         statistics.Set("s-b", Usage(Morning, "claude-opus-5-5", 10, 0));
         var linked = System.Collections.Immutable.ImmutableHashSet.Create("work", "home");
         var withdrawn = new ConcurrentQueue<string>();
-        await using var connector = fleet.NodeConnector(sessions, statistics, space => Volatile.Read(ref linked).Contains(space ?? ""));
-        connector.StatisticsWithdrawn += (_, result) => { foreach (var id in result.SessionIds) withdrawn.Enqueue(id); };
-        sessions.Set(Session("s-a", "work"), Session("s-b", "home"));
-        connector.Start();
-        await WaitForTotalsAsync(fleet, static measures => measures.InputTokens == 110);
+        await using (var connector = fleet.NodeConnector(sessions, statistics, space => Volatile.Read(ref linked).Contains(space ?? "")))
+        {
+            connector.StatisticsWithdrawn += (_, result) => { foreach (var id in result.SessionIds) withdrawn.Enqueue(id); };
+            sessions.Set(Session("s-a", "work"), Session("s-b", "home"));
+            connector.Start();
+            await WaitForTotalsAsync(fleet, static measures => measures.InputTokens == 110);
 
-        sessions.Set(Session("s-a", "work", isPrivate: true), Session("s-b", "home"));
-        await WaitForTotalsAsync(fleet, static measures => measures.InputTokens == 10);
-        Volatile.Write(ref linked, ["work"]);
-        sessions.Set(Session("s-a", "work", isPrivate: true), Session("s-b", "home"));
-        await WaitForTotalsAsync(fleet, static measures => measures.InputTokens == 0);
-        // The server shows the withdrawal before its answer reaches the connector, which then tells it.
-        await WaitForAsync(() => Task.FromResult(withdrawn.Count >= 2));
-        CollectionAssert.AreEqual(new[] { "s-a", "s-b" }, withdrawn.ToArray());
-        var audit = await fleet.Server.GetService<ICoordinatorStore>().ListAuditAsync(0, 500);
-        Assert.AreEqual(2, audit.Count(static record => record.Entry.Action == "statistics.withdraw"), "every withdrawal is audited");
+            sessions.Set(Session("s-a", "work", isPrivate: true), Session("s-b", "home"));
+            await WaitForTotalsAsync(fleet, static measures => measures.InputTokens == 10);
+            Volatile.Write(ref linked, ["work"]);
+            sessions.Set(Session("s-a", "work", isPrivate: true), Session("s-b", "home"));
+            await WaitForTotalsAsync(fleet, static measures => measures.InputTokens == 0);
+            // The server shows the withdrawal before its answer reaches the connector, which then tells it.
+            await WaitForAsync(() => Task.FromResult(withdrawn.Count >= 2));
+            CollectionAssert.AreEqual(new[] { "s-a", "s-b" }, withdrawn.ToArray());
+            var audit = await fleet.Server.GetService<ICoordinatorStore>().ListAuditAsync(0, 500);
+            Assert.AreEqual(2, audit.Count(static record => record.Entry.Action == "statistics.withdraw"), "every withdrawal is audited");
 
-        // Made public again, published again.
-        sessions.Set(Session("s-a", "work"), Session("s-b", "home"));
-        await WaitForTotalsAsync(fleet, static measures => measures.InputTokens == 100);
+            // Made public again, published again.
+            sessions.Set(Session("s-a", "work"), Session("s-b", "home"));
+            await WaitForTotalsAsync(fleet, static measures => measures.InputTokens == 100);
+        }
 
+        // The connector is stopped before its outbox is read: the server shows the set before the connector has the answer and
+        // writes its outbox, and a file read while it is replaced fails (and fails the replacement of the connector with it).
         // A set of an older epoch than the one held is refused: the machine is the single writer of its facts, an epoch fences it.
         var service = fleet.Server.GetService<StatisticsService>();
         var device = (await fleet.Server.GetService<ICoordinatorStore>().GetDeviceAsync(fleet.NodeKey.DeviceId))!;

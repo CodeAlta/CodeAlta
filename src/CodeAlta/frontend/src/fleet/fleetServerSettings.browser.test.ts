@@ -63,6 +63,115 @@ test("the owner's computer updates the fleet at a time it chooses, follows the c
   }, options);
 });
 
+test("a new device of the person is approved in a popover beside its row, once its words are the ones the device shows", { skip: !edge, timeout: 90_000 }, async () => {
+  await withCanvas(async page => {
+    await page.until(`document.querySelector('.fleet-device-row[data-status=pending]')`, "the new device");
+    assert.equal(await page.evaluate(`document.querySelector('.fleet-device-row[data-status=pending] .fleet-device-title').textContent`), "LaptopNew device");
+    assert.equal(await page.evaluate(`document.querySelectorAll('.fleet-device-row[data-status=pending] .fleet-device-words').length`), 0,
+      "the words show in the confirmation, where they are compared");
+
+    // Approve… asks first, beside the row, with the six words of the device's key.
+    await page.clickText(".fleet-device-row[data-status=pending] .bp6-button", "Approve…");
+    await page.until(`document.querySelector('.fleet-device-confirm')`, "the confirmation");
+    assert.equal(await page.evaluate(`document.querySelector('.fleet-device-confirm p').textContent`), "Does Laptop show these words?");
+    assert.deepEqual(await page.evaluate(`[...document.querySelectorAll('.fleet-device-confirm .fleet-device-words .bp6-tag')].map(tag => tag.textContent)`),
+      ["otter", "river", "robin", "saddle", "salmon", "pearl"]);
+    assert.deepEqual(await page.evaluate(`[...window.fleetFixture.calls]`), [], "nothing is approved before the words are confirmed");
+    await page.shot("fleet-device-confirm");
+
+    // The approval names the words compared: the host signs the key of those words only.
+    await page.clickText(".fleet-device-confirm .bp6-button", "It shows the same words");
+    await page.until(`!document.querySelector('.fleet-device-row[data-status=pending]')`, "approved");
+    assert.deepEqual((await page.evaluate(`[...window.fleetFixture.calls]`) as string[]).map(call => JSON.parse(call)),
+      [{ approve: "laptop", words: "otter river robin saddle salmon pearl" }]);
+    assert.deepEqual(page.problems, []);
+  }, options);
+});
+
+test("the owner makes a recovery key, sees its words once with Copy, and closes them only after typing two of them back", { skip: !edge, timeout: 90_000 }, async () => {
+  await withCanvas(async page => {
+    await page.until(`document.querySelector('.fleet-server-recovery')`, "the recovery key of the server");
+    assert.equal(await page.evaluate(`document.querySelector('.fleet-server-recovery-row .bp6-tag').textContent`), "None");
+    await page.clickText(".fleet-server-recovery .bp6-button", "Make a recovery key…");
+
+    // The 32 words, numbered, and Copy.
+    await page.until(`document.querySelectorAll('.fleet-recovery-words li').length === 32`, "the words");
+    const words = await page.evaluate(`[...document.querySelectorAll('.fleet-recovery-words li')].map(item => item.textContent)`) as string[];
+    assert.deepEqual(words.slice(0, 3), ["acid", "acorn", "actor"]);
+    await page.shot("fleet-recovery-words");
+    await page.clickText(".fleet-recovery-dialog .bp6-button", "Copy");
+    await page.until(`[...document.querySelectorAll('.fleet-recovery-dialog .bp6-button')].some(button => button.textContent === 'Copied')`, "copied");
+
+    // A click outside does not close it; the check asks two words by their number.
+    await page.evaluate(`document.querySelector('.bp6-overlay-backdrop')?.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }))`);
+    assert.ok(await page.evaluate(`!!document.querySelector('.fleet-recovery-dialog')`), "still open");
+    await page.clickText(".fleet-recovery-dialog .bp6-button", "I wrote them down");
+    await page.until(`document.querySelectorAll('.fleet-recovery-check input').length === 2`, "the check");
+    const asked = (await page.evaluate(`[...document.querySelectorAll('.fleet-recovery-check label span')].map(span => span.textContent)`) as string[])
+      .map(label => Number(label.replace("Word ", "")));
+    const done = `[...document.querySelectorAll('.fleet-recovery-dialog .bp6-button')].find(button => button.textContent === 'Done')`;
+    await page.evaluate(type(".fleet-recovery-check label:nth-of-type(1) input", words[asked[0] - 1]));
+    await page.evaluate(type(".fleet-recovery-check label:nth-of-type(2) input", "wrong"));
+    assert.equal(await page.evaluate(`${done}.disabled`), true, "a wrong word keeps it open");
+    await page.evaluate(type(".fleet-recovery-check label:nth-of-type(2) input", ` ${words[asked[1] - 1].toUpperCase()} `));
+    await page.until(`${done}.disabled === false`, "both words right");
+    await page.evaluate(`${done}.click()`);
+    await page.until(`!document.querySelector('.fleet-recovery-dialog')`, "the dialog closes");
+    await page.until(`document.querySelector('.fleet-server-recovery-row .bp6-tag')?.textContent === 'Kept'`, "the server read again");
+    assert.deepEqual((await page.evaluate(`[...window.fleetFixture.calls]`) as string[]).map(call => JSON.parse(call)),
+      [{ recoveryKey: "made" }, { copied: words.join(" ") }]);
+
+    // A new one is confirmed beside the row first.
+    await page.clickText(".fleet-server-recovery .bp6-button", "New recovery key…");
+    await page.until(`document.querySelector('.fleet-server-confirm .bp6-intent-danger')`, "the confirmation");
+    assert.equal(await page.evaluate(`document.querySelector('.fleet-server-confirm p').textContent`), "Make a new recovery key?");
+    assert.deepEqual(page.problems, []);
+  }, options);
+});
+
+// Types in a text area as the user does.
+const typeArea = (selector: string, value: string) => `(() => { const area = document.querySelector(${JSON.stringify(selector)});
+  Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set.call(area, ${JSON.stringify(value)});
+  area.dispatchEvent(new Event('input', { bubbles: true })); return true; })()`;
+
+test("a computer without a server recovers with the 32 words of the recovery key from the empty page", { skip: !edge, timeout: 90_000 }, async () => {
+  await withCanvas(async page => {
+    // Leaving the only server empties the page, where Recover with the recovery key… is offered.
+    await page.until(`document.querySelector('button[aria-label="Leave https://fleet.example"]')`, "the card of the server");
+    await page.evaluate(`document.querySelector('button[aria-label="Leave https://fleet.example"]').click()`);
+    await page.clickText(".fleet-server-confirm .bp6-button", "Leave");
+    await page.until(`document.querySelector('.fleet-server-empty')`, "the empty page");
+    await page.clickText(".fleet-server-empty .bp6-button", "Recover with the recovery key…");
+    await page.until(`document.querySelector('.fleet-server-dialog textarea')`, "the recovery dialog");
+    assert.equal(await page.evaluate(`document.querySelector('.fleet-server-dialog .bp6-dialog-header').textContent`), "Recover with the recovery key");
+    const recover = `[...document.querySelectorAll('.fleet-server-dialog .bp6-button')].find(button => button.textContent === 'Recover')`;
+    const words = "acid acorn actor agent alarm album alien alpha amber anchor angel ankle apple apron arena arrow atlas attic autumn award bacon badge bagel baker "
+      + "bamboo banjo barn basil basket beach beacon bear";
+
+    // Recover waits for an address and the 32 words, counted as they are typed.
+    await page.evaluate(type(".fleet-server-dialog input", "https://fleet.example/"));
+    await page.evaluate(typeArea(".fleet-server-dialog textarea", words.split(" ").slice(0, 31).join(" ")));
+    await page.until(`document.querySelector('.fleet-server-dialog small')?.textContent === '31 of 32 words'`, "the count");
+    assert.equal(await page.evaluate(`${recover}.disabled`), true);
+    await page.shot("fleet-recover-dialog");
+
+    // Words that are not a recovery key of the server are refused, and the dialog stays.
+    await page.evaluate(typeArea(".fleet-server-dialog textarea", words.replace("bear", "bird")));
+    await page.until(`${recover}.disabled === false`, "32 words");
+    await page.evaluate(`${recover}.click()`);
+    await page.until(`document.querySelector('.fleet-server-dialog [role=alert]')?.textContent === 'These words are not a recovery key of this server.'`, "refused");
+
+    // The right ones, spaced and on lines as they were written down, link this computer again.
+    await page.evaluate(typeArea(".fleet-server-dialog textarea", ` ${words.split(" ").slice(0, 16).join(" ")}\n${words.split(" ").slice(16).join("  ")} `));
+    await page.evaluate(`${recover}.click()`);
+    await page.until(`!document.querySelector('.fleet-server-dialog')`, "the dialog closes");
+    await page.until(`document.querySelector('.fleet-server-card')`, "the server again");
+    const calls = (await page.evaluate(`[...window.fleetFixture.calls]`) as string[]).map(call => JSON.parse(call)).filter(call => call.recover);
+    assert.deepEqual(calls.map(call => [call.recover, call.words === words]), [["https://fleet.example", false], ["https://fleet.example", true]]);
+    assert.deepEqual(page.problems, []);
+  }, options);
+});
+
 test("the owner's computer sees the telemetry of the fleet and changes it without the page holding a secret", { skip: !edge, timeout: 90_000 }, async () => {
   await withCanvas(async page => {
     // The card of the server says where the machines send, in one line.

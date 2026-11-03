@@ -94,6 +94,58 @@ public sealed class FleetNodeManagementTests
     }
 
     [TestMethod]
+    public async Task Manager_SetsRotatesAndDeletesTheSecretsOfTheMachine_WhileOthersAreForbidden()
+    {
+        await using var fixture = await ManagedNodeFixture.StartAsync(TestContext.CancellationToken);
+        var token = TestContext.CancellationToken;
+        var store = new CodeAlta.Catalog.Secrets.LocalSecretStore(fixture.Node.Host.CatalogOptions.GlobalRoot);
+        try
+        {
+            var ownerMachine = await fixture.PairAsync(fixture.Owner, "laptop", manages: false, token);
+            var otherMachine = await fixture.PairAsync(fixture.Other, "phone", manages: false, token);
+            await using var manager = await FleetNodeClient.ConnectAsync(ownerMachine, fixture.Owner, token);
+            await using var other = await FleetNodeClient.ConnectAsync(otherMachine, fixture.Other, token);
+
+            // The device that manages the machine sets a secret, rotates it and sets a variable; the value never comes back.
+            var set = await manager.SetSecretAsync(new FleetSecretSetParams("GRAFANA_TOKEN", "glsa_from_laptop_1"), cancellationToken: token);
+            Assert.AreEqual((1, (string?)null, "laptop (manage)"), (set.Secret!.Version, set.Secret.Value, set.Secret.SetBy), "who set it is recorded by the name of its device");
+            Assert.AreEqual(2, (await manager.SetSecretAsync(new FleetSecretSetParams("GRAFANA_TOKEN", "glsa_from_laptop_2"), rotate: true, token)).Secret!.Version);
+            await manager.SetSecretAsync(new FleetSecretSetParams("GRAFANA_URL", "https://grafana.example", Variable: true), cancellationToken: token);
+            var list = await manager.ListSecretsAsync(token);
+            Assert.AreEqual(("GRAFANA_TOKEN", (string?)null), (list.Secrets.Single().Name, list.Secrets.Single().Value));
+            Assert.AreEqual("https://grafana.example", list.Variables.Single().Value);
+            Assert.IsTrue(store.TryGetSecret("GRAFANA_TOKEN", out var value));
+            Assert.AreEqual("glsa_from_laptop_2", value, "the machine holds the new value");
+
+            // A device that does not manage the machine reads, sets and deletes nothing there.
+            foreach (var call in new Func<Task>[]
+            {
+                () => other.ListSecretsAsync(token),
+                () => other.SetSecretAsync(new FleetSecretSetParams("GRAFANA_TOKEN", "stolen"), cancellationToken: token),
+                () => other.SetSecretAsync(new FleetSecretSetParams("GRAFANA_TOKEN", "stolen"), rotate: true, token),
+                () => other.DeleteSecretAsync(new FleetSecretRef("GRAFANA_TOKEN"), token),
+            })
+            {
+                Assert.AreEqual(FleetErrorCodes.Forbidden, (await Assert.ThrowsExactlyAsync<FleetException>(call)).Error.Code);
+            }
+
+            Assert.IsTrue(store.TryGetSecret("GRAFANA_TOKEN", out value));
+            Assert.AreEqual("glsa_from_laptop_2", value, "the other device changed nothing");
+
+            await manager.DeleteSecretAsync(new FleetSecretRef("GRAFANA_TOKEN"), token);
+            await manager.DeleteSecretAsync(new FleetSecretRef("GRAFANA_URL", Variable: true), token);
+            Assert.AreEqual(FleetNodeErrorCodes.SecretNotFound,
+                (await Assert.ThrowsExactlyAsync<FleetException>(() => manager.DeleteSecretAsync(new FleetSecretRef("GRAFANA_TOKEN"), token))).Error.Code);
+            var empty = await manager.ListSecretsAsync(token);
+            Assert.AreEqual((0, 0), (empty.Secrets.Count, empty.Variables.Count));
+        }
+        finally
+        {
+            store.Delete();
+        }
+    }
+
+    [TestMethod]
     public async Task ManagerWhoLosesManage_IsForbiddenAtTheNextCall()
     {
         await using var fixture = await ManagedNodeFixture.StartAsync(TestContext.CancellationToken);

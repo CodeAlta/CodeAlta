@@ -41,9 +41,6 @@ internal interface ILocalProcesses
     /// <summary>Runs a command and waits for it.</summary>
     Task<SshResult> RunAsync(string executable, IReadOnlyList<string> arguments, CancellationToken cancellationToken);
 
-    /// <summary>Starts a command that goes on by itself, beyond this process.</summary>
-    void StartDetached(string executable, IReadOnlyList<string> arguments);
-
     /// <summary>Gets whether a file exists.</summary>
     bool Exists(string path);
 
@@ -95,15 +92,6 @@ internal sealed class SystemProcesses : ILocalProcesses
     }
 
     /// <inheritdoc />
-    public void StartDetached(string executable, IReadOnlyList<string> arguments)
-    {
-        // No redirection: the server holds no handle of this process, and goes on when the desktop closes.
-        var start = new ProcessStartInfo(executable) { UseShellExecute = false, CreateNoWindow = true, WorkingDirectory = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile) };
-        foreach (var argument in arguments) start.ArgumentList.Add(argument);
-        using var process = Process.Start(start);
-    }
-
-    /// <inheritdoc />
     public bool Exists(string path) => File.Exists(path);
 
     /// <inheritdoc />
@@ -115,9 +103,10 @@ internal sealed class SystemProcesses : ILocalProcesses
 }
 
 /// <summary>
-/// Sets up CodeAlta Server on this computer in one go: finds <c>altaserver</c> (or installs it, a .NET tool), starts it
-/// on the loopback, reads its one-time setup code here (it is given to this machine only), and claims it with that code
-/// as its owner — what the person would otherwise copy from one window to another.
+/// Sets up CodeAlta Server on this computer in one go: finds <c>altaserver</c> (or installs it, a .NET tool), runs it on
+/// the loopback as a service of the user (<c>altaserver install</c>: it starts again after a restart), reads its one-time
+/// setup code here (it is given to this machine only), and claims it with that code as its owner — what the person would
+/// otherwise copy from one window to another.
 /// </summary>
 internal sealed class LocalServerSetup(ILocalProcesses processes, string desktopVersion)
 {
@@ -166,15 +155,21 @@ internal sealed class LocalServerSetup(ILocalProcesses processes, string desktop
         progress(new(LocalServerSteps.Start, "running"));
         List<string> root = request.DataRoot is { Length: > 0 } data ? ["--data-root", data] : [];
         var status = await processes.RunAsync(server, ["status", .. root], cancellationToken).ConfigureAwait(false);
-        if (!status.Succeeded)
+        var running = status.Succeeded;
+        // A service of the user (a task at sign-in on Windows, a LaunchAgent, a systemd --user unit), so that the server starts
+        // again after a restart; it starts now too, or, for a server that runs already, once that one exits.
+        var service = await processes.RunAsync(server, ["install", "--urls", $"http://127.0.0.1:{request.Port.ToString(CultureInfo.InvariantCulture)}", .. root],
+            cancellationToken).ConfigureAwait(false);
+        if (!service.Succeeded) throw new SshSetupException(LocalServerSteps.Start, "service_failed", FirstLines(service.Error + service.Output));
+        if (!running)
         {
-            processes.StartDetached(server, ["run", "--port", request.Port.ToString(CultureInfo.InvariantCulture), .. root]);
             var deadline = DateTime.UtcNow + StartTimeout;
             while (true)
             {
                 await Task.Delay(TimeSpan.FromMilliseconds(500), cancellationToken).ConfigureAwait(false);
                 status = await processes.RunAsync(server, ["status", .. root], cancellationToken).ConfigureAwait(false);
-                if (status.Succeeded && status.Output.Contains("Health:", StringComparison.Ordinal)) break;
+                // "Health: ok" once it serves: status also prints "Health: no answer ..." while it starts.
+                if (status.Succeeded && Serves(status.Output)) break;
                 if (DateTime.UtcNow > deadline) throw new SshSetupException(LocalServerSteps.Start, "server_start_failed", FirstLines(status.Output + status.Error));
             }
         }
@@ -192,6 +187,10 @@ internal sealed class LocalServerSetup(ILocalProcesses processes, string desktop
         progress(new(LocalServerSteps.Claim, "done", request.OrganizationName));
         return linkId;
     }
+
+    // Whether altaserver status says the server serves.
+    private static bool Serves(string status)
+        => status.Split('\n', StringSplitOptions.TrimEntries).Any(static line => line.StartsWith("Health: ok", StringComparison.Ordinal));
 
     // The executable of the tool: its launcher, or on Windows the program a .cmd launcher of a package per runtime starts
     // (started itself, so that no cmd.exe stands between the server and its stop).

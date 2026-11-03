@@ -252,7 +252,7 @@ internal static class ModelProviderEditorDiagnostics
     }
 
     private static bool HasResolvedApiCredential(ModelProviderEditorItemViewModel item)
-        => HasLiteralApiKey(item) || HasResolvedApiKeyEnvValue(item);
+        => HasLiteralApiKey(item) || !string.IsNullOrWhiteSpace(item.ApiKeySecret) || HasResolvedApiKeyEnvValue(item);
 
     private static bool HasLiteralApiKey(ModelProviderEditorItemViewModel item)
         => !item.UseDefaultApiKey && !string.IsNullOrWhiteSpace(item.ApiKey);

@@ -285,6 +285,37 @@ internal sealed partial class NodeAutomations : IFleetNodeAutomations, IAutomati
         }
     }
 
+    /// <summary>
+    /// Takes away the automations a server gave this node, once the link to that server is gone (the node left it): they
+    /// run no more, and their numbers stay so that a version replayed later is refused.
+    /// </summary>
+    /// <param name="linkId">The server link they came through.</param>
+    /// <param name="cancellationToken">Cancels before the next automation is removed.</param>
+    /// <returns>How many automations were taken away.</returns>
+    internal async Task<int> ForgetServerAsync(string linkId, CancellationToken cancellationToken)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(linkId);
+        string[] ids;
+        lock (_gate) ids = [.. _assignments.Where(pair => !pair.Value.Removed && pair.Value.Via == linkId).Select(static pair => pair.Key)];
+        foreach (var id in ids)
+        {
+            if (Engine.Snapshot.Find(id) is { Source.IsAssigned: true } && await Engine.DeleteAsync(id, cancellationToken).ConfigureAwait(false) is { } refused)
+                Log($"The automation {id} given through a server that is gone could not be removed: {refused}");
+            lock (_gate)
+            {
+                if (_assignments.TryGetValue(id, out var known) && !known.Removed) _assignments[id] = known with { Removed = true, Signed = null };
+            }
+        }
+
+        if (ids.Length > 0)
+        {
+            lock (_gate) SaveAssignments();
+            Log($"{ids.Length} automation(s) given through the server link {linkId} were taken away: the node left that server.");
+        }
+
+        return ids.Length;
+    }
+
     /// <inheritdoc />
     public async Task<bool> RemoveAsync(FleetAutomationCaller caller, string id, CancellationToken cancellationToken)
     {
