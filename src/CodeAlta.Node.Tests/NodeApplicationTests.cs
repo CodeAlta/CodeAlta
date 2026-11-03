@@ -76,17 +76,6 @@ public sealed class NodeApplicationTests
     }
 
     [TestMethod]
-    [DataRow("update")]
-    public async Task CommandsOfTheSurface_SayTheyAreNotImplementedYet(params string[] args)
-    {
-        using var root = new NodeTestRoot();
-        var app = Application(root, out _, out var error);
-
-        Assert.AreEqual(NodeExitCodes.NotImplemented, await app.RunAsync(args));
-        StringAssert.Contains(error.ToString(), $"altanode {args[0]}: not implemented yet.");
-    }
-
-    [TestMethod]
     [DataRow]
     [DataRow("unknown")]
     [DataRow("run", "--unknown")]

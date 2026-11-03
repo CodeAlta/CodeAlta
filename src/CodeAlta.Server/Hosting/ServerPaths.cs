@@ -34,4 +34,13 @@ public sealed class ServerPaths
 
     /// <summary>Gets the lock a running server holds, so that one server at a time uses the data root.</summary>
     public string LockPath => Path.Combine(DataRoot, "altaserver.lock");
+
+    /// <summary>Gets the folder of the versions of the server (<c>altaserver update</c>): each beside the others, and the pointer.</summary>
+    public string VersionsRoot => Path.Combine(DataRoot, "versions");
+
+    /// <summary>Gets the settings of the updates of the server: the feed and the allowed feeds.</summary>
+    public string UpdatePolicyPath => Path.Combine(DataRoot, "update.json");
+
+    /// <summary>Gets the folder of the backups of the database taken before each update.</summary>
+    public string BackupsRoot => Path.Combine(DataRoot, "backups");
 }

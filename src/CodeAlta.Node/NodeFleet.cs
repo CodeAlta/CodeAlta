@@ -81,7 +81,19 @@ internal sealed class NodeFleet : IAsyncDisposable
     /// <param name="requestStop">What stops the node gracefully (<c>altanode uninstall</c> on Windows); null for none.</param>
     /// <returns>The fleet part of the node.</returns>
     /// <exception cref="SocketException">The address cannot be bound.</exception>
-    public static NodeFleet Start(NodeHost node, NodeListenOptions listen, string name, string version, Action? requestStop)
+    public static NodeFleet Start(NodeHost node, NodeListenOptions listen, string name, string version, Action? requestStop) => Start(node, listen, name, version, requestStop, null);
+
+    /// <summary>Starts the node API and its listener, with the stop of the owner's local control and the versions it reports.</summary>
+    /// <param name="node">The running node.</param>
+    /// <param name="listen">Where to listen.</param>
+    /// <param name="name">The name of the node.</param>
+    /// <param name="version">The version of CodeAlta it runs.</param>
+    /// <param name="requestStop">What stops the node gracefully (<c>altanode uninstall</c> on Windows); null for none.</param>
+    /// <param name="updateStatus">What reads the versions of the node and its self-update (<c>node.info</c>, <c>control.status</c>); null for none.</param>
+    /// <returns>The fleet part of the node.</returns>
+    /// <exception cref="SocketException">The address cannot be bound.</exception>
+    public static NodeFleet Start(NodeHost node, NodeListenOptions listen, string name, string version, Action? requestStop,
+        Func<Fleet.Protocol.FleetUpdateStatus?>? updateStatus)
     {
         ArgumentNullException.ThrowIfNull(node);
         ArgumentNullException.ThrowIfNull(listen);
@@ -96,6 +108,7 @@ internal sealed class NodeFleet : IAsyncDisposable
             {
                 Host = node.Host, Identity = identity, TrustedDevices = new TrustedDeviceStore(catalog), Name = name, Version = version,
                 AcceptsWork = () => node.AcceptsWork, PairingAddresses = () => addresses, RequestStop = requestStop, CloneRoot = node.Options.CloneRoot,
+                Updating = () => node.AdmissionPaused, UpdateStatus = updateStatus,
             });
             string? file = null;
             // Without a listener the node API still serves the channels its servers relay.

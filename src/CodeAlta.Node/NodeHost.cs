@@ -33,6 +33,7 @@ public sealed class NodeHost : IAsyncDisposable
     private readonly object _gate = new();
     private Task? _stop;
     private int _acceptsWork = 1;
+    private int _admissionPaused;
 
     private NodeHost(NodeHostOptions options, CodeAltaSingleInstanceGuard guard, CodeAltaHost host, HeadlessAltaTools alta,
         ModelsDevCatalogService modelsDev, LoopbackHarnessToolEndpoints toolEndpoints, Logger logger)
@@ -65,10 +66,20 @@ public sealed class NodeHost : IAsyncDisposable
     public string LockFilePath => _guard.LockFilePath;
 
     /// <summary>
-    /// Gets whether the node accepts new work. False from the start of <see cref="StopAsync"/>: what admits work from
-    /// outside (the node API, automations) checks it.
+    /// Gets whether the node accepts new work. False from the start of <see cref="StopAsync"/>, and while admission is
+    /// paused (<see cref="PauseAdmission"/>): what admits work from outside (the node API, automations) checks it.
     /// </summary>
-    public bool AcceptsWork => Volatile.Read(ref _acceptsWork) == 1;
+    public bool AcceptsWork => Volatile.Read(ref _acceptsWork) == 1 && Volatile.Read(ref _admissionPaused) == 0;
+
+    /// <summary>Gets whether admission is paused while the node drains its sessions to switch to a new version.</summary>
+    public bool AdmissionPaused => Volatile.Read(ref _admissionPaused) == 1 && Volatile.Read(ref _acceptsWork) == 1;
+
+    /// <summary>
+    /// Pauses or resumes the admission of new work from outside, while the node drains its sessions to switch to a new
+    /// version (<c>altanode update</c>): the node API refuses new work with <c>node.updating</c>, which callers retry.
+    /// </summary>
+    /// <param name="paused">Whether new work is refused.</param>
+    public void PauseAdmission(bool paused) => Volatile.Write(ref _admissionPaused, paused ? 1 : 0);
 
     /// <summary>Takes the lock of the profile and starts the host.</summary>
     /// <param name="options">The profile and the options of the node.</param>

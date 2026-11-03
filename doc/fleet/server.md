@@ -117,7 +117,11 @@ Nodes are autonomous: a server that is down stops visibility, relay and sharing,
 
 - **Upgrades** go from one minor version to the next (N-1 to N) directly. The server takes a backup, then runs its
   numbered migrations at start under a migration lock, each in a transaction; a failed migration leaves the previous
-  version in place. Going back means restoring the backup taken before the upgrade.
+  version in place. Going back means restoring the backup taken before the upgrade. `altaserver update` does both: the
+  running server copies its database to `backups/` (SQLite's backup API, the last five kept), then switches; a new
+  version that does not serve within its trial is rolled back and that copy restored
+  ([deployment](deployment.md#updates)). Until `altaserver install` exists, the switch works for a server run in the
+  foreground: the process stays and runs the new version as its child.
 - **A backup is a consistent set**: the database, the blobs it references and the server's own keys (TLS, token
   signing), the keys encrypted. The server holds no key that decrypts Private data, so a backup holds none either.
 - **Restore epochs**: a restored server starts a new epoch. Nodes notice that it is behind them and publish again what
@@ -136,9 +140,10 @@ Nodes are autonomous: a server that is down stops visibility, relay and sharing,
   for the owner and admins ([console](console.md)), through the REST API like any other client.
 - **The REST API** for everything else: `altacli fleet`, plugins, scripts and integrations reach every operation the
   console reaches.
-- **`altaserver` commands** on the machine: `run`, `install` (service), `status`, `backup`, `restore`,
+- **`altaserver` commands** on the machine: `run`, `install` (service), `status` (with its versions; `GET
+  /api/v1/server/update` reads them), `update [--version <v>] [--source <feed>] [--check]`, `backup`, `restore`,
   `migrate --to postgres`, `audit export`, `recover-owner` (on the server's own terminal only: it gives the Owner role
-  back, never needs the recovery key of encrypted data).
+  back, never needs the recovery key of encrypted data). Today: `run`, `status`, `setup-code`, `update`.
 - **Web pages**: setup, sign-in, device approval, the phone's page. No administration interface: that is a choice, not
   a gap ([console](console.md#why-the-desktop-and-what-it-costs)).
 

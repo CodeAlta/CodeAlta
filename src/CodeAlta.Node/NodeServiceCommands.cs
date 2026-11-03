@@ -33,6 +33,9 @@ internal sealed class NodeServiceCommands(TextWriter output, TextWriter error, F
     /// <summary>Gets or sets what stops a call to the node, for tests; none by default.</summary>
     public CancellationToken Stop { get; init; }
 
+    /// <summary>Gets or sets the version of the installed entry point (this executable); null when this process runs a staged version.</summary>
+    public string? InstalledVersion { get; init; }
+
     public async ValueTask<int> InstallAsync(NodeInstallOptions options)
     {
         var (manager, plan, failure) = await PlanAsync(options, "install").ConfigureAwait(false);
@@ -147,6 +150,7 @@ internal sealed class NodeServiceCommands(TextWriter output, TextWriter error, F
         await output.WriteLineAsync($"Profile: {profile.StateRoot}").ConfigureAwait(false);
         await output.WriteLineAsync(control.Status.Describe()).ConfigureAwait(false);
         var reached = false;
+        Fleet.Protocol.FleetUpdateStatus? update = null;
         if (control.NodeListens)
         {
             try
@@ -158,7 +162,9 @@ internal sealed class NodeServiceCommands(TextWriter output, TextWriter error, F
                 await using (client.ConfigureAwait(false))
                 {
                     var status = await client.GetStatusAsync(timeout.Token).ConfigureAwait(false);
-                    await output.WriteLineAsync($"Node: {status.Name} ({status.DeviceId}), CodeAlta {status.Version}{(status.AcceptsWork ? "" : ", stopping")}.").ConfigureAwait(false);
+                    await output.WriteLineAsync($"Node: {status.Name} ({status.DeviceId}), CodeAlta {status.Version}{(status.AcceptsWork ? "" : status.Updating ? ", switching versions" : ", stopping")}.")
+                        .ConfigureAwait(false);
+                    update = status.Update;
                     await output.WriteLineAsync($"Listening on: {string.Join(", ", control.Listener!.Addresses)}").ConfigureAwait(false);
                     await output.WriteLineAsync($"Paired devices: {status.TrustedDevices}{(status.RevokedDevices > 0 ? $" ({status.RevokedDevices} revoked)" : "")}; connected now: {status.Channels}.")
                         .ConfigureAwait(false);
@@ -189,6 +195,19 @@ internal sealed class NodeServiceCommands(TextWriter output, TextWriter error, F
             {
                 await output.WriteLineAsync($"Paired devices: unreadable ({exception.Message}).").ConfigureAwait(false);
             }
+        }
+
+        // The versions: as the running node reports them, otherwise as the folder of versions of the profile says.
+        if (update is null)
+        {
+            var state = NodeUpdatePaths.Store(profile).Read();
+            var running = state.Current ?? InstalledVersion;
+            if (running is not null) update = Fleet.Update.UpdateStatusReport.Describe(state, running, InstalledVersion);
+        }
+
+        if (update is not null)
+        {
+            foreach (var line in Fleet.Update.UpdateStatusReport.Lines(update, "altanode")) await output.WriteLineAsync(line).ConfigureAwait(false);
         }
 
         await new NodeServerCommands(output, error).WriteStatusAsync(control.Catalog, control.Status.IsHeld).ConfigureAwait(false);

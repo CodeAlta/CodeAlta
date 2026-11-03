@@ -1,5 +1,6 @@
 using CodeAlta.Fleet.Protocol;
 using CodeAlta.Server.Control;
+using CodeAlta.Server.Hosting;
 using CodeAlta.Server.Services;
 using CodeAlta.Server.Storage;
 using Microsoft.AspNetCore.Builder;
@@ -29,6 +30,10 @@ internal static class ApiEndpoints
             })
             .WithMetadata(new AllowUnknownDeviceAttribute())
             .WithSummary("The health and version of the server; needs no device.");
+
+        api.MapGet("/server/update", (ServerUpdateStatusSource update) => update.Read())
+            .Produces<FleetUpdateStatus>()
+            .WithSummary("The versions of the server and where its self-update stands: the running and installed versions, the one on trial, the switch that waits, the versions rolled back.");
 
         api.MapPost("/setup", async (SetupRequest? request, HttpContext context, SetupService setup) =>
                 Results.Json(await setup.SetUpAsync(request, DeviceAuthenticationMiddleware.GetSigned(context), Origin(context), context.RequestAborted).ConfigureAwait(false),

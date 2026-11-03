@@ -119,6 +119,30 @@ public sealed class SqliteCoordinatorStore : ICoordinatorStore
         }
     }
 
+    /// <summary>
+    /// Copies the database into a new file with SQLite's backup API: a consistent copy of the last committed state, taken
+    /// while the server runs (the writer goes on; the copy is what was committed when it started).
+    /// </summary>
+    /// <param name="destinationPath">The file to write; it must not exist.</param>
+    /// <param name="cancellationToken">Cancels the wait for the copy to start.</param>
+    /// <returns>A task that completes once the copy is written.</returns>
+    /// <exception cref="IOException">The destination exists.</exception>
+    public async Task BackupAsync(string destinationPath, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(destinationPath);
+        ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);
+        if (File.Exists(destinationPath)) throw new IOException($"The backup '{destinationPath}' exists already.");
+        Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(destinationPath))!);
+        await Task.Run(() =>
+        {
+            using var source = new SqliteConnection(_readConnectionString);
+            source.Open();
+            using var destination = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = destinationPath, Mode = SqliteOpenMode.ReadWriteCreate, Pooling = false }.ToString());
+            destination.Open();
+            source.BackupDatabase(destination);
+        }, cancellationToken).ConfigureAwait(false);
+    }
+
     /// <inheritdoc />
     public ValueTask<int> GetSchemaVersionAsync(CancellationToken cancellationToken = default)
         => ReadAsync(static connection =>

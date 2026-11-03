@@ -234,6 +234,7 @@ public sealed record AddMetadataKeyWrapsRequest(IReadOnlyList<MetadataKeyWrapDto
 [JsonSerializable(typeof(ListResponse<AuditRecordDto>))]
 [JsonSerializable(typeof(AuditVerificationDto))]
 [JsonSerializable(typeof(ServerHealthDto))]
+[JsonSerializable(typeof(FleetUpdateStatus))]
 [JsonSerializable(typeof(ApiProblemDto))]
 [JsonSerializable(typeof(FleetMachineInventory))]
 [JsonSerializable(typeof(MetadataKeyDto))]

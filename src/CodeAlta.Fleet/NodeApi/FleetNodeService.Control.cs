@@ -88,7 +88,11 @@ public sealed partial class FleetNodeService
         var devices = _trusted.List(includeRevoked: true);
         var revoked = devices.Count(static device => device.IsRevoked);
         return Task.FromResult(new FleetNodeStatus(_options.Name, _options.Identity.DeviceId, _options.Version, _options.AcceptsWork(),
-            _host.RuntimeService.CountSessionsAtWork(), _callers.Values.Count(static caller => !caller.IsOwner), devices.Count - revoked, revoked));
+            _host.RuntimeService.CountSessionsAtWork(), _callers.Values.Count(static caller => !caller.IsOwner), devices.Count - revoked, revoked)
+        {
+            Updating = _options.Updating(),
+            Update = _options.UpdateStatus?.Invoke(),
+        });
     }
 
     private Task<FleetDeviceList> ControlListDevicesAsync(FleetNodeCall call, FleetEmpty parameters, CancellationToken cancellationToken)

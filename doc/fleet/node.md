@@ -27,11 +27,11 @@ What it is not:
 | `altanode uninstall [--system --account <name>]` | Stops and removes the service; keeps the profile. |
 | `altanode pair` | Shows a pairing code and QR code (in the terminal) for a desktop to scan. The first slice prints the `codealta-pair://` link only, and waits until a device redeems it or it expires. |
 | `altanode join <server-url> [--token <enrollment>]` | Enrolls in a fleet: with an enrollment token, or by a device code a person approves. |
-| `altanode status` | Where the node listens, its paired devices, the sessions at work, the service, and whether it will still run after a restart or a logout. Later: the fleet connections, the providers' readiness. |
+| `altanode status` | Where the node listens, its paired devices, the sessions at work, its versions and its update, the service, and whether it will still run after a restart or a logout. Later: the fleet connections, the providers' readiness. |
 | `altanode logs [--follow] [--lines <n>]` | The node's log (`logs/altanode.log`), followed across its daily rolls. |
 | `altanode devices`, `revoke <device>`, `permissions <device> [--allow <list>] [--deny <list>]` | The devices paired with the node: name, short fingerprint, permissions (`view`, `drive`, `start`, `move`), paired and revoked dates. A revoked device is disconnected at once; one that loses a permission is disconnected and reconnects with what it may do. Without a running node, they change `fleet/trusted-devices.json`. |
 | `altanode projects [list]`, `add <path>`, `clone <url>`, `remove <project>` (`--space <space>`) | The projects of the node's catalog: an existing folder added, a repository cloned into `~/code/<host>/<owner>/<repo>` (the clone-on-demand of moves), a project removed from the catalog with its files left. Through the running node's local control (`control.projects.*`), which keeps a project that has sessions; otherwise on the catalog files of the profile. |
-| `altanode update` | Updates to the version the fleet recommends, when idle. |
+| `altanode update [--version <v>] [--source <feed>] [--check] [--now]` | Downloads a version (the latest release, a prerelease when one runs), checks its hash, and switches to it when the node is idle; the new version runs on trial and is rolled back if it does not confirm ([deployment](deployment.md#updates)). Later: the version the fleet recommends. |
 | `altanode machines`, `connect <link>`, `remote <machine> info\|sessions\|history\|send\|create\|watch` | The client side, for testing until the desktop does it: the machines this profile paired with, pairing with a node from its link, and its sessions. They read only the device key and `fleet/paired-machines.json` (written under a lock file), so they run beside a desktop or a node on the same profile. |
 | `altanode remote <machine> move <session> [--move-id <id>] [--clone]`, `altanode moves` | A session of a paired machine moves to the node of this profile (which runs, and which the machine lets this device move sessions to it): the machine gives it through `moves.start`, the command forwards the target's methods to the node over its local control. The same `--move-id` goes on with a move that stopped. `moves` lists the move records of the profile (`fleet/moves`). |
 
@@ -58,7 +58,8 @@ for everyone. A dedicated machine gets its own OS user (`codealta`) with its own
 
 - The installer writes the unit with restart on failure, and a bounded log under the state root. It starts the
   executable from a stable path: a .NET tool from its shim (`~/.dotnet/tools/altanode`), which `dotnet tool update`
-  keeps. launchd and systemd units get the installer's `PATH` and `DOTNET_ROOT`, since they start with almost none.
+  keeps. That entry point runs the version `altanode update` selected as its child, so an update never rewrites the
+  service ([deployment](deployment.md#updates)). launchd and systemd units get the installer's `PATH` and `DOTNET_ROOT`, since they start with almost none.
 - On Windows the task runs `conhost.exe --headless` (no console window) at logon, with a time trigger that starts the
   node again within 5 minutes if it stopped (`conhost` hides the node's exit code from Task Scheduler). `uninstall`
   deletes the task, then stops the node through its local control. `--system` is refused on Windows until the node
