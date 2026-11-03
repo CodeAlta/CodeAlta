@@ -34,12 +34,12 @@ test("through Dev Tunnels: the code of the tunnel, no word of Tailscale, the sig
   assert.deepEqual([read?.provider.id, read?.provider.state, read?.provider.url], ["devtunnel", "serving", "https://abc-2584.euw.devtunnels.ms"]);
   const served = mobileView(tunnel());
   assert.deepEqual([served.code?.address, served.problems], ["https://abc-2584.euw.devtunnels.ms", []]);
-  assert.equal(served.instruction, "Scan it with the camera of the phone. The first time, the phone shows a page of Microsoft: choose Continue.");
+  assert.equal(served.instruction, "Scan it with the camera of the phone. The first time, the phone signs in with the same GitHub account.");
 
   const out = { connectUrl: null, address: null, qr: null };
   const signIn = mobileView(tunnel(out, { state: "not-signed-in", url: null, detail: "Sign in." })).problems;
   assert.deepEqual(signIn.map(problem => [problem.key, problem.title, problem.detail, problem.actions.map(action => action.action), problem.retry]),
-    [["provider", "Sign in to Dev Tunnels.", null, ["signin-microsoft", "signin-github"], false]], "the title says it, the buttons of the provider follow");
+    [["provider", "Sign in to Dev Tunnels.", null, ["signin-github"], false]], "the title says it, the buttons of the provider follow");
   const missing = mobileView(tunnel(out, { state: "not-installed", url: null, detail: "Install it.", fixUrl: "https://learn.microsoft.com/dev-tunnels" })).problems[0];
   assert.deepEqual([missing.intent, missing.fix, missing.retry], ["danger", { label: "Install Dev Tunnels", url: "https://learn.microsoft.com/dev-tunnels" }, true]);
   assert.deepEqual(mobileView(tunnel(out, { state: "failed", url: null, detail: "devtunnel host did not start: boom" })).problems.map(problem => [problem.title, problem.detail]),

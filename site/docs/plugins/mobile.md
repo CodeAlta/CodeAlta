@@ -65,14 +65,14 @@ When something keeps a phone from connecting, the Mobile tab says what it is and
 
 ## Without Tailscale: Dev Tunnels
 
-A [Dev Tunnel](https://learn.microsoft.com/azure/developer/dev-tunnels/overview) of Microsoft gives the phone page an HTTPS address, such as `https://bold-tree-x1y2-2584.euw.devtunnels.ms`, that any phone opens: nothing to install on the phone, and nothing to change on your router.
+A [Dev Tunnel](https://learn.microsoft.com/azure/developer/dev-tunnels/overview) of Microsoft gives the phone page an HTTPS address, such as `https://bold-tree-x1y2-2584.euw.devtunnels.ms`, that only your GitHub account opens: nothing to install on the phone, and nothing to change on your router.
 
 1. Install the [Dev Tunnels command line](https://learn.microsoft.com/azure/developer/dev-tunnels/get-started) (`devtunnel`) on the computer, for example with `winget install Microsoft.devtunnel` on Windows or `brew install --cask devtunnel` on macOS.
 2. In **Settings > Extensions > Mobile**, choose **Dev Tunnels** under **Phones connect through**, then **Apply**.
-3. The first time, the Mobile tab asks you to sign in: **Sign in with Microsoft** or **Sign in with GitHub** opens the page of the account in your browser.
-4. Scan the QR code. The first time, the phone shows a page of Microsoft that warns about the tunnel: choose **Continue**.
+3. The first time, the Mobile tab asks you to sign in: **Sign in with GitHub** opens the page of GitHub in your browser.
+4. Scan the QR code. The first time, the phone asks you to sign in with the same GitHub account; if the page then asks for the code, scan it again.
 
-CodeAlta makes the tunnel once, in your account, and keeps it: its address stays the same, and the phones connected stay connected. The tunnel serves while CodeAlta runs with the plugin on. Dev Tunnels has [limits](https://learn.microsoft.com/azure/developer/dev-tunnels/faq) on the use of a tunnel; the phone page is light.
+CodeAlta makes the tunnel once, in your account, and keeps it, open to your account alone: its address stays the same, and the phones connected stay connected. The tunnel serves while CodeAlta runs with the plugin on. Dev Tunnels has [limits](https://learn.microsoft.com/azure/developer/dev-tunnels/faq) on the use of a tunnel; the phone page is light.
 
 ## Spaces
 

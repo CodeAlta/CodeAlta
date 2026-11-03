@@ -19,6 +19,7 @@ public sealed class MobileDevTunnelTests
         Assert.IsTrue(MobileDevTunnel.IsSignedIn(new MobileCliResult(0, "Logged in as someone using GitHub.")));
         Assert.IsFalse(MobileDevTunnel.IsSignedIn(new MobileCliResult(0, "Not logged in.")));
         Assert.IsFalse(MobileDevTunnel.IsSignedIn(new MobileCliResult(1, "")));
+        Assert.IsFalse(MobileDevTunnel.IsSignedIn(new MobileCliResult(0, "Logged in as someone@example.com using Microsoft.")), "the sign-in is a GitHub one");
         Assert.AreEqual("Error: Forbidden. The user is not allowed to change the tunnel.",
             MobileDevTunnel.Summary("Welcome to dev tunnels!\nError: Forbidden. The user is not allowed to change the tunnel.\nRequest ID: 9f818614-208b-477d-9084-9a0a82e60a26"),
             "the request id says nothing to a person");
@@ -31,39 +32,70 @@ public sealed class MobileDevTunnelTests
             .Answer("port create old-tunnel.euw -p 2584 --protocol http", 1, "Error: Forbidden.\nRequest ID: 1")
             .Answer("show old-tunnel.euw", 0, "Tunnel ID : old-tunnel.euw");
 
-        var published = await new MobileDevTunnel(cli).PublishAsync(2584, "old-tunnel.euw", CancellationToken.None);
+        var published = await new MobileDevTunnel(cli).PublishAsync(2584, "old-tunnel.euw", true, CancellationToken.None);
 
         Assert.AreEqual(("serving", "bold-tree-x1y2.euw"), (published.Status.State, published.TunnelId), published.Status.Detail);
-        CollectionAssert.Contains(cli.Calls.ToArray(), "create --allow-anonymous");
+        CollectionAssert.Contains(cli.Calls.ToArray(), "create");
     }
 
     [TestMethod]
-    public async Task ATunnelIsMadeOnce_WithAnonymousAccess_ThePortAdded_AndHosted()
+    public async Task ATunnelIsMadeOnce_ForItsAccountAlone_ThePortAdded_AndHosted()
     {
         var cli = new FakeDevTunnelCli();
 
-        var published = await new MobileDevTunnel(cli).PublishAsync(2584, null, CancellationToken.None);
+        var published = await new MobileDevTunnel(cli).PublishAsync(2584, null, true, CancellationToken.None);
 
         Assert.AreEqual(("serving", "https://bold-tree-x1y2-2584.euw.devtunnels.ms"), (published.Status.State, published.Status.Url), published.Status.Detail);
         Assert.AreEqual("bold-tree-x1y2.euw", published.TunnelId);
-        CollectionAssert.AreEqual(new[] { "user show", "create --allow-anonymous", "port create bold-tree-x1y2.euw -p 2584 --protocol http" }, cli.Calls.ToArray());
+        CollectionAssert.AreEqual(new[] { "user show", "create", "port create bold-tree-x1y2.euw -p 2584 --protocol http" }, cli.Calls.ToArray());
         Assert.AreEqual("host bold-tree-x1y2.euw", cli.Hosts.Single().Args);
 
         // The tunnel kept is used again: its address does not change.
         cli.Calls.Clear();
         cli.Answer("port create bold-tree-x1y2.euw -p 2584 --protocol http", 1, "Conflict: the port already exists.");
-        var again = await new MobileDevTunnel(cli).PublishAsync(2584, "bold-tree-x1y2.euw", CancellationToken.None);
+        var again = await new MobileDevTunnel(cli).PublishAsync(2584, "bold-tree-x1y2.euw", true, CancellationToken.None);
         Assert.AreEqual("serving", again.Status.State, again.Status.Detail);
-        CollectionAssert.DoesNotContain(cli.Calls.ToArray(), "create --allow-anonymous");
+        CollectionAssert.DoesNotContain(cli.Calls.ToArray(), "create");
+    }
+
+    [TestMethod]
+    public async Task ATunnelOfBefore_ThatLetAnyoneIn_LetsItsAccountAloneIn()
+    {
+        var cli = new FakeDevTunnelCli().Answer("access reset bold-tree-x1y2.euw", 0, "Access control entries reset.");
+
+        var published = await new MobileDevTunnel(cli).PublishAsync(2584, "bold-tree-x1y2.euw", false, CancellationToken.None);
+
+        Assert.AreEqual(("serving", "bold-tree-x1y2.euw", true), (published.Status.State, published.TunnelId, published.Private), published.Status.Detail);
+        var calls = cli.Calls.ToList();
+        Assert.IsTrue(calls.IndexOf("access reset bold-tree-x1y2.euw") is >= 0 and var reset && reset < calls.IndexOf("port create bold-tree-x1y2.euw -p 2584 --protocol http"),
+            "the access is reset before the view is published");
+        CollectionAssert.DoesNotContain(calls, "create");
+
+        // A tunnel already reset is not reset again.
+        cli.Calls.Clear();
+        await new MobileDevTunnel(cli).PublishAsync(2584, "bold-tree-x1y2.euw", true, CancellationToken.None);
+        CollectionAssert.DoesNotContain(cli.Calls.ToArray(), "access reset bold-tree-x1y2.euw");
+    }
+
+    [TestMethod]
+    public async Task ATunnelOfBefore_WhoseAccessCannotBeReset_IsReplacedByANewOne()
+    {
+        var cli = new FakeDevTunnelCli().Answer("access reset old-tunnel.euw", 1, "Error: Forbidden.");
+
+        var published = await new MobileDevTunnel(cli).PublishAsync(2584, "old-tunnel.euw", false, CancellationToken.None);
+
+        Assert.AreEqual(("serving", "bold-tree-x1y2.euw", true), (published.Status.State, published.TunnelId, published.Private), published.Status.Detail);
+        CollectionAssert.Contains(cli.Calls.ToArray(), "create");
+        CollectionAssert.DoesNotContain(cli.Calls.ToArray(), "port create old-tunnel.euw -p 2584 --protocol http", "a tunnel that may let anyone in serves nothing");
     }
 
     [TestMethod]
     public async Task ASignInTheAccountNoLongerAccepts_AsksForTheSignInAgain()
     {
         // GitHub revoked the token, while the command line still says it is signed in.
-        var cli = new FakeDevTunnelCli().Answer("create --allow-anonymous", 1, "GitHub login required.\nRequest ID: 42");
+        var cli = new FakeDevTunnelCli().Answer("create", 1, "GitHub login required.\nRequest ID: 42");
 
-        var published = await new MobileDevTunnel(cli).PublishAsync(2584, null, CancellationToken.None);
+        var published = await new MobileDevTunnel(cli).PublishAsync(2584, null, true, CancellationToken.None);
 
         Assert.AreEqual("not-signed-in", published.Status.State, published.Status.Detail);
         Assert.IsTrue(MobileDevTunnel.NeedsSignIn("Error: Unauthorized"));
@@ -73,14 +105,14 @@ public sealed class MobileDevTunnelTests
     [TestMethod]
     public async Task WhatKeepsTheTunnelFromServing_IsSaid()
     {
-        var missing = await new MobileDevTunnel(new FakeDevTunnelCli { Installed = false }).PublishAsync(2584, null, CancellationToken.None);
+        var missing = await new MobileDevTunnel(new FakeDevTunnelCli { Installed = false }).PublishAsync(2584, null, true, CancellationToken.None);
         Assert.AreEqual(("not-installed", MobileDevTunnel.InstallUrl), (missing.Status.State, missing.Status.FixUrl));
 
         var cli = new FakeDevTunnelCli().Answer("user show", 0, "Not logged in.");
-        Assert.AreEqual("not-signed-in", (await new MobileDevTunnel(cli).PublishAsync(2584, null, CancellationToken.None)).Status.State);
+        Assert.AreEqual("not-signed-in", (await new MobileDevTunnel(cli).PublishAsync(2584, null, true, CancellationToken.None)).Status.State);
 
         cli = new FakeDevTunnelCli { HostLines = ["Error: the tunnel host failed: quota exceeded"] };
-        var failed = await new MobileDevTunnel(cli).PublishAsync(2584, null, CancellationToken.None);
+        var failed = await new MobileDevTunnel(cli).PublishAsync(2584, null, true, CancellationToken.None);
         Assert.AreEqual("failed", failed.Status.State);
         StringAssert.Contains(failed.Status.Detail, "quota exceeded");
         Assert.IsTrue(cli.Hosts.Single().Disposed, "a host that did not start is ended");
@@ -105,7 +137,8 @@ public sealed class MobileDevTunnelTests
         var status = await tab.InvokeAsync<MobileEmpty, MobileStatus>("mobile.status", new MobileEmpty());
         Assert.AreEqual("devtunnel", status.Provider.Id);
         StringAssert.StartsWith(status.ConnectUrl, url + "/#k=", "the code holds the address of the tunnel and the pairing token");
-        Assert.AreEqual(("devtunnel", "bold-tree-x1y2.euw"), (fixture.State.Read().Mode, fixture.State.Read().TunnelId), "the tunnel is kept for the next start");
+        Assert.AreEqual(("devtunnel", "bold-tree-x1y2.euw", true), (fixture.State.Read().Mode, fixture.State.Read().TunnelId, fixture.State.Read().TunnelPrivate),
+            "the tunnel is kept for the next start, known to let its account alone in");
 
         await page.InvokeAsync<MobileSettingsChange, MobileSettingsView>("mobile.settings.set", new MobileSettingsChange("tailscale", port, 4443));
         await WaitAsync(() => fixture.Plugin.Settings().Provider.State != "pending", "Tailscale is asked");
@@ -220,7 +253,7 @@ public sealed class MobileDevTunnelTests
         private readonly Dictionary<string, MobileCliResult> _answers = new(StringComparer.Ordinal)
         {
             ["user show"] = new(0, "Logged in as someone using GitHub."),
-            ["create --allow-anonymous"] = new(0, "Tunnel ID             : bold-tree-x1y2.euw\nAccess control        : {+Anonymous [connect]}"),
+            ["create"] = new(0, "Tunnel ID             : bold-tree-x1y2.euw\nAccess control        : {}"),
             ["show bold-tree-x1y2.euw"] = new(0, "Tunnel ID             : bold-tree-x1y2.euw"),
         };
 
@@ -249,12 +282,6 @@ public sealed class MobileDevTunnelTests
             lock (Calls) Calls.Add(line);
             if (_answers.TryGetValue(line, out var answer)) return Task.FromResult(answer);
             return Task.FromResult(line.StartsWith("port ", StringComparison.Ordinal) ? new MobileCliResult(0, "") : new MobileCliResult(1, "unknown command: " + line));
-        }
-
-        public Task<int> RunInWindowAsync(IReadOnlyList<string> args, TimeSpan patience, CancellationToken cancellationToken)
-        {
-            lock (Calls) Calls.Add("window: " + string.Join(' ', args));
-            return Task.FromResult(0);
         }
 
         public IMobileHostedProcess Start(IReadOnlyList<string> args)

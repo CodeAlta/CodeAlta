@@ -708,6 +708,12 @@ internal sealed record MobileSettings
 
     /// <summary>Gets the Dev Tunnel the plugin made, kept so that its address does not change; null until one is made.</summary>
     public string? TunnelId { get; init; }
+
+    /// <summary>
+    /// Gets a value indicating whether <see cref="TunnelId"/> lets in its account alone. A tunnel made by a CodeAlta of before let anyone
+    /// in: its access is reset once.
+    /// </summary>
+    public bool TunnelPrivate { get; init; }
 }
 
 /// <summary>An action of the provider the tab asks for.</summary>

@@ -36,7 +36,7 @@ internal static class MobileCommandLine
     /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled.</exception>
     internal static async Task<MobileCliResult> RunAsync(string path, IReadOnlyList<string> args, TimeSpan patience, CancellationToken cancellationToken)
     {
-        using var process = Process.Start(Info(path, args, redirected: true)) ?? throw new InvalidOperationException($"{Path.GetFileName(path)} did not start.");
+        using var process = Process.Start(Info(path, args)) ?? throw new InvalidOperationException($"{Path.GetFileName(path)} did not start.");
         var output = process.StandardOutput.ReadToEndAsync(CancellationToken.None);
         var errors = process.StandardError.ReadToEndAsync(CancellationToken.None);
         var ended = await WaitAsync(process, patience, cancellationToken).ConfigureAwait(false);
@@ -44,23 +44,10 @@ internal static class MobileCommandLine
         return new(ended ? process.ExitCode : -1, text, !ended);
     }
 
-    /// <summary>
-    /// Runs a command in a console window of its own, for what it shows to the person (the account picker of Windows takes that console as
-    /// its parent), and waits for its end, <paramref name="patience"/> at most.
-    /// </summary>
-    /// <returns>Its exit code; -1 when it did not end in time.</returns>
-    /// <exception cref="InvalidOperationException">The command did not start.</exception>
-    /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was canceled.</exception>
-    internal static async Task<int> RunInWindowAsync(string path, IReadOnlyList<string> args, TimeSpan patience, CancellationToken cancellationToken)
+    /// <summary>How a command starts: its output and its errors redirected, without a window.</summary>
+    internal static ProcessStartInfo Info(string path, IReadOnlyList<string> args)
     {
-        using var process = Process.Start(Info(path, args, redirected: false)) ?? throw new InvalidOperationException($"{Path.GetFileName(path)} did not start.");
-        return await WaitAsync(process, patience, cancellationToken).ConfigureAwait(false) ? process.ExitCode : -1;
-    }
-
-    /// <summary>How a command starts: redirected and without a window, or with a console of its own.</summary>
-    internal static ProcessStartInfo Info(string path, IReadOnlyList<string> args, bool redirected)
-    {
-        var info = new ProcessStartInfo(path) { RedirectStandardOutput = redirected, RedirectStandardError = redirected, UseShellExecute = false, CreateNoWindow = redirected };
+        var info = new ProcessStartInfo(path) { RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false, CreateNoWindow = true };
         foreach (var arg in args) info.ArgumentList.Add(arg);
         return info;
     }

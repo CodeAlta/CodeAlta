@@ -89,11 +89,11 @@ export type MobileText = "The phone page is starting." | "Tailscale is starting 
   | "Tailscale could not publish the page." | "The page is not published on the tailnet."
   | "Download Tailscale" | "Enable it in the admin console" | "Open Tailscale" | "Open the page that fixes it"
   | "Scan it with the camera of the phone. The phone must be signed in to the same tailnet."
-  | "Scan it with the camera of the phone. The first time, the phone shows a page of Microsoft: choose Continue."
+  | "Scan it with the camera of the phone. The first time, the phone signs in with the same GitHub account."
   | "Scan it with the camera of the phone."
   | "Dev Tunnels is opening the tunnel." | "Waiting for the sign-in in the browser…"
   | "The Dev Tunnels command line is not installed." | "Sign in to Dev Tunnels." | "The Dev Tunnel did not open." | "The Dev Tunnel is closed."
-  | "Install Dev Tunnels" | "Sign in with Microsoft" | "Sign in with GitHub" | "The phone page could not be published.";
+  | "Install Dev Tunnels" | "Sign in with GitHub" | "The phone page could not be published.";
 
 /** A button of a problem that runs an action of the provider (`mobile.act`). */
 export type MobileProviderAction = Readonly<{ action: string; label: MobileText; primary?: boolean }>;
@@ -165,13 +165,13 @@ const providers: Readonly<Record<string, ProviderText>> = {
       "not-installed": { title: "The Dev Tunnels command line is not installed.", danger: true, fix: "Install Dev Tunnels", retry: true },
       "not-signed-in": {
         title: "Sign in to Dev Tunnels.", quiet: true,
-        actions: [{ action: "signin-microsoft", label: "Sign in with Microsoft", primary: true }, { action: "signin-github", label: "Sign in with GitHub" }],
+        actions: [{ action: "signin-github", label: "Sign in with GitHub", primary: true }],
       },
       "failed": { title: "The Dev Tunnel did not open.", retry: true },
       "stopped": { title: "The Dev Tunnel is closed." },
     },
     waiting: { pending: "Dev Tunnels is opening the tunnel.", "signing-in": "Waiting for the sign-in in the browser…" },
-    instruction: "Scan it with the camera of the phone. The first time, the phone shows a page of Microsoft: choose Continue.",
+    instruction: "Scan it with the camera of the phone. The first time, the phone signs in with the same GitHub account.",
   },
 };
 

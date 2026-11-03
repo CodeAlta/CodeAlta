@@ -2,12 +2,12 @@
 // of `localization.ts`. English is the key.
 export const mobileSettingsMessages = {
   "Phones connect through": ["Los teléfonos se conectan mediante", "Les téléphones se connectent via", "Telefone verbinden sich über", "スマートフォンの接続方法", "手机的连接方式"],
-  "A Dev Tunnel of Microsoft gives the page an HTTPS address any phone opens, without installing anything on it. This computer needs the Dev Tunnels command line and a Microsoft or GitHub account.": [
-    "Un Dev Tunnel de Microsoft da a la página una dirección HTTPS que cualquier teléfono abre, sin instalar nada en él. Este equipo necesita la línea de comandos de Dev Tunnels y una cuenta de Microsoft o GitHub.",
-    "Un Dev Tunnel de Microsoft donne à la page une adresse HTTPS que n’importe quel téléphone ouvre, sans rien y installer. Cet ordinateur a besoin de la ligne de commande Dev Tunnels et d’un compte Microsoft ou GitHub.",
-    "Ein Dev Tunnel von Microsoft gibt der Seite eine HTTPS-Adresse, die jedes Telefon öffnet, ohne dass etwas darauf installiert wird. Dieser Computer braucht die Befehlszeile von Dev Tunnels und ein Microsoft- oder GitHub-Konto.",
-    "Microsoft の Dev Tunnel は、何もインストールせずにどのスマートフォンでも開ける HTTPS アドレスをページに与えます。このコンピューターには Dev Tunnels のコマンド ラインと Microsoft または GitHub のアカウントが必要です。",
-    "Microsoft 的 Dev Tunnel 为页面提供一个任何手机都能打开的 HTTPS 地址，手机上无需安装任何东西。此计算机需要 Dev Tunnels 命令行以及 Microsoft 或 GitHub 帐户。"],
+  "A Dev Tunnel of Microsoft gives the page an HTTPS address only your GitHub account opens, without installing anything on the phone. This computer needs the Dev Tunnels command line, and the phone signs in with the same GitHub account.": [
+    "Un Dev Tunnel de Microsoft da a la página una dirección HTTPS que solo abre tu cuenta de GitHub, sin instalar nada en el teléfono. Este equipo necesita la línea de comandos de Dev Tunnels, y el teléfono inicia sesión con la misma cuenta de GitHub.",
+    "Un Dev Tunnel de Microsoft donne à la page une adresse HTTPS que seul votre compte GitHub ouvre, sans rien installer sur le téléphone. Cet ordinateur a besoin de la ligne de commande Dev Tunnels, et le téléphone se connecte avec le même compte GitHub.",
+    "Ein Dev Tunnel von Microsoft gibt der Seite eine HTTPS-Adresse, die nur Ihr GitHub-Konto öffnet, ohne dass etwas auf dem Telefon installiert wird. Dieser Computer braucht die Befehlszeile von Dev Tunnels, und das Telefon meldet sich mit demselben GitHub-Konto an.",
+    "Microsoft の Dev Tunnel は、あなたの GitHub アカウントだけが開ける HTTPS アドレスをページに与えます。スマートフォンには何もインストールしません。このコンピューターには Dev Tunnels のコマンド ラインが必要で、スマートフォンは同じ GitHub アカウントでサインインします。",
+    "Microsoft 的 Dev Tunnel 为页面提供一个只有你的 GitHub 帐户能打开的 HTTPS 地址，手机上无需安装任何东西。此计算机需要 Dev Tunnels 命令行，手机需使用同一个 GitHub 帐户登录。"],
   "Address of the Dev Tunnel": ["Dirección del Dev Tunnel", "Adresse du Dev Tunnel", "Adresse des Dev Tunnels", "Dev Tunnel のアドレス", "Dev Tunnel 的地址"],
   "Apply to open the Dev Tunnel.": ["Aplica para abrir el Dev Tunnel.", "Appliquez pour ouvrir le Dev Tunnel.", "Übernehmen Sie, um den Dev Tunnel zu öffnen.", "適用すると Dev Tunnel が開きます。", "应用以打开 Dev Tunnel。"],
   "Apply to publish the page on the tailnet.": ["Aplica para publicar la página en la tailnet.", "Appliquez pour publier la page sur le tailnet.", "Übernehmen Sie, um die Seite im Tailnet zu veröffentlichen.",
