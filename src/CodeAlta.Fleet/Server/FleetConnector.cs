@@ -125,6 +125,13 @@ public sealed class FleetConnectorOptions
     public Func<FleetUpdateCancel, CancellationToken, Task>? UpdateCancel { get; init; }
 
     /// <summary>
+    /// Gets what receives the update policy of the fleet (<see cref="FleetServerMethods.UpdatePolicy"/>), as signed: it
+    /// verifies the signature itself. It is given one event of the updates at a time, in the order the server sent them.
+    /// Null ignores it.
+    /// </summary>
+    public Func<FleetSignedUpdateDocument, CancellationToken, Task>? UpdatePolicy { get; init; }
+
+    /// <summary>
     /// Gets where this node stands in the campaign of this server, sent with its presence and once it connects
     /// (<see cref="FleetServerMethods.UpdateReport"/>); null for none.
     /// </summary>
@@ -430,6 +437,13 @@ public sealed class FleetConnector : IAsyncDisposable
                     try { cancelled = fleetEvent.Payload?.Deserialize(FleetServerJsonContext.Default.FleetUpdateCancel); }
                     catch (JsonException) { /* Not read: the campaign goes on. */ }
                     if (cancelled is { CampaignId.Length: > 0 }) QueueUpdate(() => cancel(cancelled, stop), stop);
+                    break;
+                case FleetServerMethods.UpdatePolicy when _options.UpdatePolicy is { } receivePolicy:
+                    FleetSignedUpdateDocument? policy = null;
+                    try { policy = fleetEvent.Payload?.Deserialize(FleetServerJsonContext.Default.FleetSignedUpdateDocument); }
+                    catch (JsonException) { /* A policy this node does not read changes nothing. */ }
+                    // In the order of the instructions: a policy that arrives first takes away what it no longer allows.
+                    if (policy is { Payload.Length: > 0 }) QueueUpdate(() => receivePolicy(policy, stop), stop);
                     break;
             }
 

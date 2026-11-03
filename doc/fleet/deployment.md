@@ -174,7 +174,11 @@ All signed (Authenticode, Apple notarization, NuGet signatures, cosign for image
   **automatic**: the server reads the policy's feed daily and starts a campaign to its latest stable version at the
   maintenance window (a time of day in a time zone). No person signs the hash of that version, so each machine checks
   the feed itself: the version must be the latest stable one the feed lists, newer than the one it runs, and the
-  package must match the feed's own hash.
+  package must match the feed's own hash. Each machine also waits for the signed window itself (its time zone, daylight
+  saving time included; it stays open four hours), whenever the server sends the instruction. The server sends the
+  signed policy to its nodes (`update.policy`) on each connection and each change; a node keeps the latest it verified,
+  refuses what a policy it replaced would have allowed (an automatic update after a manual or pinned policy, another
+  version than the pinned one), and drops a campaign that waits for what the new policy no longer allows.
 - Containers update by image tag.
 
 ## Backup, restore, leave

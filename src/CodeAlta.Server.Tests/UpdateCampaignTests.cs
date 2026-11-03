@@ -362,6 +362,7 @@ public sealed class UpdateCampaignTests
                     return Task.CompletedTask;
                 },
                 UpdateReport = () => agent.Report(LinkId),
+                UpdatePolicy = (policy, token) => agent.AcceptPolicyAsync(LinkId, organization, policy, async read => await connector!.Devices.RefreshAsync(read), token),
             });
             Agent = agent;
             Connector = connector;

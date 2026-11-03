@@ -227,6 +227,9 @@ public static class FleetUpdateDocuments
     /// <summary>The most bytes of a signed document.</summary>
     public const int MaxPayloadBytes = 64 * 1024;
 
+    /// <summary>How long the maintenance window of an automatic policy stays open from its start: a machine starts an automatic update only within it.</summary>
+    public static readonly TimeSpan WindowLength = TimeSpan.FromHours(4);
+
     private const string ManifestDomain = "codealta-update-manifest/1\n";
     private const string PolicyDomain = "codealta-update-policy/1\n";
     private const int MaxTextLength = 2048;
@@ -450,18 +453,48 @@ public static class FleetUpdateDocuments
         ArgumentNullException.ThrowIfNull(policy);
         if (!TryParseWindow(policy.Window, out var start)) return after;
         var zone = FindZone(policy.TimeZone);
-        var local = TimeZoneInfo.ConvertTime(after, zone);
+        var today = DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(after, zone).DateTime);
         for (var day = 0; day < 3; day++)
         {
-            var date = DateOnly.FromDateTime(local.DateTime).AddDays(day);
-            var wall = date.ToDateTime(start, DateTimeKind.Unspecified);
-            // A time skipped by a change of daylight saving time moves an hour later.
-            if (zone.IsInvalidTime(wall)) wall = wall.AddHours(1);
-            var candidate = new DateTimeOffset(wall, zone.GetUtcOffset(wall));
-            if (candidate >= after) return candidate.ToUniversalTime();
+            var candidate = Opening(zone, today.AddDays(day), start);
+            if (candidate >= after) return candidate;
         }
 
         return after;
+    }
+
+    /// <summary>
+    /// Gets when an automatic update may start at or after a time: the time itself while a maintenance window of the
+    /// policy is open (it lasts <see cref="WindowLength"/> from its start, in its time zone), or the start of the next one.
+    /// </summary>
+    /// <param name="policy">The policy.</param>
+    /// <param name="at">The time.</param>
+    /// <returns>The time, or the start of the next window, in UTC.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="policy"/> is null.</exception>
+    public static DateTimeOffset WindowOpening(FleetUpdatePolicy policy, DateTimeOffset at)
+    {
+        ArgumentNullException.ThrowIfNull(policy);
+        if (!TryParseWindow(policy.Window, out var start)) return at;
+        var zone = FindZone(policy.TimeZone);
+        var today = DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(at, zone).DateTime);
+        // Yesterday's window may still be open (one that starts late in the evening).
+        for (var day = -1; day < 3; day++)
+        {
+            var opening = Opening(zone, today.AddDays(day), start);
+            if (opening <= at && at < opening + WindowLength) return at;
+            if (opening > at) return opening;
+        }
+
+        return at;
+    }
+
+    // The start of the window of a day, in UTC, from the offset of that day in its time zone.
+    private static DateTimeOffset Opening(TimeZoneInfo zone, DateOnly date, TimeOnly start)
+    {
+        var wall = date.ToDateTime(start, DateTimeKind.Unspecified);
+        // A time skipped by a change of daylight saving time moves an hour later.
+        if (zone.IsInvalidTime(wall)) wall = wall.AddHours(1);
+        return new DateTimeOffset(wall, zone.GetUtcOffset(wall)).ToUniversalTime();
     }
 
     private static TimeZoneInfo FindZone(string? id)

@@ -166,6 +166,103 @@ public sealed class FleetUpdateAgentTests
         Assert.IsNull(agent.Tick());
         Assert.AreEqual(FleetUpdateMachineStates.Updated, agent.Current?.State);
     }
+
+    [TestMethod]
+    public async Task AManualPolicyRevokesTheAutomaticPolicyItReplaced()
+    {
+        using var harness = new AgentHarness();
+        using var outsider = new UpdateSigner();
+        harness.Latest = UpdateVersion.Parse("4.1.0");
+        var agent = harness.Start();
+        var automatic = harness.Policy(2, FleetUpdateModes.Automatic);
+        await harness.AcceptAsync(agent, LinkA, harness.Automatic("auto-1", automatic, "4.1.0"));
+        Assert.AreEqual(FleetUpdateMachineStates.Waiting, agent.Current?.State);
+
+        // A policy that does not verify, or older than the one kept, changes nothing.
+        var manual = harness.Policy(3, FleetUpdateModes.Manual);
+        await harness.AcceptPolicyAsync(agent, LinkA, outsider.Sign(manual with { SignerDeviceId = outsider.DeviceId }));
+        await harness.AcceptPolicyAsync(agent, LinkA, harness.Owner.Sign(manual) with { Signature = "" });
+        await harness.AcceptPolicyAsync(agent, LinkA, harness.Owner.Sign(manual with { OrganizationId = "org-b" }));
+        await harness.AcceptPolicyAsync(agent, LinkA, harness.Owner.Sign(harness.Policy(1, FleetUpdateModes.Manual)));
+        Assert.AreEqual(FleetUpdateMachineStates.Waiting, agent.Current?.State);
+
+        // The owner turns the automatic updates off: the update that waited is dropped, and the policy it came with no longer counts.
+        await harness.AcceptPolicyAsync(agent, LinkA, harness.Owner.Sign(manual));
+        Assert.AreEqual(FleetUpdateMachineStates.Cancelled, agent.Current?.State);
+        StringAssert.Contains(agent.Current?.Message, "manual");
+        Assert.IsNull(agent.Tick());
+        await harness.AcceptAsync(agent, LinkA, harness.Automatic("auto-2", automatic, "4.1.0"));
+        Assert.AreEqual(("auto-2", FleetUpdateMachineStates.Refused), (agent.Report(LinkA)?.CampaignId, agent.Report(LinkA)?.State));
+        StringAssert.Contains(agent.Report(LinkA)?.Message, "older than policy 3");
+
+        agent = harness.Restart(agent);
+        await harness.AcceptAsync(agent, LinkA, harness.Automatic("auto-3", automatic, "4.1.0"));
+        Assert.AreEqual(("auto-3", FleetUpdateMachineStates.Refused), (agent.Report(LinkA)?.CampaignId, agent.Report(LinkA)?.State), "kept across a restart");
+        Assert.AreEqual(0, harness.Applied.Count);
+
+        // A newer automatic policy, as an instruction carries it, counts again.
+        await harness.AcceptAsync(agent, LinkA, harness.Automatic("auto-4", harness.Policy(4, FleetUpdateModes.Automatic), "4.1.0"));
+        Assert.AreEqual(("auto-4", FleetUpdateMachineStates.Waiting), (agent.Report(LinkA)?.CampaignId, agent.Report(LinkA)?.State));
+    }
+
+    [TestMethod]
+    public async Task APinnedPolicyRefusesAndDropsAManifestForAnotherVersion()
+    {
+        using var harness = new AgentHarness();
+        var agent = harness.Start();
+        await harness.AcceptAsync(agent, LinkA, harness.Instruction(harness.Manifest(1, "c1", "4.0.2")));
+        Assert.AreEqual(FleetUpdateMachineStates.Waiting, agent.Current?.State);
+
+        await harness.AcceptPolicyAsync(agent, LinkA, harness.Owner.Sign(harness.Policy(1, FleetUpdateModes.Pinned, pinned: "4.0.1")));
+        Assert.AreEqual(FleetUpdateMachineStates.Cancelled, agent.Current?.State, "the fleet stays on 4.0.1");
+        StringAssert.Contains(agent.Current?.Message, "4.0.1");
+
+        // A manifest signed before the pin, delivered after it.
+        await harness.AcceptAsync(agent, LinkA, harness.Instruction(harness.Manifest(2, "c2", "4.0.2")));
+        Assert.AreEqual(("c2", FleetUpdateMachineStates.Refused), (agent.Report(LinkA)?.CampaignId, agent.Report(LinkA)?.State));
+        StringAssert.Contains(agent.Report(LinkA)?.Message, "pinned");
+        Assert.AreEqual(0, harness.Applied.Count);
+    }
+
+    [TestMethod]
+    public async Task AnAutomaticUpdateWaitsForTheSignedMaintenanceWindow()
+    {
+        using var harness = new AgentHarness();
+        harness.Latest = UpdateVersion.Parse("4.1.0");
+        var agent = harness.Start();
+        // Noon UTC; the window opens at 02:00 in Paris, 01:00 UTC in November.
+        var policy = harness.Policy(1, FleetUpdateModes.Automatic, window: "02:00", zone: "Europe/Paris");
+        await harness.AcceptAsync(agent, LinkA, harness.Automatic("auto-1", policy, "4.1.0"));
+        Assert.AreEqual(FleetUpdateMachineStates.Waiting, agent.Current?.State);
+        Assert.IsNull(agent.Tick(), "the server sent it at noon");
+
+        harness.Clock.Now = new DateTimeOffset(2026, 11, 4, 0, 59, 0, TimeSpan.Zero);
+        Assert.IsNull(agent.Tick());
+        Assert.AreEqual(0, harness.Applied.Count);
+
+        harness.Clock.Now = new DateTimeOffset(2026, 11, 4, 1, 0, 0, TimeSpan.Zero);
+        await (agent.Tick() ?? Task.CompletedTask);
+        Assert.AreEqual(1, harness.Applied.Count, "it starts within its window");
+    }
+
+    [TestMethod]
+    public async Task AnAutomaticUpdateThatMissedItsWindowWaitsForTheNextOne()
+    {
+        using var harness = new AgentHarness();
+        harness.Latest = UpdateVersion.Parse("4.1.0");
+        harness.Clock.Now = new DateTimeOffset(2026, 11, 4, 1, 30, 0, TimeSpan.Zero);
+        var agent = harness.Start();
+        await harness.AcceptAsync(agent, LinkA, harness.Automatic("auto-1", harness.Policy(1, FleetUpdateModes.Automatic, window: "02:00", zone: "Europe/Paris"), "4.1.0"));
+
+        // The node was off from inside its window to past its end.
+        harness.Clock.Now = new DateTimeOffset(2026, 11, 4, 6, 0, 0, TimeSpan.Zero);
+        agent = harness.Restart(agent);
+        Assert.IsNull(agent.Tick());
+        Assert.AreEqual(0, harness.Applied.Count);
+        harness.Clock.Now = new DateTimeOffset(2026, 11, 5, 1, 0, 0, TimeSpan.Zero);
+        await (agent.Tick() ?? Task.CompletedTask);
+        Assert.AreEqual(1, harness.Applied.Count);
+    }
 }
 
 /// <summary>An update agent on a folder of its own, with a controller that signs, a clock and a faked self-update.</summary>
@@ -200,6 +297,9 @@ internal sealed class AgentHarness : IDisposable
     /// <summary>Gets or sets where the self-update stands, as the agent reads it.</summary>
     public FleetUpdateStatus? Status { get; set; }
 
+    /// <summary>Gets or sets the latest stable version the feed lists, for an automatic campaign; null for none.</summary>
+    public UpdateVersion? Latest { get; set; }
+
     public List<UpdateRequest> Applied { get; } = [];
 
     public List<string> Logs { get; } = [];
@@ -217,7 +317,9 @@ internal sealed class AgentHarness : IDisposable
                     ? new StagedUpdate(UpdateVersion.Parse(request.Version!), Folder, PackageHash.Parse(request.ExpectedSha512 ?? Hash('n')), "expected hash", false)
                     : null);
             },
-            Check = (_, _) => throw new InvalidOperationException("No automatic campaign here."),
+            Check = (request, _) => Latest is { } latest
+                ? Task.FromResult(new UpdateCheck(request.Source ?? UpdateFeeds.NuGetOrg, "CodeAlta.Node", UpdateVersion.Parse(Running), latest, latest, null))
+                : throw new InvalidOperationException("No automatic campaign here."),
             Status = () => Status ?? new FleetUpdateStatus(Running, null, null, null, null, null, [], null),
             Time = Clock,
             Log = message => { lock (Logs) Logs.Add(message); },
@@ -234,6 +336,14 @@ internal sealed class AgentHarness : IDisposable
 
     public Task AcceptAsync(FleetUpdateAgent agent, string linkId, FleetUpdateInstruction instruction, string organization = Organization, FleetDeviceListState? devices = null)
         => agent.AcceptAsync(linkId, organization, instruction, _ => Task.FromResult<FleetDeviceListState?>(devices ?? DeviceList), CancellationToken.None);
+
+    public Task AcceptPolicyAsync(FleetUpdateAgent agent, string linkId, FleetSignedUpdateDocument policy)
+        => agent.AcceptPolicyAsync(linkId, Organization, policy, _ => Task.FromResult<FleetDeviceListState?>(DeviceList), CancellationToken.None);
+
+    public FleetUpdatePolicy Policy(long sequence, string mode, string? window = null, string? zone = null, string? pinned = null)
+        => new(FleetUpdatePolicy.CurrentVersion, Organization, sequence, mode, pinned, null, window, zone, Owner.DeviceId, DateTimeOffset.UnixEpoch);
+
+    public FleetUpdateInstruction Automatic(string campaign, FleetUpdatePolicy policy, string version) => new(campaign, null, Owner.Sign(policy), version);
 
     public FleetUpdateManifest Manifest(long sequence, string campaign, string version) => Manifest(Owner, Organization, sequence, campaign, version);
 

@@ -251,11 +251,19 @@ public sealed class FleetUpdateAgent : IAsyncDisposable
         }
 
         FleetUpdateAgentLink sequences;
-        lock (_gate) sequences = _state.Links.GetValueOrDefault(linkId) ?? new FleetUpdateAgentLink();
+        FleetUpdatePolicy? kept;
+        lock (_gate)
+        {
+            sequences = _state.Links.GetValueOrDefault(linkId) ?? new FleetUpdateAgentLink();
+            kept = KeptPolicy(linkId);
+        }
+
+        var now = _options.Time.GetUtcNow();
         var context = new UpdateInstructionContext
         {
             Devices = devicesState, OrganizationId = organizationId ?? devicesState.OrganizationId, DeviceId = _options.DeviceId, Product = _options.Product, Runtime = runtime,
-            Running = _options.Running, LastSequence = sequences.Sequence, LastCampaignId = sequences.CampaignId, LastPolicySequence = sequences.PolicySequence,
+            Running = _options.Running, LastSequence = sequences.Sequence, LastCampaignId = sequences.CampaignId, LastPolicySequence = sequences.PolicySequence, Policy = kept,
+            Now = now,
         };
         if (!UpdateInstructions.TryVerify(instruction, context, out var update, out var reason))
         {
@@ -273,11 +281,13 @@ public sealed class FleetUpdateAgent : IAsyncDisposable
             return;
         }
 
-        var now = _options.Time.GetUtcNow();
         FleetUpdateAgentState next;
         lock (_gate)
         {
-            conflict = Readable() ? OtherFleet(linkId) : _unreadable;
+            // A policy or a campaign that came meanwhile wins: the instruction is checked again against it by its next send.
+            conflict = !Readable() ? _unreadable
+                : !(_state.Links.GetValueOrDefault(linkId) ?? new FleetUpdateAgentLink()).SameAuthority(sequences) ? "the update policy or a campaign of the fleet changed meanwhile"
+                : OtherFleet(linkId);
             if (conflict is null)
             {
                 var links = new Dictionary<string, FleetUpdateAgentLink>(_state.Links, StringComparer.Ordinal);
@@ -285,8 +295,9 @@ public sealed class FleetUpdateAgent : IAsyncDisposable
                 if (_state.LinkId is { } previousLink && ReportOf(_state) is { } previous)
                     links[previousLink] = (links.GetValueOrDefault(previousLink) ?? new FleetUpdateAgentLink()) with { Receipt = previous };
                 var current = links.GetValueOrDefault(linkId) ?? new FleetUpdateAgentLink();
+                // An automatic update brings its policy, the latest this node knows once verified.
                 links[linkId] = update.Automatic
-                    ? current with { PolicySequence = Math.Max(current.PolicySequence, update.Sequence) }
+                    ? current with { PolicySequence = update.Sequence, Policy = instruction.Policy }
                     : current with { Sequence = update.Sequence, CampaignId = update.CampaignId };
                 next = Accepted(links);
                 // The checkpoint is on disk before anything runs: one that is not kept would let this manifest, or an
@@ -321,6 +332,130 @@ public sealed class FleetUpdateAgent : IAsyncDisposable
             };
     }
 
+    /// <summary>
+    /// Takes the update policy of the fleet a server sent (<see cref="FleetServerMethods.UpdatePolicy"/>): verifies it
+    /// against the device list of that server and keeps it when it is newer than the one kept; what it no longer allows
+    /// stops.
+    /// </summary>
+    /// <param name="connector">The connector of the server.</param>
+    /// <param name="link">The link of the server.</param>
+    /// <param name="policy">The signed policy.</param>
+    /// <param name="cancellationToken">Cancels the check.</param>
+    /// <returns>A task that completes once it is kept or ignored.</returns>
+    /// <exception cref="ArgumentNullException">An argument is null.</exception>
+    public Task AcceptPolicyAsync(FleetConnector connector, FleetServerLink link, FleetSignedUpdateDocument policy, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(connector);
+        ArgumentNullException.ThrowIfNull(link);
+        ArgumentNullException.ThrowIfNull(policy);
+        lock (_gate) _connectors[link.Id] = connector;
+        return AcceptPolicyAsync(link.Id, link.OrganizationId, policy, token => ReadDevicesAsync(connector, token), cancellationToken);
+    }
+
+    /// <summary>Takes the update policy of the fleet, with the device list read by <paramref name="devices"/>; tests call it directly.</summary>
+    /// <param name="linkId">The link of the server.</param>
+    /// <param name="organizationId">The organization of the server; null for the one of its device list.</param>
+    /// <param name="signed">The signed policy.</param>
+    /// <param name="devices">Reads the device list of the server.</param>
+    /// <param name="cancellationToken">Cancels the check.</param>
+    /// <returns>A task that completes once it is kept or ignored.</returns>
+    internal async Task AcceptPolicyAsync(string linkId, string? organizationId, FleetSignedUpdateDocument signed, Func<CancellationToken, Task<FleetDeviceListState?>> devices,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(signed);
+        if (!FleetUpdateDocuments.TryParsePolicy(signed.Payload, out var policy, out var reason))
+        {
+            _options.Log($"The update policy of the fleet was ignored: {reason}.");
+            return;
+        }
+
+        FleetDeviceListState? list;
+        try
+        {
+            list = await devices(cancellationToken).ConfigureAwait(false);
+        }
+        catch (FleetDeviceListException exception)
+        {
+            _options.Log($"The update policy {policy.Sequence} of the fleet was ignored: the device list of the server does not verify ({exception.Reason}).");
+            return;
+        }
+
+        if (list is null
+            || !FleetUpdateDocuments.TryVerifySigner(signed, FleetUpdateDocuments.GetPolicySignedBytes(signed.Payload), policy.OrganizationId, policy.SignerDeviceId, list,
+                organizationId ?? list.OrganizationId, out reason))
+        {
+            _options.Log($"The update policy {policy.Sequence} of the fleet was ignored: {reason ?? "the device list of the server could not be read"}.");
+            return;
+        }
+
+        FleetUpdateAgentState next;
+        string? stopped;
+        lock (_gate)
+        {
+            if (!Readable())
+            {
+                _options.Log($"The update policy {policy.Sequence} of the fleet was ignored: {_unreadable}.");
+                return;
+            }
+
+            var link = _state.Links.GetValueOrDefault(linkId) ?? new FleetUpdateAgentLink();
+            if (policy.Sequence < link.PolicySequence || policy.Sequence == link.PolicySequence && link.Policy is not null)
+            {
+                if (link.Policy?.Payload != signed.Payload)
+                    _options.Log($"The update policy {policy.Sequence} of the fleet was ignored: this node keeps policy {link.PolicySequence}.");
+                return;
+            }
+
+            var links = new Dictionary<string, FleetUpdateAgentLink>(_state.Links, StringComparer.Ordinal)
+            {
+                [linkId] = link with { Policy = signed, PolicySequence = policy.Sequence },
+            };
+            next = _state with { Links = links };
+            // What the new policy no longer allows stops: an automatic update under a manual or pinned policy, another
+            // version than the one a policy pins.
+            stopped = _state.LinkId == linkId ? Disallowed(_state, policy) : null;
+            if (stopped is not null) next = Stop(next, stopped);
+            // A newer policy only takes away: it applies even when it cannot be kept, and the instruction it would
+            // allow is kept, with it, before it runs.
+            Save(next);
+            _state = next;
+        }
+
+        _options.Log($"The update policy {policy.Sequence} of the fleet is {policy.Mode}." + (stopped is null ? "" : $" Campaign {next.CampaignId} stops: {stopped}."));
+        if (stopped is not null) Publish(next);
+    }
+
+    // Why a policy no longer allows the campaign this node follows, or null when it does (or the campaign ended).
+    private static string? Disallowed(FleetUpdateAgentState state, FleetUpdatePolicy policy)
+    {
+        if (state.CampaignId is null || FleetUpdateMachineStates.IsTerminal(state.State) || !UpdateVersion.TryParse(state.Version, out var target)) return null;
+        if (state.Automatic)
+        {
+            if (policy.Mode != FleetUpdateModes.Automatic) return $"policy {policy.Sequence} of the fleet is {policy.Mode}: it no longer updates by itself";
+            if (!string.Equals(policy.Feed ?? UpdateFeeds.NuGetOrg, state.Feed, StringComparison.Ordinal)) return $"policy {policy.Sequence} of the fleet follows another feed";
+            return null;
+        }
+
+        return policy.Mode == FleetUpdateModes.Pinned && !(UpdateVersion.TryParse(policy.PinnedVersion, out var pin) && pin.Equals(target))
+            ? $"policy {policy.Sequence} pins the fleet to {policy.PinnedVersion}"
+            : null;
+    }
+
+    // The policy last accepted from a server, as kept once verified; null for none.
+    private FleetUpdatePolicy? KeptPolicy(string linkId)
+        => _state.Links.GetValueOrDefault(linkId)?.Policy is { } kept && FleetUpdateDocuments.TryParsePolicy(kept.Payload, out var policy, out _) ? policy : null;
+
+    private static FleetUpdatePolicy? PolicyOf(FleetUpdateInstruction? instruction)
+        => instruction?.Policy is { } signed && FleetUpdateDocuments.TryParsePolicy(signed.Payload, out var policy, out _) ? policy : null;
+
+    // Stops the campaign this node follows (a cancellation, a policy that no longer allows it): an update that waits is
+    // dropped, a switch that waits for it is withdrawn. Under the gate.
+    private FleetUpdateAgentState Stop(FleetUpdateAgentState state, string? message)
+    {
+        if (state.State == FleetUpdateMachineStates.Switching && _options.CancelSwitch is { } withdraw) withdraw($"Campaign {state.CampaignId} was cancelled.");
+        return state with { State = FleetUpdateMachineStates.Cancelled, Message = message, At = _options.Time.GetUtcNow() };
+    }
+
     /// <summary>Takes the cancellation of a campaign: an update that waits is dropped, a switch that waits is withdrawn.</summary>
     /// <param name="link">The link of the server.</param>
     /// <param name="cancel">The cancellation.</param>
@@ -343,8 +478,7 @@ public sealed class FleetUpdateAgent : IAsyncDisposable
         lock (_gate)
         {
             if (_state.LinkId != linkId || _state.CampaignId != cancel.CampaignId || FleetUpdateMachineStates.IsTerminal(_state.State)) return;
-            if (_state.State == FleetUpdateMachineStates.Switching && _options.CancelSwitch is { } withdraw) withdraw($"Campaign {cancel.CampaignId} was cancelled.");
-            next = _state with { State = FleetUpdateMachineStates.Cancelled, Message = null, At = _options.Time.GetUtcNow() };
+            next = Stop(_state, null);
             _state = next;
             Save(next);
         }
@@ -365,6 +499,20 @@ public sealed class FleetUpdateAgent : IAsyncDisposable
             state = _state;
             if (state.State != FleetUpdateMachineStates.Waiting || state.CampaignId is null || _applying is { IsCompleted: false }) return null;
             if (state.NotBefore is { } start && now < start) return null;
+            if (state.Automatic)
+            {
+                // No person chose the time: the signed maintenance window of the latest policy decides, also for an
+                // update that missed its window while the node was off.
+                if ((KeptPolicy(state.LinkId!) ?? PolicyOf(state.Instruction)) is not { } policy) return null;
+                var opening = FleetUpdateDocuments.WindowOpening(policy, now);
+                if (opening > now)
+                {
+                    _state = state with { NotBefore = opening };
+                    Save(_state);
+                    return null;
+                }
+            }
+
             state = state with { State = FleetUpdateMachineStates.Downloading, Message = null, At = now };
             _state = state;
             Save(state);
@@ -669,8 +817,17 @@ internal sealed record FleetUpdateAgentLink
     /// <summary>Gets the campaign of that manifest.</summary>
     public string? CampaignId { get; init; }
 
-    /// <summary>Gets the sequence of the last automatic policy accepted.</summary>
+    /// <summary>Gets the sequence of the last update policy accepted, of any mode.</summary>
     public long PolicySequence { get; init; }
+
+    /// <summary>Gets the last update policy accepted, as signed (<see cref="FleetServerMethods.UpdatePolicy"/>, or the one of an automatic campaign); null before.</summary>
+    public FleetSignedUpdateDocument? Policy { get; init; }
+
+    /// <summary>Gets whether what authorizes an instruction (the sequences and the policy) is the same as another's.</summary>
+    /// <param name="other">The other.</param>
+    /// <returns>Whether they are the same.</returns>
+    public bool SameAuthority(FleetUpdateAgentLink other)
+        => Sequence == other.Sequence && CampaignId == other.CampaignId && PolicySequence == other.PolicySequence && Equals(Policy, other.Policy);
 
     /// <summary>Gets how the last campaign of this server ended, once another campaign replaced it; null before.</summary>
     public FleetUpdateReport? Receipt { get; init; }

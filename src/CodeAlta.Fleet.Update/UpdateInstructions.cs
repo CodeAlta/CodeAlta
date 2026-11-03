@@ -30,8 +30,21 @@ public sealed record UpdateInstructionContext
     /// <summary>Gets the campaign of that manifest; null for none.</summary>
     public string? LastCampaignId { get; init; }
 
-    /// <summary>Gets the sequence of the last automatic policy the machine accepted from this server; 0 for none.</summary>
+    /// <summary>Gets the sequence of the last update policy the machine accepted from this server, of any mode; 0 for none.</summary>
     public long LastPolicySequence { get; init; }
+
+    /// <summary>
+    /// Gets the last update policy the machine accepted from this server, of any mode, once verified; null for none (the
+    /// server, which holds the policy itself). A manifest of a pinned fleet must name its version, and an automatic
+    /// update needs this policy, or a newer one.
+    /// </summary>
+    public FleetUpdatePolicy? Policy { get; init; }
+
+    /// <summary>
+    /// Gets when the machine checks the instruction, for the start of an automatic update: the maintenance window of its
+    /// policy (<see cref="FleetUpdateDocuments.WindowOpening"/>); null leaves the start to the caller.
+    /// </summary>
+    public DateTimeOffset? Now { get; init; }
 }
 
 /// <summary>An instruction of the fleet once verified: what to install, from where, checked against which hash, and when.</summary>
@@ -46,6 +59,9 @@ public sealed record UpdateInstructionContext
 public sealed record VerifiedUpdate(string CampaignId, UpdateVersion Version, string Feed, string? ExpectedSha512, DateTimeOffset? NotBefore, bool Rollback, long Sequence,
     bool Automatic)
 {
+    /// <summary>Gets the automatic policy the update comes from, as signed and verified; null for a manifest.</summary>
+    public FleetUpdatePolicy? Policy { get; init; }
+
     /// <summary>Gets the request of the self-update that carries it out.</summary>
     /// <returns>The request, from the fleet.</returns>
     public UpdateRequest ToRequest() => new() { Version = Version.ToString(), Source = Feed, ExpectedSha512 = ExpectedSha512, Origin = UpdateOrigin.Remote };
@@ -57,7 +73,9 @@ public sealed record VerifiedUpdate(string CampaignId, UpdateVersion Version, st
 /// device list the machine anchored, newer than the last one it accepted, naming it, for a version newer than the one it
 /// runs (an older one only when the manifest says a person chose a rollback), with the hash of the package of its
 /// runtime. An automatic campaign must carry an automatic policy signed the same way, for a stable version newer than
-/// the one it runs; the machine then checks the feed itself (<see cref="UpdateRequest.StableOnly"/>).
+/// the one it runs, and starts at the maintenance window of that policy; the machine then checks the feed itself
+/// (<see cref="UpdateRequest.StableOnly"/>). The latest policy the machine accepted (<see cref="UpdateInstructionContext.Policy"/>)
+/// wins: an automatic policy it replaced allows nothing, and a pinned one allows only its version.
 /// </summary>
 public static class UpdateInstructions
 {
@@ -143,6 +161,13 @@ public static class UpdateInstructions
             return false;
         }
 
+        // A manifest signed before the fleet was pinned, delivered after it.
+        if (context.Policy is { Mode: FleetUpdateModes.Pinned } pinned && !(UpdateVersion.TryParse(pinned.PinnedVersion, out var pin) && pin.Equals(target)))
+        {
+            reason = $"the fleet is pinned to {pinned.PinnedVersion} by policy {pinned.Sequence}, not {target}";
+            return false;
+        }
+
         var hash = manifest.HashFor(context.Product.PackageId, context.Runtime);
         if (hash is null || !PackageHash.TryParse(hash, out _))
         {
@@ -173,9 +198,16 @@ public static class UpdateInstructions
             return false;
         }
 
-        if (policy.Sequence < context.LastPolicySequence)
+        // A policy replaced (by a manual or a pinned one too) no longer allows anything.
+        if (policy.Sequence < Math.Max(context.LastPolicySequence, context.Policy?.Sequence ?? 0))
         {
-            reason = $"policy {policy.Sequence} is older than policy {context.LastPolicySequence}, the last one this machine accepted";
+            reason = $"policy {policy.Sequence} is older than policy {Math.Max(context.LastPolicySequence, context.Policy?.Sequence ?? 0)}, the last one this machine accepted";
+            return false;
+        }
+
+        if (context.Policy is { } kept && kept.Sequence == policy.Sequence && kept != policy)
+        {
+            reason = $"policy {policy.Sequence} is another policy than the one this machine accepted under that number";
             return false;
         }
 
@@ -192,7 +224,9 @@ public static class UpdateInstructions
             return false;
         }
 
-        update = new VerifiedUpdate(instruction.CampaignId, target, policy.Feed ?? UpdateFeeds.NuGetOrg, null, null, false, policy.Sequence, Automatic: true);
+        // Its time is the signed maintenance window, whenever the server sends it.
+        DateTimeOffset? notBefore = context.Now is { } now && FleetUpdateDocuments.WindowOpening(policy, now) is var opening && opening > now ? opening : null;
+        update = new VerifiedUpdate(instruction.CampaignId, target, policy.Feed ?? UpdateFeeds.NuGetOrg, null, notBefore, false, policy.Sequence, Automatic: true) { Policy = policy };
         reason = null;
         return true;
     }
