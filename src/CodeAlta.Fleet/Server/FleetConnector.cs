@@ -228,9 +228,13 @@ public sealed class FleetConnector : IAsyncDisposable
                         break;
                 }
             }
-            catch (Exception exception) when (exception is IOException or TimeoutException or System.Net.WebSockets.WebSocketException or HttpRequestException
-                or FleetException or ObjectDisposedException or InvalidOperationException)
+            catch (Exception exception) when (exception is not OperationCanceledException || !stop.IsCancellationRequested)
             {
+                // A connection that fails, an answer that does not read, an outbox that cannot be written: the connector
+                // stays alive and tries again, so that a fault of one attempt never ends the publications of the instance.
+                if (exception is not (IOException or TimeoutException or System.Net.WebSockets.WebSocketException or HttpRequestException or FleetException)
+                    && LogManager.IsInitialized)
+                    _logger.Warn(exception, $"The control connection to {FleetServerAddress.Format(_options.ServerAddress)} failed");
                 SetState(FleetConnectorState.Offline, new FleetError(FleetErrorCodes.TransportError, FleetErrorHints.Reconnect, exception.Message));
                 wait = Backoff(attempt++);
             }

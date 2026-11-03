@@ -13,6 +13,9 @@ export type FleetServerApi = Pick<typeof fleetServer, "status" | "create" | "joi
 /** The address a server the person runs on this computer listens on, as `altaserver run` says it. */
 export const localServerAddress = "http://127.0.0.1:2586";
 
+/** How often the devices of a server are read again while the page shows them, so that a machine that enrolls appears. */
+const devicesPollMilliseconds = 5000;
+
 /**
  * Settings > Fleet > Server: the CodeAlta Server this computer is linked to and how it stands. Without one: create the server the
  * person runs (its address and the code `altaserver setup-code` prints: this computer becomes the owner's), or join one with an
@@ -98,7 +101,12 @@ function ServerDevices({ server, epoch, api, revision }: { server: FleetServerVi
       if (value.status === "ok") { setDevices(value.devices); setProblem(null); } else setProblem({ key: serverProblem(value.status) ?? "The operation did not complete.", detail: value.message });
     }, () => { if (!abort.signal.aborted) setProblem({ key: "The server does not answer." }); });
     return () => abort.abort();
-  }, [api, epoch, server.id, server.connection, revision, generation]);
+    // The server announces no enrollment: the list is read again with each read of the page (Reload, a change) and now and then.
+  }, [api, epoch, server, revision, generation]);
+  useEffect(() => {
+    const timer = setInterval(() => setGeneration(value => value + 1), devicesPollMilliseconds);
+    return () => clearInterval(timer);
+  }, []);
   async function act(device: FleetDeviceView, call: "approve" | "revoke") {
     setActing(device.id);
     try {
