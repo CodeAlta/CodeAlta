@@ -72,6 +72,37 @@
 .pair-machine-preview p { margin: 0; }
 .pair-machine-words { display: flex; flex-wrap: wrap; gap: 6px; }
 .pair-machine-words .bp6-tag { font-family: var(--bp-typography-family-mono); }
+.pair-machine-guide { margin-bottom: 12px; }
+.pair-machine-guide p { margin: 0 0 4px; }
+.pair-machine-guide ol { margin: 0; padding-left: 20px; display: grid; gap: 4px; }
+.pair-machine-guide code { user-select: all; }
+
+/* Add a machine…: how it is reached, then the checklist of its setup. */
+.add-machine-dialog { width: min(620px, calc(100vw - 32px)); }
+.add-machine-choices { display: grid; gap: 8px; }
+.add-machine-choice { all: unset; box-sizing: border-box; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 12px;
+  padding: 12px 14px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); cursor: pointer; }
+.add-machine-choice:hover:not(:disabled), .add-machine-choice:focus-visible { border-color: var(--accent, #2d72d2);
+  background: color-mix(in srgb, var(--accent, #2d72d2) 7%, var(--panel)); }
+.add-machine-choice:focus-visible { outline: 2px solid var(--accent, #2d72d2); outline-offset: 1px; }
+.add-machine-choice:disabled { cursor: default; opacity: .6; }
+.add-machine-choice-icon { display: inline-flex; color: var(--accent, #2d72d2); }
+.add-machine-choice-main { display: grid; gap: 3px; min-width: 0; }
+.add-machine-choice-main strong { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.add-machine-field { display: grid; gap: 4px; margin-bottom: 12px; }
+.add-machine-field > span { color: var(--muted); font-size: 12px; }
+.add-machine-advanced { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); column-gap: 12px; padding-top: 8px; }
+.add-machine-steps { list-style: none; margin: 0 0 12px; padding: 0; display: grid; gap: 10px; }
+.add-machine-steps li { display: grid; grid-template-columns: 20px minmax(0, 1fr); gap: 10px; align-items: start; }
+.add-machine-step-icon { display: inline-flex; justify-content: center; padding-top: 2px; color: var(--muted); }
+.add-machine-steps li[data-state="done"] .add-machine-step-icon { color: var(--green); }
+.add-machine-steps li[data-state="failed"] .add-machine-step-icon { color: var(--red, #cd4246); }
+.add-machine-steps li[data-state="waiting"] { opacity: .55; }
+.add-machine-step-main { display: grid; gap: 2px; min-width: 0; }
+.add-machine-step-main small { overflow-wrap: anywhere; }
+.add-machine-detail { margin: 6px 0 0; max-height: 120px; overflow: auto; font-size: 11.5px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.add-machine-words { margin-top: 6px; }
+.add-machine-waiting { display: flex; align-items: center; gap: 6px; }
 
 /* The machine of a remote session, after its title in the Explorer and in its tab: small, beside the marks. */
 .session-machine-chip { display: inline-flex; align-items: center; gap: 3px; flex: 0 1 auto; min-width: 0; max-width: 40%; margin-left: 4px; padding: 0 5px;

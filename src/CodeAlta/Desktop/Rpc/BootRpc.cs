@@ -514,6 +514,8 @@ internal sealed record BootClosing(string? Step, int Seconds, bool CanForceExit)
 [JsonSerializable(typeof(MachineManageResult))]
 [JsonSerializable(typeof(MachineLogView))]
 [JsonSerializable(typeof(MachineUpdateView))]
+[JsonSerializable(typeof(MachineSshRequest))]
+[JsonSerializable(typeof(MachineSetupEvent))]
 [JsonSerializable(typeof(FleetServerRequest))]
 [JsonSerializable(typeof(FleetServerView))]
 [JsonSerializable(typeof(FleetServerStatus))]

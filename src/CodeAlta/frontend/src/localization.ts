@@ -54,6 +54,7 @@ import { settingsSearchMessages } from "./settings/messages";
 import { startPromptMessages } from "./startPrompts/messages";
 import { machineMessages } from "./machines/messages";
 import { machineManageMessages } from "./machines/manageMessages";
+import { addMachineMessages } from "./machines/addMachineMessages";
 import { fleetMessages } from "./fleet/messages";
 // English source keys follow SR's fallback convention. Order: es, fr, de, ja, zh-CN.
 type Row = readonly [string, string, string, string, string];
@@ -2859,6 +2860,7 @@ export const messages = dictionary({
   ...worktreeMessages,
   ...machineMessages,
   ...machineManageMessages,
+  ...addMachineMessages,
   ...fleetMessages,
   ...documentationMessages,
   ...storageMessages,

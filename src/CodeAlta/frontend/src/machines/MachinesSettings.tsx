@@ -9,8 +9,9 @@ import type { MessageKey } from "../localization";
 import { machineIntent, machineState, machineStateLabel, orderedMachines, pairingLinkOf, pairingProblem, pairingWords } from "./machines";
 import { MachinePage, type MachinePageApi } from "./MachinePage";
 import { managesMachine } from "./machineManagement";
+import { AddMachineDialog, type AddMachineApi } from "./AddMachineDialog";
 
-type MachinesApi = Pick<typeof machines, "list" | "previewPairing" | "pair" | "forget" | "watch" | "moveSettings" | "setReceiveMoves"> & Partial<MachinePageApi>;
+type MachinesApi = Pick<typeof machines, "list" | "previewPairing" | "pair" | "forget" | "watch" | "moveSettings" | "setReceiveMoves"> & Partial<MachinePageApi> & Partial<AddMachineApi>;
 
 /**
  * Settings > Fleet > Machines: the machines this computer is paired with and their state, pairing with another one
@@ -20,6 +21,8 @@ export function MachinesSettings({ epoch, api = machines }: { epoch: string | nu
   const { t } = useShellLanguage();
   const { listing, loading, busy, notice, reload, mutate } = useSettingsEditor(options => api.list({ expectedEpoch: epoch ?? "" }, options), `${epoch}`);
   const [pairing, setPairing] = useState(false);
+  // Add a machine…: how it is reached, then its setup.
+  const [adding, setAdding] = useState(false);
   // The machine whose page is open, by its id; its row opens it.
   const [opened, setOpened] = useState<string | null>(null);
   // Whether this computer receives the sessions its machines move here: off until the person turns it on.
@@ -45,10 +48,12 @@ export function MachinesSettings({ epoch, api = machines }: { epoch: string | nu
   return <SettingsPage className="machines-settings" label={t("Machines")} group="Fleet" title="Paired machines"
     description="The computers this one is paired with: their sessions are listed and driven from here."
     notice={notice} loading={loading} busy={busy} onReload={reload}
-    actions={<Button intent="primary" icon={<AppIcon name="plus" size={15} />} disabled={!epoch || !listing} onClick={() => setPairing(true)}>{t("Pair a machine…")}</Button>}>
+    actions={<Button intent="primary" icon={<AppIcon name="plus" size={15} />} disabled={!epoch || !listing} onClick={() => setAdding(true)}>{t("Add a machine…")}</Button>}>
     {!listing ? <SettingsUnavailable loading={loading} icon="remote" title="Machines unavailable" />
       // The machines of a server reached through its relay are its own business: only the paired ones are here.
-      : !listing.machines.some(machine => machine.paired) ? <NonIdealState className="machines-empty" icon={<AppIcon name="remote" size={36} />} title={t("No paired machine.")} />
+      : !listing.machines.some(machine => machine.paired) ? <NonIdealState className="machines-empty" icon={<AppIcon name="remote" size={36} />} title={t("No paired machine.")}
+        description={t("Another computer of yours can run sessions for you: a Mac mini that stays on, a build machine, a cloud server. CodeAlta installs CodeAlta Node there over SSH, or pairs with one that runs already.")}
+        action={<Button intent="primary" icon={<AppIcon name="plus" size={15} />} disabled={!epoch} onClick={() => setAdding(true)}>{t("Add a machine…")}</Button>} />
       : <><ul className="machine-list" aria-label={t("Machines")}>
         {orderedMachines(listing.machines.filter(machine => machine.paired)).map(machine => <MachineRow key={machine.id} machine={machine} busy={busy}
           onOpen={() => setOpened(machine.id)} onForget={() => void mutate(async () => api.forget({ expectedEpoch: epoch ?? "", machineId: machine.id }, { timeoutMilliseconds: 30_000 }))} />)}
@@ -59,7 +64,9 @@ export function MachinesSettings({ epoch, api = machines }: { epoch: string | nu
             .then(value => { if (value.status === "ok") setReceive(value.receiveMoves); }, () => { }); }} />
         <small className="muted-text">{t("Sessions your paired machines move here then run on this computer.")}</small>
       </div>}</>}
-    {pairing && epoch && <PairMachineDialog epoch={epoch} api={api} onClose={paired => { setPairing(false); if (paired) reload(); }} />}
+    {pairing && epoch && <PairMachineDialog epoch={epoch} api={api} guide onClose={paired => { setPairing(false); if (paired) reload(); }} />}
+    {adding && epoch && <AddMachineDialog epoch={epoch} api={{ ...machines, ...api } as AddMachineApi} onPairLink={() => { setAdding(false); setPairing(true); }}
+      onClose={added => { setAdding(false); if (added) reload(); }} onOpen={machineId => { setAdding(false); reload(); setOpened(machineId); }} />}
   </SettingsPage>;
 }
 
@@ -96,7 +103,7 @@ export function MachineRow({ machine, busy, onOpen, onForget }: { machine: Machi
  * Pairing from a link: the link is read as it is pasted, and the name of the machine and the six words of its key are
  * shown before anything connects. Pair connects, pinned to that key.
  */
-export function PairMachineDialog({ epoch, api, onClose }: { epoch: string; api: Pick<MachinesApi, "previewPairing" | "pair">; onClose: (paired: boolean) => void }) {
+export function PairMachineDialog({ epoch, api, guide = false, onClose }: { epoch: string; api: Pick<MachinesApi, "previewPairing" | "pair">; guide?: boolean; onClose: (paired: boolean) => void }) {
   const { t } = useShellLanguage();
   const [text, setText] = useState("");
   const [preview, setPreview] = useState<MachinePairPreview | null>(null);
@@ -135,6 +142,14 @@ export function PairMachineDialog({ epoch, api, onClose }: { epoch: string; api:
   const words = pairingWords(preview?.words);
   return <Dialog isOpen className="pair-machine-dialog" title={t("Pair a machine")} canOutsideClickClose={false} onClose={() => { if (!pairing) onClose(false); }}>
     <DialogBody>
+      {guide && !preview && <div className="pair-machine-guide">
+        <p className="muted-text">{t("On the machine, with .NET 10 installed, run these once:")}</p>
+        <ol>
+          <li><code>dotnet tool install -g CodeAlta.Node</code></li>
+          <li><code>altanode install --listen-all</code> <span className="muted-text">{t("starts it as a service")}</span></li>
+          <li><code>altanode pair</code> <span className="muted-text">{t("shows the link and six words")}</span></li>
+        </ol>
+      </div>}
       <label className="pair-machine-field"><span>{t("Pairing link")}</span>
         <TextArea autoFocus fill rows={3} value={text} disabled={pairing} placeholder="codealta-pair://…" aria-label={t("Pairing link")}
           onChange={event => setText(event.currentTarget.value)} />
