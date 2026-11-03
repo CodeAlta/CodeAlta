@@ -43,6 +43,11 @@ plane exists only with a server.
      reach the node, asks the node to accept, then splices the two streams. Relaying is the path that always works;
      direct paths are an optimization (measured by Harness, one of the products studied: direct peer-to-peer
      connections through home routers failed in 9 trials out of 9).
+     Carrier (built in M3a): `relay.incoming` is an event to the node, which answers with the request `relay.accept`
+     (or `relay.close` to decline); each side then opens a WebSocket of its own, `wss://<server>/fleet/v1/relay/{ticket}`,
+     with a one-time ticket and an upgrade signed by its device key, and the server copies binary frames from one to the
+     other. The control connection stays free, and a relay that drops costs nothing but itself. Limits per relay (bytes,
+     idle time) and per device (relays at once); the audit records who reached whom, when and the bytes.
    - **Direct** (paired machines, or a node reachable on the LAN or the tailnet): the viewer connects to
      `wss://<node>:2585/fleet/v1/channel`.
    - Inside both: TLS 1.3 with the viewer as client, the node as server; the viewer pins the node's key (from pairing,

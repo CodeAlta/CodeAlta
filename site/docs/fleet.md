@@ -160,12 +160,21 @@ A CodeAlta Server shows the machines of all your computers, whether they are onl
 
 A space publishes to a server only when you choose it: **Settings** > **Spaces** > the space > **General** > **Server**. `altanode join` links the default space of the node (`--space` chooses others). A session made **Private** in its options (the Agent chip, **More options**) is never published.
 
-The **Fleet** canvas (`/fleet`) shows the machines of the server and their sessions as they change. A session of this computer or of a paired machine opens with **Open**; the others are shown only. `altanode status` says whether the node is connected to its server.
+The **Fleet** canvas (`/fleet`) shows the machines of the server and their sessions as they change. A session of this computer, of a paired machine or of a node of the server opens with **Open**; the others are shown only. `altanode status` says whether the node is connected to its server.
+
+### Reach machines through the server
+
+The nodes of your server are reachable from CodeAlta Desktop without pairing and without opening a port on them: each machine only connects out to the server, which relays the session between them. They are listed in the Explorer like paired machines, and their sessions are read, watched and driven the same way. A node joined with `altanode join` and run with `--no-listen` has no inbound port at all.
+
+- A paired machine is reached directly when one of its addresses answers, and through the server otherwise (on another network, say).
+- The tab of a remote session says **Direct** or **Relayed** after its title.
+- The connection is encrypted from one computer to the other: the server passes it on without being able to read it, and records only who reached which machine, when and how much data went through.
+- Your own computers may see, drive and start sessions on your nodes, as a paired computer does. Other machines of the server may do nothing there yet.
 
 ## Security
 
 - **Remote sessions run code on the machine.** A paired computer can start agents there that use its tools, as you would sitting at it. Pair only your own computers, and revoke the ones you no longer use.
-- **Keys are pinned.** Each computer has its own key. Pairing records the key of the other side, and every connection checks it: a machine that presents another key is refused. The six words let you check, at pairing, that the link comes from the machine you think.
+- **Keys are pinned.** Each computer has its own key. Pairing records the key of the other side, and every connection checks it: a machine that presents another key is refused. The six words let you check, at pairing, that the link comes from the machine you think. Through a server, the key comes from the list of devices your own computers signed, never from the server alone, and a device revoked there is refused.
 - **Permission requests wait for a person.** The node never grants a permission request by itself: you answer it from a paired computer or on the machine.
 - **Credentials stay where they are.** Each machine signs in to its providers itself; nothing is copied from your desktop.
 - **Choose where the node listens.** By default it listens on the machine itself only. `--listen-all` opens it to every network the machine is on: prefer a private network you control.
