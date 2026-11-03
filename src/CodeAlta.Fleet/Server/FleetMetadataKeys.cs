@@ -333,7 +333,9 @@ public static class FleetKeyWrap
     /// <summary>
     /// Opens a copy of a key wrapped to this device, once its grant holds against the device list this device verified:
     /// signed by a controller device of the list of the same person as this device, for this device, this key, this
-    /// epoch, the organization of the list and its person, by a list no newer than the one verified.
+    /// epoch, the organization of the list and its person, by a list no newer than the one verified. The signer is a
+    /// controller of the list at an entry from the one the grant names on (<see cref="FleetDeviceListState.MemberFrom"/>):
+    /// the copies a controller gave before it left the list still open; the key is then stale and seals nothing new.
     /// </summary>
     /// <param name="wrapped">The wrapped key.</param>
     /// <param name="keyId">The id the key must have.</param>
@@ -423,8 +425,10 @@ public static class FleetKeyWrap
     private static void CheckGrant(JsonElement root, string keyId, FleetKeyGrant grant, string deviceId, FleetDeviceListState list)
     {
         if (!list.Members.TryGetValue(deviceId, out var self)) throw new InvalidDataException("This device is not a member of the device list it verified.");
-        // A controller device gives keys; the recovery key gives the copies it holds to the device it signed in.
-        if (FleetSealedJson.Text(root, "signer") is not { Length: > 0 } signerId || !list.Members.TryGetValue(signerId, out var signer)
+        // A controller device gives keys; the recovery key gives the copies it holds to the device it signed in. The signer is
+        // read from the history of the list: one that left later still vouches for the copies it gave by the list of an entry
+        // before its removal (they stay readable, and are stale: they seal nothing new), never for a list from its removal on.
+        if (FleetSealedJson.Text(root, "signer") is not { Length: > 0 } signerId || list.MemberFrom(signerId, grant.DeviceListSequence) is not { } signer
             || signer.Kind is not (FleetDeviceKinds.Controller or FleetDeviceKinds.Recovery))
         {
             throw new InvalidDataException("The wrapped key was not given by a controller device of the device list.");

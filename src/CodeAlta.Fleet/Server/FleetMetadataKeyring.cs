@@ -47,8 +47,13 @@ public sealed class FleetMetadataKeyring
     /// <summary>Gets the anchored device list the keyring wraps by.</summary>
     public FleetOrganizationDevices Devices => _devices;
 
-    /// <summary>Gets the keys that seal, by the id of their space on this device; a space waits without one before its key reaches this device or while a removal waits for its new epoch.</summary>
-    public IReadOnlyDictionary<string, FleetMetadataKey> Current => Volatile.Read(ref _snapshot).Current;
+    /// <summary>
+    /// Gets the keys that seal, by the id of their space on this device; a space waits without one before its key reaches
+    /// this device or while a removal waits for its new epoch. A key given before the last removal the anchored list
+    /// accepted is never among them, from the moment the list accepted it: also when the keys were not read again since,
+    /// or the next epoch could not be made.
+    /// </summary>
+    public IReadOnlyDictionary<string, FleetMetadataKey> Current => Sealing(Volatile.Read(ref _snapshot).Current, _devices.Current);
 
     /// <summary>Gets every key this device opened: those that seal, older epochs and the keys of the person, which still open what they sealed.</summary>
     public IReadOnlyCollection<FleetMetadataKey> Held => Volatile.Read(ref _snapshot).Held.Values.ToArray();
@@ -100,6 +105,9 @@ public sealed class FleetMetadataKeyring
         var wanted = spaces.Select(Normalize).ToHashSet(StringComparer.Ordinal);
         // The list first: nothing is read or wrapped through a server whose list does not extend the anchored one.
         var list = await _devices.RefreshAsync(cancellationToken).ConfigureAwait(false);
+        // A removal it accepted stops the older keys sealing now, before the calls that follow can fail (or a server delay them).
+        var accepted = Volatile.Read(ref _snapshot);
+        if (Sealing(accepted.Current, list) is var sealing && !ReferenceEquals(sealing, accepted.Current)) Volatile.Write(ref _snapshot, accepted with { Current = sealing });
         using var client = new FleetServerClient(_devices.ServerAddress, _identity, _devices.Handler) { DeviceList = _devices };
         var rows = await client.ListMetadataKeysAsync(cancellationToken).ConfigureAwait(false);
         var opened = Open(rows, list);
@@ -198,8 +206,8 @@ public sealed class FleetMetadataKeyring
         return spaces;
     }
 
-    // A new epoch when a device left after the key was given, or when the copy of the newest epoch for this device does
-    // not open (its maker left the list); else the newest key goes to the person's devices that lack it.
+    // A new epoch when a device left after the key was given (its maker included), or when the copy of the newest epoch for
+    // this device does not open; else the newest key goes to the person's devices that lack it.
     private async Task<FleetMetadataKey?> KeepAsync(Making context, KnownSpace space, Dictionary<string, FleetMetadataKey> opened, CancellationToken cancellationToken)
     {
         var newest = space.Rows[^1];
@@ -274,6 +282,10 @@ public sealed class FleetMetadataKeyring
     private static string Normalize(string? space) => string.IsNullOrWhiteSpace(space) ? SpaceDescriptor.DefaultId : space.Trim();
 
     private static bool IsStale(FleetMetadataKey key, FleetDeviceListState list) => key.Grant is not { } grant || grant.DeviceListSequence < list.LastRemovalSequence;
+
+    // The keys that seal by a list: the same dictionary when none is stale by it.
+    private static ImmutableDictionary<string, FleetMetadataKey> Sealing(ImmutableDictionary<string, FleetMetadataKey> current, FleetDeviceListState? list)
+        => list is null || !current.Values.Any(key => IsStale(key, list)) ? current : current.RemoveRange([.. current.Where(pair => IsStale(pair.Value, list)).Select(static pair => pair.Key)]);
 
     private sealed record Snapshot(ImmutableDictionary<string, FleetMetadataKey> Current, ImmutableDictionary<string, FleetMetadataKey> Held)
     {
