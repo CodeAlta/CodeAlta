@@ -96,7 +96,7 @@ public sealed class MobileDevTunnelTests
         var (page, _) = await fixture.OpenAsync(MobilePlugin.SettingsCanvasId);
         var (tab, _) = await fixture.OpenAsync(MobilePlugin.CanvasId);
 
-        var answer = await page.InvokeAsync<MobileSettingsChange, MobileSettingsView>("mobile.settings.set", new MobileSettingsChange("devtunnel", port, 4443, null));
+        var answer = await page.InvokeAsync<MobileSettingsChange, MobileSettingsView>("mobile.settings.set", new MobileSettingsChange("devtunnel", port, 4443));
         Assert.AreEqual(("devtunnel", "pending"), (answer.Provider.Id, answer.Provider.State));
         await WaitAsync(() => fixture.Plugin.Settings().Provider.State != "pending", "the tunnel opens");
 
@@ -107,10 +107,111 @@ public sealed class MobileDevTunnelTests
         StringAssert.StartsWith(status.ConnectUrl, url + "/#k=", "the code holds the address of the tunnel and the pairing token");
         Assert.AreEqual(("devtunnel", "bold-tree-x1y2.euw"), (fixture.State.Read().Mode, fixture.State.Read().TunnelId), "the tunnel is kept for the next start");
 
-        await page.InvokeAsync<MobileSettingsChange, MobileSettingsView>("mobile.settings.set", new MobileSettingsChange("tailscale", port, 4443, null));
+        await page.InvokeAsync<MobileSettingsChange, MobileSettingsView>("mobile.settings.set", new MobileSettingsChange("tailscale", port, 4443));
         await WaitAsync(() => fixture.Plugin.Settings().Provider.State != "pending", "Tailscale is asked");
         Assert.IsTrue(tunnel.Hosts.Single().Disposed, "the host of the tunnel stops");
         Assert.IsNull(fixture.Plugin.Settings().Address);
+    }
+
+    [TestMethod]
+    public async Task ThePortTheViewLeft_IsTakenOffTheTunnel_EvenWhenItsHostDidNotStart()
+    {
+        var cli = new FakeDevTunnelCli { HostLines = ["Error: the tunnel host failed"] };
+        var host = new FakeProviderHost(new MobileSettings { Mode = MobileDevTunnelProvider.ProviderId, Port = 2584 });
+        await using var provider = new MobileDevTunnelProvider(cli, host);
+
+        Assert.AreEqual("failed", (await provider.PublishAsync(CancellationToken.None)).State);
+        await host.SaveAsync(settings => settings with { Port = 2600 });
+        await provider.PublishAsync(CancellationToken.None);
+
+        var calls = cli.Calls.ToList();
+        CollectionAssert.Contains(calls, "port delete bold-tree-x1y2.euw -p 2584", "the port given before the host failed is taken off");
+        Assert.IsTrue(calls.IndexOf("port delete bold-tree-x1y2.euw -p 2584") < calls.IndexOf("port create bold-tree-x1y2.euw -p 2600 --protocol http"));
+    }
+
+    [TestMethod]
+    public async Task ASignIn_IsAStepThatRuns_ThenSaysHowItEnded()
+    {
+        var port = FreePort.Next();
+        var tunnel = new FakeDevTunnelCli { Port = port }.Answer("user show", 0, "Not logged in.");
+        await using var fixture = new Fixture(new FakeTailscaleCli(installed: false), plugin: new MobilePlugin(new FakeTailscaleCli(installed: false), tunnel));
+        await fixture.State.WriteJsonAsync(PluginStateScope.User, "mobile.json", new MobileSettings { Mode = MobileDevTunnelProvider.ProviderId, Port = port });
+        await fixture.StartAsync(port, 4443, write: false);
+        Assert.AreEqual("not-signed-in", fixture.Plugin.Settings().Provider.State);
+        var (tab, _) = await fixture.OpenAsync(MobilePlugin.CanvasId);
+
+        var acted = await tab.InvokeAsync<MobileAction, MobileStatus>("mobile.act", new MobileAction("signin-github"));
+
+        Assert.AreEqual(("signing-in", true), (acted.Provider.State, acted.Provider.Working), "the sign-in runs: a wait, not a problem");
+        await WaitAsync(() => fixture.Plugin.Settings().Provider is { State: "not-signed-in", Working: false }, "the sign-in that did not end is said");
+        var unknown = await tab.InvokeAsync<MobileAction, MobileStatus>("mobile.act", new MobileAction("dance"));
+        Assert.AreEqual("not-signed-in", unknown.Provider.State, "an action the provider does not know changes nothing");
+    }
+
+    [TestMethod]
+    public async Task AProviderThatWasReplaced_SaysNothingAnyMore()
+    {
+        var port = FreePort.Next();
+        IMobileProviderHost? replaced = null;
+        var plugin = new MobilePlugin((id, host) => id switch
+        {
+            MobileTailscaleProvider.ProviderId => new MobileTailscaleProvider(new FakeTailscaleCli(installed: false), host),
+            MobileDevTunnelProvider.ProviderId => new SilentProvider(replaced = host),
+            _ => null,
+        });
+        await using var fixture = new Fixture(new FakeTailscaleCli(installed: false), plugin: plugin);
+        await fixture.State.WriteJsonAsync(PluginStateScope.User, "mobile.json", new MobileSettings { Mode = MobileDevTunnelProvider.ProviderId, Port = port });
+        await fixture.StartAsync(port, 4443, write: false);
+        var (page, _) = await fixture.OpenAsync(MobilePlugin.SettingsCanvasId);
+
+        await page.InvokeAsync<MobileSettingsChange, MobileSettingsView>("mobile.settings.set", new MobileSettingsChange("tailscale", port, 4443));
+        await WaitAsync(() => fixture.Plugin.Settings().Provider.State == "not-installed", "Tailscale is asked");
+        await replaced!.ReportAsync(new MobileProviderStatus("serving", "https://stale.example", "A tunnel of before."));
+        await replaced.RepublishAsync();
+
+        Assert.AreEqual(("tailscale", "not-installed"), (fixture.Plugin.Settings().Provider.Id, fixture.Plugin.Settings().Provider.State));
+    }
+
+    // A provider of the tests that publishes nothing and keeps its host.
+    private sealed class SilentProvider(IMobileProviderHost host) : IMobileProvider
+    {
+        public string Id => MobileDevTunnelProvider.ProviderId;
+
+        public MobileListen Listen(MobileSettings settings) => new(settings.Port);
+
+        public Task<MobileProviderStatus> PublishAsync(CancellationToken cancellationToken) => Task.FromResult(new MobileProviderStatus("not-signed-in", null, host.Settings.Mode));
+
+        public Task UnpublishAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+
+        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+    }
+
+    // What the plugin gives a provider, in memory.
+    private sealed class FakeProviderHost(MobileSettings settings) : IMobileProviderHost
+    {
+        public MobileSettings Settings { get; private set; } = settings;
+
+        public List<MobileProviderStatus> Reports { get; } = [];
+
+        public Task SaveAsync(Func<MobileSettings, MobileSettings> change)
+        {
+            Settings = change(Settings);
+            return Task.CompletedTask;
+        }
+
+        public Task ReportAsync(MobileProviderStatus status)
+        {
+            lock (Reports) Reports.Add(status);
+            return Task.CompletedTask;
+        }
+
+        public Task RepublishAsync() => Task.CompletedTask;
+
+        public void Run(string name, string description, Func<CancellationToken, ValueTask> work) => _ = Task.Run(async () => await work(CancellationToken.None));
+
+        public void Log(string line)
+        {
+        }
     }
 
     /// <summary>A Dev Tunnels command line of the tests: signed in, it makes the tunnel <c>bold-tree-x1y2.euw</c> and hosts it.</summary>

@@ -1,5 +1,5 @@
 import { useEffect, useState, type KeyboardEvent } from "react";
-import { Button, Callout, Card, InputGroup, NumericInput, Radio, RadioGroup, type Intent } from "@blueprintjs/core";
+import { Button, Callout, Card, NumericInput, Radio, RadioGroup, type Intent } from "@blueprintjs/core";
 import { ActivitySpinner } from "../../ActivitySpinner";
 import { AppIcon } from "../../AppIcon";
 import { ConfirmPopover } from "../../ConfirmPopover";
@@ -36,10 +36,6 @@ const pages: Readonly<Record<string, ProviderPage>> = {
   devtunnel: {
     name: "Dev Tunnels", address: "Address of the Dev Tunnel", unserved: "Not served through Dev Tunnels", apply: "Apply to open the Dev Tunnel.",
     help: "A Dev Tunnel of Microsoft gives the page an HTTPS address any phone opens, without installing anything on it. This computer needs the Dev Tunnels command line and a Microsoft or GitHub account.",
-  },
-  internet: {
-    name: "The Internet", translated: true, address: "Address on the Internet", unserved: "Not served on the Internet", apply: "Apply to get the certificate and serve the page.",
-    help: "Phones open https:// and your domain name. Point the name at the public address of your router, and forward port 443 of the router to the port of this computer below: Let's Encrypt checks the name on that port and CodeAlta gets and renews the certificate.",
   },
 };
 
@@ -113,10 +109,6 @@ export function MobileSettings({ api }: { api: MobileSettingsApi }) {
           {settings.providers.map(id => <Radio key={id} value={id} label={name(id)} />)}
         </RadioGroup>
       </Field>
-      {shown.includes("host") && <Field label={t("Domain name")} htmlFor="mobile-settings-host">
-        <InputGroup id="mobile-settings-host" className="mobile-settings-text" value={fields.host} placeholder="pulsar.example.com" disabled={busy}
-          spellCheck={false} autoComplete="off" onValueChange={host => edit({ host })} onKeyDown={enter} />
-      </Field>}
       <Field label={t("Port on this computer")} htmlFor="mobile-settings-port" notice={!shown.includes("httpsPort") && portNotice}>
         {portField("mobile-settings-port", fields.port, portProblem, text => edit({ port: text }))}
       </Field>

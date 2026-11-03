@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Net;
 using System.Net.Sockets;
 using System.Text.Json;
 using CodeAlta.Plugins;
@@ -50,7 +51,7 @@ public sealed class MobileSettingsTests
 
         foreach (var (local, https) in new (int?, int?)[] { (1023, 4443), (65536, 4443), (null, 4443), (port, 80), (port, 70000) })
         {
-            var answer = await page.InvokeAsync<MobileSettingsChange, MobileSettingsView>("mobile.settings.set", new MobileSettingsChange(null, local, https, null));
+            var answer = await page.InvokeAsync<MobileSettingsChange, MobileSettingsView>("mobile.settings.set", new MobileSettingsChange(null, local, https));
             Assert.IsNotNull(answer.Error, $"{local} and {https} are refused");
             StringAssert.Contains(answer.Error, "1024 to 65535");
             Assert.AreEqual((port, 4443), (answer.Port, answer.HttpsPort), "the ports of now come back with the refusal");
@@ -80,7 +81,7 @@ public sealed class MobileSettingsTests
         cli.Answer("serve status --json", Served(4443, oldPort))
             .Answer("serve --https=4443 off", "")
             .Answer($"serve --bg --https=5443 http://127.0.0.1:{newPort}", "");
-        var answer = await page.InvokeAsync<MobileSettingsChange, MobileSettingsView>("mobile.settings.set", new MobileSettingsChange(null, newPort, 5443, null));
+        var answer = await page.InvokeAsync<MobileSettingsChange, MobileSettingsView>("mobile.settings.set", new MobileSettingsChange(null, newPort, 5443));
 
         Assert.IsNull(answer.Error);
         Assert.AreEqual((newPort, 5443), (answer.Port, answer.HttpsPort));
@@ -117,7 +118,7 @@ public sealed class MobileSettingsTests
         cli.Answer("serve status --json", Served(4443, port))
             .Answer("serve --https=4443 off", "")
             .Answer($"serve --bg --https=6443 http://127.0.0.1:{port}", "");
-        await page.InvokeAsync<MobileSettingsChange, MobileSettingsView>("mobile.settings.set", new MobileSettingsChange(null, port, 6443, null));
+        await page.InvokeAsync<MobileSettingsChange, MobileSettingsView>("mobile.settings.set", new MobileSettingsChange(null, port, 6443));
         await WaitAsync(() => fixture.Plugin.Settings().Address == "https://desk.tail1234.ts.net:6443", "Tailscale serves the new port");
 
         Assert.IsTrue(cli.Calls.Contains("serve --https=4443 off"));
@@ -134,7 +135,7 @@ public sealed class MobileSettingsTests
         var (page, _) = await fixture.OpenAsync(MobilePlugin.SettingsCanvasId);
         var writes = fixture.State.Writes;
 
-        var answer = await page.InvokeAsync<MobileSettingsChange, MobileSettingsView>("mobile.settings.set", new MobileSettingsChange(null, port, 4443, null));
+        var answer = await page.InvokeAsync<MobileSettingsChange, MobileSettingsView>("mobile.settings.set", new MobileSettingsChange(null, port, 4443));
 
         Assert.IsNull(answer.Error);
         Assert.AreEqual(writes, fixture.State.Writes, "nothing is written");
@@ -252,6 +253,24 @@ public sealed class MobileSettingsTests
         public ValueTask<PluginAskOutcome> CancelAsync(PluginAskReference ask, CancellationToken cancellationToken = default) => ValueTask.FromResult(new PluginAskOutcome("unavailable"));
     }
 
+    [TestMethod]
+    public async Task APortInUse_LeavesTheProviderSayingSo_NotWaiting()
+    {
+        var (port, taken) = (FreePort.Next(), FreePort.Next());
+        using var other = new TcpListener(IPAddress.Loopback, taken);
+        other.Start();
+        await using var fixture = new Fixture(new FakeTailscaleCli(installed: false));
+        await fixture.StartAsync(port, 4443);
+        var (page, _) = await fixture.OpenAsync(MobilePlugin.SettingsCanvasId);
+
+        await page.InvokeAsync<MobileSettingsChange, MobileSettingsView>("mobile.settings.set", new MobileSettingsChange(null, taken, 4443));
+        await WaitAsync(() => !fixture.Plugin.Settings().Provider.Working, "the publication ends");
+
+        var settings = fixture.Plugin.Settings();
+        Assert.AreNotEqual("listening", settings.Server, settings.ServerDetail);
+        Assert.AreEqual("failed", settings.Provider.State, "nothing is published without a server, and nothing waits");
+    }
+
     // What `tailscale serve status --json` says when the HTTPS port serves the server of the plugin on its local port.
     private static string Served(int httpsPort, int localPort)
         => """{"Web":{"desk.tail1234.ts.net:HTTPS":{"Handlers":{"/":{"Proxy":"http://127.0.0.1:LOCAL"}}}}}"""
@@ -292,12 +311,9 @@ public sealed class MobileSettingsTests
         // The access of the plugin, read from its files when it started.
         internal Task<MobileAccess> AccessAsync() => Task.FromResult(Plugin.Access!);
 
-        internal Task StartAsync(int port, int httpsPort, bool write = true) => StartAsync(write ? new MobileSettings { Port = port, HttpsPort = httpsPort } : null);
-
-        // Starts the plugin with the settings written first, or with those of the state as they are (null).
-        internal async Task StartAsync(MobileSettings? settings)
+        internal async Task StartAsync(int port, int httpsPort, bool write = true)
         {
-            if (settings is not null) await State.WriteJsonAsync(PluginStateScope.User, "mobile.json", settings);
+            if (write) await State.WriteJsonAsync(PluginStateScope.User, "mobile.json", new MobileSettings { Port = port, HttpsPort = httpsPort });
             var services = new Services(State) { Asks = asks ?? NoopPluginAskService.Instance };
             Plugin.AttachRuntimeContext(new PluginRuntimeContext
             {
@@ -365,10 +381,7 @@ public sealed class MobileSettingsTests
 
         internal MobileSettings Read() => JsonSerializer.Deserialize<MobileSettings>(Text!)!;
 
-        // A folder of its own: a provider keeps its files there (a certificate).
-        private readonly string _directory = Path.Combine(Path.GetTempPath(), "codealta-mobile-state-" + Guid.NewGuid().ToString("N"));
-
-        public string GetDirectory(PluginStateScope scope) => _directory;
+        public string GetDirectory(PluginStateScope scope) => Path.GetTempPath();
 
         public ValueTask<T?> ReadJsonAsync<T>(PluginStateScope scope, string name, CancellationToken cancellationToken = default)
             => ValueTask.FromResult(_files.TryGetValue(name, out var text) ? JsonSerializer.Deserialize<T>(text) : default);

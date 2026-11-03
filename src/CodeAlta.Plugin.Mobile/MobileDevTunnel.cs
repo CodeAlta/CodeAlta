@@ -48,8 +48,11 @@ internal sealed partial class MobileDevTunnel(IMobileDevTunnelCli cli, Action<st
 
     private static readonly TimeSpan Patience = TimeSpan.FromSeconds(30);
 
-    /// <summary>What a publication gave: the state, the tunnel to keep in the settings, and the host process that serves it.</summary>
-    internal sealed record Published(MobileProviderStatus Status, string? TunnelId, IMobileHostedProcess? Host);
+    /// <summary>
+    /// What a publication gave: the state, the tunnel to keep in the settings, the host process that serves it, and whether the tunnel
+    /// was given the port (to take it off when the view moves to another one, even when the host did not start).
+    /// </summary>
+    internal sealed record Published(MobileProviderStatus Status, string? TunnelId, IMobileHostedProcess? Host, bool HasPort = false);
 
     /// <summary>
     /// Publishes <c>http://127.0.0.1:{port}</c>: checks the command line and the sign-in, makes the tunnel when there is none, gives it the
@@ -91,12 +94,12 @@ internal sealed partial class MobileDevTunnel(IMobileDevTunnelCli cli, Action<st
         {
             await host.DisposeAsync().ConfigureAwait(false);
             var output = url.Output.Trim();
-            if (NeedsSignIn(output)) return new(NotSignedIn, tunnelId, null);
+            if (NeedsSignIn(output)) return new(NotSignedIn, tunnelId, null, HasPort: true);
             log?.Invoke("Mobile: devtunnel host said: " + output);
-            return new(new("failed", null, "devtunnel host did not start" + (output.Length > 0 ? ": " + Summary(output) : ".")), tunnelId, null);
+            return new(new("failed", null, "devtunnel host did not start" + (output.Length > 0 ? ": " + Summary(output) : ".")), tunnelId, null, HasPort: true);
         }
 
-        return new(new("serving", url.Url, $"Dev Tunnels serves {url.Url}"), tunnelId, host);
+        return new(new("serving", url.Url, $"Dev Tunnels serves {url.Url}"), tunnelId, host, HasPort: true);
     }
 
     // Makes a tunnel with anonymous access: its id, or why there is none.
@@ -349,7 +352,7 @@ internal sealed class MobileDevTunnelProvider(IMobileDevTunnelCli cli, IMobilePr
     public string Id => ProviderId;
 
     /// <inheritdoc />
-    public MobileListen Listen(MobileSettings settings) => new(settings.Port, null);
+    public MobileListen Listen(MobileSettings settings) => new(settings.Port);
 
     private MobileDevTunnel Tunnel => new(cli, host.Log);
 
@@ -373,10 +376,10 @@ internal sealed class MobileDevTunnelProvider(IMobileDevTunnelCli cli, IMobilePr
         // The tunnel made now is kept: its address, which phones keep, stays the same at the next start.
         if (published.TunnelId != settings.TunnelId) await host.SaveAsync(kept => kept with { TunnelId = published.TunnelId }).ConfigureAwait(false);
         host.Log($"Mobile: {published.Status.Detail}");
+        if (published.HasPort) _published = (published.TunnelId!, settings.Port);
         if (published.Host is { } hosted)
         {
             _host = hosted;
-            _published = (published.TunnelId!, settings.Port);
             host.Run("mobile-tunnel", "Watches the Dev Tunnel of the mobile view.", ct => WatchAsync(hosted, ct));
         }
 
@@ -387,22 +390,29 @@ internal sealed class MobileDevTunnelProvider(IMobileDevTunnelCli cli, IMobilePr
     /// <remarks>The tunnel and its address stay in the account, for the next start.</remarks>
     public async Task UnpublishAsync(CancellationToken cancellationToken)
     {
-        if (Interlocked.Exchange(ref _signIn, null) is { } signIn) await signIn.CancelAsync().ConfigureAwait(false);
+        await CancelSignInAsync(Interlocked.Exchange(ref _signIn, null)).ConfigureAwait(false);
         if (Interlocked.Exchange(ref _host, null) is { } hosted) await hosted.DisposeAsync().ConfigureAwait(false);
     }
 
     /// <inheritdoc />
-    public Task<bool> ActAsync(string action, CancellationToken cancellationToken)
+    public async Task<MobileProviderStatus?> ActAsync(string action, CancellationToken cancellationToken)
     {
-        if (action is not ("signin-github" or "signin-microsoft")) return Task.FromResult(false);
+        if (action is not ("signin-github" or "signin-microsoft")) return null;
         var github = action == "signin-github";
         var run = new CancellationTokenSource();
-        Interlocked.Exchange(ref _signIn, run)?.Cancel();
-        _ = host.ReportAsync(new MobileProviderStatus("signing-in", null, !github && OperatingSystem.IsWindows()
-            ? "Choose your account in the window of Windows that opens, then come back here."
-            : "Sign in in the browser that opens, then come back here.") { Working = true });
+        await CancelSignInAsync(Interlocked.Exchange(ref _signIn, run)).ConfigureAwait(false);
         host.Run("mobile-devtunnel-signin", "Signs in to Dev Tunnels.", async _ => await SignInAsync(github, run).ConfigureAwait(false));
-        return Task.FromResult(true);
+        return new MobileProviderStatus("signing-in", null, !github && OperatingSystem.IsWindows()
+            ? "Choose your account in the window of Windows that opens, then come back here."
+            : "Sign in in the browser that opens, then come back here.") { Working = true };
+    }
+
+    // Stops a sign-in that runs; its task disposes it once it ended.
+    private static async Task CancelSignInAsync(CancellationTokenSource? signIn)
+    {
+        if (signIn is null) return;
+        try { await signIn.CancelAsync().ConfigureAwait(false); }
+        catch (ObjectDisposedException) { }
     }
 
     private async Task SignInAsync(bool github, CancellationTokenSource run)
@@ -414,7 +424,7 @@ internal sealed class MobileDevTunnelProvider(IMobileDevTunnelCli cli, IMobilePr
         }
         catch (OperationCanceledException)
         {
-            return;
+            signedIn = false;
         }
         catch (Exception exception) when (exception is InvalidOperationException or IOException or System.ComponentModel.Win32Exception)
         {
@@ -422,8 +432,10 @@ internal sealed class MobileDevTunnelProvider(IMobileDevTunnelCli cli, IMobilePr
             signedIn = false;
         }
 
-        if (run.IsCancellationRequested) return;
         Interlocked.CompareExchange(ref _signIn, null, run);
+        var canceled = run.IsCancellationRequested;
+        run.Dispose();
+        if (canceled) return;
         if (!signedIn)
         {
             await host.ReportAsync(new MobileProviderStatus("not-signed-in", null, "The sign-in did not end. Sign in again, or run devtunnel user login in a terminal.")).ConfigureAwait(false);

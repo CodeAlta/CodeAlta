@@ -131,7 +131,7 @@ internal static class DesktopPlugins
     internal static BuiltInPluginDefinition MobileDefinition { get; } = new()
     {
         Id = "mobile", DisplayName = "Mobile",
-        Description = "The sessions of this computer on a phone, through Tailscale, Dev Tunnels or the Internet.",
+        Description = "The sessions of this computer on a phone, through Tailscale or Dev Tunnels.",
         EnabledByDefault = false, Frontends = PluginFrontends.Desktop,
         PluginType = typeof(MobilePlugin), Factory = static () => new MobilePlugin(),
     };

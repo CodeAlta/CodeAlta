@@ -3,7 +3,7 @@ import test from "node:test";
 import { changedSettings, draftOf, fieldsOf, readMobileSettings, readPort, type MobileSettingsView } from "./model";
 
 const answer: MobileSettingsView = {
-  providers: ["tailscale", "devtunnel"], provider: { id: "tailscale", state: "serving", detail: "Tailscale serves it" }, port: 2584, httpsPort: 2584, host: null,
+  providers: ["tailscale", "devtunnel"], provider: { id: "tailscale", state: "serving", detail: "Tailscale serves it" }, port: 2584, httpsPort: 2584,
   address: "https://desk.tail1234.ts.net:2584", server: "listening", serverDetail: null, error: null,
 };
 
@@ -30,7 +30,5 @@ test("a port is a whole number from 1024 to 65535, and Apply sends the fields of
   assert.deepEqual(changedSettings(answer, { ...fields, provider: "devtunnel", httpsPort: "x" }), { provider: "devtunnel", port: 2584 },
     "Dev Tunnels has no port on the tailnet: it is neither checked nor sent");
   assert.equal(changedSettings({ ...answer, provider: { ...answer.provider, id: "devtunnel" } }, { ...fields, provider: "devtunnel" }), null);
-  assert.deepEqual([fieldsOf("tailscale"), fieldsOf("devtunnel"), fieldsOf("internet"), fieldsOf("pigeons")], [["httpsPort"], [], ["host"], []]);
-  assert.deepEqual(changedSettings(answer, { ...fields, provider: "internet", host: " pulsar.example.com " }), { provider: "internet", port: 2584, host: "pulsar.example.com" },
-    "the Internet sends its name, trimmed, and the plugin judges it");
+  assert.deepEqual([fieldsOf("tailscale"), fieldsOf("devtunnel"), fieldsOf("pigeons")], [["httpsPort"], [], []]);
 });

@@ -27,7 +27,7 @@ const builtIn: readonly { id: string; name: string; description: MessageKey; ico
   { id: "ui", name: "UI tools", description: "Tools an agent sees and drives this window with, when its session asks for them." },
   { id: "acp", name: "ACP agents", description: "Coding agents of the Agent Client Protocol registry, as model providers." },
   // It publishes this computer on the tailnet: off until the user turns it on.
-  { id: "mobile", name: "Mobile", description: "The sessions of this computer on a phone, through Tailscale, Dev Tunnels or the Internet.", icon: "smartphone", off: true },
+  { id: "mobile", name: "Mobile", description: "The sessions of this computer on a phone, through Tailscale or Dev Tunnels.", icon: "smartphone", off: true },
 ];
 const stateIntent: Record<string, Intent> = { Enabled: "success", Failed: "danger", Changed: "warning", Disabled: "none", Configured: "none" };
 // What the running application did with an enabled plugin, when that is not simply "running".

@@ -200,7 +200,7 @@ internal sealed class MobileTailscaleProvider(IMobileTailscaleCli cli, IMobilePr
     public string Id => ProviderId;
 
     /// <inheritdoc />
-    public MobileListen Listen(MobileSettings settings) => new(settings.Port, null);
+    public MobileListen Listen(MobileSettings settings) => new(settings.Port);
 
     /// <inheritdoc />
     public string? Refusal(MobileSettings settings)

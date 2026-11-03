@@ -10,12 +10,12 @@ namespace CodeAlta.Plugin.Mobile;
 
 /// <summary>
 /// Serves a mobile view of CodeAlta (the recent sessions, their timelines and a composer) from an in-process server, and shows its
-/// address as a QR code in the Mobile tab. A provider of the settings makes the view reachable: Tailscale Serve on the tailnet, a Dev
-/// Tunnel of Microsoft, or the Internet at a domain name of the user with a certificate of Let's Encrypt; the plugin starts the server as the provider says, asks it to publish the view, and shows what it says. It runs
+/// address as a QR code in the Mobile tab. A provider of the settings makes the view reachable: Tailscale Serve on the tailnet, or a Dev
+/// Tunnel of Microsoft; the plugin starts the server as the provider says, asks it to publish the view, and shows what it says. It runs
 /// while it is turned on in Settings &gt; Plugins, which is off until the user turns it on; the provider, its ports and the access of the
 /// phones are on its settings page, Settings &gt; Extensions &gt; Mobile.
 /// </summary>
-[Plugin("mobile", DisplayName = "Mobile", Description = "The sessions of this computer on a phone, through Tailscale, Dev Tunnels or the Internet.", Frontends = PluginFrontends.Desktop)]
+[Plugin("mobile", DisplayName = "Mobile", Description = "The sessions of this computer on a phone, through Tailscale or Dev Tunnels.", Frontends = PluginFrontends.Desktop)]
 public sealed class MobilePlugin : PluginBase
 {
     /// <summary>The id of the Mobile tab.</summary>
@@ -51,7 +51,6 @@ public sealed class MobilePlugin : PluginBase
     private readonly Lock _canvases = new();
     private readonly List<IPluginCanvasRpc> _open = [];
     private readonly List<IPluginCanvasRpc> _settingsPages = [];
-    private readonly Host _host;
     private volatile MobileSettings _settings = new();
     private volatile MobileAccess? _access;
     private MobileServer? _server;
@@ -77,25 +76,17 @@ public sealed class MobilePlugin : PluginBase
     {
     }
 
-    /// <summary>Creates the plugin with command lines of the tests, and Let's Encrypt.</summary>
+    /// <summary>Creates the plugin with command lines of the tests.</summary>
     internal MobilePlugin(IMobileTailscaleCli cli, IMobileDevTunnelCli tunnelCli)
-        : this(cli, tunnelCli, MobileInternetOptions.System)
-    {
-    }
-
-    /// <summary>Creates the plugin with command lines and an ACME authority of the tests.</summary>
-    internal MobilePlugin(IMobileTailscaleCli cli, IMobileDevTunnelCli tunnelCli, MobileInternetOptions internet)
         : this((id, host) => id switch
         {
             MobileTailscaleProvider.ProviderId => new MobileTailscaleProvider(cli, host),
             MobileDevTunnelProvider.ProviderId => new MobileDevTunnelProvider(tunnelCli, host),
-            MobileInternetProvider.ProviderId => new MobileInternetProvider(host, internet),
             _ => null,
         })
     {
         ArgumentNullException.ThrowIfNull(cli);
         ArgumentNullException.ThrowIfNull(tunnelCli);
-        ArgumentNullException.ThrowIfNull(internet);
     }
 
     /// <summary>Creates the plugin with the providers a factory makes by their id; null for an id it does not know.</summary>
@@ -103,11 +94,19 @@ public sealed class MobilePlugin : PluginBase
     {
         _providers = providers ?? throw new ArgumentNullException(nameof(providers));
         _live = new MobileLive { SteerProbe = CanSteerAsync };
-        _host = new Host(this);
+    }
+
+    // Makes a provider with a host of its own: what a provider that was replaced reports afterwards is ignored.
+    private IMobileProvider? Create(string id)
+    {
+        var host = new Host(this);
+        var provider = _providers(id, host);
+        host.Provider = provider;
+        return provider;
     }
 
     /// <summary>The ids of the providers, in the order the settings page offers them.</summary>
-    internal static IReadOnlyList<string> ProviderIds { get; } = [MobileTailscaleProvider.ProviderId, MobileDevTunnelProvider.ProviderId, MobileInternetProvider.ProviderId];
+    internal static IReadOnlyList<string> ProviderIds { get; } = [MobileTailscaleProvider.ProviderId, MobileDevTunnelProvider.ProviderId];
 
     /// <summary>Gets what the plugin serves now.</summary>
     internal MobileState State => _state;
@@ -163,9 +162,9 @@ public sealed class MobilePlugin : PluginBase
             // A plugin turned off before its start ran starts nothing.
             if (_stopped) return;
             _settings = await ReadSettingsAsync(cancellationToken).ConfigureAwait(false);
-            _provider = _providers(_settings.Mode, _host) ?? _providers(MobileTailscaleProvider.ProviderId, _host)!;
+            _provider = Create(_settings.Mode) ?? Create(MobileTailscaleProvider.ProviderId)!;
             await StartServerAsync(cancellationToken).ConfigureAwait(false);
-            if (_server is not null) await PublishAsync(cancellationToken).ConfigureAwait(false);
+            await PublishAsync(cancellationToken).ConfigureAwait(false);
         }
         finally
         {
@@ -210,7 +209,7 @@ public sealed class MobilePlugin : PluginBase
         MobileApi.RemoveStaleAttachments(attachments);
         var server = new MobileServer(new MobileServerOptions
         {
-            Port = listen.Port, Tls = listen.Tls, Access = _access!, Hosts = () => _state.PublicHost is { } host ? [host] : [],
+            Port = listen.Port, Access = _access!, Hosts = () => _state.PublicHost is { } host ? [host] : [],
             Files = Services.AppFiles, Sessions = sessions, Api = new MobileApi(Services.Alta, sessions, attachments),
             Asks = new MobileAsks(Services.Asks, sessions), Permissions = new MobilePermissions(Services.Permissions, sessions), Live = _live, Logger = Logger,
         });
@@ -220,7 +219,7 @@ public sealed class MobilePlugin : PluginBase
             _server = server;
             _listening = listen;
             _state = _state with { Server = "listening", ServerDetail = null };
-            Logger.Info(listen.Tls is null ? $"Mobile: the mobile view listens on http://127.0.0.1:{listen.Port}" : $"Mobile: the mobile view serves HTTPS on port {listen.Port} of every address");
+            Logger.Info($"Mobile: the mobile view listens on http://127.0.0.1:{listen.Port}");
         }
         catch (Exception exception) when (exception is IOException { InnerException: SocketException { SocketErrorCode: SocketError.AddressAlreadyInUse } } or SocketException { SocketErrorCode: SocketError.AddressAlreadyInUse })
         {
@@ -243,11 +242,19 @@ public sealed class MobilePlugin : PluginBase
     }
 
     private static readonly MobileProviderStatus Publishing = MobileProviderStatus.Pending("Publishing the mobile view…");
+    private static readonly MobileProviderStatus NotListening = new("failed", null, "The mobile view does not listen on this computer, so it is not published.");
 
-    // Has the provider publish the view the server serves; with the gate held.
+    // Has the provider publish the view the server serves; with the gate held. Without a server, nothing is published: the provider
+    // says so rather than staying at a step that runs.
     private async Task PublishAsync(CancellationToken cancellationToken)
     {
         var provider = _provider!;
+        if (_server is null)
+        {
+            _state = _state with { Provider = NotListening };
+            return;
+        }
+
         _state = _state with { Provider = Publishing };
         await ChangedAsync().ConfigureAwait(false);
         MobileProviderStatus status;
@@ -294,7 +301,7 @@ public sealed class MobilePlugin : PluginBase
         {
             if (_stopped || _provider is null) return Status();
             if (_server is null) await StartServerAsync(cancellationToken).ConfigureAwait(false);
-            if (_server is not null) await PublishAsync(cancellationToken).ConfigureAwait(false);
+            await PublishAsync(cancellationToken).ConfigureAwait(false);
         }
         finally
         {
@@ -305,11 +312,23 @@ public sealed class MobilePlugin : PluginBase
         return Status();
     }
 
-    // Runs an action of the provider the tab offers (a sign-in): its outcome comes with the changes it reports.
+    // Runs an action of the provider the tab offers (a sign-in), with the gate held so that it does not cross a publication: what it
+    // does at once is shown, and its outcome comes with the changes it reports.
     private async Task<MobileStatus> ActAsync(string action, CancellationToken cancellationToken)
     {
-        if (_provider is { } provider && !await provider.ActAsync(action, cancellationToken).ConfigureAwait(false))
-            Logger.Warn($"Mobile: the provider {provider.Id} knows no action {action}.");
+        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            if (_stopped || _provider is not { } provider) return Status();
+            if (await provider.ActAsync(action, cancellationToken).ConfigureAwait(false) is { } status) _state = _state with { Provider = status };
+            else Logger.Warn($"Mobile: the provider {provider.Id} knows no action {action}.");
+        }
+        finally
+        {
+            _gate.Release();
+        }
+
+        await ChangedAsync().ConfigureAwait(false);
         return Status();
     }
 
@@ -356,10 +375,9 @@ public sealed class MobilePlugin : PluginBase
             var next = old with
             {
                 Mode = id, Port = request.Port!.Value, HttpsPort = request.HttpsPort ?? old.HttpsPort,
-                Host = request.Host is null ? old.Host : string.IsNullOrWhiteSpace(request.Host) ? null : request.Host.Trim().TrimEnd('.').ToLowerInvariant(),
             };
             if (next == old) return Settings();
-            var provider = id == _provider.Id ? _provider : _providers(id, _host)!;
+            var provider = id == _provider.Id ? _provider : Create(id)!;
             if (provider.Refusal(next) is { } refusal)
             {
                 if (!ReferenceEquals(provider, _provider)) await provider.DisposeAsync().ConfigureAwait(false);
@@ -486,7 +504,7 @@ public sealed class MobilePlugin : PluginBase
     {
         var state = _state;
         var settings = _settings;
-        return new MobileSettingsView(settings.Port, settings.HttpsPort, settings.Host, ServedUrl(state), state.Server, state.ServerDetail, View(state));
+        return new MobileSettingsView(settings.Port, settings.HttpsPort, ServedUrl(state), state.Server, state.ServerDetail, View(state));
     }
 
     private MobileProviderView View(MobileState state)
@@ -540,7 +558,7 @@ public sealed class MobilePlugin : PluginBase
         }) with
         {
             Label = "Mobile: connect a phone",
-            SearchText = "mobile phone qr tailscale dev tunnels internet https connect",
+            SearchText = "mobile phone qr tailscale dev tunnels connect",
             KeyBinding = new PluginKeyBinding(new PluginKeyGesture('G', PluginKeyModifiers.Ctrl), new PluginKeyGesture('M')),
         };
     }
@@ -573,7 +591,7 @@ public sealed class MobilePlugin : PluginBase
         {
             Id = SettingsCanvasId,
             Title = "Mobile",
-            Description = "How phones connect (Tailscale, Dev Tunnels or the Internet), the ports of the mobile view, and the access of the phones.",
+            Description = "How phones connect (Tailscale or Dev Tunnels), the ports of the mobile view, and the access of the phones.",
             Icon = "smartphone",
             Scope = PluginCanvasScope.Application,
             Placement = PluginCanvasPlacement.Settings,
@@ -625,12 +643,13 @@ public sealed class MobilePlugin : PluginBase
         internal string? PublicHost => Provider.Url is { } url && Uri.TryCreate(url, UriKind.Absolute, out var uri) ? uri.Authority : null;
     }
 
-    // What the plugin gives its provider: its settings, its folder, its log, its background, and a way to say what changed.
+    // What the plugin gives a provider: its settings, its log, its background, and a way to say what changed. A provider that was
+    // replaced (the settings changed, the plugin stopped) says nothing any more.
     private sealed class Host(MobilePlugin plugin) : IMobileProviderHost
     {
-        public MobileSettings Settings => plugin._settings;
+        internal IMobileProvider? Provider { get; set; }
 
-        public string Folder => Path.Combine(plugin.Services.State.GetDirectory(PluginStateScope.User), "provider");
+        public MobileSettings Settings => plugin._settings;
 
         public async Task SaveAsync(Func<MobileSettings, MobileSettings> change)
         {
@@ -640,11 +659,26 @@ public sealed class MobilePlugin : PluginBase
 
         public async Task ReportAsync(MobileProviderStatus status)
         {
-            plugin._state = plugin._state with { Provider = status };
+            await plugin._gate.WaitAsync().ConfigureAwait(false);
+            try
+            {
+                if (!IsCurrent) return;
+                plugin._state = plugin._state with { Provider = status };
+            }
+            finally
+            {
+                plugin._gate.Release();
+            }
+
             await plugin.ChangedAsync().ConfigureAwait(false);
         }
 
-        public Task RepublishAsync() => plugin.RetryAsync(CancellationToken.None);
+        public async Task RepublishAsync()
+        {
+            if (IsCurrent) await plugin.RetryAsync(CancellationToken.None).ConfigureAwait(false);
+        }
+
+        private bool IsCurrent => Provider is not null && ReferenceEquals(Provider, plugin._provider) && !plugin._stopped;
 
         public void Run(string name, string description, Func<CancellationToken, ValueTask> work)
             => _ = plugin.Tasks.Run(name, work, new PluginTaskOptions { SessionRetentionIndependent = true, Description = description });
@@ -674,9 +708,6 @@ internal sealed record MobileSettings
 
     /// <summary>Gets the Dev Tunnel the plugin made, kept so that its address does not change; null until one is made.</summary>
     public string? TunnelId { get; init; }
-
-    /// <summary>Gets the domain name phones open, for a provider that needs one; null otherwise.</summary>
-    public string? Host { get; init; }
 }
 
 /// <summary>An action of the provider the tab asks for.</summary>
@@ -709,18 +740,16 @@ internal sealed record MobileStatus(string Server, int Port, string? ServerDetai
 /// <param name="Provider">The id of the provider; null keeps the one of now.</param>
 /// <param name="Port">The port of the server on this computer.</param>
 /// <param name="HttpsPort">The HTTPS port on the tailnet, for Tailscale; null keeps the one of now.</param>
-/// <param name="Host">The domain name, for a provider that needs one; null keeps the one of now, empty clears it.</param>
-internal sealed record MobileSettingsChange(string? Provider, int? Port, int? HttpsPort, string? Host);
+internal sealed record MobileSettingsChange(string? Provider, int? Port, int? HttpsPort);
 
 /// <summary>What the settings page shows.</summary>
 /// <param name="Port">The port of the server on this computer.</param>
 /// <param name="HttpsPort">The HTTPS port on the tailnet, for Tailscale.</param>
-/// <param name="Host">The domain name, for a provider that needs one.</param>
 /// <param name="Address">The address of the view while it is served, without the access token; null otherwise.</param>
 /// <param name="Server">What the server does: <c>starting</c>, <c>listening</c>, <c>port-in-use</c>, <c>failed</c> or <c>stopped</c>.</param>
 /// <param name="ServerDetail">Why it does not listen.</param>
 /// <param name="Provider">What the provider does.</param>
-internal sealed record MobileSettingsView(int Port, int HttpsPort, string? Host, string? Address, string Server, string? ServerDetail, MobileProviderView Provider)
+internal sealed record MobileSettingsView(int Port, int HttpsPort, string? Address, string Server, string? ServerDetail, MobileProviderView Provider)
 {
     /// <summary>Gets why the settings that were asked for are refused, or null.</summary>
     public string? Error { get; init; }

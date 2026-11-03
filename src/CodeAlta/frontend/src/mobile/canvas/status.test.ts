@@ -49,20 +49,6 @@ test("through Dev Tunnels: the code of the tunnel, no word of Tailscale, the sig
   assert.equal(mobileView(serving()).instruction, "Scan it with the camera of the phone. The phone must be signed in to the same tailnet.");
 });
 
-test("on the Internet: the code of the name, Let's Encrypt said while it works, and what to fix when it fails", () => {
-  const internet = (overrides: Partial<MobileStatus> = {}, provider: Partial<MobileStatus["provider"]> = {}) => serving({
-    connectUrl: "https://pulsar.example.com/#k=secret", address: "https://pulsar.example.com", ...overrides },
-    { id: "internet", state: "serving", url: "https://pulsar.example.com", detail: "Reachable.", ...provider });
-  assert.deepEqual([mobileView(internet()).code?.address, mobileView(internet()).problems, mobileView(internet()).instruction],
-    ["https://pulsar.example.com", [], "Scan it with the camera of the phone."]);
-  const out = { connectUrl: null, address: null, qr: null };
-  assert.equal(mobileView(internet(out, { state: "pending", working: true, url: null })).waiting, "Getting a certificate from Let's Encrypt…");
-  const failed = mobileView(internet(out, { state: "certificate-failed", url: null, detail: "Timeout during connect. Check port 443." })).problems;
-  assert.deepEqual(failed.map(problem => [problem.title, problem.detail, problem.retry]), [["Let's Encrypt gave no certificate.", "Timeout during connect. Check port 443.", true]]);
-  assert.deepEqual(["address-missing", "dns-missing"].map(state => mobileView(internet(out, { state, url: null, detail: "why" })).problems[0].title),
-    ["The domain name is missing.", "The domain name is not known on the Internet."]);
-});
-
 test("a provider or a state the tab has no words for: the plugin's line under a general title, and its code when it serves", () => {
   const other = mobileView(serving({ connectUrl: null, address: null, qr: null }, { id: "pigeons", state: "lost", url: null, detail: "The pigeon got lost." }));
   assert.deepEqual(other.problems.map(problem => [problem.key, problem.title, problem.detail, problem.retry]),

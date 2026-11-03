@@ -1,5 +1,4 @@
 using System.Net;
-using System.Net.Security;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
@@ -7,7 +6,6 @@ using CodeAlta.Plugins.Abstractions;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
-using Microsoft.AspNetCore.Server.Kestrel.Https;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -17,14 +15,8 @@ namespace CodeAlta.Plugin.Mobile;
 /// <summary>What the server of the mobile view serves, and with what.</summary>
 internal sealed record MobileServerOptions
 {
-    /// <summary>Gets the port: on the loopback address, or on every address of this computer when the server serves HTTPS itself.</summary>
+    /// <summary>Gets the port on the loopback address.</summary>
     public required int Port { get; init; }
-
-    /// <summary>
-    /// Gets what answers the TLS handshakes when the server serves HTTPS itself, on every address of this computer; null to serve HTTP on
-    /// the loopback address only, for a provider that publishes it.
-    /// </summary>
-    public IMobileServerTls? Tls { get; init; }
 
     /// <summary>Gets who may use the view: the pairing token of the QR code, and the key of each phone.</summary>
     public required MobileAccess Access { get; init; }
@@ -98,31 +90,7 @@ internal sealed partial class MobileServer : IAsyncDisposable
         builder.Logging.ClearProviders();
         builder.WebHost.ConfigureKestrel(kestrel =>
         {
-            if (_options.Tls is { } tls)
-            {
-                // Every address, IPv6 and IPv4. The certificate is chosen at each handshake (a renewal is served without a restart), and
-                // a handshake of Let's Encrypt that asks for acme-tls/1 gets the certificate of its challenge, with that protocol alone.
-                kestrel.ListenAnyIP(_options.Port, listen => listen.UseHttps(new HttpsConnectionAdapterOptions
-                {
-                    TlsClientHelloBytesCallback = MobileTls.Observe,
-                    ServerCertificateSelector = (connection, _) => tls.Context(MobileTls.IsAcme(connection))?.TargetCertificate,
-                    OnAuthenticate = (connection, ssl) =>
-                    {
-                        var acme = MobileTls.IsAcme(connection);
-                        if (tls.Context(acme) is not { } chosen) return;
-                        // The chain goes with the certificate: a phone that is given the certificate alone may not find who signed it.
-                        ssl.ServerCertificateSelectionCallback = null;
-                        ssl.ServerCertificate = null;
-                        ssl.ServerCertificateContext = chosen;
-                        if (acme) ssl.ApplicationProtocols = [new SslApplicationProtocol(MobileTls.AcmeProtocol)];
-                    },
-                }));
-            }
-            else
-            {
-                kestrel.Listen(IPAddress.Loopback, _options.Port);
-            }
-
+            kestrel.Listen(IPAddress.Loopback, _options.Port);
             kestrel.AddServerHeader = false;
             kestrel.Limits.MaxRequestBodySize = MaximumDiagram;
         });
