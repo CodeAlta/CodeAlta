@@ -46,7 +46,7 @@ public sealed class NodeServerAutomationTests
         Assert.AreEqual(NodeExitCodes.Success, await new NodeApplication(TextWriter.Null, TextWriter.Null) { InitializeLogging = false, ServiceEnvironment = static () => null }
             .RunAsync(["join", address.ToString(), "--token", enrollment.Token, "--data-root", root.DataRoot, "--name", "test-node", "--no-wait"]));
         var nodeId = (await desktop.ListDevicesAsync(token)).Single(static device => device.Status == "pending").Id;
-        await desktop.ApproveAsync(nodeId, token);
+        await desktop.ApproveAsync(nodeId, FleetDeviceKinds.Node, token);
 
         var provider = new ScriptedNodeProvider();
         await using var node = await NodeHost.StartAsync(root.Options() with

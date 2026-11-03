@@ -192,7 +192,7 @@ public sealed class FleetNodeManagementTests
         Assert.AreEqual(CodeAlta.Fleet.Server.FleetServerLinkStates.Pending, link.State);
         var pending = (await desktop.ListDevicesAsync(token)).Single(static device => device.Status == "pending");
         Assert.AreEqual(joined.DeviceId, pending.Id);
-        await desktop.ApproveAsync(pending.Id, token);
+        await desktop.ApproveAsync(pending.Id, FleetDeviceKinds.Node, token);
         Assert.AreEqual("approved", (await desktop.ListDevicesAsync(token)).Single(device => device.Id == joined.DeviceId).Status);
 
         Assert.IsTrue((await manager.JoinServerAsync(new FleetServerJoinParams(address.ToString(), "used-token"), token)).AlreadyLinked,

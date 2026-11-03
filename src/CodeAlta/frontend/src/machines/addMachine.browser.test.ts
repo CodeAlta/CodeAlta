@@ -45,7 +45,7 @@ test("through the server, the machine that joins with the code made here is appr
     assert.deepEqual(await page.evaluate(`[...document.querySelectorAll('.add-machine-words .bp6-tag')].map(tag => tag.textContent)`),
       ["maple", "orbit", "tiger", "cloud", "amber", "stone"]);
     await page.shot("add-machine-server-approved");
-    assert.deepEqual(await calls(page), [{ token: "home" }, { approve: "box" }]);
+    assert.deepEqual(await calls(page), [{ token: "home" }, { approve: "box", kind: "node" }], "a machine is approved as a node, never as a controller");
     assert.deepEqual(page.problems, []);
   }, options);
 });

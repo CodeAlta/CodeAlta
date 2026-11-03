@@ -288,7 +288,7 @@ public sealed class UpdateCampaignTests
                 var key = DeviceIdentity.LoadOrCreate(Path.Combine(root.Path, name));
                 using (var client = new FleetServerClient(server.BaseAddress, key))
                     await client.EnrollAsync((await desktop.CreateEnrollmentTokenAsync()).Token, name);
-                await desktop.ApproveAsync(key.DeviceId);
+                await desktop.ApproveAsync(key.DeviceId, FleetDeviceKinds.Node);
                 nodes.Add(new TestNode(server, key, Path.Combine(root.Path, name + "-state"), organization));
             }
 

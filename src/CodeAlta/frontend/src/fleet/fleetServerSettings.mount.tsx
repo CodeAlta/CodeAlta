@@ -47,7 +47,7 @@ const api: FleetServerApi = {
   },
   devices: async () => ({ status: "ok", devices, message: null }),
   approve: async (request: FleetServerDeviceRequest) => {
-    calls.push(JSON.stringify({ approve: request.deviceId, words: request.words }));
+    calls.push(JSON.stringify({ approve: request.deviceId, words: request.words, kind: request.kind }));
     devices = devices.map(device => device.id === request.deviceId ? { ...device, status: "approved" } : device);
     return { status: "ok", device: devices.find(device => device.id === request.deviceId) ?? null, message: null };
   },
