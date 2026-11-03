@@ -105,7 +105,8 @@ function SecretRow({ secret, busy, date, run, actions }: {
     if (await run(() => actions.rotateSecret(secret.name, typed))) setRotating(false);
   };
   return <li className="secret-row" data-secret={secret.name}>
-    <span className="secret-name"><code>{secret.name}</code><span className="secret-reference">{referenceOf("secret", secret.name)}</span></span>
+    <span className="secret-name"><code title={secret.name}>{secret.name}</code>
+      <span className="secret-reference" title={referenceOf("secret", secret.name)}>{referenceOf("secret", secret.name)}</span></span>
     <Tag minimal>{t("Version {version}", { version: String(secret.version) })}</Tag>
     <span className="secret-meta">{t("Set {date} by {who}", { date: date(secret.setAt), who: secret.setBy })}</span>
     <span className="secret-actions">
@@ -141,7 +142,8 @@ function VariableRow({ variable, busy, run, actions }: {
   const [deleting, setDeleting] = useState(false);
   const changed = value !== variable.value;
   return <li className="secret-row" data-variable={variable.name}>
-    <span className="secret-name"><code>{variable.name}</code><span className="secret-reference">{referenceOf("var", variable.name)}</span></span>
+    <span className="secret-name"><code title={variable.name}>{variable.name}</code>
+      <span className="secret-reference" title={referenceOf("var", variable.name)}>{referenceOf("var", variable.name)}</span></span>
     <InputGroup className="secret-value" small value={value} disabled={busy} aria-label={t("Value of {name}", { name: variable.name })}
       onChange={event => setValue(event.target.value)} onKeyDown={event => { if (event.key === "Enter" && changed && value) void run(() => actions.setVariable(variable.name, value)); }} />
     <span className="secret-actions">

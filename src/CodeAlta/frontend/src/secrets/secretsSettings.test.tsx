@@ -22,7 +22,7 @@ test("a secret is listed by name, version, and who set it when, with Rotate and 
   const html = render(createElement(SecretsBody, { listing, busy: false, run: never, actions }));
 
   assert.match(html, /data-secret="GRAFANA_TOKEN"/);
-  assert.match(html, /<code>GRAFANA_TOKEN<\/code>/);
+  assert.match(html, /<code title="GRAFANA_TOKEN">GRAFANA_TOKEN<\/code>/, "the name, whole in its tooltip where the row cuts it");
   assert.match(html, /\$\{secret:GRAFANA_TOKEN\}/);
   assert.match(html, /Version 2/);
   assert.match(html, /by alex \(CodeAlta Desktop\)/);
