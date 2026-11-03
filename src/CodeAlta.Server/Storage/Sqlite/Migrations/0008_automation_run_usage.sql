@@ -5,3 +5,6 @@ ALTER TABLE automation_runs ADD COLUMN input_tokens INTEGER NULL;
 ALTER TABLE automation_runs ADD COLUMN output_tokens INTEGER NULL;
 ALTER TABLE automation_runs ADD COLUMN cost REAL NULL;
 ALTER TABLE automation_runs ADD COLUMN cost_unit TEXT NULL;
+
+-- When a schedule of an automation is next due on its machine, as the machine reports it.
+ALTER TABLE automations ADD COLUMN next_due INTEGER NULL;

@@ -14,6 +14,8 @@ internal sealed partial class NodeAutomations
 
     // What was last reported of each run, per server link: a run is sent again only when it changed.
     private readonly Dictionary<string, Dictionary<string, string>> _reported = new(StringComparer.Ordinal);
+    // When the schedules were last reported due, per server link: sent again only when it changed.
+    private readonly Dictionary<string, Dictionary<string, DateTimeOffset?>> _reportedSchedules = new(StringComparer.Ordinal);
     private readonly SemaphoreSlim _reports = new(1, 1);
     private readonly CancellationTokenSource _reportsStop = new();
     private int _reportQueued;
@@ -180,10 +182,23 @@ internal sealed partial class NodeAutomations
                 }
             }
 
-            foreach (var batch in changed.Chunk(RunsPerReport))
+            // When their schedules are next due here, sent with the first batch, or alone when only they changed.
+            if (!_reportedSchedules.TryGetValue(linkId, out var dues) || all) _reportedSchedules[linkId] = dues = new(StringComparer.Ordinal);
+            var schedules = new List<FleetAutomationSchedule>();
+            foreach (var id in ids)
             {
-                if (!await report(linkId, new FleetAutomationRunFacts([.. batch.Select(static item => item.Fact)]), cancellationToken).ConfigureAwait(false)) return;
+                var next = Engine.NextDue(id);
+                if (!dues.TryGetValue(id, out var known) || known != next) schedules.Add(new FleetAutomationSchedule(id, next));
+            }
+
+            List<(FleetAutomationRunFact Fact, string Key)[]> batches = changed.Count > 0 ? [.. changed.Chunk(RunsPerReport)] : schedules.Count > 0 ? [[]] : [];
+            foreach (var batch in batches)
+            {
+                var facts = new FleetAutomationRunFacts([.. batch.Select(static item => item.Fact)]) { Schedules = schedules.Count > 0 ? schedules : null };
+                if (!await report(linkId, facts, cancellationToken).ConfigureAwait(false)) return;
                 foreach (var (fact, key) in batch) reported[fact.RunId] = key;
+                foreach (var schedule in schedules) dues[schedule.AutomationId] = schedule.NextDue;
+                schedules = [];
             }
 
             // Forgets what no longer is among the latest runs.

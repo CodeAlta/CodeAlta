@@ -74,7 +74,9 @@ The authority of an assignment is the authenticated, paired device on a direct c
 
 ## Smaller follow-ups of the first part
 
-- [ ] The desktop shows the next due time of a placed automation as its machine reports it (`FleetAutomationInfo.NextDue`).
+- [x] The desktop shows the next due time of a placed automation as its machine reports it (`FleetAutomationInfo.NextDue`).
+  - Done: from `automations.list` on a direct channel; through a server, the node reports its schedules with its runs
+    (`FleetAutomationRunFacts.Schedules`), kept in `automations.next_due` (migration `0008`) and given by `GET`.
 - [x] A remote run's session opens from the run list when the machine lists it (today: when it is among the sessions
   the machine host lists).
   - Done: a run of another machine with a session is always a link; opening it reads the sessions of the window again,

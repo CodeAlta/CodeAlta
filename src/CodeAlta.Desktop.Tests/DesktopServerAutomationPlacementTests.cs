@@ -129,14 +129,16 @@ public sealed class DesktopServerAutomationPlacementTests
 
                 // The machine reports a run: the desktop lists it.
                 var now = DateTimeOffset.UtcNow;
+                var due = new DateTimeOffset(2026, 11, 3, 23, 0, 0, TimeSpan.Zero);
                 Assert.IsTrue(await connector.ReportAutomationRunsAsync(new FleetAutomationRunFacts([
-                    new FleetAutomationRunFact("node-run-1", Id, first.Version.Number, "daily", AutomationRun.Completed, now, now.AddMinutes(1)) { SessionId = "node-session-1" }]),
-                    token));
+                    new FleetAutomationRunFact("node-run-1", Id, first.Version.Number, "daily", AutomationRun.Completed, now, now.AddMinutes(1)) { SessionId = "node-session-1" }])
+                    { Schedules = [new FleetAutomationSchedule(Id, due)] }, token));
                 await WaitForAsync(async () =>
                 {
                     await placement.SyncAsync(token);
                     return placement.Runs(Id).Any(static run => run is { Id: "node-run-1", Status: AutomationRun.Completed, SessionId: "node-session-1" });
                 }, "the run to be listed", token);
+                Assert.AreEqual(due, placement.NextDue(Id), "when the machine says it is next due, through the server");
                 // Run now: a request this computer signs goes through the server to the machine, which verifies it.
                 var ran = (await automations.RunAsync(Id, token))!;
                 Assert.AreEqual(AutomationRun.Running, ran.Status, ran.Message);

@@ -22,7 +22,11 @@ public sealed record PutAutomationRequest(FleetSignedAutomationVersion Version);
 /// <param name="Message">Why the machine refused it; null otherwise.</param>
 /// <param name="Version">The version as signed.</param>
 public sealed record AutomationDto(string Id, string MachineId, long Number, bool Removed, bool Enabled, IReadOnlyList<string> Triggers, string SignerDeviceId,
-    DateTimeOffset UpdatedAt, string State, string? Message, FleetSignedAutomationVersion Version);
+    DateTimeOffset UpdatedAt, string State, string? Message, FleetSignedAutomationVersion Version)
+{
+    /// <summary>Gets when a schedule of it is next due on its machine, as the machine last reported it; null when unknown or none.</summary>
+    public DateTimeOffset? NextDue { get; init; }
+}
 
 /// <summary>The body of <c>POST /api/v1/automations/{id}/run</c>: a run the calling controller device signed for one machine.</summary>
 /// <param name="Request">The signed run request.</param>

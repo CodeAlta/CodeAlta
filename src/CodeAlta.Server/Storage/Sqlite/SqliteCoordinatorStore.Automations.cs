@@ -6,7 +6,7 @@ namespace CodeAlta.Server.Storage.Sqlite;
 public sealed partial class SqliteCoordinatorStore
 {
     private const string AutomationColumns = "SELECT organization_id, automation_id, machine_id, owner_person_id, number, removed, enabled, triggers, payload, signature, " +
-        "signer_device_id, updated_at, delivery_state, delivery_message FROM automations";
+        "signer_device_id, updated_at, delivery_state, delivery_message, next_due FROM automations";
 
     private const string AutomationRunColumns = "SELECT organization_id, run_id, automation_id, machine_id, number, trigger, status, occurrence, started_at, ended_at, " +
         "lease_until, session_id, message, updated_at, input_tokens, output_tokens, cost, cost_unit FROM automation_runs";
@@ -180,6 +180,22 @@ public sealed partial class SqliteCoordinatorStore
     }
 
     /// <inheritdoc />
+    public ValueTask SetAutomationNextDueAsync(string organizationId, string machineId, IReadOnlyList<(string AutomationId, DateTimeOffset? NextDue)> schedules,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(organizationId);
+        ArgumentException.ThrowIfNullOrEmpty(machineId);
+        ArgumentNullException.ThrowIfNull(schedules);
+        return new ValueTask(WriteAsync((connection, transaction) =>
+        {
+            foreach (var (automationId, nextDue) in schedules)
+                Execute(connection, transaction, "UPDATE automations SET next_due = $due WHERE organization_id = $org AND automation_id = $id AND machine_id = $machine",
+                    ("$org", organizationId), ("$id", automationId), ("$machine", machineId), ("$due", ToNullableTime(nextDue)));
+            return true;
+        }, cancellationToken).AsTask());
+    }
+
+    /// <inheritdoc />
     public ValueTask<IReadOnlyList<AutomationRunRecord>> ListAutomationRunsAsync(string organizationId, string automationId, int limit, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrEmpty(organizationId);
@@ -202,7 +218,10 @@ public sealed partial class SqliteCoordinatorStore
 
     private static AutomationRecord ReadAutomation(SqliteDataReader reader)
         => new(reader.GetString(0), reader.GetString(1), reader.GetString(2), reader.GetString(3), reader.GetInt64(4), reader.GetInt64(5) != 0, reader.GetInt64(6) != 0,
-            reader.GetString(7), reader.GetString(8), reader.GetString(9), reader.GetString(10), FromTime(reader.GetInt64(11)), reader.GetString(12), GetNullableString(reader, 13));
+            reader.GetString(7), reader.GetString(8), reader.GetString(9), reader.GetString(10), FromTime(reader.GetInt64(11)), reader.GetString(12), GetNullableString(reader, 13))
+        {
+            NextDue = GetNullableTime(reader, 14),
+        };
 
     private static AutomationRunRecord ReadAutomationRun(SqliteDataReader reader)
         => new(reader.GetString(0), reader.GetString(1), reader.GetString(2), reader.GetString(3), reader.GetInt64(4), reader.GetString(5), reader.GetString(6),

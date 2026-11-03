@@ -140,6 +140,13 @@ public sealed class AutomationServerTests
         await second.SendRequestAsync(FleetAutomationMethods.Runs, JsonSerializer.SerializeToElement(new FleetAutomationRunFacts([
             new FleetAutomationRunFact("run-1", Id, 2, "hourly", "failed", now, now)]), FleetAutomationServerJsonContext.Default.FleetAutomationRunFacts));
 
+        // Only the schedules changed: they come alone; the server keeps them for what it holds for that machine.
+        var due = new DateTimeOffset(2026, 11, 3, 11, 0, 0, TimeSpan.Zero);
+        await second.SendRequestAsync(FleetAutomationMethods.Runs, JsonSerializer.SerializeToElement(new FleetAutomationRunFacts([]) { Schedules = [new FleetAutomationSchedule(Id, due)] },
+            FleetAutomationServerJsonContext.Default.FleetAutomationRunFacts));
+        var byMachine = (await ListAsync(fixture, owner)).ToDictionary(static item => item.MachineId);
+        Assert.AreEqual((due, (DateTimeOffset?)null), (byMachine[other.DeviceId].NextDue, byMachine[node.DeviceId].NextDue));
+
         var runs = await fixture.SendAsync(owner, HttpMethod.Get, $"/api/v1/automations/{Id}/runs");
         Assert.AreEqual(HttpStatusCode.OK, runs.Status, runs.Body.ToString());
         var list = runs.Read<AutomationRunListDto>().Runs;

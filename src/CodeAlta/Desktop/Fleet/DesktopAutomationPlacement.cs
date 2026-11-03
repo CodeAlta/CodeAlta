@@ -54,6 +54,7 @@ internal sealed class DesktopAutomationPlacement : IAutomationPlacement, IAsyncD
     private readonly Dictionary<string, IReadOnlyList<AutomationRun>> _runs = new(StringComparer.Ordinal);
     private readonly Dictionary<string, DateTimeOffset> _runsReadAt = new(StringComparer.Ordinal);
     private readonly Dictionary<string, long> _numbers;
+    private readonly Dictionary<string, DateTimeOffset> _nextDue = new(StringComparer.Ordinal);
     // The removals given through a server that the server is asked to forget once their machine took them away.
     private readonly HashSet<(string Id, string MachineId)> _forget = [];
     private readonly string _numbersPath;
@@ -133,6 +134,12 @@ internal sealed class DesktopAutomationPlacement : IAutomationPlacement, IAsyncD
         }
 
         return new(machine, _machines(machine)?.Machine.Name ?? Route(machine, static route => route.MachineName), "pending", "It is copied to the machine in a moment.", null);
+    }
+
+    /// <summary>When a schedule of a placed automation is next due on its machine, as the machine last reported it; null when unknown or none.</summary>
+    internal DateTimeOffset? NextDue(string id)
+    {
+        lock (_gate) return _nextDue.TryGetValue(id, out var due) ? due : null;
     }
 
     /// <summary>The latest runs the machine of an automation reported, newest first.</summary>
@@ -368,9 +375,11 @@ internal sealed class DesktopAutomationPlacement : IAutomationPlacement, IAsyncD
         }
 
         IReadOnlyList<AutomationRun> runs;
+        DateTimeOffset? nextDue;
         try
         {
             runs = [.. (await client.ListAutomationRunsAsync(id, RunsKept, cancellationToken).ConfigureAwait(false)).Runs.Select(ToRun)];
+            nextDue = (await client.ListAutomationsAsync(cancellationToken).ConfigureAwait(false)).Automations.FirstOrDefault(item => item.Id == id)?.NextDue;
         }
         catch (Exception exception) when (exception is FleetException or IOException or ObjectDisposedException or FleetConnectionClosedException)
         {
@@ -379,9 +388,18 @@ internal sealed class DesktopAutomationPlacement : IAutomationPlacement, IAsyncD
             return false;
         }
 
+        return SetRead(id, runs, nextDue);
+    }
+
+    // Under the gate of nothing: keeps the runs and the next due time a machine reported; says whether they changed.
+    private bool SetRead(string id, IReadOnlyList<AutomationRun> runs, DateTimeOffset? nextDue)
+    {
         lock (_gate)
         {
-            if (_runs.TryGetValue(id, out var known) && known.SequenceEqual(runs)) return false;
+            var changed = _nextDue.GetValueOrDefault(id) != nextDue;
+            if (nextDue is { } due) _nextDue[id] = due;
+            else _nextDue.Remove(id);
+            if (_runs.TryGetValue(id, out var known) && known.SequenceEqual(runs)) return changed;
             _runs[id] = runs;
             return true;
         }
@@ -550,12 +568,7 @@ internal sealed class DesktopAutomationPlacement : IAutomationPlacement, IAsyncD
         }
 
         var changed = SetStatus(id, status);
-        lock (_gate)
-        {
-            if (_runs.TryGetValue(id, out var known) && known.SequenceEqual(runs)) return changed;
-            _runs[id] = runs;
-            return true;
-        }
+        return SetRead(id, runs, held?.NextDue) || changed;
     }
 
     // Under _work. Takes an automation away from a machine it was given through a server: a signed removal, newer than the version given.

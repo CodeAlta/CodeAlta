@@ -73,6 +73,8 @@ public sealed class NodeServerAutomationTests
             await WaitForAsync(() => Task.FromResult(automations.AssignmentOf(Id) is { Via: not null, Number: 1 } held ? held : null), token);
             Assert.AreEqual(Noon.AddMinutes(30), automations.Engine.NextDue(Id), "the node fires its schedule");
             await WaitForAsync(async () => (await desktop.ListAutomationsAsync(token)).Automations.SingleOrDefault(static item => item.State == "applied"), token);
+            Assert.AreEqual(Noon.AddMinutes(30), (await WaitForAsync(async () => (await desktop.ListAutomationsAsync(token)).Automations
+                .SingleOrDefault(static item => item.NextDue is not null), token)).NextDue, "the node reports when it is next due");
             var entry = automations.Engine.Snapshot.Find(Id)!;
             Assert.IsNull(automations.Check(entry, new CodeAlta.Agent.ModelProviderDescriptor(new("scripted"), "Scripted")));
 

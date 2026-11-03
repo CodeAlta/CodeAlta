@@ -29,7 +29,11 @@ public static class AutomationDeliveryStates
 /// <param name="DeliveryState">Where its delivery stands (<see cref="AutomationDeliveryStates"/>).</param>
 /// <param name="DeliveryMessage">Why the machine refused it; null otherwise.</param>
 public sealed record AutomationRecord(string OrganizationId, string AutomationId, string MachineId, string OwnerPersonId, long Number, bool Removed, bool Enabled,
-    string Triggers, string Payload, string Signature, string SignerDeviceId, DateTimeOffset UpdatedAt, string DeliveryState, string? DeliveryMessage);
+    string Triggers, string Payload, string Signature, string SignerDeviceId, DateTimeOffset UpdatedAt, string DeliveryState, string? DeliveryMessage)
+{
+    /// <summary>Gets when a schedule of it is next due on its machine, as the machine last reported it.</summary>
+    public DateTimeOffset? NextDue { get; init; }
+}
 
 /// <summary>A run of an automation a machine reported, or a due time it claimed.</summary>
 /// <param name="OrganizationId">The organization.</param>
@@ -138,6 +142,15 @@ public interface IAutomationStore
     /// <param name="cancellationToken">Cancels the operation.</param>
     /// <returns>How many were written.</returns>
     ValueTask<int> RecordAutomationRunsAsync(IReadOnlyList<AutomationRunRecord> runs, int keep, CancellationToken cancellationToken = default);
+
+    /// <summary>Records when the schedules of automations are next due on their machine, for the versions held for it.</summary>
+    /// <param name="organizationId">The organization.</param>
+    /// <param name="machineId">The machine that reports them.</param>
+    /// <param name="schedules">The automations and their next due times.</param>
+    /// <param name="cancellationToken">Cancels the operation.</param>
+    /// <returns>A task that completes once they are written.</returns>
+    ValueTask SetAutomationNextDueAsync(string organizationId, string machineId, IReadOnlyList<(string AutomationId, DateTimeOffset? NextDue)> schedules,
+        CancellationToken cancellationToken = default);
 
     /// <summary>Lists the runs of an automation, the newest first.</summary>
     /// <param name="organizationId">The organization.</param>

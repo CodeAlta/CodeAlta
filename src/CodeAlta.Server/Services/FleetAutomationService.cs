@@ -275,7 +275,8 @@ internal sealed class FleetAutomationService
     public async Task RecordRunsAsync(DeviceRecord device, FleetAutomationRunFacts? facts, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(device);
-        if (facts?.Runs is not { Count: > 0 and <= MaxRunsPerReport } runs
+        if (facts?.Runs is not { Count: <= MaxRunsPerReport } runs || runs.Count == 0 && facts.Schedules is not { Count: > 0 }
+            || facts.Schedules is { Count: > MaxRunsPerReport } || facts.Schedules?.Any(static schedule => schedule is not { AutomationId.Length: > 0 }) == true
             || runs.Any(static run => run is not { RunId.Length: > 0 and <= MaxRunIdLength, AutomationId.Length: > 0, Trigger.Length: > 0 and <= 32, Status.Length: > 0 and <= 32 }
                 || run.SessionId is { Length: > 128 }))
             throw CoordinatorException.BadRequest(CoordinatorErrorCodes.PublicationInvalid, $"automations.runs needs 1 to {MaxRunsPerReport} runs, each with its ids, trigger and status.");
@@ -303,6 +304,10 @@ internal sealed class FleetAutomationService
         }
 
         if (records.Count > 0) await _automations.RecordAutomationRunsAsync(records, RunsKept, cancellationToken).ConfigureAwait(false);
+        // When its schedules are next due, for what the server holds for the machine (the store ignores the rest).
+        if (facts.Schedules is { Count: > 0 } schedules)
+            await _automations.SetAutomationNextDueAsync(device.OrganizationId, device.Id, [.. schedules.Select(static schedule => (schedule.AutomationId, schedule.NextDue))],
+                cancellationToken).ConfigureAwait(false);
     }
 
     private async Task DeliverAsync(ControlSession session, IReadOnlyList<AutomationRecord> records)
@@ -340,7 +345,7 @@ internal sealed class FleetAutomationService
         try { triggers = JsonSerializer.Deserialize(record.Triggers, FleetAutomationApiJsonContext.Default.IReadOnlyListString) ?? []; }
         catch (JsonException) { triggers = []; }
         return new AutomationDto(record.AutomationId, record.MachineId, record.Number, record.Removed, record.Enabled, triggers, record.SignerDeviceId, record.UpdatedAt,
-            record.DeliveryState, record.DeliveryMessage, new FleetSignedAutomationVersion(record.Payload, record.Signature));
+            record.DeliveryState, record.DeliveryMessage, new FleetSignedAutomationVersion(record.Payload, record.Signature)) { NextDue = record.Removed ? null : record.NextDue };
     }
 
     private static bool IsUnit(string? unit) => unit is { Length: > 0 and <= 32 } && !unit.Any(char.IsControl);

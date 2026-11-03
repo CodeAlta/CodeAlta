@@ -67,9 +67,18 @@ public sealed record FleetAutomationClaimRequest(string AutomationId, long Numbe
 /// <param name="Message">Why not; null when granted.</param>
 public sealed record FleetAutomationClaimResult(bool Granted, string? Message);
 
-/// <summary>Runs a machine reports.</summary>
-/// <param name="Runs">The runs, the newest last.</param>
-public sealed record FleetAutomationRunFacts(IReadOnlyList<FleetAutomationRunFact> Runs);
+/// <summary>Runs a machine reports, and when the schedules of its automations are next due.</summary>
+/// <param name="Runs">The runs, the newest last; none when only the schedules changed.</param>
+public sealed record FleetAutomationRunFacts(IReadOnlyList<FleetAutomationRunFact> Runs)
+{
+    /// <summary>Gets when the schedules of the automations of the server are next due on the machine; null when unchanged.</summary>
+    public IReadOnlyList<FleetAutomationSchedule>? Schedules { get; init; }
+}
+
+/// <summary>When an automation is next due on its machine, as the machine reads its schedules.</summary>
+/// <param name="AutomationId">The automation.</param>
+/// <param name="NextDue">When a schedule of it is next due; null without one, while disabled or paused.</param>
+public sealed record FleetAutomationSchedule(string AutomationId, DateTimeOffset? NextDue);
 
 /// <summary>The facts of one run: never the prompt, the answer or what the trigger was about.</summary>
 /// <param name="RunId">The run.</param>

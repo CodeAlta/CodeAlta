@@ -104,10 +104,12 @@ public sealed class DesktopAutomationPlacementTests
             Assert.AreEqual(0, runner.Starts.Count);
             await placement.SyncAsync(token);
             Assert.AreEqual("node-run-1", placement.Runs(Id).Single().Id);
+            Assert.AreEqual(new DateTimeOffset(2026, 11, 3, 23, 0, 0, TimeSpan.Zero), placement.NextDue(Id), "when its machine says it is next due");
             var rpc = new AutomationsService(automations, fixture.Host.ProjectCatalog, Epoch, placement: placement);
             var item = (await rpc.ListAsync(new(Epoch), token)).Items.Single();
             Assert.AreEqual((machine.DeviceId, "copied", "test-node"), (item.RunsOn, item.Placement!.State, item.Placement.MachineName));
             Assert.AreEqual(("node-run-1", machine.DeviceId), (item.LastRun!.Id, item.LastRun.MachineId));
+            Assert.AreEqual(new DateTimeOffset(2026, 11, 3, 23, 0, 0, TimeSpan.Zero), item.NextRunAt);
             Assert.IsTrue(item.Running);
             Assert.AreEqual(machine.DeviceId, rpc.Runs(new(Epoch, Id, null)).Runs.Single().MachineId);
             var ranByRpc = await rpc.RunAsync(new(Epoch, Id), token);
@@ -202,7 +204,8 @@ public sealed class DesktopAutomationPlacementTests
             return Task.FromResult(true);
         }
 
-        public IReadOnlyList<FleetAutomationInfo> List(FleetAutomationCaller caller) => [];
+        public IReadOnlyList<FleetAutomationInfo> List(FleetAutomationCaller caller)
+            => [new FleetAutomationInfo(Id, "Nightly on the mini", true, "fingerprint") { NextDue = new DateTimeOffset(2026, 11, 3, 23, 0, 0, TimeSpan.Zero) }];
 
         public Task<FleetAutomationRunInfo> RunAsync(FleetAutomationCaller caller, string id, CancellationToken cancellationToken)
         {
