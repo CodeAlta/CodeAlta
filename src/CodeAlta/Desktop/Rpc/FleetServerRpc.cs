@@ -297,6 +297,7 @@ internal sealed class FleetServerService
     private static (string Status, string? Message)? Failure(Exception exception) => exception switch
     {
         FleetServerException refused => (refused.Code, refused.Message),
+        FleetDeviceListException broken => (FleetDeviceListException.Code, broken.Message),
         HttpRequestException or TaskCanceledException or TimeoutException => ("unreachable", exception.Message),
         KeyNotFoundException => ("not_found", null),
         IOException or UnauthorizedAccessException or InvalidDataException => ("write_failed", exception.Message),

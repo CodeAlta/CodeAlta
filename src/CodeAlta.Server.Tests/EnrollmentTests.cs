@@ -87,6 +87,65 @@ public sealed class EnrollmentTests
     }
 
     [TestMethod]
+    public async Task ADesktopEnrollsAsAControllerAndOnceApprovedApprovesOthers()
+    {
+        await using var server = await ServerFixture.StartAsync();
+        using var owner = new TestDevice("Desktop");
+        using var laptop = new TestDevice("Laptop");
+        using var mac = new TestDevice("Mac mini");
+        var setup = await server.SetUpAsync(owner);
+
+        var unknown = await server.SendAsync(owner, HttpMethod.Post, "/api/v1/enrollment-tokens", new EnrollmentTokenRequest());
+        var badKind = await server.SendAsync(laptop, HttpMethod.Post, "/api/v1/enroll",
+            new EnrollRequest(unknown.Read<EnrollmentTokenResponse>().Token, laptop.PublicKey, laptop.Name, "phone"));
+        Assert.AreEqual((HttpStatusCode.BadRequest, CoordinatorErrorCodes.InvalidBody), (badKind.Status, badKind.Code));
+
+        var pending = await server.EnrollAsync(owner, laptop, FleetDeviceKinds.Controller);
+        Assert.AreEqual((FleetDeviceKinds.Controller, DeviceStatuses.Pending, setup.Owner.Id), (pending.Kind, pending.Status, pending.OwnerId));
+        // While pending it signs nothing; an entry that adds it as a node is refused.
+        var asNode = await server.NextEntryAsync(owner, FleetDeviceListOperations.Add, laptop.DeviceId, laptop.PublicKey, FleetDeviceKinds.Node, setup.Owner.Id, setup.Organization.Id);
+        Assert.AreEqual(CoordinatorErrorCodes.EntryInvalid,
+            (await server.SendAsync(owner, HttpMethod.Post, $"/api/v1/devices/{laptop.DeviceId}/approve", new DeviceListChangeRequest(asNode))).Code);
+        var entry = await server.NextEntryAsync(owner, FleetDeviceListOperations.Add, laptop.DeviceId, laptop.PublicKey, FleetDeviceKinds.Controller, setup.Owner.Id,
+            setup.Organization.Id);
+        var approved = await server.SendAsync(owner, HttpMethod.Post, $"/api/v1/devices/{laptop.DeviceId}/approve", new DeviceListChangeRequest(entry));
+        Assert.AreEqual(HttpStatusCode.OK, approved.Status, approved.Body.ToString());
+        Assert.AreEqual((FleetDeviceKinds.Controller, DeviceStatuses.Approved), (approved.Read<DeviceDto>().Kind, approved.Read<DeviceDto>().Status));
+
+        // The new controller makes a token and approves a node with an entry it signs itself.
+        var node = await server.EnrollAsync(laptop, mac);
+        var nodeEntry = await server.NextEntryAsync(laptop, FleetDeviceListOperations.Add, node.Id, mac.PublicKey, FleetDeviceKinds.Node, setup.Owner.Id, setup.Organization.Id);
+        var nodeApproved = await server.SendAsync(laptop, HttpMethod.Post, $"/api/v1/devices/{node.Id}/approve", new DeviceListChangeRequest(nodeEntry));
+        Assert.AreEqual(HttpStatusCode.OK, nodeApproved.Status, nodeApproved.Body.ToString());
+
+        var verification = DeviceListChain.Verify(await server.Server.Store.ListDeviceListAsync(setup.Organization.Id));
+        Assert.IsTrue(verification.IsValid);
+        Assert.AreEqual((FleetDeviceKinds.Controller, FleetDeviceKinds.Controller, FleetDeviceKinds.Node),
+            (verification.Members[owner.DeviceId], verification.Members[laptop.DeviceId], verification.Members[mac.DeviceId]));
+        var enroll = (await server.SendAsync(owner, HttpMethod.Get, "/api/v1/audit")).Read<ListResponse<AuditRecordDto>>().Items
+            .First(record => record.Action == "device.enroll" && record.Target == laptop.DeviceId);
+        Assert.AreEqual("{\"kind\":\"controller\"}", enroll.Details);
+    }
+
+    [TestMethod]
+    public async Task AnApprovedNodeSignsNoEntry()
+    {
+        await using var server = await ServerFixture.StartAsync();
+        using var owner = new TestDevice("Desktop");
+        using var mac = new TestDevice("Mac mini");
+        using var pc = new TestDevice("PC");
+        var (setup, _) = await server.SetUpWithNodeAsync(owner, mac);
+        var pending = await server.EnrollAsync(owner, pc);
+
+        // The entry is right in every field but its signer, an execution node.
+        var byNode = await server.NextEntryAsync(mac, FleetDeviceListOperations.Add, pending.Id, pc.PublicKey, FleetDeviceKinds.Node, setup.Owner.Id, setup.Organization.Id);
+        var refused = await server.SendAsync(mac, HttpMethod.Post, $"/api/v1/devices/{pending.Id}/approve", new DeviceListChangeRequest(byNode));
+        Assert.AreEqual((HttpStatusCode.Forbidden, FleetErrorCodes.Forbidden), (refused.Status, refused.Code));
+        Assert.AreEqual(2, (await server.Server.Store.ListDeviceListAsync(setup.Organization.Id)).Count, "nothing was appended");
+        Assert.AreEqual(DeviceStatuses.Pending, (await server.SendAsync(owner, HttpMethod.Get, $"/api/v1/devices/{pending.Id}")).Read<DeviceDto>().Status);
+    }
+
+    [TestMethod]
     public async Task AnApprovalWithABadEntryIsRefusedAndAudited()
     {
         await using var server = await ServerFixture.StartAsync();

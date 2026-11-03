@@ -79,13 +79,17 @@ public sealed class DeviceService
         return new EnrollmentTokenResponse(record.Id, token, record.ExpiresAt);
     }
 
-    /// <summary>Registers a machine as a pending device with an enrollment token; the request is signed by the machine's key.</summary>
+    /// <summary>
+    /// Registers a device as pending with an enrollment token; the request is signed by the device's key. A desktop
+    /// enrolls as a controller device, which a controller device of the same person approves and which then approves
+    /// others; a node enrolls as an execution device, which never signs an entry of the device list.
+    /// </summary>
     /// <param name="request">The request.</param>
     /// <param name="signed">The signature of the request.</param>
     /// <param name="origin">Where it comes from.</param>
     /// <param name="cancellationToken">Cancels the operation.</param>
     /// <returns>The pending device.</returns>
-    /// <exception cref="CoordinatorException">The request does not verify, the token is unknown, used or expired, or the device exists.</exception>
+    /// <exception cref="CoordinatorException">The request does not verify, the kind is unknown, the token is unknown, used or expired, or the device exists.</exception>
     public async Task<EnrollResponse> EnrollAsync(EnrollRequest? request, SignedRequestData signed, RequestOrigin origin, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(signed);
@@ -96,7 +100,13 @@ public sealed class DeviceService
         }
 
         var name = SetupService.RequireName(request.DeviceName, "deviceName");
-        if (!DevicePublicKey.TryParse(request.PublicKey, out var key))
+        var kind = request.Kind ?? FleetDeviceKinds.Node;
+        if (!FleetDeviceKinds.IsKnown(kind))
+        {
+            throw CoordinatorException.BadRequest(CoordinatorErrorCodes.InvalidBody, $"kind must be '{FleetDeviceKinds.Controller}' or '{FleetDeviceKinds.Node}'.");
+        }
+
+        if (!FleetDevicePublicKey.TryParse(request.PublicKey, out var key))
         {
             throw CoordinatorException.BadRequest(CoordinatorErrorCodes.InvalidBody, "publicKey must be the base64 of the SubjectPublicKeyInfo of a P-256 key.");
         }
@@ -104,8 +114,8 @@ public sealed class DeviceService
         _authenticator.VerifyWithKey(signed, key);
         var now = _time.GetUtcNow();
         // Organization, owner and enroller come from the token, in the store's transaction.
-        var device = new DeviceRecord(key.DeviceId, string.Empty, name, FleetDeviceKinds.Node, key.Text, key.Fingerprint, null, DeviceStatuses.Pending, null, null, now, null, null, 1);
-        var audit = new AuditEntry("device.enroll", AuditEntry.Success, null, key.DeviceId, key.DeviceId, origin.SourceAddress, origin.RequestId);
+        var device = new DeviceRecord(key.DeviceId, string.Empty, name, kind, key.Text, key.Fingerprint, null, DeviceStatuses.Pending, null, null, now, null, null, 1);
+        var audit = new AuditEntry("device.enroll", AuditEntry.Success, null, key.DeviceId, key.DeviceId, origin.SourceAddress, origin.RequestId, $"{{\"kind\":\"{kind}\"}}");
         var (outcome, enrolled) = await _store.EnrollDeviceAsync(HashToken(request.Token), device, now, audit, cancellationToken).ConfigureAwait(false);
         if (outcome != EnrollmentOutcome.Enrolled)
         {
@@ -140,6 +150,12 @@ public sealed class DeviceService
         RequireController(actor);
         var device = await RequireDeviceAsync(actor, deviceId, cancellationToken).ConfigureAwait(false);
         if (device.Status != DeviceStatuses.Pending) throw CoordinatorException.Conflict(CoordinatorErrorCodes.DeviceState, $"The device is {device.Status}, not pending.");
+        // A controller device signs others in: only a controller device of its own person lets it in (the owner's, in this step).
+        if (device.Kind == FleetDeviceKinds.Controller && (device.OwnerPersonId is null || device.OwnerPersonId != actor.OwnerPersonId))
+        {
+            throw CoordinatorException.Forbidden(FleetErrorCodes.Forbidden, "A controller device is approved by a controller device of its own person.");
+        }
+
         var (payload, record) = await ReadEntryAsync(actor, request?.DeviceListEntry, cancellationToken).ConfigureAwait(false);
         DeviceListChain.Require(payload.Operation == FleetDeviceListOperations.Add, "add the device");
         DeviceListChain.Require(payload.DeviceId == device.Id && payload.PublicKey == device.PublicKey, "name the device and its key as the server holds them");
@@ -208,17 +224,21 @@ public sealed class DeviceService
     private async Task<(FleetDeviceListEntryPayload Payload, DeviceListEntryRecord Record)> ReadEntryAsync(DeviceRecord actor, FleetSignedDeviceListEntry? entry,
         CancellationToken cancellationToken)
     {
-        if (!DevicePublicKey.TryParse(actor.PublicKey, out var key)) throw new InvalidOperationException("The key of a device in the table does not read.");
+        if (!FleetDevicePublicKey.TryParse(actor.PublicKey, out var key)) throw new InvalidOperationException("The key of a device in the table does not read.");
         var payload = DeviceListChain.ReadSigned(entry, key);
         DeviceListChain.Require(payload.SignerDeviceId == actor.Id, "be signed by the device that sends it");
         DeviceListChain.Require(payload.OrganizationId == actor.OrganizationId, "name the organization of the server");
-        var last = await _store.GetLastDeviceListEntryAsync(actor.OrganizationId, cancellationToken).ConfigureAwait(false)
-            ?? throw new InvalidOperationException("An organization without a device list.");
+        var list = await _store.ListDeviceListAsync(actor.OrganizationId, cancellationToken).ConfigureAwait(false);
+        if (list.Count == 0) throw new InvalidOperationException("An organization without a device list.");
+        var last = list[^1];
         if (payload.Sequence != last.Sequence + 1 || !string.Equals(payload.Previous, last.Hash, StringComparison.Ordinal))
         {
             throw CoordinatorException.Conflict(CoordinatorErrorCodes.EntryConflict,
                 $"The entry must follow the last entry of the device list (seq {last.Sequence + 1}, prev {last.Hash}): read the list again.");
         }
+
+        // The server keeps no entry the devices would refuse when they replay the list.
+        DeviceListChain.RequireAppendable(list, entry!);
 
         return (payload, new DeviceListEntryRecord(actor.OrganizationId, payload.Sequence, payload.DeviceId, payload.Operation, actor.Id, entry!.Payload, entry.Signature,
             FleetDeviceListEntries.Hash(entry), _time.GetUtcNow()));

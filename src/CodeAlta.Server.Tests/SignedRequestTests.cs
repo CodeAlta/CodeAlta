@@ -99,7 +99,7 @@ public sealed class SignedRequestTests
     {
         using var root = new TempDirectory();
         using var identity = DeviceIdentity.LoadOrCreate(root.Path);
-        Assert.IsTrue(DevicePublicKey.TryParse(Convert.ToBase64String(identity.ExportSubjectPublicKeyInfo()), out var key));
+        Assert.IsTrue(FleetDevicePublicKey.TryParse(Convert.ToBase64String(identity.ExportSubjectPublicKeyInfo()), out var key));
         Assert.AreEqual(identity.DeviceId, key.DeviceId);
         Assert.AreEqual(identity.Fingerprint.ToString(), key.Fingerprint);
         var signed = FleetSignedRequest.GetSignedBytes("GET", "/api/v1/devices", 1, FleetSignedRequest.CreateNonce(), FleetSignedRequest.HashBody([]), identity.DeviceId);
@@ -111,10 +111,10 @@ public sealed class SignedRequestTests
     public void OnlyP256KeysAreDeviceKeys()
     {
         using var p384 = System.Security.Cryptography.ECDsa.Create(System.Security.Cryptography.ECCurve.NamedCurves.nistP384);
-        Assert.IsFalse(DevicePublicKey.TryParse(Convert.ToBase64String(p384.ExportSubjectPublicKeyInfo()), out _));
+        Assert.IsFalse(FleetDevicePublicKey.TryParse(Convert.ToBase64String(p384.ExportSubjectPublicKeyInfo()), out _));
         using var rsa = System.Security.Cryptography.RSA.Create(2048);
-        Assert.IsFalse(DevicePublicKey.TryParse(Convert.ToBase64String(rsa.ExportSubjectPublicKeyInfo()), out _));
-        Assert.IsFalse(DevicePublicKey.TryParse("not base64", out _));
+        Assert.IsFalse(FleetDevicePublicKey.TryParse(Convert.ToBase64String(rsa.ExportSubjectPublicKeyInfo()), out _));
+        Assert.IsFalse(FleetDevicePublicKey.TryParse("not base64", out _));
     }
 
     [TestMethod]

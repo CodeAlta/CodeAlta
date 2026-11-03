@@ -113,7 +113,11 @@ public sealed record EnrollmentTokenResponse(string Id, string Token, DateTimeOf
 /// <param name="Token">The enrollment token.</param>
 /// <param name="PublicKey">The public key of the machine.</param>
 /// <param name="DeviceName">Its name.</param>
-public sealed record EnrollRequest(string Token, string PublicKey, string DeviceName);
+/// <param name="Kind">
+/// Its class (<see cref="FleetDeviceKinds"/>): <c>controller</c> for a person's desktop, which a controller device of the
+/// same person approves and which then approves others; <c>node</c> (the default) for an execution device.
+/// </param>
+public sealed record EnrollRequest(string Token, string PublicKey, string DeviceName, string? Kind = null);
 
 /// <summary>The answer of an enrollment.</summary>
 /// <param name="Device">The device, pending until a controller device signs it into the device list.</param>

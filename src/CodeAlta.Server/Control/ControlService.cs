@@ -218,7 +218,7 @@ public sealed class ControlService
         {
             var device = await store.GetDeviceAsync(context.DeviceId, cancellationToken).ConfigureAwait(false);
             // The proof is checked before the status, so that a pending or revoked answer tells only the holder of the key.
-            if (device is null || !DevicePublicKey.TryParse(device.PublicKey, out var key) || !key.Verify(context.GetSignedBytes(), hello.Device.Proof))
+            if (device is null || !FleetDevicePublicKey.TryParse(device.PublicKey, out var key) || !key.Verify(context.GetSignedBytes(), hello.Device.Proof))
             {
                 return FleetProofVerification.Reject(new FleetError(FleetErrorCodes.Unauthenticated, FleetErrorHints.Reauthenticate,
                     "The device proof does not verify with a device of this server."));

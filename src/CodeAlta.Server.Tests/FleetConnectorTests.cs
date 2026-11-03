@@ -57,6 +57,56 @@ public sealed class FleetConnectorTests
     }
 
     [TestMethod]
+    public async Task ADesktopJoinsAsAControllerAndApprovesWithAVerifiedList()
+    {
+        await using var fleet = await FleetFixture.StartAsync(approve: false);
+        using var laptopKey = DeviceIdentity.LoadOrCreate(Path.Combine(fleet.Root.Path, "laptop"));
+        using var laptop = new FleetServerClient(fleet.Server.BaseAddress, laptopKey);
+        using var node = new FleetServerClient(fleet.Server.BaseAddress, fleet.NodeKey);
+
+        var pending = await laptop.EnrollAsync((await fleet.Desktop.CreateEnrollmentTokenAsync()).Token, "Laptop", FleetDeviceKinds.Controller);
+        Assert.AreEqual((FleetDeviceKinds.Controller, "pending"), (pending.Kind, pending.Status));
+        Assert.AreEqual("approved", (await fleet.Desktop.ApproveAsync(laptopKey.DeviceId)).Status);
+
+        // The laptop approves the node with an entry it signs after the list it verified.
+        var approved = await laptop.ApproveAsync(fleet.NodeKey.DeviceId);
+        Assert.AreEqual(("approved", FleetDeviceKinds.Node), (approved.Status, approved.Kind));
+        var state = await node.ReadVerifiedDeviceListAsync();
+        Assert.AreEqual(3L, state.Sequence);
+        Assert.IsTrue(state.IsController(laptopKey.DeviceId));
+        Assert.AreEqual(fleet.NodeKey.DeviceId, state.Members[fleet.NodeKey.DeviceId].Key.DeviceId);
+        Assert.AreEqual(laptop.PublicKey, (await node.GetTrustedMemberAsync(laptopKey.DeviceId))!.Key.Text);
+
+        // A node signs no entry: its client refuses before it sends anything.
+        using var otherKey = DeviceIdentity.LoadOrCreate(Path.Combine(fleet.Root.Path, "other"));
+        using (var other = new FleetServerClient(fleet.Server.BaseAddress, otherKey))
+            await other.EnrollAsync((await laptop.CreateEnrollmentTokenAsync()).Token, "Other");
+        var refused = await Assert.ThrowsExactlyAsync<FleetDeviceListException>(() => node.ApproveAsync(otherKey.DeviceId));
+        StringAssert.Contains(refused.Message, "not a controller device");
+        Assert.AreEqual("pending", (await laptop.GetDeviceAsync(otherKey.DeviceId)).Status);
+    }
+
+    [TestMethod]
+    public async Task TheClientRefusesToSignAfterADeviceListThatDoesNotVerify()
+    {
+        await using var fleet = await FleetFixture.StartAsync();
+        using var strangerKey = DeviceIdentity.LoadOrCreate(Path.Combine(fleet.Root.Path, "stranger"));
+        using var pcKey = DeviceIdentity.LoadOrCreate(Path.Combine(fleet.Root.Path, "pc"));
+        using (var pc = new FleetServerClient(fleet.Server.BaseAddress, pcKey)) await pc.EnrollAsync((await fleet.Desktop.CreateEnrollmentTokenAsync()).Token, "PC");
+
+        // A server that lies: it shows an entry the node signed, which adds a device of its choice after the real ones.
+        using var lying = new ForgingHandler(fleet.NodeKey, strangerKey) { InnerHandler = new HttpClientHandler() };
+        using var desktop = new FleetServerClient(fleet.Server.BaseAddress, fleet.DesktopKey, lying);
+        var broken = await Assert.ThrowsExactlyAsync<FleetDeviceListException>(() => desktop.ApproveAsync(pcKey.DeviceId));
+        Assert.AreEqual((3L, "its signer is not a controller device"), (broken.BrokenAt, broken.Reason));
+        Assert.AreEqual("pending", (await fleet.Desktop.GetDeviceAsync(pcKey.DeviceId)).Status, "nothing was signed or sent");
+        await Assert.ThrowsExactlyAsync<FleetDeviceListException>(() => desktop.GetTrustedMemberAsync(strangerKey.DeviceId));
+
+        // The true list verifies, and the stranger is not in it.
+        Assert.IsNull(await fleet.Desktop.GetTrustedMemberAsync(strangerKey.DeviceId));
+    }
+
+    [TestMethod]
     public async Task OnlyTheSessionsOfLinkedSpacesThatAreNotPrivateArePublished()
     {
         await using var fleet = await FleetFixture.StartAsync();
@@ -245,6 +295,27 @@ public sealed class FleetConnectorTests
             NodeKey.Dispose();
             await Server.DisposeAsync();
             Root.Dispose();
+        }
+    }
+
+    /// <summary>A server that adds to the device list it answers an entry an execution node signed, with the right sequence and hash.</summary>
+    private sealed class ForgingHandler(DeviceIdentity signer, DeviceIdentity added) : DelegatingHandler
+    {
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            var response = await base.SendAsync(request, cancellationToken);
+            if (request.Method != HttpMethod.Get || request.RequestUri?.AbsolutePath.EndsWith("/api/v1/device-list", StringComparison.Ordinal) != true) return response;
+            var list = System.Text.Json.JsonSerializer.Deserialize(await response.Content.ReadAsByteArrayAsync(cancellationToken),
+                ServerApiJsonContext.Default.ListResponseDeviceListEntryDto)!;
+            var last = list.Items[^1];
+            FleetDeviceListEntries.TryParsePayload(last.Entry.Payload, out var lastPayload);
+            var payload = FleetDeviceListEntries.SerializePayload(new FleetDeviceListEntryPayload(1, lastPayload!.OrganizationId, last.Sequence + 1, last.Hash,
+                FleetDeviceListOperations.Add, added.DeviceId, Convert.ToBase64String(added.ExportSubjectPublicKeyInfo()), FleetDeviceKinds.Controller, lastPayload.OwnerId,
+                signer.DeviceId, Created));
+            var entry = new FleetSignedDeviceListEntry(payload, System.Buffers.Text.Base64Url.EncodeToString(signer.SignData(FleetDeviceListEntries.GetSignedBytes(payload))));
+            var forged = new ListResponse<DeviceListEntryDto>([.. list.Items, new DeviceListEntryDto(last.Sequence + 1, FleetDeviceListEntries.Hash(entry), entry, Created)]);
+            response.Content = new ByteArrayContent(System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(forged, ServerApiJsonContext.Default.ListResponseDeviceListEntryDto));
+            return response;
         }
     }
 
