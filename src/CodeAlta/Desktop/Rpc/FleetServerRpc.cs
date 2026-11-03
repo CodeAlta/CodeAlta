@@ -176,14 +176,14 @@ internal sealed partial class FleetServerService
     }
 
     /// <summary>
-    /// Approves a pending device once the person confirmed it shows the words of its key: this device signs the entry of the
-    /// device list that adds that key, and the device gets the person's keys only then.
+    /// Approves a pending device once the person confirmed its class and that it shows the words of its key: this device
+    /// signs the entry of the device list that adds that key as that class, and the device gets the person's keys only then.
     /// </summary>
     [NeoRpcMethod("approve")]
     public Task<FleetServerDeviceResult> ApproveAsync(FleetServerDeviceRequest request, CancellationToken cancellationToken)
-        => request?.Words is { Length: > 256 }
+        => request is not null && (request.Words is { Length: > 256 } || !FleetDeviceKinds.IsKnown(request.Kind))
             ? Task.FromResult(new FleetServerDeviceResult("invalid_request", null, null))
-            : ChangeDeviceAsync(request!, (link, device) => _servers!.ApproveAsync(link, device, request!.Words, cancellationToken));
+            : ChangeDeviceAsync(request!, (link, device) => _servers!.ApproveAsync(link, device, request!.Kind!, request.Words, cancellationToken));
 
     /// <summary>Revokes a device, or refuses a pending one.</summary>
     [NeoRpcMethod("revoke")]
@@ -776,7 +776,8 @@ internal sealed record FleetServerDevicesResult(string Status, FleetDeviceView[]
 /// <param name="LinkId">The id of the link.</param>
 /// <param name="DeviceId">The device.</param>
 /// <param name="Words">For an approval, the words of its key the person compared with the device's screen; null when none were.</param>
-internal sealed record FleetServerDeviceRequest(string ExpectedEpoch, string LinkId, string DeviceId, string? Words = null);
+/// <param name="Kind">For an approval, the class the person approves it as, as the page showed it: <c>controller</c> or <c>node</c>; needed.</param>
+internal sealed record FleetServerDeviceRequest(string ExpectedEpoch, string LinkId, string DeviceId, string? Words = null, string? Kind = null);
 
 /// <summary>The outcome of an approval or a revocation.</summary>
 /// <param name="Status"><c>ok</c>, the code of the server's refusal, <c>unreachable</c>, <c>not_found</c>, <c>invalid_request</c>, <c>stale_epoch</c> or <c>unavailable</c>.</param>

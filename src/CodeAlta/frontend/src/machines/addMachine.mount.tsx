@@ -44,7 +44,7 @@ const serverApi: AddMachineServerApi = {
     return { status: "ok", devices, message: null };
   },
   approve: async request => {
-    calls.push(JSON.stringify({ approve: request.deviceId }));
+    calls.push(JSON.stringify({ approve: request.deviceId, kind: request.kind }));
     devices = devices.map(device => device.id === request.deviceId ? { ...device, status: "approved" } : device);
     return { status: "ok", device: devices.find(device => device.id === request.deviceId) ?? null, message: null };
   },

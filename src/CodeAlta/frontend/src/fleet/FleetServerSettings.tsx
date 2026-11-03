@@ -141,7 +141,9 @@ function ServerDevices({ server, epoch, api, revision }: { server: FleetServerVi
     setActing(device.id);
     try {
       // An approval names the words the person compared: the host signs the key of those words only.
-      const result = await api[call]({ expectedEpoch: epoch, linkId: server.id, deviceId: device.id, words: call === "approve" ? device.words : null }, { timeoutMilliseconds: 30_000 });
+      const approving = call === "approve";
+      const result = await api[call]({ expectedEpoch: epoch, linkId: server.id, deviceId: device.id, words: approving ? device.words : null, kind: approving ? device.kind : null },
+        { timeoutMilliseconds: 30_000 });
       setProblem(result.status === "ok" ? null : { key: serverProblem(result.status) ?? "The operation did not complete.", detail: result.message });
     } catch { setProblem({ key: "The server does not answer." }); }
     finally { setActing(null); setGeneration(value => value + 1); }

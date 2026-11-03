@@ -396,44 +396,77 @@ public sealed partial class FleetServerClient : IDisposable
         => (await SendAsync(HttpMethod.Get, "api/v1/sessions", null, ServerApiJsonContext.Default.ListResponseSessionDto, cancellationToken).ConfigureAwait(false)).Items;
 
     /// <summary>
-    /// Approves a pending device: this controller device signs the entry that adds it to the device list, after the last
-    /// entry, giving it to this device's person. The list is read again once when another entry came first.
+    /// Approves a pending device as the class the caller approves: this controller device signs the entry that adds it to
+    /// the device list as that class, after the last entry, giving it to this device's person. The list is read again once
+    /// when another entry came first.
     /// </summary>
     /// <param name="deviceId">The pending device.</param>
+    /// <param name="kind">The class approved (<see cref="FleetDeviceKinds.Controller"/> or <see cref="FleetDeviceKinds.Node"/>): a device the server lists as another is refused.</param>
     /// <param name="cancellationToken">Cancels the call.</param>
     /// <returns>The approved device.</returns>
-    /// <exception cref="ArgumentException"><paramref name="deviceId"/> is empty.</exception>
+    /// <exception cref="ArgumentException"><paramref name="deviceId"/> is empty, or <paramref name="kind"/> is not a class of device.</exception>
     /// <exception cref="FleetServerException">The server refused the approval: not a controller, not pending, or the list moved on twice.</exception>
-    /// <exception cref="FleetDeviceListException">The device list does not verify, or this device is not a controller device in it: nothing was signed.</exception>
+    /// <exception cref="FleetDeviceListException">The device list does not verify, this device is not a controller device in it, or the server lists the device as another class: nothing was signed.</exception>
     /// <exception cref="HttpRequestException">The server does not answer.</exception>
-    public Task<DeviceDto> ApproveAsync(string deviceId, CancellationToken cancellationToken = default) => ApproveAsync(deviceId, null, cancellationToken);
+    public Task<DeviceDto> ApproveAsync(string deviceId, string kind, CancellationToken cancellationToken = default)
+        => ApproveCoreAsync(deviceId, kind, null, null, cancellationToken);
 
     /// <summary>
-    /// Approves a pending device once the person confirmed that it shows the words of its key: this controller device signs
-    /// the entry that adds that key only, so that a server cannot show the words of one key and have another one signed.
+    /// Approves a pending device once the person confirmed its class and that it shows the words of its key: this controller
+    /// device signs the entry that adds that key as that class only, so that a server can neither show the words of one key
+    /// and have another one signed, nor have a machine approved as a controller.
     /// </summary>
     /// <param name="deviceId">The pending device.</param>
+    /// <param name="kind">The class the person approves (<see cref="FleetDeviceKinds.Controller"/> or <see cref="FleetDeviceKinds.Node"/>).</param>
     /// <param name="confirmedWords">The words the person compared (<see cref="DeviceFingerprint.ToShortWords()"/>); null when none were compared.</param>
     /// <param name="cancellationToken">Cancels the call.</param>
     /// <returns>The approved device.</returns>
-    /// <exception cref="ArgumentException"><paramref name="deviceId"/> is empty.</exception>
+    /// <exception cref="ArgumentException"><paramref name="deviceId"/> is empty, or <paramref name="kind"/> is not a class of device.</exception>
     /// <exception cref="FleetServerException">The server refused the approval: not a controller, not pending, or the list moved on twice.</exception>
-    /// <exception cref="FleetDeviceListException">The device list does not verify, this device is not a controller device in it, or the key of the device is not the one whose words were confirmed: nothing was signed.</exception>
+    /// <exception cref="FleetDeviceListException">The device list does not verify, this device is not a controller device in it, the server lists the device as another class, or its key is not the one whose words were confirmed: nothing was signed.</exception>
     /// <exception cref="HttpRequestException">The server does not answer.</exception>
-    public Task<DeviceDto> ApproveAsync(string deviceId, string? confirmedWords, CancellationToken cancellationToken = default)
+    public Task<DeviceDto> ApproveAsync(string deviceId, string kind, string? confirmedWords, CancellationToken cancellationToken = default)
+        => ApproveCoreAsync(deviceId, kind, confirmedWords, null, cancellationToken);
+
+    /// <summary>
+    /// Approves a pending device whose whole key this device knows already (the machine it paired with, over the channel
+    /// pinned to that key), as the class approved: nothing a server or the machine answers chooses the key or the class signed.
+    /// </summary>
+    /// <param name="deviceId">The pending device, which must be the device of <paramref name="key"/>.</param>
+    /// <param name="kind">The class approved (<see cref="FleetDeviceKinds.Controller"/> or <see cref="FleetDeviceKinds.Node"/>).</param>
+    /// <param name="key">The fingerprint of the key this device trusts for it.</param>
+    /// <param name="cancellationToken">Cancels the call.</param>
+    /// <returns>The approved device.</returns>
+    /// <exception cref="ArgumentException"><paramref name="deviceId"/> is empty, <paramref name="kind"/> is not a class of device, or <paramref name="key"/> is empty.</exception>
+    /// <exception cref="FleetServerException">The server refused the approval: not a controller, not pending, or the list moved on twice.</exception>
+    /// <exception cref="FleetDeviceListException">The device list does not verify, this device is not a controller device in it, the server lists the device as another class, or with another key: nothing was signed.</exception>
+    /// <exception cref="HttpRequestException">The server does not answer.</exception>
+    public Task<DeviceDto> ApproveAsync(string deviceId, string kind, DeviceFingerprint key, CancellationToken cancellationToken = default)
+    {
+        if (key.IsEmpty) throw new ArgumentException("The key of the device to approve is needed.", nameof(key));
+        return ApproveCoreAsync(deviceId, kind, null, key, cancellationToken);
+    }
+
+    private Task<DeviceDto> ApproveCoreAsync(string deviceId, string kind, string? confirmedWords, DeviceFingerprint? expected, CancellationToken cancellationToken)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(deviceId);
+        if (!FleetDeviceKinds.IsKnown(kind)) throw new ArgumentException($"'{kind}' is not a class of device to approve.", nameof(kind));
         return ChangeListAsync(deviceId, "approve", async (organization, self, token) =>
         {
             var device = await GetDeviceAsync(deviceId, token).ConfigureAwait(false);
-            // The key signed is the one the device id comes from, and the one whose words the person saw on both screens.
+            // The key signed is the one the device id comes from, and the one whose words the person saw on both screens, or
+            // the one this device knows whole.
             if (!FleetDevicePublicKey.TryParse(device.PublicKey, out var key) || key.DeviceId != deviceId
+                || expected is { } known && DeviceFingerprint.Parse(key.Fingerprint) != known
                 || confirmedWords is not null && !string.Equals(DeviceFingerprint.Parse(key.Fingerprint).ToShortWords(), confirmedWords.Trim(), StringComparison.Ordinal))
             {
                 throw new FleetDeviceListException(0, "the key of the device is not the one whose words were confirmed");
             }
 
-            return (FleetDeviceListOperations.Add, device.PublicKey, device.Kind, self.OwnerId);
+            // The class signed is the one approved, never the one the server says: a machine is never signed in as a controller.
+            if (!string.Equals(device.Kind, kind, StringComparison.Ordinal))
+                throw new FleetDeviceListException(0, $"the server lists the device as a {device.Kind}, not as the {kind} approved");
+            return (FleetDeviceListOperations.Add, device.PublicKey, kind, self.OwnerId);
         }, cancellationToken);
     }
 
