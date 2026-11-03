@@ -261,7 +261,7 @@ internal sealed partial class BuiltInAltaCommandContributor
     {
         var command = Leaf("start", "Refused: a person starts an update campaign, in Settings > Fleet > Server > Updates.");
         command.Add((_, _) => ValueTask.FromResult(PermissionDenied(context, "fleet.needsPerson",
-            "An update campaign replaces CodeAlta on the machines of the fleet: a person starts it, in Settings > Fleet > Server > Updates. Tell the user which version and machines you would update, or ask them with `alta ask`.")));
+            "An update campaign replaces CodeAlta on the machines of the fleet: a person starts it, in Settings > Fleet > Server > Updates. Tell the user which version and machines you would update.")));
         return command;
     }
 
