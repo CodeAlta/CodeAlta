@@ -138,6 +138,10 @@ internal sealed partial class RemoteSessionHost : ISessionHost, IAsyncDisposable
     /// <inheritdoc />
     public bool Lists(string sessionId) => sessionId is not null && Volatile.Read(ref _listed).Contains(sessionId);
 
+    /// <inheritdoc />
+    /// <remarks>What the machine lists is its word, not a record of this process: it owns nothing here.</remarks>
+    public bool Owns(string sessionId) => false;
+
     /// <summary>Starts the connection loop.</summary>
     public void Start() => _loop = Task.Run(RunAsync);
 

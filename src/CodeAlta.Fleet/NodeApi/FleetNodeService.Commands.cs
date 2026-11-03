@@ -21,7 +21,7 @@ public sealed partial class FleetNodeService
         if (parameters.Title is { } title && (string.IsNullOrWhiteSpace(title) || title.Length > MaxTitleLength || title.Any(char.IsControl)))
             throw new FleetException(FleetErrorCodes.InvalidParams, null, $"A title has 1 to {MaxTitleLength} characters.");
         var retryKey = RetryKey(call);
-        return Once(call, () => CreateSessionCoreAsync(retryKey, parameters));
+        return Once(call, FleetNodeJsonContext.Default.FleetCreateSessionResult, () => CreateSessionCoreAsync(retryKey, parameters));
     }
 
     private async Task<FleetCreateSessionResult> CreateSessionCoreAsync(string retryKey, FleetCreateSessionParams parameters)
@@ -112,45 +112,45 @@ public sealed partial class FleetNodeService
         return Admit(_host.Commands.AdmitSend(new OwnedTextSendRequest(retryKey, session.SessionId, parameters.Text) { Selection = selection }, cancellationToken));
     }
 
-    private Task<FleetQueueResult> QueueAsync(FleetNodeCall call, FleetQueueParams parameters, CancellationToken cancellationToken)
+    private async Task<FleetQueueResult> QueueAsync(FleetNodeCall call, FleetQueueParams parameters, CancellationToken cancellationToken)
     {
         RequireWork();
         RequirePrompt(parameters.Text);
-        _ = RequireSessionId(parameters.SessionId);
-        return Once(call, async () =>
+        _ = await RequireRemoteSessionAsync(parameters.SessionId, cancellationToken).ConfigureAwait(false);
+        return await Once(call, FleetNodeJsonContext.Default.FleetQueueResult, async () =>
         {
             var session = await RequireSessionAsync(parameters.SessionId, CancellationToken.None).ConfigureAwait(false);
             var item = await _host.RuntimeService.QueuePromptAsync(session, parameters.Text, "queue", null, CancellationToken.None).ConfigureAwait(false);
             return new FleetQueueResult("queued", item.QueueItemId);
-        });
+        }).ConfigureAwait(false);
     }
 
-    private Task<FleetCommandResult> SteerAsync(FleetNodeCall call, FleetSteerParams parameters, CancellationToken cancellationToken)
+    private async Task<FleetCommandResult> SteerAsync(FleetNodeCall call, FleetSteerParams parameters, CancellationToken cancellationToken)
     {
         RequireWork();
         var retryKey = RetryKey(call);
         RequirePrompt(parameters.Text);
-        var sessionId = RequireSessionId(parameters.SessionId);
+        var sessionId = await RequireRemoteSessionAsync(parameters.SessionId, cancellationToken).ConfigureAwait(false);
         if (parameters.RuntimeInstanceId == Guid.Empty || parameters.AttachmentGeneration <= 0 || string.IsNullOrWhiteSpace(parameters.RunId))
             throw new FleetException(FleetErrorCodes.InvalidParams, null, "Steering is bound to the runtime, attachment and run of sessions.state.");
-        return Task.FromResult(Admit(_host.Commands.AdmitSteer(new OwnedTextSteerRequest(retryKey, sessionId, parameters.RuntimeInstanceId,
-            parameters.AttachmentGeneration, parameters.RunId, parameters.Text), cancellationToken)));
+        return Admit(_host.Commands.AdmitSteer(new OwnedTextSteerRequest(retryKey, sessionId, parameters.RuntimeInstanceId,
+            parameters.AttachmentGeneration, parameters.RunId, parameters.Text), cancellationToken));
     }
 
-    private Task<FleetCommandResult> AbortAsync(FleetNodeCall call, FleetAbortParams parameters, CancellationToken cancellationToken)
+    private async Task<FleetCommandResult> AbortAsync(FleetNodeCall call, FleetAbortParams parameters, CancellationToken cancellationToken)
     {
         var retryKey = RetryKey(call);
-        var sessionId = RequireSessionId(parameters.SessionId);
+        var sessionId = await RequireRemoteSessionAsync(parameters.SessionId, cancellationToken).ConfigureAwait(false);
         if (parameters.OperationId is { } operation)
         {
             if (operation == Guid.Empty) throw new FleetException(FleetErrorCodes.InvalidParams, null, "The operation of a send is required.");
-            return Task.FromResult(Admit(_host.Commands.AdmitAbort(new OwnedAbortRequest(retryKey, operation), cancellationToken)));
+            return Admit(_host.Commands.AdmitAbort(new OwnedAbortRequest(retryKey, operation), cancellationToken));
         }
 
         if (parameters.RuntimeInstanceId is not { } runtime || runtime == Guid.Empty || parameters.AttachmentGeneration is not > 0 || string.IsNullOrWhiteSpace(parameters.RunId))
             throw new FleetException(FleetErrorCodes.InvalidParams, null, "Stopping names the operation of a send, or the runtime, attachment and run of sessions.state.");
-        return Task.FromResult(Admit(_host.Commands.AdmitAbortRun(new OwnedAbortRunRequest(retryKey, sessionId, runtime,
-            parameters.AttachmentGeneration.Value, parameters.RunId), cancellationToken)));
+        return Admit(_host.Commands.AdmitAbortRun(new OwnedAbortRunRequest(retryKey, sessionId, runtime,
+            parameters.AttachmentGeneration.Value, parameters.RunId), cancellationToken));
     }
 
     private static void RequirePrompt(string? text)

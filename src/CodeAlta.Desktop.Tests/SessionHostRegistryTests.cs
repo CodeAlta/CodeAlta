@@ -34,6 +34,68 @@ public sealed class SessionHostRegistryTests
     }
 
     [TestMethod]
+    public void Resolve_KeepsASessionThisProcessOwns_WhateverAnotherMachineLists()
+    {
+        var local = new RecordingSessionHost(null);
+        var remote = new RecordingSessionHost("mac-mini");
+        var registry = new SessionHostRegistry(local, [remote]);
+        local.Owned.Add(SessionId);
+        remote.Listed.Add(SessionId);
+
+        Assert.AreSame(local, registry.Resolve(SessionId), "A machine that lists a session this process owns does not take its commands.");
+        Assert.IsTrue(registry.Routes(new SessionReference(SessionId)));
+        Assert.IsFalse(registry.Routes(new SessionReference(SessionId, "mac-mini")), "A reference to the machine is refused, not followed.");
+
+        // Once this process gave the session away, the machine that lists it has it.
+        local.Owned.Remove(SessionId);
+        Assert.AreSame(remote, registry.Resolve(SessionId));
+        Assert.IsTrue(registry.Routes(new SessionReference(SessionId, "mac-mini")));
+        Assert.IsFalse(registry.Routes(new SessionReference(SessionId)));
+        Assert.IsFalse(registry.Routes(new SessionReference(SessionId, "elsewhere")));
+    }
+
+    [TestMethod]
+    public void Resolve_GivesASessionTwoMachinesList_ToNeither()
+    {
+        var local = new RecordingSessionHost(null);
+        var first = new RecordingSessionHost("mac-mini");
+        var second = new RecordingSessionHost("laptop");
+        var registry = new SessionHostRegistry(local, [first, second]);
+        first.Listed.Add(SessionId);
+        second.Listed.Add(SessionId);
+
+        Assert.AreSame(local, registry.Resolve(SessionId), "Listings that disagree route to no machine.");
+        Assert.IsFalse(registry.Routes(new SessionReference(SessionId, "mac-mini")));
+        Assert.IsFalse(registry.Routes(new SessionReference(SessionId, "laptop")));
+    }
+
+    [TestMethod]
+    public async Task RoutedServices_AskThisProcess_ForASessionItOwns_ThatAnotherMachineLists()
+    {
+        var local = new RecordingSessionHost(null);
+        var remote = new RecordingSessionHost("mac-mini");
+        var hosts = new SessionHostRegistry(local, [remote]);
+        local.Owned.Add(SessionId);
+        remote.Listed.Add(SessionId);
+
+        _ = await new SessionRuntimeStateService(hosts, Epoch).CurrentAsync(new SessionRuntimeStateRequest(Epoch, SessionId), CancellationToken.None);
+        _ = await new SessionAsksService(hosts, Epoch).ListAsync(new SessionAsksRequest(Epoch, SessionId), CancellationToken.None);
+        _ = await new SessionPermissionsService(hosts, Epoch, static () => true).ListAsync(new SessionPermissionsRequest(Epoch, SessionId), CancellationToken.None);
+        var send = new SessionOperationsService(Epoch, hosts).Send(new SessionSendRequest(Epoch, "6f1c8a52-3a4b-4d6e-9f10-000000000001", SessionId, "Hello"),
+            CancellationToken.None);
+        var redirected = new SessionOperationsService(Epoch, hosts).Send(new SessionSendRequest(Epoch, "6f1c8a52-3a4b-4d6e-9f10-000000000002", SessionId, "Hello")
+        {
+            MachineId = "mac-mini",
+        }, CancellationToken.None);
+
+        Assert.AreEqual(0, remote.Calls.Count, "The machine that lists the session is asked nothing.");
+        CollectionAssert.AreEqual(new[] { $"ReadRuntimeState {SessionId}", $"ListAsks {SessionId}", $"ListPermissions {SessionId}", $"AdmitSend {SessionId}" },
+            local.Calls.ToArray());
+        Assert.AreEqual("accepted", send.Status);
+        Assert.AreEqual("unknowntarget", redirected.Status, "A command that names another machine than the owner of the session is refused.");
+    }
+
+    [TestMethod]
     public void Resolve_RefusesAMachineItHasNoHostFor()
     {
         var registry = new SessionHostRegistry(new RecordingSessionHost(null));
@@ -119,11 +181,15 @@ public sealed class SessionHostRegistryTests
 
         public HashSet<string> Listed { get; } = new(StringComparer.OrdinalIgnoreCase);
 
+        public HashSet<string> Owned { get; } = new(StringComparer.OrdinalIgnoreCase);
+
         public HashSet<Guid> Operations { get; } = [];
 
         public string? MachineId => machineId;
 
         public bool Lists(string sessionId) => Listed.Contains(sessionId);
+
+        public bool Owns(string sessionId) => Owned.Contains(sessionId);
 
         public bool Admitted(Guid operationId) => Operations.Contains(operationId);
 
@@ -179,7 +245,12 @@ public sealed class SessionHostRegistryTests
         public Task<OwnedRuntimeObservation> ObserveRuntimeStateAsync(string sessionId, DateTimeOffset createdAt, string scope, string? projectId, string? projectPath,
             CancellationToken cancellationToken) => throw new NotSupportedException();
         public IAsyncEnumerable<RuntimeToolOutputUpdate> ObserveToolOutputAsync(string sessionId, string activityId, CancellationToken cancellationToken) => throw new NotSupportedException();
-        public OwnedSessionCommandAdmission AdmitSend(OwnedTextSendRequest request, CancellationToken cancellationToken) => throw new NotSupportedException();
+        public OwnedSessionCommandAdmission AdmitSend(OwnedTextSendRequest request, CancellationToken cancellationToken)
+        {
+            Calls.Add($"AdmitSend {request.SessionId}");
+            return new(OwnedSessionCommandAdmissionKind.Accepted, null);
+        }
+
         public OwnedSessionCommandAdmission AdmitAbort(OwnedAbortRequest request, CancellationToken cancellationToken) => throw new NotSupportedException();
         public OwnedSessionCommandAdmission AdmitSteer(OwnedTextSteerRequest request, CancellationToken cancellationToken) => throw new NotSupportedException();
         public OwnedSessionCommandAdmission AdmitCompact(OwnedCompactRequest request, CancellationToken cancellationToken) => throw new NotSupportedException();

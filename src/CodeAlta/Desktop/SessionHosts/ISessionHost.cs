@@ -53,11 +53,19 @@ internal interface ISessionHost
     string? MachineId { get; }
 
     /// <summary>
-    /// Gets whether the host lists a session, as its last list said: the registry gives a session to the host of a
-    /// machine that lists it, and to the host of this process otherwise.
+    /// Gets whether the host lists a session, as its last list said: the registry gives a session this process does not
+    /// own to the one host of a machine that lists it, and to the host of this process otherwise.
     /// </summary>
     /// <param name="sessionId">The session.</param>
     bool Lists(string sessionId);
+
+    /// <summary>
+    /// Gets whether the host owns a session by its own records, never by what another machine says: the host of this
+    /// process owns the sessions it lists and did not give away; a remote host owns nothing here (its machine's word is
+    /// <see cref="Lists"/>). The registry keeps a session the host of this process owns, whatever a machine lists.
+    /// </summary>
+    /// <param name="sessionId">The session.</param>
+    bool Owns(string sessionId);
 
     /// <summary>Gets whether the host admitted an operation and still keeps its receipt, for the abort of that operation.</summary>
     /// <param name="operationId">The operation.</param>

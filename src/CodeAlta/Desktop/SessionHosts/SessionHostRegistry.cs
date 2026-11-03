@@ -3,8 +3,9 @@ using System.Collections.Immutable;
 namespace CodeAlta.Desktop.SessionHosts;
 
 /// <summary>
-/// The hosts of the sessions the window shows, and which one owns a session: the host of a machine for a session it
-/// lists (or that names that machine), the host of this process otherwise.
+/// The hosts of the sessions the window shows, and which one owns a session: the host of this process for a session it
+/// owns (<see cref="ISessionHost.Owns"/>), whatever a machine lists; else the host of the one machine that lists it (or
+/// that a reference names); the host of this process otherwise.
 /// </summary>
 /// <remarks>
 /// The hosts of other machines come and go while the window runs (a machine is paired or forgotten). Their set is an
@@ -60,14 +61,25 @@ internal sealed class SessionHostRegistry
         return new Membership(this);
     }
 
-    /// <summary>Resolves the host of a session: the host of a machine that lists it, the host of this process otherwise.</summary>
+    /// <summary>
+    /// Resolves the host of a session: the host of this process when it owns the session, whatever another machine lists
+    /// (as the window shows its row); else the host of the one machine that lists it; the host of this process otherwise.
+    /// A listing is what a machine says of itself: it never takes a session of this process, and two machines that list
+    /// the same session get neither its commands nor its reads.
+    /// </summary>
     /// <param name="sessionId">The identifier of the session.</param>
     /// <returns>The host of the session.</returns>
     public ISessionHost Resolve(string sessionId)
     {
+        ISessionHost? claimant = null;
         foreach (var remote in Volatile.Read(ref _remotes).Values)
-            if (remote.Lists(sessionId)) return remote;
-        return Local;
+        {
+            if (!remote.Lists(sessionId)) continue;
+            if (claimant is not null) return Local;
+            claimant = remote;
+        }
+
+        return claimant is null || Local.Owns(sessionId) ? Local : claimant;
     }
 
     /// <summary>Resolves the host that owns a session.</summary>
@@ -92,6 +104,11 @@ internal sealed class SessionHostRegistry
 
         return Volatile.Read(ref _remotes).TryGetValue(machine, out host);
     }
+
+    /// <summary>Gets whether a session reference names the host the registry resolves for its session.</summary>
+    /// <param name="session">The session and the machine a request names for it; null for this process.</param>
+    /// <returns>Whether the commands of the session go to that machine.</returns>
+    public bool Routes(SessionReference session) => string.Equals(Resolve(session.SessionId).MachineId, session.MachineId, StringComparison.Ordinal);
 
     /// <summary>Resolves the host that admitted an operation, for the abort of that operation.</summary>
     /// <param name="operationId">The operation the abort targets.</param>

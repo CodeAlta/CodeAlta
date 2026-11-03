@@ -100,7 +100,7 @@ server/node → welcome { protocol, features, cursors, policy }  |  error { code
 | Server to node: deliveries (child answers, cross-machine messages, chat, policy) | A per-node delivery sequence with acknowledgements and a time to live; queued while the node is offline. A delivery that carries content (an answer, a message) is sealed to the receiving device: the server routes it without reading it. |
 | Replicas | `replica.append(sessionId, epoch, generation, fromOffset, bytes)`; the server stores what follows the last acknowledged offset, refuses a gap (with the expected offset), a stale epoch or an older generation (a rewind starts a new one). |
 | Viewers | Display: full replacements with a revision and a gap flag (lossy by design). History: windows by journal cursor. After a reconnection: the current display, then the history after the viewer's cursor. |
-| Commands | The node keeps receipts by idempotency key (bounded); a retry returns the first receipt; an evicted receipt answers `expired`, never runs again. |
+| Commands | The node keeps receipts by idempotency key, across restarts: the results of the latest calls (bounded), and every key for the lifetime of a retry token (7 days), after which a client never retries it. A retry returns the first receipt; a call still running keeps its receipt; an evicted receipt, or a call a stop interrupted, answers `expired`, never runs again. |
 
 Transient streaming deltas (tokens of an answer) are never replicated or acknowledged: the display replacement that
 follows carries the state.

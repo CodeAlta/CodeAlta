@@ -48,6 +48,9 @@ public sealed class FleetNodeServiceOptions
     /// <c>~/code</c> by default; null clones nothing.
     /// </summary>
     public string? CloneRoot { get; init; } = Moves.FleetMoveReceiver.DefaultCloneRoot;
+
+    /// <summary>Gets how many results of side-effecting calls the node keeps for their retries; fewer in tests.</summary>
+    internal int RetryReceiptCapacity { get; init; } = FleetRetryReceipts.DefaultResultCapacity;
 }
 
 /// <summary>
@@ -59,16 +62,13 @@ public sealed class FleetNodeServiceOptions
 public sealed partial class FleetNodeService : IAsyncDisposable
 {
     private const int MaxIdempotencyKeyLength = 128;
-    private const int KeptResults = 256;
 
     private readonly FleetNodeServiceOptions _options;
     private readonly CodeAltaHost _host;
     private readonly TrustedDeviceStore _trusted;
     private readonly X509Certificate2 _certificate;
     private readonly ConcurrentDictionary<FleetConnection, FleetNodeCaller> _callers = new();
-    private readonly Lock _resultsGate = new();
-    private readonly Dictionary<string, KeptResult> _results = new(StringComparer.Ordinal);
-    private readonly Queue<string> _resultOrder = new();
+    private readonly FleetRetryReceipts _receipts;
     private readonly Logger _logger = LogManager.GetLogger("CodeAlta.Fleet.Node");
     // The repository of each project, which node.info publishes: read with git once in a while, not at every call.
     private readonly CodeAlta.Catalog.SessionMoves.RepositoryLocationCache _locations = new();
@@ -95,6 +95,8 @@ public sealed partial class FleetNodeService : IAsyncDisposable
         MoveReceiver = new Moves.FleetMoveReceiver(options.Host, moves, options.CloneRoot);
         MoveSender = new Moves.FleetMoveSender(options.Host, moves);
         _projectEditor = new FleetProjectEditor(options.Host.SpaceCatalog, options.CloneRoot);
+        _receipts = new FleetRetryReceipts(options.Host.CatalogOptions.FleetRoot, options.TimeProvider, options.RetryReceiptCapacity,
+            Math.Max(options.RetryReceiptCapacity, FleetRetryReceipts.DefaultKeyCapacity), LogWarn);
     }
 
     /// <summary>Gets the pairing of the node.</summary>
@@ -405,32 +407,10 @@ public sealed partial class FleetNodeService : IAsyncDisposable
     }
 
     // A side effect the runtime does not deduplicate itself (a creation, a queued prompt, an answer): the first call of a
-    // key runs it, a retry of the same key with the same parameters gets its result, with other parameters a conflict.
-    private Task<T> Once<T>(FleetNodeCall call, Func<Task<T>> run) where T : class
-    {
-        var key = call.Context.Method + "|" + RetryKey(call);
-        var fingerprint = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(call.Context.Params?.GetRawText() ?? "")));
-        lock (_resultsGate)
-        {
-            if (_results.TryGetValue(key, out var kept))
-            {
-                if (kept.Fingerprint != fingerprint)
-                    throw new FleetException(FleetErrorCodes.InvalidRequest, null, "The idempotency key was already used for another request.");
-                // A call that failed before its effect is tried again; one that succeeded or still runs is shared.
-                if (!kept.Work.IsFaulted && !kept.Work.IsCanceled) return Replay(kept.Work);
-                _results.Remove(key);
-            }
-
-            var work = Task.Run(run);
-            _results[key] = new KeptResult(fingerprint, Box(work));
-            _resultOrder.Enqueue(key);
-            while (_resultOrder.Count > KeptResults) _results.Remove(_resultOrder.Dequeue());
-            return work;
-        }
-
-        static async Task<T> Replay(Task<object> work) => (T)await work.ConfigureAwait(false);
-        static async Task<object> Box(Task<T> work) => await work.ConfigureAwait(false);
-    }
+    // key runs it, a retry of the same key with the same parameters gets its result, with other parameters a conflict,
+    // and a key whose receipt was evicted or interrupted by a stop answers expired, across restarts (FleetRetryReceipts).
+    private Task<T> Once<T>(FleetNodeCall call, JsonTypeInfo<T> resultType, Func<Task<T>> run) where T : class
+        => _receipts.RunOnceAsync(call.Context.Method + "|" + RetryKey(call), call.Context.Params?.GetRawText() ?? "", resultType, run);
 
     private void LogInfo(string message)
     {
@@ -451,8 +431,6 @@ public sealed partial class FleetNodeService : IAsyncDisposable
     {
         if (LogManager.IsInitialized) _logger.Debug(message);
     }
-
-    private sealed record KeptResult(string Fingerprint, Task<object> Work);
 
     /// <summary>One call: who makes it, the device as the node trusts it now, and the request.</summary>
     private sealed record FleetNodeCall(FleetNodeCaller Caller, TrustedDevice? Device, FleetRequestContext Context);

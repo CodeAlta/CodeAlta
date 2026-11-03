@@ -1,3 +1,4 @@
+using System.Collections.Immutable;
 using CodeAlta.Agent;
 using CodeAlta.Agent.Runtime;
 using CodeAlta.Catalog;
@@ -10,6 +11,10 @@ namespace CodeAlta.Desktop.SessionHosts;
 /// <summary>The sessions of this process: every call goes to its <see cref="CodeAltaHost"/>, unchanged.</summary>
 internal sealed class LocalSessionHost : ISessionHost
 {
+    // The sessions of the last list of this process (the rows the window shows as its own), with those it created since.
+    private ImmutableHashSet<string> _owned = ImmutableHashSet.Create<string>(StringComparer.OrdinalIgnoreCase);
+    private ImmutableHashSet<string> _createdSinceList = ImmutableHashSet.Create<string>(StringComparer.OrdinalIgnoreCase);
+
     /// <summary>Creates the local host over the host of the process.</summary>
     /// <param name="host">The host of the process.</param>
     /// <exception cref="ArgumentNullException"><paramref name="host"/> is null.</exception>
@@ -33,6 +38,14 @@ internal sealed class LocalSessionHost : ISessionHost
     public bool Lists(string sessionId) => true;
 
     /// <inheritdoc />
+    /// <remarks>
+    /// A session of its last list, or one it created since, that it did not give to another machine (a move): the rows the
+    /// window shows as sessions of this computer.
+    /// </remarks>
+    public bool Owns(string sessionId) => sessionId is not null && Volatile.Read(ref _owned).Contains(sessionId)
+        && Runtime.Relinquishments.Read(sessionId) is not { IsRelinquished: true };
+
+    /// <inheritdoc />
     /// <remarks>The host of this process is the one of every operation no other host admitted: it answers true.</remarks>
     public bool Admitted(Guid operationId) => true;
 
@@ -43,7 +56,16 @@ internal sealed class LocalSessionHost : ISessionHost
     private SessionRuntimeService Runtime => Host.RuntimeService;
 
     /// <inheritdoc />
-    public Task<OwnedWorkspaceSnapshot> ReadSnapshotAsync(CancellationToken cancellationToken) => Reads.ReadSnapshotAsync(cancellationToken);
+    public async Task<OwnedWorkspaceSnapshot> ReadSnapshotAsync(CancellationToken cancellationToken)
+    {
+        var created = Interlocked.Exchange(ref _createdSinceList, _createdSinceList.Clear());
+        var snapshot = await Reads.ReadSnapshotAsync(cancellationToken).ConfigureAwait(false);
+        // A session created while the list was read is kept: the next list has it.
+        var owned = snapshot.Sessions.Select(static session => session.SessionId).ToImmutableHashSet(StringComparer.OrdinalIgnoreCase)
+            .Union(created).Union(Volatile.Read(ref _createdSinceList));
+        Volatile.Write(ref _owned, owned);
+        return snapshot;
+    }
 
     /// <inheritdoc />
     public Task<AgentSessionHistoryPage> ReadHistoryPageAsync(string sessionId, AgentSessionHistoryCursor? cursor, CancellationToken cancellationToken)
@@ -163,7 +185,13 @@ internal sealed class LocalSessionHost : ISessionHost
         => Commands.GetDraftPromptsAsync(scope, spaceId, cancellationToken);
 
     /// <inheritdoc />
-    public Task<SessionViewDescriptor> CreateSessionAsync(ProjectDescriptor? project, ModelProviderDescriptor provider, string? title, string? worktreeDirectory,
+    public async Task<SessionViewDescriptor> CreateSessionAsync(ProjectDescriptor? project, ModelProviderDescriptor provider, string? title, string? worktreeDirectory,
         string? spaceId, string? permissionMode, AgentSessionOptions? options)
-        => Commands.CreateDraftSessionAsync(project, provider, title, null, worktreeDirectory, spaceId, permissionMode, null, null, options);
+    {
+        var session = await Commands.CreateDraftSessionAsync(project, provider, title, null, worktreeDirectory, spaceId, permissionMode, null, null, options)
+            .ConfigureAwait(false);
+        ImmutableInterlocked.Update(ref _createdSinceList, static (set, id) => set.Add(id), session.SessionId);
+        ImmutableInterlocked.Update(ref _owned, static (set, id) => set.Add(id), session.SessionId);
+        return session;
+    }
 }
