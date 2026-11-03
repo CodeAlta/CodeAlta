@@ -1,7 +1,9 @@
-import { useEffect, useMemo, useState } from "react";
+import { useContext, useEffect, useMemo, useState } from "react";
+import { LandingShellContext } from "../landing/landingShell";
 import { useAlta } from "../pluginScript/PluginScript";
 import { useVisible } from "../pluginScript/codealta";
 import { statisticsContext } from "./canvasContext";
+import { createFleetApi } from "./fleetRpc";
 import { createRpcApi, type StatisticsDirectory } from "./rpcApi";
 import { StatisticsCanvas } from "./StatisticsCanvas";
 
@@ -13,6 +15,9 @@ export default function Canvas() {
   const alta = useAlta();
   const visible = useVisible();
   const api = useMemo(() => createRpcApi(alta.rpc), [alta]);
+  // "My fleet" asks the host of the window, as the Fleet canvas does: the shell around the tabs lends its epoch.
+  const epoch = useContext(LandingShellContext)?.epoch ?? null;
+  const fleet = useMemo(() => epoch ? createFleetApi(epoch) : null, [epoch]);
   // The directory comes first: the first frame of the canvas starts from the space and the project it names. A tab that is hidden
   // reads nothing, so a tab restored behind another asks for it when it is first shown; it is then kept.
   const [directory, setDirectory] = useState<{ value: StatisticsDirectory | null } | null>(null);
@@ -27,5 +32,5 @@ export default function Canvas() {
   }, [api, visible, known]);
   const context = useMemo(() => directory ? statisticsContext(alta, visible, directory.value) : null, [alta, visible, directory]);
   if (!context) return <div className="stats-loading" role="status" aria-busy="true" />;
-  return <StatisticsCanvas api={api} context={context} />;
+  return <StatisticsCanvas api={api} context={context} fleet={fleet} />;
 }
