@@ -324,6 +324,10 @@ internal sealed record WorkspaceProject(string Id, string Name, string Path, boo
     // catalog); absent for a project of the catalog.
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? MachineId { get; init; }
+
+    // The state of that machine: "online", "connecting", "offline" or "unauthorized"; absent for a project of the catalog.
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? MachineState { get; init; }
 }
 internal sealed record WorkspaceSession(string Id, string Title, string? WorkspacePath, string? ProviderKey, DateTimeOffset UpdatedAt,
     string FullTitle, bool FullTitleTruncated, string? ParentSessionId, string? ScopeKind, string? ProjectId, string? LineageIssue,

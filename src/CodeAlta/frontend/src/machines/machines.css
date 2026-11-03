@@ -26,6 +26,8 @@
   border-radius: 8px; font-size: 10.5px; line-height: 15px; color: var(--muted); background: color-mix(in srgb, var(--muted) 12%, transparent); }
 .session-machine-chip > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .session-machine-chip[data-state="offline"], .session-machine-chip[data-state="unauthorized"] { opacity: .6; }
+/* The row of a paired machine in the Explorer: dimmed while the machine does not answer. */
+.project-machine-row:not([data-state="online"]) > button .project-icon, .project-machine-row:not([data-state="online"]) > button strong { opacity: .6; }
 
 /* The Run on chip of a new session, and the project, provider and model of a session on another machine. */
 .composer-run-on[data-remote="true"] .composer-selection-part > svg { color: var(--green); }

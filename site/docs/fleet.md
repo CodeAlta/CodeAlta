@@ -96,7 +96,7 @@ A paired computer may see the sessions of the machine, drive them and start new 
 The sessions of a paired machine are listed in the Explorer with your own, with a chip that names their machine:
 
 - A session in a project you also have here, a checkout of the same git repository, is listed under that project, whatever its folder and its name on each computer.
-- The other sessions of the machine are listed under a row named after the machine.
+- The other sessions of the machine are listed under a row named after the machine. That row is there as soon as the machine is paired, sessions or none, and is dimmed while the machine is offline; its tooltip says its state.
 
 Open one: its tab is the tab of any session. You read its timeline as it works, answer its questions and permission requests, send it prompts, steer it and stop it. The provider and the model are the ones the machine gives it.
 

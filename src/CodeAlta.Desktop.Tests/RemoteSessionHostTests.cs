@@ -117,6 +117,31 @@ public sealed class RemoteSessionHostTests
     }
 
     [TestMethod]
+    public async Task APairedMachineWithNoSession_HasItsRow_WithItsState()
+    {
+        var token = TestContext.CancellationToken;
+        await using var fixture = await FleetNodeFixture.StartAsync(token);
+        var machine = await fixture.PairViewerAsync(token);
+        await using var host = new RemoteSessionHost(machine, cancellation => FleetNodeClient.ConnectAsync(machine, fixture.ViewerIdentity, cancellation), Quick,
+            localDeviceId: fixture.ViewerIdentity.DeviceId);
+        var empty = new WorkspaceSnapshot(true, [], [], false, false, false);
+        Assert.AreSame(empty, WorkspaceService.WithRemoteSessions(empty, []), "Without a paired machine, the list is the one of this process.");
+
+        // Before it answered, and once it answered with no session: the row of the machine is there, so is its +.
+        var before = WorkspaceService.WithRemoteSessions(empty, [host]).Projects.Single();
+        Assert.AreEqual(WorkspaceService.MachineScopePrefix + machine.DeviceId, before.Id);
+        Assert.AreEqual(machine.DeviceId, before.MachineId);
+        Assert.AreEqual("connecting", before.MachineState);
+        host.Start();
+        await WaitForAsync(() => host.State == RemoteMachineState.Online && host.Listing.Info is not null, "the machine to be online", token);
+        var merged = WorkspaceService.WithRemoteSessions(empty, [host]);
+        Assert.AreEqual(0, merged.Sessions.Length);
+        var row = merged.Projects.Single();
+        Assert.AreEqual("test-node", row.Name);
+        Assert.AreEqual("online", row.MachineState);
+    }
+
+    [TestMethod]
     public async Task RemoteHost_GoesOffline_AndConnectsAgain_WhenTheChannelDrops()
     {
         var token = TestContext.CancellationToken;
