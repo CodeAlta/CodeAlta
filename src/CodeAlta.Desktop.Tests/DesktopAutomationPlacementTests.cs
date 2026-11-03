@@ -56,7 +56,7 @@ public sealed class DesktopAutomationPlacementTests
         await using var automations = new AutomationService(global, _ => Task.FromResult<IReadOnlyList<ProjectDescriptor>>([]),
             new AutomationStateStore(Path.Combine(fixture.Root, "desktop-state", "automations.json"), false), runner, TimeProvider.System, TimeZoneInfo.Utc);
         await automations.RefreshAsync();
-        var placement = new DesktopAutomationPlacement(automations, fleet.Find, desktopFleetRoot, () => fleet.DeviceId, fleet.SignAutomation);
+        var placement = new DesktopAutomationPlacement(automations, fleet.Find, desktopFleetRoot, () => fleet.DeviceId, fleet.SignAutomation) { PausesPlaced = true };
         automations.Placement = placement;
         await using (placement)
         {
@@ -87,6 +87,16 @@ public sealed class DesktopAutomationPlacementTests
             await placement.SyncAsync(token);
             Assert.AreEqual(2, node.Puts.Count);
             StringAssert.Contains(node.Puts[1].Definition, "Summarize the week.");
+
+            // Paused here, it is paused on its machine too: given disabled, then enabled again once resumed.
+            automations.Paused = true;
+            await placement.SyncAsync(token);
+            Assert.AreEqual(3, node.Puts.Count);
+            StringAssert.Contains(node.Puts[2].Definition, "enabled = false");
+            automations.Paused = false;
+            await placement.SyncAsync(token);
+            Assert.AreEqual(4, node.Puts.Count);
+            StringAssert.Contains(node.Puts[3].Definition, "enabled = true");
 
             // Run now: the machine runs it, and its runs are what the page lists, with the machine they ran on.
             var run = await automations.RunAsync(Id, token);

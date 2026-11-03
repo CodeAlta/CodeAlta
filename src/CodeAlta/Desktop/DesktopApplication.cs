@@ -885,6 +885,8 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                 {
                     ServerRoute = placedServers is null ? null : placedServers.AutomationRoute,
                     SignRun = placedFleet.SignAutomationRun,
+                    // Pausing every automation pauses those on machines too; a developer instance starts paused and leaves them.
+                    PausesPlaced = !options.Developer,
                 };
                 automations.Placement = placement;
                 fleet.Changed += placement.Poke;

@@ -79,5 +79,7 @@ The authority of an assignment is the authenticated, paired device on a direct c
   the machine host lists).
   - Done: a run of another machine with a session is always a link; opening it reads the sessions of the window again,
     and says so when the machine does not list that session now.
-- [ ] Pausing all automations on the desktop does not pause those placed on machines; decide whether it should.
+- [x] Pausing all automations on the desktop does not pause those placed on machines; decide whether it should.
+  - Decided: it does. While paused, the copies are given disabled (a new signed version), and enabled again once
+    resumed. A developer instance, which starts paused, leaves the machines as they are.
 - [ ] `altanode automations` (list, runs, policy) for the owner on the node, instead of editing the policy file.

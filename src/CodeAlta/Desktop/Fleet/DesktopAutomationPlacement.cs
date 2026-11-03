@@ -95,6 +95,12 @@ internal sealed class DesktopAutomationPlacement : IAutomationPlacement, IAsyncD
     /// </summary>
     internal Func<string, DesktopServerAutomationRoute?>? ServerRoute { get; init; }
 
+    /// <summary>
+    /// Gets whether pausing the automations here pauses those placed on machines too: their copies are given disabled while
+    /// paused, and enabled again once resumed. A developer instance, which starts paused, leaves the machines as they are.
+    /// </summary>
+    internal bool PausesPlaced { get; init; }
+
     /// <summary>Gets what signs a run asked by hand of a machine reached through a server; null runs none by hand there.</summary>
     internal Func<FleetAutomationRunRequest, FleetSignedAutomationRunRequest>? SignRun { get; init; }
 
@@ -304,7 +310,7 @@ internal sealed class DesktopAutomationPlacement : IAutomationPlacement, IAsyncD
         }
 
         // What the machine runs: the definition without where it runs here, its project being found there by its repository.
-        var copy = entry.Definition with { RunsOn = null, Project = null };
+        var copy = Copy(entry);
         var key = Key(copy, repository);
         lock (_gate)
         {
@@ -434,7 +440,7 @@ internal sealed class DesktopAutomationPlacement : IAutomationPlacement, IAsyncD
                 return SetStatus(entry.Id, new(machineId, machineName, "failed", "Its project has no remote repository that the other machine could find.", null));
         }
 
-        var copy = entry.Definition with { RunsOn = null, Project = null };
+        var copy = Copy(entry);
         var key = Key(copy, repository);
         lock (_gate)
         {
@@ -673,6 +679,11 @@ internal sealed class DesktopAutomationPlacement : IAutomationPlacement, IAsyncD
     private static string Key(AutomationDefinition copy, string? repository)
         => Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(
             "signed\n" + copy.Fingerprint() + "\n" + (copy.Enabled ? "1" : "0") + "\n" + repository)))[..32];
+
+    // What the machine runs: the definition without where it runs here, its project found there by its repository, and
+    // disabled while the automations here are paused.
+    private AutomationDefinition Copy(AutomationEntry entry)
+        => entry.Definition with { RunsOn = null, Project = null, Enabled = entry.Definition.Enabled && !(PausesPlaced && _automations.Paused) };
 
     /// <summary>The kinds of the triggers of an automation, the facts a version says in clear.</summary>
     internal static IReadOnlyList<string> TriggerKinds(AutomationDefinition definition)

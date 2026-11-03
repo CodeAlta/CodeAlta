@@ -150,6 +150,7 @@ An automation of yours can run on a paired machine, or on a machine of your serv
 The machine fires its schedules and starts its sessions; **Run now** runs it there too. Its runs are listed with the automation, as the machine reports them, and their sessions are those of the machine. Choose **This computer** to bring it back: the machine no longer has it.
 
 - The automation keeps its definition here; edit it here, and the machine gets the change.
+- Turning off **Running** in the **Automations** tab pauses the automations on machines too: they get them disabled until you turn it on again.
 - Its project is found on the machine by its git repository: the machine needs a checkout of it (`altanode projects clone <url>`). An automation of no project runs as a chat there.
 - Name a provider the machine has, or none for the machine's default one.
 - A command trigger runs on this computer only, and an automation kept in the configuration of a project runs on the machines that have the project.
