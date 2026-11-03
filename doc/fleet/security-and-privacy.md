@@ -184,7 +184,14 @@ Starting or driving a session on another machine is remote code execution, by de
    node) only selects it, and the machine authenticates the event itself (re-fetched from its source with its own
    credentials, or checked against the source's signature with a secret the server does not hold) before any of it
    reaches a prompt ([orchestration](orchestration.md#triggers)).
-8. **Autonomy is a list of tools.** What an unattended run may do without a person is a list of tools with typed
+8. **The fleet is never a way out of a sandbox.** The `alta` tool runs in the host, outside the session's sandbox, so
+   every fleet operation a session can trigger (a child or a message elsewhere, a move, an automation placed or run, a
+   Run on, a fleet command of `alta fleet`) carries the session's confinement with it: its sandbox profile, network and
+   file limits and permission mode become the floor of what it starts or drives, the receiving machine enforces a
+   confinement at least as strict or refuses, and a sandbox profile that does not allow fleet operations makes them
+   refused at the host. A session never reaches through another machine what its own sandbox denies it here: a host
+   path, a network, a credential, an unsandboxed process.
+9. **Autonomy is a list of tools.** What an unattended run may do without a person is a list of tools with typed
    parameters, never shell patterns; everything else waits for an approval routed to a person
    ([orchestration](orchestration.md#autonomy-and-approvals)).
 
