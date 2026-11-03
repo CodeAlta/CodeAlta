@@ -26,3 +26,10 @@
   border-radius: 8px; font-size: 10.5px; line-height: 15px; color: var(--muted); background: color-mix(in srgb, var(--muted) 12%, transparent); }
 .session-machine-chip > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .session-machine-chip[data-state="offline"], .session-machine-chip[data-state="unauthorized"] { opacity: .6; }
+
+/* The Run on chip of a new session, and the project, provider and model of a session on another machine. */
+.composer-run-on[data-remote="true"] .composer-selection-part > svg { color: var(--green); }
+.remote-session-choice[data-missing="true"] .composer-selection-part:first-child { color: var(--yellow); }
+.remote-session-fields { display: grid; gap: 10px; width: min(320px, calc(100vw - 32px)); padding: 12px; }
+.remote-session-field { display: grid; gap: 4px; }
+.remote-session-field > span { color: var(--muted); font-size: 12px; }

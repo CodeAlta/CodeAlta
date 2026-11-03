@@ -1,6 +1,8 @@
 using System.Globalization;
 using System.Runtime.CompilerServices;
 using System.Threading.Channels;
+using CodeAlta.Catalog;
+using CodeAlta.Catalog.SessionMoves;
 using CodeAlta.Desktop.Fleet;
 using CodeAlta.Fleet.Identity;
 using CodeAlta.Fleet.NodeApi;
@@ -19,6 +21,9 @@ internal sealed class MachinesService
 {
     private const int MaximumLinkLength = 4096;
     private const int MaximumPromptLength = 32768;
+    private const int MaximumNameLength = 256;
+    // How long a new session waits to be listed by its machine, so that the next list of the page has it.
+    private static readonly TimeSpan ListedWait = TimeSpan.FromSeconds(10);
     private readonly DesktopFleet? _fleet;
     private readonly string? _epoch;
 
@@ -35,6 +40,28 @@ internal sealed class MachinesService
         _fleet = fleet;
         _epoch = epoch;
     }
+
+    /// <summary>Creates the service over the fleet of the instance and the projects of its catalog.</summary>
+    /// <param name="fleet">The paired machines.</param>
+    /// <param name="epoch">The host epoch requests must name.</param>
+    /// <param name="projects">The projects of this computer, whose repositories suggest the same project on a machine.</param>
+    /// <returns>The service.</returns>
+    /// <exception cref="ArgumentNullException">An argument is null.</exception>
+    internal static MachinesService Create(DesktopFleet fleet, string epoch, ProjectCatalog projects)
+    {
+        ArgumentNullException.ThrowIfNull(fleet);
+        ArgumentNullException.ThrowIfNull(projects);
+        return new MachinesService(fleet, epoch)
+        {
+            LocalLocation = async (projectId, token) => await projects.GetByIdAsync(projectId, token).ConfigureAwait(false) is { Archived: false } project
+                && !string.IsNullOrWhiteSpace(project.ProjectPath)
+                ? await fleet.Locations.GetAsync(project.ProjectPath, token).ConfigureAwait(false)
+                : null,
+        };
+    }
+
+    /// <summary>Gets the repository of a project of this computer, by its id; null when the service suggests no project of a machine.</summary>
+    internal Func<string, CancellationToken, Task<RepositoryLocation?>>? LocalLocation { get; init; }
 
     /// <summary>Lists the paired machines and their state.</summary>
     [NeoRpcMethod("list")]
@@ -101,18 +128,73 @@ internal sealed class MachinesService
         return List(request!);
     }
 
-    /// <summary>Creates a session on a machine, in one of its projects, with its first prompt.</summary>
+    /// <summary>
+    /// What a new session on a machine can be given: its projects and its ready providers, as it says now, and the project
+    /// of that machine in the same repository as a project of this computer.
+    /// </summary>
+    [NeoRpcMethod("newSessionChoices")]
+    public async Task<MachineNewSessionChoices> NewSessionChoicesAsync(MachineNewSessionChoicesRequest request, CancellationToken cancellationToken)
+    {
+        if (Refuse(request?.ExpectedEpoch) is { } refused) return MachineNewSessionChoices.Refused(refused);
+        if (request!.MachineId is not { Length: > 0 and <= 64 } id || request.LocalProjectId is { Length: > MaximumNameLength }) return MachineNewSessionChoices.Refused("invalid_request");
+        if (_fleet!.Find(id) is not { } host) return MachineNewSessionChoices.Refused("not_found");
+        FleetNodeInfo info;
+        try
+        {
+            info = await host.ReadInfoAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch (ObjectDisposedException) { return MachineNewSessionChoices.Refused(RemoteSessionHost.Describe(host.State)); }
+        catch (FleetException exception) { return MachineNewSessionChoices.Refused(exception.Error.Code) with { Message = exception.Error.Message }; }
+        catch (Exception exception) when (exception is IOException or TimeoutException) { return MachineNewSessionChoices.Refused(RemoteSessionHost.MachineOfflineCode) with { Message = exception.Message }; }
+
+        // What this device may do there now: the owner of the machine may have changed it since the pairing.
+        if (!info.Permissions.Contains("start", StringComparer.Ordinal)) return MachineNewSessionChoices.Refused("not_allowed");
+        var local = request.LocalProjectId is { Length: > 0 } localId && !localId.StartsWith(WorkspaceService.MachineScopePrefix, StringComparison.Ordinal) && LocalLocation is { } read
+            ? await read(localId, cancellationToken).ConfigureAwait(false)
+            : null;
+        return Choices(info, local);
+    }
+
+    /// <summary>The choices of a machine as the page shows them, and the project of the same repository as <paramref name="local"/>.</summary>
+    /// <param name="info">The machine, as it describes itself.</param>
+    /// <param name="local">The repository of the project of this computer the person is in; null for none.</param>
+    /// <returns>The choices.</returns>
+    internal static MachineNewSessionChoices Choices(FleetNodeInfo info, RepositoryLocation? local)
+    {
+        ArgumentNullException.ThrowIfNull(info);
+        var projects = info.Projects.Where(static project => project.Id is { Length: > 0 and <= MaximumNameLength })
+            .OrderBy(static project => project.Name, StringComparer.CurrentCultureIgnoreCase).ToArray();
+        // The same folder of the same repository, as the Explorer groups the sessions; the only one, or none is suggested.
+        var same = local is null ? [] : projects.Where(project => project.RepositoryKey is { } key
+            && RepositoryKey.SameLocation(new RepositoryLocation(key, project.RepositoryPath ?? string.Empty), local)).ToArray();
+        return new MachineNewSessionChoices("ok", Bounded(info.Name),
+            [.. projects.Select(static project => new MachineProjectChoice(project.Id, Bounded(project.Name), project.RepositoryKey))],
+            same.Length == 1 ? same[0].Id : null,
+            [.. info.Providers.Where(static provider => provider.Key is { Length: > 0 and <= MaximumNameLength }).Select(static provider => new MachineProviderChoice(provider.Key,
+                Bounded(provider.Name), provider.IsDefault, provider.DefaultModelId,
+                [.. provider.Models.Where(static model => model.Id is { Length: > 0 and <= MaximumNameLength }).Select(static model => new MachineModelChoice(model.Id, Bounded(model.Name)))]))],
+            null);
+
+        static string Bounded(string value) => value.Length <= MaximumNameLength ? value : value[..MaximumNameLength];
+    }
+
+    /// <summary>Creates a session on a machine, in one of its projects, with its provider and model and its first prompt.</summary>
     [NeoRpcMethod("newSession")]
     public async Task<MachineNewSessionResult> NewSessionAsync(MachineNewSessionRequest request, CancellationToken cancellationToken)
     {
         if (Refuse(request?.ExpectedEpoch) is { } refused) return new(refused, null, null);
         if (request!.MachineId is not { Length: > 0 and <= 64 } id || request.ClientRequestId is not { Length: > 0 and <= 256 } key
-            || request.ProjectId is { Length: > 256 } || request.Prompt is { Length: > MaximumPromptLength }) return new("invalid_request", null, null);
+            || request.ProjectId is { Length: > MaximumNameLength } || request.Prompt is { Length: > MaximumPromptLength }
+            || request.ProviderKey is { Length: > MaximumNameLength } || request.ModelId is { Length: > MaximumNameLength } || request.ModelId is not null && request.ProviderKey is null)
+            return new("invalid_request", null, null);
         if (_fleet!.Find(id) is not { } host) return new("not_found", null, null);
+        var selection = request.ProviderKey is { Length: > 0 } provider ? new FleetModelSelection(provider, request.ModelId is { Length: > 0 } model ? model : null) : null;
         try
         {
             var created = await host.CreateRemoteSessionAsync(new FleetCreateSessionParams(request.ProjectId, null, null,
-                string.IsNullOrWhiteSpace(request.Prompt) ? null : request.Prompt), key, cancellationToken).ConfigureAwait(false);
+                string.IsNullOrWhiteSpace(request.Prompt) ? null : request.Prompt, selection), key, cancellationToken).ConfigureAwait(false);
+            // The page opens the session from its next list: the machine is asked for it until it lists it.
+            await host.WaitListedAsync(created.SessionId, ListedWait, cancellationToken).ConfigureAwait(false);
             return new(created.Send is { Status: not ("accepted" or "replay") } send ? send.Status : "ok", created.SessionId, null);
         }
         catch (ObjectDisposedException) { return new(RemoteSessionHost.Describe(host.State), null, null); }
@@ -227,7 +309,52 @@ internal sealed record MachineActionResult(string Status);
 /// <param name="ClientRequestId">The key of the creation: the same key again is the same session.</param>
 /// <param name="ProjectId">The project of the machine; null for a session outside a project.</param>
 /// <param name="Prompt">The first prompt; null for none.</param>
-internal sealed record MachineNewSessionRequest(string ExpectedEpoch, string MachineId, string ClientRequestId, string? ProjectId, string? Prompt);
+/// <param name="ProviderKey">The provider of the machine; null for its default.</param>
+/// <param name="ModelId">The model of that provider; null for its default. Only with a provider.</param>
+internal sealed record MachineNewSessionRequest(string ExpectedEpoch, string MachineId, string ClientRequestId, string? ProjectId, string? Prompt,
+    string? ProviderKey = null, string? ModelId = null);
+
+/// <summary>A request for what a new session on a machine can be given.</summary>
+/// <param name="ExpectedEpoch">The host epoch the page knows.</param>
+/// <param name="MachineId">The device id of the machine.</param>
+/// <param name="LocalProjectId">The project of this computer the person is in, whose repository the machine may have too; null for none.</param>
+internal sealed record MachineNewSessionChoicesRequest(string ExpectedEpoch, string MachineId, string? LocalProjectId);
+
+/// <summary>A project of a machine a new session can work in.</summary>
+/// <param name="Id">Its id on the machine.</param>
+/// <param name="Name">Its name.</param>
+/// <param name="RepositoryKey">The repository of its checkout; null for a folder in no repository with a remote.</param>
+internal sealed record MachineProjectChoice(string Id, string Name, string? RepositoryKey);
+
+/// <summary>A model of a provider of a machine.</summary>
+/// <param name="Id">Its id.</param>
+/// <param name="Name">Its name.</param>
+internal sealed record MachineModelChoice(string Id, string Name);
+
+/// <summary>A provider of a machine that is ready to run sessions.</summary>
+/// <param name="Key">Its key on the machine.</param>
+/// <param name="Name">Its name.</param>
+/// <param name="IsDefault">Whether a session that names no provider runs on it.</param>
+/// <param name="DefaultModelId">The model a session takes when it names none; null when the provider chooses.</param>
+/// <param name="Models">Its models.</param>
+internal sealed record MachineProviderChoice(string Key, string Name, bool IsDefault, string? DefaultModelId, MachineModelChoice[] Models);
+
+/// <summary>What a new session on a machine can be given.</summary>
+/// <param name="Status">
+/// <c>ok</c>, <c>not_allowed</c> (this device may not start sessions there), <c>not_found</c>, the state of a machine that
+/// is not online (<c>offline</c>, <c>connecting</c>, <c>unauthorized</c>, <c>machine_offline</c>), the code of a refusal of
+/// the machine, <c>invalid_request</c>, <c>stale_epoch</c> or <c>unavailable</c>.
+/// </param>
+/// <param name="MachineName">The name of the machine.</param>
+/// <param name="Projects">Its projects, by name.</param>
+/// <param name="SuggestedProjectId">Its project in the same folder of the same repository as the project of this computer; null for none or several.</param>
+/// <param name="Providers">Its ready providers.</param>
+/// <param name="Message">What the machine said of a refusal.</param>
+internal sealed record MachineNewSessionChoices(string Status, string? MachineName, MachineProjectChoice[] Projects, string? SuggestedProjectId,
+    MachineProviderChoice[] Providers, string? Message)
+{
+    internal static MachineNewSessionChoices Refused(string status) => new(status, null, [], null, [], null);
+}
 
 /// <summary>The outcome of a new session on a machine.</summary>
 /// <param name="Status"><c>ok</c>, the code of what the machine refused, the state of a machine that is not online, or <c>not_found</c>.</param>

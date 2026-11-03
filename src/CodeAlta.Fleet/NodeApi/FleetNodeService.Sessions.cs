@@ -3,6 +3,7 @@ using System.Text.Json;
 using CodeAlta.Agent;
 using CodeAlta.Agent.Runtime;
 using CodeAlta.Catalog;
+using CodeAlta.Catalog.SessionMoves;
 using CodeAlta.Fleet.Channels;
 using CodeAlta.Fleet.Protocol;
 using CodeAlta.Orchestration.Runtime;
@@ -25,12 +26,77 @@ public sealed partial class FleetNodeService
     private async Task<FleetNodeInfo> NodeInfoAsync(FleetNodeCall call, FleetEmpty parameters, CancellationToken cancellationToken)
     {
         var spaces = await _host.SpaceCatalog.LoadAsync(cancellationToken).ConfigureAwait(false);
-        var projects = await _host.ProjectCatalog.LoadAsync(cancellationToken).ConfigureAwait(false);
+        var projects = (await _host.ProjectCatalog.LoadAsync(cancellationToken).ConfigureAwait(false)).Where(static project => !project.Archived).ToArray();
+        // The repository of each project, so that another machine recognizes its own checkout of it; a few at a time.
+        var locations = new RepositoryLocation?[projects.Length];
+        await Parallel.ForEachAsync(Enumerable.Range(0, projects.Length), new ParallelOptions { MaxDegreeOfParallelism = 4, CancellationToken = cancellationToken },
+            async (index, token) => locations[index] = string.IsNullOrWhiteSpace(projects[index].ProjectPath) ? null
+                : await _locations.GetAsync(projects[index].ProjectPath, token).ConfigureAwait(false)).ConfigureAwait(false);
         return new FleetNodeInfo(_options.Name, _options.Identity.DeviceId, FleetChannelProtocol.OperatingSystemName, _options.Version,
             [.. spaces.Select(static space => new FleetSpaceInfo(space.Id, space.Name))],
-            [.. projects.Where(static project => !project.Archived).Select(static project => new FleetProjectInfo(project.Id,
-                string.IsNullOrWhiteSpace(project.DisplayName) ? project.Name : project.DisplayName, project.ProjectPath, [.. project.Spaces]))],
-            Describe(call.Device!.Permissions));
+            [.. projects.Select((project, index) => new FleetProjectInfo(project.Id,
+                string.IsNullOrWhiteSpace(project.DisplayName) ? project.Name : project.DisplayName, project.ProjectPath, [.. project.Spaces])
+            {
+                RepositoryKey = locations[index]?.Key,
+                RepositoryPath = locations[index]?.Path,
+            })],
+            Describe(call.Device!.Permissions))
+        {
+            Providers = await ReadyProvidersAsync(cancellationToken).ConfigureAwait(false),
+        };
+    }
+
+    /// <summary>The most providers, and models of a provider, <c>node.info</c> lists.</summary>
+    internal const int MaxListedProviders = 32, MaxListedModels = 200;
+
+    // How long node.info waits for the providers it prepares: one that takes longer is listed by a later call.
+    private static readonly TimeSpan ProviderPreparationWait = TimeSpan.FromSeconds(5);
+
+    // The providers that can run a session now: enabled, and ready at their last probe. A node prepares a provider when a
+    // session first needs it: the enabled ones not prepared yet are prepared now, for a while, so that a person who starts
+    // a session from another machine chooses among them. The default is the one a creation that names no provider takes
+    // (ResolveProvider).
+    private async Task<IReadOnlyList<FleetProviderInfo>> ReadyProvidersAsync(CancellationToken cancellationToken)
+    {
+        var initialization = _host.ModelProviderInitializationService;
+        var preparing = initialization.CurrentStates
+            .Where(static state => state.Descriptor.IsEnabled && state.Availability is ModelProviderAvailability.Unknown or ModelProviderAvailability.Probing)
+            .Select(state => PrepareAsync(state.ProviderId)).ToArray();
+        if (preparing.Length > 0)
+        {
+            try { await Task.WhenAll(preparing).WaitAsync(ProviderPreparationWait, cancellationToken).ConfigureAwait(false); }
+            catch (TimeoutException) { /* Listed once ready, by a later call. */ }
+        }
+
+        return ReadyProviders();
+
+        async Task PrepareAsync(ModelProviderId provider)
+        {
+            try
+            {
+                _ = await initialization.GetModelsAsync(provider, CancellationToken.None).ConfigureAwait(false);
+            }
+            catch (Exception exception) when (exception is not OutOfMemoryException)
+            {
+                // A provider that cannot be prepared is not ready: its state says why, and it is not listed.
+                LogInfo($"The provider {provider.Value} could not be prepared for node.info: {exception.Message}");
+            }
+        }
+    }
+
+    private IReadOnlyList<FleetProviderInfo> ReadyProviders()
+    {
+        string? defaultKey;
+        try { defaultKey = ResolveProvider(null, null).ProviderId.Value; }
+        catch (FleetException) { defaultKey = null; }
+        return [.. _host.ModelProviderInitializationService.CurrentStates
+            .Where(static state => state.Descriptor.IsEnabled && state.Availability == ModelProviderAvailability.Ready)
+            .Take(MaxListedProviders)
+            .Select(state => new FleetProviderInfo(state.ProviderId.Value,
+                string.IsNullOrWhiteSpace(state.Descriptor.DisplayName) ? state.ProviderId.Value : state.Descriptor.DisplayName,
+                string.Equals(state.ProviderId.Value, defaultKey, StringComparison.Ordinal),
+                state.SelectedModelId ?? state.Descriptor.DefaultModelId,
+                [.. state.Models.Take(MaxListedModels).Select(static model => new FleetModelInfo(model.Id, string.IsNullOrWhiteSpace(model.DisplayName) ? model.Id : model.DisplayName))]))];
     }
 
     // The sessions as the desktop lists them: the snapshot of the owned workspace (WorkspaceReads), the project and the

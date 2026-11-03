@@ -1,0 +1,126 @@
+---
+title: Fleet
+---
+
+# Fleet
+
+Your other computers can run sessions for you: a Mac mini that stays on, a build machine, a small cloud server. You install **CodeAlta Node** (`altanode`) there, pair it with CodeAlta Desktop once, and its sessions are listed beside yours: you read them, answer their questions, send them prompts and start new ones there.
+
+Each machine keeps its own sessions, providers and sign-ins. Nothing is copied from one computer to another, and no server of ours is involved: your computers talk to each other directly.
+
+## Install CodeAlta Node
+
+On the machine that will run the sessions, install [.NET 10](https://dotnet.microsoft.com/en-us/download/dotnet/10.0), then the node:
+
+```sh
+dotnet tool install -g CodeAlta.Node
+altanode --help
+```
+
+`dotnet tool update -g CodeAlta.Node` updates it.
+
+On a machine without the .NET SDK, publish a self-contained `altanode` from a checkout of CodeAlta on a computer that has it, for the system of that machine (`win-x64`, `win-arm64`, `osx-arm64`, `osx-x64`, `linux-x64`, `linux-arm64`), and copy the folder:
+
+```sh
+dotnet publish src/CodeAlta.Node -c Release -r linux-x64 --self-contained -o altanode-linux-x64
+```
+
+The node uses the same profile as CodeAlta Desktop and TUI, `~/.alta`: its providers, prompts, skills and projects. Set up its providers as you would for the desktop app (see [Model Providers](model-providers/readme.md)): the sessions of a machine run with the accounts of that machine. Only one CodeAlta runs on a profile at a time, so on a computer where you also use CodeAlta Desktop, run the node only while the desktop app is closed, or give it a profile of its own with `--data-root <folder>` (a full path).
+
+The projects a session can start in on the machine are the projects of that profile. To add one, open its folder once with CodeAlta Desktop (`alta <folder>`) or CodeAlta TUI on that machine, while the node is stopped.
+
+## Run it
+
+```sh
+altanode run --listen-all
+```
+
+The node runs in the foreground and writes its log to the console. **Ctrl+C** stops it: running turns get a moment to finish.
+
+| Option | What it does |
+| --- | --- |
+| `--listen-all` | Listens on every network of the machine (your LAN, a Tailscale network) |
+| `--bind <address>` | Listens on one address only, such as the machine's Tailscale address |
+| `--port <port>` | Another port than 2585 |
+| `--name <name>` | The name your other computers see (the machine name by default) |
+| `--no-listen` | Runs sessions without any connection from other computers |
+
+Without `--listen-all` or `--bind`, the node listens on the machine itself only (`127.0.0.1`), and other computers cannot reach it.
+
+`altanode status` tells whether the node runs and whether it will start again after a restart. `altanode logs` prints the end of its log; `altanode logs --follow` keeps printing it.
+
+## Run it as a service
+
+To have the node start by itself, install it as a service with the options it runs with:
+
+```sh
+altanode install --listen-all
+```
+
+| System | What `altanode install` sets up |
+| --- | --- |
+| Windows | A Task Scheduler task at your logon, without administrator rights |
+| macOS | A LaunchAgent in `~/Library/LaunchAgents` |
+| Linux | A `systemd --user` unit, with lingering so that it runs without a login |
+
+The service runs as you, with your sign-ins. Run `altanode install` again to change its options, and `altanode uninstall` to remove it: your profile and sessions stay. `altanode install --dry-run` prints what it would set up without changing anything.
+
+For a machine that should start the node at boot under an account of its own (one that uses deploy keys and tokens only), use `altanode install --system --account <name>`, with `sudo` on macOS and Linux.
+
+## Pair it with CodeAlta Desktop
+
+1. On the machine of the node, while it runs, type `altanode pair`. It prints a pairing link, `codealta-pair://…`, and six words, then waits.
+2. In CodeAlta Desktop, open **Settings** > **Fleet** > **Machines** and click **Pair a machine…**.
+3. Paste the link. CodeAlta shows the name of the machine and six words: check that they are the words `altanode pair` printed.
+4. Click **Pair**. `altanode pair` says which device paired, and the machine is listed as **Online**.
+
+The link works once and expires after 10 minutes (`altanode pair --minutes <n>` gives it more). Pairing again with a new link replaces the machine, for example after its address changed.
+
+A paired computer may see the sessions of the machine, drive them and start new ones. Moving sessions to the machine stays off.
+
+## See and drive its sessions
+
+The sessions of a paired machine are listed in the Explorer with your own, with a chip that names their machine:
+
+- A session in a project you also have here, a checkout of the same git repository, is listed under that project, whatever its folder and its name on each computer.
+- The other sessions of the machine are listed under a row named after the machine.
+
+Open one: its tab is the tab of any session. You read its timeline as it works, answer its questions and permission requests, send it prompts, steer it and stop it. The provider and the model are the ones the machine gives it.
+
+What works on the files of a project (the code editor, Changes, terminals, worktrees) is not offered for a session of another machine: its folder is on that machine. Renaming, forking, archiving and deleting it are not offered either. Pictures and files attached to a prompt are not sent to another machine.
+
+While a machine is offline, its sessions stay listed with what was last known of them, and CodeAlta connects again by itself.
+
+## Start a session on it
+
+1. Open a new session in a project, or in **Chats**.
+2. Beside the agent chip above the prompt, click **Run on** (it shows **This machine**) and choose the machine. Only machines that are online are offered.
+3. Choose the project of that machine: when the machine has a checkout of the same repository as the project you are in, it is already chosen. **Chat (no project)** starts a session in no project.
+4. Choose the provider and the model among the ones ready on that machine.
+5. Write your prompt and send it. The session starts on the machine and opens in its tab.
+
+The **+** of the row of a machine in the Explorer opens the same prompt, already set to run on that machine.
+
+## Manage the devices of a node
+
+On the machine of the node:
+
+| Command | What it does |
+| --- | --- |
+| `altanode devices` | Lists the computers paired with the node |
+| `altanode revoke <device>` | Revokes a computer and disconnects it at once |
+| `altanode permissions <device>` | Shows what a computer may do |
+| `altanode permissions <device> --deny start` | Takes a permission away: `view`, `drive`, `start` or `move` (`--allow` gives one) |
+
+In CodeAlta Desktop, **Forget** on the row of a machine in **Settings** > **Fleet** > **Machines** removes it from this computer; its sessions go on there. To make sure a lost or replaced computer can no longer reach a node, revoke it on the node.
+
+From a terminal, `altanode connect <link>` pairs another profile with a node, and `altanode remote <machine> sessions`, `history`, `send`, `create` and `watch` read and drive the sessions of a paired machine.
+
+## Security
+
+- **Remote sessions run code on the machine.** A paired computer can start agents there that use its tools, as you would sitting at it. Pair only your own computers, and revoke the ones you no longer use.
+- **Keys are pinned.** Each computer has its own key. Pairing records the key of the other side, and every connection checks it: a machine that presents another key is refused. The six words let you check, at pairing, that the link comes from the machine you think.
+- **Permission requests wait for a person.** The node never grants a permission request by itself: you answer it from a paired computer or on the machine.
+- **Credentials stay where they are.** Each machine signs in to its providers itself; nothing is copied from your desktop.
+- **Choose where the node listens.** By default it listens on the machine itself only. `--listen-all` opens it to every network the machine is on: prefer a private network you control.
+- **Tailscale is the simplest safe network.** With [Tailscale](https://tailscale.com) on your computers, bind the node to the machine's Tailscale address (`altanode run --bind 100.x.y.z`) or use `--listen-all`: your computers reach it from anywhere, through an encrypted network only they are on, and nothing is exposed to the internet. Do not forward the node's port on your router.

@@ -63,6 +63,8 @@ public sealed partial class FleetNodeService : IAsyncDisposable
     private readonly Dictionary<string, KeptResult> _results = new(StringComparer.Ordinal);
     private readonly Queue<string> _resultOrder = new();
     private readonly Logger _logger = LogManager.GetLogger("CodeAlta.Fleet.Node");
+    // The repository of each project, which node.info publishes: read with git once in a while, not at every call.
+    private readonly CodeAlta.Catalog.SessionMoves.RepositoryLocationCache _locations = new();
     private int _disposed;
 
     /// <summary>Initializes a new instance of the <see cref="FleetNodeService"/> class.</summary>

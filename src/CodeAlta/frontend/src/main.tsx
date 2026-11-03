@@ -241,6 +241,7 @@ import { TimelineEmphasisProvider } from "./timelineEmphasis/useTimelineEmphasis
 import { StorageSettings } from "./storage/StorageSettings";
 import { useStorageMaintenance } from "./storage/useStorageMaintenance";
 import { storage } from "#neoastra";
+import { machines as machinesApi } from "#neoastra";
 import { speech as speechApi } from "#neoastra";
 import { mcpApps as mcpAppsApi } from "#neoastra";
 import { createMcpAppsHost, McpAppsContext } from "./mcpApps/mcpAppHost";
@@ -279,6 +280,8 @@ import { WorktreeManager } from "./worktrees/WorktreeManager";
 import { WorktreeSettings } from "./worktrees/WorktreeSettings";
 import { McpHostSettings } from "./mcpHost/McpHostSettings";
 import { MachinesSettings } from "./machines/MachinesSettings";
+import { RemoteSessionChoice, RunOnChip, useMachines, useRemoteChoices } from "./machines/RunOnChip";
+import { newSessionProblem, noRemoteSelection, remoteSelection, remoteStartBlocker, runOnMachine, runOnTargets, type RemoteSelection } from "./machines/runOn";
 import { createSpacesHub, type SpacesRequestKind } from "./spaces/spacesHub";
 import { ElsewhereBadge } from "./sessionLeases/ElsewhereBadge";
 import { elsewhereFollowView, elsewhereKind, elsewhereLabel, openSessionIds, type ElsewhereKind } from "./sessionLeases/sessionLeases";
@@ -2966,10 +2969,33 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
   const storedPlace = selectedProject ? workPlaces.get(selectedProject.id) ?? inProjectFolder : inProjectFolder;
   const draftPlace = storedPlace.cloud && !cloudOffered ? inProjectFolder : storedPlace;
   const draftProjectId = selectedProject && !selectedProject.archived ? selectedProject.id : null;
-  const draftCloud = !!draftPlace.cloud && draftProjectId !== null && owned;
-  const draftPlaceControl = useMemo(() => owned && draftProjectId !== null ? { value: draftPlace, onChange: (place: WorkPlace) => setWorkPlace(draftProjectId, place),
-    onOpenSettings: () => navigate("worktrees"), cloud: cloudOffered } : undefined, [owned, draftProjectId, draftPlace, cloudOffered]);
-  const draftChrome = useComposerChrome(owned ? status?.hostEpoch ?? null : null, selectedProject, null, owned ? showProjectChanges : null, null, draftPlaceControl);
+  // The machine the next session starts on: this computer, or a paired machine the Run on chip names (the machine of its
+  // row, for the sessions of a machine of no project here). Its project, provider and model are that machine's.
+  const pairedMachines = useMachines(owned ? status?.hostEpoch : null);
+  const [runOnChoices, setRunOnChoices] = useState<ReadonlyMap<string, string>>(() => new Map());
+  const runOnKey = JSON.stringify(projectId);
+  const scopeMachine = selectedProject?.machineId ?? null;
+  const draftMachine = owned ? runOnMachine(runOnChoices.get(runOnKey) ?? null, pairedMachines, scopeMachine) : null;
+  const runOnOffered = runOnTargets(pairedMachines, t("This machine"));
+  const runOnShown = draftMachine && !runOnOffered.some(target => target.id === draftMachine)
+    ? [...runOnOffered, { id: draftMachine, name: pairedMachines.find(machine => machine.id === draftMachine)?.name ?? selectedProject?.name ?? draftMachine }] : runOnOffered;
+  const remoteChoices = useRemoteChoices(owned ? status?.hostEpoch : null, draftMachine, scopeMachine ? null : projectId);
+  const remoteKey = `${draftMachine}|${runOnKey}`;
+  const [remoteChosen, setRemoteChosen] = useState<{ key: string; selection: RemoteSelection } | null>(null);
+  const remoteSelected = remoteSelection(remoteChoices.choices, remoteChosen?.key === remoteKey ? remoteChosen.selection : noRemoteSelection);
+  const remoteBlocker = draftMachine ? remoteStartBlocker(remoteChoices.choices, remoteSelected) : null;
+  // The start on a machine under way: its key, until the machine answered.
+  const [remoteStart, setRemoteStart] = useState<string | null>(null);
+  const chooseRunOn = (machineId: string | null) => {
+    invalidateCreation();
+    setRunOnChoices(current => { const next = new Map(current); if (machineId) next.set(runOnKey, machineId); else next.delete(runOnKey); return next; });
+  };
+  const draftCloud = !draftMachine && !!draftPlace.cloud && draftProjectId !== null && owned;
+  const draftPlaceControl = useMemo(() => owned && draftProjectId !== null && !draftMachine ? { value: draftPlace, onChange: (place: WorkPlace) => setWorkPlace(draftProjectId, place),
+    onOpenSettings: () => navigate("worktrees"), cloud: cloudOffered } : undefined, [owned, draftProjectId, draftPlace, cloudOffered, draftMachine]);
+  // A session of another machine works in a folder of that machine: the chips of the folder of the project here are not shown.
+  const draftChrome = useComposerChrome(owned ? status?.hostEpoch ?? null : null, draftMachine && selectedProject && !scopeMachine ? { ...selectedProject, machineId: draftMachine } : selectedProject,
+    null, owned ? showProjectChanges : null, null, draftPlaceControl);
   // Explorer markers for sessions with active reminders: read when the host is ready, after every reminder
   // change made here, and on a slow interval because reminders also fire and complete on their own.
   const [activeReminders, setActiveReminders] = useState<ActiveReminders | null>(null);
@@ -3754,6 +3780,12 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
   // One menu per scope row: the session actions first select that scope, then act on it.
   function scopeSessionAction(id: string | null, kind: "create" | "search" | "browse") {
     if (kind === "create" && (modalDialogOpen() || !scopeCanCreateSession(id))) return;
+    // The row of a paired machine: its new session is typed in the prompt, which starts it on that machine.
+    if (kind === "create" && id !== null && snapshot?.projects.some(project => project.id === id && project.machineId)) {
+      setProjectTree(current => expandScope(current, id));
+      selectProject(id, null, true);
+      return;
+    }
     // The sessions of a scope are searched in the search of the window, which then keeps to that scope.
     if (kind === "search") { openSearch({ category: "sessions", projectId: id }); return; }
     if (id !== selectedScope.current) selectProject(id);
@@ -4716,6 +4748,49 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
         onChange={next => change("reasoningEffort", next)} />} />;
   }
 
+  // Starts the session on the machine of the Run on chip, with the prompt as its first prompt, then opens it: the prompt
+  // starts empty again, unless it says something else meanwhile.
+  async function startRemoteFromDraft() {
+    const machineId = draftMachine;
+    const epoch = status?.hostEpoch;
+    const choices = remoteChoices.choices;
+    if (!machineId || !epoch || remoteStart || !mutation?.capability.canMutate()) return;
+    const id = projectId, scope = draftScope, selection = remoteSelected;
+    const prompt = (localDrafts.peek(scope) ?? localDraft).text.trim();
+    const say = (key: MessageKey, parameters?: Readonly<Record<string, string | number>>) => translate(shownLocale.current, key, parameters);
+    if (!prompt) return;
+    const blocker = remoteStartBlocker(choices, selection);
+    if (blocker || !choices) { showToast({ message: say(blocker ?? "Reading the machine…"), intent: "warning", icon: "warning-sign", timeout: 6000 }); return; }
+    const machineName = choices.machineName ?? machineId;
+    const requestId = crypto.randomUUID();
+    setRemoteStart(requestId);
+    let result: Awaited<ReturnType<typeof machinesApi.newSession>> | null = null;
+    try {
+      result = await machinesApi.newSession({ expectedEpoch: epoch, machineId, clientRequestId: requestId, projectId: selection.projectId ?? null, prompt,
+        providerKey: selection.providerKey, modelId: selection.modelId }, { timeoutMilliseconds: 60_000 });
+    } catch { /* Said below. */ }
+    setRemoteStart(current => current === requestId ? null : current);
+    if (!creationAlive.current) return;
+    if (!result?.sessionId) {
+      showToast({ message: `${say(newSessionProblem(result?.status))}${result?.message ? ` ${result.message}` : ""}`, intent: "warning", icon: "warning-sign", timeout: 8000 });
+      return;
+    }
+    const sent = result.status === "ok";
+    if (sent && localDrafts.peek(scope)?.text.trim() === prompt) {
+      localDrafts.edit(scope, "");
+      persistDraft((_key, value) => localStorage.setItem(`codealta.desktop.localPrompt.${JSON.stringify(id)}`, value),
+        () => localStorage.removeItem(`codealta.desktop.localPrompt.${JSON.stringify(id)}`), scope, "");
+    }
+    if (!sent) showToast({ message: say("The session was started on {name}, but its prompt was not sent. The prompt keeps its text.", { name: machineName }), intent: "warning", icon: "warning-sign", timeout: 8000 });
+    const fresh = await refreshProjects(creationRefresh.current.signal);
+    const row = fresh?.sessions.find(session => session.id === result.sessionId);
+    if (!creationAlive.current) return;
+    if (row && selectedScope.current === id && selectedSessionId.current === null) {
+      keptSession.current = row.id;
+      revealSessionLatest.current(row);
+    } else if (sent) showToast({ message: say("The session was started on {name}.", { name: machineName }), intent: "success", icon: "tick", timeout: 8000,
+      action: row ? { text: say("Show"), onClick: () => revealSessionLatest.current(row) } : undefined });
+  }
   // Sends the prompt of a project to the cloud: Claude Code starts a cloud session from it, in a terminal of the window
   // that is shown when it asks something, and the session is listed and opened once it exists. The prompt keeps its
   // text until then, and after a failure.
@@ -4816,7 +4891,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
   async function createSelectedSession(fromDraft = false) {
     if (creationPending.current || !owned || !snapshot || !mutation?.capability.canMutate() || selectedProject?.archived
       || projectId !== null && !selectedProject || settingsVisible.current || dialog || searchOpen
-      || currentView.current !== "workspace" || modalDialogOpen() || !draftChoices.ready) return;
+      || currentView.current !== "workspace" || modalDialogOpen() || !draftMachine && !draftChoices.ready) return;
     // A send asked while the prompt is dictated waits for the last words: the dictation is stopped, they are written,
     // and the session is then created with what the prompt holds.
     if (fromDraft) {
@@ -4828,6 +4903,12 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
         }
         return;
       }
+    }
+    // A session of another machine is started there from what the prompt says; the form beside the row leads to it.
+    if (draftMachine) {
+      if (fromDraft) void startRemoteFromDraft();
+      else { setCreatingVisible(false); showScopeDraft(projectId); focusPromptSoon(); }
+      return;
     }
     // The text as it is now, not as it was when App was last rendered.
     const typed = localDrafts.peek(draftScope) ?? localDraft;
@@ -5410,7 +5491,9 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
   }
   // The form of a new session is beside the row of its scope. What is said about its creation is said there, not also in the list.
   const creatingShown = creatingVisible && view === "workspace" && !settingsOpen && (projectId === null || !!selectedProject);
-  const newPromptDisabled = creatingBusy || !draftChoices.ready || !owned || !mutation?.capability.canMutate() || !snapshot
+  const newPromptDisabled = draftMachine
+    ? creatingBusy || !owned || !mutation?.capability.canMutate() || !snapshot || !!remoteStart || !localDraft.text.trim() || remoteBlocker !== null
+    : creatingBusy || !draftChoices.ready || !owned || !mutation?.capability.canMutate() || !snapshot
     || !!selectedProject?.archived || projectId !== null && !selectedProject || (!localDraft.text.trim() && !localImages.images.length)
     || localImages.images.length > 0 && (localDraft.text.length > imageLimits.text || localDraft.text !== "" && !localDraft.text.trim())
     || draftWorktreeWaits;
@@ -5939,6 +6022,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
               description={t("Drag a tab to this window, or choose Move to window in the menu of a tab.")} />
             : !selectedSession
             ? <NewSessionWorkspace key={draftScope} project={selectedProject} chrome={draftChrome} worktree={!!draftPlaceControl && draftPlace.worktree} cloud={draftCloud}
+                machine={draftMachine ? runOnShown.find(target => target.id === draftMachine)?.name ?? draftMachine : null}
                 starting={cloudStart && cloudStart.projectId === projectId ? <CloudStartProgress step={cloudStart.step} outcome={cloudStart.outcome} onStop={stopCloudStart}
                   onShowTerminal={showTerminalById} onOpenLink={url => openCloudLink(url, null)}
                   onBringHere={url => { const id = cloudStart.projectId; setCloudStart(null); setCloudBring({ projectId: id, link: url }); }}
@@ -5954,17 +6038,21 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
                 preferredHeight={composerHeights.get(composerSizeKey(status?.hostEpoch ?? null, projectId, draftScope))}
                 onHeight={height => setComposerHeights(sizes => rememberComposerHeight(sizes, composerSizeKey(status?.hostEpoch ?? null, projectId, draftScope), height))}>
                 <ReadOnlyComposer key={draftScope} sessionId={draftScope} provider={null} draftIndicators={draftIndicators} folder={selectedProject?.path ?? null}
-                  localImages={owned && snapshot?.configured && currentProjectWritable() && !draftCloud ? localImages : undefined}
+                  localImages={owned && snapshot?.configured && currentProjectWritable() && !draftCloud && !draftMachine ? localImages : undefined}
                   onOpenHelp={openHelp} onOpenCommands={openCommandSearch}
                   placeholder={draftCloud ? t("Describe the task for the cloud session…") : undefined}
                   reason={t("Draft kept locally. Start a session to send it.")}
                   localDraft={{ read: () => localDrafts.peek(draftScope)?.text ?? "", subscribe: localDrafts.subscribe, edit: editLocalDraft,
-                    options: draftCloud ? <CloudAccountChoice accounts={cloudAccounts} value={draftChoices.value.providerKey || null} disabled={!!cloudStart && !cloudStart.outcome}
+                    options: draftMachine ? <><RunOnChip targets={runOnShown} value={draftMachine} locked={!!scopeMachine} disabled={!!remoteStart} onChange={chooseRunOn} />
+                      <RemoteSessionChoice choices={remoteChoices.choices} selection={remoteSelected} disabled={!!remoteStart} onRetry={remoteChoices.reload}
+                        onChange={selection => { invalidateCreation(); setRemoteChosen({ key: remoteKey, selection }); }} /></>
+                      : draftCloud ? <CloudAccountChoice accounts={cloudAccounts} value={draftChoices.value.providerKey || null} disabled={!!cloudStart && !cloudStart.outcome}
                       onChange={id => { invalidateCreation(); draftChoices.change("providerKey", id); }}
                       onLocal={() => { if (draftProjectId) setWorkPlace(draftProjectId, inProjectFolder);
                         showToast({ message: t("The next session works on this computer, in the folder of the project. Choose its provider in the prompt."), intent: "none", icon: "info-sign", timeout: 6000 }); }} />
-                      : creationProviderChoice(),
-                    disabled: newPromptDisabled || draftCloud && !!cloudStart && !cloudStart.outcome, busy: creatingScope?.projectId === projectId || draftCloud && !!cloudStart && !cloudStart.outcome,
+                      : <>{runOnOffered.length > 1 && <RunOnChip targets={runOnOffered} value={null} disabled={creatingBusy} onChange={chooseRunOn} />}{creationProviderChoice()}</>,
+                    disabled: newPromptDisabled || draftCloud && !!cloudStart && !cloudStart.outcome,
+                    busy: creatingScope?.projectId === projectId || draftCloud && !!cloudStart && !cloudStart.outcome || !!remoteStart,
                     submit: () => void createSelectedSession(true),
                     surface: owned && status?.hostEpoch ? { epoch: status.hostEpoch, onOpenProviders: () => navigate("providers"),
                       contextTokens: draftContextTokens } : undefined,
@@ -5974,7 +6062,9 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
                      <SendSplitButton enqueue={false} onEnqueueChange={() => { /* A session that has not started has nothing to wait for. */ }} enqueueDisabled optionsDisabled={newPromptDisabled}>
                        <Button intent="primary" icon={<AppIcon name={draftCloud ? "cloud" : "send"} size={16} />} disabled={newPromptDisabled || draftCloud && !!cloudStart && !cloudStart.outcome}
                          aria-label={t(draftCloud ? "Send to the cloud" : "Start session")}
-                         title={draftCloud ? t("Send to the cloud: Claude Code starts a cloud session (Enter)") : draftWorktreeWaits ? t("The worktree is not ready yet") : t("Start the session and send (Enter)")}
+                         title={draftCloud ? t("Send to the cloud: Claude Code starts a cloud session (Enter)")
+                           : draftMachine ? remoteBlocker ? t(remoteBlocker) : t("Start the session on {name} and send (Enter)", { name: remoteChoices.choices?.machineName ?? "" })
+                           : draftWorktreeWaits ? t("The worktree is not ready yet") : t("Start the session and send (Enter)")}
                          data-cloud-send={draftCloud || undefined} onClick={() => void createSelectedSession(true)}>{draftCloud ? t("Send to the cloud") : undefined}</Button>
                      </SendSplitButton>
                      {creatingScope?.handoff && creatingScope.projectId === projectId && <Button variant="minimal" icon={<AppIcon name="stop" size={16} />} aria-label={t("Cancel transfer")}

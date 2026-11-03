@@ -279,6 +279,7 @@ const icons = {
   rewind: Undo2,
   worktree: Trees,
   remote: RadioTower,
+  computer: Monitor,
   cloud: Cloud,
   smartphone: Smartphone,
   themeDark: Moon,

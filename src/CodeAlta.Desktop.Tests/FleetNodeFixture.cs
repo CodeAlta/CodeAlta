@@ -37,6 +37,12 @@ internal sealed class FleetNodeFixture : IAsyncDisposable
         ViewerMachines = new PairedMachineStore(viewerFleet);
     }
 
+    /// <summary>Gets the runtime of the node: its catalog of projects, its providers.</summary>
+    public CodeAltaHost Host => _host;
+
+    /// <summary>Gets a folder of the fixture that is deleted with it.</summary>
+    public string Root => _root;
+
     public FleetNodeService Service { get; }
 
     public DeviceIdentity NodeIdentity { get; }

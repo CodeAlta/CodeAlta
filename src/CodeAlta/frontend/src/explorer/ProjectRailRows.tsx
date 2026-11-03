@@ -149,8 +149,9 @@ export function ProjectRailRows({ projects, favorites = 0, selectedId, onSelect,
   // A project listed under several labels: its first row is its own (its forms, the sessions of the selected scope),
   // the others show the same project.
   const listed = new Set<string>();
-  // The row of a paired machine groups its sessions of no project of this catalog: it opens and closes, and offers
-  // nothing that works on a folder of this computer (code editor, changes, terminals, a new session, project actions).
+  // The row of a paired machine groups its sessions of no project of this catalog: it opens and closes, starts a new
+  // session on that machine, and offers nothing that works on a folder of this computer (code editor, changes,
+  // terminals, project actions).
   const machineRow = (project: WorkspaceProject, place: string) => {
     const primary = !listed.has(project.id);
     listed.add(project.id);
@@ -161,6 +162,7 @@ export function ProjectRailRows({ projects, favorites = 0, selectedId, onSelect,
         <span className="project-icon" data-file-tone="teal"><AppIcon name="remote" size={15} /></span>
         <strong>{project.name}</strong>{activity?.(project.id)}
       </button>
+      {newSession(project.id, t("New session on {name}", { name: project.name }), t("New session"))}
     </li>{primary ? branch(project.id) : null}</Fragment>;
   };
   const row = (project: WorkspaceProject, place = "", from: string | null = null) => {

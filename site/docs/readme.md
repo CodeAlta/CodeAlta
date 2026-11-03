@@ -35,6 +35,7 @@ This guide applies to the two apps. Screenshots have a **Desktop / TUI** switch,
 - [Work Items](work-items.md): the tasks agents propose, the plans you approved and the reviews in flight.
 - [Bookmarks](bookmarks.md): the messages and sessions you marked.
 - [Automations](automations.md): prompts run on a schedule, on a new issue or pull request, or on demand.
+- [Fleet](fleet.md): your other computers run sessions you see, drive and start from CodeAlta Desktop.
 
 ## Tools and integrations
 
