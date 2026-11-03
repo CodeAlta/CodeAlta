@@ -75,7 +75,9 @@ The authority of an assignment is the authenticated, paired device on a direct c
 ## Smaller follow-ups of the first part
 
 - [ ] The desktop shows the next due time of a placed automation as its machine reports it (`FleetAutomationInfo.NextDue`).
-- [ ] A remote run's session opens from the run list when the machine lists it (today: when it is among the sessions
+- [x] A remote run's session opens from the run list when the machine lists it (today: when it is among the sessions
   the machine host lists).
+  - Done: a run of another machine with a session is always a link; opening it reads the sessions of the window again,
+    and says so when the machine does not list that session now.
 - [ ] Pausing all automations on the desktop does not pause those placed on machines; decide whether it should.
 - [ ] `altanode automations` (list, runs, policy) for the owner on the node, instead of editing the policy file.
