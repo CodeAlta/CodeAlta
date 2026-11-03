@@ -58,6 +58,18 @@ public sealed class FleetConnectorOptions
     public IFleetPublicationSource? Source { get; init; }
 
     /// <summary>
+    /// Gets the statistics facts of the instance, published as a versioned set per session for the sessions <see cref="Source"/>
+    /// publishes (<c>doc/fleet/statistics.md</c>); null publishes none.
+    /// </summary>
+    public IFleetStatisticsSource? Statistics { get; init; }
+
+    /// <summary>Gets the first quarter hour of the statistics published (<see cref="FleetStatisticsFamilies.QuarterOf"/>): the facts before it stay on the machine.</summary>
+    public long StatisticsFromQuarter { get; init; } = long.MinValue;
+
+    /// <summary>Gets the file of the outbox of the statistics; null for <c>statistics.json</c> beside <see cref="OutboxPath"/>.</summary>
+    public string? StatisticsOutboxPath { get; init; }
+
+    /// <summary>
     /// Gets whether the sessions of a space are published to this server: only the spaces linked to it are (the default
     /// space when null). Private sessions are never published, whatever this says.
     /// </summary>
@@ -158,8 +170,22 @@ public sealed class FleetConnector : IAsyncDisposable
     /// <summary>The most facts in one batch, as the server takes them.</summary>
     public const int MaxFactsPerBatch = 500;
 
+    /// <summary>The most statistics sets in one batch.</summary>
+    public const int MaxStatisticsSetsPerBatch = 200;
+
+    /// <summary>The most statistics rows in one batch: a batch stays far below the largest frame.</summary>
+    public const int MaxStatisticsRowsPerBatch = 4000;
+
+    /// <summary>The most rows of the set of one session; a larger one is not published (a log says so).</summary>
+    public const int MaxStatisticsRowsPerSet = 8000;
+
     private readonly FleetConnectorOptions _options;
     private readonly FleetPublicationOutbox _outbox;
+    private readonly FleetStatisticsOutbox? _statistics;
+    // Whether the server of the connection keeps statistics: announced in its welcome.
+    private bool _statisticsServed;
+    // The sessions whose set is too large to publish, logged once.
+    private readonly HashSet<string> _statisticsTooLarge = new(StringComparer.Ordinal);
     private readonly Channel<bool> _wake = Channel.CreateBounded<bool>(new BoundedChannelOptions(1) { FullMode = BoundedChannelFullMode.DropWrite, SingleReader = true });
     private readonly CancellationTokenSource _stop = new();
     private readonly Logger _logger = LogManager.GetLogger("CodeAlta.Fleet.Server");
@@ -193,6 +219,12 @@ public sealed class FleetConnector : IAsyncDisposable
         ArgumentNullException.ThrowIfNull(options.Identity);
         _options = options;
         _outbox = FleetPublicationOutbox.Load(options.OutboxPath);
+        if (options.Statistics is not null)
+        {
+            _statistics = FleetStatisticsOutbox.Load(options.StatisticsOutboxPath
+                ?? Path.Combine(Path.GetDirectoryName(Path.GetFullPath(options.OutboxPath)) ?? ".", "statistics.json"));
+        }
+
         Devices = options.Devices ?? options.MetadataKeys?.Devices ?? new FleetOrganizationDevices(options.ServerAddress, options.Identity, options.DeviceListPinPath);
     }
 
@@ -210,6 +242,12 @@ public sealed class FleetConnector : IAsyncDisposable
 
     /// <summary>Raised after a withdrawal of facts was answered, with the answer.</summary>
     public event Action<FleetConnector, FleetFactsWithdrawResult>? Withdrawn;
+
+    /// <summary>Raised after a batch of statistics sets was answered, with the answer.</summary>
+    public event Action<FleetConnector, FleetStatisticsPublishResult>? StatisticsPublished;
+
+    /// <summary>Raised after a withdrawal of statistics sets was answered, with the answer.</summary>
+    public event Action<FleetConnector, FleetStatisticsWithdrawResult>? StatisticsWithdrawn;
 
     /// <summary>Gets the address of the server.</summary>
     public Uri ServerAddress => _options.ServerAddress;
@@ -236,6 +274,7 @@ public sealed class FleetConnector : IAsyncDisposable
         ObjectDisposedException.ThrowIf(_stop.IsCancellationRequested, this);
         if (Interlocked.Exchange(ref _started, 1) != 0) return;
         if (_options.Source is { } source) source.Changed += Nudge;
+        if (_options.Statistics is { } statistics) statistics.Changed += Nudge;
         _loop = Task.Run(() => RunAsync(_stop.Token));
     }
 
@@ -278,6 +317,7 @@ public sealed class FleetConnector : IAsyncDisposable
     public async ValueTask DisposeAsync()
     {
         if (_options.Source is { } source) source.Changed -= Nudge;
+        if (_options.Statistics is { } statistics) statistics.Changed -= Nudge;
         if (!_stop.IsCancellationRequested) await _stop.CancelAsync().ConfigureAwait(false);
         try { await _loop.ConfigureAwait(false); }
         catch (OperationCanceledException) { }
@@ -374,7 +414,8 @@ public sealed class FleetConnector : IAsyncDisposable
             {
                 Protocol = new FleetProtocolRange(1, 1),
                 Client = _options.Client,
-                ResumeCursors = JsonSerializer.SerializeToElement(_outbox.Cursors, FleetServerJsonContext.Default.FleetPublicationCursors),
+                ResumeCursors = JsonSerializer.SerializeToElement(_outbox.Cursors with { Statistics = _statistics?.Acked ?? 0 },
+                    FleetServerJsonContext.Default.FleetPublicationCursors),
             }, new Signer(_options.Identity), stop).ConfigureAwait(false);
         }
         catch
@@ -387,6 +428,9 @@ public sealed class FleetConnector : IAsyncDisposable
         try { cursors = welcome.Cursors?.Deserialize(FleetServerJsonContext.Default.FleetPublicationCursors); }
         catch (JsonException) { /* A welcome without cursors of ours: the server holds nothing of this device. */ }
         _outbox.Resume(cursors);
+        // A server that does not announce statistics is never sent any: an older server, or one that keeps none.
+        _statisticsServed = _statistics is not null && welcome.Features?.Contains(FleetStatisticsMethods.Feature, StringComparer.Ordinal) == true;
+        if (_statisticsServed) _statistics!.Resume(cursors?.Statistics ?? 0);
         Volatile.Write(ref _keysReadAt, 0);
         var connection = new FleetConnection(transport, FleetConnectionOptions.FromPolicy(welcome.Policy));
         _heartbeat = TimeSpan.FromMilliseconds(Math.Clamp(welcome.Policy.HeartbeatMilliseconds, 1_000, 120_000));
@@ -689,8 +733,85 @@ public sealed class FleetConnector : IAsyncDisposable
             Published?.Invoke(this, result);
         }
 
+        try
+        {
+            await PublishStatisticsAsync(connection, all, sessions, key, stop).ConfigureAwait(false);
+        }
+        catch (FleetException exception) when (exception is not FleetConnectionClosedException)
+        {
+            // A refusal of the server (a set it does not take, a method it lacks) stops the statistics of this connection, never
+            // the connection: presence and the facts of sessions go on, and the next connection tries the statistics again.
+            _statisticsServed = false;
+            if (LogManager.IsInitialized)
+                _logger.Warn($"The statistics were not published to {FleetServerAddress.Format(_options.ServerAddress)}: {exception.Error.Code} {exception.Message}");
+        }
+
         var active = sessions.Count(static session => session.State == FleetSessionStates.Running);
         return active;
+    }
+
+    // The statistics of the sessions published, as a set per session: read again when the revision of its facts, its epoch or
+    // its project changed, and sent when its set changed. The sessions no longer published have their sets taken back; Private
+    // sessions and those of spaces not linked to this server never had one.
+    private async Task PublishStatisticsAsync(FleetConnection connection, IReadOnlyList<FleetLocalSession> all, IReadOnlyList<FleetLocalSession> published,
+        FleetMetadataKey? key, CancellationToken stop)
+    {
+        if (_options.Statistics is not { } source || _statistics is not { } outbox || !_statisticsServed) return;
+        var withdrawals = outbox.Withdrawals(all.Where(session => !IsPublished(session)).Select(static session => session.SessionId), MaxStatisticsSetsPerBatch);
+        if (withdrawals.Count > 0)
+        {
+            var withdrawn = await connection.SendRequestAsync(FleetStatisticsMethods.Withdraw, new FleetStatisticsWithdraw(withdrawals),
+                FleetStatisticsJsonContext.Default.FleetStatisticsWithdraw, FleetStatisticsJsonContext.Default.FleetStatisticsWithdrawResult, null, stop).ConfigureAwait(false);
+            if (withdrawn is not null)
+            {
+                outbox.Withdrawn(withdrawals);
+                StatisticsWithdrawn?.Invoke(this, withdrawn);
+            }
+        }
+
+        outbox.Retain([.. published.Select(static session => session.SessionId)]);
+        var revisions = await source.ReadRevisionsAsync(stop).ConfigureAwait(false);
+        var sets = new List<FleetStatisticsSet>();
+        var rows = 0;
+        foreach (var session in published.OrderBy(static session => session.UpdatedAt))
+        {
+            if (!revisions.TryGetValue(session.SessionId, out var revision)) continue;
+            // The project travels as a blind index of the person's key: without a key yet, it waits with the titles.
+            var projectKey = key is not null && session.ProjectIdentity is { Length: > 0 } identity ? FleetProjectKeys.Of(key, identity) : null;
+            if (!outbox.NeedsRows(session.SessionId, revision, session.Epoch, projectKey)) continue;
+            var read = await source.ReadRowsAsync(session.SessionId, _options.StatisticsFromQuarter, stop).ConfigureAwait(false);
+            if (read.Count > MaxStatisticsRowsPerSet)
+            {
+                if (_statisticsTooLarge.Add(session.SessionId) && LogManager.IsInitialized)
+                    _logger.Warn($"The statistics of the session {session.SessionId} have {read.Count} rows, more than {MaxStatisticsRowsPerSet}: they are not published.");
+                continue;
+            }
+
+            if (outbox.Record(session.SessionId, revision, session.Epoch, projectKey, read) is not { } set) continue;
+            if (sets.Count > 0 && (sets.Count >= MaxStatisticsSetsPerBatch || rows + set.Rows.Count > MaxStatisticsRowsPerBatch))
+            {
+                await SendStatisticsAsync(connection, outbox, sets, stop).ConfigureAwait(false);
+                sets.Clear();
+                rows = 0;
+            }
+
+            sets.Add(set);
+            rows += set.Rows.Count;
+        }
+
+        if (sets.Count > 0) await SendStatisticsAsync(connection, outbox, sets, stop).ConfigureAwait(false);
+        outbox.SaveIfChanged();
+    }
+
+    private async Task SendStatisticsAsync(FleetConnection connection, FleetStatisticsOutbox outbox, IReadOnlyList<FleetStatisticsSet> sets, CancellationToken stop)
+    {
+        var batch = outbox.Batch(sets);
+        var result = await connection.SendRequestAsync(FleetStatisticsMethods.Publish, batch, FleetStatisticsJsonContext.Default.FleetStatisticsPublish,
+            FleetStatisticsJsonContext.Default.FleetStatisticsPublishResult, null, stop).ConfigureAwait(false);
+        if (result is null) return;
+        outbox.Acknowledged(result);
+        if (result.Stale.Count > 0) _logger.Warn($"The server refused the statistics of {result.Stale.Count} session(s) as stale: their epoch is older than the one it holds.");
+        StatisticsPublished?.Invoke(this, result);
     }
 
     private bool IsPublished(FleetLocalSession session) => !session.IsPrivate && _options.PublishesSpace(session.SpaceId);

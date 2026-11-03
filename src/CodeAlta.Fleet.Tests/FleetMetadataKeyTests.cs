@@ -40,6 +40,24 @@ public sealed class FleetMetadataKeyTests
     }
 
     [TestMethod]
+    public void ABlindIndexIsTheSameOnEveryDeviceOfThePerson_AndRevealsNeitherTheValueNorAnotherIndex()
+    {
+        var bytes = new byte[FleetMetadataKey.KeyLength];
+        bytes[0] = 7;
+        var onDesktop = new FleetMetadataKey("k1", bytes);
+        var onNode = new FleetMetadataKey("k1", bytes);
+        var identity = "repo:github.com/codealta/codealta";
+
+        var index = FleetProjectKeys.Of(onDesktop, identity);
+        Assert.AreEqual(index, FleetProjectKeys.Of(onNode, identity), "two devices of the person give one key to one project");
+        Assert.AreEqual(22, index.Length);
+        Assert.IsFalse(index.Contains("codealta", StringComparison.OrdinalIgnoreCase));
+        Assert.AreNotEqual(index, FleetProjectKeys.Of(onDesktop, "repo:github.com/codealta/other"));
+        Assert.AreNotEqual(index, onDesktop.BlindIndex("session", identity), "another purpose gives another index");
+        Assert.AreNotEqual(index, FleetProjectKeys.Of(FleetMetadataKey.Generate(), identity), "another person's key gives another index");
+    }
+
+    [TestMethod]
     public void AKeyWrappedToADeviceOpensWithThatDeviceOnly()
     {
         using var devices = new Devices();

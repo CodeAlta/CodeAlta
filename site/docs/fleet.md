@@ -257,6 +257,23 @@ Your computer signs what the machines install, with the hash of the package of e
 | **Pinned** | The fleet stays on one version: an update to another version is refused until you change the policy |
 | **Automatic** | The server reads the feed every day and updates the fleet to its latest stable version at the time of day you choose; each machine checks the package against the hash the feed publishes |
 
+### See the statistics of all your machines
+
+Each machine linked to your server counts the statistics of its sessions, a node as CodeAlta Desktop does, and sends them to the server: tokens, active time, runs, tool calls and estimated costs, by provider, model and quarter hour.
+
+1. In CodeAlta Desktop, open the **Statistics** tab.
+2. At the top, choose **My fleet** instead of **This machine**.
+3. Pick the period: **Last 7 days**, **Last 30 days**, **Last 90 days** or **This month**.
+
+**My fleet** shows the totals, then the numbers **By machine** (with when each machine last sent its statistics, so a machine that stopped sending shows), **By project** and **By model**. The days are those of your computer's time zone.
+
+- A machine sends the statistics of the sessions it publishes to the server, from the day it was linked to it. A **Private** session sends nothing; a session made Private later, or whose space you unlink, has its statistics removed from the server.
+- The server receives numbers and the names of providers, models and tools, never prompts, answers or file names. Projects travel as keys made with the key only your computers hold: the server cannot tell which project a key is, and your computer names the projects it has too (the same repository on two machines is one project). A project only another machine has shows as **Project** and the start of its key.
+- A machine that was offline sends what it counted when it comes back, and sending the same statistics again changes nothing.
+- **My fleet** shows the machines of your own fleet. **This machine** is the full Statistics page, with its filters and comparisons, for this computer.
+
+A node starts counting with the day it first runs.
+
 ## Security
 
 - **Remote sessions run code on the machine.** A paired computer can start agents there that use its tools, as you would sitting at it. Pair only your own computers, and revoke the ones you no longer use.

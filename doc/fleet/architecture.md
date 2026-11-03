@@ -159,14 +159,15 @@ New code, by layer (names to confirm in the first sub-plan):
 | Project | Owns | Depends on |
 | --- | --- | --- |
 | `CodeAlta.Fleet.Protocol` | Message contracts (source-generated JSON), framing, versions, error codes; the REST client generated from the server's OpenAPI document | nothing of CodeAlta |
-| `CodeAlta.Fleet` | Fleet connector, outbox, node API over the runtime, remote session hosts, session channels, session bundles, the fleet services the desktop and plugins use | Orchestration, Catalog, Fleet.Protocol |
+| `CodeAlta.Fleet` | Fleet connector, outbox, node API over the runtime, remote session hosts, session channels, session bundles, the fleet services the desktop and plugins use | Orchestration, Catalog, Fleet.Protocol, the statistics engine (`CodeAlta.Plugin.Statistics`, whose facts it publishes) |
 | `CodeAlta.Node` | The `altanode` executable: headless host, service integration, pairing and enrollment commands | Hosting, Fleet |
 | `CodeAlta.Server` (+ storage packages) | The `altaserver` executable: ASP.NET Core coordinator, REST API, identity, access control, scheduler, statistics store, relay, web pages | Fleet.Protocol only |
 | `CodeAlta.Plugin.Fleet` | The console: its canvases, buttons and landing card, as a built-in plugin of the desktop | Plugins.Abstractions, Fleet |
 | `src/CodeAlta/Desktop/Fleet`, `frontend/src/fleet` | Remote sessions in the window, the setup assistant, the host side of the console | Fleet |
 
 Two engines leave the desktop for libraries every host runs, so that nodes run them too: the **automation engine**
-(today desktop-only) and the **statistics engine** of the Statistics plugin.
+(today desktop-only) and the **statistics engine** of the Statistics plugin, which any host with journals and a
+database runs (`StatisticsPlugin.CreateForHost`: CodeAlta Node among its built-in plugins).
 
 Two boundaries matter and get guardrail tests (`ArchitectureGuardrailTests`):
 

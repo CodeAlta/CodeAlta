@@ -173,7 +173,7 @@ export const fleetServer = Object.freeze({ status: async () => ({ status: "unava
   create: unavailable, join: unavailable, leave: unavailable, createToken: unavailable, devices: unavailable, approve: unavailable, revoke: unavailable,
   linkSpace: unavailable, directory: async () => ({ status: "unavailable", linkId: null, url: null, organization: null, connection: null, machines: [], sessions: [] }),
   telemetry: unavailable, setTelemetry: unavailable, updates: unavailable, startUpdate: unavailable, cancelUpdate: unavailable, setUpdatePolicy: unavailable,
-  watch: async () => (async function* () { })() });
+  statistics: async () => ({ status: "unavailable", view: null, message: null }), watch: async () => (async function* () { })() });
 // A browser preview neither measures nor edits the user's real profile.
 export const storage = Object.freeze({
   readSettings: async () => ({ status: "unavailable", rootPath: null, settings: null, error: null }),

@@ -29,6 +29,7 @@ public sealed class FleetMetadataKey
     private const int NonceLength = 12;
     private const int TagLength = 16;
     private const string SealDomain = "codealta-sealed-metadata/1";
+    private const string BlindIndexDomain = "codealta-blind-index/1:";
 
     private readonly byte[] _key;
 
@@ -133,6 +134,33 @@ public sealed class FleetMetadataKey
         catch (Exception exception) when (exception is JsonException or CryptographicException or FormatException)
         {
             return false;
+        }
+    }
+
+    /// <summary>
+    /// Gives the blind index of a value: a keyed hash that the server can group by but not reverse, the same on every device
+    /// of the person for the same value, and another for another purpose (a project key is not a session key).
+    /// </summary>
+    /// <param name="purpose">What the index is of, such as <c>project</c>.</param>
+    /// <param name="value">The value, such as the repository key of a project.</param>
+    /// <returns>The index: 22 characters of base64url (128 bits).</returns>
+    /// <exception cref="ArgumentException"><paramref name="purpose"/> or <paramref name="value"/> is empty.</exception>
+    public string BlindIndex(string purpose, string value)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(purpose);
+        ArgumentException.ThrowIfNullOrEmpty(value);
+        // A key of its own per purpose, derived from the metadata key: an index never reveals a seal, nor another index.
+        Span<byte> derived = stackalloc byte[KeyLength];
+        HKDF.DeriveKey(HashAlgorithmName.SHA256, _key, derived, salt: [], info: Encoding.UTF8.GetBytes(BlindIndexDomain + purpose));
+        Span<byte> hash = stackalloc byte[32];
+        try
+        {
+            HMACSHA256.HashData(derived, Encoding.UTF8.GetBytes(value), hash);
+            return Base64Url.EncodeToString(hash[..16]);
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(derived);
         }
     }
 

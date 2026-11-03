@@ -375,6 +375,7 @@ public sealed class CoordinatorServer : IAsyncDisposable
             json.SerializerOptions.TypeInfoResolverChain.Insert(0, ServerApiJsonContext.Default);
             json.SerializerOptions.TypeInfoResolverChain.Insert(1, FleetServerJsonContext.Default);
             json.SerializerOptions.TypeInfoResolverChain.Insert(2, FleetDeviceListJsonContext.Default);
+            json.SerializerOptions.TypeInfoResolverChain.Insert(3, FleetStatisticsJsonContext.Default);
             json.SerializerOptions.DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull;
         });
         services.AddProblemDetails();
@@ -408,6 +409,7 @@ public sealed class CoordinatorServer : IAsyncDisposable
             provider.GetRequiredService<RelayHub>()) { Metrics = metrics });
         services.AddSingleton(provider => new PublicationService(store, provider.GetRequiredService<DirectoryHub>(), time) { Metrics = metrics });
         services.AddSingleton(_ => new MetadataKeyService(store, time));
+        services.AddSingleton(_ => new StatisticsService(store, time) { Metrics = metrics });
         services.AddSingleton(provider => new TelemetrySettingsService(store, provider.GetRequiredService<PresenceRegistry>(), telemetry, time,
             provider.GetRequiredService<ILoggerFactory>().CreateLogger("CodeAlta.Server.Telemetry")));
         services.AddSingleton(provider => new OtlpForwarder(telemetry, provider.GetRequiredService<RequestAuthenticator>(),
@@ -428,6 +430,7 @@ public sealed class CoordinatorServer : IAsyncDisposable
             TelemetrySettings = provider.GetRequiredService<TelemetrySettingsService>(),
             Updates = provider.GetRequiredService<UpdateCampaignService>(),
             Stopping = provider.GetRequiredService<IHostApplicationLifetime>().ApplicationStopping,
+            Statistics = provider.GetRequiredService<StatisticsService>(),
         });
 
         var app = builder.Build();

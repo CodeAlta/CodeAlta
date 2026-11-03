@@ -15,6 +15,9 @@ public sealed partial class StatisticsPlugin
     private readonly TimeSpan? _startDelay;
     private readonly TimeSpan? _flowDebounce;
 
+    // The choice of history of a host where nobody is asked; null for CodeAlta Desktop, which asks its user.
+    private readonly HistoryChoice? _defaultChoice;
+
     // The clock of the engine and of the events of a canvas; null for the one of the system. Tests give one they move by hand.
     private readonly TimeProvider? _time;
     private StatisticsEngine? _engine;
@@ -55,6 +58,30 @@ public sealed partial class StatisticsPlugin
         _archives = archives;
     }
 
+    private StatisticsPlugin(ISessionJournalCatalog journals, HistoryChoice defaultChoice)
+        : this(journals)
+    {
+        ArgumentNullException.ThrowIfNull(defaultChoice);
+        _defaultChoice = defaultChoice;
+    }
+
+    /// <summary>
+    /// Creates the Statistics plugin of a host without a window (CodeAlta Node): it keeps the statistics of every session in the
+    /// application database of the host, as CodeAlta Desktop does, whatever the frontend the host gives its plugins. Nobody is asked
+    /// how much history to read: the statistics start with the day of the first start, and <c>alta statistics history</c> reads more.
+    /// </summary>
+    /// <param name="journals">The journals of the session store of the host.</param>
+    /// <returns>The plugin.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="journals"/> is null.</exception>
+    public static StatisticsPlugin CreateForHost(ISessionJournalCatalog journals) => new(journals, HistoryChoice.FromToday);
+
+    internal StatisticsPlugin(ISessionJournalCatalog journals, HistoryChoice defaultChoice, TimeSpan startDelay, TimeSpan flowDebounce)
+        : this(journals, defaultChoice)
+    {
+        _startDelay = startDelay;
+        _flowDebounce = flowDebounce;
+    }
+
     internal StatisticsPlugin(ISessionJournalCatalog journals, TimeSpan startDelay, TimeSpan flowDebounce, TimeProvider? time = null)
         : this(journals)
     {
@@ -69,13 +96,20 @@ public sealed partial class StatisticsPlugin
     /// </summary>
     public IStatisticsService? Statistics => _engine;
 
+    /// <summary>
+    /// Gets what a host that publishes the statistics of its sessions (a machine of a fleet) reads of the store: the revisions of the
+    /// sessions and their rows; null when the plugin does not read the sessions.
+    /// </summary>
+    public IStatisticsPublication? Publication => _engine;
+
     /// <summary>Gets the active engine's source-bound archive capability; null when disabled, unloaded or not composed with durable storage.</summary>
     public ISessionStatisticsRetirementArchive? RetirementArchive => _archives is null ? null : _engine;
 
     /// <inheritdoc />
     public override ValueTask OnActivatedAsync(CancellationToken cancellationToken = default)
     {
-        if (_journals is null || Context.Host.Frontend != PluginFrontends.Desktop || !Services.Database.HasDatabase)
+        // The engine runs where the plugin was given the journals: CodeAlta Desktop, or a host without a window made for it.
+        if (_journals is null || (_defaultChoice is null && Context.Host.Frontend != PluginFrontends.Desktop) || !Services.Database.HasDatabase)
         {
             return ValueTask.CompletedTask;
         }
@@ -89,6 +123,7 @@ public sealed partial class StatisticsPlugin
             Time = _time ?? TimeProvider.System,
             StartDelay = _startDelay ?? TimeSpan.FromSeconds(5),
             FlowDebounce = _flowDebounce ?? TimeSpan.FromSeconds(1),
+            DefaultChoice = _defaultChoice,
             ProjectDirectory = directory,
             ResolveProjectNames = async token => (await directory.ListProjectsAsync(token).ConfigureAwait(false))
                 .ToDictionary(static project => project.Id, static project => project.Name, StringComparer.OrdinalIgnoreCase),

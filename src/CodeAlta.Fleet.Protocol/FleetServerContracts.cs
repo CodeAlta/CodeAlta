@@ -112,7 +112,8 @@ public static class FleetServerMethods
 /// <summary>The cursors of the publications of a device, given back in the welcome so that it resumes from them.</summary>
 /// <param name="Facts">The last acknowledged sequence of <c>facts.publish</c>.</param>
 /// <param name="Inventory">The last acknowledged sequence of <c>inventory.publish</c>.</param>
-public sealed record FleetPublicationCursors(long Facts, long Inventory);
+/// <param name="Statistics">The last acknowledged sequence of <c>statistics.publish</c>; 0 from a server that keeps none.</param>
+public sealed record FleetPublicationCursors(long Facts, long Inventory, long Statistics = 0);
 
 /// <summary>The parameters of <c>presence.update</c>.</summary>
 /// <param name="State">The state of the device, such as <c>active</c>, <c>idle</c> or <c>busy</c>.</param>
