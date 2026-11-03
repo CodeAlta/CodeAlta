@@ -47,6 +47,7 @@
     <Project Path="CodeAlta.CodeMode/CodeAlta.CodeMode.csproj" />
     <Project Path="CodeAlta.CodexAppServer/CodeAlta.CodexAppServer.csproj" />
     <Project Path="CodeAlta.Fleet.Protocol/CodeAlta.Fleet.Protocol.csproj" />
+    <Project Path="CodeAlta.Fleet.Update/CodeAlta.Fleet.Update.csproj" />
     <Project Path="CodeAlta.Hosting/CodeAlta.Hosting.csproj" />
     <Project Path="CodeAlta.LiveTool/CodeAlta.LiveTool.csproj" />
     <Project Path="CodeAlta.Orchestration/CodeAlta.Orchestration.csproj" />
@@ -78,6 +79,7 @@
     <Project Path="CodeAlta.Cli.Tests/CodeAlta.Cli.Tests.csproj" />
     <Project Path="CodeAlta.CodeMode.Tests/CodeAlta.CodeMode.Tests.csproj" />
     <Project Path="CodeAlta.Fleet.Protocol.Tests/CodeAlta.Fleet.Protocol.Tests.csproj" />
+    <Project Path="CodeAlta.Fleet.Update.Tests/CodeAlta.Fleet.Update.Tests.csproj" />
     <Project Path="CodeAlta.Hosting.Tests/CodeAlta.Hosting.Tests.csproj" />
     <Project Path="CodeAlta.Node.Tests/CodeAlta.Node.Tests.csproj" />
     <Project Path="CodeAlta.Orchestration.Tests/CodeAlta.Orchestration.Tests.csproj" />
