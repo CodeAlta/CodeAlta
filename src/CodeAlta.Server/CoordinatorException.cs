@@ -122,4 +122,13 @@ public static class CoordinatorErrorCodes
 
     /// <summary>A wrap of a metadata key that does not read, or names a device that may not have it.</summary>
     public const string MetadataKeyInvalid = "metadata_key.invalid";
+
+    /// <summary>A telemetry setting that does not read, does not hold, or is not signed by the device that sends it.</summary>
+    public const string TelemetryInvalid = "telemetry.invalid";
+
+    /// <summary>A telemetry setting whose sequence is not after the one the server holds: read it again.</summary>
+    public const string TelemetryConflict = "telemetry.conflict";
+
+    /// <summary>The fleet does not send its telemetry through the server, or not this signal.</summary>
+    public const string TelemetryNotForwarded = "telemetry.not_forwarded";
 }

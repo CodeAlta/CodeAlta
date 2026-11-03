@@ -43,4 +43,13 @@ public sealed class ServerPaths
 
     /// <summary>Gets the folder of the backups of the database taken before each update.</summary>
     public string BackupsRoot => Path.Combine(DataRoot, "backups");
+
+    /// <summary>
+    /// Gets the owner's telemetry setting of this server (<c>telemetry.json</c>), which wins over the fleet's: it can turn
+    /// telemetry off, refuse the fleet's setting, or name a collector of its own.
+    /// </summary>
+    public string TelemetryPath => Path.Combine(DataRoot, CodeAlta.Fleet.Protocol.FleetLocalTelemetrySettings.FileName);
+
+    /// <summary>Gets the file of the id of this server in its telemetry (<c>service.instance.id</c>), made at its first start.</summary>
+    public string InstanceIdPath => Path.Combine(DataRoot, "instance-id");
 }

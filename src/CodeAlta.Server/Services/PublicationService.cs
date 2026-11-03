@@ -41,13 +41,19 @@ public sealed class PublicationService
         _time = time;
     }
 
+    /// <summary>Gets the instruments of the publications; null for none.</summary>
+    public Telemetry.ServerMetrics? Metrics { get; init; }
+
     /// <summary>Keeps the inventory of a machine and announces it when it changed.</summary>
     /// <param name="device">The device of the machine.</param>
     /// <param name="publication">The publication.</param>
     /// <param name="cancellationToken">Cancels the operation.</param>
     /// <returns>The acknowledged sequence.</returns>
     /// <exception cref="CoordinatorException">The inventory does not read (<see cref="CoordinatorErrorCodes.PublicationInvalid"/>).</exception>
-    public async Task<FleetPublishAck> PublishInventoryAsync(DeviceRecord device, FleetInventoryPublish? publication, CancellationToken cancellationToken)
+    public Task<FleetPublishAck> PublishInventoryAsync(DeviceRecord device, FleetInventoryPublish? publication, CancellationToken cancellationToken)
+        => CountedAsync("inventory", () => PublishInventoryCoreAsync(device, publication, cancellationToken));
+
+    private async Task<FleetPublishAck> PublishInventoryCoreAsync(DeviceRecord device, FleetInventoryPublish? publication, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(device);
         if (publication?.Inventory is not { } inventory || publication.Sequence <= 0) throw Invalid("inventory.publish needs a sequence from 1 and an inventory.");
@@ -74,7 +80,10 @@ public sealed class PublicationService
     /// <param name="cancellationToken">Cancels the operation.</param>
     /// <returns>The acknowledged sequence and what happened to the facts.</returns>
     /// <exception cref="CoordinatorException">A fact does not read (<see cref="CoordinatorErrorCodes.PublicationInvalid"/>).</exception>
-    public async Task<FleetFactsPublishResult> PublishFactsAsync(DeviceRecord device, FleetFactsPublish? publication, CancellationToken cancellationToken)
+    public Task<FleetFactsPublishResult> PublishFactsAsync(DeviceRecord device, FleetFactsPublish? publication, CancellationToken cancellationToken)
+        => CountedAsync("facts", () => PublishFactsCoreAsync(device, publication, cancellationToken));
+
+    private async Task<FleetFactsPublishResult> PublishFactsCoreAsync(DeviceRecord device, FleetFactsPublish? publication, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(device);
         if (publication?.Facts is not { } facts || publication.Sequence <= 0) throw Invalid("facts.publish needs a sequence from 1 and facts.");
@@ -113,6 +122,7 @@ public sealed class PublicationService
             }
         }
 
+        Metrics?.Facts(applied, unchanged, stale.Count);
         return new FleetFactsPublishResult(result.Ack, applied, unchanged, stale);
     }
 
@@ -125,7 +135,10 @@ public sealed class PublicationService
     /// <param name="cancellationToken">Cancels the operation.</param>
     /// <returns>The sessions whose facts were deleted.</returns>
     /// <exception cref="CoordinatorException">The withdrawal does not read (<see cref="CoordinatorErrorCodes.PublicationInvalid"/>).</exception>
-    public async Task<FleetFactsWithdrawResult> WithdrawFactsAsync(DeviceRecord device, FleetFactsWithdraw? withdrawal, CancellationToken cancellationToken)
+    public Task<FleetFactsWithdrawResult> WithdrawFactsAsync(DeviceRecord device, FleetFactsWithdraw? withdrawal, CancellationToken cancellationToken)
+        => CountedAsync("withdraw", () => WithdrawFactsCoreAsync(device, withdrawal, cancellationToken));
+
+    private async Task<FleetFactsWithdrawResult> WithdrawFactsCoreAsync(DeviceRecord device, FleetFactsWithdraw? withdrawal, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(device);
         if (withdrawal?.SessionIds is not { } ids) throw Invalid("facts.withdraw needs the ids of sessions.");
@@ -140,6 +153,21 @@ public sealed class PublicationService
         }
 
         return new FleetFactsWithdrawResult([.. removed.Select(static session => session.Id)]);
+    }
+
+    private async Task<T> CountedAsync<T>(string kind, Func<Task<T>> publish)
+    {
+        try
+        {
+            var result = await publish().ConfigureAwait(false);
+            Metrics?.Publication(kind, null);
+            return result;
+        }
+        catch (CoordinatorException exception)
+        {
+            Metrics?.Publication(kind, exception.Code);
+            throw;
+        }
     }
 
     private static string? Text(string? value, string field, bool required = false, int maxLength = MaxTextLength)

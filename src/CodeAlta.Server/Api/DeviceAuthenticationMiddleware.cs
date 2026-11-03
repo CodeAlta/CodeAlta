@@ -35,7 +35,9 @@ internal sealed class DeviceAuthenticationMiddleware(RequestDelegate next, Reque
         context.Items[SignedKey] = signed;
         if (context.GetEndpoint()?.Metadata.GetMetadata<AllowUnknownDeviceAttribute>() is null)
         {
-            context.Items[DeviceKey] = await authenticator.AuthenticateAsync(signed, context.RequestAborted).ConfigureAwait(false);
+            var device = await authenticator.AuthenticateAsync(signed, context.RequestAborted).ConfigureAwait(false);
+            context.Items[DeviceKey] = device;
+            System.Diagnostics.Activity.Current?.SetTag("codealta.device.short_id", Telemetry.ServerMetrics.ShortId(device.Id));
         }
 
         await next(context).ConfigureAwait(false);

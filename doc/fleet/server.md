@@ -39,7 +39,8 @@ which mints tokens and never clones).
 - **Blobs** (snapshots, replicas, attachments of messages): the file system by default; S3, Azure Blob Storage or
   Google Cloud Storage behind an interface.
 - **JSON** with source-generated contracts shared with the nodes (`CodeAlta.Fleet.Protocol`).
-- **OpenTelemetry** for its own traces and metrics; an OTLP endpoint that forwards what nodes send.
+- **OpenTelemetry** for its own traces, metrics and logs; an OTLP endpoint that forwards what nodes send, without storing
+  it ([observability](observability.md#where-telemetry-goes)).
 - It references `CodeAlta.Fleet.Protocol` only: never the agent runtime (a guardrail test checks it).
 
 ## Inside

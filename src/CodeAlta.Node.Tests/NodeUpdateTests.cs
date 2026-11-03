@@ -221,7 +221,7 @@ public sealed class NodeUpdateTests
         var provider = new ScriptedNodeProvider();
         await using var node = await NodeHost.StartAsync(root.Options() with { ConfigureModelProviders = provider.Register }, TestContext.CancellationToken);
         var status = new FleetUpdateStatus("99.0.0", "98.0.0", "99.0.0", null, null, null, [], null);
-        await using var fleet = NodeFleet.Start(node, new NodeListenOptions { Port = 0 }, "test-node", "99.0.0", null, () => status);
+        await using var fleet = NodeFleet.Start(node, new NodeListenOptions { Port = 0 }, "test-node", "99.0.0", null, () => status, null);
         using var nodeIdentity = Fleet.Identity.DeviceIdentity.LoadOrCreate(node.Host.CatalogOptions);
         var viewerFleet = Path.Combine(root.Root, "viewer", "fleet");
         using var viewer = Fleet.Identity.DeviceIdentity.LoadOrCreate(viewerFleet);

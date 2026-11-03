@@ -140,6 +140,62 @@ internal sealed class FleetServerService
     public Task<FleetServerDeviceResult> RevokeAsync(FleetServerDeviceRequest request, CancellationToken cancellationToken)
         => ChangeDeviceAsync(request, (link, device) => _servers!.RevokeAsync(link, device, cancellationToken));
 
+    /// <summary>The telemetry of the fleet of a server, its headers masked; for the owner's computer.</summary>
+    [NeoRpcMethod("telemetry")]
+    public async Task<FleetTelemetryResult> TelemetryAsync(FleetServerLinkRequest request, CancellationToken cancellationToken)
+    {
+        if (Refuse(request?.ExpectedEpoch) is { } refused) return new(refused, null, null);
+        if (!FleetServerLinkStore.IsValidId(request!.LinkId)) return new("invalid_request", null, null);
+        try
+        {
+            return new("ok", TelemetryView(await _servers!.GetTelemetryAsync(request.LinkId, cancellationToken).ConfigureAwait(false)), null);
+        }
+        catch (Exception exception) when (Failure(exception) is { } failure)
+        {
+            return new(failure.Status, null, failure.Message);
+        }
+    }
+
+    /// <summary>
+    /// Sets the telemetry of the fleet of a server: this computer signs the setting, which the server applies and pushes to
+    /// the machines. A header given without a value keeps the value held; the page never sees one.
+    /// </summary>
+    [NeoRpcMethod("setTelemetry")]
+    public async Task<FleetTelemetryResult> SetTelemetryAsync(FleetTelemetryRequest request, CancellationToken cancellationToken)
+    {
+        if (Refuse(request?.ExpectedEpoch) is { } refused) return new(refused, null, null);
+        if (!FleetServerLinkStore.IsValidId(request!.LinkId) || request.Endpoint is { Length: > MaximumText } || request.Environment is { Length: > 64 }
+            || request.Signals is not { Length: <= 3 } || request.Headers is not { Length: <= FleetTelemetrySettingsDocuments.MaxHeaders }
+            || !FleetTelemetryProtocols.IsKnown(request.Protocol) || !FleetTelemetryRoutes.IsKnown(request.Route))
+            return new("invalid_request", null, null);
+        try
+        {
+            var held = await _servers!.GetTelemetryAsync(request.LinkId, cancellationToken).ConfigureAwait(false);
+            var current = HeldHeaders(held);
+            var headers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var edit in request.Headers)
+            {
+                var name = edit?.Name?.Trim();
+                if (string.IsNullOrEmpty(name) || headers.ContainsKey(name)) return new("invalid_request", null, $"'{name}' is not a header, or is there twice.");
+                var value = edit!.Value ?? current.GetValueOrDefault(name);
+                if (value is null) return new("invalid_request", null, $"The header '{name}' has no value.");
+                headers[name] = value.Trim();
+            }
+
+            var server = request.Route == FleetTelemetryRoutes.Server;
+            var change = new FleetTelemetryChange(request.Enabled, string.IsNullOrWhiteSpace(request.Endpoint) ? null : request.Endpoint.Trim().TrimEnd('/'), request.Protocol,
+                request.Route, [.. request.Signals.Distinct(StringComparer.Ordinal)], server ? null : headers,
+                string.IsNullOrWhiteSpace(request.Environment) ? null : request.Environment.Trim());
+            var set = await _servers.SetTelemetryAsync(request.LinkId, change, server ? headers : null, cancellationToken).ConfigureAwait(false);
+            ChangedLocally?.Invoke();
+            return new("ok", TelemetryView(set), null);
+        }
+        catch (Exception exception) when (Failure(exception) is { } failure)
+        {
+            return new(failure.Status, null, failure.Message);
+        }
+    }
+
     /// <summary>Links a space to a server, or unlinks it.</summary>
     [NeoRpcMethod("linkSpace")]
     public async Task<FleetServerActionResult> LinkSpaceAsync(FleetServerSpaceRequest request, CancellationToken cancellationToken)
@@ -268,6 +324,35 @@ internal sealed class FleetServerService
     private static int Clamp(long value) => (int)Math.Clamp(value, 0, int.MaxValue);
 
     private static string Time(DateTimeOffset time) => time.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture);
+
+    /// <summary>The telemetry setting as the page shows it: the values of its headers masked.</summary>
+    /// <param name="settings">The setting as the server holds it.</param>
+    /// <returns>The view; the defaults of a new setting when there is none.</returns>
+    internal static FleetTelemetryView TelemetryView(TelemetrySettingsDto settings)
+    {
+        if (settings.Settings is not { } signed || !FleetTelemetrySettingsDocuments.TryParse(signed.Payload, out var parsed))
+            return new FleetTelemetryView(false, null, FleetTelemetryProtocols.HttpProtobuf, FleetTelemetryRoutes.Direct, [FleetTelemetrySignals.Traces, FleetTelemetrySignals.Metrics],
+                [], null, null);
+        return new FleetTelemetryView(parsed.Enabled, parsed.Endpoint, parsed.Protocol, parsed.Route, [.. parsed.Signals],
+            [.. HeldHeaders(settings).OrderBy(static pair => pair.Key, StringComparer.OrdinalIgnoreCase).Select(static pair => new FleetTelemetryHeaderView(pair.Key, Mask(pair.Value)))],
+            parsed.Environment, settings.UpdatedAt is { } updated ? Time(updated) : null);
+    }
+
+    // The headers the setting uses: those of a direct route are signed in it, those of the server route only the server holds.
+    private static Dictionary<string, string> HeldHeaders(TelemetrySettingsDto settings)
+    {
+        var headers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        if (settings.Settings is { } signed && FleetTelemetrySettingsDocuments.TryParse(signed.Payload, out var parsed))
+        {
+            var held = parsed.Route == FleetTelemetryRoutes.Server ? settings.ServerHeaders : parsed.Headers;
+            foreach (var (name, value) in held ?? new Dictionary<string, string>()) headers[name] = value;
+        }
+
+        return headers;
+    }
+
+    // A secret is never shown: its last characters only, when it is long enough for them to tell nothing.
+    private static string Mask(string value) => value.Length >= 16 ? "\u2022\u2022\u2022\u2022" + value[^4..] : "\u2022\u2022\u2022\u2022";
 
     internal static FleetDeviceView DeviceView(DeviceDto device)
     {
@@ -481,3 +566,44 @@ internal sealed record FleetDirectoryResult(string Status, string? LinkId, strin
 /// <summary>A change of the servers.</summary>
 /// <param name="Kind"><c>changed</c>.</param>
 internal sealed record FleetServerEvent(string Kind);
+
+/// <summary>A header of the collector, its value masked.</summary>
+/// <param name="Name">Its name.</param>
+/// <param name="Masked">Its value as the page shows it.</param>
+internal sealed record FleetTelemetryHeaderView(string Name, string Masked);
+
+/// <summary>The telemetry of a fleet as the page shows it.</summary>
+/// <param name="Enabled">Whether the machines send.</param>
+/// <param name="Endpoint">The address of the collector.</param>
+/// <param name="Protocol"><c>http/protobuf</c> or <c>grpc</c>.</param>
+/// <param name="Route"><c>direct</c> (each machine sends to the collector) or <c>server</c> (through the server).</param>
+/// <param name="Signals"><c>traces</c>, <c>metrics</c>, <c>logs</c>.</param>
+/// <param name="Headers">The headers sent to the collector, masked.</param>
+/// <param name="Environment">The environment the machines name, or null.</param>
+/// <param name="UpdatedAt">When it was last set, or null.</param>
+internal sealed record FleetTelemetryView(bool Enabled, string? Endpoint, string Protocol, string Route, string[] Signals, FleetTelemetryHeaderView[] Headers,
+    string? Environment, string? UpdatedAt);
+
+/// <summary>The telemetry of a fleet, or why it could not be read or set.</summary>
+/// <param name="Status"><c>ok</c>, the code of the server's refusal, <c>unreachable</c>, <c>invalid_request</c>, <c>stale_epoch</c> or <c>unavailable</c>.</param>
+/// <param name="Telemetry">The setting.</param>
+/// <param name="Message">What the failure said.</param>
+internal sealed record FleetTelemetryResult(string Status, FleetTelemetryView? Telemetry, string? Message);
+
+/// <summary>A header of the collector as the page edits it.</summary>
+/// <param name="Name">Its name.</param>
+/// <param name="Value">Its new value; null keeps the one held.</param>
+internal sealed record FleetTelemetryHeaderEdit(string Name, string? Value);
+
+/// <summary>The telemetry of a fleet to set.</summary>
+/// <param name="ExpectedEpoch">The host epoch the page knows.</param>
+/// <param name="LinkId">The link of the server.</param>
+/// <param name="Enabled">Whether the machines send.</param>
+/// <param name="Endpoint">The address of the collector.</param>
+/// <param name="Protocol"><c>http/protobuf</c> or <c>grpc</c>.</param>
+/// <param name="Route"><c>direct</c> or <c>server</c>.</param>
+/// <param name="Signals">The signals.</param>
+/// <param name="Headers">The headers; one without a value keeps the value held.</param>
+/// <param name="Environment">The environment the machines name, or null.</param>
+internal sealed record FleetTelemetryRequest(string ExpectedEpoch, string LinkId, bool Enabled, string? Endpoint, string Protocol, string Route, string[] Signals,
+    FleetTelemetryHeaderEdit[] Headers, string? Environment);

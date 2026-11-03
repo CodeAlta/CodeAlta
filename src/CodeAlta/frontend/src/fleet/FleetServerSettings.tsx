@@ -1,14 +1,16 @@
 import { useEffect, useState } from "react";
-import { Button, Callout, Dialog, DialogBody, DialogFooter, InputGroup, NonIdealState, PopoverNext, Tag } from "@blueprintjs/core";
-import { fleetServer, type FleetDeviceView, type FleetServerView } from "#neoastra";
+import { Button, Callout, Checkbox, Dialog, DialogBody, DialogFooter, HTMLSelect, InputGroup, NonIdealState, PopoverNext, Switch, Tag } from "@blueprintjs/core";
+import { fleetServer, type FleetDeviceView, type FleetServerView, type FleetTelemetryView } from "#neoastra";
 import { AppIcon } from "../AppIcon";
 import { ActivitySpinner } from "../ActivitySpinner";
 import { SettingsPage, SettingsUnavailable, useSettingsEditor } from "../SettingsPage";
 import { useShellLanguage } from "../shellLanguage";
 import type { MessageKey } from "../localization";
-import { joinCommand, keyWords, orderedDevices, serverAddressOf, serverConnection, serverConnectionIntent, serverConnectionLabel, serverProblem } from "./fleetServer";
+import { joinCommand, keyWords, orderedDevices, serverAddressOf, serverConnection, serverConnectionIntent, serverConnectionLabel, serverProblem, telemetryDraft,
+  telemetryHeaderEdits, telemetryProblem, telemetrySignals, telemetrySummary, type TelemetryDraft, type TelemetrySignal } from "./fleetServer";
 
-export type FleetServerApi = Pick<typeof fleetServer, "status" | "create" | "join" | "leave" | "createToken" | "devices" | "approve" | "revoke" | "watch">;
+export type FleetServerApi = Pick<typeof fleetServer, "status" | "create" | "join" | "leave" | "createToken" | "devices" | "approve" | "revoke" | "watch" | "telemetry"
+  | "setTelemetry">;
 
 /** The address a server the person runs on this computer listens on, as `altaserver run` says it. */
 export const localServerAddress = "http://127.0.0.1:2586";
@@ -83,6 +85,7 @@ function ServerCard({ server, epoch, api, busy, revision, onLeave }: {
       </PopoverNext>
     </div>
     {server.controller && connection !== "revoked" && <ServerDevices server={server} epoch={epoch} api={api} revision={revision} />}
+    {server.controller && connection !== "revoked" && <ServerTelemetry server={server} epoch={epoch} api={api} revision={revision} />}
     {token && <TokenDialog server={server} epoch={epoch} api={api} onClose={() => setToken(false)} />}
   </section>;
 }
@@ -141,6 +144,109 @@ function ServerDevices({ server, epoch, api, revision }: { server: FleetServerVi
       </li>)}
     </ul>}
   </div>;
+}
+
+const signalLabels: Record<TelemetrySignal, MessageKey> = { traces: "Traces", metrics: "Metrics", logs: "Logs" };
+
+/**
+ * The telemetry of the fleet, for an owner's computer: off, or what the machines send and where. A computer that may not read it
+ * (a member's) shows nothing.
+ */
+function ServerTelemetry({ server, epoch, api, revision }: { server: FleetServerView; epoch: string; api: FleetServerApi; revision: number }) {
+  const { t } = useShellLanguage();
+  const [view, setView] = useState<FleetTelemetryView | null>(null);
+  const [editing, setEditing] = useState(false);
+  const [generation, setGeneration] = useState(0);
+  useEffect(() => {
+    const abort = new AbortController();
+    api.telemetry({ expectedEpoch: epoch, linkId: server.id }, { signal: abort.signal, timeoutMilliseconds: 20_000 }).then(value => {
+      if (!abort.signal.aborted) setView(value.status === "ok" ? value.telemetry : null);
+    }, () => { if (!abort.signal.aborted) setView(null); });
+    return () => abort.abort();
+  }, [api, epoch, server.id, revision, generation]);
+  if (!view) return null;
+  const summary = telemetrySummary(view);
+  return <div className="fleet-server-telemetry">
+    <AppIcon name="usage" size={15} />
+    <div className="fleet-telemetry-main">
+      <strong>{t("Telemetry")}</strong>
+      <span className="muted-text fleet-telemetry-summary" title={summary.detail ?? undefined}>{t(summary.key)}{summary.detail ? ` · ${summary.detail}` : ""}</span>
+    </div>
+    <Button size="small" variant="minimal" onClick={() => setEditing(true)}>{t("Change…")}</Button>
+    {editing && <TelemetryDialog server={server} epoch={epoch} api={api} view={view} onClose={changed => { setEditing(false); if (changed) setGeneration(value => value + 1); }} />}
+  </div>;
+}
+
+/** The form of the telemetry of the fleet: the collector, how the machines reach it, the signals, its headers (masked when held) and the environment. */
+function TelemetryDialog({ server, epoch, api, view, onClose }: {
+  server: FleetServerView; epoch: string; api: Pick<FleetServerApi, "setTelemetry">; view: FleetTelemetryView; onClose: (changed: boolean) => void;
+}) {
+  const { t } = useShellLanguage();
+  const [draft, setDraft] = useState<TelemetryDraft>(() => telemetryDraft(view));
+  const [working, setWorking] = useState(false);
+  const [problem, setProblem] = useState<{ key: MessageKey; detail?: string | null } | null>(null);
+  const invalid = telemetryProblem(draft);
+  const update = (change: Partial<TelemetryDraft>) => setDraft(value => ({ ...value, ...change }));
+  const updateHeader = (index: number, change: Partial<TelemetryDraft["headers"][number]>) =>
+    setDraft(value => ({ ...value, headers: value.headers.map((header, at) => at === index ? { ...header, ...change } : header) }));
+  async function save() {
+    if (invalid) return;
+    setWorking(true);
+    setProblem(null);
+    try {
+      const result = await api.setTelemetry({ expectedEpoch: epoch, linkId: server.id, enabled: draft.enabled, endpoint: serverAddressOf(draft.endpoint) || null,
+        protocol: draft.protocol, route: draft.route, signals: [...draft.signals], headers: telemetryHeaderEdits(draft), environment: draft.environment.trim() || null },
+        { timeoutMilliseconds: 60_000 });
+      if (result.status === "ok") { onClose(true); return; }
+      setProblem({ key: serverProblem(result.status) ?? "The operation did not complete.", detail: result.message });
+    } catch {
+      setProblem({ key: "The server does not answer." });
+    } finally { setWorking(false); }
+  }
+  return <Dialog isOpen className="fleet-telemetry-dialog" title={t("Telemetry of the fleet")} canOutsideClickClose={false} onClose={() => { if (!working) onClose(false); }}>
+    <DialogBody>
+      <form className="fleet-server-form" onSubmit={event => { event.preventDefault(); void save(); }}>
+        <Switch checked={draft.enabled} disabled={working} label={t("Send to a collector")} onChange={event => update({ enabled: event.currentTarget.checked })} />
+        <label><span>{t("Collector")}</span>
+          <InputGroup value={draft.endpoint} disabled={working} placeholder="https://otlp.example:4318" spellCheck={false}
+            intent={draft.endpoint.trim() && !serverAddressOf(draft.endpoint) ? "danger" : undefined} onChange={event => update({ endpoint: event.target.value })} /></label>
+        <div className="fleet-telemetry-choices">
+          <label><span>{t("Protocol")}</span>
+            <HTMLSelect value={draft.protocol} disabled={working} options={[{ value: "http/protobuf", label: "OTLP/HTTP" }, { value: "grpc", label: "OTLP/gRPC" }]}
+              onChange={event => update({ protocol: event.currentTarget.value === "grpc" ? "grpc" : "http/protobuf" })} /></label>
+          <label><span>{t("Route")}</span>
+            <HTMLSelect value={draft.route} disabled={working} options={[{ value: "direct", label: t("Each machine sends to the collector") },
+              { value: "server", label: t("Machines send through this server") }]}
+              onChange={event => update({ route: event.currentTarget.value === "server" ? "server" : "direct" })} /></label>
+        </div>
+        <div className="fleet-telemetry-signals" role="group" aria-label={t("Signals")}><span>{t("Signals")}</span>
+          {telemetrySignals.map(signal => <Checkbox key={signal} inline disabled={working} label={t(signalLabels[signal])} checked={draft.signals.includes(signal)}
+            onChange={event => update({ signals: telemetrySignals.filter(item => item === signal ? event.currentTarget.checked : draft.signals.includes(item)) })} />)}
+        </div>
+        <div className="fleet-telemetry-headers" role="group" aria-label={t("Headers")}><span>{t("Headers")}</span>
+          {draft.headers.map((header, index) => <div className="fleet-telemetry-header" key={index}>
+            <InputGroup aria-label={t("Name")} placeholder={t("Name")} value={header.name} disabled={working} spellCheck={false}
+              onChange={event => updateHeader(index, { name: event.target.value })} />
+            <InputGroup aria-label={t("Value")} type="password" autoComplete="off" placeholder={header.masked ?? t("Value")} value={header.value} disabled={working}
+              onChange={event => updateHeader(index, { value: event.target.value })} />
+            <Button variant="minimal" icon={<AppIcon name="trash" size={14} />} aria-label={t("Remove")} title={t("Remove")} disabled={working}
+              onClick={() => update({ headers: draft.headers.filter((_, at) => at !== index) })} />
+          </div>)}
+          <Button size="small" variant="minimal" icon={<AppIcon name="plus" size={14} />} disabled={working || draft.headers.length >= 16}
+            onClick={() => update({ headers: [...draft.headers, { name: "", value: "", masked: null }] })}>{t("Add a header")}</Button>
+        </div>
+        <label><span>{t("Environment")}</span>
+          <InputGroup value={draft.environment} disabled={working} placeholder="production" spellCheck={false} onChange={event => update({ environment: event.target.value })} /></label>
+        <button type="submit" hidden />
+      </form>
+      {(problem ?? (invalid ? { key: invalid } : null)) && <Callout compact intent="warning" role="alert">{t((problem ?? { key: invalid! }).key)}
+        {problem?.detail && <div className="muted-text">{problem.detail}</div>}</Callout>}
+    </DialogBody>
+    <DialogFooter actions={<>
+      <Button disabled={working} text={t("Cancel")} onClick={() => onClose(false)} />
+      <Button intent="primary" disabled={!!invalid || working} icon={working ? <ActivitySpinner size={14} /> : undefined} text={t("Save")} onClick={() => void save()} />
+    </>} />
+  </Dialog>;
 }
 
 /** An enrollment code for a machine, made when asked and shown once, with the command that joins with it. */

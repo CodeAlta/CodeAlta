@@ -104,6 +104,15 @@ public sealed class FleetConnectorOptions
 
     /// <summary>Gets what wraps the stream of each relay, for tests that look at the bytes the server pipes; null for none.</summary>
     public Func<Stream, Stream>? WrapRelayStream { get; init; }
+
+    /// <summary>
+    /// Gets what receives the fleet's telemetry setting the server sends (<see cref="FleetServerMethods.TelemetrySettings"/>),
+    /// as signed: it verifies the signature before it applies anything. Null ignores it.
+    /// </summary>
+    public Func<FleetSignedTelemetrySettings, CancellationToken, Task>? TelemetrySettings { get; init; }
+
+    /// <summary>Gets the instruments of the connections and publications; null for none.</summary>
+    public Telemetry.FleetMetrics? Metrics { get; init; }
 }
 
 /// <summary>
@@ -254,6 +263,7 @@ public sealed class FleetConnector : IAsyncDisposable
     private async Task RunAsync(CancellationToken stop)
     {
         var attempt = 0;
+        var connectedBefore = false;
         while (!stop.IsCancellationRequested)
         {
             SetState(FleetConnectorState.Connecting, LastError);
@@ -262,7 +272,10 @@ public sealed class FleetConnector : IAsyncDisposable
             {
                 await using var connection = await ConnectAsync(stop).ConfigureAwait(false);
                 attempt = 0;
+                _options.Metrics?.ConnectorOnline(_options.ServerAddress, connectedBefore);
+                connectedBefore = true;
                 var closing = await ServeAsync(connection, stop).ConfigureAwait(false);
+                if (!stop.IsCancellationRequested) _options.Metrics?.ConnectorFailed(_options.ServerAddress, closing?.Code ?? FleetErrorCodes.ConnectionClosed);
                 if (closing?.Code == FleetErrorCodes.Revoked)
                 {
                     SetState(FleetConnectorState.Revoked, closing);
@@ -279,6 +292,7 @@ public sealed class FleetConnector : IAsyncDisposable
             catch (FleetHandshakeException exception)
             {
                 var error = exception.Error;
+                _options.Metrics?.ConnectorFailed(_options.ServerAddress, error.Code);
                 switch (error.Code)
                 {
                     case FleetErrorCodes.Revoked:
@@ -309,6 +323,7 @@ public sealed class FleetConnector : IAsyncDisposable
                 if (exception is not (IOException or TimeoutException or System.Net.WebSockets.WebSocketException or HttpRequestException or FleetException)
                     && LogManager.IsInitialized)
                     _logger.Warn(exception, $"The control connection to {FleetServerAddress.Format(_options.ServerAddress)} failed");
+                _options.Metrics?.ConnectorFailed(_options.ServerAddress, FleetErrorCodes.TransportError);
                 SetState(FleetConnectorState.Offline, new FleetError(FleetErrorCodes.TransportError, FleetErrorHints.Reconnect, exception.Message));
                 wait = Backoff(attempt++);
             }
@@ -374,6 +389,13 @@ public sealed class FleetConnector : IAsyncDisposable
                     try { incoming = fleetEvent.Payload?.Deserialize(FleetServerJsonContext.Default.FleetRelayIncoming); }
                     catch (JsonException) { /* An offer this device does not read lapses. */ }
                     if (incoming is { RelayId.Length: > 0 }) Track(Task.Run(() => AnswerRelayAsync(connection, incoming, stop), CancellationToken.None));
+                    break;
+                case FleetServerMethods.TelemetrySettings when _options.TelemetrySettings is { } receive:
+                    FleetSignedTelemetrySettings? settings = null;
+                    try { settings = fleetEvent.Payload?.Deserialize(FleetServerJsonContext.Default.FleetSignedTelemetrySettings); }
+                    catch (JsonException) { /* A setting this device does not read is not applied. */ }
+                    // Verified beside the reader of the connection: the check reads the device list from the server.
+                    if (settings is { Payload.Length: > 0 }) Track(Task.Run(() => ReceiveTelemetryAsync(receive, settings, stop), CancellationToken.None));
                     break;
             }
 
@@ -470,6 +492,22 @@ public sealed class FleetConnector : IAsyncDisposable
         }
     }
 
+    private async Task ReceiveTelemetryAsync(Func<FleetSignedTelemetrySettings, CancellationToken, Task> receive, FleetSignedTelemetrySettings settings, CancellationToken stop)
+    {
+        try
+        {
+            await receive(settings, stop).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (stop.IsCancellationRequested)
+        {
+        }
+        catch (Exception exception) when (exception is IOException or InvalidOperationException or HttpRequestException or FleetServerException or FleetDeviceListException
+            or UnauthorizedAccessException or OperationCanceledException)
+        {
+            if (LogManager.IsInitialized) _logger.Warn($"The telemetry setting of {FleetServerAddress.Format(_options.ServerAddress)} was not applied: {exception.Message}");
+        }
+    }
+
     private void Track(Task relay)
     {
         lock (_gate) _relays.Add(relay);
@@ -509,15 +547,19 @@ public sealed class FleetConnector : IAsyncDisposable
         }
 
         _outbox.Retain([.. sessions.Select(static session => session.SessionId)]);
+        var first = true;
         while (!stop.IsCancellationRequested)
         {
             var pending = _outbox.Pending(sessions, MaxFactsPerBatch, key);
+            if (first) _options.Metrics?.Backlog(_options.ServerAddress, pending.Count);
+            first = false;
             if (pending.Count == 0) break;
             var batch = _outbox.Batch(pending);
             var result = await connection.SendRequestAsync(FleetServerMethods.FactsPublish, batch, FleetServerJsonContext.Default.FleetFactsPublish,
                 FleetServerJsonContext.Default.FleetFactsPublishResult, null, stop).ConfigureAwait(false);
             if (result is null) break;
             _outbox.Acknowledged(result);
+            _options.Metrics?.FactsPublished(_options.ServerAddress, result.Applied, result.Unchanged, result.Stale.Count);
             if (result.Stale.Count > 0) _logger.Warn($"The server refused the facts of {result.Stale.Count} session(s) as stale: another machine owns them now.");
             Published?.Invoke(this, result);
         }

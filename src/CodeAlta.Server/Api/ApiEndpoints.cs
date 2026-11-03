@@ -35,9 +35,13 @@ internal static class ApiEndpoints
             .Produces<FleetUpdateStatus>()
             .WithSummary("The versions of the server and where its self-update stands: the running and installed versions, the one on trial, the switch that waits, the versions rolled back.");
 
-        api.MapPost("/setup", async (SetupRequest? request, HttpContext context, SetupService setup) =>
-                Results.Json(await setup.SetUpAsync(request, DeviceAuthenticationMiddleware.GetSigned(context), Origin(context), context.RequestAborted).ConfigureAwait(false),
-                    ServerApiJsonContext.Default.SetupResponse, statusCode: StatusCodes.Status201Created))
+        api.MapPost("/setup", async (SetupRequest? request, HttpContext context, SetupService setup, Telemetry.ServerTelemetry telemetry) =>
+            {
+                var response = await setup.SetUpAsync(request, DeviceAuthenticationMiddleware.GetSigned(context), Origin(context), context.RequestAborted).ConfigureAwait(false);
+                // The organization joins the resource of the server's telemetry.
+                telemetry.Apply(null, response.Organization.Id);
+                return Results.Json(response, ServerApiJsonContext.Default.SetupResponse, statusCode: StatusCodes.Status201Created);
+            })
             .WithMetadata(new AllowUnknownDeviceAttribute())
             .Produces<SetupResponse>(StatusCodes.Status201Created)
             .WithSummary("Sets the server up with its one-time code, from its own machine: the organization, its owner and the owner's first controller device.");
@@ -154,6 +158,17 @@ internal static class ApiEndpoints
             })
             .WithSummary("Checks the hash chain of the audit log.");
 
+        api.MapGet("/telemetry", (HttpContext context, TelemetrySettingsService telemetry)
+                => telemetry.GetAsync(DeviceAuthenticationMiddleware.GetDevice(context), context.RequestAborted))
+            .WithSummary("The telemetry setting of the fleet, signed by a controller device, and the headers only the server holds; for an owner's controller device.");
+
+        api.MapPut("/telemetry", (SetTelemetrySettingsRequest? request, HttpContext context, TelemetrySettingsService telemetry) =>
+                AuditedAsync(context, "telemetry.set", null, actor => telemetry.SetAsync(actor, request, Origin(context), context.RequestAborted)))
+            .Produces<TelemetrySettingsDto>()
+            .WithSummary("Sets the telemetry of the fleet with a setting the calling owner's controller device signed: applied at once and pushed to the machines, which check its signature.");
+
+        app.MapPost(FleetTelemetryPaths.Forward + "/{signal}", (string signal, HttpContext context, OtlpForwarder forwarder) => forwarder.HandleAsync(context, signal))
+            .ExcludeFromDescription();
         app.Map(FleetServerMethods.ControlPath, (HttpContext context, ControlService control) => control.HandleAsync(context)).ExcludeFromDescription();
         app.Map(FleetServerMethods.RelayPath + "/{ticket}", (string ticket, HttpContext context, RelayHub relays) => relays.HandleAsync(context, ticket)).ExcludeFromDescription();
     }

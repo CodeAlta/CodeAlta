@@ -251,6 +251,37 @@ internal sealed class DesktopFleetServers : IAsyncDisposable
         return await client.ListDevicesAsync(cancellationToken).ConfigureAwait(false);
     }
 
+    /// <summary>Reads the telemetry setting of the fleet of a server, with the headers only the server holds; an owner's controller device only.</summary>
+    /// <param name="linkId">The link.</param>
+    /// <param name="cancellationToken">Cancels the call.</param>
+    /// <returns>The setting as the server holds it.</returns>
+    /// <exception cref="KeyNotFoundException">No such link.</exception>
+    /// <exception cref="FleetServerException">The server refused.</exception>
+    /// <exception cref="HttpRequestException">The server does not answer.</exception>
+    public async Task<TelemetrySettingsDto> GetTelemetryAsync(string linkId, CancellationToken cancellationToken)
+    {
+        using var client = Client(linkId);
+        return await client.GetTelemetryAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>Sets the telemetry of the fleet of a server with a setting this device signs; the machines check the signature before they apply it.</summary>
+    /// <param name="linkId">The link.</param>
+    /// <param name="change">What the setting says.</param>
+    /// <param name="serverHeaders">The headers only the server holds, for the server route; null for none.</param>
+    /// <param name="cancellationToken">Cancels the call.</param>
+    /// <returns>The setting as the server holds it now.</returns>
+    /// <exception cref="KeyNotFoundException">No such link.</exception>
+    /// <exception cref="ArgumentException">The setting does not hold.</exception>
+    /// <exception cref="FleetDeviceListException">This device is not a controller device of the verified device list.</exception>
+    /// <exception cref="FleetServerException">The server refused.</exception>
+    /// <exception cref="HttpRequestException">The server does not answer.</exception>
+    public async Task<TelemetrySettingsDto> SetTelemetryAsync(string linkId, FleetTelemetryChange change, IReadOnlyDictionary<string, string>? serverHeaders,
+        CancellationToken cancellationToken)
+    {
+        using var client = Client(linkId);
+        return await client.SetTelemetryAsync(change, serverHeaders, cancellationToken).ConfigureAwait(false);
+    }
+
     /// <summary>Approves a pending device of a server, signing the entry of the device list that adds it with this device's key.</summary>
     /// <param name="linkId">The link.</param>
     /// <param name="deviceId">The device.</param>

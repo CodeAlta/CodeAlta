@@ -49,6 +49,9 @@
     </PackageReference>
     <PackageReference Include="Microsoft.AspNetCore.OpenApi" />
     <PackageReference Include="Microsoft.Data.Sqlite" />
+    <!-- Its own traces, metrics and logs, and ASP.NET Core's, over OTLP when a collector is named (doc/fleet/observability.md). -->
+    <PackageReference Include="OpenTelemetry" />
+    <PackageReference Include="OpenTelemetry.Exporter.OpenTelemetryProtocol" />
     <PackageReference Include="XenoAtom.CommandLine" />
   </ItemGroup>
 
@@ -56,6 +59,11 @@
     <!-- The server references the protocol and the self-update only, never the agent runtime: ArchitectureGuardrailTests checks it. -->
     <ProjectReference Include="..\CodeAlta.Fleet.Protocol\CodeAlta.Fleet.Protocol.csproj" />
     <ProjectReference Include="..\CodeAlta.Fleet.Update\CodeAlta.Fleet.Update.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- The OTLP export shared with altanode, as source: the server references no CodeAlta library but the protocol. -->
+    <Compile Include="..\Shared\FleetTelemetry\FleetOtlpPipeline.cs" Link="Telemetry\FleetOtlpPipeline.cs" />
   </ItemGroup>
 
   <ItemGroup>

@@ -152,6 +152,7 @@ windows, asks, permissions, jobs); the node API is that surface, made remote, pl
 | `directory` | `watch` (machines, published sessions, people, projects) |
 | `facts` | `publish`, `ack` (session facts, usage, audit events) |
 | `relay` | `open`, `incoming`, `accept`, `close` |
+| `telemetry` | `settings`: the fleet's telemetry setting, signed by a controller device, sent when a device connects and when an owner changes it ([observability](observability.md#where-telemetry-goes)) |
 | `ownership` | `commit` (a move), `takeover`, `changed` |
 | `replica` | `append`, `read`, `status` |
 | `deliveries` | `push`, `ack` |
@@ -189,6 +190,9 @@ The management plane, and the whole surface of the console ([console](console.md
 - **Change feed**: the control connection (or server-sent events for a client without one) tells a client which
   resources it may see have changed (kind, id, version); the client reads them again. Canvases stay live without
   polling.
+- **Telemetry**: `GET`/`PUT /api/v1/telemetry` reads and sets the fleet's signed telemetry setting (an owner's controller
+  device only); `POST /otlp/v1/{traces,metrics,logs}` takes the OTLP of approved devices, signed as the API's calls are,
+  and forwards it to the collector ([observability](observability.md#where-telemetry-goes)).
 - **Content stays off it**: prompts, answers and files never go through the REST API, except what a person shared in a
   Managed space. Signed authority (automation versions, remote starts, approvals, policies) travels as signed documents
   that the API stores and nodes verify, never as a decision of the server.

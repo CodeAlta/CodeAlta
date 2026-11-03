@@ -26,7 +26,12 @@ public sealed partial class FleetNodeService
         On(caller, FleetNodeMethods.MovesPrepare, target, FleetNodeJsonContext.Default.FleetMoveRef, FleetNodeJsonContext.Default.FleetMoveStepResult,
             (call, value, token) => MoveReceiver.PrepareAsync(RequireMoveId(value.MoveId), call.Caller.DeviceId, token));
         On(caller, FleetNodeMethods.MovesCommit, target, FleetNodeJsonContext.Default.FleetMoveRef, FleetNodeJsonContext.Default.FleetMoveStepResult,
-            (call, value, token) => MoveReceiver.CommitAsync(RequireMoveId(value.MoveId), call.Caller.DeviceId, token));
+            async (call, value, token) =>
+            {
+                var result = await MoveReceiver.CommitAsync(RequireMoveId(value.MoveId), call.Caller.DeviceId, token).ConfigureAwait(false);
+                _options.Metrics?.Move("target", result.Status);
+                return result;
+            });
         On(caller, FleetNodeMethods.MovesStatus, target, FleetNodeJsonContext.Default.FleetMoveStatusParams, FleetNodeJsonContext.Default.FleetMoveStatus,
             // The device the move is bound to, or the node's owner, which sees every move of its node.
             (call, value, token) => MoveReceiver.StatusAsync(RequireMoveId(value.MoveId), value.Resolve, call.Caller.IsOwner ? null : call.Caller.DeviceId, token));
@@ -56,6 +61,7 @@ public sealed partial class FleetNodeService
         var route = new SessionMoveRoute(call.Caller.DeviceId, parameters.Via);
         var result = await MoveSender.MoveAsync(sessionId, moveId, target, name, route, parameters.CloneRepository, cancellationToken).ConfigureAwait(false);
         LogInfo($"Move {moveId} of session {sessionId}: {result.Status}{(result.Code is { } code ? $" ({code})" : "")}.");
+        _options.Metrics?.Move("source", result.Status);
         return result;
     }
 

@@ -21,6 +21,9 @@ public sealed class DirectoryHub
 
     private readonly ConcurrentDictionary<ControlSession, DirectoryWatcher> _watchers = new();
 
+    /// <summary>Gets the instruments of the watchers; null for none.</summary>
+    public Telemetry.ServerMetrics? Metrics { get; init; }
+
     /// <summary>Starts sending the changes of the directory to a connection.</summary>
     /// <param name="session">The connection.</param>
     /// <returns>Whether it was not watching already.</returns>
@@ -29,8 +32,9 @@ public sealed class DirectoryHub
     {
         ArgumentNullException.ThrowIfNull(session);
         if (_watchers.ContainsKey(session)) return false;
-        var watcher = new DirectoryWatcher(session);
+        var watcher = new DirectoryWatcher(session, Metrics);
         if (!_watchers.TryAdd(session, watcher)) return false;
+        Metrics?.Watcher(1);
         watcher.Start();
         return true;
     }
@@ -39,7 +43,11 @@ public sealed class DirectoryHub
     /// <param name="session">The connection.</param>
     public void Unwatch(ControlSession session)
     {
-        if (_watchers.TryRemove(session, out var watcher)) watcher.Stop();
+        if (_watchers.TryRemove(session, out var watcher))
+        {
+            Metrics?.Watcher(-1);
+            watcher.Stop();
+        }
     }
 
     /// <summary>Sends a change to the watchers that may see it.</summary>
@@ -49,13 +57,14 @@ public sealed class DirectoryHub
     public void Publish(string organizationId, FleetDirectoryChange change)
     {
         ArgumentNullException.ThrowIfNull(change);
+        Metrics?.DirectoryChange(change.Kind);
         foreach (var (session, watcher) in _watchers)
         {
             if (session.Device.OrganizationId == organizationId) watcher.Post(change);
         }
     }
 
-    private sealed class DirectoryWatcher(ControlSession session)
+    private sealed class DirectoryWatcher(ControlSession session, Telemetry.ServerMetrics? metrics)
     {
         private readonly Channel<FleetDirectoryChange> _queue = Channel.CreateBounded<FleetDirectoryChange>(new BoundedChannelOptions(WatcherCapacity)
         {
@@ -74,6 +83,7 @@ public sealed class DirectoryHub
             if (_queue.Writer.TryWrite(change)) return;
             if (_queue.Writer.TryComplete())
             {
+                metrics?.WatcherDropped();
                 _ = session.CloseAsync(new FleetError(FleetErrorCodes.ServerBusy, FleetErrorHints.Reconnect,
                     "The directory events were not read in time: reconnect and watch again."));
             }

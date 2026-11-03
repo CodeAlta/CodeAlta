@@ -49,6 +49,15 @@ public sealed class FleetServerConnectionsOptions
     public Func<FleetConnectorOptions, FleetConnectorOptions>? Configure { get; init; }
 
     /// <summary>
+    /// Gets what receives the telemetry setting of the fleet a server sends, with the connector and the link of that server,
+    /// as signed: it verifies it before it applies it. Null ignores it (a desktop does, in this step).
+    /// </summary>
+    public Func<FleetConnector, FleetServerLink, FleetSignedTelemetrySettings, CancellationToken, Task>? TelemetrySettings { get; init; }
+
+    /// <summary>Gets the instruments of the connections; null for none.</summary>
+    public Telemetry.FleetMetrics? Metrics { get; init; }
+
+    /// <summary>
     /// Gets what serves a relayed channel a server offers this instance, with the connector of that server (whose
     /// <see cref="FleetConnector.Devices"/> say who its organization holds); null declines every relay (a desktop does).
     /// </summary>
@@ -250,6 +259,8 @@ public sealed class FleetServerConnections : IAsyncDisposable
             MetadataKeys = new FleetMetadataKeyring(devices),
             DeviceListPinPath = Path.Combine(_store.LinkFolder(link.Id), FleetOrganizationDevices.PinFileName),
             AcceptRelay = _options.AcceptRelay is { } accept ? (incoming, stream, token) => accept(created!, incoming, stream, token) : null,
+            TelemetrySettings = _options.TelemetrySettings is { } receive ? (settings, token) => receive(created!, link, settings, token) : null,
+            Metrics = _options.Metrics,
         };
         if (_options.Configure is { } configure) options = configure(options);
         var connector = new FleetConnector(options);

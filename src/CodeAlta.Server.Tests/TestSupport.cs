@@ -78,6 +78,12 @@ internal sealed class TestDevice : IFleetHandshakeSigner, IDisposable
     public FleetSignedDeviceListEntry FirstEntry(DateTimeOffset time)
         => SignEntry(new FleetDeviceListEntryPayload(1, null, 1, null, FleetDeviceListOperations.Add, DeviceId, PublicKey, FleetDeviceKinds.Controller, null, DeviceId, time));
 
+    public FleetSignedTelemetrySettings SignTelemetry(FleetTelemetrySettings settings)
+    {
+        var text = FleetTelemetrySettingsDocuments.Serialize(settings);
+        return new FleetSignedTelemetrySettings(text, Sign(FleetTelemetrySettingsDocuments.GetSignedBytes(text)));
+    }
+
     public void Dispose() => _key.Dispose();
 }
 
@@ -90,7 +96,7 @@ internal sealed record ApiAnswer(HttpStatusCode Status, JsonElement Body)
 
     public static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
     {
-        TypeInfoResolverChain = { ServerApiJsonContext.Default, FleetServerJsonContext.Default, FleetDeviceListJsonContext.Default },
+        TypeInfoResolverChain = { ServerApiJsonContext.Default, FleetServerJsonContext.Default, FleetDeviceListJsonContext.Default, FleetTelemetryJsonContext.Default },
     };
 }
 
@@ -120,7 +126,7 @@ internal sealed class ServerFixture : IAsyncDisposable
 
     /// <summary>Starts a server; a data root given stays the caller's, one made here is deleted with the fixture.</summary>
     public static async Task<ServerFixture> StartAsync(TempDirectory? root = null, TestClock? clock = null, Control.RelayOptions? relay = null,
-        Func<FleetUpdateStatus?>? updateStatus = null)
+        Func<FleetUpdateStatus?>? updateStatus = null, Func<string, string?>? environment = null, TimeSpan? telemetryInterval = null)
     {
         var owned = root is null ? new TempDirectory() : null;
         root ??= owned!;
@@ -133,6 +139,9 @@ internal sealed class ServerFixture : IAsyncDisposable
             Relay = relay ?? new Control.RelayOptions(),
             ConfigureLogging = static _ => { },
             UpdateStatus = updateStatus,
+            // The OTEL_* variables of the machine that runs the tests never reach a test's server.
+            EnvironmentVariable = environment ?? (static _ => null),
+            TelemetryExportInterval = telemetryInterval,
         });
         return new ServerFixture(owned, server, clock);
     }
@@ -167,6 +176,26 @@ internal sealed class ServerFixture : IAsyncDisposable
         var text = await response.Content.ReadAsStringAsync();
         var json = string.IsNullOrEmpty(text) ? default : JsonDocument.Parse(text).RootElement.Clone();
         return new ApiAnswer(response.StatusCode, json);
+    }
+
+    /// <summary>Posts bytes, signed by a device unless none is given, and gives the status of the answer.</summary>
+    public async Task<HttpStatusCode> PostBytesAsync(TestDevice? device, string path, byte[] body, string contentType = "application/x-protobuf")
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Post, path) { Content = new ByteArrayContent(body) };
+        request.Content.Headers.ContentType = new MediaTypeHeaderValue(contentType);
+        if (device is not null)
+        {
+            var time = Clock.Now.ToUnixTimeMilliseconds();
+            var nonce = FleetSignedRequest.CreateNonce();
+            var signed = FleetSignedRequest.GetSignedBytes("POST", path, time, nonce, FleetSignedRequest.HashBody(body), device.DeviceId);
+            request.Headers.Add(FleetSignedRequest.DeviceHeader, device.DeviceId);
+            request.Headers.Add(FleetSignedRequest.TimestampHeader, time.ToString(System.Globalization.CultureInfo.InvariantCulture));
+            request.Headers.Add(FleetSignedRequest.NonceHeader, nonce);
+            request.Headers.Add(FleetSignedRequest.SignatureHeader, device.Sign(signed));
+        }
+
+        using var response = await Http.SendAsync(request);
+        return response.StatusCode;
     }
 
     /// <summary>Sets the server up with an owner device.</summary>

@@ -1,5 +1,7 @@
+using System.Diagnostics;
 using System.Globalization;
 using System.Reflection;
+using System.Runtime.CompilerServices;
 using System.Threading.Channels;
 using CodeAlta.Fleet.Protocol;
 using Microsoft.Data.Sqlite;
@@ -20,6 +22,12 @@ public sealed class SqliteCoordinatorStoreOptions
 
     /// <summary>Gets how many writes may wait in the queue before a writer waits for room.</summary>
     public int WriteQueueCapacity { get; init; } = 1024;
+
+    /// <summary>
+    /// Gets what is told of each operation once it ended: its name (such as <c>PublishSessionFacts</c>), how long it took
+    /// (for a write, its wait in the queue included) and whether it failed; null for nothing.
+    /// </summary>
+    public Action<string, TimeSpan, bool>? ObserveOperation { get; init; }
 }
 
 /// <summary>
@@ -70,6 +78,9 @@ public sealed class SqliteCoordinatorStore : ICoordinatorStore
 
     /// <summary>Gets the full path of the database file.</summary>
     public string DatabasePath { get; }
+
+    /// <summary>Gets how many writes wait in the queue of the writer now.</summary>
+    public int WriteQueueDepth => _writes.Reader.Count;
 
     /// <summary>Gets the numbers and names of the migrations this version of the store has, in order.</summary>
     /// <returns>The migrations.</returns>
@@ -528,6 +539,38 @@ public sealed class SqliteCoordinatorStore : ICoordinatorStore
     }
 
     /// <inheritdoc />
+    public ValueTask<TelemetrySettingsRecord?> GetTelemetrySettingsAsync(string organizationId, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(organizationId);
+        return ReadAsync(connection => QuerySingle(connection, null,
+            "SELECT organization_id, seq, payload, signature, signer_device_id, server_headers, updated_at FROM telemetry_settings WHERE organization_id = $org",
+            static reader => new TelemetrySettingsRecord(reader.GetString(0), reader.GetInt64(1), reader.GetString(2), reader.GetString(3), reader.GetString(4),
+                GetNullableString(reader, 5), FromTime(reader.GetInt64(6))), ("$org", organizationId)), cancellationToken);
+    }
+
+    /// <inheritdoc />
+    public ValueTask<bool> SetTelemetrySettingsAsync(TelemetrySettingsRecord settings, AuditEntry audit, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(settings);
+        ArgumentNullException.ThrowIfNull(audit);
+        return WriteAsync((connection, transaction) =>
+        {
+            // A setting replaces only an older one: two owners that sign at once do not undo each other silently.
+            var changed = Execute(connection, transaction,
+                "INSERT INTO telemetry_settings (organization_id, seq, payload, signature, signer_device_id, server_headers, updated_at) " +
+                "VALUES ($org, $seq, $payload, $signature, $signer, $headers, $at) " +
+                "ON CONFLICT (organization_id) DO UPDATE SET seq = excluded.seq, payload = excluded.payload, signature = excluded.signature, " +
+                "signer_device_id = excluded.signer_device_id, server_headers = excluded.server_headers, updated_at = excluded.updated_at " +
+                "WHERE telemetry_settings.seq < excluded.seq",
+                ("$org", settings.OrganizationId), ("$seq", settings.Sequence), ("$payload", settings.Payload), ("$signature", settings.Signature),
+                ("$signer", settings.SignerDeviceId), ("$headers", settings.ServerHeaders), ("$at", ToTime(settings.UpdatedAt)));
+            if (changed == 0) return false;
+            AppendAudit(connection, transaction, audit);
+            return true;
+        }, cancellationToken);
+    }
+
+    /// <inheritdoc />
     public ValueTask AppendAuditAsync(AuditEntry audit, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(audit);
@@ -586,32 +629,63 @@ public sealed class SqliteCoordinatorStore : ICoordinatorStore
         _initGate.Dispose();
     }
 
-    private ValueTask<T> ReadAsync<T>(Func<SqliteConnection, T> read, CancellationToken cancellationToken)
+    private ValueTask<T> ReadAsync<T>(Func<SqliteConnection, T> read, CancellationToken cancellationToken, [CallerMemberName] string operation = "")
     {
         ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);
         cancellationToken.ThrowIfCancellationRequested();
         if (_writeLoop is null && !_readyReadOnly) throw new InvalidOperationException("The store is not initialized.");
-        using var connection = new SqliteConnection(_readConnectionString);
-        connection.Open();
-        return ValueTask.FromResult(read(connection));
+        var started = Stopwatch.GetTimestamp();
+        var failed = true;
+        try
+        {
+            using var connection = new SqliteConnection(_readConnectionString);
+            connection.Open();
+            var result = read(connection);
+            failed = false;
+            return ValueTask.FromResult(result);
+        }
+        finally
+        {
+            Observe(operation, started, failed);
+        }
     }
 
-    private async ValueTask<T> WriteAsync<T>(Func<SqliteConnection, SqliteTransaction, T> write, CancellationToken cancellationToken)
+    private async ValueTask<T> WriteAsync<T>(Func<SqliteConnection, SqliteTransaction, T> write, CancellationToken cancellationToken,
+        [CallerMemberName] string operation = "")
     {
         ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);
         if (_options.ReadOnly) throw new InvalidOperationException("The store was opened to read only.");
         if (_writeLoop is null) throw new InvalidOperationException("The store is not initialized.");
         var item = new WriteItem<T>(write, cancellationToken);
+        var started = Stopwatch.GetTimestamp();
+        var failed = true;
         try
         {
-            await _writes.Writer.WriteAsync(item, cancellationToken).ConfigureAwait(false);
-        }
-        catch (ChannelClosedException exception)
-        {
-            throw new ObjectDisposedException(nameof(SqliteCoordinatorStore), exception);
-        }
+            try
+            {
+                await _writes.Writer.WriteAsync(item, cancellationToken).ConfigureAwait(false);
+            }
+            catch (ChannelClosedException exception)
+            {
+                throw new ObjectDisposedException(nameof(SqliteCoordinatorStore), exception);
+            }
 
-        return await item.Task.ConfigureAwait(false);
+            var result = await item.Task.ConfigureAwait(false);
+            failed = false;
+            return result;
+        }
+        finally
+        {
+            Observe(operation, started, failed);
+        }
+    }
+
+    // The name of the operation without its Async suffix, and the time since it started.
+    private void Observe(string operation, long started, bool failed)
+    {
+        if (_options.ObserveOperation is not { } observe) return;
+        var name = operation.EndsWith("Async", StringComparison.Ordinal) ? operation[..^"Async".Length] : operation;
+        observe(name, Stopwatch.GetElapsedTime(started), failed);
     }
 
     private async Task WriteLoopAsync()

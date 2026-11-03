@@ -42,7 +42,7 @@ the server does not hold).
 | Credentials | Each node | Never | Never |
 | Organization provider keys | The server stores copies sealed to each allowed machine | Never in clear | Never in clear |
 | Audit events | The server | Readable, no content | Readable, no content |
-| Traces | The collector the organization names | Spans without content | Spans without content: content never leaves a machine through telemetry |
+| Telemetry (traces, metrics, logs) | The collector the owner names, directly or forwarded by the server | Spans and metrics without content; logs (paths, errors) only when turned on | Same: content never leaves a machine through telemetry |
 | Push notifications | Apple, Google, Web Push services | A wake-up without content | Same |
 
 The session title answers the owner's question "what about titles?": it is descriptive metadata written from prompts,

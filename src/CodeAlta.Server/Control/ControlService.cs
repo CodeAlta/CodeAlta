@@ -19,7 +19,7 @@ public sealed class ControlService
     public static readonly FleetProtocolRange Protocol = new(1, 1);
 
     /// <summary>The features the server announces in its welcome.</summary>
-    public static readonly IReadOnlyList<string> Features = ["presence", "inventory", "facts", "facts.withdraw", "directory", "relay"];
+    public static readonly IReadOnlyList<string> Features = ["presence", "inventory", "facts", "facts.withdraw", "directory", "relay", "telemetry"];
 
     private const int MaxStateLength = 32;
 
@@ -78,6 +78,12 @@ public sealed class ControlService
         _relays = relays;
     }
 
+    /// <summary>Gets the instruments of the control connections; null for none.</summary>
+    public Telemetry.ServerMetrics? Metrics { get; init; }
+
+    /// <summary>Gets what sends the fleet's telemetry setting to a device that connects; null for none.</summary>
+    internal TelemetrySettingsService? TelemetrySettings { get; init; }
+
     /// <summary>Serves a WebSocket request on <see cref="FleetServerMethods.ControlPath"/>.</summary>
     /// <param name="context">The request.</param>
     /// <returns>A task that completes when the connection ends.</returns>
@@ -130,8 +136,11 @@ public sealed class ControlService
             or System.Net.WebSockets.WebSocketException)
         {
             _logger.LogDebug("A control connection was refused: {Reason}", exception.Message);
+            Metrics?.Handshake(exception is FleetHandshakeException refused ? refused.Error.Code : FleetErrorCodes.TransportError);
             return;
         }
+
+        Metrics?.Handshake(null);
 
         var session = new ControlSession(verifier.Device!, new FleetConnection(transport, FleetConnectionOptions.FromPolicy(accepted.Welcome.Policy)), _time.GetUtcNow())
         {
@@ -149,6 +158,9 @@ public sealed class ControlService
 
         _directory.Publish(session.Device.OrganizationId, PresenceChange(session.GetPresence()));
         _logger.LogInformation("Device {Device} ({Kind}) connected", session.Device.Id, session.Device.Kind);
+        Metrics?.Connection(session.Device.Kind, 1);
+        // The fleet's telemetry setting, signed by a controller device: the device checks it before it applies it.
+        if (TelemetrySettings is { } telemetry) _ = telemetry.SendCurrentAsync(session);
         try
         {
             using var registration = cancellationToken.Register(static state =>
@@ -158,6 +170,7 @@ public sealed class ControlService
         }
         finally
         {
+            Metrics?.Connection(session.Device.Kind, -1);
             _directory.Unwatch(session);
             if (_presence.Remove(session))
             {
@@ -175,7 +188,8 @@ public sealed class ControlService
     private void Register(ControlSession session)
     {
         var connection = session.Connection;
-        connection.RegisterRequestHandler(FleetServerMethods.PresenceUpdate, Handler(FleetServerJsonContext.Default.FleetPresenceUpdate, (update, _) =>
+        void On(string method, FleetRequestHandler handler) => connection.RegisterRequestHandler(method, Traced(session, handler));
+        On(FleetServerMethods.PresenceUpdate, Handler(FleetServerJsonContext.Default.FleetPresenceUpdate, (update, _) =>
         {
             if (update is null || string.IsNullOrEmpty(update.State) || update.State.Length > MaxStateLength || update.ActiveSessions < 0)
             {
@@ -186,25 +200,25 @@ public sealed class ControlService
             return Task.FromResult<JsonElement?>(null);
         }));
 
-        connection.RegisterRequestHandler(FleetServerMethods.InventoryPublish, Handler(FleetServerJsonContext.Default.FleetInventoryPublish, async (publication, token) =>
+        On(FleetServerMethods.InventoryPublish, Handler(FleetServerJsonContext.Default.FleetInventoryPublish, async (publication, token) =>
         {
             var ack = await _publications.PublishInventoryAsync(session.Device, publication, token).ConfigureAwait(false);
             return JsonSerializer.SerializeToElement(ack, FleetServerJsonContext.Default.FleetPublishAck);
         }));
 
-        connection.RegisterRequestHandler(FleetServerMethods.FactsPublish, Handler(FleetServerJsonContext.Default.FleetFactsPublish, async (publication, token) =>
+        On(FleetServerMethods.FactsPublish, Handler(FleetServerJsonContext.Default.FleetFactsPublish, async (publication, token) =>
         {
             var result = await _publications.PublishFactsAsync(session.Device, publication, token).ConfigureAwait(false);
             return JsonSerializer.SerializeToElement(result, FleetServerJsonContext.Default.FleetFactsPublishResult);
         }));
 
-        connection.RegisterRequestHandler(FleetServerMethods.FactsWithdraw, Handler(FleetServerJsonContext.Default.FleetFactsWithdraw, async (withdrawal, token) =>
+        On(FleetServerMethods.FactsWithdraw, Handler(FleetServerJsonContext.Default.FleetFactsWithdraw, async (withdrawal, token) =>
         {
             var result = await _publications.WithdrawFactsAsync(session.Device, withdrawal, token).ConfigureAwait(false);
             return JsonSerializer.SerializeToElement(result, FleetServerJsonContext.Default.FleetFactsWithdrawResult);
         }));
 
-        connection.RegisterRequestHandler(FleetServerMethods.DirectoryWatch, async (_, token) =>
+        On(FleetServerMethods.DirectoryWatch, async (_, token) =>
         {
             // Watch first, then read: a change between the two comes as an event, and versions make it idempotent.
             _directory.Watch(session);
@@ -219,21 +233,48 @@ public sealed class ControlService
         });
 
         if (_relays is not { } relays) return;
-        connection.RegisterRequestHandler(FleetServerMethods.RelayOpen, Handler(FleetServerJsonContext.Default.FleetRelayOpen, async (open, token) =>
+        On(FleetServerMethods.RelayOpen, Handler(FleetServerJsonContext.Default.FleetRelayOpen, async (open, token) =>
         {
             var ticket = await relays.OpenAsync(session, open, token).ConfigureAwait(false);
             return JsonSerializer.SerializeToElement(ticket, FleetServerJsonContext.Default.FleetRelayTicket);
         }));
 
-        connection.RegisterRequestHandler(FleetServerMethods.RelayAccept, Handler(FleetServerJsonContext.Default.FleetRelayRef, (accept, _) =>
+        On(FleetServerMethods.RelayAccept, Handler(FleetServerJsonContext.Default.FleetRelayRef, (accept, _) =>
             Task.FromResult<JsonElement?>(JsonSerializer.SerializeToElement(relays.Accept(session.Device, accept), FleetServerJsonContext.Default.FleetRelayTicket))));
 
-        connection.RegisterRequestHandler(FleetServerMethods.RelayClose, Handler(FleetServerJsonContext.Default.FleetRelayClose, async (close, _) =>
+        On(FleetServerMethods.RelayClose, Handler(FleetServerJsonContext.Default.FleetRelayClose, async (close, _) =>
         {
             await relays.CloseAsync(session.Device, close).ConfigureAwait(false);
             return null;
         }));
     }
+
+    // A span per request: the method, the device in short and the outcome; never the parameters.
+    private FleetRequestHandler Traced(ControlSession session, FleetRequestHandler handler)
+        => async (context, cancellationToken) =>
+        {
+            var started = System.Diagnostics.Stopwatch.GetTimestamp();
+            var activity = Metrics?.StartControlRequest(context.Method, session.Device.Id);
+            string? failure = null;
+            try
+            {
+                return await handler(context, cancellationToken).ConfigureAwait(false);
+            }
+            catch (FleetException exception)
+            {
+                failure = exception.Error.Code;
+                throw;
+            }
+            catch (Exception exception) when (exception is not OperationCanceledException)
+            {
+                failure = FleetErrorCodes.InternalError;
+                throw;
+            }
+            finally
+            {
+                Metrics?.EndControlRequest(activity, context.Method, started, failure);
+            }
+        };
 
     private static FleetRequestHandler Handler<T>(JsonTypeInfo<T> type, Func<T?, CancellationToken, Task<JsonElement?>> handle)
         => async (context, cancellationToken) =>

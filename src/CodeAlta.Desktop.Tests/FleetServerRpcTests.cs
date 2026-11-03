@@ -152,6 +152,68 @@ public sealed class FleetServerRpcTests
         }
     }
 
+    [TestMethod]
+    public async Task TheOwnersComputerSetsTheTelemetryOfTheFleetWithItsHeadersMasked()
+    {
+        var token = TestContext.CancellationToken;
+        var root = Directory.CreateTempSubdirectory("codealta-fleet-telemetry-rpc-").FullName;
+        string At(string name) => Directory.CreateDirectory(Path.Combine(root, name)).FullName;
+        try
+        {
+            await using var server = await CoordinatorServer.StartAsync(new CoordinatorServerOptions
+            {
+                DataRoot = At("server"), Urls = ["http://127.0.0.1:0"], ConfigureLogging = static _ => { }, EnvironmentVariable = static _ => null,
+            }, token);
+            var address = server.Addresses.First(static uri => uri.Scheme == "http");
+            await using var host = await CodeAltaHost.CreateAsync(new CodeAltaHostOptions
+            {
+                GlobalRoot = At("global"), CurrentProjectPath = At("project"), DiscoveryScope = new(At("home"), root), BuiltInSkillRoot = At("builtin"),
+                PluginEnvironment = FrozenDictionary<string, string?>.Empty, StartPlugins = false, IsHeadless = true, OwnsLogging = false,
+            }, token);
+            await using var servers = new DesktopFleetServers(host, "Desktop", "4.0.0");
+            var epoch = Guid.NewGuid().ToString("D");
+            var service = new FleetServerService(servers, epoch) { Spaces = host.SpaceCatalog };
+            var created = await service.CreateAsync(new FleetServerCreateRequest(epoch, address.ToString(), server.SetupCode!.Code, "Alex", "Home"), token);
+            Assert.AreEqual("ok", created.Status, created.Message);
+            var linkId = created.Server!.Id;
+
+            var none = await service.TelemetryAsync(new FleetServerLinkRequest(epoch, linkId), token);
+            Assert.AreEqual(("ok", false, "direct"), (none.Status, none.Telemetry!.Enabled, none.Telemetry.Route), "a fleet without a setting reads as off");
+
+            const string Secret = "secret-api-key-0123456789";
+            var set = await service.SetTelemetryAsync(new FleetTelemetryRequest(epoch, linkId, true, "https://otlp.example:4318/", FleetTelemetryProtocols.HttpProtobuf,
+                FleetTelemetryRoutes.Server, [FleetTelemetrySignals.Traces, FleetTelemetrySignals.Logs], [new FleetTelemetryHeaderEdit("x-api-key", Secret)], "production"), token);
+            Assert.AreEqual("ok", set.Status, set.Message);
+            var view = set.Telemetry!;
+            Assert.AreEqual((true, "https://otlp.example:4318", "server", "production"), (view.Enabled, view.Endpoint, view.Route, view.Environment));
+            CollectionAssert.AreEqual(new[] { "traces", "logs" }, view.Signals);
+            Assert.AreEqual(("x-api-key", "\u2022\u2022\u2022\u20226789"), (view.Headers.Single().Name, view.Headers.Single().Masked), "the page never sees a secret");
+
+            // A header sent without a value keeps the one the server holds.
+            var again = await service.SetTelemetryAsync(new FleetTelemetryRequest(epoch, linkId, true, "https://otlp.example:4318", FleetTelemetryProtocols.HttpProtobuf,
+                FleetTelemetryRoutes.Server, [FleetTelemetrySignals.Traces], [new FleetTelemetryHeaderEdit("x-api-key", null)], null), token);
+            Assert.AreEqual("ok", again.Status, again.Message);
+            var held = await servers.GetTelemetryAsync(linkId, token);
+            Assert.AreEqual(Secret, held.ServerHeaders!["x-api-key"]);
+            Assert.IsTrue(FleetTelemetrySettingsDocuments.TryParse(held.Settings!.Payload, out var signed));
+            Assert.AreEqual((2L, (string?)null), (signed.Sequence, signed.Environment));
+            Assert.IsFalse(held.Settings.Payload.Contains(Secret, StringComparison.Ordinal), "the headers of the server route are not in what the machines get");
+
+            var refused = await service.SetTelemetryAsync(new FleetTelemetryRequest(epoch, linkId, true, "https://otlp.example:4317", FleetTelemetryProtocols.Grpc,
+                FleetTelemetryRoutes.Server, [FleetTelemetrySignals.Traces], [], null), token);
+            Assert.AreEqual("invalid_request", refused.Status, "the server forwards OTLP over HTTP only");
+            var unknown = await service.SetTelemetryAsync(new FleetTelemetryRequest(epoch, linkId, true, "https://otlp.example:4318", FleetTelemetryProtocols.HttpProtobuf,
+                FleetTelemetryRoutes.Direct, [FleetTelemetrySignals.Traces], [new FleetTelemetryHeaderEdit("x-other", null)], null), token);
+            Assert.AreEqual("invalid_request", unknown.Status, "a header without a value must be one the server holds");
+        }
+        finally
+        {
+            try { Directory.Delete(root, recursive: true); }
+            catch (IOException) { }
+            catch (UnauthorizedAccessException) { }
+        }
+    }
+
     private static SessionViewDescriptor Descriptor(string id, string path, DateTimeOffset? created = null) => new()
     {
         SessionId = id, Kind = SessionViewKind.GlobalSession, ProviderId = Provider.Value, ProviderKey = Provider.Value, WorkingDirectory = path, Title = "A chat",
