@@ -122,6 +122,74 @@ public sealed class FleetUpdateAgentTests
     }
 
     [TestMethod]
+    public async Task AnAcknowledgedCancellationIsNeverPushedOutByOthers()
+    {
+        using var harness = new AgentHarness();
+        var agent = harness.Start();
+        var c1 = harness.Instruction(harness.Manifest(1, "c1", "4.0.2"));
+        Assert.AreEqual(FleetUpdateMachineStates.Cancelled, agent.CancelAndReport(LinkA, new FleetUpdateCancel("c1"))?.State, "acknowledged before its instruction");
+
+        // A server that turned hostile sends the cancellations of campaigns that never existed, to push that one out.
+        var acknowledged = 0;
+        for (var i = 0; i < 2 * FleetUpdateAgentLink.MaxCancelled; i++)
+        {
+            if (agent.CancelAndReport(LinkA, new FleetUpdateCancel($"made-up-{i}")) is not null) acknowledged++;
+        }
+
+        // Then it replays the signed manifest of the campaign cancelled: it never starts.
+        agent = harness.Restart(agent);
+        await harness.AcceptAsync(agent, LinkA, c1);
+        Assert.IsNull(agent.Current, "the cancellation acknowledged holds");
+        StringAssert.Contains(agent.Report(LinkA)?.Message, "cancelled");
+        Assert.AreEqual(0, harness.Applied.Count);
+        Assert.AreEqual(FleetUpdateAgentLink.MaxCancelled - 1, acknowledged, "past the bound, a cancellation is neither kept nor acknowledged");
+    }
+
+    [TestMethod]
+    public async Task ACancellationWithItsSignedDocumentIsKeptUntilANewerOneIsTaken()
+    {
+        using var harness = new AgentHarness();
+        var agent = harness.Start();
+        var c2 = harness.Instruction(harness.Manifest(2, "c2", "4.0.2"));
+        Assert.AreEqual(FleetUpdateMachineStates.Cancelled, agent.CancelAndReport(LinkA, null, new FleetUpdateCancel("c2", c2.Manifest), harness.DeviceList)?.State);
+        agent = harness.Restart(agent);
+        await harness.AcceptAsync(agent, LinkA, c2);
+        Assert.IsNull(agent.Current, "it never starts");
+        CollectionAssert.AreEqual(new[] { "c2" }, agent.CancellationsOf(LinkA).ToArray());
+
+        // Once a newer manifest is taken, that of c2 can no longer be: its cancellation is no longer kept.
+        await harness.AcceptAsync(agent, LinkA, harness.Instruction(harness.Manifest(3, "c3", "4.0.2")));
+        Assert.AreEqual(("c3", FleetUpdateMachineStates.Waiting), (agent.Current?.CampaignId, agent.Current?.State));
+        Assert.AreEqual(0, agent.CancellationsOf(LinkA).Count);
+        await harness.AcceptAsync(agent, LinkA, c2);
+        Assert.AreEqual("c3", agent.Current?.CampaignId);
+        StringAssert.Contains(harness.Said.Last(said => said.Report.CampaignId == "c2").Report.Message, "older than campaign 3");
+
+        // The cancellation of a campaign already behind takes no room.
+        Assert.IsNotNull(agent.CancelAndReport(LinkA, null, new FleetUpdateCancel("c1", harness.Instruction(harness.Manifest(1, "c1", "4.0.2")).Manifest), harness.DeviceList));
+        Assert.AreEqual(0, agent.CancellationsOf(LinkA).Count);
+
+        // An automatic campaign is kept with the sequence of its policy, until a newer policy is taken.
+        var automatic = harness.Automatic("auto-9", harness.Policy(7, FleetUpdateModes.Automatic), "4.1.0");
+        Assert.IsNotNull(agent.CancelAndReport(LinkA, null, new FleetUpdateCancel("auto-9", null, automatic.Policy), harness.DeviceList));
+        CollectionAssert.Contains(agent.CancellationsOf(LinkA).ToArray(), "auto-9");
+        await harness.AcceptPolicyAsync(agent, LinkA, harness.Owner.Sign(harness.Policy(8, FleetUpdateModes.Manual)));
+        Assert.AreEqual(0, agent.CancellationsOf(LinkA).Count);
+
+        // Cancellations without a document that verifies fill their own room, not the room of signed manifests.
+        using var stranger = new UpdateSigner();
+        var forged = harness.Instruction(harness.Manifest(9, "c9", "4.0.2"), stranger);
+        Assert.IsNotNull(agent.CancelAndReport(LinkA, null, new FleetUpdateCancel("c9", forged.Manifest), harness.DeviceList), "kept for good");
+        for (var i = 1; i < FleetUpdateAgentLink.MaxCancelled; i++) Assert.IsNotNull(agent.CancelAndReport(LinkA, new FleetUpdateCancel($"made-up-{i}")));
+        Assert.IsNull(agent.CancelAndReport(LinkA, new FleetUpdateCancel("made-up-more")), "full: neither kept nor acknowledged");
+        var c5 = harness.Instruction(harness.Manifest(5, "c5", "4.0.2"));
+        Assert.AreEqual(FleetUpdateMachineStates.Cancelled, agent.CancelAndReport(LinkA, null, new FleetUpdateCancel("c5", c5.Manifest), harness.DeviceList)?.State);
+        await harness.AcceptAsync(agent, LinkA, c5);
+        Assert.AreEqual("c3", agent.Current?.CampaignId, "c5 never starts");
+        Assert.AreEqual(FleetUpdateAgentLink.MaxCancelled + 1, harness.Restart(agent).CancellationsOf(LinkA).Count, "kept across a restart");
+    }
+
+    [TestMethod]
     public async Task ACancellationThatCannotBeKeptIsNotAcknowledged()
     {
         using var harness = new AgentHarness();
@@ -141,6 +209,59 @@ public sealed class FleetUpdateAgentTests
         Assert.AreEqual(("c1", FleetUpdateMachineStates.Cancelled), (agent.Current?.CampaignId, agent.Current?.State));
         Assert.IsNull(agent.Tick());
         Assert.AreEqual(0, harness.Applied.Count);
+    }
+
+    [TestMethod]
+    public async Task ARefusalIsNotSaidBeforeTheCancellationItAcknowledgesIsKept()
+    {
+        using var harness = new AgentHarness();
+        var agent = harness.Start();
+        Assert.IsNotNull(agent.CancelAndReport(LinkA, new FleetUpdateCancel("c0")), "a first cancellation is kept: the checkpoint is on disk");
+        var c1 = harness.Instruction(harness.Manifest(1, "c1", "4.0.2"));
+        using (harness.FailWrites())
+        {
+            // The cancellation comes before its instruction and cannot be kept: it is not acknowledged.
+            Assert.IsNull(agent.CancelAndReport(LinkA, new FleetUpdateCancel("c1")));
+            // The instruction is refused, as cancelled; that refusal is a final state, which the server takes as the
+            // acknowledgement of the cancellation: nothing is said while a restart would forget the cancellation.
+            await harness.AcceptAsync(agent, LinkA, c1);
+            Assert.IsNull(agent.Report(LinkA), "no report on a connection");
+            Assert.IsFalse(harness.Said.Any(said => said.Report.CampaignId == "c1"), "no report sent");
+        }
+
+        // Once the cancellation is kept, the refusal is said, and the cancellation holds across a restart.
+        Assert.AreEqual(("c1", FleetUpdateMachineStates.Refused), (agent.Report(LinkA)?.CampaignId, agent.Report(LinkA)?.State));
+        agent = harness.Restart(agent);
+        await harness.AcceptAsync(agent, LinkA, c1);
+        Assert.IsNull(agent.Current, "the campaign never starts");
+        Assert.IsNull(agent.Tick());
+        Assert.AreEqual(0, harness.Applied.Count);
+    }
+
+    [TestMethod]
+    public async Task ARefusalIsNotSaidForACancellationReceivedWhileTheCheckpointDoesNotRead()
+    {
+        using var harness = new AgentHarness();
+        Directory.CreateDirectory(Path.GetDirectoryName(harness.StatePath)!);
+        File.WriteAllText(harness.StatePath, "{ not json");
+        var agent = harness.Start();
+
+        Assert.IsNull(agent.CancelAndReport(LinkA, new FleetUpdateCancel("c1")), "not kept, not acknowledged");
+        await harness.AcceptAsync(agent, LinkA, harness.Instruction(harness.Manifest(1, "c1", "4.0.2")));
+        Assert.IsNull(agent.Report(LinkA), "its refusal would acknowledge the cancellation");
+        Assert.IsFalse(harness.Said.Any(said => said.Report.CampaignId == "c1"));
+
+        // Another campaign's refusal tells the server why nothing is taken.
+        await harness.AcceptAsync(agent, LinkA, harness.Instruction(harness.Manifest(2, "c2", "4.0.2")));
+        Assert.AreEqual(("c2", FleetUpdateMachineStates.Refused), (agent.Report(LinkA)?.CampaignId, agent.Report(LinkA)?.State));
+        StringAssert.Contains(agent.Report(LinkA)?.Message, "cannot be read");
+
+        // Once the owner resets the file, the cancellation sent again is kept and acknowledged.
+        File.Delete(harness.StatePath);
+        Assert.AreEqual(FleetUpdateMachineStates.Cancelled, agent.CancelAndReport(LinkA, new FleetUpdateCancel("c1"))?.State);
+        await harness.AcceptAsync(agent, LinkA, harness.Instruction(harness.Manifest(1, "c1", "4.0.2")));
+        Assert.IsTrue(harness.Said.Any(said => said.Report is { CampaignId: "c1", State: FleetUpdateMachineStates.Refused }));
+        Assert.IsNull(agent.Current);
     }
 
     [TestMethod]
@@ -167,6 +288,51 @@ public sealed class FleetUpdateAgentTests
         await harness.AcceptAsync(agent, LinkA, harness.Automatic("auto-3", harness.Policy(2, FleetUpdateModes.Automatic), "4.1.0"));
         StringAssert.Contains(agent.Report(LinkA)?.Message, "older than policy 3");
         Assert.AreEqual(0, harness.Applied.Count);
+    }
+
+    [TestMethod]
+    public async Task APolicyLostWithARestartIsHeardAgainBeforeTheCampaignKeptRuns()
+    {
+        using var harness = new AgentHarness();
+        harness.Latest = UpdateVersion.Parse("4.1.0");
+        var agent = harness.Start();
+        var automatic = harness.Automatic("auto-1", harness.Policy(2, FleetUpdateModes.Automatic), "4.1.0");
+        await harness.AcceptAsync(agent, LinkA, automatic);
+        var manual = harness.Owner.Sign(harness.Policy(3, FleetUpdateModes.Manual));
+        using (harness.FailWrites())
+        {
+            await harness.AcceptPolicyAsync(agent, LinkA, manual);
+            Assert.AreEqual(FleetUpdateMachineStates.Cancelled, agent.Current?.State, "stopped in memory");
+
+            // The node restarts before the write succeeds: the checkpoint brings back the older policy and its campaign.
+            agent = harness.Restart(agent);
+            Assert.AreEqual(("auto-1", FleetUpdateMachineStates.Waiting), (agent.Current?.CampaignId, agent.Current?.State));
+            Assert.IsNull(agent.Tick(), "nothing kept from before the start runs before its server is heard again");
+        }
+
+        Assert.IsNull(agent.Tick(), "a write that succeeds does not say the checkpoint is current");
+
+        // At the connection, the server sends its policy, then the instruction of the campaign the node follows.
+        await harness.AcceptPolicyAsync(agent, LinkA, manual);
+        await harness.AcceptAsync(agent, LinkA, automatic);
+        Assert.AreEqual(FleetUpdateMachineStates.Cancelled, agent.Current?.State);
+        Assert.IsNull(agent.Tick());
+        Assert.AreEqual(0, harness.Applied.Count);
+    }
+
+    [TestMethod]
+    public async Task ACampaignKeptAcrossARestartRunsOnceItsServerSendsItAgain()
+    {
+        using var harness = new AgentHarness();
+        var agent = harness.Start();
+        var c1 = harness.Instruction(harness.Manifest(1, "c1", "4.0.2"));
+        await harness.AcceptAsync(agent, LinkA, c1);
+        agent = harness.Restart(agent);
+        Assert.IsNull(agent.Tick(), "it waits for its server");
+
+        await harness.AcceptAsync(agent, LinkA, c1);
+        await (agent.Tick() ?? throw new AssertFailedException("The campaign did not start once its server sent it again."));
+        Assert.AreEqual(1, harness.Applied.Count);
     }
 
     [TestMethod]
@@ -362,11 +528,13 @@ public sealed class FleetUpdateAgentTests
         harness.Latest = UpdateVersion.Parse("4.1.0");
         harness.Clock.Now = new DateTimeOffset(2026, 11, 4, 1, 30, 0, TimeSpan.Zero);
         var agent = harness.Start();
-        await harness.AcceptAsync(agent, LinkA, harness.Automatic("auto-1", harness.Policy(1, FleetUpdateModes.Automatic, window: "02:00", zone: "Europe/Paris"), "4.1.0"));
+        var automatic = harness.Automatic("auto-1", harness.Policy(1, FleetUpdateModes.Automatic, window: "02:00", zone: "Europe/Paris"), "4.1.0");
+        await harness.AcceptAsync(agent, LinkA, automatic);
 
-        // The node was off from inside its window to past its end.
+        // The node was off from inside its window to past its end; its server sends the campaign again at the connection.
         harness.Clock.Now = new DateTimeOffset(2026, 11, 4, 6, 0, 0, TimeSpan.Zero);
         agent = harness.Restart(agent);
+        await harness.AcceptAsync(agent, LinkA, automatic);
         Assert.IsNull(agent.Tick());
         Assert.AreEqual(0, harness.Applied.Count);
         harness.Clock.Now = new DateTimeOffset(2026, 11, 5, 1, 0, 0, TimeSpan.Zero);
@@ -464,6 +632,9 @@ internal sealed class AgentHarness : IDisposable
 
     public List<string> Logs { get; } = [];
 
+    /// <summary>Gets the reports the agent sent to its servers.</summary>
+    public List<(string LinkId, FleetUpdateReport Report)> Said { get; } = [];
+
     /// <summary>Makes every write of the checkpoint fail until disposed, the file on disk kept as it is (what a restart reads).</summary>
     public IDisposable FailWrites()
     {
@@ -522,6 +693,7 @@ internal sealed class AgentHarness : IDisposable
             Status = () => Status ?? new FleetUpdateStatus(Running, null, null, null, null, null, [], null),
             Time = Clock,
             Log = message => { lock (Logs) Logs.Add(message); },
+            Said = (linkId, report) => { lock (Said) Said.Add((linkId, report)); },
         };
         return new FleetUpdateAgent(configure?.Invoke(options) ?? options);
     }

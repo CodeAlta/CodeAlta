@@ -157,11 +157,14 @@ public sealed class UpdateCampaignTests
         var manifest = Manifest(organization, fleet.OwnerKey.DeviceId, 1, "4.0.2", feed: feed) with { Packages = hashes, NotBefore = start };
 
         // An instruction received early (here straight from the test) waits for its time on the node itself.
-        await mac.Agent!.AcceptAsync(mac.Connector!, LinkId, organization, new FleetUpdateInstruction("c1", fleet.SignManifest(manifest)), CancellationToken.None);
+        var instruction = new FleetUpdateInstruction("c1", fleet.SignManifest(manifest));
+        await mac.Agent!.AcceptAsync(mac.Connector!, LinkId, organization, instruction, CancellationToken.None);
         Assert.AreEqual(FleetUpdateMachineStates.Waiting, mac.Agent.Current?.State);
         Assert.IsNull(mac.Agent.Tick());
         await mac.RestartAsync("4.0.1");
         Assert.AreEqual(FleetUpdateMachineStates.Waiting, mac.Agent!.Current?.State, "kept across a restart");
+        // What the node kept runs once its server sent the campaign again, after its policy, as at each connection.
+        await mac.Agent.AcceptAsync(mac.Connector!, LinkId, organization, instruction, CancellationToken.None);
         Assert.IsNull(mac.Agent.Tick());
         Assert.AreEqual(0, mac.Applied.Count);
 

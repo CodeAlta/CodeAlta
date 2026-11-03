@@ -205,9 +205,16 @@ public sealed record FleetSignedUpdateDocument(
 /// <param name="Version">The version an automatic campaign installs; null with a manifest.</param>
 public sealed record FleetUpdateInstruction(string CampaignId, FleetSignedUpdateDocument? Manifest, FleetSignedUpdateDocument? Policy = null, string? Version = null);
 
-/// <summary>The payload of <see cref="FleetServerMethods.UpdateCancel"/>: a campaign cancelled before the node switched.</summary>
+/// <summary>
+/// The payload of <see cref="FleetServerMethods.UpdateCancel"/>: a campaign cancelled before the node switched, with the
+/// signed document of its instruction. A cancellation itself is not signed; that document gives the node the sequence a
+/// controller signed for the campaign, so that it keeps the cancellation of a campaign it never took until that sequence
+/// can no longer be accepted, and no longer.
+/// </summary>
 /// <param name="CampaignId">The campaign.</param>
-public sealed record FleetUpdateCancel(string CampaignId);
+/// <param name="Manifest">The signed manifest of a campaign a person started; null otherwise.</param>
+/// <param name="Policy">The signed automatic policy of an automatic campaign; null otherwise.</param>
+public sealed record FleetUpdateCancel(string CampaignId, FleetSignedUpdateDocument? Manifest = null, FleetSignedUpdateDocument? Policy = null);
 
 /// <summary>
 /// Where a node stands in a campaign (<see cref="FleetServerMethods.UpdateReport"/>, and in its presence): sent when it

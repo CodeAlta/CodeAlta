@@ -59,9 +59,11 @@ public sealed class UpdateCampaignServerTests
         var node = await fleet.ConnectAsync(0);
         var manual = await fleet.CreateCampaignAsync("4.0.2");
         await fleet.TickAsync();
-        Assert.AreEqual(manual.Id, (await node.NextAsync(FleetServerMethods.UpdateInstruction, FleetServerJsonContext.Default.FleetUpdateInstruction)).CampaignId);
+        var asked = await node.NextAsync(FleetServerMethods.UpdateInstruction, FleetServerJsonContext.Default.FleetUpdateInstruction);
+        Assert.AreEqual(manual.Id, asked.CampaignId);
         await fleet.SetPolicyAsync(3, FleetUpdateModes.Pinned, pinned: "4.0.1");
-        Assert.AreEqual(manual.Id, (await node.NextAsync(FleetServerMethods.UpdateCancel, FleetServerJsonContext.Default.FleetUpdateCancel)).CampaignId);
+        var revoked = await node.NextAsync(FleetServerMethods.UpdateCancel, FleetServerJsonContext.Default.FleetUpdateCancel);
+        Assert.AreEqual((manual.Id, asked.Manifest), (revoked.CampaignId, revoked.Manifest), "with its signed manifest, for the node to keep it as long as it could be taken");
         Assert.AreEqual(FleetUpdateCampaignStates.Cancelled, (await fleet.CampaignAsync(manual.Id)).State);
     }
 
@@ -96,8 +98,9 @@ public sealed class UpdateCampaignServerTests
         Assert.AreEqual(FleetUpdateCampaignStates.Cancelled, (await fleet.CancelAsync(campaign.Id)).State);
 
         var back = await fleet.ConnectAsync(0);
-        Assert.AreEqual(campaign.Id, (await back.NextAsync(FleetServerMethods.UpdateCancel, FleetServerJsonContext.Default.FleetUpdateCancel)).CampaignId,
-            "the cancellation waits for the node");
+        var cancel = await back.NextAsync(FleetServerMethods.UpdateCancel, FleetServerJsonContext.Default.FleetUpdateCancel);
+        Assert.AreEqual(campaign.Id, cancel.CampaignId, "the cancellation waits for the node");
+        Assert.IsNotNull(cancel.Manifest, "with its signed manifest");
         await back.ReportAsync(campaign.Id, FleetUpdateMachineStates.Cancelled);
         await fleet.WaitForAsync(async () => !(await fleet.MachinesAsync(campaign.Id)).Single().CancelPending);
 

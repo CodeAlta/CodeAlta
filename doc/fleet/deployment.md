@@ -157,6 +157,11 @@ All signed (Authenticode, Apple notarization, NuGet signatures, cosign for image
   switches holds the server for ten minutes. A campaign is cancelled until the server's step; a node already asked is
   told, again at each connection, until it reports the campaign done (any final state). The node keeps the
   cancellation before it acknowledges it, also one that comes before the instruction, which then never starts there.
+  A cancellation is not signed, so it carries the signed manifest (or automatic policy) of its campaign: the node keeps
+  the cancellation of a campaign it never took until it accepts a newer manifest (or policy) from that server, which
+  makes that one impossible to take, and for good without a document that verifies. It never forgets one it
+  acknowledged: past its bounds (64 cancellations per server without a signed manifest, 256 with one), it neither keeps
+  nor acknowledges a new one.
   The server's own step is done only once its new version confirmed its trial (it ends as rolled back otherwise), and
   the campaign stays active until then: one campaign at a time is active, whoever starts it. A server stopped during
   its own step takes that step again at its start unless its self-update holds the switch.
@@ -174,9 +179,13 @@ All signed (Authenticode, Apple notarization, NuGet signatures, cosign for image
   `"fleet": false`, which refuses every update of the fleet; so does a switch its owner asked for (`altanode update`),
   which a campaign never replaces nor withdraws. A node keeps the instruction it accepted
   (`fleet/update-campaign.json`) and waits for its time itself, across restarts; nothing runs until that file is
-  written, and while it does not read, the node refuses every update of the fleet (the owner fixes it, or deletes it to
-  start again as a new node). A newer policy or a cancellation it cannot write holds in memory, and until the write
-  succeeds (tried again) the node takes no instruction, runs no work of the fleet and acknowledges nothing. A version
+  written. After a start, the campaign the file holds runs only once its server sent it again (at each connection,
+  after its policy and the cancellations not acknowledged) and the state is kept: a write that failed before the
+  restart leaves the file behind, and nothing on disk can say so. While the file does not read, the node refuses
+  every update of the fleet (the owner fixes it, or deletes it to start again as a new node). A newer policy or a cancellation it cannot write holds in memory, and until the write
+  succeeds (tried again) the node takes no instruction, runs no work of the fleet and acknowledges nothing. The server
+  takes any final state as the acknowledgement of a cancellation: the node reports none, a refusal included, for a
+  campaign whose cancellation it received and has not kept; it still refuses the others with the reason. A version
   is confirmed only from a self-update state that reads. A campaign it accepted never starts again: sent again, even after a refusal, it only gets
   where the node stands. A node follows one fleet at a time: another server's instruction is refused while a campaign
   runs, and each server keeps reading how its own last campaign ended. An automatic update waits on each machine, the

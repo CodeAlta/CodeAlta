@@ -195,7 +195,7 @@ internal sealed class UpdateCampaignService : IAsyncDisposable
             // A node offline gets it when it connects again: the cancellation stays due until the node acknowledges it.
             foreach (var device in cancelled.Asked)
             {
-                if (_presence.Get(device) is { } session) _ = SendCancelAsync(session, campaign.Id);
+                if (_presence.Get(device) is { } session) _ = SendCancelAsync(session, campaign);
             }
 
             _logger.LogInformation("Update campaign {Sequence} was cancelled by {Device}", campaign.Sequence, actor.Id);
@@ -230,7 +230,7 @@ internal sealed class UpdateCampaignService : IAsyncDisposable
         var record = new UpdatePolicyRecord(actor.OrganizationId, policy.Sequence, signed.Payload, signed.Signature, actor.Id, null, null, _time.GetUtcNow());
         var audit = origin.Audit("update.policy.set", actor, actor.OrganizationId,
             details: $"{{\"seq\":{policy.Sequence},\"mode\":\"{policy.Mode}\"}}");
-        var revoked = new List<(string CampaignId, IReadOnlyList<string> Asked)>();
+        var revoked = new List<(UpdateCampaignRecord Campaign, IReadOnlyList<string> Asked)>();
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
@@ -249,7 +249,7 @@ internal sealed class UpdateCampaignService : IAsyncDisposable
                 await _store.SaveUpdateCampaignAsync(withdrawn.Campaign, withdrawn.Machines, origin.Audit("update.campaign.cancel", actor, campaign.Id,
                     details: $"{{\"policy\":{policy.Sequence}}}"), CancellationToken.None).ConfigureAwait(false);
                 _logger.LogInformation("Update campaign {Sequence} to {Version} was withdrawn: {Reason}", campaign.Sequence, campaign.TargetVersion, why);
-                revoked.Add((campaign.Id, withdrawn.Asked));
+                revoked.Add((campaign, withdrawn.Asked));
                 Changed(withdrawn.Campaign);
             }
         }
@@ -263,7 +263,7 @@ internal sealed class UpdateCampaignService : IAsyncDisposable
         foreach (var session in _presence.List(actor.OrganizationId))
         {
             if (session.Device.Kind != FleetDeviceKinds.Node) continue;
-            var cancelled = revoked.Where(item => item.Asked.Contains(session.Device.Id, StringComparer.Ordinal)).Select(static item => item.CampaignId).ToArray();
+            var cancelled = revoked.Where(item => item.Asked.Contains(session.Device.Id, StringComparer.Ordinal)).Select(static item => item.Campaign).ToArray();
             _ = DeliverAsync(session, record, cancelled);
         }
 
@@ -306,10 +306,10 @@ internal sealed class UpdateCampaignService : IAsyncDisposable
     // Who asks for the server's switch of a campaign, as its self-update records it (requestedBy).
     private static string ServerRequester(UpdateCampaignRecord campaign) => $"fleet campaign {campaign.Sequence} ({campaign.Id})";
 
-    private async Task DeliverAsync(ControlSession session, UpdatePolicyRecord policy, IReadOnlyList<string> cancelled)
+    private async Task DeliverAsync(ControlSession session, UpdatePolicyRecord policy, IReadOnlyList<UpdateCampaignRecord> cancelled)
     {
         await SendPolicyAsync(session, policy).ConfigureAwait(false);
-        foreach (var campaignId in cancelled) await SendCancelAsync(session, campaignId).ConfigureAwait(false);
+        foreach (var campaign in cancelled) await SendCancelAsync(session, campaign).ConfigureAwait(false);
     }
 
     /// <summary>Records where a node stands in a campaign.</summary>
@@ -322,7 +322,7 @@ internal sealed class UpdateCampaignService : IAsyncDisposable
         ArgumentNullException.ThrowIfNull(device);
         ArgumentNullException.ThrowIfNull(report);
         if (string.IsNullOrEmpty(report.CampaignId) || report.CampaignId.Length > 64 || !FleetUpdateMachineStates.IsReported(report.State)) return;
-        var cancel = false;
+        UpdateCampaignRecord? cancel = null;
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
@@ -332,7 +332,7 @@ internal sealed class UpdateCampaignService : IAsyncDisposable
             if (machines.FirstOrDefault(machine => machine.DeviceId == device.Id) is not { } machine) return;
             var applied = UpdateCampaignEngine.Apply(machine, report, _time.GetUtcNow());
             // A node that still works on a cancelled campaign did not get its cancellation: it gets it again.
-            cancel = applied.CancelPending && !FleetUpdateMachineStates.IsTerminal(report.State);
+            cancel = applied.CancelPending && !FleetUpdateMachineStates.IsTerminal(report.State) ? campaign : null;
             if (ReferenceEquals(applied, machine)) return;
             await _store.SaveUpdateCampaignAsync(campaign, [applied], null, cancellationToken).ConfigureAwait(false);
             if (applied.State != machine.State)
@@ -342,7 +342,7 @@ internal sealed class UpdateCampaignService : IAsyncDisposable
         finally
         {
             _gate.Release();
-            if (cancel && _presence.Get(device.Id) is { } session) _ = SendCancelAsync(session, report.CampaignId);
+            if (cancel is not null && _presence.Get(device.Id) is { } session) _ = SendCancelAsync(session, cancel);
         }
 
         Nudge();
@@ -364,7 +364,9 @@ internal sealed class UpdateCampaignService : IAsyncDisposable
             if (await _store.GetUpdatePolicyAsync(session.Device.OrganizationId).ConfigureAwait(false) is { } policy)
                 await SendPolicyAsync(session, policy).ConfigureAwait(false);
             foreach (var cancelled in await _store.ListUpdateCancellationsAsync(session.Device.OrganizationId, session.Device.Id).ConfigureAwait(false))
-                await SendCancelAsync(session, cancelled).ConfigureAwait(false);
+            {
+                if (await _store.GetUpdateCampaignAsync(cancelled).ConfigureAwait(false) is { } campaign) await SendCancelAsync(session, campaign).ConfigureAwait(false);
+            }
 
             // Every campaign with work left, however many newer ones the history of the desktop shows.
             foreach (var campaign in await _store.ListOutstandingUpdateCampaignsAsync(session.Device.OrganizationId).ConfigureAwait(false))
@@ -659,8 +661,14 @@ internal sealed class UpdateCampaignService : IAsyncDisposable
         => SendAsync(session, FleetServerMethods.UpdatePolicy,
             JsonSerializer.SerializeToElement(new FleetSignedUpdateDocument(policy.Payload, policy.Signature), FleetUpdateJsonContext.Default.FleetSignedUpdateDocument));
 
-    private Task SendCancelAsync(ControlSession session, string campaignId)
-        => SendAsync(session, FleetServerMethods.UpdateCancel, JsonSerializer.SerializeToElement(new FleetUpdateCancel(campaignId), FleetServerJsonContext.Default.FleetUpdateCancel));
+    // The cancellation carries the signed document of the campaign: the node keeps the cancellation of a campaign it never
+    // took until that document's sequence can no longer be accepted.
+    private Task SendCancelAsync(ControlSession session, UpdateCampaignRecord campaign)
+    {
+        var instruction = Instruction(campaign);
+        return SendAsync(session, FleetServerMethods.UpdateCancel,
+            JsonSerializer.SerializeToElement(new FleetUpdateCancel(campaign.Id, instruction.Manifest, instruction.Policy), FleetServerJsonContext.Default.FleetUpdateCancel));
+    }
 
     private static FleetUpdateInstruction Instruction(UpdateCampaignRecord campaign)
         => campaign.Automatic
