@@ -336,12 +336,13 @@ internal sealed class DesktopFleetServers : IAsyncDisposable
         using var client = Client(linkId);
         var response = await client.QueryStatisticsAsync(request, cancellationToken).ConfigureAwait(false);
         var names = new Dictionary<string, string>(StringComparer.Ordinal);
-        if (Volatile.Read(ref _connections)?.Find(linkId)?.Connector?.MetadataKey is { } key)
+        // A project key is the blind index of the key of its space: every key this computer holds may name one of its projects.
+        if (Volatile.Read(ref _connections)?.Find(linkId)?.Connector?.MetadataKeys?.Held is { Count: > 0 } keys)
         {
             foreach (var project in await _host.ProjectCatalog.LoadAsync(cancellationToken).ConfigureAwait(false))
             {
                 if (await FleetProjectKeys.IdentityAsync(project, _repositories, cancellationToken).ConfigureAwait(false) is not { } identity) continue;
-                names.TryAdd(FleetProjectKeys.Of(key, identity), string.IsNullOrWhiteSpace(project.DisplayName) ? project.Name : project.DisplayName);
+                foreach (var key in keys) names.TryAdd(FleetProjectKeys.Of(key, identity), string.IsNullOrWhiteSpace(project.DisplayName) ? project.Name : project.DisplayName);
             }
         }
 

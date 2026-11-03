@@ -155,14 +155,17 @@ public sealed record SessionRecord(
     string? SealedMetadata,
     DateTimeOffset ReceivedAt);
 
-/// <summary>A metadata key of a person: what the server knows of it, never the key itself.</summary>
+/// <summary>A metadata key of a space of a person: what the server knows of it, never the key itself.</summary>
 /// <param name="Id">The id of the key.</param>
 /// <param name="OrganizationId">Its organization.</param>
 /// <param name="PersonId">The person whose devices hold it.</param>
-/// <param name="Epoch">Its epoch.</param>
+/// <param name="Epoch">Its epoch, counted per space.</param>
 /// <param name="CreatedByDeviceId">The controller device that made it.</param>
 /// <param name="CreatedAt">When it was made.</param>
-public sealed record MetadataKeyRecord(string Id, string OrganizationId, string PersonId, int Epoch, string CreatedByDeviceId, DateTimeOffset CreatedAt);
+/// <param name="SpaceId">The opaque id of its space; empty for a key of the person made before spaces had keys.</param>
+/// <param name="SealedDescriptor">Which space it is on the devices, sealed with the key; null for a key of the person.</param>
+public sealed record MetadataKeyRecord(string Id, string OrganizationId, string PersonId, int Epoch, string CreatedByDeviceId, DateTimeOffset CreatedAt,
+    string SpaceId = "", string? SealedDescriptor = null);
 
 /// <summary>A metadata key wrapped to one device, as opaque text.</summary>
 /// <param name="KeyId">The key.</param>

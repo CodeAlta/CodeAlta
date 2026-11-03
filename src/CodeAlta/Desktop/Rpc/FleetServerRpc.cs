@@ -423,13 +423,13 @@ internal sealed class FleetServerService
                 directory.Sessions.Values.Count(session => session.MachineId == id), !self && isReachable(id));
         }).OrderBy(static machine => machine.IsThisComputer ? 0 : machine.Online ? 1 : 2).ThenBy(static machine => machine.Name, StringComparer.CurrentCultureIgnoreCase).ToArray();
         var openable = machines.Where(static machine => machine.IsThisComputer || machine.IsReachable).Select(static machine => machine.Id).ToHashSet(StringComparer.Ordinal);
-        // Titles travel sealed with the metadata key of the person: opened here, in the host, never by the server.
-        var key = connection.Connector?.MetadataKey;
+        // Titles travel sealed with the metadata key of their space: opened here, in the host, never by the server.
+        var keys = connection.Connector?.MetadataKeys;
         var sessions = directory.Sessions.Values.OrderByDescending(static session => session.Fact.UpdatedAt).Take(500).Select(session =>
         {
             var fact = session.Fact;
             var counts = fact.Counts ?? new FleetSessionCounts();
-            var title = key is not null && key.TryOpen(fact.SessionId, fact.SealedMetadata, out var metadata) ? metadata!.Title : null;
+            var title = keys is not null && keys.TryOpen(fact.SessionId, fact.SealedMetadata, out var metadata) ? metadata!.Title : null;
             return new FleetSessionView(fact.SessionId, session.MachineId, fact.State, fact.ProviderType, fact.Model, Time(fact.CreatedAt), Time(fact.UpdatedAt),
                 Clamp(counts.Turns), Clamp(counts.InputTokens + counts.OutputTokens), openable.Contains(session.MachineId), title);
         }).ToArray();

@@ -77,10 +77,11 @@ internal sealed class FleetPublicationOutbox
 
     /// <summary>
     /// Records the sessions to publish as they are now, a new version for each whose facts changed, and gives the facts the
-    /// server does not hold yet, at most <paramref name="limit"/>, the oldest changes first. With a metadata key, their
-    /// titles are sealed into the facts: a version follows the title and the key, never the random bytes of a seal.
+    /// server does not hold yet, at most <paramref name="limit"/>, the oldest changes first. With the metadata key of a
+    /// session's space, its title is sealed into the facts: a version follows the title and the key, never the random
+    /// bytes of a seal, so a new key (another space, a new epoch) seals it again.
     /// </summary>
-    public IReadOnlyList<FleetSessionFact> Pending(IReadOnlyList<FleetLocalSession> sessions, int limit, FleetMetadataKey? key = null)
+    public IReadOnlyList<FleetSessionFact> Pending(IReadOnlyList<FleetLocalSession> sessions, int limit, Func<FleetLocalSession, FleetMetadataKey?>? keyOf = null)
     {
         var pending = new List<(FleetSessionFact Fact, DateTimeOffset UpdatedAt)>();
         var changed = false;
@@ -88,6 +89,7 @@ internal sealed class FleetPublicationOutbox
         {
             var fact = new FleetSessionFact(session.SessionId, session.Epoch, 0, session.State, session.CreatedAt, session.UpdatedAt, session.ProviderType, session.Model,
                 session.Counts);
+            var key = keyOf?.Invoke(session);
             var title = key is null ? null : session.Title;
             var hash = Hash(fact, title is null ? null : $"{key!.Id}\n{title}");
             if (!_state.Sessions.TryGetValue(session.SessionId, out var kept))

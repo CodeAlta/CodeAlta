@@ -488,16 +488,18 @@ public sealed partial class SqliteCoordinatorStore : ICoordinatorStore, IAutomat
         ArgumentNullException.ThrowIfNull(audit);
         return WriteAsync((connection, transaction) =>
         {
-            using (var exists = Create(connection, transaction, "SELECT COUNT(*) FROM metadata_keys WHERE (person_id = $person AND epoch = $epoch) OR id = $id",
-                ("$person", key.PersonId), ("$epoch", key.Epoch), ("$id", key.Id)))
+            using (var exists = Create(connection, transaction,
+                "SELECT COUNT(*) FROM metadata_keys WHERE (person_id = $person AND space_id = $space AND epoch = $epoch) OR id = $id",
+                ("$person", key.PersonId), ("$space", key.SpaceId), ("$epoch", key.Epoch), ("$id", key.Id)))
             {
                 if (Convert.ToInt64(exists.ExecuteScalar(), CultureInfo.InvariantCulture) > 0) return false;
             }
 
             Execute(connection, transaction,
-                "INSERT INTO metadata_keys (id, organization_id, person_id, epoch, created_by_device_id, created_at) VALUES ($id, $org, $person, $epoch, $by, $created)",
+                "INSERT INTO metadata_keys (id, organization_id, person_id, epoch, created_by_device_id, created_at, space_id, sealed_descriptor) "
+                + "VALUES ($id, $org, $person, $epoch, $by, $created, $space, $descriptor)",
                 ("$id", key.Id), ("$org", key.OrganizationId), ("$person", key.PersonId), ("$epoch", key.Epoch), ("$by", key.CreatedByDeviceId),
-                ("$created", ToTime(key.CreatedAt)));
+                ("$created", ToTime(key.CreatedAt)), ("$space", key.SpaceId), ("$descriptor", key.SealedDescriptor));
             foreach (var wrap in wraps) InsertWrap(connection, transaction, wrap);
             AppendAudit(connection, transaction, audit);
             return true;
@@ -529,9 +531,10 @@ public sealed partial class SqliteCoordinatorStore : ICoordinatorStore, IAutomat
         return ReadAsync<IReadOnlyList<MetadataKeyWithWraps>>(connection =>
         {
             var keys = QueryList(connection, null,
-                "SELECT id, organization_id, person_id, epoch, created_by_device_id, created_at FROM metadata_keys WHERE person_id = $person ORDER BY epoch",
+                "SELECT id, organization_id, person_id, epoch, created_by_device_id, created_at, space_id, sealed_descriptor FROM metadata_keys "
+                + "WHERE person_id = $person ORDER BY space_id, epoch",
                 static reader => new MetadataKeyRecord(reader.GetString(0), reader.GetString(1), reader.GetString(2), reader.GetInt32(3), reader.GetString(4),
-                    FromTime(reader.GetInt64(5))), ("$person", personId));
+                    FromTime(reader.GetInt64(5)), reader.GetString(6), GetNullableString(reader, 7)), ("$person", personId));
             return [.. keys.Select(key => new MetadataKeyWithWraps(key, QueryList(connection, null,
                 "SELECT key_id, device_id, wrapped, wrapped_by_device_id, created_at FROM metadata_key_wraps WHERE key_id = $key ORDER BY created_at, device_id",
                 static reader => new MetadataKeyWrapRecord(reader.GetString(0), reader.GetString(1), reader.GetString(2), reader.GetString(3), FromTime(reader.GetInt64(4))),

@@ -75,6 +75,11 @@ snapshot never grants a whole space.
 | **Organization key** (Managed spaces) | Encrypts shared content at rest on the server; held by the server or a KMS |
 | **Policy key** (ES256) | Signs policy bundles; held by the Owner's device at home, admin devices or an HSM in companies, never by the server |
 
+- The server knows a space only by an opaque id. Which space a key is for on the devices (the space's id there) is
+  sealed with that key, so the devices of a person agree on it without the server learning it: a device that links a
+  space takes the key of the space with the same id, and the first one made wins when two devices made one at once.
+  Only a controller device makes a space's key, so a node seals the titles of a space once a controller device of its
+  person linked a space of the same id. A space that is unlinked seals nothing more with its key.
 - Revoking someone's access rotates the keys they held (a new epoch); what they already read cannot be taken back,
   and deleting ciphertext at the server does not revoke copies a recipient made.
 - **Account recovery is not encryption recovery.** Regaining the Owner role on a server (`altaserver recover-owner`, on

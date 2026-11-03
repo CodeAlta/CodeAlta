@@ -190,22 +190,28 @@ public sealed record ApiProblemDto(int? Status, string? Title, string? Detail, s
 public sealed record MetadataKeyWrapDto(string DeviceId, string Wrapped);
 
 /// <summary>
-/// A metadata key of a person (<c>doc/fleet/security-and-privacy.md</c>, keys): it seals the descriptive metadata of the
-/// sessions their devices publish (titles). The server keeps it wrapped to each of the person's devices and never in clear.
+/// A metadata key of a space of a person (<c>doc/fleet/security-and-privacy.md</c>, keys): it seals the descriptive
+/// metadata of the sessions of that space (titles) and keys its blind index. The server keeps it wrapped to each of the
+/// person's devices and never in clear.
 /// </summary>
 /// <param name="Id">The id of the key, which sealed metadata names.</param>
-/// <param name="Epoch">Its epoch: 1 until keys rotate.</param>
+/// <param name="Epoch">Its epoch in its space: 1 until keys rotate.</param>
 /// <param name="CreatedByDeviceId">The controller device that made it.</param>
 /// <param name="CreatedAt">When it was made.</param>
 /// <param name="Wrapped">The copy wrapped to the calling device, or <see langword="null"/> when it has none yet.</param>
 /// <param name="WrappedTo">The devices that have a copy.</param>
-public sealed record MetadataKeyDto(string Id, int Epoch, string CreatedByDeviceId, DateTimeOffset CreatedAt, string? Wrapped, IReadOnlyList<string> WrappedTo);
+/// <param name="Space">The opaque id of its space; <see langword="null"/> for a key of the person made before spaces had keys, which seals nothing new.</param>
+/// <param name="SealedDescriptor">Which space it is on the devices, sealed with the key itself; <see langword="null"/> for a key of the person.</param>
+public sealed record MetadataKeyDto(string Id, int Epoch, string CreatedByDeviceId, DateTimeOffset CreatedAt, string? Wrapped, IReadOnlyList<string> WrappedTo,
+    string? Space = null, string? SealedDescriptor = null);
 
-/// <summary>The body of <c>POST /api/v1/metadata-keys</c>: a new key of the calling device's person, wrapped to its devices, the caller included.</summary>
+/// <summary>The body of <c>POST /api/v1/metadata-keys</c>: a new key of a space of the calling device's person, wrapped to its devices, the caller included.</summary>
 /// <param name="Id">The id of the key, made by the device: 22 characters of base64url.</param>
-/// <param name="Epoch">Its epoch: 1.</param>
+/// <param name="Epoch">Its epoch in its space.</param>
 /// <param name="Wraps">Its copies, one per device.</param>
-public sealed record CreateMetadataKeyRequest(string Id, int Epoch, IReadOnlyList<MetadataKeyWrapDto> Wraps);
+/// <param name="Space">The opaque id of its space, made by the device (base64url); <see langword="null"/> for a key of the person, as older devices make.</param>
+/// <param name="SealedDescriptor">Which space it is on the devices, sealed with the key; required with <paramref name="Space"/>.</param>
+public sealed record CreateMetadataKeyRequest(string Id, int Epoch, IReadOnlyList<MetadataKeyWrapDto> Wraps, string? Space = null, string? SealedDescriptor = null);
 
 /// <summary>The body of <c>POST /api/v1/metadata-keys/{id}/wraps</c>: copies of the key for devices that have none.</summary>
 /// <param name="Wraps">The copies.</param>

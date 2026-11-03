@@ -101,7 +101,7 @@ public static class FleetAutomationSigning
 
     /// <summary>
     /// Opens what a version does, on a device it was sealed for: the copy of the key wrapped to this device must be given
-    /// by a controller device of its person (<see cref="FleetKeyWrap.Unwrap"/>), and the content must be the one of this
+    /// by a controller device of its person (<see cref="FleetKeyWrap.Unwrap(string, string, int, DeviceIdentity, FleetDeviceListState)"/>), and the content must be the one of this
     /// automation, number and machine.
     /// </summary>
     /// <param name="sealedText">The sealed text of the version.</param>

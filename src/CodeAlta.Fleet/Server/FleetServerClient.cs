@@ -301,6 +301,22 @@ public sealed partial class FleetServerClient : IDisposable
         => SendAsync(HttpMethod.Post, "api/v1/metadata-keys", Body(new CreateMetadataKeyRequest(keyId, epoch, wraps), ServerApiJsonContext.Default.CreateMetadataKeyRequest),
             ServerApiJsonContext.Default.MetadataKeyDto, cancellationToken);
 
+    /// <summary>Records the key this controller device made for a space of its person, wrapped to that person's devices, this one included.</summary>
+    /// <param name="keyId">The id of the key.</param>
+    /// <param name="epoch">Its epoch in the space.</param>
+    /// <param name="space">The opaque id of the space.</param>
+    /// <param name="sealedDescriptor">Which space it is on the devices, sealed with the key (<see cref="FleetMetadataKey.SealSpace"/>).</param>
+    /// <param name="wraps">Its copies, one per device.</param>
+    /// <param name="cancellationToken">Cancels the call.</param>
+    /// <returns>The key.</returns>
+    /// <exception cref="FleetServerException">The server refused the key: not a controller, a wrong wrap, or a key exists at that epoch (<c>metadata_key.exists</c>).</exception>
+    /// <exception cref="HttpRequestException">The server does not answer.</exception>
+    public Task<MetadataKeyDto> CreateSpaceKeyAsync(string keyId, int epoch, string space, string sealedDescriptor, IReadOnlyList<MetadataKeyWrapDto> wraps,
+        CancellationToken cancellationToken = default)
+        => SendAsync(HttpMethod.Post, "api/v1/metadata-keys",
+            Body(new CreateMetadataKeyRequest(keyId, epoch, wraps, space, sealedDescriptor), ServerApiJsonContext.Default.CreateMetadataKeyRequest),
+            ServerApiJsonContext.Default.MetadataKeyDto, cancellationToken);
+
     /// <summary>Gives copies of a metadata key this controller device holds to devices of its person that have none.</summary>
     /// <param name="keyId">The key.</param>
     /// <param name="wraps">The copies.</param>

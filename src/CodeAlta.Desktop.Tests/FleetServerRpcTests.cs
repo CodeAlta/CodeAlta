@@ -104,7 +104,7 @@ public sealed class FleetServerRpcTests
             Assert.AreEqual(FleetSessionStates.Idle, session.State);
             Assert.IsFalse(directory.Sessions.Any(static session => session.Id == "private-1"), "a Private session is never published");
             Assert.AreEqual("Desktop", directory.Machines.Single(static machine => machine.IsThisComputer).Name);
-            // Its title travels sealed with the key this computer made for its person; it opens here, and the server holds ciphertext only.
+            // Its title travels sealed with the key this computer made for its space; it opens here, and the server holds ciphertext only.
             Assert.AreEqual("A chat", session.Title);
             var connector = servers.Connections.Single().Connector!;
             StringAssert.Contains(connector.Directory.Sessions["chat-1"].Fact.SealedMetadata, "\"alg\":\"a256gcm\"");
@@ -122,7 +122,8 @@ public sealed class FleetServerRpcTests
             }
 
             var nodeList = await new FleetOrganizationDevices(address, nodeKey).RefreshAsync(token);
-            Assert.AreEqual(connector.MetadataKey!.Id, FleetKeyWrap.Unwrap(nodeCopy!.Wrapped!, nodeCopy.Id, nodeCopy.Epoch, nodeKey, nodeList).Id);
+            Assert.AreEqual(connector.MetadataKeys!.CurrentFor(null)!.Id, FleetKeyWrap.Unwrap(nodeCopy!.Wrapped!, nodeCopy.Id, nodeCopy.Epoch, nodeCopy.Space, nodeKey, nodeList).Id,
+                "the key of the default space, the one linked");
 
             // Its counts come from its journal: one turn with one tool call, the tokens of its usage.
             Assert.AreEqual((1, 1500), (session.Turns, session.Tokens));

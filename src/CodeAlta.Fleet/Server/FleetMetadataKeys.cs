@@ -29,6 +29,7 @@ public sealed class FleetMetadataKey
     private const int NonceLength = 12;
     private const int TagLength = 16;
     private const string SealDomain = "codealta-sealed-metadata/1";
+    private const string SpaceDomain = "codealta-sealed-space/1";
     private const string BlindIndexDomain = "codealta-blind-index/1:";
 
     private readonly byte[] _key;
@@ -84,15 +85,36 @@ public sealed class FleetMetadataKey
     {
         ArgumentException.ThrowIfNullOrEmpty(sessionId);
         ArgumentNullException.ThrowIfNull(metadata);
-        var plain = FleetSealedJson.Write(writer =>
+        return SealText(SealDomain, sessionId, FleetSealedJson.Write(writer =>
         {
             if (metadata.Title is not null) writer.WriteString("title", metadata.Title);
-        });
+        }));
+    }
+
+    /// <summary>Gets the id of the key a sealed text names, without opening it.</summary>
+    /// <param name="sealedText">The sealed text.</param>
+    /// <returns>The id of its key, or <see langword="null"/> when the text does not read.</returns>
+    public static string? KeyIdOf(string? sealedText)
+    {
+        if (string.IsNullOrEmpty(sealedText) || sealedText.Length > 65536) return null;
+        try
+        {
+            using var document = JsonDocument.Parse(sealedText);
+            return FleetSealedJson.Text(document.RootElement, "kid");
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    private string SealText(string domain, string binding, byte[] plain)
+    {
         var nonce = RandomNumberGenerator.GetBytes(NonceLength);
         var sealedBytes = new byte[plain.Length + TagLength];
         using (var aes = new AesGcm(_key, TagLength))
         {
-            aes.Encrypt(nonce, plain, sealedBytes.AsSpan(0, plain.Length), sealedBytes.AsSpan(plain.Length), Associated(Id, sessionId));
+            aes.Encrypt(nonce, plain, sealedBytes.AsSpan(0, plain.Length), sealedBytes.AsSpan(plain.Length), Associated(domain, Id, binding));
         }
 
         return Encoding.UTF8.GetString(FleetSealedJson.Write(writer =>
@@ -104,6 +126,29 @@ public sealed class FleetMetadataKey
         }));
     }
 
+    // The plain bytes, when this key sealed the text for this binding; null for another key, binding, a changed text or an unknown algorithm.
+    private byte[]? OpenText(string domain, string binding, string? sealedText)
+    {
+        if (string.IsNullOrEmpty(sealedText) || sealedText.Length > 65536) return null;
+        try
+        {
+            using var document = JsonDocument.Parse(sealedText);
+            var root = document.RootElement;
+            if (FleetSealedJson.Text(root, "alg") != SealAlgorithm || FleetSealedJson.Text(root, "kid") != Id) return null;
+            var nonce = FleetSealedJson.Bytes(root, "iv");
+            var sealedBytes = FleetSealedJson.Bytes(root, "ct");
+            if (nonce is not { Length: NonceLength } || sealedBytes is not { Length: >= TagLength }) return null;
+            var plain = new byte[sealedBytes.Length - TagLength];
+            using var aes = new AesGcm(_key, TagLength);
+            aes.Decrypt(nonce, sealedBytes.AsSpan(0, plain.Length), sealedBytes.AsSpan(plain.Length), plain, Associated(domain, Id, binding));
+            return plain;
+        }
+        catch (Exception exception) when (exception is JsonException or CryptographicException or FormatException)
+        {
+            return null;
+        }
+    }
+
     /// <summary>Opens the sealed metadata of a session, when this key sealed it for this session.</summary>
     /// <param name="sessionId">The session.</param>
     /// <param name="sealedText">The sealed text, as the server gave it.</param>
@@ -112,26 +157,50 @@ public sealed class FleetMetadataKey
     public bool TryOpen(string sessionId, string? sealedText, out FleetSessionMetadata? metadata)
     {
         metadata = null;
-        if (string.IsNullOrEmpty(sessionId) || string.IsNullOrEmpty(sealedText) || sealedText.Length > 65536) return false;
+        if (string.IsNullOrEmpty(sessionId) || OpenText(SealDomain, sessionId, sealedText) is not { } plain) return false;
         try
         {
-            using var document = JsonDocument.Parse(sealedText);
-            var root = document.RootElement;
-            if (FleetSealedJson.Text(root, "alg") != SealAlgorithm || FleetSealedJson.Text(root, "kid") != Id) return false;
-            var nonce = FleetSealedJson.Bytes(root, "iv");
-            var sealedBytes = FleetSealedJson.Bytes(root, "ct");
-            if (nonce is not { Length: NonceLength } || sealedBytes is not { Length: >= TagLength }) return false;
-            var plain = new byte[sealedBytes.Length - TagLength];
-            using (var aes = new AesGcm(_key, TagLength))
-            {
-                aes.Decrypt(nonce, sealedBytes.AsSpan(0, plain.Length), sealedBytes.AsSpan(plain.Length), plain, Associated(Id, sessionId));
-            }
-
             using var opened = JsonDocument.Parse(plain);
             metadata = new FleetSessionMetadata(FleetSealedJson.Text(opened.RootElement, "title"));
             return true;
         }
-        catch (Exception exception) when (exception is JsonException or CryptographicException or FormatException)
+        catch (JsonException)
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Seals which space a key is for on the devices of its person (the id of the space there, such as <c>default</c>),
+    /// bound to the opaque id the server knows the space by, so that a server can neither read it nor move it to another space.
+    /// </summary>
+    /// <param name="spaceId">The opaque id of the space at the server.</param>
+    /// <param name="localSpace">The id of the space on the devices.</param>
+    /// <returns>The sealed text.</returns>
+    /// <exception cref="ArgumentException">An argument is empty.</exception>
+    public string SealSpace(string spaceId, string localSpace)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(spaceId);
+        ArgumentException.ThrowIfNullOrEmpty(localSpace);
+        return SealText(SpaceDomain, spaceId, FleetSealedJson.Write(writer => writer.WriteString("space", localSpace)));
+    }
+
+    /// <summary>Opens what <see cref="SealSpace"/> sealed, when this key sealed it for this space.</summary>
+    /// <param name="spaceId">The opaque id of the space at the server.</param>
+    /// <param name="sealedText">The sealed text, as the server gave it.</param>
+    /// <param name="localSpace">The id of the space on the devices, or <see langword="null"/>.</param>
+    /// <returns>Whether the text opened.</returns>
+    public bool TryOpenSpace(string spaceId, string? sealedText, out string? localSpace)
+    {
+        localSpace = null;
+        if (string.IsNullOrEmpty(spaceId) || OpenText(SpaceDomain, spaceId, sealedText) is not { } plain) return false;
+        try
+        {
+            using var opened = JsonDocument.Parse(plain);
+            localSpace = FleetSealedJson.Text(opened.RootElement, "space");
+            return !string.IsNullOrEmpty(localSpace);
+        }
+        catch (JsonException)
         {
             return false;
         }
@@ -167,7 +236,7 @@ public sealed class FleetMetadataKey
     /// <summary>Gets the bytes of the key, to wrap it to a device.</summary>
     internal ReadOnlySpan<byte> Material => _key;
 
-    private static byte[] Associated(string keyId, string sessionId) => Encoding.UTF8.GetBytes($"{SealDomain}\n{SealAlgorithm}\n{keyId}\n{sessionId}");
+    private static byte[] Associated(string domain, string keyId, string binding) => Encoding.UTF8.GetBytes($"{domain}\n{SealAlgorithm}\n{keyId}\n{binding}");
 }
 
 /// <summary>
@@ -180,7 +249,14 @@ public sealed class FleetMetadataKey
 /// <param name="PersonId">The person whose devices hold the key.</param>
 /// <param name="Epoch">The epoch of the key, from 1; a removal from the device list makes a new one.</param>
 /// <param name="DeviceListSequence">The sequence of the last entry of the device list the key was made by: the devices it was given to are those of that list.</param>
-public sealed record FleetKeyGrant(string OrganizationId, string PersonId, int Epoch, long DeviceListSequence);
+public sealed record FleetKeyGrant(string OrganizationId, string PersonId, int Epoch, long DeviceListSequence)
+{
+    /// <summary>
+    /// Gets the opaque id of the space the key is for, signed with the grant so that a server cannot give the key of one
+    /// space as the key of another; null for a key of the person, made before spaces had keys.
+    /// </summary>
+    public string? SpaceId { get; init; }
+}
 
 /// <summary>
 /// Wraps a metadata key to one device (<c>doc/fleet/security-and-privacy.md</c>, keys): ECDH-ES on P-256 with an
@@ -196,6 +272,7 @@ public static class FleetKeyWrap
 
     private const string Domain = "codealta-key-wrap/1";
     private const string GrantDomain = "codealta-key-grant/1";
+    private const string SpaceGrantDomain = "codealta-space-key-grant/1";
     private const int NonceLength = 12;
     private const int TagLength = 16;
 
@@ -213,7 +290,7 @@ public static class FleetKeyWrap
         ArgumentNullException.ThrowIfNull(recipient);
         ArgumentNullException.ThrowIfNull(grant);
         ArgumentNullException.ThrowIfNull(signer);
-        if (!IsName(grant.OrganizationId) || !IsName(grant.PersonId) || grant.Epoch < 1 || grant.DeviceListSequence < 1)
+        if (!IsName(grant.OrganizationId) || !IsName(grant.PersonId) || grant.Epoch < 1 || grant.DeviceListSequence < 1 || grant.SpaceId is not null && !IsName(grant.SpaceId))
             throw new ArgumentException("A grant names its organization and person, without control characters, and an epoch and a sequence from 1.", nameof(grant));
         using var ephemeral = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
         using var peer = ECDiffieHellman.Create();
@@ -244,6 +321,7 @@ public static class FleetKeyWrap
             writer.WriteString("person", grant.PersonId);
             writer.WriteNumber("epoch", grant.Epoch);
             writer.WriteNumber("seq", grant.DeviceListSequence);
+            if (grant.SpaceId is not null) writer.WriteString("space", grant.SpaceId);
             writer.WriteString("signer", signer.DeviceId);
             writer.WriteString("epk", epkText);
             writer.WriteString("iv", ivText);
@@ -266,6 +344,23 @@ public static class FleetKeyWrap
     /// <exception cref="ArgumentNullException">An argument is <see langword="null"/>.</exception>
     /// <exception cref="InvalidDataException">The copy is not for this device, this key or this epoch, its signer is not a controller device of this device's person, it uses an unknown algorithm, or it does not open.</exception>
     public static FleetMetadataKey Unwrap(string wrapped, string keyId, int epoch, DeviceIdentity identity, FleetDeviceListState list)
+        => Unwrap(wrapped, keyId, epoch, null, identity, list);
+
+    /// <summary>
+    /// Opens a copy of the key of a space wrapped to this device, once its grant holds against the device list this
+    /// device verified (<see cref="Unwrap(string, string, int, DeviceIdentity, FleetDeviceListState)"/>) and names the
+    /// space the server lists the key for.
+    /// </summary>
+    /// <param name="wrapped">The wrapped key.</param>
+    /// <param name="keyId">The id the key must have.</param>
+    /// <param name="epoch">The epoch the server lists the key at, which the grant must name.</param>
+    /// <param name="space">The space the server lists the key for, which the grant must name; null for a key of the person.</param>
+    /// <param name="identity">The key of this device.</param>
+    /// <param name="list">The device list as this device verified it.</param>
+    /// <returns>The key, with its grant.</returns>
+    /// <exception cref="ArgumentNullException">An argument is <see langword="null"/>.</exception>
+    /// <exception cref="InvalidDataException">The copy is not for this device, this key, this epoch or this space, its signer is not a controller device of this device's person, it uses an unknown algorithm, or it does not open.</exception>
+    public static FleetMetadataKey Unwrap(string wrapped, string keyId, int epoch, string? space, DeviceIdentity identity, FleetDeviceListState list)
     {
         ArgumentNullException.ThrowIfNull(wrapped);
         ArgumentNullException.ThrowIfNull(keyId);
@@ -280,6 +375,7 @@ public static class FleetKeyWrap
                 throw new InvalidDataException("The wrapped key is not the copy of this key for this device.");
             var grant = ReadGrant(root) ?? throw new InvalidDataException("The wrapped key carries no signed grant.");
             if (grant.Epoch != epoch) throw new InvalidDataException("The wrapped key was given for another epoch than the one the server lists.");
+            if (!string.Equals(grant.SpaceId, space, StringComparison.Ordinal)) throw new InvalidDataException("The wrapped key was given for another space than the one the server lists.");
             CheckGrant(root, keyId, grant, identity.DeviceId, list);
             var epk = FleetSealedJson.Bytes(root, "epk");
             var nonce = FleetSealedJson.Bytes(root, "iv");
@@ -319,7 +415,8 @@ public static class FleetKeyWrap
     private static FleetKeyGrant? ReadGrant(JsonElement root)
         => FleetSealedJson.Text(root, "org") is { } organization && IsName(organization) && FleetSealedJson.Text(root, "person") is { } person && IsName(person)
             && FleetSealedJson.Integer(root, "epoch") is { } epoch and >= 1 and <= int.MaxValue && FleetSealedJson.Integer(root, "seq") is { } sequence and >= 1
-                ? new FleetKeyGrant(organization, person, (int)epoch, sequence)
+            && FleetSealedJson.Text(root, "space") is var space && (space is null || IsName(space))
+                ? new FleetKeyGrant(organization, person, (int)epoch, sequence) { SpaceId = space }
                 : null;
 
     // The signer vouches for the copy: a controller device of the verified list, of this device's person, for this list.
@@ -347,136 +444,15 @@ public static class FleetKeyWrap
         }
     }
 
+    // A grant of a space signs its space too, under a domain of its own: a grant of a person's key never reads as one of a space.
     private static byte[] GrantBytes(string keyId, string deviceId, FleetKeyGrant grant, string signerId, string epk, string iv, string ct)
-        => Encoding.UTF8.GetBytes(string.Create(CultureInfo.InvariantCulture,
-            $"{GrantDomain}\n{Algorithm}\n{keyId}\n{deviceId}\n{grant.OrganizationId}\n{grant.PersonId}\n{grant.Epoch}\n{grant.DeviceListSequence}\n{signerId}\n{epk}\n{iv}\n{ct}"));
+        => Encoding.UTF8.GetBytes(grant.SpaceId is null
+            ? string.Create(CultureInfo.InvariantCulture,
+                $"{GrantDomain}\n{Algorithm}\n{keyId}\n{deviceId}\n{grant.OrganizationId}\n{grant.PersonId}\n{grant.Epoch}\n{grant.DeviceListSequence}\n{signerId}\n{epk}\n{iv}\n{ct}")
+            : string.Create(CultureInfo.InvariantCulture,
+                $"{SpaceGrantDomain}\n{Algorithm}\n{keyId}\n{deviceId}\n{grant.OrganizationId}\n{grant.PersonId}\n{grant.SpaceId}\n{grant.Epoch}\n{grant.DeviceListSequence}\n{signerId}\n{epk}\n{iv}\n{ct}"));
 
     private static byte[] Associated(string keyId, string deviceId) => Encoding.UTF8.GetBytes($"{Domain}\n{Algorithm}\n{keyId}\n{deviceId}");
-}
-
-/// <summary>
-/// The metadata key of this device's person at one server: it reads the copies wrapped to this device and takes the
-/// newest one a controller device of its person signed (<see cref="FleetKeyWrap.Unwrap"/>); on a controller device, it
-/// makes the key (the person's first controller device does), makes a new epoch once a device was removed from the
-/// list after the key was given, and wraps the key to the person's devices that lack it. The devices and their keys
-/// come from the device list as the anchor of the link verified it (<see cref="FleetOrganizationDevices"/>), never from
-/// the server's tables nor from a list that does not extend the one this device verified before.
-/// </summary>
-/// <remarks>
-/// A key given before the last removal of the list may be held by the removed device: it seals nothing more, and
-/// <see cref="Current"/> is null until the new epoch reaches this device, never an older key.
-/// One caller at a time: the loop of a <see cref="FleetConnector"/>; <see cref="Current"/> is read from any thread.
-/// </remarks>
-public sealed class FleetMetadataKeyring
-{
-    private readonly FleetOrganizationDevices _devices;
-    private readonly DeviceIdentity _identity;
-    private FleetMetadataKey? _current;
-
-    /// <summary>Initializes a new instance of the <see cref="FleetMetadataKeyring"/> class.</summary>
-    /// <param name="devices">The anchored device list of the server, whose key and HTTP handler the calls use too.</param>
-    /// <exception cref="ArgumentNullException"><paramref name="devices"/> is <see langword="null"/>.</exception>
-    public FleetMetadataKeyring(FleetOrganizationDevices devices)
-    {
-        ArgumentNullException.ThrowIfNull(devices);
-        _devices = devices;
-        _identity = devices.Identity;
-    }
-
-    /// <summary>Gets the anchored device list the keyring wraps by.</summary>
-    public FleetOrganizationDevices Devices => _devices;
-
-    /// <summary>Gets the key that seals the titles of this device's person; null before it is read, when none was given to this device yet, or while a removal waits for its new epoch.</summary>
-    public FleetMetadataKey? Current => Volatile.Read(ref _current);
-
-    /// <summary>
-    /// Reads the key again: the copies of this device, and on a controller device, makes the key when the person has
-    /// none or a new epoch after a removal, and wraps it to the person's devices that lack it.
-    /// </summary>
-    /// <param name="cancellationToken">Cancels the calls.</param>
-    /// <returns>The key that seals, or null when this device has none yet.</returns>
-    /// <exception cref="FleetDeviceListException">The device list does not verify, or does not extend the one this device verified: nothing is read or wrapped.</exception>
-    /// <exception cref="FleetServerException">The server refused a call.</exception>
-    /// <exception cref="HttpRequestException">The server does not answer.</exception>
-    public async Task<FleetMetadataKey?> RefreshAsync(CancellationToken cancellationToken)
-    {
-        // The list first: nothing is read or wrapped through a server whose list does not extend the anchored one.
-        var list = await _devices.RefreshAsync(cancellationToken).ConfigureAwait(false);
-        using var client = new FleetServerClient(_devices.ServerAddress, _identity, _devices.Handler) { DeviceList = _devices };
-        var keys = await client.ListMetadataKeysAsync(cancellationToken).ConfigureAwait(false);
-        var newest = keys.MaxBy(static key => key.Epoch);
-        var (key, held) = Open(keys, list);
-        var me = _identity.DeviceId;
-        if (list.IsController(me))
-        {
-            var self = list.Members[me];
-            var devices = list.Members.Values.Where(member => member.DeviceId == me || self.OwnerId is not null && member.OwnerId == self.OwnerId).ToArray();
-            var make = newest is null
-                // The person's first controller device makes the key; another one only once that device left the list.
-                ? list.FirstDeviceId == me || list.FirstDeviceId is { } first && !list.Members.ContainsKey(first)
-                // A new epoch when a device left after the key was given, or when no copy of this device holds (its maker left the list).
-                : key is null ? newest.Wrapped is not null : IsStale(key, list);
-            if (make)
-            {
-                var made = await MakeAsync(client, list, self, devices, (newest?.Epoch ?? 0) + 1, cancellationToken).ConfigureAwait(false);
-                if (made is not null) (key, held) = (made, null);
-            }
-            else if (key is not null && held is not null && devices.Where(device => !held.WrappedTo.Contains(device.DeviceId)).ToArray() is { Length: > 0 } missing)
-            {
-                await client.AddMetadataKeyWrapsAsync(held.Id, [.. missing.Select(device => new MetadataKeyWrapDto(device.DeviceId, FleetKeyWrap.Wrap(key, device.Key, key.Grant!, _identity)))],
-                    cancellationToken).ConfigureAwait(false);
-            }
-        }
-
-        // Never back to an older epoch, nor to a key the removed device may hold.
-        var current = Current;
-        if (key is not null && !IsStale(key, list) && (current is null || key.Grant!.Epoch >= current.Grant!.Epoch)) current = key;
-        if (current is not null && IsStale(current, list)) current = null;
-        Volatile.Write(ref _current, current);
-        return current;
-    }
-
-    // The newest copy of this device whose grant holds; a copy the server made or relabelled is passed over.
-    private (FleetMetadataKey? Key, MetadataKeyDto? Held) Open(IReadOnlyList<MetadataKeyDto> keys, FleetDeviceListState list)
-    {
-        foreach (var candidate in keys.OrderByDescending(static key => key.Epoch))
-        {
-            if (candidate.Wrapped is not { } wrapped) continue;
-            try
-            {
-                return (FleetKeyWrap.Unwrap(wrapped, candidate.Id, candidate.Epoch, _identity, list), candidate);
-            }
-            catch (InvalidDataException)
-            {
-                // Not a copy a controller device of this person gave: refused.
-            }
-        }
-
-        return (null, null);
-    }
-
-    private async Task<FleetMetadataKey?> MakeAsync(FleetServerClient client, FleetDeviceListState list, FleetDeviceListMember self, IReadOnlyList<FleetDeviceListMember> devices,
-        int epoch, CancellationToken cancellationToken)
-    {
-        // The list names the person of the first device once it signed an entry; before, the server's tables do.
-        var person = self.OwnerId ?? (await client.GetDeviceAsync(null, cancellationToken).ConfigureAwait(false)).OwnerId;
-        if (person is null) return null;
-        var organization = list.OrganizationId ?? (await client.GetOrganizationAsync(cancellationToken).ConfigureAwait(false)).Id;
-        var made = FleetMetadataKey.Generate(new FleetKeyGrant(organization, person, epoch, list.Sequence));
-        try
-        {
-            await client.CreateMetadataKeyAsync(made.Id, epoch, [.. devices.Select(device => new MetadataKeyWrapDto(device.DeviceId, FleetKeyWrap.Wrap(made, device.Key, made.Grant!, _identity)))],
-                cancellationToken).ConfigureAwait(false);
-            return made;
-        }
-        catch (FleetServerException exception) when (exception.Code == "metadata_key.exists")
-        {
-            // Another device made it first: its copy for this device is read at the next refresh.
-            return null;
-        }
-    }
-
-    private static bool IsStale(FleetMetadataKey key, FleetDeviceListState list) => key.Grant is not { } grant || grant.DeviceListSequence < list.LastRemovalSequence;
 }
 
 /// <summary>The small JSON texts of sealed data, written and read without reflection.</summary>

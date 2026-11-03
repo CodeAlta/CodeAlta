@@ -285,6 +285,7 @@ public sealed class FleetServerConnections : IAsyncDisposable
             Statistics = source is null ? null : _options.Statistics,
             StatisticsFromQuarter = FleetHostStatisticsSource.FirstQuarter(link.CreatedAt),
             PublishesSpace = linked.Contains,
+            LinkedSpaces = () => linked.Ids,
             WatchDirectory = _options.WatchDirectory,
             Devices = devices,
             MetadataKeys = new FleetMetadataKeyring(devices),
@@ -400,6 +401,8 @@ public sealed class FleetServerConnections : IAsyncDisposable
         private ImmutableHashSet<string> _ids = ImmutableHashSet<string>.Empty;
 
         public bool Contains(string? spaceId) => Volatile.Read(ref _ids).Contains(spaceId ?? SpaceDescriptor.DefaultId);
+
+        public IReadOnlyCollection<string> Ids => Volatile.Read(ref _ids);
 
         public async Task RefreshAsync(CancellationToken cancellationToken)
         {

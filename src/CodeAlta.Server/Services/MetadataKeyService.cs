@@ -5,9 +5,10 @@ using CodeAlta.Server.Storage;
 namespace CodeAlta.Server.Services;
 
 /// <summary>
-/// The metadata keys of people (<c>doc/fleet/security-and-privacy.md</c>, keys): a controller device makes its person's
-/// key and wraps it to each device of that person; the server keeps the wrapped copies as opaque text and gives each
-/// device its own. It never holds a key in clear, and it cannot read the titles a key seals.
+/// The metadata keys of the spaces of people (<c>doc/fleet/security-and-privacy.md</c>, keys): a controller device makes
+/// the key of a space of its person, with its epochs, and wraps it to each device of that person; the server keeps the
+/// wrapped copies as opaque text and gives each device its own. It never holds a key in clear, and it cannot read the
+/// titles a key seals nor which space it is (an opaque id, and a descriptor sealed with the key).
 /// </summary>
 /// <remarks>
 /// The server checks who may hold a copy (approved devices of the same person) as its tables say; devices wrap only to
@@ -45,8 +46,7 @@ public sealed class MetadataKeyService
         ArgumentNullException.ThrowIfNull(actor);
         if (actor.OwnerPersonId is null) return new([]);
         var keys = await _store.ListMetadataKeysAsync(actor.OwnerPersonId, cancellationToken).ConfigureAwait(false);
-        return new([.. keys.Select(key => new MetadataKeyDto(key.Key.Id, key.Key.Epoch, key.Key.CreatedByDeviceId, key.Key.CreatedAt,
-            key.Wraps.FirstOrDefault(wrap => wrap.DeviceId == actor.Id)?.Wrapped, [.. key.Wraps.Select(static wrap => wrap.DeviceId)]))]);
+        return new([.. keys.Select(key => ToDto(key.Key, key.Wraps.FirstOrDefault(wrap => wrap.DeviceId == actor.Id)?.Wrapped, key.Wraps.Select(static wrap => wrap.DeviceId)))]);
     }
 
     /// <summary>Records a new metadata key of the calling controller device's person, wrapped to its devices, the caller included.</summary>
@@ -62,17 +62,24 @@ public sealed class MetadataKeyService
         ArgumentNullException.ThrowIfNull(origin);
         RequireController(actor);
         if (request is null || !IsKeyId(request.Id) || request.Epoch < 1) throw Invalid("The request needs the id of the key (base64url, at most 64 characters) and an epoch from 1.");
-        var wraps = await CheckWrapsAsync(actor, request.Id, request.Wraps, cancellationToken).ConfigureAwait(false);
-        if (!wraps.Any(wrap => wrap.DeviceId == actor.Id)) throw Invalid("A new key is wrapped to the device that makes it too.");
-        var key = new MetadataKeyRecord(request.Id, actor.OrganizationId, actor.OwnerPersonId!, request.Epoch, actor.Id, _time.GetUtcNow());
-        var audit = origin.Audit("metadata_key.create", actor, key.Id, details: $"{{\"epoch\":{key.Epoch},\"devices\":{wraps.Count}}}");
-        if (!await _store.CreateMetadataKeyAsync(key, wraps, audit, cancellationToken).ConfigureAwait(false))
+        if (request.Space is not null && (!IsKeyId(request.Space) || request.SealedDescriptor is not { Length: > 0 and <= MaxWrappedLength } descriptor
+            || descriptor.Any(char.IsControl)))
         {
-            throw CoordinatorException.Conflict(CoordinatorErrorCodes.MetadataKeyExists, "The person has a metadata key at this epoch: read it and add wraps instead.");
+            throw Invalid($"The key of a space names its space (base64url, at most 64 characters) and holds its sealed descriptor (at most {MaxWrappedLength} characters).");
         }
 
-        return new MetadataKeyDto(key.Id, key.Epoch, key.CreatedByDeviceId, key.CreatedAt, wraps.First(wrap => wrap.DeviceId == actor.Id).Wrapped,
-            [.. wraps.Select(static wrap => wrap.DeviceId)]);
+        var wraps = await CheckWrapsAsync(actor, request.Id, request.Wraps, cancellationToken).ConfigureAwait(false);
+        if (!wraps.Any(wrap => wrap.DeviceId == actor.Id)) throw Invalid("A new key is wrapped to the device that makes it too.");
+        var key = new MetadataKeyRecord(request.Id, actor.OrganizationId, actor.OwnerPersonId!, request.Epoch, actor.Id, _time.GetUtcNow(), request.Space ?? string.Empty,
+            request.Space is null ? null : request.SealedDescriptor);
+        var audit = origin.Audit("metadata_key.create", actor, key.Id,
+            details: request.Space is null ? $"{{\"epoch\":{key.Epoch},\"devices\":{wraps.Count}}}" : $"{{\"space\":\"{request.Space}\",\"epoch\":{key.Epoch},\"devices\":{wraps.Count}}}");
+        if (!await _store.CreateMetadataKeyAsync(key, wraps, audit, cancellationToken).ConfigureAwait(false))
+        {
+            throw CoordinatorException.Conflict(CoordinatorErrorCodes.MetadataKeyExists, "The space has a metadata key at this epoch: read it and add wraps instead.");
+        }
+
+        return ToDto(key, wraps.First(wrap => wrap.DeviceId == actor.Id).Wrapped, wraps.Select(static wrap => wrap.DeviceId));
     }
 
     /// <summary>Adds copies of a metadata key for devices of the person that have none; the caller must hold a copy.</summary>
@@ -95,9 +102,11 @@ public sealed class MetadataKeyService
             ?? throw CoordinatorException.Forbidden(FleetErrorCodes.Forbidden, "Only a device that holds the key wraps it to others.");
         var wraps = await CheckWrapsAsync(actor, keyId, request?.Wraps, cancellationToken).ConfigureAwait(false);
         var added = await _store.AddMetadataKeyWrapsAsync(wraps, origin.Audit("metadata_key.wrap", actor, keyId), cancellationToken).ConfigureAwait(false);
-        return new MetadataKeyDto(key.Key.Id, key.Key.Epoch, key.Key.CreatedByDeviceId, key.Key.CreatedAt, mine.Wrapped,
-            [.. key.Wraps.Select(static wrap => wrap.DeviceId).Concat(added).Distinct(StringComparer.Ordinal)]);
+        return ToDto(key.Key, mine.Wrapped, key.Wraps.Select(static wrap => wrap.DeviceId).Concat(added).Distinct(StringComparer.Ordinal));
     }
+
+    private static MetadataKeyDto ToDto(MetadataKeyRecord key, string? wrapped, IEnumerable<string> wrappedTo)
+        => new(key.Id, key.Epoch, key.CreatedByDeviceId, key.CreatedAt, wrapped, [.. wrappedTo], key.SpaceId.Length == 0 ? null : key.SpaceId, key.SealedDescriptor);
 
     // Each wrap goes to an approved device of the caller's person, once, and reads as bounded text.
     private async Task<IReadOnlyList<MetadataKeyWrapRecord>> CheckWrapsAsync(DeviceRecord actor, string keyId, IReadOnlyList<MetadataKeyWrapDto>? wraps,

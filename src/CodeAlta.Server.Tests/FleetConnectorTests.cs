@@ -165,13 +165,13 @@ public sealed class FleetConnectorTests
         var desktopKeys = new FleetMetadataKeyring(new FleetOrganizationDevices(fleet.Server.BaseAddress, fleet.DesktopKey));
         var nodeKeys = new FleetMetadataKeyring(new FleetOrganizationDevices(fleet.Server.BaseAddress, fleet.NodeKey));
         // A node never makes the key: it waits for the copy a controller device of its person gives it.
-        Assert.IsNull(await nodeKeys.RefreshAsync(CancellationToken.None));
+        Assert.IsNull(await nodeKeys.RefreshAsync("work", CancellationToken.None));
         Assert.AreEqual(0, (await fleet.Desktop.ListMetadataKeysAsync()).Count);
-        var key = await desktopKeys.RefreshAsync(CancellationToken.None);
+        var key = await desktopKeys.RefreshAsync("work", CancellationToken.None);
         Assert.IsNotNull(key);
         var made = (await fleet.Desktop.ListMetadataKeysAsync()).Single();
         CollectionAssert.AreEquivalent(new[] { fleet.DesktopKey.DeviceId, fleet.NodeKey.DeviceId }, made.WrappedTo.ToArray());
-        Assert.AreEqual(key.Id, (await desktopKeys.RefreshAsync(CancellationToken.None))!.Id, "read again, the same key");
+        Assert.AreEqual(key.Id, (await desktopKeys.RefreshAsync("work", CancellationToken.None))!.Id, "read again, the same key");
 
         var source = new FakeSource();
         source.Set(Session("s1", "work") with { Title = "Fix the parser" }, Session("s2", "work"));
@@ -217,7 +217,7 @@ public sealed class FleetConnectorTests
 
         // Through the anchor of the link, which pinned the genuine list: the key goes to nobody, no entry is signed.
         var devices = new FleetOrganizationDevices(fleet.Server.BaseAddress, fleet.DesktopKey, pin, replacing);
-        await Assert.ThrowsExactlyAsync<FleetDeviceListException>(() => new FleetMetadataKeyring(devices).RefreshAsync(CancellationToken.None));
+        await Assert.ThrowsExactlyAsync<FleetDeviceListException>(() => new FleetMetadataKeyring(devices).RefreshAsync("work", CancellationToken.None));
         using var client = new FleetServerClient(fleet.Server.BaseAddress, fleet.DesktopKey, replacing) { DeviceList = devices };
         await Assert.ThrowsExactlyAsync<FleetDeviceListException>(() => client.ApproveAsync(pcKey.DeviceId));
         Assert.AreEqual(0, replacing.Writes, "nothing was wrapped or signed after the replaced list");
@@ -228,7 +228,7 @@ public sealed class FleetConnectorTests
     public async Task ANodeTakesNoKeyTheServerMadeOrRelabelledAndSealsWithTheOneItsPersonGave()
     {
         await using var fleet = await FleetFixture.StartAsync();
-        var genuine = (await new FleetMetadataKeyring(new FleetOrganizationDevices(fleet.Server.BaseAddress, fleet.DesktopKey)).RefreshAsync(CancellationToken.None))!;
+        var genuine = (await new FleetMetadataKeyring(new FleetOrganizationDevices(fleet.Server.BaseAddress, fleet.DesktopKey)).RefreshAsync("work", CancellationToken.None))!;
         using var serverKey = DeviceIdentity.LoadOrCreate(Path.Combine(fleet.Root.Path, "server-key"));
         var organization = (await fleet.Desktop.GetOrganizationAsync()).Id;
         var person = (await fleet.Desktop.GetDeviceAsync()).OwnerId!;
@@ -240,16 +240,16 @@ public sealed class FleetConnectorTests
         // The server lists newer keys for the node: one of its own, signed by a key of its own or by nobody, and the
         // genuine copy relabelled for a newer epoch.
         var forged = FleetMetadataKey.Generate();
-        var grant = new FleetKeyGrant(organization, person, 3, list.Sequence);
-        var signedByServer = FleetKeyWrap.Wrap(forged, nodeKey, grant, serverKey);
+        var grant = new FleetKeyGrant(organization, person, 3, list.Sequence) { SpaceId = copy.Space };
+        var signedByServer = FleetKeyWrap.Wrap(forged, nodeKey, grant with { Epoch = 4 }, serverKey);
         var unsigned = System.Text.Json.Nodes.JsonNode.Parse(FleetKeyWrap.Wrap(forged, nodeKey, grant, fleet.DesktopKey))!.AsObject();
         unsigned.Remove("sig");
         var injecting = new InjectingHandler(
-            new MetadataKeyDto(forged.Id, 4, fleet.DesktopKey.DeviceId, Created, signedByServer, [fleet.NodeKey.DeviceId]),
-            new MetadataKeyDto("unsigned-copy", 3, fleet.DesktopKey.DeviceId, Created, unsigned.ToJsonString(), [fleet.NodeKey.DeviceId]),
+            new MetadataKeyDto(forged.Id, 4, fleet.DesktopKey.DeviceId, Created, signedByServer, [fleet.NodeKey.DeviceId], copy.Space, forged.SealSpace(copy.Space!, "work")),
+            new MetadataKeyDto("unsigned-copy", 3, fleet.DesktopKey.DeviceId, Created, unsigned.ToJsonString(), [fleet.NodeKey.DeviceId], copy.Space, copy.SealedDescriptor),
             copy with { Id = copy.Id, Epoch = 2 }) { InnerHandler = new HttpClientHandler() };
         var nodeKeys = new FleetMetadataKeyring(new FleetOrganizationDevices(fleet.Server.BaseAddress, fleet.NodeKey, null, injecting));
-        Assert.AreEqual(genuine.Id, (await nodeKeys.RefreshAsync(CancellationToken.None))?.Id, "the node keeps the key a controller of its person gave it");
+        Assert.AreEqual(genuine.Id, (await nodeKeys.RefreshAsync("work", CancellationToken.None))?.Id, "the node keeps the key a controller of its person gave it");
 
         var source = new FakeSource();
         source.Set(Session("s1", "work") with { Title = "Fix the parser" });
@@ -270,20 +270,20 @@ public sealed class FleetConnectorTests
         await fleet.Desktop.ApproveAsync(pcKey.DeviceId);
         var desktopKeys = new FleetMetadataKeyring(new FleetOrganizationDevices(fleet.Server.BaseAddress, fleet.DesktopKey));
         var nodeKeys = new FleetMetadataKeyring(new FleetOrganizationDevices(fleet.Server.BaseAddress, fleet.NodeKey));
-        var first = (await desktopKeys.RefreshAsync(CancellationToken.None))!;
-        Assert.AreEqual(first.Id, (await new FleetMetadataKeyring(new FleetOrganizationDevices(fleet.Server.BaseAddress, pcKey)).RefreshAsync(CancellationToken.None))?.Id,
+        var first = (await desktopKeys.RefreshAsync("work", CancellationToken.None))!;
+        Assert.AreEqual(first.Id, (await new FleetMetadataKeyring(new FleetOrganizationDevices(fleet.Server.BaseAddress, pcKey)).RefreshAsync("work", CancellationToken.None))?.Id,
             "the PC holds the first key");
-        Assert.AreEqual(first.Id, (await nodeKeys.RefreshAsync(CancellationToken.None))?.Id);
+        Assert.AreEqual(first.Id, (await nodeKeys.RefreshAsync("work", CancellationToken.None))?.Id);
 
         await fleet.Desktop.RevokeAsync(pcKey.DeviceId);
         // Until the new epoch reaches it, the node seals nothing with the key the removed device holds.
-        Assert.IsNull(await nodeKeys.RefreshAsync(CancellationToken.None));
-        var second = (await desktopKeys.RefreshAsync(CancellationToken.None))!;
+        Assert.IsNull(await nodeKeys.RefreshAsync("work", CancellationToken.None));
+        var second = (await desktopKeys.RefreshAsync("work", CancellationToken.None))!;
         Assert.AreEqual((2, false), (second.Grant!.Epoch, second.Id == first.Id));
         CollectionAssert.AreEquivalent(new[] { fleet.DesktopKey.DeviceId, fleet.NodeKey.DeviceId },
             (await fleet.Desktop.ListMetadataKeysAsync()).Single(key => key.Id == second.Id).WrappedTo.ToArray(), "the new epoch goes to the devices that remain");
-        Assert.AreEqual(second.Id, (await nodeKeys.RefreshAsync(CancellationToken.None))?.Id);
-        Assert.AreEqual(second.Id, (await desktopKeys.RefreshAsync(CancellationToken.None))?.Id, "read again, the same epoch");
+        Assert.AreEqual(second.Id, (await nodeKeys.RefreshAsync("work", CancellationToken.None))?.Id);
+        Assert.AreEqual(second.Id, (await desktopKeys.RefreshAsync("work", CancellationToken.None))?.Id, "read again, the same epoch");
 
         var source = new FakeSource();
         source.Set(Session("s1", "work") with { Title = "After the removal" });
@@ -294,6 +294,100 @@ public sealed class FleetConnectorTests
         Assert.IsTrue(second.TryOpen("s1", sealedText, out var opened));
         Assert.AreEqual("After the removal", opened!.Title);
         Assert.IsFalse(first.TryOpen("s1", sealedText, out _), "the key the removed device holds opens nothing published after its removal");
+    }
+
+    [TestMethod]
+    public async Task EachSpaceSealsWithAKeyOfItsOwn_WhichTheDevicesOfThePersonFindByTheirSpace()
+    {
+        await using var fleet = await FleetFixture.StartAsync();
+        var desktopKeys = new FleetMetadataKeyring(new FleetOrganizationDevices(fleet.Server.BaseAddress, fleet.DesktopKey));
+        var nodeKeys = new FleetMetadataKeyring(new FleetOrganizationDevices(fleet.Server.BaseAddress, fleet.NodeKey));
+        var made = await desktopKeys.RefreshAsync(["work", "home"], CancellationToken.None);
+        var (work, home) = (made["work"], made["home"]);
+        Assert.AreNotEqual(work.Id, home.Id);
+        Assert.AreNotEqual(work.Grant!.SpaceId, home.Grant!.SpaceId);
+        var rows = await fleet.Desktop.ListMetadataKeysAsync();
+        Assert.AreEqual(2, rows.Count);
+        Assert.IsTrue(rows.All(static row => row.Space is { Length: > 0 } && row.SealedDescriptor is { } descriptor && !descriptor.Contains("work", StringComparison.Ordinal)
+            && !descriptor.Contains("home", StringComparison.Ordinal)), "the server knows a space by an opaque id only");
+
+        // The node finds the key of its own space by what the descriptor says, and never gets one made for it by itself.
+        Assert.AreEqual(work.Id, (await nodeKeys.RefreshAsync("work", CancellationToken.None))?.Id);
+        Assert.IsNull(await nodeKeys.RefreshAsync("lab", CancellationToken.None), "a node makes no key, not even for a space no controller linked");
+        var source = new FakeSource();
+        source.Set(Session("s1", "work") with { Title = "Fix the parser" }, Session("s2", "home") with { Title = "Plan the trip" });
+        await using var connector = fleet.NodeConnector(source, static _ => true, keys: nodeKeys);
+        connector.Start();
+        await WaitForAsync(async () => (await fleet.Desktop.ListSessionsAsync()).Count(static session => session.SealedMetadata is not null) == 2);
+        var listed = (await fleet.Desktop.ListSessionsAsync()).ToDictionary(static session => session.Id);
+        Assert.IsTrue(work.TryOpen("s1", listed["s1"].SealedMetadata, out var opened));
+        Assert.AreEqual("Fix the parser", opened!.Title);
+        Assert.IsFalse(home.TryOpen("s1", listed["s1"].SealedMetadata, out _), "the key of another space opens nothing of this one");
+        Assert.IsTrue(home.TryOpen("s2", listed["s2"].SealedMetadata, out _));
+        Assert.IsTrue(desktopKeys.TryOpen("s2", listed["s2"].SealedMetadata, out var byRing) && byRing!.Title == "Plan the trip", "the keyring opens by the key a text names");
+        Assert.AreNotEqual(FleetProjectKeys.Of(work, "repo:x"), FleetProjectKeys.Of(home, "repo:x"), "a project is matched within its space");
+
+        // Unlinked, the space has no key that seals; its key still opens what it sealed.
+        var linked = await desktopKeys.RefreshAsync(["work"], CancellationToken.None);
+        Assert.IsFalse(linked.ContainsKey("home"));
+        Assert.IsNull(desktopKeys.CurrentFor("home"));
+        Assert.IsTrue(desktopKeys.TryOpen("s2", listed["s2"].SealedMetadata, out _));
+    }
+
+    [TestMethod]
+    public async Task TwoSpacesMadeForOneSpaceOfThePersonConvergeOnTheFirstMade()
+    {
+        await using var fleet = await FleetFixture.StartAsync();
+        using var pcKey = DeviceIdentity.LoadOrCreate(Path.Combine(fleet.Root.Path, "pc"));
+        using (var pc = new FleetServerClient(fleet.Server.BaseAddress, pcKey)) await pc.EnrollAsync((await fleet.Desktop.CreateEnrollmentTokenAsync()).Token, "PC", FleetDeviceKinds.Controller);
+        await fleet.Desktop.ApproveAsync(pcKey.DeviceId);
+        var desktopKeys = new FleetMetadataKeyring(new FleetOrganizationDevices(fleet.Server.BaseAddress, fleet.DesktopKey));
+        var first = (await desktopKeys.RefreshAsync("work", CancellationToken.None))!;
+
+        // The PC made its own "work" space at the same time, before it read the desktop's.
+        var list = await fleet.Desktop.ReadVerifiedDeviceListAsync();
+        var person = (await fleet.Desktop.GetDeviceAsync()).OwnerId!;
+        var organization = (await fleet.Desktop.GetOrganizationAsync()).Id;
+        var late = FleetMetadataKey.Generate(new FleetKeyGrant(organization, person, 1, list.Sequence) { SpaceId = "late-space" });
+        using (var pc = new FleetServerClient(fleet.Server.BaseAddress, pcKey))
+        {
+            await pc.CreateSpaceKeyAsync(late.Id, 1, "late-space", late.SealSpace("late-space", "work"),
+                [.. list.Members.Values.Select(member => new MetadataKeyWrapDto(member.DeviceId, FleetKeyWrap.Wrap(late, member.Key, late.Grant!, pcKey)))]);
+        }
+
+        // The first made wins; the clock of the test server stands still, so the opaque id orders them, the same way on every device.
+        var rows = await fleet.Desktop.ListMetadataKeysAsync();
+        var winner = rows.OrderBy(static row => row.CreatedAt).ThenBy(static row => row.Space, StringComparer.Ordinal).First().Id;
+        var pcKeys = new FleetMetadataKeyring(new FleetOrganizationDevices(fleet.Server.BaseAddress, pcKey));
+        Assert.AreEqual(winner, (await pcKeys.RefreshAsync("work", CancellationToken.None))?.Id);
+        Assert.AreEqual(winner, (await desktopKeys.RefreshAsync("work", CancellationToken.None))?.Id, "the desktop moves to it when it was not its own");
+        Assert.AreEqual(winner, (await new FleetMetadataKeyring(new FleetOrganizationDevices(fleet.Server.BaseAddress, fleet.NodeKey)).RefreshAsync("work", CancellationToken.None))?.Id);
+        Assert.IsTrue(pcKeys.Held.Any(key => key.Id == late.Id) && pcKeys.Held.Any(key => key.Id == first.Id), "what either one sealed still opens");
+    }
+
+    [TestMethod]
+    public async Task TheKeyOfThePersonMadeBeforeSpacesStillOpensAndReachesNewDevicesButSealsNothing()
+    {
+        await using var fleet = await FleetFixture.StartAsync();
+        // A key of the person, as a desktop of an earlier version made it: wrapped to that desktop only.
+        var list = await fleet.Desktop.ReadVerifiedDeviceListAsync();
+        var person = (await fleet.Desktop.GetDeviceAsync()).OwnerId!;
+        var organization = (await fleet.Desktop.GetOrganizationAsync()).Id;
+        var legacy = FleetMetadataKey.Generate(new FleetKeyGrant(organization, person, 1, list.Sequence));
+        await fleet.Desktop.CreateMetadataKeyAsync(legacy.Id, 1,
+            [new MetadataKeyWrapDto(fleet.DesktopKey.DeviceId, FleetKeyWrap.Wrap(legacy, list.Members[fleet.DesktopKey.DeviceId].Key, legacy.Grant!, fleet.DesktopKey))]);
+        var sealedBefore = legacy.Seal("s0", new FleetSessionMetadata("Before spaces"));
+
+        var desktopKeys = new FleetMetadataKeyring(new FleetOrganizationDevices(fleet.Server.BaseAddress, fleet.DesktopKey));
+        var work = (await desktopKeys.RefreshAsync("work", CancellationToken.None))!;
+        Assert.AreNotEqual(legacy.Id, work.Id, "a space gets a key of its own, never the person's");
+        Assert.IsTrue(desktopKeys.TryOpen("s0", sealedBefore, out var opened) && opened!.Title == "Before spaces");
+        CollectionAssert.AreEquivalent(new[] { fleet.DesktopKey.DeviceId, fleet.NodeKey.DeviceId },
+            (await fleet.Desktop.ListMetadataKeysAsync()).Single(key => key.Id == legacy.Id).WrappedTo.ToArray(), "the devices of the person still get it, to open what it sealed");
+        var nodeKeys = new FleetMetadataKeyring(new FleetOrganizationDevices(fleet.Server.BaseAddress, fleet.NodeKey));
+        Assert.AreEqual(work.Id, (await nodeKeys.RefreshAsync("work", CancellationToken.None))?.Id);
+        Assert.IsTrue(nodeKeys.TryOpen("s0", sealedBefore, out _));
+        Assert.AreEqual(1, (await fleet.Desktop.ListMetadataKeysAsync()).Count(static key => key.Space is null), "no new key of the person");
     }
 
     [TestMethod]
