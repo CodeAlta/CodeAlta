@@ -2,6 +2,7 @@ using System.Runtime.ExceptionServices;
 using CodeAlta.Agent;
 using CodeAlta.Agent.Runtime;
 using CodeAlta.Catalog;
+using CodeAlta.Catalog.Secrets;
 using CodeAlta.Catalog.Skills;
 using CodeAlta.Catalog.Storage;
 using CodeAlta.Orchestration.Runtime;
@@ -580,7 +581,11 @@ public sealed class CodeAltaHost : IAsyncDisposable
                 InheritPermissionMode = options.InheritPermissionModePolicy,
                 ShowsPromptSuggestions = options.ShowsPromptSuggestions,
                 Identities = options.AppliesSpaceIdentities
-                    ? new SessionIdentityResolver(new SpaceCatalog(projectCatalog), projectProfiles: new CodeAltaConfigStore(catalogOptions).LoadProjectCliProfiles)
+                    // The CLI profiles read their ${secret:NAME} and ${var:NAME} from the store of this machine.
+                    ? new SessionIdentityResolver(new SpaceCatalog(projectCatalog),
+                        identity => SpaceIdentityEnvironment.Create(identity, SecretReferenceResolver.ForMachine(catalogOptions.GlobalRoot).Read,
+                            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), OperatingSystem.IsWindows()),
+                        new CodeAltaConfigStore(catalogOptions).LoadProjectCliProfiles)
                     : SessionIdentityResolver.None,
                 AskWhenConversationHeld = options.AskWhenConversationHeld,
                 SandboxBackend = options.SandboxBackend,

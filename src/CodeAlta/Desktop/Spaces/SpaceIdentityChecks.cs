@@ -7,6 +7,7 @@ using System.Text.Json;
 using System.Text.RegularExpressions;
 using CodeAlta.Agent;
 using CodeAlta.Catalog;
+using CodeAlta.Catalog.Secrets;
 using CodeAlta.Plugin.Jira;
 
 namespace CodeAlta.Desktop.Spaces;
@@ -74,6 +75,14 @@ internal sealed partial class SpaceIdentityChecks : IDisposable
     /// <summary>Creates the checks of this machine.</summary>
     internal SpaceIdentityChecks()
         : this(RunAsync, new HttpClientHandler(), Environment.GetEnvironmentVariable, Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), OperatingSystem.IsWindows(),
+            RunShellAsync)
+    {
+    }
+
+    /// <summary>Creates the checks of this machine, whose CLI profiles read the secrets and variables of a profile.</summary>
+    /// <param name="root">The root of the profile, <c>~/.alta</c>.</param>
+    internal SpaceIdentityChecks(string root)
+        : this(RunAsync, new HttpClientHandler(), SecretReferenceResolver.ForMachine(root).Read, Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), OperatingSystem.IsWindows(),
             RunShellAsync)
     {
     }
@@ -255,9 +264,11 @@ internal sealed partial class SpaceIdentityChecks : IDisposable
         foreach (var (name, value) in profile.Environment)
         {
             if (missing.FirstOrDefault(left => left.Key == name) is { Key: not null } unset)
-                lines.Add(new("error", $"{name} is left out: the variable {unset.Value} is not set in the environment of CodeAlta."));
-            else if (SpaceCliProfile.References(value) is { Count: > 0 } references)
-                lines.Add(new("ok", $"{name} is set from {string.Join(", ", references.Select(static reference => "${env:" + reference + "}"))}."));
+                lines.Add(new("error", unset.Value.StartsWith("${", StringComparison.Ordinal)
+                    ? $"{name} is left out: {unset.Value} is not set on this machine."
+                    : $"{name} is left out: the variable {unset.Value} is not set in the environment of CodeAlta."));
+            else if (SecretReferences.Find(value) is { Count: > 0 } references)
+                lines.Add(new("ok", $"{name} is set from {string.Join(", ", references)}."));
             else
                 lines.Add(new("ok", $"{name}={environment.Get(name)}"));
         }

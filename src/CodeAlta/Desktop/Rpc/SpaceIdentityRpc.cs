@@ -34,7 +34,7 @@ internal sealed class SpaceIdentityService : IDisposable
         ArgumentNullException.ThrowIfNull(catalog);
         ArgumentNullException.ThrowIfNull(session);
         ArgumentException.ThrowIfNullOrWhiteSpace(epoch);
-        (_catalog, _session, _epoch, _checks) = (catalog, session, epoch, checks ?? new SpaceIdentityChecks());
+        (_catalog, _session, _epoch, _checks) = (catalog, session, epoch, checks ?? new SpaceIdentityChecks(catalog.Projects.Options.GlobalRoot));
     }
 
     /// <inheritdoc />
