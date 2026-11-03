@@ -154,7 +154,9 @@ All signed (Authenticode, Apple notarization, NuGet signatures, cosign for image
   connection (`update.instruction`), two at a time; it waits until each node online runs the version, failed or rolled
   back, then updates itself, last, with the same self-update. A node offline does not hold the campaign: it is pending,
   asked when it reconnects, and the campaign ends **partly done** until it is. A node that goes offline while it
-  switches holds the server for ten minutes. A campaign is cancelled until the server's step; one at a time runs.
+  switches holds the server for ten minutes. A campaign is cancelled until the server's step; a node already asked is
+  told, again at each connection, until it reports the campaign done. One campaign at a time is active, whoever starts
+  it. A server stopped during its own step takes that step again at its start unless its self-update holds the switch.
   States: scheduled, updating nodes, updating server, done, partly done, failed (the server did not update, or every
   node that tried failed), cancelled. Nodes report where they stand (`update.report`, and in their presence); the REST
   API (`/api/v1/updates`) and the change feed give the campaign to the desktop.
@@ -171,7 +173,11 @@ All signed (Authenticode, Apple notarization, NuGet signatures, cosign for image
   **automatic**: the server reads the policy's feed daily and starts a campaign to its latest stable version at the
   maintenance window (a time of day in a time zone). No person signs the hash of that version, so each machine checks
   the feed itself: the version must be the latest stable one the feed lists, newer than the one it runs, and the
-  package must match the feed's own hash.
+  package must match the feed's own hash; the server reads the feed again before its own step. A version that failed
+  is tried again at the next daily checks, three times at most; one that rolled back is not. The server sends the
+  signed policy, whatever its mode, to its nodes (`update.policy`) when it changes and at each connection; a node keeps
+  the newest and refuses what an older one allowed. A new policy withdraws the campaigns it no longer allows: the
+  automatic ones of the policy it replaces, and those to another version than a pinned one.
 - Containers update by image tag.
 
 ## Backup, restore, leave
