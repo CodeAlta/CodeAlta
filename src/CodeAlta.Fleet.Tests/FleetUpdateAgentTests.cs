@@ -223,6 +223,51 @@ public sealed class FleetUpdateAgentTests
     }
 
     [TestMethod]
+    public async Task APolicyLostWithARestartIsHeardAgainBeforeTheCampaignKeptRuns()
+    {
+        using var harness = new AgentHarness();
+        harness.Latest = UpdateVersion.Parse("4.1.0");
+        var agent = harness.Start();
+        var automatic = harness.Automatic("auto-1", harness.Policy(2, FleetUpdateModes.Automatic), "4.1.0");
+        await harness.AcceptAsync(agent, LinkA, automatic);
+        var manual = harness.Owner.Sign(harness.Policy(3, FleetUpdateModes.Manual));
+        using (harness.FailWrites())
+        {
+            await harness.AcceptPolicyAsync(agent, LinkA, manual);
+            Assert.AreEqual(FleetUpdateMachineStates.Cancelled, agent.Current?.State, "stopped in memory");
+
+            // The node restarts before the write succeeds: the checkpoint brings back the older policy and its campaign.
+            agent = harness.Restart(agent);
+            Assert.AreEqual(("auto-1", FleetUpdateMachineStates.Waiting), (agent.Current?.CampaignId, agent.Current?.State));
+            Assert.IsNull(agent.Tick(), "nothing kept from before the start runs before its server is heard again");
+        }
+
+        Assert.IsNull(agent.Tick(), "a write that succeeds does not say the checkpoint is current");
+
+        // At the connection, the server sends its policy, then the instruction of the campaign the node follows.
+        await harness.AcceptPolicyAsync(agent, LinkA, manual);
+        await harness.AcceptAsync(agent, LinkA, automatic);
+        Assert.AreEqual(FleetUpdateMachineStates.Cancelled, agent.Current?.State);
+        Assert.IsNull(agent.Tick());
+        Assert.AreEqual(0, harness.Applied.Count);
+    }
+
+    [TestMethod]
+    public async Task ACampaignKeptAcrossARestartRunsOnceItsServerSendsItAgain()
+    {
+        using var harness = new AgentHarness();
+        var agent = harness.Start();
+        var c1 = harness.Instruction(harness.Manifest(1, "c1", "4.0.2"));
+        await harness.AcceptAsync(agent, LinkA, c1);
+        agent = harness.Restart(agent);
+        Assert.IsNull(agent.Tick(), "it waits for its server");
+
+        await harness.AcceptAsync(agent, LinkA, c1);
+        await (agent.Tick() ?? throw new AssertFailedException("The campaign did not start once its server sent it again."));
+        Assert.AreEqual(1, harness.Applied.Count);
+    }
+
+    [TestMethod]
     public async Task ACheckpointThatDoesNotReadRefusesEveryUpdateAndIsLeftAsItIs()
     {
         using var harness = new AgentHarness();
@@ -415,11 +460,13 @@ public sealed class FleetUpdateAgentTests
         harness.Latest = UpdateVersion.Parse("4.1.0");
         harness.Clock.Now = new DateTimeOffset(2026, 11, 4, 1, 30, 0, TimeSpan.Zero);
         var agent = harness.Start();
-        await harness.AcceptAsync(agent, LinkA, harness.Automatic("auto-1", harness.Policy(1, FleetUpdateModes.Automatic, window: "02:00", zone: "Europe/Paris"), "4.1.0"));
+        var automatic = harness.Automatic("auto-1", harness.Policy(1, FleetUpdateModes.Automatic, window: "02:00", zone: "Europe/Paris"), "4.1.0");
+        await harness.AcceptAsync(agent, LinkA, automatic);
 
-        // The node was off from inside its window to past its end.
+        // The node was off from inside its window to past its end; its server sends the campaign again at the connection.
         harness.Clock.Now = new DateTimeOffset(2026, 11, 4, 6, 0, 0, TimeSpan.Zero);
         agent = harness.Restart(agent);
+        await harness.AcceptAsync(agent, LinkA, automatic);
         Assert.IsNull(agent.Tick());
         Assert.AreEqual(0, harness.Applied.Count);
         harness.Clock.Now = new DateTimeOffset(2026, 11, 5, 1, 0, 0, TimeSpan.Zero);

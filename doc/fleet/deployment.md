@@ -174,8 +174,10 @@ All signed (Authenticode, Apple notarization, NuGet signatures, cosign for image
   `"fleet": false`, which refuses every update of the fleet; so does a switch its owner asked for (`altanode update`),
   which a campaign never replaces nor withdraws. A node keeps the instruction it accepted
   (`fleet/update-campaign.json`) and waits for its time itself, across restarts; nothing runs until that file is
-  written, and while it does not read, the node refuses every update of the fleet (the owner fixes it, or deletes it to
-  start again as a new node). A newer policy or a cancellation it cannot write holds in memory, and until the write
+  written. After a start, the campaign the file holds runs only once its server sent it again (at each connection,
+  after its policy and the cancellations not acknowledged) and the state is kept: a write that failed before the
+  restart leaves the file behind, and nothing on disk can say so. While the file does not read, the node refuses
+  every update of the fleet (the owner fixes it, or deletes it to start again as a new node). A newer policy or a cancellation it cannot write holds in memory, and until the write
   succeeds (tried again) the node takes no instruction, runs no work of the fleet and acknowledges nothing. The server
   takes any final state as the acknowledgement of a cancellation: the node reports none, a refusal included, for a
   campaign whose cancellation it received and has not kept; it still refuses the others with the reason. A version

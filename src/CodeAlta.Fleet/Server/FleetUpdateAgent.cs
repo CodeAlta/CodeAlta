@@ -97,6 +97,12 @@ public sealed class FleetUpdateAgent : IAsyncDisposable
     private bool _unkeptOverflow;
     private const int MaxUnkept = 1024;
     private bool _loaded;
+    // Whether the campaign this node follows was read from the checkpoint and its server has not sent it again since the
+    // start: nothing of it runs until then. A write that failed before a restart (a newer policy, a cancellation held in
+    // memory) leaves the checkpoint behind, and nothing on disk can say so (that write failed too); the server sends its
+    // policy and the cancellations not acknowledged at each connection, before the instruction of the campaign the node
+    // follows, so that instruction, once the state is kept, says the checkpoint is current.
+    private bool _resumed;
     private Task _loop = Task.CompletedTask;
     private Task? _applying;
     // What stops the download that runs, and its campaign; null when none runs.
@@ -226,6 +232,11 @@ public sealed class FleetUpdateAgent : IAsyncDisposable
             // kept), and nothing starts again, whatever was refused meanwhile.
             receipt = conflict is null ? ReceiptOf(linkId, instruction.CampaignId) : null;
             if (receipt is null) conflict ??= CancelledBefore(linkId, instruction.CampaignId) ?? (Persisted() ? null : UnsavedReason) ?? OtherFleet(linkId);
+            else if (_resumed && _state.LinkId == linkId && _state.CampaignId == instruction.CampaignId && Persisted())
+            {
+                _resumed = false;
+                _wake.Writer.TryWrite(true);
+            }
         }
 
         if (receipt is not null)
@@ -350,6 +361,7 @@ public sealed class FleetUpdateAgent : IAsyncDisposable
                     replaced = WorkOf(_state);
                     _state = next;
                     _unsaved = false;
+                    _resumed = false;
                 }
             }
             else
@@ -644,8 +656,8 @@ public sealed class FleetUpdateAgent : IAsyncDisposable
         lock (_gate)
         {
             // Nothing runs from a state that is not kept (a policy or a cancellation held in memory only): the write is
-            // tried again first.
-            if (!Persisted()) return null;
+            // tried again first. Nor from a checkpoint read at the start before its server is heard again (_resumed).
+            if (!Persisted() || _resumed) return null;
             state = _state;
             if (state.State != FleetUpdateMachineStates.Waiting || state.CampaignId is null || _applying is { IsCompleted: false }) return null;
             if (state.NotBefore is { } start && now < start) return null;
@@ -986,6 +998,7 @@ public sealed class FleetUpdateAgent : IAsyncDisposable
         _unreadable = null;
         _state = loaded!;
         _unsaved = false;
+        _resumed = loaded!.CampaignId is not null && !FleetUpdateMachineStates.IsTerminal(loaded.State);
         _loaded = true;
         return true;
     }
