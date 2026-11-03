@@ -192,6 +192,44 @@ public sealed class UpdateCampaignServerTests
         Assert.AreEqual(campaign.Id, (await node.NextAsync(FleetServerMethods.UpdateInstruction, FleetServerJsonContext.Default.FleetUpdateInstruction)).CampaignId);
     }
 
+    [TestMethod]
+    public async Task AFailedAutomaticCampaignIsTriedAgainTheNextDaysABoundedNumberOfTimes()
+    {
+        await using var fleet = await TestFleet.StartAsync(latest: "4.0.2");
+        fleet.Server.Failure = "The feed did not answer.";
+        await fleet.SetPolicyAsync(1, FleetUpdateModes.Automatic);
+        await fleet.TickAsync();
+        Assert.AreEqual(FleetUpdateCampaignStates.Failed, (await fleet.UpdatesAsync()).Campaigns.Single().State);
+
+        for (var day = 2; day <= 4; day++)
+        {
+            fleet.Clock.Advance(TimeSpan.FromDays(1).Add(TimeSpan.FromMinutes(1)));
+            await fleet.TickAsync();
+        }
+
+        var campaigns = (await fleet.UpdatesAsync()).Campaigns;
+        Assert.AreEqual(3, campaigns.Count, "tried again each day, three times at most");
+        Assert.IsTrue(campaigns.All(static campaign => campaign.Automatic && campaign.TargetVersion == "4.0.2" && campaign.State == FleetUpdateCampaignStates.Failed));
+        Assert.AreEqual(3, fleet.Server.Applied.Count);
+        StringAssert.Contains((await fleet.UpdatesAsync()).Policy.LastCheckMessage, "failed 3 times");
+    }
+
+    [TestMethod]
+    public async Task AnAutomaticVersionThatRolledBackIsNotTriedAgain()
+    {
+        await using var fleet = await TestFleet.StartAsync(latest: "4.0.2");
+        fleet.Server.RollBack = true;
+        await fleet.SetPolicyAsync(1, FleetUpdateModes.Automatic);
+        await fleet.TickAsync();
+        await fleet.TickAsync();
+        var first = (await fleet.UpdatesAsync()).Campaigns.Single();
+        Assert.AreEqual((FleetUpdateCampaignStates.Failed, FleetUpdateMachineStates.RolledBack), (first.State, first.ServerState));
+
+        fleet.Clock.Advance(TimeSpan.FromDays(1).Add(TimeSpan.FromMinutes(1)));
+        await fleet.TickAsync();
+        Assert.AreEqual(1, (await fleet.UpdatesAsync()).Campaigns.Count, "a version that rolled back is not tried again");
+    }
+
     /// <summary>The self-update of the server, faked: it records what it was asked, and runs the version, fails, or rolls back.</summary>
     private sealed class FakeServer(TestClock clock)
     {

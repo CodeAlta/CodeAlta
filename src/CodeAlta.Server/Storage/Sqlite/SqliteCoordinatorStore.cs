@@ -596,6 +596,15 @@ public sealed class SqliteCoordinatorStore : ICoordinatorStore
     }
 
     /// <inheritdoc />
+    public ValueTask<IReadOnlyList<UpdateCampaignRecord>> ListAutomaticUpdateCampaignsAsync(string organizationId, string targetVersion, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(organizationId);
+        ArgumentException.ThrowIfNullOrEmpty(targetVersion);
+        return ReadAsync(connection => QueryList(connection, null, CampaignColumns + " FROM update_campaigns WHERE organization_id = $org AND automatic = 1 " +
+            "AND target_version = $version ORDER BY created_at DESC, id DESC", ReadCampaign, ("$org", organizationId), ("$version", targetVersion)), cancellationToken);
+    }
+
+    /// <inheritdoc />
     public ValueTask<UpdateCampaignRecord?> GetUpdateCampaignAsync(string campaignId, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrEmpty(campaignId);

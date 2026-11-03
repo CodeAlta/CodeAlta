@@ -42,6 +42,8 @@ internal sealed record UpdateCampaignOptions
 internal sealed class UpdateCampaignService : IAsyncDisposable
 {
     private const int RecentCampaigns = 20;
+    // How many automatic campaigns to one version may fail (not roll back) before the policy stops trying it.
+    private const int MaxAutomaticAttempts = 3;
     private static readonly TimeSpan SendTimeout = TimeSpan.FromSeconds(5);
 
     private readonly ICoordinatorStore _store;
@@ -545,10 +547,7 @@ internal sealed class UpdateCampaignService : IAsyncDisposable
         if ((await _store.ListOutstandingUpdateCampaignsAsync(organization, cancellationToken).ConfigureAwait(false))
             .FirstOrDefault(static campaign => FleetUpdateCampaignStates.IsActive(campaign.State)) is { } running)
             return $"{latest} is the latest; campaign {running.Sequence} to {running.TargetVersion} runs.";
-        var campaigns = await _store.ListUpdateCampaignsAsync(organization, RecentCampaigns, cancellationToken).ConfigureAwait(false);
-        if (campaigns.Any(campaign => campaign.Automatic && UpdateCampaignEngine.Same(campaign.TargetVersion, latest.ToString())
-                                      && campaign.State is not FleetUpdateCampaignStates.Cancelled))
-            return $"{latest} is the latest; a campaign installed it already.";
+        if (await TriedAsync(organization, latest, cancellationToken).ConfigureAwait(false) is { } tried) return tried;
         var nodes = (await _store.ListDevicesAsync(organization, cancellationToken).ConfigureAwait(false))
             .Where(static device => device.Kind == FleetDeviceKinds.Node && device.Status == DeviceStatuses.Approved).ToArray();
         var versions = (await _store.ListMachinesAsync(organization, cancellationToken).ConfigureAwait(false))
@@ -568,6 +567,30 @@ internal sealed class UpdateCampaignService : IAsyncDisposable
         Changed(campaign);
         Nudge();
         return $"{latest} is the latest: the fleet updates at {start:u}.";
+    }
+
+    // What the earlier automatic campaigns to a version say of another one, or null to start it: installed (done, or
+    // partly done: the machines left update when they reconnect), withdrawn as bad (the server or a node rolled it back),
+    // or failed MaxAutomaticAttempts times (a download, a feed or a refusal, tried again at each daily check until then).
+    // A cancelled campaign does not count: a person, or a new policy, withdrew it.
+    private async Task<string?> TriedAsync(string organizationId, UpdateVersion latest, CancellationToken cancellationToken)
+    {
+        var failures = 0;
+        foreach (var campaign in await _store.ListAutomaticUpdateCampaignsAsync(organizationId, latest.ToString(), cancellationToken).ConfigureAwait(false))
+        {
+            if (campaign.State is FleetUpdateCampaignStates.Done or FleetUpdateCampaignStates.PartlyDone) return $"{latest} is the latest; a campaign installed it already.";
+            if (campaign.State != FleetUpdateCampaignStates.Failed) continue;
+            if (campaign.ServerState == FleetUpdateMachineStates.RolledBack)
+                return $"{latest} is the latest; it rolled back on the server, so it is not installed again automatically: start a campaign to install it.";
+            if ((await _store.ListUpdateCampaignMachinesAsync(campaign.Id, cancellationToken).ConfigureAwait(false))
+                .Any(static machine => machine.State == FleetUpdateMachineStates.RolledBack))
+                return $"{latest} is the latest; it rolled back on a node, so it is not installed again automatically: start a campaign to install it.";
+            failures++;
+        }
+
+        return failures >= MaxAutomaticAttempts
+            ? $"{latest} is the latest; its automatic update failed {failures} times, so it is not tried again: start a campaign to install it."
+            : null;
     }
 
     private async Task InstructAsync(ControlSession session, UpdateCampaignRecord campaign)
