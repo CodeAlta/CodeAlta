@@ -64,6 +64,9 @@ internal sealed class NodeTelemetry : IDisposable
     private readonly ConcurrentDictionary<string, Accepted> _accepted = new(StringComparer.Ordinal);
     private readonly ILogger _log;
     private readonly Lock _gate = new();
+    // Takes one setting at a time, from its check to its file and its plan: two pushes checked at once could both pass
+    // against the setting held, and the older one would then replace the newer one, also on disk.
+    private readonly Lock _settingsGate = new();
     private Accepted? _applied;
     private int _disposed;
 
@@ -153,6 +156,28 @@ internal sealed class NodeTelemetry : IDisposable
     {
         ArgumentNullException.ThrowIfNull(link);
         ArgumentNullException.ThrowIfNull(devices);
+        lock (_settingsGate) return AcceptCore(link, signed, devices, organizationId, out reason);
+    }
+
+    /// <summary>Resolves the plan again (the node's file may have changed) and applies it.</summary>
+    public void Reapply()
+    {
+        lock (_settingsGate) ReapplyCore();
+    }
+
+    /// <summary>Ends the export, once it sent what it holds.</summary>
+    public void Dispose()
+    {
+        if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
+        LogWriter.Detach();
+        Runtime.Dispose();
+        _meter.Dispose();
+        Metrics.Dispose();
+        _identity.Dispose();
+    }
+
+    private bool AcceptCore(FleetServerLink link, FleetSignedTelemetrySettings signed, FleetDeviceListState devices, string? organizationId, out string? reason)
+    {
         if (!FleetTelemetrySettingsDocuments.TryVerify(signed, devices, organizationId, out var settings, out reason))
         {
             Refused(link, reason);
@@ -189,12 +214,11 @@ internal sealed class NodeTelemetry : IDisposable
         Metrics.TelemetrySetting(true);
         Log(XenoLogLevel.Info, $"The telemetry setting {settings.Sequence} of {link.Url}, signed by {FleetMetrics.ShortId(settings.SignerDeviceId)}, was accepted: "
             + (settings.Enabled ? $"{string.Join(", ", settings.Signals)} {settings.Route} to {settings.Endpoint}" : "off") + ".");
-        Reapply();
+        ReapplyCore();
         return true;
     }
 
-    /// <summary>Resolves the plan again (the node's file may have changed) and applies it.</summary>
-    public void Reapply()
+    private void ReapplyCore()
     {
         FleetLocalTelemetrySettings? local;
         try
@@ -219,17 +243,6 @@ internal sealed class NodeTelemetry : IDisposable
         }
 
         if (Runtime.Apply(plan, force: changed && plan.Enabled)) Describe(plan);
-    }
-
-    /// <summary>Ends the export, once it sent what it holds.</summary>
-    public void Dispose()
-    {
-        if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
-        LogWriter.Detach();
-        Runtime.Dispose();
-        _meter.Dispose();
-        Metrics.Dispose();
-        _identity.Dispose();
     }
 
     // The setting of the first link, in the order the links were made, that pushed one: a node linked to several servers follows the first.

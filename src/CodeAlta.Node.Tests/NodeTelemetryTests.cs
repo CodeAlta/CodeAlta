@@ -141,6 +141,42 @@ public sealed class NodeTelemetryTests
     }
 
     [TestMethod]
+    public void SettingsAcceptedAtTheSameTimeNeverLeaveAnOlderOneHeldOrKept()
+    {
+        using var root = new NodeTestRoot();
+        var fleetRoot = FleetRoot(root);
+        using var desktop = DeviceIdentity.LoadOrCreate(Path.Combine(root.Root, "desktop"));
+        using var nodeKey = DeviceIdentity.LoadOrCreate(fleetRoot);
+        var link = Link(fleetRoot, nodeKey);
+        var devices = DeviceList(desktop, nodeKey);
+        const int Threads = 8;
+        const int Rounds = 25;
+        // Signed beforehand: the race is between the checks, not the signatures. Each setting names its own collector,
+        // so that the plan applied says which one won (a plan that only renumbers the one applied changes nothing).
+        static Uri Endpoint(long sequence) => new($"http://127.0.0.1:{10_000 + sequence}");
+        var signed = Enumerable.Range(1, Threads * Rounds).Select(sequence => Sign(desktop, Settings(desktop, sequence, Endpoint(sequence)))).ToArray();
+
+        using var telemetry = new NodeTelemetry(Options(fleetRoot) with { ExportInterval = TimeSpan.FromHours(1) });
+        for (var round = 0; round < Rounds; round++)
+        {
+            // The pushes of a round come at once, in any order: whatever the order, the newest one stays.
+            using var start = new Barrier(Threads);
+            var accepts = Enumerable.Range(0, Threads).Select(index => Task.Factory.StartNew(() =>
+            {
+                start.SignalAndWait(Patience);
+                telemetry.Accept(link, signed[round * Threads + (Threads - 1 - index)], devices, Organization, out _);
+            }, CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default)).ToArray();
+            Task.WaitAll(accepts, Patience);
+
+            var newest = (long)(round + 1) * Threads;
+            Assert.AreEqual((newest, Endpoint(newest).Port), (telemetry.Plan.FleetSequence, telemetry.Plan.Endpoint?.Port), $"round {round}: the setting applied is the newest one");
+            var kept = System.Text.Json.JsonSerializer.Deserialize(File.ReadAllBytes(Path.Combine(new FleetServerLinkStore(fleetRoot).LinkFolder(link.Id), NodeTelemetry.SettingsFileName)),
+                FleetTelemetryJsonContext.Default.FleetSignedTelemetrySettings);
+            Assert.AreEqual(signed[newest - 1].Payload, kept?.Payload, $"round {round}: the setting kept on disk is the newest one");
+        }
+    }
+
+    [TestMethod]
     public async Task ANodeSendsThroughItsServerWhenTheFleetSaysSo()
     {
         await using var receiver = await OtlpReceiver.StartAsync();
