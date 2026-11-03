@@ -34,7 +34,8 @@ public sealed record FleetUpdateTrial(string Version, DateTimeOffset SelectedAt,
 /// <param name="Since">Since when.</param>
 /// <param name="SessionsAtWork">The sessions a drain waits for.</param>
 /// <param name="Now">Whether it does not wait for running work.</param>
-public sealed record FleetUpdatePending(string Version, string Phase, DateTimeOffset Since, int SessionsAtWork, bool Now);
+/// <param name="RequestedBy">Who asked for it: <c>local</c> (the owner on the machine) or a campaign of the fleet; null when unknown.</param>
+public sealed record FleetUpdatePending(string Version, string Phase, DateTimeOffset Since, int SessionsAtWork, bool Now, string? RequestedBy = null);
 
 /// <summary>A version rolled back on this machine.</summary>
 /// <param name="Version">The version.</param>

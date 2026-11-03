@@ -36,8 +36,12 @@ public sealed record FleetUpdateAgentOptions
     /// <summary>Gets what reads where the self-update stands.</summary>
     public required Func<FleetUpdateStatus> Status { get; init; }
 
-    /// <summary>Gets what withdraws a switch that waits, for a cancelled campaign; null for none.</summary>
-    public Action<string>? CancelSwitch { get; init; }
+    /// <summary>
+    /// Gets what withdraws the switch a campaign asked for, when it still waits (a cancelled campaign): given who asked
+    /// (the <c>requestedBy</c> the agent gave <see cref="Apply"/>) and why; it must leave a switch someone else asked for
+    /// (<c>altanode update</c>) as it is. Null for none.
+    /// </summary>
+    public Action<string, string>? CancelSwitch { get; init; }
 
     /// <summary>Gets what finds the connector of a server link, to report to it; null for those the instructions came with only.</summary>
     public Func<string, FleetConnector?>? Connector { get; init; }
@@ -73,6 +77,9 @@ public sealed class FleetUpdateAgent : IAsyncDisposable
     private bool _loaded;
     private Task _loop = Task.CompletedTask;
     private Task? _applying;
+    // What stops the download that runs, and its campaign; null when none runs.
+    private CancellationTokenSource? _applyStop;
+    private string? _applyCampaign;
     private int _disposed;
 
     /// <summary>Initializes a new instance of the <see cref="FleetUpdateAgent"/> class and reads the instruction it kept.</summary>
@@ -282,6 +289,7 @@ public sealed class FleetUpdateAgent : IAsyncDisposable
         }
 
         FleetUpdateAgentState next;
+        StopWork? replaced = null;
         lock (_gate)
         {
             // A policy or a campaign that came meanwhile wins: the instruction is checked again against it by its next send.
@@ -291,9 +299,13 @@ public sealed class FleetUpdateAgent : IAsyncDisposable
             if (conflict is null)
             {
                 var links = new Dictionary<string, FleetUpdateAgentLink>(_state.Links, StringComparer.Ordinal);
-                // The campaign replaced keeps its receipt, for its server and against its replay.
+                // The campaign replaced keeps its receipt, for its server and against its replay; one that still ran is
+                // superseded, and its work stops.
                 if (_state.LinkId is { } previousLink && ReportOf(_state) is { } previous)
+                {
+                    if (!FleetUpdateMachineStates.IsTerminal(previous.State)) previous = previous with { State = FleetUpdateMachineStates.Superseded };
                     links[previousLink] = (links.GetValueOrDefault(previousLink) ?? new FleetUpdateAgentLink()) with { Receipt = previous };
+                }
                 var current = links.GetValueOrDefault(linkId) ?? new FleetUpdateAgentLink();
                 // An automatic update brings its policy, the latest this node knows once verified.
                 links[linkId] = update.Automatic
@@ -302,8 +314,15 @@ public sealed class FleetUpdateAgent : IAsyncDisposable
                 next = Accepted(links);
                 // The checkpoint is on disk before anything runs: one that is not kept would let this manifest, or an
                 // older one, through again after a restart.
-                if (TrySave(next) is { } failure) conflict = failure;
-                else _state = next;
+                if (TrySave(next) is { } failure)
+                {
+                    conflict = failure;
+                }
+                else
+                {
+                    replaced = WorkOf(_state);
+                    _state = next;
+                }
             }
             else
             {
@@ -316,6 +335,8 @@ public sealed class FleetUpdateAgent : IAsyncDisposable
             Refuse(linkId, instruction, conflict);
             return;
         }
+
+        replaced?.Run(_options);
 
         _options.Log($"The update to {update.Version} of campaign {update.CampaignId} was accepted"
             + (update.NotBefore is { } start && start > now ? $"; it waits until {start:u}." : "."));
@@ -390,6 +411,7 @@ public sealed class FleetUpdateAgent : IAsyncDisposable
 
         FleetUpdateAgentState next;
         string? stopped;
+        StopWork? work = null;
         lock (_gate)
         {
             if (!Readable())
@@ -414,13 +436,19 @@ public sealed class FleetUpdateAgent : IAsyncDisposable
             // What the new policy no longer allows stops: an automatic update under a manual or pinned policy, another
             // version than the one a policy pins.
             stopped = _state.LinkId == linkId ? Disallowed(_state, policy) : null;
-            if (stopped is not null) next = Stop(next, stopped);
+            if (stopped is not null)
+            {
+                work = WorkOf(next);
+                next = Stopped(next, stopped);
+            }
+
             // A newer policy only takes away: it applies even when it cannot be kept, and the instruction it would
             // allow is kept, with it, before it runs.
             Save(next);
             _state = next;
         }
 
+        work?.Run(_options);
         _options.Log($"The update policy {policy.Sequence} of the fleet is {policy.Mode}." + (stopped is null ? "" : $" Campaign {next.CampaignId} stops: {stopped}."));
         if (stopped is not null) Publish(next);
     }
@@ -445,15 +473,39 @@ public sealed class FleetUpdateAgent : IAsyncDisposable
     private FleetUpdatePolicy? KeptPolicy(string linkId)
         => _state.Links.GetValueOrDefault(linkId)?.Policy is { } kept && FleetUpdateDocuments.TryParsePolicy(kept.Payload, out var policy, out _) ? policy : null;
 
+    /// <summary>Gets who asks for the switch of a campaign, as the pending switch records it (<c>requestedBy</c>).</summary>
+    /// <param name="campaignId">The campaign.</param>
+    /// <returns>The requester.</returns>
+    internal static string Requester(string campaignId) => $"fleet campaign {campaignId}";
+
     private static FleetUpdatePolicy? PolicyOf(FleetUpdateInstruction? instruction)
         => instruction?.Policy is { } signed && FleetUpdateDocuments.TryParsePolicy(signed.Payload, out var policy, out _) ? policy : null;
 
-    // Stops the campaign this node follows (a cancellation, a policy that no longer allows it): an update that waits is
-    // dropped, a switch that waits for it is withdrawn. Under the gate.
-    private FleetUpdateAgentState Stop(FleetUpdateAgentState state, string? message)
+    // The campaign this node follows, stopped (a cancellation, a policy that no longer allows it). Under the gate; the
+    // work it had started stops with WorkOf, once the gate is released.
+    private FleetUpdateAgentState Stopped(FleetUpdateAgentState state, string? message)
+        => state with { State = FleetUpdateMachineStates.Cancelled, Message = message, At = _options.Time.GetUtcNow() };
+
+    // What stops the work a campaign started: its download, then the switch it asked for (only that one). Under the gate.
+    private StopWork? WorkOf(FleetUpdateAgentState state)
+        => state.CampaignId is { } campaign && state.State is FleetUpdateMachineStates.Downloading or FleetUpdateMachineStates.Switching
+            ? new StopWork(_applyCampaign == campaign ? _applyStop : null, Requester(campaign), $"Campaign {campaign} was cancelled.")
+            : null;
+
+    /// <summary>
+    /// Stops the work of a campaign: its download first, so that it publishes no switch once the switch it asked for is
+    /// withdrawn (the self-update publishes under the lock of its state, unless cancelled); then that switch only, never
+    /// one someone else asked for meanwhile.
+    /// </summary>
+    private sealed record StopWork(CancellationTokenSource? Download, string Requester, string Reason)
     {
-        if (state.State == FleetUpdateMachineStates.Switching && _options.CancelSwitch is { } withdraw) withdraw($"Campaign {state.CampaignId} was cancelled.");
-        return state with { State = FleetUpdateMachineStates.Cancelled, Message = message, At = _options.Time.GetUtcNow() };
+        public void Run(FleetUpdateAgentOptions options)
+        {
+            try { Download?.Cancel(); }
+            catch (ObjectDisposedException) { /* The download ended. */ }
+            try { options.CancelSwitch?.Invoke(Requester, Reason); }
+            catch (UpdateException exception) { options.Log($"The switch of {Requester} could not be withdrawn: {exception.Message}"); }
+        }
     }
 
     /// <summary>Takes the cancellation of a campaign: an update that waits is dropped, a switch that waits is withdrawn.</summary>
@@ -475,14 +527,17 @@ public sealed class FleetUpdateAgent : IAsyncDisposable
     {
         ArgumentNullException.ThrowIfNull(cancel);
         FleetUpdateAgentState next;
+        StopWork? work;
         lock (_gate)
         {
             if (_state.LinkId != linkId || _state.CampaignId != cancel.CampaignId || FleetUpdateMachineStates.IsTerminal(_state.State)) return;
-            next = Stop(_state, null);
+            work = WorkOf(_state);
+            next = Stopped(_state, null);
             _state = next;
             Save(next);
         }
 
+        work?.Run(_options);
         _options.Log($"Campaign {cancel.CampaignId} was cancelled.");
         Publish(next);
     }
@@ -516,7 +571,26 @@ public sealed class FleetUpdateAgent : IAsyncDisposable
             state = state with { State = FleetUpdateMachineStates.Downloading, Message = null, At = now };
             _state = state;
             Save(state);
-            _applying = Task.Run(() => ApplyAsync(state, _stop.Token));
+            // The download of this campaign stops with the node, and with the campaign.
+            var download = CancellationTokenSource.CreateLinkedTokenSource(_stop.Token);
+            (_applyStop, _applyCampaign) = (download, state.CampaignId);
+            var started = state;
+            _applying = Task.Run(async () =>
+            {
+                try
+                {
+                    await ApplyAsync(started, download.Token).ConfigureAwait(false);
+                }
+                finally
+                {
+                    lock (_gate)
+                    {
+                        if (_applyStop == download) (_applyStop, _applyCampaign) = (null, null);
+                    }
+
+                    download.Dispose();
+                }
+            });
         }
 
         Publish(state);
@@ -541,7 +615,7 @@ public sealed class FleetUpdateAgent : IAsyncDisposable
                     throw new UpdateException(UpdateErrorCodes.NotFound, $"The latest stable version {state.Feed} lists is {check.Latest?.ToString() ?? "none"}, not {state.Version}.");
             }
 
-            var staged = await _options.Apply(request, $"fleet campaign {state.CampaignId}", cancellationToken).ConfigureAwait(false);
+            var staged = await _options.Apply(request, Requester(state.CampaignId!), cancellationToken).ConfigureAwait(false);
             // A version that runs already is updated only once it confirmed; one on trial still may roll back.
             outcome = staged is null && UpdateVersion.TryParse(state.Version, out var target) && Confirmed(target, _options.Status())
                 ? FleetUpdateMachineStates.Updated
@@ -559,7 +633,8 @@ public sealed class FleetUpdateAgent : IAsyncDisposable
         }
         catch (UpdateException exception)
         {
-            outcome = exception.Code is UpdateErrorCodes.FleetRefused or UpdateErrorCodes.SourceNotAllowed or UpdateErrorCodes.InvalidSource
+            // The owner's settings, or a switch the owner asked for on the machine, win.
+            outcome = exception.Code is UpdateErrorCodes.FleetRefused or UpdateErrorCodes.SourceNotAllowed or UpdateErrorCodes.InvalidSource or UpdateErrorCodes.SwitchWaits
                 ? FleetUpdateMachineStates.Refused
                 : FleetUpdateMachineStates.Failed;
             message = exception.Message;
@@ -571,18 +646,28 @@ public sealed class FleetUpdateAgent : IAsyncDisposable
         }
 
         FleetUpdateAgentState next;
+        var superseded = false;
         lock (_gate)
         {
-            // A cancellation or a newer campaign that came meanwhile wins.
+            // A cancellation or a newer campaign that came meanwhile wins: a switch this one published just before is
+            // withdrawn (only that one).
             if (_state.CampaignId != state.CampaignId || _state.State != FleetUpdateMachineStates.Downloading)
             {
-                if (outcome == FleetUpdateMachineStates.Switching && _options.CancelSwitch is { } withdraw) withdraw($"Campaign {state.CampaignId} was cancelled.");
-                return;
+                superseded = true;
+                next = _state;
             }
+            else
+            {
+                next = _state with { State = outcome, Message = message, At = _options.Time.GetUtcNow() };
+                _state = next;
+                Save(next);
+            }
+        }
 
-            next = _state with { State = outcome, Message = message, At = _options.Time.GetUtcNow() };
-            _state = next;
-            Save(next);
+        if (superseded)
+        {
+            if (outcome == FleetUpdateMachineStates.Switching) new StopWork(null, Requester(state.CampaignId!), $"Campaign {state.CampaignId} was cancelled.").Run(_options);
+            return;
         }
 
         _options.Log($"Campaign {state.CampaignId}: {outcome}{(message is null ? "" : ": " + message)}");
@@ -643,6 +728,12 @@ public sealed class FleetUpdateAgent : IAsyncDisposable
                 {
                     outcome = FleetUpdateMachineStates.Failed;
                     message = "The switch was withdrawn on this machine.";
+                }
+                else if (state.State == FleetUpdateMachineStates.Switching && status.Pending is { RequestedBy: { } by } other && by != Requester(state.CampaignId))
+                {
+                    // The owner asked for another switch (altanode update): it replaced the one of this campaign.
+                    outcome = FleetUpdateMachineStates.Failed;
+                    message = $"The switch was replaced on this machine by one to {other.Version} ({by}).";
                 }
                 else if (state.State == FleetUpdateMachineStates.Downloading && _applying is null)
                 {

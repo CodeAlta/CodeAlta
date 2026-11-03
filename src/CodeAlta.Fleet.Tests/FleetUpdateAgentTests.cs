@@ -263,6 +263,56 @@ public sealed class FleetUpdateAgentTests
         await (agent.Tick() ?? Task.CompletedTask);
         Assert.AreEqual(1, harness.Applied.Count);
     }
+
+    [TestMethod]
+    public async Task CancellingACampaignStopsItsDownloadAndLeavesALocalSwitchAsItIs()
+    {
+        using var harness = new AgentHarness();
+        var store = new UpdateVersionStore(Path.Combine(harness.Folder, "versions"), harness.Clock);
+        var download = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        // The self-update as the node's: it publishes its switch once the download ends, unless it was cancelled.
+        var agent = harness.Start(options => options with
+        {
+            Apply = async (request, requestedBy, token) =>
+            {
+                await download.Task;
+                token.ThrowIfCancellationRequested();
+                var version = UpdateVersion.Parse(request.Version!);
+                store.RequestSwitch(version, false, requestedBy);
+                return new StagedUpdate(version, harness.Folder, PackageHash.Parse(request.ExpectedSha512!), "expected hash", false);
+            },
+            CancelSwitch = (requestedBy, reason) => store.CancelPending(reason, requestedBy),
+        });
+
+        // Cancelled while it downloads; meanwhile the owner asks for another version on the machine.
+        await harness.AcceptAsync(agent, LinkA, harness.Instruction(harness.Manifest(1, "c1", "4.0.2")));
+        var applying = agent.Tick();
+        Assert.IsNotNull(applying);
+        agent.Cancel(LinkA, new FleetUpdateCancel("c1"));
+        store.RequestSwitch(UpdateVersion.Parse("4.0.3"), false, "local");
+        download.SetResult();
+        await applying;
+        Assert.AreEqual(("4.0.3", "local"), (store.Read().Pending?.Version, store.Read().Pending?.RequestedBy), "the download publishes nothing once cancelled");
+
+        // A campaign whose switch the owner replaced: its cancellation withdraws nothing of the owner's.
+        store.CancelPending(null);
+        await harness.AcceptAsync(agent, LinkA, harness.Instruction(harness.Manifest(2, "c2", "4.0.2")));
+        await (agent.Tick() ?? Task.CompletedTask);
+        Assert.AreEqual((FleetUpdateMachineStates.Switching, FleetUpdateAgent.Requester("c2")), (agent.Current?.State, store.Read().Pending?.RequestedBy));
+        store.RequestSwitch(UpdateVersion.Parse("4.0.3"), false, "local");
+        agent.Cancel(LinkA, new FleetUpdateCancel("c2"));
+        Assert.AreEqual(("4.0.3", "local"), (store.Read().Pending?.Version, store.Read().Pending?.RequestedBy));
+
+        // Not cancelled: a campaign whose switch the owner replaced does not wait for it forever.
+        store.CancelPending(null);
+        await harness.AcceptAsync(agent, LinkA, harness.Instruction(harness.Manifest(3, "c3", "4.0.2")));
+        await (agent.Tick() ?? Task.CompletedTask);
+        store.RequestSwitch(UpdateVersion.Parse("4.0.3"), false, "local");
+        harness.Status = UpdateStatusReport.Describe(store.Read(), harness.Running, null);
+        Assert.IsNull(agent.Tick());
+        Assert.AreEqual(FleetUpdateMachineStates.Failed, agent.Current?.State);
+        StringAssert.Contains(agent.Current?.Message, "replaced");
+    }
 }
 
 /// <summary>An update agent on a folder of its own, with a controller that signs, a clock and a faked self-update.</summary>

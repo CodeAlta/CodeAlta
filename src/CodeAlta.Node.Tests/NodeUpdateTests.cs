@@ -265,6 +265,34 @@ public sealed class NodeUpdateTests
     }
 
     [TestMethod]
+    public async Task TheFleetsSwitchNeverReplacesNorWithdrawsTheOwnersSwitch()
+    {
+        using var root = new NodeTestRoot();
+        var feed = Feed(root, "99.0.0");
+        var store = NodeUpdatePaths.Store(root.Profile());
+        var updates = new NodeUpdates(new NodeUpdatesOptions
+        {
+            Store = store, Running = UpdateVersion.Parse("98.0.0"), SessionsAtWork = static () => 0, PauseAdmission = static _ => { }, Healthy = static () => true,
+            RequestRestart = static () => Assert.Fail("no restart"),
+        });
+        var request = new UpdateRequest { Version = "99.0.0", Source = feed, Origin = UpdateOrigin.Local };
+        const string campaign = "fleet campaign c1";
+
+        // The owner asked for a version while the campaign downloaded.
+        store.RequestSwitch(UpdateVersion.Parse("99.0.5"), now: false, "local");
+        var refused = await Assert.ThrowsExactlyAsync<UpdateException>(() => updates.ApplyAsync(request, campaign, TestContext.CancellationToken));
+        StringAssert.Contains(refused.Message, "altanode update");
+        Assert.IsFalse(updates.CancelPending("Campaign c1 was cancelled.", campaign));
+        Assert.AreEqual(("99.0.5", "local"), (store.Read().Pending?.Version, store.Read().Pending?.RequestedBy));
+
+        store.CancelPending(null);
+        Assert.IsNotNull(await updates.ApplyAsync(request, campaign, TestContext.CancellationToken));
+        Assert.AreEqual(campaign, store.Read().Pending?.RequestedBy);
+        Assert.IsTrue(updates.CancelPending("Campaign c1 was cancelled.", campaign));
+        Assert.IsNull(store.Read().Pending);
+    }
+
+    [TestMethod]
     public async Task ADrainingNodeRefusesNewWorkAsUpdating_AndReportsItsVersions()
     {
         using var root = new NodeTestRoot();

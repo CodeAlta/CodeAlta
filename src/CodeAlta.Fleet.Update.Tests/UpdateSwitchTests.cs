@@ -22,6 +22,25 @@ public sealed class UpdateSwitchTests
     }
 
     [TestMethod]
+    public void APendingSwitchIsWithdrawnOrReplacedOnlyAsItsRequesterAllows()
+    {
+        using var temp = new TempFolder();
+        var store = StoreWith(temp, V2, V3);
+        store.RequestSwitch(V2, now: false, "local");
+
+        // A cancelled campaign of the fleet leaves the owner's switch as it is.
+        Assert.IsFalse(store.CancelPending("Campaign c1 was cancelled.", "fleet campaign c1"));
+        Assert.AreEqual(("4.0.2", "local"), (store.Read().Pending?.Version, store.Read().Pending?.RequestedBy));
+        Assert.IsFalse(store.TryRequestSwitch(V3, now: false, "fleet campaign c1", static pending => pending is null));
+        Assert.AreEqual("local", store.Read().Pending?.RequestedBy);
+
+        store.CancelPending(null);
+        Assert.IsTrue(store.TryRequestSwitch(V3, now: false, "fleet campaign c1", static pending => pending is null));
+        Assert.IsTrue(store.CancelPending("Campaign c1 was cancelled.", "fleet campaign c1"));
+        Assert.IsNull(store.Read().Pending);
+    }
+
+    [TestMethod]
     public void ASelectedVersionIsOnTrialUntilItConfirms()
     {
         using var temp = new TempFolder();

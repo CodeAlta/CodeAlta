@@ -117,7 +117,11 @@ internal sealed class NodeUpdates : IAsyncDisposable
     /// <param name="requestedBy">Who asks, recorded with the switch.</param>
     /// <param name="cancellationToken">Cancels the download.</param>
     /// <returns>The staged version, or null when the node already runs the version asked for or the latest one.</returns>
-    /// <exception cref="UpdateException">The feed is not allowed, the package does not match its hash, or the state cannot be written.</exception>
+    /// <exception cref="UpdateException">
+    /// The feed is not allowed, the package does not match its hash, the state cannot be written, or a switch another
+    /// requester asked for waits (<see cref="UpdateErrorCodes.SwitchWaits"/>).
+    /// </exception>
+    /// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was cancelled; no switch is asked for then.</exception>
     public async Task<StagedUpdate?> ApplyAsync(UpdateRequest request, string requestedBy, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
@@ -127,8 +131,18 @@ internal sealed class NodeUpdates : IAsyncDisposable
         var check = await updater.CheckAsync(request, cancellationToken).ConfigureAwait(false);
         if (check.Target is null) return null;
         var staged = await updater.StageAsync(check, request, cancellationToken).ConfigureAwait(false);
-        _options.Store.RequestSwitch(staged.Version, request.Now, requestedBy);
-        return staged;
+        // Published atomically, under the lock of the state: not once the campaign was cancelled (its withdrawal comes
+        // after the cancellation), and never over a switch someone else asked for.
+        UpdatePending? waiting = null;
+        if (_options.Store.TryRequestSwitch(staged.Version, request.Now, requestedBy, pending =>
+            {
+                waiting = pending;
+                return !cancellationToken.IsCancellationRequested && (pending is null || string.Equals(pending.RequestedBy, requestedBy, StringComparison.Ordinal));
+            }))
+            return staged;
+        cancellationToken.ThrowIfCancellationRequested();
+        throw new UpdateException(UpdateErrorCodes.SwitchWaits,
+            $"A switch to {waiting?.Version} asked by {waiting?.RequestedBy ?? "another process"} waits on this machine: {requestedBy} does not replace it (altanode update decides).");
     }
 
     /// <summary>Reads a feed for what it offers this node, without installing anything (an automatic update of the fleet checks the latest version with it).</summary>
@@ -147,6 +161,13 @@ internal sealed class NodeUpdates : IAsyncDisposable
     /// <param name="reason">Why.</param>
     /// <exception cref="UpdateException">The state cannot be written.</exception>
     public void CancelPending(string reason) => _options.Store.CancelPending(reason);
+
+    /// <summary>Withdraws the switch that waits only when a requester asked for it (a cancelled campaign of the fleet).</summary>
+    /// <param name="reason">Why.</param>
+    /// <param name="requestedBy">Who asked for the switch to withdraw.</param>
+    /// <returns>Whether that switch waited and was withdrawn.</returns>
+    /// <exception cref="UpdateException">The state cannot be written.</exception>
+    public bool CancelPending(string reason, string requestedBy) => _options.Store.CancelPending(reason, requestedBy);
 
     /// <summary>Gets the settings of the updates of this node (<c>fleet/update.json</c>), read again.</summary>
     /// <returns>The policy.</returns>

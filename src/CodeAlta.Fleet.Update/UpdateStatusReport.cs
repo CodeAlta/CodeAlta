@@ -17,7 +17,7 @@ public static class UpdateStatusReport
         ArgumentNullException.ThrowIfNull(running);
         return new FleetUpdateStatus(running, installed, state.Current, state.Previous,
             state.Trial is { } trial ? new FleetUpdateTrial(trial.Version, trial.SelectedAt, trial.Starts) : null,
-            state.Pending is { } pending ? new FleetUpdatePending(pending.Version, pending.Phase, pending.PhaseSince, pending.SessionsAtWork, pending.Now) : null,
+            state.Pending is { } pending ? new FleetUpdatePending(pending.Version, pending.Phase, pending.PhaseSince, pending.SessionsAtWork, pending.Now, pending.RequestedBy) : null,
             [.. state.Bad.Select(static bad => new FleetUpdateBadVersion(bad.Version, bad.At, bad.Reason))],
             state.LastOutcome is { } outcome ? new FleetUpdateOutcome(outcome.Version, outcome.Outcome, outcome.At, outcome.Message) : null);
     }

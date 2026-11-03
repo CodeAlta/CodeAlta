@@ -378,7 +378,7 @@ internal sealed class NodeApplication
                         Check = (request, token) => updates is { } self ? self.CheckAsync(request, token)
                             : throw new UpdateException(UpdateErrorCodes.StateUnavailable, "The self-update of this node is not running."),
                         Status = () => updates?.Status() ?? UpdateStatusReport.Describe(store.Read(), Version, InstalledVersion()),
-                        CancelSwitch = reason => updates?.CancelPending(reason),
+                        CancelSwitch = (requestedBy, reason) => updates?.CancelPending(reason, requestedBy),
                         Connector = linkId => servers?.Connections.Find(linkId)?.Connector,
                         Log = static message => NodeLog(message),
                     })
