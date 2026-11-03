@@ -222,7 +222,12 @@ public sealed class FleetMoveReceiver
             {
                 try
                 {
-                    await SessionBundle.UnpackAsync(stream, bundle, cancellationToken).ConfigureAwait(false);
+                    // The archive stores its files as they are (SessionBundle.PackAsync): they cannot unpack to more than its length.
+                    var limits = SessionBundleLimits.Default with
+                    {
+                        MaximumEntryBytes = incoming.Offer.ArchiveLength, MaximumTotalBytes = incoming.Offer.ArchiveLength,
+                    };
+                    await SessionBundle.UnpackAsync(stream, bundle, limits, cancellationToken).ConfigureAwait(false);
                 }
                 catch (InvalidDataException exception)
                 {
