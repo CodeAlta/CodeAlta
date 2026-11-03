@@ -80,6 +80,11 @@ flowchart LR
 | **Audit** | The audit log, filtered and exported |
 | **Server** | Health, version, connections, storage, backups and restore, updates, sign-in methods, SSO |
 
+- **Updates** today: the Fleet canvas shows the version of each machine; Settings > Fleet > Server shows the server's
+  version and policy, **Update the fleet…** (a version, now or at a time, the machines), the last campaign with each
+  machine's state and **Cancel**, and **Policy…** ([deployment](deployment.md#updates)). Machines paired directly,
+  without a server, are updated on them (`altanode update`).
+
 - Each canvas exists in the application scope; some also in a project's scope (the automations, runs and statistics of
   a project) or a machine's.
 - A household sees Fleet, Machines, Automations and Statistics; the others appear under **Advanced** or for roles that

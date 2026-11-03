@@ -86,7 +86,9 @@ If the new version does not start and connect within two minutes, the node goes 
 
 `altaserver update` does the same for CodeAlta Server: it first copies its database to the `backups` folder of its data root, and puts that copy back if the new version has to be undone.
 
-To allow only some feeds on a machine, list them in `fleet/update.json` of the profile (`update.json` of the data root for the server): `{ "source": "https://my-mirror/v3/index.json", "allowedSources": ["https://my-mirror/v3/index.json"] }`.
+To allow only some feeds on a machine, list them in `fleet/update.json` of the profile (`update.json` of the data root for the server): `{ "source": "https://my-mirror/v3/index.json", "allowedSources": ["https://my-mirror/v3/index.json"] }`. Add `"fleet": false` to update that machine only by hand.
+
+With a CodeAlta Server, update all your machines at once from CodeAlta Desktop: see [Update all your machines](#update-all-your-machines).
 
 ## Give it projects
 
@@ -216,6 +218,25 @@ The owner of a machine decides last, with the `telemetry.json` file of the machi
 | `{ "endpoint": "http://localhost:4318", "signals": ["traces", "metrics", "logs"] }` | Sends to this collector instead |
 
 The standard `OTEL_EXPORTER_OTLP_ENDPOINT` and other `OTEL_*` variables of the service also work, and win over the fleet's setting; `OTEL_SDK_DISABLED=true` turns telemetry off.
+
+### Update all your machines
+
+1. In CodeAlta Desktop, on the owner's computer, open **Settings** > **Fleet** > **Server**. The card of the server shows **Updates**: the version of the server and the update policy.
+2. Click **Update the fleet…**. Leave **Version** empty for the latest one, or type a version; **Feed** empty for nuget.org.
+3. Choose **Now**, or **At a time** and the date and the hour, in the time zone of your computer.
+4. Untick the machines that should not update, then click **Update**.
+
+The machines update first, two at a time, each when no session is working, then the server updates itself. The card follows the campaign: each machine with its state, and **Cancel** until the server's turn comes. A machine that is offline updates when it connects again. The Fleet canvas shows the version of each machine.
+
+Your computer signs what the machines install, with the hash of the package of each system: a machine installs only an update that a computer of the owner signed, never an older version unless you named it, and only the package that matches that hash. The server alone cannot make your machines install anything.
+
+**Policy…** sets how the fleet updates:
+
+| Policy | Effect |
+| --- | --- |
+| **Manual** | Machines update only when you click **Update the fleet…** |
+| **Pinned** | The fleet stays on one version: an update to another version is refused until you change the policy |
+| **Automatic** | The server reads the feed every day and updates the fleet to its latest stable version at the time of day you choose; each machine checks the package against the hash the feed publishes |
 
 ## Security
 

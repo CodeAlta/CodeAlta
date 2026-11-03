@@ -167,6 +167,32 @@ internal static class ApiEndpoints
             .Produces<TelemetrySettingsDto>()
             .WithSummary("Sets the telemetry of the fleet with a setting the calling owner's controller device signed: applied at once and pushed to the machines, which check its signature.");
 
+        api.MapGet("/updates", (HttpContext context, UpdateCampaignService updates)
+                => updates.GetAsync(DeviceAuthenticationMiddleware.GetDevice(context), context.RequestAborted))
+            .Produces<UpdatesDto>()
+            .WithSummary("The updates of the fleet: the versions of the server, the update policy and the recent campaigns with each machine's state; for a controller device.");
+
+        api.MapGet("/updates/campaigns/{id}", (string id, HttpContext context, UpdateCampaignService updates)
+                => updates.GetCampaignAsync(DeviceAuthenticationMiddleware.GetDevice(context), id, context.RequestAborted))
+            .Produces<UpdateCampaignDto>()
+            .WithSummary("An update campaign and the state of each of its machines; for a controller device.");
+
+        api.MapPost("/updates/campaigns", (CreateUpdateCampaignRequest? request, HttpContext context, UpdateCampaignService updates) =>
+                AuditedAsync(context, "update.campaign.create", null, actor => updates.CreateAsync(actor, request, Origin(context), context.RequestAborted),
+                    StatusCodes.Status201Created))
+            .Produces<UpdateCampaignDto>(StatusCodes.Status201Created)
+            .WithSummary("Starts an update campaign with a manifest the calling owner's controller device signed: nodes first, a few at a time, then the server.");
+
+        api.MapPost("/updates/campaigns/{id}/cancel", (string id, HttpContext context, UpdateCampaignService updates) =>
+                AuditedAsync(context, "update.campaign.cancel", id, actor => updates.CancelAsync(actor, id, Origin(context), context.RequestAborted)))
+            .Produces<UpdateCampaignDto>()
+            .WithSummary("Cancels an update campaign before the server's step; nodes that switched stay on the new version.");
+
+        api.MapPut("/updates/policy", (SetUpdatePolicyRequest? request, HttpContext context, UpdateCampaignService updates) =>
+                AuditedAsync(context, "update.policy.set", null, actor => updates.SetPolicyAsync(actor, request, Origin(context), context.RequestAborted)))
+            .Produces<UpdatePolicyDto>()
+            .WithSummary("Sets the update policy of the fleet (manual, pinned, automatic) with a policy the calling owner's controller device signed.");
+
         app.MapPost(FleetTelemetryPaths.Forward + "/{signal}", (string signal, HttpContext context, OtlpForwarder forwarder) => forwarder.HandleAsync(context, signal))
             .ExcludeFromDescription();
         app.Map(FleetServerMethods.ControlPath, (HttpContext context, ControlService control) => control.HandleAsync(context)).ExcludeFromDescription();

@@ -214,6 +214,71 @@ public sealed class FleetServerRpcTests
         }
     }
 
+    [TestMethod]
+    public async Task TheOwnersComputerStartsAnUpdateOfTheFleetAndSetsItsPolicy()
+    {
+        var token = TestContext.CancellationToken;
+        var root = Directory.CreateTempSubdirectory("codealta-fleet-update-rpc-").FullName;
+        string At(string name) => Directory.CreateDirectory(Path.Combine(root, name)).FullName;
+        try
+        {
+            // A folder feed with both products at 4.0.2, for the runtime of this machine (the server's).
+            var feed = At("feed");
+            var runtime = CodeAlta.Fleet.Update.UpdateProduct.CurrentRuntime()!;
+            foreach (var product in new[] { "CodeAlta.Node", "CodeAlta.Server" })
+            {
+                File.WriteAllText(Path.Combine(feed, $"{product}.4.0.2.nupkg"), "tool " + product);
+                File.WriteAllText(Path.Combine(feed, $"{product}.{runtime}.4.0.2.nupkg"), "runtime " + product);
+            }
+
+            await using var server = await CoordinatorServer.StartAsync(new CoordinatorServerOptions
+            {
+                DataRoot = At("server"), Urls = ["http://127.0.0.1:0"], ConfigureLogging = static _ => { }, EnvironmentVariable = static _ => null,
+                UpdateStatus = static () => new FleetUpdateStatus("4.0.1", null, null, null, null, null, [], null), UpdateInterval = TimeSpan.FromHours(1),
+            }, token);
+            var address = server.Addresses.First(static uri => uri.Scheme == "http");
+            await using var host = await CodeAltaHost.CreateAsync(new CodeAltaHostOptions
+            {
+                GlobalRoot = At("global"), CurrentProjectPath = At("project"), DiscoveryScope = new(At("home"), root), BuiltInSkillRoot = At("builtin"),
+                PluginEnvironment = FrozenDictionary<string, string?>.Empty, StartPlugins = false, IsHeadless = true, OwnsLogging = false,
+            }, token);
+            await using var servers = new DesktopFleetServers(host, "Desktop", "4.0.0");
+            var epoch = Guid.NewGuid().ToString("D");
+            var service = new FleetServerService(servers, epoch) { Spaces = host.SpaceCatalog };
+            var created = await service.CreateAsync(new FleetServerCreateRequest(epoch, address.ToString(), server.SetupCode!.Code, "Alex", "Home"), token);
+            Assert.AreEqual("ok", created.Status, created.Message);
+            var linkId = created.Server!.Id;
+
+            var before = await service.UpdatesAsync(new FleetServerLinkRequest(epoch, linkId), token);
+            Assert.AreEqual(("ok", "4.0.1", "manual", 0), (before.Status, before.Updates!.ServerVersion, before.Updates.Policy.Mode, before.Updates.Campaigns.Length));
+
+            var start = DateTimeOffset.UtcNow.AddDays(1);
+            var started = await service.StartUpdateAsync(new FleetUpdateStartRequest(epoch, linkId, null, feed, start.ToString("O"), "Europe/Paris", null, false), token);
+            Assert.AreEqual("ok", started.Status, started.Message);
+            Assert.AreEqual(("4.0.2", "scheduled", "Europe/Paris", 1), (started.Campaign!.TargetVersion, started.Campaign.State, started.Campaign.TimeZone, started.Campaign.Sequence),
+                "the latest version both products list, at the time chosen");
+            Assert.AreEqual(start.ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ss"), DateTimeOffset.Parse(started.Campaign.NotBefore!).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ss"));
+
+            var cancelled = await service.CancelUpdateAsync(new FleetUpdateCancelRequest(epoch, linkId, started.Campaign.Id), token);
+            Assert.AreEqual(("ok", "cancelled"), (cancelled.Status, cancelled.Campaign!.State));
+
+            var pinned = await service.SetUpdatePolicyAsync(new FleetUpdatePolicyRequest(epoch, linkId, "pinned", "4.0.1", null, null, null), token);
+            Assert.AreEqual("ok", pinned.Status, pinned.Message);
+            var after = await service.UpdatesAsync(new FleetServerLinkRequest(epoch, linkId), token);
+            Assert.AreEqual(("pinned", "4.0.1", "cancelled"), (after.Updates!.Policy.Mode, after.Updates.Policy.PinnedVersion, after.Updates.Campaigns[0].State));
+            var refused = await service.StartUpdateAsync(new FleetUpdateStartRequest(epoch, linkId, "4.0.2", feed, null, null, null, false), token);
+            Assert.AreEqual("update.conflict", refused.Status, "a pinned fleet stays on its version");
+            var missing = await service.StartUpdateAsync(new FleetUpdateStartRequest(epoch, linkId, "4.0.9", feed, null, null, null, false), token);
+            Assert.AreEqual("update.not_found", missing.Status, "the feed has no such version");
+        }
+        finally
+        {
+            try { Directory.Delete(root, recursive: true); }
+            catch (IOException) { }
+            catch (UnauthorizedAccessException) { }
+        }
+    }
+
     private static SessionViewDescriptor Descriptor(string id, string path, DateTimeOffset? created = null) => new()
     {
         SessionId = id, Kind = SessionViewKind.GlobalSession, ProviderId = Provider.Value, ProviderKey = Provider.Value, WorkingDirectory = path, Title = "A chat",

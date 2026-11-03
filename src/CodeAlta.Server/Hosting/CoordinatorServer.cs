@@ -70,6 +70,27 @@ public sealed class CoordinatorServerOptions
 
     /// <summary>Gets what reads the versions of the server and its self-update (<c>GET /api/v1/server/update</c>); null for the running version alone.</summary>
     public Func<FleetUpdateStatus?>? UpdateStatus { get; init; }
+
+    /// <summary>
+    /// Gets what updates the server itself, last in a campaign of the fleet (its self-update's <c>ApplyAsync</c>, given the
+    /// request and who asks); null for a server that does not update itself (its campaigns fail at the server's step).
+    /// </summary>
+    public Func<CodeAlta.Fleet.Update.UpdateRequest, string, CancellationToken, Task<CodeAlta.Fleet.Update.StagedUpdate?>>? ApplyUpdate { get; init; }
+
+    /// <summary>Gets the runtime of the server's package (<c>win-x64</c>); null for this process's.</summary>
+    public string? UpdateRuntime { get; init; }
+
+    /// <summary>Gets how often the update campaigns move on without an event.</summary>
+    public TimeSpan UpdateInterval { get; init; } = TimeSpan.FromSeconds(5);
+
+    /// <summary>Gets how many nodes update at once in a campaign.</summary>
+    public int UpdateConcurrency { get; init; } = 2;
+
+    /// <summary>Gets how long a campaign waits for a node that went offline while it updated.</summary>
+    public TimeSpan UpdateOfflineGrace { get; init; } = TimeSpan.FromMinutes(10);
+
+    /// <summary>Gets what reads the latest stable version of a feed for an automatic policy, for tests; null to read the feed.</summary>
+    public Func<string, CancellationToken, Task<string?>>? ReadLatestUpdate { get; init; }
 }
 
 /// <summary>What a running server writes in its data root, for <c>altaserver status</c>.</summary>
@@ -183,6 +204,8 @@ public sealed class CoordinatorServer : IAsyncDisposable
                     organization?.Id);
                 await LogIntegrityAsync(app, store, organization, cancellationToken).ConfigureAwait(false);
                 await app.StartAsync(cancellationToken).ConfigureAwait(false);
+                // The campaigns a stop interrupted go on, the server's own step included (a new version confirms it).
+                app.Services.GetRequiredService<UpdateCampaignService>().Start();
             }
             catch
             {
@@ -227,6 +250,7 @@ public sealed class CoordinatorServer : IAsyncDisposable
         if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
         try
         {
+            await _app.Services.GetRequiredService<UpdateCampaignService>().DisposeAsync().ConfigureAwait(false);
             await _app.StopAsync(CancellationToken.None).ConfigureAwait(false);
         }
         finally
@@ -372,12 +396,20 @@ public sealed class CoordinatorServer : IAsyncDisposable
             provider.GetRequiredService<ILoggerFactory>().CreateLogger("CodeAlta.Server.Telemetry")));
         services.AddSingleton(provider => new OtlpForwarder(telemetry, provider.GetRequiredService<RequestAuthenticator>(),
             provider.GetRequiredService<ILoggerFactory>().CreateLogger("CodeAlta.Server.Telemetry")));
+        services.AddSingleton(provider => new UpdateCampaignService(store, provider.GetRequiredService<PresenceRegistry>(), provider.GetRequiredService<DirectoryHub>(),
+            provider.GetRequiredService<ServerUpdateStatusSource>(), time, provider.GetRequiredService<ILoggerFactory>().CreateLogger("CodeAlta.Server.Update"),
+            new UpdateCampaignOptions
+            {
+                Interval = options.UpdateInterval, ApplyServerUpdate = options.ApplyUpdate, ServerRuntime = options.UpdateRuntime, ReadLatest = options.ReadLatestUpdate,
+                Limits = new UpdateCampaignLimits { MaxConcurrent = Math.Max(1, options.UpdateConcurrency), OfflineGrace = options.UpdateOfflineGrace },
+            }));
         services.AddSingleton(provider => new ControlService(store, provider.GetRequiredService<PresenceRegistry>(), provider.GetRequiredService<DirectoryHub>(),
             provider.GetRequiredService<PublicationService>(), provider.GetRequiredService<RelayHub>(), time, options.ConnectionPolicy,
             provider.GetRequiredService<ILoggerFactory>().CreateLogger("CodeAlta.Server.Control"))
         {
             Metrics = metrics,
             TelemetrySettings = provider.GetRequiredService<TelemetrySettingsService>(),
+            Updates = provider.GetRequiredService<UpdateCampaignService>(),
         });
 
         var app = builder.Build();

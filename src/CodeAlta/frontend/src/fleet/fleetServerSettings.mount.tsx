@@ -2,7 +2,8 @@
 // its telemetry through it. Driven by fleetServerSettings.browser.test.ts through `fleetFixture`: what the page asks is recorded.
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
-import type { FleetServerView, FleetTelemetryRequest, FleetTelemetryView } from "#neoastra";
+import type { FleetServerView, FleetTelemetryRequest, FleetTelemetryView, FleetUpdateCampaignView, FleetUpdatePolicyRequest, FleetUpdateStartRequest,
+  FleetUpdatesView } from "#neoastra";
 import { ShellLanguageContext } from "../shellLanguage";
 import { FleetServerSettings, type FleetServerApi } from "./FleetServerSettings";
 
@@ -13,6 +14,15 @@ const server: FleetServerView = { id: "home", url: "https://fleet.example", orga
   spaces: [] };
 let telemetry: FleetTelemetryView = { enabled: true, endpoint: "https://otlp.example:4318", protocol: "http/protobuf", route: "server", signals: ["traces", "metrics"],
   headers: [{ name: "x-api-key", masked: "••••6789" }], environment: null, updatedAt: null };
+// Two nodes, one offline; no campaign until the page starts one.
+let updates: FleetUpdatesView = { serverVersion: "4.0.1", serverPending: null, serverLastOutcome: null,
+  policy: { mode: "manual", pinnedVersion: null, feed: null, window: null, timeZone: null, lastCheckAt: null, lastCheckMessage: null }, campaigns: [],
+  machines: [{ id: "mac", name: "Mac mini", version: "4.0.1", online: true }, { id: "linux", name: "Linux box", version: "4.0.1", online: false }] };
+const campaign = (request: FleetUpdateStartRequest): FleetUpdateCampaignView => ({ id: "c1", sequence: 1, state: request.notBefore ? "scheduled" : "updating_nodes",
+  targetVersion: request.version ?? "4.0.2", feed: request.feed ?? "https://api.nuget.org/v3/index.json", notBefore: request.notBefore, timeZone: request.timeZone,
+  automatic: false, rollback: false, serverState: "pending", serverMessage: null, createdAt: "2026-11-03T08:00:00Z",
+  machines: updates.machines.filter(machine => !request.machines || request.machines.includes(machine.id)).map(machine => ({ id: machine.id, name: machine.name,
+    state: machine.online ? "switching" : "pending", running: machine.version, message: null, online: machine.online })) });
 const unavailable = async () => { throw new Error("not in this fixture"); };
 const api: FleetServerApi = {
   status: async () => ({ status: "ok", servers: [server], deviceId: "device-1", words: "apple river stone" }),
@@ -22,6 +32,23 @@ const api: FleetServerApi = {
     calls.push(JSON.stringify({ enabled: request.enabled, endpoint: request.endpoint, route: request.route, signals: request.signals, headers: request.headers }));
     telemetry = { ...telemetry, enabled: request.enabled, signals: [...request.signals] };
     return { status: "ok", telemetry, message: null };
+  },
+  updates: async () => ({ status: "ok", updates, message: null }),
+  startUpdate: async (request: FleetUpdateStartRequest) => {
+    calls.push(JSON.stringify({ update: { version: request.version, feed: request.feed, notBefore: request.notBefore, timeZone: request.timeZone, machines: request.machines } }));
+    updates = { ...updates, campaigns: [campaign(request)] };
+    return { status: "ok", campaign: updates.campaigns[0], message: null };
+  },
+  cancelUpdate: async (request: { campaignId: string }) => {
+    calls.push(JSON.stringify({ cancel: request.campaignId }));
+    updates = { ...updates, campaigns: updates.campaigns.map(item => ({ ...item, state: "cancelled", serverState: "cancelled",
+      machines: item.machines.map(machine => ({ ...machine, state: "cancelled" })) })) };
+    return { status: "ok", campaign: updates.campaigns[0], message: null };
+  },
+  setUpdatePolicy: async (request: FleetUpdatePolicyRequest) => {
+    calls.push(JSON.stringify({ policy: { mode: request.mode, pinnedVersion: request.pinnedVersion, window: request.window } }));
+    updates = { ...updates, policy: { ...updates.policy, mode: request.mode, pinnedVersion: request.pinnedVersion, window: request.window, timeZone: request.timeZone } };
+    return { status: "ok", message: null };
   },
   watch: async () => (async function* () { })(),
   create: unavailable, join: unavailable, leave: unavailable, createToken: unavailable, approve: unavailable, revoke: unavailable,

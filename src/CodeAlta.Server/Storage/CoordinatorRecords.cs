@@ -279,3 +279,48 @@ public sealed record InventoryPublication(long Ack, bool Applied);
 /// <param name="UpdatedAt">When it was set.</param>
 public sealed record TelemetrySettingsRecord(string OrganizationId, long Sequence, string Payload, string Signature, string SignerDeviceId, string? ServerHeaders,
     DateTimeOffset UpdatedAt);
+
+/// <summary>An update campaign of an organization.</summary>
+/// <param name="Id">The id of the campaign.</param>
+/// <param name="OrganizationId">The organization.</param>
+/// <param name="Sequence">The sequence of its manifest; for an automatic campaign, the sequence of its policy.</param>
+/// <param name="Automatic">Whether the automatic policy started it.</param>
+/// <param name="TargetVersion">The version it installs.</param>
+/// <param name="Feed">The feed it reads.</param>
+/// <param name="Rollback">Whether a person chose an older version.</param>
+/// <param name="NotBefore">When it starts, or null for at once.</param>
+/// <param name="TimeZone">The time zone the time was chosen in, for display.</param>
+/// <param name="Payload">The manifest as signed; for an automatic campaign, the policy as signed.</param>
+/// <param name="Signature">Its signature.</param>
+/// <param name="CreatedByDeviceId">The controller device that signed the manifest; null for an automatic campaign.</param>
+/// <param name="State">Its state (<see cref="Fleet.Protocol.FleetUpdateCampaignStates"/>).</param>
+/// <param name="ServerState">Where the server's own update stands (<see cref="Fleet.Protocol.FleetUpdateMachineStates"/>).</param>
+/// <param name="ServerMessage">What happened to the server's update, or null.</param>
+/// <param name="CreatedAt">When the server received it.</param>
+/// <param name="UpdatedAt">When it last changed.</param>
+public sealed record UpdateCampaignRecord(string Id, string OrganizationId, long Sequence, bool Automatic, string TargetVersion, string Feed, bool Rollback,
+    DateTimeOffset? NotBefore, string? TimeZone, string Payload, string Signature, string? CreatedByDeviceId, string State, string ServerState, string? ServerMessage,
+    DateTimeOffset CreatedAt, DateTimeOffset UpdatedAt);
+
+/// <summary>A machine of an update campaign.</summary>
+/// <param name="CampaignId">The campaign.</param>
+/// <param name="DeviceId">The device of the node.</param>
+/// <param name="State">Where it stands (<see cref="Fleet.Protocol.FleetUpdateMachineStates"/>).</param>
+/// <param name="Running">The version it last said it runs, or null.</param>
+/// <param name="Message">What happened, for a failure or a refusal; null otherwise.</param>
+/// <param name="InstructedAt">When the server last sent it the instruction, or null.</param>
+/// <param name="UpdatedAt">When its state last changed.</param>
+public sealed record UpdateCampaignMachineRecord(string CampaignId, string DeviceId, string State, string? Running, string? Message, DateTimeOffset? InstructedAt,
+    DateTimeOffset UpdatedAt);
+
+/// <summary>The update policy of an organization, as a controller device signed it, and its last check of the feed.</summary>
+/// <param name="OrganizationId">The organization.</param>
+/// <param name="Sequence">The sequence of the policy.</param>
+/// <param name="Payload">The JSON text that was signed.</param>
+/// <param name="Signature">The signature.</param>
+/// <param name="SignerDeviceId">The controller device that signed it.</param>
+/// <param name="LastCheckAt">When an automatic policy last read its feed, or null.</param>
+/// <param name="LastCheckMessage">What that check found, or null.</param>
+/// <param name="UpdatedAt">When it was set.</param>
+public sealed record UpdatePolicyRecord(string OrganizationId, long Sequence, string Payload, string Signature, string SignerDeviceId, DateTimeOffset? LastCheckAt,
+    string? LastCheckMessage, DateTimeOffset UpdatedAt);

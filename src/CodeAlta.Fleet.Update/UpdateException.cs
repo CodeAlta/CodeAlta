@@ -38,6 +38,9 @@ public static class UpdateErrorCodes
 
     /// <summary>Another process holds the lease of the launcher of the folder of versions.</summary>
     public const string LauncherBusy = "update.launcher_busy";
+
+    /// <summary>The owner of the machine turned off the updates of the fleet (<c>"fleet": false</c> in <c>update.json</c>).</summary>
+    public const string FleetRefused = "update.fleet_refused";
 }
 
 /// <summary>An update that could not be done, with a stable code (<see cref="UpdateErrorCodes"/>).</summary>

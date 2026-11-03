@@ -131,4 +131,13 @@ public static class CoordinatorErrorCodes
 
     /// <summary>The fleet does not send its telemetry through the server, or not this signal.</summary>
     public const string TelemetryNotForwarded = "telemetry.not_forwarded";
+
+    /// <summary>A manifest or an update policy that does not read, does not hold, or is not signed by the device that sends it.</summary>
+    public const string UpdateInvalid = "update.invalid";
+
+    /// <summary>A manifest whose sequence is taken, a policy not newer than the one held, or a campaign while another runs.</summary>
+    public const string UpdateConflict = "update.conflict";
+
+    /// <summary>No campaign of the organization has this id.</summary>
+    public const string UpdateNotFound = "update.not_found";
 }

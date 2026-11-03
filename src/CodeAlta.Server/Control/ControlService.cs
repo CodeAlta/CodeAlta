@@ -19,7 +19,7 @@ public sealed class ControlService
     public static readonly FleetProtocolRange Protocol = new(1, 1);
 
     /// <summary>The features the server announces in its welcome.</summary>
-    public static readonly IReadOnlyList<string> Features = ["presence", "inventory", "facts", "facts.withdraw", "directory", "relay", "telemetry"];
+    public static readonly IReadOnlyList<string> Features = ["presence", "inventory", "facts", "facts.withdraw", "directory", "relay", "telemetry", "update"];
 
     private const int MaxStateLength = 32;
 
@@ -83,6 +83,9 @@ public sealed class ControlService
 
     /// <summary>Gets what sends the fleet's telemetry setting to a device that connects; null for none.</summary>
     internal TelemetrySettingsService? TelemetrySettings { get; init; }
+
+    /// <summary>Gets the coordinated update of the fleet, which takes the reports of nodes and asks a node that connects; null for none.</summary>
+    internal UpdateCampaignService? Updates { get; init; }
 
     /// <summary>Serves a WebSocket request on <see cref="FleetServerMethods.ControlPath"/>.</summary>
     /// <param name="context">The request.</param>
@@ -161,6 +164,8 @@ public sealed class ControlService
         Metrics?.Connection(session.Device.Kind, 1);
         // The fleet's telemetry setting, signed by a controller device: the device checks it before it applies it.
         if (TelemetrySettings is { } telemetry) _ = telemetry.SendCurrentAsync(session);
+        // A node in the middle of a campaign is asked again, so that it reports where it stands.
+        if (Updates is { } updates) _ = updates.SendCurrentAsync(session);
         try
         {
             using var registration = cancellationToken.Register(static state =>
@@ -198,6 +203,15 @@ public sealed class ControlService
 
             if (session.Update(update)) _directory.Publish(session.Device.OrganizationId, PresenceChange(session.GetPresence()));
             return Task.FromResult<JsonElement?>(null);
+        }));
+
+        On(FleetServerMethods.UpdateReport, Handler(FleetServerJsonContext.Default.FleetUpdateReport, async (report, token) =>
+        {
+            if (report is null || string.IsNullOrEmpty(report.CampaignId) || !FleetUpdateMachineStates.IsReported(report.State) || report.Message is { Length: > 4000 })
+                throw CoordinatorException.BadRequest(CoordinatorErrorCodes.PublicationInvalid, "update.report needs a campaign and a state a node reports.");
+            if (session.Update(report)) _directory.Publish(session.Device.OrganizationId, PresenceChange(session.GetPresence()));
+            if (Updates is { } updates) await updates.ReportAsync(session.Device, report, token).ConfigureAwait(false);
+            return null;
         }));
 
         On(FleetServerMethods.InventoryPublish, Handler(FleetServerJsonContext.Default.FleetInventoryPublish, async (publication, token) =>

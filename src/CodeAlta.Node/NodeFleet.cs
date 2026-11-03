@@ -313,6 +313,22 @@ internal sealed class NodeServers : IAsyncDisposable
     /// <returns>The connections; dispose them before the node stops.</returns>
     public static NodeServers Start(NodeHost node, FleetNodeService? service, string name, string version,
         Func<Fleet.Server.FleetConnectorOptions, Fleet.Server.FleetConnectorOptions>? configure, NodeTelemetry? telemetry)
+        => Start(node, service, name, version, configure, telemetry, null);
+
+    /// <summary>
+    /// Starts the connections of the servers of the profile, which relay session channels to the node API, push the
+    /// fleet's telemetry setting and ask the updates of the fleet.
+    /// </summary>
+    /// <param name="node">The running node.</param>
+    /// <param name="service">The node API that serves the relayed channels; null declines every relay.</param>
+    /// <param name="name">The name of the node.</param>
+    /// <param name="version">The version of CodeAlta it runs.</param>
+    /// <param name="configure">What changes the options of each connector, for tests; null for none.</param>
+    /// <param name="telemetry">The telemetry of the node, which verifies and applies the setting a server pushes; null ignores it.</param>
+    /// <param name="updates">What takes the updates the servers ask and reports where the node stands; null ignores them.</param>
+    /// <returns>The connections; dispose them before the node stops.</returns>
+    public static NodeServers Start(NodeHost node, FleetNodeService? service, string name, string version,
+        Func<Fleet.Server.FleetConnectorOptions, Fleet.Server.FleetConnectorOptions>? configure, NodeTelemetry? telemetry, Fleet.Server.FleetUpdateAgent? updates)
     {
         ArgumentNullException.ThrowIfNull(node);
         var catalog = node.Host.CatalogOptions;
@@ -329,6 +345,7 @@ internal sealed class NodeServers : IAsyncDisposable
             AcceptRelay = service is null ? null : (connector, _, stream, token) => ServeRelayAsync(service, connector, stream, token),
             TelemetrySettings = telemetry is null ? null : telemetry.AcceptAsync,
             Metrics = telemetry?.Metrics,
+            Updates = updates,
         });
         connections.Start();
         return new NodeServers(identity, source, connections);

@@ -201,7 +201,7 @@ Nodes are autonomous: the server adds visibility and reach, it never gates local
 | The server is restored from a backup | It starts a new **restore epoch**. Nodes see that the server is behind them and publish again what it lacks; revocations are signed device-list entries that devices keep too, so a restored server cannot bring a revoked device back; runs it would dispatch again are refused by nodes that already recorded them ([server](server.md#restore-and-upgrades)). |
 | A viewer loses its channel | It reconnects and asks for the current display replacement and the history after its cursor. A command it sent is retried with the same key and answered with the same receipt. |
 | Two nodes believe they own one session | Cannot happen through moves (the server commits one epoch). After a forced takeover, the old owner learns on reconnection that its epoch is stale, stops writing, and keeps its divergent tail as a fork. |
-| Version skew | The protocol negotiates a version range; a node one minor version behind keeps working, a feature it lacks is unavailable, never misbehaving. |
+| Version skew | Any 4.x desktop, node and server talk to each other ([protocol](protocol.md#versions)): fields are only added, features announced; a feature a machine lacks is unavailable, never misbehaving. |
 | Clock skew | Ordering never relies on clocks: sequences and epochs order facts; times are for display. |
 
 ## Bounds

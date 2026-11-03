@@ -1,8 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import type { FleetDeviceView, FleetMachineView, FleetServerView, FleetSessionView, FleetTelemetryView } from "#neoastra";
-import { fleetGroups, fleetSummary, joinCommand, keyWords, orderedDevices, serverAddressOf, serverConnection, serverConnectionIntent, serverConnectionLabel, serverOfSpace,
-  serverProblem, sessionModel, sessionState, sessionStateLabel, telemetryDraft, telemetryHeaderEdits, telemetryProblem, telemetrySummary } from "./fleetServer";
+import type { FleetDeviceView, FleetMachineView, FleetServerView, FleetSessionView, FleetTelemetryView, FleetUpdateCampaignView, FleetUpdatePolicyView } from "#neoastra";
+import { campaignProgress, campaignStateIntent, campaignStateLabel, canCancelCampaign, emptyUpdateDraft, fleetGroups, fleetSummary, isVersion, joinCommand, keyWords,
+  machineStateIntent, machineStateLabel, orderedDevices, policyDraft, policyDraftProblem, policySummary, serverAddressOf, serverConnection, serverConnectionIntent,
+  serverConnectionLabel, serverOfSpace, serverProblem, sessionModel, sessionState, sessionStateLabel, telemetryDraft, telemetryHeaderEdits, telemetryProblem, telemetrySummary,
+  updateDraftProblem, updateProblem, updateStart } from "./fleetServer";
 import { changedSessionOptions, storedSessionOptions } from "../sessionSettings/sessionOptions";
 
 const machine = (id: string, look: Partial<FleetMachineView> = {}): FleetMachineView => ({ id, name: id, kind: "node", os: "macos", version: "4.0.0", online: true,
@@ -111,4 +113,58 @@ test("a Private session records its options and counts as a changed option", () 
   assert.deepEqual(storedSessionOptions({ subSessions: true, private: true }), { subSessions: true, private: true });
   assert.equal(storedSessionOptions({ subSessions: true, private: false }), null, "the defaults record nothing");
   assert.equal(changedSessionOptions({ subSessions: true, private: true }), 1);
+});
+
+const campaign = (look: Partial<FleetUpdateCampaignView> = {}): FleetUpdateCampaignView => ({ id: "c1", sequence: 1, state: "updating_nodes", targetVersion: "4.0.2",
+  feed: "https://api.nuget.org/v3/index.json", notBefore: null, timeZone: null, automatic: false, rollback: false, serverState: "pending", serverMessage: null,
+  createdAt: "2026-11-03T08:00:00Z", machines: [], ...look });
+const policy = (look: Partial<FleetUpdatePolicyView> = {}): FleetUpdatePolicyView => ({ mode: "manual", pinnedVersion: null, feed: null, window: null, timeZone: null,
+  lastCheckAt: null, lastCheckMessage: null, ...look });
+
+test("a campaign reads as a state, a color and how many machines run its version; it is cancelled only before the server's step", () => {
+  assert.deepEqual(["scheduled", "updating_nodes", "updating_server", "done", "partly_done", "failed", "cancelled"].map(campaignStateLabel),
+    ["Scheduled", "Updating the machines", "Updating the server", "Done", "Partly done", "Failed", "Cancelled"]);
+  assert.deepEqual(["done", "partly_done", "failed", "updating_nodes"].map(campaignStateIntent), ["success", "warning", "danger", "primary"]);
+  assert.deepEqual(["scheduled", "updating_nodes", "updating_server", "done"].map(state => canCancelCampaign({ state })), [true, true, false, false]);
+  const machine = (id: string, state: string) => ({ id, name: id, state, running: null, message: null, online: true });
+  assert.deepEqual(campaignProgress(campaign({ machines: [machine("a", "updated"), machine("b", "pending"), machine("c", "superseded"), machine("d", "updated")] })),
+    { updated: 2, total: 3 }, "a machine a newer campaign took is not counted");
+  assert.deepEqual(["pending", "switching", "updated", "rolled_back", "refused", "something new"].map(machineStateLabel),
+    ["Pending", "Switching when idle", "Updated", "Rolled back", "Refused", "Pending"]);
+  assert.deepEqual(["updated", "failed", "pending", "downloading"].map(machineStateIntent), ["success", "danger", "none", "primary"]);
+});
+
+test("an update starts now or at a time of this computer, stored in UTC; a draft that cannot be signed says why", () => {
+  assert.equal(updateStart(emptyUpdateDraft), null);
+  const at = "2026-11-04T02:30";
+  assert.equal(updateStart({ when: "at", at }), new Date(at).toISOString(), "the local date and time, in UTC");
+  assert.equal(updateStart({ when: "at", at: "not a time" }), null);
+  const now = new Date("2026-11-03T08:00:00Z");
+  assert.equal(updateDraftProblem(emptyUpdateDraft, now), null, "the latest version, now, on every machine");
+  assert.equal(updateDraftProblem({ ...emptyUpdateDraft, version: "4.0" }, now), "This is not a version.");
+  assert.equal(updateDraftProblem({ ...emptyUpdateDraft, version: " 4.0.0-alpha.902 " }, now), null);
+  assert.equal(updateDraftProblem({ ...emptyUpdateDraft, when: "at" }, now), "Choose a date and a time.");
+  assert.equal(updateDraftProblem({ ...emptyUpdateDraft, when: "at", at: "2020-01-01T00:00" }, now), "Choose a time to come.");
+  assert.equal(updateDraftProblem({ ...emptyUpdateDraft, machines: [] }, now), "Choose at least one machine.");
+  assert.ok(isVersion("4.0.0") && isVersion("4.0.0.1") && isVersion("4.0.0-alpha.1+abc") && !isVersion("v4.0.0"));
+});
+
+test("the policy of a fleet reads in one line and its draft checks a version and a window", () => {
+  assert.deepEqual(policySummary(policy()), { key: "Manual", detail: null });
+  assert.deepEqual(policySummary(policy({ mode: "pinned", pinnedVersion: "4.0.1" })), { key: "Pinned", detail: "4.0.1" });
+  assert.deepEqual(policySummary(policy({ mode: "automatic", window: "02:00", timeZone: "Europe/Paris" })), { key: "Automatic", detail: "nuget.org · 02:00 Europe/Paris" });
+  const draft = policyDraft(policy(), "Asia/Tokyo");
+  assert.deepEqual(draft, { mode: "manual", pinnedVersion: "", feed: "", window: "", timeZone: "Asia/Tokyo" }, "a new window takes this computer's time zone");
+  assert.equal(policyDraftProblem({ ...draft, mode: "pinned" }), "This is not a version.");
+  assert.equal(policyDraftProblem({ ...draft, mode: "pinned", pinnedVersion: "4.0.1" }), null);
+  assert.equal(policyDraftProblem({ ...draft, mode: "automatic", window: "25:00" }), "The window starts at a time of the day (HH:mm).");
+  assert.equal(policyDraftProblem({ ...draft, mode: "automatic", window: "02:00" }), null);
+});
+
+test("the refusals of an update say what to do", () => {
+  assert.equal(updateProblem("update.conflict"), "A campaign runs, or the fleet is pinned: read the updates again.");
+  assert.equal(updateProblem("invalid_request"), "The server refused this update.");
+  assert.equal(updateProblem("update.not_found"), "The feed has no such version of CodeAlta Node and Server.");
+  assert.equal(updateProblem("unreachable"), "The server does not answer.");
+  assert.equal(serverProblem("invalid_request"), "The server refused this telemetry setting.", "the telemetry keeps its words");
 });

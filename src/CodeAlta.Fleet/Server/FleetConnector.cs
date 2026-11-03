@@ -114,6 +114,21 @@ public sealed class FleetConnectorOptions
 
     /// <summary>Gets the instruments of the connections and publications; null for none.</summary>
     public Telemetry.FleetMetrics? Metrics { get; init; }
+
+    /// <summary>
+    /// Gets what receives an update the fleet asks of this node (<see cref="FleetServerMethods.UpdateInstruction"/>); it
+    /// verifies the signed manifest itself. Null ignores it.
+    /// </summary>
+    public Func<FleetUpdateInstruction, CancellationToken, Task>? UpdateInstruction { get; init; }
+
+    /// <summary>Gets what receives a campaign cancelled by the fleet (<see cref="FleetServerMethods.UpdateCancel"/>); null ignores it.</summary>
+    public Func<FleetUpdateCancel, CancellationToken, Task>? UpdateCancel { get; init; }
+
+    /// <summary>
+    /// Gets where this node stands in the campaign of this server, sent with its presence and once it connects
+    /// (<see cref="FleetServerMethods.UpdateReport"/>); null for none.
+    /// </summary>
+    public Func<FleetUpdateReport?>? UpdateReport { get; init; }
 }
 
 /// <summary>
@@ -147,6 +162,8 @@ public sealed class FleetConnector : IAsyncDisposable
     // The last telemetry setting taken or waiting: each one waits for the one before, so that the check of a setting
     // against the one held is never raced by another push, and an older one never lands after a newer one.
     private Task _telemetryTail = Task.CompletedTask;
+    // The last update instruction or cancellation taken or waiting, for the same reason.
+    private Task _updateTail = Task.CompletedTask;
     private FleetDirectoryView _directory = FleetDirectoryView.Empty;
     // The changes received while a directory.watch waits for its snapshot, replayed after it; null when none waits.
     private List<FleetDirectoryChange>? _directoryPending;
@@ -401,6 +418,19 @@ public sealed class FleetConnector : IAsyncDisposable
                     // Verified beside the reader of the connection (the check reads the device list from the server), one at a time.
                     if (settings is { Payload.Length: > 0 }) QueueTelemetry(receive, settings, stop);
                     break;
+                case FleetServerMethods.UpdateInstruction when _options.UpdateInstruction is { } instruct:
+                    FleetUpdateInstruction? instruction = null;
+                    try { instruction = fleetEvent.Payload?.Deserialize(FleetServerJsonContext.Default.FleetUpdateInstruction); }
+                    catch (JsonException) { /* An instruction this node does not read installs nothing. */ }
+                    // Verified beside the reader of the connection: the check reads the device list from the server.
+                    if (instruction is { CampaignId.Length: > 0 }) QueueUpdate(() => instruct(instruction, stop), stop);
+                    break;
+                case FleetServerMethods.UpdateCancel when _options.UpdateCancel is { } cancel:
+                    FleetUpdateCancel? cancelled = null;
+                    try { cancelled = fleetEvent.Payload?.Deserialize(FleetServerJsonContext.Default.FleetUpdateCancel); }
+                    catch (JsonException) { /* Not read: the campaign goes on. */ }
+                    if (cancelled is { CampaignId.Length: > 0 }) QueueUpdate(() => cancel(cancelled, stop), stop);
+                    break;
             }
 
             return ValueTask.CompletedTask;
@@ -411,6 +441,8 @@ public sealed class FleetConnector : IAsyncDisposable
         {
             SetState(FleetConnectorState.Online, null);
             if (_options.WatchDirectory) await WatchDirectoryAsync(connection, stop).ConfigureAwait(false);
+            // Where this node stands in a campaign, again on each connection: the server may have missed the last report.
+            if (_options.UpdateReport?.Invoke() is { } report) await SendUpdateReportAsync(connection, report, stop).ConfigureAwait(false);
 
             var lastPresence = DateTimeOffset.MinValue;
             var lastRead = DateTimeOffset.MinValue;
@@ -510,6 +542,65 @@ public sealed class FleetConnector : IAsyncDisposable
         }
 
         Track(next);
+    }
+
+    // The update instructions and cancellations of the server are taken one at a time, in the order they came: the
+    // node checks each against the last one it accepted, which two at once could both pass.
+    private void QueueUpdate(Func<Task> receive, CancellationToken stop)
+    {
+        Task next;
+        lock (_gate)
+        {
+            var previous = _updateTail;
+            _updateTail = next = Task.Run(async () =>
+            {
+                await previous.ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
+                await ReceiveUpdateAsync(receive, stop).ConfigureAwait(false);
+            }, CancellationToken.None);
+        }
+
+        Track(next);
+    }
+
+    /// <summary>Reports where this node stands in a campaign of this server, when it is connected.</summary>
+    /// <param name="report">The report.</param>
+    /// <param name="cancellationToken">Cancels the request.</param>
+    /// <returns>Whether the server received it; false while offline (the report is sent again on the next connection).</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="report"/> is null.</exception>
+    public async Task<bool> ReportUpdateAsync(FleetUpdateReport report, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(report);
+        if (Volatile.Read(ref _connection) is not { State: FleetConnectionState.Open } connection) return false;
+        try
+        {
+            await SendUpdateReportAsync(connection, report, cancellationToken).ConfigureAwait(false);
+            return true;
+        }
+        catch (Exception exception) when (exception is FleetException or FleetConnectionClosedException or IOException or TimeoutException
+            or System.Net.WebSockets.WebSocketException or InvalidOperationException)
+        {
+            return false;
+        }
+    }
+
+    private static Task SendUpdateReportAsync(FleetConnection connection, FleetUpdateReport report, CancellationToken cancellationToken)
+        => connection.SendRequestAsync(FleetServerMethods.UpdateReport, JsonSerializer.SerializeToElement(report, FleetServerJsonContext.Default.FleetUpdateReport), null,
+            cancellationToken);
+
+    private async Task ReceiveUpdateAsync(Func<Task> receive, CancellationToken stop)
+    {
+        try
+        {
+            await receive().ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (stop.IsCancellationRequested)
+        {
+        }
+        catch (Exception exception) when (exception is IOException or InvalidOperationException or HttpRequestException or FleetServerException or FleetDeviceListException
+            or UnauthorizedAccessException or OperationCanceledException or FleetException)
+        {
+            if (LogManager.IsInitialized) _logger.Warn($"The update asked by {FleetServerAddress.Format(_options.ServerAddress)} was not taken: {exception.Message}");
+        }
     }
 
     private async Task ReceiveTelemetryAsync(Func<FleetSignedTelemetrySettings, CancellationToken, Task> receive, FleetSignedTelemetrySettings settings, CancellationToken stop)
@@ -614,7 +705,7 @@ public sealed class FleetConnector : IAsyncDisposable
     {
         _activeSessions = active;
         await connection.SendRequestAsync(FleetServerMethods.PresenceUpdate,
-            JsonSerializer.SerializeToElement(new FleetPresenceUpdate(active > 0 ? "busy" : "active", active), FleetServerJsonContext.Default.FleetPresenceUpdate),
+            JsonSerializer.SerializeToElement(new FleetPresenceUpdate(active > 0 ? "busy" : "active", active, _options.UpdateReport?.Invoke()), FleetServerJsonContext.Default.FleetPresenceUpdate),
             null, stop).ConfigureAwait(false);
     }
 
@@ -746,6 +837,9 @@ public sealed record FleetDirectoryView(
     /// <returns>Whether it holds a control connection, as the server last said.</returns>
     public bool IsOnline(string deviceId) => Presence.TryGetValue(deviceId, out var presence) && presence.Online;
 
+    /// <summary>Gets how many times the server said an update campaign or the update policy changed since the watch began.</summary>
+    public long UpdatesRevision { get; init; }
+
     /// <summary>Makes the directory of a snapshot of <c>directory.watch</c>.</summary>
     /// <param name="snapshot">The snapshot.</param>
     /// <returns>The directory.</returns>
@@ -776,6 +870,9 @@ public sealed record FleetDirectoryView(
                 return this with { Sessions = Sessions.SetItem(session.Fact.SessionId, session) };
             case FleetServerMethods.ChangeKinds.Presence when change.Presence is { } presence:
                 return this with { Presence = Presence.SetItem(presence.DeviceId, presence) };
+            case FleetServerMethods.ChangeKinds.Update:
+                // The campaigns are read from the REST API: the change only says when to read them again.
+                return this with { UpdatesRevision = UpdatesRevision + 1 };
             case FleetServerMethods.ChangeKinds.SessionRemoved when Sessions.TryGetValue(change.Id, out var current):
                 // A removal names the facts it removed: newer facts, or those of another machine, stay.
                 if (change.Session is { } removed && (current.MachineId != removed.MachineId || IsNewer(current.Fact, removed.Fact))) return this;

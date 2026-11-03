@@ -226,6 +226,72 @@ public sealed record TelemetrySettingsDto(FleetSignedTelemetrySettings? Settings
 /// <param name="ServerHeaders">The headers the server sends to the collector on the server route (API keys); never pushed to machines.</param>
 public sealed record SetTelemetrySettingsRequest(FleetSignedTelemetrySettings Settings, IReadOnlyDictionary<string, string>? ServerHeaders = null);
 
+/// <summary>A machine in an update campaign.</summary>
+/// <param name="DeviceId">The device of the node.</param>
+/// <param name="Name">Its name.</param>
+/// <param name="State">Where it stands (<see cref="FleetUpdateMachineStates"/>).</param>
+/// <param name="Running">The version it last said it runs, or null.</param>
+/// <param name="Message">What happened, for a failure or a refusal; null otherwise.</param>
+/// <param name="Online">Whether it holds a control connection now.</param>
+/// <param name="UpdatedAt">When its state last changed.</param>
+public sealed record UpdateCampaignMachineDto(string DeviceId, string Name, string State, string? Running, string? Message, bool Online, DateTimeOffset UpdatedAt);
+
+/// <summary>An update campaign (<c>GET /api/v1/updates/campaigns/{id}</c>).</summary>
+/// <param name="Id">The id of the campaign.</param>
+/// <param name="Sequence">Its number in the organization.</param>
+/// <param name="State">Its state (<see cref="FleetUpdateCampaignStates"/>).</param>
+/// <param name="TargetVersion">The version it installs.</param>
+/// <param name="Feed">The feed it reads.</param>
+/// <param name="Rollback">Whether a person chose an older version.</param>
+/// <param name="NotBefore">When it starts, in UTC; null for at once.</param>
+/// <param name="TimeZone">The time zone the time was chosen in, for display.</param>
+/// <param name="Automatic">Whether the automatic policy started it.</param>
+/// <param name="CreatedBy">The controller device that signed it; null for an automatic campaign.</param>
+/// <param name="CreatedAt">When the server received it.</param>
+/// <param name="UpdatedAt">When its state last changed.</param>
+/// <param name="ServerState">Where the server's own update stands (<see cref="FleetUpdateMachineStates"/>).</param>
+/// <param name="ServerMessage">What happened to the server's update, or null.</param>
+/// <param name="Machines">Its machines.</param>
+public sealed record UpdateCampaignDto(
+    string Id,
+    long Sequence,
+    string State,
+    string TargetVersion,
+    string Feed,
+    bool Rollback,
+    DateTimeOffset? NotBefore,
+    string? TimeZone,
+    bool Automatic,
+    string? CreatedBy,
+    DateTimeOffset CreatedAt,
+    DateTimeOffset UpdatedAt,
+    string ServerState,
+    string? ServerMessage,
+    IReadOnlyList<UpdateCampaignMachineDto> Machines);
+
+/// <summary>The update policy of the fleet as the server holds it.</summary>
+/// <param name="Policy">The signed policy, or null when the fleet has none (manual).</param>
+/// <param name="Mode">Its mode (<see cref="FleetUpdateModes"/>): <c>manual</c> without a policy.</param>
+/// <param name="LastCheckAt">When an automatic policy last read its feed, or null.</param>
+/// <param name="LastCheckMessage">What that check found, or null.</param>
+/// <param name="UpdatedAt">When it was last set, or null.</param>
+public sealed record UpdatePolicyDto(FleetSignedUpdateDocument? Policy, string Mode, DateTimeOffset? LastCheckAt, string? LastCheckMessage, DateTimeOffset? UpdatedAt);
+
+/// <summary>The updates of the fleet (<c>GET /api/v1/updates</c>): the server's versions, the policy and the recent campaigns.</summary>
+/// <param name="Server">The versions of the server and its self-update.</param>
+/// <param name="Policy">The update policy.</param>
+/// <param name="Campaigns">The recent campaigns, the newest first.</param>
+/// <param name="NextSequence">The sequence the next campaign signs.</param>
+public sealed record UpdatesDto(FleetUpdateStatus Server, UpdatePolicyDto Policy, IReadOnlyList<UpdateCampaignDto> Campaigns, long NextSequence);
+
+/// <summary>The body of <c>POST /api/v1/updates/campaigns</c>: a manifest the calling owner's controller device signed.</summary>
+/// <param name="Manifest">The signed manifest.</param>
+public sealed record CreateUpdateCampaignRequest(FleetSignedUpdateDocument Manifest);
+
+/// <summary>The body of <c>PUT /api/v1/updates/policy</c>: a policy the calling owner's controller device signed, numbered after the one held.</summary>
+/// <param name="Policy">The signed policy.</param>
+public sealed record SetUpdatePolicyRequest(FleetSignedUpdateDocument Policy);
+
 /// <summary>The source-generated contracts of the REST API.</summary>
 [JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase, DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull)]
 [JsonSerializable(typeof(SetupRequest))]
@@ -258,4 +324,9 @@ public sealed record SetTelemetrySettingsRequest(FleetSignedTelemetrySettings Se
 [JsonSerializable(typeof(AddMetadataKeyWrapsRequest))]
 [JsonSerializable(typeof(TelemetrySettingsDto))]
 [JsonSerializable(typeof(SetTelemetrySettingsRequest))]
+[JsonSerializable(typeof(UpdateCampaignDto))]
+[JsonSerializable(typeof(UpdatePolicyDto))]
+[JsonSerializable(typeof(UpdatesDto))]
+[JsonSerializable(typeof(CreateUpdateCampaignRequest))]
+[JsonSerializable(typeof(SetUpdatePolicyRequest))]
 public sealed partial class ServerApiJsonContext : JsonSerializerContext;

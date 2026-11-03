@@ -207,6 +207,73 @@ public interface ICoordinatorStore : IAsyncDisposable
     /// <returns><see langword="false"/> when the setting held has the same sequence or a later one: nothing was written.</returns>
     ValueTask<bool> SetTelemetrySettingsAsync(TelemetrySettingsRecord settings, AuditEntry audit, CancellationToken cancellationToken = default);
 
+    /// <summary>Lists the update campaigns of an organization, the newest first.</summary>
+    /// <param name="organizationId">The organization.</param>
+    /// <param name="limit">The most campaigns.</param>
+    /// <param name="cancellationToken">Cancels the operation.</param>
+    /// <returns>The campaigns.</returns>
+    ValueTask<IReadOnlyList<UpdateCampaignRecord>> ListUpdateCampaignsAsync(string organizationId, int limit, CancellationToken cancellationToken = default);
+
+    /// <summary>Gets an update campaign.</summary>
+    /// <param name="campaignId">The campaign.</param>
+    /// <param name="cancellationToken">Cancels the operation.</param>
+    /// <returns>The campaign, or <see langword="null"/>.</returns>
+    ValueTask<UpdateCampaignRecord?> GetUpdateCampaignAsync(string campaignId, CancellationToken cancellationToken = default);
+
+    /// <summary>Lists the machines of an update campaign.</summary>
+    /// <param name="campaignId">The campaign.</param>
+    /// <param name="cancellationToken">Cancels the operation.</param>
+    /// <returns>The machines, by device id.</returns>
+    ValueTask<IReadOnlyList<UpdateCampaignMachineRecord>> ListUpdateCampaignMachinesAsync(string campaignId, CancellationToken cancellationToken = default);
+
+    /// <summary>Gets the highest sequence of the manifests of an organization's campaigns.</summary>
+    /// <param name="organizationId">The organization.</param>
+    /// <param name="cancellationToken">Cancels the operation.</param>
+    /// <returns>The sequence, 0 before the first campaign.</returns>
+    ValueTask<long> GetLastUpdateSequenceAsync(string organizationId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Records a new campaign and its machines, audited in the same transaction; the machines still waiting in an older
+    /// campaign are superseded by it.
+    /// </summary>
+    /// <param name="campaign">The campaign.</param>
+    /// <param name="machines">Its machines.</param>
+    /// <param name="audit">The audit record.</param>
+    /// <param name="cancellationToken">Cancels the operation.</param>
+    /// <returns><see langword="false"/> when a campaign has the same manifest sequence: nothing was written.</returns>
+    ValueTask<bool> CreateUpdateCampaignAsync(UpdateCampaignRecord campaign, IReadOnlyList<UpdateCampaignMachineRecord> machines, AuditEntry? audit,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>Writes the state of a campaign and of the machines given, in one transaction.</summary>
+    /// <param name="campaign">The campaign.</param>
+    /// <param name="machines">The machines that changed.</param>
+    /// <param name="audit">An audit record, or <see langword="null"/>.</param>
+    /// <param name="cancellationToken">Cancels the operation.</param>
+    /// <returns>A task that completes once it is written.</returns>
+    ValueTask SaveUpdateCampaignAsync(UpdateCampaignRecord campaign, IReadOnlyList<UpdateCampaignMachineRecord> machines, AuditEntry? audit,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>Gets the update policy of an organization.</summary>
+    /// <param name="organizationId">The organization.</param>
+    /// <param name="cancellationToken">Cancels the operation.</param>
+    /// <returns>The policy, or <see langword="null"/> when it has none (manual).</returns>
+    ValueTask<UpdatePolicyRecord?> GetUpdatePolicyAsync(string organizationId, CancellationToken cancellationToken = default);
+
+    /// <summary>Replaces the update policy of an organization with a newer one, audited in the same transaction.</summary>
+    /// <param name="policy">The policy.</param>
+    /// <param name="audit">The audit record.</param>
+    /// <param name="cancellationToken">Cancels the operation.</param>
+    /// <returns><see langword="false"/> when the policy held has the same sequence or a later one: nothing was written.</returns>
+    ValueTask<bool> SetUpdatePolicyAsync(UpdatePolicyRecord policy, AuditEntry audit, CancellationToken cancellationToken = default);
+
+    /// <summary>Records the last check of the feed of an automatic policy.</summary>
+    /// <param name="organizationId">The organization.</param>
+    /// <param name="at">When.</param>
+    /// <param name="message">What it found.</param>
+    /// <param name="cancellationToken">Cancels the operation.</param>
+    /// <returns>A task that completes once it is written.</returns>
+    ValueTask SetUpdatePolicyCheckAsync(string organizationId, DateTimeOffset at, string? message, CancellationToken cancellationToken = default);
+
     /// <summary>Appends a record to the audit log, alone (a refusal, a read that is audited).</summary>
     /// <param name="audit">The record.</param>
     /// <param name="cancellationToken">Cancels the operation.</param>
