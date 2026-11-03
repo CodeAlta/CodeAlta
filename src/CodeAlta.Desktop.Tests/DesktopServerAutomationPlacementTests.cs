@@ -207,7 +207,7 @@ public sealed class DesktopServerAutomationPlacementTests
             using var nodeKey = DeviceIdentity.LoadOrCreate(Path.Combine(root, "node-fleet"));
             using (var enrolling = new FleetServerClient(address, nodeKey))
                 await enrolling.EnrollAsync((await desktop.CreateEnrollmentTokenAsync(null, "mini", token)).Token, "mini", FleetDeviceKinds.Node, token);
-            await desktop.ApproveAsync(nodeKey.DeviceId, token);
+            await desktop.ApproveAsync(nodeKey.DeviceId, FleetDeviceKinds.Node, token);
 
             var registry = new SessionHostRegistry(new SessionHostRegistryTests.RecordingSessionHost(null));
             await using var fleet = new DesktopFleet(desktopFleetRoot, registry.TakeMembership(), "desktop");
