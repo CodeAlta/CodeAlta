@@ -52,7 +52,7 @@ public interface IAltaFleet
     /// <param name="automationId">The automation.</param>
     /// <param name="machine">The machine, by name or id; null for this computer.</param>
     /// <param name="cancellationToken">Stops before the configuration is written.</param>
-    /// <returns><c>ok</c>, <c>not_found</c>, <c>machine_not_found</c>, <c>not_allowed</c> (the machine does not let this computer automate) or <c>refused</c>.</returns>
+    /// <returns><c>ok</c>, <c>not_found</c>, <c>machine_not_found</c>, <c>not_allowed</c> (a paired machine does not let this computer automate, or a machine reached through a server is not one of the person's own) or <c>refused</c>.</returns>
     Task<AltaFleetChange> PlaceAutomationAsync(string automationId, string? machine, CancellationToken cancellationToken);
 
     /// <summary>Reads the sums of the statistics of the person's machines from a server.</summary>

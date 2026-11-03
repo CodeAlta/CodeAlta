@@ -187,6 +187,75 @@ public sealed class DesktopServerAutomationPlacementTests
         }
     }
 
+    [TestMethod]
+    public async Task AltaFleetPlace_OnAMachineOfTheServer_IsTakenForAMachineOfThePerson_AndRefusedForAnother()
+    {
+        var token = TestContext.CancellationToken;
+        var root = Path.Combine(Path.GetTempPath(), "CodeAlta-desktop-server-place-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            await using var server = await CoordinatorServer.StartAsync(new CoordinatorServerOptions
+            {
+                DataRoot = Path.Combine(root, "server"), Urls = ["http://127.0.0.1:0"], ConfigureLogging = static _ => { }, EnvironmentVariable = static _ => null,
+            }, token);
+            var address = server.Addresses.First(static uri => uri.Scheme == "http");
+            var desktopFleetRoot = Path.Combine(root, "desktop-fleet");
+            using var desktopKey = DeviceIdentity.LoadOrCreate(desktopFleetRoot);
+            using var desktop = new FleetServerClient(address, desktopKey);
+            var setup = await desktop.SetUpAsync(server.SetupCode!.Code, "Alex", "Desktop", "Home", token);
+            using var nodeKey = DeviceIdentity.LoadOrCreate(Path.Combine(root, "node-fleet"));
+            using (var enrolling = new FleetServerClient(address, nodeKey))
+                await enrolling.EnrollAsync((await desktop.CreateEnrollmentTokenAsync(null, "mini", token)).Token, "mini", FleetDeviceKinds.Node, token);
+            await desktop.ApproveAsync(nodeKey.DeviceId, token);
+
+            var registry = new SessionHostRegistry(new SessionHostRegistryTests.RecordingSessionHost(null));
+            await using var fleet = new DesktopFleet(desktopFleetRoot, registry.TakeMembership(), "desktop");
+            var global = Path.Combine(root, "desktop-config.toml");
+            File.WriteAllText(global, $$"""
+                [automations.{{Id}}]
+                name = "Nightly"
+                enabled = false
+                prompt = "Summarize the day."
+                triggers = [{ type = "daily", at = ["23:00"] }]
+                """);
+            await using var automations = new AutomationService(global, _ => Task.FromResult<IReadOnlyList<ProjectDescriptor>>([]),
+                new AutomationStateStore(Path.Combine(root, "desktop-state", "automations.json"), false), new FakeAutomationRunner(), TimeProvider.System, TimeZoneInfo.Utc);
+            await automations.RefreshAsync();
+            DesktopServerAutomationRoute? Route(string machineId) => machineId is "elsewhere" || machineId == nodeKey.DeviceId
+                ? new DesktopServerAutomationRoute("link-1", setup.Organization.Id, "mini", new FleetOrganizationDevices(address, desktopKey), desktopKey,
+                    new FleetServerClient(address, desktopKey))
+                : null;
+            await using var placement = new DesktopAutomationPlacement(automations, fleet.Find, desktopFleetRoot, () => fleet.DeviceId, fleet.SignAutomation) { ServerRoute = Route };
+            var alta = new DesktopAltaFleet(fleet, "desktop-pc", "4.0.0")
+            {
+                Automations = automations, Placement = placement, ServerRoute = Route,
+                // "elsewhere" is listed by the server but is no node of this person's in its device list.
+                ServerMachines = () => [(nodeKey.DeviceId, "mini"), ("elsewhere", "elsewhere")],
+            };
+
+            // A machine this computer is not paired with, reached through the server, signed with the person's authority.
+            var placed = await alta.PlaceAutomationAsync(Id, "MINI", token);
+            Assert.AreEqual("ok", placed.Status, placed.Message);
+            Assert.AreEqual(nodeKey.DeviceId, automations.Snapshot.Find(Id)!.Definition.RunsOn);
+            Assert.IsFalse(automations.Snapshot.Find(Id)!.Definition.Enabled, "placed, it stays disabled until a person enables it");
+
+            var refused = await alta.PlaceAutomationAsync(Id, "elsewhere", token);
+            Assert.AreEqual("not_allowed", refused.Status);
+            StringAssert.Contains(refused.Message, "not one of your machines");
+            Assert.AreEqual(nodeKey.DeviceId, automations.Snapshot.Find(Id)!.Definition.RunsOn, "nothing changed");
+            Assert.AreEqual("machine_not_found", (await alta.PlaceAutomationAsync(Id, "nowhere", token)).Status);
+            Assert.AreEqual("ok", (await alta.PlaceAutomationAsync(Id, null, token)).Status);
+            Assert.IsNull(automations.Snapshot.Find(Id)!.Definition.RunsOn);
+        }
+        finally
+        {
+            try { Directory.Delete(root, recursive: true); }
+            catch (IOException) { }
+            catch (UnauthorizedAccessException) { }
+        }
+    }
+
     private static Task WaitForAsync(Func<bool> condition, string what, CancellationToken cancellationToken)
         => WaitForAsync(() => Task.FromResult(condition()), what, cancellationToken);
 

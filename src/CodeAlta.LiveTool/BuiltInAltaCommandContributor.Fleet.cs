@@ -201,7 +201,7 @@ internal sealed partial class BuiltInAltaCommandContributor
         command.Add(async (_, _) => await WithFleetFloorAsync(context, async () => await HandleFleetAutomationPlaceAsync(context, id, machine, here).ConfigureAwait(false)).ConfigureAwait(false));
         AddHelpText(
             command,
-            "The automation runs there by its triggers while this computer is closed. What would run unattended is enabled by a person: an agent places a disabled automation only (`fleet.needsPerson` otherwise), and the machine must let this computer automate.",
+            "The automation runs there by its triggers while this computer is closed. What would run unattended is enabled by a person: an agent places a disabled automation only (`fleet.needsPerson` otherwise). A paired machine must let this computer automate; a machine reached through a server must be one of the user's own.",
             "Examples: `alta fleet automation place <automation-id> --machine build-box`; `alta fleet automation place <automation-id> --here`.");
         return command;
     }

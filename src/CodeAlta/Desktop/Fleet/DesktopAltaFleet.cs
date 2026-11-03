@@ -31,6 +31,12 @@ internal sealed class DesktopAltaFleet(DesktopFleet fleet, string machineName, s
     /// <summary>Gets where the automations placed on machines stand; null when none can be placed.</summary>
     internal DesktopAutomationPlacement? Placement { get; init; }
 
+    /// <summary>Gets what finds the way to give automations to a machine through a server; null for that of <see cref="Servers"/>. Tests replace it.</summary>
+    internal Func<string, DesktopServerAutomationRoute?>? ServerRoute { get; init; }
+
+    /// <summary>Gets what lists the nodes of the servers this computer is connected to; null for those of <see cref="Servers"/>. Tests replace it.</summary>
+    internal Func<IReadOnlyList<(string Id, string Name)>>? ServerMachines { get; init; }
+
     /// <summary>Gets the runtime of this computer, which says whether a session runs here; null when it is not asked.</summary>
     internal CodeAltaHost? Host { get; init; }
 
@@ -193,11 +199,24 @@ internal sealed class DesktopAltaFleet(DesktopFleet fleet, string machineName, s
         string? runsOn = null;
         if (machine is not null && !IsThisComputer(machine))
         {
-            if (Resolve(machine) is not { } host) return new("machine_not_found");
-            // What the machine says this computer may do there, once it said it.
-            if (!(host.Listing.Info?.Permissions ?? host.Machine.Permissions).Contains("automate", StringComparer.Ordinal))
-                return new("not_allowed", $"{Name(host)} does not let this computer automate: its owner gives the `automate` permission in the page of the machine.");
-            runsOn = host.MachineId;
+            var host = Resolve(machine);
+            if (host is { IsPaired: true })
+            {
+                // A paired machine takes it through its node API: what the machine says this computer may do there, once it said it.
+                if (!(host.Listing.Info?.Permissions ?? host.Machine.Permissions).Contains("automate", StringComparer.Ordinal))
+                    return new("not_allowed", $"{Name(host)} does not let this computer automate: its owner gives the `automate` permission in the page of the machine.");
+                runsOn = host.MachineId;
+            }
+            else
+            {
+                // Any other machine takes it through a server, as the placement gives it: only a machine of the person's own.
+                string id, name;
+                if (host is not null) (id, name) = (host.MachineId!, Name(host));
+                else if (ResolveServerMachine(machine) is { } listed) (id, name) = listed;
+                else return new("machine_not_found");
+                if (await ServerOwnershipAsync(id, name, cancellationToken).ConfigureAwait(false) is { } notOwned) return notOwned;
+                runsOn = id;
+            }
         }
 
         if (string.Equals(entry.Definition.RunsOn, runsOn, StringComparison.Ordinal)) return new("ok");
@@ -375,6 +394,38 @@ internal sealed class DesktopAltaFleet(DesktopFleet fleet, string machineName, s
     }
 
     private static string Name(RemoteSessionHost host) => host.Listing.Info?.Name ?? host.Machine.Name;
+
+    // A node of a server this computer is connected to, by its id, or by its name when one node only has it.
+    private (string Id, string Name)? ResolveServerMachine(string machine)
+    {
+        var name = machine.Trim();
+        var machines = ServerMachines?.Invoke() ?? Servers?.OrganizationMachines() ?? [];
+        if (machines.FirstOrDefault(candidate => string.Equals(candidate.Id, name, StringComparison.Ordinal)) is { Id: not null } byId) return byId;
+        var found = machines.Where(candidate => string.Equals(candidate.Name, name, StringComparison.OrdinalIgnoreCase)).ToArray();
+        return found.Length == 1 ? found[0] : null;
+    }
+
+    // Null when the machine is one of the person's own, as the device list of a server that lists it verifies it now (what
+    // the server and the machine check for each version); otherwise why it cannot be placed there.
+    private async Task<AltaFleetChange?> ServerOwnershipAsync(string machineId, string name, CancellationToken cancellationToken)
+    {
+        var route = ServerRoute is { } find ? find(machineId) : Servers?.AutomationRoute(machineId);
+        if (route is null)
+            return new("not_allowed", $"{name} is reached through no server online that gives it automations: pair with it, or connect to its server.");
+        using (route)
+        {
+            try
+            {
+                return await route.IsOwnMachineAsync(machineId, cancellationToken).ConfigureAwait(false)
+                    ? null
+                    : new AltaFleetChange("not_allowed", $"{name} is not one of your machines: you give automations to the machines you own.");
+            }
+            catch (Exception exception) when (Failure(exception) is { } failure)
+            {
+                return new(failure.Status, failure.Message);
+            }
+        }
+    }
 
     private static AltaFleetMeasures Measures(StatisticsMeasuresDto measures)
         => new(measures.ActiveMs, measures.Runs, measures.RunsFailed, measures.Requests, measures.InputTokens, measures.OutputTokens, measures.ToolCalls, measures.ToolFailures,
