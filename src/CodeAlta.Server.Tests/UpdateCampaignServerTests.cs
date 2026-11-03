@@ -215,6 +215,23 @@ public sealed class UpdateCampaignServerTests
     }
 
     [TestMethod]
+    public async Task StepsThatReadTheFeedAtOnceCheckItOnceADay()
+    {
+        using var both = new Barrier(2);
+        var calls = 0;
+        // The first two reads of the feed meet: two steps read it before either decides.
+        await using var fleet = await TestFleet.StartAsync(readLatest: () =>
+        {
+            if (Interlocked.Increment(ref calls) <= 2) both.SignalAndWait(TimeSpan.FromSeconds(5));
+            return "4.0.2";
+        });
+        fleet.Server.Failure = "The feed did not answer.";
+        await fleet.SetPolicyAsync(1, FleetUpdateModes.Automatic);
+        await Task.WhenAll(Task.Run(fleet.TickAsync), Task.Run(fleet.TickAsync));
+        Assert.AreEqual(1, (await fleet.UpdatesAsync()).Campaigns.Count, "one check, one campaign");
+    }
+
+    [TestMethod]
     public async Task AnAutomaticVersionThatRolledBackIsNotTriedAgain()
     {
         await using var fleet = await TestFleet.StartAsync(latest: "4.0.2");

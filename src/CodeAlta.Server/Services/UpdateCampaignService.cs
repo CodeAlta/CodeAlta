@@ -533,6 +533,8 @@ internal sealed class UpdateCampaignService : IAsyncDisposable
             || policy.Mode != FleetUpdateModes.Automatic)
             return;
         var now = _time.GetUtcNow();
+        // Another step may have checked meanwhile: once a day.
+        if (held.LastCheckAt is { } last && now - last < _options.CheckInterval) return;
         var message = read.Error ?? await CheckFeedAsync(held, policy, read.Latest, now, cancellationToken).ConfigureAwait(false);
         await _store.SetUpdatePolicyCheckAsync(organizationId, now, message, cancellationToken).ConfigureAwait(false);
         _logger.LogInformation("The automatic update policy read its feed: {Message}", message);
