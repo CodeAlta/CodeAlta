@@ -170,8 +170,9 @@ public sealed class UpdateInstructionTests
             "no person signed a hash: the feed's checks the package");
 
         Refused(new FleetUpdateInstruction("auto-1", null, owner.Sign(automatic), "4.1.0-beta.1"), context, "stable");
-        Refused(new FleetUpdateInstruction("auto-1", null, owner.Sign(automatic), "3.9.0"), context, "not newer");
-        Refused(new FleetUpdateInstruction("auto-1", null, owner.Sign(automatic), "4.0.0"), context, "not newer");
+        Refused(new FleetUpdateInstruction("auto-1", null, owner.Sign(automatic), "3.9.0"), context, "older than 4.0.0");
+        // The version that runs: nothing to install, the machine reports it updated once confirmed.
+        Assert.IsTrue(UpdateInstructions.TryVerify(new FleetUpdateInstruction("auto-1", null, owner.Sign(automatic), "4.0.0"), context, out _, out reason), reason);
         Refused(new FleetUpdateInstruction("auto-1", null, owner.Sign(automatic with { Mode = FleetUpdateModes.Manual }), "4.1.0"), context, "not automatic");
         Refused(new FleetUpdateInstruction("auto-1", null, owner.Sign(automatic with { Sequence = 1 }), "4.1.0"), context, "older than policy 2");
         Refused(new FleetUpdateInstruction("auto-1", null, outsider.Sign(automatic with { SignerDeviceId = outsider.DeviceId }), "4.1.0"), context, "not signed by a controller");

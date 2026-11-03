@@ -183,6 +183,29 @@ public sealed class FleetUpdateAgentTests
     }
 
     [TestMethod]
+    public async Task ANodeThatRunsTheVersionAlreadyCompletesItsCampaignWithoutInstallingIt()
+    {
+        using var harness = new AgentHarness();
+        harness.Latest = UpdateVersion.Parse("4.1.0");
+        harness.Running = "4.1.0";
+        harness.Staged = false;
+        var agent = harness.Start();
+
+        // An automatic campaign to the version it runs, confirmed: it is updated, with nothing installed.
+        await harness.AcceptAsync(agent, LinkA, harness.Automatic("auto-1", harness.Policy(1, FleetUpdateModes.Automatic), "4.1.0"));
+        Assert.IsNull(agent.Tick());
+        Assert.AreEqual(("auto-1", FleetUpdateMachineStates.Updated), (agent.Report(LinkA)?.CampaignId, agent.Report(LinkA)?.State));
+        Assert.AreEqual(0, harness.Applied.Count);
+
+        // The same for a campaign a person started.
+        harness.Clock.Advance(TimeSpan.FromMinutes(1));
+        await harness.AcceptAsync(agent, LinkA, harness.Instruction(harness.Manifest(1, "c1", "4.1.0")));
+        Assert.IsNull(agent.Tick());
+        Assert.AreEqual(("c1", FleetUpdateMachineStates.Updated), (agent.Report(LinkA)?.CampaignId, agent.Report(LinkA)?.State));
+        Assert.AreEqual(0, harness.Applied.Count);
+    }
+
+    [TestMethod]
     public async Task AManualPolicyRevokesTheAutomaticPolicyItReplaced()
     {
         using var harness = new AgentHarness();
