@@ -266,7 +266,8 @@ internal sealed class AutomationsService
             return new AutomationItem(entry.Id, definition.Name, definition.Enabled, definition.Prompt, entry.ProjectId, project?.DisplayName,
                 entry.ProjectPath ?? definition.Project, entry.Source.ProjectId, entry.Source.FilePath, definition.Model.Provider, definition.Model.Model,
                 definition.Model.Effort?.ToString(), definition.Agent, definition.PermissionMode, definition.ReviewBeforeCommit, definition.Sandbox, definition.CatchUp, [.. definition.Triggers.Select(Trigger)], entry.Problem,
-                _automations.NextDue(entry.Id), running, lastRun,
+                // A placed automation is next due when its machine says.
+                definition.RunsOn is not null && _placement is not null ? _placement.NextDue(entry.Id) : _automations.NextDue(entry.Id), running, lastRun,
                 _automations.Repository(entry.Id), definition.Enabled ? _automations.WatchProblem(entry.Id) : null, _automations.IsAllowed(entry))
             {
                 Script = definition.Script,

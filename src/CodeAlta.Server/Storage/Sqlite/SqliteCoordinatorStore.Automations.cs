@@ -2,14 +2,14 @@ using Microsoft.Data.Sqlite;
 
 namespace CodeAlta.Server.Storage.Sqlite;
 
-// The automations of the organization and their runs (migration 0007).
+// The automations of the organization and their runs (migrations 0007 and 0008).
 public sealed partial class SqliteCoordinatorStore
 {
     private const string AutomationColumns = "SELECT organization_id, automation_id, machine_id, owner_person_id, number, removed, enabled, triggers, payload, signature, " +
-        "signer_device_id, updated_at, delivery_state, delivery_message FROM automations";
+        "signer_device_id, updated_at, delivery_state, delivery_message, next_due FROM automations";
 
     private const string AutomationRunColumns = "SELECT organization_id, run_id, automation_id, machine_id, number, trigger, status, occurrence, started_at, ended_at, " +
-        "lease_until, session_id, message, updated_at FROM automation_runs";
+        "lease_until, session_id, message, updated_at, input_tokens, output_tokens, cost, cost_unit FROM automation_runs";
 
     /// <inheritdoc />
     public ValueTask<bool> PutAutomationAsync(AutomationRecord automation, AuditEntry audit, CancellationToken cancellationToken = default)
@@ -108,7 +108,14 @@ public sealed partial class SqliteCoordinatorStore
             var held = QuerySingle(connection, transaction, AutomationRunColumns + " WHERE organization_id = $org AND automation_id = $id AND occurrence = $occurrence",
                 ReadAutomationRun, ("$org", claim.OrganizationId), ("$id", claim.AutomationId), ("$occurrence", claim.Occurrence));
             if (held is not null)
-                return held.RunId == claim.RunId && held.MachineId == claim.MachineId ? new AutomationClaimOutcome(true, null) : new AutomationClaimOutcome(false, held);
+            {
+                if (held.RunId != claim.RunId || held.MachineId != claim.MachineId) return new AutomationClaimOutcome(false, held);
+                // The same run claims again while it works: its lease is renewed, never once it ended.
+                if (held.EndedAt is null)
+                    Execute(connection, transaction, "UPDATE automation_runs SET lease_until = $lease, updated_at = $at WHERE organization_id = $org AND run_id = $run",
+                        ("$org", claim.OrganizationId), ("$run", claim.RunId), ("$lease", ToNullableTime(claim.LeaseUntil)), ("$at", ToTime(claim.UpdatedAt)));
+                return new AutomationClaimOutcome(true, null);
+            }
             // A run id is the machine's: one reported already for this run, without its due time, takes it now.
             if (QuerySingle(connection, transaction, AutomationRunColumns + " WHERE organization_id = $org AND run_id = $run", ReadAutomationRun,
                     ("$org", claim.OrganizationId), ("$run", claim.RunId)) is { } known)
@@ -148,10 +155,12 @@ public sealed partial class SqliteCoordinatorStore
                     if (known.MachineId != run.MachineId || known.AutomationId != run.AutomationId) continue;
                     Execute(connection, transaction,
                         "UPDATE automation_runs SET number = $number, trigger = $trigger, status = $status, started_at = $started, ended_at = $ended, " +
-                        "lease_until = $lease, session_id = $session, message = $message, updated_at = $at WHERE organization_id = $org AND run_id = $run",
+                        "lease_until = $lease, session_id = $session, message = $message, updated_at = $at, input_tokens = $input, output_tokens = $output, " +
+                        "cost = $cost, cost_unit = $unit WHERE organization_id = $org AND run_id = $run",
                         ("$org", run.OrganizationId), ("$run", run.RunId), ("$number", run.Number), ("$trigger", run.Trigger), ("$status", run.Status),
                         ("$started", ToTime(run.StartedAt)), ("$ended", ToNullableTime(run.EndedAt)), ("$lease", ToNullableTime(run.LeaseUntil ?? known.LeaseUntil)),
-                        ("$session", run.SessionId), ("$message", run.Message), ("$at", ToTime(run.UpdatedAt)));
+                        ("$session", run.SessionId), ("$message", run.Message), ("$at", ToTime(run.UpdatedAt)), ("$input", run.InputTokens),
+                        ("$output", run.OutputTokens), ("$cost", run.Cost), ("$unit", run.CostUnit));
                 }
 
                 touched.Add((run.OrganizationId, run.AutomationId));
@@ -171,6 +180,22 @@ public sealed partial class SqliteCoordinatorStore
     }
 
     /// <inheritdoc />
+    public ValueTask SetAutomationNextDueAsync(string organizationId, string machineId, IReadOnlyList<(string AutomationId, DateTimeOffset? NextDue)> schedules,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(organizationId);
+        ArgumentException.ThrowIfNullOrEmpty(machineId);
+        ArgumentNullException.ThrowIfNull(schedules);
+        return new ValueTask(WriteAsync((connection, transaction) =>
+        {
+            foreach (var (automationId, nextDue) in schedules)
+                Execute(connection, transaction, "UPDATE automations SET next_due = $due WHERE organization_id = $org AND automation_id = $id AND machine_id = $machine",
+                    ("$org", organizationId), ("$id", automationId), ("$machine", machineId), ("$due", ToNullableTime(nextDue)));
+            return true;
+        }, cancellationToken).AsTask());
+    }
+
+    /// <inheritdoc />
     public ValueTask<IReadOnlyList<AutomationRunRecord>> ListAutomationRunsAsync(string organizationId, string automationId, int limit, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrEmpty(organizationId);
@@ -184,17 +209,26 @@ public sealed partial class SqliteCoordinatorStore
     private static void InsertRun(SqliteConnection connection, SqliteTransaction transaction, AutomationRunRecord run)
         => Execute(connection, transaction,
             "INSERT INTO automation_runs (organization_id, run_id, automation_id, machine_id, number, trigger, status, occurrence, started_at, ended_at, lease_until, " +
-            "session_id, message, updated_at) VALUES ($org, $run, $id, $machine, $number, $trigger, $status, $occurrence, $started, $ended, $lease, $session, $message, $at)",
+            "session_id, message, updated_at, input_tokens, output_tokens, cost, cost_unit) " +
+            "VALUES ($org, $run, $id, $machine, $number, $trigger, $status, $occurrence, $started, $ended, $lease, $session, $message, $at, $input, $output, $cost, $unit)",
             ("$org", run.OrganizationId), ("$run", run.RunId), ("$id", run.AutomationId), ("$machine", run.MachineId), ("$number", run.Number), ("$trigger", run.Trigger),
             ("$status", run.Status), ("$occurrence", run.Occurrence), ("$started", ToTime(run.StartedAt)), ("$ended", ToNullableTime(run.EndedAt)),
-            ("$lease", ToNullableTime(run.LeaseUntil)), ("$session", run.SessionId), ("$message", run.Message), ("$at", ToTime(run.UpdatedAt)));
+            ("$lease", ToNullableTime(run.LeaseUntil)), ("$session", run.SessionId), ("$message", run.Message), ("$at", ToTime(run.UpdatedAt)),
+            ("$input", run.InputTokens), ("$output", run.OutputTokens), ("$cost", run.Cost), ("$unit", run.CostUnit));
 
     private static AutomationRecord ReadAutomation(SqliteDataReader reader)
         => new(reader.GetString(0), reader.GetString(1), reader.GetString(2), reader.GetString(3), reader.GetInt64(4), reader.GetInt64(5) != 0, reader.GetInt64(6) != 0,
-            reader.GetString(7), reader.GetString(8), reader.GetString(9), reader.GetString(10), FromTime(reader.GetInt64(11)), reader.GetString(12), GetNullableString(reader, 13));
+            reader.GetString(7), reader.GetString(8), reader.GetString(9), reader.GetString(10), FromTime(reader.GetInt64(11)), reader.GetString(12), GetNullableString(reader, 13))
+        {
+            NextDue = GetNullableTime(reader, 14),
+        };
 
     private static AutomationRunRecord ReadAutomationRun(SqliteDataReader reader)
         => new(reader.GetString(0), reader.GetString(1), reader.GetString(2), reader.GetString(3), reader.GetInt64(4), reader.GetString(5), reader.GetString(6),
             GetNullableString(reader, 7), FromTime(reader.GetInt64(8)), GetNullableTime(reader, 9), GetNullableTime(reader, 10), GetNullableString(reader, 11),
-            GetNullableString(reader, 12), FromTime(reader.GetInt64(13)));
+            GetNullableString(reader, 12), FromTime(reader.GetInt64(13)))
+        {
+            InputTokens = reader.IsDBNull(14) ? null : reader.GetInt64(14), OutputTokens = reader.IsDBNull(15) ? null : reader.GetInt64(15),
+            Cost = reader.IsDBNull(16) ? null : reader.GetDouble(16), CostUnit = GetNullableString(reader, 17),
+        };
 }

@@ -61,6 +61,37 @@ internal sealed class NodeServerAutomations(NodeAutomations automations, DeviceI
     }
 
     /// <inheritdoc />
+    public async Task RunAsync(FleetConnector connector, FleetServerLink link, FleetSignedAutomationRunRequest request, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(connector);
+        ArgumentNullException.ThrowIfNull(link);
+        ArgumentNullException.ThrowIfNull(request);
+        FleetDeviceListState? devices;
+        try
+        {
+            devices = await connector.Devices.RefreshAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is FleetServerException or HttpRequestException or IOException or TaskCanceledException && !cancellationToken.IsCancellationRequested)
+        {
+            devices = connector.Devices.Current;
+        }
+        catch (FleetDeviceListException exception)
+        {
+            Log($"A run asked through {link.Url} was refused: the device list of the server does not verify ({exception.Reason}).");
+            return;
+        }
+
+        if (devices is null)
+        {
+            Log($"A run asked through {link.Url} was refused: the device list of the server could not be read.");
+            return;
+        }
+
+        // A refused request is logged by the automations; the run of one that holds is reported as the others.
+        await automations.RunFromServerAsync(link.Id, devices, link.OrganizationId ?? devices.OrganizationId, request, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <inheritdoc />
     public Task OnlineAsync(FleetConnector connector, FleetServerLink link, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(link);

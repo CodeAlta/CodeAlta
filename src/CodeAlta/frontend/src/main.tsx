@@ -2715,18 +2715,20 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
     openFile(automationsTab);
   }
   // Opens the session of a run. One that was just started is not in the list of sessions yet: the list is read first.
-  async function openAutomationSession(id: string) {
+  // Opens a session by its id, reading the sessions again when this window does not list it yet; says whether it opened.
+  async function openAutomationSession(id: string): Promise<boolean> {
     let shown = currentSnapshot.current;
     if (!shown?.sessions.some(session => session.id === id)) {
       try {
         const fresh = await workspace.snapshot({}, { timeoutMilliseconds: 30_000 });
-        if (!creationAlive.current || !fresh.configured) return;
+        if (!creationAlive.current || !fresh.configured) return false;
         publishWorkspaceState({ kind: "ready", snapshot: fresh });
         shown = fresh;
-      } catch { return; }
+      } catch { return false; }
     }
     const session = shown.sessions.find(candidate => candidate.id === id) ?? catalog.current?.sessions.find(candidate => candidate.id === id);
     if (session) revealSession(session);
+    return session !== undefined;
   }
   // The bookmarks: the sessions and the messages the user marked to find them again. This window lists them and is told
   // when they change. It does not follow them itself: the tab, the rail of a timeline and the mark of a row do.
@@ -6004,7 +6006,10 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
                 projectId={selectedProject && !selectedProject.archived ? selectedProject.id : null} epoch={!status ? undefined : owned ? status.hostEpoch : null}
                 providers={configurationState.snapshot?.providerRuntimeAvailable ? [...configurationState.snapshot.providers].filter(provider => provider.enabled).sort((a, b) => Number(b.isDefault) - Number(a.isDefault)) : []}
                 visible={visible && view === "workspace" && !settingsOpen} focus={automationFocus} onFocused={() => setAutomationFocus(null)}
-                onActivate={activateShown(tab, visible)} onOpenSession={id => void openAutomationSession(id)} />
+                onActivate={activateShown(tab, visible)} onOpenSession={id => void openAutomationSession(id).then(opened => {
+                  // A run on another machine whose session that machine does not list now: said, rather than nothing.
+                  if (!opened && creationAlive.current) showToast({ message: t("The machine of this run does not list its session now."), intent: "warning", icon: "warning-sign", timeout: 6000 });
+                })} />
               : isWorkflowsTab(tab)
               ? <WorkflowsPanel key={fileTabKey(tab)} api={workflowsApi} epoch={!status ? undefined : owned ? status.hostEpoch : null}
                 projects={snapshot?.projects.filter(project => !project.archived) ?? []} sessions={(catalog.current ?? snapshot)?.sessions ?? []}

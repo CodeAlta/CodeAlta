@@ -73,6 +73,8 @@ public sealed class NodeServerAutomationTests
             await WaitForAsync(() => Task.FromResult(automations.AssignmentOf(Id) is { Via: not null, Number: 1 } held ? held : null), token);
             Assert.AreEqual(Noon.AddMinutes(30), automations.Engine.NextDue(Id), "the node fires its schedule");
             await WaitForAsync(async () => (await desktop.ListAutomationsAsync(token)).Automations.SingleOrDefault(static item => item.State == "applied"), token);
+            Assert.AreEqual(Noon.AddMinutes(30), (await WaitForAsync(async () => (await desktop.ListAutomationsAsync(token)).Automations
+                .SingleOrDefault(static item => item.NextDue is not null), token)).NextDue, "the node reports when it is next due");
             var entry = automations.Engine.Snapshot.Find(Id)!;
             Assert.IsNull(automations.Check(entry, new CodeAlta.Agent.ModelProviderDescriptor(new("scripted"), "Scripted")));
 
@@ -92,15 +94,49 @@ public sealed class NodeServerAutomationTests
             var reported = await WaitForAsync(async () => (await desktop.ListAutomationRunsAsync(Id, null, token)).Runs
                 .FirstOrDefault(static run => run.Status == AutomationRun.Completed), token);
             Assert.AreEqual(("hourly", nodeId, 1L), (reported.Trigger, reported.MachineId, reported.Number));
+            Assert.AreEqual((120L, 30L, 0.002, "usd"), (reported.InputTokens, reported.OutputTokens, reported.Cost, reported.CostUnit), "what the session used, as facts");
             Assert.AreEqual(AutomationService.Occurrence(entry.Definition.Triggers[0], Noon.AddMinutes(30)), reported.Occurrence, "the claim of the server keyed the run");
             StringAssert.Contains(provider.LastUserText, "Say hello.");
+
+            // Run now, asked through the server with a request the desktop signs: it runs with the id it names, once.
+            var runId = Guid.CreateVersion7().ToString("N");
+            var request = FleetAutomationSigning.SignRun(desktopKey, new FleetAutomationRunRequest(FleetAutomationRunRequest.CurrentVersion, setup.Organization.Id, Id, nodeId,
+                runId, string.Empty, string.Empty, clock.Now));
+            Assert.AreEqual(("requested", runId), (await desktop.RunAutomationAsync(request, token)) is var asked ? (asked.Status, asked.RunId) : default);
+            var manual = await WaitForAsync(async () => (await desktop.ListAutomationRunsAsync(Id, null, token)).Runs
+                .FirstOrDefault(run => run.RunId == runId && run.Status == AutomationRun.Completed), token);
+            Assert.AreEqual(("manual", nodeId), (manual.Trigger, manual.MachineId));
+            var link = automations.AssignmentOf(Id)!.Via!;
+            var again = await automations.RunFromServerAsync(link, list, setup.Organization.Id, request, token);
+            Assert.AreEqual(runId, again.Run?.Id, "the same request is answered by the run it started");
+            Assert.AreEqual(1, automations.Engine.Runs(Id, 50).Count(run => run.Id == runId));
+            var otherRun = request with { Payload = request.Payload.Replace(runId, Guid.CreateVersion7().ToString("N"), StringComparison.Ordinal) };
+            StringAssert.Contains((await automations.RunFromServerAsync(link, list, setup.Organization.Id, otherRun, token)).Refused, "signature");
+
+            // A long run: while it works, the node renews the lease of its due time with the server.
+            var gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var working = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            provider.Turns.Enqueue(ScriptedNodeProvider.WaitThenReply(gate.Task, "Done.", working));
+            var longOccurrence = AutomationService.Occurrence(entry.Definition.Triggers[0], Noon.AddHours(1).AddMinutes(30));
+            clock.Now = Noon.AddHours(1).AddMinutes(30).AddSeconds(5);
+            automations.Engine.Tick(clock.Now);
+            await working.Task.WaitAsync(Patience, token);
+            var claimed = await WaitForAsync(async () => (await desktop.ListAutomationRunsAsync(Id, null, token)).Runs.FirstOrDefault(run => run.Occurrence == longOccurrence), token);
+            await Task.Delay(50, token);
+            clock.Now = clock.Now.AddMinutes(2);
+            automations.Engine.Tick(clock.Now);
+            await WaitForAsync(async () => (await desktop.ListAutomationRunsAsync(Id, null, token)).Runs
+                .FirstOrDefault(run => run.Occurrence == longOccurrence && run.LeaseUntil > claimed.LeaseUntil), token);
+            gate.SetResult();
+            await WaitForAsync(async () => (await desktop.ListAutomationRunsAsync(Id, null, token)).Runs
+                .FirstOrDefault(run => run.Occurrence == longOccurrence && run.Status == AutomationRun.Completed), token);
 
             // The server is away when the next time comes: the node runs it alone.
             await server.DisposeAsync();
             server = null;
-            clock.Now = Noon.AddHours(1).AddMinutes(30).AddSeconds(5);
+            clock.Now = Noon.AddHours(2).AddMinutes(30).AddSeconds(5);
             automations.Engine.Tick(clock.Now);
-            await WaitForAsync(() => Task.FromResult(automations.Engine.Runs(Id, 10).FirstOrDefault(static run => run is { Status: AutomationRun.Completed, StartedAt.Hour: 13 })), token);
+            await WaitForAsync(() => Task.FromResult(automations.Engine.Runs(Id, 10).FirstOrDefault(static run => run is { Status: AutomationRun.Completed, StartedAt.Hour: 14 })), token);
         }
         finally
         {
@@ -189,7 +225,7 @@ public sealed class NodeServerAutomationTests
         PublishesSpace = options.PublishesSpace, WatchDirectory = options.WatchDirectory, PendingApprovalRetry = TimeSpan.FromMilliseconds(200),
         MinimumBackoff = TimeSpan.FromMilliseconds(100), MaximumBackoff = TimeSpan.FromSeconds(1), PollInterval = TimeSpan.FromMilliseconds(500),
         DeviceListPinPath = options.DeviceListPinPath, Devices = options.Devices, MetadataKeys = options.MetadataKeys, AcceptRelay = options.AcceptRelay,
-        AutomationsAssigned = options.AutomationsAssigned, AutomationsOnline = options.AutomationsOnline,
+        AutomationsAssigned = options.AutomationsAssigned, AutomationsOnline = options.AutomationsOnline, AutomationsRun = options.AutomationsRun,
     };
 
     private async Task<T> WaitForAsync<T>(Func<Task<T?>> read, CancellationToken cancellationToken) where T : class

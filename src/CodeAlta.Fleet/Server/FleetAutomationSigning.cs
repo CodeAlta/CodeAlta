@@ -47,6 +47,22 @@ public static class FleetAutomationSigning
         return new FleetSignedAutomationVersion(text, Base64Url.EncodeToString(identity.SignData(FleetAutomationVersionDocuments.GetSignedBytes(text))));
     }
 
+    /// <summary>Signs a run request with the key of this device, which it names as its signer.</summary>
+    /// <param name="identity">The key of the controller device that asks the run.</param>
+    /// <param name="request">The request; its signer and key are set to those of <paramref name="identity"/>.</param>
+    /// <returns>The signed request.</returns>
+    /// <exception cref="ArgumentNullException">An argument is null.</exception>
+    /// <exception cref="ArgumentException">The request does not hold.</exception>
+    public static FleetSignedAutomationRunRequest SignRun(DeviceIdentity identity, FleetAutomationRunRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(identity);
+        ArgumentNullException.ThrowIfNull(request);
+        var named = request with { SignerDeviceId = identity.DeviceId, SignerKey = Convert.ToBase64String(identity.ExportSubjectPublicKeyInfo()) };
+        var text = FleetAutomationRunRequestDocuments.Serialize(named);
+        if (!FleetAutomationRunRequestDocuments.TryRead(text, out _, out var reason)) throw new ArgumentException($"The run request does not hold: {reason}.", nameof(request));
+        return new FleetSignedAutomationRunRequest(text, Base64Url.EncodeToString(identity.SignData(FleetAutomationRunRequestDocuments.GetSignedBytes(text))));
+    }
+
     /// <summary>
     /// Seals what a version does for its machine and the controller devices of the signer's person, as the device list
     /// verified by the signer holds them.

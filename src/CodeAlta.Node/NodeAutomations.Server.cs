@@ -14,10 +14,15 @@ internal sealed partial class NodeAutomations
 
     // What was last reported of each run, per server link: a run is sent again only when it changed.
     private readonly Dictionary<string, Dictionary<string, string>> _reported = new(StringComparer.Ordinal);
+    // When the schedules were last reported due, per server link: sent again only when it changed.
+    private readonly Dictionary<string, Dictionary<string, DateTimeOffset?>> _reportedSchedules = new(StringComparer.Ordinal);
     private readonly SemaphoreSlim _reports = new(1, 1);
     private readonly CancellationTokenSource _reportsStop = new();
     private int _reportQueued;
     private Task _reportTask = Task.CompletedTask;
+    // The due times claimed with a server for the runs still at work: their leases are renewed there while they run.
+    private readonly Dictionary<string, (string Link, FleetAutomationClaimRequest Claim)> _serverClaims = new(StringComparer.Ordinal);
+    private DateTimeOffset _serverClaimsRenewedAt;
 
     /// <summary>
     /// Gets or sets what claims a due time with the server of a link (<see cref="FleetAutomationMethods.Claim"/>); its
@@ -56,7 +61,86 @@ internal sealed partial class NodeAutomations
             return null;
         }
 
-        return result.Granted ? null : result.Message ?? "This due time was already taken by another run.";
+        if (!result.Granted) return result.Message ?? "This due time was already taken by another run.";
+        lock (_gate) _serverClaims[runId] = (link, new FleetAutomationClaimRequest(automationId, assignment.Number, occurrence, runId, default));
+        return null;
+    }
+
+    /// <summary>
+    /// Renews with their servers the leases of the due times this node claimed there for the runs still at work, at most
+    /// once a minute of <paramref name="now"/>: a run longer than its lease stays known as at work, and the server does
+    /// not take it for lost. A server that does not answer renews nothing; the run goes on.
+    /// </summary>
+    /// <param name="now">The time of the renewal.</param>
+    internal void RenewServerClaims(DateTimeOffset now)
+    {
+        if (ServerClaim is not { } claim) return;
+        (string Link, FleetAutomationClaimRequest Claim)[] renewals;
+        lock (_gate)
+        {
+            if (_serverClaims.Count == 0 || now - _serverClaimsRenewedAt < TimeSpan.FromMinutes(1) && now >= _serverClaimsRenewedAt) return;
+            _serverClaimsRenewedAt = now;
+            renewals = [.. _serverClaims.Values.Select(item => (item.Link, item.Claim with { LeaseUntil = now + AutomationClaimStore.LeaseDuration }))];
+        }
+
+        foreach (var (link, request) in renewals)
+        {
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    using var timeout = new CancellationTokenSource(ClaimTimeout);
+                    await claim(link, request, timeout.Token).ConfigureAwait(false);
+                }
+                catch (Exception exception) when (exception is not OutOfMemoryException)
+                {
+                    Log($"The lease of {request.Occurrence} of the automation {request.AutomationId} was not renewed with its server: {exception.Message}");
+                }
+            });
+        }
+    }
+
+    /// <summary>Forgets the claim a server holds for a run that ended: its lease is no longer renewed, and its end is reported.</summary>
+    /// <param name="runId">The run.</param>
+    internal void ReleaseServerClaim(string runId)
+    {
+        lock (_gate) _serverClaims.Remove(runId);
+    }
+
+    /// <summary>
+    /// Runs an automation a person asked by hand through the server of a link: the request must verify against the device
+    /// list of that server (a controller device of the owner of this machine, for this machine, signed within minutes of
+    /// its time), and name an automation this node holds from that server. Its run takes the id the request names: a request
+    /// given again is answered by the run it started, never run twice.
+    /// </summary>
+    /// <param name="linkId">The server link it came through.</param>
+    /// <param name="devices">The device list of that server, as this node verified it now.</param>
+    /// <param name="organizationId">The organization of that server.</param>
+    /// <param name="signed">The signed request.</param>
+    /// <param name="cancellationToken">Cancels the start.</param>
+    /// <returns>The run, or why the request was refused.</returns>
+    internal async Task<(AutomationRun? Run, string? Refused)> RunFromServerAsync(string linkId, FleetDeviceListState devices, string? organizationId,
+        FleetSignedAutomationRunRequest signed, CancellationToken cancellationToken)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(linkId);
+        ArgumentNullException.ThrowIfNull(devices);
+        ArgumentNullException.ThrowIfNull(signed);
+        if (DeviceId is not { } self) return (null, "This machine does not know its own device yet.");
+        if (!FleetAutomationRunRequestDocuments.TryVerify(signed, devices, organizationId, self, _options.TimeProvider.GetUtcNow(), out var request, out var reason))
+        {
+            Log($"A run asked through the server was refused: {reason}.");
+            return (null, reason);
+        }
+
+        if (AssignmentOf(request.AutomationId) is not { Via: { } via } || via != linkId)
+        {
+            Log($"A run of {request.AutomationId} asked through the server was refused: this machine holds no such automation from that server.");
+            return (null, "this machine holds no such automation from that server");
+        }
+
+        var run = await Engine.RunAsync(request.AutomationId, request.RunId, cancellationToken).ConfigureAwait(false);
+        if (run is not null) Log($"{request.SignerDeviceId} ran the automation {request.AutomationId} through the server: {run.Status}.");
+        return (run, run is null ? "the automation is not on this machine" : null);
     }
 
     /// <summary>Reports to the server of a link the runs of the automations it gave this node: all of the latest ones, or only those that changed.</summary>
@@ -91,16 +175,30 @@ internal sealed partial class NodeAutomations
                         SessionId = run.SessionId,
                         // Why a run failed or was skipped, never what it answered nor what its trigger was about.
                         Message = run.Status is AutomationRun.Failed or AutomationRun.Skipped ? run.Message : null,
+                        InputTokens = run.InputTokens, OutputTokens = run.OutputTokens, Cost = run.Cost, CostUnit = run.CostUnit,
                     };
-                    var key = $"{fact.Status}|{fact.EndedAt?.ToUnixTimeMilliseconds()}|{fact.SessionId}|{fact.Number}";
+                    var key = $"{fact.Status}|{fact.EndedAt?.ToUnixTimeMilliseconds()}|{fact.SessionId}|{fact.Number}|{fact.InputTokens}|{fact.OutputTokens}|{fact.Cost}";
                     if (!reported.TryGetValue(run.Id, out var known) || known != key) changed.Add((fact, key));
                 }
             }
 
-            foreach (var batch in changed.Chunk(RunsPerReport))
+            // When their schedules are next due here, sent with the first batch, or alone when only they changed.
+            if (!_reportedSchedules.TryGetValue(linkId, out var dues) || all) _reportedSchedules[linkId] = dues = new(StringComparer.Ordinal);
+            var schedules = new List<FleetAutomationSchedule>();
+            foreach (var id in ids)
             {
-                if (!await report(linkId, new FleetAutomationRunFacts([.. batch.Select(static item => item.Fact)]), cancellationToken).ConfigureAwait(false)) return;
+                var next = Engine.NextDue(id);
+                if (!dues.TryGetValue(id, out var known) || known != next) schedules.Add(new FleetAutomationSchedule(id, next));
+            }
+
+            List<(FleetAutomationRunFact Fact, string Key)[]> batches = changed.Count > 0 ? [.. changed.Chunk(RunsPerReport)] : schedules.Count > 0 ? [[]] : [];
+            foreach (var batch in batches)
+            {
+                var facts = new FleetAutomationRunFacts([.. batch.Select(static item => item.Fact)]) { Schedules = schedules.Count > 0 ? schedules : null };
+                if (!await report(linkId, facts, cancellationToken).ConfigureAwait(false)) return;
                 foreach (var (fact, key) in batch) reported[fact.RunId] = key;
+                foreach (var schedule in schedules) dues[schedule.AutomationId] = schedule.NextDue;
+                schedules = [];
             }
 
             // Forgets what no longer is among the latest runs.
@@ -158,10 +256,18 @@ internal sealed class NodeAutomationClaims(AutomationClaimStore local, NodeAutom
     public bool TryClaim(string automationId, string occurrence, string runId, DateTimeOffset now) => local.TryClaim(automationId, occurrence, runId, now);
 
     /// <inheritdoc />
-    public void Renew(DateTimeOffset now) => local.Renew(now);
+    public void Renew(DateTimeOffset now)
+    {
+        local.Renew(now);
+        automations.RenewServerClaims(now);
+    }
 
     /// <inheritdoc />
-    public void Release(string runId, DateTimeOffset now) => local.Release(runId, now);
+    public void Release(string runId, DateTimeOffset now)
+    {
+        local.Release(runId, now);
+        automations.ReleaseServerClaim(runId);
+    }
 
     /// <inheritdoc />
     public ValueTask<string?> ConfirmAsync(string automationId, string occurrence, string runId, CancellationToken cancellationToken)
