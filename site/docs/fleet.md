@@ -149,6 +149,19 @@ In CodeAlta Desktop, **Forget** on the row of a machine in **Settings** > **Flee
 
 From a terminal, `altanode connect <link>` pairs another profile with a node, and `altanode remote <machine> sessions`, `history`, `send`, `create` and `watch` read and drive the sessions of a paired machine. `altanode remote <machine> move <session>` moves one of them to the node of that profile.
 
+## Connect to a CodeAlta Server
+
+A CodeAlta Server shows the machines of all your computers, whether they are online, and the sessions they publish, in one place. It never reads their content: a session publishes its state, its provider and model and its times, never its prompts, answers or title.
+
+1. On the always-on machine, run `altaserver run`. It prints a one-time setup code (`altaserver setup-code` prints it again).
+2. In CodeAlta Desktop on that machine, open **Settings** > **Fleet** > **Server**, click **Create my server…**, and give its address (`http://127.0.0.1:2586`), the setup code and your name. This computer becomes the owner's.
+3. To add a node, click **Add a machine…** and run the command it shows on the machine: `altanode join <address> --token <code>`. The node appears under the server, **Waiting for approval**: click **Approve** when it shows the same six words as the node.
+4. Another computer joins with **Join a server…** and an enrollment code; the owner approves it the same way.
+
+A space publishes to a server only when you choose it: **Settings** > **Spaces** > the space > **General** > **Server**. `altanode join` links the default space of the node (`--space` chooses others). A session made **Private** in its options (the Agent chip, **More options**) is never published.
+
+The **Fleet** canvas (`/fleet`) shows the machines of the server and their sessions as they change. A session of this computer or of a paired machine opens with **Open**; the others are shown only. `altanode status` says whether the node is connected to its server.
+
 ## Security
 
 - **Remote sessions run code on the machine.** A paired computer can start agents there that use its tools, as you would sitting at it. Pair only your own computers, and revoke the ones you no longer use.
