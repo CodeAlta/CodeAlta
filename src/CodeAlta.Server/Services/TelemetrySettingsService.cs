@@ -24,6 +24,9 @@ internal sealed class TelemetrySettingsService
     private readonly ServerTelemetry _telemetry;
     private readonly TimeProvider _time;
     private readonly ILogger _logger;
+    // One setting at a time, from the read of the one held to its application: two set at once could otherwise both be
+    // stored in turn and the older one applied last to the server's own telemetry and forwarding.
+    private readonly SemaphoreSlim _setGate = new(1, 1);
 
     /// <summary>Initializes a new instance of the <see cref="TelemetrySettingsService"/> class.</summary>
     /// <param name="store">The store.</param>
@@ -118,19 +121,30 @@ internal sealed class TelemetrySettingsService
             if (!FleetTelemetrySettingsDocuments.TryValidateHeaders(serverHeaders, out var headerReason)) throw Invalid($"The headers do not hold: {headerReason}.");
         }
 
-        var held = await _store.GetTelemetrySettingsAsync(actor.OrganizationId, cancellationToken).ConfigureAwait(false);
-        if (held is not null && settings.Sequence <= held.Sequence)
-            throw CoordinatorException.Conflict(CoordinatorErrorCodes.TelemetryConflict, $"The setting must be numbered after the one held ({held.Sequence}): read it again.");
+        TelemetrySettingsRecord record;
+        await _setGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            var held = await _store.GetTelemetrySettingsAsync(actor.OrganizationId, cancellationToken).ConfigureAwait(false);
+            if (held is not null && settings.Sequence <= held.Sequence)
+                throw CoordinatorException.Conflict(CoordinatorErrorCodes.TelemetryConflict, $"The setting must be numbered after the one held ({held.Sequence}): read it again.");
 
-        var record = new TelemetrySettingsRecord(actor.OrganizationId, settings.Sequence, signed.Payload, signed.Signature, actor.Id,
-            serverHeaders is null ? null : JsonSerializer.Serialize(serverHeaders.ToDictionary(), Fleet.Protocol.FleetTelemetryJsonContext.Default.DictionaryStringString),
-            _time.GetUtcNow());
-        // Where the machines send is a security decision: the audit says it, never the headers.
-        var audit = origin.Audit("telemetry.set", actor, actor.OrganizationId, details: Details(settings, serverHeaders?.Count ?? 0));
-        if (!await _store.SetTelemetrySettingsAsync(record, audit, cancellationToken).ConfigureAwait(false))
-            throw CoordinatorException.Conflict(CoordinatorErrorCodes.TelemetryConflict, "Another setting was stored meanwhile: read it again.");
+            record = new TelemetrySettingsRecord(actor.OrganizationId, settings.Sequence, signed.Payload, signed.Signature, actor.Id,
+                serverHeaders is null ? null : JsonSerializer.Serialize(serverHeaders.ToDictionary(), Fleet.Protocol.FleetTelemetryJsonContext.Default.DictionaryStringString),
+                _time.GetUtcNow());
+            // Where the machines send is a security decision: the audit says it, never the headers.
+            var audit = origin.Audit("telemetry.set", actor, actor.OrganizationId, details: Details(settings, serverHeaders?.Count ?? 0));
+            // Once stored, it is applied whatever the caller does: the server never holds one setting and runs another.
+            if (!await _store.SetTelemetrySettingsAsync(record, audit, CancellationToken.None).ConfigureAwait(false))
+                throw CoordinatorException.Conflict(CoordinatorErrorCodes.TelemetryConflict, "Another setting was stored meanwhile: read it again.");
 
-        _telemetry.Apply(record, actor.OrganizationId);
+            _telemetry.Apply(record, actor.OrganizationId);
+        }
+        finally
+        {
+            _setGate.Release();
+        }
+
         foreach (var session in _presence.List(actor.OrganizationId)) _ = PushAsync(session, signed);
         _logger.LogInformation("The telemetry setting {Sequence} of the fleet was set by {Device}: {State}", settings.Sequence, actor.Id,
             settings.Enabled ? $"{settings.Route} to {settings.Endpoint}" : "off");

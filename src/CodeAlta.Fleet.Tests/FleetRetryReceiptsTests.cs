@@ -13,7 +13,7 @@ public sealed class FleetRetryReceiptsTests
     public async Task ACallStillRunning_KeepsItsReceiptPastCapacity_AndARetryWaitsForIt()
     {
         using var folder = new TestFolder();
-        var receipts = new FleetRetryReceipts(folder.Path, new ManualTimeProvider(DateTimeOffset.UtcNow), resultCapacity: 1, keyCapacity: 1);
+        var receipts = new FleetRetryReceipts(folder.Path, new ManualTimeProvider(DateTimeOffset.UtcNow), resultCapacity: 1, keyCapacity: 8);
         var gate = new TaskCompletionSource<Item>(TaskCreationOptions.RunContinuationsAsynchronously);
         var runs = 0;
         var first = receipts.RunOnceAsync("a", "{}", TestJson.Default.Item, () => { Interlocked.Increment(ref runs); return gate.Task; });
@@ -40,6 +40,42 @@ public sealed class FleetRetryReceiptsTests
             () => throw new AssertFailedException("An evicted key never runs again.")));
         Assert.AreEqual(FleetErrorCodes.Expired, expired.Error.Code);
         Assert.AreEqual("b", (await receipts.RunOnceAsync("b", "{}", TestJson.Default.Item, () => throw new AssertFailedException("Kept."))).Value);
+    }
+
+    [TestMethod]
+    public async Task KeysWithinTheirLifetimeAreNeverForgotten_AndAFullStoreRefusesNewKeysUntilOneExpires()
+    {
+        using var folder = new TestFolder();
+        var clock = new ManualTimeProvider(DateTimeOffset.UtcNow);
+        var receipts = new FleetRetryReceipts(folder.Path, clock, resultCapacity: 1, keyCapacity: 4);
+        for (var index = 0; index < 4; index++)
+        {
+            _ = await receipts.RunOnceAsync("k" + index, "{}", TestJson.Default.Item, () => Task.FromResult(new Item("done")));
+            clock.Advance(TimeSpan.FromHours(1));
+        }
+
+        // A fifth key while the four are within their lifetime: refused, retryable, rather than forget the first.
+        var runs = 0;
+        var full = await Assert.ThrowsExactlyAsync<FleetException>(() => receipts.RunOnceAsync("k4", "{}", TestJson.Default.Item,
+            () => { runs++; return Task.FromResult(new Item("k4")); }));
+        Assert.AreEqual((FleetErrorCodes.ServerBusy, FleetErrorHints.Retry), (full.Error.Code, full.Error.Hint));
+        Assert.IsTrue(full.Error.RetryAfterSeconds is > 0, "The refusal says when the oldest key expires.");
+        Assert.AreEqual(0, runs, "A key the node cannot remember is not run.");
+
+        // The first key is still known, also after a restart: its retry never runs again.
+        foreach (var store in new[] { receipts, new FleetRetryReceipts(folder.Path, clock, resultCapacity: 1, keyCapacity: 4) })
+        {
+            var retried = await Assert.ThrowsExactlyAsync<FleetException>(() => store.RunOnceAsync("k0", "{}", TestJson.Default.Item,
+                () => throw new AssertFailedException("A key within its lifetime never runs again.")));
+            Assert.AreEqual(FleetErrorCodes.Expired, retried.Error.Code);
+        }
+
+        // Once the oldest key is past its lifetime, a new key is taken.
+        clock.Advance(FleetRetryReceipts.Lifetime - TimeSpan.FromHours(3));
+        Assert.AreEqual("k4", (await receipts.RunOnceAsync("k4", "{}", TestJson.Default.Item, () => Task.FromResult(new Item("k4")))).Value);
+        var stillKnown = await Assert.ThrowsExactlyAsync<FleetException>(() => receipts.RunOnceAsync("k1", "{}", TestJson.Default.Item,
+            () => throw new AssertFailedException("A key within its lifetime never runs again.")));
+        Assert.AreEqual(FleetErrorCodes.Expired, stillKnown.Error.Code);
     }
 
     [TestMethod]

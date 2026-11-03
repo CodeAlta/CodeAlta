@@ -107,7 +107,8 @@ public sealed class FleetConnectorOptions
 
     /// <summary>
     /// Gets what receives the fleet's telemetry setting the server sends (<see cref="FleetServerMethods.TelemetrySettings"/>),
-    /// as signed: it verifies the signature before it applies anything. Null ignores it.
+    /// as signed: it verifies the signature before it applies anything. It is given one setting at a time, in the order
+    /// the server sent them. Null ignores it.
     /// </summary>
     public Func<FleetSignedTelemetrySettings, CancellationToken, Task>? TelemetrySettings { get; init; }
 
@@ -143,6 +144,9 @@ public sealed class FleetConnector : IAsyncDisposable
     private readonly Lock _gate = new();
     private readonly HashSet<Task> _relays = [];
     private Task _loop = Task.CompletedTask;
+    // The last telemetry setting taken or waiting: each one waits for the one before, so that the check of a setting
+    // against the one held is never raced by another push, and an older one never lands after a newer one.
+    private Task _telemetryTail = Task.CompletedTask;
     private FleetDirectoryView _directory = FleetDirectoryView.Empty;
     // The changes received while a directory.watch waits for its snapshot, replayed after it; null when none waits.
     private List<FleetDirectoryChange>? _directoryPending;
@@ -394,8 +398,8 @@ public sealed class FleetConnector : IAsyncDisposable
                     FleetSignedTelemetrySettings? settings = null;
                     try { settings = fleetEvent.Payload?.Deserialize(FleetServerJsonContext.Default.FleetSignedTelemetrySettings); }
                     catch (JsonException) { /* A setting this device does not read is not applied. */ }
-                    // Verified beside the reader of the connection: the check reads the device list from the server.
-                    if (settings is { Payload.Length: > 0 }) Track(Task.Run(() => ReceiveTelemetryAsync(receive, settings, stop), CancellationToken.None));
+                    // Verified beside the reader of the connection (the check reads the device list from the server), one at a time.
+                    if (settings is { Payload.Length: > 0 }) QueueTelemetry(receive, settings, stop);
                     break;
             }
 
@@ -490,6 +494,22 @@ public sealed class FleetConnector : IAsyncDisposable
         {
             if (LogManager.IsInitialized) _logger.Info($"The relay {incoming.RelayId} from {incoming.From} was not served: {exception.Message}");
         }
+    }
+
+    private void QueueTelemetry(Func<FleetSignedTelemetrySettings, CancellationToken, Task> receive, FleetSignedTelemetrySettings settings, CancellationToken stop)
+    {
+        Task next;
+        lock (_gate)
+        {
+            var previous = _telemetryTail;
+            _telemetryTail = next = Task.Run(async () =>
+            {
+                await previous.ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
+                await ReceiveTelemetryAsync(receive, settings, stop).ConfigureAwait(false);
+            }, CancellationToken.None);
+        }
+
+        Track(next);
     }
 
     private async Task ReceiveTelemetryAsync(Func<FleetSignedTelemetrySettings, CancellationToken, Task> receive, FleetSignedTelemetrySettings settings, CancellationToken stop)

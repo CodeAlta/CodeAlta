@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Diagnostics;
 using System.Net.Http.Headers;
 using CodeAlta.Fleet.Protocol;
@@ -20,11 +21,15 @@ internal sealed class OtlpForwarder : IDisposable
     /// <summary>The largest OTLP request forwarded.</summary>
     public const int MaxBodyBytes = 8 * 1024 * 1024;
 
+    // The most of a collector's answer the server reads: past it, the machine gets the status without the body.
     private const int MaxAnswerBytes = 64 * 1024;
+
+    private static readonly TimeSpan DefaultTimeout = TimeSpan.FromSeconds(30);
 
     private readonly ServerTelemetry _telemetry;
     private readonly RequestAuthenticator _authenticator;
     private readonly HttpClient _http;
+    private readonly TimeSpan _timeout;
     private readonly ILogger _logger;
 
     /// <summary>Initializes a new instance of the <see cref="OtlpForwarder"/> class.</summary>
@@ -32,13 +37,18 @@ internal sealed class OtlpForwarder : IDisposable
     /// <param name="authenticator">Checks the signature of each request.</param>
     /// <param name="logger">The log.</param>
     /// <param name="handler">The HTTP handler toward the collector; null for the usual one.</param>
-    public OtlpForwarder(ServerTelemetry telemetry, RequestAuthenticator authenticator, ILogger logger, HttpMessageHandler? handler = null)
+    /// <param name="timeout">How long a forwarding may take, the collector's answer read to its end; null for 30 seconds.</param>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="timeout"/> is not positive.</exception>
+    public OtlpForwarder(ServerTelemetry telemetry, RequestAuthenticator authenticator, ILogger logger, HttpMessageHandler? handler = null, TimeSpan? timeout = null)
     {
+        if (timeout is { } given) ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(given, TimeSpan.Zero, nameof(timeout));
         _telemetry = telemetry;
         _authenticator = authenticator;
         _logger = logger;
+        _timeout = timeout ?? DefaultTimeout;
         _http = handler is null ? new HttpClient() : new HttpClient(handler, disposeHandler: false);
-        _http.Timeout = TimeSpan.FromSeconds(30);
+        // The timeout of HttpClient ends with the headers of the answer: each forwarding has its own deadline, body included.
+        _http.Timeout = Timeout.InfiniteTimeSpan;
     }
 
     /// <summary>Serves a request of a machine.</summary>
@@ -69,27 +79,63 @@ internal sealed class OtlpForwarder : IDisposable
         request.Content.Headers.ContentType = MediaTypeHeaderValue.TryParse(context.Request.ContentType, out var type) ? type : new MediaTypeHeaderValue("application/x-protobuf");
         if (context.Request.Headers.ContentEncoding.ToString() is { Length: > 0 } encoding) request.Content.Headers.TryAddWithoutValidation("Content-Encoding", encoding);
         foreach (var (name, value) in target.Headers) request.Headers.TryAddWithoutValidation(name, value);
-        try
+        byte[]? bytes;
+        int status;
+        string? answerType;
+        using (var deadline = CancellationTokenSource.CreateLinkedTokenSource(context.RequestAborted))
         {
-            using var answer = await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, context.RequestAborted).ConfigureAwait(false);
-            _telemetry.Metrics.Forwarded(signal, answer.IsSuccessStatusCode ? "ok" : ((int)answer.StatusCode).ToString(System.Globalization.CultureInfo.InvariantCulture),
-                answer.IsSuccessStatusCode ? body.Length : 0);
-            context.Response.StatusCode = (int)answer.StatusCode;
-            if (answer.Content.Headers.ContentType is { } answerType) context.Response.ContentType = answerType.ToString();
-            var bytes = await answer.Content.ReadAsByteArrayAsync(context.RequestAborted).ConfigureAwait(false);
-            if (bytes.Length <= MaxAnswerBytes) await context.Response.Body.WriteAsync(bytes, context.RequestAborted).ConfigureAwait(false);
+            deadline.CancelAfter(_timeout);
+            try
+            {
+                using var answer = await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, deadline.Token).ConfigureAwait(false);
+                status = (int)answer.StatusCode;
+                answerType = answer.Content.Headers.ContentType?.ToString();
+                // Read before anything is answered: a collector that stalls in its body still gets the machine a 502.
+                bytes = await ReadAnswerAsync(answer.Content, deadline.Token).ConfigureAwait(false);
+            }
+            catch (Exception exception) when (exception is HttpRequestException or IOException or OperationCanceledException && !context.RequestAborted.IsCancellationRequested)
+            {
+                _telemetry.Metrics.Forwarded(signal, "unreachable", 0);
+                _logger.LogWarning("The collector {Endpoint} did not take the {Signal} of a machine: {Reason}", target.Endpoint, signal,
+                    deadline.IsCancellationRequested ? $"no complete answer within {_timeout.TotalSeconds:0.#} s" : exception.Message);
+                // The exporter of the machine retries a 502 and a 503 later.
+                context.Response.StatusCode = StatusCodes.Status502BadGateway;
+                return;
+            }
         }
-        catch (Exception exception) when (exception is HttpRequestException or TaskCanceledException && !context.RequestAborted.IsCancellationRequested)
-        {
-            _telemetry.Metrics.Forwarded(signal, "unreachable", 0);
-            _logger.LogWarning("The collector {Endpoint} did not take the {Signal} of a machine: {Reason}", target.Endpoint, signal, exception.Message);
-            // The exporter of the machine retries a 502 and a 503 later.
-            context.Response.StatusCode = StatusCodes.Status502BadGateway;
-        }
+
+        var success = status is >= 200 and <= 299;
+        _telemetry.Metrics.Forwarded(signal, success ? "ok" : status.ToString(System.Globalization.CultureInfo.InvariantCulture), success ? body.Length : 0);
+        context.Response.StatusCode = status;
+        if (answerType is not null) context.Response.ContentType = answerType;
+        if (bytes is not null) await context.Response.Body.WriteAsync(bytes, context.RequestAborted).ConfigureAwait(false);
     }
 
     /// <inheritdoc />
     public void Dispose() => _http.Dispose();
+
+    // The answer of the collector, or null when it is larger than the server relays: never more than the limit is read.
+    private static async Task<byte[]?> ReadAnswerAsync(HttpContent content, CancellationToken cancellationToken)
+    {
+        if (content.Headers.ContentLength > MaxAnswerBytes) return null;
+        var buffer = ArrayPool<byte>.Shared.Rent(MaxAnswerBytes + 1);
+        try
+        {
+            var stream = await content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
+            await using (stream.ConfigureAwait(false))
+            {
+                var length = 0;
+                int read;
+                while (length <= MaxAnswerBytes && (read = await stream.ReadAsync(buffer.AsMemory(length, MaxAnswerBytes + 1 - length), cancellationToken).ConfigureAwait(false)) > 0)
+                    length += read;
+                return length > MaxAnswerBytes ? null : buffer.AsSpan(0, length).ToArray();
+            }
+        }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(buffer);
+        }
+    }
 
     private static async Task<byte[]> ReadBodyAsync(HttpContext context)
     {
