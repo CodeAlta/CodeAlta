@@ -122,8 +122,8 @@ labels, its local policy).
   - Before a run starts, the node reads its policy (`fleet/automation-policy.json`: automations on or off, credentials
     `any` or `account` only) and derives the credential kind from how the provider starts; `unknown` is refused, and a
     refused run is recorded with its reason, without a session.
-- **Statistics are counted on nodes.** The statistics engine runs headless too (today only in the desktop); the node
-  publishes its facts as versioned rows ([statistics](statistics.md)).
+- **Statistics are counted on nodes.** The statistics engine runs headless too, from the node's first day; the node
+  publishes its facts as a versioned set per session ([statistics](statistics.md)).
 - **The node's host can ask.** Unlike today's headless runs of `altacli`, which grant everything (`FullTrust`), a node
   routes permission requests and questions to people, bound to their exact attempts, and refuses what nobody may
   approve.

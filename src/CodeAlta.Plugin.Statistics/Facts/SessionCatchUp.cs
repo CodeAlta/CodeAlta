@@ -30,8 +30,8 @@ internal sealed class CatchUpResult
     /// <summary>
     /// Gets or sets a value indicating whether the file was not the one the cursor belonged to (a header prepended to an old
     /// file, a file replaced when the provider changed while idle, a file shorter than the offset, a state of another version of
-    /// the facts): the batch is then the facts of the whole session, and the store must remove the rows it has for the session
-    /// before it saves them.
+    /// the facts), or a move to another machine changed which of its records are the work of this machine: the batch is then the
+    /// facts of the whole session, and the store must remove the rows it has for the session before it saves them.
     /// </summary>
     public bool Restarted { get; init; }
 
@@ -99,6 +99,15 @@ internal sealed class SessionCatchUp : IDisposable
             // Not the file the cursor was made for: its facts are of another file, so the session is read again from the start.
             restarted = true;
             reducer = new SessionFactsReducer(sessionId);
+            scan = _scanner.Scan(stream, 0, null, reducer, maxBytes, cancellationToken);
+        }
+
+        // A move the reading did not know changed which records are the work of this machine: the session is read again from the
+        // start with the moves it found. Each reading that asks again found one more, and their number is bounded.
+        for (var reading = 0; reducer.RestartRequested && reading <= SessionFactsState.MaxMoves; reading++)
+        {
+            restarted = true;
+            reducer = new SessionFactsReducer(sessionId, new SessionFactsState { Moved = reducer.State.Moved!.Known() });
             scan = _scanner.Scan(stream, 0, null, reducer, maxBytes, cancellationToken);
         }
 

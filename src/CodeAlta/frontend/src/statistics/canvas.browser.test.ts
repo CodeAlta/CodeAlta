@@ -7,7 +7,8 @@ import { edge, withCanvas, type Page } from "./browserHarness";
 
 type Call = { name: string; input: any };
 const settled = `document.querySelector('.statistics-canvas') && !document.querySelector('.stats-block[data-state="loading"]') && !document.querySelector('.stats-tile-skeleton') && document.querySelectorAll('.stats-block').length > 0`;
-const options = { entry: "./canvas.mount.tsx", fixture: "canvasFixture" };
+// The module of the canvas binds "My fleet" to the fleetServer service of the window: the inert one of the previews stands in for it.
+const options = { entry: "./canvas.mount.tsx", fixture: "canvasFixture", rpcFixture: "../demo-api.ts" };
 const calls = (page: Page) => page.evaluate<Call[]>(`canvasFixture.calls()`);
 const names = (list: Call[]) => list.map(call => call.name);
 const render = (page: Page, parameters: object = {}) => page.evaluate(`canvasFixture.render(${JSON.stringify(parameters)})`);

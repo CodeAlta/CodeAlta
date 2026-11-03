@@ -39,6 +39,9 @@ public sealed class FleetServerConnectionsOptions
     /// <summary>Gets what there is to publish; null publishes nothing.</summary>
     public IFleetPublicationSource? Source { get; init; }
 
+    /// <summary>Gets the statistics facts of the instance, published from the day each link was made; null publishes none.</summary>
+    public IFleetStatisticsSource? Statistics { get; init; }
+
     /// <summary>Gets whether the connectors follow the directory of their organization (a desktop does).</summary>
     public bool WatchDirectory { get; init; }
 
@@ -278,6 +281,9 @@ public sealed class FleetServerConnections : IAsyncDisposable
             OutboxPath = Path.Combine(_store.LinkFolder(link.Id), "outbox.json"),
             Client = _options.Client,
             Source = source,
+            // From the day the link was made: publishing the history before is the person's choice, to come.
+            Statistics = source is null ? null : _options.Statistics,
+            StatisticsFromQuarter = FleetHostStatisticsSource.FirstQuarter(link.CreatedAt),
             PublishesSpace = linked.Contains,
             WatchDirectory = _options.WatchDirectory,
             Devices = devices,

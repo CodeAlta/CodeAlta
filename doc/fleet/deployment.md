@@ -9,6 +9,12 @@ cloud, with no Kubernetes.
   for scripts and servers, never required.
 - **One step per machine.** Adding a machine is one command, one scan, or nothing at all when the desktop can reach
   it over SSH.
+- **Managing is as smooth as setting up.** Living with a fleet, at home or in a company, happens in the desktop too:
+  what a machine may do, its projects, providers, updates, logs, telemetry, devices and revocations, the server's
+  people, approvals and backups. A person never has to open a terminal on a machine to manage it. Every state says
+  what it means and every problem comes with the action that fixes it (**Allow automations**, **Update**, **Approve**,
+  **Sign in again**). Home and enterprise share the same pages; what a household does not need stays out of sight
+  until it is used.
 - **Any OS.** Windows, macOS and Linux, x64 and Arm64, for the node and the server. No container runtime required;
   containers when the platform wants them.
 - **No Kubernetes.** A Helm chart can come for organizations that already run it.
@@ -66,6 +72,9 @@ Nodes only ever dial out: none of these needs an inbound port on a node.
 | An organization on AWS | **ECS Express Mode** (Fargate + load balancer) + **RDS PostgreSQL**, from a Terraform module | App Runner no longer takes new customers (since 2026-04-30) |
 | An organization on GCP | **Cloud Run** + **Cloud SQL**, Terraform | Workable: WebSockets end after 60 minutes at most, which reconnection absorbs; billed while connections are open |
 | An organization with Kubernetes | A Helm chart (later) | |
+
+Whatever the recipe, the platform's probes (the container's health check, the load balancer's target check) call the
+server's `/health/live` and `/health/ready` ([observability](observability.md#health-checks)).
 
 Shipped artifacts stay few: one image, one `compose.yaml`, one `azd` template, one Terraform module per cloud. Aspire
 is used to run a server and several nodes together in development, not as the deployment path (its Azure deploy is
@@ -140,7 +149,7 @@ All signed (Authenticode, Apple notarization, NuGet signatures, cosign for image
   selected, and once it changes to one newer than the selected version, the pointer is dropped and the installed entry
   point runs; a version chosen older on purpose (`update --version`) stays until the installed one changes.
 - **Trial and rollback.** A new version confirms itself once healthy: a node when it listens and its connections to
-  the servers that approved it are up, the server when it answers its own health request. One that exits first, or does
+  the servers that approved it are up, the server when it answers its own health request (`/api/v1/server/health`). One that exits first, or does
   not confirm within 2 minutes (over 2 starts), or cannot be started, is stopped, marked bad (an update skips it unless
   named) and the previous version starts again. A rollback with a backup is recorded with the move of the pointer and
   kept until the backup is restored: the launcher restores it before it starts anything, and when it cannot, it starts

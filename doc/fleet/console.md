@@ -91,7 +91,10 @@ flowchart LR
   need them.
 - A **Fleet** button in the title bar shows the fleet's state (machines online, what waits for me) and opens the Fleet
   canvas; the search (`Ctrl+P`) reaches every canvas and action.
-- The setup assistant ([deployment](deployment.md#the-setup-assistant)) is part of the console.
+- The setup assistant ([deployment](deployment.md#the-setup-assistant)) is part of the console, and so is everything a
+  machine's owner manages after it: a machine's row opens its page (state, version, what each device may do, projects,
+  providers and their readiness, automations it holds, log, update, revoke), and what waits for a person (a device to
+  approve, a machine that fell behind, a sign-in that expired) is shown where they look, with the button that settles it.
 
 ## Plugins
 

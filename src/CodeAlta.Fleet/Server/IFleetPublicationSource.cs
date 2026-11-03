@@ -34,6 +34,10 @@ public static class FleetSessionStates
 /// <param name="Model">Its model; null when unknown.</param>
 /// <param name="Counts">Its counts; null when unknown.</param>
 /// <param name="Title">Its title; null when it has none. Published only sealed (<see cref="FleetMetadataKey"/>).</param>
+/// <param name="ProjectIdentity">
+/// What recognizes its project on the person's machines (<see cref="FleetProjectKeys"/>); null for a session without a project.
+/// Never published: its statistics carry its blind index only.
+/// </param>
 public sealed record FleetLocalSession(
     string SessionId,
     string? SpaceId,
@@ -45,7 +49,8 @@ public sealed record FleetLocalSession(
     string? ProviderType = null,
     string? Model = null,
     FleetSessionCounts? Counts = null,
-    string? Title = null);
+    string? Title = null,
+    string? ProjectIdentity = null);
 
 /// <summary>What an instance has to publish to its servers: the inventory of the machine and its sessions.</summary>
 public interface IFleetPublicationSource

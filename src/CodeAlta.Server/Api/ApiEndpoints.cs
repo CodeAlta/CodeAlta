@@ -127,6 +127,12 @@ internal static class ApiEndpoints
             })
             .WithSummary("The published sessions: their facts and their sealed metadata, which the server cannot read.");
 
+        api.MapPost("/statistics/query", async (StatisticsQueryRequest? request, HttpContext context, StatisticsService statistics) =>
+                Results.Json(await statistics.QueryAsync(DeviceAuthenticationMiddleware.GetDevice(context), request, context.RequestAborted).ConfigureAwait(false),
+                    FleetStatisticsJsonContext.Default.StatisticsQueryResponse))
+            .Produces<StatisticsQueryResponse>()
+            .WithSummary("Sums the statistics facts the machines of the calling device's person published: time, runs, tokens, costs and tool calls, by machine, project key, provider, model, day or month.");
+
         api.MapGet("/metadata-keys", (HttpContext context, MetadataKeyService keys)
                 => keys.ListAsync(DeviceAuthenticationMiddleware.GetDevice(context), context.RequestAborted))
             .WithSummary("The metadata keys of the calling device's person, each with the copy wrapped to that device; never a key in clear.");

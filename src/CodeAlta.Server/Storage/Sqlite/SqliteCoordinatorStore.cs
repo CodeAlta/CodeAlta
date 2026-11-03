@@ -456,7 +456,8 @@ public sealed partial class SqliteCoordinatorStore : ICoordinatorStore, IAutomat
     public ValueTask<FleetPublicationCursors> GetPublicationCursorsAsync(string deviceId, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrEmpty(deviceId);
-        return ReadAsync(connection => new FleetPublicationCursors(ReadCursor(connection, null, deviceId, FactsStream), ReadCursor(connection, null, deviceId, InventoryStream)),
+        return ReadAsync(connection => new FleetPublicationCursors(ReadCursor(connection, null, deviceId, FactsStream), ReadCursor(connection, null, deviceId, InventoryStream),
+                ReadCursor(connection, null, deviceId, StatisticsStream)),
             cancellationToken);
     }
 

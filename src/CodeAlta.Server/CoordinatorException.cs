@@ -149,4 +149,7 @@ public static class CoordinatorErrorCodes
 
     /// <summary>No automation of the caller's person has this id.</summary>
     public const string AutomationNotFound = "automation.not_found";
+
+    /// <summary>A statistics query that does not read: its days, its time zone, its groups or its scope.</summary>
+    public const string StatisticsInvalid = "statistics.invalid";
 }

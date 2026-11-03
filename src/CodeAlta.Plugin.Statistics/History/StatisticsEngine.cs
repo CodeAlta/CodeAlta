@@ -42,6 +42,12 @@ internal sealed class StatisticsEngineOptions
 
     /// <summary>Gets a function that gives the names of the projects of the application by reference; null for none.</summary>
     public Func<CancellationToken, ValueTask<IReadOnlyDictionary<string, string>>>? ResolveProjectNames { get; init; }
+
+    /// <summary>
+    /// Gets the choice of history made for a host where nobody is asked (CodeAlta Node): applied at a start that finds no choice,
+    /// and saved as if chosen. Null waits for the user's choice.
+    /// </summary>
+    public HistoryChoice? DefaultChoice { get; init; }
 }
 
 /// <summary>
@@ -227,6 +233,19 @@ internal sealed partial class StatisticsEngine : IStatisticsService, IAsyncDispo
         finally
         {
             _initialization.Release();
+        }
+
+        bool needsChoice;
+        lock (_gate)
+        {
+            needsChoice = _choice is null;
+        }
+
+        if (needsChoice && _options.DefaultChoice is { } fallback)
+        {
+            // A host without a user: the choice is made for it, so its sessions are counted from now on.
+            await ChooseHistoryAsync(fallback, cancellationToken).ConfigureAwait(false);
+            return;
         }
 
         // The state is known and published; the first-time card gets its numbers right after, so that a slow disk never delays the state.
