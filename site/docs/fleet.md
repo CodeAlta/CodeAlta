@@ -237,6 +237,7 @@ From a terminal, `altanode connect <link>` pairs another profile with a node, an
 
 A CodeAlta Server shows the machines of all your computers, whether they are online, and the sessions they publish, in one place. It never reads their content: a session publishes its state, its provider and model, its times and its counts (turns, tool calls, tokens), never its prompts or answers. Its title travels encrypted with a key that only your approved computers and machines hold: the server cannot read it.
 
+<<<<<<< HEAD
 ### Create my server
 
 In CodeAlta Desktop, open **Settings** > **Fleet** > **Server** and click **Create my server…**. Choose where it runs:
@@ -253,9 +254,9 @@ Once you are its owner, **Add your machines** lists the machines this computer m
 
 ### Add machines and computers
 
-- **A machine**: in **Settings** > **Fleet** > **Machines**, **Add a machine…** > **Through my server** shows the command to run on it, `altanode join <address> --token <code>`. This computer made the code: the machine is approved as soon as it comes, and its six words are shown. The **Add a machine…** of the server's card shows the same command for a machine that waits for you to approve it.
+- **A machine**: in **Settings** > **Fleet** > **Machines**, **Add a machine…** > **Through my server** shows the command to run on it, `altanode join <address> --token <code>`. This computer made the code: the machine is approved as soon as it comes, and its six words are shown. The **Add a machine…** of the server's card shows the same command for a machine that waits for you to approve it: it appears under the server as a **New device**; click **Approve…**, check that the machine shows the same six words, and click **It shows the same words**.
 - **What waits for you**: when a machine or a computer asks to join, a message comes wherever you are in CodeAlta, with its six words, **Approve** and **Refuse**, and the **Fleet** button of the title bar counts what waits. Approve when the words are the same as on the device.
-- **Another of your computers**: **Join an organization…** with the address of the server and an enrollment code; you approve it the same way from a computer already approved. Once approved, it can add and approve machines too. A node never approves anything.
+- **Another of your computers**: **Join an organization…** with the address of the server and an enrollment code; it shows six words while it waits, and you approve it the same way from a computer already approved. Once approved, it can add and approve machines too. A node never approves anything.
 
 ### Join an organization
 
@@ -266,7 +267,15 @@ To join the server of your company, open **Settings** > **Fleet** > **Server** a
 3. **Space**: the space that works with the organization, **A new Work space** by default. Its sessions are published to the server: their states and counts, never their content.
 4. **Approval**: an administrator approves this computer; they see the six words shown here beside it.
 
-A space publishes to a server only when you choose it: **Settings** > **Spaces** > the space > **General** > **Server**. `altanode join` links the default space of the node (`--space` chooses others). A session made **Private** in its options (the Agent chip, **More options**) is never published; one made Private later, or whose space you unlink, is removed from the server.
+A device gets the keys that open your titles only once one of your computers approved it: the server alone cannot add one.
+
+### Keep your recovery key
+
+The recovery key lets you get your keys back on a new computer if every computer of yours that holds them is lost. The card of the server shows **Recovery key**: **Kept** once you have one. **Make a recovery key…** makes one for a server you created before; **New recovery key…** makes another, and the words you kept before stop working. Without your computers and without these words, what was encrypted for them cannot be read again, by you or by the server.
+
+A space publishes to a server only when you choose it: **Settings** > **Spaces** > the space > **General** > **Server**. `altanode join` links the default space of the node (`--space` chooses others). A session made **Private** in its options (the Agent chip, **More options**) is never published; one made Private later, or whose space you unlink, is removed from the server. Each space has a key of its own, so the titles of one space never open with the key of another.
+
+To leave a server, click the trash button of its card, then **Leave**: the server removes what this computer published there (its sessions, their titles, its statistics), its copies of your keys and the automations given to it through that server, and its spaces are unlinked. When the server does not answer, this computer leaves anyway and the page says that what it published stays there.
 
 The **Fleet** canvas (`/fleet`) shows the machines of the server and their sessions, with their titles, as they change. A session of this computer, of a paired machine or of a node of the server opens with **Open**; the others are shown only. `altanode status` says whether the node is connected to its server.
 

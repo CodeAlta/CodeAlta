@@ -301,6 +301,22 @@ public sealed partial class FleetServerClient : IDisposable
         => SendAsync(HttpMethod.Post, "api/v1/metadata-keys", Body(new CreateMetadataKeyRequest(keyId, epoch, wraps), ServerApiJsonContext.Default.CreateMetadataKeyRequest),
             ServerApiJsonContext.Default.MetadataKeyDto, cancellationToken);
 
+    /// <summary>Records the key this controller device made for a space of its person, wrapped to that person's devices, this one included.</summary>
+    /// <param name="keyId">The id of the key.</param>
+    /// <param name="epoch">Its epoch in the space.</param>
+    /// <param name="space">The opaque id of the space.</param>
+    /// <param name="sealedDescriptor">Which space it is on the devices, sealed with the key (<see cref="FleetMetadataKey.SealSpace"/>).</param>
+    /// <param name="wraps">Its copies, one per device.</param>
+    /// <param name="cancellationToken">Cancels the call.</param>
+    /// <returns>The key.</returns>
+    /// <exception cref="FleetServerException">The server refused the key: not a controller, a wrong wrap, or a key exists at that epoch (<c>metadata_key.exists</c>).</exception>
+    /// <exception cref="HttpRequestException">The server does not answer.</exception>
+    public Task<MetadataKeyDto> CreateSpaceKeyAsync(string keyId, int epoch, string space, string sealedDescriptor, IReadOnlyList<MetadataKeyWrapDto> wraps,
+        CancellationToken cancellationToken = default)
+        => SendAsync(HttpMethod.Post, "api/v1/metadata-keys",
+            Body(new CreateMetadataKeyRequest(keyId, epoch, wraps, space, sealedDescriptor), ServerApiJsonContext.Default.CreateMetadataKeyRequest),
+            ServerApiJsonContext.Default.MetadataKeyDto, cancellationToken);
+
     /// <summary>Gives copies of a metadata key this controller device holds to devices of its person that have none.</summary>
     /// <param name="keyId">The key.</param>
     /// <param name="wraps">The copies.</param>
@@ -356,12 +372,33 @@ public sealed partial class FleetServerClient : IDisposable
     /// <exception cref="FleetServerException">The server refused the approval: not a controller, not pending, or the list moved on twice.</exception>
     /// <exception cref="FleetDeviceListException">The device list does not verify, or this device is not a controller device in it: nothing was signed.</exception>
     /// <exception cref="HttpRequestException">The server does not answer.</exception>
-    public Task<DeviceDto> ApproveAsync(string deviceId, CancellationToken cancellationToken = default)
+    public Task<DeviceDto> ApproveAsync(string deviceId, CancellationToken cancellationToken = default) => ApproveAsync(deviceId, null, cancellationToken);
+
+    /// <summary>
+    /// Approves a pending device once the person confirmed that it shows the words of its key: this controller device signs
+    /// the entry that adds that key only, so that a server cannot show the words of one key and have another one signed.
+    /// </summary>
+    /// <param name="deviceId">The pending device.</param>
+    /// <param name="confirmedWords">The words the person compared (<see cref="DeviceFingerprint.ToShortWords()"/>); null when none were compared.</param>
+    /// <param name="cancellationToken">Cancels the call.</param>
+    /// <returns>The approved device.</returns>
+    /// <exception cref="ArgumentException"><paramref name="deviceId"/> is empty.</exception>
+    /// <exception cref="FleetServerException">The server refused the approval: not a controller, not pending, or the list moved on twice.</exception>
+    /// <exception cref="FleetDeviceListException">The device list does not verify, this device is not a controller device in it, or the key of the device is not the one whose words were confirmed: nothing was signed.</exception>
+    /// <exception cref="HttpRequestException">The server does not answer.</exception>
+    public Task<DeviceDto> ApproveAsync(string deviceId, string? confirmedWords, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(deviceId);
         return ChangeListAsync(deviceId, "approve", async (organization, self, token) =>
         {
             var device = await GetDeviceAsync(deviceId, token).ConfigureAwait(false);
+            // The key signed is the one the device id comes from, and the one whose words the person saw on both screens.
+            if (!FleetDevicePublicKey.TryParse(device.PublicKey, out var key) || key.DeviceId != deviceId
+                || confirmedWords is not null && !string.Equals(DeviceFingerprint.Parse(key.Fingerprint).ToShortWords(), confirmedWords.Trim(), StringComparison.Ordinal))
+            {
+                throw new FleetDeviceListException(0, "the key of the device is not the one whose words were confirmed");
+            }
+
             return (FleetDeviceListOperations.Add, device.PublicKey, device.Kind, self.OwnerId);
         }, cancellationToken);
     }

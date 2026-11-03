@@ -52,7 +52,8 @@ export function FleetApprovals({ epoch, api = fleetServer, onOpen }: { epoch: st
   const act = useCallback(async (approval: WaitingApproval, approve: boolean) => {
     if (!epoch) return;
     dismissToast(toastKey(approval));
-    const request = { expectedEpoch: epoch, linkId: approval.server.id, deviceId: approval.device.id };
+    // An approval names the words the person compared in the toast: the host signs the key of those words only.
+    const request = { expectedEpoch: epoch, linkId: approval.server.id, deviceId: approval.device.id, words: approve ? approval.device.words : null };
     await (approve ? api.approve(request, { timeoutMilliseconds: 30_000 }) : api.revoke(request, { timeoutMilliseconds: 30_000 })).catch(() => null);
     setWaiting(current => current.filter(item => item.device.id !== approval.device.id || item.server.id !== approval.server.id));
   }, [api, epoch]);

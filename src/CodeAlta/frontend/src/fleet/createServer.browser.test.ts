@@ -62,6 +62,7 @@ test("A device that waits comes as a toast with its words, and the Fleet button 
     assert.equal(await page.evaluate(`document.querySelector('.fleet-approval-toast strong').textContent`), "build-box asks to join Home as a machine.");
     await page.clickText(".fleet-approval-toast .bp6-button", "Approve");
     await page.until(`document.querySelector('.fleet-approvals-button')?.getAttribute('aria-label') === 'Fleet'`, "nothing waits");
-    assert.ok((await calls(page)).some(call => call.approve === "box"));
+    assert.deepEqual((await calls(page)).filter(call => call.approve), [{ approve: "box", words: "ruby scarf apple ember camera finch" }],
+      "the approval names the words the toast showed: the host signs the key of those words only");
   }, options);
 });

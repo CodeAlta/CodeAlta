@@ -123,6 +123,12 @@ public static class CoordinatorErrorCodes
     /// <summary>A wrap of a metadata key that does not read, or names a device that may not have it.</summary>
     public const string MetadataKeyInvalid = "metadata_key.invalid";
 
+    /// <summary>The calling device is not a recovery key the server keeps an anchor for.</summary>
+    public const string RecoveryKeyNotFound = "recovery_key.not_found";
+
+    /// <summary>A recovery that is not signed by a recovery key of the organization, or does not add the device that sends it.</summary>
+    public const string RecoveryRefused = "recovery.refused";
+
     /// <summary>A telemetry setting that does not read, does not hold, or is not signed by the device that sends it.</summary>
     public const string TelemetryInvalid = "telemetry.invalid";
 

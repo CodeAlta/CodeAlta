@@ -71,10 +71,15 @@ snapshot never grants a whole space.
 | **Channel key**, with epochs | Seals the messages of one project's channel, for its members |
 | **Session replica key** (random 256 bits) | Encrypts one session's replica, in segments with derived sub-keys to stay far from AES-GCM nonce limits; wrapped only to the devices allowed to read that session |
 | **Snapshot key** (random, one per snapshot) | Encrypts one shared snapshot; it opens that snapshot and nothing later |
-| **Recovery key** (256 bits, shown once in base32) | Restores a person's keys on a new device when every device is lost, decrypting locally. In a Private space, losing every device and this key loses the sealed data, which the UI says plainly; a Managed space may also escrow its members' keys with the organization (wrapped to its signers), which then restores a member's access |
+| **Recovery key** (256 bits, shown once as 32 words) | Restores a person's keys on a new device when every device is lost, decrypting locally. It derives a key that is a member of the device list, of a class of its own: the person's keys are wrapped to it as to a device, and it signs a new controller device of its person in, nothing else. The server keeps the anchor of the list (its organization and first entry) sealed with it, which a recovering device pins. In a Private space, losing every device and this key loses the sealed data, which the UI says plainly; a Managed space may also escrow its members' keys with the organization (wrapped to its signers), which then restores a member's access |
 | **Organization key** (Managed spaces) | Encrypts shared content at rest on the server; held by the server or a KMS |
 | **Policy key** (ES256) | Signs policy bundles; held by the Owner's device at home, admin devices or an HSM in companies, never by the server |
 
+- The server knows a space only by an opaque id. Which space a key is for on the devices (the space's id there) is
+  sealed with that key, so the devices of a person agree on it without the server learning it: a device that links a
+  space takes the key of the space with the same id, and the first one made wins when two devices made one at once.
+  Only a controller device makes a space's key, so a node seals the titles of a space once a controller device of its
+  person linked a space of the same id. A space that is unlinked seals nothing more with its key.
 - Revoking someone's access rotates the keys they held (a new epoch); what they already read cannot be taken back,
   and deleting ciphertext at the server does not revoke copies a recipient made.
 - **Account recovery is not encryption recovery.** Regaining the Owner role on a server (`altaserver recover-owner`, on
@@ -109,7 +114,10 @@ analysis of Matrix showed a malicious server exploiting exactly that).
   of the last entry it accepted, which a later list must hold at the same place. A server can neither swap the
   organization under a device nor answer an older list that takes back a removal. What a device trusts, the entries
   it signs and the devices it wraps keys to all come from that one anchored list.
-- Every device of the person shows **New device: …** until one of them confirms it.
+- Every device of the person shows **New device: …** until one of them confirms it, comparing the six words of its
+  key; the entry it signs adds the key of those words only, and the new device gets keys only then.
+- A person's **recovery key** is a member of the list of its own class: it signs only the entry that adds a new
+  controller device of its person, never a removal, and a person has one at a time (a new one replaces the old one).
 - A wrapped key carries a grant signed by the controller device that gave it: the organization, the person, the
   epoch, the sequence of the list it was given by, and the recipient. A device takes a key only from a controller
   device of its own person in its anchored list, so a server cannot give it a key of its own nor relabel a copy.

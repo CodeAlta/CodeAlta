@@ -191,6 +191,39 @@ public sealed class NodeServerAutomationTests
         Assert.AreEqual(1, automations.AssignmentOf(Id)!.Number, "nothing refused replaced what the node holds");
     }
 
+    [TestMethod]
+    public async Task TheAutomationsAServerGaveStopOnceTheNodeLeftItAndAReplayedVersionIsRefused()
+    {
+        var token = TestContext.CancellationToken;
+        using var root = new NodeTestRoot();
+        await using var node = await NodeHost.StartAsync(root.Options() with
+        {
+            Automations = new NodeAutomationOptions
+            {
+                TimeProvider = new NodeClock { Now = Noon }, TimeZone = TimeZoneInfo.Utc, WatchRepositories = false, CredentialKind = static _ => AutomationCredentialKind.Account,
+            },
+        }, token);
+        using var laptop = DeviceIdentity.LoadOrCreate(Path.Combine(root.Root, "laptop"));
+        using var tablet = DeviceIdentity.LoadOrCreate(Path.Combine(root.Root, "tablet"));
+        using var self = DeviceIdentity.LoadOrCreate(Path.Combine(root.Root, "self"));
+        var automations = node.Automations!;
+        automations.DeviceId = self.DeviceId;
+        var list = DeviceList(laptop, tablet, self, removeTablet: false);
+        (FleetAutomationContent?, string?) Open(FleetAutomationVersion version)
+            => FleetAutomationSigning.TryOpen(version.Sealed, version.AutomationId, version.Number, version.MachineId, self, list, out var content, out var reason) ? (content, null) : (null, reason);
+        Assert.IsTrue((await automations.AcceptFromServerAsync("link-1", list, "org", Sign(tablet, list, "org", self.DeviceId, 1), Open, token)).Applied);
+        Assert.IsNotNull(automations.Engine.Snapshot.Find(Id));
+
+        // Another server's link going leaves it; the link it came through going takes it away.
+        Assert.AreEqual(0, await automations.ForgetServerAsync("link-2", token));
+        Assert.AreEqual(1, await automations.ForgetServerAsync("link-1", token));
+        Assert.IsNull(automations.Engine.Snapshot.Find(Id));
+        Assert.IsNull(automations.AssignmentOf(Id));
+        Assert.AreEqual(1, automations.NumberOf(Id), "its number stays");
+        Assert.IsFalse((await automations.AcceptFromServerAsync("link-1", list, "org", Sign(tablet, list, "org", self.DeviceId, 1), Open, token)).Applied,
+            "the version replayed later is refused");
+    }
+
     // A version signed by a controller for a machine, its definition sealed for the machine and the person's controllers.
     private static FleetSignedAutomationVersion Sign(DeviceIdentity signer, FleetDeviceListState list, string organization, string machine, long number)
     {

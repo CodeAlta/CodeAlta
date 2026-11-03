@@ -21,6 +21,18 @@
 .fleet-device-title strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
 .fleet-device-words { display: flex; flex-wrap: wrap; gap: 4px; }
 .fleet-device-actions { display: inline-flex; gap: 6px; }
+.fleet-device-confirm .fleet-device-words { margin: 2px 0 4px; }
+.fleet-server-pending-words { display: grid; gap: 4px; margin-top: 4px; }
+.fleet-server-recovery { display: grid; gap: 6px; padding-left: 28px; }
+.fleet-server-recovery-row { display: flex; align-items: center; gap: 8px; color: var(--muted); }
+.fleet-server-recovery-row > span:first-of-type { color: var(--text); font-weight: 500; }
+.fleet-server-recovery-spacer { flex: 1; }
+.fleet-recovery-dialog { width: min(560px, calc(100vw - 32px)); }
+.fleet-recovery-dialog p { margin: 0 0 10px; }
+.fleet-recovery-words { list-style: none; counter-reset: word; margin: 0 0 12px; padding: 0; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px 10px; }
+.fleet-recovery-words li { counter-increment: word; display: flex; align-items: center; gap: 6px; font-family: var(--font-mono, monospace); }
+.fleet-recovery-words li::before { content: counter(word); min-width: 1.6em; text-align: right; color: var(--muted); font-size: 11px; }
+.fleet-recovery-check { max-width: 260px; }
 .fleet-server-form { display: grid; gap: 12px; }
 .fleet-server-form > label:not(.bp6-control) { display: grid; gap: 4px; }
 .fleet-token-dialog p { margin: 0 0 8px; }
