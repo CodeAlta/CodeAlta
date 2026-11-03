@@ -44,8 +44,9 @@ public sealed record SandboxConfinement(
     /// <summary>
     /// Says why this confinement lets a session do more than <paramref name="floor"/>: a wider network, a host, a port,
     /// a folder, a variable or an MCP server the floor does not give, a folder the floor denies and this one does not,
-    /// commands outside the sandbox or the fleet where the floor has none. Folders compare as written, so that the same
-    /// profile compares the same on two machines; a folder written otherwise is taken as another one.
+    /// commands outside the sandbox or the fleet where the floor has none. Folders compare as written, case included, so
+    /// that the same profile compares the same on two machines; a folder written otherwise, or only in another case, is
+    /// taken as another one, which is the stricter reading on a file system that tells case apart.
     /// </summary>
     /// <param name="floor">The confinement to be at least as strict as.</param>
     /// <returns>Why it is weaker, for a person; null when it is at least as strict.</returns>
@@ -58,11 +59,13 @@ public sealed record SandboxConfinement(
             && Hosts.FirstOrDefault(host => !floor.Hosts.Any(allowed => Covers(allowed, host))) is { } host)
             return $"it reaches the host '{host}'";
         if (LocalPorts.Except(floor.LocalPorts).Select(static port => (int?)port).FirstOrDefault() is { } port) return $"it reaches the local port {port}";
-        if (Missing(Write, floor.Write) is { } written) return $"it writes '{written}'";
-        if (Missing(Read, [.. floor.Read, .. floor.Write]) is { } read) return $"it reads '{read}'";
-        if (Missing(floor.Deny, Deny) is { } denied) return $"it does not deny '{denied}'";
+        // Folders compare by case: the two machines may have file systems that tell case apart (Linux) where the other
+        // does not, and a folder that differs only by case is taken as another one, which refuses rather than gives more.
+        if (Missing(Write, floor.Write, StringComparer.Ordinal) is { } written) return $"it writes '{written}'";
+        if (Missing(Read, [.. floor.Read, .. floor.Write], StringComparer.Ordinal) is { } read) return $"it reads '{read}'";
+        if (Missing(floor.Deny, Deny, StringComparer.Ordinal) is { } denied) return $"it does not deny '{denied}'";
         if (Missing(Env, floor.Env, StringComparer.Ordinal) is { } variable) return $"it receives the variable '{variable}'";
-        if (Missing(McpServers, floor.McpServers) is { } server) return $"it uses the MCP server '{server}'";
+        if (Missing(McpServers, floor.McpServers, StringComparer.OrdinalIgnoreCase) is { } server) return $"it uses the MCP server '{server}'";
         if (Outside == SandboxOutside.Ask && floor.Outside == SandboxOutside.Never) return "it may ask to run a command outside the sandbox";
         if (Fleet && !floor.Fleet) return "it starts and drives work on other machines";
         return null;
@@ -109,9 +112,8 @@ public sealed record SandboxConfinement(
     }
 
     // The first entry of a list that another does not have, folders compared as written whatever their separators.
-    private static string? Missing(IReadOnlyList<string> entries, IReadOnlyList<string> within, StringComparer? comparer = null)
+    private static string? Missing(IReadOnlyList<string> entries, IReadOnlyList<string> within, StringComparer comparer)
     {
-        comparer ??= StringComparer.OrdinalIgnoreCase;
         var known = new HashSet<string>(within.Select(Path), comparer);
         return entries.FirstOrDefault(entry => !known.Contains(Path(entry)));
     }
