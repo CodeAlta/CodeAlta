@@ -10,13 +10,13 @@ import type { SandboxApi } from "./sandboxChoices";
 document.documentElement.classList.add("bp6-dark");
 
 const profile = (change: Partial<SandboxProfileItem> & { name: string }): SandboxProfileItem => ({ builtIn: false, extends: null, network: null, outside: null,
-  hosts: [], write: [], read: [], deny: [], localPorts: [], env: [], mcpServers: [], problem: null, ...change });
+  fleet: null, hosts: [], write: [], read: [], deny: [], localPorts: [], env: [], mcpServers: [], problem: null, ...change });
 // What the host holds.
 const held = {
   allSessions: null as string | null,
   profiles: [
-    profile({ name: "workspace", builtIn: true, network: "hosts", outside: "ask", hosts: ["nuget.org", "*.nuget.org", "github.com"], read: ["~/.dotnet"] }),
-    profile({ name: "strict", builtIn: true, network: "off", outside: "never" }),
+    profile({ name: "workspace", builtIn: true, network: "hosts", outside: "ask", fleet: "allow", hosts: ["nuget.org", "*.nuget.org", "github.com"], read: ["~/.dotnet"] }),
+    profile({ name: "strict", builtIn: true, network: "off", outside: "never", fleet: "never" }),
     profile({ name: "broken", extends: "gone", problem: "The sandbox profile 'broken' extends 'gone', which does not exist." }),
   ],
   scopes: [{ kind: "provider", id: "ollama", name: "Ollama", modelId: null, profile: "strict" }, { kind: "space", id: "work", name: "Work", modelId: null, profile: "off" },

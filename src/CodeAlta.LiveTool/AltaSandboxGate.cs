@@ -28,6 +28,9 @@ internal static class AltaSandboxGate
         "session current", "session create", "session fork", "session send", "session queue", "session steer", "session request",
         "session message", "session tail", "session events", "session result", "session info", "session status", "session choices",
         "session abort", "session compact", "session title", "session metrics",
+        // The machines its sessions elsewhere run on: what it starts or drives there carries its sandbox as a floor, and a
+        // profile without the fleet refuses them in the commands (`SessionRuntimeService.GetFleetFloorAsync`).
+        "session machines",
         // To a new worktree, or the folder of its project: an existing checkout elsewhere is refused by the command itself.
         "session set_worktree",
         // The fleet is read; what starts or changes work on another machine is refused (doc/fleet/security-and-privacy.md, rule 8).

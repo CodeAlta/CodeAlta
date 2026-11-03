@@ -288,5 +288,12 @@ public sealed partial class SessionRuntimeService
             "ask" => SandboxOutside.Ask,
             _ => SandboxOutside.Never,
         },
+        Fleet = settings.Fleet switch
+        {
+            null => null,
+            "allow" => SandboxFleet.Allow,
+            // A value no version knows is the safest one: nothing goes to another machine.
+            _ => SandboxFleet.Never,
+        },
     };
 }

@@ -22,10 +22,11 @@ internal sealed partial class BuiltInAltaCommandContributor
         return command;
     }
 
-    private static ValueTask<int> HandleSessionMachinesAsync(AltaCommandContext context)
+    private static async ValueTask<int> HandleSessionMachinesAsync(AltaCommandContext context)
     {
-        if (context.Services.Get<SessionRuntimeService>()?.RemoteChildren is not { } remote)
-            return ValueTask.FromResult(Unsupported(context, "fleet.unavailable", "This host reaches no other machine."));
+        if (context.Services.Get<SessionRuntimeService>() is not { RemoteChildren: { } remote } runtime)
+            return Unsupported(context, "fleet.unavailable", "This host reaches no other machine.");
+        if (await RefuseFleetToCallerAsync(context, runtime).ConfigureAwait(false) is { } refused) return refused;
         foreach (var machine in remote.ListMachines())
         {
             AltaJsonlWriter.WriteRecord(context.Stdout, new
@@ -39,7 +40,28 @@ internal sealed partial class BuiltInAltaCommandContributor
             });
         }
 
-        return ValueTask.FromResult(AltaExitCodes.Success);
+        return AltaExitCodes.Success;
+    }
+
+    // The fleet is never a way out of a sandbox (doc/fleet/security-and-privacy.md, "Remote execution", rule 8): a session
+    // whose sandbox profile does not allow the fleet, or cannot be used, starts and drives nothing on another machine.
+    // Null when allowed, or when no session calls.
+    private static async Task<int?> RefuseFleetToCallerAsync(AltaCommandContext context, SessionRuntimeService runtime)
+    {
+        if (NormalizeOptionalText(context.Caller.SourceSessionId) is not { } callerId) return null;
+        var floor = await runtime.GetFleetFloorAsync(callerId, context.CancellationToken).ConfigureAwait(false);
+        return floor.Refusal is { } refusal ? PermissionDenied(context, "sandbox.fleetDenied", refusal) : null;
+    }
+
+    // A sandboxed session reaches on another machine only the sessions it started there, itself or through the sessions it
+    // created here, as on this computer: another one could run less confined, or read for it what its sandbox keeps from
+    // it. The machine then checks that the session runs at least as confined as the caller. Null when allowed.
+    private static async Task<int?> RefuseRemoteSessionToSandboxAsync(AltaCommandContext context, IRemoteChildSessions remote, string sessionId, string callerId,
+        SessionFleetFloor floor)
+    {
+        if (!floor.IsSandboxed || await DescendsFromAsync(context, remote.FindParentOf(sessionId), callerId).ConfigureAwait(false)) return null;
+        return PermissionDenied(context, "sandbox.notOwnSession",
+            $"This session is sandboxed (profile '{floor.Sandbox}'): on another machine it reaches only the sessions it started there, and session '{sessionId}' is not one of them. Ask the user.");
     }
 
     // A child on another machine: the calling session is its parent, and what it has is what the child may have at most.
@@ -74,6 +96,14 @@ internal sealed partial class BuiltInAltaCommandContributor
         var parent = await runtime.TryGetResumableSessionAsync(parentId, context.CancellationToken).ConfigureAwait(false);
         if (parent is null) return NotFound(context, "session.notFound", $"Session '{parentId}' was not found.");
 
+        // What the calling session has is the floor of the child: a profile without the fleet starts none, and a sandboxed
+        // session starts one only in the project of its own repository, as it works here in the folder of its project.
+        var floor = await runtime.GetFleetFloorAsync(parentId, context.CancellationToken).ConfigureAwait(false);
+        if (floor.Refusal is { } fleetRefusal) return PermissionDenied(context, "sandbox.fleetDenied", fleetRefusal);
+        if (floor.IsSandboxed && (options.Global || NormalizeOptionalText(options.Project) is not null))
+            return PermissionDenied(context, "sandbox.projectDenied",
+                $"This session is sandboxed (profile '{floor.Sandbox}'): on another machine it starts sessions in the project of its own repository only. Leave --project and --global out.");
+
         var space = await ResolveNewSessionSpaceAsync(context, options.Space, CommandPath).ConfigureAwait(false);
         if (space.ExitCode != AltaExitCodes.Success) return space.ExitCode;
         var parentOptions = await runtime.GetSessionOptionsAsync(parentId, context.CancellationToken).ConfigureAwait(false);
@@ -81,16 +111,18 @@ internal sealed partial class BuiltInAltaCommandContributor
             return PermissionDenied(context, "session.privateMachine", "This session is Private: nothing of it reaches another machine, so it starts no session there.");
 
         // Never asks the user less than the calling session.
-        var parentMode = runtime.GetEffectivePermissionMode(parentId);
+        var parentMode = floor.PermissionMode;
         var permissionMode = NormalizeOptionalText(options.PermissionMode);
         if (permissionMode is not null && SessionPermissionModes.Rank(permissionMode) > SessionPermissionModes.Rank(parentMode))
             return PermissionDenied(context, "session.permissionModeDenied",
                 $"This session runs in '{parentMode}': it cannot start a session in '{permissionMode}', which asks less, on another machine either.");
 
-        // A sandbox at least as strict: the calling session's, or the one asked when it has none.
+        // A sandbox at least as strict: the calling session's, or the one asked when it has none, with what it confines here.
         if (await RefuseSandboxChoiceAsync(context, runtime, options.Sandbox, null, CommandPath).ConfigureAwait(false) is { } sandboxRefused) return sandboxRefused;
-        var parentSandbox = await runtime.GetSessionSandboxAsync(parentId, context.CancellationToken).ConfigureAwait(false);
-        var sandbox = parentSandbox.IsSandboxed ? parentSandbox.Choice.Profile : NormalizeOptionalText(options.Sandbox);
+        var (sandbox, confinement) = floor.IsSandboxed ? (floor.Sandbox, floor.Confinement)
+            : NormalizeOptionalText(options.Sandbox) is { } asked ? (asked, runtime.ResolveSandboxConfinement(asked)) : (null, null);
+        if (sandbox is not null && confinement is null)
+            return UsageError(context, "usage.invalidSandbox", $"The sandbox profile '{sandbox}' cannot be used on this computer: name another one, or leave --sandbox out.", CommandPath);
 
         // Without the tools the calling session does without, by its settings and by the command line of its run.
         var disabled = (await runtime.GetDisabledToolsAsync(parentId, context.CancellationToken).ConfigureAwait(false))
@@ -111,6 +143,7 @@ internal sealed partial class BuiltInAltaCommandContributor
             DisabledTools = disabled,
             PermissionMode = permissionMode ?? parentMode,
             Sandbox = sandbox,
+            Confinement = confinement,
             SubSessions = parentOptions.SubSessions && !options.NoSubSessions,
         }, context.CancellationToken).ConfigureAwait(false);
         if (result.Status != "created") return MachineRefusal(context, result.Code, result.Message, result.MachineName ?? options.Machine);
@@ -144,6 +177,11 @@ internal sealed partial class BuiltInAltaCommandContributor
             return Unsupported(context, "session.remoteCaller", "A prompt to a session of another machine is sent by an agent, from its session; a person sends it from that session's tab.");
         if (options.HasSelection || options.Sandbox is not null || options.PromptId is not null || options.AttachmentsPath is not null)
             return PermissionDenied(context, "session.remoteSelection", "An agent does not change the model, the mode, the sandbox or the agent prompt of a session of another machine, nor sends it files.");
+        // The sender's confinement is the floor of the session it drives: refused here when its profile forbids the fleet
+        // or the session is not one it started, and by the machine when the session runs less confined than the sender.
+        var floor = await runtime.GetFleetFloorAsync(sender, context.CancellationToken).ConfigureAwait(false);
+        if (floor.Refusal is { } fleetRefusal) return PermissionDenied(context, "sandbox.fleetDenied", fleetRefusal);
+        if (await RefuseRemoteSessionToSandboxAsync(context, remote, sessionId, sender, floor).ConfigureAwait(false) is { } notOwn) return notOwn;
         var space = await ResolveNewSessionSpaceAsync(context, null, CommandPathForPrompt(kind)).ConfigureAwait(false);
         if (space.ExitCode != AltaExitCodes.Success) return space.ExitCode;
         var parent = await runtime.TryGetResumableSessionAsync(sender, context.CancellationToken).ConfigureAwait(false);
@@ -156,8 +194,8 @@ internal sealed partial class BuiltInAltaCommandContributor
             _ when options.QueueIfBusy => "queue",
             _ => "send",
         };
-        var result = await remote.SendAsync(new RemoteMessageRequest(sender, sessionId, prompt, remoteKind) { SpaceId = space.SpaceId ?? parent?.SpaceId ?? "default" },
-            context.CancellationToken).ConfigureAwait(false);
+        var result = await remote.SendAsync(new RemoteMessageRequest(sender, sessionId, prompt, remoteKind)
+            { SpaceId = space.SpaceId ?? parent?.SpaceId ?? "default", Floor = floor }, context.CancellationToken).ConfigureAwait(false);
         if (result.Status == "refused") return MachineRefusal(context, result.Code, result.Message, result.MachineName);
         AltaJsonlWriter.WriteRecord(context.Stdout, new
         {

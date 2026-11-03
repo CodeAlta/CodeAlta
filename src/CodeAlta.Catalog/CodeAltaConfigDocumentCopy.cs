@@ -104,6 +104,7 @@ internal static class CodeAltaConfigDocumentCopy
                         Env = Copy(profile.Env),
                         McpServers = Copy(profile.McpServers),
                         Outside = profile.Outside,
+                        Fleet = profile.Fleet,
                     }),
                 }
                 : null,

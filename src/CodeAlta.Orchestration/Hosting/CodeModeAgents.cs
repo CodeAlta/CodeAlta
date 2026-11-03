@@ -246,7 +246,13 @@ public sealed class CodeModeAgents : ICodeModeAgents, IAsyncDisposable
         if (request.Schema is { } asked && StructuredAnswer.Inspect(asked) is { Count: > 0 } problems) return Refused(SchemaRefusal(problems));
         if (request.Sandbox is { } sandboxAsked && await RefuseSandboxAsync(parentSessionId, sandboxAsked, cancellationToken).ConfigureAwait(false) is { } sandboxRefusal)
             return Refused(sandboxRefusal);
-        var own = await runtime.GetSessionSandboxAsync(parentSessionId, cancellationToken).ConfigureAwait(false);
+        // The fleet is never a way out of a sandbox: the child is at least as confined as the script's session, by its own
+        // sandbox, or by the one asked when it has none, as this computer resolves it; a profile without the fleet starts nothing.
+        var floor = await runtime.GetFleetFloorAsync(parentSessionId, cancellationToken).ConfigureAwait(false);
+        if (floor.Refusal is { } fleetRefusal) return Refused(fleetRefusal);
+        var (sandbox, confinement) = floor.IsSandboxed ? (floor.Sandbox, floor.Confinement)
+            : (request.Sandbox, request.Sandbox is { } askedSandbox ? runtime.ResolveSandboxConfinement(askedSandbox) : null);
+        if (sandbox is not null && confinement is null) return Refused($"This computer has no sandbox profile '{sandbox}' that can be used: leave `sandbox` out, or name one of its profiles.");
         var disabled = (await runtime.GetDisabledToolsAsync(parentSessionId, cancellationToken).ConfigureAwait(false))
             .Union(runtime.GetDisabledToolPatterns(parentSessionId), StringComparer.OrdinalIgnoreCase).Order(StringComparer.Ordinal).ToArray();
         string? provider = null, model = null;
@@ -268,8 +274,9 @@ public sealed class CodeModeAgents : ICodeModeAgents, IAsyncDisposable
             ReasoningEffort = request.Effort?.ToString(),
             AgentPromptId = request.AgentPromptId,
             DisabledTools = disabled,
-            PermissionMode = runtime.GetEffectivePermissionMode(parentSessionId),
-            Sandbox = own.IsSandboxed ? own.Choice.Profile : request.Sandbox,
+            PermissionMode = floor.PermissionMode,
+            Sandbox = sandbox,
+            Confinement = confinement,
             SubSessions = request.SubSessions,
             ForScript = true,
         }, cancellationToken).ConfigureAwait(false);

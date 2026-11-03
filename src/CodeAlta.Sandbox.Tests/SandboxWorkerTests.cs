@@ -87,6 +87,10 @@ public sealed class SandboxWorkerTests
         await worker.StopWorkerAsync();
         var failed = await pending.WaitAsync(Deadline);
         Assert.IsFalse(failed.Success);
+        // A worker whose input ends cancels its calls and answers them before its output ends: the call can fail on that
+        // answer before the client reads the end of the output. The client knows the worker ended once it has read it.
+        var ended = Stopwatch.StartNew();
+        while (!worker.Client.HasEnded && ended.Elapsed < Deadline) await Task.Delay(20);
         Assert.IsTrue(worker.Client.HasEnded);
         Assert.IsFalse((await worker.Client.InvokeAsync(Call("read_file", new { path = "x" }), allow, CancellationToken.None).WaitAsync(Deadline)).Success);
         await worker.DisposeAsync();

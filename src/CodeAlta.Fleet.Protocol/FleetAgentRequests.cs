@@ -18,12 +18,56 @@ namespace CodeAlta.Fleet.Protocol;
 /// <param name="Sandbox">The sandbox profile it runs in at least; null when its parent runs without one.</param>
 /// <param name="SubSessions">Whether it may start sessions of its own.</param>
 /// <param name="Depth">How many agents of other machines are above it, from 1.</param>
+/// <param name="Confinement">What <paramref name="Sandbox"/> confines on the machine of the parent: the machine runs the session in a
+/// profile at least as strict, or refuses it. Named with <paramref name="Sandbox"/>, null without it.</param>
 public sealed record FleetAgentLimits(
     [property: JsonPropertyName("disabledTools")] IReadOnlyList<string> DisabledTools,
     [property: JsonPropertyName("permissionMode")] string? PermissionMode,
     [property: JsonPropertyName("sandbox")] string? Sandbox,
     [property: JsonPropertyName("subSessions")] bool SubSessions,
-    [property: JsonPropertyName("depth")] int Depth);
+    [property: JsonPropertyName("depth")] int Depth,
+    [property: JsonPropertyName("confinement")] FleetSandboxConfinement? Confinement = null);
+
+/// <summary>
+/// What a sandbox profile confines, as the settings of its machine write it (<c>doc/fleet/security-and-privacy.md</c>,
+/// "Remote execution", rule 8): the floor a session carries to the work it starts or drives on another machine. That
+/// machine compares a profile of its own with it, and refuses one that would let the work do more.
+/// </summary>
+/// <param name="Profile">The name of the profile.</param>
+/// <param name="Network"><c>off</c>, <c>hosts</c> or <c>on</c>.</param>
+/// <param name="Hosts">The hosts of the <c>hosts</c> network.</param>
+/// <param name="LocalPorts">The ports of the computer it reaches.</param>
+/// <param name="Write">The folders it writes beyond those of its session, as written.</param>
+/// <param name="Read">The folders it reads beyond those of its session, as written.</param>
+/// <param name="Deny">The folders and files it never reads, as written.</param>
+/// <param name="Env">The names of the variables of the environment it receives.</param>
+/// <param name="McpServers">The MCP servers it may use.</param>
+/// <param name="Outside"><c>ask</c> or <c>never</c>: whether a command may be asked to run outside the sandbox.</param>
+/// <param name="Fleet">Whether its sessions may start or drive work on other machines.</param>
+public sealed record FleetSandboxConfinement(
+    [property: JsonPropertyName("profile")] string Profile,
+    [property: JsonPropertyName("network")] string Network,
+    [property: JsonPropertyName("hosts")] IReadOnlyList<string> Hosts,
+    [property: JsonPropertyName("localPorts")] IReadOnlyList<int> LocalPorts,
+    [property: JsonPropertyName("write")] IReadOnlyList<string> Write,
+    [property: JsonPropertyName("read")] IReadOnlyList<string> Read,
+    [property: JsonPropertyName("deny")] IReadOnlyList<string> Deny,
+    [property: JsonPropertyName("env")] IReadOnlyList<string> Env,
+    [property: JsonPropertyName("mcpServers")] IReadOnlyList<string> McpServers,
+    [property: JsonPropertyName("outside")] string Outside,
+    [property: JsonPropertyName("fleet")] bool Fleet);
+
+/// <summary>
+/// The floor of the session that sends a prompt to a session of another machine: that machine refuses the prompt for a
+/// session that runs in a wider permission mode, or less confined, than the sender.
+/// </summary>
+/// <param name="PermissionMode">The permission mode the sender runs in.</param>
+/// <param name="Sandbox">The sandbox profile of the sender; null when it runs without one.</param>
+/// <param name="Confinement">What that profile confines; named with <paramref name="Sandbox"/>, null without it.</param>
+public sealed record FleetAgentFloor(
+    [property: JsonPropertyName("permissionMode")] string PermissionMode,
+    [property: JsonPropertyName("sandbox")] string? Sandbox,
+    [property: JsonPropertyName("confinement")] FleetSandboxConfinement? Confinement);
 
 /// <summary>
 /// What an agent asks of another machine on behalf of a person: to start a session there (<see cref="FleetAgentRequestKinds.Start"/>),
@@ -45,6 +89,7 @@ public sealed record FleetAgentLimits(
 /// <param name="ProjectId">The project of the machine a start works in; null for a session outside a project, or a prompt.</param>
 /// <param name="TextHash">The SHA-256 of the UTF-8 of the prompt, base64url (<see cref="FleetAgentRequestDocuments.HashText"/>); null for a start without one.</param>
 /// <param name="Limits">What a started session runs within; null for a prompt.</param>
+/// <param name="Floor">The floor of the session that sends a prompt; null for a start, which carries it in its limits.</param>
 public sealed record FleetAgentRequest(
     [property: JsonPropertyName("v")] int Version,
     [property: JsonPropertyName("kind")] string Kind,
@@ -59,7 +104,8 @@ public sealed record FleetAgentRequest(
     [property: JsonPropertyName("session")] string? SessionId,
     [property: JsonPropertyName("project")] string? ProjectId,
     [property: JsonPropertyName("text")] string? TextHash,
-    [property: JsonPropertyName("limits")] FleetAgentLimits? Limits)
+    [property: JsonPropertyName("limits")] FleetAgentLimits? Limits,
+    [property: JsonPropertyName("floor")] FleetAgentFloor? Floor = null)
 {
     /// <summary>The version of the format this library writes.</summary>
     public const int CurrentVersion = 1;
@@ -190,10 +236,21 @@ public static class FleetAgentRequestDocuments
                 reason = "the tools a start does without do not read";
                 return false;
             }
+
+            if (read.Floor is not null || !IsSandboxFloor(limits.Sandbox, limits.Confinement))
+            {
+                reason = "a start names the sandbox of its parent with what it confines, or neither";
+                return false;
+            }
         }
         else if (!IsName(read.SessionId) || read.TextHash is null || read.Limits is not null)
         {
             reason = "a prompt names its session and its text, and no limits";
+            return false;
+        }
+        else if (read.Floor is not { } floor || !IsName(floor.PermissionMode) || !IsSandboxFloor(floor.Sandbox, floor.Confinement))
+        {
+            reason = "a prompt names the permission mode of its sender, and its sandbox with what it confines, or none";
             return false;
         }
 
@@ -239,6 +296,18 @@ public static class FleetAgentRequestDocuments
     }
 
     private static bool IsName([NotNullWhen(true)] string? text) => !string.IsNullOrEmpty(text) && text.Length <= MaxIdLength && !text.Any(char.IsControl);
+
+    // A sandbox is named with what it confines, under the same name, or neither is.
+    private static bool IsSandboxFloor(string? sandbox, FleetSandboxConfinement? confinement)
+    {
+        if (sandbox is null || confinement is null) return sandbox is null && confinement is null;
+        return IsName(sandbox) && string.Equals(sandbox, confinement.Profile, StringComparison.OrdinalIgnoreCase)
+            && confinement.Network is "off" or "hosts" or "on" && confinement.Outside is "ask" or "never"
+            && Names(confinement.Hosts) && Names(confinement.Write) && Names(confinement.Read) && Names(confinement.Deny) && Names(confinement.Env)
+            && Names(confinement.McpServers) && confinement.LocalPorts is { Count: <= MaxDisabledTools } ports && ports.All(static port => port is > 0 and < 65536);
+
+        static bool Names(IReadOnlyList<string>? values) => values is { Count: <= MaxDisabledTools } && values.All(IsName);
+    }
 }
 
 /// <summary>The source-generated contracts of the agent requests.</summary>

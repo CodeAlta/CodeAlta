@@ -11,6 +11,7 @@ using CodeAlta.Fleet.Protocol;
 using CodeAlta.Orchestration.Hosting;
 using CodeAlta.Orchestration.Runtime;
 using CodeAlta.Orchestration.Runtime.Scripts;
+using CodeAlta.Sandbox;
 
 namespace CodeAlta.Desktop.Tests;
 
@@ -99,7 +100,8 @@ public sealed class RemoteChildSessionsTests
             second.TrySetResult(LastUserText(request));
             return Task.FromResult(ScriptedFleetProvider.Answer("Good."));
         });
-        var sent = await two.Children.SendAsync(new RemoteMessageRequest(parent.SessionId, childId, "Now the Android tests.", "send") { SpaceId = "default" }, token);
+        var sent = await two.Children.SendAsync(new RemoteMessageRequest(parent.SessionId, childId, "Now the Android tests.", "send")
+            { SpaceId = "default", Floor = await two.Desktop.RuntimeService.GetFleetFloorAsync(parent.SessionId, token) }, token);
         Assert.AreEqual("accepted", sent.Status, sent.Message);
         StringAssert.Contains(await second.Task.WaitAsync(Patience, token), "The Android tests pass too.");
         var report = await two.Children.ReportAsync(childId, token);
@@ -135,6 +137,34 @@ public sealed class RemoteChildSessionsTests
         Assert.AreEqual("refused", kept.Status, "session() keeps sessions of this machine only.");
     }
 
+    // The fleet is never a way out of a sandbox: a script runs nothing elsewhere for a session whose profile forbids the
+    // fleet, and the session it starts for one that allows it is as sandboxed there.
+    [TestMethod]
+    public async Task AScriptOfASandboxedSession_StartsAnAgentElsewhere_OnlyAsConfinedAndWhereItsProfileAllows()
+    {
+        var token = TestContext.CancellationToken;
+        await using var two = await TwoHosts.StartAsync(token);
+        var parent = await two.CreateParentAsync(token);
+        two.Node.Service.AgentSessions.WritePolicy(new FleetAgentPolicyInfo(["default"]));
+        var config = Path.Combine(two.Node.Root, "desktop", "global", "config.toml");
+        var agents = new CodeModeAgents(two.Desktop);
+        await using var _ = agents;
+
+        File.WriteAllText(config, "[sandbox]\nall_sessions = \"strict\"\n");
+        var refused = await agents.RunAsync(parent.SessionId, new CodeModeAgentRequest("Count the tests.") { RunId = "run-1", Machine = "test-node", Timeout = Patience }, token);
+        Assert.IsFalse(refused.Succeeded);
+        StringAssert.Contains(refused.Failure, "does not allow the fleet");
+        Assert.AreEqual(0, two.Node.Service.AgentSessions.Children.Count, "Nothing reached the machine.");
+
+        if (!two.Node.Host.RuntimeService.GetSandboxAvailability().IsAvailable) return;
+        File.WriteAllText(config, "[sandbox]\nall_sessions = \"workspace\"\n");
+        two.Node.Provider.Turns.Enqueue((_, _) => Task.FromResult(ScriptedFleetProvider.Answer("42 tests.")));
+        var started = await agents.RunAsync(parent.SessionId, new CodeModeAgentRequest("Count the tests.") { RunId = "run-2", Machine = "test-node", Timeout = Patience }, token);
+        Assert.IsTrue(started.Succeeded, started.Failure);
+        var childId = two.Children.Children.Single().ChildSessionId;
+        Assert.AreEqual("workspace", (await two.Node.Host.RuntimeService.GetSessionSandboxAsync(childId, token)).Choice.Profile);
+    }
+
     [TestMethod]
     public async Task TheNodeRefusesUnsignedRequests_ReplaysAndWhatItCannotHold_AndNeverGivesMoreThanItsPolicy()
     {
@@ -165,7 +195,7 @@ public sealed class RemoteChildSessionsTests
             await RefusedAsync(new FleetCreateSessionParams(SpaceId: "work", Prompt: "Hello") { Agent = Sign(two.Fleet.DeviceKey, limits, space: "work") }));
         // A sandbox the node does not have: it does not run the session less sandboxed than its parent.
         Assert.AreEqual(FleetNodeErrorCodes.AgentRequestDenied, await RefusedAsync(new FleetCreateSessionParams(SpaceId: "default", Prompt: "Hello")
-            { Agent = Sign(two.Fleet.DeviceKey, limits with { Sandbox = "no-such-profile" }) }));
+            { Agent = Sign(two.Fleet.DeviceKey, limits with { Sandbox = "no-such-profile", Confinement = Workspace with { Profile = "no-such-profile" } }) }));
 
         // Within the rules: a parent that bypasses permissions gives a child that does not, unless the owner allows it.
         var created = await client.CreateSessionAsync(new FleetCreateSessionParams(SpaceId: "default", Prompt: "Hello") { Agent = signed }, "start-1", token);
@@ -177,11 +207,98 @@ public sealed class RemoteChildSessionsTests
 
         // A prompt of an agent changes no model, and reaches only its own space.
         var send = FleetAgentSigning.Sign(two.Fleet.DeviceKey, new FleetAgentRequest(FleetAgentRequest.CurrentVersion, FleetAgentRequestKinds.Send, nodeId, "", "",
-            DateTimeOffset.UtcNow, "", "parent-x", "desktop-pc", "default", created.SessionId, null, FleetAgentRequestDocuments.HashText("Again"), null));
+            DateTimeOffset.UtcNow, "", "parent-x", "desktop-pc", "default", created.SessionId, null, FleetAgentRequestDocuments.HashText("Again"), null,
+            new FleetAgentFloor(SessionPermissionModes.Bypass, null, null)));
         var selection = await Assert.ThrowsExactlyAsync<FleetException>(() => client.SendAsync(new FleetSendParams(created.SessionId, "Again", new FleetModelSelection(ModelId: "x")) { Agent = send },
             Guid.NewGuid().ToString("N"), token));
         Assert.AreEqual(FleetNodeErrorCodes.AgentRequestDenied, selection.Error.Code);
     }
+
+    // The fleet is never a way out of a sandbox (doc/fleet/security-and-privacy.md, "Remote execution", rule 8): the node
+    // holds the child of a sandboxed parent to what the parent's profile confines on its own machine, not to a name.
+    [TestMethod]
+    public async Task TheNodeRunsTheChildOfASandboxedParent_AtLeastAsConfined_OrRefusesIt()
+    {
+        var token = TestContext.CancellationToken;
+        await using var two = await TwoHosts.StartAsync(token);
+        two.Node.Service.AgentSessions.WritePolicy(new FleetAgentPolicyInfo(["default"]));
+        var client = await two.Machine.WaitOnlineAsync(token);
+        var config = Path.Combine(two.Node.Root, "global", "config.toml");
+        var available = two.Node.Host.RuntimeService.GetSandboxAvailability().IsAvailable;
+        FleetCreateSessionParams Start(string sandbox, FleetSandboxConfinement confinement)
+            => new(SpaceId: "default", Prompt: "Hello")
+            {
+                Agent = FleetAgentSigning.Sign(two.Fleet.DeviceKey, new FleetAgentRequest(FleetAgentRequest.CurrentVersion, FleetAgentRequestKinds.Start,
+                    two.Node.NodeIdentity.DeviceId, "", "", DateTimeOffset.UtcNow, "", "parent-x", "desktop-pc", "default", null, null, FleetAgentRequestDocuments.HashText("Hello"),
+                    new FleetAgentLimits([], SessionPermissionModes.Ask, sandbox, true, 1, confinement))),
+            };
+        async Task<string> RefusedAsync(FleetCreateSessionParams parameters)
+        {
+            var exception = await Assert.ThrowsExactlyAsync<FleetException>(() => client.CreateSessionAsync(parameters, Guid.NewGuid().ToString("N"), token));
+            Assert.AreEqual(FleetNodeErrorCodes.AgentRequestDenied, exception.Error.Code, exception.Error.Message);
+            return exception.Error.Message ?? "";
+        }
+
+        // The workspace of the node reaches the whole internet: the same name, but it would let the child do more.
+        File.WriteAllText(config, "[sandbox.profiles.workspace]\nnetwork = \"on\"\n");
+        StringAssert.Contains(await RefusedAsync(Start("workspace", Workspace)), "lets the session do more than its parent");
+        Assert.AreEqual(0, two.Node.Service.AgentSessions.Children.Count, "Nothing was started.");
+
+        // A parent that does not let its sessions reach other machines never asks; a floor that says so is held too.
+        File.WriteAllText(config, "");
+        StringAssert.Contains(await RefusedAsync(Start("workspace", Workspace with { Fleet = false })), "other machines");
+
+        // As strict as the parent's, or the stricter one the owner requires: the child runs in it, or nowhere.
+        if (!available)
+        {
+            StringAssert.Contains(await RefusedAsync(Start("workspace", Workspace)), "cannot start a sandbox");
+            return;
+        }
+
+        var same = await client.CreateSessionAsync(Start("workspace", Workspace), Guid.NewGuid().ToString("N"), token);
+        Assert.AreEqual("workspace", same.Sandbox);
+        Assert.AreEqual("workspace", (await two.Node.Host.RuntimeService.GetSessionSandboxAsync(same.SessionId, token)).Choice.Profile);
+        two.Node.Service.AgentSessions.WritePolicy(new FleetAgentPolicyInfo(["default"], SandboxProfiles.Strict));
+        var stricter = await client.CreateSessionAsync(Start("workspace", Workspace), Guid.NewGuid().ToString("N"), token);
+        Assert.AreEqual(SandboxProfiles.Strict, stricter.Sandbox, "the policy of the owner is stricter than the parent: it wins");
+        Assert.AreEqual(SandboxProfiles.Strict, (await two.Node.Host.RuntimeService.GetSessionSandboxAsync(stricter.SessionId, token)).Choice.Profile);
+    }
+
+    [TestMethod]
+    public async Task AnAgentDrivesOnAnotherMachine_NoSessionLessConfinedThanItself()
+    {
+        var token = TestContext.CancellationToken;
+        await using var two = await TwoHosts.StartAsync(token);
+        two.Node.Service.AgentSessions.WritePolicy(new FleetAgentPolicyInfo(["default"]));
+        var client = await two.Machine.WaitOnlineAsync(token);
+        var peer = await two.Node.Host.Commands.CreateDraftSessionAsync(null, two.Node.Host.ModelProviderRegistry.ListProviders().Single(static provider => provider.IsEnabled), "Peer");
+        var peerMode = await two.Node.Host.RuntimeService.GetPermissionModeAsync(peer.SessionId, token);
+        FleetSendParams Send(FleetAgentFloor floor)
+            => new(peer.SessionId, "Hello")
+            {
+                Agent = FleetAgentSigning.Sign(two.Fleet.DeviceKey, new FleetAgentRequest(FleetAgentRequest.CurrentVersion, FleetAgentRequestKinds.Send,
+                    two.Node.NodeIdentity.DeviceId, "", "", DateTimeOffset.UtcNow, "", "parent-x", "desktop-pc", "default", peer.SessionId, null,
+                    FleetAgentRequestDocuments.HashText("Hello"), null, floor)),
+            };
+        async Task<string> RefusedAsync(FleetSendParams parameters)
+        {
+            var exception = await Assert.ThrowsExactlyAsync<FleetException>(() => client.SendAsync(parameters, Guid.NewGuid().ToString("N"), token));
+            Assert.AreEqual(FleetNodeErrorCodes.AgentRequestDenied, exception.Error.Code, exception.Error.Message);
+            return exception.Error.Message ?? "";
+        }
+
+        // A sandboxed agent does not drive a session without a sandbox, nor an agent that asks more a session that asks less.
+        StringAssert.Contains(await RefusedAsync(Send(new FleetAgentFloor(SessionPermissionModes.Bypass, "workspace", Workspace))), "runs without a sandbox");
+        StringAssert.Contains(await RefusedAsync(Send(new FleetAgentFloor("plan", null, null))), $"'{peerMode}'");
+
+        // An agent that runs without a sandbox, and asks no more than the session, drives it as before (a session that
+        // bypasses permissions holds the prompt of an agent for a person, whatever its floor).
+        if (SessionPermissionModes.Rank(peerMode) >= SessionPermissionModes.Rank(SessionPermissionModes.Bypass)) return;
+        var accepted = await client.SendAsync(Send(new FleetAgentFloor(SessionPermissionModes.Bypass, null, null)), Guid.NewGuid().ToString("N"), token);
+        Assert.AreEqual("accepted", accepted.Status);
+    }
+
+    private static FleetSandboxConfinement Workspace => FleetSandboxFloors.ToWire(SandboxConfinement.Of(SandboxProfiles.Resolve(SandboxProfiles.Workspace, [])));
 
     private static RemoteChildRequest Request(string parentId, string prompt)
         => new(parentId, "test-node") { Prompt = prompt, SpaceId = "default", PermissionMode = SessionPermissionModes.Ask };

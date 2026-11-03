@@ -30,7 +30,8 @@ public enum SandboxOutside
 /// <remarks>
 /// A profile named like a built-in one changes it: each key it sets replaces the built-in value. A profile with
 /// <see cref="Extends"/> starts from that profile: its lists are added to the lists of the base, its other keys
-/// replace them. A profile with neither starts from no folder, no host, no network and <see cref="SandboxOutside.Ask"/>.
+/// replace them. A profile with neither starts from no folder, no host, no network, <see cref="SandboxOutside.Ask"/> and
+/// <see cref="SandboxFleet.Never"/>.
 /// </remarks>
 public sealed record SandboxProfile
 {
@@ -66,6 +67,22 @@ public sealed record SandboxProfile
 
     /// <summary>Gets whether a command may be asked to run outside the sandbox.</summary>
     public SandboxOutside? Outside { get; init; }
+
+    /// <summary>
+    /// Gets whether its sessions may start or drive work on other machines (a child or a message elsewhere, a move, an
+    /// automation placed or run there): that work carries the confinement of the session as its floor.
+    /// </summary>
+    public SandboxFleet? Fleet { get; init; }
+}
+
+/// <summary>Whether the sessions of a sandbox may start or drive work on other machines of the fleet.</summary>
+public enum SandboxFleet
+{
+    /// <summary>They may, and the work is at least as confined as the session that starts or drives it.</summary>
+    Allow,
+
+    /// <summary>They may not: CodeAlta refuses it before anything reaches another machine.</summary>
+    Never,
 }
 
 /// <summary>A profile with every value decided: the one a session runs with.</summary>
@@ -79,6 +96,7 @@ public sealed record SandboxProfile
 /// <param name="Env">The names of the variables of the user's environment it receives.</param>
 /// <param name="McpServers">The MCP servers its sessions may use.</param>
 /// <param name="Outside">Whether a command may be asked to run outside the sandbox.</param>
+/// <param name="Fleet">Whether its sessions may start or drive work on other machines.</param>
 public sealed record ResolvedSandboxProfile(
     string Name,
     IReadOnlyList<string> Write,
@@ -89,7 +107,8 @@ public sealed record ResolvedSandboxProfile(
     IReadOnlyList<int> LocalPorts,
     IReadOnlyList<string> Env,
     IReadOnlyList<string> McpServers,
-    SandboxOutside Outside);
+    SandboxOutside Outside,
+    bool Fleet);
 
 /// <summary>The built-in profiles, and the resolution of the profiles of the settings.</summary>
 public static class SandboxProfiles
@@ -120,8 +139,8 @@ public static class SandboxProfiles
     /// <summary>Gets the built-in profiles: <see cref="Workspace"/> and <see cref="Strict"/>.</summary>
     public static IReadOnlyList<ResolvedSandboxProfile> BuiltIn { get; } =
     [
-        new(Workspace, [], [], [], SandboxNetwork.Hosts, RegistryHosts, [], [], [], SandboxOutside.Ask),
-        new(Strict, [], [], [], SandboxNetwork.Off, [], [], [], [], SandboxOutside.Never),
+        new(Workspace, [], [], [], SandboxNetwork.Hosts, RegistryHosts, [], [], [], SandboxOutside.Ask, Fleet: true),
+        new(Strict, [], [], [], SandboxNetwork.Off, [], [], [], [], SandboxOutside.Never, Fleet: false),
     ];
 
     /// <summary>Gets whether a name is a valid profile name: letters, digits, <c>-</c> and <c>_</c>, not <see cref="Off"/>.</summary>
@@ -182,15 +201,17 @@ public static class SandboxProfiles
             result = new(written.Name,
                 Union(basis.Write, written.Write), Union(basis.Read, written.Read), Union(basis.Deny, written.Deny),
                 written.Network ?? basis.Network, Union(basis.Hosts, written.Hosts), [.. basis.LocalPorts.Union(written.LocalPorts ?? [])],
-                Union(basis.Env, written.Env), Union(basis.McpServers, written.McpServers), written.Outside ?? basis.Outside);
+                Union(basis.Env, written.Env), Union(basis.McpServers, written.McpServers), written.Outside ?? basis.Outside,
+                written.Fleet is { } fleet ? fleet == SandboxFleet.Allow : basis.Fleet);
         }
         else
         {
-            var basis = builtIn ?? new ResolvedSandboxProfile(written.Name, [], [], [], SandboxNetwork.Off, [], [], [], [], SandboxOutside.Ask);
+            var basis = builtIn ?? new ResolvedSandboxProfile(written.Name, [], [], [], SandboxNetwork.Off, [], [], [], [], SandboxOutside.Ask, Fleet: false);
             result = new(builtIn?.Name ?? written.Name,
                 written.Write ?? basis.Write, written.Read ?? basis.Read, written.Deny ?? basis.Deny,
                 written.Network ?? basis.Network, written.Hosts ?? basis.Hosts, written.LocalPorts ?? basis.LocalPorts,
-                written.Env ?? basis.Env, written.McpServers ?? basis.McpServers, written.Outside ?? basis.Outside);
+                written.Env ?? basis.Env, written.McpServers ?? basis.McpServers, written.Outside ?? basis.Outside,
+                written.Fleet is { } fleet ? fleet == SandboxFleet.Allow : basis.Fleet);
         }
 
         visiting.RemoveAt(visiting.Count - 1);
