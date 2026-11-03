@@ -36,8 +36,7 @@ The authority of an assignment is the authenticated, paired device on a direct c
   /api/v1/automations/{id}` stores a signed version (the content sealed to the owner's devices and the assigned machine
   in a Private space, so the server sees only the facts: id, owner, version, machine, schedule kinds, enabled), `GET` lists
   them for the owner, `DELETE` removes. Owner checks as for update campaigns (an owner's controller device).
-  - Done: migration `0006_automations` (the statistics branch `alta/silken-lathe-jqr3` also has a `0006`: the second
-    merged renumbers). The server takes only sealed versions (never a definition in clear), one row per automation and
+  - Done: migration `0007_automations` (after `0006_statistics` of the fleet statistics). The server takes only sealed versions (never a definition in clear), one row per automation and
     machine. A removal is a signed version too (`PUT` with `removed`); `DELETE ?machine=` only forgets a removal the
     machine acknowledged. Personal scope: the caller is a controller device of the person who owns the machine (the node
     checks the same against its anchored list), not an organization owner. `GET /api/v1/automations/{id}/runs`.

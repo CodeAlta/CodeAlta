@@ -2,7 +2,7 @@ using Microsoft.Data.Sqlite;
 
 namespace CodeAlta.Server.Storage.Sqlite;
 
-// The automations of the organization and their runs (migration 0006).
+// The automations of the organization and their runs (migration 0007).
 public sealed partial class SqliteCoordinatorStore
 {
     private const string AutomationColumns = "SELECT organization_id, automation_id, machine_id, owner_person_id, number, removed, enabled, triggers, payload, signature, " +
