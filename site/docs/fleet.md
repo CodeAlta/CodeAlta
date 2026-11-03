@@ -141,10 +141,10 @@ The **+** of the row of a machine in the Explorer opens the same prompt, already
 
 ## Run your automations on it
 
-An automation of yours can run on a paired machine, by its triggers, while this computer is closed.
+An automation of yours can run on a paired machine, or on a machine of your server, by its triggers, while this computer is closed.
 
 1. On the machine of the node, let this computer give it automations: `altanode permissions <device> --allow automate` (`altanode devices` names the computers).
-2. In the **Automations** tab, edit the automation and choose the machine in **Runs on**. It is offered for an automation kept in your configuration, once a machine is paired.
+2. In the **Automations** tab, edit the automation and choose the machine in **Runs on**. It is offered for an automation kept in your configuration, once a machine is paired or your server lists one.
 3. Save. CodeAlta copies the automation to the machine: its card says **On** and the name of the machine, and its details say **Copied to** that machine. A machine that is offline gets it when it answers.
 
 The machine fires its schedules and starts its sessions; **Run now** runs it there too. Its runs are listed with the automation, as the machine reports them, and their sessions are those of the machine. Choose **This computer** to bring it back: the machine no longer has it.
@@ -153,6 +153,8 @@ The machine fires its schedules and starts its sessions; **Run now** runs it the
 - Its project is found on the machine by its git repository: the machine needs a checkout of it (`altanode projects clone <url>`). An automation of no project runs as a chat there.
 - Name a provider the machine has, or none for the machine's default one.
 - A command trigger runs on this computer only, and an automation kept in the configuration of a project runs on the machines that have the project.
+
+A machine of your server that is not paired with this computer gets the automation through the server, with no permission to give on the machine: it must be one of your machines. The server keeps it sealed, so it cannot read nor change it, and the machine gets it when it connects. Its details say whether the machine took it or refused it, and why. **Run now** needs the machine paired with this computer; its triggers run it either way, also while the server is away.
 
 On the machine, what it runs is up to it: `fleet/automation-policy.json` in its state root turns automations off (`"enabled": false`) or limits them to account credentials (`"credentials": "account"`: API keys and local models, never a personal plan). A run the machine refuses is listed with its reason. A computer that loses the permission, or is revoked, no longer gets its automations run.
 

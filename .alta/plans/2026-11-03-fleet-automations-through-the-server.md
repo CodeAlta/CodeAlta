@@ -65,8 +65,11 @@ The authority of an assignment is the authenticated, paired device on a direct c
     server's anchored device list and `PUT`s it; where it stands (pending, taken, refused) and its runs come from the
     server; leaving the machine sends a signed removal. Not done: a run by hand on a machine reached only through a
     server (it says to pair the machine); the server's tombstone of a removal is not forgotten (`DELETE`) by the desktop.
-- [ ] **Tests.** The multi-host harness: desktop, server and node in one process; a server that is down while a
+- [x] **Tests.** The multi-host harness: desktop, server and node in one process; a server that is down while a
   schedule fires (the node fires it), a hostile server that alters a version (the node refuses it), a revoked device.
+  - Done in `NodeServerAutomationTests` (server and node host, the desktop's client), `DesktopServerAutomationPlacementTests`
+    (desktop placement, server, a node connector), `AutomationServerTests` and `FleetAutomationSigningTests`; checked end
+    to end with altaserver, altanode (`--no-listen`) and an isolated CodeAlta Desktop.
 
 ## Smaller follow-ups of the first part
 
