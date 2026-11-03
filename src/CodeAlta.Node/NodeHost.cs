@@ -36,7 +36,7 @@ public sealed class NodeHost : IAsyncDisposable
     private int _admissionPaused;
 
     private NodeHost(NodeHostOptions options, CodeAltaSingleInstanceGuard guard, CodeAltaHost host, HeadlessAltaTools alta,
-        ModelsDevCatalogService modelsDev, LoopbackHarnessToolEndpoints toolEndpoints, Logger logger)
+        ModelsDevCatalogService modelsDev, LoopbackHarnessToolEndpoints toolEndpoints, Logger logger, NodeAutomations? automations)
     {
         _options = options;
         _guard = guard;
@@ -45,10 +45,17 @@ public sealed class NodeHost : IAsyncDisposable
         _modelsDev = modelsDev;
         _toolEndpoints = toolEndpoints;
         _logger = logger;
+        Automations = automations;
     }
 
     /// <summary>Gets the runtime of the node.</summary>
     public CodeAltaHost Host { get; }
+
+    /// <summary>
+    /// Gets the automations the node runs (those of its profile and those its paired devices assigned to it); null when
+    /// it runs none (<see cref="NodeHostOptions.RunAutomations"/>).
+    /// </summary>
+    internal NodeAutomations? Automations { get; }
 
     /// <summary>
     /// Gets the dispatcher of the <c>alta</c> commands, the one of the <c>alta</c> tool of the sessions of the node
@@ -112,8 +119,16 @@ public sealed class NodeHost : IAsyncDisposable
             var pluginProviderTypes = new PluginModelProviderTypes(toolEndpoints) { ModelCatalog = modelsDev };
             host = await CodeAltaHost.CreateAsync(CreateHostOptions(options, guard, modelsDev, pluginProviderTypes), cancellationToken).ConfigureAwait(false);
             var alta = HeadlessAltaTools.Attach(host, CreateAltaOptions(profile));
+            // The schedules fire on the node: those of its profile, and those its devices assigned to it, which it keeps.
+            NodeAutomations? automations = null;
+            if (options.RunAutomations)
+            {
+                automations = new NodeAutomations(host, options.Automations);
+                automations.Start();
+            }
+
             logger.Info($"CodeAlta Node started on {profile.StateRoot} (PID {Environment.ProcessId}).");
-            return new NodeHost(options, guard, host, alta, modelsDev, toolEndpoints, logger);
+            return new NodeHost(options, guard, host, alta, modelsDev, toolEndpoints, logger, automations);
         }
         catch
         {
@@ -236,6 +251,16 @@ public sealed class NodeHost : IAsyncDisposable
             catch (Exception failure)
             {
                 _logger.Error(failure, "The reminders failed while they stopped.");
+            }
+
+            // Nor an automation: its schedules stop, and the runs under way are drained as the other sessions are.
+            try
+            {
+                if (Automations is not null) await Automations.DisposeAsync().ConfigureAwait(false);
+            }
+            catch (Exception failure)
+            {
+                _logger.Error(failure, "The automations failed while they stopped.");
             }
 
             await DrainAsync(drainCancellation).ConfigureAwait(false);

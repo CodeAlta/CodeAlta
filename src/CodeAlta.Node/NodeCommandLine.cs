@@ -244,7 +244,7 @@ internal static class NodeCommandLine
             "loses a permission is disconnected and reconnects with what it may do.",
             _,
             "Options:",
-            { "allow=", "The permissions to give ({LIST}: view,drive,start,move)", v => permissions.Allow.Add(v!) },
+            { "allow=", "The permissions to give ({LIST}: view,drive,start,move,automate)", v => permissions.Allow.Add(v!) },
             { "deny=", "The permissions to take away ({LIST})", v => permissions.Deny.Add(v!) },
         };
         AddProfile(permissionsCommand, permissions.Profile);

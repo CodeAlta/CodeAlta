@@ -139,6 +139,7 @@ follows carries the state.
 | `providers` | `status`, `signIn.start` (device code flows), `signIn.poll` |
 | `sessions` | `list`, `watch` (display stream), `history` (windows), `create`, `send`, `queue`, `steer`, `abort`, `answerAsk`, `answerPermission`, `jobs.list`, `jobs.output`, `jobs.stop`, `image`, `archive`, `restore`, `fork` |
 | `moves` | `offer`, `accept`, `transfer`, `commit`, `abort` |
+| `automations` | `put` (an automation as one table of `config.toml`, with the repository key of its project), `remove`, `list`, `run`, `runs`: the automations a paired device assigns to the node (**Runs on**), with the `automate` permission |
 | `terminal` | `open` (a setup terminal, owner only, audited), `input`, `resize`, `close` |
 
 They map onto what the desktop's RPC services already call (owned commands, the display projection, history

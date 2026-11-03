@@ -244,6 +244,15 @@ internal sealed record AutomationDefinition(string Id, string Name)
     /// <summary>In the configuration of the user only: the folder of the project it runs in. Without one it runs as a chat.</summary>
     public string? Project { get; init; }
 
+    /// <summary>The longest name of a machine kept.</summary>
+    internal const int MaximumMachineLength = 128;
+
+    /// <summary>
+    /// In the configuration of the user only: the paired machine (its device id) that runs the automation in place of
+    /// this one, which then keeps its definition and copies it there. Null runs it here.
+    /// </summary>
+    public string? RunsOn { get; init; }
+
     /// <summary>The provider, model and effort asked for.</summary>
     public AutomationModelRef Model { get; init; }
 
@@ -286,6 +295,8 @@ internal sealed record AutomationDefinition(string Id, string Name)
         // Nor without options of their own.
         if (AgentSessionOptions.Stored(SessionOptions) is { } options) text += "\noptions\n" + (options.SubSessions ? "1" : "0");
         if (Script is not null) text += "\nscript\n" + Script + "\n" + (ScriptArguments ?? string.Empty);
+        // Nor without a machine of their own.
+        if (RunsOn is not null) text += "\nruns_on\n" + RunsOn;
         return Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(text)));
     }
 
@@ -303,8 +314,14 @@ internal sealed record AutomationDefinition(string Id, string Name)
 /// <param name="ProjectPath">The folder of that project.</param>
 internal sealed record AutomationSource(string FilePath, string? ProjectId, string? ProjectPath)
 {
-    /// <summary>Whether this is the configuration of the user.</summary>
+    /// <summary>Whether this is the configuration of the user, or the file of the automations other devices assigned to this machine.</summary>
     public bool IsGlobal => ProjectId is null;
+
+    /// <summary>
+    /// Whether this is the file of the automations other devices of the user assigned to this machine (a node), which
+    /// only the host writes, through what checks those devices; false for the configuration of the user or of a project.
+    /// </summary>
+    public bool IsAssigned { get; init; }
 }
 
 /// <summary>An automation with where it is defined and where it runs.</summary>

@@ -95,6 +95,8 @@ internal static class AutomationConfig
         if (definition.Prompt.Any(static character => char.IsControl(character) && character is not ('\n' or '\t')) || !IsWellFormed(definition.Prompt))
             return "The prompt of an automation is plain text.";
         if (definition.Project is { } project && (project.Length is 0 or > 4096 || project.Any(char.IsControl))) return "The project of an automation is the path of its folder.";
+        if (definition.RunsOn is { } machine && (machine.Length is 0 or > AutomationDefinition.MaximumMachineLength || machine.Any(static character => char.IsControl(character) || char.IsWhiteSpace(character))))
+            return "The machine an automation runs on is the id of a paired machine.";
         if (definition.Agent is { } agent && (agent.Length is 0 or > 256 || agent.Any(char.IsControl))) return "The agent prompt of an automation is a name.";
         if (definition.PermissionMode is { } mode && (mode.Length is 0 or > 64 || mode.Any(char.IsControl) || mode.Trim() != mode))
             return "The permission mode of an automation is a name.";
@@ -240,7 +242,8 @@ internal static class AutomationConfig
             || !TryText(table, "agent", out var agent, out problem) || !TryFlag(table, "enabled", true, out var enabled, out problem)
             || !TryFlag(table, "catch_up", false, out var catchUp, out problem) || !TryText(table, "permission_mode", out var permissionMode, out problem)
             || !TryText(table, "sandbox", out var sandbox, out problem) || !TryText(table, "script", out var script, out problem)
-            || !TryText(table, "script_args", out var scriptArguments, out problem) || !TryFlag(table, "sub_sessions", true, out var subSessions, out problem)) return false;
+            || !TryText(table, "script_args", out var scriptArguments, out problem) || !TryFlag(table, "sub_sessions", true, out var subSessions, out problem)
+            || !TryText(table, "runs_on", out var runsOn, out problem)) return false;
         bool? review = null;
         if (table.ContainsKey("review_before_commit"))
         {
@@ -285,6 +288,8 @@ internal static class AutomationConfig
             ScriptArguments = Blank(scriptArguments),
             // The folder a project automation runs in is the one of its file.
             Project = source.IsGlobal ? Blank(project) : null,
+            // Only an automation of the user is placed on another machine; one a device assigned here runs here.
+            RunsOn = source.IsGlobal && !source.IsAssigned ? Blank(runsOn) : null,
             Model = reference,
             Agent = Blank(agent),
             PermissionMode = Blank(permissionMode),
@@ -423,6 +428,7 @@ internal static class AutomationConfig
         builder.Append("enabled = ").Append(definition.Enabled ? "true" : "false").Append(newline);
         // A folder of Windows is written with the slashes every system reads, which need no escape.
         if (definition.Project is { } project) builder.Append("project = ").Append(Quote(OperatingSystem.IsWindows() ? project.Replace('\\', '/') : project)).Append(newline);
+        if (definition.RunsOn is { } machine) builder.Append("runs_on = ").Append(Quote(machine)).Append(newline);
         if (definition.Model.Format() is { } model) builder.Append("model = ").Append(Quote(model)).Append(newline);
         if (definition.Agent is { } agent) builder.Append("agent = ").Append(Quote(agent)).Append(newline);
         if (definition.PermissionMode is { } mode) builder.Append("permission_mode = ").Append(Quote(mode)).Append(newline);

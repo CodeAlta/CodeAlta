@@ -166,7 +166,7 @@ On the machine of the node:
 | `altanode devices` | Lists the computers paired with the node |
 | `altanode revoke <device>` | Revokes a computer and disconnects it at once |
 | `altanode permissions <device>` | Shows what a computer may do |
-| `altanode permissions <device> --deny start` | Takes a permission away: `view`, `drive`, `start` or `move` (`--allow` gives one) |
+| `altanode permissions <device> --deny start` | Takes a permission away: `view`, `drive`, `start`, `move` or `automate` (`--allow` gives one) |
 
 In CodeAlta Desktop, **Forget** on the row of a machine in **Settings** > **Fleet** > **Machines** removes it from this computer; its sessions go on there. To make sure a lost or replaced computer can no longer reach a node, revoke it on the node.
 

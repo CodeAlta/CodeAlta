@@ -55,4 +55,13 @@ public sealed record NodeHostOptions
     /// <c>&lt;root&gt;/&lt;host&gt;/&lt;owner&gt;/&lt;repo&gt;</c>, <c>~/code</c> by default; null clones nothing.
     /// </summary>
     public string? CloneRoot { get; init; } = FleetMoveReceiver.DefaultCloneRoot;
+
+    /// <summary>
+    /// Gets whether the node runs automations: those of its profile and those its paired devices assign to it
+    /// (<see cref="NodeHost.Automations"/>). Default true.
+    /// </summary>
+    public bool RunAutomations { get; init; } = true;
+
+    /// <summary>Gets the options of the automations, for tests (a clock, the credential kinds); null for the defaults.</summary>
+    internal NodeAutomationOptions? Automations { get; init; }
 }

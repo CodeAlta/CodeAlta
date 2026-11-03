@@ -526,6 +526,55 @@ public sealed class FleetNodeClient : IAsyncDisposable
         => CallAsync(FleetNodeMethods.ControlProjectsRemove, new FleetProjectRef(project), FleetNodeJsonContext.Default.FleetProjectRef,
             FleetNodeJsonContext.Default.FleetProjectChange, null, cancellationToken);
 
+    /// <summary>Copies an automation to the node, or replaces its copy: the node runs it by its triggers from now on.</summary>
+    /// <param name="parameters">The automation, as one table of a configuration file, and the repository of its project.</param>
+    /// <param name="retryKey">The key of the call; null for a new key.</param>
+    /// <param name="cancellationToken">Cancels the call.</param>
+    /// <returns>The automation as the node keeps it.</returns>
+    /// <exception cref="FleetException">The node refused it (<see cref="FleetErrorCodes.Forbidden"/> without the <c>automate</c> permission,
+    /// <see cref="FleetNodeErrorCodes.AutomationInvalid"/>, <see cref="FleetNodeErrorCodes.ProjectNotFound"/>).</exception>
+    public Task<FleetAutomationInfo> PutAutomationAsync(FleetAutomationPutParams parameters, string? retryKey = null, CancellationToken cancellationToken = default)
+        => CallAsync(FleetNodeMethods.AutomationsPut, parameters, FleetNodeJsonContext.Default.FleetAutomationPutParams,
+            FleetNodeJsonContext.Default.FleetAutomationInfo, retryKey ?? NewRetryKey(), cancellationToken);
+
+    /// <summary>Removes an automation this device's owner assigned to the node; its runs stay.</summary>
+    /// <param name="id">The automation.</param>
+    /// <param name="retryKey">The key of the call; null for a new key.</param>
+    /// <param name="cancellationToken">Cancels the call.</param>
+    /// <returns>Whether the node had it.</returns>
+    /// <exception cref="FleetException">The node refused the call.</exception>
+    public Task<FleetAutomationRemoved> RemoveAutomationAsync(string id, string? retryKey = null, CancellationToken cancellationToken = default)
+        => CallAsync(FleetNodeMethods.AutomationsRemove, new FleetAutomationRef(id), FleetNodeJsonContext.Default.FleetAutomationRef,
+            FleetNodeJsonContext.Default.FleetAutomationRemoved, retryKey ?? NewRetryKey(), cancellationToken);
+
+    /// <summary>Lists the automations devices assigned to the node.</summary>
+    /// <param name="cancellationToken">Cancels the call.</param>
+    /// <returns>The automations.</returns>
+    /// <exception cref="FleetException">The node refused the call.</exception>
+    public Task<FleetAutomationList> ListAutomationsAsync(CancellationToken cancellationToken = default)
+        => CallAsync(FleetNodeMethods.AutomationsList, new FleetEmpty(), FleetNodeJsonContext.Default.FleetEmpty,
+            FleetNodeJsonContext.Default.FleetAutomationList, null, cancellationToken);
+
+    /// <summary>Runs an assigned automation now on the node.</summary>
+    /// <param name="id">The automation.</param>
+    /// <param name="retryKey">The key of the call, so that a retry starts no second run; null for a new key.</param>
+    /// <param name="cancellationToken">Cancels the call.</param>
+    /// <returns>The run, once its session exists or it failed to start.</returns>
+    /// <exception cref="FleetException">The node refused the call (<see cref="FleetNodeErrorCodes.AutomationNotFound"/>).</exception>
+    public Task<FleetAutomationRunInfo> RunAutomationAsync(string id, string? retryKey = null, CancellationToken cancellationToken = default)
+        => CallAsync(FleetNodeMethods.AutomationsRun, new FleetAutomationRef(id), FleetNodeJsonContext.Default.FleetAutomationRef,
+            FleetNodeJsonContext.Default.FleetAutomationRunInfo, retryKey ?? NewRetryKey(), cancellationToken);
+
+    /// <summary>Lists the runs of the automations assigned to the node, newest first.</summary>
+    /// <param name="id">The automation; null for all the assigned ones.</param>
+    /// <param name="limit">The most runs; null for the node's default.</param>
+    /// <param name="cancellationToken">Cancels the call.</param>
+    /// <returns>The runs.</returns>
+    /// <exception cref="FleetException">The node refused the call.</exception>
+    public Task<FleetAutomationRunList> ListAutomationRunsAsync(string? id = null, int? limit = null, CancellationToken cancellationToken = default)
+        => CallAsync(FleetNodeMethods.AutomationsRuns, new FleetAutomationRunsParams(id, limit), FleetNodeJsonContext.Default.FleetAutomationRunsParams,
+            FleetNodeJsonContext.Default.FleetAutomationRunList, null, cancellationToken);
+
     /// <summary>Closes the channel.</summary>
     /// <param name="cancellationToken">Cancels the wait for the close.</param>
     /// <returns>A task that completes once the channel is closed.</returns>

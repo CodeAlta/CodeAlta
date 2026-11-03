@@ -60,6 +60,12 @@ public sealed class FleetNodeServiceOptions
 
     /// <summary>Gets the instruments of the requests and the moves; null for none.</summary>
     public Telemetry.FleetMetrics? Metrics { get; init; }
+
+    /// <summary>
+    /// Gets the automations the node runs for its paired devices (<c>automations.*</c>); null for a host that runs none,
+    /// whose methods then answer <see cref="FleetNodeErrorCodes.AutomationsUnavailable"/>.
+    /// </summary>
+    public IFleetNodeAutomations? Automations { get; init; }
 }
 
 /// <summary>
@@ -318,6 +324,7 @@ public sealed partial class FleetNodeService : IAsyncDisposable
             FleetNodeJsonContext.Default.FleetMoveResult, StartMoveAsync);
         On(caller, FleetNodeMethods.MovesList, Access.View, FleetNodeJsonContext.Default.FleetEmpty, FleetNodeJsonContext.Default.FleetMoveList,
             ListMovesAsync, optionalParams: true);
+        RegisterAutomations(caller);
     }
 
     // Who may call a method: anyone on the channel (pairing), the owner's local control, or a trusted device with a permission.
@@ -330,6 +337,8 @@ public sealed partial class FleetNodeService : IAsyncDisposable
         public static Access Start => new(DevicePermissions.View | DevicePermissions.Start, false, false);
         public static Access Move => new(DevicePermissions.Move, false, false);
         public static Access Relocate => new(DevicePermissions.View | DevicePermissions.Drive | DevicePermissions.Move, false, false);
+        public static Access Automations => new(DevicePermissions.View | DevicePermissions.Automate, false, false);
+        public static Access Automate => new(DevicePermissions.View | DevicePermissions.Start | DevicePermissions.Automate, false, false);
     }
 
     private delegate Task<TResult> Handler<TParams, TResult>(FleetNodeCall call, TParams parameters, CancellationToken cancellationToken);
@@ -419,7 +428,7 @@ public sealed partial class FleetNodeService : IAsyncDisposable
         if (access.AnyoneMayCall) return device;
         if (device is null) throw new FleetException(FleetErrorCodes.Unauthenticated, FleetErrorHints.Reauthenticate, "This device is not paired with the node.");
         if ((device.Permissions & access.Required) != access.Required)
-            throw new FleetException(FleetErrorCodes.Forbidden, null, $"This device may not do this on the node (it needs {Describe(access.Required & ~device.Permissions)}).");
+            throw new FleetException(FleetErrorCodes.Forbidden, null, $"This device may not do this on the node (it needs {string.Join(", ", Describe(access.Required & ~device.Permissions))}).");
         return device;
     }
 

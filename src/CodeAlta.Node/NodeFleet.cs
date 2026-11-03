@@ -108,12 +108,16 @@ internal sealed class NodeFleet : IAsyncDisposable
         try
         {
             IReadOnlyList<string> addresses = [];
+            var trusted = new TrustedDeviceStore(catalog);
             service = new FleetNodeService(new FleetNodeServiceOptions
             {
-                Host = node.Host, Identity = identity, TrustedDevices = new TrustedDeviceStore(catalog), Name = name, Version = version,
+                Host = node.Host, Identity = identity, TrustedDevices = trusted, Name = name, Version = version,
                 AcceptsWork = () => node.AcceptsWork, PairingAddresses = () => addresses, RequestStop = requestStop, CloneRoot = node.Options.CloneRoot,
-                Updating = () => node.AdmissionPaused, UpdateStatus = updateStatus, Metrics = metrics,
+                Updating = () => node.AdmissionPaused, UpdateStatus = updateStatus, Metrics = metrics, Automations = node.Automations,
             });
+            // An assigned automation runs while the device that assigned it is still paired, with the automate permission.
+            if (node.Automations is { } automations)
+                automations.Devices = deviceId => trusted.List().FirstOrDefault(device => string.Equals(device.DeviceId, deviceId, StringComparison.Ordinal));
             string? file = null;
             // Without a listener the node API still serves the channels its servers relay.
             if (listen.Enabled)
