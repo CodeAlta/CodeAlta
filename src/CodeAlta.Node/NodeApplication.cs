@@ -248,6 +248,9 @@ internal sealed class NodeApplication
         {
             try
             {
+                // An installed entry point the owner updated past the selected version runs itself (dotnet tool update).
+                if (store.ReconcileInstalled(InstalledVersion()) is { } replaced)
+                    await _error.WriteLineAsync($"altanode: the installed altanode {InstalledVersion()} is newer than {replaced}, which was selected before it: it runs instead.").ConfigureAwait(false);
                 store.TakePending(UpdateProduct.Node);
             }
             catch (UpdateException exception)

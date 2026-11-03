@@ -135,7 +135,10 @@ All signed (Authenticode, Apple notarization, NuGet signatures, cosign for image
   holds the lease of the folder of versions (`launcher.lock`) from its start to its end, across the selection, the
   version that runs, its confirmation and its rollback; a second `run` is refused at once, even before the version
   started has taken the profile or the data root. A version refused because another process holds them (exit code 3)
-  did not run: it neither fails its trial nor counts a start.
+  did not run: it neither fails its trial nor counts a start. The owner's own update of the installed entry point
+  (`dotnet tool update`) wins over an older selection: `state.json` records the installed version while a version is
+  selected, and once it changes to one newer than the selected version, the pointer is dropped and the installed entry
+  point runs; a version chosen older on purpose (`update --version`) stays until the installed one changes.
 - **Trial and rollback.** A new version confirms itself once healthy: a node when it listens and its connections to
   the servers that approved it are up, the server when it answers its own health request. One that exits first, or does
   not confirm within 2 minutes (over 2 starts), or cannot be started, is stopped, marked bad (an update skips it unless

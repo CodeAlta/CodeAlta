@@ -244,6 +244,9 @@ public sealed class ServerApplication
         {
             try
             {
+                // An installed entry point the owner updated past the selected version runs itself (dotnet tool update).
+                if (store.ReconcileInstalled(InstalledVersion()) is { } replaced)
+                    await _error.WriteLineAsync($"altaserver: the installed altaserver {InstalledVersion()} is newer than {replaced}, which was selected before it: it runs instead.").ConfigureAwait(false);
                 // Without a running server to copy it, the database is copied here: a switch is never selected without it.
                 store.TakePending(UpdateProduct.Server, target => ServerUpdates.BackupStopped(paths, target));
             }

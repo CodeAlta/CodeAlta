@@ -306,6 +306,38 @@ public sealed class UpdateVersionStore
            && pending.Now == expected.Now && string.Equals(pending.RequestedBy, expected.RequestedBy, StringComparison.Ordinal);
 
     /// <summary>
+    /// Gives way to the installed entry point when the owner changed it since a version was selected: a
+    /// <c>dotnet tool update</c> to a version newer than the selected one drops the pointer, so that the installed entry
+    /// point runs, and the folders of versions nothing needs any more are pruned. A version selected older than the
+    /// installed one (<c>update --version</c>) stays as long as the installed entry point does not change, and nothing
+    /// changes while a rollback waits for its restore. Otherwise the installed version is recorded while a version is
+    /// selected, to tell a later change.
+    /// </summary>
+    /// <param name="installedVersion">The version of the installed entry point; null when unknown.</param>
+    /// <returns>The selected version dropped, or null when the pointer stays.</returns>
+    /// <exception cref="UpdateException">The lock could not be taken, or the state could not be written.</exception>
+    public string? ReconcileInstalled(string? installedVersion)
+    {
+        if (!UpdateVersion.TryParse(installedVersion, out var installed)) return null;
+        var state = Read();
+        if (state.Current is null || state.RollingBack is not null || Same(state.Installed, installed)) return null;
+        string? dropped = null;
+        Change(current =>
+        {
+            if (current.Current is null || current.RollingBack is not null || Same(current.Installed, installed)) return current;
+            if (current.Installed is not null && UpdateVersion.TryParse(current.Current, out var selected) && installed > selected)
+            {
+                dropped = current.Current;
+                return current with { Current = null, Previous = null, Trial = null, Installed = installed.ToString() };
+            }
+
+            return current with { Installed = installed.ToString() };
+        });
+        if (dropped is not null) Prune();
+        return dropped;
+    }
+
+    /// <summary>
     /// Takes the switch that waits, when no process of the product runs (at start, or in a launcher between two
     /// versions): a staged version is selected on trial at once, since nothing has to drain; one that is not staged, or
     /// already selected, is dropped. Nothing is taken while a rollback waits for its restore.

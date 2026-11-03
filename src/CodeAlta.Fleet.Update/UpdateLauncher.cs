@@ -182,6 +182,17 @@ public sealed class UpdateLauncher
             : store.TryAcquireLauncherLease() ?? throw new UpdateException(UpdateErrorCodes.LauncherBusy, $"Another launcher runs the versions of {store.Root}.");
         using var signals = _options.HandleSignals ? RegisterSignals() : null;
         using var stop = _options.Stop.Register(() => RequestStop(forward: true));
+        try
+        {
+            // The owner updated the installed entry point past the selected version (dotnet tool update): it runs.
+            if (store.ReconcileInstalled(_options.InstalledVersion) is { } replaced)
+                Log($"The installed {_options.Product.AssemblyName} {_options.InstalledVersion} is newer than {replaced}, which was selected before it: it runs instead.");
+        }
+        catch (UpdateException exception)
+        {
+            Log(exception.Message);
+        }
+
         while (true)
         {
             // A rollback whose backup is not restored yet (a crash or a failure since) is finished before anything starts.
