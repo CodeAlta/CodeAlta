@@ -78,6 +78,13 @@ public static class FleetServerMethods
     /// <summary>Where the node stands in a campaign (<see cref="FleetUpdateReport"/>); the server records it for the campaign.</summary>
     public const string UpdateReport = "update.report";
 
+    /// <summary>
+    /// The event of the update policy of the fleet (<see cref="FleetSignedUpdateDocument"/>, the policy as its controller
+    /// device signed it, whatever its mode): sent to the nodes online when an owner changes it, and to each node that
+    /// connects. A node keeps the newest it accepted, by sequence, and refuses what a policy it superseded would allow.
+    /// </summary>
+    public const string UpdatePolicy = "update.policy";
+
     /// <summary>The kinds of <see cref="FleetDirectoryChange"/>.</summary>
     public static class ChangeKinds
     {

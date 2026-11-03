@@ -25,6 +25,47 @@ public sealed class UpdateCampaignServerTests
     private const string Runtime = "win-x64";
 
     [TestMethod]
+    public async Task ThePolicyGoesToTheNodesAsSignedOnEachChangeAndEachConnection()
+    {
+        await using var fleet = await TestFleet.StartAsync(nodes: 1);
+        var node = await fleet.ConnectAsync(0);
+        var manual = await fleet.SetPolicyAsync(1, FleetUpdateModes.Manual);
+        Assert.AreEqual(manual, await node.NextAsync(FleetServerMethods.UpdatePolicy, FleetUpdateJsonContext.Default.FleetSignedUpdateDocument), "every mode goes to the nodes");
+        var pinned = await fleet.SetPolicyAsync(2, FleetUpdateModes.Pinned, pinned: "4.0.1");
+        Assert.AreEqual(pinned, await node.NextAsync(FleetServerMethods.UpdatePolicy, FleetUpdateJsonContext.Default.FleetSignedUpdateDocument));
+
+        await fleet.DisconnectAsync(node);
+        var again = await fleet.ConnectAsync(0);
+        Assert.AreEqual(pinned, await again.NextAsync(FleetServerMethods.UpdatePolicy, FleetUpdateJsonContext.Default.FleetSignedUpdateDocument), "and again on each connection");
+    }
+
+    [TestMethod]
+    public async Task APolicyRevokesTheCampaignsItNoLongerAllows()
+    {
+        await using var fleet = await TestFleet.StartAsync(nodes: 1, latest: "4.0.2");
+        // An automatic policy whose window is later today: its campaign waits for it.
+        await fleet.SetPolicyAsync(1, FleetUpdateModes.Automatic, window: fleet.Clock.Now.AddHours(2).ToString("HH:mm", System.Globalization.CultureInfo.InvariantCulture));
+        await fleet.TickAsync();
+        var automatic = (await fleet.UpdatesAsync()).Campaigns.Single();
+        Assert.AreEqual((true, FleetUpdateCampaignStates.Scheduled), (automatic.Automatic, automatic.State));
+
+        await fleet.SetPolicyAsync(2, FleetUpdateModes.Manual);
+        Assert.AreEqual(FleetUpdateCampaignStates.Cancelled, (await fleet.CampaignAsync(automatic.Id)).State, "a manual policy revokes the automatic campaign");
+        await fleet.TickAsync();
+        Assert.AreEqual(1, (await fleet.UpdatesAsync()).Campaigns.Count, "and starts none");
+
+        // A campaign a person started to another version than the one the fleet is now pinned to is revoked too; the node
+        // that was asked is told.
+        var node = await fleet.ConnectAsync(0);
+        var manual = await fleet.CreateCampaignAsync("4.0.2");
+        await fleet.TickAsync();
+        Assert.AreEqual(manual.Id, (await node.NextAsync(FleetServerMethods.UpdateInstruction, FleetServerJsonContext.Default.FleetUpdateInstruction)).CampaignId);
+        await fleet.SetPolicyAsync(3, FleetUpdateModes.Pinned, pinned: "4.0.1");
+        Assert.AreEqual(manual.Id, (await node.NextAsync(FleetServerMethods.UpdateCancel, FleetServerJsonContext.Default.FleetUpdateCancel)).CampaignId);
+        Assert.AreEqual(FleetUpdateCampaignStates.Cancelled, (await fleet.CampaignAsync(manual.Id)).State);
+    }
+
+    [TestMethod]
     public async Task ACancellationReachesANodeThatWasOfflineWhenItReconnects()
     {
         await using var fleet = await TestFleet.StartAsync(nodes: 1);

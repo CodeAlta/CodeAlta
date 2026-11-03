@@ -217,6 +217,34 @@ internal sealed class UpdateCampaignEngine(UpdateCampaignLimits limits)
         return (campaign with { State = FleetUpdateCampaignStates.Cancelled, ServerState = FleetUpdateMachineStates.Cancelled, UpdatedAt = now }, cancelled, asked);
     }
 
+    /// <summary>
+    /// Withdraws a campaign the update policy no longer allows: one before the server's step is cancelled; one partly done
+    /// keeps what is done, and its machines not done with it are cancelled. The machines asked already keep the cancellation
+    /// due until they acknowledge it.
+    /// </summary>
+    /// <param name="campaign">The campaign.</param>
+    /// <param name="machines">Its machines.</param>
+    /// <param name="now">The time.</param>
+    /// <param name="message">Why, for the campaign and its machines.</param>
+    /// <returns>The campaign, the machines cancelled, and those that were asked already; null when nothing is left to withdraw.</returns>
+    public static (UpdateCampaignRecord Campaign, IReadOnlyList<UpdateCampaignMachineRecord> Machines, IReadOnlyList<string> Asked)? Revoke(UpdateCampaignRecord campaign,
+        IReadOnlyList<UpdateCampaignMachineRecord> machines, DateTimeOffset now, string message)
+    {
+        ArgumentNullException.ThrowIfNull(campaign);
+        ArgumentNullException.ThrowIfNull(machines);
+        ArgumentException.ThrowIfNullOrEmpty(message);
+        if (campaign.State is FleetUpdateCampaignStates.Scheduled or FleetUpdateCampaignStates.UpdatingNodes)
+        {
+            var (all, askedAll) = CancelMachines(machines, now, message);
+            return (campaign with { State = FleetUpdateCampaignStates.Cancelled, ServerState = FleetUpdateMachineStates.Cancelled, ServerMessage = message, UpdatedAt = now },
+                all, askedAll);
+        }
+
+        if (campaign.State != FleetUpdateCampaignStates.PartlyDone) return null;
+        var (left, asked) = CancelMachines(machines, now, message);
+        return left.Length == 0 ? null : (campaign with { UpdatedAt = now }, left, asked);
+    }
+
     private static (UpdateCampaignMachineRecord[] Cancelled, string[] Asked) CancelMachines(IReadOnlyList<UpdateCampaignMachineRecord> machines, DateTimeOffset now,
         string? message)
     {
