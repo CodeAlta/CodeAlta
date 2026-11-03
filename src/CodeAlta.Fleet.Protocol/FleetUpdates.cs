@@ -95,10 +95,13 @@ public static class FleetUpdateMachineStates
     /// <returns>Whether nothing more happens for it.</returns>
     public static bool IsTerminal(string? state) => state is Updated or Failed or RolledBack or Refused or Cancelled or Superseded;
 
-    /// <summary>Gets whether a state is one a node reports.</summary>
+    /// <summary>
+    /// Gets whether a state is one a node reports: where it stands in a campaign, or any final state
+    /// (<see cref="IsTerminal"/>), the one vocabulary both sides use; a cancellation is acknowledged by a final state.
+    /// </summary>
     /// <param name="state">The state.</param>
     /// <returns>Whether a node may report it.</returns>
-    public static bool IsReported(string? state) => state is Waiting or Downloading or Switching or Updated or Failed or RolledBack or Refused or Cancelled;
+    public static bool IsReported(string? state) => state is Waiting or Downloading or Switching || IsTerminal(state);
 }
 
 /// <summary>
