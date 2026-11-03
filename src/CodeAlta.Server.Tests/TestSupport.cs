@@ -119,7 +119,7 @@ internal sealed class ServerFixture : IAsyncDisposable
     public string SetupCode => Server.SetupCode?.Code ?? throw new InvalidOperationException("The server has an owner.");
 
     /// <summary>Starts a server; a data root given stays the caller's, one made here is deleted with the fixture.</summary>
-    public static async Task<ServerFixture> StartAsync(TempDirectory? root = null, TestClock? clock = null)
+    public static async Task<ServerFixture> StartAsync(TempDirectory? root = null, TestClock? clock = null, Control.RelayOptions? relay = null)
     {
         var owned = root is null ? new TempDirectory() : null;
         root ??= owned!;
@@ -129,6 +129,7 @@ internal sealed class ServerFixture : IAsyncDisposable
             DataRoot = root.Path,
             Urls = ["http://127.0.0.1:0"],
             TimeProvider = clock,
+            Relay = relay ?? new Control.RelayOptions(),
             ConfigureLogging = static _ => { },
         });
         return new ServerFixture(owned, server, clock);

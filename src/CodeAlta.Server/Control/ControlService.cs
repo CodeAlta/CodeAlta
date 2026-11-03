@@ -19,7 +19,7 @@ public sealed class ControlService
     public static readonly FleetProtocolRange Protocol = new(1, 1);
 
     /// <summary>The features the server announces in its welcome.</summary>
-    public static readonly IReadOnlyList<string> Features = ["presence", "inventory", "facts", "directory"];
+    public static readonly IReadOnlyList<string> Features = ["presence", "inventory", "facts", "directory", "relay"];
 
     private const int MaxStateLength = 32;
 
@@ -27,6 +27,7 @@ public sealed class ControlService
     private readonly PresenceRegistry _presence;
     private readonly DirectoryHub _directory;
     private readonly PublicationService _publications;
+    private readonly RelayHub? _relays;
     private readonly TimeProvider _time;
     private readonly FleetConnectionPolicy _policy;
     private readonly ILogger _logger;
@@ -59,6 +60,24 @@ public sealed class ControlService
         _logger = logger;
     }
 
+    /// <summary>Initializes a new instance of the <see cref="ControlService"/> class, with the relay of session channels.</summary>
+    /// <param name="store">The store.</param>
+    /// <param name="presence">The devices online.</param>
+    /// <param name="directory">The watchers of the directory.</param>
+    /// <param name="publications">What machines publish.</param>
+    /// <param name="relays">The relay of session channels.</param>
+    /// <param name="time">The clock.</param>
+    /// <param name="policy">The limits of the connections.</param>
+    /// <param name="logger">The log.</param>
+    /// <exception cref="ArgumentNullException">An argument is <see langword="null"/>.</exception>
+    public ControlService(ICoordinatorStore store, PresenceRegistry presence, DirectoryHub directory, PublicationService publications, RelayHub relays, TimeProvider time,
+        FleetConnectionPolicy policy, ILogger logger)
+        : this(store, presence, directory, publications, time, policy, logger)
+    {
+        ArgumentNullException.ThrowIfNull(relays);
+        _relays = relays;
+    }
+
     /// <summary>Serves a WebSocket request on <see cref="FleetServerMethods.ControlPath"/>.</summary>
     /// <param name="context">The request.</param>
     /// <returns>A task that completes when the connection ends.</returns>
@@ -75,7 +94,7 @@ public sealed class ControlService
 
         var socket = await context.WebSockets.AcceptWebSocketAsync().ConfigureAwait(false);
         await using var transport = new FleetWebSocketTransport(socket);
-        await ServeAsync(transport, context.RequestAborted).ConfigureAwait(false);
+        await ServeAsync(transport, context.Connection.RemoteIpAddress, context.RequestAborted).ConfigureAwait(false);
     }
 
     /// <summary>Runs the handshake and the connection on a transport, until the connection ends.</summary>
@@ -83,7 +102,15 @@ public sealed class ControlService
     /// <param name="cancellationToken">Ends the connection.</param>
     /// <returns>A task that completes when the connection ends.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="transport"/> is <see langword="null"/>.</exception>
-    public async Task ServeAsync(IFleetTransport transport, CancellationToken cancellationToken)
+    public Task ServeAsync(IFleetTransport transport, CancellationToken cancellationToken) => ServeAsync(transport, null, cancellationToken);
+
+    /// <summary>Runs the handshake and the connection on a transport, until the connection ends.</summary>
+    /// <param name="transport">The transport; the caller disposes it.</param>
+    /// <param name="remoteAddress">The address the connection comes from, for the audit log; null when unknown.</param>
+    /// <param name="cancellationToken">Ends the connection.</param>
+    /// <returns>A task that completes when the connection ends.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="transport"/> is <see langword="null"/>.</exception>
+    public async Task ServeAsync(IFleetTransport transport, System.Net.IPAddress? remoteAddress, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(transport);
         var verifier = new DeviceVerifier(_store);
@@ -106,7 +133,10 @@ public sealed class ControlService
             return;
         }
 
-        var session = new ControlSession(verifier.Device!, new FleetConnection(transport, FleetConnectionOptions.FromPolicy(accepted.Welcome.Policy)), _time.GetUtcNow());
+        var session = new ControlSession(verifier.Device!, new FleetConnection(transport, FleetConnectionOptions.FromPolicy(accepted.Welcome.Policy)), _time.GetUtcNow())
+        {
+            RemoteAddress = remoteAddress,
+        };
         await using var connection = session.Connection;
         Register(session);
         // Online before the first request is read: an answer to it implies the presence.
@@ -181,6 +211,22 @@ public sealed class ControlService
             var presence = _presence.List(organization).Select(static online => online.GetPresence()).ToArray();
             return JsonSerializer.SerializeToElement(new FleetDirectorySnapshot(machines, sessions, presence), FleetServerJsonContext.Default.FleetDirectorySnapshot);
         });
+
+        if (_relays is not { } relays) return;
+        connection.RegisterRequestHandler(FleetServerMethods.RelayOpen, Handler(FleetServerJsonContext.Default.FleetRelayOpen, async (open, token) =>
+        {
+            var ticket = await relays.OpenAsync(session, open, token).ConfigureAwait(false);
+            return JsonSerializer.SerializeToElement(ticket, FleetServerJsonContext.Default.FleetRelayTicket);
+        }));
+
+        connection.RegisterRequestHandler(FleetServerMethods.RelayAccept, Handler(FleetServerJsonContext.Default.FleetRelayRef, (accept, _) =>
+            Task.FromResult<JsonElement?>(JsonSerializer.SerializeToElement(relays.Accept(session.Device, accept), FleetServerJsonContext.Default.FleetRelayTicket))));
+
+        connection.RegisterRequestHandler(FleetServerMethods.RelayClose, Handler(FleetServerJsonContext.Default.FleetRelayClose, async (close, _) =>
+        {
+            await relays.CloseAsync(session.Device, close).ConfigureAwait(false);
+            return null;
+        }));
     }
 
     private static FleetRequestHandler Handler<T>(JsonTypeInfo<T> type, Func<T?, CancellationToken, Task<JsonElement?>> handle)
