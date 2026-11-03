@@ -185,6 +185,13 @@ internal sealed class UpdateCampaignEngine(UpdateCampaignLimits limits)
         ArgumentNullException.ThrowIfNull(machine);
         ArgumentNullException.ThrowIfNull(report);
         if (!FleetUpdateMachineStates.IsReported(report.State) || report.CampaignId != machine.CampaignId) return machine;
+        // A node that reports the cancelled campaign done (cancelled, or ended otherwise) acknowledged its cancellation.
+        if (machine.CancelPending && FleetUpdateMachineStates.IsTerminal(report.State))
+        {
+            var state = report.State == FleetUpdateMachineStates.Updated ? FleetUpdateMachineStates.Updated : machine.State;
+            return machine with { State = state, CancelPending = false, Running = report.Running, Message = Trim(report.Message), UpdatedAt = now };
+        }
+
         // A machine done with the campaign stays so; one that switched before a cancellation reached it is updated still.
         if (FleetUpdateMachineStates.IsTerminal(machine.State) && !(report.State == FleetUpdateMachineStates.Updated && machine.State == FleetUpdateMachineStates.Cancelled))
             return machine;
@@ -192,7 +199,10 @@ internal sealed class UpdateCampaignEngine(UpdateCampaignLimits limits)
         return machine with { State = report.State, Running = report.Running, Message = Trim(report.Message), UpdatedAt = now };
     }
 
-    /// <summary>Cancels a campaign before the server's step: the machines not done with it are cancelled.</summary>
+    /// <summary>
+    /// Cancels a campaign before the server's step: the machines not done with it are cancelled, and those that were asked
+    /// already keep the cancellation due until they acknowledge it (<see cref="UpdateCampaignMachineRecord.CancelPending"/>).
+    /// </summary>
     /// <param name="campaign">The campaign.</param>
     /// <param name="machines">Its machines.</param>
     /// <param name="now">The time.</param>
@@ -203,10 +213,69 @@ internal sealed class UpdateCampaignEngine(UpdateCampaignLimits limits)
         ArgumentNullException.ThrowIfNull(campaign);
         ArgumentNullException.ThrowIfNull(machines);
         if (campaign.State is not (FleetUpdateCampaignStates.Scheduled or FleetUpdateCampaignStates.UpdatingNodes)) return null;
-        var cancelled = machines.Where(static machine => !FleetUpdateMachineStates.IsTerminal(machine.State))
-            .Select(machine => machine with { State = FleetUpdateMachineStates.Cancelled, UpdatedAt = now }).ToArray();
-        var asked = machines.Where(static machine => InProgress.Contains(machine.State)).Select(static machine => machine.DeviceId).ToArray();
+        var (cancelled, asked) = CancelMachines(machines, now, null);
         return (campaign with { State = FleetUpdateCampaignStates.Cancelled, ServerState = FleetUpdateMachineStates.Cancelled, UpdatedAt = now }, cancelled, asked);
+    }
+
+    /// <summary>
+    /// Withdraws a campaign the update policy no longer allows: one before the server's step is cancelled; one partly done
+    /// keeps what is done, and its machines not done with it are cancelled. The machines asked already keep the cancellation
+    /// due until they acknowledge it.
+    /// </summary>
+    /// <param name="campaign">The campaign.</param>
+    /// <param name="machines">Its machines.</param>
+    /// <param name="now">The time.</param>
+    /// <param name="message">Why, for the campaign and its machines.</param>
+    /// <returns>The campaign, the machines cancelled, and those that were asked already; null when nothing is left to withdraw.</returns>
+    public static (UpdateCampaignRecord Campaign, IReadOnlyList<UpdateCampaignMachineRecord> Machines, IReadOnlyList<string> Asked)? Revoke(UpdateCampaignRecord campaign,
+        IReadOnlyList<UpdateCampaignMachineRecord> machines, DateTimeOffset now, string message)
+    {
+        ArgumentNullException.ThrowIfNull(campaign);
+        ArgumentNullException.ThrowIfNull(machines);
+        ArgumentException.ThrowIfNullOrEmpty(message);
+        if (campaign.State is FleetUpdateCampaignStates.Scheduled or FleetUpdateCampaignStates.UpdatingNodes)
+        {
+            var (all, askedAll) = CancelMachines(machines, now, message);
+            return (campaign with { State = FleetUpdateCampaignStates.Cancelled, ServerState = FleetUpdateMachineStates.Cancelled, ServerMessage = message, UpdatedAt = now },
+                all, askedAll);
+        }
+
+        if (campaign.State != FleetUpdateCampaignStates.PartlyDone) return null;
+        var (left, asked) = CancelMachines(machines, now, message);
+        return left.Length == 0 ? null : (campaign with { UpdatedAt = now }, left, asked);
+    }
+
+    private static (UpdateCampaignMachineRecord[] Cancelled, string[] Asked) CancelMachines(IReadOnlyList<UpdateCampaignMachineRecord> machines, DateTimeOffset now,
+        string? message)
+    {
+        var cancelled = machines.Where(static machine => !FleetUpdateMachineStates.IsTerminal(machine.State))
+            .Select(machine => machine with
+            {
+                State = FleetUpdateMachineStates.Cancelled, CancelPending = InProgress.Contains(machine.State), Message = message ?? machine.Message, UpdatedAt = now,
+            }).ToArray();
+        return (cancelled, [.. cancelled.Where(static machine => machine.CancelPending).Select(static machine => machine.DeviceId)]);
+    }
+
+    /// <summary>
+    /// Reconciles the server's step of a campaign, as recorded before a stop, with what the self-update of the server holds:
+    /// a step recorded as asked whose switch the self-update never recorded (no pending switch, no trial, no outcome of
+    /// that version since) was interrupted, and is taken again. The self-update takes the same version idempotently.
+    /// </summary>
+    /// <param name="campaign">The campaign.</param>
+    /// <param name="server">The status of the server's self-update.</param>
+    /// <param name="now">The time.</param>
+    /// <returns>The campaign whose server's step is to be taken again; null when nothing is to be resumed.</returns>
+    public static UpdateCampaignRecord? ResumeServerStep(UpdateCampaignRecord campaign, FleetUpdateStatus server, DateTimeOffset now)
+    {
+        ArgumentNullException.ThrowIfNull(campaign);
+        ArgumentNullException.ThrowIfNull(server);
+        if (campaign.State != FleetUpdateCampaignStates.UpdatingServer || campaign.ServerState is not (FleetUpdateMachineStates.Instructed or FleetUpdateMachineStates.Switching))
+            return null;
+        var target = campaign.TargetVersion;
+        // Running it, switching to it, or done with it since the step was asked: the next step records it.
+        if (Same(server.Running, target) || Same(server.Pending?.Version, target) || Same(server.Trial?.Version, target)) return null;
+        if (server.LastOutcome is { } outcome && Same(outcome.Version, target) && outcome.At >= campaign.UpdatedAt.AddSeconds(-1)) return null;
+        return campaign with { ServerState = FleetUpdateMachineStates.Pending, ServerMessage = null, UpdatedAt = now };
     }
 
     /// <summary>Gets whether two versions are the same, once normalized.</summary>

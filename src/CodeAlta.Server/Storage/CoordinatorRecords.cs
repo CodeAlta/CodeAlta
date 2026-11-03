@@ -310,8 +310,9 @@ public sealed record UpdateCampaignRecord(string Id, string OrganizationId, long
 /// <param name="Message">What happened, for a failure or a refusal; null otherwise.</param>
 /// <param name="InstructedAt">When the server last sent it the instruction, or null.</param>
 /// <param name="UpdatedAt">When its state last changed.</param>
+/// <param name="CancelPending">Whether the node was asked before the campaign was cancelled and has not acknowledged the cancellation yet.</param>
 public sealed record UpdateCampaignMachineRecord(string CampaignId, string DeviceId, string State, string? Running, string? Message, DateTimeOffset? InstructedAt,
-    DateTimeOffset UpdatedAt);
+    DateTimeOffset UpdatedAt, bool CancelPending = false);
 
 /// <summary>The update policy of an organization, as a controller device signed it, and its last check of the feed.</summary>
 /// <param name="OrganizationId">The organization.</param>

@@ -42,6 +42,8 @@ internal sealed record UpdateCampaignOptions
 internal sealed class UpdateCampaignService : IAsyncDisposable
 {
     private const int RecentCampaigns = 20;
+    // How many automatic campaigns to one version may fail (not roll back) before the policy stops trying it.
+    private const int MaxAutomaticAttempts = 3;
     private static readonly TimeSpan SendTimeout = TimeSpan.FromSeconds(5);
 
     private readonly ICoordinatorStore _store;
@@ -58,6 +60,8 @@ internal sealed class UpdateCampaignService : IAsyncDisposable
     private readonly HttpClient _http = new() { Timeout = TimeSpan.FromMinutes(2) };
     private Task _loop = Task.CompletedTask;
     private int _disposed;
+    // Written under the gate only.
+    private bool _serverStepsResumed;
 
     /// <summary>Initializes a new instance of the <see cref="UpdateCampaignService"/> class; <see cref="Start"/> runs it.</summary>
     public UpdateCampaignService(ICoordinatorStore store, PresenceRegistry presence, DirectoryHub directory, ServerUpdateStatusSource server, TimeProvider time,
@@ -126,21 +130,24 @@ internal sealed class UpdateCampaignService : IAsyncDisposable
             throw Invalid($"The manifest signs no hash of {UpdateProduct.Server.RuntimePackageId(runtime)}, the package of this server.");
 
         var organization = actor.OrganizationId;
-        if (await _store.GetUpdatePolicyAsync(organization, cancellationToken).ConfigureAwait(false) is { } held
-            && FleetUpdateDocuments.TryParsePolicy(held.Payload, out var policy, out _) && policy.Mode == FleetUpdateModes.Pinned
-            && !UpdateCampaignEngine.Same(policy.PinnedVersion, manifest.TargetVersion))
-            throw CoordinatorException.Conflict(CoordinatorErrorCodes.UpdateConflict, $"The fleet is pinned to {policy.PinnedVersion}: change its policy first.");
-
+        // Every creation and every change of the policy goes through the gate: the policy read here holds until the
+        // campaign is stored, and no automatic campaign starts meanwhile.
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            var recent = await _store.ListUpdateCampaignsAsync(organization, RecentCampaigns, cancellationToken).ConfigureAwait(false);
-            if (recent.FirstOrDefault(static campaign => FleetUpdateCampaignStates.IsActive(campaign.State)) is { } running)
+            if (await _store.GetUpdatePolicyAsync(organization, cancellationToken).ConfigureAwait(false) is { } held
+                && FleetUpdateDocuments.TryParsePolicy(held.Payload, out var policy, out _) && policy.Mode == FleetUpdateModes.Pinned
+                && !UpdateCampaignEngine.Same(policy.PinnedVersion, manifest.TargetVersion))
+                throw CoordinatorException.Conflict(CoordinatorErrorCodes.UpdateConflict, $"The fleet is pinned to {policy.PinnedVersion}: change its policy first.");
+
+            var outstanding = await _store.ListOutstandingUpdateCampaignsAsync(organization, cancellationToken).ConfigureAwait(false);
+            if (outstanding.FirstOrDefault(static campaign => FleetUpdateCampaignStates.IsActive(campaign.State)) is { } running)
                 throw CoordinatorException.Conflict(CoordinatorErrorCodes.UpdateConflict, $"Campaign {running.Sequence} to {running.TargetVersion} runs: cancel it first, or wait for its end.");
             var last = await _store.GetLastUpdateSequenceAsync(organization, cancellationToken).ConfigureAwait(false);
             if (manifest.Sequence <= last)
                 throw CoordinatorException.Conflict(CoordinatorErrorCodes.UpdateConflict, $"The manifest must be numbered after campaign {last}: read the updates again.");
-            if (recent.Any(campaign => campaign.Id == manifest.CampaignId)) throw CoordinatorException.Conflict(CoordinatorErrorCodes.UpdateConflict, "A campaign has this id.");
+            if (await _store.GetUpdateCampaignAsync(manifest.CampaignId, cancellationToken).ConfigureAwait(false) is not null)
+                throw CoordinatorException.Conflict(CoordinatorErrorCodes.UpdateConflict, "A campaign has this id.");
 
             var now = _time.GetUtcNow();
             var nodes = (await _store.ListDevicesAsync(organization, cancellationToken).ConfigureAwait(false))
@@ -151,7 +158,7 @@ internal sealed class UpdateCampaignService : IAsyncDisposable
             var machines = nodes.Select(device => new UpdateCampaignMachineRecord(campaign.Id, device.Id, FleetUpdateMachineStates.Pending, null, null, null, now)).ToArray();
             var audit = origin.Audit("update.campaign.create", actor, campaign.Id, details: Details(campaign, machines.Length));
             if (!await _store.CreateUpdateCampaignAsync(campaign, machines, audit, cancellationToken).ConfigureAwait(false))
-                throw CoordinatorException.Conflict(CoordinatorErrorCodes.UpdateConflict, "Another campaign has this sequence: read the updates again.");
+                throw CoordinatorException.Conflict(CoordinatorErrorCodes.UpdateConflict, "Another campaign runs or has this sequence: read the updates again.");
             _logger.LogInformation("Update campaign {Sequence} to {Version} from {Feed} for {Count} node(s), {When}, signed by {Device}", campaign.Sequence, campaign.TargetVersion,
                 campaign.Feed, machines.Length, campaign.NotBefore is { } start ? $"at {start:O}" : "now", actor.Id);
             Changed(campaign);
@@ -179,10 +186,10 @@ internal sealed class UpdateCampaignService : IAsyncDisposable
                 throw CoordinatorException.Conflict(CoordinatorErrorCodes.UpdateConflict, $"The campaign is {campaign.State}: it can be cancelled only before the server's step.");
             await _store.SaveUpdateCampaignAsync(cancelled.Campaign, cancelled.Machines, origin.Audit("update.campaign.cancel", actor, campaign.Id), cancellationToken)
                 .ConfigureAwait(false);
+            // A node offline gets it when it connects again: the cancellation stays due until the node acknowledges it.
             foreach (var device in cancelled.Asked)
             {
-                if (_presence.Get(device) is { } session)
-                    _ = SendAsync(session, FleetServerMethods.UpdateCancel, JsonSerializer.SerializeToElement(new FleetUpdateCancel(campaign.Id), FleetServerJsonContext.Default.FleetUpdateCancel));
+                if (_presence.Get(device) is { } session) _ = SendCancelAsync(session, campaign.Id);
             }
 
             _logger.LogInformation("Update campaign {Sequence} was cancelled by {Device}", campaign.Sequence, actor.Id);
@@ -217,12 +224,65 @@ internal sealed class UpdateCampaignService : IAsyncDisposable
         var record = new UpdatePolicyRecord(actor.OrganizationId, policy.Sequence, signed.Payload, signed.Signature, actor.Id, null, null, _time.GetUtcNow());
         var audit = origin.Audit("update.policy.set", actor, actor.OrganizationId,
             details: $"{{\"seq\":{policy.Sequence},\"mode\":\"{policy.Mode}\"}}");
-        if (!await _store.SetUpdatePolicyAsync(record, audit, cancellationToken).ConfigureAwait(false))
-            throw CoordinatorException.Conflict(CoordinatorErrorCodes.UpdateConflict, "The policy must be numbered after the one held: read it again.");
+        var revoked = new List<(string CampaignId, IReadOnlyList<string> Asked)>();
+        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            // Once stored, the policy is applied whatever the caller does: the server never holds one policy and runs
+            // campaigns only the one it replaced allowed.
+            if (!await _store.SetUpdatePolicyAsync(record, audit, CancellationToken.None).ConfigureAwait(false))
+                throw CoordinatorException.Conflict(CoordinatorErrorCodes.UpdateConflict, "The policy must be numbered after the one held: read it again.");
+            foreach (var campaign in await _store.ListOutstandingUpdateCampaignsAsync(actor.OrganizationId, CancellationToken.None).ConfigureAwait(false))
+            {
+                if (Disallowed(policy, campaign) is not { } why) continue;
+                var machines = await _store.ListUpdateCampaignMachinesAsync(campaign.Id, CancellationToken.None).ConfigureAwait(false);
+                if (UpdateCampaignEngine.Revoke(campaign, machines, _time.GetUtcNow(), why) is not { } withdrawn) continue;
+                await _store.SaveUpdateCampaignAsync(withdrawn.Campaign, withdrawn.Machines, origin.Audit("update.campaign.cancel", actor, campaign.Id,
+                    details: $"{{\"policy\":{policy.Sequence}}}"), CancellationToken.None).ConfigureAwait(false);
+                _logger.LogInformation("Update campaign {Sequence} to {Version} was withdrawn: {Reason}", campaign.Sequence, campaign.TargetVersion, why);
+                revoked.Add((campaign.Id, withdrawn.Asked));
+                Changed(withdrawn.Campaign);
+            }
+        }
+        finally
+        {
+            _gate.Release();
+        }
+
         _logger.LogInformation("The update policy {Sequence} of the fleet is {Mode}, set by {Device}", policy.Sequence, policy.Mode, actor.Id);
+        // The nodes hold the newest policy themselves, and refuse what a policy it replaced would allow.
+        foreach (var session in _presence.List(actor.OrganizationId))
+        {
+            if (session.Device.Kind != FleetDeviceKinds.Node) continue;
+            var cancelled = revoked.Where(item => item.Asked.Contains(session.Device.Id, StringComparer.Ordinal)).Select(static item => item.CampaignId).ToArray();
+            _ = DeliverAsync(session, record, cancelled);
+        }
+
         _directory.Publish(actor.OrganizationId, new FleetDirectoryChange(FleetServerMethods.ChangeKinds.Update, "policy"));
         Nudge();
         return PolicyDto(record);
+    }
+
+    // Why a policy no longer allows a campaign, or null when it does: an automatic campaign holds only under the
+    // automatic policy that started it; a pinned fleet takes no campaign to another version.
+    private static string? Disallowed(FleetUpdatePolicy policy, UpdateCampaignRecord campaign)
+    {
+        if (campaign.Automatic)
+        {
+            return policy.Mode == FleetUpdateModes.Automatic && policy.Sequence == campaign.Sequence
+                ? null
+                : $"The update policy {policy.Sequence} ({policy.Mode}) replaced the automatic policy that started it.";
+        }
+
+        return policy.Mode == FleetUpdateModes.Pinned && !UpdateCampaignEngine.Same(policy.PinnedVersion, campaign.TargetVersion)
+            ? $"The update policy {policy.Sequence} pins the fleet to {policy.PinnedVersion}."
+            : null;
+    }
+
+    private async Task DeliverAsync(ControlSession session, UpdatePolicyRecord policy, IReadOnlyList<string> cancelled)
+    {
+        await SendPolicyAsync(session, policy).ConfigureAwait(false);
+        foreach (var campaignId in cancelled) await SendCancelAsync(session, campaignId).ConfigureAwait(false);
     }
 
     /// <summary>Records where a node stands in a campaign.</summary>
@@ -235,6 +295,7 @@ internal sealed class UpdateCampaignService : IAsyncDisposable
         ArgumentNullException.ThrowIfNull(device);
         ArgumentNullException.ThrowIfNull(report);
         if (string.IsNullOrEmpty(report.CampaignId) || report.CampaignId.Length > 64 || !FleetUpdateMachineStates.IsReported(report.State)) return;
+        var cancel = false;
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
@@ -243,6 +304,8 @@ internal sealed class UpdateCampaignService : IAsyncDisposable
             var machines = await _store.ListUpdateCampaignMachinesAsync(campaign.Id, cancellationToken).ConfigureAwait(false);
             if (machines.FirstOrDefault(machine => machine.DeviceId == device.Id) is not { } machine) return;
             var applied = UpdateCampaignEngine.Apply(machine, report, _time.GetUtcNow());
+            // A node that still works on a cancelled campaign did not get its cancellation: it gets it again.
+            cancel = applied.CancelPending && !FleetUpdateMachineStates.IsTerminal(report.State);
             if (ReferenceEquals(applied, machine)) return;
             await _store.SaveUpdateCampaignAsync(campaign, [applied], null, cancellationToken).ConfigureAwait(false);
             if (applied.State != machine.State)
@@ -252,12 +315,16 @@ internal sealed class UpdateCampaignService : IAsyncDisposable
         finally
         {
             _gate.Release();
+            if (cancel && _presence.Get(device.Id) is { } session) _ = SendCancelAsync(session, report.CampaignId);
         }
 
         Nudge();
     }
 
-    /// <summary>Sends a node that connects the instruction of a campaign it is in the middle of, so that it reports again.</summary>
+    /// <summary>
+    /// Sends a node that connects the update policy of the fleet, the cancellations it has not acknowledged, and the
+    /// instruction of a campaign it is in the middle of, so that it reports again.
+    /// </summary>
     /// <param name="session">Its control connection.</param>
     /// <returns>A task that completes once it was sent or could not be.</returns>
     public async Task SendCurrentAsync(ControlSession session)
@@ -266,7 +333,14 @@ internal sealed class UpdateCampaignService : IAsyncDisposable
         if (session.Device.Kind != FleetDeviceKinds.Node) return;
         try
         {
-            foreach (var campaign in await _store.ListUpdateCampaignsAsync(session.Device.OrganizationId, RecentCampaigns).ConfigureAwait(false))
+            // The policy first: the node judges what follows by the newest one.
+            if (await _store.GetUpdatePolicyAsync(session.Device.OrganizationId).ConfigureAwait(false) is { } policy)
+                await SendPolicyAsync(session, policy).ConfigureAwait(false);
+            foreach (var cancelled in await _store.ListUpdateCancellationsAsync(session.Device.OrganizationId, session.Device.Id).ConfigureAwait(false))
+                await SendCancelAsync(session, cancelled).ConfigureAwait(false);
+
+            // Every campaign with work left, however many newer ones the history of the desktop shows.
+            foreach (var campaign in await _store.ListOutstandingUpdateCampaignsAsync(session.Device.OrganizationId).ConfigureAwait(false))
             {
                 if (campaign.State is not (FleetUpdateCampaignStates.UpdatingNodes or FleetUpdateCampaignStates.UpdatingServer or FleetUpdateCampaignStates.PartlyDone)) continue;
                 var machine = (await _store.ListUpdateCampaignMachinesAsync(campaign.Id).ConfigureAwait(false)).FirstOrDefault(item => item.DeviceId == session.Device.Id);
@@ -289,25 +363,50 @@ internal sealed class UpdateCampaignService : IAsyncDisposable
     internal async Task TickAsync(CancellationToken cancellationToken)
     {
         if (await _store.GetOrganizationAsync(cancellationToken).ConfigureAwait(false) is not { } organization) return;
-        await CheckPolicyAsync(organization.Id, cancellationToken).ConfigureAwait(false);
+        var feed = await ReadDueFeedAsync(organization.Id, cancellationToken).ConfigureAwait(false);
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            var campaigns = await _store.ListUpdateCampaignsAsync(organization.Id, RecentCampaigns, cancellationToken).ConfigureAwait(false);
-            var moving = campaigns.Where(static campaign => FleetUpdateCampaignStates.IsActive(campaign.State) || campaign.State == FleetUpdateCampaignStates.PartlyDone).ToArray();
-            if (moving.Length == 0) return;
+            // Under the gate, as a campaign a person starts: the automatic policy never starts a second active campaign.
+            if (feed is not null) await CheckPolicyAsync(organization.Id, feed, cancellationToken).ConfigureAwait(false);
+            var moving = await _store.ListOutstandingUpdateCampaignsAsync(organization.Id, cancellationToken).ConfigureAwait(false);
+            if (!_serverStepsResumed && await ResumeServerStepsAsync(moving, cancellationToken).ConfigureAwait(false))
+                moving = await _store.ListOutstandingUpdateCampaignsAsync(organization.Id, cancellationToken).ConfigureAwait(false);
+            if (moving.Count == 0) return;
             var inventory = (await _store.ListMachinesAsync(organization.Id, cancellationToken).ConfigureAwait(false))
                 .ToDictionary(static machine => machine.DeviceId, static machine => machine.ReadInventory()?.AppVersion, StringComparer.Ordinal);
             var status = _server.Read();
             var server = new UpdateCampaignServer(status.Running, status.LastOutcome);
             // The oldest first: a newer campaign has superseded the machines both name.
-            foreach (var campaign in moving.Reverse())
+            foreach (var campaign in moving.Reverse<UpdateCampaignRecord>())
                 await StepAsync(campaign, inventory, server, cancellationToken).ConfigureAwait(false);
         }
         finally
         {
             _gate.Release();
         }
+    }
+
+    // Once, at the first step whose self-update status is known (it starts after this service): the server's step a stop
+    // interrupted before the self-update recorded its switch is taken again. Under the gate, a step asked and its
+    // application happen together, so only a stop leaves one asked and not recorded. Gives whether a campaign changed.
+    private async Task<bool> ResumeServerStepsAsync(IReadOnlyList<UpdateCampaignRecord> campaigns, CancellationToken cancellationToken)
+    {
+        FleetUpdateStatus? status = null;
+        if (_options.ApplyServerUpdate is not null && !_server.TryRead(out status)) return false;
+        _serverStepsResumed = true;
+        // A server that does not update itself fails the step at once when it is taken again.
+        status ??= _server.Read();
+        var changed = false;
+        foreach (var campaign in campaigns)
+        {
+            if (UpdateCampaignEngine.ResumeServerStep(campaign, status, _time.GetUtcNow()) is not { } resumed) continue;
+            await _store.SaveUpdateCampaignAsync(resumed, [], null, cancellationToken).ConfigureAwait(false);
+            _logger.LogInformation("Update campaign {Sequence}: a stop interrupted the server's step before its switch was recorded; it is taken again", campaign.Sequence);
+            changed = true;
+        }
+
+        return changed;
     }
 
     private async Task StepAsync(UpdateCampaignRecord campaign, Dictionary<string, string?> inventory, UpdateCampaignServer server, CancellationToken cancellationToken)
@@ -345,8 +444,9 @@ internal sealed class UpdateCampaignService : IAsyncDisposable
         {
             failure = await ApplyServerAsync(campaign, cancellationToken).ConfigureAwait(false);
         }
-        catch (UpdateException exception)
+        catch (Exception exception) when (exception is UpdateException or HttpRequestException or IOException or UnauthorizedAccessException or InvalidOperationException)
         {
+            // The step was recorded as asked: it fails here rather than stay asked with nothing under way.
             failure = exception.Message;
         }
 
@@ -368,6 +468,9 @@ internal sealed class UpdateCampaignService : IAsyncDisposable
         if (_options.ApplyServerUpdate is not { } apply) return "This server does not update itself (it does not run under its launcher).";
         if (ServerRuntime() is not { } runtime) return "No package of CodeAlta Server is published for this server's OS and architecture.";
         if (!UpdateVersion.TryParse(_server.Read().Running, out var running)) return "The version of this server is not known.";
+        // An automatic campaign holds only while the policy that started it does, as on the nodes.
+        if (campaign.Automatic && (await _store.GetUpdatePolicyAsync(campaign.OrganizationId, cancellationToken).ConfigureAwait(false))?.Sequence != campaign.Sequence)
+            return "The automatic update policy that started the campaign was replaced.";
         var entries = await _store.ListDeviceListAsync(campaign.OrganizationId, cancellationToken).ConfigureAwait(false);
         FleetDeviceListState devices;
         try
@@ -384,46 +487,69 @@ internal sealed class UpdateCampaignService : IAsyncDisposable
             Devices = devices, OrganizationId = campaign.OrganizationId, Product = UpdateProduct.Server, Runtime = runtime, Running = running,
         };
         if (!UpdateInstructions.TryVerify(Instruction(campaign), context, out var update, out var reason)) return $"The server refused the campaign: {reason}.";
+        if (update.Automatic)
+        {
+            // No person signed this version: it must still be the latest stable release the feed lists, read now, not when
+            // the campaign started (a release withdrawn meanwhile is not installed). Its own self-update checks it again.
+            var latest = await ReadLatestAsync(campaign.Feed, cancellationToken).ConfigureAwait(false);
+            if (!UpdateCampaignEngine.Same(latest, campaign.TargetVersion))
+                return $"{campaign.TargetVersion} is no longer the latest stable version {campaign.Feed} lists ({latest ?? "none"}).";
+        }
+
         var request = update.ToRequest() with { StableOnly = update.Automatic };
         await apply(request, $"fleet campaign {campaign.Sequence} ({campaign.Id})", cancellationToken).ConfigureAwait(false);
         return null;
     }
 
-    private async Task CheckPolicyAsync(string organizationId, CancellationToken cancellationToken)
+    // The feed of an automatic policy whose daily check is due, read outside the gate (a feed may take minutes to
+    // answer); null when no check is due.
+    private async Task<FeedRead?> ReadDueFeedAsync(string organizationId, CancellationToken cancellationToken)
     {
         var held = await _store.GetUpdatePolicyAsync(organizationId, cancellationToken).ConfigureAwait(false);
-        if (held is null || !FleetUpdateDocuments.TryParsePolicy(held.Payload, out var policy, out _) || policy.Mode != FleetUpdateModes.Automatic) return;
-        var now = _time.GetUtcNow();
-        if (held.LastCheckAt is { } last && now - last < _options.CheckInterval) return;
-        string message;
+        if (held is null || !FleetUpdateDocuments.TryParsePolicy(held.Payload, out var policy, out _) || policy.Mode != FleetUpdateModes.Automatic) return null;
+        if (held.LastCheckAt is { } last && _time.GetUtcNow() - last < _options.CheckInterval) return null;
         try
         {
-            message = await CheckFeedAsync(held, policy, now, cancellationToken).ConfigureAwait(false);
+            return new FeedRead(held.Sequence, await ReadLatestAsync(policy.Feed ?? UpdateFeeds.NuGetOrg, cancellationToken).ConfigureAwait(false), null);
         }
         catch (UpdateException exception)
         {
-            message = exception.Message;
+            return new FeedRead(held.Sequence, null, exception.Message);
         }
+    }
 
+    // The latest stable version both products list on a feed (each with its tool package listed), or null.
+    private async Task<string?> ReadLatestAsync(string feed, CancellationToken cancellationToken)
+        => _options.ReadLatest is { } read
+            ? await read(feed, cancellationToken).ConfigureAwait(false)
+            : (await UpdateReleases.ListAsync(UpdateFeeds.Open(feed, _http), UpdateReleases.FleetProducts, false, cancellationToken).ConfigureAwait(false)).FirstOrDefault()?.ToString();
+
+    // Under the gate: decides on what the feed listed for the policy still held, and records the check.
+    private async Task CheckPolicyAsync(string organizationId, FeedRead read, CancellationToken cancellationToken)
+    {
+        var held = await _store.GetUpdatePolicyAsync(organizationId, cancellationToken).ConfigureAwait(false);
+        // A policy set while the feed was read is checked at the next step, on its own feed.
+        if (held is null || held.Sequence != read.PolicySequence || !FleetUpdateDocuments.TryParsePolicy(held.Payload, out var policy, out _)
+            || policy.Mode != FleetUpdateModes.Automatic)
+            return;
+        var now = _time.GetUtcNow();
+        // Another step may have checked meanwhile: once a day.
+        if (held.LastCheckAt is { } last && now - last < _options.CheckInterval) return;
+        var message = read.Error ?? await CheckFeedAsync(held, policy, read.Latest, now, cancellationToken).ConfigureAwait(false);
         await _store.SetUpdatePolicyCheckAsync(organizationId, now, message, cancellationToken).ConfigureAwait(false);
         _logger.LogInformation("The automatic update policy read its feed: {Message}", message);
         _directory.Publish(organizationId, new FleetDirectoryChange(FleetServerMethods.ChangeKinds.Update, "policy"));
     }
 
-    private async Task<string> CheckFeedAsync(UpdatePolicyRecord held, FleetUpdatePolicy policy, DateTimeOffset now, CancellationToken cancellationToken)
+    private async Task<string> CheckFeedAsync(UpdatePolicyRecord held, FleetUpdatePolicy policy, string? latestText, DateTimeOffset now, CancellationToken cancellationToken)
     {
         var feed = policy.Feed ?? UpdateFeeds.NuGetOrg;
-        var latestText = _options.ReadLatest is { } read
-            ? await read(feed, cancellationToken).ConfigureAwait(false)
-            : (await UpdateReleases.ListAsync(UpdateFeeds.Open(feed, _http), UpdateReleases.FleetProducts, false, cancellationToken).ConfigureAwait(false)).FirstOrDefault()?.ToString();
         if (!UpdateVersion.TryParse(latestText, out var latest)) return $"{feed} lists no stable version of the fleet.";
         var organization = held.OrganizationId;
-        var campaigns = await _store.ListUpdateCampaignsAsync(organization, RecentCampaigns, cancellationToken).ConfigureAwait(false);
-        if (campaigns.FirstOrDefault(static campaign => FleetUpdateCampaignStates.IsActive(campaign.State)) is { } running)
+        if ((await _store.ListOutstandingUpdateCampaignsAsync(organization, cancellationToken).ConfigureAwait(false))
+            .FirstOrDefault(static campaign => FleetUpdateCampaignStates.IsActive(campaign.State)) is { } running)
             return $"{latest} is the latest; campaign {running.Sequence} to {running.TargetVersion} runs.";
-        if (campaigns.Any(campaign => campaign.Automatic && UpdateCampaignEngine.Same(campaign.TargetVersion, latest.ToString())
-                                      && campaign.State is not FleetUpdateCampaignStates.Cancelled))
-            return $"{latest} is the latest; a campaign installed it already.";
+        if (await TriedAsync(organization, latest, cancellationToken).ConfigureAwait(false) is { } tried) return tried;
         var nodes = (await _store.ListDevicesAsync(organization, cancellationToken).ConfigureAwait(false))
             .Where(static device => device.Kind == FleetDeviceKinds.Node && device.Status == DeviceStatuses.Approved).ToArray();
         var versions = (await _store.ListMachinesAsync(organization, cancellationToken).ConfigureAwait(false))
@@ -437,16 +563,48 @@ internal sealed class UpdateCampaignService : IAsyncDisposable
         var campaign = new UpdateCampaignRecord(id, organization, policy.Sequence, true, latest.ToString(), feed, false, start == now ? null : start, policy.TimeZone,
             held.Payload, held.Signature, null, FleetUpdateCampaignStates.Scheduled, FleetUpdateMachineStates.Pending, null, now, now);
         var machines = nodes.Select(node => new UpdateCampaignMachineRecord(id, node.Id, FleetUpdateMachineStates.Pending, null, null, null, now)).ToArray();
-        await _store.CreateUpdateCampaignAsync(campaign, machines, new AuditEntry("update.campaign.create", AuditEntry.Success, null, null, id, null, null,
-            $"{{\"automatic\":true,\"version\":\"{latest}\"}}"), cancellationToken).ConfigureAwait(false);
+        if (!await _store.CreateUpdateCampaignAsync(campaign, machines, new AuditEntry("update.campaign.create", AuditEntry.Success, null, null, id, null, null,
+                $"{{\"automatic\":true,\"version\":\"{latest}\"}}"), cancellationToken).ConfigureAwait(false))
+            return $"{latest} is the latest; another campaign runs.";
         Changed(campaign);
         Nudge();
         return $"{latest} is the latest: the fleet updates at {start:u}.";
     }
 
+    // What the earlier automatic campaigns to a version say of another one, or null to start it: installed (done, or
+    // partly done: the machines left update when they reconnect), withdrawn as bad (the server or a node rolled it back),
+    // or failed MaxAutomaticAttempts times (a download, a feed or a refusal, tried again at each daily check until then).
+    // A cancelled campaign does not count: a person, or a new policy, withdrew it.
+    private async Task<string?> TriedAsync(string organizationId, UpdateVersion latest, CancellationToken cancellationToken)
+    {
+        var failures = 0;
+        foreach (var campaign in await _store.ListAutomaticUpdateCampaignsAsync(organizationId, latest.ToString(), cancellationToken).ConfigureAwait(false))
+        {
+            if (campaign.State is FleetUpdateCampaignStates.Done or FleetUpdateCampaignStates.PartlyDone) return $"{latest} is the latest; a campaign installed it already.";
+            if (campaign.State != FleetUpdateCampaignStates.Failed) continue;
+            if (campaign.ServerState == FleetUpdateMachineStates.RolledBack)
+                return $"{latest} is the latest; it rolled back on the server, so it is not installed again automatically: start a campaign to install it.";
+            if ((await _store.ListUpdateCampaignMachinesAsync(campaign.Id, cancellationToken).ConfigureAwait(false))
+                .Any(static machine => machine.State == FleetUpdateMachineStates.RolledBack))
+                return $"{latest} is the latest; it rolled back on a node, so it is not installed again automatically: start a campaign to install it.";
+            failures++;
+        }
+
+        return failures >= MaxAutomaticAttempts
+            ? $"{latest} is the latest; its automatic update failed {failures} times, so it is not tried again: start a campaign to install it."
+            : null;
+    }
+
     private async Task InstructAsync(ControlSession session, UpdateCampaignRecord campaign)
         => await SendAsync(session, FleetServerMethods.UpdateInstruction,
             JsonSerializer.SerializeToElement(Instruction(campaign), FleetServerJsonContext.Default.FleetUpdateInstruction)).ConfigureAwait(false);
+
+    private Task SendPolicyAsync(ControlSession session, UpdatePolicyRecord policy)
+        => SendAsync(session, FleetServerMethods.UpdatePolicy,
+            JsonSerializer.SerializeToElement(new FleetSignedUpdateDocument(policy.Payload, policy.Signature), FleetUpdateJsonContext.Default.FleetSignedUpdateDocument));
+
+    private Task SendCancelAsync(ControlSession session, string campaignId)
+        => SendAsync(session, FleetServerMethods.UpdateCancel, JsonSerializer.SerializeToElement(new FleetUpdateCancel(campaignId), FleetServerJsonContext.Default.FleetUpdateCancel));
 
     private static FleetUpdateInstruction Instruction(UpdateCampaignRecord campaign)
         => campaign.Automatic
@@ -572,6 +730,12 @@ internal sealed class UpdateCampaignService : IAsyncDisposable
         _gate.Dispose();
     }
 }
+
+/// <summary>What the feed of an automatic policy listed when its daily check was due.</summary>
+/// <param name="PolicySequence">The sequence of the policy it was read for.</param>
+/// <param name="Latest">The latest stable version of the fleet it lists, or null.</param>
+/// <param name="Error">Why it could not be read, or null.</param>
+internal sealed record FeedRead(long PolicySequence, string? Latest, string? Error);
 
 /// <summary>The source-generated JSON of the audit details of the updates.</summary>
 [System.Text.Json.Serialization.JsonSerializable(typeof(Dictionary<string, string>))]

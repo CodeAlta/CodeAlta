@@ -583,6 +583,28 @@ public sealed class SqliteCoordinatorStore : ICoordinatorStore
     }
 
     /// <inheritdoc />
+    public ValueTask<IReadOnlyList<UpdateCampaignRecord>> ListOutstandingUpdateCampaignsAsync(string organizationId, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(organizationId);
+        // A partly done campaign has work while a machine is not done with it, or once every machine runs the version (its
+        // next step makes it done).
+        return ReadAsync(connection => QueryList(connection, null, CampaignColumns + " FROM update_campaigns WHERE organization_id = $org " +
+            "AND (state IN ('scheduled', 'updating_nodes', 'updating_server') OR state = 'partly_done' AND (" +
+            "EXISTS (SELECT 1 FROM update_campaign_machines AS m WHERE m.campaign_id = update_campaigns.id AND m.state IN ('pending', 'instructed', 'waiting', 'downloading', 'switching')) " +
+            "OR NOT EXISTS (SELECT 1 FROM update_campaign_machines AS m WHERE m.campaign_id = update_campaigns.id AND m.state NOT IN ('updated', 'superseded')))) " +
+            "ORDER BY created_at DESC, id DESC", ReadCampaign, ("$org", organizationId)), cancellationToken);
+    }
+
+    /// <inheritdoc />
+    public ValueTask<IReadOnlyList<UpdateCampaignRecord>> ListAutomaticUpdateCampaignsAsync(string organizationId, string targetVersion, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(organizationId);
+        ArgumentException.ThrowIfNullOrEmpty(targetVersion);
+        return ReadAsync(connection => QueryList(connection, null, CampaignColumns + " FROM update_campaigns WHERE organization_id = $org AND automatic = 1 " +
+            "AND target_version = $version ORDER BY created_at DESC, id DESC", ReadCampaign, ("$org", organizationId), ("$version", targetVersion)), cancellationToken);
+    }
+
+    /// <inheritdoc />
     public ValueTask<UpdateCampaignRecord?> GetUpdateCampaignAsync(string campaignId, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrEmpty(campaignId);
@@ -594,9 +616,20 @@ public sealed class SqliteCoordinatorStore : ICoordinatorStore
     {
         ArgumentException.ThrowIfNullOrEmpty(campaignId);
         return ReadAsync(connection => QueryList(connection, null,
-            "SELECT campaign_id, device_id, state, running, message, instructed_at, updated_at FROM update_campaign_machines WHERE campaign_id = $id ORDER BY device_id",
+            "SELECT campaign_id, device_id, state, running, message, instructed_at, updated_at, cancel_pending FROM update_campaign_machines WHERE campaign_id = $id ORDER BY device_id",
             static reader => new UpdateCampaignMachineRecord(reader.GetString(0), reader.GetString(1), reader.GetString(2), GetNullableString(reader, 3), GetNullableString(reader, 4),
-                GetNullableTime(reader, 5), FromTime(reader.GetInt64(6))), ("$id", campaignId)), cancellationToken);
+                GetNullableTime(reader, 5), FromTime(reader.GetInt64(6)), reader.GetInt64(7) != 0), ("$id", campaignId)), cancellationToken);
+    }
+
+    /// <inheritdoc />
+    public ValueTask<IReadOnlyList<string>> ListUpdateCancellationsAsync(string organizationId, string deviceId, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(organizationId);
+        ArgumentException.ThrowIfNullOrEmpty(deviceId);
+        return ReadAsync(connection => QueryList(connection, null,
+            "SELECT m.campaign_id FROM update_campaign_machines AS m JOIN update_campaigns AS c ON c.id = m.campaign_id " +
+            "WHERE m.device_id = $device AND m.cancel_pending = 1 AND c.organization_id = $org ORDER BY c.created_at, c.id",
+            static reader => reader.GetString(0), ("$device", deviceId), ("$org", organizationId)), cancellationToken);
     }
 
     /// <inheritdoc />
@@ -618,6 +651,15 @@ public sealed class SqliteCoordinatorStore : ICoordinatorStore
         ArgumentNullException.ThrowIfNull(machines);
         return WriteAsync((connection, transaction) =>
         {
+            // One campaign of an organization is active at a time, whether a person or the automatic policy starts it.
+            if (FleetUpdateCampaignStates.IsActive(campaign.State))
+            {
+                using var active = Create(connection, transaction,
+                    "SELECT COUNT(*) FROM update_campaigns WHERE organization_id = $org AND state IN ('scheduled', 'updating_nodes', 'updating_server')",
+                    ("$org", campaign.OrganizationId));
+                if (Convert.ToInt64(active.ExecuteScalar(), CultureInfo.InvariantCulture) > 0) return false;
+            }
+
             if (!campaign.Automatic)
             {
                 using var exists = Create(connection, transaction, "SELECT COUNT(*) FROM update_campaigns WHERE organization_id = $org AND automatic = 0 AND seq = $seq",
@@ -710,11 +752,12 @@ public sealed class SqliteCoordinatorStore : ICoordinatorStore
 
     private static void WriteCampaignMachine(SqliteConnection connection, SqliteTransaction transaction, UpdateCampaignMachineRecord machine)
         => Execute(connection, transaction,
-            "INSERT INTO update_campaign_machines (campaign_id, device_id, state, running, message, instructed_at, updated_at) " +
-            "VALUES ($campaign, $device, $state, $running, $message, $instructed, $updated) ON CONFLICT (campaign_id, device_id) DO UPDATE SET " +
-            "state = excluded.state, running = excluded.running, message = excluded.message, instructed_at = excluded.instructed_at, updated_at = excluded.updated_at",
+            "INSERT INTO update_campaign_machines (campaign_id, device_id, state, running, message, instructed_at, updated_at, cancel_pending) " +
+            "VALUES ($campaign, $device, $state, $running, $message, $instructed, $updated, $cancel) ON CONFLICT (campaign_id, device_id) DO UPDATE SET " +
+            "state = excluded.state, running = excluded.running, message = excluded.message, instructed_at = excluded.instructed_at, updated_at = excluded.updated_at, " +
+            "cancel_pending = excluded.cancel_pending",
             ("$campaign", machine.CampaignId), ("$device", machine.DeviceId), ("$state", machine.State), ("$running", machine.Running), ("$message", machine.Message),
-            ("$instructed", ToNullableTime(machine.InstructedAt)), ("$updated", ToTime(machine.UpdatedAt)));
+            ("$instructed", ToNullableTime(machine.InstructedAt)), ("$updated", ToTime(machine.UpdatedAt)), ("$cancel", machine.CancelPending ? 1 : 0));
 
     private static UpdateCampaignRecord ReadCampaign(SqliteDataReader reader)
         => new(reader.GetString(0), reader.GetString(1), reader.GetInt64(2), reader.GetInt64(3) != 0, reader.GetString(4), reader.GetString(5), reader.GetInt64(6) != 0,

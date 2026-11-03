@@ -214,6 +214,23 @@ public interface ICoordinatorStore : IAsyncDisposable
     /// <returns>The campaigns.</returns>
     ValueTask<IReadOnlyList<UpdateCampaignRecord>> ListUpdateCampaignsAsync(string organizationId, int limit, CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// Lists the update campaigns of an organization that still have work, however old, the newest first: the active ones
+    /// (scheduled or updating), and the partly done ones with a machine not done with them or whose machines all run the
+    /// version (their next step makes them done).
+    /// </summary>
+    /// <param name="organizationId">The organization.</param>
+    /// <param name="cancellationToken">Cancels the operation.</param>
+    /// <returns>The campaigns.</returns>
+    ValueTask<IReadOnlyList<UpdateCampaignRecord>> ListOutstandingUpdateCampaignsAsync(string organizationId, CancellationToken cancellationToken = default);
+
+    /// <summary>Lists the campaigns the automatic policy of an organization started to a version, however old, the newest first.</summary>
+    /// <param name="organizationId">The organization.</param>
+    /// <param name="targetVersion">The version, normalized as the campaigns record it.</param>
+    /// <param name="cancellationToken">Cancels the operation.</param>
+    /// <returns>The campaigns.</returns>
+    ValueTask<IReadOnlyList<UpdateCampaignRecord>> ListAutomaticUpdateCampaignsAsync(string organizationId, string targetVersion, CancellationToken cancellationToken = default);
+
     /// <summary>Gets an update campaign.</summary>
     /// <param name="campaignId">The campaign.</param>
     /// <param name="cancellationToken">Cancels the operation.</param>
@@ -225,6 +242,13 @@ public interface ICoordinatorStore : IAsyncDisposable
     /// <param name="cancellationToken">Cancels the operation.</param>
     /// <returns>The machines, by device id.</returns>
     ValueTask<IReadOnlyList<UpdateCampaignMachineRecord>> ListUpdateCampaignMachinesAsync(string campaignId, CancellationToken cancellationToken = default);
+
+    /// <summary>Lists the cancelled campaigns a node has not acknowledged the cancellation of yet, the oldest first.</summary>
+    /// <param name="organizationId">The organization.</param>
+    /// <param name="deviceId">The device of the node.</param>
+    /// <param name="cancellationToken">Cancels the operation.</param>
+    /// <returns>The ids of the campaigns.</returns>
+    ValueTask<IReadOnlyList<string>> ListUpdateCancellationsAsync(string organizationId, string deviceId, CancellationToken cancellationToken = default);
 
     /// <summary>Gets the highest sequence of the manifests of an organization's campaigns.</summary>
     /// <param name="organizationId">The organization.</param>
@@ -240,7 +264,10 @@ public interface ICoordinatorStore : IAsyncDisposable
     /// <param name="machines">Its machines.</param>
     /// <param name="audit">The audit record.</param>
     /// <param name="cancellationToken">Cancels the operation.</param>
-    /// <returns><see langword="false"/> when a campaign has the same manifest sequence: nothing was written.</returns>
+    /// <returns>
+    /// <see langword="false"/> when a campaign has the same manifest sequence, or the campaign is active and another one of
+    /// the organization is (scheduled or updating): nothing was written.
+    /// </returns>
     ValueTask<bool> CreateUpdateCampaignAsync(UpdateCampaignRecord campaign, IReadOnlyList<UpdateCampaignMachineRecord> machines, AuditEntry? audit,
         CancellationToken cancellationToken = default);
 

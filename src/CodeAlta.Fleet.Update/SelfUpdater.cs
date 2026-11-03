@@ -17,7 +17,10 @@ public sealed record UpdateRequest
     /// <summary>Gets whether a prerelease may be chosen when the running version is a release.</summary>
     public bool Prerelease { get; init; }
 
-    /// <summary>Gets whether only a stable version is chosen, even when a prerelease runs (the automatic policy of a fleet).</summary>
+    /// <summary>
+    /// Gets whether only a stable version is chosen, even when a prerelease runs (the automatic policy of a fleet); with an
+    /// exact <see cref="Version"/>, that version must be the latest stable one both packages list.
+    /// </summary>
     public bool StableOnly { get; init; }
 
     /// <summary>Gets whether the switch does not wait for running work.</summary>
@@ -151,6 +154,19 @@ public sealed class SelfUpdater
                     _ => $"{toolPackageId} {exact} but not {runtimePackageId} {exact}, the package of this machine: the release is not complete yet",
                 };
                 throw new UpdateException(UpdateErrorCodes.NotFound, $"{source} has {missing}.");
+            }
+
+            if (request.StableOnly)
+            {
+                // The automatic policy of a fleet: no person named this version, so it must still be the latest stable
+                // release both packages list, read now.
+                if (exact.IsPrerelease) throw new UpdateException(UpdateErrorCodes.NotFound, $"{exact} is a prerelease: only a stable version is taken.");
+                if (!tool.Listed || !runtime.Listed) throw new UpdateException(UpdateErrorCodes.NotFound, $"{exact} is unlisted on {source}: the release was withdrawn.");
+                var listedRuntimes = runtimeVersions.Where(static found => found.Listed).Select(static found => found.Version).ToHashSet();
+                var latestStable = toolVersions.Where(found => found.Listed && !found.Version.IsPrerelease && listedRuntimes.Contains(found.Version))
+                    .Select(static found => found.Version).DefaultIfEmpty().Max();
+                if (latestStable is not null && latestStable > exact)
+                    throw new UpdateException(UpdateErrorCodes.NotFound, $"{exact} is no longer the latest stable version {source} lists: {latestStable} is.");
             }
 
             var note = exact.Equals(running) ? $"{exact} already runs."

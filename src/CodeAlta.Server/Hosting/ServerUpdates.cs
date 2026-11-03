@@ -11,6 +11,15 @@ internal sealed class ServerUpdateStatusSource(Func<FleetUpdateStatus?>? read)
     /// <summary>Reads the status: as the self-update reports it, or the running version alone.</summary>
     /// <returns>The status.</returns>
     public FleetUpdateStatus Read() => read?.Invoke() ?? new FleetUpdateStatus(ServerVersion.Current, null, null, null, null, null, [], null);
+
+    /// <summary>Reads the status as the self-update reports it: its pending switch, its trial and how its last switch ended.</summary>
+    /// <param name="status">The status, when the self-update runs.</param>
+    /// <returns>Whether the self-update reported it (it does not before it started, nor in a server without one).</returns>
+    public bool TryRead([System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out FleetUpdateStatus? status)
+    {
+        status = read?.Invoke();
+        return status is not null;
+    }
 }
 
 /// <summary>What a <see cref="ServerUpdates"/> reads and drives.</summary>
