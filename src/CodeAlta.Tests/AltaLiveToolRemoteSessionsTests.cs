@@ -105,6 +105,8 @@ public sealed partial class AltaLiveToolTests
 
         public RemoteMachine? FindMachineOf(string sessionId) => sessionId == "child-1" ? new("m1", "mac-mini", "online") : null;
 
+        public string? FindParentOf(string childSessionId) => childSessionId == "child-1" ? Created.FirstOrDefault()?.ParentSessionId : null;
+
         public Task<RemoteChildResult> CreateAsync(RemoteChildRequest request, CancellationToken cancellationToken)
         {
             if (Refusal is { } code) return Task.FromResult(new RemoteChildResult("refused", code, "The owner did not allow it.") { MachineName = "mac-mini" });

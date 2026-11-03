@@ -355,19 +355,19 @@ internal sealed record SandboxAvailabilityItem(bool Available, string Backend, s
 /// <summary>A profile: one of CodeAlta as it resolves, or one of the user as it is written (a null value is inherited).</summary>
 internal sealed record SandboxProfileItem(string Name, bool BuiltIn, string? Extends, string? Network, string? Outside, IReadOnlyList<string> Hosts,
     IReadOnlyList<string> Write, IReadOnlyList<string> Read, IReadOnlyList<string> Deny, IReadOnlyList<int> LocalPorts, IReadOnlyList<string> Env,
-    IReadOnlyList<string> McpServers, string? Problem = null)
+    IReadOnlyList<string> McpServers, string? Problem = null, string? Fleet = null)
 {
     internal static SandboxProfileItem FromResolved(ResolvedSandboxProfile profile, bool builtIn) => new(profile.Name, builtIn, null,
         profile.Network.ToString().ToLowerInvariant(), profile.Outside.ToString().ToLowerInvariant(), profile.Hosts, profile.Write, profile.Read, profile.Deny,
-        profile.LocalPorts, profile.Env, profile.McpServers);
+        profile.LocalPorts, profile.Env, profile.McpServers, Fleet: profile.Fleet ? "allow" : "never");
 
     internal static SandboxProfileItem FromWritten(CodeAltaSandboxProfileSettings profile, string? problem) => new(profile.Name, false, profile.Extends,
         profile.Network, profile.Outside, profile.Hosts ?? [], profile.Write ?? [], profile.Read ?? [], profile.Deny ?? [], profile.LocalPorts ?? [],
-        profile.Env ?? [], profile.McpServers ?? [], problem);
+        profile.Env ?? [], profile.McpServers ?? [], problem, profile.Fleet);
 
     // The page writes every list it shows; an empty one inherits nothing.
     internal CodeAltaSandboxProfileSettings ToSettings(string name) => new(name, Clean(Extends), Strings(Write), Strings(Read), Strings(Deny), Clean(Network),
-        Strings(Hosts), LocalPorts is { Count: > 0 } ports ? [.. ports.Distinct()] : null, Strings(Env), Strings(McpServers), Clean(Outside));
+        Strings(Hosts), LocalPorts is { Count: > 0 } ports ? [.. ports.Distinct()] : null, Strings(Env), Strings(McpServers), Clean(Outside), Clean(Fleet));
 
     private static string? Clean(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 

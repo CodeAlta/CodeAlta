@@ -145,7 +145,7 @@ public sealed partial class FleetNodeService
 
         var provider = ResolveProvider(parameters.Selection?.ProviderKey, project?.ProjectPath);
         var permissionMode = AgentPermissionMode(provider.ProviderId.Value, limits.PermissionMode, policy);
-        var sandbox = AgentSandbox(limits.Sandbox, policy.Sandbox);
+        var sandbox = AgentSandbox(limits, policy.Sandbox);
         var sessionId = Guid.NewGuid().ToString();
         var createdBy = new AltaActorProvenance
         {
@@ -216,21 +216,54 @@ public sealed partial class FleetNodeService
             ?? throw new FleetException(FleetNodeErrorCodes.AgentRequestDenied, null, $"The provider '{providerKey}' of {_options.Name} offers no mode that asks as much as the agent's.");
     }
 
-    // The sandbox the session runs in: the parent's, or the one the policy requires, the stricter when both are named;
-    // the node refuses one it does not have, or cannot start.
-    private string? AgentSandbox(string? parent, string? required)
+    // The sandbox the session runs in (doc/fleet/security-and-privacy.md, "Remote execution", rules 4 and 8): a profile of
+    // this node at least as strict as the parent's profile as its machine resolves it, and as the one the policy requires
+    // as this node resolves it; the parent's name first, then the policy's. A profile of the same name is not enough: the
+    // owner of this node may have given it more. The node refuses when none holds, or when it cannot start a sandbox.
+    private string? AgentSandbox(FleetAgentLimits limits, string? required)
     {
-        string? sandbox = (parent, required) switch
+        var parent = limits.Sandbox?.Trim();
+        required = required?.Trim();
+        if (parent is null && required is null) return null;
+        var floor = limits.Confinement is { } wire ? FleetSandboxFloors.FromWire(wire) : null;
+        var profiles = _host.RuntimeService.ReadSandboxSettings().Profiles;
+        SandboxConfinement? Here(string name)
         {
-            (null, null) => null,
-            ({ } own, null) => own,
-            (null, { } policy) => policy,
-            ({ } own, { } policy) when string.Equals(own, policy, StringComparison.OrdinalIgnoreCase) => own,
-            ({ } own, { } policy) => string.Equals(policy, SandboxProfiles.Strict, StringComparison.OrdinalIgnoreCase) ? policy : own,
-        };
-        if (sandbox is null) return null;
-        if (string.Equals(sandbox, SandboxProfiles.Off, StringComparison.OrdinalIgnoreCase) || !KnowsSandbox(sandbox))
-            throw new FleetException(FleetNodeErrorCodes.AgentRequestDenied, null, $"{_options.Name} has no sandbox profile '{sandbox}': it cannot run the session as sandboxed as its parent.");
+            if (string.Equals(name, SandboxProfiles.Off, StringComparison.OrdinalIgnoreCase)) return null;
+            try { return SandboxConfinement.Of(SandboxProfiles.Resolve(name, profiles)); }
+            catch (SandboxProfileException) { return null; }
+        }
+
+        var policyFloor = required is null ? null
+            : Here(required) ?? throw new FleetException(FleetNodeErrorCodes.AgentRequestDenied, null, $"{_options.Name} has no sandbox profile '{required}' that its policy requires.");
+        string? sandbox = null;
+        string? why = null;
+        foreach (var name in new[] { parent, required }.OfType<string>().Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            if (Here(name) is not { } candidate)
+            {
+                why ??= $"it has no sandbox profile '{name}' that can be used";
+                continue;
+            }
+
+            if ((floor is null ? null : candidate.WeakerThan(floor)) is { } weaker)
+            {
+                why ??= $"its profile '{name}' lets the session do more than its parent: {weaker}";
+                continue;
+            }
+
+            if ((policyFloor is null ? null : candidate.WeakerThan(policyFloor)) is { } loose)
+            {
+                why ??= $"its profile '{name}' is weaker than the profile '{required}' its policy requires: {loose}";
+                continue;
+            }
+
+            sandbox = name;
+            break;
+        }
+
+        if (sandbox is null)
+            throw new FleetException(FleetNodeErrorCodes.AgentRequestDenied, null, $"{_options.Name} cannot run the session as sandboxed as its parent: {why}.");
         var availability = _host.RuntimeService.GetSandboxAvailability();
         if (!availability.IsAvailable)
             throw new FleetException(FleetNodeErrorCodes.AgentRequestDenied, null, $"{_options.Name} cannot start a sandbox ({availability.Reason}): it does not run the session without one.");
@@ -255,6 +288,7 @@ public sealed partial class FleetNodeService
         var session = await RequireViewedSessionAsync(sessionId, cancellationToken).ConfigureAwait(false);
         if (!SameId(session.SpaceId ?? "default", request.SpaceId))
             throw new FleetException(FleetNodeErrorCodes.AgentRequestDenied, null, "An agent reaches only the sessions of its own space.");
+        await RequireAgentFloorAsync(session.SessionId, request.Floor!, cancellationToken).ConfigureAwait(false);
         var child = _agents.Find(session.SessionId);
         var ownChild = child is not null && string.Equals(child.ParentSessionId, request.ParentSessionId, StringComparison.OrdinalIgnoreCase)
             && child.ParentDeviceId == call.Caller.DeviceId;
@@ -275,6 +309,25 @@ public sealed partial class FleetNodeService
 
             {text}
             """;
+    }
+
+    // The fleet is never a way out of a sandbox (doc/fleet/security-and-privacy.md, "Remote execution", rule 8): an agent
+    // drives only a session that asks the user at least as much as itself, and runs at least as confined as its sandbox.
+    private async Task RequireAgentFloorAsync(string sessionId, FleetAgentFloor floor, CancellationToken cancellationToken)
+    {
+        var mode = await _host.RuntimeService.GetPermissionModeAsync(sessionId, cancellationToken).ConfigureAwait(false);
+        if (SessionPermissionModes.Rank(mode) > SessionPermissionModes.Rank(floor.PermissionMode))
+            throw new FleetException(FleetNodeErrorCodes.AgentRequestDenied, null,
+                $"The session runs in '{mode}', which asks less than the agent that sends the prompt ('{floor.PermissionMode}'): a person sends it from the session.");
+        if (floor.Confinement is not { } wire) return;
+        var sandbox = await _host.RuntimeService.GetSessionSandboxAsync(sessionId, cancellationToken).ConfigureAwait(false);
+        var why = !sandbox.IsSandboxed ? "it runs without a sandbox"
+            : sandbox.Profile is not { } profile ? $"its sandbox '{sandbox.Choice.Profile}' cannot be used"
+            : SandboxConfinement.Of(profile).WeakerThan(FleetSandboxFloors.FromWire(wire)) is { } weaker ? $"its sandbox '{sandbox.Choice.Profile}' lets it do more: {weaker}"
+            : null;
+        if (why is not null)
+            throw new FleetException(FleetNodeErrorCodes.AgentRequestDenied, null,
+                $"The agent that sends the prompt is sandboxed (profile '{floor.Sandbox}'), and the session is less confined than it ({why}): a person sends it from the session.");
     }
 
     // The restrictions of the sessions agents started here are held by the runtime only: they are given again at each start.

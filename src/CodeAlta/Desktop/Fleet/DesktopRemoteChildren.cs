@@ -84,10 +84,17 @@ internal sealed class DesktopRemoteChildren : IRemoteChildSessions, IAsyncDispos
         => _fleet.Hosts.FirstOrDefault(host => host.Lists(sessionId)) is { } found ? new RemoteMachine(found.MachineId!, NameOf(found), RemoteSessionHost.Describe(found.State)) : null;
 
     /// <inheritdoc />
+    public string? FindParentOf(string childSessionId)
+        => Children.FirstOrDefault(child => string.Equals(child.ChildSessionId, childSessionId, StringComparison.OrdinalIgnoreCase))?.ParentSessionId;
+
+    /// <inheritdoc />
     public async Task<RemoteChildResult> CreateAsync(RemoteChildRequest request, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
         if (Resolve(request.Machine) is not { } host) return Refused("machine_not_found", $"No machine is named '{request.Machine}': `alta session create --machine-list` lists them.");
+        // A sandbox goes with what it confines here, which the machine holds the child to: never its name alone.
+        if (request.Sandbox is not null && request.Confinement is null)
+            return Refused("agent_request_denied", $"The sandbox '{request.Sandbox}' of the session cannot be used here: it starts nothing on another machine.");
         var name = NameOf(host);
         if (await OnlineAsync(host, cancellationToken).ConfigureAwait(false) is null) return Refused("machine_offline", $"{name} is {RemoteSessionHost.Describe(host.State)}.", name);
         try
@@ -100,7 +107,8 @@ internal sealed class DesktopRemoteChildren : IRemoteChildSessions, IAsyncDispos
             var signed = _fleet.SignAgentRequest(new FleetAgentRequest(FleetAgentRequest.CurrentVersion, FleetAgentRequestKinds.Start, host.MachineId!, "", "",
                 _time.GetUtcNow(), "", request.ParentSessionId, _machineName, request.SpaceId, null, projectId,
                 request.Prompt is { } prompt ? FleetAgentRequestDocuments.HashText(prompt) : null,
-                new FleetAgentLimits(request.DisabledTools, request.PermissionMode, request.Sandbox, request.SubSessions, 1)));
+                new FleetAgentLimits(request.DisabledTools, request.PermissionMode, request.Sandbox, request.SubSessions, 1,
+                    request.Confinement is { } confinement ? FleetSandboxFloors.ToWire(confinement) : null)));
             var selection = request.ProviderKey is null && request.ModelId is null && request.ReasoningEffort is null && request.AgentPromptId is null
                 ? null : new FleetModelSelection(request.ProviderKey, request.ModelId, request.AgentPromptId, request.ReasoningEffort);
             // The answer of a child a script waits for is kept from the start: it may come before the script waits.
@@ -172,7 +180,8 @@ internal sealed class DesktopRemoteChildren : IRemoteChildSessions, IAsyncDispos
             }
 
             var signed = _fleet.SignAgentRequest(new FleetAgentRequest(FleetAgentRequest.CurrentVersion, kind, host.MachineId!, "", "", _time.GetUtcNow(), "",
-                request.SenderSessionId, _machineName, request.SpaceId, request.SessionId, null, FleetAgentRequestDocuments.HashText(request.Text), null));
+                request.SenderSessionId, _machineName, request.SpaceId, request.SessionId, null, FleetAgentRequestDocuments.HashText(request.Text), null,
+                FleetSandboxFloors.ToWire(request.Floor)));
             var key = Guid.NewGuid().ToString("N");
             switch (kind)
             {

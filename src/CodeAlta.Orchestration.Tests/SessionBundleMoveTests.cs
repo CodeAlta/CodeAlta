@@ -7,6 +7,7 @@ using CodeAlta.Catalog;
 using CodeAlta.Catalog.SessionMoves;
 using CodeAlta.Orchestration.Hosting;
 using CodeAlta.Orchestration.Runtime;
+using CodeAlta.Sandbox;
 
 namespace CodeAlta.Orchestration.Tests;
 
@@ -332,6 +333,52 @@ public sealed class SessionBundleMoveTests
             Assert.AreEqual(SessionMoveState.Finished, recovered.Status, string.Join(" ", recovered.Warnings));
             await SendAsync(target, sessionId, "Here now.");
             Assert.AreEqual(recovered.Transaction!.WorkFolder, provider.LastWorkingDirectory);
+        }
+    }
+
+    // The fleet is never a way out of a sandbox (doc/fleet/security-and-privacy.md, "Remote execution", rule 8): a
+    // session sandboxed here, even by a setting rather than a choice of its own, is at least as confined on the target,
+    // which refuses it when its own profile of that name lets it do more.
+    [TestMethod]
+    public async Task ASandboxedSession_StaysAtLeastAsConfinedOnTheTarget_OrTheTargetRefusesIt()
+    {
+        using var machines = Machines.Create();
+        var provider = new RecordingProvider();
+        string sessionId;
+        const string moveId = "move-sandboxed";
+        SessionMoveStepResult offered;
+        await using (var source = await machines.CreateSourceHostAsync(provider))
+        {
+            sessionId = (await source.Commands.CreateDraftSessionAsync(source.CurrentProject, provider.Descriptor, null)).SessionId;
+            await SendAsync(source, sessionId, "One.");
+            // Sandboxed by the setting of every session of the source, which the target does not have.
+            File.WriteAllText(Path.Combine(machines.SourceGlobal, "config.toml"), "[sandbox]\nall_sessions = \"workspace\"\n");
+            Assert.AreEqual("workspace", (await source.RuntimeService.GetSessionSandboxAsync(sessionId)).Choice.Profile);
+            offered = await new SessionMoveService(source, "Windows PC").OfferAsync(sessionId, moveId, "Mac mini");
+            Assert.AreEqual(SessionMoveState.Offered, offered.Status, string.Join(" ", offered.Warnings));
+        }
+
+        var manifest = (await SessionBundle.ReadManifestAsync(offered.Transaction!.BundleFolder!, CancellationToken.None))!;
+        Assert.AreEqual("workspace", manifest.Sandbox, "The bundle carries the sandbox the session runs in, wherever it comes from.");
+
+        await using (var target = await machines.CreateTargetHostAsync(provider))
+        {
+            var moves = new SessionMoveService(target, "Mac mini");
+            var received = await machines.TransferAsync(offered.Transaction!.BundleFolder!, moves.GetBundleFolder(moveId, SessionMoveRole.Target));
+
+            // The workspace of the target reaches the whole internet: it would let the session do more there.
+            File.WriteAllText(Path.Combine(machines.TargetGlobal, "config.toml"), "[sandbox.profiles.workspace]\nnetwork = \"on\"\n");
+            var refused = await moves.PrepareAsync(received, CancellationToken.None);
+            Assert.AreEqual("sandbox_weaker", refused.Status, string.Join(" ", refused.Warnings));
+            Assert.IsNull(moves.Store.Read(moveId, SessionMoveRole.Target), "Nothing of the session is kept for a move refused.");
+
+            // As strict as the source's: it comes, and keeps that sandbox as its own whatever the settings of the target say.
+            File.WriteAllText(Path.Combine(machines.TargetGlobal, "config.toml"), "");
+            Assert.AreEqual(SessionMoveState.Prepared, (await moves.PrepareAsync(received, CancellationToken.None)).Status);
+            var committed = await moves.CommitAsync(moveId, new LocalSessionMoveArbiter(moves.Store), CancellationToken.None);
+            Assert.AreEqual(SessionMoveState.Finished, committed.Status, string.Join(" ", committed.Warnings));
+            var sandbox = await target.RuntimeService.GetSessionSandboxAsync(sessionId);
+            Assert.AreEqual(("workspace", SandboxScope.Session), (sandbox.Choice.Profile, sandbox.Choice.Source));
         }
     }
 
