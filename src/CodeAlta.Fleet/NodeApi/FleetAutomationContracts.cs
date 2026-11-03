@@ -46,7 +46,11 @@ public interface IFleetNodeAutomations
 /// <summary>The device that calls a method of the <c>automations.*</c> group.</summary>
 /// <param name="DeviceId">Its device id.</param>
 /// <param name="Name">The name it gave itself at pairing.</param>
-public sealed record FleetAutomationCaller(string DeviceId, string Name);
+public sealed record FleetAutomationCaller(string DeviceId, string Name)
+{
+    /// <summary>Gets the fingerprint of the key the device authenticated the channel with; null when unknown.</summary>
+    public string? Fingerprint { get; init; }
+}
 
 /// <summary>The parameters of <c>automations.put</c>.</summary>
 /// <param name="Definition">
@@ -57,7 +61,15 @@ public sealed record FleetAutomationCaller(string DeviceId, string Name);
 /// The repository key of the project it runs in (<c>host/owner/repo</c>), which the node finds among its projects; null
 /// for an automation that runs as a chat.
 /// </param>
-public sealed record FleetAutomationPutParams(string Definition, string? Repository);
+public sealed record FleetAutomationPutParams(string Definition, string? Repository)
+{
+    /// <summary>
+    /// Gets the version the device signed for this machine (<see cref="Protocol.FleetSignedAutomationVersion"/>), with the
+    /// definition and the repository in clear: the node runs what it signed, and only while the signature verifies with
+    /// the key of the device it is paired with. Required: a definition without it is refused.
+    /// </summary>
+    public Protocol.FleetSignedAutomationVersion? Signed { get; init; }
+}
 
 /// <summary>The parameters of <c>automations.remove</c> and <c>automations.run</c>.</summary>
 /// <param name="Id">The automation.</param>

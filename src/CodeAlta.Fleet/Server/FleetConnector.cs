@@ -34,7 +34,7 @@ public enum FleetConnectorState
 }
 
 /// <summary>What a <see cref="FleetConnector"/> connects with and publishes.</summary>
-public sealed class FleetConnectorOptions
+public sealed partial class FleetConnectorOptions
 {
     /// <summary>Gets the address of the server.</summary>
     public required Uri ServerAddress { get; init; }
@@ -165,7 +165,7 @@ public sealed class FleetConnectorOptions
 /// </para>
 /// <para>One loop owns the connection and the outbox; the source and the callers only wake it.</para>
 /// </remarks>
-public sealed class FleetConnector : IAsyncDisposable
+public sealed partial class FleetConnector : IAsyncDisposable
 {
     /// <summary>The most facts in one batch, as the server takes them.</summary>
     public const int MaxFactsPerBatch = 500;
@@ -489,6 +489,9 @@ public sealed class FleetConnector : IAsyncDisposable
                     // In the order of the instructions: a policy that arrives first takes away what it no longer allows.
                     if (policy is { Payload.Length: > 0 }) QueueUpdate(() => receivePolicy(policy, stop), stop);
                     break;
+                case FleetAutomationMethods.Assigned:
+                    OnAutomationsAssigned(fleetEvent, stop);
+                    break;
             }
 
             return ValueTask.CompletedTask;
@@ -501,6 +504,8 @@ public sealed class FleetConnector : IAsyncDisposable
             if (_options.WatchDirectory) await WatchDirectoryAsync(connection, stop).ConfigureAwait(false);
             // Where this node stands in a campaign, again on each connection: the server may have missed the last report.
             if (_options.UpdateReport?.Invoke() is { } report) await SendUpdateReportAsync(connection, report, stop).ConfigureAwait(false);
+            // The runs of the automations this server gave, again on each connection: the server may have missed some.
+            OnAutomationsOnline(stop);
 
             var lastPresence = DateTimeOffset.MinValue;
             var lastRead = DateTimeOffset.MinValue;

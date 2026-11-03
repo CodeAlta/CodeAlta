@@ -59,7 +59,7 @@ public static class FleetServerAddress
 /// this device, and approves and revokes devices with device-list entries this controller device signs.
 /// </summary>
 /// <remarks>The server signs nothing: an approval is an entry of the device list signed here, after the last one the server holds.</remarks>
-public sealed class FleetServerClient : IDisposable
+public sealed partial class FleetServerClient : IDisposable
 {
     private static readonly MediaTypeHeaderValue Json = new("application/json");
 

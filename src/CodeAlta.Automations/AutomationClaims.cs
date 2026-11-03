@@ -25,6 +25,17 @@ internal interface IAutomationClaims
     /// <param name="runId">The run.</param>
     /// <param name="now">The time it ended.</param>
     void Release(string runId, DateTimeOffset now);
+
+    /// <summary>
+    /// Confirms a claim with whoever else must know of it before its run starts (the server of an automation it gave),
+    /// once the claim of this host was taken.
+    /// </summary>
+    /// <param name="automationId">The automation.</param>
+    /// <param name="occurrence">What is due.</param>
+    /// <param name="runId">The run that took it.</param>
+    /// <param name="cancellationToken">Cancels the confirmation.</param>
+    /// <returns>Why the run does not start (another run took that time elsewhere); null when it starts.</returns>
+    ValueTask<string?> ConfirmAsync(string automationId, string occurrence, string runId, CancellationToken cancellationToken) => ValueTask.FromResult<string?>(null);
 }
 
 /// <summary>

@@ -117,7 +117,10 @@ internal sealed class NodeFleet : IAsyncDisposable
             });
             // An assigned automation runs while the device that assigned it is still paired, with the automate permission.
             if (node.Automations is { } automations)
+            {
                 automations.Devices = deviceId => trusted.List().FirstOrDefault(device => string.Equals(device.DeviceId, deviceId, StringComparison.Ordinal));
+                automations.DeviceId = identity.DeviceId;
+            }
             string? file = null;
             // Without a listener the node API still serves the channels its servers relay.
             if (listen.Enabled)
@@ -356,7 +359,20 @@ internal sealed class NodeServers : IAsyncDisposable
             TelemetrySettings = telemetry is null ? null : telemetry.AcceptAsync,
             Metrics = telemetry?.Metrics,
             Updates = updates,
+            // The automations a server gives this node, verified against its device list and opened with the key of this node.
+            Automations = node.Automations is { } given ? new NodeServerAutomations(given, identity) : null,
         });
+        if (node.Automations is { } automations)
+        {
+            automations.DeviceId ??= identity.DeviceId;
+            Fleet.Server.FleetConnector? ConnectorOf(string linkId) => connections.Find(linkId)?.Connector;
+            automations.ServerDevices = linkId => ConnectorOf(linkId)?.Devices.Current;
+            automations.ServerClaim = (linkId, claim, token) => ConnectorOf(linkId) is { } connector
+                ? connector.ClaimAutomationAsync(claim, token)
+                : Task.FromResult<CodeAlta.Fleet.Protocol.FleetAutomationClaimResult?>(null);
+            automations.ServerReport = (linkId, facts, token) => ConnectorOf(linkId) is { } connector ? connector.ReportAutomationRunsAsync(facts, token) : Task.FromResult(false);
+        }
+
         connections.Start();
         return new NodeServers(identity, source, connections, statistics);
     }

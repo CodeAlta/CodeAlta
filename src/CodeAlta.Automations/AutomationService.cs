@@ -677,7 +677,7 @@ internal sealed partial class AutomationService : IAsyncDisposable
             return false;
         }
 
-        var start = BeginAsync(entry, trigger, detail, prompt, _stop.Token, runId);
+        var start = BeginAsync(entry, trigger, detail, prompt, _stop.Token, runId, occurrence);
         lock (_gate)
         {
             _observers.RemoveAll(static task => task.IsCompleted);
@@ -688,7 +688,8 @@ internal sealed partial class AutomationService : IAsyncDisposable
     }
 
     // Records the run, starts its session and returns once the session exists; what follows is observed apart.
-    private async Task<AutomationRun?> BeginAsync(AutomationEntry entry, string trigger, string? detail, string prompt, CancellationToken cancellationToken, string? runId = null)
+    private async Task<AutomationRun?> BeginAsync(AutomationEntry entry, string trigger, string? detail, string prompt, CancellationToken cancellationToken, string? runId = null,
+        string? occurrence = null)
     {
         var run = new AutomationRun(runId ?? NewRunId(), entry.Id, _time.GetUtcNow(), trigger) { Name = entry.Definition.Name, ProjectId = entry.ProjectId, Detail = detail };
         lock (_gate)
@@ -704,6 +705,17 @@ internal sealed partial class AutomationService : IAsyncDisposable
 
         _state.Add(run);
         Changed?.Invoke();
+        // A time claimed here may be taken elsewhere already (the automation ran on another machine before it came here).
+        string? taken = null;
+        if (occurrence is not null && _claims is not null)
+        {
+            try { taken = await _claims.ConfirmAsync(entry.Id, occurrence, run.Id, cancellationToken).ConfigureAwait(false); }
+            catch (OperationCanceledException) { taken = "The application closed before the run started."; }
+            // A confirmation that fails is no answer: the claim of this host holds.
+            catch (Exception exception) when (exception is not OutOfMemoryException) { taken = null; }
+        }
+
+        if (taken is not null) return End(run.Id, entry.Id, new(AutomationRun.Skipped, taken), null);
         AutomationStart start;
         try
         {

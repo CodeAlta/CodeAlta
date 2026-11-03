@@ -90,6 +90,9 @@ Every event has an id, so a run happens once even when two machines see the same
   ([disconnects](#disconnects)).
 - **Without a server** (paired machines), **Runs on** a paired machine copies the automation to it; it runs there and
   shows in the paired view.
+- **Through a server** (personal scope), **Runs on** a machine of the person that the desktop reaches only through the
+  server gives the server the signed, sealed version; the machine verifies it against the device list it anchored,
+  claims each due time with the server, and reports its runs ([protocol](protocol.md#server-api-over-the-control-connection)).
 
 ## Who a run acts as
 
