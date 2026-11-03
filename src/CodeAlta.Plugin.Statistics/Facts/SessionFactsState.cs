@@ -51,8 +51,12 @@ internal sealed class SessionFactsState
     /// <summary>The number of runs of scripts without an end that are remembered.</summary>
     public const int MaxOpenScripts = 64;
 
-    /// <summary>The number of moves to another machine a journal is told apart by; the records after more of them are counted as those before.</summary>
-    public const int MaxMoves = 256;
+    /// <summary>
+    /// The number of times a journal is read again from its start because a move it did not know changed which records are the work
+    /// of this machine. One reading takes every move it meets, so a second one is enough unless the journal grows while it is read.
+    /// There is no limit on the moves themselves: the state holds one entry for each move record of the journal.
+    /// </summary>
+    public const int MaxRestartReadings = 64;
 
     /// <summary>Gets or sets the version of the facts this state belongs to.</summary>
     public int Version { get; set; } = CurrentVersion;
@@ -212,7 +216,8 @@ internal sealed class SessionFactsState
 /// <summary>
 /// The moves of a session between machines, in the order of its journal. A machine counts the records it wrote: the journal it holds
 /// is the one of the machine its last move went to, the records before the first move were written by the machine that move came
-/// from, and those after a move by the machine it went to. A machine is known by its name.
+/// from, and those after a move by the machine it went to. A machine is known by its device id, which a rename does not change;
+/// a move written before the ids were recorded names the machines only, and those names are compared instead.
 /// </summary>
 internal sealed class MovedSessionState
 {
@@ -233,9 +238,10 @@ internal sealed class MovedSessionState
                 return true;
             }
 
-            var holder = Moves[^1].To;
-            var writer = Met == 0 ? Moves[0].From : Moves[Met - 1].To;
-            return holder is not null && string.Equals(writer, holder, StringComparison.Ordinal);
+            var holder = Moves[^1];
+            return Met == 0
+                ? MoveState.SameMachine(Moves[0].FromDevice, Moves[0].From, holder.ToDevice, holder.To)
+                : MoveState.SameMachine(Moves[Met - 1].ToDevice, Moves[Met - 1].To, holder.ToDevice, holder.To);
         }
     }
 
@@ -255,6 +261,31 @@ internal sealed class MoveState
 
     /// <summary>Gets or sets the name of the machine the session went to.</summary>
     public string? To { get; set; }
+
+    /// <summary>Gets or sets the device id of the machine the session came from; null for a move written before the ids were recorded.</summary>
+    public string? FromDevice { get; set; }
+
+    /// <summary>Gets or sets the device id of the machine the session went to; null for a move written before the ids were recorded.</summary>
+    public string? ToDevice { get; set; }
+
+    /// <summary>Gets a value indicating whether the move says which machine the session went to.</summary>
+    [JsonIgnore]
+    public bool KnowsTarget => !string.IsNullOrEmpty(ToDevice) || To is not null;
+
+    /// <summary>
+    /// Tells whether two ways of naming a machine are the same machine: by device id when both have one (a machine renamed between two
+    /// moves keeps its id), otherwise by name (a move written before the ids were recorded). A machine that is not named at all is
+    /// never the same as another.
+    /// </summary>
+    /// <param name="deviceA">The device id of the first, or null.</param>
+    /// <param name="nameA">The name of the first, or null.</param>
+    /// <param name="deviceB">The device id of the second, or null.</param>
+    /// <param name="nameB">The name of the second, or null.</param>
+    /// <returns><see langword="true"/> when they are the same machine.</returns>
+    public static bool SameMachine(string? deviceA, string? nameA, string? deviceB, string? nameB)
+        => !string.IsNullOrEmpty(deviceA) && !string.IsNullOrEmpty(deviceB)
+            ? string.Equals(deviceA, deviceB, StringComparison.Ordinal)
+            : nameA is not null && string.Equals(nameA, nameB, StringComparison.Ordinal);
 }
 
 /// <summary>

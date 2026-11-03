@@ -331,18 +331,14 @@ internal sealed class SessionFactsReducer : IJournalRecordSink
             RestartRequested = true;
         }
 
-        if (moved.Moves.Count >= SessionFactsState.MaxMoves)
-        {
-            return;
-        }
-
-        var holder = moved.Moves.Count > 0 ? moved.Moves[^1].To : null;
-        if (moved.Moves.Count == 0 || move.To is null || !string.Equals(move.To, holder, StringComparison.Ordinal))
+        var added = new MoveState { MoveId = move.MoveId!, From = move.From, To = move.To, FromDevice = move.FromDevice, ToDevice = move.ToDevice };
+        if (moved.Moves.Count == 0 || !added.KnowsTarget
+            || !MoveState.SameMachine(added.ToDevice, added.To, moved.Moves[^1].ToDevice, moved.Moves[^1].To))
         {
             RestartRequested = true;
         }
 
-        moved.Moves.Add(new MoveState { MoveId = move.MoveId!, From = move.From, To = move.To });
+        moved.Moves.Add(added);
         moved.Met++;
     }
 
