@@ -87,7 +87,7 @@ public sealed class FleetHostStatisticsSource : IFleetStatisticsSource, IDisposa
                 {
                     case "provider": provider = Bounded(value); break;
                     case "model": model = Bounded(value); break;
-                    default: keys.Add(value); break;
+                    default: keys.Add(Key(value)); break;
                 }
             }
 
@@ -134,6 +134,13 @@ public sealed class FleetHostStatisticsSource : IFleetStatisticsSource, IDisposa
 
     // Names are kept as the store has them; one that is not a short name without control characters is not published.
     private static string? Bounded(string value) => string.IsNullOrEmpty(value) || value.Length > 128 || value.Any(char.IsControl) ? null : value;
+
+    // Another key (an effort, a tool) as the server takes it: at most 128 characters, without control characters.
+    private static string Key(string value)
+    {
+        var kept = value.Length > 128 ? value[..128] : value;
+        return kept.Any(char.IsControl) ? new string([.. kept.Select(static c => char.IsControl(c) ? ' ' : c)]) : kept;
+    }
 
     /// <summary>Gives the quarter hours from which the facts of a server link are published: those of the day the link was made, in UTC.</summary>
     /// <param name="linkedAt">When the link was made.</param>

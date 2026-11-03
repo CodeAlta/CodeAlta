@@ -6,22 +6,23 @@ using CodeAlta.Catalog;
 using CodeAlta.Desktop.Fleet;
 using CodeAlta.Desktop.Rpc;
 using CodeAlta.Fleet.Server;
-using CodeAlta.Hosting;
-using CodeAlta.Node;
 using CodeAlta.Orchestration.Hosting;
-using CodeAlta.Orchestration.Runtime;
+using CodeAlta.Plugin.Statistics;
+using CodeAlta.Plugins;
+using CodeAlta.Plugins.Abstractions;
 using CodeAlta.Server.Hosting;
 
 namespace CodeAlta.Desktop.Tests;
 
 /// <summary>
-/// Fleet statistics end to end (<c>doc/fleet/statistics.md</c>): a CodeAlta Node of this process with a session counts its
-/// statistics and publishes them to a CodeAlta Server of this process; the server sums them; the <c>fleetServer</c> service of
-/// the window returns the "My fleet" view, with the node named and its project named by this computer, which has the same
-/// repository and computes the same blind index with the person's key. No model is called: the session is a journal.
+/// Fleet statistics end to end (<c>doc/fleet/statistics.md</c>): a second machine of this process, a headless host that runs the
+/// statistics engine as CodeAlta Node does (<see cref="StatisticsPlugin.CreateForHost"/>) and publishes its statistics, joins a
+/// CodeAlta Server of this process; the server sums them; the <c>fleetServer</c> service of this window returns the "My fleet"
+/// view, with the machine named and its project named by this computer, which has the same repository and computes the same blind
+/// index with the person's key. No model is called: the session is a journal. (<c>altanode</c> itself is exercised the same way
+/// by <c>NodeStatisticsTests</c>: only its own tests may reference it.)
 /// </summary>
 [TestClass]
-[DoNotParallelize]
 public sealed class FleetStatisticsEndToEndTests
 {
     private static readonly TimeSpan Patience = TimeSpan.FromSeconds(90);
@@ -30,14 +31,11 @@ public sealed class FleetStatisticsEndToEndTests
     public TestContext TestContext { get; set; } = null!;
 
     [TestMethod]
-    public async Task ANodePublishes_TheServerSums_AndTheDesktopShowsMyFleet()
+    public async Task AMachinePublishes_TheServerSums_AndTheDesktopShowsMyFleet()
     {
         var token = TestContext.CancellationToken;
         var root = Directory.CreateTempSubdirectory("codealta-fleet-statistics-").FullName;
         string At(string name) => Directory.CreateDirectory(Path.Combine(root, name)).FullName;
-        // The node logs as the executable does; the log of this test is its own, shut down at its end.
-        var ownsLog = !XenoAtom.Logging.LogManager.IsInitialized;
-        if (ownsLog) XenoAtom.Logging.LogManager.InitializeForAsync(new XenoAtom.Logging.LogManagerConfig());
         try
         {
             await using var server = await CoordinatorServer.StartAsync(new CoordinatorServerOptions
@@ -46,11 +44,11 @@ public sealed class FleetStatisticsEndToEndTests
             }, token);
             var address = server.Addresses.First(static uri => uri.Scheme == "http");
 
-            // One repository, checked out on the node and on this computer: one project of the person, on two machines.
-            var nodeCheckout = Repository(At("node-checkout"));
+            // One repository, checked out on both machines: one project of the person, on two machines.
+            var machineCheckout = Repository(At("machine-checkout"));
             var desktopCheckout = Repository(At("desktop-checkout"));
 
-            // The desktop: the owner's controller device, which made the server and approves the node.
+            // This desktop: the owner's controller device, which makes the server and approves the other machine.
             await using var host = await CodeAltaHost.CreateAsync(new CodeAltaHostOptions
             {
                 GlobalRoot = At("global"), CurrentProjectPath = desktopCheckout, DiscoveryScope = new(At("home"), root), BuiltInSkillRoot = At("builtin"),
@@ -64,75 +62,62 @@ public sealed class FleetStatisticsEndToEndTests
             var created = await service.CreateAsync(new FleetServerCreateRequest(epoch, address.ToString(), server.SetupCode!.Code, "Alex", "Home"), token);
             Assert.AreEqual("ok", created.Status, created.Message);
             var linkId = created.Server!.Id;
-            var enrollment = await service.CreateTokenAsync(new FleetServerTokenRequest(epoch, linkId, 2, "test-node"), token);
+            var enrollment = await service.CreateTokenAsync(new FleetServerTokenRequest(epoch, linkId, 2, "Mac mini"), token);
 
-            // The node, with a session of its project in its journals: one turn, a tool call, 1200 tokens in and 300 out.
-            var dataRoot = At("node");
-            var nodeOptions = NodeOptions(root, dataRoot, nodeCheckout);
-            await using (var writer = await NodeHost.StartAsync(nodeOptions, token))
+            // The other machine: its session of the project is in its journals (one turn, a tool call, 1200 tokens in and 300 out)
+            // before it starts, and its statistics engine reads it from its first day, as on a node.
+            var machineGlobal = At("machine");
+            await using (var writer = await MachineHostAsync(machineGlobal, machineCheckout, root, startPlugins: false, token))
             {
-                var project = await writer.Host.ProjectCatalog.UpsertFromPathAsync(nodeCheckout, token);
-                await AddProjectSessionAsync(writer.Host, "node-session", project, token);
+                var project = await writer.ProjectCatalog.UpsertFromPathAsync(machineCheckout, token);
+                await AddProjectSessionAsync(writer, "machine-session", project, token);
             }
 
-            var started = new TaskCompletionSource<Action>(TaskCreationOptions.RunContinuationsAsynchronously);
-            var node = new NodeApplication(TextWriter.Null, TextWriter.Null)
+            await using var machine = await MachineHostAsync(machineGlobal, machineCheckout, root, startPlugins: true, token);
+            Assert.IsNotNull(machine.PluginRuntime.ActivePlugins.Select(static active => active.Instance).OfType<StatisticsPlugin>().Single().Statistics,
+                "the statistics engine runs on the machine");
+            await using var machineServers = new DesktopFleetServers(machine, "Mac mini", "4.0.0", Fast);
+            var machineEpoch = Guid.NewGuid().ToString("D");
+            var machineService = new FleetServerService(machineServers, machineEpoch) { Spaces = machine.SpaceCatalog, IsPaired = static _ => false };
+            var joined = await machineService.JoinAsync(new FleetServerJoinRequest(machineEpoch, address.ToString(), enrollment.Token!), token);
+            Assert.AreEqual("ok", joined.Status, joined.Message);
+            Assert.AreEqual("ok", (await machineService.LinkSpaceAsync(new FleetServerSpaceRequest(machineEpoch, SpaceDescriptor.DefaultId, joined.Server!.Id), token)).Status);
+            var pending = (await service.DevicesAsync(new FleetServerLinkRequest(epoch, linkId), token)).Devices.Single(static device => device.Status == "pending");
+            Assert.AreEqual("ok", (await service.ApproveAsync(new FleetServerDeviceRequest(epoch, linkId, pending.Id), token)).Status);
+
+            // The machine counts its session, publishes its set once it holds the person's key, and the server sums it.
+            var deadline = DateTime.UtcNow + Patience;
+            FleetStatisticsResult result;
+            while (true)
             {
-                InitializeLogging = false,
-                ConfigureHost = _ => nodeOptions with { StartPlugins = true },
-                Started = (_, stop) => started.TrySetResult(stop),
-                ConfigureConnector = Fast,
-                ServiceEnvironment = static () => null,
-            };
-            var running = node.RunAsync(["run", "--data-root", dataRoot, "--no-listen", "--name", "test-node"]);
-            var stop = await started.Task.WaitAsync(Patience, token);
-            try
-            {
-                var joined = await new NodeApplication(TextWriter.Null, TextWriter.Null) { InitializeLogging = false, ServiceEnvironment = static () => null }
-                    .RunAsync(["join", address.ToString(), "--token", enrollment.Token!, "--data-root", dataRoot, "--name", "test-node", "--no-wait"]);
-                Assert.AreEqual(NodeExitCodes.Success, joined);
-                var pending = (await service.DevicesAsync(new FleetServerLinkRequest(epoch, linkId), token)).Devices.Single(static device => device.Status == "pending");
-                Assert.AreEqual("ok", (await service.ApproveAsync(new FleetServerDeviceRequest(epoch, linkId, pending.Id), token)).Status);
-
-                // The node counts its session, publishes its set once it holds the person's key, and the server sums it.
-                var deadline = DateTime.UtcNow + Patience;
-                FleetStatisticsResult result;
-                while (true)
-                {
-                    result = await service.StatisticsAsync(Request(epoch, "machine", "project"), token);
-                    if (result.View?.Groups.Any(static group => group.ProjectName is not null) == true) break;
-                    if (DateTime.UtcNow > deadline) Assert.Fail($"The desktop did not get the statistics of the node: {result.Status} {result.Message} {result.View?.Totals.InputTokens}.");
-                    await Task.Delay(250, token);
-                }
-
-                var view = result.View!;
-                Assert.AreEqual(("ok", linkId), (result.Status, view.LinkId));
-                Assert.AreEqual((1200m, 300m, 1m, 1m), (view.Totals.InputTokens, view.Totals.OutputTokens, view.Totals.Runs, view.Totals.ToolCalls));
-                var group = view.Groups.Single(static group => group.Measures.InputTokens > 0);
-                Assert.AreEqual(("test-node", desktopProject.DisplayName), (group.MachineName, group.ProjectName),
-                    "the node is named by the server, its project by this computer, which has the same repository");
-                Assert.AreEqual(22, group.Project!.Length, "the server holds a blind index, never the project");
-                var machine = view.Machines.Single(static machine => machine.Name == "test-node");
-                Assert.AreEqual((1, false), (machine.Sessions, machine.IsThisComputer));
-                Assert.IsNotNull(machine.LastPublishedAt);
-                Assert.IsTrue(view.Machines.Single(static machine => machine.Name == "Desktop").IsThisComputer);
-
-                // By model and by day, from the same facts.
-                var byModel = (await service.StatisticsAsync(Request(epoch, "provider", "model"), token)).View!;
-                Assert.IsTrue(byModel.Groups.Any(static group => group.Provider == Provider.Value && group.Measures.InputTokens == 1200m), string.Join(", ", byModel.Groups.Select(static group => $"{group.Provider}/{group.Model}")));
-                var byDay = (await service.StatisticsAsync(Request(epoch, "day"), token)).View!;
-                Assert.AreEqual(1200m, byDay.Groups.Sum(static group => group.Measures.InputTokens));
-                Assert.AreEqual("invalid_request", (await service.StatisticsAsync(Request(epoch, "session"), token)).Status);
+                result = await service.StatisticsAsync(Request(epoch, "machine", "project"), token);
+                if (result.View?.Groups.Any(static group => group.ProjectName is not null) == true) break;
+                if (DateTime.UtcNow > deadline) Assert.Fail($"The desktop did not get the statistics of the machine: {result.Status} {result.Message} {result.View?.Totals.InputTokens}.");
+                await Task.Delay(250, token);
             }
-            finally
-            {
-                stop();
-                Assert.AreEqual(NodeExitCodes.Success, await running.WaitAsync(Patience, token));
-            }
+
+            var view = result.View!;
+            Assert.AreEqual(("ok", linkId), (result.Status, view.LinkId));
+            Assert.AreEqual((1200m, 300m, 1m, 1m), (view.Totals.InputTokens, view.Totals.OutputTokens, view.Totals.Runs, view.Totals.ToolCalls));
+            var group = view.Groups.Single(static group => group.Measures.InputTokens > 0);
+            Assert.AreEqual(("Mac mini", desktopProject.DisplayName), (group.MachineName, group.ProjectName),
+                "the machine is named by the server, its project by this computer, which has the same repository");
+            Assert.AreEqual(22, group.Project!.Length, "the server holds a blind index, never the project");
+            var published = view.Machines.Single(static machine => machine.Name == "Mac mini");
+            Assert.AreEqual((1, false), (published.Sessions, published.IsThisComputer));
+            Assert.IsNotNull(published.LastPublishedAt);
+            Assert.IsTrue(view.Machines.Single(static machine => machine.Name == "Desktop").IsThisComputer);
+
+            // By model and by day, from the same facts.
+            var byModel = (await service.StatisticsAsync(Request(epoch, "provider", "model"), token)).View!;
+            Assert.IsTrue(byModel.Groups.Any(static group => group.Provider == Provider.Value && group.Measures.InputTokens == 1200m),
+                string.Join(", ", byModel.Groups.Select(static group => $"{group.Provider}/{group.Model}")));
+            var byDay = (await service.StatisticsAsync(Request(epoch, "day"), token)).View!;
+            Assert.AreEqual(1200m, byDay.Groups.Sum(static group => group.Measures.InputTokens));
+            Assert.AreEqual("invalid_request", (await service.StatisticsAsync(Request(epoch, "session"), token)).Status);
         }
         finally
         {
-            if (ownsLog) XenoAtom.Logging.LogManager.Shutdown();
             try { Directory.Delete(root, recursive: true); }
             catch (IOException) { }
             catch (UnauthorizedAccessException) { }
@@ -152,19 +137,26 @@ public sealed class FleetStatisticsEndToEndTests
         PollInterval = TimeSpan.FromMilliseconds(250), PendingApprovalRetry = TimeSpan.FromMilliseconds(200),
     };
 
-    // A node on a profile of its own, off the network and without providers, as the tests of the node isolate it.
-    private static NodeHostOptions NodeOptions(string root, string dataRoot, string project) => new()
+    // A headless host with the statistics engine of a host without a window, as CodeAlta Node composes it among its plugins.
+    private static Task<CodeAltaHost> MachineHostAsync(string globalRoot, string project, string root, bool startPlugins, CancellationToken token)
     {
-        Profile = CodeAltaInstanceProfile.Create(dataRoot, false),
-        CurrentProjectPath = project,
-        StartPlugins = false,
-        Offline = true,
-        ConfigureModelProviders = static _ => { },
-        DiscoveryScope = new SessionDiscoveryScope(Directory.CreateDirectory(Path.Combine(root, "node-home")).FullName, root),
-        BuiltInSkillRoot = Directory.CreateDirectory(Path.Combine(root, "node-builtin")).FullName,
-        DrainLimit = TimeSpan.FromSeconds(5),
-        CloneRoot = Path.Combine(root, "node-code"),
-    };
+        var catalog = new CatalogOptions { GlobalRoot = globalRoot, StateRoot = globalRoot };
+        var journals = new FileSystemSessionJournalCatalog(new AgentRuntimePathLayout(catalog.StateRoot));
+        return CodeAltaHost.CreateAsync(new CodeAltaHostOptions
+        {
+            GlobalRoot = globalRoot, StateRoot = globalRoot, CurrentProjectPath = project, DiscoveryScope = new(Directory.CreateDirectory(Path.Combine(root, "machine-home")).FullName, root),
+            BuiltInSkillRoot = Directory.CreateDirectory(Path.Combine(root, "machine-builtin")).FullName, PluginEnvironment = FrozenDictionary<string, string?>.Empty,
+            StartPlugins = startPlugins, IsHeadless = true, OwnsLogging = false, PluginFrontend = PluginFrontends.Cli,
+            PluginBuiltIns =
+            [
+                new BuiltInPluginDefinition
+                {
+                    Id = "statistics", DisplayName = "Statistics", PluginType = typeof(StatisticsPlugin), Frontends = PluginFrontends.All | PluginFrontends.Cli,
+                    Factory = () => StatisticsPlugin.CreateForHost(journals),
+                },
+            ],
+        }, token);
+    }
 
     private static async Task AddProjectSessionAsync(CodeAltaHost host, string id, ProjectDescriptor project, CancellationToken token)
     {

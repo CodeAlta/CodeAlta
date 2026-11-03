@@ -159,6 +159,27 @@ public sealed class FleetStatisticsTests
     }
 
     [TestMethod]
+    public async Task ASetTheServerRefuses_StopsTheStatisticsOfTheConnection_NeverTheConnection()
+    {
+        await using var fleet = await StatisticsFixture.StartAsync();
+        var sessions = new FakeSessions();
+        var statistics = new FakeStatistics();
+        statistics.Set("s1", new FleetStatisticsRow("histogram", Morning, "anthropic", "m", null, new Dictionary<string, long> { ["n"] = 1 }));
+        sessions.Set(Session("s1", "work"));
+        await using var connector = fleet.NodeConnector(sessions, statistics, static _ => true);
+        var states = new ConcurrentQueue<FleetConnectorState>();
+        connector.StateChanged += value => states.Enqueue(value.State);
+        connector.Start();
+
+        // The facts of the session are published; the statistics the server refuses do not drop the connection.
+        await WaitForAsync(async () => (await fleet.Desktop.ListSessionsAsync()).Any(static session => session.Id == "s1"));
+        await Task.Delay(1000);
+        Assert.AreEqual(FleetConnectorState.Online, connector.State);
+        Assert.AreEqual(1, states.Count(static state => state == FleetConnectorState.Online), "connected once, never again");
+        Assert.AreEqual(0L, (await TotalsAsync(fleet)).InputTokens);
+    }
+
+    [TestMethod]
     public async Task AQuery_IsSignedAndChecked()
     {
         await using var fleet = await StatisticsFixture.StartAsync();

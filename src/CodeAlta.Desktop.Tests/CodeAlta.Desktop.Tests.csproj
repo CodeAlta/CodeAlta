@@ -12,8 +12,6 @@
     <!-- A CodeAlta Server of the test process, for the fleetServer service. -->
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
     <ProjectReference Include="../CodeAlta.Server/CodeAlta.Server.csproj" />
-    <!-- A CodeAlta Node of the test process, whose statistics reach the desktop through the server. -->
-    <ProjectReference Include="../CodeAlta.Node/CodeAlta.Node.csproj" />
     <ProjectReference Include="../CodeAlta.Plugin.Mcp/CodeAlta.Plugin.Mcp.csproj" />
     <ProjectReference Include="../CodeAlta.Tests.TinyMcpServer/CodeAlta.Tests.TinyMcpServer.csproj" />
   </ItemGroup>

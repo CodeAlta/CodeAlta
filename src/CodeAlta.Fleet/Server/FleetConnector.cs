@@ -733,7 +733,19 @@ public sealed class FleetConnector : IAsyncDisposable
             Published?.Invoke(this, result);
         }
 
-        await PublishStatisticsAsync(connection, all, sessions, key, stop).ConfigureAwait(false);
+        try
+        {
+            await PublishStatisticsAsync(connection, all, sessions, key, stop).ConfigureAwait(false);
+        }
+        catch (FleetException exception) when (exception is not FleetConnectionClosedException)
+        {
+            // A refusal of the server (a set it does not take, a method it lacks) stops the statistics of this connection, never
+            // the connection: presence and the facts of sessions go on, and the next connection tries the statistics again.
+            _statisticsServed = false;
+            if (LogManager.IsInitialized)
+                _logger.Warn($"The statistics were not published to {FleetServerAddress.Format(_options.ServerAddress)}: {exception.Error.Code} {exception.Message}");
+        }
+
         var active = sessions.Count(static session => session.State == FleetSessionStates.Running);
         return active;
     }
