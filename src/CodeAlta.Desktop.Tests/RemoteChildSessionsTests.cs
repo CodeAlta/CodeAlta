@@ -137,6 +137,34 @@ public sealed class RemoteChildSessionsTests
         Assert.AreEqual("refused", kept.Status, "session() keeps sessions of this machine only.");
     }
 
+    // The fleet is never a way out of a sandbox: a script runs nothing elsewhere for a session whose profile forbids the
+    // fleet, and the session it starts for one that allows it is as sandboxed there.
+    [TestMethod]
+    public async Task AScriptOfASandboxedSession_StartsAnAgentElsewhere_OnlyAsConfinedAndWhereItsProfileAllows()
+    {
+        var token = TestContext.CancellationToken;
+        await using var two = await TwoHosts.StartAsync(token);
+        var parent = await two.CreateParentAsync(token);
+        two.Node.Service.AgentSessions.WritePolicy(new FleetAgentPolicyInfo(["default"]));
+        var config = Path.Combine(two.Node.Root, "desktop", "global", "config.toml");
+        var agents = new CodeModeAgents(two.Desktop);
+        await using var _ = agents;
+
+        File.WriteAllText(config, "[sandbox]\nall_sessions = \"strict\"\n");
+        var refused = await agents.RunAsync(parent.SessionId, new CodeModeAgentRequest("Count the tests.") { RunId = "run-1", Machine = "test-node", Timeout = Patience }, token);
+        Assert.IsFalse(refused.Succeeded);
+        StringAssert.Contains(refused.Failure, "does not allow the fleet");
+        Assert.AreEqual(0, two.Node.Service.AgentSessions.Children.Count, "Nothing reached the machine.");
+
+        if (!two.Node.Host.RuntimeService.GetSandboxAvailability().IsAvailable) return;
+        File.WriteAllText(config, "[sandbox]\nall_sessions = \"workspace\"\n");
+        two.Node.Provider.Turns.Enqueue((_, _) => Task.FromResult(ScriptedFleetProvider.Answer("42 tests.")));
+        var started = await agents.RunAsync(parent.SessionId, new CodeModeAgentRequest("Count the tests.") { RunId = "run-2", Machine = "test-node", Timeout = Patience }, token);
+        Assert.IsTrue(started.Succeeded, started.Failure);
+        var childId = two.Children.Children.Single().ChildSessionId;
+        Assert.AreEqual("workspace", (await two.Node.Host.RuntimeService.GetSessionSandboxAsync(childId, token)).Choice.Profile);
+    }
+
     [TestMethod]
     public async Task TheNodeRefusesUnsignedRequests_ReplaysAndWhatItCannotHold_AndNeverGivesMoreThanItsPolicy()
     {
