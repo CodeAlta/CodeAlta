@@ -208,6 +208,63 @@ public sealed class UpdateSwitchTests
     }
 
     [TestMethod]
+    public async Task AVersionThatCannotBeStartedIsRolledBack()
+    {
+        using var temp = new TempFolder();
+        var store = StoreWith(temp, V1, V2);
+        store.Select(V1);
+        store.Confirm(V1);
+        store.Select(V2, backup: "pre-4.0.2.sqlite3");
+        UpdateTrial? restored = null;
+        var inner = new FakeRunner((process, _) => { process.Exit(0); return Task.CompletedTask; });
+        // The app host of 4.0.2 is corrupt or of another architecture: the operating system refuses to start it.
+        var runner = new FailingStartRunner(inner, count => count == 1 ? new System.ComponentModel.Win32Exception(193, "not a valid application") : null);
+        var launcher = new UpdateLauncher(new UpdateLauncherOptions
+        {
+            Store = store, Product = UpdateProduct.Node, Arguments = ["run"], Installed = new UpdateCommand("installed-altanode", []), Runner = runner,
+            PollInterval = TimeSpan.FromMilliseconds(10), RestartDelay = TimeSpan.Zero, DotnetRoot = null, HandleSignals = false,
+            RolledBack = (trial, _) => { restored = trial; return Task.CompletedTask; },
+        });
+
+        Assert.AreEqual(0, await launcher.RunAsync(), "the previous version runs and ends as it ends");
+        Assert.AreEqual("4.0.1", VersionOf(inner.Started.Single()));
+        Assert.AreEqual("pre-4.0.2.sqlite3", restored?.Backup);
+        var state = store.Read();
+        Assert.AreEqual("4.0.1", state.Current);
+        Assert.IsTrue(state.IsBad(V2));
+        StringAssert.Contains(state.LastOutcome?.Message, "not a valid application");
+    }
+
+    [TestMethod]
+    public async Task ARestoreThatFailsStartsNothing_AndTheNextStartRestoresFirst()
+    {
+        using var temp = new TempFolder();
+        var store = StoreWith(temp, V1, V2);
+        store.Select(V1);
+        store.Confirm(V1);
+        store.Select(V2, backup: "pre-4.0.2.sqlite3");
+        var log = new List<string>();
+        var runner = new FakeRunner((process, _) => { process.Exit(134); return Task.CompletedTask; });
+        var exitCode = await Launcher(store, runner, rolledBack: static (_, _) => throw new IOException("the disk is full"), log: log).RunAsync();
+
+        // 4.0.1 never runs on the database 4.0.2 migrated: the launcher stops and says why.
+        Assert.AreNotEqual(0, exitCode);
+        Assert.AreEqual("4.0.2", VersionOf(runner.Started.Single()));
+        Assert.IsTrue(store.Read().IsBad(V2));
+        Assert.IsTrue(log.Any(static line => line.Contains("the disk is full", StringComparison.Ordinal)), string.Join("\n", log));
+        Assert.AreEqual("pre-4.0.2.sqlite3", store.Read().RollingBack?.Trial.Backup, "the rollback is recorded until its backup is restored");
+        Assert.AreEqual("the disk is full", store.Read().RollingBack?.Error);
+        Assert.IsNull(store.TakePending(UpdateProduct.Node), "nothing is selected before the restore");
+
+        UpdateTrial? restored = null;
+        var next = new FakeRunner((process, _) => { process.Exit(0); return Task.CompletedTask; });
+        Assert.AreEqual(0, await Launcher(store, next, rolledBack: (trial, _) => { restored = trial; return Task.CompletedTask; }).RunAsync());
+        Assert.AreEqual("pre-4.0.2.sqlite3", restored?.Backup, "the backup reference is kept until the restore succeeds");
+        Assert.AreEqual("4.0.1", VersionOf(next.Started.Single()));
+        Assert.IsNull(store.Read().RollingBack);
+    }
+
+    [TestMethod]
     public async Task AVersionThatDoesNotConfirmInTimeIsStoppedAndRolledBackToTheInstalledEntryPoint()
     {
         using var temp = new TempFolder();
@@ -310,6 +367,81 @@ public sealed class UpdateSwitchTests
     }
 
     [TestMethod]
+    public async Task ASwitchTakenBetweenTwoVersionsIsCopiedFirst_AndDroppedWhenTheCopyFails()
+    {
+        using var temp = new TempFolder();
+        var store = StoreWith(temp, V1, V2);
+        store.Select(V1);
+        store.Confirm(V1);
+        string? backupOfTrial = null;
+        var runner = new FakeRunner(async (process, count) =>
+        {
+            await Task.Delay(20);
+            if (count == 1)
+            {
+                // 4.0.1 runs; a switch is asked for meanwhile and 4.0.1 stops for it, without selecting it itself.
+                store.RequestSwitch(V2, now: true, "local");
+                process.Exit(UpdateLauncher.RestartExitCode);
+                return;
+            }
+
+            backupOfTrial = store.Read().Trial?.Backup;
+            store.Confirm(V2);
+            await Task.Delay(20);
+            process.Exit(0);
+        });
+        var launcher = new UpdateLauncher(new UpdateLauncherOptions
+        {
+            Store = store, Product = UpdateProduct.Node, Arguments = ["run"], Installed = new UpdateCommand("installed-altanode", []), Runner = runner,
+            PollInterval = TimeSpan.FromMilliseconds(10), RestartDelay = TimeSpan.Zero, DotnetRoot = null, HandleSignals = false,
+            Backup = version => $"before-{version}.sqlite3",
+        });
+        Assert.AreEqual(0, await launcher.RunAsync());
+        CollectionAssert.AreEqual(new[] { "4.0.1", "4.0.2" }, runner.Started.Select(VersionOf).ToArray());
+        Assert.AreEqual("before-4.0.2.sqlite3", backupOfTrial);
+
+        store.RequestSwitch(V1, now: false, "local");
+        Assert.IsNull(store.TakePending(UpdateProduct.Node, static _ => throw new IOException("disk full")), "no switch without its copy");
+        var state = store.Read();
+        Assert.AreEqual("4.0.2", state.Current);
+        Assert.IsNull(state.Pending);
+        StringAssert.Contains(state.LastOutcome?.Message, "disk full");
+    }
+
+    [TestMethod]
+    public async Task OneLauncherAtATimeRunsTheVersions_AndARefusedVersionIsNotBlamed()
+    {
+        using var temp = new TempFolder();
+        var store = StoreWith(temp, V1);
+        store.Select(V1);
+        var runner = new FakeRunner((process, _) => { process.Exit(3); return Task.CompletedTask; });
+        UpdateLauncher Create(UpdateLauncherLease? lease) => new(new UpdateLauncherOptions
+        {
+            Store = store, Product = UpdateProduct.Node, Arguments = ["run"], Installed = new UpdateCommand("installed-altanode", []), Runner = runner,
+            PollInterval = TimeSpan.FromMilliseconds(10), RestartDelay = TimeSpan.Zero, DotnetRoot = null, HandleSignals = false, Lease = lease, HeldExitCode = 3,
+        });
+
+        using (var lease = store.TryAcquireLauncherLease())
+        {
+            Assert.IsNotNull(lease);
+            Assert.IsNull(new UpdateVersionStore(store.Root).TryAcquireLauncherLease(), "another launcher of the same folder is refused");
+            var busy = await Assert.ThrowsExactlyAsync<UpdateException>(() => Create(null).RunAsync());
+            Assert.AreEqual(UpdateErrorCodes.LauncherBusy, busy.Code);
+            Assert.AreEqual(0, runner.Started.Count);
+
+            // The holder of the lease runs the version; refused by the holder of its profile, it is not blamed.
+            Assert.AreEqual(3, await Create(lease).RunAsync());
+        }
+
+        var state = store.Read();
+        Assert.AreEqual("4.0.1", state.Trial?.Version);
+        Assert.AreEqual(0, state.Trial?.Starts);
+        Assert.AreEqual(0, state.Bad.Count);
+        using var again = store.TryAcquireLauncherLease();
+        Assert.IsNotNull(again, "the lease is free once its holder released it");
+    }
+
+    [TestMethod]
     public void ANodeDrainsThenWaitsForTheNextIdleMoment()
     {
         var start = DateTimeOffset.UnixEpoch;
@@ -346,5 +478,14 @@ public sealed class UpdateSwitchTests
         StringAssert.Contains(text, "Version: 4.0.2 (selected by altanode update, installed 4.0.0, previous 4.0.1).");
         StringAssert.Contains(text, "on trial");
         StringAssert.Contains(text, "waiting for 2 session(s)");
+    }
+
+    /// <summary>A runner whose starts fail as a test says, for an app host that cannot be started (corrupt, another architecture).</summary>
+    private sealed class FailingStartRunner(IUpdateProcessRunner inner, Func<int, Exception?> failure) : IUpdateProcessRunner
+    {
+        private int _count;
+
+        public IUpdateProcess Start(UpdateCommand command, IReadOnlyList<string> arguments, IReadOnlyDictionary<string, string?> environment)
+            => failure(++_count) is { } exception ? throw exception : inner.Start(command, arguments, environment);
     }
 }

@@ -23,6 +23,9 @@ public static class ServerExitCodes
 
     /// <summary>The command line is not valid.</summary>
     public const int InvalidUsage = 2;
+
+    /// <summary>For <c>run</c>: another server, or another <c>run</c> that starts one, holds the data root.</summary>
+    public const int DataRootInUse = 3;
 }
 
 /// <summary>The commands of <c>altaserver</c>: <c>run</c>, <c>status</c>, <c>setup-code</c>, <c>update</c>.</summary>
@@ -211,21 +214,46 @@ public sealed class ServerApplication
         }
 
         // The installed entry point (the tool) hands over to the version altaserver update selected, and passes its exit
-        // code through; a switch that waited for the next start is taken first. Not while another server holds the data
-        // root: this run is refused below as before, and the version on trial is not blamed for that refusal.
+        // code through; a switch that waited for the next start is taken first. It holds the lease of the launcher from
+        // here to its end, so that a second run never selects, starts or rolls back a version while this one does: it is
+        // refused at once, even in the moment the version this run started has not taken the data root yet. Not while
+        // another server holds the data root: this run is refused below as before, and the version on trial is not blamed.
         var store = new UpdateVersionStore(paths!.VersionsRoot);
-        if (!UpdateLauncher.IsSupervised && !store.Contains(ApplicationDirectory ?? AppContext.BaseDirectory) && !CoordinatorServer.IsRunning(paths))
+        UpdateLauncherLease? lease = null;
+        if (!UpdateLauncher.IsSupervised && !store.Contains(ApplicationDirectory ?? AppContext.BaseDirectory))
         {
             try
             {
-                store.TakePending(UpdateProduct.Server);
+                lease = store.TryAcquireLauncherLease();
+            }
+            catch (UpdateException exception)
+            {
+                await _error.WriteLineAsync($"altaserver: {exception.Message}").ConfigureAwait(false);
+                return ServerExitCodes.Failure;
+            }
+
+            if (lease is null)
+            {
+                await _error.WriteLineAsync($"altaserver: another altaserver run holds the data root '{paths.DataRoot}' (it runs the server, or starts it).").ConfigureAwait(false);
+                return ServerExitCodes.DataRootInUse;
+            }
+        }
+
+        using var heldLease = lease;
+        if (lease is not null && !CoordinatorServer.IsRunning(paths))
+        {
+            try
+            {
+                // Without a running server to copy it, the database is copied here: a switch is never selected without it.
+                store.TakePending(UpdateProduct.Server, target => ServerUpdates.BackupStopped(paths, target));
             }
             catch (UpdateException exception)
             {
                 await _error.WriteLineAsync($"altaserver: the versions of {store.Root} could not be read: {exception.Message}").ConfigureAwait(false);
             }
 
-            if (store.Read().Current is not null) return await RunLauncherAsync(paths, store).ConfigureAwait(false);
+            // A rollback whose database is not restored yet goes through the launcher too: it restores first, or starts nothing.
+            if (store.Read() is { } selected && (selected.Current is not null || selected.RollingBack is not null)) return await RunLauncherAsync(paths, store, lease).ConfigureAwait(false);
         }
 
         CoordinatorServer server;
@@ -241,6 +269,12 @@ public sealed class ServerApplication
                 UpdateStatus = () => updates?.Status(),
             };
             server = await CoordinatorServer.StartAsync(ConfigureServer?.Invoke(serverOptions) ?? serverOptions).ConfigureAwait(false);
+        }
+        catch (DataRootInUseException exception)
+        {
+            // Under a launcher, this exit code tells it that this version did not run: its trial is not failed.
+            await _error.WriteLineAsync($"altaserver: {exception.Message}").ConfigureAwait(false);
+            return ServerExitCodes.DataRootInUse;
         }
         catch (Exception exception) when (exception is InvalidOperationException or ArgumentException or IOException or System.Security.Cryptography.CryptographicException)
         {
@@ -287,17 +321,19 @@ public sealed class ServerApplication
         if (updates?.RestartRequested != true) return ServerExitCodes.Success;
         // A launcher waits for this process and starts the newly selected version; without one, this process becomes it.
         if (UpdateLauncher.IsSupervised) return UpdateLauncher.RestartExitCode;
-        return await RunLauncherAsync(paths, store).ConfigureAwait(false);
+        return await RunLauncherAsync(paths, store, lease).ConfigureAwait(false);
     }
 
     // The launcher hop: the selected version runs as a child process of this one, which ends with its exit code. A
     // rollback restores the database copied before the switch.
-    private async Task<int> RunLauncherAsync(ServerPaths paths, UpdateVersionStore store)
+    private async Task<int> RunLauncherAsync(ServerPaths paths, UpdateVersionStore store, UpdateLauncherLease? lease)
     {
         var options = new UpdateLauncherOptions
         {
             Store = store, Product = UpdateProduct.Server, Arguments = _args, Installed = InstalledCommand(), InstalledVersion = InstalledVersion(),
+            Lease = lease, HeldExitCode = ServerExitCodes.DataRootInUse,
             Log = message => _error.WriteLine("altaserver: " + message),
+            Backup = target => ServerUpdates.BackupStopped(paths, target),
             RolledBack = (trial, _) =>
             {
                 if (trial.Backup is { } backup)
@@ -423,6 +459,12 @@ public sealed class ServerApplication
     private async Task WriteVersionsAsync(ServerPaths paths, string? runningVersion)
     {
         var state = new UpdateVersionStore(paths.VersionsRoot).Read();
+        if (state.RollingBack is { } rollback)
+        {
+            await _output.WriteLineAsync($"{rollback.Trial.Version} was rolled back, but the database copied before it ({rollback.Trial.Backup}) is not restored yet"
+                + $"{(rollback.Error is { } error ? ": " + error : "")}. altaserver run restores it before it starts the server.").ConfigureAwait(false);
+        }
+
         var installed = InstalledVersion();
         var running = runningVersion ?? state.Current ?? installed;
         if (running is null) return;

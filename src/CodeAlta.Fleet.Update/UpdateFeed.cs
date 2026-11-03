@@ -1,3 +1,4 @@
+using System.IO.Compression;
 using System.Net;
 using System.Text.Json;
 
@@ -211,16 +212,23 @@ internal sealed class NuGetHttpFeed(string source, Uri serviceIndex, HttpClient 
             if (response.StatusCode == HttpStatusCode.NotFound) throw new UpdateException(UpdateErrorCodes.NotFound, $"{source} has no {packageId} {version}.");
             EnsureSuccess(response, address);
             if (response.Content.Headers.ContentLength > UpdateFeeds.MaxPackageBytes) throw TooLarge(address);
-            await using var content = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
+            await using var content = Decode(await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false), response, address);
             await using var file = new FileStream(destinationPath, FileMode.CreateNew, FileAccess.Write, FileShare.None, 81920, useAsync: true);
             var buffer = new byte[81920];
             long total = 0;
             int read;
-            while ((read = await content.ReadAsync(buffer, cancellationToken).ConfigureAwait(false)) > 0)
+            try
             {
-                total += read;
-                if (total > UpdateFeeds.MaxPackageBytes) throw TooLarge(address);
-                await file.WriteAsync(buffer.AsMemory(0, read), cancellationToken).ConfigureAwait(false);
+                while ((read = await content.ReadAsync(buffer, cancellationToken).ConfigureAwait(false)) > 0)
+                {
+                    total += read;
+                    if (total > UpdateFeeds.MaxPackageBytes) throw TooLarge(address);
+                    await file.WriteAsync(buffer.AsMemory(0, read), cancellationToken).ConfigureAwait(false);
+                }
+            }
+            catch (InvalidDataException exception)
+            {
+                throw new UpdateException(UpdateErrorCodes.DownloadFailed, $"{address} sent a compressed answer that cannot be read: {exception.Message}", exception);
             }
         }
 
@@ -304,13 +312,34 @@ internal sealed class NuGetHttpFeed(string source, Uri serviceIndex, HttpClient 
         EnsureSuccess(response, address);
         try
         {
-            await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
+            await using var stream = Decode(await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false), response, address);
             return await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken).ConfigureAwait(false);
         }
-        catch (JsonException exception)
+        catch (Exception exception) when (exception is JsonException or InvalidDataException)
         {
             throw new UpdateException(UpdateErrorCodes.FeedUnavailable, $"{address} did not answer JSON: {exception.Message}", exception);
         }
+    }
+
+    // The content as sent, decoded: nuget.org answers its registrations (RegistrationsBaseUrl/3.6.0) in gzip whatever the
+    // request asks, and the client given may not decompress (an HttpClient does not by default). A handler that does
+    // removes the header, so nothing is decoded twice.
+    private static Stream Decode(Stream content, HttpResponseMessage response, Uri address)
+    {
+        var decoded = content;
+        foreach (var encoding in response.Content.Headers.ContentEncoding.Reverse())
+        {
+            decoded = encoding.ToLowerInvariant() switch
+            {
+                "gzip" or "x-gzip" => new GZipStream(decoded, CompressionMode.Decompress),
+                "deflate" => new ZLibStream(decoded, CompressionMode.Decompress),
+                "br" => new BrotliStream(decoded, CompressionMode.Decompress),
+                "identity" => decoded,
+                _ => throw new UpdateException(UpdateErrorCodes.FeedUnavailable, $"{address} answered in an encoding this update cannot read: '{encoding}'."),
+            };
+        }
+
+        return decoded;
     }
 
     private async Task<HttpResponseMessage> SendAsync(Uri address, CancellationToken cancellationToken)

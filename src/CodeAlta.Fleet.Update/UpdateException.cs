@@ -32,6 +32,12 @@ public static class UpdateErrorCodes
 
     /// <summary>The state of the versions could not be read or written.</summary>
     public const string StateUnavailable = "update.state_unavailable";
+
+    /// <summary>The data could not be copied before a switch (the server's database): the switch does not happen.</summary>
+    public const string BackupFailed = "update.backup_failed";
+
+    /// <summary>Another process holds the lease of the launcher of the folder of versions.</summary>
+    public const string LauncherBusy = "update.launcher_busy";
 }
 
 /// <summary>An update that could not be done, with a stable code (<see cref="UpdateErrorCodes"/>).</summary>

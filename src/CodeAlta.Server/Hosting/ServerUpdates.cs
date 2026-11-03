@@ -1,6 +1,7 @@
 using System.Globalization;
 using CodeAlta.Fleet.Protocol;
 using CodeAlta.Fleet.Update;
+using Microsoft.Data.Sqlite;
 
 namespace CodeAlta.Server.Hosting;
 
@@ -207,6 +208,37 @@ internal sealed class ServerUpdates : IAsyncDisposable
         }
 
         return Path.Combine(paths.BackupsRoot, $"before-{target}-{ServerVersion.Current}-{now.UtcDateTime.ToString("yyyyMMdd-HHmmss", CultureInfo.InvariantCulture)}.sqlite3");
+    }
+
+    /// <summary>
+    /// Copies the database of a stopped server before a switch to a version (at the start, or in the launcher between two
+    /// versions), with SQLite's backup API as a running server does: the trial records the copy, which a rollback restores.
+    /// </summary>
+    /// <param name="paths">The files of the server; no server runs on them.</param>
+    /// <param name="target">The version switched to.</param>
+    /// <returns>The path of the copy, or null when the server has no database yet.</returns>
+    /// <exception cref="UpdateException">The database could not be copied.</exception>
+    internal static string? BackupStopped(ServerPaths paths, UpdateVersion target)
+    {
+        if (!File.Exists(paths.DatabasePath)) return null;
+        var backup = BackupPath(paths, target, DateTimeOffset.UtcNow);
+        try
+        {
+            // Read-write, as the server opens it: a write-ahead log left by a crash is recovered into the copy.
+            using var source = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = paths.DatabasePath, Mode = SqliteOpenMode.ReadWrite, Pooling = false }.ToString());
+            source.Open();
+            using var destination = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = backup, Mode = SqliteOpenMode.ReadWriteCreate, Pooling = false }.ToString());
+            destination.Open();
+            source.BackupDatabase(destination);
+        }
+        catch (SqliteException exception)
+        {
+            try { File.Delete(backup); }
+            catch (Exception deletion) when (deletion is IOException or UnauthorizedAccessException) { }
+            throw new UpdateException(UpdateErrorCodes.BackupFailed, $"{paths.DatabasePath} could not be copied to {backup}: {exception.Message}", exception);
+        }
+
+        return backup;
     }
 
     /// <summary>

@@ -98,6 +98,56 @@ public sealed class NodeUpdateTests
     }
 
     [TestMethod]
+    public async Task AVersionRefusedBecauseTheProfileIsHeldIsNotRolledBack()
+    {
+        using var root = new NodeTestRoot();
+        var store = NodeUpdatePaths.Store(root.Profile());
+        var target = UpdateVersion.Parse("99.0.0");
+        Stage(store, target);
+        store.Select(target);
+        // The version on trial is refused by the lock of the profile (CodeAlta Desktop or a node started by hand meanwhile).
+        var runner = new RecordingRunner(exitCode: NodeExitCodes.ProfileInUse);
+        var app = Application(root, out _, out var error, runner);
+
+        Assert.AreEqual(NodeExitCodes.ProfileInUse, await app.RunAsync(["run", "--data-root", root.DataRoot, "--port", "0"]));
+
+        Assert.AreEqual(1, runner.Started.Count, error.ToString());
+        var state = store.Read();
+        Assert.AreEqual(0, state.Bad.Count, "the version on trial is not blamed");
+        Assert.AreEqual("99.0.0", state.Trial?.Version);
+        Assert.AreEqual(0, state.Trial?.Starts, "a start refused for the profile does not count");
+    }
+
+    [TestMethod]
+    public async Task ASecondRunWhileALauncherRunsStartsNoOtherVersion()
+    {
+        using var root = new NodeTestRoot();
+        var store = NodeUpdatePaths.Store(root.Profile());
+        var target = UpdateVersion.Parse("99.0.0");
+        Stage(store, target);
+        store.Select(target);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var runner = new RecordingRunner(exitCode: 0, gate: release.Task);
+        var first = Application(root, out _, out var firstError, runner).RunAsync(["run", "--data-root", root.DataRoot, "--port", "0"]);
+        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(10);
+        while (runner.Started.Count == 0 && DateTime.UtcNow < deadline) await Task.Delay(20, TestContext.CancellationToken);
+        Assert.AreEqual(1, runner.Started.Count, firstError.ToString());
+
+        // The version on trial has not taken the profile yet: only the launcher's lease tells that one runs.
+        var second = Application(root, out _, out var secondError, runner).RunAsync(["run", "--data-root", root.DataRoot, "--port", "0"]);
+        var ended = await Task.WhenAny(second, Task.Delay(TimeSpan.FromSeconds(10), TestContext.CancellationToken)) == second;
+        var startedBySecond = runner.Started.Count - 1;
+        store.Confirm(target);
+        release.TrySetResult();
+        await Task.WhenAll(first, second).WaitAsync(TimeSpan.FromSeconds(30), TestContext.CancellationToken);
+
+        Assert.IsTrue(ended, "the second run is refused at once");
+        Assert.AreEqual(0, startedBySecond, "the second run starts no other version");
+        Assert.AreEqual(NodeExitCodes.ProfileInUse, await second, secondError.ToString());
+        Assert.AreEqual(0, store.Read().Bad.Count);
+    }
+
+    [TestMethod]
     public async Task Run_SwitchesWhenIdle_ThenBecomesTheLauncherOfTheNewVersion()
     {
         using var root = new NodeTestRoot();
@@ -295,23 +345,32 @@ public sealed class NodeUpdateTests
     }
 
     /// <summary>Records the versions a launcher starts; each does what the test says at its start, then exits with the code given.</summary>
-    private sealed class RecordingRunner(int exitCode, Action? onStart = null) : IUpdateProcessRunner
+    private sealed class RecordingRunner(int exitCode, Action? onStart = null, Task? gate = null) : IUpdateProcessRunner
     {
-        public List<(UpdateCommand Command, IReadOnlyList<string> Arguments, IReadOnlyDictionary<string, string?> Environment)> Started { get; } = [];
+        private readonly List<(UpdateCommand Command, IReadOnlyList<string> Arguments, IReadOnlyDictionary<string, string?> Environment)> _started = [];
+
+        public List<(UpdateCommand Command, IReadOnlyList<string> Arguments, IReadOnlyDictionary<string, string?> Environment)> Started
+        {
+            get
+            {
+                lock (_started) return [.. _started];
+            }
+        }
 
         public IUpdateProcess Start(UpdateCommand command, IReadOnlyList<string> arguments, IReadOnlyDictionary<string, string?> environment)
         {
-            Started.Add((command, arguments, environment));
-            return new Exited(exitCode, onStart);
+            lock (_started) _started.Add((command, arguments, environment));
+            return new Exited(exitCode, onStart, gate);
         }
 
-        private sealed class Exited(int code, Action? onStart) : IUpdateProcess
+        private sealed class Exited(int code, Action? onStart, Task? gate) : IUpdateProcess
         {
             public int Id => 1;
 
             public async Task<int> WaitForExitAsync(CancellationToken cancellationToken)
             {
                 onStart?.Invoke();
+                if (gate is not null) await gate.WaitAsync(cancellationToken).ConfigureAwait(false);
                 // The launcher reads the state between polls: the version exits once it confirmed.
                 await Task.Delay(TimeSpan.FromMilliseconds(onStart is null ? 0 : 300), cancellationToken).ConfigureAwait(false);
                 return code;

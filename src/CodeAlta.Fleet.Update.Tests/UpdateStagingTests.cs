@@ -130,6 +130,26 @@ public sealed class UpdateStagingTests
     }
 
     [TestMethod]
+    public async Task ARegistrationAnsweredInGzipIsDecoded()
+    {
+        // nuget.org's RegistrationsBaseUrl/3.6.0 answers gzip whatever the request asks; a plain HttpClient does not decode it.
+        using var temp = new TempFolder();
+        var source = Directory.CreateDirectory(temp.Combine("packages")).FullName;
+        var handler = new FakeNuGetFeed { GzipRegistrations = true, PagedRegistration = true };
+        foreach (var version in new[] { "4.0.0", "4.0.1" })
+        {
+            handler.Add(PackageId, version, File.ReadAllBytes(Packages.Write(source, version)));
+            handler.Add(Packages.Product.PackageId, version, File.ReadAllBytes(Packages.WriteTool(source, version)));
+        }
+
+        var updater = Updater(temp, "4.0.0", new HttpClient(handler));
+        var request = new UpdateRequest { Source = FakeNuGetFeed.Index };
+        var check = await updater.CheckAsync(request, CancellationToken.None);
+        Assert.AreEqual("4.0.1", check.Target?.ToString());
+        Assert.AreEqual("feed", (await updater.StageAsync(check, request, CancellationToken.None)).Checked, "the hash of the gzip catalog entry checks the package");
+    }
+
+    [TestMethod]
     public async Task APackageThatDoesNotMatchTheFeedsHashIsRefused()
     {
         using var temp = new TempFolder();

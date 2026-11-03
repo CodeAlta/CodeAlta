@@ -111,6 +111,114 @@ public sealed class ServerUpdateTests
     }
 
     [TestMethod]
+    public async Task Update_WhileStopped_CopiesTheDatabaseBeforeRunStartsTheNewVersion()
+    {
+        using var root = new TempDirectory();
+        await (await ServerFixture.StartAsync(root)).DisposeAsync();
+        var paths = new ServerPaths(root.Path);
+        Assert.IsTrue(File.Exists(paths.DatabasePath), "the server ran once and left its database");
+        var feed = Feed(root, "99.0.0");
+        var store = new UpdateVersionStore(paths.VersionsRoot);
+        var target = UpdateVersion.Parse("99.0.0");
+        string? backupOfTrial = null;
+        var runner = new RecordingRunner(0, () =>
+        {
+            backupOfTrial ??= store.Read().Trial?.Backup ?? "";
+            store.Confirm(target);
+        });
+        var app = Application(runner, out var output, out var error);
+
+        Assert.AreEqual(ServerExitCodes.Success, await app.RunAsync(["update", "--source", feed, "--data-root", paths.DataRoot]), error.ToString());
+        StringAssert.Contains(output.ToString(), "No server runs on");
+        Assert.AreEqual(0, await app.RunAsync(["run", "--port", "45998", "--data-root", paths.DataRoot]), error.ToString());
+
+        Assert.IsFalse(string.IsNullOrEmpty(backupOfTrial), "the version on trial has a copy of the database a rollback restores: " + error);
+        Assert.IsTrue(File.Exists(backupOfTrial) && new FileInfo(backupOfTrial).Length > 0, backupOfTrial);
+        StringAssert.StartsWith(backupOfTrial, paths.BackupsRoot);
+    }
+
+    [TestMethod]
+    public async Task ARollbackWhoseBackupCannotBeRestoredDoesNotStartThePreviousVersion()
+    {
+        using var root = new TempDirectory();
+        var paths = new ServerPaths(Path.Combine(root.Path, "data"));
+        Directory.CreateDirectory(paths.DataRoot);
+        File.WriteAllText(paths.DatabasePath, "migrated by 99.0.0");
+        var store = new UpdateVersionStore(paths.VersionsRoot);
+        var target = UpdateVersion.Parse("99.0.0");
+        Stage(store, target);
+        store.Select(target, Path.Combine(root.Path, "missing.sqlite3"));
+        var runner = new RecordingRunner(0, crashFirst: true);
+        var app = Application(runner, out _, out var error);
+
+        Assert.AreNotEqual(0, await app.RunAsync(["run", "--data-root", paths.DataRoot]), error.ToString());
+
+        Assert.AreEqual(1, runner.Started.Count, "the previous version is not started on a database it may not read");
+        Assert.AreEqual("migrated by 99.0.0", File.ReadAllText(paths.DatabasePath));
+        StringAssert.Contains(error.ToString(), "could not be restored");
+        Assert.IsTrue(store.Read().IsBad(target));
+        Assert.AreEqual(UpdateLauncher.RestoreFailedExitCode, await app.RunAsync(["run", "--data-root", paths.DataRoot]), "the next run restores first, and still cannot");
+        Assert.AreEqual(1, runner.Started.Count, error.ToString());
+
+        var output = new StringWriter();
+        Assert.AreEqual(ServerExitCodes.Failure, await new ServerApplication(output, new StringWriter()).RunAsync(["status", "--data-root", paths.DataRoot]));
+        StringAssert.Contains(output.ToString(), "is not restored yet");
+    }
+
+    [TestMethod]
+    public async Task ASecondRunWhileALauncherRunsStartsNoOtherVersion()
+    {
+        using var root = new TempDirectory();
+        var paths = new ServerPaths(Path.Combine(root.Path, "data"));
+        var store = new UpdateVersionStore(paths.VersionsRoot);
+        var target = UpdateVersion.Parse("99.0.0");
+        Stage(store, target);
+        store.Select(target);
+        var release = new TaskCompletionSource<int>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var runner = new RecordingRunner(0, gate: release.Task);
+        var first = Application(runner, out _, out var firstError).RunAsync(["run", "--data-root", paths.DataRoot]);
+        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(10);
+        while (runner.Started.Count == 0 && DateTime.UtcNow < deadline) await Task.Delay(20);
+        Assert.AreEqual(1, runner.Started.Count, firstError.ToString());
+
+        // The version on trial has not taken the lock of the data root yet: only the launcher's lease tells that one runs.
+        var second = Application(runner, out _, out var secondError).RunAsync(["run", "--data-root", paths.DataRoot]);
+        var ended = await Task.WhenAny(second, Task.Delay(TimeSpan.FromSeconds(10))) == second;
+        var startedBySecond = runner.Started.Count - 1;
+        store.Confirm(target);
+        release.TrySetResult(0);
+        await Task.WhenAll(first, second).WaitAsync(TimeSpan.FromSeconds(30));
+
+        Assert.IsTrue(ended, "the second run is refused at once");
+        Assert.AreEqual(0, startedBySecond, "the second run starts no other version");
+        Assert.AreEqual(ServerExitCodes.DataRootInUse, await second);
+        StringAssert.Contains(secondError.ToString(), paths.DataRoot);
+        Assert.AreEqual(0, store.Read().Bad.Count);
+    }
+
+    [TestMethod]
+    public async Task AVersionRefusedBecauseAnotherServerHoldsTheDataRootIsNotRolledBack()
+    {
+        using var root = new TempDirectory();
+        var paths = new ServerPaths(Path.Combine(root.Path, "data"));
+        var store = new UpdateVersionStore(paths.VersionsRoot);
+        var target = UpdateVersion.Parse("99.0.0");
+        Stage(store, target);
+        store.Select(target);
+        // The version on trial is refused by the lock of the data root (a server started by hand meanwhile).
+        var runner = new RecordingRunner(ServerExitCodes.DataRootInUse);
+        var app = Application(runner, out _, out var error);
+
+        Assert.AreEqual(ServerExitCodes.DataRootInUse, await app.RunAsync(["run", "--data-root", paths.DataRoot]), error.ToString());
+
+        Assert.AreEqual(1, runner.Started.Count, error.ToString());
+        var state = store.Read();
+        Assert.AreEqual(0, state.Bad.Count, "the version on trial is not blamed");
+        Assert.AreEqual("99.0.0", state.Trial?.Version);
+        Assert.AreEqual(0, state.Trial?.Starts, "a start refused for the data root does not count");
+    }
+
+    [TestMethod]
     public async Task Run_DoesNotHandOverWhileAnotherServerHoldsTheDataRoot()
     {
         using var root = new TempDirectory();
@@ -123,7 +231,7 @@ public sealed class ServerUpdateTests
         var runner = new RecordingRunner(1);
         var app = Application(runner, out _, out var error);
 
-        Assert.AreEqual(ServerExitCodes.Failure, await app.RunAsync(["run", "--urls", "http://127.0.0.1:0", "--data-root", paths.DataRoot]));
+        Assert.AreEqual(ServerExitCodes.DataRootInUse, await app.RunAsync(["run", "--urls", "http://127.0.0.1:0", "--data-root", paths.DataRoot]));
         StringAssert.Contains(error.ToString(), "Another CodeAlta Server uses the data root");
         Assert.AreEqual(0, runner.Started.Count);
         Assert.AreEqual(0, store.Read().Bad.Count, "the version on trial is not blamed for a server that was already running");
@@ -191,23 +299,38 @@ public sealed class ServerUpdateTests
     }
 
     /// <summary>Records the versions a launcher starts; each does what the test says, then exits with the code given.</summary>
-    private sealed class RecordingRunner(int exitCode, Action? onStart = null, bool crashFirst = false) : IUpdateProcessRunner
+    private sealed class RecordingRunner(int exitCode, Action? onStart = null, bool crashFirst = false, Task? gate = null) : IUpdateProcessRunner
     {
-        public List<(UpdateCommand Command, IReadOnlyList<string> Arguments)> Started { get; } = [];
+        private readonly List<(UpdateCommand Command, IReadOnlyList<string> Arguments)> _started = [];
+
+        public List<(UpdateCommand Command, IReadOnlyList<string> Arguments)> Started
+        {
+            get
+            {
+                lock (_started) return [.. _started];
+            }
+        }
 
         public IUpdateProcess Start(UpdateCommand command, IReadOnlyList<string> arguments, IReadOnlyDictionary<string, string?> environment)
         {
-            Started.Add((command, arguments));
-            return new Exited(crashFirst && Started.Count == 1 ? 134 : exitCode, crashFirst ? null : onStart);
+            int count;
+            lock (_started)
+            {
+                _started.Add((command, arguments));
+                count = _started.Count;
+            }
+
+            return new Exited(crashFirst && count == 1 ? 134 : exitCode, crashFirst ? null : onStart, gate);
         }
 
-        private sealed class Exited(int code, Action? onStart) : IUpdateProcess
+        private sealed class Exited(int code, Action? onStart, Task? gate) : IUpdateProcess
         {
             public int Id => 1;
 
             public async Task<int> WaitForExitAsync(CancellationToken cancellationToken)
             {
                 onStart?.Invoke();
+                if (gate is not null) await gate.WaitAsync(cancellationToken).ConfigureAwait(false);
                 await Task.Delay(TimeSpan.FromMilliseconds(onStart is null ? 0 : 300), cancellationToken).ConfigureAwait(false);
                 return code;
             }

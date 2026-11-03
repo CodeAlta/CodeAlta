@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using System.Diagnostics;
 using System.Globalization;
 using System.Runtime.InteropServices;
@@ -46,8 +47,31 @@ public sealed record UpdateLauncherOptions
     /// <summary>Gets what the launcher reports (it has no log of its own); null for nothing.</summary>
     public Action<string>? Log { get; init; }
 
-    /// <summary>Gets what restores the backup of a trial rolled back (the server's database); null for nothing.</summary>
+    /// <summary>
+    /// Gets what restores the backup of a trial rolled back (the server's database); null for nothing. It throws when it
+    /// cannot: the launcher then starts no version, and tries again at its next start.
+    /// </summary>
     public Func<UpdateTrial, CancellationToken, Task>? RolledBack { get; init; }
+
+    /// <summary>
+    /// Gets what copies the data a new version may change (the server's database) before a switch that waited is taken
+    /// between two versions, as <see cref="UpdateVersionStore.TakePending(UpdateProduct, Func{UpdateVersion, string?})"/>
+    /// describes; null when the product needs no copy.
+    /// </summary>
+    public Func<UpdateVersion, string?>? Backup { get; init; }
+
+    /// <summary>
+    /// Gets the lease of the launcher the caller holds already (from before it selected a version at start); null for the
+    /// launcher to take it when it starts.
+    /// </summary>
+    public UpdateLauncherLease? Lease { get; init; }
+
+    /// <summary>
+    /// Gets the exit code of a version refused because another process holds what it runs on (the profile of a node, the
+    /// data root of a server): a version on trial that ends with it did not run, so it neither fails its trial nor counts
+    /// a start; null for none.
+    /// </summary>
+    public int? HeldExitCode { get; init; }
 
     /// <summary>Gets whether the launcher handles SIGTERM and SIGINT itself (true for a process; false in tests).</summary>
     public bool HandleSignals { get; init; } = true;
@@ -74,6 +98,12 @@ public sealed class UpdateLauncher
 
     /// <summary>The exit code of a version that stopped to let its launcher start the newly selected version (EX_TEMPFAIL).</summary>
     public const int RestartExitCode = 75;
+
+    /// <summary>
+    /// The exit code of a launcher that rolled a version back but could not restore the backup taken before it (EX_IOERR):
+    /// it starts no version on data that version may not read, and restores first at its next start.
+    /// </summary>
+    public const int RestoreFailedExitCode = 74;
 
     /// <summary>How long a version on trial has to confirm, by default.</summary>
     public static readonly TimeSpan DefaultTrialLimit = TimeSpan.FromMinutes(2);
@@ -108,7 +138,7 @@ public sealed class UpdateLauncher
     {
         ArgumentNullException.ThrowIfNull(store);
         ArgumentNullException.ThrowIfNull(baseDirectory);
-        return !IsSupervised && !store.Contains(baseDirectory) && store.Read().Current is not null;
+        return !IsSupervised && !store.Contains(baseDirectory) && store.Read() is { } state && (state.Current is not null || state.RollingBack is not null);
     }
 
     /// <summary>
@@ -144,21 +174,27 @@ public sealed class UpdateLauncher
 
     /// <summary>Starts the selected version and follows it until it ends without asking for a restart.</summary>
     /// <returns>The exit code of the last version started.</returns>
+    /// <exception cref="UpdateException">No lease was given and another process holds the lease of the launcher.</exception>
     public async Task<int> RunAsync()
     {
+        var store = _options.Store;
+        using var ownLease = _options.Lease is not null ? null
+            : store.TryAcquireLauncherLease() ?? throw new UpdateException(UpdateErrorCodes.LauncherBusy, $"Another launcher runs the versions of {store.Root}.");
         using var signals = _options.HandleSignals ? RegisterSignals() : null;
         using var stop = _options.Stop.Register(() => RequestStop(forward: true));
-        var store = _options.Store;
         while (true)
         {
+            // A rollback whose backup is not restored yet (a crash or a failure since) is finished before anything starts.
+            if (store.Read().RollingBack is { } rollback && !await RestoreAsync(rollback).ConfigureAwait(false)) return RestoreFailedExitCode;
+
             // Between two versions nothing runs: a switch that waits is taken at once.
-            if (store.TakePending(_options.Product) is { } taken) Log($"Switching to {taken}, which waited for the next start.");
+            if (store.TakePending(_options.Product, _options.Backup) is { } taken) Log($"Switching to {taken}, which waited for the next start.");
             var state = store.Read();
             var trial = state.Trial is { } selected && UpdateVersion.TryParse(selected.Version, out var trialVersion) && UpdateVersionStore.Same(state.Current, trialVersion)
                 ? selected : null;
             if (trial is not null && trial.Starts >= _options.MaxTrialStarts)
             {
-                await RollBackAsync($"it did not confirm that it works after {trial.Starts} start(s)").ConfigureAwait(false);
+                RollBack($"it did not confirm that it works after {trial.Starts} start(s)");
                 continue;
             }
 
@@ -180,7 +216,7 @@ public sealed class UpdateLauncher
                 // confirmed one leaves the pointer to the installed entry point.
                 if (trial is not null)
                 {
-                    await RollBackAsync($"its folder {store.Root}{Path.DirectorySeparatorChar}{state.Current} is missing").ConfigureAwait(false);
+                    RollBack($"its folder {store.Root}{Path.DirectorySeparatorChar}{state.Current} is missing");
                 }
                 else
                 {
@@ -194,7 +230,8 @@ public sealed class UpdateLauncher
             if (trial is not null) store.CountTrialStart();
             Log($"Starting {label}.");
             var started = Stopwatch.StartNew();
-            using var process = _options.Runner.Start(command, _options.Arguments, ChildEnvironment());
+            using var process = Start(command, label, trial is not null);
+            if (process is null) continue;
             Volatile.Write(ref _child, process);
             if (Volatile.Read(ref _stopping) == 1) process.RequestStop();
             int exitCode;
@@ -250,14 +287,22 @@ public sealed class UpdateLauncher
                 var code = await exited.ConfigureAwait(false);
                 // A stop asked during the trial is not the version's failure: it is tried again at the next start.
                 if (Volatile.Read(ref _stopping) == 1) return (code, false);
-                await RollBackAsync($"it exited with code {code.ToString(CultureInfo.InvariantCulture)} before it confirmed that it works").ConfigureAwait(false);
+                // Nor is a refusal because another process holds its profile or data root: it did not run.
+                if (code == _options.HeldExitCode)
+                {
+                    store.UncountTrialStart(version);
+                    Log($"{_options.Product.AssemblyName} {version} did not run: another process holds what it runs on. It stays on trial for the next start.");
+                    return (code, false);
+                }
+
+                RollBack($"it exited with code {code.ToString(CultureInfo.InvariantCulture)} before it confirmed that it works");
                 return (code, true);
             }
 
             if (deadline.Elapsed < _options.TrialLimit || Volatile.Read(ref _stopping) == 1) continue;
             Log($"{_options.Product.AssemblyName} {version} did not confirm within {_options.TrialLimit.TotalSeconds:0} s: it is stopped.");
             await StopAsync(process, exited).ConfigureAwait(false);
-            await RollBackAsync($"it did not confirm that it works within {_options.TrialLimit.TotalSeconds:0} s").ConfigureAwait(false);
+            RollBack($"it did not confirm that it works within {_options.TrialLimit.TotalSeconds:0} s");
             return (await exited.ConfigureAwait(false), true);
         }
     }
@@ -271,27 +316,75 @@ public sealed class UpdateLauncher
         await exited.ConfigureAwait(false);
     }
 
-    private async Task RollBackAsync(string reason)
+    // Starts a version. One on trial that cannot be started (its app host corrupt, of another architecture) fails its
+    // trial as one that crashes: it is rolled back, and null tells the loop to go on with the previous version.
+    private IUpdateProcess? Start(UpdateCommand command, string label, bool onTrial)
+    {
+        try
+        {
+            return _options.Runner.Start(command, _options.Arguments, ChildEnvironment());
+        }
+        catch (Exception exception) when (onTrial && exception is Win32Exception or InvalidOperationException or IOException or UnauthorizedAccessException
+            or PlatformNotSupportedException)
+        {
+            Log($"{label} could not be started: {exception.Message}");
+            RollBack($"it could not be started: {exception.Message}");
+            return null;
+        }
+    }
+
+    // Moves the pointer back and marks the trial bad; its backup, if any, is restored at the top of the loop, before
+    // anything starts (RestoreAsync), so that a crash in between finds it recorded.
+    private void RollBack(string reason)
     {
         var store = _options.Store;
         var trial = store.RollBack(reason);
         if (trial is null) return;
         var state = store.Read();
+        var next = state.Current is { } current ? current : "the installed entry point";
         Log($"{_options.Product.AssemblyName} {trial.Version} is rolled back and marked bad: {reason}. "
-            + $"{(state.Current is { } current ? current : "The installed entry point")} runs again.");
-        if (_options.RolledBack is { } restore)
+            + (state.RollingBack is null ? $"{char.ToUpperInvariant(next[0])}{next[1..]} runs again." : $"The backup taken before it is restored, then {next} runs again."));
+        if (state.RollingBack is null) store.Prune();
+    }
+
+    // Restores the backup of a rollback. When it cannot, nothing starts: the previous version would run on data the
+    // version rolled back may have migrated beyond what it reads. The rollback stays recorded for the next start.
+    private async Task<bool> RestoreAsync(UpdateRollback rollback)
+    {
+        var store = _options.Store;
+        var trial = rollback.Trial;
+        string error;
+        if (_options.RolledBack is not { } restore)
+        {
+            error = "this launcher cannot restore it";
+        }
+        else
         {
             try
             {
                 await restore(trial, CancellationToken.None).ConfigureAwait(false);
+                store.CompleteRollback(trial);
+                store.Prune();
+                return true;
             }
-            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException)
+            catch (Exception exception)
             {
-                Log($"The backup taken before {trial.Version} could not be restored: {exception.Message}");
+                error = exception.Message;
             }
         }
 
-        store.Prune();
+        try
+        {
+            store.RecordRestoreFailure(error);
+        }
+        catch (UpdateException exception)
+        {
+            Log(exception.Message);
+        }
+
+        Log($"{_options.Product.AssemblyName} {trial.Version} was rolled back, but the backup taken before it ({trial.Backup}) could not be restored: {error}. "
+            + "No version is started on data it may not read: fix the cause and start again, the restore is tried first.");
+        return false;
     }
 
     private Dictionary<string, string?> ChildEnvironment()

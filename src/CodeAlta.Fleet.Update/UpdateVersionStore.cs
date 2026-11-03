@@ -15,6 +15,7 @@ public sealed class UpdateVersionStore
 
     private const string StateFileName = "state.json";
     private const string LockFileName = "state.lock";
+    private const string LauncherLockFileName = "launcher.lock";
     private static readonly TimeSpan LockPatience = TimeSpan.FromSeconds(15);
 
     private readonly TimeProvider _time;
@@ -175,14 +176,29 @@ public sealed class UpdateVersionStore
     /// <summary>
     /// Takes the switch that waits, when no process of the product runs (at start, or in a launcher between two
     /// versions): a staged version is selected on trial at once, since nothing has to drain; one that is not staged, or
-    /// already selected, is dropped.
+    /// already selected, is dropped. Nothing is taken while a rollback waits for its restore.
     /// </summary>
     /// <param name="product">The product.</param>
     /// <returns>The version selected, or null when none was.</returns>
-    public UpdateVersion? TakePending(UpdateProduct product)
+    public UpdateVersion? TakePending(UpdateProduct product) => TakePending(product, null);
+
+    /// <summary>
+    /// Takes the switch that waits, as <see cref="TakePending(UpdateProduct)"/>, after a copy of what the new version may
+    /// change (the server's database): the trial records the copy, which a rollback restores. A copy that fails drops the
+    /// switch, since without it there is no way back.
+    /// </summary>
+    /// <param name="product">The product.</param>
+    /// <param name="backup">
+    /// Copies the data before the switch to a version and gives the path of the copy, or null when there is nothing to
+    /// copy; it throws <see cref="UpdateException"/>, <see cref="IOException"/> or <see cref="UnauthorizedAccessException"/>
+    /// when it fails. Null when the product needs no copy.
+    /// </param>
+    /// <returns>The version selected, or null when none was.</returns>
+    public UpdateVersion? TakePending(UpdateProduct product, Func<UpdateVersion, string?>? backup)
     {
         ArgumentNullException.ThrowIfNull(product);
-        if (Read().Pending is not { } pending) return null;
+        var state = Read();
+        if (state.Pending is not { } pending || state.RollingBack is not null) return null;
         if (!UpdateVersion.TryParse(pending.Version, out var version) || !IsStaged(version, product))
         {
             CancelPending($"{pending.Version} is not staged in {Root}.");
@@ -195,14 +211,77 @@ public sealed class UpdateVersionStore
             return null;
         }
 
-        Select(version);
+        string? copy = null;
+        if (backup is not null)
+        {
+            SetPhase(version, UpdatePhases.BackingUp);
+            try
+            {
+                copy = backup(version);
+            }
+            catch (Exception exception) when (exception is UpdateException or IOException or UnauthorizedAccessException)
+            {
+                CancelPending($"The data could not be copied before the switch: {exception.Message}");
+                return null;
+            }
+        }
+
+        Select(version, copy);
         return version;
+    }
+
+    /// <summary>
+    /// Takes the lease of the launcher of this folder of versions (<c>launcher.lock</c>), unless another process holds
+    /// it: the one process that selects a version at start, runs a version as its child, follows its trial and rolls it
+    /// back. The operating system releases it when that process ends.
+    /// </summary>
+    /// <returns>The lease, to dispose once the launcher ends; null when another process holds it.</returns>
+    /// <exception cref="UpdateException">The folder of versions cannot be created, or its lease cannot be opened.</exception>
+    public UpdateLauncherLease? TryAcquireLauncherLease()
+    {
+        var path = Path.Combine(Root, LauncherLockFileName);
+        FileStream stream;
+        try
+        {
+            Directory.CreateDirectory(Root);
+            stream = new FileStream(path, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
+        }
+        catch (IOException) when (File.Exists(path))
+        {
+            return null;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            throw new UpdateException(UpdateErrorCodes.StateUnavailable, $"{path} could not be opened: {exception.Message}", exception);
+        }
+
+        try
+        {
+            // The process that holds it, for a person who looks.
+            stream.SetLength(0);
+            stream.Write(System.Text.Encoding.ASCII.GetBytes(Environment.ProcessId.ToString(System.Globalization.CultureInfo.InvariantCulture)));
+            stream.Flush();
+        }
+        catch (IOException)
+        {
+        }
+
+        return new UpdateLauncherLease(stream);
     }
 
     /// <summary>Counts a start of the version on trial, before a launcher starts it.</summary>
     /// <returns>The state.</returns>
     public UpdateState CountTrialStart()
         => Change(state => state.Trial is not { } trial ? state : state with { Trial = trial with { Starts = trial.Starts + 1 } });
+
+    /// <summary>Takes back the start of a version on trial that did not run: another process held what it runs on.</summary>
+    /// <param name="version">The version on trial.</param>
+    /// <returns>The state.</returns>
+    public UpdateState UncountTrialStart(UpdateVersion version)
+    {
+        ArgumentNullException.ThrowIfNull(version);
+        return Change(state => state.Trial is not { Starts: > 0 } trial || !Same(trial.Version, version) ? state : state with { Trial = trial with { Starts = trial.Starts - 1 } });
+    }
 
     /// <summary>Confirms the version on trial, called by that version once it is healthy.</summary>
     /// <param name="version">The version that runs.</param>
@@ -220,9 +299,13 @@ public sealed class UpdateVersionStore
         return confirmed;
     }
 
-    /// <summary>Rolls the version on trial back: the pointer returns to the previous version and the trial is marked bad.</summary>
+    /// <summary>
+    /// Rolls the version on trial back: the pointer returns to the previous version and the trial is marked bad. A trial
+    /// with a backup is recorded as <see cref="UpdateState.RollingBack"/> in the same write, until
+    /// <see cref="CompleteRollback"/> says that the backup is restored.
+    /// </summary>
     /// <param name="reason">Why, for a person.</param>
-    /// <returns>The trial rolled back (its backup is restored by the caller), or null when no version was on trial.</returns>
+    /// <returns>The trial rolled back, or null when no version was on trial.</returns>
     public UpdateTrial? RollBack(string reason)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(reason);
@@ -237,11 +320,38 @@ public sealed class UpdateVersionStore
                 Current = state.Previous,
                 Previous = null,
                 Trial = null,
+                RollingBack = trial.Backup is null ? state.RollingBack : new UpdateRollback(trial, at, reason),
                 Bad = [.. state.Bad.Where(bad => !string.Equals(bad.Version, trial.Version, StringComparison.OrdinalIgnoreCase)), new UpdateBadVersion(trial.Version, at, reason)],
                 LastOutcome = new UpdateOutcome(trial.Version, UpdateOutcomes.RolledBack, at, reason),
             };
         });
         return rolledBack;
+    }
+
+    /// <summary>Records why the restore of a rollback failed; the rollback stays, to be restored at the next start.</summary>
+    /// <param name="error">Why, for a person.</param>
+    /// <returns>The state.</returns>
+    public UpdateState RecordRestoreFailure(string error)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(error);
+        return Change(state => state.RollingBack is not { } rollback ? state : state with { RollingBack = rollback with { Error = error } });
+    }
+
+    /// <summary>Ends a rollback once its backup is restored.</summary>
+    /// <param name="trial">The trial of the rollback restored.</param>
+    /// <returns>Whether it was the rollback that waited.</returns>
+    public bool CompleteRollback(UpdateTrial trial)
+    {
+        ArgumentNullException.ThrowIfNull(trial);
+        var completed = false;
+        Change(state =>
+        {
+            if (state.RollingBack is not { } rollback || !string.Equals(rollback.Trial.Version, trial.Version, StringComparison.OrdinalIgnoreCase)
+                || rollback.Trial.SelectedAt != trial.SelectedAt) return state;
+            completed = true;
+            return state with { RollingBack = null };
+        });
+        return completed;
     }
 
     /// <summary>
