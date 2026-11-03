@@ -2,7 +2,7 @@ using System.Globalization;
 using System.Text;
 using CodeAlta.Plugin.Git;
 
-namespace CodeAlta.Desktop.Automations;
+namespace CodeAlta.Automations;
 
 /// <summary>Text that comes from elsewhere, a repository or a configuration file, as it is shown or sent.</summary>
 internal static class AutomationText

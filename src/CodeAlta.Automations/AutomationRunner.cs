@@ -5,7 +5,7 @@ using CodeAlta.Orchestration.Hosting;
 using CodeAlta.Orchestration.Runtime;
 using CodeAlta.Orchestration.Runtime.SystemPrompts;
 
-namespace CodeAlta.Desktop.Automations;
+namespace CodeAlta.Automations;
 
 /// <summary>How a run of an automation ended.</summary>
 /// <param name="Status">One of the status constants of <see cref="AutomationRun"/>.</param>

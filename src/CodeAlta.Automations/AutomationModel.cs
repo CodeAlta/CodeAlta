@@ -2,7 +2,7 @@ using System.Security.Cryptography;
 using System.Text;
 using CodeAlta.Agent;
 
-namespace CodeAlta.Desktop.Automations;
+namespace CodeAlta.Automations;
 
 /// <summary>What starts an automation besides the user.</summary>
 internal enum AutomationTriggerKind

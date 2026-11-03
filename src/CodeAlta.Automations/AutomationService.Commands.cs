@@ -2,7 +2,7 @@ using System.Text;
 using CodeAlta.Agent;
 using CodeAlta.Orchestration.Jobs;
 
-namespace CodeAlta.Desktop.Automations;
+namespace CodeAlta.Automations;
 
 /// <summary>How the command of a trigger ended.</summary>
 /// <param name="ExitCode">Its exit code.</param>

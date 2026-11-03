@@ -1,7 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
-namespace CodeAlta.Desktop.Automations;
+namespace CodeAlta.Automations;
 
 /// <summary>One time an automation was started, and the session it started.</summary>
 /// <param name="Id">The identifier of the run.</param>

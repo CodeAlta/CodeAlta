@@ -6,7 +6,7 @@ using Tomlyn.Model;
 using Tomlyn.Parsing;
 using Tomlyn.Syntax;
 
-namespace CodeAlta.Desktop.Automations;
+namespace CodeAlta.Automations;
 
 /// <summary>
 /// The automations of one configuration file: each is a table <c>[automations.&lt;guid&gt;]</c>. Reading is on its

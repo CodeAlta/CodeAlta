@@ -1,5 +1,5 @@
+using CodeAlta.Automations;
 using CodeAlta.Catalog;
-using CodeAlta.Desktop.Automations;
 
 namespace CodeAlta.Desktop.Tests;
 

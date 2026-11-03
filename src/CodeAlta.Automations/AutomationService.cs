@@ -4,7 +4,7 @@ using System.Text;
 using CodeAlta.Agent.Runtime;
 using CodeAlta.Catalog;
 
-namespace CodeAlta.Desktop.Automations;
+namespace CodeAlta.Automations;
 
 /// <summary>The automations as they are known at one moment.</summary>
 /// <param name="Entries">The automations that were read, by name.</param>

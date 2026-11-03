@@ -1,5 +1,5 @@
 using CodeAlta.Agent;
-using CodeAlta.Desktop.Automations;
+using CodeAlta.Automations;
 
 namespace CodeAlta.Desktop.Tests;
 

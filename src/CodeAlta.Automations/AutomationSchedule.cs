@@ -1,6 +1,6 @@
 using System.Globalization;
 
-namespace CodeAlta.Desktop.Automations;
+namespace CodeAlta.Automations;
 
 /// <summary>
 /// When a trigger is due: a set of minutes, hours, days and months on the clock of the machine. A cron
