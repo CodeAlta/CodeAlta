@@ -78,6 +78,7 @@ These files can contain comments and trailing commas. A project server starts in
 | Variable | In CodeAlta |
 |---|---|
 | `${env:NAME}`, `${NAME}`, `${NAME:-default}` | The environment variable `NAME` of CodeAlta, or the default. |
+| `${secret:NAME}`, `${var:NAME}` | A [secret or a variable](../secrets.md) of this computer. One that is not set keeps the server from starting, with a diagnostic that names it. |
 | `${workspaceFolder}`, `${workspaceFolderBasename}` | The project folder, and its name. |
 | `${userHome}` | Your home folder. |
 | `${input:...}` | Not supported: only Visual Studio Code can ask for it. |
