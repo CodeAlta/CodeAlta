@@ -427,8 +427,43 @@ public sealed class FleetNodeClient : IAsyncDisposable
     /// <returns>The offer.</returns>
     /// <exception cref="FleetException">The node refused the call.</exception>
     public Task<FleetPairingOffer> CreatePairingOfferAsync(TimeSpan? lifetime = null, CancellationToken cancellationToken = default)
-        => CallAsync(FleetNodeMethods.ControlPairingCreate, new FleetPairingCreateParams(lifetime is { } value ? (int)value.TotalSeconds : null),
+        => CreatePairingOfferAsync(lifetime, manage: false, cancellationToken);
+
+    /// <summary>The owner's local control: creates a pairing offer whose device may also manage the node.</summary>
+    /// <param name="lifetime">How long the offer stays open; null for 10 minutes.</param>
+    /// <param name="manage">Whether the device that redeems it manages the node.</param>
+    /// <param name="cancellationToken">Cancels the call.</param>
+    /// <returns>The offer.</returns>
+    /// <exception cref="FleetException">The node refused the call.</exception>
+    public Task<FleetPairingOffer> CreatePairingOfferAsync(TimeSpan? lifetime, bool manage, CancellationToken cancellationToken = default)
+        => CallAsync(FleetNodeMethods.ControlPairingCreate, new FleetPairingCreateParams(lifetime is { } value ? (int)value.TotalSeconds : null, manage),
             FleetNodeJsonContext.Default.FleetPairingCreateParams, FleetNodeJsonContext.Default.FleetPairingOffer, null, cancellationToken);
+
+    /// <summary>The owner's local control, or a device that manages the node: reads the end of its log.</summary>
+    /// <param name="lines">How many of the last lines; null for 200.</param>
+    /// <param name="cancellationToken">Cancels the call.</param>
+    /// <returns>The end of the log.</returns>
+    /// <exception cref="FleetException">The node refused the call (<see cref="FleetNodeErrorCodes.Unavailable"/> for a node without a log).</exception>
+    public Task<FleetNodeLog> ReadLogAsync(int? lines = null, CancellationToken cancellationToken = default)
+        => CallAsync(FleetNodeMethods.ControlLog, new FleetNodeLogParams(lines), FleetNodeJsonContext.Default.FleetNodeLogParams,
+            FleetNodeJsonContext.Default.FleetNodeLog, null, cancellationToken);
+
+    /// <summary>The longest an update of <see cref="UpdateNodeAsync"/> (a check, or a download) is waited for.</summary>
+    public static readonly TimeSpan UpdateTimeout = TimeSpan.FromMinutes(10);
+
+    /// <summary>The owner's local control, or a device that manages the node: checks its feed for an update, or installs one.</summary>
+    /// <param name="parameters">Whether to check only, the version, and whether to switch now.</param>
+    /// <param name="cancellationToken">Cancels the call.</param>
+    /// <returns>Where the update stands.</returns>
+    /// <exception cref="FleetException">The node refused the call.</exception>
+    public async Task<FleetNodeUpdateResult> UpdateNodeAsync(FleetNodeUpdateParams parameters, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(parameters);
+        var result = await _channel.Connection.SendRequestAsync(FleetNodeMethods.ControlUpdate,
+            JsonSerializer.SerializeToElement(parameters, FleetNodeJsonContext.Default.FleetNodeUpdateParams), new FleetRequestOptions { Timeout = UpdateTimeout },
+            cancellationToken).ConfigureAwait(false);
+        return Read(result, FleetNodeJsonContext.Default.FleetNodeUpdateResult);
+    }
 
     /// <summary>The owner's local control: waits until the open offer is redeemed, expires or is replaced.</summary>
     /// <param name="timeout">How long to wait at most.</param>

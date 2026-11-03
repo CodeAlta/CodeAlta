@@ -238,13 +238,15 @@ internal static class NodeCommandLine
             new CommandUsage("Usage: {NAME} <device> [--allow <list>] [--deny <list>] [options]"),
             _,
             "The permissions are view (see the sessions), drive (send prompts, answer",
-            "questions and permission requests), start (start sessions here) and move",
-            "(move sessions here). Lists are separated by commas: --allow view,drive.",
+            "questions and permission requests), start (start sessions here), move",
+            "(move sessions here), automate (run its automations here) and manage",
+            "(manage the node from its desktop: devices, projects, log, updates).",
+            "Lists are separated by commas: --allow view,drive.",
             "Without --allow or --deny, shows what the device may do. A device that",
             "loses a permission is disconnected and reconnects with what it may do.",
             _,
             "Options:",
-            { "allow=", "The permissions to give ({LIST}: view,drive,start,move,automate)", v => permissions.Allow.Add(v!) },
+            { "allow=", "The permissions to give ({LIST}: view,drive,start,move,automate,manage)", v => permissions.Allow.Add(v!) },
             { "deny=", "The permissions to take away ({LIST})", v => permissions.Deny.Add(v!) },
         };
         AddProfile(permissionsCommand, permissions.Profile);
@@ -264,11 +266,13 @@ internal static class NodeCommandLine
             "codealta-pair:// link with its key, its addresses and a secret), prints",
             "it, and waits until a device uses it (altanode connect <link>) or it",
             "expires. The device then may view, drive and start sessions here; moving",
-            "sessions here stays off. Runs beside the node, as its owner: it reads the",
+            "sessions here stays off. The first device paired with a node manages it",
+            "too, as --manage gives. Runs beside the node, as its owner: it reads the",
             "device key of the node from the profile and talks to it on this machine.",
             _,
             "Options:",
             { "minutes=", "How many {MINUTES} the link is valid (default 10)", v => pair.Minutes = v },
+            { "manage", "The device that pairs manages the node from its desktop: what each device may do, projects, log, updates", v => pair.Manage = v is not null },
         };
         AddProfile(pairCommand, pair.Profile);
         pairCommand.Add((_, _) => handlers.Pair(pair));

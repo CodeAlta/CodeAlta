@@ -90,11 +90,13 @@ If the new version does not start and connect within two minutes, the node goes 
 
 To allow only some feeds on a machine, list them in `fleet/update.json` of the profile (`update.json` of the data root for the server): `{ "source": "https://my-mirror/v3/index.json", "allowedSources": ["https://my-mirror/v3/index.json"] }`. Add `"fleet": false` to update that machine only by hand.
 
-With a CodeAlta Server, update all your machines at once from CodeAlta Desktop: see [Update all your machines](#update-all-your-machines).
+From CodeAlta Desktop, the page of a machine you manage updates it with **Check for updates** (see [Manage a machine from CodeAlta Desktop](#manage-a-machine-from-codealta-desktop)). With a CodeAlta Server, update all your machines at once: see [Update all your machines](#update-all-your-machines).
 
 ## Give it projects
 
-The sessions of a node run in the projects of its catalog. On the machine of the node:
+The sessions of a node run in the projects of its catalog. In CodeAlta Desktop, on a computer that manages the machine (see [Manage a machine from CodeAlta Desktop](#manage-a-machine-from-codealta-desktop)), open its page and, under **Projects**, type a repository URL and click **Clone**, or the full path of a folder of the machine and click **Add the folder**. The trash button of a project removes it from the machine's projects; its files stay.
+
+On the machine of the node:
 
 | Command | What it does |
 | --- | --- |
@@ -114,7 +116,7 @@ The sessions of a node run in the projects of its catalog. On the machine of the
 
 The link works once and expires after 10 minutes (`altanode pair --minutes <n>` gives it more). Pairing again with a new link replaces the machine, for example after its address changed.
 
-A paired computer may see the sessions of the machine, drive them and start new ones. Moving sessions to the machine stays off (see [Move a session](#move-a-session)).
+A paired computer may see the sessions of the machine, drive them and start new ones. Moving sessions to the machine stays off (see [Move a session](#move-a-session)). The first computer paired with a new machine also manages it: its row says **Managed from here** (see [Manage a machine from CodeAlta Desktop](#manage-a-machine-from-codealta-desktop)).
 
 ## See and drive its sessions
 
@@ -143,7 +145,7 @@ The **+** of the row of a machine in the Explorer opens the same prompt, already
 
 An automation of yours can run on a paired machine, by its triggers, while this computer is closed.
 
-1. On the machine of the node, let this computer give it automations: `altanode permissions <device> --allow automate` (`altanode devices` names the computers).
+1. Let this computer give the machine automations: on its page in **Settings** > **Fleet** > **Machines**, turn on **Automate** for **This computer** (or, on the machine, `altanode permissions <device> --allow automate`).
 2. In the **Automations** tab, edit the automation and choose the machine in **Runs on**. It is offered for an automation kept in your configuration, once a machine is paired.
 3. Save. CodeAlta copies the automation to the machine: its card says **On** and the name of the machine, and its details say **Copied to** that machine. A machine that is offline gets it when it answers.
 
@@ -162,7 +164,7 @@ A session can move to another machine and go on working there: its conversation,
 
 Moves are off until you allow them on the side that receives the session:
 
-- **To a node**: on the machine of the node, give the computer the Move permission with `altanode permissions <device> --allow move`. The same permission lets that computer take sessions of the node back.
+- **To a node**: on the page of the machine in **Settings** > **Fleet** > **Machines**, turn on **Move** for the computer (or, on the machine, `altanode permissions <device> --allow move`). The same permission lets that computer take sessions of the node back.
 - **To this computer**: in **Settings** > **Fleet** > **Machines**, turn on **Receive moved sessions on this computer**.
 
 To move a session:
@@ -176,18 +178,31 @@ Only a session of a project in a git repository with a remote moves. On the mach
 
 What stays behind: its background jobs, reminders and terminals, and the files that look like secrets (the dialog names them). A move that a lost connection stopped goes on when the machine is back.
 
-## Manage the devices of a node
+## Manage a machine from CodeAlta Desktop
 
-On the machine of the node:
+In **Settings** > **Fleet** > **Machines**, click the name of a machine to open its page. A computer that manages the machine changes everything there, without a terminal on the machine:
+
+| Section | What you do |
+| --- | --- |
+| **Devices** | Each computer paired with the machine, with a switch per permission: **View**, **Drive**, **Start**, **Move**, **Automate** and **Manage**. **Revoke** (the cross at the end of the row, then **Revoke**) refuses that computer there at once. |
+| **Projects** | Clone a repository there, add a folder, remove a project |
+| **Providers** | The providers ready on the machine, and its default model. A machine without one cannot start sessions: sign in to a provider on it |
+| **Updates** | The version it runs. **Check for updates**, then **Update to** the version found: it switches once no session works |
+| **Log** | **Show the log** reads its last lines |
+
+The first computer paired with a machine manages it. Give another computer the **Manage** switch on its row to let it manage the machine too; turning it off for **This computer** asks first, since only the owner can give it back. A computer that does not manage the machine sees its providers, and how its owner gives it the permission.
+
+On the machine itself, the same is done with:
 
 | Command | What it does |
 | --- | --- |
 | `altanode devices` | Lists the computers paired with the node |
 | `altanode revoke <device>` | Revokes a computer and disconnects it at once |
 | `altanode permissions <device>` | Shows what a computer may do |
-| `altanode permissions <device> --deny start` | Takes a permission away: `view`, `drive`, `start`, `move` or `automate` (`--allow` gives one) |
+| `altanode permissions <device> --deny start` | Takes a permission away: `view`, `drive`, `start`, `move`, `automate` or `manage` (`--allow` gives one) |
+| `altanode pair --manage` | A pairing link whose computer manages the node |
 
-In CodeAlta Desktop, **Forget** on the row of a machine in **Settings** > **Fleet** > **Machines** removes it from this computer; its sessions go on there. To make sure a lost or replaced computer can no longer reach a node, revoke it on the node.
+**Forget** on the row of a machine removes it from this computer; its sessions go on there. To make sure a lost or replaced computer can no longer reach a node, revoke it on the page of the machine, from a computer that manages it.
 
 From a terminal, `altanode connect <link>` pairs another profile with a node, and `altanode remote <machine> sessions`, `history`, `send`, `create` and `watch` read and drive the sessions of a paired machine. `altanode remote <machine> move <session>` moves one of them to the node of that profile.
 

@@ -17,7 +17,7 @@ namespace CodeAlta.Desktop.Rpc;
 /// names, states, addresses and the words of keys.
 /// </summary>
 [NeoRpcService("machines", Version = 1)]
-internal sealed class MachinesService
+internal sealed partial class MachinesService
 {
     private const int MaximumLinkLength = 4096;
     private const int MaximumPromptLength = 32768;

@@ -56,21 +56,21 @@ public sealed partial class NodeClientCommandTests
 
             (code, output, error) = await RunAsync(["permissions", "viewer", "--data-root", root.DataRoot]);
             Assert.AreEqual(NodeExitCodes.Success, code, error);
-            StringAssert.Contains(output, "may view, drive, start.");
+            StringAssert.Contains(output, "may view, drive, start, manage.", "The first device of a node manages it.");
 
             (code, output, error) = await RunAsync(["permissions", viewerIdentity.DeviceId[..6], "--allow", "move", "--data-root", root.DataRoot]);
             Assert.AreEqual(NodeExitCodes.Success, code, error);
-            StringAssert.Contains(output, "may view, drive, start, move.");
+            StringAssert.Contains(output, "may view, drive, start, move, manage.");
             Assert.IsFalse(viewer.Completion.IsCompleted, "A permission given keeps the channel.");
 
             (code, output, error) = await RunAsync(["permissions", "viewer", "--deny", "drive,move", "--data-root", root.DataRoot]);
             Assert.AreEqual(NodeExitCodes.Success, code, error);
-            StringAssert.Contains(output, "may view, start.");
+            StringAssert.Contains(output, "may view, start, manage.");
             StringAssert.Contains(output, "1 open channel(s) closed");
             await viewer.Completion.WaitAsync(Patience, token);
             (code, output, error) = await RunAsync(["remote", "test-node", "info", "--data-root", viewerRoot]);
             Assert.AreEqual(NodeExitCodes.Success, code, error);
-            StringAssert.Contains(output, "this device may view, start.");
+            StringAssert.Contains(output, "this device may view, start, manage.");
 
             await using var second = await FleetNodeClient.ConnectAsync(machine, viewerIdentity, token);
             await second.GetInfoAsync(token);

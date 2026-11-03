@@ -98,6 +98,24 @@ internal sealed class NodeFleet : IAsyncDisposable
     /// <exception cref="SocketException">The address cannot be bound.</exception>
     public static NodeFleet Start(NodeHost node, NodeListenOptions listen, string name, string version, Action? requestStop,
         Func<Fleet.Protocol.FleetUpdateStatus?>? updateStatus, Fleet.Telemetry.FleetMetrics? metrics)
+        => Start(node, listen, name, version, requestStop, updateStatus, metrics, null);
+
+    /// <summary>
+    /// Starts the node API and its listener, with the stop of the owner's local control, the versions it reports, the
+    /// instruments of its requests and moves, and the log and self-update its owner and its managing devices reach.
+    /// </summary>
+    /// <param name="node">The running node.</param>
+    /// <param name="listen">Where to listen.</param>
+    /// <param name="name">The name of the node.</param>
+    /// <param name="version">The version of CodeAlta it runs.</param>
+    /// <param name="requestStop">What stops the node gracefully (<c>altanode uninstall</c> on Windows); null for none.</param>
+    /// <param name="updateStatus">What reads the versions of the node and its self-update (<c>node.info</c>, <c>control.status</c>); null for none.</param>
+    /// <param name="metrics">The instruments of the node API; null for none.</param>
+    /// <param name="management">The log and the self-update of <c>control.log</c> and <c>control.update</c>; null for none.</param>
+    /// <returns>The fleet part of the node.</returns>
+    /// <exception cref="SocketException">The address cannot be bound.</exception>
+    public static NodeFleet Start(NodeHost node, NodeListenOptions listen, string name, string version, Action? requestStop,
+        Func<Fleet.Protocol.FleetUpdateStatus?>? updateStatus, Fleet.Telemetry.FleetMetrics? metrics, IFleetNodeManagement? management)
     {
         ArgumentNullException.ThrowIfNull(node);
         ArgumentNullException.ThrowIfNull(listen);
@@ -114,6 +132,7 @@ internal sealed class NodeFleet : IAsyncDisposable
                 Host = node.Host, Identity = identity, TrustedDevices = trusted, Name = name, Version = version,
                 AcceptsWork = () => node.AcceptsWork, PairingAddresses = () => addresses, RequestStop = requestStop, CloneRoot = node.Options.CloneRoot,
                 Updating = () => node.AdmissionPaused, UpdateStatus = updateStatus, Metrics = metrics, Automations = node.Automations,
+                Management = management,
             });
             // An assigned automation runs while the device that assigned it is still paired, with the automate permission.
             if (node.Automations is { } automations)

@@ -18,6 +18,9 @@ internal sealed class NodePairOptions
 
     /// <summary>Gets or sets how many minutes the code stays valid, as typed; null for 10.</summary>
     public string? Minutes { get; set; }
+
+    /// <summary>Gets or sets whether the device that pairs manages the node (what each device may do, projects, log, updates).</summary>
+    public bool Manage { get; set; }
 }
 
 /// <summary>The options of <c>altanode connect</c>.</summary>
@@ -104,7 +107,7 @@ internal sealed class NodeClientCommands(TextWriter output, TextWriter error)
         var (client, identity) = await control.ConnectAsync(stop.Token).ConfigureAwait(false);
         using var ownedIdentity = identity;
         await using var ownedClient = client;
-        var offer = await client.CreatePairingOfferAsync(lifetime, stop.Token).ConfigureAwait(false);
+        var offer = await client.CreatePairingOfferAsync(lifetime, options.Manage, stop.Token).ConfigureAwait(false);
         await output.WriteLineAsync("Give this pairing link to the device to pair (altanode connect <link>, or Pair a machine in CodeAlta Desktop):").ConfigureAwait(false);
         await output.WriteLineAsync().ConfigureAwait(false);
         await output.WriteLineAsync(offer.Link).ConfigureAwait(false);

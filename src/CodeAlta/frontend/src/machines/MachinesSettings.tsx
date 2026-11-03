@@ -7,8 +7,10 @@ import { SettingsPage, SettingsUnavailable, useSettingsEditor } from "../Setting
 import { useShellLanguage } from "../shellLanguage";
 import type { MessageKey } from "../localization";
 import { machineIntent, machineState, machineStateLabel, orderedMachines, pairingLinkOf, pairingProblem, pairingWords } from "./machines";
+import { MachinePage, type MachinePageApi } from "./MachinePage";
+import { managesMachine } from "./machineManagement";
 
-type MachinesApi = Pick<typeof machines, "list" | "previewPairing" | "pair" | "forget" | "watch" | "moveSettings" | "setReceiveMoves">;
+type MachinesApi = Pick<typeof machines, "list" | "previewPairing" | "pair" | "forget" | "watch" | "moveSettings" | "setReceiveMoves"> & Partial<MachinePageApi>;
 
 /**
  * Settings > Fleet > Machines: the machines this computer is paired with and their state, pairing with another one
@@ -18,6 +20,8 @@ export function MachinesSettings({ epoch, api = machines }: { epoch: string | nu
   const { t } = useShellLanguage();
   const { listing, loading, busy, notice, reload, mutate } = useSettingsEditor(options => api.list({ expectedEpoch: epoch ?? "" }, options), `${epoch}`);
   const [pairing, setPairing] = useState(false);
+  // The machine whose page is open, by its id; its row opens it.
+  const [opened, setOpened] = useState<string | null>(null);
   // Whether this computer receives the sessions its machines move here: off until the person turns it on.
   const [receive, setReceive] = useState<boolean | null>(null);
   useEffect(() => {
@@ -36,6 +40,8 @@ export function MachinesSettings({ epoch, api = machines }: { epoch: string | nu
     })();
     return () => abort.abort();
   }, [api, epoch, reload]);
+  const openedMachine = opened ? listing?.machines.find(machine => machine.id === opened && machine.paired) : undefined;
+  if (openedMachine && epoch) return <MachinePage epoch={epoch} machine={openedMachine} api={{ ...machines, ...api } as MachinePageApi} onBack={() => setOpened(null)} />;
   return <SettingsPage className="machines-settings" label={t("Machines")} group="Fleet" title="Paired machines"
     description="The computers this one is paired with: their sessions are listed and driven from here."
     notice={notice} loading={loading} busy={busy} onReload={reload}
@@ -45,7 +51,7 @@ export function MachinesSettings({ epoch, api = machines }: { epoch: string | nu
       : !listing.machines.some(machine => machine.paired) ? <NonIdealState className="machines-empty" icon={<AppIcon name="remote" size={36} />} title={t("No paired machine.")} />
       : <><ul className="machine-list" aria-label={t("Machines")}>
         {orderedMachines(listing.machines.filter(machine => machine.paired)).map(machine => <MachineRow key={machine.id} machine={machine} busy={busy}
-          onForget={() => void mutate(async () => api.forget({ expectedEpoch: epoch ?? "", machineId: machine.id }, { timeoutMilliseconds: 30_000 }))} />)}
+          onOpen={() => setOpened(machine.id)} onForget={() => void mutate(async () => api.forget({ expectedEpoch: epoch ?? "", machineId: machine.id }, { timeoutMilliseconds: 30_000 }))} />)}
       </ul>
       {receive !== null && <div className="machine-receive">
         <Switch checked={receive} disabled={busy} label={t("Receive moved sessions on this computer")}
@@ -57,8 +63,8 @@ export function MachinesSettings({ epoch, api = machines }: { epoch: string | nu
   </SettingsPage>;
 }
 
-/** One paired machine: its name, state and what it runs, the start of its key, and Forget. */
-export function MachineRow({ machine, busy, onForget }: { machine: MachineView; busy: boolean; onForget: () => void }) {
+/** One paired machine: its name, state and what it runs, the start of its key, its page, and Forget. */
+export function MachineRow({ machine, busy, onOpen, onForget }: { machine: MachineView; busy: boolean; onOpen?: () => void; onForget: () => void }) {
   const { t } = useShellLanguage();
   const state = machineState(machine);
   const details = [machine.os, machine.version && `CodeAlta ${machine.version}`, machine.address,
@@ -66,12 +72,16 @@ export function MachineRow({ machine, busy, onForget }: { machine: MachineView; 
   return <li className="machine-row" data-state={state}>
     <span className="machine-icon"><AppIcon name="remote" size={18} /></span>
     <div className="machine-main">
-      <div className="machine-title"><strong>{machine.name}</strong>
-        <Tag minimal round intent={machineIntent(state)} className="machine-state">{t(machineStateLabel(state))}</Tag></div>
+      <div className="machine-title">{onOpen ? <button type="button" className="machine-open" onClick={onOpen} title={t("Open the page of {name}", { name: machine.name })}><strong>{machine.name}</strong></button>
+        : <strong>{machine.name}</strong>}
+        <Tag minimal round intent={machineIntent(state)} className="machine-state">{t(machineStateLabel(state))}</Tag>
+        {managesMachine(machine) && <Tag minimal round icon={<AppIcon name="shield" size={11} />} className="machine-manages">{t("Managed from here")}</Tag>}</div>
       <div className="machine-details muted-text">{details}</div>
       {machine.problem && state !== "online" && <div className="machine-problem muted-text" title={machine.problem}>{machine.problem}</div>}
     </div>
     <code className="machine-fingerprint" title={machine.words}>{machine.fingerprint}</code>
+    {onOpen && <Button variant="minimal" size="small" icon={<AppIcon name="chevronRight" size={15} />} aria-label={t("Open the page of {name}", { name: machine.name })}
+      title={t("Open the page of {name}", { name: machine.name })} onClick={onOpen} />}
     <PopoverNext placement="left" content={<div className="machine-forget">
       <p>{t("Forget {name}?", { name: machine.name })}</p>
       <p className="muted-text">{t("Its sessions are no longer shown here; they go on on the machine.")}</p>

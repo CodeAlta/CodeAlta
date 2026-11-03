@@ -67,8 +67,8 @@ public sealed partial class FleetNodeService
         var lifetime = parameters.LifetimeSeconds is { } seconds ? TimeSpan.FromSeconds(seconds) : PairingOfferService.DefaultLifetime;
         if (lifetime < TimeSpan.FromSeconds(10) || lifetime > PairingOfferService.MaxLifetime)
             throw new FleetException(FleetErrorCodes.InvalidParams, null, "A pairing code lives from 10 seconds to 24 hours.");
-        var (offer, _) = Pairing.CreateOffer(_options.Name, [.. addresses.Take(PairingPayload.MaxAddresses)], lifetime);
-        LogInfo($"A pairing code was made, valid until {offer.ExpiresAt:O}.");
+        var (offer, _) = Pairing.CreateOffer(_options.Name, [.. addresses.Take(PairingPayload.MaxAddresses)], lifetime, parameters.Manage);
+        LogInfo($"A pairing code{(parameters.Manage ? " for a device that manages the node" : "")} was made, valid until {offer.ExpiresAt:O}.");
         return Task.FromResult(new FleetPairingOffer(offer.ToUri(), offer.ExpiresAt, offer.Addresses));
     }
 

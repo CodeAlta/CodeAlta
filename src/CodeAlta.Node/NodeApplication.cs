@@ -357,7 +357,8 @@ internal sealed class NodeApplication
                 try
                 {
                     // The node API runs with or without a listener (--no-listen): the servers the node joined relay channels to it.
-                    fleet = NodeFleet.Start(node, listen, name, Version, stopRequested.Cancel, () => updates?.Describe(), telemetry?.Metrics);
+                    fleet = NodeFleet.Start(node, listen, name, Version, stopRequested.Cancel, () => updates?.Describe(), telemetry?.Metrics,
+                        new NodeManagement(profile, Version, () => updates));
                     listening = fleet;
                 }
                 catch (SocketException exception)
