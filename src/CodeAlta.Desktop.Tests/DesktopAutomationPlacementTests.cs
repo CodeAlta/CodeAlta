@@ -112,6 +112,53 @@ public sealed class DesktopAutomationPlacementTests
         }
     }
 
+    [TestMethod]
+    public async Task VersionNumbers_NeverGoBelowTheLastSigned_EvenWhenTheClockGoesBack_OrAfterARestart()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "CodeAlta-placement-numbers-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            var global = Path.Combine(root, "config.toml");
+            File.WriteAllText(global, string.Empty);
+            await using var automations = new AutomationService(global, _ => Task.FromResult<IReadOnlyList<ProjectDescriptor>>([]),
+                new AutomationStateStore(Path.Combine(root, "state", "automations.json"), false), new FakeAutomationRunner(), TimeProvider.System, TimeZoneInfo.Utc);
+            var fleetRoot = Path.Combine(root, "fleet");
+            var clock = new SetClock { Now = new DateTimeOffset(2026, 11, 3, 12, 0, 0, TimeSpan.Zero) };
+            DesktopAutomationPlacement Placement() => new(automations, static _ => null, fleetRoot, static () => "desktop",
+                static _ => throw new InvalidOperationException("Nothing is signed here.")) { Time = clock };
+
+            long last;
+            await using (var placement = Placement())
+            {
+                var first = placement.NextNumber(Id);
+                Assert.AreEqual(clock.Now.ToUnixTimeMilliseconds(), first, "a number starts from the time");
+                Assert.AreEqual(first + 1, placement.NextNumber(Id), "the same millisecond still numbers after the last one");
+                clock.Now = clock.Now.AddYears(-1);
+                last = placement.NextNumber(Id);
+                Assert.AreEqual(first + 2, last, "a clock set back numbers after the last one signed");
+                Assert.AreEqual(clock.Now.ToUnixTimeMilliseconds(), placement.NextNumber("another"), "each automation has its own numbers");
+            }
+
+            // Started again with the clock still behind, and no record of a placement: it numbers after the last one signed.
+            await using (var restarted = Placement()) Assert.AreEqual(last + 1, restarted.NextNumber(Id));
+        }
+        finally
+        {
+            try { Directory.Delete(root, recursive: true); }
+            catch (IOException) { }
+            catch (UnauthorizedAccessException) { }
+        }
+    }
+
+    /// <summary>A clock the test sets.</summary>
+    private sealed class SetClock : TimeProvider
+    {
+        public DateTimeOffset Now { get; set; }
+
+        public override DateTimeOffset GetUtcNow() => Now;
+    }
+
     private static async Task WaitForAsync(Func<bool> condition, string what, CancellationToken cancellationToken)
     {
         var deadline = DateTime.UtcNow + Patience;

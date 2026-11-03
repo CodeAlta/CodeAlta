@@ -35,6 +35,9 @@ internal sealed class DesktopAutomationPlacement : IAutomationPlacement, IAsyncD
     /// <summary>The name of the record of what was copied where, in the fleet folder of the state root.</summary>
     public const string FileName = "placed-automations.json";
 
+    /// <summary>The name of the record of the last version number signed per automation, kept when an automation leaves its machine.</summary>
+    public const string NumbersFileName = "automation-version-numbers.json";
+
     private const int RunsKept = 50;
     private static readonly TimeSpan RefreshEvery = TimeSpan.FromSeconds(30);
     private static readonly TimeSpan RunsReadEvery = TimeSpan.FromSeconds(15);
@@ -50,7 +53,8 @@ internal sealed class DesktopAutomationPlacement : IAutomationPlacement, IAsyncD
     private readonly Dictionary<string, AutomationPlacementStatus> _status = new(StringComparer.Ordinal);
     private readonly Dictionary<string, IReadOnlyList<AutomationRun>> _runs = new(StringComparer.Ordinal);
     private readonly Dictionary<string, DateTimeOffset> _runsReadAt = new(StringComparer.Ordinal);
-    private readonly Dictionary<string, long> _numbers = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, long> _numbers;
+    private readonly string _numbersPath;
     private readonly SemaphoreSlim _signal = new(0, 1);
     private readonly SemaphoreSlim _work = new(1, 1);
     private readonly CancellationTokenSource _stop = new();
@@ -74,6 +78,8 @@ internal sealed class DesktopAutomationPlacement : IAutomationPlacement, IAsyncD
         ArgumentNullException.ThrowIfNull(sign);
         (_automations, _machines, _deviceId, _sign) = (automations, machines, deviceId, sign);
         _path = Path.Combine(fleetRoot, FileName);
+        _numbersPath = Path.Combine(fleetRoot, NumbersFileName);
+        _numbers = LoadNumbers(_numbersPath);
         _repositoryOf = repositoryOf ?? RepositoryKey.ReadAsync;
         _placed = Load(_path);
     }
@@ -572,13 +578,55 @@ internal sealed class DesktopAutomationPlacement : IAutomationPlacement, IAsyncD
     internal static IReadOnlyList<string> TriggerKinds(AutomationDefinition definition)
         => [.. definition.Triggers.Select(static trigger => trigger.Kind.ToString().ToLowerInvariant()).Distinct(StringComparer.Ordinal).Take(FleetAutomationVersionDocuments.MaxTriggers)];
 
-    // A number above every one this computer signed for the automation, and above the time: a record lost here still numbers after what the machine holds.
-    private long NextNumber(string id)
+    /// <summary>Gets the clock the version numbers start from; tests set one.</summary>
+    internal TimeProvider Time { get; init; } = TimeProvider.System;
+
+    /// <summary>
+    /// Reserves the number of the next version of an automation: after every number this computer signed for it (kept in a
+    /// file of its own, also once the automation left its machine), and at least the time in milliseconds, so that a record
+    /// lost here still numbers after what a machine holds. A clock set back never gives a number below the last one.
+    /// </summary>
+    internal long NextNumber(string id)
     {
         lock (_gate)
         {
             var held = Math.Max(_numbers.GetValueOrDefault(id), _placed.TryGetValue(id, out var record) ? record.Number : 0);
-            return Math.Max(held + 1, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
+            var number = Math.Max(held + 1, Time.GetUtcNow().ToUnixTimeMilliseconds());
+            _numbers[id] = number;
+            SaveNumbers();
+            return number;
+        }
+    }
+
+    private static Dictionary<string, long> LoadNumbers(string path)
+    {
+        try
+        {
+            if (!File.Exists(path)) return new(StringComparer.Ordinal);
+            using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+            var read = JsonSerializer.Deserialize(stream, PlacedAutomationJsonContext.Default.DictionaryStringInt64);
+            return new((read ?? []).Where(static pair => pair.Value > 0), StringComparer.Ordinal);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or JsonException or NotSupportedException)
+        {
+            // Without it, the clock and the placement record still number after what the machines hold.
+            return new(StringComparer.Ordinal);
+        }
+    }
+
+    // Under the gate.
+    private void SaveNumbers()
+    {
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(_numbersPath)!);
+            var staged = _numbersPath + ".tmp";
+            File.WriteAllText(staged, JsonSerializer.Serialize(_numbers, PlacedAutomationJsonContext.Default.DictionaryStringInt64));
+            File.Move(staged, _numbersPath, overwrite: true);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            Log("The version numbers of the placed automations could not be written: " + exception.Message);
         }
     }
 
@@ -635,4 +683,5 @@ internal sealed record PlacedAutomation(string MachineId, string Key, DateTimeOf
 
 [JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase)]
 [JsonSerializable(typeof(Dictionary<string, PlacedAutomation>))]
+[JsonSerializable(typeof(Dictionary<string, long>))]
 internal sealed partial class PlacedAutomationJsonContext : JsonSerializerContext;
