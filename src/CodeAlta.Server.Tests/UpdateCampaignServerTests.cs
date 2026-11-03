@@ -66,6 +66,21 @@ public sealed class UpdateCampaignServerTests
     }
 
     [TestMethod]
+    public async Task TheServerTakesAnAutomaticVersionOnlyWhileItIsTheLatestStable()
+    {
+        var reads = 0;
+        // The feed lists 4.0.2 when the campaign starts, and withdraws it before the server's step.
+        await using var fleet = await TestFleet.StartAsync(readLatest: () => Interlocked.Increment(ref reads) == 1 ? "4.0.2" : "4.0.1");
+        await fleet.SetPolicyAsync(1, FleetUpdateModes.Automatic);
+        await fleet.TickAsync();
+
+        var campaign = (await fleet.UpdatesAsync()).Campaigns.Single();
+        Assert.AreEqual(0, fleet.Server.Applied.Count, "the server reads the feed again before its own step");
+        Assert.AreEqual((FleetUpdateCampaignStates.Failed, FleetUpdateMachineStates.Failed), (campaign.State, campaign.ServerState));
+        StringAssert.Contains(campaign.ServerMessage, "4.0.2");
+    }
+
+    [TestMethod]
     public async Task ACancellationReachesANodeThatWasOfflineWhenItReconnects()
     {
         await using var fleet = await TestFleet.StartAsync(nodes: 1);

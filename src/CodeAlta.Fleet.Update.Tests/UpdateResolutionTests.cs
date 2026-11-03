@@ -100,6 +100,26 @@ public sealed class UpdateResolutionTests
     }
 
     [TestMethod]
+    public void AnExactVersionOfTheAutomaticPolicyMustBeTheLatestStableBothPackagesList()
+    {
+        var running = UpdateVersion.Parse("4.0.0");
+        FeedVersion[] tool = [new(UpdateVersion.Parse("4.0.1"), true), new(UpdateVersion.Parse("4.0.2"), Listed: false), new(UpdateVersion.Parse("4.0.3"), true),
+            new(UpdateVersion.Parse("4.1.0-beta.1"), true)];
+        FeedVersion[] runtime = [new(UpdateVersion.Parse("4.0.1"), true), new(UpdateVersion.Parse("4.0.2"), true), new(UpdateVersion.Parse("4.0.3"), true),
+            new(UpdateVersion.Parse("4.1.0-beta.1"), true)];
+        UpdateCheck Choose(string version, FeedVersion[] runtimes)
+            => SelfUpdater.Choose("feed", "CodeAlta.Node", tool, "CodeAlta.Node.win-x64", runtimes, new UpdateRequest { Version = version, StableOnly = true }, running,
+                new UpdateState());
+
+        Assert.AreEqual("4.0.3", Choose("4.0.3", runtime).Target?.ToString());
+        StringAssert.Contains(Assert.ThrowsExactly<UpdateException>(() => Choose("4.0.2", runtime)).Message, "unlisted", "a withdrawn release");
+        StringAssert.Contains(Assert.ThrowsExactly<UpdateException>(() => Choose("4.0.1", runtime)).Message, "4.0.3", "a release that is no longer the latest");
+        StringAssert.Contains(Assert.ThrowsExactly<UpdateException>(() => Choose("4.1.0-beta.1", runtime)).Message, "stable", "a prerelease");
+        FeedVersion[] runtimeWithdrawn = [.. runtime.Where(static found => !found.Version.Equals(UpdateVersion.Parse("4.0.3"))), new(UpdateVersion.Parse("4.0.3"), Listed: false)];
+        StringAssert.Contains(Assert.ThrowsExactly<UpdateException>(() => Choose("4.0.3", runtimeWithdrawn)).Message, "unlisted", "the package of this machine withdrawn");
+    }
+
+    [TestMethod]
     public void AVersionRolledBackIsSkippedUnlessNamed()
     {
         FeedVersion[] feed = [new(UpdateVersion.Parse("4.0.0"), true), new(UpdateVersion.Parse("4.0.1"), true), new(UpdateVersion.Parse("4.0.2"), true)];

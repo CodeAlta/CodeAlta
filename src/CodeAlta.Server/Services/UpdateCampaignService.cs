@@ -458,6 +458,15 @@ internal sealed class UpdateCampaignService : IAsyncDisposable
             Devices = devices, OrganizationId = campaign.OrganizationId, Product = UpdateProduct.Server, Runtime = runtime, Running = running,
         };
         if (!UpdateInstructions.TryVerify(Instruction(campaign), context, out var update, out var reason)) return $"The server refused the campaign: {reason}.";
+        if (update.Automatic)
+        {
+            // No person signed this version: it must still be the latest stable release the feed lists, read now, not when
+            // the campaign started (a release withdrawn meanwhile is not installed). Its own self-update checks it again.
+            var latest = await ReadLatestAsync(campaign.Feed, cancellationToken).ConfigureAwait(false);
+            if (!UpdateCampaignEngine.Same(latest, campaign.TargetVersion))
+                return $"{campaign.TargetVersion} is no longer the latest stable version {campaign.Feed} lists ({latest ?? "none"}).";
+        }
+
         var request = update.ToRequest() with { StableOnly = update.Automatic };
         await apply(request, $"fleet campaign {campaign.Sequence} ({campaign.Id})", cancellationToken).ConfigureAwait(false);
         return null;
