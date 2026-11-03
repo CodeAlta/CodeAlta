@@ -152,8 +152,8 @@ public interface ICoordinatorStore : IAsyncDisposable
     /// <param name="sessionIds">The sessions.</param>
     /// <param name="audit">The audit record, whose details the store sets to the sessions deleted.</param>
     /// <param name="cancellationToken">Cancels the operation.</param>
-    /// <returns>The sessions whose facts were deleted.</returns>
-    ValueTask<IReadOnlyList<string>> WithdrawSessionFactsAsync(string deviceId, IReadOnlyList<string> sessionIds, AuditEntry audit, CancellationToken cancellationToken = default);
+    /// <returns>The facts deleted, as they were held: their epoch and version name what was removed.</returns>
+    ValueTask<IReadOnlyList<SessionRecord>> WithdrawSessionFactsAsync(string deviceId, IReadOnlyList<string> sessionIds, AuditEntry audit, CancellationToken cancellationToken = default);
 
     /// <summary>Gets the cursors of the publications of a device.</summary>
     /// <param name="deviceId">The device.</param>

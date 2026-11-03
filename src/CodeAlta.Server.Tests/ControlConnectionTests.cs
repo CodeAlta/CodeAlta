@@ -202,6 +202,8 @@ public sealed class ControlConnectionTests
         CollectionAssert.AreEqual(new[] { "s1" }, result.Removed.ToArray());
         var removed = await NextAsync(events, FleetServerMethods.ChangeKinds.SessionRemoved);
         Assert.AreEqual("s1", removed.Id);
+        Assert.AreEqual((mac.DeviceId, 1L, 1L), (removed.Session?.MachineId, removed.Session?.Fact.Epoch, removed.Session?.Fact.Version),
+            "a removal names the facts it removed, so that a watcher keeps newer ones");
         var sessions = (await server.SendAsync(owner, HttpMethod.Get, "/api/v1/sessions")).Read<ListResponse<SessionDto>>().Items;
         CollectionAssert.AreEqual(new[] { "s2" }, sessions.Select(static session => session.Id).ToArray());
         Assert.AreEqual(0, (await WithdrawAsync(node, "s1")).Removed.Count, "a withdrawal is idempotent");

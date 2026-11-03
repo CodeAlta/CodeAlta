@@ -129,6 +129,8 @@ public sealed class FleetConnector : IAsyncDisposable
     private readonly HashSet<Task> _relays = [];
     private Task _loop = Task.CompletedTask;
     private FleetDirectoryView _directory = FleetDirectoryView.Empty;
+    // The changes received while a directory.watch waits for its snapshot, replayed after it; null when none waits.
+    private List<FleetDirectoryChange>? _directoryPending;
     private FleetConnectorState _state;
     private FleetError? _lastError;
     private FleetConnection? _connection;
@@ -376,11 +378,7 @@ public sealed class FleetConnector : IAsyncDisposable
         try
         {
             SetState(FleetConnectorState.Online, null);
-            if (_options.WatchDirectory)
-            {
-                var snapshot = await connection.SendRequestAsync(FleetServerMethods.DirectoryWatch, null, null, stop).ConfigureAwait(false);
-                if (snapshot?.Deserialize(FleetServerJsonContext.Default.FleetDirectorySnapshot) is { } directory) SetDirectory(FleetDirectoryView.From(directory));
-            }
+            if (_options.WatchDirectory) await WatchDirectoryAsync(connection, stop).ConfigureAwait(false);
 
             var lastPresence = DateTimeOffset.MinValue;
             var lastRead = DateTimeOffset.MinValue;
@@ -580,22 +578,56 @@ public sealed class FleetConnector : IAsyncDisposable
 
     private static TimeSpan Min(TimeSpan left, TimeSpan right) => left < right ? left : right;
 
-    private void ApplyDirectory(FleetDirectoryChange change)
+    // The server starts the events before it reads the snapshot, and an event can arrive before or just after the
+    // answer: the events wait until the snapshot is set, then apply over it in order, so that an older snapshot never
+    // undoes a newer change (an update, a withdrawal) the server sent meanwhile.
+    private async Task WatchDirectoryAsync(FleetConnection connection, CancellationToken stop)
     {
-        FleetDirectoryView current, next;
-        do
+        lock (_gate) _directoryPending = [];
+        try
         {
-            current = Volatile.Read(ref _directory);
-            next = current.Apply(change);
-            if (ReferenceEquals(next, current)) return;
+            var snapshot = await connection.SendRequestAsync(FleetServerMethods.DirectoryWatch, null, null, stop).ConfigureAwait(false);
+            if (snapshot?.Deserialize(FleetServerJsonContext.Default.FleetDirectorySnapshot) is not { } directory) return;
+            lock (_gate)
+            {
+                var view = FleetDirectoryView.From(directory);
+                foreach (var change in _directoryPending!) view = view.Apply(change);
+                Volatile.Write(ref _directory, view);
+                _directoryPending = null;
+            }
+
+            DirectoryChanged?.Invoke(this);
         }
-        while (Interlocked.CompareExchange(ref _directory, next, current) != current);
-        DirectoryChanged?.Invoke(this);
+        finally
+        {
+            List<FleetDirectoryChange>? pending;
+            lock (_gate)
+            {
+                pending = _directoryPending;
+                _directoryPending = null;
+            }
+
+            // A watch that gave no snapshot: what came meanwhile applies to the directory held.
+            foreach (var change in pending ?? []) ApplyDirectory(change);
+        }
     }
 
-    private void SetDirectory(FleetDirectoryView view)
+    private void ApplyDirectory(FleetDirectoryChange change)
     {
-        Volatile.Write(ref _directory, view);
+        lock (_gate)
+        {
+            if (_directoryPending is { } pending)
+            {
+                pending.Add(change);
+                return;
+            }
+
+            var current = Volatile.Read(ref _directory);
+            var next = current.Apply(change);
+            if (ReferenceEquals(next, current)) return;
+            Volatile.Write(ref _directory, next);
+        }
+
         DirectoryChanged?.Invoke(this);
     }
 
@@ -672,16 +704,18 @@ public sealed record FleetDirectoryView(
             case FleetServerMethods.ChangeKinds.Machine when change.Machine is { } machine:
                 return this with { Machines = Machines.SetItem(machine.DeviceId, machine) };
             case FleetServerMethods.ChangeKinds.Session when change.Session is { } session:
-                if (Sessions.TryGetValue(session.Fact.SessionId, out var held)
-                    && (session.Fact.Epoch < held.Fact.Epoch || session.Fact.Epoch == held.Fact.Epoch && session.Fact.Version <= held.Fact.Version))
-                    return this;
+                if (Sessions.TryGetValue(session.Fact.SessionId, out var held) && !IsNewer(session.Fact, held.Fact)) return this;
                 return this with { Sessions = Sessions.SetItem(session.Fact.SessionId, session) };
             case FleetServerMethods.ChangeKinds.Presence when change.Presence is { } presence:
                 return this with { Presence = Presence.SetItem(presence.DeviceId, presence) };
-            case FleetServerMethods.ChangeKinds.SessionRemoved when Sessions.ContainsKey(change.Id):
+            case FleetServerMethods.ChangeKinds.SessionRemoved when Sessions.TryGetValue(change.Id, out var current):
+                // A removal names the facts it removed: newer facts, or those of another machine, stay.
+                if (change.Session is { } removed && (current.MachineId != removed.MachineId || IsNewer(current.Fact, removed.Fact))) return this;
                 return this with { Sessions = Sessions.Remove(change.Id) };
             default:
                 return this;
         }
     }
+
+    private static bool IsNewer(FleetSessionFact fact, FleetSessionFact than) => fact.Epoch > than.Epoch || fact.Epoch == than.Epoch && fact.Version > than.Version;
 }

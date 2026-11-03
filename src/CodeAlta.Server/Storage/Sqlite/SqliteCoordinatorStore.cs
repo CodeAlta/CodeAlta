@@ -388,23 +388,29 @@ public sealed class SqliteCoordinatorStore : ICoordinatorStore
     }
 
     /// <inheritdoc />
-    public ValueTask<IReadOnlyList<string>> WithdrawSessionFactsAsync(string deviceId, IReadOnlyList<string> sessionIds, AuditEntry audit,
+    public ValueTask<IReadOnlyList<SessionRecord>> WithdrawSessionFactsAsync(string deviceId, IReadOnlyList<string> sessionIds, AuditEntry audit,
         CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrEmpty(deviceId);
         ArgumentNullException.ThrowIfNull(sessionIds);
         ArgumentNullException.ThrowIfNull(audit);
-        return WriteAsync<IReadOnlyList<string>>((connection, transaction) =>
+        return WriteAsync<IReadOnlyList<SessionRecord>>((connection, transaction) =>
         {
-            var removed = new List<string>();
+            var removed = new List<SessionRecord>();
             foreach (var id in sessionIds.Distinct(StringComparer.Ordinal))
             {
-                if (Execute(connection, transaction, "DELETE FROM sessions WHERE id = $id AND machine_id = $device", ("$id", id), ("$device", deviceId)) == 1) removed.Add(id);
+                var held = QuerySingle(connection, transaction, SessionColumns + " FROM sessions WHERE id = $id AND machine_id = $device", ReadSession, ("$id", id),
+                    ("$device", deviceId));
+                if (held is not null
+                    && Execute(connection, transaction, "DELETE FROM sessions WHERE id = $id AND machine_id = $device", ("$id", id), ("$device", deviceId)) == 1)
+                {
+                    removed.Add(held);
+                }
             }
 
             if (removed.Count > 0)
             {
-                AppendAudit(connection, transaction, audit with { Details = IdsDetails("sessions", removed) });
+                AppendAudit(connection, transaction, audit with { Details = IdsDetails("sessions", [.. removed.Select(static session => session.Id)]) });
             }
 
             return removed;
