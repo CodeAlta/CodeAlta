@@ -36,6 +36,18 @@ public interface IUpdateFeed
     /// <returns>The hash the feed gives for it, if any.</returns>
     /// <exception cref="UpdateException">The feed does not have the package, or the download failed.</exception>
     Task<FeedDownload> DownloadAsync(string packageId, UpdateVersion version, string destinationPath, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Gets the SHA-512 of a package without installing it: the one the feed publishes (the <c>packageHash</c> of its
+    /// catalog, the <c>.sha512</c> beside a file), or the hash of the package downloaded when the feed publishes none.
+    /// What a controller device signs in the manifest of a campaign.
+    /// </summary>
+    /// <param name="packageId">The package id.</param>
+    /// <param name="version">Its version.</param>
+    /// <param name="cancellationToken">Cancels the request.</param>
+    /// <returns>The hash, or null when the feed does not have the package.</returns>
+    /// <exception cref="UpdateException">The feed did not answer, or its hash is not a SHA-512.</exception>
+    Task<PackageHash?> GetHashAsync(string packageId, UpdateVersion version, CancellationToken cancellationToken);
 }
 
 /// <summary>Opens the feeds of the updates.</summary>
@@ -134,6 +146,21 @@ internal sealed class LocalFolderFeed(string root) : IUpdateFeed
         return new FeedDownload(hash);
     }
 
+    public async Task<PackageHash?> GetHashAsync(string packageId, UpdateVersion version, CancellationToken cancellationToken)
+    {
+        var file = Find(packageId).FirstOrDefault(found => found.Version.Equals(version)).Path;
+        if (file is null) return null;
+        var hashFile = file + ".sha512";
+        if (File.Exists(hashFile))
+        {
+            return PackageHash.TryParse(await File.ReadAllTextAsync(hashFile, cancellationToken).ConfigureAwait(false), out var published)
+                ? published
+                : throw new UpdateException(UpdateErrorCodes.HashMismatch, $"{hashFile} is not a SHA-512 hash.");
+        }
+
+        return await PackageHash.ComputeAsync(file, cancellationToken).ConfigureAwait(false);
+    }
+
     private IEnumerable<(UpdateVersion Version, string Path)> Find(string packageId)
     {
         var prefix = packageId + ".";
@@ -225,6 +252,33 @@ internal sealed class NuGetHttpFeed(string source, Uri serviceIndex, HttpClient 
         }
 
         return new FeedDownload(registrations is null ? null : await ReadHashAsync(registrations, id, version, cancellationToken).ConfigureAwait(false));
+    }
+
+    public async Task<PackageHash?> GetHashAsync(string packageId, UpdateVersion version, CancellationToken cancellationToken)
+    {
+        var (_, registrations) = await ResourcesAsync(cancellationToken).ConfigureAwait(false);
+        var id = packageId.ToLowerInvariant();
+        if (registrations is not null && await ReadHashAsync(registrations, id, version, cancellationToken).ConfigureAwait(false) is { } published) return published;
+        // A feed without a catalog: the package itself, downloaded to a temporary file and hashed.
+        var temporary = Path.Combine(Path.GetTempPath(), "codealta-update-" + Guid.NewGuid().ToString("N") + ".nupkg");
+        try
+        {
+            try
+            {
+                await DownloadAsync(packageId, version, temporary, cancellationToken).ConfigureAwait(false);
+            }
+            catch (UpdateException exception) when (exception.Code == UpdateErrorCodes.NotFound)
+            {
+                return null;
+            }
+
+            return await PackageHash.ComputeAsync(temporary, cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            try { File.Delete(temporary); }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException) { }
+        }
     }
 
     // The packageHash of the catalog entry the registration leaf points to; null when the feed has no catalog.

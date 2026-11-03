@@ -23,6 +23,12 @@ public sealed class UpdateSourceSettings
     /// the machine may then name any feed, the fleet only <see cref="Source"/> or nuget.org).
     /// </summary>
     public List<string>? AllowedSources { get; set; }
+
+    /// <summary>
+    /// Gets or sets false to refuse every update the fleet asks (<see cref="UpdateOrigin.Remote"/>): the owner updates this
+    /// machine on it only. Null or true lets the fleet update it from the feeds above.
+    /// </summary>
+    public bool? Fleet { get; set; }
 }
 
 /// <summary>
@@ -78,6 +84,9 @@ public sealed class UpdateSourcePolicy
         }
     }
 
+    /// <summary>Gets whether the owner lets the fleet update this machine (<see cref="UpdateSourceSettings.Fleet"/>).</summary>
+    public bool AcceptsFleet => Settings.Fleet != false;
+
     /// <summary>Resolves the feed of an update and checks that it is allowed.</summary>
     /// <param name="requested">The feed asked for; null for the configured one, or nuget.org.</param>
     /// <param name="origin">Who asks.</param>
@@ -85,6 +94,8 @@ public sealed class UpdateSourcePolicy
     /// <exception cref="UpdateException">The feed is not valid, or not allowed on this machine.</exception>
     public string Resolve(string? requested, UpdateOrigin origin)
     {
+        if (origin == UpdateOrigin.Remote && Settings.Fleet == false)
+            throw new UpdateException(UpdateErrorCodes.FleetRefused, $"The owner of this machine turned off the updates of the fleet ({Path ?? FileName}: \"fleet\": false).");
         var configured = Settings.Source is { Length: > 0 } source ? UpdateFeeds.Normalize(source) : UpdateFeeds.NuGetOrg;
         var resolved = requested is null ? configured : UpdateFeeds.Normalize(requested);
         if (Settings.AllowedSources is { } allowed)

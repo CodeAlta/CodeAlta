@@ -65,6 +65,19 @@ public static class FleetServerMethods
     /// </summary>
     public const string TelemetrySettings = "telemetry.settings";
 
+    /// <summary>
+    /// The event of an update the fleet asks of a node (<see cref="FleetUpdateInstruction"/>): sent when a campaign reaches
+    /// it, and again when it connects while the campaign waits for it. The node checks the signed manifest (or the signed
+    /// automatic policy) against the device list it anchored, keeps the instruction, and waits for its time.
+    /// </summary>
+    public const string UpdateInstruction = "update.instruction";
+
+    /// <summary>The event of a campaign cancelled before the node switched (<see cref="FleetUpdateCancel"/>).</summary>
+    public const string UpdateCancel = "update.cancel";
+
+    /// <summary>Where the node stands in a campaign (<see cref="FleetUpdateReport"/>); the server records it for the campaign.</summary>
+    public const string UpdateReport = "update.report";
+
     /// <summary>The kinds of <see cref="FleetDirectoryChange"/>.</summary>
     public static class ChangeKinds
     {
@@ -83,6 +96,9 @@ public static class FleetServerMethods
 
         /// <summary>A device that came online, went offline or changed state.</summary>
         public const string Presence = "presence";
+
+        /// <summary>An update campaign of the organization changed; <see cref="FleetDirectoryChange.Id"/> names it. Read it from the REST API.</summary>
+        public const string Update = "update";
     }
 }
 
@@ -94,7 +110,8 @@ public sealed record FleetPublicationCursors(long Facts, long Inventory);
 /// <summary>The parameters of <c>presence.update</c>.</summary>
 /// <param name="State">The state of the device, such as <c>active</c>, <c>idle</c> or <c>busy</c>.</param>
 /// <param name="ActiveSessions">How many sessions run on the device now, when it runs some.</param>
-public sealed record FleetPresenceUpdate(string State, int? ActiveSessions = null);
+/// <param name="Update">Where the device stands in the update campaign it was last asked, or null.</param>
+public sealed record FleetPresenceUpdate(string State, int? ActiveSessions = null, FleetUpdateReport? Update = null);
 
 /// <summary>A device online, with its state.</summary>
 /// <param name="DeviceId">The device.</param>
@@ -102,7 +119,8 @@ public sealed record FleetPresenceUpdate(string State, int? ActiveSessions = nul
 /// <param name="State">Its last state (<see cref="FleetPresenceUpdate.State"/>), or <see langword="null"/>.</param>
 /// <param name="ActiveSessions">How many sessions it runs, when it said so.</param>
 /// <param name="Since">When it connected, or went offline.</param>
-public sealed record FleetPresence(string DeviceId, bool Online, string? State, int? ActiveSessions, DateTimeOffset Since);
+/// <param name="Update">Where it stands in the update campaign it was last asked, when it said so.</param>
+public sealed record FleetPresence(string DeviceId, bool Online, string? State, int? ActiveSessions, DateTimeOffset Since, FleetUpdateReport? Update = null);
 
 /// <summary>The snapshot of a machine (<c>doc/fleet/server.md</c>, machines): what it is and can do, never its content.</summary>
 /// <param name="Name">The name of the machine.</param>
@@ -286,4 +304,7 @@ public sealed record FleetRelayClose(string RelayId, string? Reason = null);
 [JsonSerializable(typeof(FleetRelayRef))]
 [JsonSerializable(typeof(FleetRelayClose))]
 [JsonSerializable(typeof(FleetSignedTelemetrySettings))]
+[JsonSerializable(typeof(FleetUpdateInstruction))]
+[JsonSerializable(typeof(FleetUpdateCancel))]
+[JsonSerializable(typeof(FleetUpdateReport))]
 public sealed partial class FleetServerJsonContext : JsonSerializerContext;

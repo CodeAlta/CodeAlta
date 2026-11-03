@@ -17,6 +17,9 @@ public sealed record UpdateRequest
     /// <summary>Gets whether a prerelease may be chosen when the running version is a release.</summary>
     public bool Prerelease { get; init; }
 
+    /// <summary>Gets whether only a stable version is chosen, even when a prerelease runs (the automatic policy of a fleet).</summary>
+    public bool StableOnly { get; init; }
+
     /// <summary>Gets whether the switch does not wait for running work.</summary>
     public bool Now { get; init; }
 
@@ -158,7 +161,7 @@ public sealed class SelfUpdater
         }
 
         // A machine on a prerelease follows the prereleases; a release follows releases unless asked.
-        var prerelease = request.Prerelease || running.IsPrerelease;
+        var prerelease = !request.StableOnly && (request.Prerelease || running.IsPrerelease);
         var listedRuntime = runtimeVersions.Where(static found => found.Listed).Select(static found => found.Version).ToHashSet();
         var candidates = toolVersions.Where(found => found.Listed && listedRuntime.Contains(found.Version) && (prerelease || !found.Version.IsPrerelease))
             .Select(static found => found.Version).ToArray();

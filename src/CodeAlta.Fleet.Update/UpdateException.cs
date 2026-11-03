@@ -32,6 +32,9 @@ public static class UpdateErrorCodes
 
     /// <summary>The state of the versions could not be read or written.</summary>
     public const string StateUnavailable = "update.state_unavailable";
+
+    /// <summary>The owner of the machine turned off the updates of the fleet (<c>"fleet": false</c> in <c>update.json</c>).</summary>
+    public const string FleetRefused = "update.fleet_refused";
 }
 
 /// <summary>An update that could not be done, with a stable code (<see cref="UpdateErrorCodes"/>).</summary>
