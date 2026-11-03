@@ -35,7 +35,7 @@ const pages: Readonly<Record<string, ProviderPage>> = {
   tailscale: { name: "Tailscale", address: "Address on the tailnet", unserved: "Not served on the tailnet", apply: "Apply to publish the page on the tailnet." },
   devtunnel: {
     name: "Dev Tunnels", address: "Address of the Dev Tunnel", unserved: "Not served through Dev Tunnels", apply: "Apply to open the Dev Tunnel.",
-    help: "A Dev Tunnel of Microsoft gives the page an HTTPS address only your GitHub account opens, without installing anything on the phone. This computer needs the Dev Tunnels command line, and the phone signs in with the same GitHub account.",
+    help: "Any phone opens the page through a Dev Tunnel, signed in with your GitHub account. This computer needs the devtunnel command line.",
   },
 };
 

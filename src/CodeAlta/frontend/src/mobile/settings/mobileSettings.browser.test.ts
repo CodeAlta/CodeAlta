@@ -94,7 +94,7 @@ test("the settings page of Mobile shows its ports and its address, applies new p
     assert.equal(await evaluate("document.querySelector('.mobile-settings-address code')?.textContent"), "https://desk.tail1234.ts.net:2584");
     await evaluate(`document.querySelector('input[name="mobile-settings-mode"][value="devtunnel"]').click()`);
     assert.equal(await wait("!document.getElementById('mobile-settings-https-port')"), true);
-    assert.equal(await evaluate("[...document.querySelectorAll('.settings-field-help')].some(element => element.textContent.includes('Dev Tunnels command line'))"), true);
+    assert.equal(await evaluate("[...document.querySelectorAll('.settings-field-help')].some(element => element.textContent.includes('devtunnel command line'))"), true);
     await evaluate(`${button("Apply")}.click()`);
     assert.equal(await wait("mobileSettingsFixture.state.calls.includes('set:devtunnel:2590')"), true);
     assert.equal(await wait("document.getElementById('mobile-settings-address')?.textContent === 'Address of the Dev Tunnel'"), true);
