@@ -141,6 +141,15 @@ internal sealed class MoveRecord : JournalRecord
 
     /// <summary>Gets or sets the name of the machine the session moved to: the one that wrote the record.</summary>
     public string? To { get; set; }
+
+    /// <summary>
+    /// Gets or sets the device id of the machine the session came from; null in a record written before the ids were recorded. The id
+    /// does not change when a machine is renamed, the name does.
+    /// </summary>
+    public string? FromDevice { get; set; }
+
+    /// <summary>Gets or sets the device id of the machine the session moved to; null in a record written before the ids were recorded.</summary>
+    public string? ToDevice { get; set; }
 }
 
 /// <summary>An actor (<c>AltaActorProvenance</c>): who created a session or submitted a prompt.</summary>

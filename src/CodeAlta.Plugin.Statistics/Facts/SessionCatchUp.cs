@@ -104,7 +104,7 @@ internal sealed class SessionCatchUp : IDisposable
 
         // A move the reading did not know changed which records are the work of this machine: the session is read again from the
         // start with the moves it found. Each reading that asks again found one more, and their number is bounded.
-        for (var reading = 0; reducer.RestartRequested && reading <= SessionFactsState.MaxMoves; reading++)
+        for (var reading = 0; reducer.RestartRequested && reading < SessionFactsState.MaxRestartReadings; reading++)
         {
             restarted = true;
             reducer = new SessionFactsReducer(sessionId, new SessionFactsState { Moved = reducer.State.Moved!.Known() });
