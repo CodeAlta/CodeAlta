@@ -121,7 +121,8 @@ public sealed class FleetServerRpcTests
                 }
             }
 
-            Assert.AreEqual(connector.MetadataKey!.Id, FleetKeyWrap.Unwrap(nodeCopy!.Wrapped!, nodeCopy.Id, nodeKey).Id);
+            var nodeList = await new FleetOrganizationDevices(address, nodeKey).RefreshAsync(token);
+            Assert.AreEqual(connector.MetadataKey!.Id, FleetKeyWrap.Unwrap(nodeCopy!.Wrapped!, nodeCopy.Id, nodeCopy.Epoch, nodeKey, nodeList).Id);
 
             // Its counts come from its journal: one turn with one tool call, the tokens of its usage.
             Assert.AreEqual((1, 1500), (session.Turns, session.Tokens));

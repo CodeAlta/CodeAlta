@@ -67,7 +67,11 @@ public static class FleetServerMethods
         /// <summary>The facts of a session.</summary>
         public const string Session = "session";
 
-        /// <summary>A session whose facts its machine withdrew: <see cref="FleetDirectoryChange.Id"/> names it.</summary>
+        /// <summary>
+        /// A session whose facts its machine withdrew: <see cref="FleetDirectoryChange.Id"/> names it, and
+        /// <see cref="FleetDirectoryChange.Session"/> the facts removed (their machine, epoch and version), so that a
+        /// watcher keeps newer facts it already holds.
+        /// </summary>
         public const string SessionRemoved = "session_removed";
 
         /// <summary>A device that came online, went offline or changed state.</summary>

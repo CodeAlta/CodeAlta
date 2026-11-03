@@ -64,6 +64,51 @@ public sealed class FleetOrganizationDevicesTests
     }
 
     [TestMethod]
+    public async Task AnOlderPrefixOfTheListCannotBringBackARemovedDeviceNorAfterARestart()
+    {
+        using var keys = new Keys();
+        using var folder = new TestFolder();
+        var pin = Path.Combine(folder.Path, "link", FleetOrganizationDevices.PinFileName);
+        var chain = keys.Chain();
+        var server = new DeviceListServer(chain);
+        var devices = new FleetOrganizationDevices(new Uri("http://server.test/"), keys.Node, pin, server);
+        var verified = await devices.RefreshAsync(CancellationToken.None);
+        Assert.IsTrue(verified.IsRemoved(keys.Other.Fingerprint));
+
+        // The server answers the list as it was before the removal: valid, and the removed device a member again.
+        server.Chain = [.. chain.Take(3)];
+        await Assert.ThrowsExactlyAsync<FleetDeviceListException>(() => devices.RefreshAsync(CancellationToken.None));
+        Assert.AreSame(verified, devices.Current, "The list last verified is kept.");
+        var restarted = new FleetOrganizationDevices(new Uri("http://server.test/"), keys.Node, pin, server);
+        await Assert.ThrowsExactlyAsync<FleetDeviceListException>(() => restarted.RefreshAsync(CancellationToken.None), "The checkpoint outlives the instance.");
+        Assert.IsNull(restarted.Current);
+
+        // Nor a list of the same length that goes another way after the entries this device verified.
+        server.Chain = [.. chain.Take(3), keys.Entry(keys.Desktop, 4, chain[2].Hash, FleetDeviceListOperations.Remove, keys.Node, null)];
+        await Assert.ThrowsExactlyAsync<FleetDeviceListException>(() => restarted.RefreshAsync(CancellationToken.None));
+
+        // A list that goes on from the checkpoint is taken, and moves the checkpoint.
+        var removeNode = keys.Entry(keys.Desktop, 5, chain[3].Hash, FleetDeviceListOperations.Remove, keys.Node, null);
+        server.Chain = [.. chain, removeNode];
+        Assert.AreEqual(5L, (await restarted.RefreshAsync(CancellationToken.None)).Sequence);
+        server.Chain = chain;
+        await Assert.ThrowsExactlyAsync<FleetDeviceListException>(() => new FleetOrganizationDevices(new Uri("http://server.test/"), keys.Node, pin, server)
+            .RefreshAsync(CancellationToken.None), "The list it verified last is the one later lists must extend.");
+    }
+
+    [TestMethod]
+    public async Task AnInstanceWithoutAPinFileKeepsItsCheckpointInMemory()
+    {
+        using var keys = new Keys();
+        var chain = keys.Chain();
+        var server = new DeviceListServer(chain);
+        var devices = new FleetOrganizationDevices(new Uri("http://server.test/"), keys.Node, null, server);
+        await devices.RefreshAsync(CancellationToken.None);
+        server.Chain = [.. chain.Take(3)];
+        await Assert.ThrowsExactlyAsync<FleetDeviceListException>(() => devices.RefreshAsync(CancellationToken.None));
+    }
+
+    [TestMethod]
     public void ANodeTrustsItsOwnersControllersAsPairedOthersForNothingAndRefusesRemovedKeys()
     {
         using var keys = new Keys();

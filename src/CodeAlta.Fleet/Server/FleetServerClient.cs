@@ -66,6 +66,7 @@ public sealed class FleetServerClient : IDisposable
     private readonly bool _ownsHttp;
     private readonly DeviceIdentity _identity;
     private readonly TimeProvider _time;
+    private readonly HttpMessageHandler? _handler;
 
     /// <summary>Initializes a new instance of the <see cref="FleetServerClient"/> class.</summary>
     /// <param name="serverAddress">The address of the server (<see cref="FleetServerAddress.TryParse"/>).</param>
@@ -80,6 +81,7 @@ public sealed class FleetServerClient : IDisposable
         ServerAddress = serverAddress;
         _identity = identity;
         _time = time ?? TimeProvider.System;
+        _handler = handler;
         _http = handler is null ? new HttpClient() : new HttpClient(handler, disposeHandler: false);
         _http.Timeout = TimeSpan.FromSeconds(30);
         _ownsHttp = true;
@@ -90,6 +92,23 @@ public sealed class FleetServerClient : IDisposable
 
     /// <summary>Gets the id of this device.</summary>
     public string DeviceId => _identity.DeviceId;
+
+    /// <summary>
+    /// Gets the anchored verifier of the device list of this server for this device (its pin and checkpoint in the
+    /// folder of the link), which every entry this client signs follows; null verifies the list from the first entry
+    /// the server gives now, for a device that holds no link to this server yet.
+    /// </summary>
+    /// <exception cref="ArgumentException">The verifier is for another server or another device.</exception>
+    public FleetOrganizationDevices? DeviceList
+    {
+        get;
+        init
+        {
+            if (value is not null && (value.ServerAddress != ServerAddress || value.Identity.DeviceId != _identity.DeviceId))
+                throw new ArgumentException("The device list is anchored for another server or another device.", nameof(value));
+            field = value;
+        }
+    }
 
     /// <summary>Gets the public key of this device, as the server records it: the base64 of its SubjectPublicKeyInfo.</summary>
     public string PublicKey => Convert.ToBase64String(_identity.ExportSubjectPublicKeyInfo());
@@ -209,8 +228,9 @@ public sealed class FleetServerClient : IDisposable
 
     /// <summary>
     /// Reads the signed device list and replays it with the rules every device applies (<see cref="FleetDeviceListVerifier"/>):
-    /// signatures, sequence, previous hashes, signers that are controller devices. What it gives can be trusted whatever
-    /// the server is; a list that does not verify is refused.
+    /// signatures, sequence, previous hashes, signers that are controller devices. A list that does not verify is
+    /// refused; one that verifies is not compared with what this device verified before: what a device trusts, signs
+    /// after or wraps keys to comes from <see cref="FleetOrganizationDevices"/>, which anchors it.
     /// </summary>
     /// <param name="organizationId">The organization the list must name; null for the one the server says.</param>
     /// <param name="cancellationToken">Cancels the call.</param>
@@ -221,7 +241,16 @@ public sealed class FleetServerClient : IDisposable
     public async Task<FleetDeviceListState> ReadVerifiedDeviceListAsync(string? organizationId = null, CancellationToken cancellationToken = default)
     {
         organizationId ??= (await GetOrganizationAsync(cancellationToken).ConfigureAwait(false)).Id;
-        var list = await GetDeviceListAsync(cancellationToken).ConfigureAwait(false);
+        return VerifyDeviceList(await GetDeviceListAsync(cancellationToken).ConfigureAwait(false), organizationId);
+    }
+
+    /// <summary>Replays the entries of a device list as the server gave them.</summary>
+    /// <param name="list">The entries, with the server's sequence and hash of each.</param>
+    /// <param name="organizationId">The organization the list must name.</param>
+    /// <returns>The list after its last entry.</returns>
+    /// <exception cref="FleetDeviceListException">The list does not verify.</exception>
+    internal static FleetDeviceListState VerifyDeviceList(IReadOnlyList<DeviceListEntryDto> list, string? organizationId)
+    {
         for (var index = 0; index < list.Count; index++)
         {
             // The server's numbering of an entry agrees with the entry, or the list is not the one its signers signed.
@@ -232,7 +261,11 @@ public sealed class FleetServerClient : IDisposable
         return FleetDeviceListVerifier.VerifyOrThrow(list.Select(static item => item.Entry), organizationId);
     }
 
-    /// <summary>Gets a device from the verified device list: the key to trust for it, whatever the server's tables say.</summary>
+    // The list as the anchor of this server verifies it: the one every entry signed here follows.
+    private Task<FleetDeviceListState> ReadAnchoredDeviceListAsync(CancellationToken cancellationToken)
+        => (DeviceList ?? new FleetOrganizationDevices(ServerAddress, _identity, null, _handler)).RefreshAsync(cancellationToken);
+
+    /// <summary>Gets a device from the anchored device list (<see cref="DeviceList"/>): the key to trust for it, whatever the server's tables say.</summary>
     /// <param name="deviceId">The device.</param>
     /// <param name="cancellationToken">Cancels the call.</param>
     /// <returns>Its member record, or null when it is not in the list.</returns>
@@ -243,7 +276,7 @@ public sealed class FleetServerClient : IDisposable
     public async Task<FleetDeviceListMember?> GetTrustedMemberAsync(string deviceId, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(deviceId);
-        var state = await ReadVerifiedDeviceListAsync(null, cancellationToken).ConfigureAwait(false);
+        var state = await ReadAnchoredDeviceListAsync(cancellationToken).ConfigureAwait(false);
         return state.Members.GetValueOrDefault(deviceId);
     }
 
@@ -355,8 +388,11 @@ public sealed class FleetServerClient : IDisposable
         var (operation, key, kind, owner) = await describe(organization, self, cancellationToken).ConfigureAwait(false);
         for (var attempt = 0; ; attempt++)
         {
-            // Nothing is signed after a list this device cannot verify: its signature would vouch for what the server added.
-            var state = await ReadVerifiedDeviceListAsync(organization.Id, cancellationToken).ConfigureAwait(false);
+            // Nothing is signed after a list this device cannot verify, or that does not extend the one it verified before
+            // (another root, a removal taken away): its signature would vouch for what the server added.
+            var state = await ReadAnchoredDeviceListAsync(cancellationToken).ConfigureAwait(false);
+            if (state.OrganizationId is { } named && !string.Equals(named, organization.Id, StringComparison.Ordinal))
+                throw new FleetDeviceListException(state.Sequence, "the server names another organization than its device list");
             if (!state.IsController(DeviceId))
                 throw new FleetDeviceListException(state.Sequence, "this device is not a controller device of the list, so it signs no entry");
             var entry = Sign(new FleetDeviceListEntryPayload(FleetDeviceListEntryPayload.CurrentVersion, organization.Id, state.Sequence + 1, state.LastHash, operation, deviceId,

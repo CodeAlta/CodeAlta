@@ -32,6 +32,12 @@ public sealed record FleetDeviceListState(
     /// <summary>Gets the hash of the first entry: the root a device pins per server, so that a server cannot swap the whole list.</summary>
     public string? FirstHash { get; init; }
 
+    /// <summary>
+    /// Gets the sequence of the last entry that removed a device, 0 when none did: a key given to the devices of the
+    /// list before it may be held by the removed device, so it seals nothing new (a new epoch replaces it).
+    /// </summary>
+    public long LastRemovalSequence { get; init; }
+
     /// <summary>Gets whether a device is a controller device of the list: one that may sign entries.</summary>
     /// <param name="deviceId">The device.</param>
     /// <returns>Whether it is a member of class <see cref="FleetDeviceKinds.Controller"/>.</returns>
@@ -202,7 +208,12 @@ public static class FleetDeviceListVerifier
                 return $"its operation '{payload.Operation}' is unknown";
         }
 
-        next = new FleetDeviceListState(organization, payload.Sequence, hash, members, removed) { FirstDeviceId = state.FirstDeviceId, FirstHash = state.FirstHash };
+        next = new FleetDeviceListState(organization, payload.Sequence, hash, members, removed)
+        {
+            FirstDeviceId = state.FirstDeviceId,
+            FirstHash = state.FirstHash,
+            LastRemovalSequence = payload.Operation == FleetDeviceListOperations.Remove ? payload.Sequence : state.LastRemovalSequence,
+        };
         return null;
     }
 }

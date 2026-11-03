@@ -162,8 +162,8 @@ public sealed class FleetConnectorTests
     public async Task TitlesArePublishedSealedWithTheKeyOfThePersonAndOpenOnItsDevices()
     {
         await using var fleet = await FleetFixture.StartAsync();
-        var desktopKeys = new FleetMetadataKeyring(fleet.Server.BaseAddress, fleet.DesktopKey);
-        var nodeKeys = new FleetMetadataKeyring(fleet.Server.BaseAddress, fleet.NodeKey);
+        var desktopKeys = new FleetMetadataKeyring(new FleetOrganizationDevices(fleet.Server.BaseAddress, fleet.DesktopKey));
+        var nodeKeys = new FleetMetadataKeyring(new FleetOrganizationDevices(fleet.Server.BaseAddress, fleet.NodeKey));
         // A node never makes the key: it waits for the copy a controller device of its person gives it.
         Assert.IsNull(await nodeKeys.RefreshAsync(CancellationToken.None));
         Assert.AreEqual(0, (await fleet.Desktop.ListMetadataKeysAsync()).Count);
@@ -192,6 +192,108 @@ public sealed class FleetConnectorTests
         await WaitForAsync(async () => (await fleet.Desktop.ListSessionsAsync()).Single(session => session.Id == "s1") is var session
             && key.TryOpen("s1", session.SealedMetadata, out var changed) && changed!.Title == "Fix the lexer");
         Assert.AreEqual(version + 1, (await fleet.Desktop.ListSessionsAsync()).Single(session => session.Id == "s1").Version);
+    }
+
+    [TestMethod]
+    public async Task AReplacementChainWithTheVictimsKeyGetsNoKeyAndNoSignatureOnceTheListIsPinned()
+    {
+        await using var fleet = await FleetFixture.StartAsync();
+        var pin = Path.Combine(fleet.Root.Path, "link", FleetOrganizationDevices.PinFileName);
+        await new FleetOrganizationDevices(fleet.Server.BaseAddress, fleet.DesktopKey, pin).RefreshAsync(CancellationToken.None);
+        using var attackerKey = DeviceIdentity.LoadOrCreate(Path.Combine(fleet.Root.Path, "attacker"));
+        using var plantedKey = DeviceIdentity.LoadOrCreate(Path.Combine(fleet.Root.Path, "planted"));
+        using var pcKey = DeviceIdentity.LoadOrCreate(Path.Combine(fleet.Root.Path, "pc"));
+        using (var pc = new FleetServerClient(fleet.Server.BaseAddress, pcKey)) await pc.EnrollAsync((await fleet.Desktop.CreateEnrollmentTokenAsync()).Token, "PC");
+
+        // A valid chain the server roots in a key of its own: the victim's real key is a controller in it, and a device
+        // of the attacker is of the victim's person, so that the victim would wrap its metadata key to that device.
+        var organization = (await fleet.Desktop.GetOrganizationAsync()).Id;
+        var person = (await fleet.Desktop.GetDeviceAsync()).OwnerId;
+        var first = SignedEntry(attackerKey, 1, null, attackerKey, FleetDeviceKinds.Controller, null, null);
+        var victim = SignedEntry(attackerKey, 2, first.Hash, fleet.DesktopKey, FleetDeviceKinds.Controller, organization, person);
+        var planted = SignedEntry(attackerKey, 3, victim.Hash, plantedKey, FleetDeviceKinds.Node, organization, person);
+        Assert.IsTrue(FleetDeviceListVerifier.VerifyOrThrow([first.Entry, victim.Entry, planted.Entry], organization).IsController(fleet.DesktopKey.DeviceId));
+        var replacing = new ReplacingHandler([first, victim, planted]) { InnerHandler = new HttpClientHandler() };
+
+        // Through the anchor of the link, which pinned the genuine list: the key goes to nobody, no entry is signed.
+        var devices = new FleetOrganizationDevices(fleet.Server.BaseAddress, fleet.DesktopKey, pin, replacing);
+        await Assert.ThrowsExactlyAsync<FleetDeviceListException>(() => new FleetMetadataKeyring(devices).RefreshAsync(CancellationToken.None));
+        using var client = new FleetServerClient(fleet.Server.BaseAddress, fleet.DesktopKey, replacing) { DeviceList = devices };
+        await Assert.ThrowsExactlyAsync<FleetDeviceListException>(() => client.ApproveAsync(pcKey.DeviceId));
+        Assert.AreEqual(0, replacing.Writes, "nothing was wrapped or signed after the replaced list");
+        Assert.AreEqual(0, (await fleet.Desktop.ListMetadataKeysAsync()).Count);
+    }
+
+    [TestMethod]
+    public async Task ANodeTakesNoKeyTheServerMadeOrRelabelledAndSealsWithTheOneItsPersonGave()
+    {
+        await using var fleet = await FleetFixture.StartAsync();
+        var genuine = (await new FleetMetadataKeyring(new FleetOrganizationDevices(fleet.Server.BaseAddress, fleet.DesktopKey)).RefreshAsync(CancellationToken.None))!;
+        using var serverKey = DeviceIdentity.LoadOrCreate(Path.Combine(fleet.Root.Path, "server-key"));
+        var organization = (await fleet.Desktop.GetOrganizationAsync()).Id;
+        var person = (await fleet.Desktop.GetDeviceAsync()).OwnerId!;
+        using var node = new FleetServerClient(fleet.Server.BaseAddress, fleet.NodeKey);
+        var list = await node.ReadVerifiedDeviceListAsync();
+        var nodeKey = list.Members[fleet.NodeKey.DeviceId].Key;
+        var copy = (await node.ListMetadataKeysAsync()).Single();
+
+        // The server lists newer keys for the node: one of its own, signed by a key of its own or by nobody, and the
+        // genuine copy relabelled for a newer epoch.
+        var forged = FleetMetadataKey.Generate();
+        var grant = new FleetKeyGrant(organization, person, 3, list.Sequence);
+        var signedByServer = FleetKeyWrap.Wrap(forged, nodeKey, grant, serverKey);
+        var unsigned = System.Text.Json.Nodes.JsonNode.Parse(FleetKeyWrap.Wrap(forged, nodeKey, grant, fleet.DesktopKey))!.AsObject();
+        unsigned.Remove("sig");
+        var injecting = new InjectingHandler(
+            new MetadataKeyDto(forged.Id, 4, fleet.DesktopKey.DeviceId, Created, signedByServer, [fleet.NodeKey.DeviceId]),
+            new MetadataKeyDto("unsigned-copy", 3, fleet.DesktopKey.DeviceId, Created, unsigned.ToJsonString(), [fleet.NodeKey.DeviceId]),
+            copy with { Id = copy.Id, Epoch = 2 }) { InnerHandler = new HttpClientHandler() };
+        var nodeKeys = new FleetMetadataKeyring(new FleetOrganizationDevices(fleet.Server.BaseAddress, fleet.NodeKey, null, injecting));
+        Assert.AreEqual(genuine.Id, (await nodeKeys.RefreshAsync(CancellationToken.None))?.Id, "the node keeps the key a controller of its person gave it");
+
+        var source = new FakeSource();
+        source.Set(Session("s1", "work") with { Title = "Fix the parser" });
+        await using var connector = fleet.NodeConnector(source, static _ => true, keys: nodeKeys);
+        connector.Start();
+        await WaitForAsync(async () => (await fleet.Desktop.ListSessionsAsync()).Any(session => session.Id == "s1" && session.SealedMetadata is not null));
+        var sealedText = (await fleet.Desktop.ListSessionsAsync()).Single(session => session.Id == "s1").SealedMetadata;
+        Assert.IsTrue(genuine.TryOpen("s1", sealedText, out _));
+        Assert.IsFalse(forged.TryOpen("s1", sealedText, out _), "the server's key opens nothing the node publishes");
+    }
+
+    [TestMethod]
+    public async Task ARemovalGivesTheOtherDevicesANewEpochThatTheRemovedDeviceCannotOpen()
+    {
+        await using var fleet = await FleetFixture.StartAsync();
+        using var pcKey = DeviceIdentity.LoadOrCreate(Path.Combine(fleet.Root.Path, "pc"));
+        using (var pc = new FleetServerClient(fleet.Server.BaseAddress, pcKey)) await pc.EnrollAsync((await fleet.Desktop.CreateEnrollmentTokenAsync()).Token, "PC");
+        await fleet.Desktop.ApproveAsync(pcKey.DeviceId);
+        var desktopKeys = new FleetMetadataKeyring(new FleetOrganizationDevices(fleet.Server.BaseAddress, fleet.DesktopKey));
+        var nodeKeys = new FleetMetadataKeyring(new FleetOrganizationDevices(fleet.Server.BaseAddress, fleet.NodeKey));
+        var first = (await desktopKeys.RefreshAsync(CancellationToken.None))!;
+        Assert.AreEqual(first.Id, (await new FleetMetadataKeyring(new FleetOrganizationDevices(fleet.Server.BaseAddress, pcKey)).RefreshAsync(CancellationToken.None))?.Id,
+            "the PC holds the first key");
+        Assert.AreEqual(first.Id, (await nodeKeys.RefreshAsync(CancellationToken.None))?.Id);
+
+        await fleet.Desktop.RevokeAsync(pcKey.DeviceId);
+        // Until the new epoch reaches it, the node seals nothing with the key the removed device holds.
+        Assert.IsNull(await nodeKeys.RefreshAsync(CancellationToken.None));
+        var second = (await desktopKeys.RefreshAsync(CancellationToken.None))!;
+        Assert.AreEqual((2, false), (second.Grant!.Epoch, second.Id == first.Id));
+        CollectionAssert.AreEquivalent(new[] { fleet.DesktopKey.DeviceId, fleet.NodeKey.DeviceId },
+            (await fleet.Desktop.ListMetadataKeysAsync()).Single(key => key.Id == second.Id).WrappedTo.ToArray(), "the new epoch goes to the devices that remain");
+        Assert.AreEqual(second.Id, (await nodeKeys.RefreshAsync(CancellationToken.None))?.Id);
+        Assert.AreEqual(second.Id, (await desktopKeys.RefreshAsync(CancellationToken.None))?.Id, "read again, the same epoch");
+
+        var source = new FakeSource();
+        source.Set(Session("s1", "work") with { Title = "After the removal" });
+        await using var connector = fleet.NodeConnector(source, static _ => true, keys: nodeKeys);
+        connector.Start();
+        await WaitForAsync(async () => (await fleet.Desktop.ListSessionsAsync()).Any(session => session.Id == "s1" && session.SealedMetadata is not null));
+        var sealedText = (await fleet.Desktop.ListSessionsAsync()).Single(session => session.Id == "s1").SealedMetadata;
+        Assert.IsTrue(second.TryOpen("s1", sealedText, out var opened));
+        Assert.AreEqual("After the removal", opened!.Title);
+        Assert.IsFalse(first.TryOpen("s1", sealedText, out _), "the key the removed device holds opens nothing published after its removal");
     }
 
     [TestMethod]
@@ -380,6 +482,53 @@ public sealed class FleetConnectorTests
             var entry = new FleetSignedDeviceListEntry(payload, System.Buffers.Text.Base64Url.EncodeToString(signer.SignData(FleetDeviceListEntries.GetSignedBytes(payload))));
             var forged = new ListResponse<DeviceListEntryDto>([.. list.Items, new DeviceListEntryDto(last.Sequence + 1, FleetDeviceListEntries.Hash(entry), entry, Created)]);
             response.Content = new ByteArrayContent(System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(forged, ServerApiJsonContext.Default.ListResponseDeviceListEntryDto));
+            return response;
+        }
+    }
+
+    private static DeviceListEntryDto SignedEntry(DeviceIdentity signer, long sequence, string? previous, DeviceIdentity added, string kind, string? organization, string? owner)
+    {
+        var payload = FleetDeviceListEntries.SerializePayload(new FleetDeviceListEntryPayload(1, organization, sequence, previous, FleetDeviceListOperations.Add, added.DeviceId,
+            Convert.ToBase64String(added.ExportSubjectPublicKeyInfo()), kind, owner, signer.DeviceId, Created));
+        var entry = new FleetSignedDeviceListEntry(payload, System.Buffers.Text.Base64Url.EncodeToString(signer.SignData(FleetDeviceListEntries.GetSignedBytes(payload))));
+        return new DeviceListEntryDto(sequence, FleetDeviceListEntries.Hash(entry), entry, Created);
+    }
+
+    /// <summary>A server that answers another device list, and counts the writes (metadata keys, device-list entries) it is sent.</summary>
+    private sealed class ReplacingHandler(IReadOnlyList<DeviceListEntryDto> chain) : DelegatingHandler
+    {
+        private int _writes;
+
+        public int Writes => Volatile.Read(ref _writes);
+
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            var path = request.RequestUri!.AbsolutePath;
+            if (request.Method == HttpMethod.Post && (path.Contains("/metadata-keys", StringComparison.Ordinal) || path.EndsWith("/approve", StringComparison.Ordinal)
+                || path.EndsWith("/revoke", StringComparison.Ordinal)))
+            {
+                Interlocked.Increment(ref _writes);
+            }
+
+            if (request.Method != HttpMethod.Get || !path.EndsWith("/api/v1/device-list", StringComparison.Ordinal)) return await base.SendAsync(request, cancellationToken);
+            return new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new ByteArrayContent(System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(new ListResponse<DeviceListEntryDto>(chain),
+                    ServerApiJsonContext.Default.ListResponseDeviceListEntryDto)),
+            };
+        }
+    }
+
+    /// <summary>A server that adds keys of its own to the metadata keys it lists.</summary>
+    private sealed class InjectingHandler(params MetadataKeyDto[] injected) : DelegatingHandler
+    {
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            var response = await base.SendAsync(request, cancellationToken);
+            if (request.Method != HttpMethod.Get || request.RequestUri?.AbsolutePath.EndsWith("/api/v1/metadata-keys", StringComparison.Ordinal) != true) return response;
+            var keys = System.Text.Json.JsonSerializer.Deserialize(await response.Content.ReadAsByteArrayAsync(cancellationToken), ServerApiJsonContext.Default.ListResponseMetadataKeyDto)!;
+            response.Content = new ByteArrayContent(System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(new ListResponse<MetadataKeyDto>([.. keys.Items, .. injected]),
+                ServerApiJsonContext.Default.ListResponseMetadataKeyDto));
             return response;
         }
     }

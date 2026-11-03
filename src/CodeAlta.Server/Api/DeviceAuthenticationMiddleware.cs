@@ -59,21 +59,25 @@ internal sealed class DeviceAuthenticationMiddleware(RequestDelegate next, Reque
     {
         var request = context.Request;
         if (context.Features.Get<IHttpMaxRequestBodySizeFeature>() is { IsReadOnly: false } limit) limit.MaxRequestBodySize = MaxBodyBytes;
-        if (request.ContentLength is 0 || (request.ContentLength is null && !request.Headers.ContainsKey("Transfer-Encoding"))) return [];
-        if (request.ContentLength > MaxBodyBytes)
-        {
-            throw new CoordinatorException(StatusCodes.Status413PayloadTooLarge, CoordinatorErrorCodes.InvalidBody, $"A request body is at most {MaxBodyBytes} bytes.");
-        }
+        // Whether a body comes is what the server's body feature says, not the headers: an HTTP/2 or HTTP/3 request
+        // sends its body in DATA frames without Content-Length or Transfer-Encoding, and that body is signed too.
+        if (request.ContentLength is 0 || context.Features.Get<IHttpRequestBodyDetectionFeature>() is { CanHaveBody: false }) return [];
+        if (request.ContentLength > MaxBodyBytes) throw TooLarge();
 
         request.EnableBuffering(MaxBodyBytes);
         using var buffer = new MemoryStream();
-        await request.Body.CopyToAsync(buffer, context.RequestAborted).ConfigureAwait(false);
-        if (buffer.Length > MaxBodyBytes)
+        var chunk = new byte[16 * 1024];
+        int read;
+        while ((read = await request.Body.ReadAsync(chunk, context.RequestAborted).ConfigureAwait(false)) > 0)
         {
-            throw new CoordinatorException(StatusCodes.Status413PayloadTooLarge, CoordinatorErrorCodes.InvalidBody, $"A request body is at most {MaxBodyBytes} bytes.");
+            if (buffer.Length + read > MaxBodyBytes) throw TooLarge();
+            buffer.Write(chunk, 0, read);
         }
 
         request.Body.Position = 0;
         return buffer.ToArray();
     }
+
+    private static CoordinatorException TooLarge()
+        => new(StatusCodes.Status413PayloadTooLarge, CoordinatorErrorCodes.InvalidBody, $"A request body is at most {MaxBodyBytes} bytes.");
 }

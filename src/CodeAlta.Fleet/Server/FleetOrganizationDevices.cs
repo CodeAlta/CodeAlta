@@ -3,53 +3,71 @@ using System.Text.Json.Serialization;
 using CodeAlta.Fleet.Identity;
 using CodeAlta.Fleet.NodeApi;
 using CodeAlta.Fleet.Protocol;
+using CodeAlta.Fleet.Protocol.Api;
 
 namespace CodeAlta.Fleet.Server;
 
 /// <summary>
 /// The devices of the organization of one server link, as this device last verified them: the signed device list read
-/// from the server and replayed here with the rules every device applies (<see cref="FleetDeviceListVerifier"/>), with
-/// its first entry pinned in the folder of the link the first time it was read. A later list with another first entry
-/// is refused: a server cannot swap the organization under a device.
+/// from the server and replayed here with the rules every device applies (<see cref="FleetDeviceListVerifier"/>),
+/// anchored in the folder of the link. The first read pins the first entry; every accepted read moves a checkpoint
+/// (the sequence and the hash of the last entry) that a later list must extend. A list with another first entry, a
+/// shorter one (which could bring back a removed device) or one that goes another way after the checkpoint is refused:
+/// a server can neither swap the organization under a device nor undo an entry it verified.
 /// </summary>
+/// <remarks>
+/// This is the one verifier of a server's device list for a device: what it trusts on a relayed channel, the entries
+/// it signs (<see cref="FleetServerClient.DeviceList"/>) and the devices it gives a metadata key to
+/// (<see cref="FleetMetadataKeyring"/>) all come from it.
+/// </remarks>
 public sealed class FleetOrganizationDevices
 {
     /// <summary>The name of the file of the pin in the folder of a link.</summary>
     public const string PinFileName = "device-list.json";
 
-    private readonly Uri _server;
-    private readonly DeviceIdentity _identity;
     private readonly string? _pinPath;
-    private readonly HttpMessageHandler? _handler;
     private readonly SemaphoreSlim _refresh = new(1, 1);
     private FleetDeviceListState? _current;
+    private FleetDeviceListPin? _checkpoint;
 
     /// <summary>Initializes a new instance of the <see cref="FleetOrganizationDevices"/> class.</summary>
     /// <param name="server">The address of the server.</param>
     /// <param name="identity">The key of this device, which signs the reads.</param>
-    /// <param name="pinPath">The file of the pin of the first entry; null pins in memory only.</param>
+    /// <param name="pinPath">The file of the pin and the checkpoint; null keeps them in memory only.</param>
     /// <param name="handler">The HTTP handler, for tests; null for the usual one.</param>
     /// <exception cref="ArgumentNullException"><paramref name="server"/> or <paramref name="identity"/> is null.</exception>
     public FleetOrganizationDevices(Uri server, DeviceIdentity identity, string? pinPath = null, HttpMessageHandler? handler = null)
     {
         ArgumentNullException.ThrowIfNull(server);
         ArgumentNullException.ThrowIfNull(identity);
-        _server = server;
-        _identity = identity;
+        ServerAddress = server;
+        Identity = identity;
         _pinPath = pinPath;
-        _handler = handler;
+        Handler = handler;
     }
+
+    /// <summary>Gets the address of the server.</summary>
+    public Uri ServerAddress { get; }
 
     /// <summary>Gets the list as last verified; null before the first read.</summary>
     public FleetDeviceListState? Current => Volatile.Read(ref _current);
 
     /// <summary>Gets the trust a node gives the members of the organization on a relayed channel, read live from <see cref="Current"/>.</summary>
-    public IDeviceTrustPolicy Trust => new FleetOrganizationTrust(() => Current, _identity.DeviceId);
+    public IDeviceTrustPolicy Trust => new FleetOrganizationTrust(() => Current, Identity.DeviceId);
 
-    /// <summary>Reads the device list from the server again, verifies it, and checks its first entry against the pin.</summary>
+    /// <summary>Gets the key of this device.</summary>
+    internal DeviceIdentity Identity { get; }
+
+    /// <summary>Gets the HTTP handler of the calls, for tests; null for the usual one.</summary>
+    internal HttpMessageHandler? Handler { get; }
+
+    /// <summary>
+    /// Reads the device list from the server again, verifies it, and checks it against the anchor: the same first entry,
+    /// and the entries verified before, unchanged, at its start. The checkpoint then moves to its last entry.
+    /// </summary>
     /// <param name="cancellationToken">Cancels the read.</param>
     /// <returns>The verified list.</returns>
-    /// <exception cref="FleetDeviceListException">The list does not verify, or its first entry is not the one pinned.</exception>
+    /// <exception cref="FleetDeviceListException">The list does not verify, or it does not extend the list this device verified before.</exception>
     /// <exception cref="FleetServerException">The server refused the read.</exception>
     /// <exception cref="HttpRequestException">The server does not answer.</exception>
     public async Task<FleetDeviceListState> RefreshAsync(CancellationToken cancellationToken)
@@ -57,19 +75,53 @@ public sealed class FleetOrganizationDevices
         await _refresh.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            var pin = ReadPin();
-            using var client = new FleetServerClient(_server, _identity, _handler);
-            var list = await client.ReadVerifiedDeviceListAsync(pin?.Organization ?? Current?.OrganizationId, cancellationToken).ConfigureAwait(false);
-            var pinned = pin?.Root ?? Current?.FirstHash;
-            if (pinned is not null && !string.Equals(pinned, list.FirstHash, StringComparison.Ordinal))
-                throw new FleetDeviceListException(1, "it starts with another device than the one this device trusted for this server");
-            if (pin is null) WritePin(list);
+            var anchor = Newer(await ReadPinAsync(cancellationToken).ConfigureAwait(false), _checkpoint);
+            using var client = new FleetServerClient(ServerAddress, Identity, Handler);
+            var organization = anchor?.Organization ?? (await client.GetOrganizationAsync(cancellationToken).ConfigureAwait(false)).Id;
+            var entries = await client.GetDeviceListAsync(cancellationToken).ConfigureAwait(false);
+            var list = FleetServerClient.VerifyDeviceList(entries, organization);
+            if (anchor is not null) Extends(anchor, entries, list);
+            var accepted = new FleetDeviceListPin(list.FirstHash!, list.OrganizationId ?? organization, list.Sequence, list.LastHash);
+            WritePin(accepted);
             Volatile.Write(ref _current, list);
             return list;
         }
         finally
         {
             _refresh.Release();
+        }
+    }
+
+    // A later list keeps the first entry pinned and every entry up to the checkpoint, unchanged: a removal it verified stays.
+    private static void Extends(FleetDeviceListPin anchor, IReadOnlyList<DeviceListEntryDto> entries, FleetDeviceListState list)
+    {
+        if (!string.Equals(anchor.Root, list.FirstHash, StringComparison.Ordinal))
+            throw new FleetDeviceListException(1, "it starts with another device than the one this device trusted for this server");
+        if (anchor.Sequence <= 0) return;
+        if (entries.Count < anchor.Sequence)
+            throw new FleetDeviceListException(entries.Count + 1, $"it is shorter than the list of {anchor.Sequence} entries this device verified: entries were taken away");
+        if (!string.Equals(entries[(int)anchor.Sequence - 1].Hash, anchor.Tip, StringComparison.Ordinal))
+            throw new FleetDeviceListException(anchor.Sequence, "it goes another way than the list this device verified before");
+    }
+
+    private static FleetDeviceListPin? Newer(FleetDeviceListPin? stored, FleetDeviceListPin? held)
+        => stored is null ? held : held is null || stored.Sequence >= held.Sequence ? stored : held;
+
+    // A pin that cannot be read now (another instance replaces it) is read again; one that stays unreadable refuses
+    // the list rather than trust it from its first entry again.
+    private async Task<FleetDeviceListPin?> ReadPinAsync(CancellationToken cancellationToken)
+    {
+        for (var attempt = 0; ; attempt++)
+        {
+            try
+            {
+                return ReadPin();
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException && exception is not (FileNotFoundException or DirectoryNotFoundException))
+            {
+                if (attempt >= 4) throw new FleetDeviceListException(0, $"the anchor of the device list of this server cannot be read ({exception.Message})");
+                await Task.Delay(TimeSpan.FromMilliseconds(20 * (attempt + 1)), cancellationToken).ConfigureAwait(false);
+            }
         }
     }
 
@@ -86,12 +138,23 @@ public sealed class FleetOrganizationDevices
         }
     }
 
-    private void WritePin(FleetDeviceListState list)
+    // The checkpoint only moves forward, also when another instance of the same link wrote it meanwhile.
+    private void WritePin(FleetDeviceListPin pin)
     {
-        if (_pinPath is null || list.FirstHash is null) return;
-        Directory.CreateDirectory(Path.GetDirectoryName(_pinPath)!);
-        FleetFiles.WriteAtomically(_pinPath, JsonSerializer.SerializeToUtf8Bytes(new FleetDeviceListPin(list.FirstHash, list.OrganizationId),
-            FleetOrganizationJson.Default.FleetDeviceListPin));
+        _checkpoint = pin;
+        FleetDeviceListPin? stored;
+        try { stored = _pinPath is null ? null : ReadPin(); }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException) { return; }
+        if (_pinPath is null || stored is not null && stored.Sequence >= pin.Sequence) return;
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(_pinPath)!);
+            FleetFiles.WriteAtomically(_pinPath, JsonSerializer.SerializeToUtf8Bytes(pin, FleetOrganizationJson.Default.FleetDeviceListPin));
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            // Held in memory meanwhile; the next accepted read writes it.
+        }
     }
 }
 
@@ -168,10 +231,12 @@ public sealed class FleetCombinedTrust(IDeviceTrustPolicy paired, IDeviceTrustPo
     public bool IsRevoked(DeviceFingerprint fingerprint) => paired.IsRevoked(fingerprint) || organization.IsRevoked(fingerprint);
 }
 
-/// <summary>The pin of a device list in the folder of a link.</summary>
+/// <summary>The anchor of a device list in the folder of a link: its pin and its checkpoint.</summary>
 /// <param name="Root">The hash of its first entry.</param>
 /// <param name="Organization">The organization it named, which later lists must name too.</param>
-internal sealed record FleetDeviceListPin(string Root, string? Organization);
+/// <param name="Sequence">The sequence of the last entry accepted; 0 for a pin of an older version, without a checkpoint.</param>
+/// <param name="Tip">The hash of that entry, which a later list holds at the same place.</param>
+internal sealed record FleetDeviceListPin(string Root, string? Organization, long Sequence = 0, string? Tip = null);
 
 [JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase, WriteIndented = true)]
 [JsonSerializable(typeof(FleetDeviceListPin))]

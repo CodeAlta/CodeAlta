@@ -133,12 +133,13 @@ public sealed class PublicationService
         var checkedIds = ids.Select(id => Text(id, "sessionIds", required: true, MaxIdLength)!).ToArray();
         var audit = new AuditEntry("session.withdraw", AuditEntry.Success, device.OwnerPersonId, device.Id, device.Id, null, null);
         var removed = await _store.WithdrawSessionFactsAsync(device.Id, checkedIds, audit, cancellationToken).ConfigureAwait(false);
-        foreach (var id in removed)
+        foreach (var session in removed)
         {
-            _directory.Publish(device.OrganizationId, new FleetDirectoryChange(FleetServerMethods.ChangeKinds.SessionRemoved, id));
+            // The removal names the facts it removed, so that a watcher never removes newer facts it got first.
+            _directory.Publish(device.OrganizationId, new FleetDirectoryChange(FleetServerMethods.ChangeKinds.SessionRemoved, session.Id, Session: session.ToDirectory()));
         }
 
-        return new FleetFactsWithdrawResult(removed);
+        return new FleetFactsWithdrawResult([.. removed.Select(static session => session.Id)]);
     }
 
     private static string? Text(string? value, string field, bool required = false, int maxLength = MaxTextLength)

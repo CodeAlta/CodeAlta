@@ -118,6 +118,66 @@ public sealed class SignedRequestTests
     }
 
     [TestMethod]
+    public async Task AnHttp2BodyWithoutLengthIsHashedAndASubstitutedOneIsRefused()
+    {
+        await using var server = await ServerFixture.StartAsync();
+        using var owner = new TestDevice("Desktop");
+        await server.SetUpAsync(owner);
+        var authenticator = server.GetService<RequestAuthenticator>();
+        var body = TestText.Utf8("{\"label\":\"signed\"}");
+
+        // HTTP/2 sends a body in DATA frames, with neither Content-Length nor Transfer-Encoding: the body is still signed.
+        var legit = Http2Request(server, owner, body, FleetSignedRequest.HashBody(body));
+        byte[]? seen = null;
+        await new DeviceAuthenticationMiddleware(async context =>
+        {
+            using var read = new MemoryStream();
+            await context.Request.Body.CopyToAsync(read);
+            seen = read.ToArray();
+        }, authenticator).InvokeAsync(legit);
+        Assert.AreEqual(FleetSignedRequest.HashBody(body), DeviceAuthenticationMiddleware.GetSigned(legit).BodyHash);
+        Assert.AreEqual(owner.DeviceId, DeviceAuthenticationMiddleware.GetDevice(legit).Id);
+        CollectionAssert.AreEqual(body, seen, "The endpoint reads the body that was hashed.");
+
+        // A body put under a signature of an empty one is refused, not read as if it were signed.
+        var substituted = Http2Request(server, owner, TestText.Utf8("{\"label\":\"injected\"}"), FleetSignedRequest.HashBody([]));
+        var reached = false;
+        var refused = await Assert.ThrowsExactlyAsync<CoordinatorException>(() => new DeviceAuthenticationMiddleware(_ =>
+        {
+            reached = true;
+            return Task.CompletedTask;
+        }, authenticator).InvokeAsync(substituted));
+        Assert.AreEqual(CoordinatorErrorCodes.SignatureInvalid, refused.Code);
+        Assert.IsFalse(reached);
+    }
+
+    // A POST as Kestrel gives an HTTP/2 request: a body that can be read, without any header of its length.
+    private static Microsoft.AspNetCore.Http.DefaultHttpContext Http2Request(ServerFixture server, TestDevice device, byte[] body, string signedHash)
+    {
+        const string path = "/api/v1/enrollment-tokens";
+        var context = new Microsoft.AspNetCore.Http.DefaultHttpContext();
+        context.Features.Set<Microsoft.AspNetCore.Http.Features.IHttpRequestBodyDetectionFeature>(new BodyDetection());
+        var request = context.Request;
+        request.Protocol = "HTTP/2";
+        request.Method = "POST";
+        request.Path = path;
+        request.Body = new MemoryStream(body);
+        var time = server.Clock.Now.ToUnixTimeMilliseconds();
+        var nonce = FleetSignedRequest.CreateNonce();
+        request.Headers[FleetSignedRequest.DeviceHeader] = device.DeviceId;
+        request.Headers[FleetSignedRequest.TimestampHeader] = time.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        request.Headers[FleetSignedRequest.NonceHeader] = nonce;
+        request.Headers[FleetSignedRequest.SignatureHeader] = device.Sign(FleetSignedRequest.GetSignedBytes("POST", path, time, nonce, signedHash, device.DeviceId));
+        Assert.IsNull(request.ContentLength);
+        return context;
+    }
+
+    private sealed class BodyDetection : Microsoft.AspNetCore.Http.Features.IHttpRequestBodyDetectionFeature
+    {
+        public bool CanHaveBody => true;
+    }
+
+    [TestMethod]
     public void NoncesAreForgottenOnlyAfterTheirWindow()
     {
         var clock = new TestClock(DateTimeOffset.UtcNow);
