@@ -3,6 +3,7 @@ import { Button, Callout, Card, CardList, Checkbox, FormGroup, HTMLSelect, Input
 import { globalConfig, modelCatalog, providerLogin, providerUsage, sandboxSettings, type GlobalConfigProviderDefaults, type GlobalConfigProvidersResponse, type ModelCatalogCapability, type ModelCatalogProbeRequest, type ModelCatalogProbeResponse,
   type ModelCatalogModel, type ModelCatalogProvidersRequest, type ModelCatalogProvidersResponse } from "#neoastra";
 import { ProviderAccount } from "./ProviderAccount";
+import { ProviderKeySecret } from "./secrets/ProviderKeySecret";
 import { ProviderModelPicker } from "./ProviderModelPicker";
 import { ProviderUsagePanel } from "./UsageLimits";
 import { hasSubscriptionUsage } from "./subscriptionUsage";
@@ -80,8 +81,10 @@ function ProviderContextSize({ epoch, providerId, model, value, disabled, readMo
  * Settings page for model providers: the configured definitions on the left, an edit form on the right.
  * Saving writes the global configuration and re-registers the providers in the running host.
  */
-export function ProviderSettings({ epoch, config = globalConfig, plugins = globalConfig, login = providerLogin, usage = providerUsage, cli, readRuntime, readModels = modelCatalog.models, probe, onOpenModels, onOpenConfiguration, onApplied, guide = false, onGuideClosed, onOpenFile, filesApi, providerSessions, spaceScope = null, runInTerminal, sandbox = sandboxSettings, codeMode = globalConfig, initialProvider = null }: {
+export function ProviderSettings({ epoch, config = globalConfig, plugins = globalConfig, login = providerLogin, usage = providerUsage, cli, readRuntime, readModels = modelCatalog.models, probe, onOpenModels, onOpenConfiguration, onApplied, guide = false, onGuideClosed, onOpenFile, filesApi, providerSessions, spaceScope = null, runInTerminal, sandbox = sandboxSettings, codeMode = globalConfig, initialProvider = null, secretKeys = globalConfig }: {
   epoch: string; config?: Pick<typeof globalConfig, "providers" | "saveProvider" | "deleteProvider" | "addBuiltInProvider" | "duplicateProvider">;
+  /** Moves the key of a provider into a secret of this machine; the host by default. */
+  secretKeys?: Pick<typeof globalConfig, "keepKeyAsSecret">;
   /** The providers whose type a plugin runs (ACP agents): their form, their catalog and their sign-in; the host by default. */
   plugins?: Pick<typeof globalConfig, "savePluginProvider" | "pluginCatalog" | "installPluginProvider" | "pluginProviderDetails" | "updatePluginProvider" | "pluginProviderSignIn">;
   /** Runs a command in a terminal of the window: the sign-in of an agent that signs in in a terminal. */
@@ -482,7 +485,10 @@ export function ProviderSettings({ epoch, config = globalConfig, plugins = globa
                   <InputGroup id="provider-secret" type="password" autoComplete="off" value={form.apiKey} disabled={busy || form.clearApiKey}
                     onChange={event => edit({ apiKey: event.target.value })} placeholder={original?.hasApiKey ? "••••••••" : ""} />
                   {original?.hasApiKey && <Checkbox checked={form.clearApiKey} disabled={busy} label={t("Remove the stored key")}
-                    onChange={event => edit({ clearApiKey: event.currentTarget.checked, apiKey: "" })} />}</FormGroup>
+                    onChange={event => edit({ clearApiKey: event.currentTarget.checked, apiKey: "" })} />}
+                  {original && original.type === form.type && <ProviderKeySecret key={original.key} provider={original} disabled={busy || dirty}
+                    onKeep={name => void settle(() => secretKeys.keepKeyAsSecret({ expectedEpoch: epoch, expectedRevision: listing!.revision, key: original.key, secretName: name },
+                      { timeoutMilliseconds: 60000 }), original.key)} />}</FormGroup>
               </>}
             {original && original.type === form.type && hasSubscriptionUsage(form.type)
               && <ProviderUsagePanel key={`${original.key}:usage`} epoch={epoch} providerKey={original.key} api={usage} />}
