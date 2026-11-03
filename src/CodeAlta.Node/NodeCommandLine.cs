@@ -96,6 +96,9 @@ internal sealed record NodeCommandHandlers(
     Func<NodeUpdateOptions, ValueTask<int>> Update,
     Func<NodeAutomationCommandOptions, ValueTask<int>> Automations)
 {
+    /// <summary>Gets what shows or changes whether agents of other machines may start sessions on the node; does nothing by default.</summary>
+    public Func<NodeAgentCommandOptions, ValueTask<int>> Agents { get; init; } = static _ => ValueTask.FromResult(0);
+
     /// <summary>Handlers that do nothing, for a tree that only parses.</summary>
     public static NodeCommandHandlers Placeholders { get; } = new(static _ => ValueTask.FromResult(0), static _ => ValueTask.FromResult(0),
         static _ => ValueTask.FromResult(0), static _ => ValueTask.FromResult(0), static _ => ValueTask.FromResult(0), static _ => ValueTask.FromResult(0),
@@ -419,6 +422,35 @@ internal static class NodeCommandLine
             return handlers.Automations(automations);
         });
 
+        var agents = new NodeAgentCommandOptions();
+        var agentsCommand = new Command("agents", "Show or change whether agents of other machines may start sessions here")
+        {
+            new CommandUsage("Usage: {NAME} [show] [options]"),
+            new CommandUsage("       {NAME} allow --space <id> [--sandbox <profile>|none] [--bypass|--no-bypass] [options]"),
+            new CommandUsage("       {NAME} deny (--space <id> | --all) [options]"),
+            _,
+            "An agent of a session of another machine of the same person may start a",
+            "session here, the child of its own, and send prompts to the sessions",
+            "here, only in the spaces allowed: none by default. Such a session has at",
+            "most what its parent has (tools, permission mode, sandbox), runs in the",
+            "sandbox named here at least, and never bypasses permissions unless",
+            "--bypass allows it. A node that runs reads the policy at each request.",
+            _,
+            "Options:",
+            { "space=", "A space ({ID}); may be repeated", v => agents.Spaces.Add(v!) },
+            { "sandbox=", "The sandbox {PROFILE} their sessions run in at least, or none", v => agents.Sandbox = v },
+            { "bypass", "Their sessions may bypass permissions when their parent does", v => agents.Bypass = v is not null ? true : null },
+            { "no-bypass", "Their sessions never bypass permissions (the default)", v => agents.Bypass = v is not null ? false : null },
+            { "all", "With deny: every space", v => agents.All = v is not null },
+        };
+        AddProfile(agentsCommand, agents.Profile);
+        agentsCommand.Add("<>", "show, allow or deny");
+        agentsCommand.Add((_, words) =>
+        {
+            agents.Words.AddRange(words);
+            return handlers.Agents(agents);
+        });
+
         var join = new NodeJoinOptions();
         var joinCommand = new Command("join", "Enroll the node in a CodeAlta Server and wait for its approval")
         {
@@ -516,6 +548,7 @@ internal static class NodeCommandLine
             permissionsCommand,
             projectsCommand,
             automationsCommand,
+            agentsCommand,
             joinCommand,
             machinesCommand,
             connectCommand,

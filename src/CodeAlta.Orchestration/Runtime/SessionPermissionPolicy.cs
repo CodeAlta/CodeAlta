@@ -63,4 +63,22 @@ public static class SessionPermissionModes
     /// <param name="reviewByDefault">Whether the requests are reviewed when a session has no mode.</param>
     /// <returns><see cref="Ask"/> or <see cref="Bypass"/>.</returns>
     public static string Default(bool reviewByDefault) => reviewByDefault ? Ask : Bypass;
+
+    /// <summary>
+    /// Gets how much a mode lets a session do without asking, to compare two modes: a mode of a higher rank asks less.
+    /// <c>plan</c> and <c>dontAsk</c> (which refuses what it would ask) rank lowest, then <see cref="Ask"/> (and no mode),
+    /// <see cref="AcceptEdits"/>, Claude Code's <c>auto</c>, then <see cref="Bypass"/>; an unknown mode ranks as <see cref="Ask"/>.
+    /// </summary>
+    /// <param name="permissionMode">A mode, or null for none.</param>
+    /// <returns>The rank, from 0 to 4.</returns>
+    public static int Rank(string? permissionMode)
+        => permissionMode?.Trim() switch
+        {
+            "plan" or "dontAsk" => 0,
+            null or "" or Ask => 1,
+            AcceptEdits => 2,
+            "auto" => 3,
+            Bypass => 4,
+            _ => 1,
+        };
 }

@@ -391,16 +391,7 @@ internal sealed partial class SessionFallbackCoordinator
     // How much a mode lets run without the user, from the narrowest: the plan and the modes that refuse what is not
     // allowed, the default, file edits, the automatic approval, then everything. A mode not known here counts as the
     // default.
-    internal static int PermissionRank(string? mode)
-        => mode switch
-        {
-            "plan" or "dontAsk" => 0,
-            null or "default" => 1,
-            SessionPermissionModes.AcceptEdits => 2,
-            "auto" => 3,
-            SessionPermissionModes.Bypass => 4,
-            _ => 1,
-        };
+    internal static int PermissionRank(string? mode) => SessionPermissionModes.Rank(mode);
 
     private async Task WriteCardAsync(string sessionId, AgentSessionUpdateKind kind, string message, JsonElement details)
     {
