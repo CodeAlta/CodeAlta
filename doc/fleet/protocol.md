@@ -66,6 +66,8 @@ server/node → welcome { protocol, features, cursors, policy }  |  error { code
 - Errors say what to do, so a client reacts instead of retrying blindly: `unauthenticated` (bad or expired credential:
   `reauthenticate`), `pending_approval` (wait for `device.approved`), `forbidden` (authenticated, not allowed),
   `revoked`, `update_required` (version outside the window), `server_busy` (`retry_after`).
+- A connection the server closes later (a revocation, a reader that stayed behind, a newer connection of the same
+  device) first receives a `connection.closing` event with the same kind of error.
 
 ## Envelopes
 
@@ -171,6 +173,11 @@ The management plane, and the whole surface of the console ([console](console.md
   generated from it, as the desktop's RPC client is today.
 - **One identity and access model**: device-bound tokens with a proof of possession for devices; scoped, expiring
   tokens for integrations; every answer filtered by [access control](access-control.md); every change audited.
+- **Signed requests** (M3a): a device signs every call, with no bearer token. The headers `Alta-Device`,
+  `Alta-Timestamp` (Unix milliseconds) and `Alta-Nonce` go with `Alta-Signature`. The signature is ECDSA P-256 over
+  the method, the path and query, the timestamp, the nonce, the SHA-256 of the body and the device id. The server
+  refuses a time more than 5 minutes from its own and a nonce it has seen in that window. The host is not signed,
+  because proxies change it. Setup and enrollment are signed by the key in their body.
 - **Conventions**: JSON in camelCase with source-generated contracts; cursor pagination; `ETag` and `If-Match` for
   updates; an `Idempotency-Key` on creations; errors as problem details (RFC 9457) with a stable code and a hint; rate
   limits; `traceparent` on every call.
