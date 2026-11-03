@@ -27,6 +27,13 @@ public sealed record UpdateState
     /// </summary>
     public UpdateRollback? RollingBack { get; init; }
 
+    /// <summary>
+    /// Gets the version of the installed entry point a launcher last ran with while a version was selected; null before.
+    /// When it changes (<c>dotnet tool update</c>) to a version newer than the selected one, the installed entry point
+    /// runs instead (<see cref="UpdateVersionStore.ReconcileInstalled"/>).
+    /// </summary>
+    public string? Installed { get; init; }
+
     /// <summary>Gets the versions rolled back on this machine, which an update skips unless it names them.</summary>
     public IReadOnlyList<UpdateBadVersion> Bad { get; init; } = [];
 

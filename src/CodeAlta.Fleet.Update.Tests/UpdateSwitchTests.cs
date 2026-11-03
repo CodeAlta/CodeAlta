@@ -144,11 +144,11 @@ public sealed class UpdateSwitchTests
     }
 
     private static UpdateLauncher Launcher(UpdateVersionStore store, FakeRunner runner, TimeSpan? trialLimit = null, Func<UpdateTrial, CancellationToken, Task>? rolledBack = null,
-        List<string>? log = null, CancellationToken stop = default)
+        List<string>? log = null, CancellationToken stop = default, string installedVersion = "4.0.0")
         => new(new UpdateLauncherOptions
         {
             Store = store, Product = UpdateProduct.Node, Arguments = ["run", "--port", "0"], Installed = new UpdateCommand("installed-altanode", []),
-            InstalledVersion = "4.0.0", Runner = runner, TrialLimit = trialLimit ?? TimeSpan.FromSeconds(30), PollInterval = TimeSpan.FromMilliseconds(10),
+            InstalledVersion = installedVersion, Runner = runner, TrialLimit = trialLimit ?? TimeSpan.FromSeconds(30), PollInterval = TimeSpan.FromMilliseconds(10),
             StopGrace = TimeSpan.FromSeconds(5), RestartDelay = TimeSpan.Zero, DotnetRoot = null, HandleSignals = false, RolledBack = rolledBack,
             Log = log is null ? null : message => { lock (log) log.Add(message); }, Stop = stop,
         });
@@ -167,6 +167,43 @@ public sealed class UpdateSwitchTests
         Assert.AreEqual("4.0.1", VersionOf(runner.Started.Single()));
         Assert.AreEqual("4.0.0", runner.Environments[0][UpdateLauncher.InstalledVersionVariable]);
         Assert.IsNotNull(runner.Environments[0][UpdateLauncher.SupervisorVariable]);
+    }
+
+    [TestMethod]
+    public async Task AnInstalledEntryPointUpdatedPastTheSelectedVersionRunsInsteadOfIt()
+    {
+        using var temp = new TempFolder();
+        var store = StoreWith(temp, V1, V2);
+        store.Select(V2);
+        store.Confirm(V2);
+        var runner = new FakeRunner((process, _) => { process.Exit(0); return Task.CompletedTask; });
+        var log = new List<string>();
+
+        // The installed 4.0.0 hands over to the selected 4.0.2.
+        await Launcher(store, runner).RunAsync();
+
+        // dotnet tool update makes the installed entry point 4.0.3, newer than the selection: the owner's update runs, and
+        // the pointer is dropped.
+        await Launcher(store, runner, log: log, installedVersion: "4.0.3").RunAsync();
+        var started = string.Join(' ', runner.Started.Select(VersionOf));
+        Assert.AreEqual("4.0.2 installed", started, started);
+        Assert.IsNull(store.Read().Current);
+        Assert.IsTrue(log.Any(static line => line.Contains("4.0.3", StringComparison.Ordinal) && line.Contains("4.0.2", StringComparison.Ordinal)), string.Join("\n", log));
+
+        Assert.IsFalse(store.IsStaged(V2, UpdateProduct.Node), "the versions nothing needs any more are pruned");
+
+        // A version chosen older than the installed one (update --version) stays while the installed entry point does not change.
+        StoreWith(temp, V1);
+        store.Select(V1);
+        store.Confirm(V1);
+        await Launcher(store, runner, installedVersion: "4.0.3").RunAsync();
+        Assert.AreEqual("4.0.1", VersionOf(runner.Started[^1]));
+        Assert.AreEqual("4.0.1", store.Read().Current);
+
+        // Nor does an installed entry point changed to a version that is not newer than the selected one replace it.
+        await Launcher(store, runner, installedVersion: "4.0.1").RunAsync();
+        Assert.AreEqual("4.0.1", VersionOf(runner.Started[^1]));
+        Assert.AreEqual("4.0.1", store.Read().Current);
     }
 
     [TestMethod]
