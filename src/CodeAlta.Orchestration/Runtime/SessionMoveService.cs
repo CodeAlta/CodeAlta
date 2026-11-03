@@ -61,7 +61,8 @@ public sealed record SessionMoveStepResult(string Status, SessionMoveTransaction
 
 /// <summary>
 /// The moves of the sessions of one host to and from other machines, as a recoverable transaction recorded durably on
-/// both sides: <c>offered</c> (the source froze the session and made its bundle), <c>prepared</c> (the target holds a
+/// both sides: <c>exporting</c> (the source records that it freezes the session, before it does), <c>offered</c> (the
+/// source froze the session and made its bundle), <c>prepared</c> (the target holds a
 /// verified copy and a worktree), <c>committed</c> (the arbiter recorded the new owner), <c>finished</c> (the target
 /// installed the session, or the source relinquished it), or <c>aborted</c>.
 /// </summary>
@@ -97,6 +98,107 @@ public sealed class SessionMoveService
     /// <summary>Gets the name of this machine.</summary>
     public string? MachineName { get; }
 
+    // Runs once the session is frozen and its bundle written, before the move is recorded as offered: a test stops the
+    // source there as a crash would.
+    internal Func<string, Task>? AfterExportForTesting { get; init; }
+
+    /// <summary>
+    /// Undoes, when the source starts, the exports a crash interrupted before the move was offered to any machine: the
+    /// moves recorded as <see cref="SessionMoveState.Exporting"/>, and the sessions frozen by a move this machine has no
+    /// record of. Their bundle goes, the session is written here again and the move is recorded as aborted. A move
+    /// recorded as offered is left to its arbiter (<see cref="RecoverAsync(ISessionMoveArbiter, string?, string?, CancellationToken)"/>).
+    /// </summary>
+    /// <param name="cancellationToken">Stops waiting for the other moves of this machine.</param>
+    /// <returns>What each move is now.</returns>
+    /// <exception cref="OperationCanceledException">The token was canceled.</exception>
+    public async Task<IReadOnlyList<SessionMoveStepResult>> RecoverExportsAsync(CancellationToken cancellationToken)
+    {
+        var results = new List<SessionMoveStepResult>();
+        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            foreach (var record in Store.ListUnfinished())
+            {
+                if (record.Role != SessionMoveRole.Source || record.State != SessionMoveState.Exporting) continue;
+                results.Add(Recover(record, () => AbandonExport(record, "The source stopped before it offered the session.")));
+            }
+
+            foreach (var (sessionId, moveId) in _runtime.Relinquishments.ListFrozen())
+            {
+                // A freeze is recorded after its move (as exporting), and a move is offered once recorded as offered:
+                // with no record, no machine was offered the session.
+                if (!IsValidMoveId(moveId) || Store.Read(moveId, SessionMoveRole.Source) is not null || Store.Read(moveId, SessionMoveRole.Target) is not null) continue;
+                var orphan = new SessionMoveTransaction
+                {
+                    MoveId = moveId, Role = SessionMoveRole.Source, State = SessionMoveState.Exporting, SessionId = sessionId, FromMachine = MachineName,
+                    BundleFolder = GetBundleFolder(moveId, SessionMoveRole.Source),
+                };
+                results.Add(Recover(orphan, () => AbandonExport(orphan, "The session was frozen by a move this machine has no record of.")));
+            }
+        }
+        finally
+        {
+            _gate.Release();
+        }
+
+        return results;
+
+        static SessionMoveStepResult Recover(SessionMoveTransaction record, Func<SessionMoveStepResult> abandon)
+        {
+            try
+            {
+                return abandon();
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+            {
+                return new(record.State, record, [$"The move {record.MoveId} of the session {record.SessionId} could not be undone: {exception.Message}"]);
+            }
+        }
+
+        static bool IsValidMoveId(string moveId)
+        {
+            try
+            {
+                SessionMoveTransactionStore.ValidateMoveId(moveId);
+                return true;
+            }
+            catch (ArgumentException)
+            {
+                return false;
+            }
+        }
+    }
+
+    // An export that did not happen leaves no record; one that cannot be removed now is undone when the source starts.
+    private void TryAbandonExport(SessionMoveTransaction record)
+    {
+        try
+        {
+            AbandonExport(record, null);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            // RecoverExportsAsync ends it.
+        }
+    }
+
+    // A source's move that was never offered: its bundle goes, the session is written here again, and the move is
+    // recorded as aborted for that reason, or leaves no record without one (a refusal of the export).
+    private SessionMoveStepResult AbandonExport(SessionMoveTransaction record, string? reason)
+    {
+        if (record.BundleFolder is { } bundle && Directory.Exists(bundle)) Directory.Delete(bundle, recursive: true);
+        _runtime.UnfreezeMovedSession(record.SessionId, record.MoveId);
+        if (reason is null)
+        {
+            Store.Delete(record.MoveId, SessionMoveRole.Source);
+            return new(SessionMoveState.Aborted, null, []);
+        }
+
+        var aborted = record with { State = SessionMoveState.Aborted, Reason = reason };
+        Store.Save(aborted);
+        return new(SessionMoveState.Aborted, aborted, []);
+    }
+
     /// <summary>Gets the folder of the bundle this machine makes or receives for a move.</summary>
     /// <param name="moveId">The move.</param>
     /// <param name="role">The side (<see cref="SessionMoveRole"/>).</param>
@@ -127,18 +229,45 @@ public sealed class SessionMoveService
         await _gate.WaitAsync().ConfigureAwait(false);
         try
         {
-            if (Store.Read(moveId, SessionMoveRole.Source) is { } existing) return new(existing.State, existing, ["The move was already offered."]);
-            var export = await _commands.ExportSessionBundleAsync(sessionId, new SessionBundleExportRequest(moveId, bundle, MachineName, toMachine)
+            if (Store.Read(moveId, SessionMoveRole.Source) is { } existing)
             {
-                Epoch = epoch,
-                MaximumPayloadBytes = maximumPayloadBytes,
-            }).ConfigureAwait(false);
-            if (export.Status != "ok") return new(export.Status, null, export.Warnings);
-            var record = new SessionMoveTransaction
+                if (existing.State != SessionMoveState.Exporting) return new(existing.State, existing, ["The move was already offered."]);
+                // An export a crash interrupted: nothing was offered, it begins again.
+                TryAbandonExport(existing);
+            }
+
+            // Recorded before the session is frozen: a crash from here on leaves a record the source recovers alone
+            // (RecoverExportsAsync), since no machine was offered anything before the move is recorded as offered.
+            var intent = new SessionMoveTransaction
             {
-                MoveId = moveId, Role = SessionMoveRole.Source, State = SessionMoveState.Offered, SessionId = sessionId,
+                MoveId = moveId, Role = SessionMoveRole.Source, State = SessionMoveState.Exporting, SessionId = sessionId,
                 FromMachine = MachineName, ToMachine = toMachine, Epoch = epoch + 1, BundleFolder = bundle,
             };
+            Store.Save(intent);
+            SessionBundleExportResult export;
+            try
+            {
+                export = await _commands.ExportSessionBundleAsync(sessionId, new SessionBundleExportRequest(moveId, bundle, MachineName, toMachine)
+                {
+                    Epoch = epoch,
+                    MaximumPayloadBytes = maximumPayloadBytes,
+                }).ConfigureAwait(false);
+            }
+            catch
+            {
+                TryAbandonExport(intent);
+                throw;
+            }
+
+            if (export.Status != "ok")
+            {
+                // The export undid itself: the move leaves no record, as if it was never asked.
+                TryAbandonExport(intent);
+                return new(export.Status, null, export.Warnings);
+            }
+
+            if (AfterExportForTesting is { } hook) await hook(moveId).ConfigureAwait(false);
+            var record = intent with { State = SessionMoveState.Offered };
             Store.Save(record);
             return new(SessionMoveState.Offered, record, export.Warnings);
         }
@@ -279,7 +408,12 @@ public sealed class SessionMoveService
                     continue;
                 try
                 {
-                    if (record.Role == SessionMoveRole.Source)
+                    if (record.Role == SessionMoveRole.Source && record.State == SessionMoveState.Exporting)
+                    {
+                        // Never offered: no arbiter has anything to say of it.
+                        results.Add(AbandonExport(record, "The source stopped before it offered the session."));
+                    }
+                    else if (record.Role == SessionMoveRole.Source)
                     {
                         results.Add(await AdvanceSourceAsync(record, arbiter, cancellationToken).ConfigureAwait(false));
                     }

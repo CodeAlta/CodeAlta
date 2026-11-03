@@ -124,6 +124,28 @@ public sealed class SessionRelinquishmentStore
         return found;
     }
 
+    /// <summary>Lists the sessions of this instance that are frozen for a move, and the move that froze each.</summary>
+    /// <returns>The sessions and their moves; a file that cannot be read is left out (it counts as given away).</returns>
+    public IReadOnlyList<(string SessionId, string MoveId)> ListFrozen()
+    {
+        var found = new List<(string SessionId, string MoveId)>();
+        if (!System.IO.Directory.Exists(Directory)) return found;
+        try
+        {
+            foreach (var path in System.IO.Directory.EnumerateFiles(Directory, "*" + Extension, SearchOption.TopDirectoryOnly))
+            {
+                var sessionId = Path.GetFileNameWithoutExtension(path);
+                if (Read(sessionId) is { State: SessionRelinquishment.Frozen } record) found.Add((sessionId, record.MoveId));
+            }
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            // The folder went away meanwhile: what was read stands.
+        }
+
+        return found;
+    }
+
     /// <summary>Freezes a session for a move. The caller holds the lease of the session.</summary>
     /// <param name="sessionId">The session.</param>
     /// <param name="moveId">The move.</param>

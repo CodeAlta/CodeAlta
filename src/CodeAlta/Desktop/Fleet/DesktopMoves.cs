@@ -98,13 +98,18 @@ internal sealed class DesktopMoves
         if (enabled) OnFleetChanged();
     }
 
-    /// <summary>Ends the moves this computer took and a stop left unfinished, by its own decisions.</summary>
+    /// <summary>
+    /// Ends, by its own decisions, the moves this computer took and a stop left unfinished, and those it was giving and
+    /// had offered to no machine yet.
+    /// </summary>
     /// <param name="cancellationToken">Stops the recovery.</param>
     /// <returns>A task that completes once they are ended.</returns>
     public async Task RecoverAsync(CancellationToken cancellationToken)
     {
         try
         {
+            foreach (var result in await Sender.Moves.RecoverExportsAsync(cancellationToken).ConfigureAwait(false))
+                Log($"Move {result.Transaction?.MoveId} of session {result.Transaction?.SessionId}: {result.Status}.");
             foreach (var result in await Receiver.RecoverAsync(cancellationToken).ConfigureAwait(false))
                 Log($"Move {result.Transaction?.MoveId} of session {result.Transaction?.SessionId}: {result.Status}.");
         }

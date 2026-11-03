@@ -6,6 +6,12 @@ namespace CodeAlta.Catalog.SessionMoves;
 /// <summary>The states of a move, as each side records them.</summary>
 public static class SessionMoveState
 {
+    /// <summary>
+    /// The source recorded that it freezes the session and makes its bundle, before it does: nothing was offered to any
+    /// machine yet, so a move that stopped here is undone by the source alone.
+    /// </summary>
+    public const string Exporting = "exporting";
+
     /// <summary>The source froze the session and made its bundle.</summary>
     public const string Offered = "offered";
 
@@ -170,6 +176,13 @@ public sealed class SessionMoveTransactionStore
         var path = PathOf(moveId, role);
         return File.Exists(path) ? JsonSerializer.Deserialize(File.ReadAllBytes(path), SessionMoveJsonContext.Default.SessionMoveTransaction) : null;
     }
+
+    /// <summary>Removes the record of a move on one side: a move the source refused before it offered anything.</summary>
+    /// <param name="moveId">The move.</param>
+    /// <param name="role">The side (<see cref="SessionMoveRole"/>).</param>
+    /// <exception cref="ArgumentException">The move or the role is not valid.</exception>
+    /// <exception cref="IOException">The record cannot be removed.</exception>
+    public void Delete(string moveId, string role) => File.Delete(PathOf(moveId, role));
 
     /// <summary>Lists the moves that did not end, on both sides.</summary>
     /// <returns>The records; a damaged one is left out.</returns>

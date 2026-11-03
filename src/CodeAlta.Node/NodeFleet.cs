@@ -125,6 +125,9 @@ internal sealed class NodeFleet : IAsyncDisposable
     {
         try
         {
+            // The exports a stop interrupted before anything was offered are undone by this machine alone, first.
+            foreach (var result in await Task.Run(() => service.MoveSender.Moves.RecoverExportsAsync(CancellationToken.None)).ConfigureAwait(false))
+                Log(false, $"Move {result.Transaction?.MoveId} of session {result.Transaction?.SessionId}: {result.Status}. {string.Join(" ", result.Warnings)}");
             foreach (var result in await Task.Run(() => service.MoveReceiver.RecoverAsync(CancellationToken.None)).ConfigureAwait(false))
                 Log(false, $"Move {result.Transaction?.MoveId} of session {result.Transaction?.SessionId}: {result.Status}. {string.Join(" ", result.Warnings)}");
         }

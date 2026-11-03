@@ -125,7 +125,7 @@ public sealed class FleetMoveSender
     {
         ArgumentNullException.ThrowIfNull(target);
         var results = new List<FleetMoveResult>();
-        foreach (var record in Moves.Store.ListUnfinished().Where(record => record.Role == SessionMoveRole.Source
+        foreach (var record in Moves.Store.ListUnfinished().Where(record => record.Role == SessionMoveRole.Source && record.State != SessionMoveState.Exporting
                      && string.Equals(record.ToMachine, targetName, StringComparison.Ordinal)))
             results.Add(await MoveAsync(record.SessionId, record.MoveId, target, targetName, false, cancellationToken).ConfigureAwait(false));
         return results;
@@ -142,7 +142,8 @@ public sealed class FleetMoveSender
             return Refuse("move_exists", "That move id is used by another session.");
         if (record is not null && SessionMoveState.IsFinal(record.State)) return Done(record, null);
 
-        if (record is null)
+        // A move whose export a crash interrupted was offered to no one: it begins again (SessionMoveService.OfferAsync).
+        if (record is null || record.State == SessionMoveState.Exporting)
         {
             // Asked before anything is frozen: a target that would refuse never leaves the session frozen here.
             var preview = await PreviewAsync(sessionId, cancellationToken).ConfigureAwait(false);
