@@ -225,6 +225,27 @@ public sealed class FleetConnectorTests
     }
 
     [TestMethod]
+    public async Task AfterARestartTheListBeforeARemovalIsRefusedAndTheRemovedDeviceGetsNoKey()
+    {
+        await using var fleet = await FleetFixture.StartAsync();
+        using var pcKey = DeviceIdentity.LoadOrCreate(Path.Combine(fleet.Root.Path, "pc"));
+        using (var pc = new FleetServerClient(fleet.Server.BaseAddress, pcKey)) await pc.EnrollAsync((await fleet.Desktop.CreateEnrollmentTokenAsync()).Token, "PC");
+        await fleet.Desktop.ApproveAsync(pcKey.DeviceId);
+        var before = await fleet.Desktop.GetDeviceListAsync();
+        await fleet.Desktop.RevokeAsync(pcKey.DeviceId);
+        var pin = Path.Combine(fleet.Root.Path, "link", FleetOrganizationDevices.PinFileName);
+        await new FleetMetadataKeyring(new FleetOrganizationDevices(fleet.Server.BaseAddress, fleet.DesktopKey, pin)).RefreshAsync("work", CancellationToken.None);
+        Assert.IsFalse((await fleet.Desktop.ListMetadataKeysAsync()).Any(key => key.WrappedTo.Contains(pcKey.DeviceId)));
+
+        // The desktop starts again, and the server answers the list as it was before the removal: a valid list where the PC is a member.
+        var replacing = new ReplacingHandler(before) { InnerHandler = new HttpClientHandler() };
+        var restarted = new FleetMetadataKeyring(new FleetOrganizationDevices(fleet.Server.BaseAddress, fleet.DesktopKey, pin, replacing));
+        await Assert.ThrowsExactlyAsync<FleetDeviceListException>(() => restarted.RefreshAsync(["work", "home"], CancellationToken.None));
+        Assert.AreEqual(0, replacing.Writes, "nothing is made or wrapped after a list that takes back a removal");
+        Assert.IsFalse((await fleet.Desktop.ListMetadataKeysAsync()).Any(key => key.WrappedTo.Contains(pcKey.DeviceId)));
+    }
+
+    [TestMethod]
     public async Task ANodeTakesNoKeyTheServerMadeOrRelabelledAndSealsWithTheOneItsPersonGave()
     {
         await using var fleet = await FleetFixture.StartAsync();
