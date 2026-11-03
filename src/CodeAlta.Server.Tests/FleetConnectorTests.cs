@@ -148,6 +148,8 @@ public sealed class FleetConnectorTests
         Volatile.Write(ref linked, ["work"]);
         source.Set(Session("s-a", "work", isPrivate: true), Session("s-b", "home"), Session("s-c", "work"));
         await WaitForAsync(async () => !(await fleet.Desktop.ListSessionsAsync()).Any(session => session.Id == "s-b"));
+        // The server shows the withdrawal before its answer reaches the connector, which then tells it.
+        await WaitForAsync(() => Task.FromResult(withdrawn.Count >= 2));
         CollectionAssert.AreEqual(new[] { "s-a", "s-b" }, withdrawn.ToArray());
 
         // A session gone from the machine (deleted) keeps its facts; one made public again is published again.
@@ -323,6 +325,8 @@ public sealed class FleetConnectorTests
             await WaitForAsync(async () => (await fleet.Desktop.ListSessionsAsync()) is var listed
                 && listed.Any(session => session.Id == "s1" && session.Version == 2) && listed.Any(session => session.Id == "s2"));
             Assert.IsTrue(transports.Count >= 2, "it reconnected");
+            // The server lists the facts before its answer reaches the connector, which moves its cursor, then tells the answer.
+            await WaitForAsync(() => Task.FromResult(!results.IsEmpty && connector.Cursors.Facts == results.Last().Ack));
             // Each batch went on from the cursor the server gave back, never repeating a sequence.
             var acks = results.Select(static result => result.Ack).ToArray();
             CollectionAssert.AreEqual(acks.Order().Distinct().ToArray(), acks);
