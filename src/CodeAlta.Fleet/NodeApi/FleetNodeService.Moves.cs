@@ -28,7 +28,8 @@ public sealed partial class FleetNodeService
         On(caller, FleetNodeMethods.MovesCommit, target, FleetNodeJsonContext.Default.FleetMoveRef, FleetNodeJsonContext.Default.FleetMoveStepResult,
             (call, value, token) => MoveReceiver.CommitAsync(RequireMoveId(value.MoveId), call.Caller.DeviceId, token));
         On(caller, FleetNodeMethods.MovesStatus, target, FleetNodeJsonContext.Default.FleetMoveStatusParams, FleetNodeJsonContext.Default.FleetMoveStatus,
-            (call, value, token) => MoveReceiver.StatusAsync(RequireMoveId(value.MoveId), value.Resolve, token));
+            // The device the move is bound to, or the node's owner, which sees every move of its node.
+            (call, value, token) => MoveReceiver.StatusAsync(RequireMoveId(value.MoveId), value.Resolve, call.Caller.IsOwner ? null : call.Caller.DeviceId, token));
         On(caller, FleetNodeMethods.MovesComplete, target, FleetNodeJsonContext.Default.FleetMoveRef, FleetNodeJsonContext.Default.FleetMoveStepResult,
             (call, value, token) => MoveReceiver.CompleteAsync(RequireMoveId(value.MoveId), call.Caller.DeviceId, token));
     }

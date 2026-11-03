@@ -159,7 +159,9 @@ only" after the person confirms.
   as it does a freeze that no move of its records names.
 - **A move is bound to devices, not names**: the source records the device it drives the move through, the target
   and arbiter, or the relay and the device it forwards to. A move goes on only through that route, and recovery asks
-  only that device: a machine that shares the target's name is never offered the session nor asked to commit it.
+  only that device: a machine that shares the target's name is never offered the session nor asked to commit it. The
+  target, in turn, goes on with a move, says its outcome and decides it only for the device that offered it (and the
+  node's owner on its machine): another device cannot abort a move it never offered, nor read its records.
 - **Relinquishment is persisted** next to the session's lease, so every writer of that machine honors it, `altacli`
   included: a moved session cannot be resumed there by mistake.
 - Parent and children keep their links; a child that stays behind is a cross-machine child.
