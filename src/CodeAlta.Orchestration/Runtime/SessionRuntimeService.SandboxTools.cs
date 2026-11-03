@@ -530,6 +530,7 @@ public sealed partial class SessionRuntimeService
             MaxWebGetBytes = options.MaxWebGetBytes,
             WebGetTimeout = options.WebGetTimeout,
             ResolveToolOutputDirectoryAsync = toolOutput ?? options.ResolveToolOutputDirectoryAsync,
+            SecretMasker = options.SecretMasker,
         };
     }
 }

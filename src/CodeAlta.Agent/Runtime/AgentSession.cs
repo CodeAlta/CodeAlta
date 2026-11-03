@@ -2259,7 +2259,8 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
             DisabledTools = _options.DisabledBuiltInTools,
             WriteGuard = _options.WriteGuard,
             CommandGuard = _options.CommandGuard,
-            // The whole of a long output goes beside the journal, and goes with the session.
+            // The whole of a long output goes beside the journal, and goes with the session: it is saved masked.
+            SecretMasker = SecretMasker,
             ResolveToolOutputDirectoryAsync = _store is IAgentSessionAttachmentStore attachments
                 ? async cancellationToken => await attachments.GetAttachmentDirectoryAsync(SessionId, cancellationToken).ConfigureAwait(false) is { } folder
                     ? Path.Combine(folder, AgentBuiltInToolOptions.ToolOutputFolderName)

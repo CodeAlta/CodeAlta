@@ -143,6 +143,42 @@ public sealed class SessionBundleMoveTests
         Assert.AreEqual(folder, targetProvider.LastWorkingDirectory);
     }
 
+    // A bundle goes to another machine: the secrets of this one do not go with it, also one set after the session wrote it,
+    // in its journal, the whole output of a command kept beside it, or the transcript of its provider.
+    [TestMethod]
+    public async Task ABundle_HoldsNoSecretOfTheSourceMachine_InItsJournalItsAttachmentsOrItsTranscript()
+    {
+        const string secret = "sk-move-91b7e2c4f0";
+        using var machines = Machines.Create();
+        var provider = new RecordingProvider { TranscriptRoot = Path.Combine(machines.Root, "source-claude") };
+        string sessionId;
+        await using (var source = await machines.CreateSourceHostAsync(provider))
+        {
+            sessionId = (await source.Commands.CreateDraftSessionAsync(source.CurrentProject, provider.Descriptor, null)).SessionId;
+            await SendAsync(source, sessionId, $"Use the key {secret}.");
+            var attachments = (await source.SessionViewCatalog.JournalStore.CreateSessionStore().GetAttachmentDirectoryAsync(sessionId, CancellationToken.None))!;
+            machines.Write(attachments, "tool-output/shell-1.txt", $"exit_code: 0\nstdout:\nKEY={secret}\n");
+        }
+
+        provider.WriteTranscript(machines.SourceProject, $$"""{"type":"user","text":"Use the key {{secret}}."}""" + "\n");
+        new CodeAlta.Catalog.Secrets.LocalSecretStore(machines.SourceGlobal).SetSecret("MOVE_KEY", secret, "tests");
+        string bundle;
+        await using (var source = await machines.CreateSourceHostAsync(provider))
+        {
+            var offered = await new SessionMoveService(source, "Laptop").OfferAsync(sessionId, "move-masked", "Server");
+            Assert.AreEqual(SessionMoveState.Offered, offered.Status, string.Join(" ", offered.Warnings));
+            bundle = offered.Transaction!.BundleFolder!;
+        }
+
+        var manifest = (await SessionBundle.ReadManifestAsync(bundle, CancellationToken.None))!;
+        Assert.IsNull(await SessionBundle.VerifyAsync(bundle, manifest, CancellationToken.None), "The manifest names the masked files.");
+        foreach (var file in Directory.EnumerateFiles(bundle, "*", SearchOption.AllDirectories))
+            Assert.IsFalse(File.ReadAllText(file).Contains(secret, StringComparison.Ordinal), $"{Path.GetRelativePath(bundle, file)} holds the secret.");
+        StringAssert.Contains(File.ReadAllText(Path.Combine(bundle, SessionMoveManifest.JournalFile)), "Use the key ***.");
+        StringAssert.Contains(File.ReadAllText(Directory.EnumerateFiles(Path.Combine(bundle, SessionMoveManifest.AttachmentsFolder), "shell-1.txt", SearchOption.AllDirectories).Single()), "KEY=***");
+        StringAssert.Contains(File.ReadAllText(Directory.EnumerateFiles(Path.Combine(bundle, SessionMoveManifest.ProviderFolder), "*", SearchOption.AllDirectories).Single()), "Use the key ***.");
+    }
+
     [TestMethod]
     public async Task ASessionAtWork_IsNotOffered_AndStaysWritable()
     {

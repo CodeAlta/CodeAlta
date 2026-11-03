@@ -1,7 +1,9 @@
 using System.IO.Compression;
 using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 
+using CodeAlta.Agent.Runtime;
 using CodeAlta.Catalog.Worktrees;
 
 namespace CodeAlta.Catalog.SessionMoves;
@@ -13,6 +15,9 @@ namespace CodeAlta.Catalog.SessionMoves;
 public static class SessionBundle
 {
     private const int BufferSize = 81920;
+
+    // UTF-8 without a byte order mark of its own (one in a file is a character, copied as it is), which refuses invalid bytes.
+    private static readonly UTF8Encoding StrictUtf8 = new(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: true);
 
     /// <summary>Writes the manifest of a bundle, with the list of its files (<see cref="SessionMoveManifest.Files"/>) made from the folder.</summary>
     /// <param name="bundleFolder">The folder of the bundle.</param>
@@ -136,6 +141,28 @@ public static class SessionBundle
         return new SessionMoveFile(relative, length, Convert.ToHexStringLower(hash.GetHashAndReset()));
     }
 
+    /// <summary>
+    /// Copies a file into a bundle with the secrets of the machine masked in its text (see <see cref="CopyFolderAsync(string, string, AgentSecretMasker?, CancellationToken)"/>),
+    /// and hashes it as it was written.
+    /// </summary>
+    /// <param name="source">The file.</param>
+    /// <param name="bundleFolder">The folder of the bundle.</param>
+    /// <param name="relative">Its path in the bundle, with forward slashes.</param>
+    /// <param name="masker">Masks the secrets of the machine; null copies the file as it is.</param>
+    /// <param name="cancellationToken">Stops the copy.</param>
+    /// <returns>The file of the bundle.</returns>
+    /// <exception cref="IOException">The file cannot be read or written.</exception>
+    /// <exception cref="OperationCanceledException">The token was canceled.</exception>
+    public static async Task<SessionMoveFile> CopyIntoAsync(string source, string bundleFolder, string relative, AgentSecretMasker? masker, CancellationToken cancellationToken)
+    {
+        if (masker is null || masker.IsEmpty) return await CopyIntoAsync(source, bundleFolder, relative, cancellationToken).ConfigureAwait(false);
+        ArgumentException.ThrowIfNullOrWhiteSpace(source);
+        var target = Path.Combine(bundleFolder, relative.Replace('/', Path.DirectorySeparatorChar));
+        Directory.CreateDirectory(Path.GetDirectoryName(target)!);
+        await CopyMaskedAsync(source, target, masker, cancellationToken).ConfigureAwait(false);
+        return await HashFileAsync(target, relative, cancellationToken).ConfigureAwait(false);
+    }
+
     /// <summary>Copies a folder into a bundle, recursively.</summary>
     /// <param name="source">The folder; nothing is copied when it does not exist.</param>
     /// <param name="target">The folder it is copied to.</param>
@@ -143,20 +170,135 @@ public static class SessionBundle
     /// <returns>A task that completes once the files are copied.</returns>
     /// <exception cref="IOException">A file cannot be read or written.</exception>
     /// <exception cref="OperationCanceledException">The token was canceled.</exception>
-    public static async Task CopyFolderAsync(string source, string target, CancellationToken cancellationToken)
+    public static Task CopyFolderAsync(string source, string target, CancellationToken cancellationToken)
+        => CopyFolderAsync(source, target, masker: null, cancellationToken);
+
+    /// <summary>
+    /// Copies a folder into a bundle, recursively, with the secrets of the machine masked in the text of its files: a
+    /// bundle goes to another machine, and a file kept beside a journal (the whole output of a command) can hold a secret
+    /// set after it was written. A file that is no UTF-8 text (a picture) is copied as it is; the JSON of a journal
+    /// (<c>.jsonl</c>, line by line) or of a document (<c>.json</c>) is masked inside its strings, as it escapes them.
+    /// </summary>
+    /// <param name="source">The folder; nothing is copied when it does not exist.</param>
+    /// <param name="target">The folder it is copied to.</param>
+    /// <param name="masker">Masks the secrets of the machine; null copies the files as they are.</param>
+    /// <param name="cancellationToken">Stops the copy.</param>
+    /// <returns>A task that completes once the files are copied.</returns>
+    /// <exception cref="IOException">A file cannot be read or written.</exception>
+    /// <exception cref="OperationCanceledException">The token was canceled.</exception>
+    public static async Task CopyFolderAsync(string source, string target, AgentSecretMasker? masker, CancellationToken cancellationToken)
     {
         if (!Directory.Exists(source)) return;
         Directory.CreateDirectory(target);
         foreach (var file in Directory.EnumerateFiles(source))
         {
             cancellationToken.ThrowIfCancellationRequested();
-            await using var input = new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete, BufferSize, FileOptions.Asynchronous);
-            await using var output = new FileStream(Path.Combine(target, Path.GetFileName(file)), FileMode.CreateNew, FileAccess.Write, FileShare.None, BufferSize, FileOptions.Asynchronous);
-            await input.CopyToAsync(output, BufferSize, cancellationToken).ConfigureAwait(false);
+            var copy = Path.Combine(target, Path.GetFileName(file));
+            if (masker is null || masker.IsEmpty) await CopyRawAsync(file, copy, cancellationToken).ConfigureAwait(false);
+            else await CopyMaskedAsync(file, copy, masker, cancellationToken).ConfigureAwait(false);
         }
 
         foreach (var folder in Directory.EnumerateDirectories(source))
-            await CopyFolderAsync(folder, Path.Combine(target, Path.GetFileName(folder)), cancellationToken).ConfigureAwait(false);
+            await CopyFolderAsync(folder, Path.Combine(target, Path.GetFileName(folder)), masker, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Masks the secrets of the machine in the text of the files of a folder of a bundle, recursively, as
+    /// <see cref="CopyFolderAsync(string, string, AgentSecretMasker?, CancellationToken)"/> does: for what was written
+    /// there by another part (the files a provider keeps of a session).
+    /// </summary>
+    /// <param name="folder">The folder; nothing is done when it does not exist.</param>
+    /// <param name="masker">Masks the secrets of the machine; null leaves the files as they are.</param>
+    /// <param name="cancellationToken">Stops the masking.</param>
+    /// <returns>A task that completes once the files are masked.</returns>
+    /// <exception cref="IOException">A file cannot be read or written.</exception>
+    /// <exception cref="OperationCanceledException">The token was canceled.</exception>
+    public static async Task MaskFolderAsync(string folder, AgentSecretMasker? masker, CancellationToken cancellationToken)
+    {
+        if (masker is null || masker.IsEmpty || !Directory.Exists(folder)) return;
+        foreach (var file in Directory.EnumerateFiles(folder, "*", SearchOption.AllDirectories).ToArray())
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var masked = file + ".masking";
+            await CopyMaskedAsync(file, masked, masker, cancellationToken).ConfigureAwait(false);
+            File.Move(masked, file, overwrite: true);
+        }
+    }
+
+    private static async Task CopyRawAsync(string source, string target, CancellationToken cancellationToken)
+    {
+        await using var input = new FileStream(source, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete, BufferSize, FileOptions.Asynchronous);
+        await using var output = new FileStream(target, FileMode.CreateNew, FileAccess.Write, FileShare.None, BufferSize, FileOptions.Asynchronous);
+        await input.CopyToAsync(output, BufferSize, cancellationToken).ConfigureAwait(false);
+    }
+
+    // A text is copied with its secrets masked, its other characters (a byte order mark, its line ends) as they are. A file
+    // that turns out not to be UTF-8 text is copied as it is.
+    private static async Task CopyMaskedAsync(string source, string target, AgentSecretMasker masker, CancellationToken cancellationToken)
+    {
+        if (!await LooksLikeTextAsync(source, cancellationToken).ConfigureAwait(false))
+        {
+            await CopyRawAsync(source, target, cancellationToken).ConfigureAwait(false);
+            return;
+        }
+
+        var extension = Path.GetExtension(source);
+        try
+        {
+            await using var input = new FileStream(source, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete, BufferSize, FileOptions.Asynchronous | FileOptions.SequentialScan);
+            using var reader = new StreamReader(input, StrictUtf8, detectEncodingFromByteOrderMarks: false, BufferSize);
+            await using var output = new FileStream(target, FileMode.CreateNew, FileAccess.Write, FileShare.None, BufferSize, FileOptions.Asynchronous);
+            await using var writer = new StreamWriter(output, StrictUtf8, BufferSize);
+            var buffer = new char[BufferSize];
+            int read;
+            if (string.Equals(extension, ".jsonl", StringComparison.OrdinalIgnoreCase))
+            {
+                // Each line is one JSON value: it is masked whole, so that its names and its escapes are read as JSON.
+                var line = new System.Text.StringBuilder();
+                while ((read = await reader.ReadAsync(buffer, cancellationToken).ConfigureAwait(false)) > 0)
+                {
+                    var start = 0;
+                    for (var index = 0; index < read; index++)
+                    {
+                        if (buffer[index] != '\n') continue;
+                        line.Append(buffer, start, index + 1 - start);
+                        await writer.WriteAsync(masker.MaskJson(line.ToString())).ConfigureAwait(false);
+                        line.Clear();
+                        start = index + 1;
+                    }
+
+                    line.Append(buffer, start, read - start);
+                }
+
+                if (line.Length > 0) await writer.WriteAsync(masker.MaskJson(line.ToString())).ConfigureAwait(false);
+            }
+            else if (string.Equals(extension, ".json", StringComparison.OrdinalIgnoreCase))
+            {
+                await writer.WriteAsync(masker.MaskJson(await reader.ReadToEndAsync(cancellationToken).ConfigureAwait(false))).ConfigureAwait(false);
+            }
+            else
+            {
+                // A secret on several lines (a key) is masked whole, even across the reads.
+                var text = masker.CreateStream();
+                while ((read = await reader.ReadAsync(buffer, cancellationToken).ConfigureAwait(false)) > 0)
+                    await writer.WriteAsync(text.Write(new string(buffer, 0, read))).ConfigureAwait(false);
+                await writer.WriteAsync(text.Flush()).ConfigureAwait(false);
+            }
+        }
+        catch (DecoderFallbackException)
+        {
+            File.Delete(target);
+            await CopyRawAsync(source, target, cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    // A file with a zero byte in its start is no text (a picture, an archive); the decoding tells the rest.
+    private static async Task<bool> LooksLikeTextAsync(string path, CancellationToken cancellationToken)
+    {
+        await using var input = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete, BufferSize, FileOptions.Asynchronous);
+        var start = new byte[8192];
+        var read = await input.ReadAtLeastAsync(start, start.Length, throwOnEndOfStream: false, cancellationToken).ConfigureAwait(false);
+        return start.AsSpan(0, read).IndexOf((byte)0) < 0;
     }
 
     /// <summary>Packs a bundle folder into one archive stream (zip, stored as it is), for a transfer.</summary>

@@ -126,6 +126,12 @@ public sealed class AgentBuiltInToolOptions
     public Func<CancellationToken, ValueTask<string?>>? ResolveToolOutputDirectoryAsync { get; init; }
 
     /// <summary>
+    /// Gets or initializes what masks the secrets of the machine in what the tools give and keep: the output of
+    /// <c>shell_command</c> is masked before its whole is saved to a file, which goes with the session. Null masks nothing.
+    /// </summary>
+    public AgentSecretMasker? SecretMasker { get; init; }
+
+    /// <summary>
     /// The name of the folder of a session's tool output, in the folder of its attachments: the whole of a long output is
     /// kept there, and a sandboxed session reads it there.
     /// </summary>

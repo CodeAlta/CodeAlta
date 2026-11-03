@@ -179,6 +179,50 @@ public sealed class SecretMaskingTests
     }
 
     [TestMethod]
+    public async Task TheFilesOfABundle_AreCopiedMasked_TheirJsonStaysJson_AndAPictureIsCopiedAsItIs()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "codealta-bundle-masking-" + Guid.NewGuid().ToString("N"));
+        var source = Directory.CreateDirectory(Path.Combine(root, "source")).FullName;
+        try
+        {
+            const string type = "type";
+            var masker = new AgentSecretMasker(() => [Secret, "-----BEGIN KEY-----\nAAAA\n-----END KEY-----", type]);
+            Directory.CreateDirectory(Path.Combine(source, "tool-output"));
+            var output = string.Concat(Enumerable.Range(0, 20_000).Select(static line => $"line {line}\n")) + $"token {Secret}\n-----BEGIN KEY-----\nAAAA\n-----END KEY-----\n";
+            File.WriteAllText(Path.Combine(source, "tool-output", "shell.txt"), "﻿" + output);
+            File.WriteAllText(Path.Combine(source, "journal.jsonl"), $$"""{"type":"text","content":"the {{Secret}} and the type"}""" + "\n" + """{"broken":"line""" + "\n" + $$"""{"type":"x","v":"{{Secret}}"}""" + "\n");
+            File.WriteAllText(Path.Combine(source, "state.json"), $$"""{ "type": "{{Secret}}" }""");
+            var picture = new byte[] { 0x89, 0x50, 0x4E, 0x47, 0, 0, 0, 13 }.Concat(System.Text.Encoding.UTF8.GetBytes(Secret)).ToArray();
+            File.WriteAllBytes(Path.Combine(source, "picture.png"), picture);
+
+            var target = Path.Combine(root, "bundle", "attachments");
+            await CodeAlta.Catalog.SessionMoves.SessionBundle.CopyFolderAsync(source, target, masker, CancellationToken.None);
+            var journal = await CodeAlta.Catalog.SessionMoves.SessionBundle.CopyIntoAsync(Path.Combine(source, "journal.jsonl"), Path.Combine(root, "bundle"), "journal.jsonl", masker, CancellationToken.None);
+
+            var shell = File.ReadAllBytes(Path.Combine(target, "tool-output", "shell.txt"));
+            var expected = "﻿" + output.Replace(Secret, "***", StringComparison.Ordinal).Replace("-----BEGIN KEY-----\nAAAA\n-----END KEY-----", "***", StringComparison.Ordinal);
+            CollectionAssert.AreEqual(new System.Text.UTF8Encoding(false).GetBytes(expected), shell,
+                "A text keeps its byte order mark and its lines, and a secret on several lines is masked whole.");
+            var lines = File.ReadAllLines(Path.Combine(target, "journal.jsonl"));
+            Assert.AreEqual("""{"type":"text","content":"the *** and the ***"}""", lines[0], "The names of a line of JSON stay, also one that is a secret.");
+            Assert.AreEqual("""{"broken":"line""", lines[1]);
+            Assert.AreEqual("""{"type":"x","v":"***"}""", lines[2], "A broken line does not change how the next one is read.");
+            Assert.AreEqual("""{ "type": "***" }""", File.ReadAllText(Path.Combine(target, "state.json")));
+            CollectionAssert.AreEqual(picture, File.ReadAllBytes(Path.Combine(target, "picture.png")), "A file that is no text is copied as it is.");
+            Assert.AreEqual(new FileInfo(Path.Combine(root, "bundle", "journal.jsonl")).Length, journal.Length, "The hash is that of the masked copy.");
+            Assert.IsFalse(File.ReadAllText(Path.Combine(root, "bundle", "journal.jsonl")).Contains(Secret, StringComparison.Ordinal));
+
+            File.Copy(Path.Combine(source, "journal.jsonl"), Path.Combine(root, "provider.jsonl"));
+            await CodeAlta.Catalog.SessionMoves.SessionBundle.MaskFolderAsync(root, masker, CancellationToken.None);
+            Assert.IsFalse(File.ReadAllText(Path.Combine(root, "provider.jsonl")).Contains(Secret, StringComparison.Ordinal), "A folder written by a provider is masked where it is.");
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [TestMethod]
     public async Task ASecretSplitBetweenDeltas_IsNeverShown_WhereverItIsSplit()
     {
         const string prefix = "token ";
@@ -242,6 +286,23 @@ public sealed class SecretMaskingTests
         Assert.IsTrue(run.Published.OfType<AgentActivityEvent>().Any(static activity => activity.ParentActivityId == "call-run_script" && activity.Phase == AgentActivityPhase.Completed),
             "The calls of the script are recorded.");
         Assert.IsTrue(run.Journals.Any(static text => text.Contains("GRAFANA_TOKEN=***", StringComparison.Ordinal)), "The diff of the call is journaled, masked.");
+        AssertNoSecret(run);
+    }
+
+    [TestMethod]
+    public async Task TheWholeOfALongOutput_IsSavedBesideTheJournal_Masked()
+    {
+        // The command builds the secret from two parts: what the model sent holds none.
+        var command = OperatingSystem.IsWindows()
+            ? "1..5000 | ForEach-Object { \"line-$_ \" + 'sk-live-' + '4f9a2c7e1b' }"
+            : "seq -f 'line-%g sk-live-''4f9a2c7e1b' 1 5000";
+        var executor = new ScriptedTurnExecutor((_, _) => Task.FromResult(Call("shell_command", new { command, timeoutMs = 60_000 })));
+
+        var run = await RunSessionAsync(executor, [], "List the lines.");
+
+        var saved = run.Files.Where(static file => file.Path.Contains("tool-output", StringComparison.Ordinal)).ToArray();
+        Assert.HasCount(1, saved, "The whole output is kept with the session.");
+        StringAssert.Contains(saved[0].Text, "line-2500 ***");
         AssertNoSecret(run);
     }
 

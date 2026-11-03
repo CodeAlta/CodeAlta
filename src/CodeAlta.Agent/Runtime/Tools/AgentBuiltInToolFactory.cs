@@ -954,6 +954,13 @@ public static partial class AgentBuiltInToolFactory
 
         var stdout = (await stdoutTask.ConfigureAwait(false)).Trim();
         var stderr = (await stderrTask.ConfigureAwait(false)).Trim();
+        // Masked here, before the whole of a long output is saved, and so that the lines its note names are those of the file.
+        if (options.SecretMasker is { } masker)
+        {
+            stdout = masker.MaskText(stdout);
+            stderr = masker.MaskText(stderr);
+        }
+
         var output = FormatShellCommandOutput(process.ExitCode, stdout, stderr, workdir);
         var structured = CreateShellCommandValue(process.ExitCode, stdout, stderr, workdir);
         // A long output keeps its head and tail for the model; the user and a script have the whole of it.
