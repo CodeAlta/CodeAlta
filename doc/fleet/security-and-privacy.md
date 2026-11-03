@@ -113,17 +113,25 @@ analysis of Matrix showed a malicious server exploiting exactly that).
 - Each device anchors the list of each server: it pins the first entry and keeps a checkpoint, the sequence and hash
   of the last entry it accepted, which a later list must hold at the same place. A server can neither swap the
   organization under a device nor answer an older list that takes back a removal. What a device trusts, the entries
-  it signs and the devices it wraps keys to all come from that one anchored list.
+  it signs and the devices it wraps keys to all come from that one anchored list. The desktop that sets a server up
+  pins the entry it signed itself and the organization of the setup before any connection, as a recovery pins the
+  anchor its key sealed: even the first list a server answers cannot start elsewhere.
 - Every device of the person shows **New device: …** until one of them confirms it, comparing the six words of its
-  key; the entry it signs adds the key of those words only, and the new device gets keys only then.
+  key; the entry it signs adds the key of those words only, as the class the person confirmed, and the new device
+  gets keys only then. A machine a desktop paired with and adds to its server is approved without a person only by
+  the whole key pairing pinned, and only as an execution node: nothing the machine or the server answers brings a
+  controller in.
 - A person's **recovery key** is a member of the list of its own class: it signs only the entry that adds a new
   controller device of its person, never a removal, and a person has one at a time (a new one replaces the old one).
 - A wrapped key carries a grant signed by the controller device that gave it: the organization, the person, the
   epoch, the sequence of the list it was given by, and the recipient. A device takes a key only from a controller
-  device of its own person in its anchored list, so a server cannot give it a key of its own nor relabel a copy.
+  device of its own person in its anchored list, so a server cannot give it a key of its own nor relabel a copy. The
+  list's history decides: the signer was a controller at an entry from the one the grant names on, so the copies a
+  controller gave before it left still open, and it vouches for no list from its removal on.
 - Revocation is a signed removal, a new epoch of the keys the device held, and dropped connections. A key given
-  before the last removal seals nothing more; a controller device of the person makes the next epoch for the devices
-  that remain, and publishers wait for it rather than go back to the old one.
+  before the last removal seals nothing more from the moment the anchored list accepts the removal, whatever the
+  server does next; a controller device of the person makes the next epoch for the devices that remain, and
+  publishers wait for it rather than go back to the old one.
 
 ## Channels
 
