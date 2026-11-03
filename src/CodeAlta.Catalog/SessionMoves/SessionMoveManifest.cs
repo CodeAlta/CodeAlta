@@ -60,6 +60,13 @@ public sealed record SessionMoveManifest
     [JsonPropertyName("fromMachine")]
     public string? FromMachine { get; init; }
 
+    /// <summary>
+    /// Gets the device id of the machine the session comes from; null in a bundle of a machine that does not record it. A machine can
+    /// be renamed between two moves, its device id cannot.
+    /// </summary>
+    [JsonPropertyName("fromDevice")]
+    public string? FromDeviceId { get; init; }
+
     /// <summary>Gets the ownership epoch of the session on the source; the move commits the next one.</summary>
     [JsonPropertyName("epoch")]
     public long Epoch { get; init; }
@@ -241,6 +248,17 @@ public sealed record SessionMovedRecord
     /// <summary>Gets the machine the session goes to.</summary>
     [JsonPropertyName("to")]
     public string? To { get; init; }
+
+    /// <summary>
+    /// Gets the device id of the machine the session comes from; null in a record written before the ids were recorded. The statistics
+    /// tell which machine wrote each part of the journal by the ids (a name can change, an id cannot) and by the names when there are none.
+    /// </summary>
+    [JsonPropertyName("fromDevice")]
+    public string? FromDeviceId { get; init; }
+
+    /// <summary>Gets the device id of the machine the session goes to; null in a record written before the ids were recorded.</summary>
+    [JsonPropertyName("toDevice")]
+    public string? ToDeviceId { get; init; }
 
     /// <summary>Gets the folder the session worked in, on the source.</summary>
     [JsonPropertyName("oldWorkingFolder")]

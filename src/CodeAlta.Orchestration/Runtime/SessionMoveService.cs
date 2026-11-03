@@ -98,6 +98,15 @@ public sealed class SessionMoveService
     /// <summary>Gets the name of this machine.</summary>
     public string? MachineName { get; }
 
+    /// <summary>
+    /// Gets what gives the device id of this machine, read when a move needs it: the bundle and the move record carry it beside the
+    /// name, so that the statistics still know which machine wrote what once a machine is renamed. Null for a machine without one;
+    /// it is a function so that a machine that never moves a session never makes an identity for it.
+    /// </summary>
+    public Func<string?>? DeviceIdSource { get; init; }
+
+    private string? MachineDeviceId => DeviceIdSource?.Invoke();
+
     // Runs once the session is frozen and its bundle written, before the move is recorded as offered: a test stops the
     // source there as a crash would.
     internal Func<string, Task>? AfterExportForTesting { get; init; }
@@ -265,6 +274,7 @@ public sealed class SessionMoveService
             {
                 export = await _commands.ExportSessionBundleAsync(sessionId, new SessionBundleExportRequest(moveId, bundle, MachineName, toMachine)
                 {
+                    FromDeviceId = MachineDeviceId,
                     Epoch = epoch,
                     MaximumPayloadBytes = maximumPayloadBytes,
                 }).ConfigureAwait(false);
@@ -530,7 +540,7 @@ public sealed class SessionMoveService
         }
 
         if (prepared is null) throw new InvalidOperationException($"The bundle of the move {record.MoveId} is gone: the session cannot be installed.");
-        var warnings = await _runtime.InstallMovedSessionAsync(prepared, MachineName, committed.Epoch, CancellationToken.None).ConfigureAwait(false);
+        var warnings = await _runtime.InstallMovedSessionAsync(prepared, MachineName, MachineDeviceId, committed.Epoch, CancellationToken.None).ConfigureAwait(false);
         var finished = committed with { State = SessionMoveState.Finished };
         Store.Save(finished);
         return new(SessionMoveState.Finished, finished, warnings);
