@@ -12,7 +12,7 @@ import { SessionSandboxSelect } from "./SessionSandboxSelect";
 const reply = (change: Partial<SandboxSessionResponse>): SandboxSessionResponse =>
   ({ status: "ok", own: null, profile: "workspace", source: "all_sessions", problem: null, choices: ["off", "workspace", "strict", "mine"], ...change });
 const profile = (change: Partial<SandboxProfileItem> & { name: string }): SandboxProfileItem => ({ builtIn: false, extends: null, network: null, outside: null,
-  hosts: [], write: [], read: [], deny: [], localPorts: [], env: [], mcpServers: [], problem: null, ...change });
+  fleet: null, hosts: [], write: [], read: [], deny: [], localPorts: [], env: [], mcpServers: [], problem: null, ...change });
 const render = (node: React.ReactNode, locale = "en") => renderToStaticMarkup(<ShellLanguageContext.Provider value={{ locale: locale as "en", choice: locale as "en", setLanguage: () => {} }}>
   {node}</ShellLanguageContext.Provider>);
 const options = (markup: string) => [...markup.matchAll(/<option value="([^"]*)"[^>]*>([^<]*)<\/option>/g)].map(match => `${match[1]}=${match[2]}`);
@@ -53,17 +53,18 @@ test("the summary of a session's sandbox, its choices and the scopes the host li
 
 test("a profile of the user resolves over its base as the host resolves it", () => {
   const profiles = [
-    profile({ name: "workspace", builtIn: true, network: "hosts", outside: "ask", hosts: ["nuget.org"], write: ["~/.nuget"] }),
+    profile({ name: "workspace", builtIn: true, network: "hosts", outside: "ask", fleet: "allow", hosts: ["nuget.org"], write: ["~/.nuget"] }),
     profile({ name: "mine", extends: "workspace", hosts: ["github.com", "nuget.org"], localPorts: [5432] }),
-    profile({ name: "closed", extends: "mine", network: "off", outside: "never" }),
+    profile({ name: "closed", extends: "mine", network: "off", outside: "never", fleet: "never" }),
     profile({ name: "alone" }),
     profile({ name: "loop", extends: "again" }), profile({ name: "again", extends: "loop" }),
   ];
-  assert.deepEqual(resolveSandboxProfile("mine", profiles), { network: "hosts", outside: "ask", hosts: ["nuget.org", "github.com"], write: ["~/.nuget"], read: [], deny: [],
+  assert.deepEqual(resolveSandboxProfile("mine", profiles), { network: "hosts", outside: "ask", fleet: "allow", hosts: ["nuget.org", "github.com"], write: ["~/.nuget"], read: [], deny: [],
     localPorts: [5432], mcpServers: [] });
-  assert.deepEqual([resolveSandboxProfile("closed", profiles)?.network, resolveSandboxProfile("closed", profiles)?.outside, resolveSandboxProfile("closed", profiles)?.hosts],
-    ["off", "never", ["nuget.org", "github.com"]]);
-  assert.deepEqual([resolveSandboxProfile("alone", profiles)?.network, resolveSandboxProfile("alone", profiles)?.outside], ["off", "ask"], "without a base: no network, ask");
+  assert.deepEqual([resolveSandboxProfile("closed", profiles)?.network, resolveSandboxProfile("closed", profiles)?.outside, resolveSandboxProfile("closed", profiles)?.fleet,
+    resolveSandboxProfile("closed", profiles)?.hosts], ["off", "never", "never", ["nuget.org", "github.com"]]);
+  assert.deepEqual([resolveSandboxProfile("alone", profiles)?.network, resolveSandboxProfile("alone", profiles)?.outside, resolveSandboxProfile("alone", profiles)?.fleet],
+    ["off", "ask", "never"], "without a base: no network, ask, no other machine");
   assert.equal(resolveSandboxProfile("loop", profiles), null);
   assert.equal(resolveSandboxProfile("missing", profiles), null);
 });

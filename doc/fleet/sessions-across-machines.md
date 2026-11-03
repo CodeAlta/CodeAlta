@@ -45,7 +45,11 @@ hold, across machines:
 - the target is in the caller's space, and that space is linked to the same fleet;
 - the child does without at least the tools its parent does without, never asks the user less, and runs in a
   sandbox at least as strict (the target refuses what it cannot hold, as `RefuseRunAsync` does locally); the target
-  lowers it further to its own policy (`bypassPermissions` only where its owner allows it, a minimum sandbox);
+  lowers it further to its own policy (`bypassPermissions` only where its owner allows it, a minimum sandbox). A
+  sandbox travels with what its profile confines on the parent's machine (`SandboxConfinement`), never as a name
+  alone, which each machine resolves with its own settings: the target compares its profile with it and refuses a
+  weaker one ([security](security-and-privacy.md#remote-execution), rule 8). A prompt to a session elsewhere carries
+  the sender's floor the same way;
 - the target machine accepts agent-started sessions for that space (**off** by default: a node owner turns it on,
   `altanode agents allow --space <id>`), within a rate limit per device;
 - the lineage is recorded on both machines, and every such creation is logged with the parent session, the device

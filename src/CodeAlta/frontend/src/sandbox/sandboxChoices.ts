@@ -63,7 +63,7 @@ export function scopeSandbox(scopes: readonly SandboxScopeItem[], kind: SandboxS
 }
 
 /** What a profile gives once its base is applied: the lists of its base and its own, its own choices over those of its base. */
-export type ResolvedSandboxProfile = Readonly<{ network: string; outside: string; hosts: readonly string[]; write: readonly string[]; read: readonly string[];
+export type ResolvedSandboxProfile = Readonly<{ network: string; outside: string; fleet: string; hosts: readonly string[]; write: readonly string[]; read: readonly string[];
   deny: readonly string[]; localPorts: readonly number[]; mcpServers: readonly string[] }>;
 
 /**
@@ -74,11 +74,11 @@ export function resolveSandboxProfile(name: string, profiles: readonly SandboxPr
   const profile = profiles.find(item => item.name.toLowerCase() === name.toLowerCase());
   if (!profile || visiting.includes(profile.name.toLowerCase())) return null;
   const own = { hosts: profile.hosts, write: profile.write, read: profile.read, deny: profile.deny, localPorts: profile.localPorts, mcpServers: profile.mcpServers };
-  if (profile.builtIn || !profile.extends) return { network: profile.network ?? "off", outside: profile.outside ?? "ask", ...own };
+  if (profile.builtIn || !profile.extends) return { network: profile.network ?? "off", outside: profile.outside ?? "ask", fleet: profile.fleet ?? "never", ...own };
   const base = resolveSandboxProfile(profile.extends, profiles, [...visiting, profile.name.toLowerCase()]);
   if (!base) return null;
   const union = <T>(left: readonly T[], right: readonly T[]) => [...new Set([...left, ...right])];
-  return { network: profile.network ?? base.network, outside: profile.outside ?? base.outside, hosts: union(base.hosts, own.hosts), write: union(base.write, own.write),
+  return { network: profile.network ?? base.network, outside: profile.outside ?? base.outside, fleet: profile.fleet ?? base.fleet, hosts: union(base.hosts, own.hosts), write: union(base.write, own.write),
     read: union(base.read, own.read), deny: union(base.deny, own.deny), localPorts: union(base.localPorts, own.localPorts), mcpServers: union(base.mcpServers, own.mcpServers) };
 }
 

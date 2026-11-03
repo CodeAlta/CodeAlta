@@ -6,6 +6,7 @@ using CodeAlta.Agent.Runtime;
 using CodeAlta.Catalog;
 using CodeAlta.Catalog.SessionMoves;
 using CodeAlta.Catalog.Worktrees;
+using CodeAlta.Sandbox;
 
 namespace CodeAlta.Orchestration.Runtime;
 
@@ -178,6 +179,12 @@ public sealed partial class SessionRuntimeService
         var store = _sessionViewCatalog.JournalStore.CreateSessionStore();
         if (await store.GetJournalPathAsync(sessionId, CancellationToken.None).ConfigureAwait(false) is not { } journalPath || !File.Exists(journalPath))
             return SessionBundleExportResult.Refused("session_missing");
+        // The sandbox the session runs in, whether it chose it or a setting of this machine gives it, goes with it: the target
+        // holds it to at least that. One whose profile cannot be used here has no floor to give, and does not move.
+        var sandbox = await GetSessionSandboxAsync(sessionId, CancellationToken.None).ConfigureAwait(false);
+        if (sandbox.IsSandboxed && sandbox.Profile is null)
+            return SessionBundleExportResult.Refused("sandbox_unusable", $"The sandbox profile '{sandbox.Choice.Profile}' of the session cannot be used ({sandbox.Problem}).");
+        var permissionMode = await GetPermissionModeAsync(sessionId, CancellationToken.None).ConfigureAwait(false);
         var bundle = Directory.CreateDirectory(request.BundleFolder).FullName;
         var workFolder = ExistingWorktree(session.WorktreeDirectory) ?? session.WorkingDirectory;
 
@@ -215,7 +222,9 @@ public sealed partial class SessionRuntimeService
             ProviderKey = session.ResolvedProviderKey,
             ModelId = session.ModelId,
             ReasoningEffort = session.ReasoningEffort?.ToString(),
-            Sandbox = session.Sandbox,
+            Sandbox = sandbox.Profile is not null ? sandbox.Choice.Profile : null,
+            SandboxFloor = sandbox.Profile is { } profile ? ToMoveFloor(SandboxConfinement.Of(profile)) : null,
+            PermissionMode = permissionMode,
             AgentPromptId = session.AgentPromptId,
             Repository = repository,
             ProviderSession = providerSession,
@@ -286,6 +295,7 @@ public sealed partial class SessionRuntimeService
         if (await SessionBundle.VerifyAsync(bundleFolder, manifest, cancellationToken).ConfigureAwait(false) is { } broken)
             return new("bundle_invalid", null, [broken]);
         if (!SessionLeaseStore.IsValidSessionId(manifest.SessionId)) return new("bundle_invalid", null, [$"'{manifest.SessionId}' is not a session id."]);
+        if (RefuseMovedSandbox(manifest) is { } sandboxRefusal) return sandboxRefusal;
 
         var store = _sessionViewCatalog.JournalStore.CreateSessionStore();
         if (await store.GetJournalPathAsync(manifest.SessionId, cancellationToken).ConfigureAwait(false) is not null
@@ -417,6 +427,14 @@ public sealed partial class SessionRuntimeService
 
         if (await ResolveOwnedSessionAsync(sessionId, CancellationToken.None).ConfigureAwait(false) is not { } session)
             throw new InvalidOperationException($"The session {sessionId} cannot be read once installed.");
+
+        // The sandbox and the permission mode it ran in on the source are its own here, whatever the settings of this
+        // machine say: it is never less confined for having moved (the profile was checked when the move was prepared).
+        if (manifest.Sandbox is { } movedSandbox && !string.Equals(NormalizeOptionalText(session.Sandbox), movedSandbox, StringComparison.OrdinalIgnoreCase))
+            await SetOwnedSandboxAsync(session, movedSandbox).ConfigureAwait(false);
+        if (manifest.PermissionMode is { } movedMode
+            && Runtime.SessionPermissionModes.Rank(await GetPermissionModeAsync(sessionId, CancellationToken.None).ConfigureAwait(false)) > Runtime.SessionPermissionModes.Rank(movedMode))
+            await SetOwnedPermissionModeAsync(session, movedMode).ConfigureAwait(false);
         var installedJournal = await store.GetJournalPathAsync(sessionId, CancellationToken.None).ConfigureAwait(false) ?? journalPath;
         if (!JournalTailContains(installedJournal, manifest.MoveId))
         {
@@ -463,6 +481,27 @@ public sealed partial class SessionRuntimeService
         await _agentSessionCatalog.NotifySessionUpdatedAsync(sessionId, CancellationToken.None).ConfigureAwait(false);
         return warnings;
     }
+
+    // A session sandboxed on the source comes only where a profile of the same name is at least as strict: the fleet is
+    // never a way out of a sandbox (doc/fleet/security-and-privacy.md, "Remote execution", rule 8). Null when it may come.
+    private SessionMovePreparation? RefuseMovedSandbox(SessionMoveManifest manifest)
+    {
+        if (manifest.Sandbox is not { } name) return null;
+        if (manifest.SandboxFloor is not { } floor) return new("bundle_invalid", null, [$"The bundle names the sandbox '{name}' of the session, but not what it confines."]);
+        if (ResolveSandboxConfinement(name) is not { } here)
+            return new("sandbox_missing", null, [$"This machine has no sandbox profile '{name}' that can be used: the session would run here less confined than on {MachineName(manifest.FromMachine)}."]);
+        return here.WeakerThan(FromMoveFloor(name, floor)) is { } why
+            ? new("sandbox_weaker", null, [$"The sandbox profile '{name}' of this machine lets the session do more than on {MachineName(manifest.FromMachine)}: {why}."])
+            : null;
+    }
+
+    private static SessionMoveSandboxFloor ToMoveFloor(SandboxConfinement confinement)
+        => new(SandboxConfinement.NetworkName(confinement.Network), confinement.Hosts, confinement.LocalPorts, confinement.Write, confinement.Read, confinement.Deny,
+            confinement.Env, confinement.McpServers, confinement.Outside == SandboxOutside.Ask ? "ask" : "never", confinement.Fleet);
+
+    private static SandboxConfinement FromMoveFloor(string profile, SessionMoveSandboxFloor floor)
+        => new(profile, SandboxConfinement.ParseNetwork(floor.Network), floor.Hosts ?? [], floor.LocalPorts ?? [], floor.Write ?? [], floor.Read ?? [], floor.Deny ?? [],
+            floor.Env ?? [], floor.McpServers ?? [], floor.Outside == "ask" ? SandboxOutside.Ask : SandboxOutside.Never, floor.Fleet);
 
     internal static string MovedToMachineNoteText(string? fromMachine, string fromDirectory, string? toMachine, string toDirectory)
         => $"<codealta-context>Working directory: this session moved from {MachineName(fromMachine)}, `{fromDirectory}`, to {MachineName(toMachine)}, `{toDirectory}`, "

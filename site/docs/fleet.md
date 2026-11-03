@@ -176,7 +176,7 @@ The session starts in the project of the same repository on the machine, as a ch
 
 What the session may do:
 
-- At most what the session of the agent has: its space, the tools it does without, its permission mode and its sandbox. The agent cannot give it more.
+- At most what the session of the agent has: its space, the tools it does without, its permission mode and its sandbox. The agent cannot give it more. A sandbox goes with what it allows on this computer: the machine runs the session in a profile at least as strict, or refuses it, even when its own profile of that name allows more (see [sandbox](sessions/sandbox.md#on-other-machines)).
 - It never bypasses permissions on the machine unless you allow it there: `altanode agents allow --bypass`. When it asks before a command, or asks a question, its parent and its row show that it waits for you, with a notice.
 - `altanode agents allow --sandbox strict` makes the sessions of agents run in that sandbox at least; the machine refuses one it cannot sandbox.
 - Each request is signed by this computer: neither a server nor anyone else can start a session in its name. The machine limits how many sessions and prompts agents send it, and logs each one with the session and the computer that asked.

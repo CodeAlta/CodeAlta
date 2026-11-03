@@ -1,3 +1,5 @@
+using CodeAlta.Sandbox;
+
 namespace CodeAlta.Orchestration.Runtime;
 
 /// <summary>
@@ -89,6 +91,12 @@ public sealed record RemoteChildRequest(string ParentSessionId, string Machine)
     /// <summary>Gets the sandbox profile the child runs in at least; null when the parent runs without one.</summary>
     public string? Sandbox { get; init; }
 
+    /// <summary>
+    /// Gets what <see cref="Sandbox"/> confines on this computer: the machine runs the child in a profile at least as
+    /// strict, or refuses it (<c>doc/fleet/security-and-privacy.md</c>, "Remote execution", rule 8). Set with <see cref="Sandbox"/>.
+    /// </summary>
+    public SandboxConfinement? Confinement { get; init; }
+
     /// <summary>Gets whether the child may start sessions of its own.</summary>
     public bool SubSessions { get; init; } = true;
 
@@ -145,6 +153,12 @@ public sealed record RemoteMessageRequest(string SenderSessionId, string Session
 
     /// <summary>Gets the machine (name or id), or null for the one that lists the session.</summary>
     public string? Machine { get; init; }
+
+    /// <summary>
+    /// Gets the floor of the sender: the machine refuses the prompt for a session that runs in a wider permission mode,
+    /// or less confined, than the sender (<c>doc/fleet/security-and-privacy.md</c>, "Remote execution", rule 8).
+    /// </summary>
+    public required SessionFleetFloor Floor { get; init; }
 }
 
 /// <summary>What became of a <see cref="RemoteMessageRequest"/>.</summary>
@@ -185,6 +199,11 @@ public interface IRemoteChildSessions
     /// <param name="sessionId">The session.</param>
     /// <returns>The machine, or null when no machine this host reaches lists it.</returns>
     RemoteMachine? FindMachineOf(string sessionId);
+
+    /// <summary>Finds the session of this host that started a session of another machine.</summary>
+    /// <param name="childSessionId">The session of the other machine.</param>
+    /// <returns>The session of this host that started it, as this host recorded it; null when no session of this host did.</returns>
+    string? FindParentOf(string childSessionId);
 
     /// <summary>Starts a session on another machine, as the child of a session of this host.</summary>
     /// <param name="request">The request, with the limits of the parent.</param>

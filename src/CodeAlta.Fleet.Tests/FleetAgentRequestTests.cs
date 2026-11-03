@@ -2,6 +2,7 @@ using CodeAlta.Fleet.Identity;
 using CodeAlta.Fleet.NodeApi;
 using CodeAlta.Fleet.Protocol;
 using CodeAlta.Orchestration.Runtime;
+using CodeAlta.Sandbox;
 
 namespace CodeAlta.Fleet.Tests;
 
@@ -64,10 +65,52 @@ public sealed class FleetAgentRequestTests
         }), "A chain of agents across machines has a maximum depth.");
         Assert.ThrowsExactly<ArgumentException>(() => FleetAgentSigning.Sign(laptop, Start("m") with { Kind = FleetAgentRequestKinds.Send }),
             "A prompt names its session and its text, and no limits.");
-        var send = Start("m") with { Kind = FleetAgentRequestKinds.Send, Limits = null, SessionId = "child-1", TextHash = FleetAgentRequestDocuments.HashText("Hello") };
+        var send = Start("m") with
+        {
+            Kind = FleetAgentRequestKinds.Send, Limits = null, SessionId = "child-1", TextHash = FleetAgentRequestDocuments.HashText("Hello"), Floor = new FleetAgentFloor("default", null, null),
+        };
         Assert.IsTrue(FleetAgentRequestDocuments.TryRead(FleetAgentSigning.Sign(laptop, send).Payload, out var read, out var reason), reason);
         Assert.AreEqual(FleetAgentRequestDocuments.HashText("Hello"), read.TextHash);
         Assert.AreNotEqual(FleetAgentRequestDocuments.HashText("Hello"), FleetAgentRequestDocuments.HashText("Hello!"));
+    }
+
+    // The fleet is never a way out of a sandbox (doc/fleet/security-and-privacy.md, "Remote execution", rule 8): a sandbox
+    // travels with what it confines on the machine that names it, never as a name alone, which each machine reads its way.
+    [TestMethod]
+    public void ASandboxTravelsWithWhatItConfines_AndAPromptWithTheFloorOfItsSender()
+    {
+        using var folder = new TestFolder();
+        using var laptop = DeviceIdentity.LoadOrCreate(Path.Combine(folder.Path, "laptop"));
+        var workspace = FleetSandboxFloors.ToWire(SandboxConfinement.Of(SandboxProfiles.Resolve(SandboxProfiles.Workspace, [])));
+        var start = Start("m");
+        FleetAgentRequest WithSandbox(string? sandbox, FleetSandboxConfinement? confinement) => start with { Limits = start.Limits! with { Sandbox = sandbox, Confinement = confinement } };
+
+        foreach (var (request, why) in new[]
+        {
+            (WithSandbox("workspace", null), "a name alone"),
+            (WithSandbox(null, workspace), "a confinement without its name"),
+            (WithSandbox("workspace", workspace with { Profile = "strict" }), "another profile than the one named"),
+            (WithSandbox("workspace", workspace with { Network = "everywhere" }), "a network no version knows"),
+            (WithSandbox("workspace", workspace with { LocalPorts = [0] }), "a port that is not one"),
+        })
+        {
+            Assert.ThrowsExactly<ArgumentException>(() => FleetAgentSigning.Sign(laptop, request), why);
+        }
+
+        Assert.IsTrue(FleetAgentRequestDocuments.TryRead(FleetAgentSigning.Sign(laptop, WithSandbox("workspace", workspace)).Payload, out var read, out var reason), reason);
+        Assert.AreEqual(("workspace", "hosts", true), (read.Limits!.Confinement!.Profile, read.Limits.Confinement.Network, read.Limits.Confinement.Fleet));
+        CollectionAssert.Contains(read.Limits.Confinement.Hosts.ToArray(), "nuget.org");
+        Assert.IsNull(FleetSandboxFloors.FromWire(read.Limits.Confinement).WeakerThan(SandboxConfinement.Of(SandboxProfiles.Resolve(SandboxProfiles.Workspace, []))),
+            "What it confines reads back as it was written.");
+
+        // A prompt names the floor of its sender, and a start carries it in its limits only.
+        var send = start with { Kind = FleetAgentRequestKinds.Send, Limits = null, SessionId = "child-1", TextHash = FleetAgentRequestDocuments.HashText("Hello") };
+        Assert.ThrowsExactly<ArgumentException>(() => FleetAgentSigning.Sign(laptop, send), "a prompt without the floor of its sender");
+        Assert.ThrowsExactly<ArgumentException>(() => FleetAgentSigning.Sign(laptop, send with { Floor = new FleetAgentFloor("default", "workspace", null) }), "a sandbox without what it confines");
+        Assert.ThrowsExactly<ArgumentException>(() => FleetAgentSigning.Sign(laptop, start with { Floor = new FleetAgentFloor("default", null, null) }), "a start with a floor of its own");
+        Assert.IsTrue(FleetAgentRequestDocuments.TryRead(FleetAgentSigning.Sign(laptop, send with { Floor = new FleetAgentFloor("acceptEdits", "workspace", workspace) }).Payload,
+            out var prompt, out reason), reason);
+        Assert.AreEqual(("acceptEdits", "workspace"), (prompt.Floor!.PermissionMode, prompt.Floor.Confinement!.Profile));
     }
 
     [TestMethod]

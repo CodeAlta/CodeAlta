@@ -28,15 +28,15 @@ const commandSteps: Readonly<Record<string, string>> = Object.freeze({ dotnet: "
 const scopeIcons: Readonly<Record<SandboxScopeKind, IconName>> = Object.freeze({ provider: "provider", model: "model", space: "space", project: "folder" });
 
 /** A profile as the page edits it: the written values of a profile of the user, null where it inherits. */
-type ProfileDraft = Readonly<{ originalName: string | null; name: string; extends: string | null; network: string | null; outside: string | null;
+type ProfileDraft = Readonly<{ originalName: string | null; name: string; extends: string | null; network: string | null; outside: string | null; fleet: string | null;
   hosts: readonly string[]; write: readonly string[]; read: readonly string[]; deny: readonly string[]; localPorts: readonly number[];
   env: readonly string[]; mcpServers: readonly string[] }>;
 
 const draftOf = (profile: SandboxProfileItem): ProfileDraft => ({ originalName: profile.name, name: profile.name, extends: profile.extends, network: profile.network,
-  outside: profile.outside, hosts: profile.hosts, write: profile.write, read: profile.read, deny: profile.deny, localPorts: profile.localPorts, env: profile.env,
+  outside: profile.outside, fleet: profile.fleet ?? null, hosts: profile.hosts, write: profile.write, read: profile.read, deny: profile.deny, localPorts: profile.localPorts, env: profile.env,
   mcpServers: profile.mcpServers });
 
-const emptyDraft = (base: string | null, name: string): ProfileDraft => ({ originalName: null, name, extends: base, network: null, outside: null,
+const emptyDraft = (base: string | null, name: string): ProfileDraft => ({ originalName: null, name, extends: base, network: null, outside: null, fleet: null,
   hosts: [], write: [], read: [], deny: [], localPorts: [], env: [], mcpServers: [] });
 
 const sameDraft = (left: ProfileDraft, right: ProfileDraft) => JSON.stringify(left) === JSON.stringify(right);
@@ -243,6 +243,7 @@ function EverySession({ profiles, value, disabled, onChange }: { profiles: reado
 
 const networkChoices: readonly (readonly [string, MessageKey])[] = [["hosts", "Allowed hosts"], ["off", "Off"], ["on", "On"]];
 const outsideChoices: readonly (readonly [string, MessageKey])[] = [["ask", "Ask me"], ["never", "Never"]];
+const fleetChoices: readonly (readonly [string, MessageKey])[] = [["allow", "Allow"], ["never", "Never"]];
 
 // A profile of CodeAlta: what it gives, and a new profile of the user that starts from it.
 function BuiltInProfile({ profile, networks, busy, onDerive }: { profile: SandboxProfileItem; networks: readonly string[]; busy: boolean; onDerive: () => void }) {
@@ -350,6 +351,9 @@ function ProfileFields({ values, resolved, base, networks, disabled = false, rea
     </Field>
     <Field label={t("Run outside")}>
       {choice("sandbox-outside", values.outside, outsideChoices, "ask", resolved?.outside, outside => set({ outside }))}
+    </Field>
+    <Field label={t("Other machines")}>
+      {choice("sandbox-fleet", values.fleet, fleetChoices, "never", resolved?.fleet, fleet => set({ fleet }))}
     </Field>
   </>;
 }

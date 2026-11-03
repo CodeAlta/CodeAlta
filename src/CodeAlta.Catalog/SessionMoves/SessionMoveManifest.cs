@@ -95,9 +95,26 @@ public sealed record SessionMoveManifest
     [JsonPropertyName("reasoningEffort")]
     public string? ReasoningEffort { get; init; }
 
-    /// <summary>Gets the sandbox profile of the session (a profile name or <c>off</c>), when one was chosen.</summary>
+    /// <summary>
+    /// Gets the sandbox profile the session runs in on the source, whether the session chose it or a setting gives it; null
+    /// when it runs without one. The target keeps it as the session's own choice.
+    /// </summary>
     [JsonPropertyName("sandbox")]
     public string? Sandbox { get; init; }
+
+    /// <summary>
+    /// Gets what <see cref="Sandbox"/> confines on the source: the target refuses the session when its own profile of that
+    /// name lets it do more (<c>doc/fleet/security-and-privacy.md</c>, "Remote execution", rule 8). Null without a sandbox.
+    /// </summary>
+    [JsonPropertyName("sandboxFloor")]
+    public SessionMoveSandboxFloor? SandboxFloor { get; init; }
+
+    /// <summary>
+    /// Gets the permission mode the session runs in on the source, whether it chose it or its provider gives it: it runs in
+    /// no wider one on the target.
+    /// </summary>
+    [JsonPropertyName("permissionMode")]
+    public string? PermissionMode { get; init; }
 
     /// <summary>Gets the agent prompt of the session, when one was chosen.</summary>
     [JsonPropertyName("agentPromptId")]
@@ -115,6 +132,29 @@ public sealed record SessionMoveManifest
     [JsonPropertyName("files")]
     public IReadOnlyList<SessionMoveFile> Files { get; init; } = [];
 }
+
+/// <summary>What the sandbox profile of a moved session confines on the source, as its settings write it.</summary>
+/// <param name="Network"><c>off</c>, <c>hosts</c> or <c>on</c>.</param>
+/// <param name="Hosts">The hosts of the <c>hosts</c> network.</param>
+/// <param name="LocalPorts">The ports of the computer it reaches.</param>
+/// <param name="Write">The folders it writes beyond those of the session.</param>
+/// <param name="Read">The folders it reads beyond those of the session.</param>
+/// <param name="Deny">The folders and files it never reads.</param>
+/// <param name="Env">The names of the variables of the environment it receives.</param>
+/// <param name="McpServers">The MCP servers it may use.</param>
+/// <param name="Outside"><c>ask</c> or <c>never</c>: whether a command may be asked to run outside the sandbox.</param>
+/// <param name="Fleet">Whether it may start or drive work on other machines.</param>
+public sealed record SessionMoveSandboxFloor(
+    [property: JsonPropertyName("network")] string Network,
+    [property: JsonPropertyName("hosts")] IReadOnlyList<string> Hosts,
+    [property: JsonPropertyName("localPorts")] IReadOnlyList<int> LocalPorts,
+    [property: JsonPropertyName("write")] IReadOnlyList<string> Write,
+    [property: JsonPropertyName("read")] IReadOnlyList<string> Read,
+    [property: JsonPropertyName("deny")] IReadOnlyList<string> Deny,
+    [property: JsonPropertyName("env")] IReadOnlyList<string> Env,
+    [property: JsonPropertyName("mcpServers")] IReadOnlyList<string> McpServers,
+    [property: JsonPropertyName("outside")] string Outside,
+    [property: JsonPropertyName("fleet")] bool Fleet);
 
 /// <summary>A file of a bundle.</summary>
 /// <param name="Path">Its path in the bundle, with forward slashes.</param>
