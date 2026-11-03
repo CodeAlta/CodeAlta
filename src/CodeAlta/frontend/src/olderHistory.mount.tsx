@@ -58,7 +58,18 @@ const fixture = {
   navigate: (_action: MessageNavigation): unknown => null,
   /** Shows the first message of a turn at the top of the view, as going to a bookmark does. */
   showTurn: (_turn: number): boolean => false,
+  /** Adds a line at the end of the timeline every 40 ms, as an answer that streams in does, until `stopStream`. */
+  stream() {
+    fixture.stopStream();
+    streamTimer = window.setInterval(() => {
+      const line = document.createElement("p");
+      line.textContent = "A line of the answer that streams in.";
+      document.getElementById("fixture-stream")?.append(line);
+    }, 40);
+  },
+  stopStream() { window.clearInterval(streamTimer); },
 };
+let streamTimer = 0;
 Object.assign(window, { olderFixture: fixture });
 
 const noop = () => { };
@@ -77,6 +88,7 @@ function Pane({ sessionId, observing }: { sessionId: string; observing: boolean 
         onPointerMove={timeline.pointerMove} onPointerUp={timeline.pointerEnd} onPointerCancel={timeline.pointerEnd}>
         <History sessionId={sessionId} observing={observing} read={read as never} live={null} onNotesChange={noop} onSettled={onSettled}
           onBeforeOlder={timeline.beforeOlderPage} onAfterOlder={timeline.afterOlderPage} olderRequest={timeline.olderRequestRef} />
+        <div id="fixture-stream" />
       </div>
     </div>
   </div></div>;

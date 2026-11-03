@@ -86,7 +86,11 @@ export function createTimelineScrollMemory() {
       let pausedTop: number | null = null;
       return {
         following: () => following,
-        scroll(metrics: ScrollMetrics) {
+        /**
+         * The reader scrolled. `up`: the reader is going up, so the view does not follow the end even near it: a turn
+         * of the wheel moves it less than the follow distance, and following would take it back at the next growth.
+         */
+        scroll(metrics: ScrollMetrics, up = false) {
           if (restoring) return following;
           if (pausedTop !== null && metrics.scrollTop === pausedTop) return false;
           pausedTop = null;
@@ -97,7 +101,7 @@ export function createTimelineScrollMemory() {
           suppressedTop = null;
           // A read error/short journal can clamp the DOM to zero without a user following the tail.
           if (!following && bottomScrollTop(metrics) === 0) return false;
-          following = shouldFollowTimeline(metrics);
+          following = !up && shouldFollowTimeline(metrics);
           remember(id, metrics.scrollTop, following);
           return following;
         },
@@ -146,6 +150,9 @@ export function useTimelinePosition(sessionId: string, memory: ReturnType<typeof
   // where the view was at the last scroll, or where this hook put it since, and the sizes it had.
   const olderRequestRef = useRef<OlderHistoryRequest | null>(null);
   const goingUp = useRef(0);
+  // Until then, the scrolls that follow a move down of the reader are part of it: one that reaches the end of a
+  // growing timeline follows it again.
+  const goingDown = useRef(0);
   const lastScroll = useRef<ScrollMetrics | null>(null);
   const pressedInside = useRef(false);
   const messageAnchor = useRef<{ row: HTMLElement; top: number } | null>(null);
@@ -243,26 +250,31 @@ export function useTimelinePosition(sessionId: string, memory: ReturnType<typeof
   function scroll(element: HTMLDivElement) {
     const last = lastScroll.current;
     placed(element);
-    if (last && readerScrolledUp(last, element, performance.now() <= goingUp.current)) askOlder();
+    const readerUp = !!last && readerScrolledUp(last, element, performance.now() <= goingUp.current);
+    if (readerUp) askOlder();
     const intent = scrollIntent.current;
     const moved = !!intent && performance.now() <= intent.until && element.scrollTop !== intent.top &&
       (intent.direction === 0 || (element.scrollTop - intent.top) * intent.direction > 0);
     if (moved) scrollIntent.current = null;
     const movingAway = moved && intent?.direction !== 1;
+    // A scrollbar dragged up is a move up of the reader too, without the wheel or a key.
+    const up = readerUp || movingAway && !!last && element.scrollTop < last.scrollTop;
+    const readerDown = !!last && element.scrollTop > last.scrollTop && performance.now() <= goingDown.current;
     const geometryChanged = observedHeight.current !== null && observedHeight.current !== element.scrollHeight;
     const layoutScroll = selection.following() && !movingAway && performance.now() <= layoutUntil.current;
-    if (layoutScroll || geometryChanged && (!selection.following() || !movingAway)) {
+    if (layoutScroll || geometryChanged && (selection.following() ? !movingAway : !readerDown)) {
       // Detail/layout changes can emit a browser scroll before ResizeObserver follows the new bottom.
       // Do not infer a reader's change of follow preference from geometry alone. Explicit
       // movement away wins; moving toward a growing tail must not opt a follower out.
-      // An unfollowed reader's preference is never replaced by a simultaneous layout change.
+      // An unfollowed reader's preference is never replaced by a simultaneous layout change, unless the
+      // reader is going down: reaching the end of a growing timeline follows it again.
       observedHeight.current = element.scrollHeight;
       if (selection.following()) element.scrollTop = bottomScrollTop(element);
       else selection.pauseAt(element.scrollTop);
       return;
     }
     observedHeight.current = element.scrollHeight;
-    setFollowing(selection.scroll(element));
+    setFollowing(selection.scroll(element, up));
   }
   function markScrollIntent(direction: -1 | 0 | 1) {
     const element = elementRef.current;
@@ -273,7 +285,18 @@ export function useTimelinePosition(sessionId: string, memory: ReturnType<typeof
   function moveUp() {
     markScrollIntent(-1);
     goingUp.current = performance.now() + 500;
+    // The reader leaves the end before the view moves: content that grows meanwhile (an answer that streams in)
+    // would otherwise take the view back to the end between the frames of a turn of the wheel.
+    const element = elementRef.current;
+    if (element && element.scrollTop > 0 && selection.following()) {
+      selection.pauseAt(element.scrollTop);
+      setFollowing(false);
+    }
     askOlder();
+  }
+  function moveDown() {
+    markScrollIntent(1);
+    goingDown.current = performance.now() + 500;
   }
   function endScrollbarDrag(id?: number, released = true) {
     if (scrollbarDrag.current === null || id !== undefined && scrollbarDrag.current !== id) return;
@@ -288,7 +311,7 @@ export function useTimelinePosition(sessionId: string, memory: ReturnType<typeof
     const target = event.target as Element;
     const code = target.closest<HTMLElement>("pre.timeline-code");
     if (code ? codeCanScroll(code, event.deltaY) : target.closest(".event-details pre")) return;
-    if (event.deltaY > 0) markScrollIntent(1);
+    if (event.deltaY > 0) moveDown();
     else moveUp();
   }
   function keyDown(event: KeyboardEvent<HTMLDivElement>) {
@@ -296,7 +319,7 @@ export function useTimelinePosition(sessionId: string, memory: ReturnType<typeof
       (event.target as Element).closest("input, select, textarea, [contenteditable], .event-details pre")) return;
     if (event.key === " " && (event.target as Element).closest("button, summary, a")) return;
     if (["ArrowUp", "PageUp", "Home"].includes(event.key) || event.key === " " && event.shiftKey) moveUp();
-    else if (["ArrowDown", "PageDown", "End"].includes(event.key) || event.key === " " && !event.shiftKey) markScrollIntent(1);
+    else if (["ArrowDown", "PageDown", "End"].includes(event.key) || event.key === " " && !event.shiftKey) moveDown();
   }
   function pointerDown(event: PointerEvent<HTMLDivElement>) {
     if (event.pointerType === "touch") {
@@ -321,7 +344,7 @@ export function useTimelinePosition(sessionId: string, memory: ReturnType<typeof
     const start = touchStart.current;
     if (event.pointerType === "touch" && start?.id === event.pointerId && Math.abs(event.clientY - start.y) > 3) {
       const delta = start.y - event.clientY;
-      if (!start.code || !codeCanScroll(start.code, delta)) { if (delta > 0) markScrollIntent(1); else moveUp(); }
+      if (!start.code || !codeCanScroll(start.code, delta)) { if (delta > 0) moveDown(); else moveUp(); }
       if (start.code) start.y = event.clientY;
     }
   }

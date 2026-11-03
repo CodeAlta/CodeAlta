@@ -122,3 +122,15 @@ test("a session that was rewound starts at its end again: the position kept befo
   assert.equal(again.settle({ scrollTop: 0, scrollHeight: 600, clientHeight: 300 }), 100);
   assert.equal(memory.open("a", 2).following(), true);
 });
+
+test("a reader going up near the end does not follow it; going down there follows it again", () => {
+  const selection = createTimelineScrollMemory().open("reader");
+  selection.settle({ scrollTop: 0, scrollHeight: 1000, clientHeight: 200 });
+  selection.finishRestore();
+  selection.pauseAt(800);
+  // Within the follow distance of the end, but going up: the view stays where the reader takes it.
+  assert.equal(selection.scroll({ scrollTop: 780, scrollHeight: 1000, clientHeight: 200 }, true), false);
+  assert.equal(selection.scroll({ scrollTop: 760, scrollHeight: 1020, clientHeight: 200 }, true), false);
+  assert.equal(selection.following(), false);
+  assert.equal(selection.scroll({ scrollTop: 790, scrollHeight: 1020, clientHeight: 200 }), true);
+});
