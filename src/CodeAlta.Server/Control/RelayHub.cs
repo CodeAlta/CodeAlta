@@ -278,14 +278,15 @@ public sealed class RelayHub
 
         var relay = side.Relay;
         var socket = await context.WebSockets.AcceptWebSocketAsync().ConfigureAwait(false);
-        if (!relay.Attach(side.IsViewer, socket))
+        if (!relay.Attach(side.IsViewer, socket, out var paired))
         {
             socket.Abort();
             socket.Dispose();
             return;
         }
 
-        if (relay.BothAttached) _ = RunAsync(relay);
+        // The side that completes the pair starts the splice, once.
+        if (paired) _ = RunAsync(relay);
         try
         {
             await relay.Completion.WaitAsync(context.RequestAborted).ConfigureAwait(false);
@@ -475,14 +476,18 @@ public sealed class RelayHub
 
         public bool Involves(string deviceId) => string.Equals(Viewer.Id, deviceId, StringComparison.Ordinal) || string.Equals(Target.Id, deviceId, StringComparison.Ordinal);
 
-        public bool Attach(bool viewerSide, WebSocket socket)
+        // Whether the socket was taken; paired says that this one completed the two sides.
+        public bool Attach(bool viewerSide, WebSocket socket, out bool paired)
         {
             lock (_gate)
             {
+                paired = false;
                 if (Volatile.Read(ref _finished) != 0) return false;
                 if (viewerSide) ViewerSocket ??= socket;
                 else TargetSocket ??= socket;
-                return ReferenceEquals(viewerSide ? ViewerSocket : TargetSocket, socket);
+                if (!ReferenceEquals(viewerSide ? ViewerSocket : TargetSocket, socket)) return false;
+                paired = ViewerSocket is not null && TargetSocket is not null;
+                return true;
             }
         }
 
