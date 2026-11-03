@@ -5,6 +5,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using CodeAlta.Fleet.Protocol;
+using CodeAlta.Fleet.Protocol.Api;
 using CodeAlta.Server.Api;
 using CodeAlta.Server.Hosting;
 using CodeAlta.Server.Services;

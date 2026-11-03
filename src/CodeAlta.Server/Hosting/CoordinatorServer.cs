@@ -3,6 +3,7 @@ using System.Security.Cryptography.X509Certificates;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using CodeAlta.Fleet.Protocol;
+using CodeAlta.Fleet.Protocol.Api;
 using CodeAlta.Server.Api;
 using CodeAlta.Server.Control;
 using CodeAlta.Server.Identity;

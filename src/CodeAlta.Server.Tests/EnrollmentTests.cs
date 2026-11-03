@@ -1,5 +1,6 @@
 using System.Net;
 using CodeAlta.Fleet.Protocol;
+using CodeAlta.Fleet.Protocol.Api;
 using CodeAlta.Server.Api;
 using CodeAlta.Server.Identity;
 using CodeAlta.Server.Storage;
