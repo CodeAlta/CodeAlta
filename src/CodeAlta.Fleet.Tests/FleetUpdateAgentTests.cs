@@ -83,6 +83,21 @@ public sealed class FleetUpdateAgentTests
     }
 
     [TestMethod]
+    public async Task ACancellationSentAgainIsAcknowledgedWithAFinalState()
+    {
+        using var harness = new AgentHarness();
+        var agent = harness.Start();
+        await harness.AcceptAsync(agent, LinkA, harness.Instruction(harness.Manifest(1, "c1", "4.0.2")));
+        Assert.AreEqual(("c1", FleetUpdateMachineStates.Cancelled), (agent.CancelAndReport(LinkA, new FleetUpdateCancel("c1"))?.CampaignId, agent.Current?.State));
+
+        // The server tells the node again until it hears that the campaign ended: each time, the node says how it ended.
+        Assert.AreEqual(("c1", FleetUpdateMachineStates.Cancelled), (agent.CancelAndReport(LinkA, new FleetUpdateCancel("c1")) is { } again ? (again.CampaignId, again.State) : default));
+        var unknown = agent.CancelAndReport(LinkA, new FleetUpdateCancel("c9"));
+        Assert.IsTrue(FleetUpdateMachineStates.IsTerminal(unknown?.State), "a campaign this node never took is done with too");
+        Assert.AreEqual(("c1", FleetUpdateMachineStates.Cancelled), (agent.Current?.CampaignId, agent.Current?.State));
+    }
+
+    [TestMethod]
     public async Task ACheckpointThatDoesNotReadRefusesEveryUpdateAndIsLeftAsItIs()
     {
         using var harness = new AgentHarness();

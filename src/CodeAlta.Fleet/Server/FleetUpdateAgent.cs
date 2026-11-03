@@ -523,14 +523,36 @@ public sealed class FleetUpdateAgent : IAsyncDisposable
     /// <summary>Takes the cancellation of a campaign.</summary>
     /// <param name="linkId">The link of the server.</param>
     /// <param name="cancel">The cancellation.</param>
-    public void Cancel(string linkId, FleetUpdateCancel cancel)
+    public void Cancel(string linkId, FleetUpdateCancel cancel) => CancelAndReport(linkId, cancel);
+
+    /// <summary>
+    /// Takes the cancellation of a campaign, and acknowledges it to its server with a final state: cancelled, or how the
+    /// campaign ended before (sent again until the server hears it, a cancellation finds it done), or cancelled for a
+    /// campaign this node never took. Tests call it directly.
+    /// </summary>
+    /// <param name="linkId">The link of the server.</param>
+    /// <param name="cancel">The cancellation.</param>
+    /// <returns>The report sent to the server; null while the checkpoint does not read.</returns>
+    internal FleetUpdateReport? CancelAndReport(string linkId, FleetUpdateCancel cancel)
     {
+        ArgumentNullException.ThrowIfNull(linkId);
         ArgumentNullException.ThrowIfNull(cancel);
         FleetUpdateAgentState next;
         StopWork? work;
         lock (_gate)
         {
-            if (_state.LinkId != linkId || _state.CampaignId != cancel.CampaignId || FleetUpdateMachineStates.IsTerminal(_state.State)) return;
+            if (!Readable()) return null;
+            if (_state.LinkId != linkId || _state.CampaignId != cancel.CampaignId || FleetUpdateMachineStates.IsTerminal(_state.State))
+            {
+                var link = _state.Links.GetValueOrDefault(linkId);
+                var done = ReceiptOf(linkId, cancel.CampaignId) is { } receipt && FleetUpdateMachineStates.IsTerminal(receipt.State) ? receipt
+                    : link?.Refusal is { } refusal && refusal.CampaignId == cancel.CampaignId ? refusal
+                    : new FleetUpdateReport(cancel.CampaignId, FleetUpdateMachineStates.Cancelled, "", _options.Running.ToString(), "This machine had not taken the campaign.",
+                        _options.Time.GetUtcNow());
+                _ = SendAsync(linkId, done);
+                return done;
+            }
+
             work = WorkOf(_state);
             next = Stopped(_state, null);
             _state = next;
@@ -540,6 +562,7 @@ public sealed class FleetUpdateAgent : IAsyncDisposable
         work?.Run(_options);
         _options.Log($"Campaign {cancel.CampaignId} was cancelled.");
         Publish(next);
+        return ReportOf(next);
     }
 
     /// <summary>Looks at the instruction once: notes a switch that ended, or starts the update when its time came. The loop calls it; tests call it directly.</summary>
