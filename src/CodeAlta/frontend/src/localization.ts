@@ -53,6 +53,9 @@ import { cloudSessionMessages } from "./cloudSessions/messages";
 import { settingsSearchMessages } from "./settings/messages";
 import { startPromptMessages } from "./startPrompts/messages";
 import { machineMessages } from "./machines/messages";
+import { machineManageMessages } from "./machines/manageMessages";
+import { addMachineMessages } from "./machines/addMachineMessages";
+import { createServerMessages } from "./fleet/createServerMessages";
 import { fleetMessages } from "./fleet/messages";
 // English source keys follow SR's fallback convention. Order: es, fr, de, ja, zh-CN.
 type Row = readonly [string, string, string, string, string];
@@ -2857,6 +2860,9 @@ export const messages = dictionary({
   ...statisticsMessages,
   ...worktreeMessages,
   ...machineMessages,
+  ...machineManageMessages,
+  ...addMachineMessages,
+  ...createServerMessages,
   ...fleetMessages,
   ...documentationMessages,
   ...storageMessages,

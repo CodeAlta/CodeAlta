@@ -1,0 +1,268 @@
+import { useCallback, useEffect, useState } from "react";
+import { Button, Callout, InputGroup, PopoverNext, Switch, Tag } from "@blueprintjs/core";
+import { machines, type MachineDeviceView, type MachineManagement, type MachineUpdateView, type MachineView } from "#neoastra";
+import { AppIcon } from "../AppIcon";
+import { ActivitySpinner } from "../ActivitySpinner";
+import { RemoveButton } from "../SettingsPage";
+import { useShellLanguage } from "../shellLanguage";
+import type { MessageKey } from "../localization";
+import { machineIntent, machineState, machineStateLabel } from "./machines";
+import { confirmsLoss, devicePermissions, hasPermission, managementProblem, orderedDevices, permissionLabel, permissionsEditable, projectSource,
+  updateSummary, type DevicePermission } from "./machineManagement";
+
+/** The calls of the page of a machine. */
+export type MachinePageApi = Pick<typeof machines, "management" | "setDevicePermission" | "revokeDevice" | "addProject" | "cloneProject" | "removeProject"
+  | "readLog" | "updateMachine">;
+
+type Problem = { key: MessageKey; detail?: string | null } | null;
+
+/**
+ * The page of a paired machine, opened from its row in Settings > Fleet > Machines: its state and version, what each
+ * of its devices may do, its projects, its ready providers, its updates and its log. A computer that manages the
+ * machine changes them here; the others see what it is and how to be given the permission.
+ */
+export function MachinePage({ epoch, machine, api = machines, onBack }: { epoch: string; machine: MachineView; api?: MachinePageApi; onBack: () => void }) {
+  const { t } = useShellLanguage();
+  const [view, setView] = useState<MachineManagement | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [problem, setProblem] = useState<Problem>(null);
+  const [generation, setGeneration] = useState(0);
+  const reload = useCallback(() => setGeneration(value => value + 1), []);
+  useEffect(() => {
+    const abort = new AbortController();
+    setLoading(true);
+    api.management({ expectedEpoch: epoch, machineId: machine.id }, { signal: abort.signal, timeoutMilliseconds: 30_000 }).then(value => {
+      if (!abort.signal.aborted) setView(value);
+    }, () => { if (!abort.signal.aborted) setView(null); }).finally(() => { if (!abort.signal.aborted) setLoading(false); });
+    return () => abort.abort();
+  }, [api, epoch, machine.id, generation, machine.state]);
+
+  /** Runs one change on the machine, then reads it again; says what went wrong. */
+  const change = useCallback(async (call: () => Promise<{ status: string; message?: string | null }>, note?: (message: string | null | undefined) => void) => {
+    setBusy(true);
+    setProblem(null);
+    try {
+      const result = await call();
+      const failed = managementProblem(result.status);
+      if (failed) setProblem({ key: failed, detail: result.message });
+      else note?.(result.message);
+    } catch {
+      setProblem({ key: "The machine does not answer: it is offline." });
+    } finally {
+      setBusy(false);
+      reload();
+    }
+  }, [reload]);
+
+  const state = machineState(machine);
+  const details = [machine.os, view?.version ? `CodeAlta ${view.version}` : machine.version && `CodeAlta ${machine.version}`, machine.address].filter(Boolean).join(" · ");
+  const failure = view ? managementProblem(view.status) : !loading ? "The machine does not answer: it is offline." as MessageKey : null;
+  return <main className="configuration-page settings-editor machine-page" aria-label={machine.name}>
+    <header className="page-heading settings-editor-heading">
+      <div>
+        <Button className="machine-page-back" variant="minimal" size="small" icon={<AppIcon name="chevronLeft" size={14} />} text={t("Machines")} onClick={onBack} />
+        <h1 className="machine-page-title"><AppIcon name="remote" size={20} />{machine.name}
+          <Tag minimal round intent={machineIntent(state)}>{t(machineStateLabel(state))}</Tag>
+          {view?.status === "ok" && <Tag minimal round intent="primary" icon={<AppIcon name="shield" size={12} />}>{t("Managed from here")}</Tag>}</h1>
+        <p>{details}</p>
+      </div>
+      <div className="settings-editor-actions">
+        {(loading || busy) && <ActivitySpinner size={14} />}
+        <Button icon={<AppIcon name="refresh" size={15} />} disabled={loading || busy} onClick={reload}>{t("Reload")}</Button>
+      </div>
+    </header>
+    {problem && <Callout compact intent="warning" role="alert">{t(problem.key)}{problem.detail && <div className="muted-text">{problem.detail}</div>}</Callout>}
+    {failure && view?.status !== "not_manager" && <Callout compact intent="warning" role="alert" className="machine-page-failure">{t(failure)}
+      {view?.message && <div className="muted-text">{view.message}</div>}
+      <Button size="small" icon={<AppIcon name="refresh" size={14} />} text={t("Try again")} onClick={reload} /></Callout>}
+    {view?.status === "not_manager" && <NotManaged machine={machine} device={view.thisDevice ?? null} />}
+    {view?.status === "ok" && <>
+      <DevicesSection view={view} busy={busy} machine={machine}
+        onPermission={(device, permission, allowed) => void change(() => api.setDevicePermission({ expectedEpoch: epoch, machineId: machine.id, deviceId: device.id, permission, allowed }))}
+        onRevoke={device => void change(() => api.revokeDevice({ expectedEpoch: epoch, machineId: machine.id, deviceId: device.id }))} />
+      <ProjectsSection view={view} busy={busy} machine={machine}
+        onAdd={(kind, value, done) => void change(() => kind === "clone"
+          ? api.cloneProject({ expectedEpoch: epoch, machineId: machine.id, value }, { timeoutMilliseconds: 15 * 60_000 })
+          : api.addProject({ expectedEpoch: epoch, machineId: machine.id, value }), done)}
+        onRemove={project => void change(() => api.removeProject({ expectedEpoch: epoch, machineId: machine.id, value: project }))} />
+    </>}
+    {view && (view.status === "ok" || view.status === "not_manager") && <ProvidersSection view={view} machine={machine} />}
+    {view?.status === "ok" && <>
+      <UpdatesSection epoch={epoch} machine={machine} view={view} api={api} onChanged={reload} />
+      <LogSection epoch={epoch} machine={machine} api={api} />
+    </>}
+  </main>;
+}
+
+/** What a computer that does not manage a machine is told: how the owner gives it the permission, on the machine, once. */
+function NotManaged({ machine, device }: { machine: MachineView; device: string | null }) {
+  const { t } = useShellLanguage();
+  return <section className="machine-section" aria-label={t("Manage this machine")}>
+    <h2>{t("Manage this machine")}</h2>
+    <p className="muted-text">{t("This computer sees and drives the sessions of {name}, but does not manage it. The device that installed or first paired it manages it, and can give this computer the permission from its own page of {name}.", { name: machine.name })}</p>
+    {device && <><p className="muted-text">{t("On {name} itself, the owner gives it with:", { name: machine.name })}</p>
+      <code className="machine-command">altanode permissions {device} --allow manage</code></>}
+  </section>;
+}
+
+function DevicesSection({ view, busy, machine, onPermission, onRevoke }: {
+  view: MachineManagement; busy: boolean; machine: MachineView;
+  onPermission: (device: MachineDeviceView, permission: DevicePermission, allowed: boolean) => void; onRevoke: (device: MachineDeviceView) => void;
+}) {
+  const { t } = useShellLanguage();
+  const devices = orderedDevices(view.devices);
+  return <section className="machine-section" aria-label={t("Devices")}>
+    <h2>{t("Devices")}</h2>
+    <p className="muted-text">{t("The computers paired with {name}, and what each may do there.", { name: machine.name })}</p>
+    <div className="machine-devices" role="table" aria-label={t("Devices")}>
+      <div className="machine-device machine-device-head" role="row">
+        <span role="columnheader">{t("Device")}</span>
+        {devicePermissions.map(permission => <span key={permission} role="columnheader" title={t(permissionLabel(permission).description)}>{t(permissionLabel(permission).name)}</span>)}
+        <span role="columnheader" aria-label={t("Revoke")} />
+      </div>
+      {devices.map(device => <div key={device.id} className="machine-device" role="row" data-revoked={device.revokedAt ? "true" : undefined}>
+        <span role="cell" className="machine-device-name">
+          <strong>{device.name}</strong>
+          {device.isThisComputer && <Tag minimal round>{t("This computer")}</Tag>}
+          {device.revokedAt ? <Tag minimal round intent="danger">{t("Revoked")}</Tag> : device.channels > 0 && <Tag minimal round intent="success">{t("Connected")}</Tag>}
+          <code className="muted-text" title={device.fingerprint}>{device.fingerprint.split(" ").slice(0, 2).join(" ")}</code>
+        </span>
+        {devicePermissions.map(permission => <span key={permission} role="cell" className="machine-permission-cell">
+          <small className="machine-permission-name" aria-hidden="true">{t(permissionLabel(permission).name)}</small>
+          <PermissionSwitch device={device} permission={permission} disabled={busy || !permissionsEditable(device)} onChange={allowed => onPermission(device, permission, allowed)} />
+        </span>)}
+        <span role="cell">{!device.revokedAt && <PopoverNext placement="left" content={<div className="machine-confirm">
+          <p>{t(device.isThisComputer ? "Revoke this computer on {name}?" : "Revoke {device}?", { device: device.name, name: machine.name })}</p>
+          <p className="muted-text">{t("Its key is refused there from now on; pairing again trusts it again.")}</p>
+          <Button className="bp6-popover-dismiss" intent="danger" disabled={busy} onClick={() => onRevoke(device)}>{t("Revoke")}</Button></div>}>
+          <Button variant="minimal" size="small" intent="danger" icon={<AppIcon name="close" size={15} />} disabled={busy}
+            aria-label={`${t("Revoke")} ${device.name}`} title={t("Revoke")} />
+        </PopoverNext>}</span>
+      </div>)}
+    </div>
+  </section>;
+}
+
+/** One permission of one device: a switch, and a small confirmation beside it when this computer would give up managing the machine. */
+function PermissionSwitch({ device, permission, disabled, onChange }: { device: MachineDeviceView; permission: DevicePermission; disabled: boolean; onChange: (allowed: boolean) => void }) {
+  const { t } = useShellLanguage();
+  const checked = hasPermission(device, permission);
+  const label = `${t(permissionLabel(permission).name)} — ${device.name}`;
+  if (checked && confirmsLoss(device, permission)) {
+    return <PopoverNext placement="top" content={<div className="machine-confirm">
+      <p>{t("Stop managing this machine from here?")}</p>
+      <p className="muted-text">{t("Only its owner, on the machine or from a computer that manages it, can give it back.")}</p>
+      <Button className="bp6-popover-dismiss" intent="danger" disabled={disabled} onClick={() => onChange(false)}>{t("Stop managing")}</Button></div>}>
+      <Switch className="machine-permission" checked aria-label={label} disabled={disabled} onChange={() => { }} />
+    </PopoverNext>;
+  }
+
+  return <Switch className="machine-permission" checked={checked} aria-label={label} disabled={disabled} onChange={event => onChange(event.currentTarget.checked)} />;
+}
+
+function ProjectsSection({ view, busy, machine, onAdd, onRemove }: {
+  view: MachineManagement; busy: boolean; machine: MachineView;
+  onAdd: (kind: "clone" | "folder", value: string, done: (note: string | null | undefined) => void) => void; onRemove: (projectId: string) => void;
+}) {
+  const { t } = useShellLanguage();
+  const [text, setText] = useState("");
+  const [note, setNote] = useState<string | null>(null);
+  const source = projectSource(text);
+  const add = () => { if (source) onAdd(source.kind, source.value, value => { setText(""); setNote(value ?? null); }); };
+  return <section className="machine-section" aria-label={t("Projects")}>
+    <h2>{t("Projects")}</h2>
+    <p className="muted-text">{t("The projects a session can start in on {name}.", { name: machine.name })}</p>
+    {view.projects.length === 0 ? <p className="muted-text machine-empty">{t("No project yet: clone a repository or add a folder of the machine.")}</p>
+      : <ul className="machine-projects">{view.projects.map(project => <li key={project.id}>
+        <AppIcon name={project.repository ? "branch" : "folder"} size={15} />
+        <span className="machine-project-main"><strong>{project.name}</strong><small className="muted-text" title={project.path}>{project.path}</small></span>
+        <RemoveButton name={project.name} disabled={busy} onRemove={() => onRemove(project.id)} />
+      </li>)}</ul>}
+    <form className="machine-project-add" onSubmit={event => { event.preventDefault(); add(); }}>
+      <InputGroup fill value={text} disabled={busy} aria-label={t("Repository URL or folder")} placeholder={t("https://github.com/owner/repo, or a folder of the machine")}
+        onChange={event => { setText(event.currentTarget.value); setNote(null); }} />
+      <Button type="submit" intent="primary" disabled={busy || !source} icon={<AppIcon name={source?.kind === "folder" ? "newFolder" : "download"} size={14} />}
+        text={t(source?.kind === "folder" ? "Add the folder" : "Clone")} />
+    </form>
+    {text.trim() && !source && <small className="muted-text">{t("Give a repository URL, or the full path of a folder on the machine.")}</small>}
+    {note && <small className="muted-text">{note}</small>}
+    {view.problems.map(text => <Callout key={text} compact intent="warning">{text}</Callout>)}
+  </section>;
+}
+
+function ProvidersSection({ view, machine }: { view: MachineManagement; machine: MachineView }) {
+  const { t } = useShellLanguage();
+  return <section className="machine-section" aria-label={t("Providers")}>
+    <h2>{t("Providers")}</h2>
+    {view.providers.length === 0
+      ? <Callout compact intent="warning">{t("No provider is ready on {name}: its sessions cannot start. Sign in to a provider on the machine, as in CodeAlta Desktop.", { name: machine.name })}</Callout>
+      : <ul className="machine-providers">{view.providers.map(provider => <li key={provider.key}>
+        <AppIcon name="checked" size={14} className="machine-ready" />
+        <strong>{provider.name}</strong>
+        {provider.isDefault && <Tag minimal round>{t("Default")}</Tag>}
+        <span className="muted-text">{[provider.defaultModel, t(provider.models === 1 ? "{count} model" : "{count} models", { count: provider.models })].filter(Boolean).join(" · ")}</span>
+      </li>)}</ul>}
+  </section>;
+}
+
+function UpdatesSection({ epoch, machine, view, api, onChanged }: { epoch: string; machine: MachineView; view: MachineManagement; api: MachinePageApi; onChanged: () => void }) {
+  const { t } = useShellLanguage();
+  const [result, setResult] = useState<MachineUpdateView | null>(null);
+  const [working, setWorking] = useState(false);
+  const [failed, setFailed] = useState<Problem>(null);
+  const run = async (check: boolean) => {
+    setWorking(true);
+    setFailed(null);
+    try {
+      const value = await api.updateMachine({ expectedEpoch: epoch, machineId: machine.id, check, now: false }, { timeoutMilliseconds: 11 * 60_000 });
+      if (["up_to_date", "available", "staged", "unavailable"].includes(value.status)) setResult(value);
+      else setFailed({ key: value.status === "failed" ? "The update did not go through." : managementProblem(value.status) ?? "The update did not go through.", detail: value.message });
+      if (!check) onChanged();
+    } catch {
+      setFailed({ key: "The machine does not answer: it is offline." });
+    } finally { setWorking(false); }
+  };
+  const pending = view.update?.pendingVersion;
+  const last = view.update?.lastOutcome;
+  return <section className="machine-section" aria-label={t("Updates")}>
+    <h2>{t("Updates")}</h2>
+    <p>{t("Runs CodeAlta {version}.", { version: view.version ?? machine.version ?? "?" })}
+      {pending && <> {t("It switches to {version} once no session works.", { version: pending })}</>}
+      {!pending && last === "rolled_back" && <> {t("Version {version} did not start and was undone.", { version: view.update?.lastVersion ?? "?" })}</>}</p>
+    <div className="machine-actions">
+      <Button icon={working ? <ActivitySpinner size={14} /> : <AppIcon name="refresh" size={14} />} disabled={working} text={t("Check for updates")} onClick={() => void run(true)} />
+      {result?.status === "available" && result.target && <Button intent="primary" disabled={working} icon={<AppIcon name="download" size={14} />}
+        text={t("Update to {version}", { version: result.target })} onClick={() => void run(false)} />}
+    </div>
+    {result && <small className="muted-text" role="status">{t(updateSummary(result), { version: result.target ?? "" })}{result.message && ` ${result.message}`}</small>}
+    {failed && <Callout compact intent="warning" role="alert">{t(failed.key)}{failed.detail && <div className="muted-text">{failed.detail}</div>}</Callout>}
+  </section>;
+}
+
+function LogSection({ epoch, machine, api }: { epoch: string; machine: MachineView; api: MachinePageApi }) {
+  const { t } = useShellLanguage();
+  const [log, setLog] = useState<{ text: string; path: string | null } | null>(null);
+  const [reading, setReading] = useState(false);
+  const [failed, setFailed] = useState<Problem>(null);
+  const read = async () => {
+    setReading(true);
+    setFailed(null);
+    try {
+      const value = await api.readLog({ expectedEpoch: epoch, machineId: machine.id, lines: 300 }, { timeoutMilliseconds: 30_000 });
+      if (value.status === "ok") setLog({ text: value.text ?? "", path: value.path ?? null });
+      else setFailed({ key: managementProblem(value.status) ?? "The machine could not do it.", detail: value.message });
+    } catch {
+      setFailed({ key: "The machine does not answer: it is offline." });
+    } finally { setReading(false); }
+  };
+  return <section className="machine-section" aria-label={t("Log")}>
+    <h2>{t("Log")}</h2>
+    <div className="machine-actions">
+      <Button icon={reading ? <ActivitySpinner size={14} /> : <AppIcon name="logs" size={14} />} disabled={reading} text={t(log ? "Read again" : "Show the log")} onClick={() => void read()} />
+      {log?.path && <small className="muted-text" title={log.path}>{log.path}</small>}
+    </div>
+    {failed && <Callout compact intent="warning" role="alert">{t(failed.key)}{failed.detail && <div className="muted-text">{failed.detail}</div>}</Callout>}
+    {log && (log.text ? <pre className="machine-log" tabIndex={0} aria-label={t("Log")}>{log.text}</pre> : <p className="muted-text">{t("The machine wrote no log yet.")}</p>)}
+  </section>;
+}

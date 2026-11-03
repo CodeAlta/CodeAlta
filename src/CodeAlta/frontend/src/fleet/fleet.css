@@ -69,3 +69,34 @@
 .fleet-session-title { font-weight: 500; }
 .fleet-session-time { width: 120px; white-space: nowrap; }
 .fleet-session-open { width: 72px; text-align: right; }
+
+/* Create my server: the machines this computer manages, each added to the new server. */
+.create-server-dialog { width: min(620px, calc(100vw - 32px)); }
+.create-server-machines { margin-top: 12px; display: grid; gap: 6px; }
+.create-server-machines h3 { margin: 0; font-size: 13px; }
+.create-server-machines p { margin: 0; }
+.create-server-machines ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.create-server-machines li { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 8px; }
+.create-server-joined { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; justify-content: flex-end; }
+
+/* The Fleet button of the title bar: a mark counts the devices that wait for an approval. */
+.fleet-approvals-icon { position: relative; display: inline-flex; }
+.fleet-approvals-mark { position: absolute; top: -6px; right: -8px; min-width: 14px; height: 14px; padding: 0 3px; border-radius: 7px; box-sizing: border-box;
+  font-size: 9.5px; line-height: 14px; font-weight: 700; text-align: center; color: #fff; background: var(--orange, #c87619); }
+.fleet-approvals-button[data-waiting="true"] .fleet-approvals-icon > svg { color: var(--orange, #c87619); }
+.fleet-approval-toast { display: grid; gap: 6px; }
+.fleet-approval-words { display: flex; flex-wrap: wrap; gap: 4px; }
+.fleet-approval-words .bp6-tag { font-family: var(--bp-typography-family-mono); }
+.fleet-approval-actions { display: flex; gap: 6px; }
+
+/* Join an organization: its four steps in a row, then the step at hand. */
+.join-organization-dialog { width: min(600px, calc(100vw - 32px)); }
+.join-organization-steps { list-style: none; margin: 0 0 14px; padding: 0; display: flex; flex-wrap: wrap; gap: 6px 18px; }
+.join-organization-steps li { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12.5px; }
+.join-organization-steps li[data-state="current"] { color: inherit; font-weight: 600; }
+.join-organization-step-mark { display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; border-radius: 9px; font-size: 11px;
+  border: 1px solid var(--line); }
+.join-organization-steps li[data-state="current"] .join-organization-step-mark { border-color: var(--accent, #2d72d2); color: var(--accent, #2d72d2); }
+.join-organization-steps li[data-state="done"] .join-organization-step-mark { border-color: var(--green); color: var(--green); }
+.join-organization-spaces .bp6-control { margin-bottom: 6px; }
+.create-server-reach .bp6-control { margin-bottom: 4px; }

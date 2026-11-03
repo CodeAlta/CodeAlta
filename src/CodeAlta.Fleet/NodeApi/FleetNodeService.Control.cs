@@ -13,7 +13,11 @@ public sealed partial class FleetNodeService
     /// <param name="permissions">What it may do from now on.</param>
     /// <returns>The device as it is now and how many channels closed, or null when it is unknown or revoked.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="deviceId"/> is null.</exception>
-    public async Task<(TrustedDevice Device, int ClosedChannels)?> SetPermissionsAsync(string deviceId, DevicePermissions permissions)
+    public Task<(TrustedDevice Device, int ClosedChannels)?> SetPermissionsAsync(string deviceId, DevicePermissions permissions)
+        => SetPermissionsAsync(deviceId, permissions, null);
+
+    // The channel that asks (a manager that changes its own permissions) closes once its answer has gone.
+    private async Task<(TrustedDevice Device, int ClosedChannels)?> SetPermissionsAsync(string deviceId, DevicePermissions permissions, FleetConnection? asking)
     {
         ArgumentNullException.ThrowIfNull(deviceId);
         var before = _trusted.List().FirstOrDefault(device => string.Equals(device.DeviceId, deviceId, StringComparison.Ordinal));
@@ -21,18 +25,26 @@ public sealed partial class FleetNodeService
         var closed = 0;
         // A watch opened under a permission the device lost would go on: its channels close, and it reconnects.
         if ((before.Permissions & ~after.Permissions) != DevicePermissions.None)
-            closed = await CloseChannelsAsync(deviceId, PermissionsChangedCloseCode).ConfigureAwait(false);
+            closed = await CloseChannelsAsync(deviceId, PermissionsChangedCloseCode, asking).ConfigureAwait(false);
         return (after, closed);
     }
 
     private int CountChannels(string deviceId)
         => _callers.Values.Count(caller => !caller.IsOwner && string.Equals(caller.DeviceId, deviceId, StringComparison.Ordinal));
 
-    private async Task<int> CloseChannelsAsync(string deviceId, string code)
+    private async Task<int> CloseChannelsAsync(string deviceId, string code, FleetConnection? asking = null)
     {
         var closed = 0;
         foreach (var caller in _callers.Values.Where(caller => !caller.IsOwner && string.Equals(caller.DeviceId, deviceId, StringComparison.Ordinal)))
         {
+            if (caller.Connection == asking)
+            {
+                // Its answer goes first, as for control.stop: closing now would lose it.
+                CloseLater(caller.Connection, code);
+                closed++;
+                continue;
+            }
+
             try
             {
                 await caller.Connection.CloseAsync(code).ConfigureAwait(false);
@@ -45,6 +57,19 @@ public sealed partial class FleetNodeService
 
         return closed;
     }
+
+    private static void CloseLater(FleetConnection connection, string code)
+        => _ = Task.Run(async () =>
+        {
+            await Task.Delay(TimeSpan.FromMilliseconds(200), CancellationToken.None).ConfigureAwait(false);
+            try
+            {
+                await connection.CloseAsync(code).ConfigureAwait(false);
+            }
+            catch (Exception exception) when (exception is IOException or ObjectDisposedException or OperationCanceledException)
+            {
+            }
+        }, CancellationToken.None);
 
     private FleetDeviceInfo DescribeDevice(TrustedDevice device)
         => new(device.DeviceId, device.Name, device.Fingerprint.ToDisplayString(), DevicePermissionNames.Format(device.Permissions), device.PairedAt,
@@ -103,10 +128,36 @@ public sealed partial class FleetNodeService
         var device = ResolveDevice(parameters.Device, includeRevoked: true);
         var changed = _trusted.Revoke(device.DeviceId);
         // An already revoked device has no channel left to close, but a channel opened just before is closed all the same.
-        var closed = await CloseChannelsAsync(device.DeviceId, FleetErrorCodes.Revoked).ConfigureAwait(false);
-        if (changed) LogInfo($"Device {device.Name} ({device.DeviceId}) was revoked by the owner; {closed} channel(s) closed.");
+        var closed = await CloseChannelsAsync(device.DeviceId, FleetErrorCodes.Revoked, call.Caller.Connection).ConfigureAwait(false);
+        if (changed) LogInfo($"Device {device.Name} ({device.DeviceId}) was revoked by {Who(call)}; {closed} channel(s) closed.");
         var now = _trusted.List(includeRevoked: true).First(other => string.Equals(other.DeviceId, device.DeviceId, StringComparison.Ordinal));
         return new FleetDeviceChange(DescribeDevice(now), changed, closed);
+    }
+
+    // Who changed something, in the log of the node: its owner on its machine, or the device that manages it.
+    private static string Who(FleetNodeCall call)
+        => call.Caller.IsOwner || call.Device is null ? "the owner" : $"device {call.Device.Name} ({call.Device.DeviceId})";
+
+    private static string Capitalized(string text) => text.Length == 0 ? text : char.ToUpperInvariant(text[0]) + text[1..];
+
+    private async Task<FleetNodeLog> ControlLogAsync(FleetNodeCall call, FleetNodeLogParams parameters, CancellationToken cancellationToken)
+    {
+        var management = _options.Management ?? throw new FleetException(FleetNodeErrorCodes.Unavailable, null, "This node gives no log.");
+        var lines = parameters.Lines ?? FleetNodeLogParams.DefaultLines;
+        if (lines < 1 || lines > FleetNodeLogParams.MaxLines)
+            throw new FleetException(FleetErrorCodes.InvalidParams, null, $"A log is read by 1 to {FleetNodeLogParams.MaxLines} lines.");
+        return await management.ReadLogAsync(lines, cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task<FleetNodeUpdateResult> ControlUpdateAsync(FleetNodeCall call, FleetNodeUpdateParams parameters, CancellationToken cancellationToken)
+    {
+        if (_options.Management is not { } management) return new FleetNodeUpdateResult(FleetNodeUpdateResult.Unavailable, _options.Version);
+        if (parameters.Version is { } version && (version.Length is 0 or > 64 || version.Any(static c => char.IsWhiteSpace(c) || char.IsControl(c))))
+            throw new FleetException(FleetErrorCodes.InvalidParams, null, "A version has 1 to 64 characters without spaces.");
+        var requestedBy = call.Caller.IsOwner || call.Device is null ? "local" : "manage:" + call.Device.DeviceId;
+        var result = await management.UpdateAsync(parameters, requestedBy, cancellationToken).ConfigureAwait(false);
+        if (result.Status == FleetNodeUpdateResult.Staged) LogInfo($"{Capitalized(Who(call))} asked the node to switch to {result.Target}{(parameters.Now ? " now" : " when idle")}.");
+        return result;
     }
 
     private Task<FleetProjectList> ControlListProjectsAsync(FleetNodeCall call, FleetEmpty parameters, CancellationToken cancellationToken)
@@ -115,21 +166,21 @@ public sealed partial class FleetNodeService
     private async Task<FleetProjectChange> ControlAddProjectAsync(FleetNodeCall call, FleetProjectAddParams parameters, CancellationToken cancellationToken)
     {
         var change = await _projectEditor.AddAsync(parameters.Path, parameters.Space, cancellationToken).ConfigureAwait(false);
-        if (change.Changed) LogInfo($"The owner added the project {change.Project.Name} ({change.Project.Path}).");
+        if (change.Changed) LogInfo($"{Capitalized(Who(call))} added the project {change.Project.Name} ({change.Project.Path}).");
         return change;
     }
 
     private async Task<FleetProjectChange> ControlCloneProjectAsync(FleetNodeCall call, FleetProjectCloneParams parameters, CancellationToken cancellationToken)
     {
         var change = await _projectEditor.CloneAsync(parameters.Url, parameters.Space, cancellationToken).ConfigureAwait(false);
-        LogInfo($"The owner added the project {change.Project.Name} from {parameters.Url} ({change.Project.Path}).");
+        LogInfo($"{Capitalized(Who(call))} added the project {change.Project.Name} from {parameters.Url} ({change.Project.Path}).");
         return change;
     }
 
     private async Task<FleetProjectChange> ControlRemoveProjectAsync(FleetNodeCall call, FleetProjectRef parameters, CancellationToken cancellationToken)
     {
         var change = await _projectEditor.RemoveAsync(parameters.Project, CountProjectSessionsAsync, cancellationToken).ConfigureAwait(false);
-        LogInfo($"The owner removed the project {change.Project.Name} ({change.Project.Path}) from the catalog.");
+        LogInfo($"{Capitalized(Who(call))} removed the project {change.Project.Name} ({change.Project.Path}) from the catalog.");
         return change;
     }
 
@@ -151,10 +202,10 @@ public sealed partial class FleetNodeService
         if (device.IsRevoked)
             throw new FleetException(FleetErrorCodes.InvalidParams, null, $"{device.Name} ({device.DeviceId}) is revoked: pair it again to trust it.");
         var permissions = (device.Permissions | allow) & ~deny;
-        var changed = await SetPermissionsAsync(device.DeviceId, permissions).ConfigureAwait(false)
+        var changed = await SetPermissionsAsync(device.DeviceId, permissions, call.Caller.Connection).ConfigureAwait(false)
             ?? throw new FleetException(FleetNodeErrorCodes.DeviceNotFound, null, $"{device.Name} ({device.DeviceId}) is no longer paired.");
         if (changed.Device.Permissions != device.Permissions)
-            LogInfo($"The permissions of device {device.Name} ({device.DeviceId}) are now: {string.Join(", ", DevicePermissionNames.Format(permissions))}.");
+            LogInfo($"The permissions of device {device.Name} ({device.DeviceId}) are now, by {Who(call)}: {string.Join(", ", DevicePermissionNames.Format(permissions))}.");
         return new FleetDeviceChange(DescribeDevice(changed.Device), changed.Device.Permissions != device.Permissions, changed.ClosedChannels);
     }
 }

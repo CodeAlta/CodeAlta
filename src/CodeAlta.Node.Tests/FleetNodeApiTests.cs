@@ -41,10 +41,11 @@ public sealed class FleetNodeApiTests
 
         var trusted = fixture.Fleet.Service.TrustedDevices.FindTrusted(fixture.ViewerIdentity.Fingerprint);
         Assert.IsNotNull(trusted, "The node trusts the viewer once it redeemed the code.");
-        Assert.AreEqual(DevicePermissions.View | DevicePermissions.Drive | DevicePermissions.Start, trusted.Permissions, "Moving sessions here stays off.");
+        Assert.AreEqual(DevicePermissions.View | DevicePermissions.Drive | DevicePermissions.Start | DevicePermissions.Manage, trusted.Permissions,
+            "Moving sessions here stays off; the first device of the node manages it.");
         var recorded = fixture.ViewerMachines.Find("test-node");
         Assert.IsNotNull(recorded, "The viewer records the machine.");
-        CollectionAssert.AreEquivalent(new[] { "view", "drive", "start" }, recorded.Permissions.ToArray());
+        CollectionAssert.AreEquivalent(new[] { "view", "drive", "start", "manage" }, recorded.Permissions.ToArray());
 
         await using var client = await FleetNodeClient.ConnectAsync(recorded, fixture.ViewerIdentity, token);
         var info = await client.GetInfoAsync(token);

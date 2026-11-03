@@ -281,6 +281,7 @@ import { WorktreeSettings } from "./worktrees/WorktreeSettings";
 import { McpHostSettings } from "./mcpHost/McpHostSettings";
 import { MachinesSettings } from "./machines/MachinesSettings";
 import { FleetServerSettings } from "./fleet/FleetServerSettings";
+import { FleetApprovals } from "./fleet/FleetApprovals";
 import { RemoteSessionChoice, RunOnChip, useMachines, useRemoteChoices } from "./machines/RunOnChip";
 import { newSessionProblem, noRemoteSelection, remoteSelection, remoteStartBlocker, runOnMachine, runOnTargets, type RemoteSelection } from "./machines/runOn";
 import { MoveToMachineDialog } from "./machines/MoveToMachineDialog";
@@ -5591,6 +5592,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
               <Button variant="minimal" size="small" icon={<AppIcon name="settings" size={16} />} className="activity-settings" aria-label={t("Settings & extensions")} title={`${t("Settings & extensions")} (Ctrl+,)`} onClick={() => navigate("appearance")} /></>} />}
         </WindowBrand>
         {!secondary && <div className="window-actions">
+          <FleetApprovals epoch={owned ? status!.hostEpoch : null} onOpen={() => navigate("fleetServer")} />
           <PluginButtons place="TitleBar" context={pluginButtonContext} />
           {spacesState.available && <SpaceSwitch spaces={spacesState.spaces} shownId={spaceId} activity={spacesState.activity} canEdit={owned} request={spaceMenuRequest}
             onShow={id => { if (showSpace(id)) focusPromptSoon(); }} onCreate={() => setSpaceDialog(true)} onOrganize={() => navigate("spaces")} />}

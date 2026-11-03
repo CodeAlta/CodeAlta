@@ -21,25 +21,33 @@ public enum DevicePermissions
 
     /// <summary>Give automations to this instance, which runs them by their triggers while the device is away.</summary>
     Automate = 16,
+
+    /// <summary>
+    /// Manage this instance as its owner does on its machine: what each paired device may do, revocations, the projects
+    /// of its catalog, its status, its log and its updates. Given to the device that pairs first with a node that never
+    /// had one, to the device a pairing link made for a manager (<c>altanode pair --manage</c>) adds, or by the owner.
+    /// </summary>
+    Manage = 32,
 }
 
-/// <summary>The names of <see cref="DevicePermissions"/> as people and the node API write them: <c>view</c>, <c>drive</c>, <c>start</c>, <c>move</c>, <c>automate</c>.</summary>
+/// <summary>The names of <see cref="DevicePermissions"/> as people and the node API write them: <c>view</c>, <c>drive</c>, <c>start</c>, <c>move</c>, <c>automate</c>, <c>manage</c>.</summary>
 public static class DevicePermissionNames
 {
     /// <summary>Gets the names of the permissions, in their order.</summary>
-    public static IReadOnlyList<string> All { get; } = ["view", "drive", "start", "move", "automate"];
+    public static IReadOnlyList<string> All { get; } = ["view", "drive", "start", "move", "automate", "manage"];
 
     /// <summary>Names the permissions of a set, in their order.</summary>
     /// <param name="permissions">The set.</param>
     /// <returns>The names; empty for <see cref="DevicePermissions.None"/>.</returns>
     public static IReadOnlyList<string> Format(DevicePermissions permissions)
     {
-        var names = new List<string>(5);
+        var names = new List<string>(6);
         if (permissions.HasFlag(DevicePermissions.View)) names.Add("view");
         if (permissions.HasFlag(DevicePermissions.Drive)) names.Add("drive");
         if (permissions.HasFlag(DevicePermissions.Start)) names.Add("start");
         if (permissions.HasFlag(DevicePermissions.Move)) names.Add("move");
         if (permissions.HasFlag(DevicePermissions.Automate)) names.Add("automate");
+        if (permissions.HasFlag(DevicePermissions.Manage)) names.Add("manage");
         return names;
     }
 
@@ -63,6 +71,7 @@ public static class DevicePermissionNames
                 case "start": permissions |= DevicePermissions.Start; break;
                 case "move": permissions |= DevicePermissions.Move; break;
                 case "automate": permissions |= DevicePermissions.Automate; break;
+                case "manage": permissions |= DevicePermissions.Manage; break;
                 default:
                     unknown = part;
                     permissions = DevicePermissions.None;

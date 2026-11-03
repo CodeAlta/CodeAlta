@@ -66,6 +66,12 @@ public sealed class FleetNodeServiceOptions
     /// whose methods then answer <see cref="FleetNodeErrorCodes.AutomationsUnavailable"/>.
     /// </summary>
     public IFleetNodeAutomations? Automations { get; init; }
+
+    /// <summary>
+    /// Gets the log and the self-update the node gives its owner and the devices that manage it (<c>control.log</c>,
+    /// <c>control.update</c>); null for a host without them, whose methods then answer <see cref="FleetNodeErrorCodes.Unavailable"/>.
+    /// </summary>
+    public IFleetNodeManagement? Management { get; init; }
 }
 
 /// <summary>
@@ -73,6 +79,9 @@ public sealed class FleetNodeServiceOptions
 /// against what the calling device may do (<see cref="DevicePermissions"/>), read again at every call so that a revocation
 /// or a change of permissions applies at once. An unpaired client may only redeem the open pairing offer; the node's own
 /// key, from this machine, is the owner's local control (<c>altanode pair</c>, <c>status</c>, <c>devices</c>, <c>revoke</c>, <c>permissions</c>, <c>projects</c>).
+/// A paired device with <see cref="DevicePermissions.Manage"/> calls the same <c>control.*</c> methods from elsewhere,
+/// pairing and stopping the node excepted: the node's status, its devices and what they may do, its projects, its log and
+/// its updates.
 /// </summary>
 public sealed partial class FleetNodeService : IAsyncDisposable
 {
@@ -280,6 +289,7 @@ public sealed partial class FleetNodeService : IAsyncDisposable
                 FleetNodeJsonContext.Default.FleetProjectChange, ControlCloneProjectAsync);
             On(caller, FleetNodeMethods.ControlProjectsRemove, Access.Owner, FleetNodeJsonContext.Default.FleetProjectRef,
                 FleetNodeJsonContext.Default.FleetProjectChange, ControlRemoveProjectAsync);
+            RegisterManagementExtras(caller, Access.Owner);
             // The owner may bring a session to its own node (altanode remote <machine> move), and read its moves.
             RegisterMoves(caller, Access.Owner);
             On(caller, FleetNodeMethods.MovesList, Access.Owner, FleetNodeJsonContext.Default.FleetEmpty, FleetNodeJsonContext.Default.FleetMoveList,
@@ -325,6 +335,39 @@ public sealed partial class FleetNodeService : IAsyncDisposable
         On(caller, FleetNodeMethods.MovesList, Access.View, FleetNodeJsonContext.Default.FleetEmpty, FleetNodeJsonContext.Default.FleetMoveList,
             ListMovesAsync, optionalParams: true);
         RegisterAutomations(caller);
+        RegisterManagement(caller);
+    }
+
+    // What a device that manages the node may do from elsewhere: the owner's local control, pairing and stopping excepted.
+    private void RegisterManagement(FleetNodeCaller caller)
+    {
+        On(caller, FleetNodeMethods.ControlStatus, Access.Manage, FleetNodeJsonContext.Default.FleetEmpty,
+            FleetNodeJsonContext.Default.FleetNodeStatus, ControlStatusAsync, optionalParams: true);
+        On(caller, FleetNodeMethods.ControlDevicesList, Access.Manage, FleetNodeJsonContext.Default.FleetEmpty,
+            FleetNodeJsonContext.Default.FleetDeviceList, ControlListDevicesAsync, optionalParams: true);
+        On(caller, FleetNodeMethods.ControlDevicesRevoke, Access.Manage, FleetNodeJsonContext.Default.FleetDeviceRef,
+            FleetNodeJsonContext.Default.FleetDeviceChange, ControlRevokeDeviceAsync);
+        On(caller, FleetNodeMethods.ControlDevicesPermissions, Access.Manage, FleetNodeJsonContext.Default.FleetDevicePermissionsParams,
+            FleetNodeJsonContext.Default.FleetDeviceChange, ControlSetPermissionsAsync);
+        On(caller, FleetNodeMethods.ControlProjectsList, Access.Manage, FleetNodeJsonContext.Default.FleetEmpty,
+            FleetNodeJsonContext.Default.FleetProjectList, ControlListProjectsAsync, optionalParams: true);
+        On(caller, FleetNodeMethods.ControlProjectsAdd, Access.Manage, FleetNodeJsonContext.Default.FleetProjectAddParams,
+            FleetNodeJsonContext.Default.FleetProjectChange, ControlAddProjectAsync);
+        On(caller, FleetNodeMethods.ControlProjectsClone, Access.Manage, FleetNodeJsonContext.Default.FleetProjectCloneParams,
+            FleetNodeJsonContext.Default.FleetProjectChange, ControlCloneProjectAsync);
+        On(caller, FleetNodeMethods.ControlProjectsRemove, Access.Manage, FleetNodeJsonContext.Default.FleetProjectRef,
+            FleetNodeJsonContext.Default.FleetProjectChange, ControlRemoveProjectAsync);
+        RegisterManagementExtras(caller, Access.Manage);
+    }
+
+    private void RegisterManagementExtras(FleetNodeCaller caller, Access access)
+    {
+        On(caller, FleetNodeMethods.ControlLog, access, FleetNodeJsonContext.Default.FleetNodeLogParams,
+            FleetNodeJsonContext.Default.FleetNodeLog, ControlLogAsync, optionalParams: true);
+        On(caller, FleetNodeMethods.ControlUpdate, access, FleetNodeJsonContext.Default.FleetNodeUpdateParams,
+            FleetNodeJsonContext.Default.FleetNodeUpdateResult, ControlUpdateAsync, optionalParams: true);
+        On(caller, FleetNodeMethods.ControlServersJoin, access, FleetNodeJsonContext.Default.FleetServerJoinParams,
+            FleetNodeJsonContext.Default.FleetServerJoinResult, ControlJoinServerAsync);
     }
 
     // Who may call a method: anyone on the channel (pairing), the owner's local control, or a trusted device with a permission.
@@ -339,6 +382,7 @@ public sealed partial class FleetNodeService : IAsyncDisposable
         public static Access Relocate => new(DevicePermissions.View | DevicePermissions.Drive | DevicePermissions.Move, false, false);
         public static Access Automations => new(DevicePermissions.View | DevicePermissions.Automate, false, false);
         public static Access Automate => new(DevicePermissions.View | DevicePermissions.Start | DevicePermissions.Automate, false, false);
+        public static Access Manage => new(DevicePermissions.Manage, false, false);
     }
 
     private delegate Task<TResult> Handler<TParams, TResult>(FleetNodeCall call, TParams parameters, CancellationToken cancellationToken);

@@ -8,7 +8,31 @@ Your other computers can run sessions for you: a Mac mini that stays on, a build
 
 Each machine keeps its own sessions, providers and sign-ins. Nothing is copied from one computer to another, and no server of ours is involved: your computers talk to each other directly.
 
-## Install CodeAlta Node
+## Add a machine
+
+In CodeAlta Desktop, open **Settings** > **Fleet** > **Machines** and click **Add a machine…**. Choose how this computer reaches the machine:
+
+| Choice | When |
+| --- | --- |
+| **Over SSH** | A Linux or macOS computer you reach with `ssh`. CodeAlta does everything there; nothing to type on the machine |
+| **With a pairing link** | CodeAlta Node runs there already: paste the link of `altanode pair` (see [Pair it with CodeAlta Desktop](#pair-it-with-codealta-desktop)) |
+| **Through my server** | The machine joins your CodeAlta Server with one command, and this computer approves it (see [Connect to a CodeAlta Server](#connect-to-a-codealta-server)) |
+
+### Over SSH
+
+1. Type the computer as you would after `ssh`: `user@host`, `user@host:port`, or a host of your SSH configuration. **Name** is optional: the machine's own name by default.
+2. Click **Add the machine**. CodeAlta signs in with your SSH keys and agent (the OpenSSH client of your system, without asking for a password), then shows each step as it goes:
+   - **Connect over SSH**, and **Check the system and .NET**: Linux or macOS, x64 or Arm64, and .NET 10 there;
+   - **Install CodeAlta Node**: the .NET tool in `~/.dotnet/tools`, or the package of its system where only the .NET runtime is;
+   - **Start it as a service**: `altanode install --listen-all`, a `systemd --user` unit (with lingering) on Linux, a LaunchAgent on macOS;
+   - **Pair it with this computer**: the node makes a pairing link for this computer, which pairs at once and manages the machine. The six words of its key are shown.
+3. Click **Open its page** to give it projects and look at its providers (see [Manage a machine from CodeAlta Desktop](#manage-a-machine-from-codealta-desktop)).
+
+When a step fails, it says why and what to do: add your key to the SSH agent (`ssh-add`) or copy it to the machine (`ssh-copy-id`), install .NET 10 there, open the port of the node in its firewall. **Try again** starts over and changes only what is missing. A computer whose SSH key this one does not know yet asks first: **Trust it and try again**.
+
+Where CodeAlta Desktop runs on the machine too, the node gets a profile of its own, `~/.alta-node`. **Advanced** sets the port of the node (2585), its profile, the folder it is installed in, and a folder of this computer to install the packages from.
+
+## Install CodeAlta Node by hand
 
 On the machine that will run the sessions, install [.NET 10](https://dotnet.microsoft.com/en-us/download/dotnet/10.0), then the node:
 
@@ -90,11 +114,13 @@ If the new version does not start and connect within two minutes, the node goes 
 
 To allow only some feeds on a machine, list them in `fleet/update.json` of the profile (`update.json` of the data root for the server): `{ "source": "https://my-mirror/v3/index.json", "allowedSources": ["https://my-mirror/v3/index.json"] }`. Add `"fleet": false` to update that machine only by hand.
 
-With a CodeAlta Server, update all your machines at once from CodeAlta Desktop: see [Update all your machines](#update-all-your-machines).
+From CodeAlta Desktop, the page of a machine you manage updates it with **Check for updates** (see [Manage a machine from CodeAlta Desktop](#manage-a-machine-from-codealta-desktop)). With a CodeAlta Server, update all your machines at once: see [Update all your machines](#update-all-your-machines).
 
 ## Give it projects
 
-The sessions of a node run in the projects of its catalog. On the machine of the node:
+The sessions of a node run in the projects of its catalog. In CodeAlta Desktop, on a computer that manages the machine (see [Manage a machine from CodeAlta Desktop](#manage-a-machine-from-codealta-desktop)), open its page and, under **Projects**, type a repository URL and click **Clone**, or the full path of a folder of the machine and click **Add the folder**. The trash button of a project removes it from the machine's projects; its files stay.
+
+On the machine of the node:
 
 | Command | What it does |
 | --- | --- |
@@ -108,13 +134,13 @@ The sessions of a node run in the projects of its catalog. On the machine of the
 ## Pair it with CodeAlta Desktop
 
 1. On the machine of the node, while it runs, type `altanode pair`. It prints a pairing link, `codealta-pair://…`, and six words, then waits.
-2. In CodeAlta Desktop, open **Settings** > **Fleet** > **Machines** and click **Pair a machine…**.
+2. In CodeAlta Desktop, open **Settings** > **Fleet** > **Machines**, click **Add a machine…**, then **With a pairing link**.
 3. Paste the link. CodeAlta shows the name of the machine and six words: check that they are the words `altanode pair` printed.
 4. Click **Pair**. `altanode pair` says which device paired, and the machine is listed as **Online**.
 
 The link works once and expires after 10 minutes (`altanode pair --minutes <n>` gives it more). Pairing again with a new link replaces the machine, for example after its address changed.
 
-A paired computer may see the sessions of the machine, drive them and start new ones. Moving sessions to the machine stays off (see [Move a session](#move-a-session)).
+A paired computer may see the sessions of the machine, drive them and start new ones. Moving sessions to the machine stays off (see [Move a session](#move-a-session)). The first computer paired with a new machine also manages it: its row says **Managed from here** (see [Manage a machine from CodeAlta Desktop](#manage-a-machine-from-codealta-desktop)).
 
 ## See and drive its sessions
 
@@ -143,7 +169,7 @@ The **+** of the row of a machine in the Explorer opens the same prompt, already
 
 An automation of yours can run on a paired machine, or on a machine of your server, by its triggers, while this computer is closed.
 
-1. On the machine of the node, let this computer give it automations: `altanode permissions <device> --allow automate` (`altanode devices` names the computers).
+1. Let this computer give the machine automations: on its page in **Settings** > **Fleet** > **Machines**, turn on **Automate** for **This computer** (or, on the machine, `altanode permissions <device> --allow automate`).
 2. In the **Automations** tab, edit the automation and choose the machine in **Runs on**. It is offered for an automation kept in your configuration, once a machine is paired or your server lists one.
 3. Save. CodeAlta copies the automation to the machine: its card says **On** and the name of the machine, and its details say **Copied to** that machine. A machine that is offline gets it when it answers.
 
@@ -165,7 +191,7 @@ A session can move to another machine and go on working there: its conversation,
 
 Moves are off until you allow them on the side that receives the session:
 
-- **To a node**: on the machine of the node, give the computer the Move permission with `altanode permissions <device> --allow move`. The same permission lets that computer take sessions of the node back.
+- **To a node**: on the page of the machine in **Settings** > **Fleet** > **Machines**, turn on **Move** for the computer (or, on the machine, `altanode permissions <device> --allow move`). The same permission lets that computer take sessions of the node back.
 - **To this computer**: in **Settings** > **Fleet** > **Machines**, turn on **Receive moved sessions on this computer**.
 
 To move a session:
@@ -179,18 +205,31 @@ Only a session of a project in a git repository with a remote moves. On the mach
 
 What stays behind: its background jobs, reminders and terminals, and the files that look like secrets (the dialog names them). A move that a lost connection stopped goes on when the machine is back.
 
-## Manage the devices of a node
+## Manage a machine from CodeAlta Desktop
 
-On the machine of the node:
+In **Settings** > **Fleet** > **Machines**, click the name of a machine to open its page. A computer that manages the machine changes everything there, without a terminal on the machine:
+
+| Section | What you do |
+| --- | --- |
+| **Devices** | Each computer paired with the machine, with a switch per permission: **View**, **Drive**, **Start**, **Move**, **Automate** and **Manage**. **Revoke** (the cross at the end of the row, then **Revoke**) refuses that computer there at once. |
+| **Projects** | Clone a repository there, add a folder, remove a project |
+| **Providers** | The providers ready on the machine, and its default model. A machine without one cannot start sessions: sign in to a provider on it |
+| **Updates** | The version it runs. **Check for updates**, then **Update to** the version found: it switches once no session works |
+| **Log** | **Show the log** reads its last lines |
+
+The first computer paired with a machine manages it. Give another computer the **Manage** switch on its row to let it manage the machine too; turning it off for **This computer** asks first, since only the owner can give it back. A computer that does not manage the machine sees its providers, and how its owner gives it the permission.
+
+On the machine itself, the same is done with:
 
 | Command | What it does |
 | --- | --- |
 | `altanode devices` | Lists the computers paired with the node |
 | `altanode revoke <device>` | Revokes a computer and disconnects it at once |
 | `altanode permissions <device>` | Shows what a computer may do |
-| `altanode permissions <device> --deny start` | Takes a permission away: `view`, `drive`, `start`, `move` or `automate` (`--allow` gives one) |
+| `altanode permissions <device> --deny start` | Takes a permission away: `view`, `drive`, `start`, `move`, `automate` or `manage` (`--allow` gives one) |
+| `altanode pair --manage` | A pairing link whose computer manages the node |
 
-In CodeAlta Desktop, **Forget** on the row of a machine in **Settings** > **Fleet** > **Machines** removes it from this computer; its sessions go on there. To make sure a lost or replaced computer can no longer reach a node, revoke it on the node.
+**Forget** on the row of a machine removes it from this computer; its sessions go on there. To make sure a lost or replaced computer can no longer reach a node, revoke it on the page of the machine, from a computer that manages it.
 
 From a terminal, `altanode connect <link>` pairs another profile with a node, and `altanode remote <machine> sessions`, `history`, `send`, `create` and `watch` read and drive the sessions of a paired machine. `altanode remote <machine> move <session>` moves one of them to the node of that profile.
 
@@ -198,10 +237,34 @@ From a terminal, `altanode connect <link>` pairs another profile with a node, an
 
 A CodeAlta Server shows the machines of all your computers, whether they are online, and the sessions they publish, in one place. It never reads their content: a session publishes its state, its provider and model, its times and its counts (turns, tool calls, tokens), never its prompts or answers. Its title travels encrypted with a key that only your approved computers and machines hold: the server cannot read it.
 
-1. On the always-on machine, run `altaserver run`. It prints a one-time setup code (`altaserver setup-code` prints it again).
-2. In CodeAlta Desktop on that machine, open **Settings** > **Fleet** > **Server**, click **Create my server…**, and give its address (`http://127.0.0.1:2586`), the setup code and your name. This computer becomes the owner's.
-3. To add a node, click **Add a machine…** and run the command it shows on the machine: `altanode join <address> --token <code>`. The node appears under the server, **Waiting for approval**: click **Approve** when it shows the same six words as the node.
-4. Another of your computers joins with **Join a server…** and an enrollment code; you approve it the same way from a computer already approved. Once approved, it can add and approve machines too. A node never approves anything.
+### Create my server
+
+In CodeAlta Desktop, open **Settings** > **Fleet** > **Server** and click **Create my server…**. Choose where it runs:
+
+- **On a machine over SSH**, the usual place: an always-on Linux or macOS machine you reach with `ssh`. Give it as `user@host`, and how your machines reach it: **The local network** (`http://host:2586`, the server listens on every network of the machine), or **An address I put in front of it**, a domain or Tailscale Serve that forwards to the server, which then stays on the machine's own loopback. CodeAlta checks the system and .NET there, installs CodeAlta Server, starts it as a service (a `systemd --user` unit with lingering, or a LaunchAgent), checks that it answers from this computer at that address, then reads its setup code over SSH and makes you its owner. Nothing to copy.
+- **On this computer**: CodeAlta installs CodeAlta Server here, starts it and makes you its owner.
+- **It runs already**: a server you started with `altaserver run`; give its address, its setup code (`altaserver setup-code` prints it on its machine) and your name.
+
+Give **Your name** and an **Organization** (**Home** by default). **Advanced** sets the port (2586), the data folder, the install folder and a folder of packages.
+
+When the server runs but does not answer from here, the step says what blocks it: a firewall (on Ubuntu, `sudo ufw allow 2586/tcp` on the machine), a name that does not reach it, or a proxy that does not forward to it. **Try again** goes on from there.
+
+Once you are its owner, **Add your machines** lists the machines this computer manages: **Add** has each join the server from itself, and approves it at once. The six words of each are shown.
+
+### Add machines and computers
+
+- **A machine**: in **Settings** > **Fleet** > **Machines**, **Add a machine…** > **Through my server** shows the command to run on it, `altanode join <address> --token <code>`. This computer made the code: the machine is approved as soon as it comes, and its six words are shown. The **Add a machine…** of the server's card shows the same command for a machine that waits for you to approve it.
+- **What waits for you**: when a machine or a computer asks to join, a message comes wherever you are in CodeAlta, with its six words, **Approve** and **Refuse**, and the **Fleet** button of the title bar counts what waits. Approve when the words are the same as on the device.
+- **Another of your computers**: **Join an organization…** with the address of the server and an enrollment code; you approve it the same way from a computer already approved. Once approved, it can add and approve machines too. A node never approves anything.
+
+### Join an organization
+
+To join the server of your company, open **Settings** > **Fleet** > **Server** and click **Join an organization…**:
+
+1. **Server**: its address, which your administrator gives.
+2. **Sign in**: the one-time enrollment code your administrator made for you.
+3. **Space**: the space that works with the organization, **A new Work space** by default. Its sessions are published to the server: their states and counts, never their content.
+4. **Approval**: an administrator approves this computer; they see the six words shown here beside it.
 
 A space publishes to a server only when you choose it: **Settings** > **Spaces** > the space > **General** > **Server**. `altanode join` links the default space of the node (`--space` chooses others). A session made **Private** in its options (the Agent chip, **More options**) is never published; one made Private later, or whose space you unlink, is removed from the server.
 

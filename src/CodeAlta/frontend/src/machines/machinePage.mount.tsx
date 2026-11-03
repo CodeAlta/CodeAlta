@@ -1,0 +1,72 @@
+// Disposable page: the page of a paired machine this computer manages, then of one it does not. Driven by
+// machinePage.browser.test.ts through `machineFixture`: what the page asks is recorded.
+import { StrictMode, useState } from "react";
+import { createRoot } from "react-dom/client";
+import type { MachineDeviceView, MachineManagement, MachineView } from "#neoastra";
+import { ShellLanguageContext } from "../shellLanguage";
+import { MachinePage, type MachinePageApi } from "./MachinePage";
+
+document.documentElement.classList.add("bp6-dark");
+
+const calls: string[] = [];
+const machine = (id: string, name: string, permissions: string[]): MachineView => ({ id, name, state: "online", os: "linux", version: "4.0.0", address: `${name}:2585`,
+  fingerprint: "ABCD EFGH", words: "apple river stone cloud amber tiger", sessions: 1, lastSeen: null, problem: null, permissions, pairedAt: "2026-11-01T00:00:00Z",
+  paired: true, channel: "direct" });
+let devices: MachineDeviceView[] = [
+  { id: "me", name: "desktop", fingerprint: "HS62 JUOJ W5CV", permissions: ["view", "drive", "start", "manage"], pairedAt: "2026-11-01T00:00:00Z", revokedAt: null,
+    channels: 1, isThisComputer: true },
+  { id: "phone", name: "phone", fingerprint: "PH0N EEEE AAAA", permissions: ["view"], pairedAt: "2026-11-02T00:00:00Z", revokedAt: null, channels: 0, isThisComputer: false },
+];
+let projects = [{ id: "p1", name: "app", path: "/home/me/code/app", repository: "github.com/me/app" }];
+const view = (id: string): MachineManagement => id === "managed"
+  ? { status: "ok", message: null, version: "4.0.0", sessionsAtWork: 0, updating: false, update: { running: "4.0.0", installed: "4.0.0", pendingVersion: null, pendingPhase: null,
+    lastVersion: null, lastOutcome: null }, devices, projects, problems: [], providers: [{ key: "codex", name: "Codex", isDefault: true, defaultModel: "GPT-6.1", models: 3 }],
+    thisDevice: "me" }
+  : { status: "not_manager", message: null, version: null, sessionsAtWork: 0, updating: false, update: null, devices: [], projects: [], problems: [], providers: [], thisDevice: "me" };
+const api: MachinePageApi = {
+  management: async request => view(request.machineId),
+  setDevicePermission: async request => {
+    calls.push(JSON.stringify({ permission: [request.deviceId, request.permission, request.allowed] }));
+    devices = devices.map(device => device.id !== request.deviceId ? device
+      : { ...device, permissions: request.allowed ? [...device.permissions, request.permission] : device.permissions.filter(value => value !== request.permission) });
+    return { status: "ok", message: null };
+  },
+  revokeDevice: async request => {
+    calls.push(JSON.stringify({ revoke: request.deviceId }));
+    devices = devices.map(device => device.id === request.deviceId ? { ...device, revokedAt: "2026-11-03T00:00:00Z" } : device);
+    return { status: "ok", message: null };
+  },
+  cloneProject: async request => {
+    calls.push(JSON.stringify({ clone: request.value }));
+    projects = [...projects, { id: "p2", name: "repo", path: "/home/me/code/github.com/owner/repo", repository: "github.com/owner/repo" }];
+    return { status: "ok", message: "Cloned into /home/me/code/github.com/owner/repo." };
+  },
+  addProject: async request => { calls.push(JSON.stringify({ add: request.value })); return { status: "ok", message: null }; },
+  removeProject: async request => {
+    calls.push(JSON.stringify({ remove: request.value }));
+    projects = projects.filter(project => project.id !== request.value);
+    return { status: "ok", message: null };
+  },
+  readLog: async () => ({ status: "ok", text: "2026-11-03 INF CodeAlta Node started.\n", path: "/home/me/.alta/logs/altanode.log", truncated: false, message: null }),
+  updateMachine: async request => {
+    calls.push(JSON.stringify({ update: request.check ? "check" : "install" }));
+    return request.check ? { status: "available", running: "4.0.0", latest: "4.0.1", target: "4.0.1", message: null }
+      : { status: "staged", running: "4.0.0", latest: "4.0.1", target: "4.0.1", message: null };
+  },
+};
+
+function Fixture() {
+  const [shown, setShown] = useState("managed");
+  Object.assign(window, { machineFixture: { calls, show: setShown } });
+  return <MachinePage key={shown} epoch="12345678-1234-1234-1234-123456789abc" api={api}
+    machine={shown === "managed" ? machine("managed", "build-box", ["view", "drive", "start", "manage"]) : machine("other", "mac-mini", ["view", "drive", "start"])}
+    onBack={() => calls.push(JSON.stringify({ back: shown }))} />;
+}
+
+createRoot(document.getElementById("root")!).render(<StrictMode>
+  <ShellLanguageContext.Provider value={{ locale: "en", choice: "en", setLanguage: () => {} }}>
+    <div className="ide-shell settings-dialog-content" style={{ padding: 12, height: "100%", boxSizing: "border-box", overflow: "auto" }}>
+      <Fixture />
+    </div>
+  </ShellLanguageContext.Provider>
+</StrictMode>);
