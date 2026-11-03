@@ -116,6 +116,31 @@ public sealed class PublicationService
         return new FleetFactsPublishResult(result.Ack, applied, unchanged, stale);
     }
 
+    /// <summary>
+    /// Deletes the facts of sessions a machine no longer publishes (made Private, or their space unlinked): those it owns,
+    /// audited in the same transaction, and announced as removed to the watchers of the directory.
+    /// </summary>
+    /// <param name="device">The device of the machine.</param>
+    /// <param name="withdrawal">The withdrawal.</param>
+    /// <param name="cancellationToken">Cancels the operation.</param>
+    /// <returns>The sessions whose facts were deleted.</returns>
+    /// <exception cref="CoordinatorException">The withdrawal does not read (<see cref="CoordinatorErrorCodes.PublicationInvalid"/>).</exception>
+    public async Task<FleetFactsWithdrawResult> WithdrawFactsAsync(DeviceRecord device, FleetFactsWithdraw? withdrawal, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(device);
+        if (withdrawal?.SessionIds is not { } ids) throw Invalid("facts.withdraw needs the ids of sessions.");
+        if (ids.Count > MaxFactsPerBatch) throw Invalid($"facts.withdraw takes at most {MaxFactsPerBatch} sessions.");
+        var checkedIds = ids.Select(id => Text(id, "sessionIds", required: true, MaxIdLength)!).ToArray();
+        var audit = new AuditEntry("session.withdraw", AuditEntry.Success, device.OwnerPersonId, device.Id, device.Id, null, null);
+        var removed = await _store.WithdrawSessionFactsAsync(device.Id, checkedIds, audit, cancellationToken).ConfigureAwait(false);
+        foreach (var id in removed)
+        {
+            _directory.Publish(device.OrganizationId, new FleetDirectoryChange(FleetServerMethods.ChangeKinds.SessionRemoved, id));
+        }
+
+        return new FleetFactsWithdrawResult(removed);
+    }
+
     private static string? Text(string? value, string field, bool required = false, int maxLength = MaxTextLength)
     {
         if (string.IsNullOrEmpty(value))

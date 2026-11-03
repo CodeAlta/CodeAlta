@@ -13,11 +13,17 @@ namespace CodeAlta.Fleet.Server;
 /// <summary>
 /// What a running instance (a node, CodeAlta Desktop) publishes, read from its runtime: the inventory of the machine,
 /// and its sessions as the owned workspace lists them, with their state (at work, waiting for a person, idle, archived),
-/// their space, whether they are Private, and their ownership epoch. It says <see cref="Changed"/> when a session starts
-/// or ends a turn; the rest is read when the connector polls.
+/// their space, whether they are Private, their ownership epoch, and their counts (turns, tool calls, tokens). It says
+/// <see cref="Changed"/> when a session starts or ends a turn; the rest is read when the connector polls.
 /// </summary>
 public sealed class FleetHostPublicationSource : IFleetPublicationSource, IAsyncDisposable
 {
+    /// <summary>How long the counts of a session at work are kept before they are read again.</summary>
+    public static readonly TimeSpan CountsRefresh = TimeSpan.FromSeconds(10);
+
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, (DateTimeOffset UpdatedAt, DateTimeOffset ReadAt, FleetSessionCounts? Counts)> _counts =
+        new(StringComparer.Ordinal);
+    private readonly TimeProvider _time = TimeProvider.System;
     private readonly CodeAltaHost _host;
     private readonly string _name;
     private readonly string _version;
@@ -84,6 +90,8 @@ public sealed class FleetHostPublicationSource : IFleetPublicationSource, IAsync
             .GroupBy(static state => state.ProviderId.Value, StringComparer.Ordinal)
             .ToDictionary(static group => group.Key, static group => group.First().Descriptor.ProviderType, StringComparer.Ordinal);
         var result = new List<FleetLocalSession>(sessions.Length);
+        var store = _host.SessionViewCatalog.JournalStore.CreateSessionStore();
+        var now = _time.GetUtcNow();
         foreach (var session in sessions)
         {
             var archived = session.ViewState?.Archived == true;
@@ -93,12 +101,60 @@ public sealed class FleetHostPublicationSource : IFleetPublicationSource, IAsync
                 : FleetSessionStates.Idle;
             var providerKey = session.ViewState?.ProviderKey ?? session.ProviderKey;
             var providerType = providerKey is not null && providerTypes.TryGetValue(providerKey, out var type) ? type : session.ProtocolFamily;
-            result.Add(new FleetLocalSession(session.SessionId, SpaceOf(session, snapshot, spaces), session.ViewState?.Options?.Private == true,
+            var isPrivate = session.ViewState?.Options?.Private == true;
+            // A Private session is never published: its counts are not read.
+            var counts = isPrivate ? null : await CountsAsync(store, session, state, now, cancellationToken).ConfigureAwait(false);
+            result.Add(new FleetLocalSession(session.SessionId, SpaceOf(session, snapshot, spaces), isPrivate,
                 epochs.TryGetValue(session.SessionId, out var epoch) ? epoch : 0, state, session.CreatedAt, session.UpdatedAt, Bounded(providerType),
-                Bounded(session.ViewState?.ModelId ?? session.ModelId)));
+                Bounded(session.ViewState?.ModelId ?? session.ModelId), counts));
+        }
+
+        // The sessions gone from the instance are forgotten with their counts.
+        if (_counts.Count > sessions.Length)
+        {
+            var present = sessions.Select(static session => session.SessionId).ToHashSet(StringComparer.Ordinal);
+            foreach (var id in _counts.Keys.Where(id => !present.Contains(id)).ToArray()) _counts.TryRemove(id, out _);
         }
 
         return result;
+    }
+
+    // The counts of a session as its journal says them: turns and tool calls of its turns, tokens of its usage records,
+    // without what a fork copied from its source or what was made outside CodeAlta (statistics count them the same way).
+    // Read again when the session changed, and at most every few seconds while it is at work: a turn that writes many
+    // records makes a new version of its facts now and then, not at each record.
+    private async ValueTask<FleetSessionCounts?> CountsAsync(Agent.Runtime.FileSystemAgentSessionStore store, AgentSessionMetadata session, string state,
+        DateTimeOffset now, CancellationToken cancellationToken)
+    {
+        var atWork = state is FleetSessionStates.Running or FleetSessionStates.RequiresAction;
+        if (_counts.TryGetValue(session.SessionId, out var cached) && cached.UpdatedAt == session.UpdatedAt && (!atWork || now - cached.ReadAt < CountsRefresh))
+        {
+            return cached.Counts;
+        }
+
+        try
+        {
+            var countedFrom = (await store.GetSessionSummaryAsync(session.SessionId, cancellationToken).ConfigureAwait(false))?.ForkedFrom?.CountedFrom;
+            var turns = (await store.ReadTurnsAsync(session.SessionId, cancellationToken).ConfigureAwait(false)).Turns
+                .Where(turn => !turn.MadeElsewhere && (countedFrom is null || turn.StartedAt >= countedFrom.Value)).ToArray();
+            long input = 0, output = 0;
+            foreach (var usage in await _host.WorkspaceReads.ReadUsageUpdatesAsync(session.SessionId, cancellationToken).ConfigureAwait(false))
+            {
+                input += Math.Max(0, usage.Operation.InputTokens ?? 0);
+                output += Math.Max(0, usage.Operation.OutputTokens ?? 0);
+            }
+
+            var counts = new FleetSessionCounts(turns.Length, turns.Sum(static turn => (long)Math.Max(0, turn.ToolCallCount)), input, output);
+            _counts[session.SessionId] = (session.UpdatedAt, now, counts);
+            return counts;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException or System.Text.Json.JsonException
+            or OwnedWorkspaceBusyException)
+        {
+            // A journal that cannot be read now (the history readers' own errors are IOExceptions): the counts known
+            // before, read again at the next poll.
+            return cached.Counts;
+        }
     }
 
     /// <inheritdoc />

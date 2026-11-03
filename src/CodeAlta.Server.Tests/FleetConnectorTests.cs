@@ -130,6 +130,35 @@ public sealed class FleetConnectorTests
     }
 
     [TestMethod]
+    public async Task ASessionMadePrivateOrWhoseSpaceIsUnlinkedHasItsFactsWithdrawn()
+    {
+        await using var fleet = await FleetFixture.StartAsync();
+        var source = new FakeSource();
+        var linked = System.Collections.Immutable.ImmutableHashSet.Create("work", "home");
+        var withdrawn = new ConcurrentQueue<string>();
+        await using var connector = fleet.NodeConnector(source, space => Volatile.Read(ref linked).Contains(space ?? ""));
+        connector.Withdrawn += (_, result) => { foreach (var id in result.Removed) withdrawn.Enqueue(id); };
+        connector.Start();
+        source.Set(Session("s-a", "work"), Session("s-b", "home"), Session("s-c", "work"));
+        await WaitForAsync(async () => (await fleet.Desktop.ListSessionsAsync()).Count == 3);
+        Assert.AreEqual(new FleetSessionCounts(1, 2, 300, 40), (await fleet.Desktop.ListSessionsAsync()).Single(session => session.Id == "s-a").Counts);
+
+        source.Set(Session("s-a", "work", isPrivate: true), Session("s-b", "home"), Session("s-c", "work"));
+        await WaitForAsync(async () => !(await fleet.Desktop.ListSessionsAsync()).Any(session => session.Id == "s-a"));
+        Volatile.Write(ref linked, ["work"]);
+        source.Set(Session("s-a", "work", isPrivate: true), Session("s-b", "home"), Session("s-c", "work"));
+        await WaitForAsync(async () => !(await fleet.Desktop.ListSessionsAsync()).Any(session => session.Id == "s-b"));
+        CollectionAssert.AreEqual(new[] { "s-a", "s-b" }, withdrawn.ToArray());
+
+        // A session gone from the machine (deleted) keeps its facts; one made public again is published again.
+        source.Set(Session("s-a", "work"), Session("s-d", "work"));
+        await WaitForAsync(async () => (await fleet.Desktop.ListSessionsAsync()) is var listed && listed.Any(session => session.Id == "s-a")
+            && listed.Any(session => session.Id == "s-d"));
+        Assert.IsTrue((await fleet.Desktop.ListSessionsAsync()).Any(session => session.Id == "s-c"));
+        Assert.AreEqual(2, withdrawn.Count);
+    }
+
+    [TestMethod]
     public async Task PublicationResumesFromTheCursorsAfterADroppedConnection()
     {
         await using var fleet = await FleetFixture.StartAsync();

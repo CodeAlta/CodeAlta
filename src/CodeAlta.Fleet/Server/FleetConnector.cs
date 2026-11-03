@@ -91,8 +91,9 @@ public sealed class FleetConnectorOptions
 /// <remarks>
 /// <para>
 /// Only the sessions of the spaces linked to the server are published (<see cref="FleetConnectorOptions.PublishesSpace"/>),
-/// and never a Private one: no fact, not listed. Facts carry the allow-list only; the sealed metadata (titles) is not
-/// sent yet.
+/// and never a Private one: no fact, not listed. A session published before that is made Private, or whose space is
+/// unlinked, has its facts withdrawn (<c>facts.withdraw</c>). Facts carry the allow-list only; the sealed metadata
+/// (titles) is not sent yet.
 /// </para>
 /// <para>One loop owns the connection and the outbox; the source and the callers only wake it.</para>
 /// </remarks>
@@ -136,6 +137,9 @@ public sealed class FleetConnector : IAsyncDisposable
 
     /// <summary>Raised after a batch of facts was answered, with the answer.</summary>
     public event Action<FleetConnector, FleetFactsPublishResult>? Published;
+
+    /// <summary>Raised after a withdrawal of facts was answered, with the answer.</summary>
+    public event Action<FleetConnector, FleetFactsWithdrawResult>? Withdrawn;
 
     /// <summary>Gets the address of the server.</summary>
     public Uri ServerAddress => _options.ServerAddress;
@@ -375,7 +379,22 @@ public sealed class FleetConnector : IAsyncDisposable
             if (ack is not null) _outbox.InventoryAcknowledged(ack.Ack, publication.Publication.Sequence, publication.Hash);
         }
 
-        var sessions = (await source.ReadSessionsAsync(stop).ConfigureAwait(false)).Where(IsPublished).ToArray();
+        var all = await source.ReadSessionsAsync(stop).ConfigureAwait(false);
+        var sessions = all.Where(IsPublished).ToArray();
+        // A session published before and not now (made Private, its space unlinked) has its facts taken back; a session
+        // gone from the instance (deleted, moved away) keeps them, as statistics keep the facts of deleted sessions.
+        var withdrawals = _outbox.Withdrawals(all.Where(session => !IsPublished(session)).Select(static session => session.SessionId), MaxFactsPerBatch);
+        if (withdrawals.Count > 0)
+        {
+            var withdrawn = await connection.SendRequestAsync(FleetServerMethods.FactsWithdraw, new FleetFactsWithdraw(withdrawals),
+                FleetServerJsonContext.Default.FleetFactsWithdraw, FleetServerJsonContext.Default.FleetFactsWithdrawResult, null, stop).ConfigureAwait(false);
+            if (withdrawn is not null)
+            {
+                _outbox.Withdrawn(withdrawals);
+                Withdrawn?.Invoke(this, withdrawn);
+            }
+        }
+
         _outbox.Retain([.. sessions.Select(static session => session.SessionId)]);
         while (!stop.IsCancellationRequested)
         {
@@ -530,6 +549,8 @@ public sealed record FleetDirectoryView(
                 return this with { Sessions = Sessions.SetItem(session.Fact.SessionId, session) };
             case FleetServerMethods.ChangeKinds.Presence when change.Presence is { } presence:
                 return this with { Presence = Presence.SetItem(presence.DeviceId, presence) };
+            case FleetServerMethods.ChangeKinds.SessionRemoved when Sessions.ContainsKey(change.Id):
+                return this with { Sessions = Sessions.Remove(change.Id) };
             default:
                 return this;
         }

@@ -17,6 +17,12 @@ public static class FleetServerMethods
     /// <summary>The facts of the sessions of the machine, versioned per session.</summary>
     public const string FactsPublish = "facts.publish";
 
+    /// <summary>
+    /// Takes back the facts of sessions of the machine that are no longer published (made Private, or their space
+    /// unlinked from the server): the server deletes them, audits it, and the directory says they are gone.
+    /// </summary>
+    public const string FactsWithdraw = "facts.withdraw";
+
     /// <summary>The machines, sessions and presence the device may see, then their changes as <see cref="DirectoryChanged"/> events.</summary>
     public const string DirectoryWatch = "directory.watch";
 
@@ -38,6 +44,9 @@ public static class FleetServerMethods
 
         /// <summary>The facts of a session.</summary>
         public const string Session = "session";
+
+        /// <summary>A session whose facts its machine withdrew: <see cref="FleetDirectoryChange.Id"/> names it.</summary>
+        public const string SessionRemoved = "session_removed";
 
         /// <summary>A device that came online, went offline or changed state.</summary>
         public const string Presence = "presence";
@@ -133,6 +142,14 @@ public sealed record FleetFactsPublish(long Sequence, IReadOnlyList<FleetSession
 /// <param name="Stale">The sessions whose fact was refused: an older epoch, or another machine at the same epoch.</param>
 public sealed record FleetFactsPublishResult(long Ack, int Applied, int Unchanged, IReadOnlyList<string> Stale);
 
+/// <summary>The parameters of <c>facts.withdraw</c>.</summary>
+/// <param name="SessionIds">The sessions of the machine whose facts the server deletes.</param>
+public sealed record FleetFactsWithdraw(IReadOnlyList<string> SessionIds);
+
+/// <summary>The answer of <c>facts.withdraw</c>.</summary>
+/// <param name="Removed">The sessions whose facts the server held for this machine and deleted; the others it did not hold.</param>
+public sealed record FleetFactsWithdrawResult(IReadOnlyList<string> Removed);
+
 /// <summary>A machine as the directory shows it.</summary>
 /// <param name="DeviceId">The device of the machine.</param>
 /// <param name="Kind">The class of the device (<see cref="FleetDeviceKinds"/>).</param>
@@ -178,6 +195,8 @@ public sealed record FleetDirectoryChange(
 [JsonSerializable(typeof(FleetSessionFact))]
 [JsonSerializable(typeof(FleetFactsPublish))]
 [JsonSerializable(typeof(FleetFactsPublishResult))]
+[JsonSerializable(typeof(FleetFactsWithdraw))]
+[JsonSerializable(typeof(FleetFactsWithdrawResult))]
 [JsonSerializable(typeof(FleetDirectoryMachine))]
 [JsonSerializable(typeof(FleetDirectorySession))]
 [JsonSerializable(typeof(FleetDirectorySnapshot))]

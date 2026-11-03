@@ -388,6 +388,30 @@ public sealed class SqliteCoordinatorStore : ICoordinatorStore
     }
 
     /// <inheritdoc />
+    public ValueTask<IReadOnlyList<string>> WithdrawSessionFactsAsync(string deviceId, IReadOnlyList<string> sessionIds, AuditEntry audit,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(deviceId);
+        ArgumentNullException.ThrowIfNull(sessionIds);
+        ArgumentNullException.ThrowIfNull(audit);
+        return WriteAsync<IReadOnlyList<string>>((connection, transaction) =>
+        {
+            var removed = new List<string>();
+            foreach (var id in sessionIds.Distinct(StringComparer.Ordinal))
+            {
+                if (Execute(connection, transaction, "DELETE FROM sessions WHERE id = $id AND machine_id = $device", ("$id", id), ("$device", deviceId)) == 1) removed.Add(id);
+            }
+
+            if (removed.Count > 0)
+            {
+                AppendAudit(connection, transaction, audit with { Details = SessionsDetails(removed) });
+            }
+
+            return removed;
+        }, cancellationToken);
+    }
+
+    /// <inheritdoc />
     public ValueTask<FleetPublicationCursors> GetPublicationCursorsAsync(string deviceId, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrEmpty(deviceId);
@@ -704,6 +728,22 @@ public sealed class SqliteCoordinatorStore : ICoordinatorStore
     private static object? ToNullableTime(DateTimeOffset? time) => time?.ToUnixTimeMilliseconds();
 
     private static DateTimeOffset FromTime(long milliseconds) => DateTimeOffset.FromUnixTimeMilliseconds(milliseconds);
+
+    // {"sessions":[...]}: ids only, never content.
+    private static string SessionsDetails(IReadOnlyList<string> sessions)
+    {
+        using var buffer = new MemoryStream();
+        using (var writer = new System.Text.Json.Utf8JsonWriter(buffer))
+        {
+            writer.WriteStartObject();
+            writer.WriteStartArray("sessions");
+            foreach (var session in sessions) writer.WriteStringValue(session);
+            writer.WriteEndArray();
+            writer.WriteEndObject();
+        }
+
+        return System.Text.Encoding.UTF8.GetString(buffer.ToArray());
+    }
 
     private abstract class WriteItem
     {

@@ -5,6 +5,7 @@ using CodeAlta.Catalog;
 using CodeAlta.Desktop.Fleet;
 using CodeAlta.Desktop.Rpc;
 using CodeAlta.Fleet.Identity;
+using CodeAlta.Fleet.Protocol;
 using CodeAlta.Fleet.Server;
 using CodeAlta.Orchestration.Hosting;
 using CodeAlta.Server.Hosting;
@@ -43,7 +44,8 @@ public sealed class FleetServerRpcTests
                 GlobalRoot = global, CurrentProjectPath = At("project"), DiscoveryScope = new(At("home"), root), BuiltInSkillRoot = At("builtin"),
                 PluginEnvironment = FrozenDictionary<string, string?>.Empty, StartPlugins = false, IsHeadless = true, OwnsLogging = false,
             }, token);
-            await AddSessionAsync(host, "chat-1", global, token);
+            var chat = await AddSessionAsync(host, "chat-1", global, token);
+            await AddTurnAsync(host, "chat-1", token);
             await AddSessionAsync(host, "private-1", global, token, isPrivate: true);
 
             await using var servers = new DesktopFleetServers(host, "Desktop", "4.0.0", static options => new FleetConnectorOptions
@@ -102,6 +104,21 @@ public sealed class FleetServerRpcTests
             Assert.AreEqual(FleetSessionStates.Idle, session.State);
             Assert.IsFalse(directory.Sessions.Any(static session => session.Id == "private-1"), "a Private session is never published");
             Assert.AreEqual("Desktop", directory.Machines.Single(static machine => machine.IsThisComputer).Name);
+            // Its counts come from its journal: one turn with one tool call, the tokens of its usage.
+            Assert.AreEqual((1, 1500), (session.Turns, session.Tokens));
+            var fact = servers.Connections.Single().Connector!.Directory.Sessions["chat-1"].Fact;
+            Assert.AreEqual(new FleetSessionCounts(1, 1, 1200, 300), fact.Counts);
+
+            // Made Private, the session is withdrawn from the server and leaves the directory.
+            await host.SessionViewCatalog.JournalStore.AppendStateAsync(chat, new SessionViewLocalState { Options = new AgentSessionOptions { Private = true } },
+                token);
+            await host.AgentSessionCatalog.InvalidateAsync(token);
+            deadline = DateTime.UtcNow + Patience;
+            while (service.Directory(new FleetServerDirectoryRequest(epoch)).Sessions.Any(static session => session.Id == "chat-1"))
+            {
+                if (DateTime.UtcNow > deadline) Assert.Fail("The Private session was not withdrawn.");
+                await Task.Delay(100, token);
+            }
 
             Assert.AreEqual("ok", (await service.LeaveAsync(new FleetServerLinkRequest(epoch, linkId), token)).Status);
             Assert.AreEqual(0, (await service.StatusAsync(new FleetServerRequest(epoch), token)).Servers.Length);
@@ -115,14 +132,30 @@ public sealed class FleetServerRpcTests
         }
     }
 
-    private static async Task AddSessionAsync(CodeAltaHost host, string id, string path, CancellationToken token, bool isPrivate = false)
+    private static SessionViewDescriptor Descriptor(string id, string path, DateTimeOffset? created = null) => new()
+    {
+        SessionId = id, Kind = SessionViewKind.GlobalSession, ProviderId = Provider.Value, ProviderKey = Provider.Value, WorkingDirectory = path, Title = "A chat",
+        CreatedAt = created ?? DateTimeOffset.UtcNow, UpdatedAt = created ?? DateTimeOffset.UtcNow, SpaceId = SpaceDescriptor.DefaultId,
+    };
+
+    // One turn: a prompt, a tool call and the usage of one request to the model.
+    private static async Task AddTurnAsync(CodeAltaHost host, string id, CancellationToken token)
+    {
+        var at = DateTimeOffset.UtcNow;
+        var run = new AgentRunId("run-1");
+        await host.SessionViewCatalog.JournalStore.CreateSessionStore().AppendEventsAsync(Provider.Value, Provider.Value, id, [
+            new AgentContentCompletedEvent(Provider, id, at, run, AgentContentKind.User, "prompt:1", null, "Hello"),
+            new AgentActivityEvent(Provider, id, at, run, AgentActivityKind.ToolCall, AgentActivityPhase.Started, "tool:1", null, "read_file", null),
+            new AgentSessionUpdateEvent(Provider, id, at, run, AgentSessionUpdateKind.UsageUpdated, null,
+                Usage: new(LastOperation: new AgentOperationUsageSnapshot(InputTokens: 1200, OutputTokens: 300))),
+            new AgentSessionUpdateEvent(Provider, id, at, run, AgentSessionUpdateKind.Idle, null),
+        ], token);
+    }
+
+    private static async Task<SessionViewDescriptor> AddSessionAsync(CodeAltaHost host, string id, string path, CancellationToken token, bool isPrivate = false)
     {
         var created = DateTimeOffset.UtcNow;
-        var descriptor = new SessionViewDescriptor
-        {
-            SessionId = id, Kind = SessionViewKind.GlobalSession, ProviderId = Provider.Value, ProviderKey = Provider.Value, WorkingDirectory = path, Title = "A chat",
-            CreatedAt = created, UpdatedAt = created, SpaceId = SpaceDescriptor.DefaultId,
-        };
+        var descriptor = Descriptor(id, path, created);
         await host.SessionViewCatalog.JournalStore.EnsureHeaderAsync(descriptor, token);
         // The options of a session are a record of its local state, as the window writes them when it creates one.
         if (isPrivate) await host.SessionViewCatalog.JournalStore.AppendStateAsync(descriptor, new SessionViewLocalState { Options = new AgentSessionOptions { Private = true } }, token);
@@ -132,5 +165,6 @@ public sealed class FleetServerRpcTests
             CreatedAt = created, UpdatedAt = created,
         }, token);
         await host.AgentSessionCatalog.InvalidateAsync(token);
+        return descriptor;
     }
 }

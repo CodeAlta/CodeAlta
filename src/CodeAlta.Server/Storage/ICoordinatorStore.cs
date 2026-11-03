@@ -144,6 +144,17 @@ public interface ICoordinatorStore : IAsyncDisposable
     /// <returns>The acknowledged sequence and what happened to each fact.</returns>
     ValueTask<SessionFactsPublication> PublishSessionFactsAsync(string deviceId, long sequence, IReadOnlyList<SessionRecord> facts, CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// Deletes the facts of sessions a machine withdraws, those it owns only (a session another machine owns now stays),
+    /// and appends the audit record of the deletion when something was deleted.
+    /// </summary>
+    /// <param name="deviceId">The machine that withdraws.</param>
+    /// <param name="sessionIds">The sessions.</param>
+    /// <param name="audit">The audit record, whose details the store sets to the sessions deleted.</param>
+    /// <param name="cancellationToken">Cancels the operation.</param>
+    /// <returns>The sessions whose facts were deleted.</returns>
+    ValueTask<IReadOnlyList<string>> WithdrawSessionFactsAsync(string deviceId, IReadOnlyList<string> sessionIds, AuditEntry audit, CancellationToken cancellationToken = default);
+
     /// <summary>Gets the cursors of the publications of a device.</summary>
     /// <param name="deviceId">The device.</param>
     /// <param name="cancellationToken">Cancels the operation.</param>

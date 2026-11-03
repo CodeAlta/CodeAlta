@@ -19,7 +19,7 @@ public sealed class ControlService
     public static readonly FleetProtocolRange Protocol = new(1, 1);
 
     /// <summary>The features the server announces in its welcome.</summary>
-    public static readonly IReadOnlyList<string> Features = ["presence", "inventory", "facts", "directory"];
+    public static readonly IReadOnlyList<string> Features = ["presence", "inventory", "facts", "facts.withdraw", "directory"];
 
     private const int MaxStateLength = 32;
 
@@ -166,6 +166,12 @@ public sealed class ControlService
         {
             var result = await _publications.PublishFactsAsync(session.Device, publication, token).ConfigureAwait(false);
             return JsonSerializer.SerializeToElement(result, FleetServerJsonContext.Default.FleetFactsPublishResult);
+        }));
+
+        connection.RegisterRequestHandler(FleetServerMethods.FactsWithdraw, Handler(FleetServerJsonContext.Default.FleetFactsWithdraw, async (withdrawal, token) =>
+        {
+            var result = await _publications.WithdrawFactsAsync(session.Device, withdrawal, token).ConfigureAwait(false);
+            return JsonSerializer.SerializeToElement(result, FleetServerJsonContext.Default.FleetFactsWithdrawResult);
         }));
 
         connection.RegisterRequestHandler(FleetServerMethods.DirectoryWatch, async (_, token) =>

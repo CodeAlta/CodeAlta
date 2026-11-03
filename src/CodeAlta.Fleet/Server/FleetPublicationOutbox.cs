@@ -93,6 +93,14 @@ internal sealed class FleetPublicationOutbox
                 _state.Sessions[session.SessionId] = kept = new FleetOutboxSession { Epoch = session.Epoch };
             }
 
+            if (kept.Withdraw)
+            {
+                // Published again before its withdrawal was answered: the server may have deleted it, so it is sent again.
+                kept.Withdraw = false;
+                kept.AckedVersion = 0;
+                changed = true;
+            }
+
             if (kept.Hash != hash || kept.Epoch != session.Epoch)
             {
                 kept.Version++;
@@ -147,13 +155,43 @@ internal sealed class FleetPublicationOutbox
         Save();
     }
 
-    /// <summary>Forgets the sessions that are no longer published, so the outbox does not grow with the sessions that were.</summary>
+    /// <summary>Forgets the sessions that are no longer published, so the outbox does not grow with the sessions that were; a withdrawal waiting stays.</summary>
     public void Retain(IReadOnlyCollection<string> sessionIds)
     {
         if (_state.Sessions.Count <= sessionIds.Count * 2 + 64) return;
         var keep = sessionIds.ToHashSet(StringComparer.Ordinal);
-        foreach (var id in _state.Sessions.Keys.Where(id => !keep.Contains(id)).ToArray()) _state.Sessions.Remove(id);
+        foreach (var id in _state.Sessions.Where(pair => !pair.Value.Withdraw && !keep.Contains(pair.Key)).Select(static pair => pair.Key).ToArray()) _state.Sessions.Remove(id);
         Save();
+    }
+
+    /// <summary>
+    /// Records that sessions of the instance are no longer published (made Private, their space unlinked): those this
+    /// outbox published are to be withdrawn. Gives the withdrawals waiting, at most <paramref name="limit"/>.
+    /// </summary>
+    public IReadOnlyList<string> Withdrawals(IEnumerable<string> unpublished, int limit)
+    {
+        var changed = false;
+        foreach (var id in unpublished)
+        {
+            if (!_state.Sessions.TryGetValue(id, out var kept) || kept.Withdraw) continue;
+            kept.Withdraw = true;
+            changed = true;
+        }
+
+        if (changed) Save();
+        return [.. _state.Sessions.Where(static pair => pair.Value.Withdraw).Select(static pair => pair.Key).Order(StringComparer.Ordinal).Take(limit)];
+    }
+
+    /// <summary>Takes the answer of a withdrawal: the sessions are forgotten, so a later publication starts their versions again.</summary>
+    public void Withdrawn(IReadOnlyList<string> sessionIds)
+    {
+        var changed = false;
+        foreach (var id in sessionIds)
+        {
+            if (_state.Sessions.TryGetValue(id, out var kept) && kept.Withdraw) changed |= _state.Sessions.Remove(id);
+        }
+
+        if (changed) Save();
     }
 
     private void Acknowledge(FleetOutboxBatch batch)
