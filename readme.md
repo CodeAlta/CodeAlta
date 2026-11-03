@@ -33,6 +33,13 @@ dotnet tool install -g CodeAlta.Cli
 altacli run "Fix the failing test"
 ```
 
+CodeAlta Node runs sessions on an always-on machine, a build machine or a cloud VM, driven from CodeAlta Desktop ([Fleet](https://codealta.github.io/docs/fleet/)):
+
+```sh
+dotnet tool install -g CodeAlta.Node
+altanode run
+```
+
 Launch the app from a project folder. On first launch it opens the provider setup: sign in with a Claude, ChatGPT or GitHub Copilot subscription, or add an API key.
 
 See [Getting Started](https://codealta.github.io/docs/getting-started/) for requirements and the first steps.

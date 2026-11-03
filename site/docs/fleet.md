@@ -17,9 +17,9 @@ dotnet tool install -g CodeAlta.Node
 altanode --help
 ```
 
-`dotnet tool update -g CodeAlta.Node` updates it.
+The package runs on Windows, macOS and Linux (x64 and Arm64, Alpine included). `dotnet tool update -g CodeAlta.Node` updates it.
 
-On a machine without the .NET SDK, publish a self-contained `altanode` from a checkout of CodeAlta on a computer that has it, for the system of that machine (`win-x64`, `win-arm64`, `osx-arm64`, `osx-x64`, `linux-x64`, `linux-arm64`), and copy the folder:
+On a machine without the .NET SDK, publish a self-contained `altanode` from a checkout of CodeAlta on a computer that has it, for the system of that machine (`win-x64`, `win-arm64`, `osx-arm64`, `osx-x64`, `linux-x64`, `linux-arm64`, `linux-musl-x64`, `linux-musl-arm64`), and copy the folder:
 
 ```sh
 dotnet publish src/CodeAlta.Node -c Release -r linux-x64 --self-contained -o altanode-linux-x64
@@ -27,7 +27,7 @@ dotnet publish src/CodeAlta.Node -c Release -r linux-x64 --self-contained -o alt
 
 The node uses the same profile as CodeAlta Desktop and TUI, `~/.alta`: its providers, prompts, skills and projects. Set up its providers as you would for the desktop app (see [Model Providers](model-providers/readme.md)): the sessions of a machine run with the accounts of that machine. Only one CodeAlta runs on a profile at a time, so on a computer where you also use CodeAlta Desktop, run the node only while the desktop app is closed, or give it a profile of its own with `--data-root <folder>` (a full path).
 
-The projects a session can start in on the machine are the projects of that profile. To add one, open its folder once with CodeAlta Desktop (`alta <folder>`) or CodeAlta TUI on that machine, while the node is stopped.
+The projects a session can start in on the machine are the projects of that profile: add them with `altanode projects` (see [Give it projects](#give-it-projects)).
 
 ## Run it
 
