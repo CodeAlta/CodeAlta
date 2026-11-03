@@ -93,6 +93,9 @@ internal sealed class DesktopFleet : IAsyncDisposable
     /// <summary>Gets the hosts of the paired machines, in the order they were paired.</summary>
     public IReadOnlyList<RemoteSessionHost> Hosts => Volatile.Read(ref _hosts);
 
+    /// <summary>Gets the device id of this computer, as its paired machines authenticate it.</summary>
+    public string DeviceId => Identity().DeviceId;
+
     /// <summary>Finds the host of a machine.</summary>
     /// <param name="machineId">The device id of the machine.</param>
     /// <returns>Its host; null when no paired machine has that id.</returns>

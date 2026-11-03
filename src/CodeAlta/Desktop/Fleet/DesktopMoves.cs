@@ -187,7 +187,8 @@ internal sealed class DesktopMoves
             if (sourceMachineId is null)
             {
                 var target = Host(targetMachineId!);
-                result = await Sender.MoveAsync(sessionId, moveId, Online(target).AsMoveTarget(), target.Machine.Name, clone, cancellationToken).ConfigureAwait(false);
+                result = await Sender.MoveAsync(sessionId, moveId, Online(target).AsMoveTarget(), target.Machine.Name, new SessionMoveRoute(target.Machine.DeviceId), clone,
+                    cancellationToken).ConfigureAwait(false);
             }
             else if (targetMachineId is null)
             {
@@ -305,7 +306,8 @@ internal sealed class DesktopMoves
     {
         try
         {
-            foreach (var result in await Sender.ResumeAsync(client.AsMoveTarget(), host.Machine.Name, CancellationToken.None).ConfigureAwait(false))
+            // The moves this computer gave to that machine, by its device: never those of another machine of the same name.
+            foreach (var result in await Sender.ResumeAsync(client.AsMoveTarget(), new SessionMoveRoute(host.Machine.DeviceId), CancellationToken.None).ConfigureAwait(false))
                 Log($"Move {result.MoveId} of session {result.SessionId} to {host.Machine.Name}: {result.Status}.");
 
             if (!(host.Listing.Info?.Permissions ?? host.Machine.Permissions).Contains("move")) return;
@@ -313,20 +315,9 @@ internal sealed class DesktopMoves
             foreach (var record in moves.Moves.Where(record => record.Role == SessionMoveRole.Source && !SessionMoveState.IsFinal(record.State)
                          && !_driving.ContainsKey(record.MoveId)))
             {
-                string? via = null;
-                if (string.Equals(record.ToMachine, MachineName, StringComparison.Ordinal))
-                {
-                    if (!ReceivesMoves) continue;
-                }
-                else if (_fleet.Hosts.FirstOrDefault(other => other != host && string.Equals(other.Machine.Name, record.ToMachine, StringComparison.Ordinal)) is { } relay)
-                {
-                    via = relay.MachineId;
-                    _relays[record.MoveId] = via!;
-                }
-                else
-                {
-                    continue;
-                }
+                if (!TryResumeRoute(record, _fleet.DeviceId, host.Machine.DeviceId, id => _fleet.Find(id) is not null, out var via)) continue;
+                if (via is null && !ReceivesMoves) continue;
+                if (via is not null) _relays[record.MoveId] = via;
 
                 var result = await client.StartMoveAsync(new FleetMoveStartParams(record.SessionId, record.MoveId, record.ToMachine, via)).ConfigureAwait(false);
                 if (SessionMoveState.IsFinal(result.Status)) _relays.TryRemove(record.MoveId, out _);
@@ -337,6 +328,28 @@ internal sealed class DesktopMoves
         {
             Log($"The moves with {host.Machine.Name} could not go on: {exception.Message}");
         }
+    }
+
+    /// <summary>
+    /// How this computer goes on with a move a paired machine gives and a lost connection left unfinished: as its target,
+    /// or as the relay to the paired machine the record names, by device. Only a move the machine bound to this computer
+    /// goes on, and only with the device it recorded: never with a machine chosen by its name.
+    /// </summary>
+    /// <param name="record">The source's record of the move.</param>
+    /// <param name="ownDeviceId">The device of this computer.</param>
+    /// <param name="sourceDeviceId">The device of the machine that gives the session.</param>
+    /// <param name="isPaired">Whether a device is a paired machine of this computer.</param>
+    /// <param name="via">The device this computer forwards the move to; null when it is the target.</param>
+    /// <returns>Whether this computer goes on with the move.</returns>
+    internal static bool TryResumeRoute(FleetMoveRecord record, string ownDeviceId, string sourceDeviceId, Func<string, bool> isPaired, out string? via)
+    {
+        via = null;
+        if (!string.Equals(record.ToDeviceId, ownDeviceId, StringComparison.Ordinal)) return false;
+        if (record.Via is null) return true;
+        if (string.Equals(record.Via, sourceDeviceId, StringComparison.Ordinal) || string.Equals(record.Via, ownDeviceId, StringComparison.Ordinal) || !isPaired(record.Via))
+            return false;
+        via = record.Via;
+        return true;
     }
 
     private RemoteSessionHost Host(string machineId) => _fleet.Find(machineId) ?? throw new KeyNotFoundException($"No paired machine has the id '{machineId}'.");

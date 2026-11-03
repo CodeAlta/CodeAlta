@@ -13,14 +13,14 @@ namespace CodeAlta.Fleet.Moves;
 /// <summary>
 /// The source side of the moves of a host: it gives a session to a target (<see cref="IFleetMoveTarget"/>) as a
 /// recoverable transaction. It asks the target first (a probe, before anything is frozen), then freezes the session and
-/// makes its bundle (<see cref="SessionMoveService.OfferAsync"/>), packs it into one archive, sends it in chunks from the
+/// makes its bundle (<see cref="SessionMoveService.OfferAsync(string, string, string?, SessionMoveRoute?, long, long)"/>), packs it into one archive, sends it in chunks from the
 /// length the target holds, asks the target to prepare and to commit, and ends its side by the decision of the target,
 /// the arbiter in paired mode (<see cref="SessionMoveService.CompleteSourceAsync"/>).
 /// </summary>
 /// <remarks>
 /// A lost connection never makes the source take the session back: the move stays <c>offered</c>, the session frozen,
-/// until the same move is driven again (<see cref="MoveAsync"/> with the same id), which goes on where it stopped and
-/// asks the arbiter for the outcome. Only a move the arbiter never committed is undone.
+/// until the same move is driven again (<see cref="MoveAsync"/> with the same id, through the devices it recorded), which
+/// goes on where it stopped and asks the arbiter for the outcome. Only a move the arbiter never committed is undone.
 /// </remarks>
 public sealed class FleetMoveSender
 {
@@ -81,15 +81,22 @@ public sealed class FleetMoveSender
     /// <param name="moveId">The move.</param>
     /// <param name="target">The target.</param>
     /// <param name="targetName">The name of the target, as the session will say it moved to.</param>
+    /// <param name="route">
+    /// The authenticated devices <paramref name="target"/> stands for: the target, or the relay and the device it forwards
+    /// to. A new move records it; a move that goes on must name the one it recorded (<c>move_target_mismatch</c>
+    /// otherwise), so that no other machine, of the same name or not, is ever asked to commit it.
+    /// </param>
     /// <param name="clone">Asks the target to clone the repository when it has no project of it.</param>
     /// <param name="cancellationToken">Stops the move between its steps; what was done stays recoverable.</param>
     /// <returns>The outcome (<see cref="FleetMoveResult.Status"/>).</returns>
     /// <exception cref="ArgumentException">An id is not valid.</exception>
-    public async Task<FleetMoveResult> MoveAsync(string sessionId, string moveId, IFleetMoveTarget target, string? targetName, bool clone,
+    public async Task<FleetMoveResult> MoveAsync(string sessionId, string moveId, IFleetMoveTarget target, string? targetName, SessionMoveRoute route, bool clone,
         CancellationToken cancellationToken)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
         ArgumentNullException.ThrowIfNull(target);
+        ArgumentNullException.ThrowIfNull(route);
+        ArgumentException.ThrowIfNullOrWhiteSpace(route.DeviceId, nameof(route));
         SessionMoveTransactionStore.ValidateMoveId(moveId);
         while (true)
         {
@@ -98,7 +105,7 @@ public sealed class FleetMoveSender
             {
                 try
                 {
-                    return await RunAsync(sessionId, moveId, target, targetName, clone, cancellationToken).ConfigureAwait(false);
+                    return await RunAsync(sessionId, moveId, target, targetName, route, clone, cancellationToken).ConfigureAwait(false);
                 }
                 finally
                 {
@@ -113,25 +120,27 @@ public sealed class FleetMoveSender
     }
 
     /// <summary>
-    /// Ends, by the decision of their target, the moves this machine gave to one machine and that a lost connection left
-    /// unfinished. The moves stay as they are while the target cannot say.
+    /// Ends, by the decision of their target, the moves this machine gave through one route and that a lost connection
+    /// left unfinished: those its records bind to that route's devices, never those of a machine of the same name. The
+    /// moves stay as they are while the target cannot say.
     /// </summary>
-    /// <param name="target">The target.</param>
-    /// <param name="targetName">Its name, as the records of the moves name it.</param>
+    /// <param name="target">The target, reached by <paramref name="route"/>.</param>
+    /// <param name="route">The authenticated devices <paramref name="target"/> stands for.</param>
     /// <param name="cancellationToken">Stops the recovery.</param>
     /// <returns>What each move is now.</returns>
     /// <exception cref="OperationCanceledException">The token was canceled.</exception>
-    public async Task<IReadOnlyList<FleetMoveResult>> ResumeAsync(IFleetMoveTarget target, string? targetName, CancellationToken cancellationToken)
+    public async Task<IReadOnlyList<FleetMoveResult>> ResumeAsync(IFleetMoveTarget target, SessionMoveRoute route, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(target);
+        ArgumentNullException.ThrowIfNull(route);
         var results = new List<FleetMoveResult>();
         foreach (var record in Moves.Store.ListUnfinished().Where(record => record.Role == SessionMoveRole.Source && record.State != SessionMoveState.Exporting
-                     && string.Equals(record.ToMachine, targetName, StringComparison.Ordinal)))
-            results.Add(await MoveAsync(record.SessionId, record.MoveId, target, targetName, false, cancellationToken).ConfigureAwait(false));
+                     && route.Matches(record)))
+            results.Add(await MoveAsync(record.SessionId, record.MoveId, target, record.ToMachine, route, false, cancellationToken).ConfigureAwait(false));
         return results;
     }
 
-    private async Task<FleetMoveResult> RunAsync(string sessionId, string moveId, IFleetMoveTarget target, string? targetName, bool clone,
+    private async Task<FleetMoveResult> RunAsync(string sessionId, string moveId, IFleetMoveTarget target, string? targetName, SessionMoveRoute route, bool clone,
         CancellationToken cancellationToken)
     {
         var warnings = new List<string>();
@@ -141,6 +150,10 @@ public sealed class FleetMoveSender
         if (record is not null && !string.Equals(record.SessionId, sessionId, StringComparison.OrdinalIgnoreCase))
             return Refuse("move_exists", "That move id is used by another session.");
         if (record is not null && SessionMoveState.IsFinal(record.State)) return Done(record, null);
+        // Offered to one device: only it, the arbiter in paired mode, says whether it committed, and none other is asked
+        // to take the session. A record that names no device goes on with none.
+        if (record is not null && record.State != SessionMoveState.Exporting && !route.Matches(record))
+            return Refuse("move_target_mismatch", $"The move goes on only with the machine it was offered to{(record.ToMachine is { } name ? $" ({name})" : "")}.");
 
         // A move whose export a crash interrupted was offered to no one: it begins again (SessionMoveService.OfferAsync).
         if (record is null || record.State == SessionMoveState.Exporting)
@@ -167,7 +180,8 @@ public sealed class FleetMoveSender
                 return Refuse(probe.Code, probe.Message, probe.Warnings);
             warnings.AddRange(probe.Warnings);
 
-            var offered = await Moves.OfferAsync(sessionId, moveId, targetName, CurrentEpoch(sessionId)).ConfigureAwait(false);
+            var offered = await Moves.OfferAsync(sessionId, moveId, targetName, route, CurrentEpoch(sessionId), GitSessionPayload.DefaultMaximumBytes)
+                .ConfigureAwait(false);
             warnings.AddRange(offered.Warnings);
             if (offered.Status != SessionMoveState.Offered || offered.Transaction is null)
                 return Refuse(offered.Status, offered.Warnings.FirstOrDefault(), warnings);

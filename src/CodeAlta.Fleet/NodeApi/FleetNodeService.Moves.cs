@@ -50,7 +50,9 @@ public sealed partial class FleetNodeService
         var target = new FleetMoveTargetClient(call.Caller.Connection, parameters.Via);
         var name = parameters.TargetName is { Length: > 0 and <= 128 } given ? given.Trim() : call.Device?.Name;
         LogInfo($"Device {call.Device?.Name ?? call.Caller.DeviceId} moves session {sessionId} to {name ?? "itself"} (move {moveId}).");
-        var result = await MoveSender.MoveAsync(sessionId, moveId, target, name, parameters.CloneRepository, cancellationToken).ConfigureAwait(false);
+        // The move is bound to the caller and the device it forwards to: a move that goes on is driven by them only.
+        var route = new SessionMoveRoute(call.Caller.DeviceId, parameters.Via);
+        var result = await MoveSender.MoveAsync(sessionId, moveId, target, name, route, parameters.CloneRepository, cancellationToken).ConfigureAwait(false);
         LogInfo($"Move {moveId} of session {sessionId}: {result.Status}{(result.Code is { } code ? $" ({code})" : "")}.");
         return result;
     }

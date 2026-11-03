@@ -305,7 +305,7 @@ public sealed class FleetMoveReceiver
     {
         ArgumentNullException.ThrowIfNull(record);
         return new FleetMoveRecord(record.MoveId, record.Role, record.State, record.SessionId, record.FromMachine, record.ToMachine, record.Epoch, record.WorkFolder,
-            record.Branch, record.Reason, record.UpdatedAt);
+            record.Branch, record.Reason, record.UpdatedAt, record.ToDeviceId, record.Via);
     }
 
     internal static void DeleteQuietly(string folder)

@@ -221,8 +221,24 @@ public sealed class SessionMoveService
     /// <param name="maximumPayloadBytes">The largest git payload the bundle may carry.</param>
     /// <returns><c>offered</c>, or why the session was not offered.</returns>
     /// <exception cref="ArgumentException">An argument is not valid.</exception>
-    public async Task<SessionMoveStepResult> OfferAsync(string sessionId, string moveId, string? toMachine, long epoch = 0,
+    public Task<SessionMoveStepResult> OfferAsync(string sessionId, string moveId, string? toMachine, long epoch = 0,
         long maximumPayloadBytes = GitSessionPayload.DefaultMaximumBytes)
+        => OfferAsync(sessionId, moveId, toMachine, null, epoch, maximumPayloadBytes);
+
+    /// <summary>
+    /// The source offers a session to a target it reaches by a route: it is frozen, its bundle made in
+    /// <see cref="GetBundleFolder"/>, and the move recorded as offered with that route, the only one it goes on with.
+    /// </summary>
+    /// <param name="sessionId">The session.</param>
+    /// <param name="moveId">The move.</param>
+    /// <param name="toMachine">The name of the machine the session goes to, as the session says it moved there.</param>
+    /// <param name="route">The devices the move is bound to; null records none (a move driven on this machine alone).</param>
+    /// <param name="epoch">The ownership epoch of the session on this machine.</param>
+    /// <param name="maximumPayloadBytes">The largest git payload the bundle may carry.</param>
+    /// <returns><c>offered</c>, or why the session was not offered.</returns>
+    /// <exception cref="ArgumentException">An argument is not valid.</exception>
+    public async Task<SessionMoveStepResult> OfferAsync(string sessionId, string moveId, string? toMachine, SessionMoveRoute? route, long epoch,
+        long maximumPayloadBytes)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
         var bundle = GetBundleFolder(moveId, SessionMoveRole.Source);
@@ -241,7 +257,7 @@ public sealed class SessionMoveService
             var intent = new SessionMoveTransaction
             {
                 MoveId = moveId, Role = SessionMoveRole.Source, State = SessionMoveState.Exporting, SessionId = sessionId,
-                FromMachine = MachineName, ToMachine = toMachine, Epoch = epoch + 1, BundleFolder = bundle,
+                FromMachine = MachineName, ToMachine = toMachine, ToDeviceId = route?.DeviceId, Via = route?.Via, Epoch = epoch + 1, BundleFolder = bundle,
             };
             Store.Save(intent);
             SessionBundleExportResult export;
