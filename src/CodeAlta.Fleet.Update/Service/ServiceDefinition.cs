@@ -4,10 +4,10 @@ using System.Text;
 using System.Text.RegularExpressions;
 using System.Xml.Linq;
 
-namespace CodeAlta.Node.Service;
+namespace CodeAlta.Fleet.Update.Service;
 
-/// <summary>The operating systems whose service managers <c>altanode install</c> knows.</summary>
-internal enum NodeServicePlatform
+/// <summary>The operating systems whose service managers <c>altanode install</c> and <c>altaserver install</c> know.</summary>
+public enum ServicePlatform
 {
     /// <summary>Windows: a Task Scheduler task.</summary>
     Windows,
@@ -19,8 +19,8 @@ internal enum NodeServicePlatform
     Linux,
 }
 
-/// <summary>Whom the service of a node runs as.</summary>
-internal enum NodeServiceScope
+/// <summary>Whom the service of a node or a server runs as.</summary>
+public enum ServiceScope
 {
     /// <summary>The current user, with the logins of their session (a task at logon, a LaunchAgent, a <c>systemd --user</c> unit).</summary>
     User,
@@ -29,10 +29,18 @@ internal enum NodeServiceScope
     System,
 }
 
-/// <summary>What a service of a node runs: <c>altanode run</c> with the options given at install, from a stable path.</summary>
-internal sealed record NodeServiceSpec
+/// <summary>
+/// What a service runs: <c>altanode run</c> or <c>altaserver run</c> with the options given at install, from a stable path.
+/// </summary>
+public sealed record ServiceSpec
 {
-    /// <summary>Gets the name of the service: <c>altanode</c>, <c>altanode-dev</c>, or a name of its own for another profile.</summary>
+    /// <summary>Gets the product the service runs.</summary>
+    public required UpdateProduct Product { get; init; }
+
+    /// <summary>
+    /// Gets the name of the service: <c>altanode</c>, <c>altanode-dev</c>, <c>altaserver</c>, or a name of its own for
+    /// another profile or data root (<see cref="ServiceDefinition.ServiceName"/>).
+    /// </summary>
     public required string Name { get; init; }
 
     /// <summary>Gets the executable the service starts.</summary>
@@ -48,20 +56,20 @@ internal sealed record NodeServiceSpec
     public IReadOnlyDictionary<string, string> Environment { get; init; } = new Dictionary<string, string>();
 
     /// <summary>Gets whom it runs as.</summary>
-    public NodeServiceScope Scope { get; init; } = NodeServiceScope.User;
+    public ServiceScope Scope { get; init; } = ServiceScope.User;
 
     /// <summary>Gets the account of a system service; null for a service of the user.</summary>
     public string? Account { get; init; }
 
-    /// <summary>Gets where launchd writes what the node prints on standard error before its own log opens; null for nowhere.</summary>
+    /// <summary>Gets where launchd writes what the process prints on standard error before its own log opens; null for nowhere.</summary>
     public string? StandardErrorPath { get; init; }
 }
 
 /// <summary>
-/// The definitions of the service of a node, as the service managers read them: a Task Scheduler task, a launchd property
-/// list, a systemd unit. Pure functions of a <see cref="NodeServiceSpec"/>, tested on every OS.
+/// The definitions of the service of a node or a server, as the service managers read them: a Task Scheduler task, a
+/// launchd property list, a systemd unit. Pure functions of a <see cref="ServiceSpec"/>, tested on every OS.
 /// </summary>
-internal static partial class NodeServiceDefinition
+public static partial class ServiceDefinition
 {
     /// <summary>The prefix of the launchd labels.</summary>
     public const string LaunchdLabelPrefix = "io.codealta.";
@@ -79,21 +87,50 @@ internal static partial class NodeServiceDefinition
     /// <summary>How long a service manager waits for a graceful stop: the node gives turns 30 s, then the host 15 s.</summary>
     public const int StopTimeoutSeconds = 60;
 
+    /// <summary>
+    /// The exit code of <c>altanode</c> and <c>altaserver</c> for an invalid command line, which systemd does not restart:
+    /// starting again would never fix it.
+    /// </summary>
+    public const int InvalidUsageExitCode = 2;
+
     private static readonly XNamespace TaskNamespace = "http://schemas.microsoft.com/windows/2004/02/mit/task";
 
-    /// <summary>Names the service of a profile.</summary>
-    /// <param name="stateRoot">The state root the node owns.</param>
-    /// <param name="defaultProfile">Whether the profile is <c>~/.alta</c> (no <c>--data-root</c>).</param>
-    /// <param name="developer">Whether it is the developer instance (<c>--dev</c>).</param>
-    /// <returns><c>altanode</c>, <c>altanode-dev</c>, or <c>altanode-</c> and eight hex digits of the state root for another profile.</returns>
-    public static string ServiceName(string stateRoot, bool defaultProfile, bool developer)
+    /// <summary>Gets the name of a product for a person: <c>CodeAlta Node</c>, <c>CodeAlta Server</c>.</summary>
+    /// <param name="product">The product.</param>
+    /// <returns>The name.</returns>
+    public static string DisplayName(UpdateProduct product)
     {
+        ArgumentNullException.ThrowIfNull(product);
+        return product.PackageId.Replace('.', ' ');
+    }
+
+    /// <summary>Gets what a product runs as, in one word: <c>node</c>, <c>server</c>.</summary>
+    /// <param name="product">The product.</param>
+    /// <returns>The word.</returns>
+    public static string Noun(UpdateProduct product)
+    {
+        ArgumentNullException.ThrowIfNull(product);
+        return product.PackageId[(product.PackageId.LastIndexOf('.') + 1)..].ToLowerInvariant();
+    }
+
+    /// <summary>Names the service of a profile, or of a data root.</summary>
+    /// <param name="product">The product the service runs.</param>
+    /// <param name="stateRoot">The state root the node owns, or the data root of the server.</param>
+    /// <param name="defaultProfile">Whether it is the default one (<c>~/.alta</c>, <c>~/.altaserver</c>: no <c>--data-root</c>).</param>
+    /// <param name="developer">Whether it is the developer instance of a node (<c>--dev</c>).</param>
+    /// <returns>
+    /// The command (<c>altanode</c>, <c>altaserver</c>), <c>altanode-dev</c>, or the command, <c>-</c> and eight hex digits
+    /// of the root for another one.
+    /// </returns>
+    public static string ServiceName(UpdateProduct product, string stateRoot, bool defaultProfile, bool developer)
+    {
+        ArgumentNullException.ThrowIfNull(product);
         ArgumentException.ThrowIfNullOrWhiteSpace(stateRoot);
-        if (defaultProfile) return developer ? "altanode-dev" : "altanode";
+        if (defaultProfile) return developer ? product.AssemblyName + "-dev" : product.AssemblyName;
         var normalized = Path.TrimEndingDirectorySeparator(stateRoot.Replace('\\', '/'));
         if (OperatingSystem.IsWindows() || OperatingSystem.IsMacOS()) normalized = normalized.ToLowerInvariant();
         var hash = SHA256.HashData(Encoding.UTF8.GetBytes(normalized));
-        return "altanode-" + Convert.ToHexStringLower(hash.AsSpan(0, 4));
+        return product.AssemblyName + "-" + Convert.ToHexStringLower(hash.AsSpan(0, 4));
     }
 
     /// <summary>Gets whether a text is an account name a system service can run as.</summary>
@@ -118,7 +155,7 @@ internal static partial class NodeServiceDefinition
     public static string LaunchdLabel(string name) => LaunchdLabelPrefix + name;
 
     /// <summary>
-    /// Writes the Task Scheduler task of a node: started at the logon of the user, as the user (their token, so their
+    /// Writes the Task Scheduler task of a node or a server: started at the logon of the user, as the user (their token, so their
     /// Credential Manager, ssh-agent and DPAPI keys), with the least privileges, never stopped for a time limit or a
     /// battery, started again every few minutes if it stopped (<see cref="TaskRepetition"/>), without a console window
     /// (<c>conhost.exe --headless</c>).
@@ -129,19 +166,20 @@ internal static partial class NodeServiceDefinition
     /// <param name="installedAt">When it is installed, local time: the start of the repetition.</param>
     /// <returns>The task XML, to save as UTF-16 for <c>schtasks /Create /XML</c>.</returns>
     /// <exception cref="ArgumentException">The service is not a service of the user.</exception>
-    public static string WindowsTaskXml(NodeServiceSpec spec, string userId, string conhostPath, DateTime installedAt)
+    public static string WindowsTaskXml(ServiceSpec spec, string userId, string conhostPath, DateTime installedAt)
     {
         ArgumentNullException.ThrowIfNull(spec);
         ArgumentException.ThrowIfNullOrWhiteSpace(userId);
         ArgumentException.ThrowIfNullOrWhiteSpace(conhostPath);
-        if (spec.Scope != NodeServiceScope.User) throw new ArgumentException("A task at logon runs as the user only.", nameof(spec));
+        if (spec.Scope != ServiceScope.User) throw new ArgumentException("A task at logon runs as the user only.", nameof(spec));
         var t = TaskNamespace;
+        var command = spec.Product.AssemblyName;
         var document = new XDocument(
             new XDeclaration("1.0", "UTF-16", null),
             new XElement(t + "Task", new XAttribute("version", "1.4"),
                 new XElement(t + "RegistrationInfo",
                     new XElement(t + "Author", "CodeAlta"),
-                    new XElement(t + "Description", "CodeAlta Node (altanode run), the headless CodeAlta host of this user. Written by altanode install; altanode uninstall removes it."),
+                    new XElement(t + "Description", $"{DisplayName(spec.Product)} ({command} run), {Role(spec.Product)}. Written by {command} install; {command} uninstall removes it."),
                     new XElement(t + "URI", WindowsTaskName(spec.Name))),
                 new XElement(t + "Triggers",
                     new XElement(t + "LogonTrigger",
@@ -187,13 +225,13 @@ internal static partial class NodeServiceDefinition
     }
 
     /// <summary>
-    /// Writes the launchd property list of a node: a LaunchAgent of the user (loaded in their login session, with their
+    /// Writes the launchd property list of a node or a server: a LaunchAgent of the user (loaded in their login session, with their
     /// keychain), or a LaunchDaemon with <c>UserName</c> for a system service. Started at load, started again when it
     /// fails (not after a clean stop), given a minute to stop.
     /// </summary>
     /// <param name="spec">The service.</param>
     /// <returns>The property list.</returns>
-    public static string LaunchdPlist(NodeServiceSpec spec)
+    public static string LaunchdPlist(ServiceSpec spec)
     {
         ArgumentNullException.ThrowIfNull(spec);
         var entries = new List<XElement>();
@@ -203,8 +241,8 @@ internal static partial class NodeServiceDefinition
             entries.Add(value);
         }
 
-        Add("Label", new XElement("string", LaunchdLabel(spec.Scope == NodeServiceScope.System ? SystemServiceName(spec.Name, spec.Account!) : spec.Name)));
-        if (spec.Scope == NodeServiceScope.System) Add("UserName", new XElement("string", spec.Account));
+        Add("Label", new XElement("string", LaunchdLabel(spec.Scope == ServiceScope.System ? SystemServiceName(spec.Name, spec.Account!) : spec.Name)));
+        if (spec.Scope == ServiceScope.System) Add("UserName", new XElement("string", spec.Account));
         Add("ProgramArguments", new XElement("array", new[] { spec.Executable }.Concat(spec.Arguments).Select(static argument => new XElement("string", argument))));
         Add("WorkingDirectory", new XElement("string", spec.WorkingDirectory));
         if (spec.Environment.Count > 0)
@@ -217,7 +255,7 @@ internal static partial class NodeServiceDefinition
         Add("KeepAlive", new XElement("dict", new XElement("key", "SuccessfulExit"), new XElement("false")));
         Add("ThrottleInterval", new XElement("integer", "30"));
         Add("ExitTimeOut", new XElement("integer", StopTimeoutSeconds.ToString(CultureInfo.InvariantCulture)));
-        // The node writes its own bounded log; standard error keeps what fails before it opens.
+        // The process writes its own bounded log; standard error keeps what fails before it opens.
         Add("StandardOutPath", new XElement("string", "/dev/null"));
         if (spec.StandardErrorPath is { } errorPath) Add("StandardErrorPath", new XElement("string", errorPath));
         var document = new XDocument(
@@ -228,20 +266,21 @@ internal static partial class NodeServiceDefinition
     }
 
     /// <summary>
-    /// Writes the systemd unit of a node: a <c>systemd --user</c> unit of the user, or a system unit with <c>User=</c>.
-    /// Restarted on failure (not after an invalid command line, which never fixes itself), stopped with SIGTERM to the
-    /// node alone so that it drains its turns, its log kept by the node.
+    /// Writes the systemd unit of a node or a server: a <c>systemd --user</c> unit of the user, or a system unit with
+    /// <c>User=</c>. Restarted on failure (not after an invalid command line, which never fixes itself), stopped with
+    /// SIGTERM to the main process alone so that it drains its work, its log kept by the process.
     /// </summary>
     /// <param name="spec">The service.</param>
     /// <returns>The unit.</returns>
-    public static string SystemdUnit(NodeServiceSpec spec)
+    public static string SystemdUnit(ServiceSpec spec)
     {
         ArgumentNullException.ThrowIfNull(spec);
-        var system = spec.Scope == NodeServiceScope.System;
+        var system = spec.Scope == ServiceScope.System;
+        var command = spec.Product.AssemblyName;
         var unit = new StringBuilder();
-        unit.Append("# Written by altanode install; altanode uninstall removes it.\n");
+        unit.Append("# Written by ").Append(command).Append(" install; ").Append(command).Append(" uninstall removes it.\n");
         unit.Append("[Unit]\n");
-        unit.Append("Description=CodeAlta Node (altanode)\n");
+        unit.Append("Description=").Append(DisplayName(spec.Product)).Append(" (").Append(command).Append(")\n");
         unit.Append("Documentation=https://codealta.github.io/\n");
         if (system)
         {
@@ -257,9 +296,9 @@ internal static partial class NodeServiceDefinition
         foreach (var (name, value) in spec.Environment.OrderBy(static pair => pair.Key, StringComparer.Ordinal))
             unit.Append("Environment=").Append(SystemdQuote($"{name}={value}", command: false)).Append('\n');
         unit.Append("Restart=on-failure\n");
-        // A node refused because another instance holds the profile tries again, not in a tight loop.
+        // A process refused because another instance holds the profile or the data root tries again, not in a tight loop.
         unit.Append("RestartSec=30\n");
-        unit.Append("RestartPreventExitStatus=").Append(NodeExitCodes.InvalidUsage.ToString(CultureInfo.InvariantCulture)).Append('\n');
+        unit.Append("RestartPreventExitStatus=").Append(InvalidUsageExitCode.ToString(CultureInfo.InvariantCulture)).Append('\n');
         unit.Append("KillMode=mixed\n");
         unit.Append("TimeoutStopSec=").Append(StopTimeoutSeconds.ToString(CultureInfo.InvariantCulture)).Append('\n');
         unit.Append("StandardOutput=null\n");
@@ -363,6 +402,9 @@ internal static partial class NodeServiceDefinition
     }
 
     private static string Duration(TimeSpan span) => $"PT{(int)span.TotalMinutes}M";
+
+    // What the product is to the user, after its name in the description of its task.
+    private static string Role(UpdateProduct product) => product == UpdateProduct.Server ? "the coordinator of a CodeAlta fleet" : "the headless CodeAlta host of this user";
 
     [GeneratedRegex(@"^[A-Za-z0-9_][A-Za-z0-9_.-]{0,31}$")]
     private static partial Regex AccountPattern();

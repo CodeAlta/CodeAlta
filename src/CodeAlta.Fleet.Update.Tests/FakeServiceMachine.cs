@@ -1,10 +1,10 @@
 using System.Text;
-using CodeAlta.Node.Service;
+using CodeAlta.Fleet.Update.Service;
 
-namespace CodeAlta.Node.Tests;
+namespace CodeAlta.Fleet.Update.Tests;
 
 /// <summary>
-/// A machine for <see cref="NodeServiceManager"/> that installs nothing: its folders are temporary, and the commands of
+/// A machine for <see cref="ServiceManager"/> that installs nothing (linked into the tests of altanode and altaserver): its folders are temporary, and the commands of
 /// its service managers (<c>schtasks</c>, <c>launchctl</c>, <c>systemctl</c>, <c>loginctl</c>) are recorded and answered
 /// from a small state of their own.
 /// </summary>
@@ -13,7 +13,7 @@ internal sealed class FakeServiceMachine : IDisposable
     private readonly Lock _gate = new();
     private readonly HashSet<string> _registered = new(StringComparer.Ordinal);
 
-    public FakeServiceMachine(NodeServicePlatform platform)
+    public FakeServiceMachine(ServicePlatform platform)
     {
         Platform = platform;
         Root = Path.Combine(Path.GetTempPath(), "CodeAlta-service-" + Guid.NewGuid().ToString("N"));
@@ -21,7 +21,7 @@ internal sealed class FakeServiceMachine : IDisposable
         foreach (var directory in new[] { Home, LingerDirectory, SystemUnitDirectory, LaunchDaemonDirectory, TempDirectory }) Directory.CreateDirectory(directory);
     }
 
-    public NodeServicePlatform Platform { get; }
+    public ServicePlatform Platform { get; }
 
     public string Root { get; }
 
@@ -50,13 +50,13 @@ internal sealed class FakeServiceMachine : IDisposable
     /// <summary>Gets the task XML files <c>schtasks /Create</c> was given, with the encoding they were written in.</summary>
     public List<(string Text, Encoding Encoding)> TaskFiles { get; } = [];
 
-    public NodeServiceEnvironment Environment => new()
+    public ServiceEnvironment Environment => new()
     {
         Platform = Platform,
         Home = Home,
         UserName = "alice",
-        UserDisplayName = Platform == NodeServicePlatform.Windows ? @"PC\alice" : "alice",
-        UserId = Platform == NodeServicePlatform.Windows ? "S-1-5-21-1-2-3-1001" : IsRoot ? "0" : "501",
+        UserDisplayName = Platform == ServicePlatform.Windows ? @"PC\alice" : "alice",
+        UserId = Platform == ServicePlatform.Windows ? "S-1-5-21-1-2-3-1001" : IsRoot ? "0" : "501",
         IsRoot = IsRoot,
         ConfigHome = Path.Combine(Home, ".config"),
         LingerDirectory = LingerDirectory,
@@ -64,7 +64,7 @@ internal sealed class FakeServiceMachine : IDisposable
         LaunchDaemonDirectory = LaunchDaemonDirectory,
         WindowsDirectory = @"C:\Windows",
         TempDirectory = TempDirectory,
-        ServiceVariables = Platform == NodeServicePlatform.Windows
+        ServiceVariables = Platform == ServicePlatform.Windows
             ? new Dictionary<string, string>()
             : new Dictionary<string, string> { ["PATH"] = "/home/alice/.dotnet/tools:/usr/bin:/bin", ["DOTNET_ROOT"] = "/home/alice/.dotnet" },
         Now = static () => new DateTime(2026, 11, 3, 9, 30, 42, DateTimeKind.Local),
@@ -78,7 +78,7 @@ internal sealed class FakeServiceMachine : IDisposable
         lock (_gate) return _registered.Contains(name);
     }
 
-    private NodeCommandResult Run(string fileName, IReadOnlyList<string> arguments)
+    private ServiceCommandResult Run(string fileName, IReadOnlyList<string> arguments)
     {
         lock (_gate)
         {

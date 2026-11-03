@@ -1,6 +1,8 @@
 using System.Text;
 using System.Xml.Linq;
-using CodeAlta.Node.Service;
+using CodeAlta.Fleet.Update;
+using CodeAlta.Fleet.Update.Service;
+using CodeAlta.Fleet.Update.Tests;
 
 namespace CodeAlta.Node.Tests;
 
@@ -13,8 +15,9 @@ public sealed class NodeServiceTests
 {
     private static readonly XNamespace Task = "http://schemas.microsoft.com/windows/2004/02/mit/task";
 
-    private static NodeServiceSpec Spec(NodeServiceScope scope = NodeServiceScope.User, string? account = null) => new()
+    private static ServiceSpec Spec(ServiceScope scope = ServiceScope.User, string? account = null) => new()
     {
+        Product = UpdateProduct.Node,
         Name = "altanode",
         Executable = "/home/alice/.dotnet/tools/altanode",
         Arguments = ["run", "--port", "2600", "--name", "my node"],
@@ -29,7 +32,7 @@ public sealed class NodeServiceTests
     public void WindowsTask_RunsTheNodeAtLogonAsTheUser_WithoutAWindow_AndStartsItAgain()
     {
         var spec = Spec() with { Executable = @"C:\Users\alice\.dotnet\tools\altanode.exe", WorkingDirectory = @"C:\Users\alice" };
-        var xml = NodeServiceDefinition.WindowsTaskXml(spec, "S-1-5-21-1", @"C:\Windows\System32\conhost.exe", new DateTime(2026, 11, 3, 9, 30, 0));
+        var xml = ServiceDefinition.WindowsTaskXml(spec, "S-1-5-21-1", @"C:\Windows\System32\conhost.exe", new DateTime(2026, 11, 3, 9, 30, 0));
 
         StringAssert.StartsWith(xml, "<?xml version=\"1.0\" encoding=\"UTF-16\"?>");
         var task = XDocument.Parse(xml).Root!;
@@ -52,13 +55,13 @@ public sealed class NodeServiceTests
         Assert.AreEqual(@"C:\Windows\System32\conhost.exe", exec.Element(Task + "Command")!.Value);
         Assert.AreEqual(@"--headless C:\Users\alice\.dotnet\tools\altanode.exe run --port 2600 --name ""my node""", exec.Element(Task + "Arguments")!.Value);
         Assert.AreEqual(@"C:\Users\alice", exec.Element(Task + "WorkingDirectory")!.Value);
-        Assert.ThrowsExactly<ArgumentException>(() => NodeServiceDefinition.WindowsTaskXml(Spec(NodeServiceScope.System, "svc"), "S-1", "conhost.exe", DateTime.Now));
+        Assert.ThrowsExactly<ArgumentException>(() => ServiceDefinition.WindowsTaskXml(Spec(ServiceScope.System, "svc"), "S-1", "conhost.exe", DateTime.Now));
     }
 
     [TestMethod]
     public void LaunchAgent_StartsAtLoad_RestartsOnFailure_WithThePathOfTheUser()
     {
-        var plist = NodeServiceDefinition.LaunchdPlist(Spec());
+        var plist = ServiceDefinition.LaunchdPlist(Spec());
 
         StringAssert.Contains(plist, "<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">");
         var dict = Dict(plist);
@@ -74,7 +77,7 @@ public sealed class NodeServiceTests
         CollectionAssert.AreEqual(new[] { "DOTNET_ROOT", "/home/alice/.dotnet", "PATH", "/usr/bin:/bin" }, environment.Select(static element => element.Value).ToArray());
         Assert.IsFalse(dict.ContainsKey("UserName"));
 
-        var daemon = Dict(NodeServiceDefinition.LaunchdPlist(Spec(NodeServiceScope.System, "codealta")));
+        var daemon = Dict(ServiceDefinition.LaunchdPlist(Spec(ServiceScope.System, "codealta")));
         Assert.AreEqual("io.codealta.altanode-codealta", daemon["Label"].Value);
         Assert.AreEqual("codealta", daemon["UserName"].Value);
     }
@@ -82,7 +85,7 @@ public sealed class NodeServiceTests
     [TestMethod]
     public void SystemdUnit_OfTheUser_RestartsOnFailure_AndQuotesItsWords()
     {
-        var unit = NodeServiceDefinition.SystemdUnit(Spec() with { Arguments = ["run", "--name", "50% $HOME"] });
+        var unit = ServiceDefinition.SystemdUnit(Spec() with { Arguments = ["run", "--name", "50% $HOME"] });
 
         StringAssert.Contains(unit, "\nExecStart=/home/alice/.dotnet/tools/altanode run --name \"50%% $$HOME\"\n");
         StringAssert.Contains(unit, "\nWorkingDirectory=%h\n");
@@ -95,7 +98,7 @@ public sealed class NodeServiceTests
         Assert.IsFalse(unit.Contains("User=", StringComparison.Ordinal));
         Assert.IsFalse(unit.Contains('\r', StringComparison.Ordinal));
 
-        var system = NodeServiceDefinition.SystemdUnit(Spec(NodeServiceScope.System, "codealta"));
+        var system = ServiceDefinition.SystemdUnit(Spec(ServiceScope.System, "codealta"));
         StringAssert.Contains(system, "\nUser=codealta\n");
         StringAssert.Contains(system, "\nWorkingDirectory=~\n");
         StringAssert.Contains(system, "\nAfter=network-online.target\n");
@@ -111,30 +114,30 @@ public sealed class NodeServiceTests
     [DataRow("$PATH", false, "$PATH")]
     [DataRow("", true, "\"\"")]
     public void SystemdQuote_EscapesWhatSystemdReads(string value, bool command, string expected)
-        => Assert.AreEqual(expected, NodeServiceDefinition.SystemdQuote(value, command));
+        => Assert.AreEqual(expected, ServiceDefinition.SystemdQuote(value, command));
 
     [TestMethod]
     public void WindowsCommandLine_QuotesAsCommandLineToArgvSplits()
     {
-        Assert.AreEqual(@"run --port 1", NodeServiceDefinition.WindowsCommandLine(["run", "--port", "1"]));
-        Assert.AreEqual(@"""C:\Program Files\alta\altanode.exe"" """"", NodeServiceDefinition.WindowsCommandLine([@"C:\Program Files\alta\altanode.exe", ""]));
-        Assert.AreEqual(@"""C:\my data\\""", NodeServiceDefinition.WindowsCommandLine([@"C:\my data\"]));
-        Assert.AreEqual(@"""say \""hi\"""" C:\a\b", NodeServiceDefinition.WindowsCommandLine([@"say ""hi""", @"C:\a\b"]));
+        Assert.AreEqual(@"run --port 1", ServiceDefinition.WindowsCommandLine(["run", "--port", "1"]));
+        Assert.AreEqual(@"""C:\Program Files\alta\altanode.exe"" """"", ServiceDefinition.WindowsCommandLine([@"C:\Program Files\alta\altanode.exe", ""]));
+        Assert.AreEqual(@"""C:\my data\\""", ServiceDefinition.WindowsCommandLine([@"C:\my data\"]));
+        Assert.AreEqual(@"""say \""hi\"""" C:\a\b", ServiceDefinition.WindowsCommandLine([@"say ""hi""", @"C:\a\b"]));
     }
 
     [TestMethod]
     public void ServiceName_IsOnePerProfile()
     {
-        Assert.AreEqual("altanode", NodeServiceDefinition.ServiceName("/home/alice/.alta", defaultProfile: true, developer: false));
-        Assert.AreEqual("altanode-dev", NodeServiceDefinition.ServiceName("/home/alice/.alta/dev", defaultProfile: true, developer: true));
-        var other = NodeServiceDefinition.ServiceName("/srv/node", defaultProfile: false, developer: false);
+        Assert.AreEqual("altanode", ServiceDefinition.ServiceName(UpdateProduct.Node, "/home/alice/.alta", defaultProfile: true, developer: false));
+        Assert.AreEqual("altanode-dev", ServiceDefinition.ServiceName(UpdateProduct.Node, "/home/alice/.alta/dev", defaultProfile: true, developer: true));
+        var other = ServiceDefinition.ServiceName(UpdateProduct.Node, "/srv/node", defaultProfile: false, developer: false);
         StringAssert.Matches(other, new System.Text.RegularExpressions.Regex("^altanode-[0-9a-f]{8}$"));
-        Assert.AreEqual(other, NodeServiceDefinition.ServiceName("/srv/node/", defaultProfile: false, developer: false));
-        Assert.AreNotEqual(other, NodeServiceDefinition.ServiceName("/srv/other", defaultProfile: false, developer: false));
-        Assert.IsTrue(NodeServiceDefinition.IsValidAccount("codealta"));
-        Assert.IsFalse(NodeServiceDefinition.IsValidAccount("-rf"));
-        Assert.IsFalse(NodeServiceDefinition.IsValidAccount("a b"));
-        Assert.IsFalse(NodeServiceDefinition.IsValidAccount(null));
+        Assert.AreEqual(other, ServiceDefinition.ServiceName(UpdateProduct.Node, "/srv/node/", defaultProfile: false, developer: false));
+        Assert.AreNotEqual(other, ServiceDefinition.ServiceName(UpdateProduct.Node, "/srv/other", defaultProfile: false, developer: false));
+        Assert.IsTrue(ServiceDefinition.IsValidAccount("codealta"));
+        Assert.IsFalse(ServiceDefinition.IsValidAccount("-rf"));
+        Assert.IsFalse(ServiceDefinition.IsValidAccount("a b"));
+        Assert.IsFalse(ServiceDefinition.IsValidAccount(null));
     }
 
     [TestMethod]
@@ -145,20 +148,20 @@ public sealed class NodeServiceTests
         // The paths are made with the separators of the OS that runs the test.
         bool Exists(string path) => path.Replace('\\', '/') is "/home/alice/.dotnet/tools/altanode" or "/home/alice/.dotnet/tools/.store/codealta.node";
 
-        var fromShim = NodeExecutableLocator.Locate(shim, "/any/altanode.dll", Exists)!;
-        Assert.AreEqual(NodeExecutableKind.ToolShim, fromShim.Kind);
+        var fromShim = ServiceExecutableLocator.Locate(UpdateProduct.Node, shim, "/any/altanode.dll", Exists)!;
+        Assert.AreEqual(ServiceExecutableKind.ToolShim, fromShim.Kind);
         Assert.AreEqual(shim, fromShim.Path);
-        var fromStore = NodeExecutableLocator.Locate(store, "/any/altanode.dll", Exists)!;
-        Assert.AreEqual(NodeExecutableKind.ToolShim, fromStore.Kind);
+        var fromStore = ServiceExecutableLocator.Locate(UpdateProduct.Node, store, "/any/altanode.dll", Exists)!;
+        Assert.AreEqual(ServiceExecutableKind.ToolShim, fromStore.Kind);
         Assert.AreEqual(shim, fromStore.Path.Replace('\\', '/'));
-        StringAssert.Contains(NodeExecutableLocator.Describe(fromStore), "dotnet tool update");
+        StringAssert.Contains(ServiceExecutableLocator.Describe(UpdateProduct.Node, fromStore), "dotnet tool update");
 
-        var archive = NodeExecutableLocator.Locate("/opt/altanode/altanode", "/opt/altanode/altanode.dll", Exists)!;
-        Assert.AreEqual(NodeExecutableKind.Executable, archive.Kind);
-        var dotnet = NodeExecutableLocator.Locate(@"C:\Program Files\dotnet\dotnet.exe", @"C:\src\bin\altanode.dll", Exists)!;
-        Assert.AreEqual(NodeExecutableKind.DotnetHost, dotnet.Kind);
+        var archive = ServiceExecutableLocator.Locate(UpdateProduct.Node, "/opt/altanode/altanode", "/opt/altanode/altanode.dll", Exists)!;
+        Assert.AreEqual(ServiceExecutableKind.Executable, archive.Kind);
+        var dotnet = ServiceExecutableLocator.Locate(UpdateProduct.Node, @"C:\Program Files\dotnet\dotnet.exe", @"C:\src\bin\altanode.dll", Exists)!;
+        Assert.AreEqual(ServiceExecutableKind.DotnetHost, dotnet.Kind);
         CollectionAssert.AreEqual(new[] { @"C:\src\bin\altanode.dll" }, dotnet.PrefixArguments.ToArray());
-        Assert.IsNull(NodeExecutableLocator.Locate(null, null, Exists));
+        Assert.IsNull(ServiceExecutableLocator.Locate(UpdateProduct.Node, null, null, Exists));
     }
 
     [TestMethod]
@@ -169,23 +172,23 @@ public sealed class NodeServiceTests
         var store = tools + @"\.store\codealta.node\4.0.0\codealta.node.win-x64\4.0.0\tools\net10.0\win-x64\altanode.exe";
         bool Exists(string path) => path.Replace('\\', '/') is "C:/Users/alice/.dotnet/tools/altanode.cmd" or "C:/Users/alice/.dotnet/tools/.store/codealta.node";
 
-        var fromStore = NodeExecutableLocator.Locate(store, @"C:\any\altanode.dll", Exists)!;
-        Assert.AreEqual(NodeExecutableKind.ToolShim, fromStore.Kind);
+        var fromStore = ServiceExecutableLocator.Locate(UpdateProduct.Node, store, @"C:\any\altanode.dll", Exists)!;
+        Assert.AreEqual(ServiceExecutableKind.ToolShim, fromStore.Kind);
         Assert.AreEqual("C:/Users/alice/.dotnet/tools/altanode.cmd", fromStore.Path.Replace('\\', '/'));
         Assert.AreEqual(0, fromStore.PrefixArguments.Count);
-        StringAssert.Contains(NodeExecutableLocator.Describe(fromStore), "dotnet tool update");
+        StringAssert.Contains(ServiceExecutableLocator.Describe(UpdateProduct.Node, fromStore), "dotnet tool update");
 
         // The app host shim of an older tool keeps its name.
         bool ExistsExe(string path) => path.Replace('\\', '/') is "C:/Users/alice/.dotnet/tools/altanode.exe" or "C:/Users/alice/.dotnet/tools/altanode.cmd";
-        Assert.AreEqual("C:/Users/alice/.dotnet/tools/altanode.exe", NodeExecutableLocator.Locate(store, null, ExistsExe)!.Path.Replace('\\', '/'));
+        Assert.AreEqual("C:/Users/alice/.dotnet/tools/altanode.exe", ServiceExecutableLocator.Locate(UpdateProduct.Node, store, null, ExistsExe)!.Path.Replace('\\', '/'));
     }
 
     [TestMethod]
     public void Windows_StartsTheCmdShimHeadless_AndRefusesWhatCmdCannotPass()
     {
-        using var machine = new FakeServiceMachine(NodeServicePlatform.Windows);
-        var manager = new NodeServiceManager(machine.Environment);
-        var shim = new NodeExecutable(NodeExecutableKind.ToolShim, @"C:\Users\alice\.dotnet\tools\altanode.cmd", []);
+        using var machine = new FakeServiceMachine(ServicePlatform.Windows);
+        var manager = new ServiceManager(machine.Environment);
+        var shim = new ServiceExecutable(ServiceExecutableKind.ToolShim, @"C:\Users\alice\.dotnet\tools\altanode.cmd", []);
         var plan = manager.Plan(Request(machine) with { Executable = shim, RunArguments = ["run", "--port", "2600", "--name", "R&D (lab) box"] });
         var exec = XDocument.Parse(plan.Definition).Root!.Element(Task + "Actions")!.Element(Task + "Exec")!;
         Assert.AreEqual(@"C:\Windows\System32\conhost.exe", exec.Element(Task + "Command")!.Value);
@@ -194,11 +197,11 @@ public sealed class NodeServiceTests
 
         foreach (var name in new[] { "a&b", "a|b", "a^b", "a<b", "50%", "50% off", "say \"hi\"", "a\nb" })
         {
-            var refused = Assert.ThrowsExactly<NodeServiceException>(() => manager.Plan(Request(machine) with { Executable = shim, RunArguments = ["run", "--name", name] }), name);
+            var refused = Assert.ThrowsExactly<ServiceException>(() => manager.Plan(Request(machine) with { Executable = shim, RunArguments = ["run", "--name", name] }), name);
             StringAssert.Contains(refused.Message, "altanode.cmd");
         }
 
-        var refusedPath = Assert.ThrowsExactly<NodeServiceException>(() => manager.Plan(Request(machine) with
+        var refusedPath = Assert.ThrowsExactly<ServiceException>(() => manager.Plan(Request(machine) with
         {
             Executable = shim with { Path = @"C:\Users\R&D\.dotnet\tools\altanode.cmd" },
         }));
@@ -206,21 +209,21 @@ public sealed class NodeServiceTests
         // An executable is started directly: cmd.exe never reads its arguments.
         Assert.IsNotNull(manager.Plan(Request(machine) with
         {
-            Executable = new NodeExecutable(NodeExecutableKind.Executable, @"C:\altanode\altanode.exe", []), RunArguments = ["run", "--name", "50%&more"],
+            Executable = new ServiceExecutable(ServiceExecutableKind.Executable, @"C:\altanode\altanode.exe", []), RunArguments = ["run", "--name", "50%&more"],
         }));
     }
 
     [TestMethod]
     public void Linux_InstallsAUserUnit_TurnsLingeringOn_AndRemovesIt()
     {
-        using var machine = new FakeServiceMachine(NodeServicePlatform.Linux);
-        var manager = new NodeServiceManager(machine.Environment);
+        using var machine = new FakeServiceMachine(ServicePlatform.Linux);
+        var manager = new ServiceManager(machine.Environment);
         var plan = manager.Plan(Request(machine));
         var unitPath = Path.Combine(machine.Home, ".config", "systemd", "user", "altanode.service");
         Assert.AreEqual(unitPath, plan.DefinitionPath);
         var before = manager.Query(plan);
         Assert.IsFalse(before.Installed);
-        StringAssert.Contains(string.Join('\n', NodeServiceManager.Describe(before)), "not installed");
+        StringAssert.Contains(string.Join('\n', ServiceManager.Describe(before)), "not installed");
 
         var output = new StringWriter();
         Assert.AreEqual(NodeExitCodes.Success, manager.Install(plan, output, new StringWriter()));
@@ -235,7 +238,7 @@ public sealed class NodeServiceTests
         Assert.IsTrue(installed.Installed);
         Assert.IsTrue(installed.Enabled);
         Assert.IsTrue(installed.Lingering);
-        var answer = string.Join('\n', NodeServiceManager.Describe(installed));
+        var answer = string.Join('\n', ServiceManager.Describe(installed));
         StringAssert.Contains(answer, "After a restart: it starts at boot, without a login");
         StringAssert.Contains(answer, "After a logout: it keeps running.");
 
@@ -253,15 +256,15 @@ public sealed class NodeServiceTests
     [TestMethod]
     public void Linux_WithoutTheRightToLinger_SaysWhatToRun()
     {
-        using var machine = new FakeServiceMachine(NodeServicePlatform.Linux) { LingerAllowed = false };
-        var manager = new NodeServiceManager(machine.Environment);
+        using var machine = new FakeServiceMachine(ServicePlatform.Linux) { LingerAllowed = false };
+        var manager = new ServiceManager(machine.Environment);
         var plan = manager.Plan(Request(machine));
         var output = new StringWriter();
 
         Assert.AreEqual(NodeExitCodes.Success, manager.Install(plan, output, new StringWriter()));
 
         StringAssert.Contains(output.ToString(), "sudo loginctl enable-linger alice");
-        var answer = string.Join('\n', NodeServiceManager.Describe(manager.Query(plan)));
+        var answer = string.Join('\n', ServiceManager.Describe(manager.Query(plan)));
         StringAssert.Contains(answer, "After a restart: it waits until alice logs in");
         StringAssert.Contains(answer, "After a logout: it stops once the last session of alice ends");
     }
@@ -269,29 +272,29 @@ public sealed class NodeServiceTests
     [TestMethod]
     public void Linux_SystemUnit_NeedsRoot_AndAnAccount()
     {
-        using var machine = new FakeServiceMachine(NodeServicePlatform.Linux);
-        var system = Request(machine) with { Scope = NodeServiceScope.System, Account = "codealta", StateRoot = null };
-        var refused = Assert.ThrowsExactly<NodeServiceException>(() => new NodeServiceManager(machine.Environment).Plan(system));
+        using var machine = new FakeServiceMachine(ServicePlatform.Linux);
+        var system = Request(machine) with { Scope = ServiceScope.System, Account = "codealta", StateRoot = null };
+        var refused = Assert.ThrowsExactly<ServiceException>(() => new ServiceManager(machine.Environment).Plan(system));
         StringAssert.Contains(refused.Message, "sudo");
 
         machine.IsRoot = true;
-        var manager = new NodeServiceManager(machine.Environment);
-        Assert.ThrowsExactly<NodeServiceException>(() => manager.Plan(system with { Account = "nobody-here" }));
+        var manager = new ServiceManager(machine.Environment);
+        Assert.ThrowsExactly<ServiceException>(() => manager.Plan(system with { Account = "nobody-here" }));
         var plan = manager.Plan(system);
         Assert.AreEqual(Path.Combine(machine.SystemUnitDirectory, "altanode-codealta.service"), plan.DefinitionPath);
         Assert.AreEqual(NodeExitCodes.Success, manager.Install(plan, new StringWriter(), new StringWriter()));
         StringAssert.Contains(File.ReadAllText(plan.DefinitionPath), "\nUser=codealta\n");
         CollectionAssert.AreEqual(new[] { "systemctl daemon-reload", "systemctl enable altanode-codealta.service", "systemctl restart altanode-codealta.service" },
             machine.Commands);
-        var answer = string.Join('\n', NodeServiceManager.Describe(manager.Query(plan)));
+        var answer = string.Join('\n', ServiceManager.Describe(manager.Query(plan)));
         StringAssert.Contains(answer, "After a restart: it starts at boot as codealta, without a login.");
     }
 
     [TestMethod]
     public void MacOS_InstallsALaunchAgent_InTheGuiDomainOfTheUser()
     {
-        using var machine = new FakeServiceMachine(NodeServicePlatform.MacOS) { AutoLoginUser = "alice" };
-        var manager = new NodeServiceManager(machine.Environment);
+        using var machine = new FakeServiceMachine(ServicePlatform.MacOS) { AutoLoginUser = "alice" };
+        var manager = new ServiceManager(machine.Environment);
         var plan = manager.Plan(Request(machine));
         var plistPath = Path.Combine(machine.Home, "Library", "LaunchAgents", "io.codealta.altanode.plist");
         Assert.AreEqual(plistPath, plan.DefinitionPath);
@@ -303,7 +306,7 @@ public sealed class NodeServiceTests
         {
             "launchctl bootout gui/501/io.codealta.altanode", "launchctl enable gui/501/io.codealta.altanode", $"launchctl bootstrap gui/501 {plistPath}",
         }, machine.Commands);
-        var answer = string.Join('\n', NodeServiceManager.Describe(manager.Query(plan)));
+        var answer = string.Join('\n', ServiceManager.Describe(manager.Query(plan)));
         StringAssert.Contains(answer, "a LaunchAgent of alice");
         StringAssert.Contains(answer, "it starts when macOS logs alice in, which it does automatically");
         StringAssert.Contains(answer, "After a logout: it stops with the session");
@@ -315,10 +318,10 @@ public sealed class NodeServiceTests
     [TestMethod]
     public void Windows_RegistersATaskFromAUtf16File_DeletesTheFile_AndRefusesASystemService()
     {
-        using var machine = new FakeServiceMachine(NodeServicePlatform.Windows);
-        var manager = new NodeServiceManager(machine.Environment);
-        var plan = manager.Plan(Request(machine) with { Executable = new NodeExecutable(NodeExecutableKind.ToolShim, @"C:\Users\alice\.dotnet\tools\altanode.exe", []) });
-        Assert.IsTrue(plan.LeavesNodeRunning, "Task Scheduler ends conhost, not the node: uninstall stops it.");
+        using var machine = new FakeServiceMachine(ServicePlatform.Windows);
+        var manager = new ServiceManager(machine.Environment);
+        var plan = manager.Plan(Request(machine) with { Executable = new ServiceExecutable(ServiceExecutableKind.ToolShim, @"C:\Users\alice\.dotnet\tools\altanode.exe", []) });
+        Assert.IsTrue(plan.LeavesProcessRunning, "Task Scheduler ends conhost, not the node: uninstall stops it.");
 
         Assert.AreEqual(NodeExitCodes.Success, manager.Install(plan, new StringWriter(), new StringWriter()));
 
@@ -328,32 +331,33 @@ public sealed class NodeServiceTests
         StringAssert.Contains(text, @"<Command>C:\Windows\System32\conhost.exe</Command>");
         Assert.IsFalse(File.Exists(plan.DefinitionPath), "The task XML is given to schtasks, then deleted.");
         Assert.AreEqual($@"schtasks /Run /TN \CodeAlta\altanode", machine.Commands[^1]);
-        var answer = string.Join('\n', NodeServiceManager.Describe(manager.Query(plan)));
+        var answer = string.Join('\n', ServiceManager.Describe(manager.Query(plan)));
         StringAssert.Contains(answer, @"a task at logon of PC\alice");
         StringAssert.Contains(answer, @"it waits until PC\alice signs in");
 
         Assert.AreEqual(NodeExitCodes.Success, manager.Uninstall(plan, new StringWriter(), new StringWriter()));
         Assert.IsFalse(machine.IsRegistered(@"\CodeAlta\altanode"));
-        var refused = Assert.ThrowsExactly<NodeServiceException>(() => manager.Plan(Request(machine) with { Scope = NodeServiceScope.System, Account = "codealta" }));
+        var refused = Assert.ThrowsExactly<ServiceException>(() => manager.Plan(Request(machine) with { Scope = ServiceScope.System, Account = "codealta" }));
         StringAssert.Contains(refused.Message, "not available on Windows");
     }
 
     [TestMethod]
     public void Describe_SaysWhenTheServiceWillNotStart()
     {
-        var disabled = new NodeServiceFacts(NodeServicePlatform.Windows, NodeServiceScope.User, "a task", @"\CodeAlta\altanode", "alice", true, false, null, null);
-        StringAssert.Contains(NodeServiceManager.Describe(disabled)[0], "the task is disabled");
+        var disabled = new ServiceFacts(UpdateProduct.Node, ServicePlatform.Windows, ServiceScope.User, "a task", @"\CodeAlta\altanode", "alice", true, false, null, null);
+        StringAssert.Contains(ServiceManager.Describe(disabled)[0], "the task is disabled");
         var autoLogin = disabled with { Enabled = true, AutoLoginUser = "alice", User = @"PC\alice" };
-        StringAssert.Contains(NodeServiceManager.Describe(autoLogin)[1], "which it does automatically");
-        Assert.IsTrue(NodeServiceManager.IsTaskEnabled("<Task><Settings><Enabled>true</Enabled></Settings></Task>"));
-        Assert.IsFalse(NodeServiceManager.IsTaskEnabled("<Task xmlns=\"x\"><Settings><Enabled>false</Enabled></Settings></Task>"));
-        Assert.IsFalse(NodeServiceManager.IsTaskEnabled("not xml"));
+        StringAssert.Contains(ServiceManager.Describe(autoLogin)[1], "which it does automatically");
+        Assert.IsTrue(ServiceManager.IsTaskEnabled("<Task><Settings><Enabled>true</Enabled></Settings></Task>"));
+        Assert.IsFalse(ServiceManager.IsTaskEnabled("<Task xmlns=\"x\"><Settings><Enabled>false</Enabled></Settings></Task>"));
+        Assert.IsFalse(ServiceManager.IsTaskEnabled("not xml"));
     }
 
-    private static NodeServiceRequest Request(FakeServiceMachine machine) => new()
+    private static ServiceRequest Request(FakeServiceMachine machine) => new()
     {
+        Product = UpdateProduct.Node,
         Name = "altanode",
-        Executable = new NodeExecutable(NodeExecutableKind.ToolShim, "/home/alice/.dotnet/tools/altanode", []),
+        Executable = new ServiceExecutable(ServiceExecutableKind.ToolShim, "/home/alice/.dotnet/tools/altanode", []),
         RunArguments = ["run", "--port", "2600"],
         StateRoot = Path.Combine(machine.Home, ".alta"),
     };
