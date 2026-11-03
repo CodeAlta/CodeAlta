@@ -42,6 +42,8 @@ script_args = '{"limit": 10}'
 
 An agent creates one with `alta automation create --name "PR review" --trigger pull_request@opened --script review-pr`, and gives the arguments with `--script-args '{"lenses": ["security"]}'`. The script and its arguments are checked as a run checks them.
 
+An automation an agent creates is disabled, and an agent enables none: what runs by itself is turned on by you, in the **Automations** tab. An agent can still run one now, disable or delete one.
+
 ## What its sessions run with
 
 **Runs with** is the [Agent chip](workspace/prompt.md#agent-and-model) of the prompt: click it for the same form, with the agent prompt, the provider, the model, the reasoning effort, the [permission mode](workspace/prompt.md#permission-modes), [review before commit](reviews.md#review-before-commit) and the [sandbox](sessions/sandbox.md).
@@ -116,7 +118,7 @@ triggers = [
 - What was due while CodeAlta was closed is skipped. Turn on **Catch up on what was missed while CodeAlta was closed** in an automation to run it at the next start.
 - An automation is stored in **My configuration** (`~/.alta/config.toml`) or in **The project** (`.alta/config.toml` of its folder), which you can commit to share it with your team.
 - An automation that came with a project, written by someone else, waits until you read its prompt and click **Allow**. It asks again when its prompt, triggers or what its sessions run with change, including the command of a trigger.
-- An agent can list, create and run automations. Ask in your own words, for example:
+- An agent can list, create and run automations; one it creates waits, disabled, until you enable it. Ask in your own words, for example:
 
 ```text
 Create an automation that reviews the open pull requests every morning at 9.

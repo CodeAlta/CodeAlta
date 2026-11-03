@@ -40,6 +40,7 @@ internal sealed partial class BuiltInAltaCommandContributor
             group,
             "An automation has a name, a prompt and triggers; each run starts a new session in its project, or a chat, and sends it the prompt. It is kept in the configuration of the user or of its project, so it outlives this session, unlike a reminder.",
             "A session started by an automation finds it with `alta automation current`. Such a session reads the automations; it does not run, create, enable, disable or delete one.",
+            "What runs unattended is enabled by a person: an automation an agent creates is disabled, and an agent enables none (`automation.needsPerson`). The user enables it in the Automations tab. An agent still runs one by hand, disables or deletes one.",
             "With Sessions created by agents set to Same as the session that creates them, a session whose actions are reviewed cannot create, enable or run an automation (`automation.permissionDenied`): its future sessions do not retain the caller's permission mode. The user does this in the Automations tab.",
             "`allowed` is false for an automation that came with the repository of a project and that the user has not allowed yet in the Automations tab: its triggers start nothing until then. Only the user allows it.",
             "Triggers: `daily@09:00` (several times: `daily@09:00,17:30`), `hourly@15` (minute 15; every 2 hours: `hourly@15/2`), `weekly@mon,thu@08:30`, `cron@0 9 * * 1-5` (local time), `issue@opened`, `pull_request@opened`, `pull_request@updated` (new commits), `jira@created`, `jira@updated` (an issue of the Jira project of the project, when its configuration names one). No trigger: run it with `alta automation run`.",
@@ -116,7 +117,7 @@ internal sealed partial class BuiltInAltaCommandContributor
         command.Add("store=", "Where it is written: `user` (default, the configuration of the user) or `project` (the .alta/config.toml of its project, shared with the repository).", value => options.Store = value);
         command.Add("model=", "Model ref `provider[:model][@effort]`. Defaults to the default provider and its first model.", value => options.Model = value);
         command.Add("agent=", "Agent prompt id. Defaults to the default one.", value => options.Agent = value);
-        command.Add("disabled", "Create it with its triggers disabled.", value => options.Disabled = value is not null);
+        command.Add("disabled", "Create it with its triggers disabled. An automation an agent creates is always disabled: a person enables it.", value => options.Disabled = value is not null);
         command.Add("catch-up", "Run what was missed while CodeAlta was closed: once for a schedule, and for each issue or pull request of a trigger.", value => options.CatchUp = value is not null);
         command.Add(async (_, _) => await HandleAutomationCreateAsync(context, options).ConfigureAwait(false));
         AddHelpText(
@@ -130,7 +131,7 @@ internal sealed partial class BuiltInAltaCommandContributor
     {
         string? id = null;
         var command = enable
-            ? Leaf("enable", "Enable the triggers of an automation.")
+            ? Leaf("enable", "Enable the triggers of an automation. Refused to an agent (`automation.needsPerson`): a person enables it in the Automations tab.")
             : Leaf("disable", "Disable the triggers of an automation. It can still be run with `alta automation run`.");
         command.Add("<automation-id>", "Automation id from `alta automation list`.", value => id = value);
         command.Add(async (_, _) => await HandleAutomationChangeAsync(context, id, enable ? "enable" : "disable",
@@ -472,7 +473,8 @@ internal sealed partial class BuiltInAltaCommandContributor
             StoreInProject = store == "project",
             Model = NormalizeOptionalText(options.Model),
             Agent = NormalizeOptionalText(options.Agent),
-            Enabled = !options.Disabled,
+            // What would run unattended stays disabled until a person enables it (doc/fleet/access-control.md).
+            Enabled = !options.Disabled && !IsSessionCaller(context),
             CatchUp = options.CatchUp,
             Triggers = triggers,
         }, context.CancellationToken).ConfigureAwait(false);
@@ -486,7 +488,8 @@ internal sealed partial class BuiltInAltaCommandContributor
             return UsageError(context, "automation.refused", change.Message ?? "The automation was not created.", "alta automation create");
         }
 
-        AltaJsonlWriter.WriteRecord(context.Stdout, AutomationRecord(context, "alta.automation.created", created, prompt: false));
+        AltaJsonlWriter.WriteRecord(context.Stdout, AutomationRecord(context, "alta.automation.created", created, prompt: false,
+            IsSessionCaller(context) ? "It is disabled: what runs unattended is enabled by a person. A person enables it in the Automations tab; `alta automation run <id>` runs it once meanwhile." : null));
         return AltaExitCodes.Success;
     }
 
@@ -531,6 +534,13 @@ internal sealed partial class BuiltInAltaCommandContributor
 
         if (verb == "enable" && !AcceptsAutomationPrompt(context)) return AutomationPermissionDenied(context);
 
+        // What would run unattended is enabled by a person, never by an agent (doc/fleet/access-control.md).
+        if (verb == "enable" && IsSessionCaller(context))
+        {
+            return PermissionDenied(context, "automation.needsPerson",
+                $"Automation '{automation.Name}' runs by itself once enabled: a person enables it, in the Automations tab. Tell the user it waits for them; `alta automation run {automation.Id}` runs it once meanwhile.");
+        }
+
         var result = await change(automations, automation.Id).ConfigureAwait(false);
         if (result.Status == "not_found")
         {
@@ -572,7 +582,10 @@ internal sealed partial class BuiltInAltaCommandContributor
     private static int AutomationNotFound(AltaCommandContext context, string id)
         => NotFound(context, "automation.notFound", $"Automation '{id}' was not found. List the automations with `alta automation list`.");
 
-    private static object AutomationRecord(AltaCommandContext context, string type, AltaAutomation automation, bool prompt) => new
+    // A caller that is a session is an agent; a person calls from no session (the window, the command line).
+    private static bool IsSessionCaller(AltaCommandContext context) => NormalizeOptionalText(context.Caller.SourceSessionId) is not null;
+
+    private static object AutomationRecord(AltaCommandContext context, string type, AltaAutomation automation, bool prompt, string? note = null) => new
     {
         type,
         version = 1,
@@ -593,6 +606,7 @@ internal sealed partial class BuiltInAltaCommandContributor
         file = automation.File,
         script = automation.Script,
         prompt = prompt && automation.Script is null ? automation.Prompt : null,
+        note,
     };
 
     private static object AutomationRunRecord(AltaCommandContext context, AltaAutomationRun run) => new

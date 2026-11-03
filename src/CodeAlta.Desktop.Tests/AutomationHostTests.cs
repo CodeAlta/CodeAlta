@@ -261,10 +261,13 @@ public sealed class AutomationHostTests
             "--model", "codex:gpt@low", "--catch-up", "--content", "Review what changed today.");
         var id = Text(created, "id")!;
         Assert.IsTrue(AutomationDefinition.IsId(id));
-        Assert.AreEqual(("Nightly review", "True", "project", fixture.Project.Id, fixture.GlobalPath, "codex:gpt@low"),
+        // An agent creates it disabled: a person enables it.
+        Assert.AreEqual(("Nightly review", "False", "project", fixture.Project.Id, fixture.GlobalPath, "codex:gpt@low"),
             (Text(created, "name"), Text(created, "enabled"), Text(created, "runsIn"), Text(created, "projectId"), Text(created, "file"), Text(created, "model")));
         CollectionAssert.AreEqual(new[] { "daily@23:00", "issue@opened+anyone" }, created.GetProperty("triggers").EnumerateArray().Select(static value => value.GetString()).ToArray());
-        Assert.AreEqual(Noon.AddHours(11), created.GetProperty("nextRunAt").GetDateTimeOffset());
+        Assert.IsFalse(created.TryGetProperty("nextRunAt", out var due) && due.ValueKind != JsonValueKind.Null, "A disabled automation is not due.");
+        Assert.AreEqual(AltaExitCodes.Success, (await fixture.Run(["automation", "enable", id], caller: AltaCallerIdentity.Cli)).Code);
+        Assert.AreEqual(Noon.AddHours(11), (await fixture.One("alta.automation", "automation", "show", id)).GetProperty("nextRunAt").GetDateTimeOffset());
         Assert.IsTrue(fixture.Service.Snapshot.Find(id)!.Definition.CatchUp);
 
         // In the file of its project, from stdin, disabled, as a chat.
@@ -364,7 +367,9 @@ public sealed class AutomationHostTests
         var disabled = await fixture.One("alta.automation.changed", "automation", "disable", id);
         Assert.AreEqual((id, "False"), (Text(disabled, "id"), Text(disabled, "enabled")));
         Assert.IsFalse(fixture.Service.Snapshot.Find(id)!.Definition.Enabled);
-        Assert.AreEqual("True", Text(await fixture.One("alta.automation.changed", "automation", "enable", id), "enabled"));
+        StringAssert.Contains((await fixture.Run(["automation", "enable", id])).Text, "automation.needsPerson", "An agent enables none.");
+        var enabled = await fixture.Run(["automation", "enable", id], caller: AltaCallerIdentity.Cli);
+        Assert.AreEqual("True", Text(Of(enabled.Records, "alta.automation.changed").Single(), "enabled"));
         Assert.IsTrue(fixture.Service.Snapshot.Find(shared) is { Definition.Enabled: false }, "Another automation is not touched.");
 
         Assert.AreEqual(id, Text(await fixture.One("alta.automation.deleted", "automation", "delete", id), "id"));
@@ -447,7 +452,7 @@ public sealed class AutomationHostTests
         var id = (await review.Rpc.SaveAsync(new(Epoch, input, null), default)).Id!;
         var enable = await review.Run(["automation", "enable", id]);
         Assert.AreEqual(AltaExitCodes.PolicyDenied, enable.Code, enable.Text);
-        StringAssert.Contains(enable.Text, "automation.commandDenied");
+        StringAssert.Contains(enable.Text, "automation.needsPerson", "An agent enables none, a command trigger or not.");
         Assert.IsFalse(review.Service.Snapshot.Find(id)!.Definition.Enabled);
         Assert.AreEqual("ok", (await review.Rpc.SetEnabledAsync(new(Epoch, id, true), default)).Status);
         review.Service.Tick(Noon);
@@ -480,8 +485,12 @@ public sealed class AutomationHostTests
         Assert.AreEqual(AltaExitCodes.PolicyDenied, enable.Code, enable.Text);
         StringAssert.Contains(enable.Text, "automation.commandDenied");
         Assert.IsFalse(fixture.Service.Snapshot.Find(id)!.Definition.Enabled);
+        // Another session passes the review of its commands, and is told a person enables it: a person does.
         var other = new AltaCallerIdentity { Kind = "agent", SourceSessionId = "another-session", SourceProjectId = fixture.Project.Id };
-        Assert.AreEqual(AltaExitCodes.Success, (await fixture.Run(["automation", "enable", id], caller: other)).Code);
+        var byOther = await fixture.Run(["automation", "enable", id], caller: other);
+        Assert.AreEqual(AltaExitCodes.PolicyDenied, byOther.Code, byOther.Text);
+        StringAssert.Contains(byOther.Text, "automation.needsPerson");
+        Assert.AreEqual(AltaExitCodes.Success, (await fixture.Run(["automation", "enable", id], caller: AltaCallerIdentity.Cli)).Code);
         Assert.IsTrue(fixture.Service.Snapshot.Find(id)!.Definition.Enabled);
         Assert.AreEqual("False", Text(await fixture.One("alta.automation.changed", "automation", "disable", id), "enabled"));
     }
@@ -533,7 +542,19 @@ public sealed class AutomationHostTests
             var created = await fixture.Run(["automation", "create", "--name", "Compatible", "--chat", "--disabled", "--trigger", "daily@09:00", "--content", "Work."], caller: caller);
             Assert.AreEqual(AltaExitCodes.Success, created.Code, created.Text);
             var id = Text(Of(created.Records, "alta.automation.created").Single(), "id")!;
-            Assert.AreEqual(AltaExitCodes.Success, (await fixture.Run(["automation", "enable", id], caller: caller)).Code);
+            var enable = await fixture.Run(["automation", "enable", id], caller: caller);
+            if (noSession)
+            {
+                Assert.AreEqual(AltaExitCodes.Success, enable.Code, enable.Text);
+            }
+            else
+            {
+                // An agent enables none, whatever its mode: a person does.
+                Assert.AreEqual(AltaExitCodes.PolicyDenied, enable.Code, enable.Text);
+                StringAssert.Contains(enable.Text, "automation.needsPerson");
+                Assert.AreEqual("ok", (await fixture.Rpc.SetEnabledAsync(new(Epoch, id, true), default)).Status);
+            }
+
             // Reaching a deliberately refusing fake proves admission without executing a session or command.
             fixture.Runner.Refuse = "Controlled runner refusal.";
             var run = await fixture.Run(["automation", "run", id], caller: caller);
@@ -542,6 +563,36 @@ public sealed class AutomationHostTests
             Assert.AreEqual(1, fixture.Runner.Starts.Count);
             Assert.AreEqual(0, fixture.Commands.Count);
         }, sessionPermissionModes: modes, inherit: () => inherit, review: () => review);
+
+    [TestMethod]
+    public Task AnAgent_CreatesAnAutomationDisabled_AndEnablesNone_APersonEnablesIt()
+        => WithPermissionCallerAsync(SessionPermissionModes.Bypass, async (fixture, host, caller) =>
+        {
+            // What would run unattended stays disabled until a person enables it (doc/fleet/access-control.md), even for a
+            // session that bypasses permissions.
+            var created = await fixture.Run(["automation", "create", "--name", "Nightly", "--chat", "--trigger", "daily@23:00", "--content", "Work."], caller: caller);
+            Assert.AreEqual(AltaExitCodes.Success, created.Code, created.Text);
+            var record = Of(created.Records, "alta.automation.created").Single();
+            var id = Text(record, "id")!;
+            Assert.AreEqual("False", Text(record, "enabled"));
+            StringAssert.Contains(Text(record, "note"), "A person enables it");
+            Assert.IsFalse(fixture.Service.Snapshot.Find(id)!.Definition.Enabled);
+
+            var enable = await fixture.Run(["automation", "enable", id], caller: caller);
+            Assert.AreEqual(AltaExitCodes.PolicyDenied, enable.Code, enable.Text);
+            StringAssert.Contains(enable.Text, "automation.needsPerson");
+            Assert.IsFalse(fixture.Service.Snapshot.Find(id)!.Definition.Enabled, "Nothing is enabled.");
+
+            // The person enables it: from the window, or with alta from no session.
+            Assert.AreEqual("ok", (await fixture.Rpc.SetEnabledAsync(new(Epoch, id, true), default)).Status);
+            Assert.IsTrue(fixture.Service.Snapshot.Find(id)!.Definition.Enabled);
+            Assert.AreEqual(AltaExitCodes.Success, (await fixture.Run(["automation", "disable", id], caller: caller)).Code, "An agent still disables one.");
+            Assert.AreEqual(AltaExitCodes.Success, (await fixture.Run(["automation", "enable", id], caller: AltaCallerIdentity.Cli)).Code);
+            Assert.IsTrue(fixture.Service.Snapshot.Find(id)!.Definition.Enabled);
+            var byPerson = await fixture.Run(["automation", "create", "--name", "By the person", "--chat", "--trigger", "daily@09:00", "--content", "Work."], caller: AltaCallerIdentity.Cli);
+            Assert.AreEqual("True", Text(Of(byPerson.Records, "alta.automation.created").Single(), "enabled"));
+            Assert.AreEqual(0, fixture.Runner.Starts.Count);
+        });
 
     [TestMethod]
     public Task WhatASessionCanUse_ListsThePluginsOfItsSpaceThatAreTurnedOn_AlsoWhenNoPluginRuns()
