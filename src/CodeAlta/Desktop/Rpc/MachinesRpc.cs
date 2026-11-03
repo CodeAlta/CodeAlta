@@ -324,7 +324,9 @@ internal sealed class MachinesService
         return new MachineView(machine.DeviceId, listing.Info?.Name ?? machine.Name, RemoteSessionHost.Describe(host.State), listing.Info?.Os, listing.Info?.Version,
             machine.Addresses.FirstOrDefault(), string.Join(' ', display.Split(' ').Take(2)), machine.Fingerprint.ToShortWords(), listing.Sessions.Count,
             host.LastSeen?.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture), host.State == RemoteMachineState.Online ? null : host.Problem,
-            [.. machine.Permissions], machine.PairedAt.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture));
+            // What the machine says this device may do, once it said it: a machine reached through a server only grants what its node decides.
+            [.. listing.Info?.Permissions ?? machine.Permissions], machine.PairedAt.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture), host.IsPaired,
+            host.ChannelPath switch { CodeAlta.Fleet.Server.FleetChannelPath.Relayed => "relayed", CodeAlta.Fleet.Server.FleetChannelPath.Direct => "direct", _ => null });
     }
 }
 
@@ -346,8 +348,10 @@ internal sealed record MachinesRequest(string ExpectedEpoch);
 /// <param name="Problem">Why it is not online, in words; null while online.</param>
 /// <param name="Permissions">What this device may do on it.</param>
 /// <param name="PairedAt">When this device paired with it.</param>
+/// <param name="Paired">Whether this device paired with it; false for a machine of an organization reached through the relay of its server.</param>
+/// <param name="Channel">Where its channel goes while it is online: <c>direct</c> or <c>relayed</c>; null otherwise.</param>
 internal sealed record MachineView(string Id, string Name, string State, string? Os, string? Version, string? Address, string Fingerprint, string Words,
-    int Sessions, string? LastSeen, string? Problem, string[] Permissions, string PairedAt);
+    int Sessions, string? LastSeen, string? Problem, string[] Permissions, string PairedAt, bool Paired, string? Channel);
 
 /// <summary>The paired machines.</summary>
 /// <param name="Status"><c>ok</c>, <c>stale_epoch</c> or <c>unavailable</c>.</param>

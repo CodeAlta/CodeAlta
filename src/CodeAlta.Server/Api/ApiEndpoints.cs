@@ -150,6 +150,7 @@ internal static class ApiEndpoints
             .WithSummary("Checks the hash chain of the audit log.");
 
         app.Map(FleetServerMethods.ControlPath, (HttpContext context, ControlService control) => control.HandleAsync(context)).ExcludeFromDescription();
+        app.Map(FleetServerMethods.RelayPath + "/{ticket}", (string ticket, HttpContext context, RelayHub relays) => relays.HandleAsync(context, ticket)).ExcludeFromDescription();
     }
 
     internal static RequestOrigin Origin(HttpContext context) => new(context.Connection.RemoteIpAddress, context.TraceIdentifier);

@@ -123,6 +123,15 @@ internal sealed partial class RemoteSessionHost : ISessionHost, IAsyncDisposable
     /// <summary>Gets the client of the machine while it is online; null otherwise.</summary>
     internal FleetNodeClient? CurrentClient { get { lock (_gate) return _client; } }
 
+    /// <summary>
+    /// Gets whether this computer paired with the machine; false for a machine of an organization it reaches through the
+    /// relay of a server only, whose key the signed device list gives at each connection.
+    /// </summary>
+    public bool IsPaired => !Machine.Fingerprint.IsEmpty;
+
+    /// <summary>Gets where the channel of the machine goes while it is online: straight to it, or through a server; null otherwise.</summary>
+    public CodeAlta.Fleet.Server.FleetChannelPath? ChannelPath => CurrentClient?.Path;
+
     /// <summary>Gets what the host last read of the machine.</summary>
     public RemoteListing Listing => Volatile.Read(ref _listing);
 

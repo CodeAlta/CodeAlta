@@ -36,6 +36,28 @@ public static class FleetServerMethods
     /// </summary>
     public const string ConnectionClosing = "connection.closing";
 
+    /// <summary>
+    /// Asks the server for a relayed session channel to another device of the organization (<see cref="FleetRelayOpen"/>);
+    /// answers once that device accepted, with the ticket of the viewer's side (<see cref="FleetRelayTicket"/>).
+    /// </summary>
+    public const string RelayOpen = "relay.open";
+
+    /// <summary>The event the server sends to the device a viewer asked a relay to (<see cref="FleetRelayIncoming"/>).</summary>
+    public const string RelayIncoming = "relay.incoming";
+
+    /// <summary>The answer of a device to <see cref="RelayIncoming"/> that takes the relay (<see cref="FleetRelayRef"/>); gives the ticket of its side.</summary>
+    public const string RelayAccept = "relay.accept";
+
+    /// <summary>Declines an incoming relay, or ends one, from either side (<see cref="FleetRelayClose"/>).</summary>
+    public const string RelayClose = "relay.close";
+
+    /// <summary>
+    /// The path of the WebSocket of a relayed channel: <c>/fleet/v1/relay/{ticket}</c>, opened by each side with its
+    /// one-time ticket and a request signed with its device key. Its binary frames are the bytes of the channel, which is
+    /// TLS between the two devices: the server pipes them without reading them.
+    /// </summary>
+    public const string RelayPath = "/fleet/v1/relay";
+
     /// <summary>The kinds of <see cref="FleetDirectoryChange"/>.</summary>
     public static class ChangeKinds
     {
@@ -184,6 +206,51 @@ public sealed record FleetDirectoryChange(
     FleetDirectorySession? Session = null,
     FleetPresence? Presence = null);
 
+/// <summary>The codes of the refusals of a relay, beside those of <see cref="FleetErrorCodes"/>.</summary>
+public static class FleetRelayErrorCodes
+{
+    /// <summary>The device asked for is not online: it holds no control connection.</summary>
+    public const string TargetOffline = "relay.target_offline";
+
+    /// <summary>The device asked for declined the relay, or did not answer in time.</summary>
+    public const string Declined = "relay.declined";
+
+    /// <summary>The device has as many relays open as the server allows.</summary>
+    public const string TooMany = "relay.too_many";
+
+    /// <summary>The ticket is unknown, used, expired, or not this device's.</summary>
+    public const string TicketInvalid = "relay.invalid_ticket";
+
+    /// <summary>The relay is not known, or not this device's.</summary>
+    public const string NotFound = "relay.not_found";
+}
+
+/// <summary>The parameters of <c>relay.open</c>.</summary>
+/// <param name="Target">The device to reach.</param>
+public sealed record FleetRelayOpen(string Target);
+
+/// <summary>A side of a relay: its ticket, to open <see cref="FleetServerMethods.RelayPath"/> once, before it expires.</summary>
+/// <param name="RelayId">The relay.</param>
+/// <param name="Ticket">The one-time ticket of this side.</param>
+/// <param name="ExpiresAt">When the ticket stops working.</param>
+/// <param name="Peer">The device at the other end.</param>
+public sealed record FleetRelayTicket(string RelayId, string Ticket, DateTimeOffset ExpiresAt, string Peer);
+
+/// <summary>The payload of <c>relay.incoming</c>: a device of the organization asks for a channel to this one.</summary>
+/// <param name="RelayId">The relay.</param>
+/// <param name="From">The device that asks; the channel inside the relay authenticates it again, with its key.</param>
+/// <param name="ExpiresAt">When the offer lapses.</param>
+public sealed record FleetRelayIncoming(string RelayId, string From, DateTimeOffset ExpiresAt);
+
+/// <summary>The parameters of <c>relay.accept</c>.</summary>
+/// <param name="RelayId">The relay.</param>
+public sealed record FleetRelayRef(string RelayId);
+
+/// <summary>The parameters of <c>relay.close</c>.</summary>
+/// <param name="RelayId">The relay.</param>
+/// <param name="Reason">Why, in a word, such as <c>declined</c>; or <see langword="null"/>.</param>
+public sealed record FleetRelayClose(string RelayId, string? Reason = null);
+
 /// <summary>The source-generated contracts of the server API over the control connection.</summary>
 [JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase, DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull)]
 [JsonSerializable(typeof(FleetPublicationCursors))]
@@ -202,4 +269,9 @@ public sealed record FleetDirectoryChange(
 [JsonSerializable(typeof(FleetDirectorySnapshot))]
 [JsonSerializable(typeof(FleetDirectoryChange))]
 [JsonSerializable(typeof(FleetError))]
+[JsonSerializable(typeof(FleetRelayOpen))]
+[JsonSerializable(typeof(FleetRelayTicket))]
+[JsonSerializable(typeof(FleetRelayIncoming))]
+[JsonSerializable(typeof(FleetRelayRef))]
+[JsonSerializable(typeof(FleetRelayClose))]
 public sealed partial class FleetServerJsonContext : JsonSerializerContext;

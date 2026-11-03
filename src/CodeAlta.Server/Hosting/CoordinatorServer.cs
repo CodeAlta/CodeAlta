@@ -43,6 +43,12 @@ public sealed class CoordinatorServerOptions
     /// <summary>Gets the limits of the control connections.</summary>
     public FleetConnectionPolicy ConnectionPolicy { get; init; } = FleetConnectionPolicy.CreateDefault();
 
+    /// <summary>Gets the limits of the relayed session channels.</summary>
+    public RelayOptions Relay { get; init; } = new();
+
+    /// <summary>Gets who may reach whom through the relay; null for two approved devices of the same organization.</summary>
+    public IRelayAccessPolicy? RelayAccess { get; init; }
+
     /// <summary>Gets the clock.</summary>
     public TimeProvider TimeProvider { get; init; } = TimeProvider.System;
 
@@ -297,11 +303,15 @@ public sealed class CoordinatorServer : IAsyncDisposable
         services.AddSingleton<PresenceRegistry>();
         services.AddSingleton<DirectoryHub>();
         services.AddSingleton(provider => new SetupService(store, codes, provider.GetRequiredService<RequestAuthenticator>(), time));
-        services.AddSingleton(provider => new DeviceService(store, provider.GetRequiredService<RequestAuthenticator>(), provider.GetRequiredService<PresenceRegistry>(), time));
+        services.AddSingleton(provider => new RelayHub(store, provider.GetRequiredService<PresenceRegistry>(), provider.GetRequiredService<RequestAuthenticator>(),
+            options.RelayAccess ?? new OrganizationRelayAccess(), options.Relay, time, provider.GetRequiredService<ILoggerFactory>().CreateLogger("CodeAlta.Server.Relay")));
+        services.AddSingleton(provider => new DeviceService(store, provider.GetRequiredService<RequestAuthenticator>(), provider.GetRequiredService<PresenceRegistry>(), time,
+            provider.GetRequiredService<RelayHub>()));
         services.AddSingleton(provider => new PublicationService(store, provider.GetRequiredService<DirectoryHub>(), time));
         services.AddSingleton(_ => new MetadataKeyService(store, time));
         services.AddSingleton(provider => new ControlService(store, provider.GetRequiredService<PresenceRegistry>(), provider.GetRequiredService<DirectoryHub>(),
-            provider.GetRequiredService<PublicationService>(), time, options.ConnectionPolicy, provider.GetRequiredService<ILoggerFactory>().CreateLogger("CodeAlta.Server.Control")));
+            provider.GetRequiredService<PublicationService>(), provider.GetRequiredService<RelayHub>(), time, options.ConnectionPolicy,
+            provider.GetRequiredService<ILoggerFactory>().CreateLogger("CodeAlta.Server.Control")));
 
         var app = builder.Build();
         app.UseMiddleware<ProblemDetailsMiddleware>();

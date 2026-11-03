@@ -34,6 +34,9 @@ public sealed class ControlSession
     /// <summary>Gets when the device connected.</summary>
     public DateTimeOffset ConnectedAt { get; }
 
+    /// <summary>Gets the address the connection comes from, for the audit log, or <see langword="null"/> when unknown.</summary>
+    public System.Net.IPAddress? RemoteAddress { get; init; }
+
     /// <summary>Closes the connection after telling the device why (<see cref="FleetServerMethods.ConnectionClosing"/>).</summary>
     /// <param name="error">Why, and what the device should do.</param>
     /// <returns>A task that completes when the close started.</returns>

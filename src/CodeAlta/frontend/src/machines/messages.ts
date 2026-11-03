@@ -83,4 +83,8 @@ export const machineMessages = {
   "The session is moving, or moved already.": ["La sesión se está moviendo o ya se movió.", "La session est en cours de déplacement, ou déjà déplacée.", "Die Sitzung wird gerade verschoben oder wurde schon verschoben.", "セッションは移動中か、すでに移動済みです。", "会话正在移动或已移动。"],
   "The repository could not be cloned there.": ["No se pudo clonar el repositorio allí.", "Le dépôt n’a pas pu y être cloné.", "Das Repository konnte dort nicht geklont werden.", "そこでリポジトリをクローンできませんでした。", "无法在那里克隆仓库。"],
   "The work in progress is too large to move.": ["El trabajo en curso es demasiado grande para moverlo.", "Le travail en cours est trop volumineux pour être déplacé.", "Die laufende Arbeit ist zu groß zum Verschieben.", "作業中の変更が大きすぎて移動できません。", "进行中的工作太大，无法移动。"],
+  "Direct": ["Directo", "Direct", "Direkt", "直接", "直连"],
+  "Relayed": ["Retransmitido", "Relayé", "Weitergeleitet", "中継", "中继"],
+  "Straight to the machine": ["Directamente a la máquina", "Directement vers la machine", "Direkt zur Maschine", "マシンへ直接", "直接连接到机器"],
+  "Through the server, encrypted from end to end": ["A través del servidor, cifrado de extremo a extremo", "Par le serveur, chiffré de bout en bout", "Über den Server, Ende-zu-Ende verschlüsselt", "サーバー経由、エンドツーエンドで暗号化", "通过服务器，端到端加密"],
 } as const satisfies Record<string, Row>;

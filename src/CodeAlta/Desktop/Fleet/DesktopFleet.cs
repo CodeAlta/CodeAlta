@@ -3,6 +3,7 @@ using CodeAlta.Catalog.SessionMoves;
 using CodeAlta.Desktop.SessionHosts;
 using CodeAlta.Fleet.Client;
 using CodeAlta.Fleet.Identity;
+using CodeAlta.Fleet.Server;
 using XenoAtom.Logging;
 
 namespace CodeAlta.Desktop.Fleet;
@@ -46,6 +47,19 @@ internal sealed class DesktopFleet : IAsyncDisposable
     /// <exception cref="ArgumentNullException">An argument is null.</exception>
     public DesktopFleet(string fleetRoot, SessionHostRegistry.Membership membership, string deviceName,
         Func<PairedMachine, DeviceIdentity, RemoteSessionHost>? createHost = null)
+        : this(fleetRoot, membership, deviceName, createHost, null)
+    {
+    }
+
+    /// <summary>Creates the fleet of an instance whose hosts connect again as the options say; <see cref="StartAsync"/> connects its paired machines.</summary>
+    /// <param name="fleetRoot">The fleet folder of the state root of the instance.</param>
+    /// <param name="membership">The membership of the session hosts of the window.</param>
+    /// <param name="deviceName">The name this device gives itself to the machines it pairs with.</param>
+    /// <param name="createHost">Makes the host of a machine; null connects to it directly, else through the relay of a server.</param>
+    /// <param name="hostOptions">How the hosts made here connect again; null for the defaults.</param>
+    /// <exception cref="ArgumentNullException">An argument is null.</exception>
+    public DesktopFleet(string fleetRoot, SessionHostRegistry.Membership membership, string deviceName,
+        Func<PairedMachine, DeviceIdentity, RemoteSessionHost>? createHost, RemoteSessionHostOptions? hostOptions)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(fleetRoot);
         ArgumentNullException.ThrowIfNull(membership);
@@ -55,9 +69,14 @@ internal sealed class DesktopFleet : IAsyncDisposable
         _deviceName = deviceName;
         _store = new PairedMachineStore(fleetRoot);
         // A machine may give this computer a session over the channel: the methods of a target are served on it.
-        _createHost = createHost ?? ((machine, identity) => new RemoteSessionHost(machine,
-            token => FleetNodeClient.ConnectAsync(machine, identity, Moves?.Serve(machine), token), localDeviceId: identity.DeviceId));
+        _createHost = createHost ?? ((machine, identity) => new RemoteSessionHost(machine, token => ConnectAsync(machine, identity, token), hostOptions, localDeviceId: identity.DeviceId));
     }
+
+    /// <summary>
+    /// Gets or sets what finds the connection to a server whose relay reaches a machine (<see cref="DesktopFleetServers.FindRoute"/>);
+    /// null reaches machines directly only. Set before <see cref="StartAsync"/>.
+    /// </summary>
+    public Func<string, FleetConnector?>? RelayRoute { get; set; }
 
     /// <summary>Gets or sets the moves of sessions between this computer and its machines; set before <see cref="StartAsync"/>.</summary>
     public DesktopMoves? Moves { get; set; }
@@ -97,7 +116,12 @@ internal sealed class DesktopFleet : IAsyncDisposable
 
             if (machines.Count == 0) return;
             var identity = Identity();
-            foreach (var machine in machines) AddHost(machine, identity);
+            foreach (var machine in machines)
+            {
+                // A machine of a server reached through its relay so far keeps one host: the paired one.
+                if (_membership.Remove(machine.DeviceId) is RemoteSessionHost previous) await RetireAsync(previous).ConfigureAwait(false);
+                AddHost(machine, identity);
+            }
         }
         finally
         {
@@ -202,6 +226,93 @@ internal sealed class DesktopFleet : IAsyncDisposable
         finally
         {
             _changes.Release();
+        }
+    }
+
+    /// <summary>
+    /// Follows the machines of the organizations of the servers this computer is linked to: a node it is not paired with
+    /// gets a host that reaches it through the relay of its server, and loses it once no server lists it. A paired machine
+    /// keeps its own host, which goes through the relay when no address of it answers.
+    /// </summary>
+    /// <param name="machines">The nodes the servers list, by device id, with their names.</param>
+    /// <param name="cancellationToken">Cancels the wait for the change.</param>
+    /// <returns>A task that completes once the hosts follow the list.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="machines"/> is null.</exception>
+    public async Task SyncOrganizationMachinesAsync(IReadOnlyList<(string Id, string Name)> machines, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(machines);
+        var changed = false;
+        await _changes.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            if (_disposed) return;
+            var listed = machines.ToDictionary(static machine => machine.Id, static machine => machine.Name, StringComparer.Ordinal);
+            foreach (var host in Volatile.Read(ref _hosts).Where(host => !host.IsPaired && !listed.ContainsKey(host.MachineId!)).ToArray())
+            {
+                _membership.Remove(host.MachineId!);
+                await RetireAsync(host).ConfigureAwait(false);
+                changed = true;
+            }
+
+            var added = listed.Where(pair => Find(pair.Key) is null).ToArray();
+            if (added.Length > 0)
+            {
+                var identity = Identity();
+                // The key of the machine comes from the signed device list at each connection: none is pinned here.
+                foreach (var (id, name) in added)
+                {
+                    AddHost(new PairedMachine(string.IsNullOrWhiteSpace(name) ? id : name, id, default, [], DateTimeOffset.UnixEpoch, []), identity);
+                    changed = true;
+                }
+            }
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException)
+        {
+            Log(exception, "The machines of the organization could not be followed");
+        }
+        finally
+        {
+            _changes.Release();
+        }
+
+        if (changed) Changed?.Invoke();
+    }
+
+    // The channel of a machine: direct first when it has addresses and one answers, through the relay of a server that
+    // lists it otherwise. The relay is the path that always works; a direct one is an optimization.
+    private async Task<FleetNodeClient> ConnectAsync(PairedMachine machine, DeviceIdentity identity, CancellationToken cancellationToken)
+    {
+        var serve = Moves?.Serve(machine);
+        var route = RelayRoute?.Invoke(machine.DeviceId);
+        if (machine.Addresses.Count > 0)
+        {
+            try
+            {
+                return await FleetNodeClient.ConnectAsync(machine, identity, serve, cancellationToken).ConfigureAwait(false);
+            }
+            catch (IOException) when (route is not null && route.Directory.IsOnline(machine.DeviceId))
+            {
+                // No address answers (another network): the server reaches it.
+            }
+        }
+
+        if (route is null) throw new IOException("No server this computer is connected to lists the machine.");
+        // An offline machine is not asked for: a relay to it would fail, and leave a refusal in the audit of the server.
+        if (!route.Directory.IsOnline(machine.DeviceId)) throw new IOException("The machine is offline.");
+        try
+        {
+            return await FleetNodeClient.ConnectRelayedAsync(route, machine.DeviceId, identity, serve, machine.Fingerprint, cancellationToken).ConfigureAwait(false);
+        }
+        catch (FleetServerException exception) when (exception.Code is CodeAlta.Fleet.Protocol.FleetErrorCodes.Revoked or CodeAlta.Fleet.Protocol.FleetErrorCodes.Unauthenticated
+            or CodeAlta.Fleet.Protocol.FleetErrorCodes.Forbidden)
+        {
+            // The server refuses this device: it takes a person to change that, as a machine that refuses it.
+            throw new DeviceAuthenticationException(DeviceAuthenticationFailure.ClientNotTrusted, exception.Message, exception);
+        }
+        catch (Exception exception) when (exception is FleetServerException or HttpRequestException or InvalidDataException or CodeAlta.Fleet.Protocol.FleetDeviceListException or System.Net.WebSockets.WebSocketException)
+        {
+            // The ways a relay fails that the host knows as a machine that does not answer: it tries again later.
+            throw new IOException(exception.Message, exception);
         }
     }
 

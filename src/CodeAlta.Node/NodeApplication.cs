@@ -229,30 +229,28 @@ internal sealed class NodeApplication
 
             await using (node.ConfigureAwait(false))
             {
-                NodeFleet? fleet = null;
-                if (listen.Enabled)
+                NodeFleet fleet;
+                try
                 {
-                    try
-                    {
-                        fleet = NodeFleet.Start(node, listen, name, Version, stopRequested.Cancel);
-                    }
-                    catch (SocketException exception)
-                    {
-                        await _error.WriteLineAsync($"altanode: cannot listen on {FleetDirectConnector.Format(listen.Address, listen.Port)}: {exception.Message}").ConfigureAwait(false);
-                        await node.StopAsync(hurry.Token).ConfigureAwait(false);
-                        return NodeExitCodes.Failure;
-                    }
+                    // The node API runs with or without a listener (--no-listen): the servers the node joined relay channels to it.
+                    fleet = NodeFleet.Start(node, listen, name, Version, stopRequested.Cancel);
+                }
+                catch (SocketException exception)
+                {
+                    await _error.WriteLineAsync($"altanode: cannot listen on {FleetDirectConnector.Format(listen.Address, listen.Port)}: {exception.Message}").ConfigureAwait(false);
+                    await node.StopAsync(hurry.Token).ConfigureAwait(false);
+                    return NodeExitCodes.Failure;
                 }
 
                 using var fleetLifetime = new FleetLifetime(fleet);
                 // The servers the node joined (altanode join): one control connection each, beside the listener or without it.
-                await using var servers = NodeServers.Start(node, name, Version, ConfigureConnector);
+                await using var servers = NodeServers.Start(node, fleet.Service, name, Version, ConfigureConnector);
                 using var signals = new NodeSignals(stopRequested.Cancel, hurry.Cancel, static () => Environment.Exit(NodeExitCodes.Failure));
                 Started?.Invoke(node, stopRequested.Cancel);
                 await _output.WriteLineAsync($"CodeAlta Node runs on {profile.StateRoot}. Ctrl+C stops it.").ConfigureAwait(false);
-                await _output.WriteLineAsync(fleet is null
-                    ? "It listens for no device (--no-listen)."
-                    : $"{name} ({fleet.DeviceId}) listens for paired devices on {fleet.EndPoint}; altanode pair makes a pairing link.").ConfigureAwait(false);
+                await _output.WriteLineAsync(fleet.EndPoint is not { } endPoint
+                    ? "It listens for no device (--no-listen); the servers it joined relay their channels."
+                    : $"{name} ({fleet.DeviceId}) listens for paired devices on {endPoint}; altanode pair makes a pairing link.").ConfigureAwait(false);
                 try
                 {
                     await Task.Delay(Timeout.Infinite, stopRequested.Token).ConfigureAwait(false);

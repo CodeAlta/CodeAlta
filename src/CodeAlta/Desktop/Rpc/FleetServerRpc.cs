@@ -44,6 +44,9 @@ internal sealed class FleetServerService
     /// <summary>Gets whether a machine is paired with this computer, so that its sessions open over the direct channel; null for none.</summary>
     internal Func<string, bool>? IsPaired { get; init; }
 
+    /// <summary>Gets whether this computer reaches a machine: paired with it, or through the relay of a server; null for none.</summary>
+    internal Func<string, bool>? IsReachable { get; init; }
+
     /// <summary>The servers of this instance and how each stands.</summary>
     [NeoRpcMethod("status")]
     public async Task<FleetServerStatus> StatusAsync(FleetServerRequest request, CancellationToken cancellationToken)
@@ -172,7 +175,7 @@ internal sealed class FleetServerService
         var connection = request!.LinkId is { } id ? connections.FirstOrDefault(candidate => candidate.Link.Id == id)
             : connections.FirstOrDefault(static candidate => candidate.Connector?.State == FleetConnectorState.Online) ?? connections.FirstOrDefault();
         if (connection is null) return FleetDirectoryResult.Refused("no_server");
-        return Describe(connection, _servers.DeviceId, IsPaired ?? (static _ => false));
+        return Describe(connection, _servers.DeviceId, IsPaired ?? (static _ => false), IsReachable ?? IsPaired ?? (static _ => false));
     }
 
     private event Action? ChangedLocally;
@@ -206,7 +209,15 @@ internal sealed class FleetServerService
     /// <param name="thisDevice">The device id of this computer, whose sessions are local.</param>
     /// <param name="isPaired">Whether a machine is paired with this computer.</param>
     /// <returns>The directory.</returns>
-    internal static FleetDirectoryResult Describe(FleetServerConnection connection, string? thisDevice, Func<string, bool> isPaired)
+    internal static FleetDirectoryResult Describe(FleetServerConnection connection, string? thisDevice, Func<string, bool> isPaired) => Describe(connection, thisDevice, isPaired, isPaired);
+
+    /// <summary>The directory of a connection as the page shows it.</summary>
+    /// <param name="connection">The link and its connector.</param>
+    /// <param name="thisDevice">The device id of this computer, whose sessions are local.</param>
+    /// <param name="isPaired">Whether a machine is paired with this computer.</param>
+    /// <param name="isReachable">Whether this computer reaches a machine, paired or through the relay: its sessions open.</param>
+    /// <returns>The directory.</returns>
+    internal static FleetDirectoryResult Describe(FleetServerConnection connection, string? thisDevice, Func<string, bool> isPaired, Func<string, bool> isReachable)
     {
         var directory = connection.Connector?.Directory ?? FleetDirectoryView.Empty;
         var ids = directory.Machines.Keys.Union(directory.Presence.Keys).Union(directory.Sessions.Values.Select(static session => session.MachineId)).ToHashSet(StringComparer.Ordinal);
@@ -218,9 +229,9 @@ internal sealed class FleetServerService
             var inventory = machine?.Inventory;
             return new FleetMachineView(id, inventory?.Name ?? id, machine?.Kind ?? FleetDeviceKinds.Node, inventory?.Os, inventory?.AppVersion,
                 presence?.Online ?? false, presence?.State, presence?.ActiveSessions, self, !self && isPaired(id), [.. inventory?.Providers ?? []],
-                directory.Sessions.Values.Count(session => session.MachineId == id));
+                directory.Sessions.Values.Count(session => session.MachineId == id), !self && isReachable(id));
         }).OrderBy(static machine => machine.IsThisComputer ? 0 : machine.Online ? 1 : 2).ThenBy(static machine => machine.Name, StringComparer.CurrentCultureIgnoreCase).ToArray();
-        var openable = machines.Where(static machine => machine.IsThisComputer || machine.IsPaired).Select(static machine => machine.Id).ToHashSet(StringComparer.Ordinal);
+        var openable = machines.Where(static machine => machine.IsThisComputer || machine.IsReachable).Select(static machine => machine.Id).ToHashSet(StringComparer.Ordinal);
         // Titles travel sealed with the metadata key of the person: opened here, in the host, never by the server.
         var key = connection.Connector?.MetadataKey;
         var sessions = directory.Sessions.Values.OrderByDescending(static session => session.Fact.UpdatedAt).Take(500).Select(session =>
@@ -434,8 +445,9 @@ internal sealed record FleetServerSpaceRequest(string ExpectedEpoch, string Spac
 /// <param name="IsPaired">Whether it is paired with this computer: its sessions open over the direct channel.</param>
 /// <param name="Providers">The types of its ready providers.</param>
 /// <param name="Sessions">How many sessions it publishes.</param>
+/// <param name="IsReachable">Whether this computer reaches it, paired or through the relay of the server: its sessions open here.</param>
 internal sealed record FleetMachineView(string Id, string Name, string Kind, string? Os, string? Version, bool Online, string? Presence, int? ActiveSessions,
-    bool IsThisComputer, bool IsPaired, string[] Providers, int Sessions);
+    bool IsThisComputer, bool IsPaired, string[] Providers, int Sessions, bool IsReachable);
 
 /// <summary>A published session of the directory: its facts, and its title once opened on this computer.</summary>
 /// <param name="Id">The session.</param>

@@ -40,10 +40,10 @@ internal sealed class NodeFleet : IAsyncDisposable
     public const string ListenerFileName = "node-listener.json";
 
     private readonly DeviceIdentity _identity;
-    private readonly FleetDirectListener _listener;
-    private readonly string _listenerFile;
+    private readonly FleetDirectListener? _listener;
+    private readonly string? _listenerFile;
 
-    private NodeFleet(DeviceIdentity identity, FleetNodeService service, FleetDirectListener listener, IReadOnlyList<string> addresses, string listenerFile)
+    private NodeFleet(DeviceIdentity identity, FleetNodeService service, FleetDirectListener? listener, IReadOnlyList<string> addresses, string? listenerFile)
     {
         _identity = identity;
         Service = service;
@@ -58,8 +58,8 @@ internal sealed class NodeFleet : IAsyncDisposable
     /// <summary>Gets the device id of the node.</summary>
     public string DeviceId => _identity.DeviceId;
 
-    /// <summary>Gets the end point the listener is bound to.</summary>
-    public IPEndPoint EndPoint => _listener.LocalEndPoint;
+    /// <summary>Gets the end point the listener is bound to; null for a node that does not listen, which devices reach through its servers only.</summary>
+    public IPEndPoint? EndPoint => _listener?.LocalEndPoint;
 
     /// <summary>Gets the addresses a pairing code names, those of this machine first.</summary>
     public IReadOnlyList<string> Addresses { get; }
@@ -97,10 +97,16 @@ internal sealed class NodeFleet : IAsyncDisposable
                 Host = node.Host, Identity = identity, TrustedDevices = new TrustedDeviceStore(catalog), Name = name, Version = version,
                 AcceptsWork = () => node.AcceptsWork, PairingAddresses = () => addresses, RequestStop = requestStop, CloneRoot = node.Options.CloneRoot,
             });
-            listener = FleetDirectListener.Start(new IPEndPoint(listen.Address, listen.Port), service.ServeAsync);
-            addresses = DescribeAddresses(listener.LocalEndPoint);
-            var file = Path.Combine(catalog.FleetRoot, ListenerFileName);
-            WriteListenerFile(file, new NodeListenerFile { ProcessId = Environment.ProcessId, DeviceId = identity.DeviceId, Port = listener.LocalEndPoint.Port, Addresses = [.. addresses] });
+            string? file = null;
+            // Without a listener the node API still serves the channels its servers relay.
+            if (listen.Enabled)
+            {
+                listener = FleetDirectListener.Start(new IPEndPoint(listen.Address, listen.Port), service.ServeAsync);
+                addresses = DescribeAddresses(listener.LocalEndPoint);
+                file = Path.Combine(catalog.FleetRoot, ListenerFileName);
+                WriteListenerFile(file, new NodeListenerFile { ProcessId = Environment.ProcessId, DeviceId = identity.DeviceId, Port = listener.LocalEndPoint.Port, Addresses = [.. addresses] });
+            }
+
             // The moves this node took and a stop left unfinished end by its own decisions: a committed one is installed,
             // one never committed is undone. Those it gave away wait for the device that drove them to come back.
             _ = RecoverMovesAsync(service);
@@ -205,9 +211,13 @@ internal sealed class NodeFleet : IAsyncDisposable
     /// <returns>A task that completes once they stopped.</returns>
     public async ValueTask DisposeAsync()
     {
-        try { File.Delete(_listenerFile); }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException) { }
-        await _listener.DisposeAsync().ConfigureAwait(false);
+        if (_listenerFile is not null)
+        {
+            try { File.Delete(_listenerFile); }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException) { }
+        }
+
+        if (_listener is not null) await _listener.DisposeAsync().ConfigureAwait(false);
         await Service.DisposeAsync().ConfigureAwait(false);
         _identity.Dispose();
     }
@@ -261,6 +271,16 @@ internal sealed class NodeServers : IAsyncDisposable
     /// <param name="configure">What changes the options of each connector, for tests; null for none.</param>
     /// <returns>The connections; dispose them before the node stops.</returns>
     public static NodeServers Start(NodeHost node, string name, string version,
+        Func<Fleet.Server.FleetConnectorOptions, Fleet.Server.FleetConnectorOptions>? configure = null) => Start(node, null, name, version, configure);
+
+    /// <summary>Starts the connections of the servers of the profile, which relay session channels to the node API.</summary>
+    /// <param name="node">The running node.</param>
+    /// <param name="service">The node API that serves the relayed channels; null declines every relay.</param>
+    /// <param name="name">The name of the node.</param>
+    /// <param name="version">The version of CodeAlta it runs.</param>
+    /// <param name="configure">What changes the options of each connector, for tests; null for none.</param>
+    /// <returns>The connections; dispose them before the node stops.</returns>
+    public static NodeServers Start(NodeHost node, FleetNodeService? service, string name, string version,
         Func<Fleet.Server.FleetConnectorOptions, Fleet.Server.FleetConnectorOptions>? configure = null)
     {
         ArgumentNullException.ThrowIfNull(node);
@@ -275,9 +295,33 @@ internal sealed class NodeServers : IAsyncDisposable
             Spaces = node.Host.SpaceCatalog,
             Source = source,
             Configure = configure,
+            AcceptRelay = service is null ? null : (connector, _, stream, token) => ServeRelayAsync(service, connector, stream, token),
         });
         connections.Start();
         return new NodeServers(identity, source, connections);
+    }
+
+    // The device list is read again for each relay, so that a device removed from it is refused at once; when the server
+    // does not answer, the list last verified is kept.
+    private static async Task ServeRelayAsync(FleetNodeService service, Fleet.Server.FleetConnector connector, Stream stream, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await connector.Devices.RefreshAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is Fleet.Server.FleetServerException or HttpRequestException or IOException or TaskCanceledException)
+        {
+            if (LogManager.IsInitialized) LogManager.GetLogger("CodeAlta.Node").Info($"The device list could not be read again: {exception.Message}");
+        }
+        catch (Fleet.Protocol.FleetDeviceListException exception)
+        {
+            // A list that does not verify is no ground to trust anyone through this server.
+            if (LogManager.IsInitialized) LogManager.GetLogger("CodeAlta.Node").Warn($"A relayed channel was refused: {exception.Message}");
+            await stream.DisposeAsync().ConfigureAwait(false);
+            return;
+        }
+
+        await service.ServeRelayedAsync(stream, connector.Devices.Trust, cancellationToken).ConfigureAwait(false);
     }
 
     /// <inheritdoc />

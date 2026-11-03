@@ -768,6 +768,11 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                 fleet.Moves = new Fleet.DesktopMoves(host, fleet, Environment.MachineName, host.CatalogOptions.FleetRoot);
                 // The CodeAlta Servers this instance is linked to: none until a server is created or joined.
                 fleetServers = new Fleet.DesktopFleetServers(host, Environment.MachineName, DesktopCommandLine.Version);
+                // A machine of an organization this computer is not paired with is reached through the relay of its server.
+                fleet.RelayRoute = fleetServers.FindRoute;
+                var followedServers = fleetServers;
+                var followedFleet = fleet;
+                fleetServers.Changed += () => _ = followedFleet.SyncOrganizationMachinesAsync(followedServers.OrganizationMachines(), CancellationToken.None);
                 // The bookmarks of the sessions of this instance, in its database. A bookmarked session is kept by the
                 // retention of sessions, which deletes nothing before the bookmarks were read.
                 var bookmarks = new CodeAlta.Catalog.Bookmarks.BookmarkService(host.ApplicationDatabase,
@@ -1012,7 +1017,8 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                     builder.AddMachinesService(fleet is null ? new MachinesService() : MachinesService.Create(fleet, epoch, host.ProjectCatalog));
                     builder.AddFleetServerService(fleetServers is null ? new FleetServerService() : new FleetServerService(fleetServers, epoch)
                     {
-                        Spaces = host.SpaceCatalog, IsPaired = machineId => fleet?.Find(machineId) is not null,
+                        Spaces = host.SpaceCatalog, IsPaired = machineId => fleet?.Find(machineId) is { IsPaired: true },
+                        IsReachable = machineId => fleet?.Find(machineId) is not null,
                     });
                     builder.AddConfigurationService(new ConfigurationService(host.ModelProviderRegistry, host.PluginRuntime, new DesktopDefaultProvider(host.CatalogOptions), host.CatalogOptions)
                     {

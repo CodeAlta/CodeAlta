@@ -29,6 +29,9 @@ public sealed record FleetDeviceListState(
     /// <summary>Gets the device the first entry added: the first controller device, the owner's at setup.</summary>
     public string? FirstDeviceId { get; init; }
 
+    /// <summary>Gets the hash of the first entry: the root a device pins per server, so that a server cannot swap the whole list.</summary>
+    public string? FirstHash { get; init; }
+
     /// <summary>Gets whether a device is a controller device of the list: one that may sign entries.</summary>
     /// <param name="deviceId">The device.</param>
     /// <returns>Whether it is a member of class <see cref="FleetDeviceKinds.Controller"/>.</returns>
@@ -159,6 +162,7 @@ public static class FleetDeviceListVerifier
             next = state with
             {
                 FirstDeviceId = payload.DeviceId,
+                FirstHash = hash,
                 Sequence = 1,
                 LastHash = hash,
                 Members = state.Members.SetItem(payload.DeviceId, new FleetDeviceListMember(payload.DeviceId, FleetDeviceKinds.Controller, self, payload.OwnerId)),
@@ -198,7 +202,7 @@ public static class FleetDeviceListVerifier
                 return $"its operation '{payload.Operation}' is unknown";
         }
 
-        next = new FleetDeviceListState(organization, payload.Sequence, hash, members, removed) { FirstDeviceId = state.FirstDeviceId };
+        next = new FleetDeviceListState(organization, payload.Sequence, hash, members, removed) { FirstDeviceId = state.FirstDeviceId, FirstHash = state.FirstHash };
         return null;
     }
 }

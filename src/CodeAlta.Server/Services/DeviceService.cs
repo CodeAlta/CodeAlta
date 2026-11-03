@@ -31,6 +31,7 @@ public sealed class DeviceService
     private readonly ICoordinatorStore _store;
     private readonly RequestAuthenticator _authenticator;
     private readonly PresenceRegistry _presence;
+    private readonly Control.RelayHub? _relays;
     private readonly TimeProvider _time;
 
     /// <summary>Initializes a new instance of the <see cref="DeviceService"/> class.</summary>
@@ -49,6 +50,20 @@ public sealed class DeviceService
         _authenticator = authenticator;
         _presence = presence;
         _time = time;
+    }
+
+    /// <summary>Initializes a new instance of the <see cref="DeviceService"/> class, which also closes the relays of a revoked device.</summary>
+    /// <param name="store">The store.</param>
+    /// <param name="authenticator">Checks the signature of an enrollment with the key it names.</param>
+    /// <param name="presence">The devices online, to disconnect a revoked one.</param>
+    /// <param name="time">The clock.</param>
+    /// <param name="relays">The relays, to close those of a revoked device.</param>
+    /// <exception cref="ArgumentNullException">An argument is <see langword="null"/>.</exception>
+    public DeviceService(ICoordinatorStore store, RequestAuthenticator authenticator, PresenceRegistry presence, TimeProvider time, Control.RelayHub relays)
+        : this(store, authenticator, presence, time)
+    {
+        ArgumentNullException.ThrowIfNull(relays);
+        _relays = relays;
     }
 
     /// <summary>Makes an enrollment token; only a controller device may.</summary>
@@ -216,6 +231,7 @@ public sealed class DeviceService
         }
 
         await _presence.DisconnectAsync(revoked.Id, new FleetError(FleetErrorCodes.Revoked, null, "The device was revoked.")).ConfigureAwait(false);
+        if (_relays is not null) await _relays.CloseDeviceAsync(revoked.Id).ConfigureAwait(false);
         return revoked.ToDto(false);
     }
 
