@@ -54,6 +54,8 @@ internal sealed class DesktopAutomationPlacement : IAutomationPlacement, IAsyncD
     private readonly Dictionary<string, IReadOnlyList<AutomationRun>> _runs = new(StringComparer.Ordinal);
     private readonly Dictionary<string, DateTimeOffset> _runsReadAt = new(StringComparer.Ordinal);
     private readonly Dictionary<string, long> _numbers;
+    // The removals given through a server that the server is asked to forget once their machine took them away.
+    private readonly HashSet<(string Id, string MachineId)> _forget = [];
     private readonly string _numbersPath;
     private readonly SemaphoreSlim _signal = new(0, 1);
     private readonly SemaphoreSlim _work = new(1, 1);
@@ -250,6 +252,7 @@ internal sealed class DesktopAutomationPlacement : IAutomationPlacement, IAsyncD
                 changed |= await ReadRunsAsync(entry.Id, client, cancellationToken).ConfigureAwait(false);
             }
 
+            await ForgetRemovedAsync(cancellationToken).ConfigureAwait(false);
             if (changed) Changed?.Invoke();
         }
         finally
@@ -496,10 +499,12 @@ internal sealed class DesktopAutomationPlacement : IAutomationPlacement, IAsyncD
         }
 
         AutomationDto? held;
+        AutomationListDto list;
         IReadOnlyList<AutomationRun> runs;
         try
         {
-            held = (await route.ListAsync(cancellationToken).ConfigureAwait(false)).Automations.FirstOrDefault(item => item.Id == id && item.MachineId == machineId);
+            list = await route.ListAsync(cancellationToken).ConfigureAwait(false);
+            held = list.Automations.FirstOrDefault(item => item.Id == id && item.MachineId == machineId);
             runs = [.. (await route.ListRunsAsync(id, RunsKept, cancellationToken).ConfigureAwait(false)).Runs.Select(run => new AutomationRun(run.RunId, run.AutomationId, run.StartedAt,
                 run.Trigger)
             {
@@ -511,6 +516,13 @@ internal sealed class DesktopAutomationPlacement : IAutomationPlacement, IAsyncD
         {
             lock (_gate) _runsReadAt.Remove(id);
             return false;
+        }
+
+        // A removal the machine took away is forgotten by the server; one of a placement this computer no longer records too.
+        foreach (var item in list.Automations.Where(static item => item is { Removed: true, State: "applied" }))
+        {
+            lock (_gate)
+                if (!_placed.TryGetValue(item.Id, out var placed) || placed.MachineId != item.MachineId) _forget.Add((item.Id, item.MachineId));
         }
 
         var name = route.MachineName;
@@ -571,10 +583,52 @@ internal sealed class DesktopAutomationPlacement : IAutomationPlacement, IAsyncD
                 _numbers[id] = number;
                 _placed.Remove(id);
                 if (!stillPlaced) { _status.Remove(id); _runs.Remove(id); }
+                _forget.Add((id, record.MachineId));
                 Save();
             }
 
             return true;
+        }
+    }
+
+    // Under _work. Asks each server to forget the removals their machines took away (DELETE); one not taken yet waits.
+    private async Task ForgetRemovedAsync(CancellationToken cancellationToken)
+    {
+        (string Id, string MachineId)[] pending;
+        lock (_gate) pending = [.. _forget];
+        foreach (var machine in pending.GroupBy(static item => item.MachineId, StringComparer.Ordinal))
+        {
+            if (ServerRoute?.Invoke(machine.Key) is not { } route) continue;
+            using (route)
+            {
+                AutomationListDto list;
+                try { list = await route.ListAsync(cancellationToken).ConfigureAwait(false); }
+                catch (Exception exception) when (exception is FleetServerException or HttpRequestException or IOException or TaskCanceledException
+                    && !cancellationToken.IsCancellationRequested) { continue; }
+
+                foreach (var (id, machineId) in machine)
+                {
+                    var held = list.Automations.FirstOrDefault(item => item.Id == id && item.MachineId == machineId);
+                    // Not taken away yet: asked again at the next look.
+                    if (held is { Removed: true, State: not "applied" }) continue;
+                    if (held is { Removed: true })
+                    {
+                        try
+                        {
+                            await route.DeleteAsync(id, machineId, cancellationToken).ConfigureAwait(false);
+                            Log($"The server of {route.MachineName} forgot the automation {id}, which the machine took away.");
+                        }
+                        catch (Exception exception) when (exception is FleetServerException or HttpRequestException or IOException or TaskCanceledException
+                            && !cancellationToken.IsCancellationRequested)
+                        {
+                            continue;
+                        }
+                    }
+
+                    // Forgotten, gone, or given to the machine again since: nothing more to forget.
+                    lock (_gate) _forget.Remove((id, machineId));
+                }
+            }
         }
     }
 

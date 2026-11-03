@@ -163,6 +163,13 @@ public sealed class DesktopServerAutomationPlacementTests
                 Assert.IsTrue(removal.Version.Number > second.Version.Number);
                 Assert.IsNull(placement.Status(automations.Snapshot.Find(Id)!));
                 Assert.IsNotNull(automations.NextDue(Id));
+
+                // Once the machine took it away, the server is asked to forget it.
+                await WaitForAsync(async () =>
+                {
+                    await placement.SyncAsync(token);
+                    return (await desktop.ListAutomationsAsync(token)).Automations.Count == 0;
+                }, "the server to forget the removal", token);
             }
         }
         finally
