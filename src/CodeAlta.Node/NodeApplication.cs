@@ -354,7 +354,7 @@ internal sealed class NodeApplication
                 try
                 {
                     // The node API runs with or without a listener (--no-listen): the servers the node joined relay channels to it.
-                    fleet = NodeFleet.Start(node, listen, name, Version, stopRequested.Cancel, () => updates?.Status(), telemetry?.Metrics);
+                    fleet = NodeFleet.Start(node, listen, name, Version, stopRequested.Cancel, () => updates?.Describe(), telemetry?.Metrics);
                     listening = fleet;
                 }
                 catch (SocketException exception)
@@ -377,7 +377,7 @@ internal sealed class NodeApplication
                             : throw new UpdateException(UpdateErrorCodes.StateUnavailable, "The self-update of this node is not running."),
                         Check = (request, token) => updates is { } self ? self.CheckAsync(request, token)
                             : throw new UpdateException(UpdateErrorCodes.StateUnavailable, "The self-update of this node is not running."),
-                        Status = () => updates?.Status() ?? UpdateStatusReport.Describe(store.Read(), Version, InstalledVersion()),
+                        Status = () => updates?.Status() ?? UpdateStatusReport.Describe(store.ReadOrThrow(), Version, InstalledVersion()),
                         CancelSwitch = (requestedBy, reason) => updates?.CancelPending(reason, requestedBy),
                         Connector = linkId => servers?.Connections.Find(linkId)?.Connector,
                         Log = static message => NodeLog(message),

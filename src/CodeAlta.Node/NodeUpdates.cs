@@ -105,9 +105,17 @@ internal sealed class NodeUpdates : IAsyncDisposable
     /// <summary>Starts reading the state of the versions.</summary>
     public void Start() => _loop = Task.Run(LoopAsync);
 
-    /// <summary>Gets the versions of the node and where its self-update stands.</summary>
+    /// <summary>
+    /// Gets the versions of the node and where its self-update stands, as the coordinated update of the fleet reads them to
+    /// decide that a version confirmed: a state that exists and cannot be read throws, never taken for one without a trial.
+    /// </summary>
     /// <returns>The status.</returns>
-    public FleetUpdateStatus Status() => UpdateStatusReport.Describe(_options.Store.Read(), _options.Running.ToString(), _options.Installed);
+    /// <exception cref="UpdateException">The state of the versions cannot be read (<see cref="UpdateErrorCodes.StateUnavailable"/>).</exception>
+    public FleetUpdateStatus Status() => UpdateStatusReport.Describe(_options.Store.ReadOrThrow(), _options.Running.ToString(), _options.Installed);
+
+    /// <summary>Gets the versions of the node and where its self-update stands, for a person: a state that cannot be read is described as empty.</summary>
+    /// <returns>The status.</returns>
+    public FleetUpdateStatus Describe() => UpdateStatusReport.Describe(_options.Store.Read(), _options.Running.ToString(), _options.Installed);
 
     /// <summary>
     /// Downloads, checks and stages a version, then asks this node to switch to it when idle: what the coordinated update
@@ -211,16 +219,17 @@ internal sealed class NodeUpdates : IAsyncDisposable
             return;
         }
 
+        // Each change below holds only while the switch read here still waits: a cancellation or a newer request that came
+        // meanwhile wins, and the next step takes it.
         if (!UpdateVersion.TryParse(pending.Version, out var target) || !store.IsStaged(target, UpdateProduct.Node))
         {
-            store.CancelPending($"{pending.Version} is not staged in {store.Root}.");
-            _options.Log($"The switch to {pending.Version} was dropped: it is not staged.");
+            if (store.TryCancelPending(pending, $"{pending.Version} is not staged in {store.Root}.")) _options.Log($"The switch to {pending.Version} was dropped: it is not staged.");
             return;
         }
 
         if (target.Equals(running))
         {
-            store.CancelPending(null);
+            store.TryCancelPending(pending, null);
             return;
         }
 
@@ -240,7 +249,12 @@ internal sealed class NodeUpdates : IAsyncDisposable
             return;
         }
 
-        store.Select(target);
+        if (!store.TrySelect(target, pending))
+        {
+            _options.Log($"The switch to {target} was withdrawn or replaced before it was taken.");
+            return;
+        }
+
         _options.Log($"CodeAlta Node stops to start {target} on trial ({atWork} session(s) at work).");
         if (Interlocked.Exchange(ref _restartRequested, 1) == 0) _options.RequestRestart();
     }

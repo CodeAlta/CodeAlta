@@ -25,6 +25,12 @@ internal sealed record UpdateCampaignOptions
     /// <summary>Gets what updates the server itself (its self-update's <c>ApplyAsync</c>); null when it cannot.</summary>
     public Func<UpdateRequest, string, CancellationToken, Task<StagedUpdate?>>? ApplyServerUpdate { get; init; }
 
+    /// <summary>
+    /// Gets what withdraws the server's own switch that waits when a requester asked for it (a campaign a policy revokes),
+    /// given the requester and why; it gives whether that switch waited and was withdrawn. Null for none.
+    /// </summary>
+    public Func<string, string, bool>? WithdrawServerSwitch { get; init; }
+
     /// <summary>Gets the runtime of the server, whose package hash a manifest must sign; null for this process's.</summary>
     public string? ServerRuntime { get; init; }
 
@@ -236,7 +242,10 @@ internal sealed class UpdateCampaignService : IAsyncDisposable
             {
                 if (Disallowed(policy, campaign) is not { } why) continue;
                 var machines = await _store.ListUpdateCampaignMachinesAsync(campaign.Id, CancellationToken.None).ConfigureAwait(false);
-                if (UpdateCampaignEngine.Revoke(campaign, machines, _time.GetUtcNow(), why) is not { } withdrawn) continue;
+                // In the server's step, the server's own switch is withdrawn while it waits; one it took already ends as it ends.
+                var switchWithdrawn = campaign.State == FleetUpdateCampaignStates.UpdatingServer && campaign.ServerState != FleetUpdateMachineStates.Pending
+                    && WithdrawServerSwitch(campaign, why);
+                if (UpdateCampaignEngine.Revoke(campaign, machines, _time.GetUtcNow(), why, switchWithdrawn) is not { } withdrawn) continue;
                 await _store.SaveUpdateCampaignAsync(withdrawn.Campaign, withdrawn.Machines, origin.Audit("update.campaign.cancel", actor, campaign.Id,
                     details: $"{{\"policy\":{policy.Sequence}}}"), CancellationToken.None).ConfigureAwait(false);
                 _logger.LogInformation("Update campaign {Sequence} to {Version} was withdrawn: {Reason}", campaign.Sequence, campaign.TargetVersion, why);
@@ -278,6 +287,24 @@ internal sealed class UpdateCampaignService : IAsyncDisposable
             ? $"The update policy {policy.Sequence} pins the fleet to {policy.PinnedVersion}."
             : null;
     }
+
+    // Withdraws the switch the server's step of a campaign asked for, when it still waits; gives whether it did.
+    private bool WithdrawServerSwitch(UpdateCampaignRecord campaign, string why)
+    {
+        if (_options.WithdrawServerSwitch is not { } withdraw) return false;
+        try
+        {
+            return withdraw(ServerRequester(campaign), why);
+        }
+        catch (UpdateException exception)
+        {
+            _logger.LogWarning("Update campaign {Sequence}: the server's switch could not be withdrawn: {Reason}", campaign.Sequence, exception.Message);
+            return false;
+        }
+    }
+
+    // Who asks for the server's switch of a campaign, as its self-update records it (requestedBy).
+    private static string ServerRequester(UpdateCampaignRecord campaign) => $"fleet campaign {campaign.Sequence} ({campaign.Id})";
 
     private async Task DeliverAsync(ControlSession session, UpdatePolicyRecord policy, IReadOnlyList<string> cancelled)
     {
@@ -375,8 +402,11 @@ internal sealed class UpdateCampaignService : IAsyncDisposable
             if (moving.Count == 0) return;
             var inventory = (await _store.ListMachinesAsync(organization.Id, cancellationToken).ConfigureAwait(false))
                 .ToDictionary(static machine => machine.DeviceId, static machine => machine.ReadInventory()?.AppVersion, StringComparer.Ordinal);
-            var status = _server.Read();
-            var server = new UpdateCampaignServer(status.Running, status.LastOutcome);
+            // A version that runs is confirmed only as the self-update reports it: before it started, or while its state
+            // does not read, the server's step waits.
+            var known = _server.TryRead(out var reported) || _options.ApplyServerUpdate is null;
+            var status = reported ?? _server.Read();
+            var server = new UpdateCampaignServer(status.Running, status.LastOutcome, status.Trial?.Version, known);
             // The oldest first: a newer campaign has superseded the machines both name.
             foreach (var campaign in moving.Reverse<UpdateCampaignRecord>())
                 await StepAsync(campaign, inventory, server, cancellationToken).ConfigureAwait(false);
@@ -436,13 +466,15 @@ internal sealed class UpdateCampaignService : IAsyncDisposable
     }
 
     // The server's own step: the same checks as a node (the signature of a controller of the device list it holds, a
-    // newer version unless a person chose a rollback, the hash of its own package), then its self-update.
+    // newer version unless a person chose a rollback, the hash of its own package, the policy it holds now, and for an
+    // automatic update the signed maintenance window), then its self-update.
     private async Task<UpdateCampaignRecord> UpdateServerAsync(UpdateCampaignRecord campaign, CancellationToken cancellationToken)
     {
         string? failure;
+        DateTimeOffset? waitUntil = null;
         try
         {
-            failure = await ApplyServerAsync(campaign, cancellationToken).ConfigureAwait(false);
+            (failure, waitUntil) = await ApplyServerAsync(campaign, cancellationToken).ConfigureAwait(false);
         }
         catch (Exception exception) when (exception is UpdateException or HttpRequestException or IOException or UnauthorizedAccessException or InvalidOperationException)
         {
@@ -451,6 +483,18 @@ internal sealed class UpdateCampaignService : IAsyncDisposable
         }
 
         var now = _time.GetUtcNow();
+        if (waitUntil is { } start)
+        {
+            // Outside the window: the step is asked again at its next opening.
+            _logger.LogInformation("Update campaign {Sequence}: CodeAlta Server waits for its maintenance window, at {Start:u}", campaign.Sequence, start);
+            var waiting = campaign with
+            {
+                ServerState = FleetUpdateMachineStates.Pending, NotBefore = start, ServerMessage = $"The server waits for the maintenance window at {start:u}.", UpdatedAt = now,
+            };
+            await _store.SaveUpdateCampaignAsync(waiting, [], null, cancellationToken).ConfigureAwait(false);
+            return waiting;
+        }
+
         if (failure is null)
         {
             _logger.LogInformation("Update campaign {Sequence}: the nodes are done; CodeAlta Server switches to {Version}", campaign.Sequence, campaign.TargetVersion);
@@ -463,14 +507,20 @@ internal sealed class UpdateCampaignService : IAsyncDisposable
         return failed;
     }
 
-    private async Task<string?> ApplyServerAsync(UpdateCampaignRecord campaign, CancellationToken cancellationToken)
+    // Checks and applies the server's step: why it fails, or when it may start (outside the maintenance window of an
+    // automatic update), or neither once the self-update took it. Under the gate, as every change of the policy: the
+    // policy read here holds until the switch is asked for, whether the step is a first one or one resumed after a stop.
+    private async Task<(string? Failure, DateTimeOffset? WaitUntil)> ApplyServerAsync(UpdateCampaignRecord campaign, CancellationToken cancellationToken)
     {
-        if (_options.ApplyServerUpdate is not { } apply) return "This server does not update itself (it does not run under its launcher).";
-        if (ServerRuntime() is not { } runtime) return "No package of CodeAlta Server is published for this server's OS and architecture.";
-        if (!UpdateVersion.TryParse(_server.Read().Running, out var running)) return "The version of this server is not known.";
+        if (_options.ApplyServerUpdate is not { } apply) return ("This server does not update itself (it does not run under its launcher).", null);
+        if (ServerRuntime() is not { } runtime) return ("No package of CodeAlta Server is published for this server's OS and architecture.", null);
+        if (!UpdateVersion.TryParse(_server.Read().Running, out var running)) return ("The version of this server is not known.", null);
+        var held = await _store.GetUpdatePolicyAsync(campaign.OrganizationId, cancellationToken).ConfigureAwait(false);
+        FleetUpdatePolicy? policy = null;
+        if (held is not null && !FleetUpdateDocuments.TryParsePolicy(held.Payload, out policy, out var unreadable))
+            return ($"The update policy this server holds does not read: {unreadable}.", null);
         // An automatic campaign holds only while the policy that started it does, as on the nodes.
-        if (campaign.Automatic && (await _store.GetUpdatePolicyAsync(campaign.OrganizationId, cancellationToken).ConfigureAwait(false))?.Sequence != campaign.Sequence)
-            return "The automatic update policy that started the campaign was replaced.";
+        if (campaign.Automatic && held?.Sequence != campaign.Sequence) return ("The automatic update policy that started the campaign was replaced.", null);
         var entries = await _store.ListDeviceListAsync(campaign.OrganizationId, cancellationToken).ConfigureAwait(false);
         FleetDeviceListState devices;
         try
@@ -479,26 +529,32 @@ internal sealed class UpdateCampaignService : IAsyncDisposable
         }
         catch (FleetDeviceListException exception)
         {
-            return $"The device list of this server does not verify: {exception.Message}";
+            return ($"The device list of this server does not verify: {exception.Message}", null);
         }
 
+        // The policy held now wins, as on a node: a manifest to another version than a pinned one is refused, and an
+        // automatic update waits for the signed window, whenever the nodes were done.
+        var now = _time.GetUtcNow();
         var context = new UpdateInstructionContext
         {
             Devices = devices, OrganizationId = campaign.OrganizationId, Product = UpdateProduct.Server, Runtime = runtime, Running = running,
+            LastPolicySequence = policy?.Sequence ?? 0, Policy = policy, Now = now,
         };
-        if (!UpdateInstructions.TryVerify(Instruction(campaign), context, out var update, out var reason)) return $"The server refused the campaign: {reason}.";
+        if (!UpdateInstructions.TryVerify(Instruction(campaign), context, out var update, out var reason)) return ($"The server refused the campaign: {reason}.", null);
+        // A person's schedule was the campaign's own start; the window of an automatic update holds for every machine.
+        if (update.Automatic && update.NotBefore is { } start && start > now) return (null, start);
         if (update.Automatic)
         {
             // No person signed this version: it must still be the latest stable release the feed lists, read now, not when
             // the campaign started (a release withdrawn meanwhile is not installed). Its own self-update checks it again.
             var latest = await ReadLatestAsync(campaign.Feed, cancellationToken).ConfigureAwait(false);
             if (!UpdateCampaignEngine.Same(latest, campaign.TargetVersion))
-                return $"{campaign.TargetVersion} is no longer the latest stable version {campaign.Feed} lists ({latest ?? "none"}).";
+                return ($"{campaign.TargetVersion} is no longer the latest stable version {campaign.Feed} lists ({latest ?? "none"}).", null);
         }
 
         var request = update.ToRequest() with { StableOnly = update.Automatic };
-        await apply(request, $"fleet campaign {campaign.Sequence} ({campaign.Id})", cancellationToken).ConfigureAwait(false);
-        return null;
+        await apply(request, ServerRequester(campaign), cancellationToken).ConfigureAwait(false);
+        return (null, null);
     }
 
     // The feed of an automatic policy whose daily check is due, read outside the gate (a feed may take minutes to

@@ -247,12 +247,117 @@ public sealed class UpdateCampaignServerTests
         Assert.AreEqual(1, (await fleet.UpdatesAsync()).Campaigns.Count, "a version that rolled back is not tried again");
     }
 
-    /// <summary>The self-update of the server, faked: it records what it was asked, and runs the version, fails, or rolls back.</summary>
+    [TestMethod]
+    public async Task TheServersStepEndsOnceItsTrialConfirmedOrRolledBackAndHoldsOtherCampaignsMeanwhile()
+    {
+        await using var fleet = await TestFleet.StartAsync();
+        fleet.Server.OnTrial = true;
+        var first = await fleet.CreateCampaignAsync("4.0.2");
+        await fleet.TickAsync();
+        await fleet.TickAsync();
+        var trial = await fleet.CampaignAsync(first.Id);
+        Assert.AreEqual((FleetUpdateCampaignStates.UpdatingServer, FleetUpdateMachineStates.Switching), (trial.State, trial.ServerState), "running the version on trial is not done");
+        Assert.AreEqual(HttpStatusCode.Conflict, (await fleet.SendCampaignAsync("4.0.3")).Status, "no other campaign while the server's step is not confirmed");
+
+        // It does not confirm: its launcher rolls it back, and the campaign ends so.
+        fleet.Clock.Advance(TimeSpan.FromMinutes(2));
+        fleet.Server.EndTrial(confirmed: false);
+        await fleet.TickAsync();
+        var rolledBack = await fleet.CampaignAsync(first.Id);
+        Assert.AreEqual((FleetUpdateCampaignStates.Failed, FleetUpdateMachineStates.RolledBack), (rolledBack.State, rolledBack.ServerState));
+
+        // A campaign whose trial confirms is done once it confirmed.
+        var second = await fleet.CreateCampaignAsync("4.0.3");
+        await fleet.TickAsync();
+        await fleet.TickAsync();
+        Assert.AreEqual(FleetUpdateMachineStates.Switching, (await fleet.CampaignAsync(second.Id)).ServerState);
+        fleet.Clock.Advance(TimeSpan.FromMinutes(1));
+        fleet.Server.EndTrial(confirmed: true);
+        await fleet.TickAsync();
+        Assert.AreEqual((FleetUpdateCampaignStates.Done, FleetUpdateMachineStates.Updated), ((await fleet.CampaignAsync(second.Id)).State, (await fleet.CampaignAsync(second.Id)).ServerState));
+    }
+
+    [TestMethod]
+    public async Task TheServersAutomaticStepWaitsForTheMaintenanceWindow()
+    {
+        await using var fleet = await TestFleet.StartAsync(latest: "4.0.2");
+        await fleet.SetPolicyAsync(1, FleetUpdateModes.Automatic, window: fleet.Clock.Now.AddHours(1).ToString("HH:mm", System.Globalization.CultureInfo.InvariantCulture));
+        await fleet.TickAsync();
+        var campaign = (await fleet.UpdatesAsync()).Campaigns.Single();
+        Assert.AreEqual(FleetUpdateCampaignStates.Scheduled, campaign.State);
+
+        // The server's step comes after its window closed (the server was off, or its nodes took long).
+        fleet.Clock.Advance(TimeSpan.FromHours(6));
+        await fleet.TickAsync();
+        var waiting = await fleet.CampaignAsync(campaign.Id);
+        Assert.AreEqual(0, fleet.Server.Applied.Count, "the server does not update outside its signed window");
+        Assert.AreEqual((FleetUpdateCampaignStates.UpdatingServer, FleetUpdateMachineStates.Pending), (waiting.State, waiting.ServerState));
+        StringAssert.Contains(waiting.ServerMessage, "maintenance window");
+        await fleet.TickAsync();
+        Assert.AreEqual(0, fleet.Server.Applied.Count);
+
+        // The next window opens.
+        fleet.Clock.Advance(TimeSpan.FromHours(19));
+        await fleet.TickAsync();
+        Assert.AreEqual(1, fleet.Server.Applied.Count);
+        await fleet.TickAsync();
+        Assert.AreEqual(FleetUpdateCampaignStates.Done, (await fleet.CampaignAsync(campaign.Id)).State);
+    }
+
+    [TestMethod]
+    public async Task APolicyThatRevokesACampaignInTheServersStepWithdrawsTheServersSwitch()
+    {
+        await using var fleet = await TestFleet.StartAsync();
+        fleet.Server.Holds = true;
+        var campaign = await fleet.CreateCampaignAsync("4.0.2");
+        await fleet.TickAsync();
+        Assert.AreEqual(("4.0.2", FleetUpdateCampaignStates.UpdatingServer), (fleet.Server.Pending, (await fleet.CampaignAsync(campaign.Id)).State), "the server's switch waits");
+
+        await fleet.SetPolicyAsync(1, FleetUpdateModes.Pinned, pinned: "4.0.1");
+        Assert.IsNull(fleet.Server.Pending, "the switch the policy no longer allows is withdrawn");
+        var revoked = await fleet.CampaignAsync(campaign.Id);
+        Assert.AreEqual((FleetUpdateCampaignStates.Cancelled, FleetUpdateMachineStates.Cancelled), (revoked.State, revoked.ServerState));
+        StringAssert.Contains(revoked.ServerMessage, "pins");
+    }
+
+    [TestMethod]
+    public async Task AServerStepTakenAgainAfterARestartIsCheckedAgainstThePolicyHeldNow()
+    {
+        using var root = new TempDirectory();
+        using var owner = new TestDevice("Desktop");
+        string id;
+        await using (var first = await TestFleet.StartAsync(root: root, owner: owner))
+        {
+            id = (await first.CreateCampaignAsync("4.0.2", notBefore: first.Clock.Now.AddHours(1))).Id;
+            // The server stopped once it recorded its step as asked, before its self-update recorded the switch.
+            var campaign = await first.Store.GetUpdateCampaignAsync(id) ?? throw new InvalidOperationException("No campaign.");
+            await first.Store.SaveUpdateCampaignAsync(campaign with { State = FleetUpdateCampaignStates.UpdatingServer, ServerState = FleetUpdateMachineStates.Instructed }, [], null);
+        }
+
+        // At its start, before its self-update reports, the fleet is pinned to the version it runs.
+        await using var second = await TestFleet.StartAsync(root: root, owner: owner, setUp: false, reporting: false);
+        await second.SetPolicyAsync(1, FleetUpdateModes.Pinned, pinned: "4.0.1");
+        second.Server.Reporting = true;
+        await second.TickAsync();
+        var resumed = await second.CampaignAsync(id);
+        Assert.AreEqual(0, second.Server.Applied.Count, "the step taken again verifies the policy held now");
+        Assert.AreEqual(FleetUpdateCampaignStates.Failed, resumed.State);
+        StringAssert.Contains(resumed.ServerMessage, "pinned");
+    }
+
+    /// <summary>
+    /// The self-update of the server, faked: it records what it was asked, and runs the version (on trial or confirmed),
+    /// keeps its switch waiting, fails, or rolls back; it may not report yet, as before its start.
+    /// </summary>
     private sealed class FakeServer(TestClock clock)
     {
+        private readonly Lock _gate = new();
         private readonly TaskCompletionSource<UpdateRequest> _applied = new(TaskCreationOptions.RunContinuationsAsynchronously);
-        private volatile string _running = "4.0.1";
-        private volatile FleetUpdateOutcome? _outcome;
+        private string _running = "4.0.1";
+        private string? _previous;
+        private string? _trial;
+        private (string Version, string RequestedBy)? _pending;
+        private FleetUpdateOutcome? _outcome;
 
         public List<UpdateRequest> Applied { get; } = [];
 
@@ -260,16 +365,79 @@ public sealed class UpdateCampaignServerTests
 
         public bool RollBack { get; set; }
 
-        public FleetUpdateStatus? Status() => new(_running, null, null, null, null, null, [], _outcome);
+        /// <summary>Gets or sets whether a switch runs the new version on trial, until <see cref="EndTrial"/>.</summary>
+        public bool OnTrial { get; set; }
+
+        /// <summary>Gets or sets whether a switch waits, as a pending switch, until it is withdrawn.</summary>
+        public bool Holds { get; set; }
+
+        /// <summary>Gets or sets whether the self-update reports its status (not before it started).</summary>
+        public bool Reporting { get; set; } = true;
+
+        public string? Pending
+        {
+            get
+            {
+                lock (_gate) return _pending?.Version;
+            }
+        }
+
+        public FleetUpdateStatus? Status()
+        {
+            lock (_gate)
+            {
+                if (!Reporting) return null;
+                return new FleetUpdateStatus(_running, null, null, null, _trial is { } trial ? new FleetUpdateTrial(trial, clock.Now, 1) : null,
+                    _pending is { } pending ? new FleetUpdatePending(pending.Version, "requested", clock.Now, 0, false, pending.RequestedBy) : null, [], _outcome);
+            }
+        }
 
         public Task<StagedUpdate?> ApplyAsync(UpdateRequest request, string requestedBy, CancellationToken cancellationToken)
         {
             lock (Applied) Applied.Add(request);
             _applied.TrySetResult(request);
             if (Failure is { } failure) throw new UpdateException(UpdateErrorCodes.NotFound, failure);
-            if (RollBack) _outcome = new FleetUpdateOutcome(request.Version!, "rolled_back", clock.Now, "It did not confirm.");
-            else _running = request.Version!;
+            lock (_gate)
+            {
+                if (RollBack)
+                {
+                    _outcome = new FleetUpdateOutcome(request.Version!, "rolled_back", clock.Now, "It did not confirm.");
+                }
+                else if (Holds)
+                {
+                    _pending = (request.Version!, requestedBy);
+                }
+                else
+                {
+                    (_previous, _running) = (_running, request.Version!);
+                    if (OnTrial) _trial = request.Version;
+                }
+            }
+
             return Task.FromResult<StagedUpdate?>(null);
+        }
+
+        /// <summary>Withdraws the switch that waits, only when that requester asked for it.</summary>
+        public bool Withdraw(string requestedBy, string reason)
+        {
+            lock (_gate)
+            {
+                if (_pending is not { } pending || pending.RequestedBy != requestedBy) return false;
+                _pending = null;
+                return true;
+            }
+        }
+
+        /// <summary>Ends the trial of the version that runs: it confirms, or it rolls back to the previous version.</summary>
+        public void EndTrial(bool confirmed)
+        {
+            lock (_gate)
+            {
+                var trial = _trial ?? throw new InvalidOperationException("No version on trial.");
+                _trial = null;
+                if (!confirmed) _running = _previous!;
+                _outcome = new FleetUpdateOutcome(trial, confirmed ? "confirmed" : "rolled_back", clock.Now, confirmed ? null : "It did not confirm in time.");
+            }
         }
 
         public Task<UpdateRequest> WaitAppliedAsync() => _applied.Task.WaitAsync(Waits.Hang);
@@ -350,20 +518,20 @@ public sealed class UpdateCampaignServerTests
         private UpdateCampaignService Service => Fixture.GetService<UpdateCampaignService>();
 
         public static async Task<TestFleet> StartAsync(int nodes = 0, string? latest = null, Func<string?>? readLatest = null, TempDirectory? root = null, TestDevice? owner = null,
-            bool setUp = true)
+            bool setUp = true, bool reporting = true)
         {
             var ownedRoot = root is null ? new TempDirectory() : null;
             var ownedOwner = owner is null ? new TestDevice("Desktop") : null;
             owner ??= ownedOwner!;
             var clock = new TestClock(DateTimeOffset.UtcNow);
-            var server = new FakeServer(clock);
+            var server = new FakeServer(clock) { Reporting = reporting };
             readLatest ??= () => latest;
             var fixture = await ServerFixture.StartAsync(root ?? ownedRoot, clock, updateStatus: server.Status, configure: options => new CoordinatorServerOptions
             {
                 DataRoot = options.DataRoot, Urls = options.Urls, TimeProvider = options.TimeProvider, Relay = options.Relay, ConfigureLogging = options.ConfigureLogging,
                 UpdateStatus = options.UpdateStatus, EnvironmentVariable = options.EnvironmentVariable, TelemetryExportInterval = options.TelemetryExportInterval,
-                ApplyUpdate = server.ApplyAsync, UpdateRuntime = Runtime, UpdateInterval = TimeSpan.FromHours(1), UpdateOfflineGrace = TimeSpan.FromSeconds(30),
-                ReadLatestUpdate = (_, _) => Task.FromResult(readLatest()),
+                ApplyUpdate = server.ApplyAsync, CancelUpdate = server.Withdraw, UpdateRuntime = Runtime, UpdateInterval = TimeSpan.FromHours(1),
+                UpdateOfflineGrace = TimeSpan.FromSeconds(30), ReadLatestUpdate = (_, _) => Task.FromResult(readLatest()),
             });
             string organization;
             var devices = new List<TestDevice>();
@@ -421,6 +589,13 @@ public sealed class UpdateCampaignServerTests
 
         public async Task<UpdateCampaignDto> CreateCampaignAsync(string version, DateTimeOffset? notBefore = null)
         {
+            var answer = await SendCampaignAsync(version, notBefore);
+            Assert.AreEqual(HttpStatusCode.Created, answer.Status, answer.Body.ToString());
+            return answer.Read<UpdateCampaignDto>();
+        }
+
+        public async Task<ApiAnswer> SendCampaignAsync(string version, DateTimeOffset? notBefore = null)
+        {
             var sequence = (await UpdatesAsync()).NextSequence;
             var packages = new Dictionary<string, IReadOnlyDictionary<string, string>>
             {
@@ -429,9 +604,7 @@ public sealed class UpdateCampaignServerTests
             };
             var manifest = new FleetUpdateManifest(FleetUpdateManifest.CurrentVersion, Organization, "c" + sequence, sequence, version, UpdateFeeds.NuGetOrg, false, notBefore,
                 null, null, packages, Owner.DeviceId, Clock.Now);
-            var answer = await Fixture.SendAsync(Owner, HttpMethod.Post, "/api/v1/updates/campaigns", new CreateUpdateCampaignRequest(Owner.SignManifest(manifest)));
-            Assert.AreEqual(HttpStatusCode.Created, answer.Status, answer.Body.ToString());
-            return answer.Read<UpdateCampaignDto>();
+            return await Fixture.SendAsync(Owner, HttpMethod.Post, "/api/v1/updates/campaigns", new CreateUpdateCampaignRequest(Owner.SignManifest(manifest)));
         }
 
         public async Task<UpdateCampaignDto> CancelAsync(string id)

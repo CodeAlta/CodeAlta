@@ -8,16 +8,24 @@ namespace CodeAlta.Server.Hosting;
 /// <summary>What <c>GET /api/v1/server/update</c> reads: the versions of the server and its self-update.</summary>
 internal sealed class ServerUpdateStatusSource(Func<FleetUpdateStatus?>? read)
 {
-    /// <summary>Reads the status: as the self-update reports it, or the running version alone.</summary>
+    /// <summary>Reads the status: as the self-update reports it, or the running version alone (also when its state does not read).</summary>
     /// <returns>The status.</returns>
-    public FleetUpdateStatus Read() => read?.Invoke() ?? new FleetUpdateStatus(ServerVersion.Current, null, null, null, null, null, [], null);
+    public FleetUpdateStatus Read() => TryRead(out var status) ? status : new FleetUpdateStatus(ServerVersion.Current, null, null, null, null, null, [], null);
 
     /// <summary>Reads the status as the self-update reports it: its pending switch, its trial and how its last switch ended.</summary>
-    /// <param name="status">The status, when the self-update runs.</param>
-    /// <returns>Whether the self-update reported it (it does not before it started, nor in a server without one).</returns>
+    /// <param name="status">The status, when the self-update runs and its state reads.</param>
+    /// <returns>Whether the self-update reported it (it does not before it started, in a server without one, nor while its state does not read).</returns>
     public bool TryRead([System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out FleetUpdateStatus? status)
     {
-        status = read?.Invoke();
+        try
+        {
+            status = read?.Invoke();
+        }
+        catch (UpdateException)
+        {
+            status = null;
+        }
+
         return status is not null;
     }
 }
@@ -84,9 +92,13 @@ internal sealed class ServerUpdates : IAsyncDisposable
     /// <summary>Starts reading the state of the versions.</summary>
     public void Start() => _loop = Task.Run(LoopAsync);
 
-    /// <summary>Gets the versions of the server and where its self-update stands.</summary>
+    /// <summary>
+    /// Gets the versions of the server and where its self-update stands: a state that exists and cannot be read throws,
+    /// never taken for one without a trial (a campaign of the fleet would take the version on trial for one confirmed).
+    /// </summary>
     /// <returns>The status.</returns>
-    public FleetUpdateStatus Status() => UpdateStatusReport.Describe(_options.Store.Read(), _options.Running.ToString(), _options.Installed);
+    /// <exception cref="UpdateException">The state of the versions cannot be read (<see cref="UpdateErrorCodes.StateUnavailable"/>).</exception>
+    public FleetUpdateStatus Status() => UpdateStatusReport.Describe(_options.Store.ReadOrThrow(), _options.Running.ToString(), _options.Installed);
 
     /// <summary>
     /// Downloads, checks and stages a version, then asks this server to switch to it: what the coordinated update of the
@@ -140,16 +152,17 @@ internal sealed class ServerUpdates : IAsyncDisposable
         }
 
         if (state.Pending is not { } pending || RestartRequested) return;
+        // Each change below holds only while the switch read here still waits: one withdrawn meanwhile (a campaign a policy
+        // revoked) or replaced (altaserver update) wins, and the next step takes what waits then.
         if (!UpdateVersion.TryParse(pending.Version, out var target) || !store.IsStaged(target, UpdateProduct.Server))
         {
-            store.CancelPending($"{pending.Version} is not staged in {store.Root}.");
-            _options.Log($"The switch to {pending.Version} was dropped: it is not staged.");
+            if (store.TryCancelPending(pending, $"{pending.Version} is not staged in {store.Root}.")) _options.Log($"The switch to {pending.Version} was dropped: it is not staged.");
             return;
         }
 
         if (target.Equals(running))
         {
-            store.CancelPending(null);
+            store.TryCancelPending(pending, null);
             return;
         }
 
@@ -163,12 +176,17 @@ internal sealed class ServerUpdates : IAsyncDisposable
             or Microsoft.Data.Sqlite.SqliteException)
         {
             // Without a backup there is no way back from the migrations of the new version: no switch.
-            store.CancelPending($"The database could not be copied before the switch: {exception.Message}");
+            store.TryCancelPending(pending, $"The database could not be copied before the switch: {exception.Message}");
             _options.Log($"The switch to {target} was dropped: the database could not be copied ({exception.Message}).");
             return;
         }
 
-        store.Select(target, backup);
+        if (!store.TrySelect(target, pending, backup))
+        {
+            _options.Log($"The switch to {target} was withdrawn or replaced while the database was copied.");
+            return;
+        }
+
         _options.Log($"CodeAlta Server copied its database to {backup} and stops to start {target} on trial.");
         if (Interlocked.Exchange(ref _restartRequested, 1) == 0) _options.RequestRestart();
     }

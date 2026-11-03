@@ -77,6 +77,14 @@ public sealed class CoordinatorServerOptions
     /// </summary>
     public Func<CodeAlta.Fleet.Update.UpdateRequest, string, CancellationToken, Task<CodeAlta.Fleet.Update.StagedUpdate?>>? ApplyUpdate { get; init; }
 
+    /// <summary>
+    /// Gets what withdraws the server's own switch that waits, only when a given requester asked for it (a campaign of the
+    /// fleet that a new policy revokes during the server's step), given the requester and why; it gives whether that
+    /// switch waited and was withdrawn, and throws <see cref="CodeAlta.Fleet.Update.UpdateException"/> when the state of
+    /// the versions cannot be written. Null for none.
+    /// </summary>
+    public Func<string, string, bool>? CancelUpdate { get; init; }
+
     /// <summary>Gets the runtime of the server's package (<c>win-x64</c>); null for this process's.</summary>
     public string? UpdateRuntime { get; init; }
 
@@ -400,7 +408,8 @@ public sealed class CoordinatorServer : IAsyncDisposable
             provider.GetRequiredService<ServerUpdateStatusSource>(), time, provider.GetRequiredService<ILoggerFactory>().CreateLogger("CodeAlta.Server.Update"),
             new UpdateCampaignOptions
             {
-                Interval = options.UpdateInterval, ApplyServerUpdate = options.ApplyUpdate, ServerRuntime = options.UpdateRuntime, ReadLatest = options.ReadLatestUpdate,
+                Interval = options.UpdateInterval, ApplyServerUpdate = options.ApplyUpdate, WithdrawServerSwitch = options.CancelUpdate, ServerRuntime = options.UpdateRuntime,
+                ReadLatest = options.ReadLatestUpdate,
                 Limits = new UpdateCampaignLimits { MaxConcurrent = Math.Max(1, options.UpdateConcurrency), OfflineGrace = options.UpdateOfflineGrace },
             }));
         services.AddSingleton(provider => new ControlService(store, provider.GetRequiredService<PresenceRegistry>(), provider.GetRequiredService<DirectoryHub>(),

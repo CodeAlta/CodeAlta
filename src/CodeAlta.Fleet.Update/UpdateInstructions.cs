@@ -72,8 +72,9 @@ public sealed record VerifiedUpdate(string CampaignId, UpdateVersion Version, st
 /// machine install anything. A campaign a person started must carry a manifest signed by a controller device of the
 /// device list the machine anchored, newer than the last one it accepted, naming it, for a version newer than the one it
 /// runs (an older one only when the manifest says a person chose a rollback), with the hash of the package of its
-/// runtime. An automatic campaign must carry an automatic policy signed the same way, for a stable version newer than
-/// the one it runs, and starts at the maintenance window of that policy; the machine then checks the feed itself
+/// runtime. An automatic campaign must carry an automatic policy signed the same way, for a stable version not older than
+/// the one it runs (the one it runs already installs nothing: the machine is updated once that version confirmed), and
+/// starts at the maintenance window of that policy; the machine then checks the feed itself
 /// (<see cref="UpdateRequest.StableOnly"/>). The latest policy the machine accepted (<see cref="UpdateInstructionContext.Policy"/>)
 /// wins: an automatic policy it replaced allows nothing, and a pinned one allows only its version.
 /// </summary>
@@ -217,10 +218,11 @@ public static class UpdateInstructions
             return false;
         }
 
-        // No person chose this version: never older than what runs.
-        if (!(target > context.Running))
+        // No person chose this version: never older than what runs. The version that runs already is taken too: nothing is
+        // installed, and the machine is updated once that version confirmed.
+        if (target < context.Running)
         {
-            reason = $"{target} is not newer than {context.Running}, which runs";
+            reason = $"{target} is older than {context.Running}, which runs";
             return false;
         }
 

@@ -265,6 +265,46 @@ public sealed class NodeUpdateTests
     }
 
     [TestMethod]
+    public void ASwitchCancelledOrReplacedWhileTheNodeDecidesIsNotSelected()
+    {
+        using var root = new NodeTestRoot();
+        var store = NodeUpdatePaths.Store(root.Profile());
+        var target = UpdateVersion.Parse("99.0.0");
+        var newer = UpdateVersion.Parse("99.0.5");
+        Stage(store, target);
+        Stage(store, newer);
+        const string campaign = "fleet campaign c1";
+        Action? meanwhile = null;
+        var restarts = 0;
+        // What happens between the read of the state and the selection: the node counts its sessions there.
+        var updates = new NodeUpdates(new NodeUpdatesOptions
+        {
+            Store = store, Running = UpdateVersion.Parse("98.0.0"), PauseAdmission = static _ => { }, Healthy = static () => true, RequestRestart = () => restarts++,
+            SessionsAtWork = () =>
+            {
+                meanwhile?.Invoke();
+                meanwhile = null;
+                return 0;
+            },
+        });
+
+        // The campaign is cancelled: its switch is withdrawn just before the node takes it.
+        store.RequestSwitch(target, now: true, campaign);
+        meanwhile = () => store.CancelPending("Campaign c1 was cancelled.", campaign);
+        updates.Tick(DateTimeOffset.UtcNow);
+        Assert.AreEqual((null, null, 0), (store.Read().Current, store.Read().Pending, restarts), "the cancelled version is not selected");
+
+        // The owner asks for a newer version just before the node takes the campaign's: the newer request stays.
+        store.RequestSwitch(target, now: true, campaign);
+        meanwhile = () => store.RequestSwitch(newer, now: true, "local");
+        updates.Tick(DateTimeOffset.UtcNow);
+        Assert.AreEqual((null, "99.0.5", 0), (store.Read().Current, store.Read().Pending?.Version, restarts), "the newer request is not cleared");
+
+        updates.Tick(DateTimeOffset.UtcNow);
+        Assert.AreEqual(("99.0.5", 1), (store.Read().Current, restarts), "the next step takes what waits");
+    }
+
+    [TestMethod]
     public async Task TheFleetsSwitchNeverReplacesNorWithdrawsTheOwnersSwitch()
     {
         using var root = new NodeTestRoot();

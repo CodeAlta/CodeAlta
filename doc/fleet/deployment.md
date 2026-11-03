@@ -155,8 +155,11 @@ All signed (Authenticode, Apple notarization, NuGet signatures, cosign for image
   that runs it on trial may still roll back, and reports that too), failed or rolled back, then updates itself, last, with the same self-update. A node offline does not hold the campaign: it is pending,
   asked when it reconnects, and the campaign ends **partly done** until it is. A node that goes offline while it
   switches holds the server for ten minutes. A campaign is cancelled until the server's step; a node already asked is
-  told, again at each connection, until it reports the campaign done. One campaign at a time is active, whoever starts
-  it. A server stopped during its own step takes that step again at its start unless its self-update holds the switch.
+  told, again at each connection, until it reports the campaign done (any final state). The node keeps the
+  cancellation before it acknowledges it, also one that comes before the instruction, which then never starts there.
+  The server's own step is done only once its new version confirmed its trial (it ends as rolled back otherwise), and
+  the campaign stays active until then: one campaign at a time is active, whoever starts it. A server stopped during
+  its own step takes that step again at its start unless its self-update holds the switch.
   States: scheduled, updating nodes, updating server, done, partly done, failed (the server did not update, or every
   node that tried failed), cancelled. Nodes report where they stand (`update.report`, and in their presence); the REST
   API (`/api/v1/updates`) and the change feed give the campaign to the desktop.
@@ -166,25 +169,30 @@ All signed (Authenticode, Apple notarization, NuGet signatures, cosign for image
   anchored signed it, its sequence is newer than the last one it accepted from that server, it names the node, the
   version is newer than the one that runs (an older one only when the manifest says a person chose a rollback), the
   fleet's latest policy allows it, and its download matches the hash signed for its runtime. The server checks the
-  same against the device list it holds before its own step. The machine's `update.json` wins: its feeds, or
+  same against the device list and the policy it holds before each application of its own step, one taken again after
+  a stop included. The machine's `update.json` wins: its feeds, or
   `"fleet": false`, which refuses every update of the fleet; so does a switch its owner asked for (`altanode update`),
   which a campaign never replaces nor withdraws. A node keeps the instruction it accepted
   (`fleet/update-campaign.json`) and waits for its time itself, across restarts; nothing runs until that file is
   written, and while it does not read, the node refuses every update of the fleet (the owner fixes it, or deletes it to
-  start again as a new node). A campaign it accepted never starts again: sent again, even after a refusal, it only gets
+  start again as a new node). A newer policy or a cancellation it cannot write holds in memory, and until the write
+  succeeds (tried again) the node takes no instruction, runs no work of the fleet and acknowledges nothing. A version
+  is confirmed only from a self-update state that reads. A campaign it accepted never starts again: sent again, even after a refusal, it only gets
   where the node stands. A node follows one fleet at a time: another server's instruction is refused while a campaign
-  runs, and each server keeps reading how its own last campaign ended. An automatic update waits on the machine for the
-  signed maintenance window (its time zone, daylight saving time included; open four hours), whenever the server sends
-  it; a newer policy drops a campaign that waits for what it no longer allows.
+  runs, and each server keeps reading how its own last campaign ended. An automatic update waits on each machine, the
+  server included, for the signed maintenance window (its time zone, daylight saving time included; open four hours),
+  whenever it reaches it; a newer policy drops a campaign that waits for what it no longer allows.
 - **Policy.** Signed the same way: **manual** (campaigns only), **pinned** (no campaign to another version), or
   **automatic**: the server reads the policy's feed daily and starts a campaign to its latest stable version at the
   maintenance window (a time of day in a time zone). No person signs the hash of that version, so each machine checks
-  the feed itself: the version must be the latest stable one the feed lists, newer than the one it runs, and the
-  package must match the feed's own hash; the server reads the feed again before its own step. A version that failed
+  the feed itself: the version must be the latest stable one the feed lists, not older than the one it runs (a machine
+  that runs it installs nothing, and is updated once that version confirmed), and the package must match the feed's
+  own hash; the server reads the feed again before its own step. A version that failed
   is tried again at the next daily checks, three times at most; one that rolled back is not. The server sends the
   signed policy, whatever its mode, to its nodes (`update.policy`) when it changes and at each connection; a node keeps
   the newest and refuses what an older one allowed. A new policy withdraws the campaigns it no longer allows: the
-  automatic ones of the policy it replaces, and those to another version than a pinned one.
+  automatic ones of the policy it replaces, and those to another version than a pinned one, in the server's step too
+  while the server's own switch waits (it is withdrawn).
 - Containers update by image tag.
 
 ## Backup, restore, leave

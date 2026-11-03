@@ -271,6 +271,8 @@ public sealed class ServerApplication
                 ApplyUpdate = (request, requestedBy, token) => updates is { } self
                     ? self.ApplyAsync(request, requestedBy, token)
                     : throw new UpdateException(UpdateErrorCodes.StateUnavailable, "The self-update of this server is not running."),
+                // A campaign a new policy revokes during the server's step: its switch, while it waits (only that one).
+                CancelUpdate = (requestedBy, reason) => store.CancelPending(reason, requestedBy),
             };
             server = await CoordinatorServer.StartAsync(ConfigureServer?.Invoke(serverOptions) ?? serverOptions).ConfigureAwait(false);
         }
