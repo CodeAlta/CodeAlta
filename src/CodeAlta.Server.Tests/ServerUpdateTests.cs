@@ -149,6 +149,10 @@ public sealed class ServerUpdateTests
     private static string Feed(TempDirectory root, string version)
     {
         var feed = Directory.CreateDirectory(Path.Combine(root.Path, "feed")).FullName;
+        // The tool package and the runtime package of this machine, as dotnet pack makes them: a version needs both.
+        using (var tool = ZipFile.Open(Path.Combine(feed, $"{UpdateProduct.Server.PackageId}.{version}.nupkg"), ZipArchiveMode.Create))
+        using (var settings = tool.CreateEntry("tools/net10.0/any/DotnetToolSettings.xml").Open())
+            settings.Write(Encoding.UTF8.GetBytes("<DotNetCliTool Version=\"2\" />"));
         var id = UpdateProduct.Server.RuntimePackageId(Runtime);
         using var archive = ZipFile.Open(Path.Combine(feed, $"{id}.{version}.nupkg"), ZipArchiveMode.Create);
         foreach (var name in new[] { UpdateProduct.Server.AssemblyFileName, UpdateProduct.Server.AppHostFileName(OperatingSystem.IsWindows()) })

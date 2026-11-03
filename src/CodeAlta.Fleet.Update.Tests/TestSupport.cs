@@ -35,11 +35,15 @@ internal static class Packages
 
     public const string Runtime = "win-x64";
 
-    /// <summary>Writes a runtime package with the entry assembly, the app host and a file in a sub-folder.</summary>
+    /// <summary>
+    /// Writes a runtime package with the entry assembly, the app host and a file in a sub-folder, and the tool package
+    /// beside it unless told otherwise, as <c>dotnet pack</c> does.
+    /// </summary>
     public static string Write(string folder, string version, string? runtime = null, IEnumerable<(string Name, string Content)>? extra = null,
-        bool withAssembly = true)
+        bool withAssembly = true, bool withTool = true)
     {
         runtime ??= Runtime;
+        if (withTool) WriteTool(folder, version);
         var path = System.IO.Path.Combine(folder, $"{Product.RuntimePackageId(runtime)}.{version}.nupkg");
         using var archive = ZipFile.Open(path, ZipArchiveMode.Create);
         Add(archive, $"{Product.RuntimePackageId(runtime)}.nuspec", "<package/>");
@@ -49,6 +53,17 @@ internal static class Packages
         Add(archive, prefix + Product.AppHostFileName(windows: false), "host " + version);
         Add(archive, prefix + "content/user-guide/readme.md", "guide");
         foreach (var (name, content) in extra ?? []) Add(archive, name, content);
+        return path;
+    }
+
+    /// <summary>Writes the tool package of a version: the settings that name the runtime packages.</summary>
+    public static string WriteTool(string folder, string version)
+    {
+        var path = System.IO.Path.Combine(folder, $"{Product.PackageId}.{version}.nupkg");
+        if (File.Exists(path)) return path;
+        using var archive = ZipFile.Open(path, ZipArchiveMode.Create);
+        Add(archive, $"{Product.PackageId}.nuspec", "<package/>");
+        Add(archive, "tools/net10.0/any/DotnetToolSettings.xml", "<DotNetCliTool Version=\"2\" />");
         return path;
     }
 

@@ -218,7 +218,7 @@ public sealed class UpdateLauncher
 
             if (exitCode == RestartExitCode && Volatile.Read(ref _stopping) == 0)
             {
-                Log($"{label} stopped to switch versions after {started.Elapsed.TotalSeconds:0} s.");
+                Log($"{_options.Product.AssemblyName} {state.Current ?? _options.InstalledVersion ?? ""} stopped to switch versions after {started.Elapsed.TotalSeconds:0} s.");
                 await Task.Delay(_options.RestartDelay).ConfigureAwait(false);
                 continue;
             }

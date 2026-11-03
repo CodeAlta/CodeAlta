@@ -230,12 +230,15 @@ public sealed class NodeUpdateTests
         Assert.IsNotNull(await client.CreateSessionAsync(new FleetCreateSessionParams(Title: "x"), "create-2", TestContext.CancellationToken));
     }
 
-    // A folder feed with a runtime package of each version, for the runtime of this machine.
+    // A folder feed with the tool package and the runtime package of this machine of each version, as dotnet pack makes them.
     private static string Feed(NodeTestRoot root, params string[] versions)
     {
         var feed = Directory.CreateDirectory(Path.Combine(root.Root, "feed")).FullName;
         foreach (var version in versions)
         {
+            using (var tool = ZipFile.Open(Path.Combine(feed, $"{UpdateProduct.Node.PackageId}.{version}.nupkg"), ZipArchiveMode.Create))
+            using (var settings = tool.CreateEntry("tools/net10.0/any/DotnetToolSettings.xml").Open())
+                settings.Write(Encoding.UTF8.GetBytes("<DotNetCliTool Version=\"2\" />"));
             var id = UpdateProduct.Node.RuntimePackageId(Runtime);
             using var archive = ZipFile.Open(Path.Combine(feed, $"{id}.{version}.nupkg"), ZipArchiveMode.Create);
             foreach (var name in new[] { UpdateProduct.Node.AssemblyFileName, UpdateProduct.Node.AppHostFileName(OperatingSystem.IsWindows()) })

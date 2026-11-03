@@ -31,8 +31,23 @@ public sealed class UpdateStagingTests
 
         var versions = await UpdateFeeds.Open(feed, new HttpClient()).ListVersionsAsync(PackageId, CancellationToken.None);
         CollectionAssert.AreEquivalent(new[] { "4.0.0-alpha.901", "4.0.0-alpha.903" }, versions.Select(static v => v.Version.ToString()).ToArray());
-        Assert.AreEqual(0, (await UpdateFeeds.Open(feed, new HttpClient()).ListVersionsAsync(Packages.Product.PackageId, CancellationToken.None)).Count,
-            "the tool package is not a runtime package");
+        var tools = await UpdateFeeds.Open(feed, new HttpClient()).ListVersionsAsync(Packages.Product.PackageId, CancellationToken.None);
+        CollectionAssert.AreEquivalent(new[] { "4.0.0-alpha.901", "4.0.0-alpha.902" }, tools.Select(static v => v.Version.ToString()).ToArray(),
+            "the tool packages, not the runtime packages, whose names start the same");
+    }
+
+    [TestMethod]
+    public async Task AFolderFeedOffersAVersionOnceItHasBothPackages()
+    {
+        using var temp = new TempFolder();
+        var feed = Directory.CreateDirectory(temp.Combine("feed")).FullName;
+        Packages.Write(feed, "4.0.1");
+        Packages.Write(feed, "4.0.2", withTool: false);
+        var updater = Updater(temp, "4.0.0");
+        Assert.AreEqual("4.0.1", (await updater.CheckAsync(new UpdateRequest { Source = feed }, CancellationToken.None)).Target?.ToString(),
+            "the runtime package of 4.0.2 came before its tool package");
+        Packages.WriteTool(feed, "4.0.2");
+        Assert.AreEqual("4.0.2", (await updater.CheckAsync(new UpdateRequest { Source = feed }, CancellationToken.None)).Target?.ToString());
     }
 
     [TestMethod]
@@ -90,13 +105,17 @@ public sealed class UpdateStagingTests
         using var temp = new TempFolder();
         var source = Directory.CreateDirectory(temp.Combine("packages")).FullName;
         var handler = new FakeNuGetFeed { PagedRegistration = true };
-        handler.Add(PackageId, "4.0.0", File.ReadAllBytes(Packages.Write(source, "4.0.0")));
-        handler.Add(PackageId, "4.0.1", File.ReadAllBytes(Packages.Write(source, "4.0.1")));
-        handler.Add(PackageId, "4.0.2", File.ReadAllBytes(Packages.Write(source, "4.0.2")), listed: false);
+        foreach (var version in new[] { "4.0.0", "4.0.1", "4.0.2", "4.0.3" })
+        {
+            handler.Add(PackageId, version, File.ReadAllBytes(Packages.Write(source, version)));
+            // The tool package of 4.0.2 is unlisted (the release withdrawn), that of 4.0.3 not published yet.
+            if (version != "4.0.3") handler.Add(Packages.Product.PackageId, version, File.ReadAllBytes(Packages.WriteTool(source, version)), listed: version != "4.0.2");
+        }
+
         var updater = Updater(temp, "4.0.0", new HttpClient(handler));
         var request = new UpdateRequest { Source = FakeNuGetFeed.Index };
         var check = await updater.CheckAsync(request, CancellationToken.None);
-        Assert.AreEqual("4.0.1", check.Target?.ToString(), "an unlisted version is not the latest");
+        Assert.AreEqual("4.0.1", check.Target?.ToString(), "a withdrawn release and an incomplete one are not the latest");
         var staged = await updater.StageAsync(check, request, CancellationToken.None);
         Assert.AreEqual("feed", staged.Checked);
         Assert.AreEqual("assembly 4.0.1", File.ReadAllText(Path.Combine(staged.Path, "altanode.dll")));
@@ -110,6 +129,7 @@ public sealed class UpdateStagingTests
         var source = Directory.CreateDirectory(temp.Combine("packages")).FullName;
         var handler = new FakeNuGetFeed();
         handler.Add(PackageId, "4.0.1", File.ReadAllBytes(Packages.Write(source, "4.0.1")), hash: Convert.ToBase64String(new byte[64]));
+        handler.Add(Packages.Product.PackageId, "4.0.1", File.ReadAllBytes(Packages.WriteTool(source, "4.0.1")));
         var updater = Updater(temp, "4.0.0", new HttpClient(handler));
         var request = new UpdateRequest { Source = FakeNuGetFeed.Index };
         var failure = await Assert.ThrowsExactlyAsync<UpdateException>(async () => await updater.StageAsync(await updater.CheckAsync(request, CancellationToken.None), request, CancellationToken.None));
@@ -125,6 +145,7 @@ public sealed class UpdateStagingTests
         var package = File.ReadAllBytes(Packages.Write(source, "4.0.1"));
         var handler = new FakeNuGetFeed { Registrations = false };
         handler.Add(PackageId, "4.0.1", package);
+        handler.Add(Packages.Product.PackageId, "4.0.1", File.ReadAllBytes(Packages.WriteTool(source, "4.0.1")));
         var updater = Updater(temp, "4.0.0", new HttpClient(handler));
         var request = new UpdateRequest { Source = FakeNuGetFeed.Index };
         var check = await updater.CheckAsync(request, CancellationToken.None);

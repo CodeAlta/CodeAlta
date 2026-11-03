@@ -102,39 +102,71 @@ public sealed class SelfUpdater
     public string Runtime => _options.Runtime ?? UpdateProduct.CurrentRuntime()
         ?? throw new UpdateException(UpdateErrorCodes.UnsupportedRuntime, $"No package of {_options.Product.PackageId} is published for this OS and architecture.");
 
-    /// <summary>Reads the feed and chooses the version to install.</summary>
+    /// <summary>
+    /// Reads the feed and chooses the version to install: one that both the tool package and the runtime package of this
+    /// machine list.
+    /// </summary>
     /// <param name="request">The request.</param>
     /// <param name="cancellationToken">Cancels the requests to the feed.</param>
     /// <returns>What the feed offers.</returns>
-    /// <exception cref="UpdateException">The feed is not allowed or did not answer, or the version asked for is not valid or not in the feed.</exception>
+    /// <exception cref="UpdateException">The feed is not allowed or did not answer, or the version asked for is not valid or not in both packages.</exception>
     public async Task<UpdateCheck> CheckAsync(UpdateRequest request, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
         var source = _options.Policy.Resolve(request.Source, request.Origin);
         var feed = UpdateFeeds.Open(source, _options.Http);
-        var packageId = _options.Product.RuntimePackageId(Runtime);
-        var versions = await feed.ListVersionsAsync(packageId, cancellationToken).ConfigureAwait(false);
-        return Choose(source, packageId, versions, request, _options.Running, _options.Store.Read());
+        var runtimePackageId = _options.Product.RuntimePackageId(Runtime);
+        var toolLookup = feed.ListVersionsAsync(_options.Product.PackageId, cancellationToken);
+        var runtimeLookup = feed.ListVersionsAsync(runtimePackageId, cancellationToken);
+        await Task.WhenAll(toolLookup, runtimeLookup).ConfigureAwait(false);
+        return Choose(source, _options.Product.PackageId, await toolLookup.ConfigureAwait(false), runtimePackageId, await runtimeLookup.ConfigureAwait(false), request,
+            _options.Running, _options.Store.Read());
     }
 
-    /// <summary>Chooses the version to install among those of a feed.</summary>
-    internal static UpdateCheck Choose(string source, string packageId, IReadOnlyList<FeedVersion> versions, UpdateRequest request, UpdateVersion running, UpdateState state)
+    /// <summary>
+    /// Chooses the version to install. A version is available once both packages of the release list it: the tool
+    /// package and the runtime package of this machine. The packages of a release appear on nuget.org one after the other
+    /// (over 20 minutes to an hour), and a tool package that is unlisted withdraws the release; only the runtime package
+    /// is downloaded, since it holds the application. The same rule as CodeAlta Desktop's own update check
+    /// (<c>CodeAltaNuGetUpdateChecker.CheckNuGetOrgAsync</c> in CodeAlta.Hosting, which the server must not reference).
+    /// </summary>
+    internal static UpdateCheck Choose(string source, string toolPackageId, IReadOnlyList<FeedVersion> toolVersions, string runtimePackageId,
+        IReadOnlyList<FeedVersion> runtimeVersions, UpdateRequest request, UpdateVersion running, UpdateState state)
     {
+        var packageId = runtimePackageId;
         if (request.Version is { } asked)
         {
             if (!UpdateVersion.TryParse(asked, out var exact)) throw new UpdateException(UpdateErrorCodes.NotFound, $"'{asked}' is not a version.");
-            if (!versions.Any(found => found.Version.Equals(exact))) throw new UpdateException(UpdateErrorCodes.NotFound, $"{source} has no {packageId} {exact}.");
-            var note = exact.Equals(running) ? $"{exact} already runs." : state.IsBad(exact) ? $"{exact} was rolled back on this machine before; it is tried again because it was asked for." : null;
+            var tool = toolVersions.FirstOrDefault(found => found.Version.Equals(exact));
+            var runtime = runtimeVersions.FirstOrDefault(found => found.Version.Equals(exact));
+            if (tool is null || runtime is null)
+            {
+                var missing = (tool, runtime) switch
+                {
+                    (null, null) => $"neither {toolPackageId} {exact} nor {runtimePackageId} {exact}",
+                    (null, _) => $"{runtimePackageId} {exact} but not its tool package {toolPackageId} {exact}: the release is not complete yet, or was withdrawn",
+                    _ => $"{toolPackageId} {exact} but not {runtimePackageId} {exact}, the package of this machine: the release is not complete yet",
+                };
+                throw new UpdateException(UpdateErrorCodes.NotFound, $"{source} has {missing}.");
+            }
+
+            var note = exact.Equals(running) ? $"{exact} already runs."
+                : state.IsBad(exact) ? $"{exact} was rolled back on this machine before; it is tried again because it was asked for."
+                : !tool.Listed || !runtime.Listed ? $"{exact} is unlisted on {source}; it is installed because it was asked for."
+                : null;
             return new UpdateCheck(source, packageId, running, exact, exact.Equals(running) ? null : exact, note);
         }
 
         // A machine on a prerelease follows the prereleases; a release follows releases unless asked.
         var prerelease = request.Prerelease || running.IsPrerelease;
-        var candidates = versions.Where(found => found.Listed && (prerelease || !found.Version.IsPrerelease)).Select(static found => found.Version).ToArray();
+        var listedRuntime = runtimeVersions.Where(static found => found.Listed).Select(static found => found.Version).ToHashSet();
+        var candidates = toolVersions.Where(found => found.Listed && listedRuntime.Contains(found.Version) && (prerelease || !found.Version.IsPrerelease))
+            .Select(static found => found.Version).ToArray();
         var latest = candidates.Where(version => !state.IsBad(version)).DefaultIfEmpty().Max();
         var newest = candidates.DefaultIfEmpty().Max();
         string? skipped = newest is not null && state.IsBad(newest) ? $"{newest} was rolled back on this machine: it is skipped unless named with --version." : null;
-        if (latest is null) return new UpdateCheck(source, packageId, running, null, null, skipped ?? $"{source} lists no {(prerelease ? "" : "stable ")}version of {packageId}.");
+        if (latest is null)
+            return new UpdateCheck(source, packageId, running, null, null, skipped ?? $"{source} lists no {(prerelease ? "" : "stable ")}version of {toolPackageId} with its package {packageId}.");
         if (!(latest > running)) return new UpdateCheck(source, packageId, running, latest, null, skipped ?? $"{running} is up to date.");
         return new UpdateCheck(source, packageId, running, latest, latest, skipped);
     }
