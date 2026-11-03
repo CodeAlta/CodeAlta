@@ -29,8 +29,7 @@ public sealed partial class FleetNodeService
         // A project file the node cannot read leaves that project out, not the node: the others are listed, and the owner is told.
         var load = await _host.ProjectCatalog.LoadReadableAsync(cancellationToken).ConfigureAwait(false);
         var projects = load.Projects.Where(static project => !project.Archived).ToArray();
-        var diagnostics = load.Unreadable.Select(file => new FleetNodeDiagnostic(FleetNodeDiagnostic.UnreadableProject,
-            $"The project file {file.SourcePath} cannot be read, and its project is not listed: {file.Message}", file.SourcePath)).ToArray();
+        var diagnostics = load.Unreadable.Select(FleetProjectEditor.Diagnose).ToArray();
         WarnUnreadableProjects(load.Unreadable);
         // The repository of each project, so that another machine recognizes its own checkout of it; a few at a time.
         var locations = new RepositoryLocation?[projects.Length];
@@ -39,12 +38,7 @@ public sealed partial class FleetNodeService
                 : await _locations.GetAsync(projects[index].ProjectPath, token).ConfigureAwait(false)).ConfigureAwait(false);
         return new FleetNodeInfo(_options.Name, _options.Identity.DeviceId, FleetChannelProtocol.OperatingSystemName, _options.Version,
             [.. spaces.Select(static space => new FleetSpaceInfo(space.Id, space.Name))],
-            [.. projects.Select((project, index) => new FleetProjectInfo(project.Id,
-                string.IsNullOrWhiteSpace(project.DisplayName) ? project.Name : project.DisplayName, project.ProjectPath, [.. project.Spaces])
-            {
-                RepositoryKey = locations[index]?.Key,
-                RepositoryPath = locations[index]?.Path,
-            })],
+            [.. projects.Select((project, index) => FleetProjectEditor.Describe(project, locations[index]))],
             Describe(call.Device!.Permissions))
         {
             Providers = await ReadyProvidersAsync(cancellationToken).ConfigureAwait(false),

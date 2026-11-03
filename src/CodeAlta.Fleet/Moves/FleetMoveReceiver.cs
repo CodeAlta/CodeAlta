@@ -382,40 +382,13 @@ public sealed class FleetMoveReceiver
         File.Move(staging, path, overwrite: true);
     }
 
-    // Where a repository the target lacks is cloned: <root>/<key>, when the key is host/owner/repo and the URL is one a
-    // machine fetches from the network (never a path of the target, which a caller must not make it read).
-    private string? ClonePath(FleetMoveOffer offer)
-    {
-        if (CloneRoot is null || offer.RemoteUrl is not { Length: > 0 and <= 2048 } url || !IsNetworkUrl(url)) return null;
-        if (RepositoryKey.Normalize(url) != offer.RepositoryKey) return null;
-        var segments = offer.RepositoryKey.Split('/');
-        if (segments.Length < 2 || segments.Any(static segment => segment is "" or "." or ".." || segment.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0)) return null;
-        var path = Path.GetFullPath(Path.Combine([CloneRoot, .. segments]));
-        return GitWorktreeService.IsWithin(path, CloneRoot) ? path : null;
-    }
-
-    private static bool IsNetworkUrl(string url)
-    {
-        if (Uri.TryCreate(url, UriKind.Absolute, out var uri))
-            return uri.Scheme is "https" or "http" or "ssh" or "git" && !string.IsNullOrEmpty(uri.Host);
-        // scp-like: user@host:owner/repo
-        var colon = url.IndexOf(':', StringComparison.Ordinal);
-        var at = url.IndexOf('@', StringComparison.Ordinal);
-        return colon > 0 && at > 0 && at < colon && !url.Contains('\\', StringComparison.Ordinal);
-    }
+    // Where a repository the target lacks is cloned: <root>/<key> (FleetRepositoryClone.PathFor).
+    private string? ClonePath(FleetMoveOffer offer) => FleetRepositoryClone.PathFor(CloneRoot, offer.RemoteUrl, offer.RepositoryKey);
 
     private async Task<(ProjectDescriptor? Project, string? Message)> CloneAsync(FleetMoveOffer offer, string path, CancellationToken cancellationToken)
     {
-        if (!Directory.Exists(path) || !Directory.EnumerateFileSystemEntries(path).Any())
-        {
-            var parent = Directory.CreateDirectory(Path.GetDirectoryName(path)!).FullName;
-            var clone = await GitWorktreeService.RunGitAsync(parent, ["clone", "--", offer.RemoteUrl!, path], GitWorktreeService.WriteTimeout, cancellationToken)
-                .ConfigureAwait(false);
-            if (!clone.Succeeded) return (null, (clone.Error.Length > 0 ? clone.Error : clone.Output).Trim());
-        }
-
-        if (await RepositoryKey.ReadAsync(path, cancellationToken).ConfigureAwait(false) != offer.RepositoryKey)
-            return (null, $"{path} holds another repository.");
+        if (await FleetRepositoryClone.CloneAsync(offer.RemoteUrl!, path, offer.RepositoryKey, cancellationToken).ConfigureAwait(false) is { } failure)
+            return (null, failure);
         var folder = offer.RelativeFolder is "." ? path : Path.GetFullPath(Path.Combine(path, offer.RelativeFolder));
         if (!GitWorktreeService.IsWithin(folder, path) || !Directory.Exists(folder)) return (null, $"The repository has no folder {offer.RelativeFolder}.");
         await _host.ProjectCatalog.UpsertFromPathAsync(folder, cancellationToken).ConfigureAwait(false);

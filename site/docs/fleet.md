@@ -67,6 +67,19 @@ The service runs as you, with your sign-ins. Run `altanode install` again to cha
 
 For a machine that should start the node at boot under an account of its own (one that uses deploy keys and tokens only), use `altanode install --system --account <name>`, with `sudo` on macOS and Linux.
 
+## Give it projects
+
+The sessions of a node run in the projects of its catalog. On the machine of the node:
+
+| Command | What it does |
+| --- | --- |
+| `altanode projects` | Lists its projects |
+| `altanode projects add <path>` | Adds a folder of the machine |
+| `altanode projects clone <url>` | Clones a repository into `~/code/<host>/<owner>/<repo>` and adds it; a checkout already there is added as it is |
+| `altanode projects remove <project>` | Removes a project (its id, slug or name) from the catalog; its files stay |
+
+`--space <space>` with `add` or `clone` puts the project in a space too. While the node runs, it makes the change, and keeps a project that still has sessions; otherwise the commands change the catalog of the profile directly.
+
 ## Pair it with CodeAlta Desktop
 
 1. On the machine of the node, while it runs, type `altanode pair`. It prints a pairing link, `codealta-pair://…`, and six words, then waits.

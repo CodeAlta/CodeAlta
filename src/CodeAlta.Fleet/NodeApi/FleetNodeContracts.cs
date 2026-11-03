@@ -75,6 +75,18 @@ public static class FleetNodeMethods
     /// <summary>The owner's local control: changes what a device may do.</summary>
     public const string ControlDevicesPermissions = "control.devices.permissions";
 
+    /// <summary>The owner's local control: the projects of the node's catalog, archived ones included.</summary>
+    public const string ControlProjectsList = "control.projects.list";
+
+    /// <summary>The owner's local control: adds a folder of the node to its catalog, and to a space.</summary>
+    public const string ControlProjectsAdd = "control.projects.add";
+
+    /// <summary>The owner's local control: clones a repository into the node's clone root and adds it to its catalog.</summary>
+    public const string ControlProjectsClone = "control.projects.clone";
+
+    /// <summary>The owner's local control: removes a project from the node's catalog; its files stay.</summary>
+    public const string ControlProjectsRemove = "control.projects.remove";
+
     /// <summary>A target: takes the offer of a session (or, as a probe, only says whether it would).</summary>
     public const string MovesOffer = "moves.offer";
 
@@ -123,6 +135,15 @@ public static class FleetNodeErrorCodes
 
     /// <summary>The project, the space, the provider or the model asked for is not available on the node.</summary>
     public const string Unavailable = "unavailable";
+
+    /// <summary>No project of the node has that id or name.</summary>
+    public const string ProjectNotFound = "project.not_found";
+
+    /// <summary>The project has sessions on the node: it is not removed.</summary>
+    public const string ProjectHasSessions = "project.has_sessions";
+
+    /// <summary>The repository could not be cloned.</summary>
+    public const string CloneFailed = "project.clone_failed";
 }
 
 /// <summary>The parameters of <c>pair.redeem</c>.</summary>
@@ -158,6 +179,10 @@ public sealed record FleetProjectInfo(string Id, string Name, string Path, IRead
     /// <summary>Gets the path of its folder from the root of its checkout, with forward slashes (empty for the root); null without a repository key.</summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? RepositoryPath { get; init; }
+
+    /// <summary>Gets whether the project is archived (only <c>control.projects.list</c> lists archived projects).</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public bool Archived { get; init; }
 }
 
 /// <summary>A model a ready provider of the node offers.</summary>
@@ -559,6 +584,31 @@ public sealed record FleetDevicePermissionsParams(string Device, IReadOnlyList<s
 /// <param name="ClosedChannels">How many of its channels were closed: a revoked device, or one that lost a permission, reconnects to go on.</param>
 public sealed record FleetDeviceChange(FleetDeviceInfo Device, bool Changed, int ClosedChannels);
 
+/// <summary>The result of <c>control.projects.list</c>.</summary>
+/// <param name="Projects">The projects of the catalog, archived ones included, by name.</param>
+/// <param name="Diagnostics">The project files that could not be read (<see cref="FleetNodeDiagnostic.UnreadableProject"/>).</param>
+public sealed record FleetProjectList(IReadOnlyList<FleetProjectInfo> Projects, IReadOnlyList<FleetNodeDiagnostic> Diagnostics);
+
+/// <summary>The parameters of <c>control.projects.add</c>.</summary>
+/// <param name="Path">The folder, an absolute path of the node.</param>
+/// <param name="Space">The space the project joins too, by id or name; null for the default space only.</param>
+public sealed record FleetProjectAddParams(string Path, string? Space = null);
+
+/// <summary>The parameters of <c>control.projects.clone</c>.</summary>
+/// <param name="Url">The URL of the repository (https, ssh, git or <c>user@host:owner/repo</c>).</param>
+/// <param name="Space">The space the project joins too, by id or name; null for the default space only.</param>
+public sealed record FleetProjectCloneParams(string Url, string? Space = null);
+
+/// <summary>The parameters of <c>control.projects.remove</c>.</summary>
+/// <param name="Project">The project: its id, its slug or its name.</param>
+public sealed record FleetProjectRef(string Project);
+
+/// <summary>The result of <c>control.projects.add</c>, <c>clone</c> and <c>remove</c>.</summary>
+/// <param name="Project">The project as it is now (as it was, for a removal).</param>
+/// <param name="Changed">Whether the catalog changed: false for a folder it had already.</param>
+/// <param name="Note">What else the person should know (where the repository was cloned, a folder reused); null for nothing.</param>
+public sealed record FleetProjectChange(FleetProjectInfo Project, bool Changed, string? Note = null);
+
 /// <summary>An empty result.</summary>
 public sealed record FleetEmpty;
 
@@ -601,6 +651,11 @@ public sealed record FleetEmpty;
 [JsonSerializable(typeof(FleetDevicePermissionsParams))]
 [JsonSerializable(typeof(FleetDeviceChange))]
 [JsonSerializable(typeof(FleetEmpty))]
+[JsonSerializable(typeof(FleetProjectList))]
+[JsonSerializable(typeof(FleetProjectAddParams))]
+[JsonSerializable(typeof(FleetProjectCloneParams))]
+[JsonSerializable(typeof(FleetProjectRef))]
+[JsonSerializable(typeof(FleetProjectChange))]
 [JsonSerializable(typeof(FleetMoveOffer))]
 [JsonSerializable(typeof(FleetMoveOfferResult))]
 [JsonSerializable(typeof(FleetMoveChunk))]

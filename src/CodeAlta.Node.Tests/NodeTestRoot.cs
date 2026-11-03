@@ -33,6 +33,9 @@ internal sealed class NodeTestRoot : IDisposable
 
     internal string BuiltInSkillRoot { get; }
 
+    /// <summary>Where the nodes of the root clone repositories: never the user's <c>~/code</c>.</summary>
+    internal string CloneRoot => Path.Combine(Root, "code");
+
     internal CodeAltaInstanceProfile Profile(bool developer = false) => CodeAltaInstanceProfile.Create(DataRoot, developer);
 
     internal NodeHostOptions Options(bool developer = false) => Isolate(new NodeHostOptions { Profile = Profile(developer) });
@@ -47,6 +50,7 @@ internal sealed class NodeTestRoot : IDisposable
         DiscoveryScope = new SessionDiscoveryScope(Home, Root),
         BuiltInSkillRoot = BuiltInSkillRoot,
         DrainLimit = TimeSpan.FromSeconds(5),
+        CloneRoot = CloneRoot,
     };
 
     public void Dispose()

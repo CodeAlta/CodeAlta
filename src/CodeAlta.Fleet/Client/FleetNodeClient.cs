@@ -424,6 +424,48 @@ public sealed class FleetNodeClient : IAsyncDisposable
         => CallAsync(FleetNodeMethods.ControlDevicesPermissions, parameters, FleetNodeJsonContext.Default.FleetDevicePermissionsParams,
             FleetNodeJsonContext.Default.FleetDeviceChange, null, cancellationToken);
 
+    /// <summary>The longest a clone of <see cref="CloneProjectAsync"/> is waited for.</summary>
+    public static readonly TimeSpan CloneTimeout = TimeSpan.FromMinutes(15);
+
+    /// <summary>The owner's local control: lists the projects of the node, archived ones included.</summary>
+    /// <param name="cancellationToken">Cancels the call.</param>
+    /// <returns>The projects, and the project files the node cannot read.</returns>
+    /// <exception cref="FleetException">The node refused the call.</exception>
+    public Task<FleetProjectList> ListProjectsAsync(CancellationToken cancellationToken = default)
+        => CallAsync(FleetNodeMethods.ControlProjectsList, new FleetEmpty(), FleetNodeJsonContext.Default.FleetEmpty, FleetNodeJsonContext.Default.FleetProjectList,
+            null, cancellationToken);
+
+    /// <summary>The owner's local control: adds a folder of the node to its catalog, and to a space.</summary>
+    /// <param name="parameters">The folder, an absolute path of the node, and the space.</param>
+    /// <param name="cancellationToken">Cancels the call.</param>
+    /// <returns>The project.</returns>
+    /// <exception cref="FleetException">The node refused the call (<see cref="FleetErrorCodes.InvalidParams"/>: no such folder or space).</exception>
+    public Task<FleetProjectChange> AddProjectAsync(FleetProjectAddParams parameters, CancellationToken cancellationToken = default)
+        => CallAsync(FleetNodeMethods.ControlProjectsAdd, parameters, FleetNodeJsonContext.Default.FleetProjectAddParams, FleetNodeJsonContext.Default.FleetProjectChange,
+            null, cancellationToken);
+
+    /// <summary>The owner's local control: clones a repository into the node's clone root and adds it, waited for up to <see cref="CloneTimeout"/>.</summary>
+    /// <param name="parameters">The URL and the space.</param>
+    /// <param name="cancellationToken">Cancels the call.</param>
+    /// <returns>The project.</returns>
+    /// <exception cref="FleetException">The node refused the call (<see cref="FleetNodeErrorCodes.CloneFailed"/>, an invalid URL or space).</exception>
+    public async Task<FleetProjectChange> CloneProjectAsync(FleetProjectCloneParams parameters, CancellationToken cancellationToken = default)
+    {
+        var result = await _channel.Connection.SendRequestAsync(FleetNodeMethods.ControlProjectsClone,
+            JsonSerializer.SerializeToElement(parameters, FleetNodeJsonContext.Default.FleetProjectCloneParams),
+            new FleetRequestOptions { Timeout = CloneTimeout }, cancellationToken).ConfigureAwait(false);
+        return Read(result, FleetNodeJsonContext.Default.FleetProjectChange);
+    }
+
+    /// <summary>The owner's local control: removes a project from the node's catalog; its files stay.</summary>
+    /// <param name="project">The project: its id, its slug or its name.</param>
+    /// <param name="cancellationToken">Cancels the call.</param>
+    /// <returns>The project as it was.</returns>
+    /// <exception cref="FleetException">The node refused the call (<see cref="FleetNodeErrorCodes.ProjectNotFound"/>, <see cref="FleetNodeErrorCodes.ProjectHasSessions"/>).</exception>
+    public Task<FleetProjectChange> RemoveProjectAsync(string project, CancellationToken cancellationToken = default)
+        => CallAsync(FleetNodeMethods.ControlProjectsRemove, new FleetProjectRef(project), FleetNodeJsonContext.Default.FleetProjectRef,
+            FleetNodeJsonContext.Default.FleetProjectChange, null, cancellationToken);
+
     /// <summary>Closes the channel.</summary>
     /// <param name="cancellationToken">Cancels the wait for the close.</param>
     /// <returns>A task that completes once the channel is closed.</returns>

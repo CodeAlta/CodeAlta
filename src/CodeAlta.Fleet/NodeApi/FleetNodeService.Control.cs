@@ -105,6 +105,39 @@ public sealed partial class FleetNodeService
         return new FleetDeviceChange(DescribeDevice(now), changed, closed);
     }
 
+    private Task<FleetProjectList> ControlListProjectsAsync(FleetNodeCall call, FleetEmpty parameters, CancellationToken cancellationToken)
+        => _projectEditor.ListAsync(cancellationToken);
+
+    private async Task<FleetProjectChange> ControlAddProjectAsync(FleetNodeCall call, FleetProjectAddParams parameters, CancellationToken cancellationToken)
+    {
+        var change = await _projectEditor.AddAsync(parameters.Path, parameters.Space, cancellationToken).ConfigureAwait(false);
+        if (change.Changed) LogInfo($"The owner added the project {change.Project.Name} ({change.Project.Path}).");
+        return change;
+    }
+
+    private async Task<FleetProjectChange> ControlCloneProjectAsync(FleetNodeCall call, FleetProjectCloneParams parameters, CancellationToken cancellationToken)
+    {
+        var change = await _projectEditor.CloneAsync(parameters.Url, parameters.Space, cancellationToken).ConfigureAwait(false);
+        LogInfo($"The owner added the project {change.Project.Name} from {parameters.Url} ({change.Project.Path}).");
+        return change;
+    }
+
+    private async Task<FleetProjectChange> ControlRemoveProjectAsync(FleetNodeCall call, FleetProjectRef parameters, CancellationToken cancellationToken)
+    {
+        var change = await _projectEditor.RemoveAsync(parameters.Project, CountProjectSessionsAsync, cancellationToken).ConfigureAwait(false);
+        LogInfo($"The owner removed the project {change.Project.Name} ({change.Project.Path}) from the catalog.");
+        return change;
+    }
+
+    // The sessions of a project as sessions.list finds them, archived ones included; those moved away run elsewhere.
+    private async Task<int> CountProjectSessionsAsync(CodeAlta.Catalog.ProjectDescriptor project, CancellationToken cancellationToken)
+    {
+        var snapshot = await _host.WorkspaceReads.ReadSnapshotAsync(cancellationToken).ConfigureAwait(false);
+        var movedAway = _host.RuntimeService.Relinquishments.ListRelinquished();
+        return snapshot.Sessions.Count(session => !movedAway.Contains(session.SessionId)
+            && string.Equals(Scope(session, snapshot).Project?.Id, project.Id, StringComparison.OrdinalIgnoreCase));
+    }
+
     private async Task<FleetDeviceChange> ControlSetPermissionsAsync(FleetNodeCall call, FleetDevicePermissionsParams parameters, CancellationToken cancellationToken)
     {
         if (!DevicePermissionNames.TryParse(parameters.Allow ?? [], out var allow, out var unknown)
