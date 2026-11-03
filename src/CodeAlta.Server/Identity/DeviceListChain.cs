@@ -11,10 +11,9 @@ namespace CodeAlta.Server.Identity;
 public sealed record DeviceListVerification(bool IsValid, long Count, long? BrokenAt, IReadOnlyDictionary<string, string> Members);
 
 /// <summary>
-/// The rules of the signed device list (<c>doc/fleet/security-and-privacy.md</c>, the device list): the first entry
-/// adds a controller device signed by itself; every later entry follows the one before it (sequence and hash) and is
-/// signed by a controller device that is a member at that point. The server checks each entry it is given and can
-/// replay the whole list; devices apply the same rules, so a server cannot add a member by itself.
+/// The signed device list at the server (<c>doc/fleet/security-and-privacy.md</c>, the device list): it reads the
+/// entries it is given and replays the list with the rules of <see cref="FleetDeviceListVerifier"/>, the ones every
+/// device applies, so that the server never keeps an entry the devices would refuse, and cannot add a member by itself.
 /// </summary>
 public static class DeviceListChain
 {
@@ -23,7 +22,7 @@ public static class DeviceListChain
     /// <param name="signerKey">The key of the device that should have signed it.</param>
     /// <returns>What the entry says.</returns>
     /// <exception cref="CoordinatorException">The entry is missing or does not read (<see cref="CoordinatorErrorCodes.EntryInvalid"/>), or its signature does not verify (<see cref="CoordinatorErrorCodes.EntrySignatureInvalid"/>).</exception>
-    public static FleetDeviceListEntryPayload ReadSigned(FleetSignedDeviceListEntry? entry, DevicePublicKey signerKey)
+    public static FleetDeviceListEntryPayload ReadSigned(FleetSignedDeviceListEntry? entry, FleetDevicePublicKey signerKey)
     {
         ArgumentNullException.ThrowIfNull(signerKey);
         if (entry is null || string.IsNullOrEmpty(entry.Payload) || entry.Payload.Length > 8192 || !FleetDeviceListEntries.TryParsePayload(entry.Payload, out var payload)
@@ -49,69 +48,48 @@ public static class DeviceListChain
         if (!condition) throw CoordinatorException.BadRequest(CoordinatorErrorCodes.EntryInvalid, $"The device-list entry must {what}.");
     }
 
-    /// <summary>Replays a whole device list from its first entry.</summary>
+    /// <summary>Replays a whole device list from its first entry, with the rules every device applies (<see cref="FleetDeviceListVerifier"/>).</summary>
     /// <param name="entries">The entries, by sequence.</param>
     /// <returns>Whether the list holds, and its members.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="entries"/> is <see langword="null"/>.</exception>
     public static DeviceListVerification Verify(IReadOnlyList<DeviceListEntryRecord> entries)
     {
         ArgumentNullException.ThrowIfNull(entries);
-        var members = new Dictionary<string, (string Kind, DevicePublicKey Key)>(StringComparer.Ordinal);
-        string? previousHash = null;
-        string? organization = null;
+        var state = FleetDeviceListState.Empty;
         long count = 0;
         foreach (var record in entries)
         {
             count++;
             var signed = new FleetSignedDeviceListEntry(record.Payload, record.Signature);
-            if (!Holds(record, signed, count, previousHash, ref organization, members)) return Result(false, count, record.Sequence, members);
-            previousHash = FleetDeviceListEntries.Hash(signed);
-        }
-
-        return Result(true, count, null, members);
-    }
-
-    private static bool Holds(DeviceListEntryRecord record, FleetSignedDeviceListEntry signed, long expected, string? previousHash, ref string? organization,
-        Dictionary<string, (string Kind, DevicePublicKey Key)> members)
-    {
-        if (record.Sequence != expected || !string.Equals(record.Hash, FleetDeviceListEntries.Hash(signed), StringComparison.Ordinal)) return false;
-        if (!FleetDeviceListEntries.TryParsePayload(record.Payload, out var payload) || payload!.Sequence != expected
-            || !string.Equals(payload.Previous, previousHash, StringComparison.Ordinal))
-        {
-            return false;
-        }
-
-        if (expected == 1)
-        {
-            // The first entry: a controller device adds itself.
-            if (payload.Operation != FleetDeviceListOperations.Add || payload.Kind != FleetDeviceKinds.Controller || payload.SignerDeviceId != payload.DeviceId
-                || !DevicePublicKey.TryParse(payload.PublicKey, out var self) || self.DeviceId != payload.DeviceId
-                || !self.Verify(FleetDeviceListEntries.GetSignedBytes(record.Payload), record.Signature))
+            // The row agrees with the entry it keeps: its position and its hash.
+            if (record.Sequence != count || !string.Equals(record.Hash, FleetDeviceListEntries.Hash(signed), StringComparison.Ordinal)
+                || !FleetDeviceListVerifier.TryAppend(state, signed, count == 1 ? null : record.OrganizationId, out var next, out _))
             {
-                return false;
+                return Result(false, count, record.Sequence, state);
             }
 
-            organization = record.OrganizationId;
-            members[payload.DeviceId] = (payload.Kind, self);
-            return true;
+            state = next;
         }
 
-        if (!string.Equals(payload.OrganizationId, organization, StringComparison.Ordinal)) return false;
-        if (!members.TryGetValue(payload.SignerDeviceId, out var signer) || signer.Kind != FleetDeviceKinds.Controller) return false;
-        if (!signer.Key.Verify(FleetDeviceListEntries.GetSignedBytes(record.Payload), record.Signature)) return false;
-        switch (payload.Operation)
-        {
-            case FleetDeviceListOperations.Add when !members.ContainsKey(payload.DeviceId) && FleetDeviceKinds.IsKnown(payload.Kind)
-                && DevicePublicKey.TryParse(payload.PublicKey, out var added) && added.DeviceId == payload.DeviceId:
-                members[payload.DeviceId] = (payload.Kind!, added);
-                return true;
-            case FleetDeviceListOperations.Remove when members.Remove(payload.DeviceId):
-                return true;
-            default:
-                return false;
-        }
+        return Result(true, count, null, state);
     }
 
-    private static DeviceListVerification Result(bool valid, long count, long? brokenAt, Dictionary<string, (string Kind, DevicePublicKey Key)> members)
-        => new(valid, count, brokenAt, members.ToDictionary(static pair => pair.Key, static pair => pair.Value.Kind, StringComparer.Ordinal));
+    /// <summary>Replays a device list and checks that an entry may follow it, as every device would.</summary>
+    /// <param name="entries">The entries, by sequence.</param>
+    /// <param name="entry">The entry to append.</param>
+    /// <exception cref="ArgumentNullException">An argument is <see langword="null"/>.</exception>
+    /// <exception cref="CoordinatorException">The list does not verify, or the entry would not hold after it (<see cref="CoordinatorErrorCodes.EntryInvalid"/>).</exception>
+    public static void RequireAppendable(IReadOnlyList<DeviceListEntryRecord> entries, FleetSignedDeviceListEntry entry)
+    {
+        ArgumentNullException.ThrowIfNull(entries);
+        ArgumentNullException.ThrowIfNull(entry);
+        var replayed = FleetDeviceListVerifier.Verify(entries.Select(static record => new FleetSignedDeviceListEntry(record.Payload, record.Signature)),
+            entries.Count > 0 ? entries[0].OrganizationId : null);
+        if (!replayed.IsValid) throw new InvalidOperationException($"The device list of the server does not verify at entry {replayed.BrokenAt}: {replayed.Reason}.");
+        if (!FleetDeviceListVerifier.TryAppend(replayed.State, entry, entries.Count > 0 ? entries[0].OrganizationId : null, out _, out var reason))
+            throw CoordinatorException.BadRequest(CoordinatorErrorCodes.EntryInvalid, $"The device-list entry would not verify on the devices: {reason}.");
+    }
+
+    private static DeviceListVerification Result(bool valid, long count, long? brokenAt, FleetDeviceListState state)
+        => new(valid, count, brokenAt, state.Members.ToDictionary(static pair => pair.Key, static pair => pair.Value.Kind, StringComparer.Ordinal));
 }

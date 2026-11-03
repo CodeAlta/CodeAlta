@@ -299,6 +299,7 @@ public sealed class CoordinatorServer : IAsyncDisposable
         services.AddSingleton(provider => new SetupService(store, codes, provider.GetRequiredService<RequestAuthenticator>(), time));
         services.AddSingleton(provider => new DeviceService(store, provider.GetRequiredService<RequestAuthenticator>(), provider.GetRequiredService<PresenceRegistry>(), time));
         services.AddSingleton(provider => new PublicationService(store, provider.GetRequiredService<DirectoryHub>(), time));
+        services.AddSingleton(_ => new MetadataKeyService(store, time));
         services.AddSingleton(provider => new ControlService(store, provider.GetRequiredService<PresenceRegistry>(), provider.GetRequiredService<DirectoryHub>(),
             provider.GetRequiredService<PublicationService>(), time, options.ConnectionPolicy, provider.GetRequiredService<ILoggerFactory>().CreateLogger("CodeAlta.Server.Control")));
 

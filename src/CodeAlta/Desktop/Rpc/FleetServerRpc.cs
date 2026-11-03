@@ -221,12 +221,15 @@ internal sealed class FleetServerService
                 directory.Sessions.Values.Count(session => session.MachineId == id));
         }).OrderBy(static machine => machine.IsThisComputer ? 0 : machine.Online ? 1 : 2).ThenBy(static machine => machine.Name, StringComparer.CurrentCultureIgnoreCase).ToArray();
         var openable = machines.Where(static machine => machine.IsThisComputer || machine.IsPaired).Select(static machine => machine.Id).ToHashSet(StringComparer.Ordinal);
+        // Titles travel sealed with the metadata key of the person: opened here, in the host, never by the server.
+        var key = connection.Connector?.MetadataKey;
         var sessions = directory.Sessions.Values.OrderByDescending(static session => session.Fact.UpdatedAt).Take(500).Select(session =>
         {
             var fact = session.Fact;
             var counts = fact.Counts ?? new FleetSessionCounts();
+            var title = key is not null && key.TryOpen(fact.SessionId, fact.SealedMetadata, out var metadata) ? metadata!.Title : null;
             return new FleetSessionView(fact.SessionId, session.MachineId, fact.State, fact.ProviderType, fact.Model, Time(fact.CreatedAt), Time(fact.UpdatedAt),
-                Clamp(counts.Turns), Clamp(counts.InputTokens + counts.OutputTokens), openable.Contains(session.MachineId));
+                Clamp(counts.Turns), Clamp(counts.InputTokens + counts.OutputTokens), openable.Contains(session.MachineId), title);
         }).ToArray();
         return new FleetDirectoryResult("ok", connection.Link.Id, connection.Link.Url, connection.Link.OrganizationName, State(connection), machines, sessions);
     }
@@ -297,6 +300,7 @@ internal sealed class FleetServerService
     private static (string Status, string? Message)? Failure(Exception exception) => exception switch
     {
         FleetServerException refused => (refused.Code, refused.Message),
+        FleetDeviceListException broken => (FleetDeviceListException.Code, broken.Message),
         HttpRequestException or TaskCanceledException or TimeoutException => ("unreachable", exception.Message),
         KeyNotFoundException => ("not_found", null),
         IOException or UnauthorizedAccessException or InvalidDataException => ("write_failed", exception.Message),
@@ -433,7 +437,7 @@ internal sealed record FleetServerSpaceRequest(string ExpectedEpoch, string Spac
 internal sealed record FleetMachineView(string Id, string Name, string Kind, string? Os, string? Version, bool Online, string? Presence, int? ActiveSessions,
     bool IsThisComputer, bool IsPaired, string[] Providers, int Sessions);
 
-/// <summary>A published session of the directory: its facts only.</summary>
+/// <summary>A published session of the directory: its facts, and its title once opened on this computer.</summary>
 /// <param name="Id">The session.</param>
 /// <param name="MachineId">The machine that owns it.</param>
 /// <param name="State"><c>running</c>, <c>requires_action</c>, <c>idle</c> or <c>archived</c>.</param>
@@ -444,8 +448,9 @@ internal sealed record FleetMachineView(string Id, string Name, string Kind, str
 /// <param name="Turns">Its turns, when published.</param>
 /// <param name="Tokens">Its input and output tokens, when published.</param>
 /// <param name="CanOpen">Whether this computer can open it: its own, or one of a paired machine.</param>
+/// <param name="Title">Its title, opened with the metadata key of the person; null when it has none or this computer cannot open it.</param>
 internal sealed record FleetSessionView(string Id, string MachineId, string State, string? ProviderType, string? Model, string CreatedAt, string UpdatedAt,
-    int Turns, int Tokens, bool CanOpen);
+    int Turns, int Tokens, bool CanOpen, string? Title = null);
 
 /// <summary>The directory of a server.</summary>
 /// <param name="Status"><c>ok</c>, <c>no_server</c>, <c>stale_epoch</c> or <c>unavailable</c>.</param>

@@ -73,6 +73,30 @@ public sealed class FleetPublicationOutboxTests
     }
 
     [TestMethod]
+    public void AWithdrawalWaitsInTheOutboxUntilItIsAnswered()
+    {
+        using var folder = new TestFolder();
+        var path = Path.Combine(folder.Path, "outbox.json");
+        var outbox = FleetPublicationOutbox.Load(path);
+        outbox.Resume(new FleetPublicationCursors(0, 0));
+        var batch = outbox.Batch(outbox.Pending([Session("s1"), Session("s2")], 500));
+        outbox.Acknowledged(new FleetFactsPublishResult(batch.Sequence, 2, 0, []));
+
+        // Only a session it published is withdrawn; the withdrawal outlives a restart until it is answered.
+        CollectionAssert.AreEqual(new[] { "s1" }, outbox.Withdrawals(["s1", "never-published"], 500).ToArray());
+        var reloaded = FleetPublicationOutbox.Load(path);
+        CollectionAssert.AreEqual(new[] { "s1" }, reloaded.Withdrawals([], 500).ToArray());
+        reloaded.Withdrawn(["s1"]);
+        Assert.AreEqual(0, reloaded.Withdrawals([], 500).Count);
+        Assert.AreEqual(1L, reloaded.Pending([Session("s1")], 500).Single().Version, "published again, it starts over");
+
+        // Published again before the answer, it is sent again: the server may have deleted it meanwhile.
+        reloaded.Withdrawals(["s2"], 500);
+        Assert.AreEqual(("s2", 1L), (reloaded.Pending([Session("s2")], 500).Single(fact => fact.SessionId == "s2").SessionId, 1L));
+        Assert.AreEqual(0, reloaded.Withdrawals([], 500).Count);
+    }
+
+    [TestMethod]
     public void ASessionCreatedByAPrivateOneIsPrivate()
     {
         var created = new AgentSessionOptions().Within(new AgentSessionOptions { Private = true });

@@ -118,6 +118,21 @@ internal static class ApiEndpoints
             })
             .WithSummary("The published sessions: their facts and their sealed metadata, which the server cannot read.");
 
+        api.MapGet("/metadata-keys", (HttpContext context, MetadataKeyService keys)
+                => keys.ListAsync(DeviceAuthenticationMiddleware.GetDevice(context), context.RequestAborted))
+            .WithSummary("The metadata keys of the calling device's person, each with the copy wrapped to that device; never a key in clear.");
+
+        api.MapPost("/metadata-keys", (CreateMetadataKeyRequest? request, HttpContext context, MetadataKeyService keys) =>
+                AuditedAsync(context, "metadata_key.create", request?.Id, actor => keys.CreateAsync(actor, request, Origin(context), context.RequestAborted),
+                    StatusCodes.Status201Created))
+            .Produces<MetadataKeyDto>(StatusCodes.Status201Created)
+            .WithSummary("Records the metadata key a controller device made for its person, wrapped to that person's devices.");
+
+        api.MapPost("/metadata-keys/{id}/wraps", (string id, AddMetadataKeyWrapsRequest? request, HttpContext context, MetadataKeyService keys) =>
+                AuditedAsync(context, "metadata_key.wrap", id, actor => keys.AddWrapsAsync(actor, id, request, Origin(context), context.RequestAborted)))
+            .Produces<MetadataKeyDto>()
+            .WithSummary("Adds copies of a metadata key, wrapped by a controller device that holds it, for devices of its person that have none.");
+
         api.MapGet("/audit", async (long? after, int? limit, HttpContext context, ICoordinatorStore store) =>
             {
                 var size = Math.Clamp(limit ?? 100, 1, MaxAuditPage);

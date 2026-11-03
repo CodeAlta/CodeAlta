@@ -100,7 +100,9 @@ function MachineCard({ machine, sessions, time, onOpen }: { machine: FleetMachin
           const state = sessionState(session);
           return <tr key={session.id} data-state={state}>
             <td><Tag minimal round intent={state === "requires_action" ? "warning" : state === "running" ? "primary" : "none"}>{t(sessionStateLabel(state))}</Tag></td>
-            <td className="fleet-session-model" title={sessionModel(session)}>{sessionModel(session)}</td>
+            <td className="fleet-session-model" title={[session.title, sessionModel(session)].filter(Boolean).join(" · ")}>
+              {session.title ? <><span className="fleet-session-title">{session.title}</span> <span className="muted-text">{sessionModel(session)}</span></> : sessionModel(session)}
+            </td>
             <td className="muted-text fleet-session-time" title={t("Created {time}", { time: time.format(new Date(session.createdAt)) })}>{time.format(new Date(session.updatedAt))}</td>
             <td className="fleet-session-open">{session.canOpen
               ? <Button size="small" variant="minimal" icon={<AppIcon name="open" size={14} />} onClick={() => onOpen(session.id)}>{t("Open")}</Button>

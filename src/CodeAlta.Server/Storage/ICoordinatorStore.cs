@@ -144,6 +144,17 @@ public interface ICoordinatorStore : IAsyncDisposable
     /// <returns>The acknowledged sequence and what happened to each fact.</returns>
     ValueTask<SessionFactsPublication> PublishSessionFactsAsync(string deviceId, long sequence, IReadOnlyList<SessionRecord> facts, CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// Deletes the facts of sessions a machine withdraws, those it owns only (a session another machine owns now stays),
+    /// and appends the audit record of the deletion when something was deleted.
+    /// </summary>
+    /// <param name="deviceId">The machine that withdraws.</param>
+    /// <param name="sessionIds">The sessions.</param>
+    /// <param name="audit">The audit record, whose details the store sets to the sessions deleted.</param>
+    /// <param name="cancellationToken">Cancels the operation.</param>
+    /// <returns>The sessions whose facts were deleted.</returns>
+    ValueTask<IReadOnlyList<string>> WithdrawSessionFactsAsync(string deviceId, IReadOnlyList<string> sessionIds, AuditEntry audit, CancellationToken cancellationToken = default);
+
     /// <summary>Gets the cursors of the publications of a device.</summary>
     /// <param name="deviceId">The device.</param>
     /// <param name="cancellationToken">Cancels the operation.</param>
@@ -161,6 +172,27 @@ public interface ICoordinatorStore : IAsyncDisposable
     /// <param name="cancellationToken">Cancels the operation.</param>
     /// <returns>The sessions, most recently updated first.</returns>
     ValueTask<IReadOnlyList<SessionRecord>> ListSessionsAsync(string organizationId, CancellationToken cancellationToken = default);
+
+    /// <summary>Records a new metadata key of a person with its first wraps, unless the person has a key at that epoch.</summary>
+    /// <param name="key">The key.</param>
+    /// <param name="wraps">Its wraps.</param>
+    /// <param name="audit">The audit record.</param>
+    /// <param name="cancellationToken">Cancels the operation.</param>
+    /// <returns><see langword="false"/> when the person has a key at that epoch already: nothing was written.</returns>
+    ValueTask<bool> CreateMetadataKeyAsync(MetadataKeyRecord key, IReadOnlyList<MetadataKeyWrapRecord> wraps, AuditEntry audit, CancellationToken cancellationToken = default);
+
+    /// <summary>Adds wraps of a metadata key for devices that have none; a device that has one keeps it. Audited when one was added.</summary>
+    /// <param name="wraps">The wraps.</param>
+    /// <param name="audit">The audit record, whose details the store sets to the devices given a wrap.</param>
+    /// <param name="cancellationToken">Cancels the operation.</param>
+    /// <returns>The devices given a wrap.</returns>
+    ValueTask<IReadOnlyList<string>> AddMetadataKeyWrapsAsync(IReadOnlyList<MetadataKeyWrapRecord> wraps, AuditEntry audit, CancellationToken cancellationToken = default);
+
+    /// <summary>Lists the metadata keys of a person and their wraps.</summary>
+    /// <param name="personId">The person.</param>
+    /// <param name="cancellationToken">Cancels the operation.</param>
+    /// <returns>The keys, by epoch.</returns>
+    ValueTask<IReadOnlyList<MetadataKeyWithWraps>> ListMetadataKeysAsync(string personId, CancellationToken cancellationToken = default);
 
     /// <summary>Appends a record to the audit log, alone (a refusal, a read that is audited).</summary>
     /// <param name="audit">The record.</param>

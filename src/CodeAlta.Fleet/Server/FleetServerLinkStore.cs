@@ -261,6 +261,9 @@ internal sealed class FleetOutboxSession
     public long AckedVersion { get; set; }
 
     public string? Hash { get; set; }
+
+    /// <summary>Whether the session is no longer published and its facts wait to be withdrawn from the server.</summary>
+    public bool Withdraw { get; set; }
 }
 
 [JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase, WriteIndented = true, DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull)]

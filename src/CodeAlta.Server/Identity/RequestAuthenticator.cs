@@ -70,7 +70,7 @@ public sealed class RequestAuthenticator
         var timestamp = CheckForm(request);
         var device = await _store.GetDeviceAsync(request.DeviceId!, cancellationToken).ConfigureAwait(false);
         // An unknown device and a wrong signature answer the same, so that the answer does not tell which ids exist.
-        if (device is null || !DevicePublicKey.TryParse(device.PublicKey, out var key)) throw SignatureInvalid();
+        if (device is null || !FleetDevicePublicKey.TryParse(device.PublicKey, out var key)) throw SignatureInvalid();
         CheckSignature(request, timestamp, key);
         switch (device.Status)
         {
@@ -90,7 +90,7 @@ public sealed class RequestAuthenticator
     /// <param name="request">What the request carries.</param>
     /// <param name="key">The key of the body.</param>
     /// <exception cref="CoordinatorException">The request is not signed by that key, its time is wrong, or its nonce was seen.</exception>
-    public void VerifyWithKey(SignedRequestData request, DevicePublicKey key)
+    public void VerifyWithKey(SignedRequestData request, FleetDevicePublicKey key)
     {
         ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(key);
@@ -119,7 +119,7 @@ public sealed class RequestAuthenticator
         return timestamp;
     }
 
-    private void CheckSignature(SignedRequestData request, long timestamp, DevicePublicKey key)
+    private void CheckSignature(SignedRequestData request, long timestamp, FleetDevicePublicKey key)
     {
         byte[] signed;
         try

@@ -77,9 +77,10 @@ internal sealed class FleetPublicationOutbox
 
     /// <summary>
     /// Records the sessions to publish as they are now, a new version for each whose facts changed, and gives the facts the
-    /// server does not hold yet, at most <paramref name="limit"/>, the oldest changes first.
+    /// server does not hold yet, at most <paramref name="limit"/>, the oldest changes first. With a metadata key, their
+    /// titles are sealed into the facts: a version follows the title and the key, never the random bytes of a seal.
     /// </summary>
-    public IReadOnlyList<FleetSessionFact> Pending(IReadOnlyList<FleetLocalSession> sessions, int limit)
+    public IReadOnlyList<FleetSessionFact> Pending(IReadOnlyList<FleetLocalSession> sessions, int limit, FleetMetadataKey? key = null)
     {
         var pending = new List<(FleetSessionFact Fact, DateTimeOffset UpdatedAt)>();
         var changed = false;
@@ -87,10 +88,19 @@ internal sealed class FleetPublicationOutbox
         {
             var fact = new FleetSessionFact(session.SessionId, session.Epoch, 0, session.State, session.CreatedAt, session.UpdatedAt, session.ProviderType, session.Model,
                 session.Counts);
-            var hash = Hash(fact);
+            var title = key is null ? null : session.Title;
+            var hash = Hash(fact, title is null ? null : $"{key!.Id}\n{title}");
             if (!_state.Sessions.TryGetValue(session.SessionId, out var kept))
             {
                 _state.Sessions[session.SessionId] = kept = new FleetOutboxSession { Epoch = session.Epoch };
+            }
+
+            if (kept.Withdraw)
+            {
+                // Published again before its withdrawal was answered: the server may have deleted it, so it is sent again.
+                kept.Withdraw = false;
+                kept.AckedVersion = 0;
+                changed = true;
             }
 
             if (kept.Hash != hash || kept.Epoch != session.Epoch)
@@ -101,7 +111,11 @@ internal sealed class FleetPublicationOutbox
                 changed = true;
             }
 
-            if (kept.Version > kept.AckedVersion) pending.Add((fact with { Version = kept.Version }, session.UpdatedAt));
+            if (kept.Version > kept.AckedVersion)
+            {
+                pending.Add((fact with { Version = kept.Version, SealedMetadata = title is null ? null : key!.Seal(session.SessionId, new FleetSessionMetadata(title)) },
+                    session.UpdatedAt));
+            }
         }
 
         if (changed) Save();
@@ -147,13 +161,43 @@ internal sealed class FleetPublicationOutbox
         Save();
     }
 
-    /// <summary>Forgets the sessions that are no longer published, so the outbox does not grow with the sessions that were.</summary>
+    /// <summary>Forgets the sessions that are no longer published, so the outbox does not grow with the sessions that were; a withdrawal waiting stays.</summary>
     public void Retain(IReadOnlyCollection<string> sessionIds)
     {
         if (_state.Sessions.Count <= sessionIds.Count * 2 + 64) return;
         var keep = sessionIds.ToHashSet(StringComparer.Ordinal);
-        foreach (var id in _state.Sessions.Keys.Where(id => !keep.Contains(id)).ToArray()) _state.Sessions.Remove(id);
+        foreach (var id in _state.Sessions.Where(pair => !pair.Value.Withdraw && !keep.Contains(pair.Key)).Select(static pair => pair.Key).ToArray()) _state.Sessions.Remove(id);
         Save();
+    }
+
+    /// <summary>
+    /// Records that sessions of the instance are no longer published (made Private, their space unlinked): those this
+    /// outbox published are to be withdrawn. Gives the withdrawals waiting, at most <paramref name="limit"/>.
+    /// </summary>
+    public IReadOnlyList<string> Withdrawals(IEnumerable<string> unpublished, int limit)
+    {
+        var changed = false;
+        foreach (var id in unpublished)
+        {
+            if (!_state.Sessions.TryGetValue(id, out var kept) || kept.Withdraw) continue;
+            kept.Withdraw = true;
+            changed = true;
+        }
+
+        if (changed) Save();
+        return [.. _state.Sessions.Where(static pair => pair.Value.Withdraw).Select(static pair => pair.Key).Order(StringComparer.Ordinal).Take(limit)];
+    }
+
+    /// <summary>Takes the answer of a withdrawal: the sessions are forgotten, so a later publication starts their versions again.</summary>
+    public void Withdrawn(IReadOnlyList<string> sessionIds)
+    {
+        var changed = false;
+        foreach (var id in sessionIds)
+        {
+            if (_state.Sessions.TryGetValue(id, out var kept) && kept.Withdraw) changed |= _state.Sessions.Remove(id);
+        }
+
+        if (changed) Save();
     }
 
     private void Acknowledge(FleetOutboxBatch batch)
@@ -164,8 +208,13 @@ internal sealed class FleetPublicationOutbox
         }
     }
 
-    private static string Hash(FleetSessionFact fact)
-        => Base64Url.EncodeToString(SHA256.HashData(JsonSerializer.SerializeToUtf8Bytes(fact, FleetServerJsonContext.Default.FleetSessionFact)));
+    // The hash of the facts, and of the sealed metadata in clear when there is some; the outbox keeps the hash, never the title.
+    private static string Hash(FleetSessionFact fact, string? sealedInClear)
+    {
+        var bytes = JsonSerializer.SerializeToUtf8Bytes(fact, FleetServerJsonContext.Default.FleetSessionFact);
+        if (sealedInClear is not null) bytes = [.. bytes, (byte)'\n', .. System.Text.Encoding.UTF8.GetBytes(sealedInClear)];
+        return Base64Url.EncodeToString(SHA256.HashData(bytes));
+    }
 
     private void Save() => FleetFiles.WriteAtomically(_path, JsonSerializer.SerializeToUtf8Bytes(_state, FleetServerJsonFiles.Default.FleetOutboxFile));
 }

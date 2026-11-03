@@ -237,6 +237,7 @@ public sealed class FleetServerConnections : IAsyncDisposable
             Source = source,
             PublishesSpace = linked.Contains,
             WatchDirectory = _options.WatchDirectory,
+            MetadataKeys = new FleetMetadataKeyring(link.Address, _options.Identity),
         };
         if (_options.Configure is { } configure) options = configure(options);
         var connector = new FleetConnector(options);

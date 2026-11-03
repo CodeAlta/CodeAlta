@@ -388,6 +388,30 @@ public sealed class SqliteCoordinatorStore : ICoordinatorStore
     }
 
     /// <inheritdoc />
+    public ValueTask<IReadOnlyList<string>> WithdrawSessionFactsAsync(string deviceId, IReadOnlyList<string> sessionIds, AuditEntry audit,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(deviceId);
+        ArgumentNullException.ThrowIfNull(sessionIds);
+        ArgumentNullException.ThrowIfNull(audit);
+        return WriteAsync<IReadOnlyList<string>>((connection, transaction) =>
+        {
+            var removed = new List<string>();
+            foreach (var id in sessionIds.Distinct(StringComparer.Ordinal))
+            {
+                if (Execute(connection, transaction, "DELETE FROM sessions WHERE id = $id AND machine_id = $device", ("$id", id), ("$device", deviceId)) == 1) removed.Add(id);
+            }
+
+            if (removed.Count > 0)
+            {
+                AppendAudit(connection, transaction, audit with { Details = IdsDetails("sessions", removed) });
+            }
+
+            return removed;
+        }, cancellationToken);
+    }
+
+    /// <inheritdoc />
     public ValueTask<FleetPublicationCursors> GetPublicationCursorsAsync(string deviceId, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrEmpty(deviceId);
@@ -411,6 +435,66 @@ public sealed class SqliteCoordinatorStore : ICoordinatorStore
         ArgumentException.ThrowIfNullOrEmpty(organizationId);
         return ReadAsync(connection => QueryList(connection, null, SessionColumns + " FROM sessions WHERE organization_id = $org ORDER BY updated_at DESC, id", ReadSession,
             ("$org", organizationId)), cancellationToken);
+    }
+
+    /// <inheritdoc />
+    public ValueTask<bool> CreateMetadataKeyAsync(MetadataKeyRecord key, IReadOnlyList<MetadataKeyWrapRecord> wraps, AuditEntry audit,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(key);
+        ArgumentNullException.ThrowIfNull(wraps);
+        ArgumentNullException.ThrowIfNull(audit);
+        return WriteAsync((connection, transaction) =>
+        {
+            using (var exists = Create(connection, transaction, "SELECT COUNT(*) FROM metadata_keys WHERE (person_id = $person AND epoch = $epoch) OR id = $id",
+                ("$person", key.PersonId), ("$epoch", key.Epoch), ("$id", key.Id)))
+            {
+                if (Convert.ToInt64(exists.ExecuteScalar(), CultureInfo.InvariantCulture) > 0) return false;
+            }
+
+            Execute(connection, transaction,
+                "INSERT INTO metadata_keys (id, organization_id, person_id, epoch, created_by_device_id, created_at) VALUES ($id, $org, $person, $epoch, $by, $created)",
+                ("$id", key.Id), ("$org", key.OrganizationId), ("$person", key.PersonId), ("$epoch", key.Epoch), ("$by", key.CreatedByDeviceId),
+                ("$created", ToTime(key.CreatedAt)));
+            foreach (var wrap in wraps) InsertWrap(connection, transaction, wrap);
+            AppendAudit(connection, transaction, audit);
+            return true;
+        }, cancellationToken);
+    }
+
+    /// <inheritdoc />
+    public ValueTask<IReadOnlyList<string>> AddMetadataKeyWrapsAsync(IReadOnlyList<MetadataKeyWrapRecord> wraps, AuditEntry audit, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(wraps);
+        ArgumentNullException.ThrowIfNull(audit);
+        return WriteAsync<IReadOnlyList<string>>((connection, transaction) =>
+        {
+            var added = new List<string>();
+            foreach (var wrap in wraps)
+            {
+                if (InsertWrap(connection, transaction, wrap) == 1) added.Add(wrap.DeviceId);
+            }
+
+            if (added.Count > 0) AppendAudit(connection, transaction, audit with { Details = IdsDetails("devices", added) });
+            return added;
+        }, cancellationToken);
+    }
+
+    /// <inheritdoc />
+    public ValueTask<IReadOnlyList<MetadataKeyWithWraps>> ListMetadataKeysAsync(string personId, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(personId);
+        return ReadAsync<IReadOnlyList<MetadataKeyWithWraps>>(connection =>
+        {
+            var keys = QueryList(connection, null,
+                "SELECT id, organization_id, person_id, epoch, created_by_device_id, created_at FROM metadata_keys WHERE person_id = $person ORDER BY epoch",
+                static reader => new MetadataKeyRecord(reader.GetString(0), reader.GetString(1), reader.GetString(2), reader.GetInt32(3), reader.GetString(4),
+                    FromTime(reader.GetInt64(5))), ("$person", personId));
+            return [.. keys.Select(key => new MetadataKeyWithWraps(key, QueryList(connection, null,
+                "SELECT key_id, device_id, wrapped, wrapped_by_device_id, created_at FROM metadata_key_wraps WHERE key_id = $key ORDER BY created_at, device_id",
+                static reader => new MetadataKeyWrapRecord(reader.GetString(0), reader.GetString(1), reader.GetString(2), reader.GetString(3), FromTime(reader.GetInt64(4))),
+                ("$key", key.Id))))];
+        }, cancellationToken);
     }
 
     /// <inheritdoc />
@@ -704,6 +788,29 @@ public sealed class SqliteCoordinatorStore : ICoordinatorStore
     private static object? ToNullableTime(DateTimeOffset? time) => time?.ToUnixTimeMilliseconds();
 
     private static DateTimeOffset FromTime(long milliseconds) => DateTimeOffset.FromUnixTimeMilliseconds(milliseconds);
+
+    // A wrap is never replaced: a device keeps the copy it has. Gives 1 when added.
+    private static int InsertWrap(SqliteConnection connection, SqliteTransaction transaction, MetadataKeyWrapRecord wrap)
+        => Execute(connection, transaction,
+            "INSERT INTO metadata_key_wraps (key_id, device_id, wrapped, wrapped_by_device_id, created_at) VALUES ($key, $device, $wrapped, $by, $created) " +
+            "ON CONFLICT (key_id, device_id) DO NOTHING",
+            ("$key", wrap.KeyId), ("$device", wrap.DeviceId), ("$wrapped", wrap.Wrapped), ("$by", wrap.WrappedByDeviceId), ("$created", ToTime(wrap.CreatedAt)));
+
+    // {"<name>":[...]}: ids only, never content.
+    private static string IdsDetails(string name, IReadOnlyList<string> ids)
+    {
+        using var buffer = new MemoryStream();
+        using (var writer = new System.Text.Json.Utf8JsonWriter(buffer))
+        {
+            writer.WriteStartObject();
+            writer.WriteStartArray(name);
+            foreach (var id in ids) writer.WriteStringValue(id);
+            writer.WriteEndArray();
+            writer.WriteEndObject();
+        }
+
+        return System.Text.Encoding.UTF8.GetString(buffer.ToArray());
+    }
 
     private abstract class WriteItem
     {

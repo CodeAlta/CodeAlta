@@ -155,6 +155,28 @@ public sealed record SessionRecord(
     string? SealedMetadata,
     DateTimeOffset ReceivedAt);
 
+/// <summary>A metadata key of a person: what the server knows of it, never the key itself.</summary>
+/// <param name="Id">The id of the key.</param>
+/// <param name="OrganizationId">Its organization.</param>
+/// <param name="PersonId">The person whose devices hold it.</param>
+/// <param name="Epoch">Its epoch.</param>
+/// <param name="CreatedByDeviceId">The controller device that made it.</param>
+/// <param name="CreatedAt">When it was made.</param>
+public sealed record MetadataKeyRecord(string Id, string OrganizationId, string PersonId, int Epoch, string CreatedByDeviceId, DateTimeOffset CreatedAt);
+
+/// <summary>A metadata key wrapped to one device, as opaque text.</summary>
+/// <param name="KeyId">The key.</param>
+/// <param name="DeviceId">The device it is wrapped to.</param>
+/// <param name="Wrapped">The wrapped key.</param>
+/// <param name="WrappedByDeviceId">The controller device that wrapped it.</param>
+/// <param name="CreatedAt">When it was given.</param>
+public sealed record MetadataKeyWrapRecord(string KeyId, string DeviceId, string Wrapped, string WrappedByDeviceId, DateTimeOffset CreatedAt);
+
+/// <summary>A metadata key and its wraps.</summary>
+/// <param name="Key">The key.</param>
+/// <param name="Wraps">Its copies, one per device.</param>
+public sealed record MetadataKeyWithWraps(MetadataKeyRecord Key, IReadOnlyList<MetadataKeyWrapRecord> Wraps);
+
 /// <summary>An event of the audit log to append, without content.</summary>
 /// <param name="Action">What was done, such as <c>device.approve</c>.</param>
 /// <param name="Result">How it ended: <c>success</c> or a stable error code.</param>

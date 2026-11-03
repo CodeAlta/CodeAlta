@@ -19,7 +19,7 @@ public sealed class ControlService
     public static readonly FleetProtocolRange Protocol = new(1, 1);
 
     /// <summary>The features the server announces in its welcome.</summary>
-    public static readonly IReadOnlyList<string> Features = ["presence", "inventory", "facts", "directory"];
+    public static readonly IReadOnlyList<string> Features = ["presence", "inventory", "facts", "facts.withdraw", "directory"];
 
     private const int MaxStateLength = 32;
 
@@ -168,6 +168,12 @@ public sealed class ControlService
             return JsonSerializer.SerializeToElement(result, FleetServerJsonContext.Default.FleetFactsPublishResult);
         }));
 
+        connection.RegisterRequestHandler(FleetServerMethods.FactsWithdraw, Handler(FleetServerJsonContext.Default.FleetFactsWithdraw, async (withdrawal, token) =>
+        {
+            var result = await _publications.WithdrawFactsAsync(session.Device, withdrawal, token).ConfigureAwait(false);
+            return JsonSerializer.SerializeToElement(result, FleetServerJsonContext.Default.FleetFactsWithdrawResult);
+        }));
+
         connection.RegisterRequestHandler(FleetServerMethods.DirectoryWatch, async (_, token) =>
         {
             // Watch first, then read: a change between the two comes as an event, and versions make it idempotent.
@@ -218,7 +224,7 @@ public sealed class ControlService
         {
             var device = await store.GetDeviceAsync(context.DeviceId, cancellationToken).ConfigureAwait(false);
             // The proof is checked before the status, so that a pending or revoked answer tells only the holder of the key.
-            if (device is null || !DevicePublicKey.TryParse(device.PublicKey, out var key) || !key.Verify(context.GetSignedBytes(), hello.Device.Proof))
+            if (device is null || !FleetDevicePublicKey.TryParse(device.PublicKey, out var key) || !key.Verify(context.GetSignedBytes(), hello.Device.Proof))
             {
                 return FleetProofVerification.Reject(new FleetError(FleetErrorCodes.Unauthenticated, FleetErrorHints.Reauthenticate,
                     "The device proof does not verify with a device of this server."));

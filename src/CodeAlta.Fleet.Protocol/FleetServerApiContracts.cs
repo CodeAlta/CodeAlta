@@ -113,7 +113,11 @@ public sealed record EnrollmentTokenResponse(string Id, string Token, DateTimeOf
 /// <param name="Token">The enrollment token.</param>
 /// <param name="PublicKey">The public key of the machine.</param>
 /// <param name="DeviceName">Its name.</param>
-public sealed record EnrollRequest(string Token, string PublicKey, string DeviceName);
+/// <param name="Kind">
+/// Its class (<see cref="FleetDeviceKinds"/>): <c>controller</c> for a person's desktop, which a controller device of the
+/// same person approves and which then approves others; <c>node</c> (the default) for an execution device.
+/// </param>
+public sealed record EnrollRequest(string Token, string PublicKey, string DeviceName, string? Kind = null);
 
 /// <summary>The answer of an enrollment.</summary>
 /// <param name="Device">The device, pending until a controller device signs it into the device list.</param>
@@ -180,6 +184,33 @@ public sealed record ServerHealthDto(string Status, string Version, bool SetUp, 
 /// <param name="RequestId">The id of the request.</param>
 public sealed record ApiProblemDto(int? Status, string? Title, string? Detail, string? Code, string? Hint, string? RequestId);
 
+/// <summary>A copy of a metadata key wrapped to one device: only that device opens it.</summary>
+/// <param name="DeviceId">The device the key is wrapped to.</param>
+/// <param name="Wrapped">The wrapped key, opaque to the server (ECDH-ES P-256, HKDF-SHA256, AES-256-GCM; the algorithm id is inside).</param>
+public sealed record MetadataKeyWrapDto(string DeviceId, string Wrapped);
+
+/// <summary>
+/// A metadata key of a person (<c>doc/fleet/security-and-privacy.md</c>, keys): it seals the descriptive metadata of the
+/// sessions their devices publish (titles). The server keeps it wrapped to each of the person's devices and never in clear.
+/// </summary>
+/// <param name="Id">The id of the key, which sealed metadata names.</param>
+/// <param name="Epoch">Its epoch: 1 until keys rotate.</param>
+/// <param name="CreatedByDeviceId">The controller device that made it.</param>
+/// <param name="CreatedAt">When it was made.</param>
+/// <param name="Wrapped">The copy wrapped to the calling device, or <see langword="null"/> when it has none yet.</param>
+/// <param name="WrappedTo">The devices that have a copy.</param>
+public sealed record MetadataKeyDto(string Id, int Epoch, string CreatedByDeviceId, DateTimeOffset CreatedAt, string? Wrapped, IReadOnlyList<string> WrappedTo);
+
+/// <summary>The body of <c>POST /api/v1/metadata-keys</c>: a new key of the calling device's person, wrapped to its devices, the caller included.</summary>
+/// <param name="Id">The id of the key, made by the device: 22 characters of base64url.</param>
+/// <param name="Epoch">Its epoch: 1.</param>
+/// <param name="Wraps">Its copies, one per device.</param>
+public sealed record CreateMetadataKeyRequest(string Id, int Epoch, IReadOnlyList<MetadataKeyWrapDto> Wraps);
+
+/// <summary>The body of <c>POST /api/v1/metadata-keys/{id}/wraps</c>: copies of the key for devices that have none.</summary>
+/// <param name="Wraps">The copies.</param>
+public sealed record AddMetadataKeyWrapsRequest(IReadOnlyList<MetadataKeyWrapDto> Wraps);
+
 /// <summary>The source-generated contracts of the REST API.</summary>
 [JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase, DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull)]
 [JsonSerializable(typeof(SetupRequest))]
@@ -205,4 +236,8 @@ public sealed record ApiProblemDto(int? Status, string? Title, string? Detail, s
 [JsonSerializable(typeof(ServerHealthDto))]
 [JsonSerializable(typeof(ApiProblemDto))]
 [JsonSerializable(typeof(FleetMachineInventory))]
+[JsonSerializable(typeof(MetadataKeyDto))]
+[JsonSerializable(typeof(ListResponse<MetadataKeyDto>))]
+[JsonSerializable(typeof(CreateMetadataKeyRequest))]
+[JsonSerializable(typeof(AddMetadataKeyWrapsRequest))]
 public sealed partial class ServerApiJsonContext : JsonSerializerContext;

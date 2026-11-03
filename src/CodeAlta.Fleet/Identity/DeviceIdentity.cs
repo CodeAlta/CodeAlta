@@ -160,6 +160,34 @@ public sealed class DeviceIdentity : IDisposable
     }
 
     /// <summary>
+    /// Agrees a secret with a peer key, ECDH on P-256 with the device key (<c>doc/fleet/security-and-privacy.md</c>: the
+    /// device key receives wrapped keys): the raw shared secret, which the caller derives a key from (HKDF).
+    /// </summary>
+    /// <param name="peerSubjectPublicKeyInfo">The public key of the peer, as a DER SubjectPublicKeyInfo of a P-256 key.</param>
+    /// <returns>The 32 bytes of the shared secret.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="peerSubjectPublicKeyInfo"/> is <see langword="null"/>.</exception>
+    /// <exception cref="CryptographicException">The peer key is not a P-256 public key.</exception>
+    /// <exception cref="ObjectDisposedException">The identity is disposed.</exception>
+    public byte[] DeriveSharedSecret(byte[] peerSubjectPublicKeyInfo)
+    {
+        ArgumentNullException.ThrowIfNull(peerSubjectPublicKeyInfo);
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        using var peer = ECDiffieHellman.Create();
+        peer.ImportSubjectPublicKeyInfo(peerSubjectPublicKeyInfo, out var read);
+        if (read != peerSubjectPublicKeyInfo.Length || peer.KeySize != 256) throw new CryptographicException("The peer key is not a P-256 public key.");
+        var parameters = _key.ExportParameters(includePrivateParameters: true);
+        try
+        {
+            using var own = ECDiffieHellman.Create(parameters);
+            return own.DeriveRawSecretAgreement(peer.PublicKey);
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(parameters.D);
+        }
+    }
+
+    /// <summary>
     /// Makes a self-signed certificate of the device key, for TLS. Peers check its key against a pinned fingerprint, never
     /// its chain, name or dates; it is valid from a day ago for a year so that clocks that differ do not matter.
     /// </summary>

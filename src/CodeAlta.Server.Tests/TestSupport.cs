@@ -54,7 +54,7 @@ internal sealed class TestDevice : IFleetHandshakeSigner, IDisposable
     {
         Name = name;
         PublicKey = Convert.ToBase64String(_key.ExportSubjectPublicKeyInfo());
-        Identity.DevicePublicKey.TryParse(PublicKey, out var parsed);
+        FleetDevicePublicKey.TryParse(PublicKey, out var parsed);
         DeviceId = parsed!.DeviceId;
     }
 
@@ -175,12 +175,12 @@ internal sealed class ServerFixture : IAsyncDisposable
         return answer.Read<SetupResponse>();
     }
 
-    /// <summary>Enrolls a node with a new token of a controller.</summary>
-    public async Task<DeviceDto> EnrollAsync(TestDevice controller, TestDevice node)
+    /// <summary>Enrolls a device (a node unless told otherwise) with a new token of a controller.</summary>
+    public async Task<DeviceDto> EnrollAsync(TestDevice controller, TestDevice node, string? kind = null)
     {
         var token = await SendAsync(controller, HttpMethod.Post, "/api/v1/enrollment-tokens", new EnrollmentTokenRequest(600, "test"));
         Assert.AreEqual(HttpStatusCode.Created, token.Status, token.Body.ToString());
-        var enrolled = await SendAsync(node, HttpMethod.Post, "/api/v1/enroll", new EnrollRequest(token.Read<EnrollmentTokenResponse>().Token, node.PublicKey, node.Name));
+        var enrolled = await SendAsync(node, HttpMethod.Post, "/api/v1/enroll", new EnrollRequest(token.Read<EnrollmentTokenResponse>().Token, node.PublicKey, node.Name, kind));
         Assert.AreEqual(HttpStatusCode.Created, enrolled.Status, enrolled.Body.ToString());
         return enrolled.Read<EnrollResponse>().Device;
     }

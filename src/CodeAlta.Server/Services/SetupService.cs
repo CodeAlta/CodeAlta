@@ -81,7 +81,7 @@ public sealed class SetupService
             var ownerName = RequireName(request.OwnerName, "ownerName");
             var deviceName = RequireName(request.DeviceName, "deviceName");
             var organizationName = string.IsNullOrWhiteSpace(request.OrganizationName) ? ownerName : RequireName(request.OrganizationName, "organizationName");
-            if (!DevicePublicKey.TryParse(request.PublicKey, out var key))
+            if (!FleetDevicePublicKey.TryParse(request.PublicKey, out var key))
             {
                 throw CoordinatorException.BadRequest(CoordinatorErrorCodes.InvalidBody, "publicKey must be the base64 of the SubjectPublicKeyInfo of a P-256 key.");
             }

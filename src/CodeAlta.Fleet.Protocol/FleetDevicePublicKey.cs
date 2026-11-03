@@ -2,14 +2,14 @@ using System.Buffers.Text;
 using System.Diagnostics.CodeAnalysis;
 using System.Security.Cryptography;
 
-namespace CodeAlta.Server.Identity;
+namespace CodeAlta.Fleet.Protocol;
 
 /// <summary>
-/// The public key of a device as the server knows it: an ECDSA P-256 key given as the base64 of its DER
+/// The public key of a device as a server or a peer is given it: an ECDSA P-256 key given as the base64 of its DER
 /// SubjectPublicKeyInfo, its fingerprint (the SHA-256 of that encoding) and the device id derived from it, the same
 /// way CodeAlta's devices derive theirs, so a device is known by the same id everywhere.
 /// </summary>
-public sealed class DevicePublicKey
+public sealed class FleetDevicePublicKey
 {
     private const string P256Oid = "1.2.840.10045.3.1.7";
     private const int DeviceIdBytes = 16;
@@ -18,7 +18,7 @@ public sealed class DevicePublicKey
 
     private readonly byte[] _subjectPublicKeyInfo;
 
-    private DevicePublicKey(byte[] subjectPublicKeyInfo, string text)
+    private FleetDevicePublicKey(byte[] subjectPublicKeyInfo, string text)
     {
         _subjectPublicKeyInfo = subjectPublicKeyInfo;
         Text = text;
@@ -40,7 +40,7 @@ public sealed class DevicePublicKey
     /// <param name="text">The base64 of the DER SubjectPublicKeyInfo.</param>
     /// <param name="key">The key read, or <see langword="null"/>.</param>
     /// <returns>Whether the text is a P-256 public key.</returns>
-    public static bool TryParse(string? text, [NotNullWhen(true)] out DevicePublicKey? key)
+    public static bool TryParse(string? text, [NotNullWhen(true)] out FleetDevicePublicKey? key)
     {
         key = null;
         if (string.IsNullOrWhiteSpace(text) || text.Length > 1024) return false;
@@ -65,9 +65,13 @@ public sealed class DevicePublicKey
             return false;
         }
 
-        key = new DevicePublicKey(bytes, Convert.ToBase64String(bytes));
+        key = new FleetDevicePublicKey(bytes, Convert.ToBase64String(bytes));
         return true;
     }
+
+    /// <summary>Gets the key as its DER SubjectPublicKeyInfo, to wrap a key to it (ECDH).</summary>
+    /// <returns>A copy of the encoding.</returns>
+    public byte[] ExportSubjectPublicKeyInfo() => (byte[])_subjectPublicKeyInfo.Clone();
 
     /// <summary>Checks a signature made with the private key of this key: ECDSA P-256 over SHA-256, r and s in base64url.</summary>
     /// <param name="data">The signed bytes.</param>

@@ -19,8 +19,9 @@ public static class FleetSessionStates
 }
 
 /// <summary>
-/// A session of this instance as a <see cref="FleetConnector"/> may publish it: the facts of the allow-list, and what
-/// decides whether it is published at all (its space, whether it is Private). Never a title, a project, a path or content.
+/// A session of this instance as a <see cref="FleetConnector"/> may publish it: the facts of the allow-list, what
+/// decides whether it is published at all (its space, whether it is Private), and its title, which leaves the machine
+/// only sealed with the metadata key of its person. Never a project, a path or content.
 /// </summary>
 /// <param name="SessionId">The id of the session.</param>
 /// <param name="SpaceId">The space it is in; the default space when null.</param>
@@ -32,6 +33,7 @@ public static class FleetSessionStates
 /// <param name="ProviderType">The type of its provider, such as <c>anthropic</c>; null when unknown.</param>
 /// <param name="Model">Its model; null when unknown.</param>
 /// <param name="Counts">Its counts; null when unknown.</param>
+/// <param name="Title">Its title; null when it has none. Published only sealed (<see cref="FleetMetadataKey"/>).</param>
 public sealed record FleetLocalSession(
     string SessionId,
     string? SpaceId,
@@ -42,7 +44,8 @@ public sealed record FleetLocalSession(
     DateTimeOffset UpdatedAt,
     string? ProviderType = null,
     string? Model = null,
-    FleetSessionCounts? Counts = null);
+    FleetSessionCounts? Counts = null,
+    string? Title = null);
 
 /// <summary>What an instance has to publish to its servers: the inventory of the machine and its sessions.</summary>
 public interface IFleetPublicationSource

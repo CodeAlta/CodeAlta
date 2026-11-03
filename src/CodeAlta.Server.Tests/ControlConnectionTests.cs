@@ -171,6 +171,52 @@ public sealed class ControlConnectionTests
     }
 
     [TestMethod]
+    public async Task AMachineWithdrawsTheFactsOfItsOwnSessionsOnlyAuditedAndAnnounced()
+    {
+        await using var server = await ServerFixture.StartAsync();
+        using var owner = new TestDevice("Desktop");
+        using var mac = new TestDevice("Mac mini");
+        using var pc = new TestDevice("PC");
+        var (setup, _) = await server.SetUpWithNodeAsync(owner, mac);
+        var pending = await server.EnrollAsync(owner, pc);
+        var add = await server.NextEntryAsync(owner, FleetDeviceListOperations.Add, pending.Id, pc.PublicKey, FleetDeviceKinds.Node, setup.Owner.Id, setup.Organization.Id);
+        Assert.AreEqual(HttpStatusCode.OK, (await server.SendAsync(owner, HttpMethod.Post, $"/api/v1/devices/{pending.Id}/approve", new DeviceListChangeRequest(add))).Status);
+        var events = Channel.CreateUnbounded<FleetDirectoryChange>();
+        var (desktop, _) = await server.ConnectAsync(owner, connection => connection.SetEventHandler((fleetEvent, _) =>
+        {
+            if (fleetEvent.Event == FleetServerMethods.DirectoryChanged) events.Writer.TryWrite(fleetEvent.Payload!.Value.Deserialize(FleetServerJsonContext.Default.FleetDirectoryChange)!);
+            return ValueTask.CompletedTask;
+        }));
+        await using var _1 = desktop;
+        var (node, welcome) = await server.ConnectAsync(mac);
+        await using var _2 = node;
+        var (other, _) = await server.ConnectAsync(pc);
+        await using var _3 = other;
+        CollectionAssert.Contains(welcome.Features.ToArray(), FleetServerMethods.FactsWithdraw);
+        await desktop.SendRequestAsync(FleetServerMethods.DirectoryWatch);
+        await PublishAsync(node, 1, Fact("s1", 1, 1), Fact("s2", 1, 1));
+
+        // Another machine cannot take them back.
+        Assert.AreEqual(0, (await WithdrawAsync(other, "s1", "s2")).Removed.Count);
+        var result = await WithdrawAsync(node, "s1", "unknown", "s1");
+        CollectionAssert.AreEqual(new[] { "s1" }, result.Removed.ToArray());
+        var removed = await NextAsync(events, FleetServerMethods.ChangeKinds.SessionRemoved);
+        Assert.AreEqual("s1", removed.Id);
+        var sessions = (await server.SendAsync(owner, HttpMethod.Get, "/api/v1/sessions")).Read<ListResponse<SessionDto>>().Items;
+        CollectionAssert.AreEqual(new[] { "s2" }, sessions.Select(static session => session.Id).ToArray());
+        Assert.AreEqual(0, (await WithdrawAsync(node, "s1")).Removed.Count, "a withdrawal is idempotent");
+
+        var audit = (await server.SendAsync(owner, HttpMethod.Get, "/api/v1/audit")).Read<ListResponse<AuditRecordDto>>().Items.Where(static record => record.Action == "session.withdraw").ToArray();
+        Assert.AreEqual(1, audit.Length, "only a deletion is audited");
+        Assert.AreEqual((mac.DeviceId, setup.Owner.Id, "{\"sessions\":[\"s1\"]}"), (audit[0].ActorDeviceId, audit[0].ActorPersonId, audit[0].Details));
+
+        // Published again later, the session starts over at any version.
+        Assert.AreEqual(1, (await PublishAsync(node, 2, Fact("s1", 1, 1))).Applied);
+        var tooMany = await Assert.ThrowsExactlyAsync<FleetException>(() => WithdrawAsync(node, [.. Enumerable.Range(0, 501).Select(static index => $"s{index}")]));
+        Assert.AreEqual(CoordinatorErrorCodes.PublicationInvalid, tooMany.Error.Code);
+    }
+
+    [TestMethod]
     public async Task ANewConnectionOfADeviceReplacesItsOldOne()
     {
         await using var server = await ServerFixture.StartAsync();
@@ -209,6 +255,10 @@ public sealed class ControlConnectionTests
     private static async Task<FleetFactsPublishResult> PublishAsync(FleetConnection connection, long sequence, params FleetSessionFact[] facts)
         => (await connection.SendRequestAsync(FleetServerMethods.FactsPublish, new FleetFactsPublish(sequence, facts), FleetServerJsonContext.Default.FleetFactsPublish,
             FleetServerJsonContext.Default.FleetFactsPublishResult))!;
+
+    private static async Task<FleetFactsWithdrawResult> WithdrawAsync(FleetConnection connection, params string[] sessionIds)
+        => (await connection.SendRequestAsync(FleetServerMethods.FactsWithdraw, new FleetFactsWithdraw(sessionIds), FleetServerJsonContext.Default.FleetFactsWithdraw,
+            FleetServerJsonContext.Default.FleetFactsWithdrawResult))!;
 
     private static async Task<FleetDirectoryChange> NextAsync(Channel<FleetDirectoryChange> events, string kind)
     {

@@ -131,7 +131,10 @@ internal sealed class DesktopFleetServers : IAsyncDisposable
         }
     }
 
-    /// <summary>Joins a server with an enrollment token: this desktop waits for an admin to approve it.</summary>
+    /// <summary>
+    /// Joins a server with an enrollment token, as a controller device of the person who made the token: this desktop
+    /// waits for one of that person's controller devices to approve it, then may approve others.
+    /// </summary>
     /// <param name="address">The address of the server.</param>
     /// <param name="token">The enrollment token.</param>
     /// <param name="cancellationToken">Cancels the enrollment.</param>
@@ -148,7 +151,7 @@ internal sealed class DesktopFleetServers : IAsyncDisposable
             RequireNoLink(address);
             var identity = Identity();
             using var client = new FleetServerClient(address, identity, Handler);
-            var device = await client.EnrollAsync(token, _deviceName, cancellationToken).ConfigureAwait(false);
+            var device = await client.EnrollAsync(token, _deviceName, FleetDeviceKinds.Controller, cancellationToken).ConfigureAwait(false);
             var now = DateTimeOffset.UtcNow;
             var link = new FleetServerLink(FleetServerLinkStore.NewId(), FleetServerAddress.Format(address), null, null, identity.DeviceId, device.Kind,
                 FleetServerLinkStates.Pending, now, now);
@@ -230,7 +233,10 @@ internal sealed class DesktopFleetServers : IAsyncDisposable
     public async Task<DeviceDto> ApproveAsync(string linkId, string deviceId, CancellationToken cancellationToken)
     {
         using var client = Client(linkId);
-        return await client.ApproveAsync(deviceId, cancellationToken).ConfigureAwait(false);
+        var approved = await client.ApproveAsync(deviceId, cancellationToken).ConfigureAwait(false);
+        // The approved device gets its copy of the metadata key at the next publication of this computer.
+        Volatile.Read(ref _connections)?.Find(linkId)?.Connector?.RefreshKeys();
+        return approved;
     }
 
     /// <summary>Revokes a device of a server, or refuses a pending one.</summary>

@@ -151,16 +151,16 @@ From a terminal, `altanode connect <link>` pairs another profile with a node, an
 
 ## Connect to a CodeAlta Server
 
-A CodeAlta Server shows the machines of all your computers, whether they are online, and the sessions they publish, in one place. It never reads their content: a session publishes its state, its provider and model and its times, never its prompts, answers or title.
+A CodeAlta Server shows the machines of all your computers, whether they are online, and the sessions they publish, in one place. It never reads their content: a session publishes its state, its provider and model, its times and its counts (turns, tool calls, tokens), never its prompts or answers. Its title travels encrypted with a key that only your approved computers and machines hold: the server cannot read it.
 
 1. On the always-on machine, run `altaserver run`. It prints a one-time setup code (`altaserver setup-code` prints it again).
 2. In CodeAlta Desktop on that machine, open **Settings** > **Fleet** > **Server**, click **Create my server…**, and give its address (`http://127.0.0.1:2586`), the setup code and your name. This computer becomes the owner's.
 3. To add a node, click **Add a machine…** and run the command it shows on the machine: `altanode join <address> --token <code>`. The node appears under the server, **Waiting for approval**: click **Approve** when it shows the same six words as the node.
-4. Another computer joins with **Join a server…** and an enrollment code; the owner approves it the same way.
+4. Another of your computers joins with **Join a server…** and an enrollment code; you approve it the same way from a computer already approved. Once approved, it can add and approve machines too. A node never approves anything.
 
-A space publishes to a server only when you choose it: **Settings** > **Spaces** > the space > **General** > **Server**. `altanode join` links the default space of the node (`--space` chooses others). A session made **Private** in its options (the Agent chip, **More options**) is never published.
+A space publishes to a server only when you choose it: **Settings** > **Spaces** > the space > **General** > **Server**. `altanode join` links the default space of the node (`--space` chooses others). A session made **Private** in its options (the Agent chip, **More options**) is never published; one made Private later, or whose space you unlink, is removed from the server.
 
-The **Fleet** canvas (`/fleet`) shows the machines of the server and their sessions as they change. A session of this computer or of a paired machine opens with **Open**; the others are shown only. `altanode status` says whether the node is connected to its server.
+The **Fleet** canvas (`/fleet`) shows the machines of the server and their sessions, with their titles, as they change. A session of this computer or of a paired machine opens with **Open**; the others are shown only. `altanode status` says whether the node is connected to its server.
 
 ## Security
 

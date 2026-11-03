@@ -140,7 +140,7 @@ public sealed class FleetServerClient : IDisposable
                 ServerApiJsonContext.Default.EnrollmentTokenRequest),
             ServerApiJsonContext.Default.EnrollmentTokenResponse, cancellationToken);
 
-    /// <summary>Registers this device with an enrollment token: it is pending until a controller device approves it.</summary>
+    /// <summary>Registers this device as an execution node with an enrollment token: it is pending until a controller device approves it.</summary>
     /// <param name="token">The enrollment token.</param>
     /// <param name="deviceName">The name of this device.</param>
     /// <param name="cancellationToken">Cancels the call.</param>
@@ -148,11 +148,28 @@ public sealed class FleetServerClient : IDisposable
     /// <exception cref="ArgumentException">The token or the name is empty.</exception>
     /// <exception cref="FleetServerException">The token is unknown, used or expired, or this device is registered already.</exception>
     /// <exception cref="HttpRequestException">The server does not answer.</exception>
-    public async Task<DeviceDto> EnrollAsync(string token, string deviceName, CancellationToken cancellationToken = default)
+    public Task<DeviceDto> EnrollAsync(string token, string deviceName, CancellationToken cancellationToken = default)
+        => EnrollAsync(token, deviceName, FleetDeviceKinds.Node, cancellationToken);
+
+    /// <summary>
+    /// Registers this device with an enrollment token, as a controller device (a person's desktop, which may approve
+    /// others once a controller device of the same person approved it) or as an execution node; pending until then.
+    /// </summary>
+    /// <param name="token">The enrollment token.</param>
+    /// <param name="deviceName">The name of this device.</param>
+    /// <param name="kind">Its class (<see cref="FleetDeviceKinds"/>).</param>
+    /// <param name="cancellationToken">Cancels the call.</param>
+    /// <returns>The pending device.</returns>
+    /// <exception cref="ArgumentException">The token or the name is empty, or the kind is unknown.</exception>
+    /// <exception cref="FleetServerException">The token is unknown, used or expired, or this device is registered already.</exception>
+    /// <exception cref="HttpRequestException">The server does not answer.</exception>
+    public async Task<DeviceDto> EnrollAsync(string token, string deviceName, string kind, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(token);
         ArgumentException.ThrowIfNullOrWhiteSpace(deviceName);
-        var enrolled = await SendAsync(HttpMethod.Post, "api/v1/enroll", Body(new EnrollRequest(token.Trim(), PublicKey, deviceName.Trim()), ServerApiJsonContext.Default.EnrollRequest),
+        if (!FleetDeviceKinds.IsKnown(kind)) throw new ArgumentException($"'{kind}' is not a class of device.", nameof(kind));
+        var enrolled = await SendAsync(HttpMethod.Post, "api/v1/enroll",
+            Body(new EnrollRequest(token.Trim(), PublicKey, deviceName.Trim(), kind), ServerApiJsonContext.Default.EnrollRequest),
             ServerApiJsonContext.Default.EnrollResponse, cancellationToken).ConfigureAwait(false);
         return enrolled.Device;
     }
@@ -190,6 +207,77 @@ public sealed class FleetServerClient : IDisposable
     public async Task<IReadOnlyList<DeviceListEntryDto>> GetDeviceListAsync(CancellationToken cancellationToken = default)
         => (await SendAsync(HttpMethod.Get, "api/v1/device-list", null, ServerApiJsonContext.Default.ListResponseDeviceListEntryDto, cancellationToken).ConfigureAwait(false)).Items;
 
+    /// <summary>
+    /// Reads the signed device list and replays it with the rules every device applies (<see cref="FleetDeviceListVerifier"/>):
+    /// signatures, sequence, previous hashes, signers that are controller devices. What it gives can be trusted whatever
+    /// the server is; a list that does not verify is refused.
+    /// </summary>
+    /// <param name="organizationId">The organization the list must name; null for the one the server says.</param>
+    /// <param name="cancellationToken">Cancels the call.</param>
+    /// <returns>The list after its last entry: its members and their keys.</returns>
+    /// <exception cref="FleetDeviceListException">The list does not verify.</exception>
+    /// <exception cref="FleetServerException">The server refused the call.</exception>
+    /// <exception cref="HttpRequestException">The server does not answer.</exception>
+    public async Task<FleetDeviceListState> ReadVerifiedDeviceListAsync(string? organizationId = null, CancellationToken cancellationToken = default)
+    {
+        organizationId ??= (await GetOrganizationAsync(cancellationToken).ConfigureAwait(false)).Id;
+        var list = await GetDeviceListAsync(cancellationToken).ConfigureAwait(false);
+        for (var index = 0; index < list.Count; index++)
+        {
+            // The server's numbering of an entry agrees with the entry, or the list is not the one its signers signed.
+            if (list[index].Sequence != index + 1 || list[index].Hash != FleetDeviceListEntries.Hash(list[index].Entry))
+                throw new FleetDeviceListException(index + 1, "the server's sequence or hash of the entry does not match the entry");
+        }
+
+        return FleetDeviceListVerifier.VerifyOrThrow(list.Select(static item => item.Entry), organizationId);
+    }
+
+    /// <summary>Gets a device from the verified device list: the key to trust for it, whatever the server's tables say.</summary>
+    /// <param name="deviceId">The device.</param>
+    /// <param name="cancellationToken">Cancels the call.</param>
+    /// <returns>Its member record, or null when it is not in the list.</returns>
+    /// <exception cref="ArgumentException"><paramref name="deviceId"/> is empty.</exception>
+    /// <exception cref="FleetDeviceListException">The list does not verify.</exception>
+    /// <exception cref="FleetServerException">The server refused the call.</exception>
+    /// <exception cref="HttpRequestException">The server does not answer.</exception>
+    public async Task<FleetDeviceListMember?> GetTrustedMemberAsync(string deviceId, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(deviceId);
+        var state = await ReadVerifiedDeviceListAsync(null, cancellationToken).ConfigureAwait(false);
+        return state.Members.GetValueOrDefault(deviceId);
+    }
+
+    /// <summary>Lists the metadata keys of this device's person, each with the copy wrapped to this device when it has one.</summary>
+    /// <param name="cancellationToken">Cancels the call.</param>
+    /// <returns>The keys.</returns>
+    /// <exception cref="FleetServerException">The server refused the call.</exception>
+    /// <exception cref="HttpRequestException">The server does not answer.</exception>
+    public async Task<IReadOnlyList<MetadataKeyDto>> ListMetadataKeysAsync(CancellationToken cancellationToken = default)
+        => (await SendAsync(HttpMethod.Get, "api/v1/metadata-keys", null, ServerApiJsonContext.Default.ListResponseMetadataKeyDto, cancellationToken).ConfigureAwait(false)).Items;
+
+    /// <summary>Records the metadata key this controller device made for its person, wrapped to that person's devices, this one included.</summary>
+    /// <param name="keyId">The id of the key.</param>
+    /// <param name="epoch">Its epoch.</param>
+    /// <param name="wraps">Its copies, one per device.</param>
+    /// <param name="cancellationToken">Cancels the call.</param>
+    /// <returns>The key.</returns>
+    /// <exception cref="FleetServerException">The server refused the key: not a controller, a wrong wrap, or a key exists (<c>metadata_key.exists</c>).</exception>
+    /// <exception cref="HttpRequestException">The server does not answer.</exception>
+    public Task<MetadataKeyDto> CreateMetadataKeyAsync(string keyId, int epoch, IReadOnlyList<MetadataKeyWrapDto> wraps, CancellationToken cancellationToken = default)
+        => SendAsync(HttpMethod.Post, "api/v1/metadata-keys", Body(new CreateMetadataKeyRequest(keyId, epoch, wraps), ServerApiJsonContext.Default.CreateMetadataKeyRequest),
+            ServerApiJsonContext.Default.MetadataKeyDto, cancellationToken);
+
+    /// <summary>Gives copies of a metadata key this controller device holds to devices of its person that have none.</summary>
+    /// <param name="keyId">The key.</param>
+    /// <param name="wraps">The copies.</param>
+    /// <param name="cancellationToken">Cancels the call.</param>
+    /// <returns>The key.</returns>
+    /// <exception cref="FleetServerException">The server refused the copies.</exception>
+    /// <exception cref="HttpRequestException">The server does not answer.</exception>
+    public Task<MetadataKeyDto> AddMetadataKeyWrapsAsync(string keyId, IReadOnlyList<MetadataKeyWrapDto> wraps, CancellationToken cancellationToken = default)
+        => SendAsync(HttpMethod.Post, $"api/v1/metadata-keys/{Uri.EscapeDataString(keyId)}/wraps",
+            Body(new AddMetadataKeyWrapsRequest(wraps), ServerApiJsonContext.Default.AddMetadataKeyWrapsRequest), ServerApiJsonContext.Default.MetadataKeyDto, cancellationToken);
+
     /// <summary>Lists the machines of the organization and their last inventory.</summary>
     /// <param name="cancellationToken">Cancels the call.</param>
     /// <returns>The machines.</returns>
@@ -215,6 +303,7 @@ public sealed class FleetServerClient : IDisposable
     /// <returns>The approved device.</returns>
     /// <exception cref="ArgumentException"><paramref name="deviceId"/> is empty.</exception>
     /// <exception cref="FleetServerException">The server refused the approval: not a controller, not pending, or the list moved on twice.</exception>
+    /// <exception cref="FleetDeviceListException">The device list does not verify, or this device is not a controller device in it: nothing was signed.</exception>
     /// <exception cref="HttpRequestException">The server does not answer.</exception>
     public Task<DeviceDto> ApproveAsync(string deviceId, CancellationToken cancellationToken = default)
     {
@@ -235,6 +324,7 @@ public sealed class FleetServerClient : IDisposable
     /// <returns>The revoked device.</returns>
     /// <exception cref="ArgumentException"><paramref name="deviceId"/> is empty.</exception>
     /// <exception cref="FleetServerException">The server refused the revocation.</exception>
+    /// <exception cref="FleetDeviceListException">The device list does not verify, or this device is not a controller device in it: nothing was signed.</exception>
     /// <exception cref="HttpRequestException">The server does not answer.</exception>
     public async Task<DeviceDto> RevokeAsync(string deviceId, CancellationToken cancellationToken = default)
     {
@@ -256,7 +346,7 @@ public sealed class FleetServerClient : IDisposable
         if (_ownsHttp) _http.Dispose();
     }
 
-    // Signs the entry that follows the last one and posts it; read again once when another entry was appended meanwhile.
+    // Signs the entry that follows the last one of the verified list and posts it; read again once when another entry was appended meanwhile.
     private async Task<DeviceDto> ChangeListAsync(string deviceId, string action,
         Func<OrganizationDto, DeviceDto, CancellationToken, Task<(string Operation, string? Key, string? Kind, string? Owner)>> describe, CancellationToken cancellationToken)
     {
@@ -265,11 +355,14 @@ public sealed class FleetServerClient : IDisposable
         var (operation, key, kind, owner) = await describe(organization, self, cancellationToken).ConfigureAwait(false);
         for (var attempt = 0; ; attempt++)
         {
-            var list = await GetDeviceListAsync(cancellationToken).ConfigureAwait(false);
-            if (list.Count == 0) throw new FleetServerException(HttpStatusCode.Conflict, "device_list.empty", null, "The server has no device list.");
-            var last = list[^1];
-            var entry = Sign(new FleetDeviceListEntryPayload(FleetDeviceListEntryPayload.CurrentVersion, organization.Id, last.Sequence + 1, last.Hash, operation, deviceId, key, kind,
-                owner, DeviceId, Now()));
+            // Nothing is signed after a list this device cannot verify: its signature would vouch for what the server added.
+            var state = await ReadVerifiedDeviceListAsync(organization.Id, cancellationToken).ConfigureAwait(false);
+            if (!state.IsController(DeviceId))
+                throw new FleetDeviceListException(state.Sequence, "this device is not a controller device of the list, so it signs no entry");
+            var entry = Sign(new FleetDeviceListEntryPayload(FleetDeviceListEntryPayload.CurrentVersion, organization.Id, state.Sequence + 1, state.LastHash, operation, deviceId,
+                key, kind, owner, DeviceId, Now()));
+            if (!FleetDeviceListVerifier.TryAppend(state, entry, organization.Id, out _, out var reason))
+                throw new FleetDeviceListException(state.Sequence + 1, $"the entry this device would sign does not hold ({reason})");
             try
             {
                 return await SendAsync(HttpMethod.Post, $"api/v1/devices/{Uri.EscapeDataString(deviceId)}/{action}",
