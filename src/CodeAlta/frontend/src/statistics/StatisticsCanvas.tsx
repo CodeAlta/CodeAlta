@@ -1,6 +1,9 @@
 import { Tab, Tabs } from "@blueprintjs/core";
-import { useEffect, useId, useRef, type ReactNode, type RefObject } from "react";
+import { useEffect, useId, useRef, useState, type ReactNode, type RefObject } from "react";
 import type { StatisticsApi, StatisticsContext } from "./api";
+import { Choice } from "./blocks";
+import type { FleetStatisticsApi } from "./fleet";
+import { FleetScope } from "./FleetScope";
 import { FrameBar } from "./FrameBar";
 import { FirstTimeCard, HistoryBar } from "./HistoryBar";
 import { pageIds, type PageId } from "./frame";
@@ -49,26 +52,47 @@ function usePageTabsEdges(root: RefObject<HTMLElement | null>, page: PageId, sho
   }, [root, page, shown]);
 }
 
-function Canvas() {
+// Whether "My fleet" is offered: this computer is linked to a server. Asked once the canvas shows; a profile without a server never sees it.
+function useFleetAvailable(fleet: FleetStatisticsApi | null | undefined, visible: boolean): boolean {
+  const [available, setAvailable] = useState(false);
+  useEffect(() => {
+    if (!fleet || !visible) return;
+    const controller = new AbortController();
+    fleet.available(controller.signal).then(value => { if (!controller.signal.aborted) setAvailable(value); }, () => { });
+    return () => controller.abort();
+  }, [fleet, visible]);
+  return available;
+}
+
+function Canvas({ fleet }: Readonly<{ fleet?: FleetStatisticsApi | null }>) {
   const { t } = useText();
-  const { frame, dispatch, status, visible, header } = useStatistics();
+  const { frame, dispatch, status, visible, header, context } = useStatistics();
   const view = historyView(status);
   const showCharts = view !== "choice" || (status?.savedSessions ?? 0) > 0;
   const root = useRef<HTMLDivElement>(null);
   // Several canvases stay mounted in one window (the one of the application, the one of a project): the ids of the tabs are per canvas.
   const tabsId = useId();
-  usePageTabsEdges(root, frame.page, showCharts);
-  return <div className="statistics-canvas" ref={root} data-visible={visible} data-history={view}>
-    <FrameBar />
-    <HistoryBar />
-    {(header?.coverage.unavailableSavedMetrics?.length ?? 0) > 0 && <p role="status" className="stats-page">
-      {t("Some saved sessions predate current metric definitions. Unrecorded metrics are unavailable, not observed zeros.")}
-    </p>}
-    {view === "choice" && status && <div className="stats-page stats-page-first"><FirstTimeCard status={status} /></div>}
-    {showCharts && <Tabs id={tabsId} className="stats-tabs" selectedTabId={frame.page} onChange={next => dispatch({ type: "page", page: next as PageId })} renderActiveTabPanelOnly animate={false}
-        aria-label={t("Statistics pages")}>
-        {pageIds.map(page => <Tab key={page} id={page} disabled={false} title={pageLabel(t, page)} panel={<div className="stats-page" data-page={page}>{pages[page]()}</div>} />)}
-      </Tabs>}
+  // The scope of the canvas of the application: this machine, or every machine of the person through the server.
+  const [scope, setScope] = useState<"machine" | "fleet">("machine");
+  const offersFleet = useFleetAvailable(context.projectId || context.sessionId ? null : fleet, visible);
+  const inFleet = offersFleet && scope === "fleet" && !!fleet;
+  usePageTabsEdges(root, frame.page, showCharts && !inFleet);
+  return <div className="statistics-canvas" ref={root} data-visible={visible} data-history={view} data-scope={inFleet ? "fleet" : "machine"}>
+    {offersFleet && <div className="stats-scope">
+      <Choice label={t("Statistics scope")} value={scope} onChange={setScope} options={[{ value: "machine", label: t("This machine") }, { value: "fleet", label: t("My fleet") }]} />
+    </div>}
+    {inFleet ? <FleetScope api={fleet} /> : <>
+      <FrameBar />
+      <HistoryBar />
+      {(header?.coverage.unavailableSavedMetrics?.length ?? 0) > 0 && <p role="status" className="stats-page">
+        {t("Some saved sessions predate current metric definitions. Unrecorded metrics are unavailable, not observed zeros.")}
+      </p>}
+      {view === "choice" && status && <div className="stats-page stats-page-first"><FirstTimeCard status={status} /></div>}
+      {showCharts && <Tabs id={tabsId} className="stats-tabs" selectedTabId={frame.page} onChange={next => dispatch({ type: "page", page: next as PageId })} renderActiveTabPanelOnly animate={false}
+          aria-label={t("Statistics pages")}>
+          {pageIds.map(page => <Tab key={page} id={page} disabled={false} title={pageLabel(t, page)} panel={<div className="stats-page" data-page={page}>{pages[page]()}</div>} />)}
+        </Tabs>}
+    </>}
   </div>;
 }
 
@@ -77,8 +101,9 @@ function Canvas() {
  * state of the reading of the history. It asks `api` for every number and draws what comes back; it keeps what it needs
  * between reloads under `context.instanceId`, and stops asking while `context.visible` is false.
  *
- * Mount it once per canvas instance. It is safe under React StrictMode.
+ * Mount it once per canvas instance. It is safe under React StrictMode. With `fleet`, the canvas of the application offers the scope
+ * "My fleet" once the binding says a server is linked.
  */
-export function StatisticsCanvas({ api, context }: Readonly<{ api: StatisticsApi; context: StatisticsContext }>) {
-  return <StatisticsProvider api={api} context={context}><Canvas /></StatisticsProvider>;
+export function StatisticsCanvas({ api, context, fleet }: Readonly<{ api: StatisticsApi; context: StatisticsContext; fleet?: FleetStatisticsApi | null }>) {
+  return <StatisticsProvider api={api} context={context}><Canvas fleet={fleet} /></StatisticsProvider>;
 }

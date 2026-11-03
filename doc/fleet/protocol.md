@@ -96,6 +96,7 @@ server/node → welcome { protocol, features, cursors, policy }  |  error { code
 | Flow | Rule |
 | --- | --- |
 | Node to server: session facts | Each fact carries `(sessionId, epoch, version)`; the server keeps the highest version and refuses a stale epoch. The source is the journal and its projection, with a watermark per server: the journal is the outbox. |
+| Node to server: statistics facts | One set of rows per session with `(sessionId, epoch, version)` and a generation of the machine's outbox (`statistics.publish`); the server keeps the highest version per machine and session, refuses an older epoch, and replaces everything of a machine that starts a new generation. A batch carries a sequence, acknowledged as for the other facts and given back in the welcome, so a server restored from a backup gets every set again. `statistics.withdraw` takes back the sets of sessions no longer published. Announced by the feature `statistics`. |
 | Node to server: other facts (inventory, usage, audit events) | A small outbox table on the node, with a per-server sequence; the server acknowledges the highest contiguous sequence; the node resends from there after a reconnection. Duplicates are no-ops. |
 | Server to node: deliveries (child answers, cross-machine messages, chat, policy) | A per-node delivery sequence with acknowledgements and a time to live; queued while the node is offline. A delivery that carries content (an answer, a message) is sealed to the receiving device: the server routes it without reading it. |
 | Replicas | `replica.append(sessionId, epoch, generation, fromOffset, bytes)`; the server stores what follows the last acknowledged offset, refuses a gap (with the expected offset), a stale epoch or an older generation (a rewind starts a new one). |
@@ -152,8 +153,10 @@ windows, asks, permissions, jobs); the node API is that surface, made remote, pl
 | `presence` | `update` (in the heartbeat), `watch` |
 | `directory` | `watch` (machines, published sessions, people, projects) |
 | `facts` | `publish`, `ack` (session facts, usage, audit events) |
+| `statistics` | `publish`, `withdraw` (statistics sets, [statistics](statistics.md#publication-rows-not-increments)) |
 | `relay` | `open`, `incoming`, `accept`, `close` |
 | `telemetry` | `settings`: the fleet's telemetry setting, signed by a controller device, sent when a device connects and when an owner changes it ([observability](observability.md#where-telemetry-goes)) |
+| `automations` | `assigned` (the versions a controller device of the machine's person signed, sealed for the machine and the person's controllers, removals included; sent when one is stored for a machine online, and on each connection until acknowledged), `ack` (taken or refused, with the reason), `claim` (a due time, before its run: one run per automation and due time, whatever the machine; a node whose server does not answer runs the time it claimed itself; the same run claiming again renews its lease while it works), `runs` (run facts: version, trigger, status, times, session, tokens and cost, and when each automation is next due; never the prompt, the answer or what the trigger was about), `run` (a run asked by hand, signed by a controller device of the person for the machine and a run id, sent to the machine online; the machine refuses a request signed more than minutes away from its time, and runs a run id once) ([orchestration](orchestration.md#placement-and-dispatch)) |
 | `update` | `instruction` (a campaign's signed manifest, or the signed automatic policy and its version), `cancel`, `policy` (the fleet's signed update policy, any mode, sent on each connection and each change), `report` (where the node stands; `updated` once its trial confirmed) ([deployment](deployment.md#updates)) |
 | `ownership` | `commit` (a move), `takeover`, `changed` |
 | `replica` | `append`, `read`, `status` |
@@ -195,6 +198,10 @@ The management plane, and the whole surface of the console ([console](console.md
 - **Updates**: `GET /api/v1/updates` (the server's versions, the policy, the recent campaigns), `POST
   /api/v1/updates/campaigns` (a manifest an owner's controller device signed), `GET .../campaigns/{id}`, `POST
   .../campaigns/{id}/cancel`, `PUT /api/v1/updates/policy` ([deployment](deployment.md#updates)).
+- **Automations**: `GET /api/v1/automations` (the caller's person's, per machine: the facts the server reads, where each
+  delivery stands, the version as signed), `PUT /api/v1/automations/{id}` (a version or a removal a controller device of
+  the machine's owner signed, sealed, never in clear; never replaced by one that is not newer), `DELETE
+  .../{id}?machine=` (forgets a removal the machine acknowledged), `POST .../{id}/run` (a signed run by hand, passed to the machine online), `GET .../{id}/runs`.
 - **Telemetry**: `GET`/`PUT /api/v1/telemetry` reads and sets the fleet's signed telemetry setting (an owner's controller
   device only); `POST /otlp/v1/{traces,metrics,logs}` takes the OTLP of approved devices, signed as the API's calls are,
   and forwards it to the collector ([observability](observability.md#where-telemetry-goes)).

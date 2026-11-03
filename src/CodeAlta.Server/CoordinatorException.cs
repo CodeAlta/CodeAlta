@@ -140,4 +140,16 @@ public static class CoordinatorErrorCodes
 
     /// <summary>No campaign of the organization has this id.</summary>
     public const string UpdateNotFound = "update.not_found";
+
+    /// <summary>An automation version that does not hold, is not signed by the caller, or is given in clear.</summary>
+    public const string AutomationInvalid = "automation.invalid";
+
+    /// <summary>An automation version not newer than the one held, or forgotten before its machine took it away.</summary>
+    public const string AutomationConflict = "automation.conflict";
+
+    /// <summary>No automation of the caller's person has this id.</summary>
+    public const string AutomationNotFound = "automation.not_found";
+
+    /// <summary>A statistics query that does not read: its days, its time zone, its groups or its scope.</summary>
+    public const string StatisticsInvalid = "statistics.invalid";
 }

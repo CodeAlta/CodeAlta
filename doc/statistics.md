@@ -2,7 +2,8 @@
 
 The Statistics plugin (`src/CodeAlta.Plugin.Statistics`) turns session journals into numbers: how much was spent, in
 time, tokens, cost and tool calls, by provider, model, project, space and session, over any period. The timeline
-cards of a turn work in both applications; the store, the history and the canvas run in CodeAlta Desktop only.
+cards of a turn work in both applications; the store and the history run in CodeAlta Desktop and CodeAlta Node, the
+canvas in CodeAlta Desktop only.
 
 | Piece | Where | Role |
 | --- | --- | --- |
@@ -12,6 +13,7 @@ cards of a turn work in both applications; the store, the history and the canvas
 | `SessionCatchUp` | `Facts/` | Scanner + reducer from a cursor to a new cursor: the one operation of the history and of the flow |
 | `StatisticsStore` | `Store/` | The plugin's tables in the application database: facts, roll-ups, runs, sessions, cursors |
 | `StatisticsEngine` (`IStatisticsService`) | `History/` | The history job, the flow, the status and controls |
+| `IStatisticsPublication` | `History/` | For a host that publishes its facts to a fleet: a revision per session and its rows, read from the store ([fleet statistics](fleet/statistics.md)) |
 | `StatisticsQueries` | `Query/` | Every question, in plain C#, independent of any transport |
 | `alta statistics` | `StatisticsCommands.cs` | The same questions as JSONL commands |
 | Canvas | `Canvas/`, `src/CodeAlta/frontend/src/statistics/` | The calls of the tab and the React canvas |
@@ -52,8 +54,12 @@ Definitions the reducer guarantees:
   the provider reports, not the alias chosen.
 - **Work is counted where it was done.** A fork or the session that keeps what a rewind removed starts with a copy of
   its source's records; its header says from when its records are its own (`forked_from.counted_from`), and the
-  inherited ones only carry the choices in force. Turns made outside CodeAlta (runs whose id starts with `external:`)
-  count nothing. So the totals of a session and its forks are what was spent: nothing twice, nothing lost.
+  inherited ones only carry the choices in force. A session moved to another machine brings its journal, and the move
+  records (`codealta.sessionMoved`, naming each machine by device id, a rename does not change it) tell which machine
+  wrote each part of it: a machine counts the parts it wrote, and a
+  move it did not know makes it read the session again. Turns made outside CodeAlta (runs whose id starts with
+  `external:`) count nothing. So the totals of a session and its forks, on every machine, are what was spent: nothing
+  twice, nothing lost.
 - **A run of a script** ([Code Mode](codemode.md)) is read from its records, which belong to no turn. It is counted
   when it starts, under the model in force and the sender of the turn it started in; what it did (its outcome,
   duration, calls, steps, sessions, time waiting for the user) is counted when it ends, in the quarter of its end,
@@ -87,8 +93,9 @@ arrived before its record was written, therefore costs nothing.
 ## The history and the flow
 
 The engine runs where the plugin has the journals of the instance and a database: CodeAlta Desktop
-(`StatisticsPlugin.CreateForDesktop`). The TUI runs none; the desktop catches up what the terminal wrote at its next
-start.
+(`StatisticsPlugin.CreateForDesktop`) and CodeAlta Node (`StatisticsPlugin.CreateForHost`, whatever the frontend the
+host gives its plugins). The TUI runs none; the desktop catches up what the terminal wrote at its next start. A host
+where nobody is asked starts with the choice "from today", made for it and kept.
 
 - **Nothing is read before the user chooses** how much history to read (everything, the last N days, or from today).
   The choice, its floor, a pause and a stop survive restarts. Reading more history later replaces the sessions read

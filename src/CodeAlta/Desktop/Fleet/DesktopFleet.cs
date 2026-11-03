@@ -96,6 +96,20 @@ internal sealed class DesktopFleet : IAsyncDisposable
     /// <summary>Gets the device id of this computer, as its paired machines authenticate it.</summary>
     public string DeviceId => Identity().DeviceId;
 
+    /// <summary>Signs a version of an automation with the key of this computer, which its machines check before they run it.</summary>
+    /// <param name="version">The version.</param>
+    /// <returns>The signed version.</returns>
+    /// <exception cref="ArgumentException">The version does not hold.</exception>
+    public CodeAlta.Fleet.Protocol.FleetSignedAutomationVersion SignAutomation(CodeAlta.Fleet.Protocol.FleetAutomationVersion version)
+        => CodeAlta.Fleet.Server.FleetAutomationSigning.Sign(Identity(), version);
+
+    /// <summary>Signs a run asked by hand with the key of this computer, which the machine checks before it runs it.</summary>
+    /// <param name="request">The run request.</param>
+    /// <returns>The signed request.</returns>
+    /// <exception cref="ArgumentException">The request does not hold.</exception>
+    public CodeAlta.Fleet.Protocol.FleetSignedAutomationRunRequest SignAutomationRun(CodeAlta.Fleet.Protocol.FleetAutomationRunRequest request)
+        => CodeAlta.Fleet.Server.FleetAutomationSigning.SignRun(Identity(), request);
+
     /// <summary>Finds the host of a machine.</summary>
     /// <param name="machineId">The device id of the machine.</param>
     /// <returns>Its host; null when no paired machine has that id.</returns>

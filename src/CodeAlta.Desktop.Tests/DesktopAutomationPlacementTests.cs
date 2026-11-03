@@ -56,7 +56,7 @@ public sealed class DesktopAutomationPlacementTests
         await using var automations = new AutomationService(global, _ => Task.FromResult<IReadOnlyList<ProjectDescriptor>>([]),
             new AutomationStateStore(Path.Combine(fixture.Root, "desktop-state", "automations.json"), false), runner, TimeProvider.System, TimeZoneInfo.Utc);
         await automations.RefreshAsync();
-        var placement = new DesktopAutomationPlacement(automations, fleet.Find, desktopFleetRoot, () => fleet.DeviceId);
+        var placement = new DesktopAutomationPlacement(automations, fleet.Find, desktopFleetRoot, () => fleet.DeviceId, fleet.SignAutomation) { PausesPlaced = true };
         automations.Placement = placement;
         await using (placement)
         {
@@ -80,7 +80,7 @@ public sealed class DesktopAutomationPlacementTests
 
             // Unchanged, it is not copied again, even by a placement that starts anew; changed, it is.
             await placement.SyncAsync(token);
-            await using (var again = new DesktopAutomationPlacement(automations, fleet.Find, desktopFleetRoot, () => fleet.DeviceId)) await again.SyncAsync(token);
+            await using (var again = new DesktopAutomationPlacement(automations, fleet.Find, desktopFleetRoot, () => fleet.DeviceId, fleet.SignAutomation)) await again.SyncAsync(token);
             Assert.AreEqual(1, node.Puts.Count);
             var definition = automations.Snapshot.Find(Id)!.Definition;
             Assert.IsNull(await automations.SaveAsync(definition with { Prompt = "Summarize the week." }, null, token));
@@ -88,16 +88,28 @@ public sealed class DesktopAutomationPlacementTests
             Assert.AreEqual(2, node.Puts.Count);
             StringAssert.Contains(node.Puts[1].Definition, "Summarize the week.");
 
+            // Paused here, it is paused on its machine too: given disabled, then enabled again once resumed.
+            automations.Paused = true;
+            await placement.SyncAsync(token);
+            Assert.AreEqual(3, node.Puts.Count);
+            StringAssert.Contains(node.Puts[2].Definition, "enabled = false");
+            automations.Paused = false;
+            await placement.SyncAsync(token);
+            Assert.AreEqual(4, node.Puts.Count);
+            StringAssert.Contains(node.Puts[3].Definition, "enabled = true");
+
             // Run now: the machine runs it, and its runs are what the page lists, with the machine they ran on.
             var run = await automations.RunAsync(Id, token);
             Assert.AreEqual(("node-run-1", "node-session-1", AutomationRun.Running), (run!.Id, run.SessionId, run.Status));
             Assert.AreEqual(0, runner.Starts.Count);
             await placement.SyncAsync(token);
             Assert.AreEqual("node-run-1", placement.Runs(Id).Single().Id);
+            Assert.AreEqual(new DateTimeOffset(2026, 11, 3, 23, 0, 0, TimeSpan.Zero), placement.NextDue(Id), "when its machine says it is next due");
             var rpc = new AutomationsService(automations, fixture.Host.ProjectCatalog, Epoch, placement: placement);
             var item = (await rpc.ListAsync(new(Epoch), token)).Items.Single();
             Assert.AreEqual((machine.DeviceId, "copied", "test-node"), (item.RunsOn, item.Placement!.State, item.Placement.MachineName));
             Assert.AreEqual(("node-run-1", machine.DeviceId), (item.LastRun!.Id, item.LastRun.MachineId));
+            Assert.AreEqual(new DateTimeOffset(2026, 11, 3, 23, 0, 0, TimeSpan.Zero), item.NextRunAt);
             Assert.IsTrue(item.Running);
             Assert.AreEqual(machine.DeviceId, rpc.Runs(new(Epoch, Id, null)).Runs.Single().MachineId);
             var ranByRpc = await rpc.RunAsync(new(Epoch, Id), token);
@@ -110,6 +122,53 @@ public sealed class DesktopAutomationPlacementTests
             Assert.IsNull(placement.Status(automations.Snapshot.Find(Id)!));
             Assert.IsNotNull(automations.NextDue(Id));
         }
+    }
+
+    [TestMethod]
+    public async Task VersionNumbers_NeverGoBelowTheLastSigned_EvenWhenTheClockGoesBack_OrAfterARestart()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "CodeAlta-placement-numbers-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            var global = Path.Combine(root, "config.toml");
+            File.WriteAllText(global, string.Empty);
+            await using var automations = new AutomationService(global, _ => Task.FromResult<IReadOnlyList<ProjectDescriptor>>([]),
+                new AutomationStateStore(Path.Combine(root, "state", "automations.json"), false), new FakeAutomationRunner(), TimeProvider.System, TimeZoneInfo.Utc);
+            var fleetRoot = Path.Combine(root, "fleet");
+            var clock = new SetClock { Now = new DateTimeOffset(2026, 11, 3, 12, 0, 0, TimeSpan.Zero) };
+            DesktopAutomationPlacement Placement() => new(automations, static _ => null, fleetRoot, static () => "desktop",
+                static _ => throw new InvalidOperationException("Nothing is signed here.")) { Time = clock };
+
+            long last;
+            await using (var placement = Placement())
+            {
+                var first = placement.NextNumber(Id);
+                Assert.AreEqual(clock.Now.ToUnixTimeMilliseconds(), first, "a number starts from the time");
+                Assert.AreEqual(first + 1, placement.NextNumber(Id), "the same millisecond still numbers after the last one");
+                clock.Now = clock.Now.AddYears(-1);
+                last = placement.NextNumber(Id);
+                Assert.AreEqual(first + 2, last, "a clock set back numbers after the last one signed");
+                Assert.AreEqual(clock.Now.ToUnixTimeMilliseconds(), placement.NextNumber("another"), "each automation has its own numbers");
+            }
+
+            // Started again with the clock still behind, and no record of a placement: it numbers after the last one signed.
+            await using (var restarted = Placement()) Assert.AreEqual(last + 1, restarted.NextNumber(Id));
+        }
+        finally
+        {
+            try { Directory.Delete(root, recursive: true); }
+            catch (IOException) { }
+            catch (UnauthorizedAccessException) { }
+        }
+    }
+
+    /// <summary>A clock the test sets.</summary>
+    private sealed class SetClock : TimeProvider
+    {
+        public DateTimeOffset Now { get; set; }
+
+        public override DateTimeOffset GetUtcNow() => Now;
     }
 
     private static async Task WaitForAsync(Func<bool> condition, string what, CancellationToken cancellationToken)
@@ -145,7 +204,8 @@ public sealed class DesktopAutomationPlacementTests
             return Task.FromResult(true);
         }
 
-        public IReadOnlyList<FleetAutomationInfo> List(FleetAutomationCaller caller) => [];
+        public IReadOnlyList<FleetAutomationInfo> List(FleetAutomationCaller caller)
+            => [new FleetAutomationInfo(Id, "Nightly on the mini", true, "fingerprint") { NextDue = new DateTimeOffset(2026, 11, 3, 23, 0, 0, TimeSpan.Zero) }];
 
         public Task<FleetAutomationRunInfo> RunAsync(FleetAutomationCaller caller, string id, CancellationToken cancellationToken)
         {

@@ -325,6 +325,50 @@ internal sealed partial class FleetServerService
         return Describe(connection, _servers.DeviceId, IsPaired ?? (static _ => false), IsReachable ?? IsPaired ?? (static _ => false));
     }
 
+    /// <summary>
+    /// The statistics of "My fleet": the sums the server keeps of what the machines of this computer's person published, by machine,
+    /// project, provider, model, day or month, with the names of machines and the projects this computer can name.
+    /// </summary>
+    [NeoRpcMethod("statistics")]
+    public async Task<FleetStatisticsResult> StatisticsAsync(FleetStatisticsRequest request, CancellationToken cancellationToken)
+    {
+        if (Refuse(request?.ExpectedEpoch) is { } refused) return new(refused, null, null);
+        if (request!.LinkId is { } given && !FleetServerLinkStore.IsValidId(given) || request.From is not { Length: 10 } || request.To is not { Length: 10 }
+            || request.TimeZone is { Length: > 64 } || request.GroupBy is { Length: > 3 } || request.GroupBy?.Any(group => !StatisticsGroupBy.All.Contains(group)) == true)
+        {
+            return new("invalid_request", null, null);
+        }
+
+        var connections = _servers!.Connections;
+        var connection = request.LinkId is { } id ? connections.FirstOrDefault(candidate => candidate.Link.Id == id)
+            : connections.FirstOrDefault(static candidate => candidate.Connector?.State == FleetConnectorState.Online) ?? connections.FirstOrDefault();
+        if (connection is null) return new("no_server", null, null);
+        try
+        {
+            var (response, projects) = await _servers.QueryStatisticsAsync(connection.Link.Id,
+                new StatisticsQueryRequest(request.From, request.To, request.TimeZone, request.GroupBy, "mine"), cancellationToken).ConfigureAwait(false);
+            return new("ok", StatisticsView(connection.Link.Id, response, projects, _servers.DeviceId), null);
+        }
+        catch (Exception exception) when (Failure(exception) is { } failure)
+        {
+            return new(failure.Status, null, failure.Message);
+        }
+    }
+
+    private static FleetStatisticsView StatisticsView(string linkId, StatisticsQueryResponse response, IReadOnlyDictionary<string, string> projects, string? thisDevice)
+    {
+        var names = response.Machines.ToDictionary(static machine => machine.Id, static machine => machine.Name, StringComparer.Ordinal);
+        static FleetStatisticsMeasuresView Measures(StatisticsMeasuresDto measures) => new(measures.ActiveMs, measures.Runs, measures.RunsFailed, measures.Requests,
+            measures.InputTokens, measures.OutputTokens, measures.CacheReadTokens, measures.CacheWriteTokens, measures.ReasoningTokens, measures.ToolCalls, measures.ToolFailures,
+            [.. measures.CostMicro.Select(static cost => new FleetStatisticsCostView(cost.Key, cost.Value / 1_000_000m))]);
+        return new FleetStatisticsView(linkId, response.From, response.To, response.TimeZone, [.. response.GroupBy], Measures(response.Totals),
+            [.. response.Groups.Select(group => new FleetStatisticsGroupView(group.Machine, group.Machine is { } machine ? names.GetValueOrDefault(machine) : null,
+                group.Project, group.Project is { Length: > 0 } project ? projects.GetValueOrDefault(project) : null, group.Provider, group.Model, group.Period, Measures(group.Measures)))],
+            [.. response.Machines.Select(machine => new FleetStatisticsMachineView(machine.Id, machine.Name, machine.Kind, machine.Id == thisDevice,
+                machine.LastPublishedAt?.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture), (int)Math.Min(machine.Sessions, int.MaxValue)))],
+            response.Truncated);
+    }
+
     private event Action? ChangedLocally;
 
     /// <summary>Says each time a link, a connection or the directory changed: the page reads them again.</summary>
@@ -822,3 +866,73 @@ internal sealed record FleetTelemetryHeaderEdit(string Name, string? Value);
 /// <param name="Environment">The environment the machines name, or null.</param>
 internal sealed record FleetTelemetryRequest(string ExpectedEpoch, string LinkId, bool Enabled, string? Endpoint, string Protocol, string Route, string[] Signals,
     FleetTelemetryHeaderEdit[] Headers, string? Environment);
+
+/// <summary>A question about the statistics of "My fleet".</summary>
+/// <param name="ExpectedEpoch">The host epoch the page knows.</param>
+/// <param name="LinkId">The link of the server; null for the one online.</param>
+/// <param name="From">The first local day, <c>yyyy-MM-dd</c>.</param>
+/// <param name="To">The last local day, <c>yyyy-MM-dd</c>.</param>
+/// <param name="TimeZone">The time zone of the days; null for UTC.</param>
+/// <param name="GroupBy">The dimensions: <c>machine</c>, <c>project</c>, <c>provider</c>, <c>model</c>, <c>day</c>, <c>month</c>; at most three.</param>
+internal sealed record FleetStatisticsRequest(string ExpectedEpoch, string? LinkId, string From, string To, string? TimeZone, string[]? GroupBy);
+
+/// <summary>An estimated cost.</summary>
+/// <param name="Unit">The unit, such as <c>usd</c>.</param>
+/// <param name="Amount">The amount, in the unit.</param>
+internal sealed record FleetStatisticsCostView(string Unit, decimal Amount);
+
+/// <summary>The sums of a group of the statistics of a fleet.</summary>
+/// <param name="ActiveMs">The active time of the runs.</param>
+/// <param name="Runs">The runs.</param>
+/// <param name="RunsFailed">The runs that failed.</param>
+/// <param name="Requests">The requests to models.</param>
+/// <param name="InputTokens">The input tokens.</param>
+/// <param name="OutputTokens">The output tokens.</param>
+/// <param name="CacheReadTokens">The input tokens read from a cache.</param>
+/// <param name="CacheWriteTokens">The input tokens written to a cache.</param>
+/// <param name="ReasoningTokens">The reasoning tokens.</param>
+/// <param name="ToolCalls">The tool calls.</param>
+/// <param name="ToolFailures">The tool calls that failed.</param>
+/// <param name="Costs">The estimated costs, by unit.</param>
+internal sealed record FleetStatisticsMeasuresView(decimal ActiveMs, decimal Runs, decimal RunsFailed, decimal Requests, decimal InputTokens, decimal OutputTokens,
+    decimal CacheReadTokens, decimal CacheWriteTokens, decimal ReasoningTokens, decimal ToolCalls, decimal ToolFailures, FleetStatisticsCostView[] Costs);
+
+/// <summary>A group of the statistics of a fleet.</summary>
+/// <param name="Machine">The device id of the machine, when grouped by machine.</param>
+/// <param name="MachineName">Its name.</param>
+/// <param name="Project">The key of the project, when grouped by project; empty for the sessions without a project.</param>
+/// <param name="ProjectName">Its name, when this computer has the project; null otherwise.</param>
+/// <param name="Provider">The provider, when grouped by provider.</param>
+/// <param name="Model">The model, when grouped by model.</param>
+/// <param name="Period">The day or the month, when grouped by one.</param>
+/// <param name="Measures">The sums.</param>
+internal sealed record FleetStatisticsGroupView(string? Machine, string? MachineName, string? Project, string? ProjectName, string? Provider, string? Model, string? Period,
+    FleetStatisticsMeasuresView Measures);
+
+/// <summary>A machine of "My fleet" and its last publication of statistics.</summary>
+/// <param name="Id">The device id.</param>
+/// <param name="Name">Its name.</param>
+/// <param name="Kind"><c>node</c> or a desktop's kind.</param>
+/// <param name="IsThisComputer">Whether it is this computer.</param>
+/// <param name="LastPublishedAt">When it last published statistics, ISO 8601; null when never.</param>
+/// <param name="Sessions">The sessions it published statistics of.</param>
+internal sealed record FleetStatisticsMachineView(string Id, string Name, string Kind, bool IsThisComputer, string? LastPublishedAt, int Sessions);
+
+/// <summary>The statistics of "My fleet".</summary>
+/// <param name="LinkId">The link of the server.</param>
+/// <param name="From">The first local day.</param>
+/// <param name="To">The last local day.</param>
+/// <param name="TimeZone">The time zone of the days.</param>
+/// <param name="GroupBy">The dimensions of the groups.</param>
+/// <param name="Totals">The sums of the period.</param>
+/// <param name="Groups">The groups, the largest first by tokens.</param>
+/// <param name="Machines">The machines of the person.</param>
+/// <param name="Truncated">Whether groups were left out.</param>
+internal sealed record FleetStatisticsView(string LinkId, string From, string To, string TimeZone, string[] GroupBy, FleetStatisticsMeasuresView Totals,
+    FleetStatisticsGroupView[] Groups, FleetStatisticsMachineView[] Machines, bool Truncated);
+
+/// <summary>The answer of <c>statistics</c>.</summary>
+/// <param name="Status"><c>ok</c>, <c>no_server</c>, <c>unreachable</c>, <c>statistics.invalid</c>, <c>invalid_request</c>, <c>stale_epoch</c> or <c>unavailable</c>.</param>
+/// <param name="View">The statistics, when <c>ok</c>.</param>
+/// <param name="Message">What went wrong, or null.</param>
+internal sealed record FleetStatisticsResult(string Status, FleetStatisticsView? View, string? Message);

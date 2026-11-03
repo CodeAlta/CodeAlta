@@ -18,7 +18,7 @@ namespace CodeAlta.Server.Storage;
 /// never a write.
 /// </para>
 /// </remarks>
-public interface ICoordinatorStore : IAsyncDisposable
+public interface ICoordinatorStore : IStatisticsFactStore, IAsyncDisposable
 {
     /// <summary>Opens the store and brings its schema to the current version, each migration in a transaction.</summary>
     /// <param name="cancellationToken">Cancels the operation.</param>

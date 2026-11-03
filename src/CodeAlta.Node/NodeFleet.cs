@@ -136,7 +136,10 @@ internal sealed class NodeFleet : IAsyncDisposable
             });
             // An assigned automation runs while the device that assigned it is still paired, with the automate permission.
             if (node.Automations is { } automations)
+            {
                 automations.Devices = deviceId => trusted.List().FirstOrDefault(device => string.Equals(device.DeviceId, deviceId, StringComparison.Ordinal));
+                automations.DeviceId = identity.DeviceId;
+            }
             string? file = null;
             // Without a listener the node API still serves the channels its servers relay.
             if (listen.Enabled)
@@ -296,12 +299,15 @@ internal sealed class NodeServers : IAsyncDisposable
     private readonly DeviceIdentity _identity;
     private readonly Fleet.Server.FleetHostPublicationSource _source;
     private readonly Fleet.Server.FleetServerConnections _connections;
+    private readonly Fleet.Server.FleetHostStatisticsSource _statistics;
 
-    private NodeServers(DeviceIdentity identity, Fleet.Server.FleetHostPublicationSource source, Fleet.Server.FleetServerConnections connections)
+    private NodeServers(DeviceIdentity identity, Fleet.Server.FleetHostPublicationSource source, Fleet.Server.FleetServerConnections connections,
+        Fleet.Server.FleetHostStatisticsSource statistics)
     {
         _identity = identity;
         _source = source;
         _connections = connections;
+        _statistics = statistics;
     }
 
     /// <summary>Gets the connections to the servers.</summary>
@@ -357,6 +363,8 @@ internal sealed class NodeServers : IAsyncDisposable
         var catalog = node.Host.CatalogOptions;
         var identity = DeviceIdentity.LoadOrCreate(catalog);
         var source = new Fleet.Server.FleetHostPublicationSource(node.Host, name, version, ["sessions", "moves"]);
+        // The statistics the node counts (its Statistics plugin), published with the facts of its sessions.
+        var statistics = Fleet.Server.FleetHostStatisticsSource.ForHost(node.Host);
         var connections = new Fleet.Server.FleetServerConnections(new Fleet.Server.FleetServerConnectionsOptions
         {
             FleetRoot = catalog.FleetRoot,
@@ -364,14 +372,28 @@ internal sealed class NodeServers : IAsyncDisposable
             Client = new CodeAlta.Fleet.Protocol.FleetClientInfo("node", version, FleetChannelProtocol.OperatingSystemName),
             Spaces = node.Host.SpaceCatalog,
             Source = source,
+            Statistics = statistics,
             Configure = configure,
             AcceptRelay = service is null ? null : (connector, _, stream, token) => ServeRelayAsync(service, connector, stream, token),
             TelemetrySettings = telemetry is null ? null : telemetry.AcceptAsync,
             Metrics = telemetry?.Metrics,
             Updates = updates,
+            // The automations a server gives this node, verified against its device list and opened with the key of this node.
+            Automations = node.Automations is { } given ? new NodeServerAutomations(given, identity) : null,
         });
+        if (node.Automations is { } automations)
+        {
+            automations.DeviceId ??= identity.DeviceId;
+            Fleet.Server.FleetConnector? ConnectorOf(string linkId) => connections.Find(linkId)?.Connector;
+            automations.ServerDevices = linkId => ConnectorOf(linkId)?.Devices.Current;
+            automations.ServerClaim = (linkId, claim, token) => ConnectorOf(linkId) is { } connector
+                ? connector.ClaimAutomationAsync(claim, token)
+                : Task.FromResult<CodeAlta.Fleet.Protocol.FleetAutomationClaimResult?>(null);
+            automations.ServerReport = (linkId, facts, token) => ConnectorOf(linkId) is { } connector ? connector.ReportAutomationRunsAsync(facts, token) : Task.FromResult(false);
+        }
+
         connections.Start();
-        return new NodeServers(identity, source, connections);
+        return new NodeServers(identity, source, connections, statistics);
     }
 
     // The device list is read again for each relay, so that a device removed from it is refused at once; when the server
@@ -402,6 +424,7 @@ internal sealed class NodeServers : IAsyncDisposable
     {
         await _connections.DisposeAsync().ConfigureAwait(false);
         await _source.DisposeAsync().ConfigureAwait(false);
+        _statistics.Dispose();
         _identity.Dispose();
     }
 }

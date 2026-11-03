@@ -104,7 +104,7 @@ Each node signs in by itself; the desktop drives the sign-ins so that nobody has
 | Need | How the node gets it |
 | --- | --- |
 | Providers CodeAlta signs in (Codex subscription, Copilot, xAI) | The device code flow runs on the node; the desktop shows the code and the link; tokens stay in the node's `~/.alta/auth/` |
-| Providers with an API key | Typed by the person in the node's settings from the desktop, sent over the end-to-end channel, kept in the node's protected store (DPAPI, Keychain, libsecret) or named as an environment variable of the service |
+| Providers with an API key, and any other token a run needs | A secret of the node's store ([secrets](secrets.md)): typed by the person from the desktop and sent over the end-to-end channel, or a secret of a space, a team or the organization sealed to the node; kept in its protected store (DPAPI, Keychain, libsecret), or named as an environment variable of the service |
 | Claude Code, Codex CLI, ACP agents | Their own login on that machine, done in a setup terminal of the node opened from the desktop (owner only, audited), or over SSH |
 | Git over SSH | A key made on the node; its public key added to the Git host (`gh ssh-key add`, or copied by the person); the space identity names it. Organizations can sign short-lived SSH certificates instead (milestone 5) |
 | GitHub | `gh auth login` with a device code, per space profile as today (`gh auth setup-git` for HTTPS); with a server, the CodeAlta GitHub App's device flow gives the node expiring user tokens (8 hours, refreshed for up to 6 months) |
@@ -134,8 +134,8 @@ labels, its local policy).
   - Before a run starts, the node reads its policy (`fleet/automation-policy.json`: automations on or off, credentials
     `any` or `account` only) and derives the credential kind from how the provider starts; `unknown` is refused, and a
     refused run is recorded with its reason, without a session.
-- **Statistics are counted on nodes.** The statistics engine runs headless too (today only in the desktop); the node
-  publishes its facts as versioned rows ([statistics](statistics.md)).
+- **Statistics are counted on nodes.** The statistics engine runs headless too, from the node's first day; the node
+  publishes its facts as a versioned set per session ([statistics](statistics.md)).
 - **The node's host can ask.** Unlike today's headless runs of `altacli`, which grant everything (`FullTrust`), a node
   routes permission requests and questions to people, bound to their exact attempts, and refuses what nobody may
   approve.

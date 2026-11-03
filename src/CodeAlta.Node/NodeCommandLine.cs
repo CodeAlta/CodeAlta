@@ -75,6 +75,7 @@ internal sealed class NodeRunOptions
 /// <param name="Projects">Lists, adds, clones and removes the projects of the node.</param>
 /// <param name="Join">Enrolls the node in a CodeAlta Server and waits for its approval.</param>
 /// <param name="Update">Downloads a version of the node and switches to it when idle.</param>
+/// <param name="Automations">Lists the automations given to the node and their runs, and shows or sets its policy.</param>
 internal sealed record NodeCommandHandlers(
     Func<NodeRunOptions, ValueTask<int>> Run,
     Func<NodeProfileOptions, ValueTask<int>> Status,
@@ -92,14 +93,15 @@ internal sealed record NodeCommandHandlers(
     Func<NodeProfileOptions, ValueTask<int>> Moves,
     Func<NodeProjectOptions, ValueTask<int>> Projects,
     Func<NodeJoinOptions, ValueTask<int>> Join,
-    Func<NodeUpdateOptions, ValueTask<int>> Update)
+    Func<NodeUpdateOptions, ValueTask<int>> Update,
+    Func<NodeAutomationCommandOptions, ValueTask<int>> Automations)
 {
     /// <summary>Handlers that do nothing, for a tree that only parses.</summary>
     public static NodeCommandHandlers Placeholders { get; } = new(static _ => ValueTask.FromResult(0), static _ => ValueTask.FromResult(0),
         static _ => ValueTask.FromResult(0), static _ => ValueTask.FromResult(0), static _ => ValueTask.FromResult(0), static _ => ValueTask.FromResult(0),
         static _ => ValueTask.FromResult(0), static _ => ValueTask.FromResult(0), static _ => ValueTask.FromResult(0), static _ => ValueTask.FromResult(0),
         static _ => ValueTask.FromResult(0), static _ => ValueTask.FromResult(0), static _ => ValueTask.FromResult(0), static _ => ValueTask.FromResult(0),
-        static _ => ValueTask.FromResult(0), static _ => ValueTask.FromResult(0), static _ => ValueTask.FromResult(0));
+        static _ => ValueTask.FromResult(0), static _ => ValueTask.FromResult(0), static _ => ValueTask.FromResult(0), static _ => ValueTask.FromResult(0));
 }
 
 /// <summary>The command tree of <c>altanode</c> (<c>doc/fleet/node.md</c>).</summary>
@@ -391,6 +393,32 @@ internal static class NodeCommandLine
             return handlers.Projects(projects);
         });
 
+        var automations = new NodeAutomationCommandOptions();
+        var automationsCommand = new Command("automations", "List the automations given to the node, their runs, and its policy")
+        {
+            new CommandUsage("Usage: {NAME} [list] [options]"),
+            new CommandUsage("       {NAME} runs [<automation>] [options]"),
+            new CommandUsage("       {NAME} policy [on|off|credentials any|account] [options]"),
+            _,
+            "The automations other devices gave this machine (Runs on, in CodeAlta",
+            "Desktop), directly or through a CodeAlta Server.",
+            "  list      what was given, by which device, which way, which version",
+            "  runs      their latest runs, of all or of one automation",
+            "  policy    whether this machine runs them (on, off), and with which",
+            "            credentials: any it has, or accounts only (API keys and",
+            "            local models, never a personal plan)",
+            "A node that runs reads the policy again before each run.",
+            _,
+            "Options:",
+        };
+        AddProfile(automationsCommand, automations.Profile);
+        automationsCommand.Add("<>", "The command and its arguments");
+        automationsCommand.Add((_, words) =>
+        {
+            automations.Words.AddRange(words);
+            return handlers.Automations(automations);
+        });
+
         var join = new NodeJoinOptions();
         var joinCommand = new Command("join", "Enroll the node in a CodeAlta Server and wait for its approval")
         {
@@ -487,6 +515,7 @@ internal static class NodeCommandLine
             revokeCommand,
             permissionsCommand,
             projectsCommand,
+            automationsCommand,
             joinCommand,
             machinesCommand,
             connectCommand,

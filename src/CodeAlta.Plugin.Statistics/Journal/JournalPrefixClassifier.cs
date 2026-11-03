@@ -39,6 +39,11 @@ internal static class JournalPrefixClassifier
                 return JournalRecordKind.Header;
             }
 
+            if (eventType.SequenceEqual("codealta.sessionMoved"u8))
+            {
+                return JournalRecordKind.Moved;
+            }
+
             return eventType.SequenceEqual("codealta.sessionState"u8) || eventType.SequenceEqual("codealta.threadState"u8)
                 ? JournalRecordKind.State
                 : JournalRecordKind.Touch;

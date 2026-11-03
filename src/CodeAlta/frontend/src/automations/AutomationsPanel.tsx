@@ -138,6 +138,8 @@ function RunList({ runs, sessions, now, named, onOpen }: {
   return <ul className="automation-runs">
     {runs.map(run => {
       const session = run.sessionId ? sessions.get(run.sessionId) : undefined;
+      // The session of a run on another machine opens from the run: the window reads that machine's sessions again when it is not listed yet.
+      const remote = !session && run.sessionId && run.machineId ? run.sessionId : null;
       const when = sessionTime(run.startedAt, locale, now);
       // Among the runs of all, a run says whose it is; among those of one automation, how it ended.
       const status = t(runStatusLabel(run.status));
@@ -148,10 +150,11 @@ function RunList({ runs, sessions, now, named, onOpen }: {
           <span>{[named ? status : null, t(runTriggerLabel(run.trigger)), run.detail, run.message].filter(Boolean).join(" · ")}</span>
         </span>
         <time dateTime={when.dateTime} title={when.title}>{when.label}</time>
-        {session && <AppIcon name="chevronRight" size={14} />}
+        {(session || remote) && <AppIcon name="chevronRight" size={14} />}
       </>;
       return <li key={run.id} data-tone={runTone(run.status)}>
         {session ? <button type="button" className="automation-run" title={t("Open the session")} onClick={() => onOpen(session.id, session.projectId)}>{body}</button>
+          : remote ? <button type="button" className="automation-run" title={t("Open the session")} onClick={() => onOpen(remote, run.projectId)}>{body}</button>
           : <div className="automation-run">{body}</div>}
       </li>;
     })}

@@ -59,7 +59,7 @@ public static class FleetServerAddress
 /// this device, and approves and revokes devices with device-list entries this controller device signs.
 /// </summary>
 /// <remarks>The server signs nothing: an approval is an entry of the device list signed here, after the last one the server holds.</remarks>
-public sealed class FleetServerClient : IDisposable
+public sealed partial class FleetServerClient : IDisposable
 {
     private static readonly MediaTypeHeaderValue Json = new("application/json");
 
@@ -319,6 +319,23 @@ public sealed class FleetServerClient : IDisposable
     /// <exception cref="HttpRequestException">The server does not answer.</exception>
     public async Task<IReadOnlyList<MachineDto>> ListMachinesAsync(CancellationToken cancellationToken = default)
         => (await SendAsync(HttpMethod.Get, "api/v1/machines", null, ServerApiJsonContext.Default.ListResponseMachineDto, cancellationToken).ConfigureAwait(false)).Items;
+
+    /// <summary>
+    /// Sums the statistics facts the machines of this device's person published (<c>POST /api/v1/statistics/query</c>): time, runs,
+    /// tokens, costs and tool calls, by machine, project key, provider, model, day or month.
+    /// </summary>
+    /// <param name="request">The query.</param>
+    /// <param name="cancellationToken">Cancels the call.</param>
+    /// <returns>The sums.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="request"/> is null.</exception>
+    /// <exception cref="FleetServerException">The server refused the query (<c>statistics.invalid</c>).</exception>
+    /// <exception cref="HttpRequestException">The server does not answer.</exception>
+    public Task<StatisticsQueryResponse> QueryStatisticsAsync(StatisticsQueryRequest request, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        return SendAsync(HttpMethod.Post, FleetStatisticsMethods.QueryPath.TrimStart('/'), Body(request, FleetStatisticsJsonContext.Default.StatisticsQueryRequest),
+            FleetStatisticsJsonContext.Default.StatisticsQueryResponse, cancellationToken);
+    }
 
     /// <summary>Lists the published sessions: their facts and their sealed metadata.</summary>
     /// <param name="cancellationToken">Cancels the call.</param>

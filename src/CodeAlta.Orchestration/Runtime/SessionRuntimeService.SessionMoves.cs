@@ -19,6 +19,9 @@ public sealed record SessionBundleExportRequest(string MoveId, string BundleFold
     /// <summary>Gets the ownership epoch of the session on this machine.</summary>
     public long Epoch { get; init; }
 
+    /// <summary>Gets the device id of this machine, which the bundle and the move record carry besides its name; null when it has none.</summary>
+    public string? FromDeviceId { get; init; }
+
     /// <summary>Gets the largest git payload the bundle may carry.</summary>
     public long MaximumPayloadBytes { get; init; } = GitSessionPayload.DefaultMaximumBytes;
 }
@@ -204,6 +207,7 @@ public sealed partial class SessionRuntimeService
             Title = session.Title,
             SpaceId = session.SpaceId,
             FromMachine = request.FromMachine,
+            FromDeviceId = request.FromDeviceId,
             Epoch = request.Epoch,
             CreatedAt = DateTimeOffset.UtcNow,
             Journal = journal,
@@ -335,12 +339,29 @@ public sealed partial class SessionRuntimeService
     /// <exception cref="IOException">A file cannot be written.</exception>
     /// <exception cref="OperationCanceledException">The token was canceled before the journal was written.</exception>
     public Task<IReadOnlyList<string>> InstallMovedSessionAsync(PreparedSessionMove prepared, string? toMachine, long epoch, CancellationToken cancellationToken)
+        => InstallMovedSessionAsync(prepared, toMachine, null, epoch, cancellationToken);
+
+    /// <summary>
+    /// Installs a prepared session once its move is committed, like
+    /// <see cref="InstallMovedSessionAsync(PreparedSessionMove, string?, long, CancellationToken)"/>, and records the device id of this
+    /// machine in the move record beside its name.
+    /// </summary>
+    /// <param name="prepared">What was prepared.</param>
+    /// <param name="toMachine">The name of this machine.</param>
+    /// <param name="toDeviceId">The device id of this machine; null when it has none.</param>
+    /// <param name="epoch">The ownership epoch the move committed.</param>
+    /// <param name="cancellationToken">Stops before the journal is written.</param>
+    /// <returns>What went wrong without stopping the install, in words.</returns>
+    /// <exception cref="InvalidOperationException">The session cannot be installed.</exception>
+    /// <exception cref="IOException">A file cannot be written.</exception>
+    /// <exception cref="OperationCanceledException">The token was canceled before the journal was written.</exception>
+    public Task<IReadOnlyList<string>> InstallMovedSessionAsync(PreparedSessionMove prepared, string? toMachine, string? toDeviceId, long epoch, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(prepared);
-        return AdmitAsync(() => InstallMovedSessionBodyAsync(prepared, toMachine, epoch, cancellationToken), cancellationToken);
+        return AdmitAsync(() => InstallMovedSessionBodyAsync(prepared, toMachine, toDeviceId, epoch, cancellationToken), cancellationToken);
     }
 
-    private async Task<IReadOnlyList<string>> InstallMovedSessionBodyAsync(PreparedSessionMove prepared, string? toMachine, long epoch, CancellationToken cancellationToken)
+    private async Task<IReadOnlyList<string>> InstallMovedSessionBodyAsync(PreparedSessionMove prepared, string? toMachine, string? toDeviceId, long epoch, CancellationToken cancellationToken)
     {
         var manifest = prepared.Manifest;
         var sessionId = manifest.SessionId;
@@ -404,6 +425,8 @@ public sealed partial class SessionRuntimeService
                 MoveId = manifest.MoveId,
                 From = manifest.FromMachine,
                 To = toMachine,
+                FromDeviceId = manifest.FromDeviceId,
+                ToDeviceId = toDeviceId,
                 OldWorkingFolder = manifest.WorkingFolder,
                 NewWorkingFolder = prepared.WorkFolder,
                 Epoch = epoch,

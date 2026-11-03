@@ -75,7 +75,7 @@ flowchart LR
 | **Automations** | Automations by scope, the calendar of next runs across machines, runs and their states, a run's page with its trigger, graph, approvals and sessions ([orchestration](orchestration.md#in-the-console)) |
 | **Statistics** | Today's Statistics canvas with a scope: this machine, my fleet, a team, the organization, an automation, a machine ([statistics](statistics.md#in-the-console)) |
 | **People and access** | People, teams, roles, grants, service identities, transfers, devices, enrollment tokens, who can do what |
-| **Providers and secrets** | Organization providers, gateways, their keys, which machines may use them, rotation |
+| **Providers and secrets** | Organization providers and gateways; the secrets, variables and environments of each scope, which machines hold them, approvals that wait, rotation ([secrets](secrets.md)) |
 | **Policies and budgets** | The signed policy bundle, its rules and versions, budgets and their consumption |
 | **Audit** | The audit log, filtered and exported |
 | **Server** | Health, version, connections, storage, backups and restore, updates, sign-in methods, SSO |

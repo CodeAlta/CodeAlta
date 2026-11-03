@@ -32,6 +32,7 @@ public sealed class FleetHostPublicationSource : IFleetPublicationSource, IAsync
     private readonly string _version;
     private readonly IReadOnlyList<string> _capabilities;
     private readonly SessionMoveTransactionStore _moves;
+    private readonly RepositoryLocationCache _repositories = new();
     private readonly CancellationTokenSource _stop = new();
     private readonly Task _watch;
 
@@ -107,10 +108,12 @@ public sealed class FleetHostPublicationSource : IFleetPublicationSource, IAsync
             var isPrivate = session.ViewState?.Options?.Private == true;
             // A Private session is never published: its counts are not read.
             var counts = isPrivate ? null : await CountsAsync(store, session, state, now, cancellationToken).ConfigureAwait(false);
-            var (space, title) = Describe(session, snapshot, spaces);
+            var (space, title, project) = Describe(session, snapshot, spaces);
+            // What recognizes its project on the person's machines; its statistics carry only its blind index.
+            var projectIdentity = isPrivate || project is null ? null : await FleetProjectKeys.IdentityAsync(project, _repositories, cancellationToken).ConfigureAwait(false);
             result.Add(new FleetLocalSession(session.SessionId, space, isPrivate,
                 epochs.TryGetValue(session.SessionId, out var epoch) ? epoch : 0, state, session.CreatedAt, session.UpdatedAt, Bounded(providerType),
-                Bounded(session.ViewState?.ModelId ?? session.ModelId), counts, isPrivate ? null : title));
+                Bounded(session.ViewState?.ModelId ?? session.ModelId), counts, isPrivate ? null : title, projectIdentity));
         }
 
         // The sessions gone from the instance are forgotten with their counts.
@@ -172,7 +175,7 @@ public sealed class FleetHostPublicationSource : IFleetPublicationSource, IAsync
 
     // The space a session is in, as the desktop lists it (the one its journal records, else the one of its project), and
     // its title as the lists show it; null for a session listed by its id. The title leaves the machine only sealed.
-    private static (string Space, string? Title) Describe(AgentSessionMetadata session, OwnedWorkspaceSnapshot snapshot, IReadOnlyList<SpaceDescriptor> spaces)
+    private static (string Space, string? Title, ProjectDescriptor? Project) Describe(AgentSessionMetadata session, OwnedWorkspaceSnapshot snapshot, IReadOnlyList<SpaceDescriptor> spaces)
     {
         var recorded = session.SpaceId;
         ProjectDescriptor? project = null;
@@ -187,7 +190,7 @@ public sealed class FleetHostPublicationSource : IFleetPublicationSource, IAsync
 
         var title = SessionRuntimeService.ListedTitle(session, kind, project).Trim();
         return (SpaceCatalog.ResolveSessionSpace(recorded, project, spaces),
-            title.Length == 0 || title == session.SessionId ? null : title.Length > MaxTitleLength ? title[..MaxTitleLength] : title);
+            title.Length == 0 || title == session.SessionId ? null : title.Length > MaxTitleLength ? title[..MaxTitleLength] : title, project);
     }
 
     // The epoch a move gave each session this machine received; 0 for the others.

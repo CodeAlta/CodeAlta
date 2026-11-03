@@ -39,6 +39,9 @@ public sealed class FleetServerConnectionsOptions
     /// <summary>Gets what there is to publish; null publishes nothing.</summary>
     public IFleetPublicationSource? Source { get; init; }
 
+    /// <summary>Gets the statistics facts of the instance, published from the day each link was made; null publishes none.</summary>
+    public IFleetStatisticsSource? Statistics { get; init; }
+
     /// <summary>Gets whether the connectors follow the directory of their organization (a desktop does).</summary>
     public bool WatchDirectory { get; init; }
 
@@ -65,6 +68,36 @@ public sealed class FleetServerConnectionsOptions
 
     /// <summary>Gets what takes the updates the servers ask of this node and reports where it stands; null ignores them (a desktop does).</summary>
     public FleetUpdateAgent? Updates { get; init; }
+
+    /// <summary>Gets what takes the automations the servers give this node, and reports their runs; null ignores them (a desktop does).</summary>
+    public IFleetServerAutomations? Automations { get; init; }
+}
+
+/// <summary>What a node does with the automations its servers give it.</summary>
+public interface IFleetServerAutomations
+{
+    /// <summary>Takes the versions a server delivered: verifies each, keeps what holds, and answers the server.</summary>
+    /// <param name="connector">The connector of the server.</param>
+    /// <param name="link">The link of the server.</param>
+    /// <param name="delivery">The signed versions.</param>
+    /// <param name="cancellationToken">Cancels the work.</param>
+    /// <returns>A task that completes once they are taken or refused.</returns>
+    Task AcceptAsync(FleetConnector connector, FleetServerLink link, FleetAutomationDelivery delivery, CancellationToken cancellationToken);
+
+    /// <summary>Runs an automation a person asked by hand through a server, once the signed request verifies.</summary>
+    /// <param name="connector">The connector of the server.</param>
+    /// <param name="link">The link of the server.</param>
+    /// <param name="request">The signed run request.</param>
+    /// <param name="cancellationToken">Cancels the work.</param>
+    /// <returns>A task that completes once the run started or was refused.</returns>
+    Task RunAsync(FleetConnector connector, FleetServerLink link, FleetSignedAutomationRunRequest request, CancellationToken cancellationToken);
+
+    /// <summary>Is told that the connection of a server is online again, to report what the server may have missed.</summary>
+    /// <param name="connector">The connector of the server.</param>
+    /// <param name="link">The link of the server.</param>
+    /// <param name="cancellationToken">Cancels the work.</param>
+    /// <returns>A task that completes once it reported.</returns>
+    Task OnlineAsync(FleetConnector connector, FleetServerLink link, CancellationToken cancellationToken);
 }
 
 /// <summary>
@@ -256,6 +289,9 @@ public sealed class FleetServerConnections : IAsyncDisposable
             OutboxPath = Path.Combine(_store.LinkFolder(link.Id), "outbox.json"),
             Client = _options.Client,
             Source = source,
+            // From the day the link was made: publishing the history before is the person's choice, to come.
+            Statistics = source is null ? null : _options.Statistics,
+            StatisticsFromQuarter = FleetHostStatisticsSource.FirstQuarter(link.CreatedAt),
             PublishesSpace = linked.Contains,
             WatchDirectory = _options.WatchDirectory,
             Devices = devices,
@@ -268,6 +304,9 @@ public sealed class FleetServerConnections : IAsyncDisposable
             UpdateCancel = _options.Updates is { } cancels ? (cancel, token) => cancels.CancelAsync(link, cancel, token) : null,
             UpdatePolicy = _options.Updates is { } policies ? (policy, token) => policies.AcceptPolicyAsync(created!, link, policy, token) : null,
             UpdateReport = _options.Updates is { } reports ? () => reports.Report(link.Id) : null,
+            AutomationsAssigned = _options.Automations is { } automations ? (delivery, token) => automations.AcceptAsync(created!, link, delivery, token) : null,
+            AutomationsOnline = _options.Automations is { } online ? token => online.OnlineAsync(created!, link, token) : null,
+            AutomationsRun = _options.Automations is { } runs ? (request, token) => runs.RunAsync(created!, link, request, token) : null,
         };
         if (_options.Configure is { } configure) options = configure(options);
         var connector = new FleetConnector(options);

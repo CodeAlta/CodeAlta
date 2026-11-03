@@ -19,7 +19,7 @@ public sealed class ControlService
     public static readonly FleetProtocolRange Protocol = new(1, 1);
 
     /// <summary>The features the server announces in its welcome.</summary>
-    public static readonly IReadOnlyList<string> Features = ["presence", "inventory", "facts", "facts.withdraw", "directory", "relay", "telemetry", "update"];
+    public static readonly IReadOnlyList<string> Features = ["presence", "inventory", "facts", "facts.withdraw", "directory", "relay", "telemetry", "update", FleetAutomationMethods.Feature];
 
     private const int MaxStateLength = 32;
 
@@ -87,12 +87,18 @@ public sealed class ControlService
     /// <summary>Gets the coordinated update of the fleet, which takes the reports of nodes and asks a node that connects; null for none.</summary>
     internal UpdateCampaignService? Updates { get; init; }
 
+    /// <summary>Gets the automations of the organization, delivered to a machine that connects and claimed and reported by it; null for none.</summary>
+    internal FleetAutomationService? Automations { get; init; }
+
     /// <summary>
     /// Gets what ends every control connection when the server stops (the host's <c>ApplicationStopping</c>): each device
     /// is told at once that the server stops and reconnects, rather than cut when the host's shutdown timeout aborts the
     /// requests (a switch of versions, a service manager's stop); none by default.
     /// </summary>
     public CancellationToken Stopping { get; init; }
+
+    /// <summary>Gets what keeps the statistics sets machines publish; null keeps none, and the welcome does not announce them.</summary>
+    internal StatisticsService? Statistics { get; init; }
 
     /// <summary>Serves a WebSocket request on <see cref="FleetServerMethods.ControlPath"/>.</summary>
     /// <param name="context">The request.</param>
@@ -138,7 +144,7 @@ public sealed class ControlService
             {
                 Protocol = Protocol,
                 Policy = _policy,
-                Features = Features,
+                Features = Statistics is null ? Features : [.. Features, FleetStatisticsMethods.Feature],
                 TimeProvider = _time,
                 ResolveCursorsAsync = ResolveCursorsAsync,
             }, verifier, cancellationToken).ConfigureAwait(false);
@@ -174,6 +180,8 @@ public sealed class ControlService
         if (TelemetrySettings is { } telemetry) _ = telemetry.SendCurrentAsync(session);
         // A node in the middle of a campaign is asked again, so that it reports where it stands.
         if (Updates is { } updates) _ = updates.SendCurrentAsync(session);
+        // The automation versions the machine has not taken yet, as their controller devices signed them.
+        if (Automations is { } automations) _ = automations.SendPendingAsync(session);
         try
         {
             using var registration = cancellationToken.Register(static state =>
@@ -240,6 +248,16 @@ public sealed class ControlService
             return JsonSerializer.SerializeToElement(result, FleetServerJsonContext.Default.FleetFactsWithdrawResult);
         }));
 
+        if (Statistics is { } statistics)
+        {
+            On(FleetStatisticsMethods.Publish, Handler(FleetStatisticsJsonContext.Default.FleetStatisticsPublish, async (publication, token) =>
+                JsonSerializer.SerializeToElement(await statistics.PublishAsync(session.Device, publication, token).ConfigureAwait(false),
+                    FleetStatisticsJsonContext.Default.FleetStatisticsPublishResult)));
+            On(FleetStatisticsMethods.Withdraw, Handler(FleetStatisticsJsonContext.Default.FleetStatisticsWithdraw, async (withdrawal, token) =>
+                JsonSerializer.SerializeToElement(await statistics.WithdrawAsync(session.Device, withdrawal, token).ConfigureAwait(false),
+                    FleetStatisticsJsonContext.Default.FleetStatisticsWithdrawResult)));
+        }
+
         On(FleetServerMethods.DirectoryWatch, async (_, token) =>
         {
             // Watch first, then read: a change between the two comes as an event, and versions make it idempotent.
@@ -254,6 +272,8 @@ public sealed class ControlService
             return JsonSerializer.SerializeToElement(new FleetDirectorySnapshot(machines, sessions, presence), FleetServerJsonContext.Default.FleetDirectorySnapshot);
         });
 
+        if (Automations is { } automations) RegisterAutomations(session, automations, On);
+
         if (_relays is not { } relays) return;
         On(FleetServerMethods.RelayOpen, Handler(FleetServerJsonContext.Default.FleetRelayOpen, async (open, token) =>
         {
@@ -267,6 +287,28 @@ public sealed class ControlService
         On(FleetServerMethods.RelayClose, Handler(FleetServerJsonContext.Default.FleetRelayClose, async (close, _) =>
         {
             await relays.CloseAsync(session.Device, close).ConfigureAwait(false);
+            return null;
+        }));
+    }
+
+    // A machine answers the versions it was given, claims its due times and reports its runs.
+    private static void RegisterAutomations(ControlSession session, FleetAutomationService automations, Action<string, FleetRequestHandler> on)
+    {
+        on(FleetAutomationMethods.Ack, Handler(FleetAutomationServerJsonContext.Default.FleetAutomationAcks, async (acks, token) =>
+        {
+            await automations.AcknowledgeAsync(session.Device, acks, token).ConfigureAwait(false);
+            return null;
+        }));
+
+        on(FleetAutomationMethods.Claim, Handler(FleetAutomationServerJsonContext.Default.FleetAutomationClaimRequest, async (claim, token) =>
+        {
+            var result = await automations.ClaimAsync(session.Device, claim, token).ConfigureAwait(false);
+            return JsonSerializer.SerializeToElement(result, FleetAutomationServerJsonContext.Default.FleetAutomationClaimResult);
+        }));
+
+        on(FleetAutomationMethods.Runs, Handler(FleetAutomationServerJsonContext.Default.FleetAutomationRunFacts, async (facts, token) =>
+        {
+            await automations.RecordRunsAsync(session.Device, facts, token).ConfigureAwait(false);
             return null;
         }));
     }

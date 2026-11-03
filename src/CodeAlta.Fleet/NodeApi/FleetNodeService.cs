@@ -115,7 +115,7 @@ public sealed partial class FleetNodeService : IAsyncDisposable
         _trusted = options.TrustedDevices;
         Pairing = new FleetPairingCoordinator(options.Identity, options.TrustedDevices, options.TimeProvider);
         _certificate = options.Identity.CreateTlsCertificate();
-        var moves = new SessionMoveService(options.Host, options.Name);
+        var moves = new SessionMoveService(options.Host, options.Name) { DeviceIdSource = () => options.Identity.DeviceId };
         MoveReceiver = new Moves.FleetMoveReceiver(options.Host, moves, options.CloneRoot);
         MoveSender = new Moves.FleetMoveSender(options.Host, moves);
         _projectEditor = new FleetProjectEditor(options.Host.SpaceCatalog, options.CloneRoot);

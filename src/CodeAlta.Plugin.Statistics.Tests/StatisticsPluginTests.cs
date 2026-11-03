@@ -737,6 +737,53 @@ public sealed class StatisticsPluginTests
         Assert.AreEqual(0, journals.Opens);
     }
 
+    [TestMethod]
+    public async Task InAHostWithoutAWindow_ThePluginMadeForIt_CountsTheSessionsOfToday_WithoutAsking()
+    {
+        using var temp = new TempFolder();
+        await using var application = new ApplicationDatabase(new ApplicationDatabaseOptions { DatabasePath = Path.Combine(temp.Path, "data", "alta.sqlite3") });
+        var journals = new FakeJournalCatalog();
+        var now = DateTimeOffset.UtcNow;
+        // A session of today and one of last month: a node counts from its first start, as "from today" does.
+        var today = EngineHarness.Session("today", now.AddMinutes(-30), 2);
+        journals.Set(today, EngineHarness.EndOf(today, now.AddMinutes(-30)));
+        var old = EngineHarness.Session("old", now.AddDays(-40), 2);
+        journals.Set(old, EngineHarness.EndOf(old, now.AddDays(-40)));
+        StatisticsPlugin? created = null;
+        var runtime = new PluginRuntimeManager();
+        await runtime.StartAsync(new PluginRuntimeManagerOptions
+        {
+            GlobalRoot = temp.Path,
+            StateRoot = temp.Path,
+            ApplicationDatabase = application,
+            Frontend = PluginFrontends.Cli,
+            BuiltIns =
+            [
+                new BuiltInPluginDefinition
+                {
+                    Id = "statistics", DisplayName = "Statistics", PluginType = typeof(StatisticsPlugin), Frontends = PluginFrontends.All | PluginFrontends.Cli,
+                    Factory = () => created = new StatisticsPlugin(journals, HistoryChoice.FromToday, TimeSpan.Zero, TimeSpan.Zero),
+                },
+            ],
+        });
+        try
+        {
+            Assert.IsNotNull(created);
+            var service = created.Statistics;
+            Assert.IsNotNull(service, "The engine runs in a host without a window when the plugin is made for it.");
+            await WaitAsync(() => service.Status.State == HistoryState.Done);
+            Assert.AreEqual("from-today", service.Status.Choice, "Nobody is asked: the choice is made and kept.");
+            var summary = await service.Queries.SummaryAsync(new StatisticsRequest { Period = "2d" });
+            Assert.AreEqual(2, summary.Tiles.Single(static tile => tile.Id == "runs").Value, "The session of today is counted.");
+            var month = await service.Queries.SummaryAsync(new StatisticsRequest { Period = "90d" });
+            Assert.AreEqual(2, month.Tiles.Single(static tile => tile.Id == "runs").Value, "The session of last month is not read.");
+        }
+        finally
+        {
+            await runtime.DisposeAsync();
+        }
+    }
+
     private static Task WaitAsync(Func<bool> condition) => WaitAsync(() => Task.FromResult(condition()));
 
     private static async Task WaitAsync(Func<Task<bool>> condition)

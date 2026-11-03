@@ -22,7 +22,7 @@ The built-in Statistics plugin shows how you use CodeAlta. It adds a statistics 
 - In CodeAlta Desktop, the Statistics page with the numbers of every session, kept up to date as sessions run.
 - The `alta statistics` commands, which agents use to read the numbers and estimate the size of a text.
 
-CodeAlta TUI has the cards and the commands, not the page.
+CodeAlta TUI has the cards and the commands, not the page. CodeAlta Node keeps the numbers of its sessions too; with a CodeAlta Server, the page shows the numbers of all your machines under **My fleet** ([Fleet](../fleet.md#see-the-statistics-of-all-your-machines)).
 
 ## Open the statistics
 

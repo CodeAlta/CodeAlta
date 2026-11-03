@@ -49,6 +49,7 @@ itself are in [security and privacy](security-and-privacy.md).
 | Workflow script | A project (in its repository) or a library owner (person, team, organization) | Project or library | Versioned; a version is approved before unattended runs use it |
 | Run | The owner of its automation (a run started by hand stays the automation's, with the person as initiator); a session's ad hoc run is its session's | Automation or session | Records its initiator and its trigger |
 | Organization provider and its secret | A team or the organization | Organization | API keys or gateway keys for unattended work ([orchestration](orchestration.md#credentials-of-unattended-runs)) |
+| Secret, variable, environment | Its scope (a person, a space, a project, a team, the organization) | The scope's | Named values runs ask for; environments with approvals ([secrets](secrets.md)) |
 | Budget | The owner of the scope it limits | Person, machine, project, team, organization | |
 | Policy bundle | The organization | Organization | Signed by the policy key ([security](security-and-privacy.md#policies-and-the-kill-switch)) |
 | Statistics facts | The owner of the session or run they measure | Wherever the session was | Visibility by role and policy ([statistics](statistics.md#who-sees-what)) |

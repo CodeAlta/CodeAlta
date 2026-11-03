@@ -167,20 +167,23 @@ The **+** of the row of a machine in the Explorer opens the same prompt, already
 
 ## Run your automations on it
 
-An automation of yours can run on a paired machine, by its triggers, while this computer is closed.
+An automation of yours can run on a paired machine, or on a machine of your server, by its triggers, while this computer is closed.
 
 1. Let this computer give the machine automations: on its page in **Settings** > **Fleet** > **Machines**, turn on **Automate** for **This computer** (or, on the machine, `altanode permissions <device> --allow automate`).
-2. In the **Automations** tab, edit the automation and choose the machine in **Runs on**. It is offered for an automation kept in your configuration, once a machine is paired.
+2. In the **Automations** tab, edit the automation and choose the machine in **Runs on**. It is offered for an automation kept in your configuration, once a machine is paired or your server lists one.
 3. Save. CodeAlta copies the automation to the machine: its card says **On** and the name of the machine, and its details say **Copied to** that machine. A machine that is offline gets it when it answers.
 
 The machine fires its schedules and starts its sessions; **Run now** runs it there too. Its runs are listed with the automation, as the machine reports them, and their sessions are those of the machine. Choose **This computer** to bring it back: the machine no longer has it.
 
 - The automation keeps its definition here; edit it here, and the machine gets the change.
+- Turning off **Running** in the **Automations** tab pauses the automations on machines too: they get them disabled until you turn it on again.
 - Its project is found on the machine by its git repository: the machine needs a checkout of it (`altanode projects clone <url>`). An automation of no project runs as a chat there.
 - Name a provider the machine has, or none for the machine's default one.
 - A command trigger runs on this computer only, and an automation kept in the configuration of a project runs on the machines that have the project.
 
-On the machine, what it runs is up to it: `fleet/automation-policy.json` in its state root turns automations off (`"enabled": false`) or limits them to account credentials (`"credentials": "account"`: API keys and local models, never a personal plan). A run the machine refuses is listed with its reason. A computer that loses the permission, or is revoked, no longer gets its automations run.
+A machine of your server that is not paired with this computer gets the automation through the server, with no permission to give on the machine: it must be one of your machines. The server keeps it sealed, so it cannot read nor change it, and the machine gets it when it connects. Its details say whether the machine took it or refused it, and why. **Run now** asks the machine through the server while it is online; its triggers run it either way, also while the server is away.
+
+On the machine, what it runs is up to it: `altanode automations policy off` turns automations off (`on` again), and `altanode automations policy credentials account` limits them to account credentials (API keys and local models, never a personal plan; `any` again). A node that runs applies the change at its next run. `altanode automations` lists what the devices gave the machine, and `altanode automations runs` their latest runs. A run the machine refuses is listed with its reason. A computer that loses the permission, or is revoked, no longer gets its automations run.
 
 ## Move a session
 
@@ -319,6 +322,23 @@ Your computer signs what the machines install, with the hash of the package of e
 | **Manual** | Machines update only when you click **Update the fleet…** |
 | **Pinned** | The fleet stays on one version: an update to another version is refused until you change the policy |
 | **Automatic** | The server reads the feed every day and updates the fleet to its latest stable version at the time of day you choose; each machine checks the package against the hash the feed publishes |
+
+### See the statistics of all your machines
+
+Each machine linked to your server counts the statistics of its sessions, a node as CodeAlta Desktop does, and sends them to the server: tokens, active time, runs, tool calls and estimated costs, by provider, model and quarter hour.
+
+1. In CodeAlta Desktop, open the **Statistics** tab.
+2. At the top, choose **My fleet** instead of **This machine**.
+3. Pick the period: **Last 7 days**, **Last 30 days**, **Last 90 days** or **This month**.
+
+**My fleet** shows the totals, then the numbers **By machine** (with when each machine last sent its statistics, so a machine that stopped sending shows), **By project** and **By model**. The days are those of your computer's time zone.
+
+- A machine sends the statistics of the sessions it publishes to the server, from the day it was linked to it. A **Private** session sends nothing; a session made Private later, or whose space you unlink, has its statistics removed from the server.
+- The server receives numbers and the names of providers, models and tools, never prompts, answers or file names. Projects travel as keys made with the key only your computers hold: the server cannot tell which project a key is, and your computer names the projects it has too (the same repository on two machines is one project). A project only another machine has shows as **Project** and the start of its key.
+- A machine that was offline sends what it counted when it comes back, and sending the same statistics again changes nothing.
+- **My fleet** shows the machines of your own fleet. **This machine** is the full Statistics page, with its filters and comparisons, for this computer.
+
+A node starts counting with the day it first runs.
 
 ## Security
 

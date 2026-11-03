@@ -25,31 +25,42 @@ console queries them by scope.
 ## Every machine counts its own
 
 - Each CodeAlta instance that runs sessions (Desktop, TUI through the desktop that follows it, CodeAlta Node) computes
-  the facts of its sessions from its journals, as the desktop does today. CodeAlta Node runs the statistics engine too
-  (today it runs only in the desktop).
+  the facts of its sessions from its journals, as the desktop does. CodeAlta Node runs the statistics engine too
+  (`StatisticsPlugin.CreateForHost`, built in M0).
 - **A machine is the single writer of its facts.** After a move, the new owner counts the session's work from the move
   record on (as a fork counts from `counted_from`), so the journal it imported is never counted again; the facts the
-  old machine counted stay its own. Facts are keyed by machine as well, so a quarter hour split by a move is the merge
-  of both.
+  old machine counted stay its own, and a session that comes back counts there again what that machine did before. The
+  move records name the machines by device id (and by name, for people), so each part of a journal is counted by the
+  machine that wrote it, whatever the machines are called by then; a record written before the ids were recorded is
+  read by names. Facts are keyed by
+  machine as well, so a quarter hour split by a move is the merge of both.
 
 ## Publication: rows, not increments
 
-- A machine publishes, for each key (machine, session, quarter hour, family, dimension), the **current value of the
-  row with its version**, never an increment. The server keeps the highest version per key.
+- A machine publishes the **current value of the rows** of a session, never an increment: the rows of the session
+  (keyed by quarter hour, family and dimension) as **one set** with the session's `(sessionId, epoch, version)`, a new
+  version each time its rows change. The server keeps the set of the highest version per machine and session and
+  replaces every row of it; a set of an older epoch is refused.
 - So a replay after an outage changes nothing, a correction (a provenance written late, a session reread after a new
-  definition version) simply replaces the row, and the server's numbers converge to the machines' own.
-- **Replacement scopes**: when a machine reads a session again from its start, it publishes the session's rows as one
-  set; rows of that session it no longer has are deleted at the server (a tombstone), so a dimension that disappeared
-  does not linger.
-- **Generations**: a machine that lost its statistics store (a new disk, a reinstall) starts a new publication
-  generation; the server replaces everything that machine published before, instead of keeping old rows whose versions
+  definition version) simply replaces the set, a row that disappeared goes with it, and the server's numbers converge
+  to the machines' own. A session whose rows are all gone sends an empty set.
+- A machine reads the rows of a session again only when the revision of its facts in the store changed (where its
+  reading stopped, the version of the definitions, the floor), so publishing costs nothing while nothing is counted.
+- Published today: the families a fleet sums (`activity`, `usage`, `cost`, `tool`), keyed by provider, model and the
+  other keys of the family. The others (content, details, histograms, scripts) stay on the machine for now.
+- **Generations**: a machine that lost its publication outbox (a new disk, a reinstall) starts a new publication
+  generation; the server replaces everything that machine published before, instead of keeping old sets whose versions
   look newer.
 - **Definition versions**: each row names the version of the definitions that produced it (today 9). A total that
   would mix versions while machines catch up is marked as such in its coverage, never presented as exact.
 - Publication follows the store's transactions: what a catch-up saved is what the machine sends, coalesced to a few
   seconds, through the outbox of the control connection ([protocol](protocol.md#durability)).
-- **When publication starts**: from the moment a space is linked to a server; publishing the past is a choice of the
-  person (**Publish my history** with a starting date), as reading history is today.
+- **When publication starts**: from the day (UTC) the machine was linked to the server; publishing the past is a choice
+  of the person (**Publish my history** with a starting date, to come), as reading history is today. A node, where
+  nobody is asked, counts from its first day.
+- **Projects** travel as a blind index (an HMAC of the person's metadata key) of what recognizes the project on every
+  machine: its repository and its folder in it, or its id without a repository. The server groups by it and cannot
+  name it; the person's devices name the projects they have by computing the same index.
 - **Deleted sessions** keep their published facts (as the local archive keeps them), until the organization's
   retention removes them.
 - **Private sessions** publish nothing ([security](security-and-privacy.md#what-the-server-sees)): their numbers stay
@@ -110,12 +121,14 @@ put the names back when they draw the charts.
 
 ## Queries
 
-- `POST /api/v1/statistics/query` takes the same request as the plugin's queries (period, frequency, comparison,
-  filters, limit) plus a **scope** (mine, a team, the organization, a machine, an automation), and answers in the same
-  JSON as `alta statistics`, so the canvas and the commands work unchanged
-  ([protocol](protocol.md#the-servers-rest-api)).
+- `POST /api/v1/statistics/query` (built in M3b): local days and their time zone, up to three groups among machine,
+  project key, provider, model, day and month, and a **scope**, `mine` for now (the machines of the calling device's
+  person); it answers the totals, the groups (the largest first) and each machine's last publication. Days are exact
+  ranges of quarter hours in any time zone ([protocol](protocol.md#the-servers-rest-api)).
+- To come: the plugin's own requests (frequency, comparison, filters) and its JSON, so the canvas and `alta statistics`
+  work unchanged, and the scopes of teams and the organization with the rule below.
 - Roll-ups by day and month are kept beside the quarter hours, rebuilt from them when the organization's time zone or
-  a definition version changes, as the plugin does locally.
+  a definition version changes, as the plugin does locally (today the server sums quarter hours when asked).
 - Results are bounded and the caller's access filters them before they leave the server.
 
 ## In the console
@@ -123,6 +136,10 @@ put the names back when they draw the charts.
 The **Statistics** canvas gains a scope: **This machine** (today's numbers, local), **My fleet**, a **team**, the
 **organization**, an **automation**, a **machine**. The charts, filters and comparisons are the same; only the binding of
 `StatisticsApi` changes. `alta statistics --scope fleet` gives agents the same numbers within their person's access.
+
+Built first: **My fleet**, offered once the desktop is linked to a server, as a page of its own (totals, by machine,
+by project, by model, over a few periods) read through the desktop host (`fleetServer.statistics`), which signs the
+request and names the machines and the projects it has.
 
 ## Exports
 

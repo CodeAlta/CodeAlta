@@ -30,7 +30,7 @@ search (`Ctrl+P`) open it. Each flow is a short checklist that shows what it che
 | --- | --- |
 | **Pair a machine** | Choose how it is reached (same network, Tailscale, SSH); on the machine, `altanode install` and `altanode pair`, or **over SSH** (the desktop uses the system's OpenSSH client and the person's agent, checks the system and .NET, installs the node and its service, and redeems an `altanode pair --manage` link itself); confirm the short words; choose what the machine may do. The device that pairs first, or through a `--manage` link, manages the node from then on ([node](node.md)). |
 | **Add a machine to my fleet** | Same, then the node joins the server: a device code the desktop approves, or a one-line command with a single-use join link (`altanode join <link> --service`), or over SSH. Choose its spaces, its labels (`always-on`...), and whether it hosts sessions for others. |
-| **Create my server** | Where: another machine over SSH (the usual case, first), this computer, or a cloud (below). How it is reached: Tailscale (recommended at home), the local network, a domain name, a Cloudflare Tunnel. The desktop installs CodeAlta Server and its service, checks from itself that the server answers at the address the machines will use (before anything is claimed), reads the setup code over SSH and claims it through a port forwarded to the server's loopback (the only place a setup is accepted from), makes the owner account and the keys, shows the recovery key, then offers to add the machines it knows: each one it manages enrolls itself (\`control.servers.join\`) and is approved by the device id it gave over its pinned channel. |
+| **Create my server** | Where: almost always a machine away from the desktop, so the main path is **another machine over SSH** (or a cloud, below); this computer is the exception. How it is reached: Tailscale (recommended at home), the local network, a domain name, a Cloudflare Tunnel. The desktop installs CodeAlta Server and its service, checks from itself that the server answers at the address the machines will use (before anything is claimed), reads the setup code over SSH and claims it through a port forwarded to the server's loopback (the only place a setup is accepted from), makes the owner account and the keys, shows the recovery key, then offers to add the machines it knows: each one it manages enrolls itself (`control.servers.join`) and is approved by the device id it gave over its pinned channel. |
 | **Join an organization** | The server's address (or the configuration a company pushes to its machines); sign in with the company's SSO; choose the space it links to (a new **Work** space by default). |
 | **Connect my phone** | Today's Mobile plugin, or, with a server, the phone page of the server. |
 
@@ -72,6 +72,9 @@ Nodes only ever dial out: none of these needs an inbound port on a node.
 | An organization on AWS | **ECS Express Mode** (Fargate + load balancer) + **RDS PostgreSQL**, from a Terraform module | App Runner no longer takes new customers (since 2026-04-30) |
 | An organization on GCP | **Cloud Run** + **Cloud SQL**, Terraform | Workable: WebSockets end after 60 minutes at most, which reconnection absorbs; billed while connections are open |
 | An organization with Kubernetes | A Helm chart (later) | |
+
+Whatever the recipe, the platform's probes (the container's health check, the load balancer's target check) call the
+server's `/health/live` and `/health/ready` ([observability](observability.md#health-checks)).
 
 Shipped artifacts stay few: one image, one `compose.yaml`, one `azd` template, one Terraform module per cloud. Aspire
 is used to run a server and several nodes together in development, not as the deployment path (its Azure deploy is
@@ -146,7 +149,7 @@ All signed (Authenticode, Apple notarization, NuGet signatures, cosign for image
   selected, and once it changes to one newer than the selected version, the pointer is dropped and the installed entry
   point runs; a version chosen older on purpose (`update --version`) stays until the installed one changes.
 - **Trial and rollback.** A new version confirms itself once healthy: a node when it listens and its connections to
-  the servers that approved it are up, the server when it answers its own health request. One that exits first, or does
+  the servers that approved it are up, the server when it answers its own health request (`/api/v1/server/health`). One that exits first, or does
   not confirm within 2 minutes (over 2 starts), or cannot be started, is stopped, marked bad (an update skips it unless
   named) and the previous version starts again. A rollback with a backup is recorded with the move of the pointer and
   kept until the backup is restored: the launcher restores it before it starts anything, and when it cannot, it starts

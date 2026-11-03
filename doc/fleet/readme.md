@@ -23,6 +23,7 @@ work with, without changing anything for someone who stays on one computer.
 | [The console](console.md) | CodeAlta Desktop as the gateway of the fleet: why and at what cost, the API-complete server, canvases, plugins, agents |
 | [Protocol](protocol.md) | Three planes; connections, handshake, envelopes, durability, versions, the services, the REST API, and why WebSocket |
 | [Identity](identity.md) | People, devices, nodes, service identities; pairing, sign-in, enrollment, confirmations, agents acting for people |
+| [Secrets](secrets.md) | Secrets, variables and environments as in GitHub Actions: scopes, references from the configuration, sealed end to end to the machines that use them, write-only, masking, approvals |
 | [Security and privacy](security-and-privacy.md) | What the server sees, keys, the device list, credentials, remote execution, policies, threats, audit, SOC 2 |
 | [Collaboration](collaboration.md) | Presence, project channels, sharing, handoffs, notifications, questions across people |
 | [CodeAlta Server](server.md) | The coordinator: responsibilities, stack, data, SQLite or PostgreSQL, availability, administration |
@@ -61,7 +62,9 @@ with no account and no network call.
    runs no agent.
 3. **Private by default.** The server never reads a prompt, an answer, a tool output or a file unless a person shares
    it; a session can always be kept off the server entirely.
-4. **Credentials do not travel.** Each machine signs in by itself; the fleet helps set it up, never copies a secret.
+4. **Logins do not travel.** Each machine signs in by itself; the fleet helps set it up. The only secrets the fleet
+   distributes are the ones a person puts in its store, sealed end to end to the machines allowed to use them
+   ([secrets](secrets.md)).
 5. **The machine decides what runs on it.** Remote work is remote code execution: a node's local policy is the final
    authority, and requests are signed by a person's device, not by the server.
 6. **No more power elsewhere.** An agent gets on another machine at most what it has on its own: its space, its tools,
@@ -258,6 +261,10 @@ owner on 2026-11-02, whose answers also settled the questions that were open (23
     runs on their own machine; the GitHub token broker as an opt-in of organizations; plugins may change the fleet once
     the person accepted them, every change audited; client mode over an explicit local node for a desktop that must
     stay reachable; statistics per person only with an explicit grant.
+
+31. **Secrets are one store for every kind of value** (asked by the owner on 2026-11-03): secrets, variables and
+    environments as in GitHub Actions, referenced by name from the configuration (`${secret:NAME}`), sealed end to
+    end to the machines allowed to use them, never readable by the server ([secrets](secrets.md)).
 
 ## Open questions
 

@@ -20,6 +20,8 @@
     <!-- The fleet's updates: nodes verify instructions with it, the desktop reads the hashes it signs. -->
     <ProjectReference Include="..\CodeAlta.Fleet.Update\CodeAlta.Fleet.Update.csproj" />
     <ProjectReference Include="..\CodeAlta.Orchestration\CodeAlta.Orchestration.csproj" />
+    <!-- The statistics engine every host runs: machines publish the facts it keeps. -->
+    <ProjectReference Include="..\CodeAlta.Plugin.Statistics\CodeAlta.Plugin.Statistics.csproj" />
   </ItemGroup>
 
 </Project>

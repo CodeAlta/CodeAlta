@@ -51,5 +51,6 @@ public sealed partial class FleetNodeService
     private IFleetNodeAutomations RequireAutomations()
         => _options.Automations ?? throw new FleetException(FleetNodeErrorCodes.AutomationsUnavailable, null, "This machine runs no automation for other devices.");
 
-    private static FleetAutomationCaller AutomationCaller(FleetNodeCall call) => new(call.Caller.DeviceId, call.Device?.Name ?? call.Caller.DeviceId);
+    private static FleetAutomationCaller AutomationCaller(FleetNodeCall call)
+        => new(call.Caller.DeviceId, call.Device?.Name ?? call.Caller.DeviceId) { Fingerprint = call.Caller.Fingerprint.ToString() };
 }

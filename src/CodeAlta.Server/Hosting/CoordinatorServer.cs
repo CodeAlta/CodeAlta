@@ -92,6 +92,12 @@ public sealed class CoordinatorServerOptions
     /// <summary>Gets how often the update campaigns move on without an event.</summary>
     public TimeSpan UpdateInterval { get; init; } = TimeSpan.FromSeconds(5);
 
+    /// <summary>
+    /// Gets whether the update campaigns move on by themselves (on a timer and at each event, the default). Tests that step
+    /// the campaigns by hand turn it off: a step of the loop beside theirs would race with their clock and their assertions.
+    /// </summary>
+    public bool UpdateLoop { get; init; } = true;
+
     /// <summary>Gets how many nodes update at once in a campaign.</summary>
     public int UpdateConcurrency { get; init; } = 2;
 
@@ -369,6 +375,8 @@ public sealed class CoordinatorServer : IAsyncDisposable
             json.SerializerOptions.TypeInfoResolverChain.Insert(0, ServerApiJsonContext.Default);
             json.SerializerOptions.TypeInfoResolverChain.Insert(1, FleetServerJsonContext.Default);
             json.SerializerOptions.TypeInfoResolverChain.Insert(2, FleetDeviceListJsonContext.Default);
+            json.SerializerOptions.TypeInfoResolverChain.Insert(3, FleetStatisticsJsonContext.Default);
+            json.SerializerOptions.TypeInfoResolverChain.Insert(4, FleetAutomationApiJsonContext.Default);
             json.SerializerOptions.DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull;
         });
         services.AddProblemDetails();
@@ -402,6 +410,7 @@ public sealed class CoordinatorServer : IAsyncDisposable
             provider.GetRequiredService<RelayHub>()) { Metrics = metrics });
         services.AddSingleton(provider => new PublicationService(store, provider.GetRequiredService<DirectoryHub>(), time) { Metrics = metrics });
         services.AddSingleton(_ => new MetadataKeyService(store, time));
+        services.AddSingleton(_ => new StatisticsService(store, time) { Metrics = metrics });
         services.AddSingleton(provider => new TelemetrySettingsService(store, provider.GetRequiredService<PresenceRegistry>(), telemetry, time,
             provider.GetRequiredService<ILoggerFactory>().CreateLogger("CodeAlta.Server.Telemetry")));
         services.AddSingleton(provider => new OtlpForwarder(telemetry, provider.GetRequiredService<RequestAuthenticator>(),
@@ -410,10 +419,12 @@ public sealed class CoordinatorServer : IAsyncDisposable
             provider.GetRequiredService<ServerUpdateStatusSource>(), time, provider.GetRequiredService<ILoggerFactory>().CreateLogger("CodeAlta.Server.Update"),
             new UpdateCampaignOptions
             {
-                Interval = options.UpdateInterval, ApplyServerUpdate = options.ApplyUpdate, WithdrawServerSwitch = options.CancelUpdate, ServerRuntime = options.UpdateRuntime,
+                Interval = options.UpdateInterval, RunLoop = options.UpdateLoop, ApplyServerUpdate = options.ApplyUpdate, WithdrawServerSwitch = options.CancelUpdate, ServerRuntime = options.UpdateRuntime,
                 ReadLatest = options.ReadLatestUpdate,
                 Limits = new UpdateCampaignLimits { MaxConcurrent = Math.Max(1, options.UpdateConcurrency), OfflineGrace = options.UpdateOfflineGrace },
             }));
+        services.AddSingleton(provider => new FleetAutomationService(store, store, provider.GetRequiredService<PresenceRegistry>(), time,
+            provider.GetRequiredService<ILoggerFactory>().CreateLogger("CodeAlta.Server.Automations")));
         services.AddSingleton(provider => new ControlService(store, provider.GetRequiredService<PresenceRegistry>(), provider.GetRequiredService<DirectoryHub>(),
             provider.GetRequiredService<PublicationService>(), provider.GetRequiredService<RelayHub>(), time, options.ConnectionPolicy,
             provider.GetRequiredService<ILoggerFactory>().CreateLogger("CodeAlta.Server.Control"))
@@ -421,7 +432,9 @@ public sealed class CoordinatorServer : IAsyncDisposable
             Metrics = metrics,
             TelemetrySettings = provider.GetRequiredService<TelemetrySettingsService>(),
             Updates = provider.GetRequiredService<UpdateCampaignService>(),
+            Automations = provider.GetRequiredService<FleetAutomationService>(),
             Stopping = provider.GetRequiredService<IHostApplicationLifetime>().ApplicationStopping,
+            Statistics = provider.GetRequiredService<StatisticsService>(),
         });
 
         var app = builder.Build();
@@ -433,6 +446,7 @@ public sealed class CoordinatorServer : IAsyncDisposable
         app.UseMiddleware<DeviceAuthenticationMiddleware>();
         app.MapOpenApi();
         ApiEndpoints.Map(app);
+        HealthEndpoints.Map(app);
         return app;
     }
 
