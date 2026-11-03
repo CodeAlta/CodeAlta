@@ -70,10 +70,9 @@ public sealed class FleetServerCreateRecoveryTests
             {
                 "status" => new SshResult(0, $"CodeAlta Server 4.0.0, process 1\nListens on {address.ToString().TrimEnd('/')}\nHealth: ok, no owner yet\n", ""),
                 "setup-code" => new SshResult(0, setupCode + "\n", ""),
+                "install" => new SshResult(0, "CodeAlta Server starts at your sign-in, once the server that runs now exits.", ""),
                 _ => new SshResult(1, "", "unexpected"),
             });
-
-        public void StartDetached(string executable, IReadOnlyList<string> arguments) => throw new InvalidOperationException("The server runs already.");
 
         public bool Exists(string path) => string.Equals(path, executable, StringComparison.OrdinalIgnoreCase);
 
