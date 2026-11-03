@@ -211,16 +211,17 @@ internal sealed class NodeUpdates : IAsyncDisposable
             return;
         }
 
+        // Each change below holds only while the switch read here still waits: a cancellation or a newer request that came
+        // meanwhile wins, and the next step takes it.
         if (!UpdateVersion.TryParse(pending.Version, out var target) || !store.IsStaged(target, UpdateProduct.Node))
         {
-            store.CancelPending($"{pending.Version} is not staged in {store.Root}.");
-            _options.Log($"The switch to {pending.Version} was dropped: it is not staged.");
+            if (store.TryCancelPending(pending, $"{pending.Version} is not staged in {store.Root}.")) _options.Log($"The switch to {pending.Version} was dropped: it is not staged.");
             return;
         }
 
         if (target.Equals(running))
         {
-            store.CancelPending(null);
+            store.TryCancelPending(pending, null);
             return;
         }
 
@@ -240,7 +241,12 @@ internal sealed class NodeUpdates : IAsyncDisposable
             return;
         }
 
-        store.Select(target);
+        if (!store.TrySelect(target, pending))
+        {
+            _options.Log($"The switch to {target} was withdrawn or replaced before it was taken.");
+            return;
+        }
+
         _options.Log($"CodeAlta Node stops to start {target} on trial ({atWork} session(s) at work).");
         if (Interlocked.Exchange(ref _restartRequested, 1) == 0) _options.RequestRestart();
     }

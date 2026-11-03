@@ -140,16 +140,17 @@ internal sealed class ServerUpdates : IAsyncDisposable
         }
 
         if (state.Pending is not { } pending || RestartRequested) return;
+        // Each change below holds only while the switch read here still waits: one withdrawn meanwhile (a campaign a policy
+        // revoked) or replaced (altaserver update) wins, and the next step takes what waits then.
         if (!UpdateVersion.TryParse(pending.Version, out var target) || !store.IsStaged(target, UpdateProduct.Server))
         {
-            store.CancelPending($"{pending.Version} is not staged in {store.Root}.");
-            _options.Log($"The switch to {pending.Version} was dropped: it is not staged.");
+            if (store.TryCancelPending(pending, $"{pending.Version} is not staged in {store.Root}.")) _options.Log($"The switch to {pending.Version} was dropped: it is not staged.");
             return;
         }
 
         if (target.Equals(running))
         {
-            store.CancelPending(null);
+            store.TryCancelPending(pending, null);
             return;
         }
 
@@ -163,12 +164,17 @@ internal sealed class ServerUpdates : IAsyncDisposable
             or Microsoft.Data.Sqlite.SqliteException)
         {
             // Without a backup there is no way back from the migrations of the new version: no switch.
-            store.CancelPending($"The database could not be copied before the switch: {exception.Message}");
+            store.TryCancelPending(pending, $"The database could not be copied before the switch: {exception.Message}");
             _options.Log($"The switch to {target} was dropped: the database could not be copied ({exception.Message}).");
             return;
         }
 
-        store.Select(target, backup);
+        if (!store.TrySelect(target, pending, backup))
+        {
+            _options.Log($"The switch to {target} was withdrawn or replaced while the database was copied.");
+            return;
+        }
+
         _options.Log($"CodeAlta Server copied its database to {backup} and stops to start {target} on trial.");
         if (Interlocked.Exchange(ref _restartRequested, 1) == 0) _options.RequestRestart();
     }

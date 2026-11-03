@@ -212,14 +212,72 @@ public sealed class UpdateVersionStore
     {
         ArgumentNullException.ThrowIfNull(version);
         var at = _time.GetUtcNow();
-        return Change(state => state with
+        return Change(state => Selected(state, version, at, backup));
+    }
+
+    /// <summary>
+    /// Selects a staged version on trial, as <see cref="Select"/>, only while the switch that waits is still the one the
+    /// caller read (<paramref name="expected"/>: the same version, asked at the same time by the same requester),
+    /// atomically under the lock of the state: a switch withdrawn meanwhile (a cancelled campaign) is not taken, and a
+    /// newer one (another <c>update</c>) is not cleared.
+    /// </summary>
+    /// <param name="version">The version.</param>
+    /// <param name="expected">The switch that waited when the caller read the state.</param>
+    /// <param name="backup">The backup taken before the switch, restored by a rollback; null for none.</param>
+    /// <returns>Whether that switch still waited and its version is now selected.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="version"/> or <paramref name="expected"/> is null.</exception>
+    /// <exception cref="UpdateException">The lock could not be taken, or the state could not be written.</exception>
+    public bool TrySelect(UpdateVersion version, UpdatePending expected, string? backup = null)
+    {
+        ArgumentNullException.ThrowIfNull(version);
+        ArgumentNullException.ThrowIfNull(expected);
+        var at = _time.GetUtcNow();
+        var selected = false;
+        Change(state =>
+        {
+            if (!SameRequest(state.Pending, expected)) return state;
+            selected = true;
+            return Selected(state, version, at, backup);
+        });
+        return selected;
+    }
+
+    /// <summary>Drops the pending switch only while it is still the one the caller read, atomically; a newer one stays.</summary>
+    /// <param name="expected">The switch that waited when the caller read the state.</param>
+    /// <param name="message">Why it did not happen; null to drop it without an outcome.</param>
+    /// <returns>Whether that switch still waited and was dropped.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="expected"/> is null.</exception>
+    /// <exception cref="UpdateException">The lock could not be taken, or the state could not be written.</exception>
+    public bool TryCancelPending(UpdatePending expected, string? message)
+    {
+        ArgumentNullException.ThrowIfNull(expected);
+        var dropped = false;
+        Change(state =>
+        {
+            if (state.Pending is not { } pending || !SameRequest(pending, expected)) return state;
+            dropped = true;
+            return state with
+            {
+                Pending = null,
+                LastOutcome = message is null ? state.LastOutcome : new UpdateOutcome(pending.Version, UpdateOutcomes.Failed, _time.GetUtcNow(), message),
+            };
+        });
+        return dropped;
+    }
+
+    private static UpdateState Selected(UpdateState state, UpdateVersion version, DateTimeOffset at, string? backup)
+        => state with
         {
             Previous = Same(state.Current, version) ? state.Previous : state.Current,
             Current = version.ToString(),
             Trial = new UpdateTrial(version.ToString(), at, 0, backup),
             Pending = null,
-        });
-    }
+        };
+
+    // Whether a pending switch is the request a caller read: its phase may have moved on, not who asked, when and for what.
+    private static bool SameRequest(UpdatePending? pending, UpdatePending expected)
+        => pending is not null && string.Equals(pending.Version, expected.Version, StringComparison.OrdinalIgnoreCase) && pending.RequestedAt == expected.RequestedAt
+           && pending.Now == expected.Now && string.Equals(pending.RequestedBy, expected.RequestedBy, StringComparison.Ordinal);
 
     /// <summary>
     /// Takes the switch that waits, when no process of the product runs (at start, or in a launcher between two
@@ -249,13 +307,13 @@ public sealed class UpdateVersionStore
         if (state.Pending is not { } pending || state.RollingBack is not null) return null;
         if (!UpdateVersion.TryParse(pending.Version, out var version) || !IsStaged(version, product))
         {
-            CancelPending($"{pending.Version} is not staged in {Root}.");
+            TryCancelPending(pending, $"{pending.Version} is not staged in {Root}.");
             return null;
         }
 
         if (Same(Read().Current, version))
         {
-            CancelPending(null);
+            TryCancelPending(pending, null);
             return null;
         }
 
@@ -269,13 +327,13 @@ public sealed class UpdateVersionStore
             }
             catch (Exception exception) when (exception is UpdateException or IOException or UnauthorizedAccessException)
             {
-                CancelPending($"The data could not be copied before the switch: {exception.Message}");
+                TryCancelPending(pending, $"The data could not be copied before the switch: {exception.Message}");
                 return null;
             }
         }
 
-        Select(version, copy);
-        return version;
+        // An update asked meanwhile (during the copy) replaced or withdrew this switch: it waits for the next start.
+        return TrySelect(version, pending, copy) ? version : null;
     }
 
     /// <summary>
