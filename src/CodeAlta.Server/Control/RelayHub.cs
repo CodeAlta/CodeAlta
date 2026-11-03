@@ -125,6 +125,12 @@ public sealed class RelayHub
     /// <summary>Gets the instruments of the relays; null for none.</summary>
     public Telemetry.ServerMetrics? Metrics { get; init; }
 
+    /// <summary>
+    /// Gets what ends every relay when the server stops (the host's <c>ApplicationStopping</c>): both sides are cut at
+    /// once, not when the host's shutdown timeout aborts the requests; none by default.
+    /// </summary>
+    public CancellationToken Stopping { get; init; }
+
     /// <summary>Gets how many relays a device has now, offered or open.</summary>
     /// <param name="deviceId">The device.</param>
     /// <returns>The count.</returns>
@@ -291,14 +297,15 @@ public sealed class RelayHub
 
         // The side that completes the pair starts the splice, once.
         if (paired) _ = RunAsync(relay);
+        using var ended = CancellationTokenSource.CreateLinkedTokenSource(context.RequestAborted, Stopping);
         try
         {
-            await relay.Completion.WaitAsync(context.RequestAborted).ConfigureAwait(false);
+            await relay.Completion.WaitAsync(ended.Token).ConfigureAwait(false);
         }
         catch (OperationCanceledException)
         {
-            // This side went away. A splice that runs says how it ended (a limit cuts both sides too); one that never
-            // started ends here.
+            // This side went away, or the server stops. A splice that runs says how it ended (a limit cuts both sides
+            // too); one that never started ends here.
             if (!relay.BothAttached)
             {
                 await FinishAsync(relay, Ends.Abandoned, audit: true).ConfigureAwait(false);

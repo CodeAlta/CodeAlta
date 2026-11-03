@@ -219,6 +219,35 @@ public sealed class ControlConnectionTests
     }
 
     [TestMethod]
+    public async Task AServerThatStopsClosesItsControlConnectionsAtOnceAndAsksForAReconnection()
+    {
+        await using var server = await ServerFixture.StartAsync();
+        using var owner = new TestDevice("Desktop");
+        using var mac = new TestDevice("Mac mini");
+        await server.SetUpWithNodeAsync(owner, mac);
+        var closing = new TaskCompletionSource<FleetError>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var (connection, _) = await server.ConnectAsync(mac, connection => connection.SetEventHandler((fleetEvent, _) =>
+        {
+            if (fleetEvent.Event == FleetServerMethods.ConnectionClosing) closing.TrySetResult(fleetEvent.Payload!.Value.Deserialize(FleetServerJsonContext.Default.FleetError)!);
+            return ValueTask.CompletedTask;
+        }));
+        await using (connection)
+        {
+            await connection.SendRequestAsync(FleetServerMethods.PresenceUpdate,
+                JsonSerializer.SerializeToElement(new FleetPresenceUpdate("active"), FleetServerJsonContext.Default.FleetPresenceUpdate));
+
+            // A stop (a switch of versions, a service manager's) does not wait for the shutdown timeout of the host (30 s)
+            // to abort the connection: the node is told at once, and reconnects to the next version.
+            var stopping = System.Diagnostics.Stopwatch.StartNew();
+            await server.Server.DisposeAsync().AsTask().WaitAsync(Waits.Hang);
+            Assert.IsLessThan(TimeSpan.FromSeconds(15), stopping.Elapsed, $"The stop took {stopping.Elapsed}.");
+            var error = await closing.Task.WaitAsync(Waits.Hang);
+            Assert.AreEqual((FleetErrorCodes.ConnectionClosed, FleetErrorHints.Reconnect), (error.Code, error.Hint));
+            await connection.Completion.WaitAsync(Waits.Hang);
+        }
+    }
+
+    [TestMethod]
     public async Task ANewConnectionOfADeviceReplacesItsOldOne()
     {
         await using var server = await ServerFixture.StartAsync();
