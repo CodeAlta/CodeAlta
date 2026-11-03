@@ -4,6 +4,7 @@ using System.Text.Json;
 using CodeAlta.Agent;
 using CodeAlta.Agent.Runtime;
 using CodeAlta.Catalog;
+using XenoAtom.Logging;
 
 namespace CodeAlta.Orchestration.Runtime;
 
@@ -14,7 +15,7 @@ namespace CodeAlta.Orchestration.Runtime;
 public sealed class OwnedSessionWorkspace : IAsyncDisposable
 {
     private readonly object _gate = new();
-    private readonly Func<CancellationToken, Task<IReadOnlyList<ProjectDescriptor>>> _projects;
+    private readonly Func<CancellationToken, Task<ProjectCatalogLoad>> _projects;
     private readonly Func<CancellationToken, IAsyncEnumerable<AgentSessionMetadata>> _sessions;
     private readonly Func<string, AgentSessionHistoryCursor?, CancellationToken, Task<AgentSessionHistoryPage>> _history;
     private readonly Func<string, AgentSessionHistoryCursor?, CancellationToken, Task<AgentSessionHistoryPage>> _tailHistory;
@@ -24,6 +25,8 @@ public sealed class OwnedSessionWorkspace : IAsyncDisposable
     private readonly Func<string, long, CancellationToken, Task<AgentEvent?>>? _historyRecord;
     private readonly Func<string, CancellationToken, Task<string>> _notes = static (_, _) => Task.FromException<string>(new InvalidOperationException("Notes reader not configured."));
     private readonly HashSet<ReadOperation> _active = [];
+    // The unreadable project files already logged, as "path\nmessage": each is logged once while it stays as it is.
+    private readonly HashSet<string> _warnedUnreadable = new(StringComparer.Ordinal);
     // Eight actual reads of history, notes, images, usage and prompts; the snapshots, which list every session, have
     // their own slots so that they never hold the others back.
     private readonly SemaphoreSlim _readSlots = new(ReadSlots, ReadSlots);
@@ -61,7 +64,8 @@ public sealed class OwnedSessionWorkspace : IAsyncDisposable
         // This exact construction always supplies the journal's projection cache and shared file locks.
         // Never replace it with AgentSessionCatalog or a new/uncached filesystem store.
         var store = journals.CreateSessionStore();
-        _projects = projects.LoadAsync;
+        // A project file that cannot be read leaves its project out of the snapshot, not the whole snapshot.
+        _projects = projects.LoadReadableAsync;
         _sessions = token => store.ListSessionsAsync(filter: null, cancellationToken: token);
         _history = store.ReadHistoryPageAsync;
         _tailHistory = store.ReadHistoryTailPageAsync;
@@ -93,7 +97,7 @@ public sealed class OwnedSessionWorkspace : IAsyncDisposable
         ArgumentNullException.ThrowIfNull(projects);
         ArgumentNullException.ThrowIfNull(sessions);
         ArgumentNullException.ThrowIfNull(history);
-        _projects = projects;
+        _projects = async token => new ProjectCatalogLoad(await projects(token).ConfigureAwait(false), []);
         _sessions = sessions;
         _history = history;
         _tailHistory = history; // Literal test seam; production always uses the reverse store reader.
@@ -387,11 +391,30 @@ public sealed class OwnedSessionWorkspace : IAsyncDisposable
     private async Task<OwnedWorkspaceSnapshot> ReadSnapshotCoreAsync()
     {
         var projectRead = _projects(CancellationToken.None);
-        var projects = await projectRead.ConfigureAwait(false);
+        var load = await projectRead.ConfigureAwait(false);
+        WarnUnreadableProjects(load.Unreadable);
         var sessions = new List<AgentSessionMetadata>();
         // Fully consume the cached iterator, including its final awaited cache-completion write.
         await foreach (var session in _sessions(CancellationToken.None).ConfigureAwait(false)) sessions.Add(session);
-        return new(projects, sessions) { SessionHeaders = ReadSessionHeaders(sessions) };
+        return new(load.Projects, sessions) { SessionHeaders = ReadSessionHeaders(sessions), UnreadableProjects = load.Unreadable };
+    }
+
+    // Snapshots are read again and again (each change of the Explorer, each sessions.list of a node): a file is logged
+    // when it becomes unreadable, or unreadable for another reason, not at each read.
+    private void WarnUnreadableProjects(IReadOnlyList<UnreadableProjectFile> unreadable)
+    {
+        lock (_gate)
+        {
+            var now = unreadable.Select(static file => file.SourcePath + "\n" + file.Message).ToHashSet(StringComparer.Ordinal);
+            foreach (var file in unreadable)
+            {
+                if (_warnedUnreadable.Contains(file.SourcePath + "\n" + file.Message) || !LogManager.IsInitialized) continue;
+                LogManager.GetLogger("CodeAlta.Workspace").Warn($"The project file {file.SourcePath} cannot be read; its project is left out of the workspace: {file.Message}");
+            }
+
+            _warnedUnreadable.Clear();
+            _warnedUnreadable.UnionWith(now);
+        }
     }
 
     /// <summary>
@@ -557,4 +580,7 @@ public sealed record OwnedWorkspaceSnapshot(IReadOnlyList<ProjectDescriptor> Pro
 {
     /// <summary>The journal headers the session list records for the listed sessions; absent headers grant no scope authority.</summary>
     public IReadOnlyDictionary<string, SessionViewJournalHeader> SessionHeaders { get; init; } = new Dictionary<string, SessionViewJournalHeader>();
+
+    /// <summary>The project files that could not be read: their projects are not in <see cref="Projects"/>.</summary>
+    public IReadOnlyList<UnreadableProjectFile> UnreadableProjects { get; init; } = [];
 }
