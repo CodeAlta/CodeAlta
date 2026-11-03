@@ -60,6 +60,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\CodeAlta.Agent\CodeAlta.Agent.csproj" />
+    <ProjectReference Include="..\CodeAlta.Automations\CodeAlta.Automations.csproj" />
     <ProjectReference Include="..\CodeAlta.Catalog\CodeAlta.Catalog.csproj" />
     <ProjectReference Include="..\CodeAlta.Fleet\CodeAlta.Fleet.csproj" />
     <ProjectReference Include="..\CodeAlta.Fleet.Update\CodeAlta.Fleet.Update.csproj" />

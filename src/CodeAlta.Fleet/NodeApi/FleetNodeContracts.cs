@@ -111,6 +111,21 @@ public static class FleetNodeMethods
     /// <summary>The records of the moves of the machine.</summary>
     public const string MovesList = "moves.list";
 
+    /// <summary>Copies an automation to the node, which runs it from now on (<see cref="IFleetNodeAutomations"/>).</summary>
+    public const string AutomationsPut = "automations.put";
+
+    /// <summary>Removes an automation a device assigned to the node.</summary>
+    public const string AutomationsRemove = "automations.remove";
+
+    /// <summary>The automations devices assigned to the node.</summary>
+    public const string AutomationsList = "automations.list";
+
+    /// <summary>Runs an assigned automation now.</summary>
+    public const string AutomationsRun = "automations.run";
+
+    /// <summary>The runs of the assigned automations, newest first.</summary>
+    public const string AutomationsRuns = "automations.runs";
+
     /// <summary>The event of a live display replacement of a watched session (<see cref="FleetSessionDisplay"/>).</summary>
     public const string SessionDisplayEvent = "session.display";
 
@@ -147,6 +162,15 @@ public static class FleetNodeErrorCodes
 
     /// <summary>The repository could not be cloned.</summary>
     public const string CloneFailed = "project.clone_failed";
+
+    /// <summary>No automation assigned to the node has that id.</summary>
+    public const string AutomationNotFound = "automation.not_found";
+
+    /// <summary>The automation cannot run on the node as it is written (what is wrong is in the message).</summary>
+    public const string AutomationInvalid = "automation.invalid";
+
+    /// <summary>The node runs no automation for other devices (its host has no automation engine).</summary>
+    public const string AutomationsUnavailable = "automation.unavailable";
 }
 
 /// <summary>The parameters of <c>pair.redeem</c>.</summary>
@@ -680,4 +704,12 @@ public sealed record FleetEmpty;
 [JsonSerializable(typeof(FleetMoveList))]
 [JsonSerializable(typeof(FleetMoveStartParams))]
 [JsonSerializable(typeof(FleetMoveResult))]
+[JsonSerializable(typeof(FleetAutomationPutParams))]
+[JsonSerializable(typeof(FleetAutomationRef))]
+[JsonSerializable(typeof(FleetAutomationRemoved))]
+[JsonSerializable(typeof(FleetAutomationInfo))]
+[JsonSerializable(typeof(FleetAutomationList))]
+[JsonSerializable(typeof(FleetAutomationRunsParams))]
+[JsonSerializable(typeof(FleetAutomationRunInfo))]
+[JsonSerializable(typeof(FleetAutomationRunList))]
 public sealed partial class FleetNodeJsonContext : JsonSerializerContext;

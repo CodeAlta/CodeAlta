@@ -5,7 +5,7 @@ using CodeAlta.Orchestration.Hosting;
 using CodeAlta.Orchestration.Runtime;
 using CodeAlta.Orchestration.Runtime.SystemPrompts;
 
-namespace CodeAlta.Desktop.Automations;
+namespace CodeAlta.Automations;
 
 /// <summary>How a run of an automation ended.</summary>
 /// <param name="Status">One of the status constants of <see cref="AutomationRun"/>.</param>
@@ -17,6 +17,19 @@ internal sealed record AutomationOutcome(string Status, string? Message = null);
 /// <param name="Problem">Why the run did not start; null when it did.</param>
 /// <param name="Completion">Completes when the session has answered, failed or been stopped; null when the run did not start.</param>
 internal sealed record AutomationStart(string? SessionId, string? Problem, Task<AutomationOutcome>? Completion);
+
+/// <summary>
+/// What a host checks before a run starts, once the provider it would run with is known: a node checks its own local
+/// policy and the credential kind of the run (<c>doc/fleet/node.md</c>, "Automations and statistics").
+/// </summary>
+internal interface IAutomationRunGate
+{
+    /// <summary>Whether a run may start here with a provider.</summary>
+    /// <param name="entry">The automation.</param>
+    /// <param name="provider">The provider the run would start with.</param>
+    /// <returns>Why the run may not start; null when it may.</returns>
+    string? Check(AutomationEntry entry, ModelProviderDescriptor provider);
+}
 
 /// <summary>Starts the session of a run and sends it the prompt.</summary>
 internal interface IAutomationRunner
@@ -44,11 +57,15 @@ internal sealed class AutomationRunner : IAutomationRunner
     private const string NoCapacity = "Too many commands are pending in CodeAlta. The automation runs again at its next trigger.";
 
     private readonly CodeAltaHost _host;
+    private readonly IAutomationRunGate? _gate;
 
-    internal AutomationRunner(CodeAltaHost host)
+    /// <summary>Creates the runner of a host.</summary>
+    /// <param name="host">The host the sessions of the runs start in.</param>
+    /// <param name="gate">What the host checks before a run starts; null for nothing more than what the automation names.</param>
+    internal AutomationRunner(CodeAltaHost host, IAutomationRunGate? gate = null)
     {
         ArgumentNullException.ThrowIfNull(host);
-        _host = host;
+        (_host, _gate) = (host, gate);
     }
 
     /// <inheritdoc />
@@ -101,6 +118,9 @@ internal sealed class AutomationRunner : IAutomationRunner
                 provider = definition.Model.Provider is null ? providers.FirstOrDefault(static candidate => candidate.IsEnabled) : null;
                 if (provider is null) return Refuse(definition.Model.Provider is null ? $"No model provider is enabled in the space '{spaceId}'." : $"The provider '{providerKey}' is not enabled.");
             }
+
+            // What the host itself requires of a run (a node: its policy, the credential kind), before anything is created.
+            if (_gate?.Check(entry, provider) is { } refused) return Refuse(refused);
 
             var models = await _host.ModelProviderInitializationService.GetModelsAsync(provider.ProviderId, cancellationToken).ConfigureAwait(false);
             var modelId = definition.Model.Model ?? AgentModelDefaults.ResolveModelId(models, provider.DefaultModelId);

@@ -315,6 +315,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
         Fleet.DesktopFleet? fleet = null;
         Fleet.DesktopFleetServers? fleetServers = null;
         Automations.AutomationService? automations = null;
+        Fleet.DesktopAutomationPlacement? placement = null;
         DesktopChangesView? changesView = null;
         DesktopEditorView? editorView = null;
         Terminals.DesktopTerminals? terminals = null;
@@ -571,6 +572,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                 await CloseStepAsync(closing, "MCP server", async () => { if (mcp is not null) await mcp.DisposeAsync(); }); // No client starts a command on a host that is closing.
                 await CloseStepAsync(closing, "session retention", async () => { if (retention is not null) await retention.DisposeAsync(); }); // Join original archive/retirement work before releasing its owners.
                 await CloseStepAsync(closing, "bookmarks", () => { bookmarkLife?.Dispose(); return ValueTask.CompletedTask; });
+                await CloseStepAsync(closing, "placed automations", async () => { if (placement is not null) await placement.DisposeAsync(); }); // What was copied runs on its machines.
                 await CloseStepAsync(closing, "paired machines", async () => { if (fleet is not null) await fleet.DisposeAsync(); }); // Their channels close; their sessions go on where they run.
                 await CloseStepAsync(closing, "servers", async () => { if (fleetServers is not null) await fleetServers.DisposeAsync(); }); // Their control connections close; the servers see this computer offline.
                 await CloseStepAsync(closing, "sessions", async () => { if (workspace is not null) await Task.WhenAll(workspace.CloseImportsAsync(), workspace.CloseSessionsAsync()); });
@@ -874,6 +876,12 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                     new Automations.ShellAutomationCommands(projectId => host.Identities.ResolveAsync(null, projectId).GetAwaiter().GetResult().Environment),
                     // An automation that runs a script is allowed with the script as the library holds it.
                     entry => entry.Definition.Script is { } script ? host.CodeModeScripts.FindHash(script, entry.ProjectPath) : null);
+                // An automation of the user can run on a paired machine: it is copied there, and runs there while this
+                // computer is closed. A profile that placed none makes no call and creates no key.
+                var placedFleet = fleet;
+                placement = new Fleet.DesktopAutomationPlacement(automations, fleet.Find, host.CatalogOptions.FleetRoot, () => placedFleet.DeviceId);
+                automations.Placement = placement;
+                fleet.Changed += placement.Poke;
                 // A host that has the user review the commands of its sessions lets no session type in a terminal, nor
                 // give an automation a command to run.
                 // A host that started its plugins builds one again while it runs, and tells the page when it did. Building
@@ -971,6 +979,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                 browserHost.Activated = sessionId => uiSessions.Set(sessionId, active: false);
                 uiSessions.Activated = browserHost.ReleaseTools;
                 automations.Start();
+                placement.Start();
                 workspacePrepared.TrySetResult();
                 {
                     // Leave room for ordinary pasted images and their base64/JSON overhead.
@@ -1088,7 +1097,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                     builder.AddModelCatalogService(providers);
                     builder.AddReminderService(reminders);
                     builder.AddSessionRetentionProtectionService(retention.ProtectionRpc);
-                    builder.AddAutomationsService(new AutomationsService(automations, host.ProjectCatalog, epoch, host.CodeModeScripts));
+                    builder.AddAutomationsService(new AutomationsService(automations, host.ProjectCatalog, epoch, host.CodeModeScripts, placement));
                     var pullRequestPrompts = new CodeAlta.Catalog.PullRequests.PullRequestPromptCatalog(host.CatalogOptions);
                     builder.AddPullRequestPromptsService(new PullRequestPromptsService(pullRequestPrompts, host.ProjectCatalog, epoch));
                     var startPrompts = new CodeAlta.Catalog.StartPrompts.StartPromptCatalog(host.CatalogOptions);

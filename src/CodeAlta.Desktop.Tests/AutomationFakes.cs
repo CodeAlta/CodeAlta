@@ -1,5 +1,5 @@
 using System.Collections.Concurrent;
-using CodeAlta.Desktop.Automations;
+using CodeAlta.Automations;
 using CodeAlta.Plugin.Git;
 
 namespace CodeAlta.Desktop.Tests;

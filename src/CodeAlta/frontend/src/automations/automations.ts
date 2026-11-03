@@ -134,20 +134,34 @@ export type AutomationForm = Readonly<{
   permissionMode: string; reviewBeforeCommit: boolean | null; sandbox: string;
   /** The options of its sessions (sub-sessions); null for the defaults. */
   options: SessionOptionsChoice | null;
+  /** The paired machine it runs on (its id); null for this computer. Only an automation kept in the configuration of the user runs elsewhere. */
+  runsOn: string | null;
   triggers: readonly AutomationTriggerItem[];
 }>;
 
 /** The form of a new automation, in a project or as a chat. */
 export function emptyForm(projectId: string | null): AutomationForm {
   return { id: null, name: "", enabled: true, prompt: "", script: "", scriptArguments: "", projectId, storeInProject: false, provider: "", model: "", effort: "", agent: "", catchUp: false,
-    permissionMode: "", reviewBeforeCommit: null, sandbox: "", options: null, triggers: [] };
+    permissionMode: "", reviewBeforeCommit: null, sandbox: "", options: null, runsOn: null, triggers: [] };
 }
 
 /** The form of an automation that exists. */
 export function formOf(item: AutomationItem): AutomationForm {
   return { id: item.id, name: item.name, enabled: item.enabled, prompt: item.prompt, script: item.script ?? "", scriptArguments: item.scriptArguments ?? "", projectId: item.projectId, storeInProject: item.storeProjectId !== null,
     provider: item.provider ?? "", model: item.model ?? "", effort: item.effort ?? "", agent: item.agent ?? "", catchUp: item.catchUp,
-    permissionMode: item.permissionMode ?? "", reviewBeforeCommit: item.reviewBeforeCommit, sandbox: item.sandbox ?? "", options: storedSessionOptions(item.options), triggers: item.triggers };
+    permissionMode: item.permissionMode ?? "", reviewBeforeCommit: item.reviewBeforeCommit, sandbox: item.sandbox ?? "", options: storedSessionOptions(item.options),
+    runsOn: item.runsOn ?? null, triggers: item.triggers };
+}
+
+/** The machine an automation runs on, in words: null for this computer. */
+export function placementLabel(item: Pick<AutomationItem, "runsOn" | "placement">, t: Translate): string | null {
+  if (!item.runsOn) return null;
+  return t("On {machine}", { machine: item.placement?.machineName ?? t("Unavailable machine") });
+}
+
+/** What keeps an automation from running on its machine as it is here: why it was not copied there; null when nothing does. */
+export function placementProblem(item: Pick<AutomationItem, "placement">): string | null {
+  return item.placement && item.placement.state === "failed" ? item.placement.message ?? null : null;
 }
 
 /**
@@ -193,6 +207,7 @@ export function formProblem(form: AutomationForm): MessageKey | null {
     if (trigger.type === "weekly" && trigger.days.length === 0) return "Choose a day for the weekly trigger.";
     if (trigger.type === "cron" && !(trigger.expression ?? "").trim()) return "Write the cron expression.";
     if (trigger.type === "command" && !(trigger.command ?? "").trim()) return "Write the command of the trigger.";
+    if (trigger.type === "command" && form.runsOn && !form.storeInProject) return "A command trigger runs on this computer only.";
   }
   return null;
 }
@@ -208,6 +223,8 @@ export function inputOf(form: AutomationForm): AutomationInput {
     provider: provider || null, model: model || null, effort: model && form.effort ? form.effort : null, agent: form.agent.trim() || null,
     permissionMode: form.permissionMode.trim() || null, reviewBeforeCommit: form.reviewBeforeCommit, sandbox: form.sandbox.trim() || null,
     options: storedSessionOptions(form.options),
+    // The configuration of a project runs its automations on the machines that have it.
+    runsOn: form.storeInProject ? null : form.runsOn,
     // An automation that is run by hand misses nothing.
     catchUp: form.catchUp && form.triggers.length > 0,
     triggers: form.triggers.map(trigger => ({ ...trigger, at: [...trigger.at].sort(), expression: trigger.type === "cron" ? (trigger.expression ?? "").trim() : null,

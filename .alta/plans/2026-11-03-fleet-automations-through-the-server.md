@@ -1,0 +1,56 @@
+---
+title: Fleet automations through CodeAlta Server (M3b, personal scope)
+status: todo
+created: 2026-11-03
+summary: What is left after the first part of fleet automations (engine library, automations on altanode, Runs on a paired machine): the server stores each signed automation version and assigns it to a machine linked to it, nodes verify the signature and keep their copies, runs are reported as facts, and the desktop places automations on machines it reaches only through a server.
+---
+
+# Fleet automations through CodeAlta Server
+
+## Where it stands
+
+Built on `feature/fleet` (design: `doc/fleet/orchestration.md`, `node.md` "Automations and statistics"):
+
+- `CodeAlta.Automations` is the engine, run by CodeAlta Desktop and CodeAlta Node. Its hooks: a run gate
+  (`IAutomationRunGate`), claims of due times (`IAutomationClaims`, `AutomationClaimStore`), the file of assigned
+  automations, and `runs_on` with `IAutomationPlacement`.
+- altanode runs the automations of its profile and those a paired device assigns through `automations.put` (the
+  `automate` permission). Each due time is claimed once; before a run the node checks `fleet/automation-policy.json`,
+  the credential kind, and that the assigning device keeps the permission and the definition is the one it assigned.
+- CodeAlta Desktop: **Runs on** a paired machine copies a personal automation there (`DesktopAutomationPlacement`),
+  runs it there by hand and lists its runs as the machine reports them.
+
+The authority of an assignment is the authenticated, paired device on a direct channel. No document is signed yet.
+
+## What is left
+
+- [ ] **Signed versions.** The desktop signs each version it places (the canonical TOML of the table, its id, a version
+  number, the device id; ECDSA P-256 with the device key, as `FleetSignedRequest` signs REST calls). The node stores the
+  signature beside the definition (`assigned-automations.json`) and checks it, not only the channel, before a run: the
+  fingerprint check of `NodeAutomations.Check` becomes a signature check.
+- [ ] **Server resources.** `automations` and `runs` in the REST API v1 (`doc/fleet/protocol.md`): `PUT
+  /api/v1/automations/{id}` stores a signed version (the content sealed to the owner's devices and the assigned machine
+  in a Private space, so the server sees only the facts: id, owner, version, machine, schedule kinds, enabled), `GET` lists
+  them for the owner, `DELETE` removes. Owner checks as for update campaigns (an owner's controller device).
+- [ ] **Assignment over the control connection.** A delivery `automations.assigned` (sealed version) and
+  `automations.removed` to the machine; the node acknowledges, verifies the signature against the signed device list
+  (`FleetDeviceListVerifier`), and writes its copy as it does for `automations.put`. Offline nodes get it on reconnect
+  (the per-node delivery sequence).
+- [ ] **Run facts.** The node publishes runs as facts (`facts.publish`: automation id, version, due time, state, times,
+  tokens and cost, never the prompt or the answer); the server keeps them for the console and the desktop lists them
+  for machines it reaches only through the server.
+- [ ] **Reconciliation by (automation, due time).** The node's claim store already keys claims by occurrence: the server
+  records the claims it learns and refuses a second run of the same occurrence after a takeover; `AutomationClaim.LeaseUntil`
+  is the lease it reads.
+- [ ] **Desktop.** **Runs on** offers the machines of the linked server (`DesktopFleet.SyncOrganizationMachinesAsync`
+  hosts, `IsPaired == false`), placed through the server rather than `automations.put` on a direct channel.
+- [ ] **Tests.** The multi-host harness: desktop, server and node in one process; a server that is down while a
+  schedule fires (the node fires it), a hostile server that alters a version (the node refuses it), a revoked device.
+
+## Smaller follow-ups of the first part
+
+- [ ] The desktop shows the next due time of a placed automation as its machine reports it (`FleetAutomationInfo.NextDue`).
+- [ ] A remote run's session opens from the run list when the machine lists it (today: when it is among the sessions
+  the machine host lists).
+- [ ] Pausing all automations on the desktop does not pause those placed on machines; decide whether it should.
+- [ ] `altanode automations` (list, runs, policy) for the owner on the node, instead of editing the policy file.

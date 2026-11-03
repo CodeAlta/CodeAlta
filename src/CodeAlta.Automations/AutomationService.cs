@@ -4,7 +4,7 @@ using System.Text;
 using CodeAlta.Agent.Runtime;
 using CodeAlta.Catalog;
 
-namespace CodeAlta.Desktop.Automations;
+namespace CodeAlta.Automations;
 
 /// <summary>The automations as they are known at one moment.</summary>
 /// <param name="Entries">The automations that were read, by name.</param>
@@ -53,6 +53,8 @@ internal sealed partial class AutomationService : IAsyncDisposable
     private readonly AutomationStateStore _state;
     private readonly IAutomationRunner _runner;
     private readonly Func<AutomationEntry, string?>? _scriptHash;
+    private readonly IAutomationClaims? _claims;
+    private readonly string? _assignedConfigPath;
     private readonly TimeProvider _time;
     private readonly TimeZoneInfo _zone;
     private readonly CancellationTokenSource _stop = new();
@@ -88,14 +90,24 @@ internal sealed partial class AutomationService : IAsyncDisposable
     /// Gives the hash of the script an automation runs, as the library holds it now, or null when there is none: what
     /// an automation that runs a script is allowed with. Null when no automation runs a script.
     /// </param>
+    /// <param name="claims">
+    /// Claims each due time of a schedule before its run starts, so that it runs once whoever fires it (a node); null
+    /// when nothing else may fire it (the desktop).
+    /// </param>
+    /// <param name="assignedConfigPath">
+    /// The file of the automations other devices of the user assigned to this machine, read beside the configuration
+    /// of the user and written only through <see cref="SaveAssignedAsync"/>; null for none.
+    /// </param>
     internal AutomationService(string globalConfigPath, Func<CancellationToken, Task<IReadOnlyList<ProjectDescriptor>>> projects,
         AutomationStateStore state, IAutomationRunner runner, TimeProvider time, TimeZoneInfo zone, IAutomationFeed? feed = null,
         Func<IReadOnlyList<CodeAlta.Plugins.Abstractions.IIssueEventSource>>? trackers = null, IAutomationCommands? commands = null,
-        Func<AutomationEntry, string?>? scriptHash = null)
+        Func<AutomationEntry, string?>? scriptHash = null, IAutomationClaims? claims = null, string? assignedConfigPath = null)
     {
         _trackers = trackers;
         _commands = commands;
         _scriptHash = scriptHash;
+        _claims = claims;
+        _assignedConfigPath = string.IsNullOrWhiteSpace(assignedConfigPath) ? null : assignedConfigPath;
         ArgumentException.ThrowIfNullOrWhiteSpace(globalConfigPath);
         ArgumentNullException.ThrowIfNull(projects);
         ArgumentNullException.ThrowIfNull(state);
@@ -108,6 +120,12 @@ internal sealed partial class AutomationService : IAsyncDisposable
 
     /// <summary>Raised, on any thread, when the automations, their runs or their state changed.</summary>
     internal event Action? Changed;
+
+    /// <summary>
+    /// Gets or sets what runs by hand an automation placed on another machine (<see cref="AutomationDefinition.RunsOn"/>);
+    /// null when this host places none: such an automation then fails to run by hand here.
+    /// </summary>
+    internal IAutomationPlacement? Placement { get; set; }
 
     /// <summary>Gets the automations as they were last read.</summary>
     internal AutomationSnapshot Snapshot
@@ -166,8 +184,9 @@ internal sealed partial class AutomationService : IAsyncDisposable
         return true;
     }
 
-    // Whether the triggers of an automation start it: it is enabled, can run as defined and is allowed.
-    private bool Armed(AutomationEntry entry) => entry is { Definition.Enabled: true, Problem: null } && IsAllowed(entry);
+    // Whether the triggers of an automation start it here: it is enabled, can run as defined, is allowed, and is not
+    // placed on another machine, which fires its triggers in place of this one.
+    private bool Armed(AutomationEntry entry) => entry is { Definition.Enabled: true, Definition.RunsOn: null, Problem: null } && IsAllowed(entry);
 
     // What is allowed is what the automation does and the file it is in: the same table in another folder is another one.
     private string Allowance(AutomationEntry entry)
@@ -328,22 +347,55 @@ internal sealed partial class AutomationService : IAsyncDisposable
     /// <param name="projectId">The project whose configuration holds it; null for the configuration of the user.</param>
     /// <param name="cancellationToken">Cancels before the file is written.</param>
     /// <returns>What refused the automation, or null once it is written and read back.</returns>
-    internal async Task<string?> SaveAsync(AutomationDefinition definition, string? projectId, CancellationToken cancellationToken)
+    internal Task<string?> SaveAsync(AutomationDefinition definition, string? projectId, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(definition);
+        return SaveAsync(definition with
+        {
+            // A project's own file runs its automations in that project.
+            Project = projectId is null ? definition.Project : null,
+            RunsOn = projectId is null ? definition.RunsOn : null,
+        }, token => SourceAsync(projectId, token), cancellationToken);
+    }
+
+    /// <summary>
+    /// Writes an automation another device of the user assigned to this machine, in the file of the assigned
+    /// automations: it runs here as it is written, its project being a folder of this machine. It is allowed by that,
+    /// as what the user saves is: the host checked the device that assigned it.
+    /// </summary>
+    /// <param name="definition">The automation.</param>
+    /// <param name="cancellationToken">Cancels before the file is written.</param>
+    /// <returns>What refused the automation, or null once it is written and read back.</returns>
+    /// <exception cref="InvalidOperationException">The service has no file of assigned automations.</exception>
+    internal Task<string?> SaveAssignedAsync(AutomationDefinition definition, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(definition);
+        if (_assignedConfigPath is null) throw new InvalidOperationException("This host takes no automation from other devices.");
+        return SaveAsync(definition with { RunsOn = null }, _ => Task.FromResult<AutomationSource?>(AssignedSource), cancellationToken);
+    }
+
+    /// <summary>Whether an automation is one another device assigned to this machine.</summary>
+    internal bool IsAssigned(string id) => Snapshot.Find(id) is { Source.IsAssigned: true };
+
+    private AutomationSource? AssignedSource => _assignedConfigPath is null ? null : new(_assignedConfigPath, null, null) { IsAssigned = true };
+
+    private async Task<string?> SaveAsync(AutomationDefinition definition, Func<CancellationToken, Task<AutomationSource?>> source, CancellationToken cancellationToken)
+    {
         definition = definition with
         {
             Name = definition.Name.Trim(),
             Prompt = definition.Prompt.ReplaceLineEndings("\n").Trim(),
-            // A project's own file runs its automations in that project.
-            Project = projectId is null ? definition.Project : null,
         };
         if (AutomationConfig.Validate(definition) is { } invalid) return invalid;
         await _writes.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            var target = await SourceAsync(projectId, cancellationToken).ConfigureAwait(false);
+            var target = await source(cancellationToken).ConfigureAwait(false);
             if (target is null) return "Its project is no longer one of the projects of CodeAlta.";
+            // What another device assigned stays apart from what the user of this machine writes: neither takes the other's place.
+            if (Snapshot.Find(definition.Id) is { } existing && existing.Source.IsAssigned != target.IsAssigned)
+                return existing.Source.IsAssigned ? "This automation was assigned to this machine by another device: it is changed there."
+                    : "An automation of this machine has the identifier of this one.";
             // An automation has one definition: saved in another file, it leaves the one it was in.
             var previous = Snapshot.Find(definition.Id) is { } found && !SamePath(found.Source.FilePath, target.FilePath) ? found.Source : null;
             var refused = await Task.Run(() =>
@@ -352,7 +404,7 @@ internal sealed partial class AutomationService : IAsyncDisposable
                 {
                     var after = AutomationConfig.Write(before, definition);
                     if (ReadBack(after, definition.Id, target) is { } unreadable) return (null, unreadable);
-                    if (target.IsGlobal && CodeAltaConfigStore.ValidateGlobalConfigContent(after, target.FilePath) is { IsValid: false } invalidFile)
+                    if (target is { IsGlobal: true, IsAssigned: false } && CodeAltaConfigStore.ValidateGlobalConfigContent(after, target.FilePath) is { IsValid: false } invalidFile)
                         return (null, "The configuration file would no longer be valid: " + invalidFile.Message);
                     return (after, null);
                 }, cancellationToken);
@@ -373,7 +425,7 @@ internal sealed partial class AutomationService : IAsyncDisposable
 
         await RefreshAsync().ConfigureAwait(false);
         // What was read back is what is allowed: the definition as the file now holds it.
-        if (projectId is not null || definition.Script is not null) Allow(definition.Id);
+        if (Snapshot.Find(definition.Id) is { } saved && NeedsAllowance(saved)) Allow(definition.Id);
         return null;
     }
 
@@ -438,6 +490,13 @@ internal sealed partial class AutomationService : IAsyncDisposable
     internal async Task<AutomationRun?> RunAsync(string id, CancellationToken cancellationToken)
     {
         if (Snapshot.Find(id) is not { } entry) return null;
+        if (entry.Definition.RunsOn is not null)
+        {
+            // It runs on the machine it is placed on, which records the run.
+            if (Placement is { } placement) return await placement.RunAsync(entry, cancellationToken).ConfigureAwait(false);
+            entry = entry with { Problem = entry.Problem ?? "It runs on another machine, which this one cannot reach." };
+        }
+
         if (entry.Problem is { } problem)
         {
             var refused = new AutomationRun(NewRunId(), id, _time.GetUtcNow(), "manual") { Name = entry.Definition.Name, Status = AutomationRun.Failed, Message = problem, EndedAt = _time.GetUtcNow() };
@@ -528,15 +587,16 @@ internal sealed partial class AutomationService : IAsyncDisposable
     /// </summary>
     internal TimeSpan Tick(DateTimeOffset now)
     {
-        var starts = new List<(AutomationEntry Entry, AutomationTrigger Trigger)>();
+        var starts = new List<(AutomationEntry Entry, AutomationTrigger Trigger, DateTimeOffset Due)>();
         DateTimeOffset? next = null;
+        _claims?.Renew(now);
         lock (_gate)
         {
             _state.Alive(now);
             var paused = _state.Paused;
             foreach (var entry in _snapshot.Entries)
             {
-                AutomationTrigger? fire = null;
+                (AutomationTrigger Trigger, DateTimeOffset Due)? fire = null;
                 foreach (var trigger in entry.Definition.Triggers)
                 {
                     var key = (entry.Id, trigger.Key);
@@ -544,22 +604,27 @@ internal sealed partial class AutomationService : IAsyncDisposable
                     if (time <= now)
                     {
                         // A time that passed long ago was missed: it runs only for an automation that catches up.
-                        if (now - time <= Late || entry.Definition.CatchUp) fire ??= trigger;
+                        if (now - time <= Late || entry.Definition.CatchUp) fire ??= (trigger, time);
                         _due[key] = time = Schedule(trigger)?.Next(now, _zone) ?? DateTimeOffset.MaxValue;
                     }
 
                     if (next is null || time < next) next = time;
                 }
 
-                if (fire is not null && !paused && Armed(entry)) starts.Add((entry, fire));
+                if (fire is { } due2 && !paused && Armed(entry)) starts.Add((entry, due2.Trigger, due2.Due));
             }
         }
 
-        foreach (var (entry, trigger) in starts) Trigger(entry, trigger.KindName, null, entry.Definition.Prompt);
+        foreach (var (entry, trigger, due) in starts)
+            Trigger(entry, trigger.KindName, null, entry.Definition.Prompt, occurrence: Occurrence(trigger, due));
         if (LookAtCommands(now) is { } restart && (next is null || restart < next)) next = restart;
-        var wait = next is { } due2 ? due2 - now : LongestWait;
+        var wait = next is { } soonest ? soonest - now : LongestWait;
         return wait < TimeSpan.FromMilliseconds(250) ? TimeSpan.FromMilliseconds(250) : wait > LongestWait ? LongestWait : wait;
     }
+
+    /// <summary>What a schedule's due time is claimed as: the trigger and the time, in UTC to the second.</summary>
+    internal static string Occurrence(AutomationTrigger trigger, DateTimeOffset due)
+        => trigger.Key + "@" + due.ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ", System.Globalization.CultureInfo.InvariantCulture);
 
     /// <summary>
     /// Starts a run for a trigger, unless the previous run of the automation is still in progress, the automations
@@ -573,8 +638,9 @@ internal sealed partial class AutomationService : IAsyncDisposable
     /// Whether what triggers can wait for the run in progress to end, as an event does: nothing is then recorded.
     /// A time that is due does not wait: it is recorded as skipped.
     /// </param>
+    /// <param name="occurrence">What is due, claimed before the run starts when the host claims (<see cref="Occurrence"/>); null for nothing to claim.</param>
     /// <returns>Whether a run was started.</returns>
-    internal bool Trigger(AutomationEntry entry, string trigger, string? detail, string prompt, bool waits = false)
+    internal bool Trigger(AutomationEntry entry, string trigger, string? detail, string prompt, bool waits = false, string? occurrence = null)
     {
         bool busy;
         lock (_gate)
@@ -597,7 +663,21 @@ internal sealed partial class AutomationService : IAsyncDisposable
             return false;
         }
 
-        var start = BeginAsync(entry, trigger, detail, prompt, _stop.Token);
+        var runId = NewRunId();
+        if (occurrence is not null && _claims is not null && !_claims.TryClaim(entry.Id, occurrence, runId, _time.GetUtcNow()))
+        {
+            // Another run took this time already (fired twice, or caught up after a restart): it runs once.
+            var now = _time.GetUtcNow();
+            _state.Add(new AutomationRun(runId, entry.Id, now, trigger)
+            {
+                Name = entry.Definition.Name, ProjectId = entry.ProjectId, Detail = detail, Status = AutomationRun.Skipped,
+                Message = "This time was already claimed by another run.", EndedAt = now,
+            });
+            Changed?.Invoke();
+            return false;
+        }
+
+        var start = BeginAsync(entry, trigger, detail, prompt, _stop.Token, runId);
         lock (_gate)
         {
             _observers.RemoveAll(static task => task.IsCompleted);
@@ -608,12 +688,17 @@ internal sealed partial class AutomationService : IAsyncDisposable
     }
 
     // Records the run, starts its session and returns once the session exists; what follows is observed apart.
-    private async Task<AutomationRun?> BeginAsync(AutomationEntry entry, string trigger, string? detail, string prompt, CancellationToken cancellationToken)
+    private async Task<AutomationRun?> BeginAsync(AutomationEntry entry, string trigger, string? detail, string prompt, CancellationToken cancellationToken, string? runId = null)
     {
-        var run = new AutomationRun(NewRunId(), entry.Id, _time.GetUtcNow(), trigger) { Name = entry.Definition.Name, ProjectId = entry.ProjectId, Detail = detail };
+        var run = new AutomationRun(runId ?? NewRunId(), entry.Id, _time.GetUtcNow(), trigger) { Name = entry.Definition.Name, ProjectId = entry.ProjectId, Detail = detail };
         lock (_gate)
         {
-            if (_closed) return null;
+            if (_closed)
+            {
+                if (runId is not null) _claims?.Release(runId, _time.GetUtcNow());
+                return null;
+            }
+
             _running[entry.Id] = _running.GetValueOrDefault(entry.Id) + 1;
         }
 
@@ -679,6 +764,7 @@ internal sealed partial class AutomationService : IAsyncDisposable
         }
 
         var ended = _state.Update(runId, run => run with { Status = outcome.Status, Message = outcome.Message, EndedAt = _time.GetUtcNow(), SessionId = sessionId ?? run.SessionId });
+        _claims?.Release(runId, _time.GetUtcNow());
         if (waiting) Wake();
         Changed?.Invoke();
         return ended;
@@ -703,6 +789,7 @@ internal sealed partial class AutomationService : IAsyncDisposable
         AutomationSource[] sources =
         [
             new(_globalConfigPath, null, null),
+            .. AssignedSource is { } assigned ? [assigned] : Array.Empty<AutomationSource>(),
             .. live.Select(static project => new AutomationSource(ConfigPath(project.ProjectPath), project.Id, project.ProjectPath)),
         ];
         var reads = new FileRead[sources.Length];

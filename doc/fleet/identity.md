@@ -48,7 +48,7 @@ Pairing makes two devices trust each other's keys, with no account:
 - **Over SSH**: **Add a machine…** in the desktop installs or finds the node through the person's own SSH access and
   reads the pairing payload over that authenticated channel: nothing to scan or type.
 
-Each side records the other's key with what it may do (view, drive, start sessions, move sessions here), shows
+Each side records the other's key with what it may do (view, drive, start sessions, move sessions here, give it automations), shows
 **Paired machines** with **Revoke**, and announces a new pairing on its other paired devices.
 
 ## With a server

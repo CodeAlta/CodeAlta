@@ -29,7 +29,7 @@ What it is not:
 | `altanode join <server-url> [--token <enrollment>]` | Enrolls in a fleet: with an enrollment token, or by a device code a person approves. |
 | `altanode status` | Where the node listens, its paired devices, the sessions at work, its versions and its update, the service, and whether it will still run after a restart or a logout. Later: the fleet connections, the providers' readiness. |
 | `altanode logs [--follow] [--lines <n>]` | The node's log (`logs/altanode.log`), followed across its daily rolls. |
-| `altanode devices`, `revoke <device>`, `permissions <device> [--allow <list>] [--deny <list>]` | The devices paired with the node: name, short fingerprint, permissions (`view`, `drive`, `start`, `move`), paired and revoked dates. A revoked device is disconnected at once; one that loses a permission is disconnected and reconnects with what it may do. Without a running node, they change `fleet/trusted-devices.json`. |
+| `altanode devices`, `revoke <device>`, `permissions <device> [--allow <list>] [--deny <list>]` | The devices paired with the node: name, short fingerprint, permissions (`view`, `drive`, `start`, `move`, `automate`), paired and revoked dates. A revoked device is disconnected at once; one that loses a permission is disconnected and reconnects with what it may do. Without a running node, they change `fleet/trusted-devices.json`. |
 | `altanode projects [list]`, `add <path>`, `clone <url>`, `remove <project>` (`--space <space>`) | The projects of the node's catalog: an existing folder added, a repository cloned into `~/code/<host>/<owner>/<repo>` (the clone-on-demand of moves), a project removed from the catalog with its files left. Through the running node's local control (`control.projects.*`), which keeps a project that has sessions; otherwise on the catalog files of the profile. |
 | `altanode update [--version <v>] [--source <feed>] [--check] [--now]` | Downloads a version (the latest release, a prerelease when one runs), checks its hash, and switches to it when the node is idle; the new version runs on trial and is rolled back if it does not confirm ([deployment](deployment.md#updates)). Later: the version the fleet recommends. |
 | `altanode machines`, `connect <link>`, `remote <machine> info\|sessions\|history\|send\|create\|watch` | The client side, for testing until the desktop does it: the machines this profile paired with, pairing with a node from its link, and its sessions. They read only the device key and `fleet/paired-machines.json` (written under a lock file), so they run beside a desktop or a node on the same profile. |
@@ -113,6 +113,15 @@ labels, its local policy).
   run's signed automation version, its credential kind and its own local policy before starting it
   ([orchestration](orchestration.md)). It keeps the schedules assigned to it, to fire them while the server is
   unreachable.
+  - What a paired device assigns (`automations.put`, the `automate` permission, off at pairing) is kept apart from the
+    profile's own automations (`fleet/assigned-automations.toml`), with who assigned which fingerprint. It runs while
+    that device keeps the permission and only as it was assigned: a copy changed on the node by anything else does not
+    run. A command trigger is never taken from another device.
+  - Each due time is claimed once with a lease (`fleet/automation-claims.json`), so a time fired twice or caught up
+    after a restart runs once; a claim is never taken again (at most once).
+  - Before a run starts, the node reads its policy (`fleet/automation-policy.json`: automations on or off, credentials
+    `any` or `account` only) and derives the credential kind from how the provider starts; `unknown` is refused, and a
+    refused run is recorded with its reason, without a session.
 - **Statistics are counted on nodes.** The statistics engine runs headless too (today only in the desktop); the node
   publishes its facts as versioned rows ([statistics](statistics.md)).
 - **The node's host can ask.** Unlike today's headless runs of `altacli`, which grant everything (`FullTrust`), a node

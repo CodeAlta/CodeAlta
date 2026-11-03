@@ -18,24 +18,28 @@ public enum DevicePermissions
 
     /// <summary>Move sessions to this instance.</summary>
     Move = 8,
+
+    /// <summary>Give automations to this instance, which runs them by their triggers while the device is away.</summary>
+    Automate = 16,
 }
 
-/// <summary>The names of <see cref="DevicePermissions"/> as people and the node API write them: <c>view</c>, <c>drive</c>, <c>start</c>, <c>move</c>.</summary>
+/// <summary>The names of <see cref="DevicePermissions"/> as people and the node API write them: <c>view</c>, <c>drive</c>, <c>start</c>, <c>move</c>, <c>automate</c>.</summary>
 public static class DevicePermissionNames
 {
     /// <summary>Gets the names of the permissions, in their order.</summary>
-    public static IReadOnlyList<string> All { get; } = ["view", "drive", "start", "move"];
+    public static IReadOnlyList<string> All { get; } = ["view", "drive", "start", "move", "automate"];
 
     /// <summary>Names the permissions of a set, in their order.</summary>
     /// <param name="permissions">The set.</param>
     /// <returns>The names; empty for <see cref="DevicePermissions.None"/>.</returns>
     public static IReadOnlyList<string> Format(DevicePermissions permissions)
     {
-        var names = new List<string>(4);
+        var names = new List<string>(5);
         if (permissions.HasFlag(DevicePermissions.View)) names.Add("view");
         if (permissions.HasFlag(DevicePermissions.Drive)) names.Add("drive");
         if (permissions.HasFlag(DevicePermissions.Start)) names.Add("start");
         if (permissions.HasFlag(DevicePermissions.Move)) names.Add("move");
+        if (permissions.HasFlag(DevicePermissions.Automate)) names.Add("automate");
         return names;
     }
 
@@ -58,6 +62,7 @@ public static class DevicePermissionNames
                 case "drive": permissions |= DevicePermissions.Drive; break;
                 case "start": permissions |= DevicePermissions.Start; break;
                 case "move": permissions |= DevicePermissions.Move; break;
+                case "automate": permissions |= DevicePermissions.Automate; break;
                 default:
                     unknown = part;
                     permissions = DevicePermissions.None;
