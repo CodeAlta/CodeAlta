@@ -63,7 +63,7 @@ public sealed partial class FleetNodeService
                 throw new FleetException(FleetErrorCodes.InvalidParams, null, "An answer names a question and has at most 8192 characters.");
             return new AltaAskAnswer { QuestionIndex = answer.QuestionIndex, SelectedChoiceIndexes = [.. answer.Choices ?? []], FreeformText = answer.Text };
         }).ToArray();
-        return await Once(call, async () =>
+        return await Once(call, FleetNodeJsonContext.Default.FleetAnswerResult, async () =>
         {
             var head = _host.Commands.Asks.List(sessionId).Head;
             if (head is null || !string.Equals(head.Handle.AskId, parameters.AskId, StringComparison.Ordinal)) return new FleetAnswerResult("not_found");

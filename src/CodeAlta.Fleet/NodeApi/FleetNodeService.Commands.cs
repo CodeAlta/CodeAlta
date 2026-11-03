@@ -21,7 +21,7 @@ public sealed partial class FleetNodeService
         if (parameters.Title is { } title && (string.IsNullOrWhiteSpace(title) || title.Length > MaxTitleLength || title.Any(char.IsControl)))
             throw new FleetException(FleetErrorCodes.InvalidParams, null, $"A title has 1 to {MaxTitleLength} characters.");
         var retryKey = RetryKey(call);
-        return Once(call, () => CreateSessionCoreAsync(retryKey, parameters));
+        return Once(call, FleetNodeJsonContext.Default.FleetCreateSessionResult, () => CreateSessionCoreAsync(retryKey, parameters));
     }
 
     private async Task<FleetCreateSessionResult> CreateSessionCoreAsync(string retryKey, FleetCreateSessionParams parameters)
@@ -117,7 +117,7 @@ public sealed partial class FleetNodeService
         RequireWork();
         RequirePrompt(parameters.Text);
         _ = await RequireRemoteSessionAsync(parameters.SessionId, cancellationToken).ConfigureAwait(false);
-        return await Once(call, async () =>
+        return await Once(call, FleetNodeJsonContext.Default.FleetQueueResult, async () =>
         {
             var session = await RequireSessionAsync(parameters.SessionId, CancellationToken.None).ConfigureAwait(false);
             var item = await _host.RuntimeService.QueuePromptAsync(session, parameters.Text, "queue", null, CancellationToken.None).ConfigureAwait(false);
