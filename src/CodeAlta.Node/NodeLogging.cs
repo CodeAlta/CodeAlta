@@ -18,7 +18,13 @@ internal static class NodeLogging
     /// <summary>Sets up the logging of the process, once; false when it was set up already.</summary>
     /// <param name="stateRoot">The state root of the node.</param>
     /// <param name="console">Whether the messages are written to standard output too.</param>
-    public static bool Initialize(string stateRoot, bool console)
+    public static bool Initialize(string stateRoot, bool console) => Initialize(stateRoot, console, null);
+
+    /// <summary>Sets up the logging of the process, once, with a writer more (the telemetry's); false when it was set up already.</summary>
+    /// <param name="stateRoot">The state root of the node.</param>
+    /// <param name="console">Whether the messages are written to standard output too.</param>
+    /// <param name="telemetry">A writer that sends the records to the telemetry of the node, or null.</param>
+    public static bool Initialize(string stateRoot, bool console, LogWriter? telemetry)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(stateRoot);
         if (LogManager.IsInitialized) return false;
@@ -38,6 +44,8 @@ internal static class NodeLogging
             FailureMode = FileLogWriterFailureMode.Ignore,
         }));
         if (console) config.RootLogger.Writers.Add(new StreamLogWriter(Console.OpenStandardOutput(), ownsStream: false) { AutoFlush = true });
+        // The records the log keeps go to the collector too, when the telemetry of the node sends logs.
+        if (telemetry is not null) config.RootLogger.Writers.Add(telemetry);
         config.Loggers.Add("CodeAlta", LogLevel.Info);
         LogManager.InitializeForAsync(config);
         AppDomain.CurrentDomain.UnhandledException += static (_, args) =>

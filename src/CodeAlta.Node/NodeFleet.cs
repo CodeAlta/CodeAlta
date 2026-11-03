@@ -81,7 +81,18 @@ internal sealed class NodeFleet : IAsyncDisposable
     /// <param name="requestStop">What stops the node gracefully (<c>altanode uninstall</c> on Windows); null for none.</param>
     /// <returns>The fleet part of the node.</returns>
     /// <exception cref="SocketException">The address cannot be bound.</exception>
-    public static NodeFleet Start(NodeHost node, NodeListenOptions listen, string name, string version, Action? requestStop)
+    public static NodeFleet Start(NodeHost node, NodeListenOptions listen, string name, string version, Action? requestStop) => Start(node, listen, name, version, requestStop, null);
+
+    /// <summary>Starts the node API and its listener, with the instruments of its requests and moves.</summary>
+    /// <param name="node">The running node.</param>
+    /// <param name="listen">Where to listen.</param>
+    /// <param name="name">The name of the node.</param>
+    /// <param name="version">The version of CodeAlta it runs.</param>
+    /// <param name="requestStop">What stops the node gracefully (<c>altanode uninstall</c> on Windows); null for none.</param>
+    /// <param name="metrics">The instruments of the node API; null for none.</param>
+    /// <returns>The fleet part of the node.</returns>
+    /// <exception cref="SocketException">The address cannot be bound.</exception>
+    public static NodeFleet Start(NodeHost node, NodeListenOptions listen, string name, string version, Action? requestStop, Fleet.Telemetry.FleetMetrics? metrics)
     {
         ArgumentNullException.ThrowIfNull(node);
         ArgumentNullException.ThrowIfNull(listen);
@@ -96,6 +107,7 @@ internal sealed class NodeFleet : IAsyncDisposable
             {
                 Host = node.Host, Identity = identity, TrustedDevices = new TrustedDeviceStore(catalog), Name = name, Version = version,
                 AcceptsWork = () => node.AcceptsWork, PairingAddresses = () => addresses, RequestStop = requestStop, CloneRoot = node.Options.CloneRoot,
+                Metrics = metrics,
             });
             string? file = null;
             // Without a listener the node API still serves the channels its servers relay.
@@ -284,7 +296,18 @@ internal sealed class NodeServers : IAsyncDisposable
     /// <param name="configure">What changes the options of each connector, for tests; null for none.</param>
     /// <returns>The connections; dispose them before the node stops.</returns>
     public static NodeServers Start(NodeHost node, FleetNodeService? service, string name, string version,
-        Func<Fleet.Server.FleetConnectorOptions, Fleet.Server.FleetConnectorOptions>? configure = null)
+        Func<Fleet.Server.FleetConnectorOptions, Fleet.Server.FleetConnectorOptions>? configure = null) => Start(node, service, name, version, configure, null);
+
+    /// <summary>Starts the connections of the servers of the profile, which relay session channels to the node API and push the fleet's telemetry setting.</summary>
+    /// <param name="node">The running node.</param>
+    /// <param name="service">The node API that serves the relayed channels; null declines every relay.</param>
+    /// <param name="name">The name of the node.</param>
+    /// <param name="version">The version of CodeAlta it runs.</param>
+    /// <param name="configure">What changes the options of each connector, for tests; null for none.</param>
+    /// <param name="telemetry">The telemetry of the node, which verifies and applies the setting a server pushes; null ignores it.</param>
+    /// <returns>The connections; dispose them before the node stops.</returns>
+    public static NodeServers Start(NodeHost node, FleetNodeService? service, string name, string version,
+        Func<Fleet.Server.FleetConnectorOptions, Fleet.Server.FleetConnectorOptions>? configure, NodeTelemetry? telemetry)
     {
         ArgumentNullException.ThrowIfNull(node);
         var catalog = node.Host.CatalogOptions;
@@ -299,6 +322,8 @@ internal sealed class NodeServers : IAsyncDisposable
             Source = source,
             Configure = configure,
             AcceptRelay = service is null ? null : (connector, _, stream, token) => ServeRelayAsync(service, connector, stream, token),
+            TelemetrySettings = telemetry is null ? null : telemetry.AcceptAsync,
+            Metrics = telemetry?.Metrics,
         });
         connections.Start();
         return new NodeServers(identity, source, connections);

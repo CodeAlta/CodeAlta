@@ -53,6 +53,9 @@ internal sealed class NodeApplication
     /// <summary>Gets the HTTP handler of the calls to a CodeAlta Server (<c>join</c>), for tests; null for the usual one.</summary>
     internal HttpMessageHandler? ServerHandler { get; init; }
 
+    /// <summary>Gets what changes the options of the telemetry of <c>run</c>, for tests (their environment, a short interval); null for none.</summary>
+    internal Func<NodeTelemetryOptions, NodeTelemetryOptions>? ConfigureTelemetry { get; init; }
+
     /// <summary>Gets what changes the options of the connectors of the servers of <c>run</c>, for tests; null for none.</summary>
     internal Func<CodeAlta.Fleet.Server.FleetConnectorOptions, CodeAlta.Fleet.Server.FleetConnectorOptions>? ConfigureConnector { get; init; }
 
@@ -195,13 +198,21 @@ internal sealed class NodeApplication
         }
 
         var ownsLogging = false;
+        NodeTelemetry? telemetry = null;
+        NodeHost? running = null;
+        NodeFleet? listening = null;
+        NodeServers? linked = null;
         try
         {
             var hostOptions = new NodeHostOptions
             {
                 Profile = profile, Offline = options.Offline, StartPlugins = !options.NoPlugins,
-                // The log of the state root is opened once its lock is held: a refused start leaves it to its instance.
-                Admitted = () => ownsLogging = InitializeLogging && NodeLogging.Initialize(profile.StateRoot, console: true),
+                // The log and the telemetry of the state root start once its lock is held: a refused start leaves them to its instance.
+                Admitted = () =>
+                {
+                    telemetry = StartTelemetry(profile, () => running, () => listening, () => linked);
+                    ownsLogging = InitializeLogging && NodeLogging.Initialize(profile.StateRoot, console: true, telemetry.LogWriter);
+                },
             };
             if (ConfigureHost is not null) hostOptions = ConfigureHost(hostOptions);
             using var stopRequested = new CancellationTokenSource();
@@ -227,13 +238,15 @@ internal sealed class NodeApplication
                 }
             }
 
+            running = node;
             await using (node.ConfigureAwait(false))
             {
                 NodeFleet fleet;
                 try
                 {
                     // The node API runs with or without a listener (--no-listen): the servers the node joined relay channels to it.
-                    fleet = NodeFleet.Start(node, listen, name, Version, stopRequested.Cancel);
+                    fleet = NodeFleet.Start(node, listen, name, Version, stopRequested.Cancel, telemetry?.Metrics);
+                    listening = fleet;
                 }
                 catch (SocketException exception)
                 {
@@ -244,7 +257,8 @@ internal sealed class NodeApplication
 
                 using var fleetLifetime = new FleetLifetime(fleet);
                 // The servers the node joined (altanode join): one control connection each, beside the listener or without it.
-                await using var servers = NodeServers.Start(node, fleet.Service, name, Version, ConfigureConnector);
+                await using var servers = NodeServers.Start(node, fleet.Service, name, Version, ConfigureConnector, telemetry);
+                linked = servers;
                 using var signals = new NodeSignals(stopRequested.Cancel, hurry.Cancel, static () => Environment.Exit(NodeExitCodes.Failure));
                 Started?.Invoke(node, stopRequested.Cancel);
                 await _output.WriteLineAsync($"CodeAlta Node runs on {profile.StateRoot}. Ctrl+C stops it.").ConfigureAwait(false);
@@ -270,8 +284,24 @@ internal sealed class NodeApplication
         }
         finally
         {
+            // The last spans, metrics and records go before the log closes.
+            telemetry?.Dispose();
             if (ownsLogging) NodeLogging.Shutdown();
         }
+    }
+
+    // The telemetry of the node: its own file, its variables and the settings its servers pushed, with the gauges of what it runs.
+    private NodeTelemetry StartTelemetry(CodeAltaInstanceProfile profile, Func<NodeHost?> node, Func<NodeFleet?> fleet, Func<NodeServers?> servers)
+    {
+        var options = new NodeTelemetryOptions
+        {
+            FleetRoot = new CodeAlta.Catalog.CatalogOptions { GlobalRoot = profile.GlobalRoot, StateRoot = profile.StateRoot }.FleetRoot,
+            Version = Version,
+            SessionsWorking = () => node()?.Host.RuntimeService.CountSessionsAtWork() ?? 0,
+            ConnectedDevices = () => fleet()?.Service.ConnectionCount ?? 0,
+            ServersOnline = () => servers()?.Connections.Connections.Count(static connection => connection.Connector?.State == CodeAlta.Fleet.Server.FleetConnectorState.Online) ?? 0,
+        };
+        return new NodeTelemetry(ConfigureTelemetry?.Invoke(options) ?? options);
     }
 
     // Stops the fleet part of the node before the node, and on any way out of run.

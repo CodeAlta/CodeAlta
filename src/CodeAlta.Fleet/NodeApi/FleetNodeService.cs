@@ -51,6 +51,9 @@ public sealed class FleetNodeServiceOptions
 
     /// <summary>Gets how many results of side-effecting calls the node keeps for their retries; fewer in tests.</summary>
     internal int RetryReceiptCapacity { get; init; } = FleetRetryReceipts.DefaultResultCapacity;
+
+    /// <summary>Gets the instruments of the requests and the moves; null for none.</summary>
+    public Telemetry.FleetMetrics? Metrics { get; init; }
 }
 
 /// <summary>
@@ -331,6 +334,32 @@ public sealed partial class FleetNodeService : IAsyncDisposable
     {
         caller.Connection.RegisterRequestHandler(method, async (context, cancellationToken) =>
         {
+            // A span per request: the method, the device in short and the outcome; never the parameters.
+            var started = System.Diagnostics.Stopwatch.GetTimestamp();
+            var activity = _options.Metrics?.StartNodeApiRequest(method, caller.DeviceId);
+            string? failure = null;
+            try
+            {
+                return await HandleAsync(context, cancellationToken).ConfigureAwait(false);
+            }
+            catch (FleetException exception)
+            {
+                failure = exception.Error.Code;
+                throw;
+            }
+            catch (Exception exception) when (exception is not OperationCanceledException)
+            {
+                failure = FleetErrorCodes.InternalError;
+                throw;
+            }
+            finally
+            {
+                _options.Metrics?.EndNodeApiRequest(activity, method, started, failure);
+            }
+        });
+
+        async ValueTask<JsonElement?> HandleAsync(FleetRequestContext context, CancellationToken cancellationToken)
+        {
             var device = Authorize(caller, access);
             TParams? parameters;
             try
@@ -361,7 +390,7 @@ public sealed partial class FleetNodeService : IAsyncDisposable
             }
 
             return JsonSerializer.SerializeToElement(result, resultType);
-        });
+        }
     }
 
     // Read at every call: a device revoked or whose permissions changed since its channel opened is refused at once.

@@ -28,5 +28,7 @@
   <ItemGroup>
     <!-- Resolves the temporary directory of the test process, which macOS places below a symbolic link. -->
     <Compile Include="..\CodeAlta.Tests\LinkFreeTempDirectory.cs" Link="LinkFreeTempDirectory.cs" />
+    <!-- The collector of the tests of the server, which records what a node exports. -->
+    <Compile Include="..\CodeAlta.Server.Tests\OtlpReceiver.cs" Link="OtlpReceiver.cs" />
   </ItemGroup>
 </Project>
