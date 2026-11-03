@@ -83,7 +83,7 @@ internal sealed class NodeApplication
             var logs = new NodeLogCommand(_output, _error) { Stop = ClientStop };
             return await Create(new NodeCommandHandlers(RunNodeAsync, service.StatusAsync, NotImplementedAsync, client.PairAsync, client.MachinesAsync,
                     client.ConnectAsync, client.RemoteAsync, service.InstallAsync, service.UninstallAsync, logs.RunAsync, devices.DevicesAsync,
-                    devices.RevokeAsync, devices.PermissionsAsync))
+                    devices.RevokeAsync, devices.PermissionsAsync, client.MovesAsync))
                 .RunAsync(args, new CommandRunConfig { Out = _output, Error = _error }).ConfigureAwait(false);
         }
         catch (Exception exception)

@@ -71,6 +71,7 @@ internal sealed class NodeRunOptions
 /// <param name="Devices">Lists the devices paired with the node.</param>
 /// <param name="Revoke">Revokes a paired device.</param>
 /// <param name="Permissions">Shows or changes what a paired device may do.</param>
+/// <param name="Moves">Lists the moves of sessions this profile recorded.</param>
 internal sealed record NodeCommandHandlers(
     Func<NodeRunOptions, ValueTask<int>> Run,
     Func<NodeProfileOptions, ValueTask<int>> Status,
@@ -84,13 +85,14 @@ internal sealed record NodeCommandHandlers(
     Func<NodeLogOptions, ValueTask<int>> Logs,
     Func<NodeDeviceOptions, ValueTask<int>> Devices,
     Func<NodeDeviceOptions, ValueTask<int>> Revoke,
-    Func<NodeDeviceOptions, ValueTask<int>> Permissions)
+    Func<NodeDeviceOptions, ValueTask<int>> Permissions,
+    Func<NodeProfileOptions, ValueTask<int>> Moves)
 {
     /// <summary>Handlers that do nothing, for a tree that only parses.</summary>
     public static NodeCommandHandlers Placeholders { get; } = new(static _ => ValueTask.FromResult(0), static _ => ValueTask.FromResult(0),
         static _ => ValueTask.FromResult(0), static _ => ValueTask.FromResult(0), static _ => ValueTask.FromResult(0), static _ => ValueTask.FromResult(0),
         static _ => ValueTask.FromResult(0), static _ => ValueTask.FromResult(0), static _ => ValueTask.FromResult(0), static _ => ValueTask.FromResult(0),
-        static _ => ValueTask.FromResult(0), static _ => ValueTask.FromResult(0), static _ => ValueTask.FromResult(0));
+        static _ => ValueTask.FromResult(0), static _ => ValueTask.FromResult(0), static _ => ValueTask.FromResult(0), static _ => ValueTask.FromResult(0));
 }
 
 /// <summary>The command tree of <c>altanode</c> (<c>doc/fleet/node.md</c>).</summary>
@@ -306,9 +308,16 @@ internal static class NodeCommandLine
             new CommandUsage("       {NAME} <machine> send <session> <prompt...>"),
             new CommandUsage("       {NAME} <machine> create [--project <id>] <prompt...>"),
             new CommandUsage("       {NAME} <machine> watch <session> [--count <n>]"),
+            new CommandUsage("       {NAME} <machine> move <session> [--move-id <id>] [--clone]"),
             _,
             "The machine is the name or the device id altanode machines shows. Runs",
             "beside CodeAlta Desktop or a node on the same profile.",
+            _,
+            "move gives a session of the machine to the node of this profile, which",
+            "must run (altanode run) and have a project of the session's repository",
+            "(or clone it, with --clone). The machine must let this device move",
+            "sessions (altanode permissions <device> --allow move, on the machine).",
+            "A move that stopped goes on with the same --move-id.",
             _,
             "Options:",
             { "limit=", "The most sessions {N} a list shows (default 50)", v => remote.Limit = v },
@@ -316,6 +325,8 @@ internal static class NodeCommandLine
             { "forward", "Read the history from its start", v => remote.Forward = v is not null },
             { "count=", "Stop watching after {N} updates", v => remote.Count = v },
             { "project=", "The project {ID} of a new session", v => remote.Project = v },
+            { "move-id=", "The {ID} of a move to go on with", v => remote.MoveId = v },
+            { "clone", "Let the node clone the repository of the session when it has none", v => remote.Clone = v is not null },
         };
         AddProfile(remoteCommand, remote.Profile);
         remoteCommand.Add("<>", "The machine, the command and its arguments");
@@ -324,6 +335,19 @@ internal static class NodeCommandLine
             remote.Words.AddRange(words);
             return handlers.Remote(remote);
         });
+
+        var moves = new NodeProfileOptions();
+        var movesCommand = new Command("moves", "List the moves of sessions to and from this profile")
+        {
+            new CommandUsage("Usage: {NAME} [options]"),
+            _,
+            "Reads the records of the moves under fleet/moves of the state root, the",
+            "latest first; runs beside CodeAlta Desktop or a node on the same profile.",
+            _,
+            "Options:",
+        };
+        AddProfile(movesCommand, moves);
+        movesCommand.Add((_, _) => handlers.Moves(moves));
 
         var joinCommand = Stub(handlers, "join", "Enroll in a fleet", "Usage: {NAME} <server-url> [--token <enrollment>]");
         joinCommand.Add("token=", "The enrollment {TOKEN}", static _ => { });
@@ -371,6 +395,7 @@ internal static class NodeCommandLine
             machinesCommand,
             connectCommand,
             remoteCommand,
+            movesCommand,
             updateCommand,
             _,
             "Exit codes:",

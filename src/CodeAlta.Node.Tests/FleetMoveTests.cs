@@ -169,6 +169,31 @@ public sealed class FleetMoveTests
         Assert.IsNull(await fixture.ViewerHost.RuntimeService.TryGetRecoverableSessionAsync(created.SessionId, token), "Nothing reached the viewer.");
     }
 
+    [TestMethod]
+    public async Task Cli_RemoteMove_BringsASessionToTheNodeOfItsProfile_AndMovesListsIt()
+    {
+        await using var fixture = await MoveFixture.StartAsync(TestContext.CancellationToken);
+        var token = TestContext.CancellationToken;
+        await using var second = await fixture.StartSecondNodeAsync("node-b", token);
+        var sessionId = await fixture.CreateNodeSessionAsync(token);
+        var output = new StringWriter();
+        var error = new StringWriter();
+        var cli = new NodeApplication(output, error) { InitializeLogging = false, ClientStop = token, ServiceEnvironment = static () => null };
+
+        var code = await cli.RunAsync(["remote", "test-node", "move", sessionId, "--data-root", second.DataRoot]);
+
+        Assert.AreEqual(NodeExitCodes.Success, code, error + "" + output);
+        StringAssert.Contains(output.ToString(), "The session runs on node-b now");
+        Assert.IsNotNull(await second.Node.Host.RuntimeService.GetSessionWorktreeAsync(sessionId), "The node of the profile took the session.");
+        Assert.IsTrue(fixture.Node.Host.RuntimeService.Relinquishments.Read(sessionId)!.IsRelinquished);
+
+        var listed = new StringWriter();
+        Assert.AreEqual(NodeExitCodes.Success, await new NodeApplication(listed, error) { InitializeLogging = false, ServiceEnvironment = static () => null }
+            .RunAsync(["moves", "--data-root", second.DataRoot]));
+        StringAssert.Contains(listed.ToString(), "target finished");
+        StringAssert.Contains(listed.ToString(), sessionId);
+    }
+
     private static async Task<OwnedSessionCommandResult> TrySendOnViewerAsync(MoveFixture fixture, string sessionId)
     {
         var receipt = fixture.ViewerHost.Commands.AdmitSend(new(Guid.NewGuid().ToString("N"), sessionId, "Back here?")).Receipt!;
@@ -358,6 +383,24 @@ internal sealed class MoveFixture : IAsyncDisposable
         }
     }
 
+    /// <summary>Starts a second node on a profile of its own, with a clone as its project, paired with the first one, which lets it move sessions.</summary>
+    public async Task<SecondNode> StartSecondNodeAsync(string name, CancellationToken cancellationToken)
+    {
+        var root = new NodeTestRoot();
+        var project = Path.Combine(root.Root, "project-b");
+        Git(root.Root, "clone", "-q", Path.Combine(_root.Root, "origin.git"), project);
+        Configure(project);
+        var provider = new ScriptedNodeProvider();
+        var node = await NodeHost.StartAsync(root.Options() with { CurrentProjectPath = project, ConfigureModelProviders = provider.Register }, cancellationToken);
+        await node.Host.ProjectCatalog.EnsurePersistedAsync(node.Host.CurrentProject, cancellationToken);
+        var fleet = NodeFleet.Start(node, new NodeListenOptions { Port = 0 }, name, "1.0.0");
+        using var identity = DeviceIdentity.LoadOrCreate(node.Host.CatalogOptions);
+        var (offer, _) = Fleet.Service.Pairing.CreateOffer("test-node", Fleet.Addresses, TimeSpan.FromMinutes(1));
+        await FleetNodeClient.PairAsync(offer, identity, name, new PairedMachineStore(node.Host.CatalogOptions.FleetRoot), cancellationToken);
+        await Fleet.Service.SetPermissionsAsync(identity.DeviceId, DevicePermissions.View | DevicePermissions.Drive | DevicePermissions.Move);
+        return new SecondNode(root, node, fleet);
+    }
+
     public void Write(string root, string relative, string content)
     {
         var path = Path.Combine(root, relative.Replace('/', Path.DirectorySeparatorChar));
@@ -398,5 +441,28 @@ internal sealed class MoveFixture : IAsyncDisposable
         process.WaitForExit();
         Assert.AreEqual(0, process.ExitCode, $"git {string.Join(' ', arguments)}: {error.Result}");
         return output;
+    }
+}
+
+/// <summary>A second node, on a profile of its own.</summary>
+internal sealed class SecondNode(NodeTestRoot root, NodeHost node, NodeFleet fleet) : IAsyncDisposable
+{
+    public NodeHost Node { get; } = node;
+
+    public string DataRoot => root.DataRoot;
+
+    public async ValueTask DisposeAsync()
+    {
+        await fleet.DisposeAsync();
+        await Node.DisposeAsync();
+        try
+        {
+            foreach (var file in Directory.EnumerateFiles(root.Root, "*", SearchOption.AllDirectories)) File.SetAttributes(file, FileAttributes.Normal);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+        }
+
+        root.Dispose();
     }
 }
