@@ -89,6 +89,9 @@ internal sealed class FakeNuGetFeed : HttpMessageHandler
 
     public bool PagedRegistration { get; init; }
 
+    /// <summary>Gets whether the registrations and the catalog answer gzip with <c>Content-Encoding: gzip</c>, as nuget.org's RegistrationsBaseUrl/3.6.0 does.</summary>
+    public bool GzipRegistrations { get; init; }
+
     public List<string> Requests { get; } = [];
 
     public void Add(string packageId, string version, byte[] package, bool listed = true, string? hash = null)
@@ -139,10 +142,21 @@ internal sealed class FakeNuGetFeed : HttpMessageHandler
                 json = $"{{\"packageHash\":\"{entry.Hash}\",\"packageHashAlgorithm\":\"SHA512\"}}";
         }
 
-        var response = json is not null ? new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(json, Encoding.UTF8, "application/json") }
+        var response = json is not null ? new HttpResponseMessage(HttpStatusCode.OK) { Content = JsonContent(json, GzipRegistrations && !path.StartsWith("/v3/", StringComparison.Ordinal) && !path.StartsWith("/flat/", StringComparison.Ordinal)) }
             : bytes is not null ? new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent(bytes) }
             : new HttpResponseMessage(HttpStatusCode.NotFound);
         return Task.FromResult(response);
+    }
+
+    private static HttpContent JsonContent(string json, bool gzip)
+    {
+        if (!gzip) return new StringContent(json, Encoding.UTF8, "application/json");
+        using var buffer = new MemoryStream();
+        using (var compressed = new GZipStream(buffer, CompressionMode.Compress, leaveOpen: true)) compressed.Write(Encoding.UTF8.GetBytes(json));
+        var content = new ByteArrayContent(buffer.ToArray());
+        content.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/json");
+        content.Headers.ContentEncoding.Add("gzip");
+        return content;
     }
 }
 
