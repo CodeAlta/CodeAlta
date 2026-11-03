@@ -55,6 +55,17 @@ export function pairingWords(words: string | null | undefined): string[] {
   return (words ?? "").split(/\s+/u).filter(Boolean);
 }
 
+/** The page of Settings that opens the page of a paired machine (`machines/<id>`), for `settingsNavigation`. */
+export function machinePageLink(machineId: string): string {
+  return `machines/${machineId}`;
+}
+
+/** The machine a page of Settings names (`machines/<id>`); null for another page. */
+export function readMachinePageLink(page: string): string | null {
+  const match = /^machines\/([^/]{1,64})$/u.exec(page);
+  return match ? match[1] : null;
+}
+
 /** The machines in the order of the page: online ones first, then by name. */
 export function orderedMachines(machines: readonly MachineView[]): MachineView[] {
   const rank = (machine: MachineView) => ({ online: 0, connecting: 1, offline: 2, unauthorized: 3 })[machineState(machine)];

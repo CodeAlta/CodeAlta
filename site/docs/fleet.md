@@ -268,7 +268,7 @@ To join the server of your company, open **Settings** > **Fleet** > **Server** a
 
 A space publishes to a server only when you choose it: **Settings** > **Spaces** > the space > **General** > **Server**. `altanode join` links the default space of the node (`--space` chooses others). A session made **Private** in its options (the Agent chip, **More options**) is never published; one made Private later, or whose space you unlink, is removed from the server.
 
-The **Fleet** canvas (`/fleet`) shows the machines of the server and their sessions, with their titles, as they change. A session of this computer, of a paired machine or of a node of the server opens with **Open**; the others are shown only. `altanode status` says whether the node is connected to its server.
+The **Fleet** canvas (`/fleet`) shows the machines of the server and their sessions, with their titles, as they change; without a server, it shows the machines paired with this computer. A session of this computer, of a paired machine or of a node of the server opens with **Open**; the others are shown only. The name of a paired machine opens its page. `altanode status` says whether the node is connected to its server.
 
 ### Reach machines through the server
 
