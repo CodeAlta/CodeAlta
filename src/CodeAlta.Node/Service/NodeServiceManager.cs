@@ -176,7 +176,8 @@ internal sealed class NodeServiceManager(NodeServiceEnvironment environment)
         var env = Environment;
         var task = NodeServiceDefinition.WindowsTaskName(spec.Name);
         var user = env.UserId ?? env.UserDisplayName ?? env.UserName;
-        var conhost = Path.Combine(env.WindowsDirectory ?? @"C:\Windows", "System32", "conhost.exe");
+        // A path of Windows, written with its separator whatever the OS that makes the plan.
+        var conhost = (env.WindowsDirectory ?? @"C:\Windows").TrimEnd('\\', '/') + @"\System32\conhost.exe";
         var file = Path.Combine(env.TempDirectory, $"altanode-task-{Guid.NewGuid():N}.xml");
         return new NodeServicePlan
         {
