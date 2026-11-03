@@ -10,10 +10,36 @@ namespace CodeAlta.Node;
 
 /// <summary>
 /// The built-in plugins of a node: those that run without a window (Git, Jira, MCP, ACP, Codex CLI), as
-/// <c>altacli</c> has them. The browser and the statistics come with their own parts of the fleet.
+/// <c>altacli</c> has them, and the statistics of its sessions. The browser comes with its own part of the fleet.
 /// </summary>
 internal static class NodeBuiltInPlugins
 {
+    /// <summary>The id of the Statistics plugin.</summary>
+    public const string StatisticsId = "statistics";
+
+    /// <summary>The built-in plugins of a node whose sessions are in the state root of <paramref name="catalog"/>.</summary>
+    /// <param name="catalog">The folders of the node.</param>
+    /// <returns>The plugins: <see cref="All"/> and the Statistics plugin, which counts the sessions of the node.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="catalog"/> is null.</exception>
+    public static IReadOnlyList<BuiltInPluginDefinition> For(CodeAlta.Catalog.CatalogOptions catalog)
+    {
+        ArgumentNullException.ThrowIfNull(catalog);
+        var journals = new CodeAlta.Agent.Runtime.FileSystemSessionJournalCatalog(new CodeAlta.Agent.Runtime.AgentRuntimePathLayout(catalog.StateRoot));
+        return
+        [
+            .. All,
+            new()
+            {
+                Id = StatisticsId, DisplayName = "Statistics",
+                Description = "Keeps the statistics of the sessions of the node, which it publishes to the servers of its spaces.",
+                PluginType = typeof(CodeAlta.Plugin.Statistics.StatisticsPlugin),
+                Factory = () => CodeAlta.Plugin.Statistics.StatisticsPlugin.CreateForHost(journals),
+                Frontends = PluginFrontends.All | PluginFrontends.Cli,
+            },
+        ];
+    }
+
+    /// <summary>The built-in plugins of a node that need nothing of its folders.</summary>
     public static IReadOnlyList<BuiltInPluginDefinition> All { get; } =
     [
         new()

@@ -173,7 +173,7 @@ public sealed class NodeHost : IAsyncDisposable
             // declare the command-line application.
             StartPlugins = options.StartPlugins,
             PluginFrontend = PluginFrontends.Cli,
-            PluginBuiltIns = NodeBuiltInPlugins.All,
+            PluginBuiltIns = NodeBuiltInPlugins.For(catalog),
             RawArguments = [],
             ConfigureModelProviders = options.ConfigureModelProviders ?? (registry => ConfiguredModelProviderRegistryBuilder.RegisterConfiguredProviders(
                 registry, new CodeAltaConfigStore(catalog), profile.GlobalRoot, modelsDev, pluginProviderTypes)),

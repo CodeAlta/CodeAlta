@@ -2,7 +2,8 @@
 
 The Statistics plugin (`src/CodeAlta.Plugin.Statistics`) turns session journals into numbers: how much was spent, in
 time, tokens, cost and tool calls, by provider, model, project, space and session, over any period. The timeline
-cards of a turn work in both applications; the store, the history and the canvas run in CodeAlta Desktop only.
+cards of a turn work in both applications; the store and the history run in CodeAlta Desktop and CodeAlta Node, the
+canvas in CodeAlta Desktop only.
 
 | Piece | Where | Role |
 | --- | --- | --- |
@@ -87,8 +88,9 @@ arrived before its record was written, therefore costs nothing.
 ## The history and the flow
 
 The engine runs where the plugin has the journals of the instance and a database: CodeAlta Desktop
-(`StatisticsPlugin.CreateForDesktop`). The TUI runs none; the desktop catches up what the terminal wrote at its next
-start.
+(`StatisticsPlugin.CreateForDesktop`) and CodeAlta Node (`StatisticsPlugin.CreateForHost`, whatever the frontend the
+host gives its plugins). The TUI runs none; the desktop catches up what the terminal wrote at its next start. A host
+where nobody is asked starts with the choice "from today", made for it and kept.
 
 - **Nothing is read before the user chooses** how much history to read (everything, the last N days, or from today).
   The choice, its floor, a pause and a stop survive restarts. Reading more history later replaces the sessions read
