@@ -113,4 +113,13 @@ public static class CoordinatorErrorCodes
 
     /// <summary>A session fact or an inventory that does not read.</summary>
     public const string PublicationInvalid = "publication.invalid";
+
+    /// <summary>The person has a metadata key at that epoch already: read it and add wraps instead.</summary>
+    public const string MetadataKeyExists = "metadata_key.exists";
+
+    /// <summary>No metadata key of the person has this id.</summary>
+    public const string MetadataKeyNotFound = "metadata_key.not_found";
+
+    /// <summary>A wrap of a metadata key that does not read, or names a device that may not have it.</summary>
+    public const string MetadataKeyInvalid = "metadata_key.invalid";
 }

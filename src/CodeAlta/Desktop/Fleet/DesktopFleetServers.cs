@@ -233,7 +233,10 @@ internal sealed class DesktopFleetServers : IAsyncDisposable
     public async Task<DeviceDto> ApproveAsync(string linkId, string deviceId, CancellationToken cancellationToken)
     {
         using var client = Client(linkId);
-        return await client.ApproveAsync(deviceId, cancellationToken).ConfigureAwait(false);
+        var approved = await client.ApproveAsync(deviceId, cancellationToken).ConfigureAwait(false);
+        // The approved device gets its copy of the metadata key at the next publication of this computer.
+        Volatile.Read(ref _connections)?.Find(linkId)?.Connector?.RefreshKeys();
+        return approved;
     }
 
     /// <summary>Revokes a device of a server, or refuses a pending one.</summary>

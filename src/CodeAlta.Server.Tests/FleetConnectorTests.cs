@@ -159,6 +159,42 @@ public sealed class FleetConnectorTests
     }
 
     [TestMethod]
+    public async Task TitlesArePublishedSealedWithTheKeyOfThePersonAndOpenOnItsDevices()
+    {
+        await using var fleet = await FleetFixture.StartAsync();
+        var desktopKeys = new FleetMetadataKeyring(fleet.Server.BaseAddress, fleet.DesktopKey);
+        var nodeKeys = new FleetMetadataKeyring(fleet.Server.BaseAddress, fleet.NodeKey);
+        // A node never makes the key: it waits for the copy a controller device of its person gives it.
+        Assert.IsNull(await nodeKeys.RefreshAsync(CancellationToken.None));
+        Assert.AreEqual(0, (await fleet.Desktop.ListMetadataKeysAsync()).Count);
+        var key = await desktopKeys.RefreshAsync(CancellationToken.None);
+        Assert.IsNotNull(key);
+        var made = (await fleet.Desktop.ListMetadataKeysAsync()).Single();
+        CollectionAssert.AreEquivalent(new[] { fleet.DesktopKey.DeviceId, fleet.NodeKey.DeviceId }, made.WrappedTo.ToArray());
+        Assert.AreEqual(key.Id, (await desktopKeys.RefreshAsync(CancellationToken.None))!.Id, "read again, the same key");
+
+        var source = new FakeSource();
+        source.Set(Session("s1", "work") with { Title = "Fix the parser" }, Session("s2", "work"));
+        await using var connector = fleet.NodeConnector(source, static _ => true, keys: nodeKeys);
+        connector.Start();
+        await WaitForAsync(async () => (await fleet.Desktop.ListSessionsAsync()).Any(session => session.Id == "s1" && session.SealedMetadata is not null));
+        var listed = (await fleet.Desktop.ListSessionsAsync()).ToDictionary(static session => session.Id);
+        Assert.IsFalse(listed["s1"].SealedMetadata!.Contains("parser", StringComparison.Ordinal), "the server holds ciphertext only");
+        Assert.IsNull(listed["s2"].SealedMetadata, "no title, nothing sealed");
+        Assert.IsTrue(key.TryOpen("s1", listed["s1"].SealedMetadata, out var metadata));
+        Assert.AreEqual("Fix the parser", metadata!.Title);
+
+        // Polls seal again nothing that did not change: the version stays. A new title is a new version.
+        var version = listed["s1"].Version;
+        await Task.Delay(TimeSpan.FromMilliseconds(800));
+        Assert.AreEqual(version, (await fleet.Desktop.ListSessionsAsync()).Single(session => session.Id == "s1").Version);
+        source.Set(Session("s1", "work") with { Title = "Fix the lexer" }, Session("s2", "work"));
+        await WaitForAsync(async () => (await fleet.Desktop.ListSessionsAsync()).Single(session => session.Id == "s1") is var session
+            && key.TryOpen("s1", session.SealedMetadata, out var changed) && changed!.Title == "Fix the lexer");
+        Assert.AreEqual(version + 1, (await fleet.Desktop.ListSessionsAsync()).Single(session => session.Id == "s1").Version);
+    }
+
+    [TestMethod]
     public async Task PublicationResumesFromTheCursorsAfterADroppedConnection()
     {
         await using var fleet = await FleetFixture.StartAsync();
@@ -307,14 +343,14 @@ public sealed class FleetConnectorTests
         }
 
         public FleetConnector NodeConnector(IFleetPublicationSource source, Func<string?, bool> publishes, string? outbox = null,
-            Func<Uri, CancellationToken, Task<IFleetTransport>>? connect = null)
+            Func<Uri, CancellationToken, Task<IFleetTransport>>? connect = null, FleetMetadataKeyring? keys = null)
             => new(new FleetConnectorOptions
             {
                 ServerAddress = Server.BaseAddress, Identity = NodeKey, OutboxPath = outbox ?? Path.Combine(Root.Path, $"outbox-{Guid.NewGuid():N}.json"),
                 Client = new FleetClientInfo("node", "4.0.0", "macos"), Source = source, PublishesSpace = publishes,
                 MinimumBackoff = TimeSpan.FromMilliseconds(100), MaximumBackoff = TimeSpan.FromMilliseconds(500), PendingApprovalRetry = TimeSpan.FromMilliseconds(200),
                 PublishDelay = TimeSpan.FromMilliseconds(20), PollInterval = TimeSpan.FromMilliseconds(200),
-                ConnectTransport = connect is null ? null : async (address, token) => await connect(address, token),
+                ConnectTransport = connect is null ? null : async (address, token) => await connect(address, token), MetadataKeys = keys,
             });
 
         public async ValueTask DisposeAsync()

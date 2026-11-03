@@ -18,6 +18,9 @@ namespace CodeAlta.Fleet.Server;
 /// </summary>
 public sealed class FleetHostPublicationSource : IFleetPublicationSource, IAsyncDisposable
 {
+    /// <summary>The longest title published (sealed), in characters.</summary>
+    public const int MaxTitleLength = 512;
+
     /// <summary>How long the counts of a session at work are kept before they are read again.</summary>
     public static readonly TimeSpan CountsRefresh = TimeSpan.FromSeconds(10);
 
@@ -104,9 +107,10 @@ public sealed class FleetHostPublicationSource : IFleetPublicationSource, IAsync
             var isPrivate = session.ViewState?.Options?.Private == true;
             // A Private session is never published: its counts are not read.
             var counts = isPrivate ? null : await CountsAsync(store, session, state, now, cancellationToken).ConfigureAwait(false);
-            result.Add(new FleetLocalSession(session.SessionId, SpaceOf(session, snapshot, spaces), isPrivate,
+            var (space, title) = Describe(session, snapshot, spaces);
+            result.Add(new FleetLocalSession(session.SessionId, space, isPrivate,
                 epochs.TryGetValue(session.SessionId, out var epoch) ? epoch : 0, state, session.CreatedAt, session.UpdatedAt, Bounded(providerType),
-                Bounded(session.ViewState?.ModelId ?? session.ModelId), counts));
+                Bounded(session.ViewState?.ModelId ?? session.ModelId), counts, isPrivate ? null : title));
         }
 
         // The sessions gone from the instance are forgotten with their counts.
@@ -166,19 +170,24 @@ public sealed class FleetHostPublicationSource : IFleetPublicationSource, IAsync
         _stop.Dispose();
     }
 
-    // The space a session is in, as the desktop lists it: the one its journal records, else the one of its project.
-    private static string SpaceOf(AgentSessionMetadata session, OwnedWorkspaceSnapshot snapshot, IReadOnlyList<SpaceDescriptor> spaces)
+    // The space a session is in, as the desktop lists it (the one its journal records, else the one of its project), and
+    // its title as the lists show it; null for a session listed by its id. The title leaves the machine only sealed.
+    private static (string Space, string? Title) Describe(AgentSessionMetadata session, OwnedWorkspaceSnapshot snapshot, IReadOnlyList<SpaceDescriptor> spaces)
     {
         var recorded = session.SpaceId;
         ProjectDescriptor? project = null;
+        SessionViewKind? kind = null;
         if (snapshot.SessionHeaders.TryGetValue(session.SessionId, out var header) && header.SessionId == session.SessionId && header.CreatedAt == session.CreatedAt
             && header.WorkingDirectory == session.WorkspacePath)
         {
             recorded = header.SpaceId ?? recorded;
+            kind = header.Kind;
             if (header.Kind == SessionViewKind.ProjectSession) project = ProjectCatalog.ResolveSessionProject(header.ProjectRef, session.WorkspacePath, snapshot.Projects);
         }
 
-        return SpaceCatalog.ResolveSessionSpace(recorded, project, spaces);
+        var title = SessionRuntimeService.ListedTitle(session, kind, project).Trim();
+        return (SpaceCatalog.ResolveSessionSpace(recorded, project, spaces),
+            title.Length == 0 || title == session.SessionId ? null : title.Length > MaxTitleLength ? title[..MaxTitleLength] : title);
     }
 
     // The epoch a move gave each session this machine received; 0 for the others.

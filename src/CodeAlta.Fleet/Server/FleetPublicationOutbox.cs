@@ -77,9 +77,10 @@ internal sealed class FleetPublicationOutbox
 
     /// <summary>
     /// Records the sessions to publish as they are now, a new version for each whose facts changed, and gives the facts the
-    /// server does not hold yet, at most <paramref name="limit"/>, the oldest changes first.
+    /// server does not hold yet, at most <paramref name="limit"/>, the oldest changes first. With a metadata key, their
+    /// titles are sealed into the facts: a version follows the title and the key, never the random bytes of a seal.
     /// </summary>
-    public IReadOnlyList<FleetSessionFact> Pending(IReadOnlyList<FleetLocalSession> sessions, int limit)
+    public IReadOnlyList<FleetSessionFact> Pending(IReadOnlyList<FleetLocalSession> sessions, int limit, FleetMetadataKey? key = null)
     {
         var pending = new List<(FleetSessionFact Fact, DateTimeOffset UpdatedAt)>();
         var changed = false;
@@ -87,7 +88,8 @@ internal sealed class FleetPublicationOutbox
         {
             var fact = new FleetSessionFact(session.SessionId, session.Epoch, 0, session.State, session.CreatedAt, session.UpdatedAt, session.ProviderType, session.Model,
                 session.Counts);
-            var hash = Hash(fact);
+            var title = key is null ? null : session.Title;
+            var hash = Hash(fact, title is null ? null : $"{key!.Id}\n{title}");
             if (!_state.Sessions.TryGetValue(session.SessionId, out var kept))
             {
                 _state.Sessions[session.SessionId] = kept = new FleetOutboxSession { Epoch = session.Epoch };
@@ -109,7 +111,11 @@ internal sealed class FleetPublicationOutbox
                 changed = true;
             }
 
-            if (kept.Version > kept.AckedVersion) pending.Add((fact with { Version = kept.Version }, session.UpdatedAt));
+            if (kept.Version > kept.AckedVersion)
+            {
+                pending.Add((fact with { Version = kept.Version, SealedMetadata = title is null ? null : key!.Seal(session.SessionId, new FleetSessionMetadata(title)) },
+                    session.UpdatedAt));
+            }
         }
 
         if (changed) Save();
@@ -202,8 +208,13 @@ internal sealed class FleetPublicationOutbox
         }
     }
 
-    private static string Hash(FleetSessionFact fact)
-        => Base64Url.EncodeToString(SHA256.HashData(JsonSerializer.SerializeToUtf8Bytes(fact, FleetServerJsonContext.Default.FleetSessionFact)));
+    // The hash of the facts, and of the sealed metadata in clear when there is some; the outbox keeps the hash, never the title.
+    private static string Hash(FleetSessionFact fact, string? sealedInClear)
+    {
+        var bytes = JsonSerializer.SerializeToUtf8Bytes(fact, FleetServerJsonContext.Default.FleetSessionFact);
+        if (sealedInClear is not null) bytes = [.. bytes, (byte)'\n', .. System.Text.Encoding.UTF8.GetBytes(sealedInClear)];
+        return Base64Url.EncodeToString(SHA256.HashData(bytes));
+    }
 
     private void Save() => FleetFiles.WriteAtomically(_path, JsonSerializer.SerializeToUtf8Bytes(_state, FleetServerJsonFiles.Default.FleetOutboxFile));
 }

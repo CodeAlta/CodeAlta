@@ -51,7 +51,7 @@ public sealed class FleetServerRpcTests
             await using var servers = new DesktopFleetServers(host, "Desktop", "4.0.0", static options => new FleetConnectorOptions
             {
                 ServerAddress = options.ServerAddress, Identity = options.Identity, OutboxPath = options.OutboxPath, Client = options.Client, Source = options.Source,
-                PublishesSpace = options.PublishesSpace, WatchDirectory = options.WatchDirectory, MinimumBackoff = TimeSpan.FromMilliseconds(100),
+                PublishesSpace = options.PublishesSpace, WatchDirectory = options.WatchDirectory, MetadataKeys = options.MetadataKeys, MinimumBackoff = TimeSpan.FromMilliseconds(100),
                 PublishDelay = TimeSpan.FromMilliseconds(20), PollInterval = TimeSpan.FromMilliseconds(200), PendingApprovalRetry = TimeSpan.FromMilliseconds(200),
             });
             var epoch = Guid.NewGuid().ToString("D");
@@ -104,6 +104,25 @@ public sealed class FleetServerRpcTests
             Assert.AreEqual(FleetSessionStates.Idle, session.State);
             Assert.IsFalse(directory.Sessions.Any(static session => session.Id == "private-1"), "a Private session is never published");
             Assert.AreEqual("Desktop", directory.Machines.Single(static machine => machine.IsThisComputer).Name);
+            // Its title travels sealed with the key this computer made for its person; it opens here, and the server holds ciphertext only.
+            Assert.AreEqual("A chat", session.Title);
+            var connector = servers.Connections.Single().Connector!;
+            StringAssert.Contains(connector.Directory.Sessions["chat-1"].Fact.SealedMetadata, "\"alg\":\"a256gcm\"");
+            Assert.IsFalse(connector.Directory.Sessions["chat-1"].Fact.SealedMetadata!.Contains("A chat", StringComparison.Ordinal));
+            // The approved node got its own copy of the key, which opens with its device key only.
+            deadline = DateTime.UtcNow + Patience;
+            CodeAlta.Fleet.Protocol.Api.MetadataKeyDto? nodeCopy;
+            using (var node = new FleetServerClient(address, nodeKey))
+            {
+                while ((nodeCopy = (await node.ListMetadataKeysAsync(token)).SingleOrDefault())?.Wrapped is null)
+                {
+                    if (DateTime.UtcNow > deadline) Assert.Fail("The node did not get its copy of the metadata key.");
+                    await Task.Delay(100, token);
+                }
+            }
+
+            Assert.AreEqual(connector.MetadataKey!.Id, FleetKeyWrap.Unwrap(nodeCopy!.Wrapped!, nodeCopy.Id, nodeKey).Id);
+
             // Its counts come from its journal: one turn with one tool call, the tokens of its usage.
             Assert.AreEqual((1, 1500), (session.Turns, session.Tokens));
             var fact = servers.Connections.Single().Connector!.Directory.Sessions["chat-1"].Fact;

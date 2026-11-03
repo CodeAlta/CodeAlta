@@ -247,6 +247,37 @@ public sealed class FleetServerClient : IDisposable
         return state.Members.GetValueOrDefault(deviceId);
     }
 
+    /// <summary>Lists the metadata keys of this device's person, each with the copy wrapped to this device when it has one.</summary>
+    /// <param name="cancellationToken">Cancels the call.</param>
+    /// <returns>The keys.</returns>
+    /// <exception cref="FleetServerException">The server refused the call.</exception>
+    /// <exception cref="HttpRequestException">The server does not answer.</exception>
+    public async Task<IReadOnlyList<MetadataKeyDto>> ListMetadataKeysAsync(CancellationToken cancellationToken = default)
+        => (await SendAsync(HttpMethod.Get, "api/v1/metadata-keys", null, ServerApiJsonContext.Default.ListResponseMetadataKeyDto, cancellationToken).ConfigureAwait(false)).Items;
+
+    /// <summary>Records the metadata key this controller device made for its person, wrapped to that person's devices, this one included.</summary>
+    /// <param name="keyId">The id of the key.</param>
+    /// <param name="epoch">Its epoch.</param>
+    /// <param name="wraps">Its copies, one per device.</param>
+    /// <param name="cancellationToken">Cancels the call.</param>
+    /// <returns>The key.</returns>
+    /// <exception cref="FleetServerException">The server refused the key: not a controller, a wrong wrap, or a key exists (<c>metadata_key.exists</c>).</exception>
+    /// <exception cref="HttpRequestException">The server does not answer.</exception>
+    public Task<MetadataKeyDto> CreateMetadataKeyAsync(string keyId, int epoch, IReadOnlyList<MetadataKeyWrapDto> wraps, CancellationToken cancellationToken = default)
+        => SendAsync(HttpMethod.Post, "api/v1/metadata-keys", Body(new CreateMetadataKeyRequest(keyId, epoch, wraps), ServerApiJsonContext.Default.CreateMetadataKeyRequest),
+            ServerApiJsonContext.Default.MetadataKeyDto, cancellationToken);
+
+    /// <summary>Gives copies of a metadata key this controller device holds to devices of its person that have none.</summary>
+    /// <param name="keyId">The key.</param>
+    /// <param name="wraps">The copies.</param>
+    /// <param name="cancellationToken">Cancels the call.</param>
+    /// <returns>The key.</returns>
+    /// <exception cref="FleetServerException">The server refused the copies.</exception>
+    /// <exception cref="HttpRequestException">The server does not answer.</exception>
+    public Task<MetadataKeyDto> AddMetadataKeyWrapsAsync(string keyId, IReadOnlyList<MetadataKeyWrapDto> wraps, CancellationToken cancellationToken = default)
+        => SendAsync(HttpMethod.Post, $"api/v1/metadata-keys/{Uri.EscapeDataString(keyId)}/wraps",
+            Body(new AddMetadataKeyWrapsRequest(wraps), ServerApiJsonContext.Default.AddMetadataKeyWrapsRequest), ServerApiJsonContext.Default.MetadataKeyDto, cancellationToken);
+
     /// <summary>Lists the machines of the organization and their last inventory.</summary>
     /// <param name="cancellationToken">Cancels the call.</param>
     /// <returns>The machines.</returns>
