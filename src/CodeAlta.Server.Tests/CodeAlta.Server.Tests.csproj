@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <OutputType>Exe</OutputType>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="MSTest" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Microsoft.VisualStudio.TestTools.UnitTesting" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+    <ProjectReference Include="..\CodeAlta.Server\CodeAlta.Server.csproj" />
+    <ProjectReference Include="..\CodeAlta.Fleet.Protocol\CodeAlta.Fleet.Protocol.csproj" />
+    <!-- The device keys of CodeAlta's devices, to check that the server derives the same ids and verifies their signatures. -->
+    <ProjectReference Include="..\CodeAlta.Fleet\CodeAlta.Fleet.csproj" />
+  </ItemGroup>
+
+</Project>

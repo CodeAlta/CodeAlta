@@ -68,6 +68,7 @@
     <Project Path="CodeAlta.Tui/CodeAlta.Tui.csproj" />
     <Project Path="CodeAlta.Cli/CodeAlta.Cli.csproj" />
     <Project Path="CodeAlta.Node/CodeAlta.Node.csproj" />
+    <Project Path="CodeAlta.Server/CodeAlta.Server.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="CodeAlta.Browser.Tests/CodeAlta.Browser.Tests.csproj" />
@@ -85,6 +86,7 @@
     <Project Path="CodeAlta.Plugins.Abstractions.Tests/CodeAlta.Plugins.Abstractions.Tests.csproj" />
     <Project Path="CodeAlta.Plugins.Tests/CodeAlta.Plugins.Tests.csproj" />
     <Project Path="CodeAlta.Sandbox.Tests/CodeAlta.Sandbox.Tests.csproj" />
+    <Project Path="CodeAlta.Server.Tests/CodeAlta.Server.Tests.csproj" />
     <Project Path="CodeAlta.Tests/CodeAlta.Tests.csproj" />
     <Project Path="CodeAlta.Tests.LockProbe/CodeAlta.Tests.LockProbe.csproj" />
     <Project Path="CodeAlta.Tests.TinyMcpServer/CodeAlta.Tests.TinyMcpServer.csproj" />

@@ -1,0 +1,220 @@
+using System.Net;
+using System.Text.Json;
+using System.Threading.Channels;
+using CodeAlta.Fleet.Protocol;
+using CodeAlta.Server.Api;
+
+namespace CodeAlta.Server.Tests;
+
+[TestClass]
+public sealed class ControlConnectionTests
+{
+    private static readonly DateTimeOffset Created = new(2026, 11, 3, 9, 0, 0, TimeSpan.Zero);
+
+    [TestMethod]
+    public async Task AnApprovedDeviceIsWelcomedWithItsCursorsAndShowsOnline()
+    {
+        await using var server = await ServerFixture.StartAsync();
+        using var owner = new TestDevice("Desktop");
+        using var mac = new TestDevice("Mac mini");
+        await server.SetUpWithNodeAsync(owner, mac);
+
+        var (connection, welcome) = await server.ConnectAsync(mac);
+        await using (connection)
+        {
+            Assert.AreEqual(1, welcome.Protocol);
+            CollectionAssert.IsSubsetOf(new[] { "presence", "facts", "directory" }, welcome.Features.ToArray());
+            Assert.AreEqual(new FleetPublicationCursors(0, 0), welcome.Cursors!.Value.Deserialize(FleetServerJsonContext.Default.FleetPublicationCursors));
+            // An answer on the connection implies the presence.
+            await connection.SendRequestAsync(FleetServerMethods.PresenceUpdate,
+                JsonSerializer.SerializeToElement(new FleetPresenceUpdate("active"), FleetServerJsonContext.Default.FleetPresenceUpdate));
+            Assert.IsTrue((await server.SendAsync(owner, HttpMethod.Get, $"/api/v1/devices/{mac.DeviceId}")).Read<DeviceDto>().Online);
+
+            await PublishAsync(connection, 3, Fact("s1", 1, 1));
+            await connection.SendRequestAsync(FleetServerMethods.InventoryPublish,
+                JsonSerializer.SerializeToElement(new FleetInventoryPublish(2, new FleetMachineInventory("Mac mini", "macos")), FleetServerJsonContext.Default.FleetInventoryPublish));
+        }
+
+        // Reconnected, it resumes from what the server acknowledged.
+        var (again, resumed) = await server.ConnectAsync(mac);
+        await using (again)
+        {
+            Assert.AreEqual(new FleetPublicationCursors(3, 2), resumed.Cursors!.Value.Deserialize(FleetServerJsonContext.Default.FleetPublicationCursors));
+        }
+    }
+
+    [TestMethod]
+    public async Task PendingRevokedAndUnknownDevicesAreRefusedWithWhatToDo()
+    {
+        await using var server = await ServerFixture.StartAsync();
+        using var owner = new TestDevice("Desktop");
+        using var mac = new TestDevice("Mac mini");
+        using var stranger = new TestDevice("Stranger");
+        var setup = await server.SetUpAsync(owner);
+        await server.EnrollAsync(owner, mac);
+
+        var pending = await Assert.ThrowsExactlyAsync<FleetHandshakeException>(() => server.ConnectAsync(mac));
+        Assert.AreEqual((FleetErrorCodes.PendingApproval, FleetErrorHints.WaitForApproval), (pending.Error.Code, pending.Error.Hint));
+        var unknown = await Assert.ThrowsExactlyAsync<FleetHandshakeException>(() => server.ConnectAsync(stranger));
+        Assert.AreEqual((FleetErrorCodes.Unauthenticated, FleetErrorHints.Reauthenticate), (unknown.Error.Code, unknown.Error.Hint));
+
+        var add = await server.NextEntryAsync(owner, FleetDeviceListOperations.Add, mac.DeviceId, mac.PublicKey, FleetDeviceKinds.Node, setup.Owner.Id, setup.Organization.Id);
+        Assert.AreEqual(HttpStatusCode.OK, (await server.SendAsync(owner, HttpMethod.Post, $"/api/v1/devices/{mac.DeviceId}/approve", new DeviceListChangeRequest(add))).Status);
+        var closing = new TaskCompletionSource<FleetError>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var (connection, _) = await server.ConnectAsync(mac, connection => connection.SetEventHandler((fleetEvent, _) =>
+        {
+            if (fleetEvent.Event == FleetServerMethods.ConnectionClosing) closing.TrySetResult(fleetEvent.Payload!.Value.Deserialize(FleetServerJsonContext.Default.FleetError)!);
+            return ValueTask.CompletedTask;
+        }));
+        await using (connection)
+        {
+            // Revoked while connected: the server says so, then closes its connection.
+            var remove = await server.NextEntryAsync(owner, FleetDeviceListOperations.Remove, mac.DeviceId, null, null, null, setup.Organization.Id);
+            Assert.AreEqual(HttpStatusCode.OK, (await server.SendAsync(owner, HttpMethod.Post, $"/api/v1/devices/{mac.DeviceId}/revoke", new DeviceListChangeRequest(remove))).Status);
+            Assert.AreEqual(FleetErrorCodes.Revoked, (await closing.Task.WaitAsync(Waits.Hang)).Code);
+            await connection.Completion.WaitAsync(Waits.Hang);
+        }
+
+        var revoked = await Assert.ThrowsExactlyAsync<FleetHandshakeException>(() => server.ConnectAsync(mac));
+        Assert.AreEqual(FleetErrorCodes.Revoked, revoked.Error.Code);
+        Assert.IsFalse((await server.SendAsync(owner, HttpMethod.Get, $"/api/v1/devices/{mac.DeviceId}")).Read<DeviceDto>().Online);
+    }
+
+    [TestMethod]
+    public async Task FactsArePublishedIdempotentlyByVersion()
+    {
+        await using var server = await ServerFixture.StartAsync();
+        using var owner = new TestDevice("Desktop");
+        using var mac = new TestDevice("Mac mini");
+        await server.SetUpWithNodeAsync(owner, mac);
+        var (connection, _) = await server.ConnectAsync(mac);
+        await using var _1 = connection;
+
+        var first = await PublishAsync(connection, 1, Fact("s1", 1, 2), Fact("s2", 1, 1));
+        Assert.AreEqual(new FleetFactsPublishResult(1, 2, 0, []), first with { Stale = [] });
+        var replay = await PublishAsync(connection, 1, Fact("s1", 1, 2), Fact("s2", 1, 1));
+        Assert.AreEqual((1L, 0, 2), (replay.Ack, replay.Applied, replay.Unchanged));
+        var mixed = await PublishAsync(connection, 2, Fact("s1", 1, 1, "idle"), Fact("s2", 1, 5, "requires_action"), Fact("s1", 0, 99));
+        Assert.AreEqual((2L, 1, 1), (mixed.Ack, mixed.Applied, mixed.Unchanged));
+        CollectionAssert.AreEqual(new[] { "s1" }, mixed.Stale.ToArray(), "A fact of an older epoch is refused.");
+
+        var sessions = (await server.SendAsync(owner, HttpMethod.Get, "/api/v1/sessions")).Read<ListResponse<SessionDto>>().Items.ToDictionary(static s => s.Id);
+        Assert.AreEqual(("running", 2L), (sessions["s1"].State, sessions["s1"].Version));
+        Assert.AreEqual(("requires_action", 5L, mac.DeviceId, "sealed-blob"), (sessions["s2"].State, sessions["s2"].Version, sessions["s2"].MachineId, sessions["s2"].SealedMetadata));
+        Assert.AreEqual(new FleetSessionCounts(5, 10, 1000, 500), sessions["s2"].Counts);
+
+        var invalid = await Assert.ThrowsExactlyAsync<FleetException>(() => PublishAsync(connection, 3, Fact("", 1, 1)));
+        Assert.AreEqual(CoordinatorErrorCodes.PublicationInvalid, invalid.Error.Code);
+        var unreadable = await Assert.ThrowsExactlyAsync<FleetException>(() =>
+            connection.SendRequestAsync(FleetServerMethods.FactsPublish, JsonDocument.Parse("{\"sequence\":\"x\"}").RootElement));
+        Assert.AreEqual(FleetErrorCodes.InvalidParams, unreadable.Error.Code);
+    }
+
+    [TestMethod]
+    public async Task AWatcherSeesTheChangesOfItsOrganization()
+    {
+        await using var server = await ServerFixture.StartAsync();
+        using var owner = new TestDevice("Desktop");
+        using var mac = new TestDevice("Mac mini");
+        await server.SetUpWithNodeAsync(owner, mac);
+        var events = Channel.CreateUnbounded<FleetDirectoryChange>();
+        var (desktop, _) = await server.ConnectAsync(owner, connection => connection.SetEventHandler((fleetEvent, _) =>
+        {
+            if (fleetEvent.Event == FleetServerMethods.DirectoryChanged)
+            {
+                events.Writer.TryWrite(fleetEvent.Payload!.Value.Deserialize(FleetServerJsonContext.Default.FleetDirectoryChange)!);
+            }
+
+            return ValueTask.CompletedTask;
+        }));
+        await using var _1 = desktop;
+
+        var snapshot = (await desktop.SendRequestAsync(FleetServerMethods.DirectoryWatch))!.Value.Deserialize(FleetServerJsonContext.Default.FleetDirectorySnapshot)!;
+        Assert.AreEqual(0, snapshot.Machines.Count);
+        CollectionAssert.AreEqual(new[] { owner.DeviceId }, snapshot.Presence.Select(static p => p.DeviceId).ToArray());
+
+        var (node, _) = await server.ConnectAsync(mac);
+        await using (node)
+        {
+            var online = await NextAsync(events, FleetServerMethods.ChangeKinds.Presence);
+            Assert.AreEqual((mac.DeviceId, true), (online.Id, online.Presence!.Online));
+
+            await node.SendRequestAsync(FleetServerMethods.PresenceUpdate,
+                JsonSerializer.SerializeToElement(new FleetPresenceUpdate("busy", 2), FleetServerJsonContext.Default.FleetPresenceUpdate));
+            var busy = await NextAsync(events, FleetServerMethods.ChangeKinds.Presence);
+            Assert.AreEqual(("busy", 2), (busy.Presence!.State, busy.Presence.ActiveSessions));
+            // The same state again is no change: a heartbeat writes nothing and announces nothing.
+            await node.SendRequestAsync(FleetServerMethods.PresenceUpdate,
+                JsonSerializer.SerializeToElement(new FleetPresenceUpdate("busy", 2), FleetServerJsonContext.Default.FleetPresenceUpdate));
+
+            await node.SendRequestAsync(FleetServerMethods.InventoryPublish, JsonSerializer.SerializeToElement(
+                new FleetInventoryPublish(1, new FleetMachineInventory("Mac mini", "macos", "arm64", "4.0.0", ["sandbox"], ["macos"], ["anthropic"])),
+                FleetServerJsonContext.Default.FleetInventoryPublish));
+            var machine = await NextAsync(events, FleetServerMethods.ChangeKinds.Machine);
+            Assert.AreEqual(("Mac mini", "arm64", FleetDeviceKinds.Node), (machine.Machine!.Inventory.Name, machine.Machine.Inventory.Architecture, machine.Machine.Kind));
+
+            await PublishAsync(node, 1, Fact("s1", 1, 1));
+            var session = await NextAsync(events, FleetServerMethods.ChangeKinds.Session);
+            Assert.AreEqual(("s1", mac.DeviceId, 1L), (session.Id, session.Session!.MachineId, session.Session.Fact.Version));
+            // An unchanged fact announces nothing; the next event is the newer version.
+            await PublishAsync(node, 2, Fact("s1", 1, 1));
+            await PublishAsync(node, 3, Fact("s1", 1, 2));
+            Assert.AreEqual(2L, (await NextAsync(events, FleetServerMethods.ChangeKinds.Session)).Session!.Fact.Version);
+
+            var machines = (await server.SendAsync(owner, HttpMethod.Get, "/api/v1/machines")).Read<ListResponse<MachineDto>>().Items;
+            Assert.AreEqual((mac.DeviceId, "Mac mini", true), (machines.Single().DeviceId, machines.Single().Name, machines.Single().Online));
+        }
+
+        var offline = await NextAsync(events, FleetServerMethods.ChangeKinds.Presence);
+        Assert.AreEqual((mac.DeviceId, false), (offline.Id, offline.Presence!.Online));
+    }
+
+    [TestMethod]
+    public async Task ANewConnectionOfADeviceReplacesItsOldOne()
+    {
+        await using var server = await ServerFixture.StartAsync();
+        using var owner = new TestDevice("Desktop");
+        await server.SetUpAsync(owner);
+        var (first, _) = await server.ConnectAsync(owner);
+        await using var _1 = first;
+        var (second, _) = await server.ConnectAsync(owner);
+        await using var _2 = second;
+        await first.Completion.WaitAsync(Waits.Hang);
+        Assert.AreEqual(FleetConnectionState.Open, second.State);
+        Assert.IsTrue((await server.SendAsync(owner, HttpMethod.Get, $"/api/v1/devices/{owner.DeviceId}")).Read<DeviceDto>().Online);
+    }
+
+    [TestMethod]
+    public async Task TheOpenApiDocumentDescribesTheApi()
+    {
+        await using var server = await ServerFixture.StartAsync();
+        using var response = await server.Http.GetAsync("/openapi/v1.json");
+        Assert.AreEqual(HttpStatusCode.OK, response.StatusCode);
+        using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        StringAssert.StartsWith(document.RootElement.GetProperty("openapi").GetString(), "3.");
+        var paths = document.RootElement.GetProperty("paths");
+        foreach (var path in new[] { "/api/v1/setup", "/api/v1/organization", "/api/v1/devices", "/api/v1/devices/{id}/approve", "/api/v1/machines", "/api/v1/sessions", "/api/v1/audit" })
+        {
+            Assert.IsTrue(paths.TryGetProperty(path, out _), path);
+        }
+
+        Assert.IsFalse(paths.TryGetProperty(FleetServerMethods.ControlPath, out _));
+    }
+
+    private static FleetSessionFact Fact(string id, long epoch, long version, string state = "running")
+        => new(id, epoch, version, state, Created, Created.AddMinutes(version), "anthropic", "claude-opus-5-5", new FleetSessionCounts(version, 2 * version, 200 * version, 100 * version),
+            "sealed-blob");
+
+    private static async Task<FleetFactsPublishResult> PublishAsync(FleetConnection connection, long sequence, params FleetSessionFact[] facts)
+        => (await connection.SendRequestAsync(FleetServerMethods.FactsPublish, new FleetFactsPublish(sequence, facts), FleetServerJsonContext.Default.FleetFactsPublish,
+            FleetServerJsonContext.Default.FleetFactsPublishResult))!;
+
+    private static async Task<FleetDirectoryChange> NextAsync(Channel<FleetDirectoryChange> events, string kind)
+    {
+        while (true)
+        {
+            var change = await events.Reader.ReadAsync().AsTask().WaitAsync(Waits.Hang);
+            if (change.Kind == kind) return change;
+        }
+    }
+}
