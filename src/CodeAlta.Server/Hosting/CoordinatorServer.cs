@@ -92,6 +92,12 @@ public sealed class CoordinatorServerOptions
     /// <summary>Gets how often the update campaigns move on without an event.</summary>
     public TimeSpan UpdateInterval { get; init; } = TimeSpan.FromSeconds(5);
 
+    /// <summary>
+    /// Gets whether the update campaigns move on by themselves (on a timer and at each event, the default). Tests that step
+    /// the campaigns by hand turn it off: a step of the loop beside theirs would race with their clock and their assertions.
+    /// </summary>
+    public bool UpdateLoop { get; init; } = true;
+
     /// <summary>Gets how many nodes update at once in a campaign.</summary>
     public int UpdateConcurrency { get; init; } = 2;
 
@@ -410,7 +416,7 @@ public sealed class CoordinatorServer : IAsyncDisposable
             provider.GetRequiredService<ServerUpdateStatusSource>(), time, provider.GetRequiredService<ILoggerFactory>().CreateLogger("CodeAlta.Server.Update"),
             new UpdateCampaignOptions
             {
-                Interval = options.UpdateInterval, ApplyServerUpdate = options.ApplyUpdate, WithdrawServerSwitch = options.CancelUpdate, ServerRuntime = options.UpdateRuntime,
+                Interval = options.UpdateInterval, RunLoop = options.UpdateLoop, ApplyServerUpdate = options.ApplyUpdate, WithdrawServerSwitch = options.CancelUpdate, ServerRuntime = options.UpdateRuntime,
                 ReadLatest = options.ReadLatestUpdate,
                 Limits = new UpdateCampaignLimits { MaxConcurrent = Math.Max(1, options.UpdateConcurrency), OfflineGrace = options.UpdateOfflineGrace },
             }));

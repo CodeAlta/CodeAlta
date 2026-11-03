@@ -131,6 +131,7 @@ public sealed class UpdateCampaignServerTests
         }
 
         await using var second = await TestFleet.StartAsync(root: root, owner: owner, setUp: false);
+        await second.TickAsync();
         Assert.AreEqual("4.0.2", (await second.Server.WaitAppliedAsync()).Version, "the step is taken again");
         await second.TickAsync();
         Assert.AreEqual(FleetUpdateCampaignStates.Done, (await second.CampaignAsync(id)).State);
@@ -305,6 +306,21 @@ public sealed class UpdateCampaignServerTests
         Assert.AreEqual(1, fleet.Server.Applied.Count);
         await fleet.TickAsync();
         Assert.AreEqual(FleetUpdateCampaignStates.Done, (await fleet.CampaignAsync(campaign.Id)).State);
+    }
+
+    [TestMethod]
+    public async Task TheCampaignsOfAServerWithoutItsLoopMoveOnlyWhenTheTestStepsThem()
+    {
+        // The fixture's campaigns move by TickAsync only: a campaign made (an event that wakes the loop of a server) stays
+        // where it was until the test steps it, so no step beside the test's can race with its clock and assertions.
+        await using var fleet = await TestFleet.StartAsync();
+        fleet.Server.Holds = true;
+        var campaign = await fleet.CreateCampaignAsync("4.0.2");
+        await Task.Delay(500);
+        Assert.IsNull(fleet.Server.Pending, "nothing stepped the campaign");
+
+        await fleet.TickAsync();
+        Assert.AreEqual(("4.0.2", FleetUpdateCampaignStates.UpdatingServer), (fleet.Server.Pending, (await fleet.CampaignAsync(campaign.Id)).State));
     }
 
     [TestMethod]
@@ -533,7 +549,9 @@ public sealed class UpdateCampaignServerTests
             {
                 DataRoot = options.DataRoot, Urls = options.Urls, TimeProvider = options.TimeProvider, Relay = options.Relay, ConfigureLogging = options.ConfigureLogging,
                 UpdateStatus = options.UpdateStatus, EnvironmentVariable = options.EnvironmentVariable, TelemetryExportInterval = options.TelemetryExportInterval,
-                ApplyUpdate = server.ApplyAsync, CancelUpdate = server.Withdraw, UpdateRuntime = Runtime, UpdateInterval = TimeSpan.FromHours(1),
+                ApplyUpdate = server.ApplyAsync, CancelUpdate = server.Withdraw, UpdateRuntime = Runtime,
+                // These tests step the campaigns by hand (TickAsync) against a clock they move: no loop beside them.
+                UpdateLoop = false,
                 UpdateOfflineGrace = TimeSpan.FromSeconds(30), ReadLatestUpdate = (_, _) => Task.FromResult(readLatest()),
             });
             string organization;
