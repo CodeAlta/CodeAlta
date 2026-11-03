@@ -60,6 +60,19 @@ public sealed record UpdateLauncherOptions
     /// </summary>
     public Func<UpdateVersion, string?>? Backup { get; init; }
 
+    /// <summary>
+    /// Gets the lease of the launcher the caller holds already (from before it selected a version at start); null for the
+    /// launcher to take it when it starts.
+    /// </summary>
+    public UpdateLauncherLease? Lease { get; init; }
+
+    /// <summary>
+    /// Gets the exit code of a version refused because another process holds what it runs on (the profile of a node, the
+    /// data root of a server): a version on trial that ends with it did not run, so it neither fails its trial nor counts
+    /// a start; null for none.
+    /// </summary>
+    public int? HeldExitCode { get; init; }
+
     /// <summary>Gets whether the launcher handles SIGTERM and SIGINT itself (true for a process; false in tests).</summary>
     public bool HandleSignals { get; init; } = true;
 
@@ -161,11 +174,14 @@ public sealed class UpdateLauncher
 
     /// <summary>Starts the selected version and follows it until it ends without asking for a restart.</summary>
     /// <returns>The exit code of the last version started.</returns>
+    /// <exception cref="UpdateException">No lease was given and another process holds the lease of the launcher.</exception>
     public async Task<int> RunAsync()
     {
+        var store = _options.Store;
+        using var ownLease = _options.Lease is not null ? null
+            : store.TryAcquireLauncherLease() ?? throw new UpdateException(UpdateErrorCodes.LauncherBusy, $"Another launcher runs the versions of {store.Root}.");
         using var signals = _options.HandleSignals ? RegisterSignals() : null;
         using var stop = _options.Stop.Register(() => RequestStop(forward: true));
-        var store = _options.Store;
         while (true)
         {
             // A rollback whose backup is not restored yet (a crash or a failure since) is finished before anything starts.
@@ -271,6 +287,14 @@ public sealed class UpdateLauncher
                 var code = await exited.ConfigureAwait(false);
                 // A stop asked during the trial is not the version's failure: it is tried again at the next start.
                 if (Volatile.Read(ref _stopping) == 1) return (code, false);
+                // Nor is a refusal because another process holds its profile or data root: it did not run.
+                if (code == _options.HeldExitCode)
+                {
+                    store.UncountTrialStart(version);
+                    Log($"{_options.Product.AssemblyName} {version} did not run: another process holds what it runs on. It stays on trial for the next start.");
+                    return (code, false);
+                }
+
                 RollBack($"it exited with code {code.ToString(CultureInfo.InvariantCulture)} before it confirmed that it works");
                 return (code, true);
             }

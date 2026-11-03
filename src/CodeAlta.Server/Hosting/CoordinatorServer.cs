@@ -410,7 +410,7 @@ public sealed class CoordinatorServer : IAsyncDisposable
         }
         catch (IOException exception)
         {
-            throw new InvalidOperationException($"Another CodeAlta Server uses the data root '{paths.DataRoot}'.", exception);
+            throw new DataRootInUseException($"Another CodeAlta Server uses the data root '{paths.DataRoot}'.", exception);
         }
     }
 

@@ -15,6 +15,7 @@ public sealed class UpdateVersionStore
 
     private const string StateFileName = "state.json";
     private const string LockFileName = "state.lock";
+    private const string LauncherLockFileName = "launcher.lock";
     private static readonly TimeSpan LockPatience = TimeSpan.FromSeconds(15);
 
     private readonly TimeProvider _time;
@@ -229,10 +230,58 @@ public sealed class UpdateVersionStore
         return version;
     }
 
+    /// <summary>
+    /// Takes the lease of the launcher of this folder of versions (<c>launcher.lock</c>), unless another process holds
+    /// it: the one process that selects a version at start, runs a version as its child, follows its trial and rolls it
+    /// back. The operating system releases it when that process ends.
+    /// </summary>
+    /// <returns>The lease, to dispose once the launcher ends; null when another process holds it.</returns>
+    /// <exception cref="UpdateException">The folder of versions cannot be created, or its lease cannot be opened.</exception>
+    public UpdateLauncherLease? TryAcquireLauncherLease()
+    {
+        var path = Path.Combine(Root, LauncherLockFileName);
+        FileStream stream;
+        try
+        {
+            Directory.CreateDirectory(Root);
+            stream = new FileStream(path, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
+        }
+        catch (IOException) when (File.Exists(path))
+        {
+            return null;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            throw new UpdateException(UpdateErrorCodes.StateUnavailable, $"{path} could not be opened: {exception.Message}", exception);
+        }
+
+        try
+        {
+            // The process that holds it, for a person who looks.
+            stream.SetLength(0);
+            stream.Write(System.Text.Encoding.ASCII.GetBytes(Environment.ProcessId.ToString(System.Globalization.CultureInfo.InvariantCulture)));
+            stream.Flush();
+        }
+        catch (IOException)
+        {
+        }
+
+        return new UpdateLauncherLease(stream);
+    }
+
     /// <summary>Counts a start of the version on trial, before a launcher starts it.</summary>
     /// <returns>The state.</returns>
     public UpdateState CountTrialStart()
         => Change(state => state.Trial is not { } trial ? state : state with { Trial = trial with { Starts = trial.Starts + 1 } });
+
+    /// <summary>Takes back the start of a version on trial that did not run: another process held what it runs on.</summary>
+    /// <param name="version">The version on trial.</param>
+    /// <returns>The state.</returns>
+    public UpdateState UncountTrialStart(UpdateVersion version)
+    {
+        ArgumentNullException.ThrowIfNull(version);
+        return Change(state => state.Trial is not { Starts: > 0 } trial || !Same(trial.Version, version) ? state : state with { Trial = trial with { Starts = trial.Starts - 1 } });
+    }
 
     /// <summary>Confirms the version on trial, called by that version once it is healthy.</summary>
     /// <param name="version">The version that runs.</param>

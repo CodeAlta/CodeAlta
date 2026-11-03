@@ -133,7 +133,7 @@ public sealed class SetupTests
             Assert.AreEqual(server.SetupCode, new SetupCodeStore(server.Server.Paths.SetupCodePath, clock).GetCurrent()!.Code, "altaserver setup-code prints the same code.");
             Assert.IsTrue(CoordinatorServer.IsRunning(server.Server.Paths));
             Assert.AreEqual(Environment.ProcessId, CoordinatorServer.ReadState(server.Server.Paths)!.ProcessId);
-            await Assert.ThrowsExactlyAsync<InvalidOperationException>(() => CoordinatorServer.StartAsync(new CoordinatorServerOptions
+            await Assert.ThrowsAsync<InvalidOperationException>(() => CoordinatorServer.StartAsync(new CoordinatorServerOptions
             {
                 DataRoot = root.Path,
                 Urls = ["http://127.0.0.1:0"],

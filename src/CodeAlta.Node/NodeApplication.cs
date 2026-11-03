@@ -217,11 +217,34 @@ internal sealed class NodeApplication
         }
 
         // The installed entry point (the tool, what the service starts) hands over to the version altanode update
-        // selected, and passes its exit code through; a switch that waited for the next start is taken first. Not while
-        // another instance holds the profile: this run is refused below as before, and the version on trial of the
-        // running node is neither started twice nor blamed for that refusal.
+        // selected, and passes its exit code through; a switch that waited for the next start is taken first. It holds the
+        // lease of the launcher from here to its end, so that a second run never selects, starts or rolls back a version
+        // while this one does: it is refused at once, even in the moment the version this run started has not taken the
+        // profile yet. Not while another instance holds the profile: this run is refused below as before, and the version
+        // on trial of the running node is neither started twice nor blamed for that refusal.
         var store = NodeUpdatePaths.Store(profile);
-        if (!UpdateLauncher.IsSupervised && !store.Contains(ApplicationDirectory ?? AppContext.BaseDirectory) && !NodeProfileStatus.Read(profile).IsHeld)
+        UpdateLauncherLease? lease = null;
+        if (!UpdateLauncher.IsSupervised && !store.Contains(ApplicationDirectory ?? AppContext.BaseDirectory))
+        {
+            try
+            {
+                lease = store.TryAcquireLauncherLease();
+            }
+            catch (UpdateException exception)
+            {
+                await _error.WriteLineAsync($"altanode: {exception.Message}").ConfigureAwait(false);
+                return NodeExitCodes.Failure;
+            }
+
+            if (lease is null)
+            {
+                await _error.WriteLineAsync($"altanode: another altanode run holds the profile {profile.StateRoot} (it runs the node, or starts it).").ConfigureAwait(false);
+                return NodeExitCodes.ProfileInUse;
+            }
+        }
+
+        using var heldLease = lease;
+        if (lease is not null && !NodeProfileStatus.Read(profile).IsHeld)
         {
             try
             {
@@ -232,22 +255,23 @@ internal sealed class NodeApplication
                 await _error.WriteLineAsync($"altanode: the versions of {store.Root} could not be read: {exception.Message}").ConfigureAwait(false);
             }
 
-            if (store.Read() is { } selected && (selected.Current is not null || selected.RollingBack is not null)) return await RunLauncherAsync(store).ConfigureAwait(false);
+            if (store.Read() is { } selected && (selected.Current is not null || selected.RollingBack is not null)) return await RunLauncherAsync(store, lease).ConfigureAwait(false);
         }
 
         var (exitCode, restart) = await RunInProcessAsync(options, profile, listen, name, store).ConfigureAwait(false);
         if (!restart) return exitCode;
         // A launcher waits for this process and starts the newly selected version; without one, this process becomes it.
         if (UpdateLauncher.IsSupervised) return UpdateLauncher.RestartExitCode;
-        return await RunLauncherAsync(store).ConfigureAwait(false);
+        return await RunLauncherAsync(store, lease).ConfigureAwait(false);
     }
 
     // The launcher hop: the selected version runs as a child process of this one, which ends with its exit code.
-    private async Task<int> RunLauncherAsync(UpdateVersionStore store)
+    private async Task<int> RunLauncherAsync(UpdateVersionStore store, UpdateLauncherLease? lease)
     {
         var options = new UpdateLauncherOptions
         {
             Store = store, Product = UpdateProduct.Node, Arguments = _args, Installed = InstalledCommand(), InstalledVersion = InstalledVersion(),
+            Lease = lease, HeldExitCode = NodeExitCodes.ProfileInUse,
             Log = message => _error.WriteLine("altanode: " + message),
         };
         if (ConfigureLauncher is not null) options = ConfigureLauncher(options);

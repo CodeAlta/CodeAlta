@@ -409,6 +409,39 @@ public sealed class UpdateSwitchTests
     }
 
     [TestMethod]
+    public async Task OneLauncherAtATimeRunsTheVersions_AndARefusedVersionIsNotBlamed()
+    {
+        using var temp = new TempFolder();
+        var store = StoreWith(temp, V1);
+        store.Select(V1);
+        var runner = new FakeRunner((process, _) => { process.Exit(3); return Task.CompletedTask; });
+        UpdateLauncher Create(UpdateLauncherLease? lease) => new(new UpdateLauncherOptions
+        {
+            Store = store, Product = UpdateProduct.Node, Arguments = ["run"], Installed = new UpdateCommand("installed-altanode", []), Runner = runner,
+            PollInterval = TimeSpan.FromMilliseconds(10), RestartDelay = TimeSpan.Zero, DotnetRoot = null, HandleSignals = false, Lease = lease, HeldExitCode = 3,
+        });
+
+        using (var lease = store.TryAcquireLauncherLease())
+        {
+            Assert.IsNotNull(lease);
+            Assert.IsNull(new UpdateVersionStore(store.Root).TryAcquireLauncherLease(), "another launcher of the same folder is refused");
+            var busy = await Assert.ThrowsExactlyAsync<UpdateException>(() => Create(null).RunAsync());
+            Assert.AreEqual(UpdateErrorCodes.LauncherBusy, busy.Code);
+            Assert.AreEqual(0, runner.Started.Count);
+
+            // The holder of the lease runs the version; refused by the holder of its profile, it is not blamed.
+            Assert.AreEqual(3, await Create(lease).RunAsync());
+        }
+
+        var state = store.Read();
+        Assert.AreEqual("4.0.1", state.Trial?.Version);
+        Assert.AreEqual(0, state.Trial?.Starts);
+        Assert.AreEqual(0, state.Bad.Count);
+        using var again = store.TryAcquireLauncherLease();
+        Assert.IsNotNull(again, "the lease is free once its holder released it");
+    }
+
+    [TestMethod]
     public void ANodeDrainsThenWaitsForTheNextIdleMoment()
     {
         var start = DateTimeOffset.UnixEpoch;
