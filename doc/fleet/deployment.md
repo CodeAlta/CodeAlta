@@ -116,8 +116,36 @@ All signed (Authenticode, Apple notarization, NuGet signatures, cosign for image
 
 - **Server first, then nodes**: a node one minor version behind keeps working (N-1 window,
   [protocol](protocol.md#versions)).
-- Nodes follow the fleet's update policy (**automatic**, **pinned** or **manual**), update when idle, and an offline
-  node updates when it reconnects. The desktop shows versions and offers **Update all machines**.
+- **Self-update, no SDK.** `altanode update` and `altaserver update` (`CodeAlta.Fleet.Update`, which references the
+  protocol only, so the server keeps clear of the agent runtime) download the runtime package of the tool
+  (`CodeAlta.Node.win-x64`...) from a NuGet v3 feed (nuget.org, a mirror, or a folder), check it against the feed's
+  `packageHash` and against an expected hash when the caller gives one, and unpack its application side by side
+  under the state root: `fleet/versions/<version>/` of a node, `versions/` of the server's data root. A version is
+  available once both the tool package and the runtime package of the machine list it, as for CodeAlta Desktop's own
+  update check: the packages of a release appear one after the other, and an unlisted tool package withdraws the
+  release. A package from an HTTP feed that nothing hashes is refused. The owner restricts the feeds in `update.json`
+  beside the versions; the fleet may only name the configured feed or nuget.org. NuGet signatures are not verified
+  yet. The new version runs on the .NET runtime of the installed one: a self-contained copy without a shared runtime
+  cannot switch (its trial fails and it stays as it is).
+- **Pointer and launcher.** `state.json` of the versions selects one. The installed entry point (`altanode run`, what
+  the service starts) starts the selected version as its child, gives it its arguments and ends with its exit code. A
+  version that switches stops with exit code 75 and its launcher starts the next one; a process that ran the installed
+  version itself becomes that launcher. The process the service manager started never exits during an update, so the
+  switch does not depend on Task Scheduler, launchd or systemd restarting anything.
+- **Trial and rollback.** A new version confirms itself once healthy: a node when it listens and its connections to
+  the servers that approved it are up, the server when it answers its own health request. One that exits first, or does
+  not confirm within 2 minutes (over 2 starts), is stopped, marked bad (an update skips it unless named) and the
+  previous version starts again. Versions other than the selected, the previous and a pending one are pruned.
+- **When.** A node switches when no session works: it refuses new work (`node.updating`, retried by callers) while it
+  drains, 10 minutes at most, then takes work again and switches at the next idle moment; `--now` does not wait (its
+  running turns stop and stay resumable). The server copies its database first (SQLite's backup API, `backups/`); a
+  rollback restores that copy, losing what the new version wrote meanwhile. A switch asked while nothing runs is taken
+  at the next start.
+- **The fleet update** (next): the desktop asks the server, the server asks its nodes over the control connection,
+  checks their versions (`node.info`, the inventory) and updates itself last, possibly at a set time. Each machine
+  runs the same self-update (`ApplyAsync` with the hash a controller device signed). Nodes follow the fleet's update
+  policy (**automatic**, **pinned** or **manual**), and an offline node updates when it reconnects. The desktop shows
+  versions and offers **Update all machines**.
 - Containers update by image tag.
 
 ## Backup, restore, leave

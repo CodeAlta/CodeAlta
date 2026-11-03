@@ -17,7 +17,7 @@ dotnet tool install -g CodeAlta.Node
 altanode --help
 ```
 
-The package runs on Windows, macOS and Linux (x64 and Arm64, Alpine included). `dotnet tool update -g CodeAlta.Node` updates it.
+The package runs on Windows, macOS and Linux (x64 and Arm64, Alpine included). `altanode update` updates it (see [Update it](#update-it)).
 
 On a machine without the .NET SDK, publish a self-contained `altanode` from a checkout of CodeAlta on a computer that has it, for the system of that machine (`win-x64`, `win-arm64`, `osx-arm64`, `osx-x64`, `linux-x64`, `linux-arm64`, `linux-musl-x64`, `linux-musl-arm64`), and copy the folder:
 
@@ -66,6 +66,27 @@ altanode install --listen-all
 The service runs as you, with your sign-ins. Run `altanode install` again to change its options, and `altanode uninstall` to remove it: your profile and sessions stay. `altanode install --dry-run` prints what it would set up without changing anything.
 
 For a machine that should start the node at boot under an account of its own (one that uses deploy keys and tokens only), use `altanode install --system --account <name>`, with `sudo` on macOS and Linux.
+
+## Update it
+
+```sh
+altanode update
+```
+
+The node downloads its latest version from NuGet and switches to it as soon as no session is working: meanwhile it takes no new work, for ten minutes at most, then waits for the next quiet moment. It restarts by itself as the new version, whether it runs as a service or in a terminal: nothing else to do on the machine, and no .NET SDK needed, only the .NET runtime (a self-contained copy is updated by copying a new one).
+
+| Option | What it does |
+| --- | --- |
+| `--check` | Only tells whether an update is available |
+| `--version <version>` | Installs that version, an older one too |
+| `--now` | Switches without waiting: running turns stop and can be resumed |
+| `--source <feed>` | Another NuGet feed, or a folder of packages |
+
+If the new version does not start and connect within two minutes, the node goes back to the previous one by itself and does not take that version again unless you name it with `--version`. `altanode status` shows the version that runs and how the last update went.
+
+`altaserver update` does the same for CodeAlta Server: it first copies its database to the `backups` folder of its data root, and puts that copy back if the new version has to be undone.
+
+To allow only some feeds on a machine, list them in `fleet/update.json` of the profile (`update.json` of the data root for the server): `{ "source": "https://my-mirror/v3/index.json", "allowedSources": ["https://my-mirror/v3/index.json"] }`.
 
 ## Give it projects
 
