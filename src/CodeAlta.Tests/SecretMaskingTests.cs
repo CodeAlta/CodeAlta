@@ -192,6 +192,31 @@ public sealed class SecretMaskingTests
         AssertNoSecret(run);
     }
 
+    [TestMethod]
+    public async Task TheCallsOfAScript_NeverJournalASecret_InTheirArgumentsOrTheDiffOfTheFilesTheyChange()
+    {
+        var executor = new ScriptedTurnExecutor((_, _) => Task.FromResult(Call("run_script", new { })));
+        var script = new AgentToolDefinition(
+            new AgentToolSpec("run_script", "Runs a script.", JsonDocument.Parse("""{"type":"object"}""").RootElement.Clone()) { Exposure = AgentToolExposure.Model },
+            static async (invocation, token) =>
+            {
+                // A setting edited next to a stored token: the diff has the token as its context.
+                var edited = await invocation.Tools!.InvokeAsync(new AgentNestedToolCall("replace_in_file",
+                    JsonSerializer.SerializeToElement(new { path = "settings.env", old_string = "mode=1", new_string = "mode=2" })), token);
+                var written = await invocation.Tools.InvokeAsync(new AgentNestedToolCall("write_file",
+                    JsonSerializer.SerializeToElement(new { path = "notes.txt", content = $"the token is {Secret}\n" })), token);
+                return new AgentToolResult(edited.Success && written.Success, [new AgentToolResultItem.Text(edited.Success && written.Success ? "done" : "failed")]);
+            });
+
+        var run = await RunSessionAsync(executor, [script], "Change the mode.", workspace =>
+            File.WriteAllText(Path.Combine(workspace, "settings.env"), $"GRAFANA_TOKEN={Secret}\nmode=1\n"));
+
+        Assert.IsTrue(run.Published.OfType<AgentActivityEvent>().Any(static activity => activity.ParentActivityId == "call-run_script" && activity.Phase == AgentActivityPhase.Completed),
+            "The calls of the script are recorded.");
+        Assert.IsTrue(run.Journals.Any(static text => text.Contains("GRAFANA_TOKEN=***", StringComparison.Ordinal)), "The diff of the call is journaled, masked.");
+        AssertNoSecret(run);
+    }
+
     private static void AssertNoSecret(SessionRun run)
     {
         foreach (var (path, text) in run.Files)
@@ -201,6 +226,13 @@ public sealed class SecretMaskingTests
 
         Assert.IsFalse(run.Published.Any(static @event => @event.ToJson().Contains(Secret, StringComparison.Ordinal)), "What the user is shown holds no secret.");
     }
+
+    private static AgentTurnResponse Call(string name, object arguments)
+        => new()
+        {
+            AssistantMessage = new AgentConversationMessage(AgentConversationRole.Assistant,
+                [new AgentMessagePart.ToolCall("call-" + name, name, JsonSerializer.SerializeToElement(arguments))]),
+        };
 
     // Runs one prompt in a session whose secret store holds the secret, and reads back the files of its state and what it published.
     private static async Task<SessionRun> RunSessionAsync(IModelProviderTurnExecutor executor, IReadOnlyList<AgentToolDefinition> tools, string prompt,

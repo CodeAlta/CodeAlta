@@ -1458,6 +1458,12 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
     // follow: one write for many calls instead of one for each start and each end.
     private void AppendNestedRecords(IReadOnlyList<AgentEvent> events)
     {
+        // The arguments of the call and the diff of the files it changed hold what the call read and wrote, as its output does.
+        if (SecretMasker is { } masker)
+        {
+            events = masker.MaskEvents(events);
+        }
+
         AddToHistory(events);
         bool first;
         lock (_nestedRecordsGate)
