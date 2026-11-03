@@ -422,6 +422,113 @@ public sealed partial class GitWorktreeServiceTests
     }
 
     [TestMethod]
+    public async Task Create_OnABranchTheUserNamed_NamesTheFolderAfterIt_AndTheBranchGoesWithTheWorktree()
+    {
+        using var repository = Repository.Create();
+
+        var created = await repository.Service.CreateAsync(repository.Project, null, "feature/12345-export-csv", progress: null, withoutHooks: false);
+
+        Assert.AreEqual(GitWorktreeService.Ok, created.Status, created.Message);
+        Assert.AreEqual("feature/12345-export-csv", created.Branch);
+        Assert.AreEqual("12345-export-csv", created.Name);
+        Assert.AreEqual(Path.Combine(repository.Options.WorktreesRoot, "repository", "12345-export-csv"), created.Root);
+        Assert.AreEqual("feature/12345-export-csv", repository.GitIn(created.Root!, "branch", "--show-current").Trim());
+        Assert.AreEqual("true", repository.Git("config", "--get", "branch.feature/12345-export-csv." + GitWorktreeService.CreatedBranchKey).Trim());
+
+        // Another type of the same work item gets a folder of its own.
+        var other = await repository.Service.CreateAsync(repository.Project, null, "hotfix/12345-export-csv", progress: null, withoutHooks: false);
+        Assert.AreEqual(GitWorktreeService.Ok, other.Status, other.Message);
+        Assert.AreEqual("12345-export-csv-2", other.Name);
+
+        var removed = await repository.Service.RemoveAsync(repository.Root, created.Root!, force: false);
+
+        Assert.AreEqual((GitWorktreeService.Ok, null, "feature/12345-export-csv"), (removed.Status, removed.BranchKept, removed.BranchDeleted));
+        Assert.AreEqual(string.Empty, repository.Git("branch", "--list", "feature/12345-export-csv").Trim());
+        // Git deletes the mark with the branch: a branch of that name made later by someone else is not taken for one of CodeAlta.
+        Assert.IsFalse(repository.Git("config", "--list", "--local").Contains("branch.feature/12345-export-csv.", StringComparison.Ordinal));
+    }
+
+    [TestMethod]
+    public async Task Create_OnABranchTheUserNamed_KeepsItWithCommitsOfItsOwn()
+    {
+        using var repository = Repository.Create();
+        var created = await repository.Service.CreateAsync(repository.Project, null, "fix/7-crash", progress: null, withoutHooks: false);
+        File.WriteAllText(Path.Combine(created.Root!, "work.txt"), "work");
+        repository.GitIn(created.Root!, "add", "-A");
+        repository.GitIn(created.Root!, "commit", "-q", "-m", "work");
+
+        var removed = await repository.Service.RemoveAsync(repository.Root, created.Root!, force: false);
+
+        Assert.AreEqual((GitWorktreeService.Ok, "fix/7-crash", null), (removed.Status, removed.BranchKept, removed.BranchDeleted));
+        StringAssert.Contains(repository.Git("branch", "--list", "fix/7-crash"), "fix/7-crash");
+    }
+
+    [TestMethod]
+    public async Task Create_RefusesABranchThatExists_OrThatGitRefuses_AndLeavesNothing()
+    {
+        using var repository = Repository.Create();
+        repository.Git("branch", "feature/taken");
+
+        var taken = await repository.Service.CreateAsync(repository.Project, null, "feature/taken", progress: null, withoutHooks: false);
+        var invalid = await repository.Service.CreateAsync(repository.Project, null, "feature/a b", progress: null, withoutHooks: false);
+        // Only git's own check refuses a part of the name that ends with .lock.
+        var lockName = await repository.Service.CreateAsync(repository.Project, null, "feature/x.lock/y", progress: null, withoutHooks: false);
+
+        Assert.AreEqual(("branch_exists", "invalid_branch", "invalid_branch"), (taken.Status, invalid.Status, lockName.Status));
+        Assert.AreEqual(1, (await repository.Service.ListAsync(repository.Root))!.Count, "no worktree is added");
+        Assert.IsFalse(repository.Git("config", "--list", "--local").Contains(GitWorktreeService.CreatedBranchKey, StringComparison.Ordinal), "no branch is marked");
+    }
+
+    [TestMethod]
+    public async Task Create_RefusesABranchThatDiffersOnlyInCase_AlsoWhenItIsPacked()
+    {
+        using var repository = Repository.Create();
+        repository.Git("branch", "feature/Foo");
+        // Packed, git itself does not see it when it creates feature/foo on a file system that ignores case.
+        repository.Git("pack-refs", "--all");
+
+        var created = await repository.Service.CreateAsync(repository.Project, null, "feature/foo", progress: null, withoutHooks: false);
+
+        Assert.AreEqual("branch_exists", created.Status);
+        StringAssert.Contains(created.Message, "feature/Foo");
+        Assert.AreEqual(1, (await repository.Service.ListAsync(repository.Root))!.Count, "no worktree is added");
+    }
+
+    [TestMethod]
+    public async Task Create_SaysWhenTheBranchCannotBeMarked_AndStillCreatesTheWorktree()
+    {
+        using var repository = Repository.Create();
+        // Another git command holds the configuration of the repository.
+        var lockFile = Path.Combine(repository.Root, ".git", "config.lock");
+        File.WriteAllText(lockFile, string.Empty);
+        try
+        {
+            var created = await repository.Service.CreateAsync(repository.Project, null, "feature/7-locked", progress: null, withoutHooks: false);
+
+            Assert.AreEqual(GitWorktreeService.Ok, created.Status, created.Message);
+            StringAssert.Contains(created.Warning, "could not be marked");
+        }
+        finally
+        {
+            File.Delete(lockFile);
+        }
+    }
+
+    [TestMethod]
+    public async Task Remove_LeavesABranchTheWorktreeWasNotCreatedOn()
+    {
+        using var repository = Repository.Create();
+        var created = await repository.Service.CreateAsync(repository.Project);
+        // The user moved the worktree to a branch of theirs.
+        repository.GitIn(created.Root!, "switch", "-q", "-c", "feature/mine");
+
+        var removed = await repository.Service.RemoveAsync(repository.Root, created.Root!, force: false);
+
+        Assert.AreEqual((GitWorktreeService.Ok, null, null), (removed.Status, removed.BranchKept, removed.BranchDeleted));
+        StringAssert.Contains(repository.Git("branch", "--list", "feature/mine"), "feature/mine");
+    }
+
+    [TestMethod]
     public async Task Remove_RefusesTheMainCheckoutAndWhatIsNoWorktree()
     {
         using var repository = Repository.Create();

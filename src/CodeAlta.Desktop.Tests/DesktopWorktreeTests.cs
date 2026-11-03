@@ -24,6 +24,39 @@ public sealed class DesktopWorktreeTests
     private const string Epoch = "11111111-1111-4111-8111-111111111111";
 
     [TestMethod]
+    public async Task WorkStartedOnANamedBranch_InTheProjectFolder_MovesTheFolderToANewBranch()
+    {
+        using var repository = await Repository.CreateAsync();
+        repository.Git("branch", "Fix/7-Crash");
+        var provider = new FixtureProvider();
+        await using var host = await repository.HostAsync(provider);
+        var project = await host.ProjectCatalog.UpsertFromPathAsync(repository.Root);
+        var starter = new CodeAlta.Desktop.WorkItems.SessionStarter(host, new GitWorktreeService(host.CatalogOptions, new CodeAltaConfigStore(host.CatalogOptions)), () => null);
+        var service = new WorkspaceService(host, Epoch);
+        try
+        {
+            // A branch that is there, also in another case, is not taken: nothing starts, and the folder stays where it is.
+            var taken = await starter.StartAsync(project, "#7 Crash", _ => "Work on it.", false, null, "issue", new() { Branch = "fix/7-crash" });
+            Assert.AreEqual(((string?)null, "branch_exists"), (taken.SessionId, taken.Reason), taken.Problem);
+            Assert.AreEqual("main", repository.Git("branch", "--show-current").Trim());
+
+            // A new one: the folder moves to it before the session starts, with what is not committed.
+            File.WriteAllText(Path.Combine(repository.Root, "notes.txt"), "not committed");
+            var started = await starter.StartAsync(project, "#8 Export", _ => "Work on it.", false, null, "issue", new() { Branch = "feature/8-export" });
+
+            Assert.IsNull(started.Problem, started.Problem);
+            Assert.AreEqual("feature/8-export", repository.Git("branch", "--show-current").Trim());
+            Assert.AreEqual("not committed", File.ReadAllText(Path.Combine(repository.Root, "notes.txt")));
+            Assert.IsNull((await service.SnapshotAsync(new(), CancellationToken.None)).Sessions.Single(session => session.Id == started.SessionId).WorktreePath,
+                "The session works in the folder of the project.");
+        }
+        finally
+        {
+            await service.CloseSessionsAsync();
+        }
+    }
+
+    [TestMethod]
     public async Task CreateSession_InANewWorktree_MakesTheCheckoutAndListsWhereTheSessionWorks()
     {
         using var repository = await Repository.CreateAsync();

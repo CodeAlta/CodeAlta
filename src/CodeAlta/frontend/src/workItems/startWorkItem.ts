@@ -60,6 +60,9 @@ export function startRefusal(reason: string | null): MessageKey | null {
   return reason === "worktree_not_repository" || reason === "worktree_no_commit"
     ? "This project has no git repository with a commit: start it in a new session instead."
     : reason === "worktree_git_unavailable" ? "Git was not found: start it in a new session instead."
+    : reason === "worktree_branch_exists" || reason === "branch_exists" ? "This branch already exists: choose another name."
+    : reason === "branch_in_use" ? "A session works in the folder of the project: its branch is not changed. Start in a new worktree instead."
+    : reason === "worktree_invalid_branch" ? "Git does not accept this name for a branch."
     : reason === "not_found" ? "It is no longer there."
     : null;
 }

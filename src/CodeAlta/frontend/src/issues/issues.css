@@ -121,6 +121,32 @@
 .issue-place { font-family: var(--bp-typography-family-mono); font-size: .92em; }
 .issue-elsewhere { margin: 0; color: var(--muted); font-size: 12px; }
 .issue-detail .work-detail-actions { gap: 10px; }
+/* The branch of a new worktree: wide enough for a whole name, and no wider than the line. */
+.issue-branch { flex-wrap: nowrap; }
+.issue-branch .issue-branch-input { flex: 1 1 auto; min-width: 0; max-width: 560px; }
+.work-runs-with .issue-branch-toggle { margin: 0 0 0 10px; white-space: nowrap; font-size: 12px; color: var(--muted); }
+.issue-branch .issue-branch-input input { font-family: var(--bp-typography-family-mono); font-size: 12px; }
+/* The form of the scheme of the branches, in the popover of the button next to the field. */
+.branch-scheme { display: grid; align-content: start; gap: 10px; min-height: 0; min-width: 0; height: 100%; overflow-y: auto; margin: 0; border: 0; padding: 16px 20px; }
+.branch-scheme-head { display: flex; align-items: center; gap: 8px; }
+.branch-scheme-note, .branch-scheme-loading { margin: 0; color: var(--muted); font-size: 12px; }
+.branch-scheme-field { display: grid; grid-template-columns: 110px minmax(0, 1fr); align-items: center; gap: 8px; font-size: 12px; }
+.branch-scheme-field input, .branch-scheme-types input { font-family: var(--bp-typography-family-mono); font-size: 12px; }
+.branch-scheme-length .bp6-input-group { max-width: 90px; }
+.branch-scheme-placeholders { display: flex; gap: 6px; margin-left: 118px; }
+.branch-scheme-types { width: 100%; border-collapse: collapse; font-size: 12px; }
+.branch-scheme-types th { text-align: left; font-weight: 500; color: var(--muted); padding: 2px 4px; }
+.branch-scheme-types td { padding: 2px 4px; }
+.branch-scheme-types td:last-child, .branch-scheme-types th:last-child { width: 84px; }
+.branch-scheme-row-actions { white-space: nowrap; }
+.branch-scheme-others td:first-child { color: var(--muted); font-style: italic; }
+.branch-scheme-add { justify-self: start; }
+.branch-scheme-preview { margin: 0; font-size: 12px; overflow-wrap: anywhere; }
+.branch-scheme-preview code { font-size: 12px; }
+.branch-scheme-problem { color: var(--bp-intent-danger-text, var(--muted)); }
+.branch-scheme-callout { font-size: 12px; overflow-wrap: anywhere; }
+.branch-scheme-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.issue-branch-problem { margin: -4px 0 0; color: var(--bp-intent-warning-text, var(--muted)); font-size: 12px; overflow-wrap: anywhere; }
 
 .issue-text { display: grid; gap: 4px; min-width: 0; }
 .issue-nothing { margin: 0; color: var(--muted); font-style: italic; font-size: 13px; }

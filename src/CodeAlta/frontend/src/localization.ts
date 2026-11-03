@@ -1,6 +1,7 @@
 import { landingMessages } from "./landing/messages";
 import { statisticsMessages } from "./statistics/messages";
 import { worktreeMessages } from "./worktrees/messages";
+import { issueBranchMessages } from "./issues/branchMessages";
 import { documentationMessages } from "./documentation/messages";
 import { bookmarkMessages } from "./bookmarks/messages";
 import { storageMessages } from "./storage/messages";
@@ -2851,6 +2852,7 @@ export const messages = dictionary({
   ...landingMessages,
   ...statisticsMessages,
   ...worktreeMessages,
+  ...issueBranchMessages,
   ...documentationMessages,
   ...storageMessages,
   ...sessionBranchMessages,

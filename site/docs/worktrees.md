@@ -113,6 +113,8 @@ Choose in **Settings > Worktrees**:
 
 A worktree gets a name of two words and four random characters, such as `quiet-heron-7k2m`, and its branch is `alta/` and that name. The random characters keep apart worktrees created at the same time by agents that do not see each other.
 
+A worktree started on an issue is on the branch named in the [Issues tab](issues.md#branch-name), such as `feature/12345-export`, and its folder takes the last part of that name. CodeAlta marks that branch as its own: below, it goes with its worktree as an `alta/` branch does.
+
 ## Good to know
 
 - When a worktree is removed, its sessions continue in the project folder.
