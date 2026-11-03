@@ -105,9 +105,17 @@ internal sealed class NodeUpdates : IAsyncDisposable
     /// <summary>Starts reading the state of the versions.</summary>
     public void Start() => _loop = Task.Run(LoopAsync);
 
-    /// <summary>Gets the versions of the node and where its self-update stands.</summary>
+    /// <summary>
+    /// Gets the versions of the node and where its self-update stands, as the coordinated update of the fleet reads them to
+    /// decide that a version confirmed: a state that exists and cannot be read throws, never taken for one without a trial.
+    /// </summary>
     /// <returns>The status.</returns>
-    public FleetUpdateStatus Status() => UpdateStatusReport.Describe(_options.Store.Read(), _options.Running.ToString(), _options.Installed);
+    /// <exception cref="UpdateException">The state of the versions cannot be read (<see cref="UpdateErrorCodes.StateUnavailable"/>).</exception>
+    public FleetUpdateStatus Status() => UpdateStatusReport.Describe(_options.Store.ReadOrThrow(), _options.Running.ToString(), _options.Installed);
+
+    /// <summary>Gets the versions of the node and where its self-update stands, for a person: a state that cannot be read is described as empty.</summary>
+    /// <returns>The status.</returns>
+    public FleetUpdateStatus Describe() => UpdateStatusReport.Describe(_options.Store.Read(), _options.Running.ToString(), _options.Installed);
 
     /// <summary>
     /// Downloads, checks and stages a version, then asks this node to switch to it when idle: what the coordinated update

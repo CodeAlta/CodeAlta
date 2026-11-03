@@ -88,6 +88,32 @@ public sealed class UpdateVersionStore
         }
     }
 
+    /// <summary>
+    /// Reads the state as <see cref="Read"/> does, but tells a state that cannot be read from a missing one: a missing
+    /// state is the empty state, while one that exists and does not read (corrupt, locked, not allowed) throws. What decides
+    /// that a version confirmed reads it so: an unreadable state is never taken for a state without a trial.
+    /// </summary>
+    /// <returns>The state.</returns>
+    /// <exception cref="UpdateException">The state exists and cannot be read (<see cref="UpdateErrorCodes.StateUnavailable"/>).</exception>
+    public UpdateState ReadOrThrow()
+    {
+        var path = Path.Combine(Root, StateFileName);
+        try
+        {
+            using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+            return JsonSerializer.Deserialize(stream, UpdateJsonContext.Default.UpdateState)
+                ?? throw new UpdateException(UpdateErrorCodes.StateUnavailable, $"{path} holds no state.");
+        }
+        catch (Exception exception) when (exception is FileNotFoundException or DirectoryNotFoundException)
+        {
+            return new UpdateState();
+        }
+        catch (Exception exception) when (exception is JsonException or IOException or UnauthorizedAccessException)
+        {
+            throw new UpdateException(UpdateErrorCodes.StateUnavailable, $"{path} cannot be read: {exception.Message}", exception);
+        }
+    }
+
     /// <summary>Changes the state under its lock: reads it, applies the change, writes the result atomically.</summary>
     /// <param name="change">The change; returning the same instance writes nothing.</param>
     /// <returns>The state after the change.</returns>

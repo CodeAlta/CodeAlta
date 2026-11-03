@@ -33,7 +33,10 @@ public sealed record FleetUpdateAgentOptions
     /// <summary>Gets what reads a feed for the latest version this node may take (the self-update's check), for an automatic campaign.</summary>
     public required Func<UpdateRequest, CancellationToken, Task<UpdateCheck>> Check { get; init; }
 
-    /// <summary>Gets what reads where the self-update stands.</summary>
+    /// <summary>
+    /// Gets what reads where the self-update stands; it throws <see cref="UpdateException"/> when its state cannot be read,
+    /// and nothing is taken as confirmed then (an unreadable state is not a state without a trial).
+    /// </summary>
     public required Func<FleetUpdateStatus> Status { get; init; }
 
     /// <summary>
@@ -639,8 +642,9 @@ public sealed class FleetUpdateAgent : IAsyncDisposable
             }
 
             var staged = await _options.Apply(request, Requester(state.CampaignId!), cancellationToken).ConfigureAwait(false);
-            // A version that runs already is updated only once it confirmed; one on trial still may roll back.
-            outcome = staged is null && UpdateVersion.TryParse(state.Version, out var target) && Confirmed(target, _options.Status())
+            // A version that runs already is updated only once it confirmed; one on trial still may roll back, and a state
+            // that does not read confirms nothing (the next look decides).
+            outcome = staged is null && UpdateVersion.TryParse(state.Version, out var target) && TryStatus(out var status) && Confirmed(target, status)
                 ? FleetUpdateMachineStates.Updated
                 : FleetUpdateMachineStates.Switching;
         }
@@ -697,7 +701,23 @@ public sealed class FleetUpdateAgent : IAsyncDisposable
         Publish(next);
     }
 
-    // Whether a version runs and confirmed that it works: it runs, and no trial of it waits for its confirmation.
+    // Where the self-update stands, or false when its state does not read.
+    private bool TryStatus([System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out FleetUpdateStatus? status)
+    {
+        try
+        {
+            status = _options.Status();
+            return true;
+        }
+        catch (UpdateException)
+        {
+            status = null;
+            return false;
+        }
+    }
+
+    // Whether a version runs and confirmed that it works: it runs, and no trial of it waits for its confirmation (read
+    // from a state that reads: see TryStatus).
     private bool Confirmed(UpdateVersion target, FleetUpdateStatus status)
         => target.Equals(_options.Running) && !(status.Trial is { } trial && UpdateVersion.TryParse(trial.Version, out var onTrial) && onTrial.Equals(target));
 
@@ -719,9 +739,7 @@ public sealed class FleetUpdateAgent : IAsyncDisposable
             if (state.CampaignId is null || state.Version is null) return;
             if (FleetUpdateMachineStates.IsTerminal(state.State) && state.State is not (FleetUpdateMachineStates.Cancelled or FleetUpdateMachineStates.Updated)) return;
             if (!UpdateVersion.TryParse(state.Version, out var target)) return;
-            FleetUpdateStatus status;
-            try { status = _options.Status(); }
-            catch (UpdateException) { return; }
+            if (!TryStatus(out var status)) return;
             string? outcome = null;
             string? message = null;
             if (state.State == FleetUpdateMachineStates.Updated)
