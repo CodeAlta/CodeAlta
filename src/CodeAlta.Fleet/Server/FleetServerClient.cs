@@ -7,6 +7,7 @@ using System.Text.Json.Serialization.Metadata;
 using CodeAlta.Fleet.Identity;
 using CodeAlta.Fleet.Protocol;
 using CodeAlta.Fleet.Protocol.Api;
+using CodeAlta.Fleet.Update;
 
 namespace CodeAlta.Fleet.Server;
 
@@ -418,6 +419,120 @@ public sealed class FleetServerClient : IDisposable
                     ServerApiJsonContext.Default.TelemetrySettingsDto, cancellationToken).ConfigureAwait(false);
             }
             catch (FleetServerException exception) when (exception.Code == "telemetry.conflict" && attempt == 0)
+            {
+                // Another owner set it first: signed again after the new one.
+            }
+        }
+    }
+
+    /// <summary>Reads the updates of the fleet: the server's versions, the update policy and the recent campaigns; a controller device only.</summary>
+    /// <param name="cancellationToken">Cancels the call.</param>
+    /// <returns>The updates.</returns>
+    /// <exception cref="FleetServerException">The server refused the call.</exception>
+    /// <exception cref="HttpRequestException">The server does not answer.</exception>
+    public Task<UpdatesDto> GetUpdatesAsync(CancellationToken cancellationToken = default)
+        => SendAsync(HttpMethod.Get, "api/v1/updates", null, ServerApiJsonContext.Default.UpdatesDto, cancellationToken);
+
+    /// <summary>
+    /// Starts an update campaign: this controller device reads the feed (the latest version every product lists, unless
+    /// one is given, and the SHA-512 of the runtime package of each runtime), signs the manifest, numbered after the
+    /// last campaign, and sends it. The server asks the nodes, then updates itself; each machine checks this signature
+    /// and its package against the hash signed for its runtime.
+    /// </summary>
+    /// <param name="change">What the campaign installs, from where, when and on which machines.</param>
+    /// <param name="feedHttp">The HTTP client of the feed; null for one of its own.</param>
+    /// <param name="cancellationToken">Cancels the calls.</param>
+    /// <returns>The campaign as the server holds it.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="change"/> is null.</exception>
+    /// <exception cref="UpdateException">The feed is not valid, did not answer, or lacks the version.</exception>
+    /// <exception cref="FleetDeviceListException">This device is not a controller device of the device list it verified: nothing was signed.</exception>
+    /// <exception cref="FleetServerException">The server refused the campaign.</exception>
+    /// <exception cref="HttpRequestException">The server does not answer.</exception>
+    public async Task<UpdateCampaignDto> StartUpdateAsync(FleetUpdateCampaignChange change, HttpClient? feedHttp = null, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(change);
+        var organization = await GetOrganizationAsync(cancellationToken).ConfigureAwait(false);
+        var state = await ReadAnchoredDeviceListAsync(cancellationToken).ConfigureAwait(false);
+        if (!state.IsController(DeviceId)) throw new FleetDeviceListException(state.Sequence, "this device is not a controller device of the list, so it signs no update");
+        using var ownHttp = feedHttp is null ? new HttpClient { Timeout = TimeSpan.FromMinutes(2) } : null;
+        var feed = UpdateFeeds.Open(change.Feed ?? UpdateFeeds.NuGetOrg, feedHttp ?? ownHttp!);
+        UpdateVersion version;
+        if (change.Version is { } asked)
+        {
+            version = UpdateVersion.TryParse(asked, out var parsed) ? parsed : throw new UpdateException(UpdateErrorCodes.NotFound, $"'{asked}' is not a version.");
+        }
+        else
+        {
+            version = (await UpdateReleases.ListAsync(feed, UpdateReleases.FleetProducts, change.Prerelease, cancellationToken).ConfigureAwait(false)).FirstOrDefault()
+                ?? throw new UpdateException(UpdateErrorCodes.NotFound, $"{feed.Source} lists no version of both CodeAlta.Node and CodeAlta.Server.");
+        }
+
+        var hashes = await UpdateReleases.ReadHashesAsync(feed, UpdateReleases.FleetProducts, version, cancellationToken).ConfigureAwait(false);
+        for (var attempt = 0; ; attempt++)
+        {
+            var updates = await GetUpdatesAsync(cancellationToken).ConfigureAwait(false);
+            var manifest = new FleetUpdateManifest(FleetUpdateManifest.CurrentVersion, organization.Id, Guid.NewGuid().ToString("N"), updates.NextSequence, version.ToString(),
+                feed.Source, change.Rollback, change.NotBefore?.ToUniversalTime(), change.TimeZone, change.Machines is { Count: > 0 } machines ? machines : null, hashes, DeviceId,
+                Now());
+            if (FleetUpdateDocuments.Check(manifest) is { } reason) throw new ArgumentException($"The manifest does not hold: {reason}.", nameof(change));
+            var text = FleetUpdateDocuments.Serialize(manifest);
+            var request = new CreateUpdateCampaignRequest(new FleetSignedUpdateDocument(text,
+                Base64Url.EncodeToString(_identity.SignData(FleetUpdateDocuments.GetManifestSignedBytes(text)))));
+            try
+            {
+                return await SendAsync(HttpMethod.Post, "api/v1/updates/campaigns", Body(request, ServerApiJsonContext.Default.CreateUpdateCampaignRequest),
+                    ServerApiJsonContext.Default.UpdateCampaignDto, cancellationToken).ConfigureAwait(false);
+            }
+            catch (FleetServerException exception) when (exception.Code == "update.conflict" && attempt == 0 && exception.Message.Contains("numbered", StringComparison.Ordinal))
+            {
+                // Another owner started one first: signed again after it.
+            }
+        }
+    }
+
+    /// <summary>Cancels an update campaign before the server's step; an owner's controller device only.</summary>
+    /// <param name="campaignId">The campaign.</param>
+    /// <param name="cancellationToken">Cancels the call.</param>
+    /// <returns>The campaign.</returns>
+    /// <exception cref="FleetServerException">The server refused (<c>update.conflict</c> once the server updates).</exception>
+    /// <exception cref="HttpRequestException">The server does not answer.</exception>
+    public Task<UpdateCampaignDto> CancelUpdateAsync(string campaignId, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(campaignId);
+        return SendAsync(HttpMethod.Post, $"api/v1/updates/campaigns/{Uri.EscapeDataString(campaignId)}/cancel", [], ServerApiJsonContext.Default.UpdateCampaignDto,
+            cancellationToken);
+    }
+
+    /// <summary>Sets the update policy of the fleet: this controller device signs it, numbered after the one held.</summary>
+    /// <param name="change">The policy.</param>
+    /// <param name="cancellationToken">Cancels the calls.</param>
+    /// <returns>The policy as the server holds it.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="change"/> is null.</exception>
+    /// <exception cref="ArgumentException">The policy does not hold.</exception>
+    /// <exception cref="FleetDeviceListException">This device is not a controller device of the device list it verified: nothing was signed.</exception>
+    /// <exception cref="FleetServerException">The server refused the policy.</exception>
+    /// <exception cref="HttpRequestException">The server does not answer.</exception>
+    public async Task<UpdatePolicyDto> SetUpdatePolicyAsync(FleetUpdatePolicyChange change, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(change);
+        var organization = await GetOrganizationAsync(cancellationToken).ConfigureAwait(false);
+        var state = await ReadAnchoredDeviceListAsync(cancellationToken).ConfigureAwait(false);
+        if (!state.IsController(DeviceId)) throw new FleetDeviceListException(state.Sequence, "this device is not a controller device of the list, so it signs no policy");
+        for (var attempt = 0; ; attempt++)
+        {
+            var held = (await GetUpdatesAsync(cancellationToken).ConfigureAwait(false)).Policy;
+            var sequence = held.Policy is { } signed && FleetUpdateDocuments.TryParsePolicy(signed.Payload, out var current, out _) ? current.Sequence + 1 : 1;
+            var policy = new FleetUpdatePolicy(FleetUpdatePolicy.CurrentVersion, organization.Id, sequence, change.Mode, change.PinnedVersion, change.Feed, change.Window,
+                change.TimeZone, DeviceId, Now());
+            if (FleetUpdateDocuments.Check(policy) is { } reason) throw new ArgumentException($"The update policy does not hold: {reason}.", nameof(change));
+            var text = FleetUpdateDocuments.Serialize(policy);
+            var request = new SetUpdatePolicyRequest(new FleetSignedUpdateDocument(text, Base64Url.EncodeToString(_identity.SignData(FleetUpdateDocuments.GetPolicySignedBytes(text)))));
+            try
+            {
+                return await SendAsync(HttpMethod.Put, "api/v1/updates/policy", Body(request, ServerApiJsonContext.Default.SetUpdatePolicyRequest),
+                    ServerApiJsonContext.Default.UpdatePolicyDto, cancellationToken).ConfigureAwait(false);
+            }
+            catch (FleetServerException exception) when (exception.Code == "update.conflict" && attempt == 0)
             {
                 // Another owner set it first: signed again after the new one.
             }

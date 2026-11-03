@@ -341,9 +341,28 @@ internal sealed class NodeApplication
                 }
 
                 using var fleetLifetime = new FleetLifetime(fleet);
+                // The coordinated update of the fleet: what a server asks, once verified, waits for its time and runs the
+                // self-update below; it reports to that server where it stands.
+                NodeServers? servers = null;
+                await using var fleetUpdates = UpdateVersion.TryParse(Version, out var agentVersion)
+                    ? new FleetUpdateAgent(new FleetUpdateAgentOptions
+                    {
+                        StatePath = NodeUpdatePaths.CampaignPath(profile), DeviceId = fleet.DeviceId, Running = agentVersion,
+                        Policy = () => updates?.Policy() ?? UpdateSourcePolicy.Load(NodeUpdatePaths.PolicyPath(profile)),
+                        Apply = (request, requestedBy, token) => updates is { } self ? self.ApplyAsync(request, requestedBy, token)
+                            : throw new UpdateException(UpdateErrorCodes.StateUnavailable, "The self-update of this node is not running."),
+                        Check = (request, token) => updates is { } self ? self.CheckAsync(request, token)
+                            : throw new UpdateException(UpdateErrorCodes.StateUnavailable, "The self-update of this node is not running."),
+                        Status = () => updates?.Status() ?? UpdateStatusReport.Describe(store.Read(), Version, InstalledVersion()),
+                        CancelSwitch = reason => updates?.CancelPending(reason),
+                        Connector = linkId => servers?.Connections.Find(linkId)?.Connector,
+                        Log = static message => NodeLog(message),
+                    })
+                    : null;
                 // The servers the node joined (altanode join): one control connection each, beside the listener or without it.
-                await using var servers = NodeServers.Start(node, fleet.Service, name, Version, ConfigureConnector, telemetry);
-                linked = servers;
+                servers = NodeServers.Start(node, fleet.Service, name, Version, ConfigureConnector, telemetry, fleetUpdates);
+                await using var serversLifetime = servers;
+                linked = serversLifetime;
                 // The self-update: a version on trial confirms itself once healthy; a switch altanode update asks for
                 // stops the node when it is idle, so that its launcher starts the new version.
                 if (UpdateVersion.TryParse(Version, out var runningVersion))
@@ -351,12 +370,14 @@ internal sealed class NodeApplication
                     var updateOptions = new NodeUpdatesOptions
                     {
                         Store = store, Running = runningVersion, Installed = InstalledVersion(), SessionsAtWork = node.Host.RuntimeService.CountSessionsAtWork,
-                        PauseAdmission = node.PauseAdmission, Healthy = () => IsHealthy(fleet, listen, servers), RequestRestart = stopRequested.Cancel,
+                        PauseAdmission = node.PauseAdmission, Healthy = () => IsHealthy(fleet, listen, serversLifetime), RequestRestart = stopRequested.Cancel,
                         PolicyPath = NodeUpdatePaths.PolicyPath(profile), Log = static message => NodeLog(message),
                     };
                     updates = new NodeUpdates(ConfigureUpdates?.Invoke(updateOptions) ?? updateOptions);
                     updates.Start();
                 }
+
+                fleetUpdates?.Start();
 
                 using var signals = new NodeSignals(stopRequested.Cancel, hurry.Cancel, static () => Environment.Exit(NodeExitCodes.Failure));
                 Started?.Invoke(node, stopRequested.Cancel);
@@ -374,10 +395,11 @@ internal sealed class NodeApplication
 
                 var restart = updates?.RestartRequested == true;
                 await _output.WriteLineAsync(restart ? "Stopping CodeAlta Node to start its new version..." : "Stopping CodeAlta Node...").ConfigureAwait(false);
+                if (fleetUpdates is not null) await fleetUpdates.DisposeAsync().ConfigureAwait(false);
                 if (updates is not null) await updates.DisposeAsync().ConfigureAwait(false);
                 // The channels close first: no remote call reaches a runtime that stops.
                 await fleetLifetime.StopAsync().ConfigureAwait(false);
-                await servers.DisposeAsync().ConfigureAwait(false);
+                await serversLifetime.DisposeAsync().ConfigureAwait(false);
                 await node.StopAsync(hurry.Token).ConfigureAwait(false);
                 return (NodeExitCodes.Success, restart);
             }

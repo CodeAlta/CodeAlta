@@ -48,15 +48,28 @@ internal sealed class TempDirectory : IDisposable
 /// <summary>A device of a test: a P-256 key, as CodeAlta's devices make one.</summary>
 internal sealed class TestDevice : IFleetHandshakeSigner, IDisposable
 {
-    private readonly ECDsa _key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+    private readonly ECDsa? _key;
+    private readonly CodeAlta.Fleet.Identity.DeviceIdentity? _identity;
 
     public TestDevice(string name)
     {
         Name = name;
+        _key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
         PublicKey = Convert.ToBase64String(_key.ExportSubjectPublicKeyInfo());
         FleetDevicePublicKey.TryParse(PublicKey, out var parsed);
         DeviceId = parsed!.DeviceId;
     }
+
+    private TestDevice(CodeAlta.Fleet.Identity.DeviceIdentity identity)
+    {
+        Name = identity.DeviceId;
+        _identity = identity;
+        PublicKey = Convert.ToBase64String(identity.ExportSubjectPublicKeyInfo());
+        DeviceId = identity.DeviceId;
+    }
+
+    /// <summary>A device of a test that signs with the key of a CodeAlta device the test owns (and disposes).</summary>
+    public static TestDevice From(CodeAlta.Fleet.Identity.DeviceIdentity identity) => new(identity);
 
     public string Name { get; }
 
@@ -65,7 +78,15 @@ internal sealed class TestDevice : IFleetHandshakeSigner, IDisposable
     public string DeviceId { get; }
 
     public string Sign(ReadOnlySpan<byte> data)
-        => Base64Url.EncodeToString(_key.SignData(data, HashAlgorithmName.SHA256, DSASignatureFormat.IeeeP1363FixedFieldConcatenation));
+        => _identity is { } identity
+            ? Base64Url.EncodeToString(identity.SignData(data.ToArray()))
+            : Base64Url.EncodeToString(_key!.SignData(data, HashAlgorithmName.SHA256, DSASignatureFormat.IeeeP1363FixedFieldConcatenation));
+
+    public FleetSignedUpdateDocument SignManifest(FleetUpdateManifest manifest)
+    {
+        var text = FleetUpdateDocuments.Serialize(manifest);
+        return new FleetSignedUpdateDocument(text, Sign(FleetUpdateDocuments.GetManifestSignedBytes(text)));
+    }
 
     public ValueTask<string> SignAsync(FleetProofContext context, CancellationToken cancellationToken) => ValueTask.FromResult(Sign(context.GetSignedBytes()));
 
@@ -84,7 +105,7 @@ internal sealed class TestDevice : IFleetHandshakeSigner, IDisposable
         return new FleetSignedTelemetrySettings(text, Sign(FleetTelemetrySettingsDocuments.GetSignedBytes(text)));
     }
 
-    public void Dispose() => _key.Dispose();
+    public void Dispose() => _key?.Dispose();
 }
 
 /// <summary>What the server answered: the status and the JSON body.</summary>
@@ -126,12 +147,13 @@ internal sealed class ServerFixture : IAsyncDisposable
 
     /// <summary>Starts a server; a data root given stays the caller's, one made here is deleted with the fixture.</summary>
     public static async Task<ServerFixture> StartAsync(TempDirectory? root = null, TestClock? clock = null, Control.RelayOptions? relay = null,
-        Func<FleetUpdateStatus?>? updateStatus = null, Func<string, string?>? environment = null, TimeSpan? telemetryInterval = null)
+        Func<FleetUpdateStatus?>? updateStatus = null, Func<string, string?>? environment = null, TimeSpan? telemetryInterval = null,
+        Func<CoordinatorServerOptions, CoordinatorServerOptions>? configure = null)
     {
         var owned = root is null ? new TempDirectory() : null;
         root ??= owned!;
         clock ??= new TestClock(DateTimeOffset.UtcNow);
-        var server = await CoordinatorServer.StartAsync(new CoordinatorServerOptions
+        var options = new CoordinatorServerOptions
         {
             DataRoot = root.Path,
             Urls = ["http://127.0.0.1:0"],
@@ -142,7 +164,8 @@ internal sealed class ServerFixture : IAsyncDisposable
             // The OTEL_* variables of the machine that runs the tests never reach a test's server.
             EnvironmentVariable = environment ?? (static _ => null),
             TelemetryExportInterval = telemetryInterval,
-        });
+        };
+        var server = await CoordinatorServer.StartAsync(configure?.Invoke(options) ?? options);
         return new ServerFixture(owned, server, clock);
     }
 

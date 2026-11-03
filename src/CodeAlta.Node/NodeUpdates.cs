@@ -16,6 +16,15 @@ internal static class NodeUpdatePaths
         return new UpdateVersionStore(Path.Combine(profile.StateRoot, "fleet", "versions"));
     }
 
+    /// <summary>Gets the file of the update campaign of the fleet a node accepted: <c>fleet/update-campaign.json</c>.</summary>
+    /// <param name="profile">The profile.</param>
+    /// <returns>The path.</returns>
+    public static string CampaignPath(CodeAltaInstanceProfile profile)
+    {
+        ArgumentNullException.ThrowIfNull(profile);
+        return Path.Combine(profile.StateRoot, "fleet", "update-campaign.json");
+    }
+
     /// <summary>Gets the settings of the updates of a profile: <c>fleet/update.json</c> (the feed, the allowed feeds).</summary>
     /// <param name="profile">The profile.</param>
     /// <returns>The path.</returns>
@@ -114,17 +123,40 @@ internal sealed class NodeUpdates : IAsyncDisposable
         ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(requestedBy);
         using var ownHttp = _options.Http is null ? new HttpClient() : null;
-        var updater = new SelfUpdater(new SelfUpdaterOptions
-        {
-            Product = UpdateProduct.Node, Store = _options.Store, Running = _options.Running, Http = _options.Http ?? ownHttp!,
-            Policy = _options.PolicyPath is null ? UpdateSourcePolicy.From(new UpdateSourceSettings()) : UpdateSourcePolicy.Load(_options.PolicyPath),
-        });
+        var updater = Updater(_options.Http ?? ownHttp!);
         var check = await updater.CheckAsync(request, cancellationToken).ConfigureAwait(false);
         if (check.Target is null) return null;
         var staged = await updater.StageAsync(check, request, cancellationToken).ConfigureAwait(false);
         _options.Store.RequestSwitch(staged.Version, request.Now, requestedBy);
         return staged;
     }
+
+    /// <summary>Reads a feed for what it offers this node, without installing anything (an automatic update of the fleet checks the latest version with it).</summary>
+    /// <param name="request">The request.</param>
+    /// <param name="cancellationToken">Cancels the requests to the feed.</param>
+    /// <returns>What the feed offers.</returns>
+    /// <exception cref="UpdateException">The feed is not allowed or did not answer.</exception>
+    public async Task<UpdateCheck> CheckAsync(UpdateRequest request, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        using var ownHttp = _options.Http is null ? new HttpClient() : null;
+        return await Updater(_options.Http ?? ownHttp!).CheckAsync(request, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>Withdraws the switch that waits, if any (a cancelled campaign of the fleet).</summary>
+    /// <param name="reason">Why.</param>
+    /// <exception cref="UpdateException">The state cannot be written.</exception>
+    public void CancelPending(string reason) => _options.Store.CancelPending(reason);
+
+    /// <summary>Gets the settings of the updates of this node (<c>fleet/update.json</c>), read again.</summary>
+    /// <returns>The policy.</returns>
+    /// <exception cref="UpdateException">The file is not valid.</exception>
+    public UpdateSourcePolicy Policy() => _options.PolicyPath is null ? UpdateSourcePolicy.From(new UpdateSourceSettings()) : UpdateSourcePolicy.Load(_options.PolicyPath);
+
+    private SelfUpdater Updater(HttpClient http) => new(new SelfUpdaterOptions
+    {
+        Product = UpdateProduct.Node, Store = _options.Store, Running = _options.Running, Http = http, Policy = Policy(),
+    });
 
     /// <summary>Reads the state once: confirms a trial, or moves a pending switch on. The loop calls it; tests call it directly.</summary>
     /// <param name="now">The time.</param>

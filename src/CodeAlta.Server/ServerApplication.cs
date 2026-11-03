@@ -239,6 +239,10 @@ public sealed class ServerApplication
                 CertificatePath = options.Certificate,
                 CertificatePassword = password,
                 UpdateStatus = () => updates?.Status(),
+                // The last step of a campaign of the fleet: the same self-update as altaserver update, with the signed hash.
+                ApplyUpdate = (request, requestedBy, token) => updates is { } self
+                    ? self.ApplyAsync(request, requestedBy, token)
+                    : throw new UpdateException(UpdateErrorCodes.StateUnavailable, "The self-update of this server is not running."),
             };
             server = await CoordinatorServer.StartAsync(ConfigureServer?.Invoke(serverOptions) ?? serverOptions).ConfigureAwait(false);
         }

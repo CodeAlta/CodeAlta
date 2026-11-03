@@ -10,6 +10,7 @@ public sealed class ControlSession
     private readonly Lock _gate = new();
     private string? _state;
     private int? _activeSessions;
+    private FleetUpdateReport? _update;
 
     /// <summary>Initializes a new instance of the <see cref="ControlSession"/> class.</summary>
     /// <param name="device">The device, as it was when it connected.</param>
@@ -62,7 +63,7 @@ public sealed class ControlSession
     /// <returns>Its presence, online.</returns>
     public FleetPresence GetPresence()
     {
-        lock (_gate) return new FleetPresence(Device.Id, true, _state, _activeSessions, ConnectedAt);
+        lock (_gate) return new FleetPresence(Device.Id, true, _state, _activeSessions, ConnectedAt, _update);
     }
 
     /// <summary>Keeps the state the device sent with its heartbeat.</summary>
@@ -73,9 +74,25 @@ public sealed class ControlSession
         ArgumentNullException.ThrowIfNull(update);
         lock (_gate)
         {
-            if (_state == update.State && _activeSessions == update.ActiveSessions) return false;
+            var report = update.Update ?? _update;
+            if (_state == update.State && _activeSessions == update.ActiveSessions && Equals(_update, report)) return false;
             _state = update.State;
             _activeSessions = update.ActiveSessions;
+            _update = report;
+            return true;
+        }
+    }
+
+    /// <summary>Keeps where the device stands in an update campaign, as it reported it.</summary>
+    /// <param name="report">The report.</param>
+    /// <returns>Whether it differs from the one held.</returns>
+    public bool Update(FleetUpdateReport report)
+    {
+        ArgumentNullException.ThrowIfNull(report);
+        lock (_gate)
+        {
+            if (Equals(_update, report)) return false;
+            _update = report;
             return true;
         }
     }

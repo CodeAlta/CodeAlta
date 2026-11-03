@@ -62,6 +62,9 @@ public sealed class FleetServerConnectionsOptions
     /// <see cref="FleetConnector.Devices"/> say who its organization holds); null declines every relay (a desktop does).
     /// </summary>
     public Func<FleetConnector, FleetRelayIncoming, Stream, CancellationToken, Task>? AcceptRelay { get; init; }
+
+    /// <summary>Gets what takes the updates the servers ask of this node and reports where it stands; null ignores them (a desktop does).</summary>
+    public FleetUpdateAgent? Updates { get; init; }
 }
 
 /// <summary>
@@ -261,6 +264,9 @@ public sealed class FleetServerConnections : IAsyncDisposable
             AcceptRelay = _options.AcceptRelay is { } accept ? (incoming, stream, token) => accept(created!, incoming, stream, token) : null,
             TelemetrySettings = _options.TelemetrySettings is { } receive ? (settings, token) => receive(created!, link, settings, token) : null,
             Metrics = _options.Metrics,
+            UpdateInstruction = _options.Updates is { } updates ? (instruction, token) => updates.AcceptAsync(created!, link, instruction, token) : null,
+            UpdateCancel = _options.Updates is { } cancels ? (cancel, token) => cancels.CancelAsync(link, cancel, token) : null,
+            UpdateReport = _options.Updates is { } reports ? () => reports.Report(link.Id) : null,
         };
         if (_options.Configure is { } configure) options = configure(options);
         var connector = new FleetConnector(options);

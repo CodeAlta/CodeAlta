@@ -570,6 +570,157 @@ public sealed class SqliteCoordinatorStore : ICoordinatorStore
         }, cancellationToken);
     }
 
+    private const string CampaignColumns = "SELECT id, organization_id, seq, automatic, target_version, feed, rollback, not_before, time_zone, payload, signature, " +
+        "created_by_device_id, state, server_state, server_message, created_at, updated_at";
+
+    /// <inheritdoc />
+    public ValueTask<IReadOnlyList<UpdateCampaignRecord>> ListUpdateCampaignsAsync(string organizationId, int limit, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(organizationId);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(limit);
+        return ReadAsync(connection => QueryList(connection, null, CampaignColumns + " FROM update_campaigns WHERE organization_id = $org ORDER BY created_at DESC, id DESC LIMIT $limit",
+            ReadCampaign, ("$org", organizationId), ("$limit", limit)), cancellationToken);
+    }
+
+    /// <inheritdoc />
+    public ValueTask<UpdateCampaignRecord?> GetUpdateCampaignAsync(string campaignId, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(campaignId);
+        return ReadAsync(connection => QuerySingle(connection, null, CampaignColumns + " FROM update_campaigns WHERE id = $id", ReadCampaign, ("$id", campaignId)), cancellationToken);
+    }
+
+    /// <inheritdoc />
+    public ValueTask<IReadOnlyList<UpdateCampaignMachineRecord>> ListUpdateCampaignMachinesAsync(string campaignId, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(campaignId);
+        return ReadAsync(connection => QueryList(connection, null,
+            "SELECT campaign_id, device_id, state, running, message, instructed_at, updated_at FROM update_campaign_machines WHERE campaign_id = $id ORDER BY device_id",
+            static reader => new UpdateCampaignMachineRecord(reader.GetString(0), reader.GetString(1), reader.GetString(2), GetNullableString(reader, 3), GetNullableString(reader, 4),
+                GetNullableTime(reader, 5), FromTime(reader.GetInt64(6))), ("$id", campaignId)), cancellationToken);
+    }
+
+    /// <inheritdoc />
+    public ValueTask<long> GetLastUpdateSequenceAsync(string organizationId, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(organizationId);
+        return ReadAsync(connection =>
+        {
+            using var command = Create(connection, null, "SELECT COALESCE(MAX(seq), 0) FROM update_campaigns WHERE organization_id = $org AND automatic = 0", ("$org", organizationId));
+            return Convert.ToInt64(command.ExecuteScalar(), CultureInfo.InvariantCulture);
+        }, cancellationToken);
+    }
+
+    /// <inheritdoc />
+    public ValueTask<bool> CreateUpdateCampaignAsync(UpdateCampaignRecord campaign, IReadOnlyList<UpdateCampaignMachineRecord> machines, AuditEntry? audit,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(campaign);
+        ArgumentNullException.ThrowIfNull(machines);
+        return WriteAsync((connection, transaction) =>
+        {
+            if (!campaign.Automatic)
+            {
+                using var exists = Create(connection, transaction, "SELECT COUNT(*) FROM update_campaigns WHERE organization_id = $org AND automatic = 0 AND seq = $seq",
+                    ("$org", campaign.OrganizationId), ("$seq", campaign.Sequence));
+                if (Convert.ToInt64(exists.ExecuteScalar(), CultureInfo.InvariantCulture) > 0) return false;
+            }
+
+            Execute(connection, transaction,
+                "INSERT INTO update_campaigns (id, organization_id, seq, automatic, target_version, feed, rollback, not_before, time_zone, payload, signature, " +
+                "created_by_device_id, state, server_state, server_message, created_at, updated_at) VALUES ($id, $org, $seq, $automatic, $version, $feed, $rollback, " +
+                "$notBefore, $zone, $payload, $sig, $by, $state, $serverState, $serverMessage, $created, $updated)",
+                ("$id", campaign.Id), ("$org", campaign.OrganizationId), ("$seq", campaign.Sequence), ("$automatic", campaign.Automatic ? 1 : 0),
+                ("$version", campaign.TargetVersion), ("$feed", campaign.Feed), ("$rollback", campaign.Rollback ? 1 : 0), ("$notBefore", ToNullableTime(campaign.NotBefore)),
+                ("$zone", campaign.TimeZone), ("$payload", campaign.Payload), ("$sig", campaign.Signature), ("$by", campaign.CreatedByDeviceId), ("$state", campaign.State),
+                ("$serverState", campaign.ServerState), ("$serverMessage", campaign.ServerMessage), ("$created", ToTime(campaign.CreatedAt)), ("$updated", ToTime(campaign.UpdatedAt)));
+            foreach (var machine in machines)
+            {
+                // A machine an older campaign still waits for is this campaign's now.
+                Execute(connection, transaction,
+                    "UPDATE update_campaign_machines SET state = 'superseded', updated_at = $at WHERE device_id = $device AND campaign_id <> $id " +
+                    "AND state IN ('pending', 'instructed', 'waiting', 'downloading', 'switching') " +
+                    "AND campaign_id IN (SELECT id FROM update_campaigns WHERE organization_id = $org)",
+                    ("$at", ToTime(campaign.CreatedAt)), ("$device", machine.DeviceId), ("$id", campaign.Id), ("$org", campaign.OrganizationId));
+                WriteCampaignMachine(connection, transaction, machine);
+            }
+
+            if (audit is not null) AppendAudit(connection, transaction, audit);
+            return true;
+        }, cancellationToken);
+    }
+
+    /// <inheritdoc />
+    public ValueTask SaveUpdateCampaignAsync(UpdateCampaignRecord campaign, IReadOnlyList<UpdateCampaignMachineRecord> machines, AuditEntry? audit,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(campaign);
+        ArgumentNullException.ThrowIfNull(machines);
+        return new ValueTask(WriteAsync((connection, transaction) =>
+        {
+            Execute(connection, transaction,
+                "UPDATE update_campaigns SET state = $state, server_state = $serverState, server_message = $serverMessage, updated_at = $updated WHERE id = $id",
+                ("$state", campaign.State), ("$serverState", campaign.ServerState), ("$serverMessage", campaign.ServerMessage), ("$updated", ToTime(campaign.UpdatedAt)),
+                ("$id", campaign.Id));
+            foreach (var machine in machines) WriteCampaignMachine(connection, transaction, machine);
+            if (audit is not null) AppendAudit(connection, transaction, audit);
+            return true;
+        }, cancellationToken).AsTask());
+    }
+
+    /// <inheritdoc />
+    public ValueTask<UpdatePolicyRecord?> GetUpdatePolicyAsync(string organizationId, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(organizationId);
+        return ReadAsync(connection => QuerySingle(connection, null,
+            "SELECT organization_id, seq, payload, signature, signer_device_id, last_check_at, last_check_message, updated_at FROM update_policies WHERE organization_id = $org",
+            static reader => new UpdatePolicyRecord(reader.GetString(0), reader.GetInt64(1), reader.GetString(2), reader.GetString(3), reader.GetString(4),
+                GetNullableTime(reader, 5), GetNullableString(reader, 6), FromTime(reader.GetInt64(7))), ("$org", organizationId)), cancellationToken);
+    }
+
+    /// <inheritdoc />
+    public ValueTask<bool> SetUpdatePolicyAsync(UpdatePolicyRecord policy, AuditEntry audit, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(policy);
+        ArgumentNullException.ThrowIfNull(audit);
+        return WriteAsync((connection, transaction) =>
+        {
+            // A new policy forgets the last check: an automatic one reads its feed at once.
+            var changed = Execute(connection, transaction,
+                "INSERT INTO update_policies (organization_id, seq, payload, signature, signer_device_id, last_check_at, last_check_message, updated_at) " +
+                "VALUES ($org, $seq, $payload, $signature, $signer, NULL, NULL, $at) " +
+                "ON CONFLICT (organization_id) DO UPDATE SET seq = excluded.seq, payload = excluded.payload, signature = excluded.signature, " +
+                "signer_device_id = excluded.signer_device_id, last_check_at = NULL, last_check_message = NULL, updated_at = excluded.updated_at " +
+                "WHERE update_policies.seq < excluded.seq",
+                ("$org", policy.OrganizationId), ("$seq", policy.Sequence), ("$payload", policy.Payload), ("$signature", policy.Signature),
+                ("$signer", policy.SignerDeviceId), ("$at", ToTime(policy.UpdatedAt)));
+            if (changed == 0) return false;
+            AppendAudit(connection, transaction, audit);
+            return true;
+        }, cancellationToken);
+    }
+
+    /// <inheritdoc />
+    public ValueTask SetUpdatePolicyCheckAsync(string organizationId, DateTimeOffset at, string? message, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(organizationId);
+        return new ValueTask(WriteAsync((connection, transaction) => Execute(connection, transaction,
+            "UPDATE update_policies SET last_check_at = $at, last_check_message = $message WHERE organization_id = $org",
+            ("$at", ToTime(at)), ("$message", message), ("$org", organizationId)), cancellationToken).AsTask());
+    }
+
+    private static void WriteCampaignMachine(SqliteConnection connection, SqliteTransaction transaction, UpdateCampaignMachineRecord machine)
+        => Execute(connection, transaction,
+            "INSERT INTO update_campaign_machines (campaign_id, device_id, state, running, message, instructed_at, updated_at) " +
+            "VALUES ($campaign, $device, $state, $running, $message, $instructed, $updated) ON CONFLICT (campaign_id, device_id) DO UPDATE SET " +
+            "state = excluded.state, running = excluded.running, message = excluded.message, instructed_at = excluded.instructed_at, updated_at = excluded.updated_at",
+            ("$campaign", machine.CampaignId), ("$device", machine.DeviceId), ("$state", machine.State), ("$running", machine.Running), ("$message", machine.Message),
+            ("$instructed", ToNullableTime(machine.InstructedAt)), ("$updated", ToTime(machine.UpdatedAt)));
+
+    private static UpdateCampaignRecord ReadCampaign(SqliteDataReader reader)
+        => new(reader.GetString(0), reader.GetString(1), reader.GetInt64(2), reader.GetInt64(3) != 0, reader.GetString(4), reader.GetString(5), reader.GetInt64(6) != 0,
+            GetNullableTime(reader, 7), GetNullableString(reader, 8), reader.GetString(9), reader.GetString(10), GetNullableString(reader, 11), reader.GetString(12),
+            reader.GetString(13), GetNullableString(reader, 14), FromTime(reader.GetInt64(15)), FromTime(reader.GetInt64(16)));
+
     /// <inheritdoc />
     public ValueTask AppendAuditAsync(AuditEntry audit, CancellationToken cancellationToken = default)
     {
