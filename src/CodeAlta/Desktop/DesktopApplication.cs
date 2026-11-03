@@ -1053,7 +1053,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                         machinesService.ServerAddress = linkId => fleetServers.Connections.FirstOrDefault(connection => connection.Link.Id == linkId)?.Link.Url;
                         machinesService.CreateJoinCode = async (linkId, token) => (await fleetServers.CreateEnrollmentTokenAsync(linkId, TimeSpan.FromMinutes(10),
                             "Added from CodeAlta Desktop", token).ConfigureAwait(false)).Token;
-                        machinesService.ApproveDevice = async (linkId, deviceId, words, token) => await fleetServers.ApproveAsync(linkId, deviceId, words, token).ConfigureAwait(false);
+                        machinesService.ApproveDevice = async (linkId, machine, token) => await fleetServers.ApproveMachineAsync(linkId, machine, token).ConfigureAwait(false);
                     }
 
                     builder.AddMachinesService(machinesService);

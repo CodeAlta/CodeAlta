@@ -137,6 +137,9 @@ internal sealed class OpenSshRunner : ISshRunner
     /// <param name="ssh">The ssh executable.</param>
     internal OpenSshRunner(string ssh) => _ssh = ssh;
 
+    /// <summary>Gets what is told of the ssh process of each forward once it started, for tests; null for nothing.</summary>
+    internal Action<Process>? ForwardStarted { get; init; }
+
     /// <inheritdoc />
     public async Task<SshResult> RunAsync(SshTarget target, string script, bool acceptNewHostKey, Action<string>? onOutput, CancellationToken cancellationToken)
     {
@@ -177,6 +180,7 @@ internal sealed class OpenSshRunner : ISshRunner
         var start = new ProcessStartInfo(_ssh) { UseShellExecute = false, CreateNoWindow = true, RedirectStandardInput = true, RedirectStandardOutput = true, RedirectStandardError = true };
         foreach (var argument in arguments) start.ArgumentList.Add(argument);
         var process = Process.Start(start) ?? throw new IOException("ssh did not start.");
+        ForwardStarted?.Invoke(process);
         process.BeginOutputReadLine();
         var error = new StringBuilder();
         process.ErrorDataReceived += (_, line) => { if (line.Data is not null) lock (error) error.Append(line.Data).Append('\n'); };
@@ -188,32 +192,40 @@ internal sealed class OpenSshRunner : ISshRunner
             process.Dispose();
         }
 
-        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(30);
-        while (true)
+        // Whatever ends the wait but the forward (ssh exited, the deadline, a cancellation) ends ssh too: none is left running.
+        var forwarded = false;
+        try
         {
-            if (process.HasExited)
+            var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(30);
+            while (true)
             {
-                string why;
-                lock (error) why = error.ToString().Trim();
-                Close();
-                throw new IOException(why.Length > 0 ? why : "ssh ended before the forward opened.");
-            }
+                if (process.HasExited)
+                {
+                    string why;
+                    lock (error) why = error.ToString().Trim();
+                    throw new IOException(why.Length > 0 ? why : "ssh ended before the forward opened.");
+                }
 
-            try
-            {
-                using var probe = new System.Net.Sockets.TcpClient();
-                await probe.ConnectAsync(System.Net.IPAddress.Loopback, localPort, cancellationToken).ConfigureAwait(false);
-                return new SshForward(localPort, Close);
+                try
+                {
+                    using var probe = new System.Net.Sockets.TcpClient();
+                    await probe.ConnectAsync(System.Net.IPAddress.Loopback, localPort, cancellationToken).ConfigureAwait(false);
+                    forwarded = true;
+                    return new SshForward(localPort, Close);
+                }
+                catch (System.Net.Sockets.SocketException) when (DateTime.UtcNow < deadline)
+                {
+                    await Task.Delay(TimeSpan.FromMilliseconds(250), cancellationToken).ConfigureAwait(false);
+                }
+                catch (System.Net.Sockets.SocketException exception)
+                {
+                    throw new IOException("The forward over SSH did not open: " + exception.Message, exception);
+                }
             }
-            catch (System.Net.Sockets.SocketException) when (DateTime.UtcNow < deadline)
-            {
-                await Task.Delay(TimeSpan.FromMilliseconds(250), cancellationToken).ConfigureAwait(false);
-            }
-            catch (System.Net.Sockets.SocketException exception)
-            {
-                Close();
-                throw new IOException("The forward over SSH did not open: " + exception.Message, exception);
-            }
+        }
+        finally
+        {
+            if (!forwarded) Close();
         }
     }
 

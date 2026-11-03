@@ -44,7 +44,7 @@ public sealed class DesktopServerAutomationPlacementTests
             using var nodeKey = DeviceIdentity.LoadOrCreate(Path.Combine(root, "node-fleet"));
             using (var enrolling = new FleetServerClient(address, nodeKey))
                 await enrolling.EnrollAsync((await desktop.CreateEnrollmentTokenAsync(null, "mini", token)).Token, "mini", FleetDeviceKinds.Node, token);
-            await desktop.ApproveAsync(nodeKey.DeviceId, token);
+            await desktop.ApproveAsync(nodeKey.DeviceId, FleetDeviceKinds.Node, token);
 
             // The machine: its control connection opens what it is given with its own key, and says it took it.
             var given = new ConcurrentQueue<(FleetAutomationVersion Version, FleetAutomationContent? Content)>();

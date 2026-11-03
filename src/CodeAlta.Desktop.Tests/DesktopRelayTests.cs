@@ -38,7 +38,7 @@ public sealed class DesktopRelayTests
             await desktop.SetUpAsync(server.SetupCode!.Code, "Alex", "Desktop", "Home", token);
             var enrollment = await desktop.CreateEnrollmentTokenAsync(null, "test-node", token);
             using (var node = new FleetServerClient(address, fixture.NodeIdentity)) await node.EnrollAsync(enrollment.Token, "test-node", token);
-            await desktop.ApproveAsync(nodeId, token);
+            await desktop.ApproveAsync(nodeId, FleetDeviceKinds.Node, token);
         }
 
         // The node's control connection serves the relays offered to it with its node API.

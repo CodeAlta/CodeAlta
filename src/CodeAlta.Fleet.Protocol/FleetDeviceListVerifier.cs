@@ -9,6 +9,12 @@ namespace CodeAlta.Fleet.Protocol;
 /// <param name="OwnerId">The person it belongs to; null for the first device until it signs an entry for its person.</param>
 public sealed record FleetDeviceListMember(string DeviceId, string Kind, FleetDevicePublicKey Key, string? OwnerId);
 
+/// <summary>The time of a device in a verified device list: the entry that added it and, once it left, the one that removed it.</summary>
+/// <param name="Member">The device, as the list last held it.</param>
+/// <param name="AddedAt">The sequence of the entry that added it.</param>
+/// <param name="RemovedAt">The sequence of the entry that removed it; null while it is a member.</param>
+public sealed record FleetDeviceListTenure(FleetDeviceListMember Member, long AddedAt, long? RemovedAt);
+
 /// <summary>A device list as a verifier replayed it: its members after its last entry, and where the next entry goes.</summary>
 /// <param name="OrganizationId">The organization the entries after the first name; null while the list has one entry.</param>
 /// <param name="Sequence">The sequence of the last entry, 0 for an empty list.</param>
@@ -37,6 +43,26 @@ public sealed record FleetDeviceListState(
     /// list before it may be held by the removed device, so it seals nothing new (a new epoch replaces it).
     /// </summary>
     public long LastRemovalSequence { get; init; }
+
+    /// <summary>
+    /// Gets every device the list ever held, members and removed devices, by id, with the entries that added and removed
+    /// it: what a device was by an earlier entry of the list, as the list itself authenticates it.
+    /// </summary>
+    public ImmutableDictionary<string, FleetDeviceListTenure> Tenures { get; init; } = ImmutableDictionary.Create<string, FleetDeviceListTenure>(StringComparer.Ordinal);
+
+    /// <summary>
+    /// Gets a device as the list held it at an entry from <paramref name="sequence"/> on: a member now, or one that a later
+    /// entry than that one removed. A device that left by that entry, or never was in the list, gives null.
+    /// </summary>
+    /// <param name="deviceId">The device.</param>
+    /// <param name="sequence">The sequence of an entry of the list.</param>
+    /// <returns>The device, or null.</returns>
+    public FleetDeviceListMember? MemberFrom(string deviceId, long sequence)
+    {
+        if (Tenures.TryGetValue(deviceId, out var tenure)) return tenure.RemovedAt is { } removed && removed <= sequence ? null : tenure.Member;
+        // A state made without its history (by hand) knows its members only.
+        return Members.GetValueOrDefault(deviceId);
+    }
 
     /// <summary>Gets whether a device is a controller device of the list: one that may sign entries.</summary>
     /// <param name="deviceId">The device.</param>
@@ -167,13 +193,15 @@ public static class FleetDeviceListVerifier
                 return "the first entry must add a controller device signed by itself";
             if (!FleetDevicePublicKey.TryParse(payload.PublicKey, out var self) || self.DeviceId != payload.DeviceId) return "the first device's key does not give its id";
             if (!self.Verify(signed, entry.Signature)) return "the signature of the first device does not verify";
+            var first = new FleetDeviceListMember(payload.DeviceId, FleetDeviceKinds.Controller, self, payload.OwnerId);
             next = state with
             {
                 FirstDeviceId = payload.DeviceId,
                 FirstHash = hash,
                 Sequence = 1,
                 LastHash = hash,
-                Members = state.Members.SetItem(payload.DeviceId, new FleetDeviceListMember(payload.DeviceId, FleetDeviceKinds.Controller, self, payload.OwnerId)),
+                Members = state.Members.SetItem(payload.DeviceId, first),
+                Tenures = state.Tenures.SetItem(payload.DeviceId, new FleetDeviceListTenure(first, 1, null)),
             };
             return null;
         }
@@ -187,6 +215,7 @@ public static class FleetDeviceListVerifier
 
         var members = state.Members;
         var removed = state.Removed;
+        var tenures = state.Tenures;
         switch (payload.Operation)
         {
             case FleetDeviceListOperations.Add:
@@ -197,11 +226,18 @@ public static class FleetDeviceListVerifier
                 // A recovery key signs in a new controller device of its person, when every device is lost, and nothing else.
                 if (signer.Kind == FleetDeviceKinds.Recovery && payload.Kind != FleetDeviceKinds.Controller) return "a recovery key adds controller devices only";
                 // The person of the first device is the one its first entry names.
-                if (signer.OwnerId is null) members = members.SetItem(signer.DeviceId, signer = signer with { OwnerId = payload.OwnerId });
+                if (signer.OwnerId is null)
+                {
+                    members = members.SetItem(signer.DeviceId, signer = signer with { OwnerId = payload.OwnerId });
+                    tenures = tenures.SetItem(signer.DeviceId, tenures.TryGetValue(signer.DeviceId, out var tenure) ? tenure with { Member = signer } : new(signer, 1, null));
+                }
+
                 if (!string.Equals(signer.OwnerId, payload.OwnerId, StringComparison.Ordinal)) return "a controller device adds devices of its own person only";
                 if (payload.Kind == FleetDeviceKinds.Recovery && members.Values.Any(member => member.Kind == FleetDeviceKinds.Recovery && member.OwnerId == payload.OwnerId))
                     return "the person has a recovery key already: the old one leaves the list first";
-                members = members.SetItem(payload.DeviceId, new FleetDeviceListMember(payload.DeviceId, payload.Kind!, added, payload.OwnerId));
+                var joined = new FleetDeviceListMember(payload.DeviceId, payload.Kind!, added, payload.OwnerId);
+                members = members.SetItem(payload.DeviceId, joined);
+                tenures = tenures.SetItem(payload.DeviceId, new FleetDeviceListTenure(joined, payload.Sequence, null));
                 break;
             case FleetDeviceListOperations.Remove:
                 if (signer.Kind == FleetDeviceKinds.Recovery) return "a recovery key removes no device";
@@ -210,6 +246,9 @@ public static class FleetDeviceListVerifier
                     return "it removes the last controller device";
                 members = members.Remove(payload.DeviceId);
                 removed = removed.Add(payload.DeviceId);
+                tenures = tenures.SetItem(payload.DeviceId, tenures.TryGetValue(payload.DeviceId, out var held)
+                    ? held with { RemovedAt = payload.Sequence }
+                    : new FleetDeviceListTenure(gone, 0, payload.Sequence));
                 break;
             default:
                 return $"its operation '{payload.Operation}' is unknown";
@@ -220,6 +259,7 @@ public static class FleetDeviceListVerifier
             FirstDeviceId = state.FirstDeviceId,
             FirstHash = state.FirstHash,
             LastRemovalSequence = payload.Operation == FleetDeviceListOperations.Remove ? payload.Sequence : state.LastRemovalSequence,
+            Tenures = tenures,
         };
         return null;
     }

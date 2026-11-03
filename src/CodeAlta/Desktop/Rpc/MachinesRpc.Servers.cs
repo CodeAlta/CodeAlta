@@ -1,4 +1,6 @@
 using CodeAlta.Desktop.Fleet;
+using CodeAlta.Fleet.Client;
+using CodeAlta.Fleet.Identity;
 using CodeAlta.Fleet.NodeApi;
 using CodeAlta.Fleet.Protocol;
 using CodeAlta.Fleet.Server;
@@ -8,8 +10,8 @@ namespace CodeAlta.Desktop.Rpc;
 
 /// <summary>
 /// Add a machine this computer manages to its server: this computer makes a one-time enrollment code, the machine
-/// enrolls with it from itself (<c>control.servers.join</c>), and this computer approves the device the machine named
-/// over the channel pinned to its key — the person checks nothing by hand, and the six words are shown.
+/// enrolls with it from itself (<c>control.servers.join</c>), and this computer approves the key it pinned for the machine,
+/// as an execution node — the person checks nothing by hand, and the six words are shown.
 /// </summary>
 internal sealed partial class MachinesService
 {
@@ -20,10 +22,20 @@ internal sealed partial class MachinesService
     internal Func<string, CancellationToken, Task<string>>? CreateJoinCode { get; set; }
 
     /// <summary>
-    /// Gets what approves a device at a server, by the id of its link, the device and the words of its key as the machine
-    /// said them over its pinned channel: the approval signs that key only.
+    /// Gets what approves a machine at a server, by the id of its link and the fingerprint of the key pairing pinned for the
+    /// machine: the approval signs that key only, as an execution node.
     /// </summary>
-    internal Func<string, string, string, CancellationToken, Task>? ApproveDevice { get; set; }
+    internal Func<string, DeviceFingerprint, CancellationToken, Task>? ApproveDevice { get; set; }
+
+    /// <summary>
+    /// Gets the key to approve for a machine that joined a server: the one pairing pinned, when the device the machine says
+    /// it enrolled is that key's; null otherwise (another key, or a machine not paired), and nothing is approved.
+    /// </summary>
+    /// <param name="machine">The machine, as this computer paired with it.</param>
+    /// <param name="joined">What the machine answered.</param>
+    /// <returns>The fingerprint of the key to approve, or null.</returns>
+    internal static DeviceFingerprint? ServerDevice(PairedMachine machine, FleetServerJoinResult joined)
+        => !machine.Fingerprint.IsEmpty && string.Equals(DeviceIdentity.DeviceIdOf(machine.Fingerprint), joined.DeviceId, StringComparison.Ordinal) ? machine.Fingerprint : null;
 
     /// <summary>Has a machine this computer manages join a server this computer owns, and approves it there.</summary>
     [NeoRpcMethod("joinServer")]
@@ -45,17 +57,21 @@ internal sealed partial class MachinesService
         catch (FleetServerException exception) { return new("server_refused", null, null, exception.Message); }
         catch (Exception exception) when (exception is IOException or TimeoutException or HttpRequestException) { return new(RemoteSessionHost.MachineOfflineCode, null, null, exception.Message); }
 
+        // The device approved is the machine this computer paired with, by the whole key pinned for it, as a node: never the
+        // id, the words or the class the machine answers, so that a machine that was taken over brings no controller in.
+        if (ServerDevice(host.Machine, joined) is not { } key)
+            return new("approve_failed", joined.Name, null, "The machine enrolled another key than the one this computer paired with: nothing was approved.");
+        var words = key.ToShortWords();
         try
         {
-            // The words the machine gave over the channel pinned to its key: a server that names another key is refused.
-            await approve(linkId, joined.DeviceId, joined.Words, cancellationToken).ConfigureAwait(false);
+            await approve(linkId, key, cancellationToken).ConfigureAwait(false);
         }
-        catch (FleetServerException exception) { return new("approve_failed", joined.Name, joined.Words, exception.Message); }
-        catch (FleetDeviceListException exception) { return new("approve_failed", joined.Name, joined.Words, exception.Message); }
-        catch (HttpRequestException exception) { return new("approve_failed", joined.Name, joined.Words, exception.Message); }
+        catch (FleetServerException exception) { return new("approve_failed", joined.Name, words, exception.Message); }
+        catch (FleetDeviceListException exception) { return new("approve_failed", joined.Name, words, exception.Message); }
+        catch (HttpRequestException exception) { return new("approve_failed", joined.Name, words, exception.Message); }
 
         Changed();
-        return new("ok", joined.Name, joined.Words, null);
+        return new("ok", joined.Name, words, null);
     }
 }
 
