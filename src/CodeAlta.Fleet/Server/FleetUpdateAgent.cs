@@ -99,8 +99,36 @@ public sealed class FleetUpdateAgent : IAsyncDisposable
     /// <returns>The report, or null when no campaign of that server reached this node.</returns>
     public FleetUpdateReport? Report(string linkId)
     {
-        lock (_gate) return _state.LinkId == linkId ? ReportOf(_state) : null;
+        lock (_gate)
+        {
+            // The campaign that runs first; otherwise the last word of this node to that server: how its last campaign
+            // ended (kept once another fleet's campaign took over), or the last instruction it refused.
+            var active = _state.LinkId == linkId ? ReportOf(_state) : null;
+            if (active is not null && !FleetUpdateMachineStates.IsTerminal(active.State)) return active;
+            var link = _state.Links.GetValueOrDefault(linkId);
+            FleetUpdateReport? newest = null;
+            foreach (var report in new[] { active, link?.Receipt, link?.Refusal })
+            {
+                if (report is not null && (newest is null || report.At >= newest.At)) newest = report;
+            }
+
+            return newest;
+        }
     }
+
+    // What this node keeps of a campaign of a server it accepted: the one it follows, or the receipt of the last one.
+    private FleetUpdateReport? ReceiptOf(string linkId, string campaignId)
+    {
+        if (_state.LinkId == linkId && _state.CampaignId == campaignId) return ReportOf(_state);
+        return _state.Links.GetValueOrDefault(linkId)?.Receipt is { } receipt && receipt.CampaignId == campaignId ? receipt : null;
+    }
+
+    // One fleet at a time: a campaign of another server waits until the one this node follows ends, so that no server is
+    // left waiting for a node that silently went to another fleet.
+    private string? OtherFleet(string linkId)
+        => _state.LinkId is { } other && other != linkId && _state.CampaignId is { } campaign && !FleetUpdateMachineStates.IsTerminal(_state.State)
+            ? $"this machine follows campaign {campaign} of another server; it takes an update of this fleet once that one ends"
+            : null;
 
     /// <summary>Takes an instruction a server sent: verifies it against the device list of that server, read again (or the one last verified).</summary>
     /// <param name="connector">The connector of the server.</param>
@@ -128,24 +156,56 @@ public sealed class FleetUpdateAgent : IAsyncDisposable
         ArgumentNullException.ThrowIfNull(linkId);
         ArgumentNullException.ThrowIfNull(instruction);
         lock (_gate) _connectors[linkId] = connector;
-        lock (_gate)
-        {
-            // The same campaign sent again, on a reconnection: the server reads where it stands.
-            if (_state.LinkId == linkId && _state.CampaignId == instruction.CampaignId && _state.State != FleetUpdateMachineStates.Refused)
-            {
-                Publish(_state);
-                return;
-            }
-        }
+        await AcceptAsync(linkId, organizationId, instruction, token => ReadDevicesAsync(connector, token), cancellationToken).ConfigureAwait(false);
+    }
 
-        FleetDeviceListState? devices;
+    // The device list of the server, read again, or the one last verified when the server does not answer; null when none.
+    private static async Task<FleetDeviceListState?> ReadDevicesAsync(FleetConnector connector, CancellationToken cancellationToken)
+    {
         try
         {
-            devices = await connector.Devices.RefreshAsync(cancellationToken).ConfigureAwait(false);
+            return await connector.Devices.RefreshAsync(cancellationToken).ConfigureAwait(false);
         }
         catch (Exception exception) when (exception is FleetServerException or HttpRequestException or IOException or TaskCanceledException && !cancellationToken.IsCancellationRequested)
         {
-            devices = connector.Devices.Current;
+            return connector.Devices.Current;
+        }
+    }
+
+    /// <summary>Takes an instruction, with the device list read by <paramref name="devices"/>; tests call it directly.</summary>
+    /// <param name="linkId">The link of the server.</param>
+    /// <param name="organizationId">The organization of the server; null for the one of its device list.</param>
+    /// <param name="instruction">The instruction.</param>
+    /// <param name="devices">Reads the device list of the server; throws <see cref="FleetDeviceListException"/> when it does not verify.</param>
+    /// <param name="cancellationToken">Cancels the check.</param>
+    /// <returns>A task that completes once it is accepted or refused.</returns>
+    internal async Task AcceptAsync(string linkId, string? organizationId, FleetUpdateInstruction instruction, Func<CancellationToken, Task<FleetDeviceListState?>> devices,
+        CancellationToken cancellationToken)
+    {
+        string? conflict;
+        lock (_gate)
+        {
+            // The same campaign sent again, on a reconnection or as a replay: the server reads where it stands, and
+            // nothing starts again, whatever was refused meanwhile.
+            if (ReceiptOf(linkId, instruction.CampaignId) is { } receipt)
+            {
+                _ = SendAsync(linkId, receipt);
+                return;
+            }
+
+            conflict = OtherFleet(linkId);
+        }
+
+        if (conflict is not null)
+        {
+            Refuse(linkId, instruction, conflict);
+            return;
+        }
+
+        FleetDeviceListState? list;
+        try
+        {
+            list = await devices(cancellationToken).ConfigureAwait(false);
         }
         catch (FleetDeviceListException exception)
         {
@@ -153,7 +213,7 @@ public sealed class FleetUpdateAgent : IAsyncDisposable
             return;
         }
 
-        if (devices is null)
+        if (list is not { } devicesState)
         {
             Refuse(linkId, instruction, "the device list of the server could not be read");
             return;
@@ -187,7 +247,7 @@ public sealed class FleetUpdateAgent : IAsyncDisposable
         lock (_gate) sequences = _state.Links.GetValueOrDefault(linkId) ?? new FleetUpdateAgentLink();
         var context = new UpdateInstructionContext
         {
-            Devices = devices, OrganizationId = organizationId ?? devices.OrganizationId, DeviceId = _options.DeviceId, Product = _options.Product, Runtime = runtime,
+            Devices = devicesState, OrganizationId = organizationId ?? devicesState.OrganizationId, DeviceId = _options.DeviceId, Product = _options.Product, Runtime = runtime,
             Running = _options.Running, LastSequence = sequences.Sequence, LastCampaignId = sequences.CampaignId, LastPolicySequence = sequences.PolicySequence,
         };
         if (!UpdateInstructions.TryVerify(instruction, context, out var update, out var reason))
@@ -210,26 +270,46 @@ public sealed class FleetUpdateAgent : IAsyncDisposable
         FleetUpdateAgentState next;
         lock (_gate)
         {
-            var links = new Dictionary<string, FleetUpdateAgentLink>(_state.Links, StringComparer.Ordinal)
+            conflict = OtherFleet(linkId);
+            if (conflict is null)
             {
-                [linkId] = update.Automatic
-                    ? sequences with { PolicySequence = update.Sequence }
-                    : sequences with { Sequence = update.Sequence, CampaignId = update.CampaignId },
-            };
-            next = new FleetUpdateAgentState
+                var links = new Dictionary<string, FleetUpdateAgentLink>(_state.Links, StringComparer.Ordinal);
+                // The campaign replaced keeps its receipt, for its server and against its replay.
+                if (_state.LinkId is { } previousLink && ReportOf(_state) is { } previous)
+                    links[previousLink] = (links.GetValueOrDefault(previousLink) ?? new FleetUpdateAgentLink()) with { Receipt = previous };
+                var current = links.GetValueOrDefault(linkId) ?? new FleetUpdateAgentLink();
+                links[linkId] = update.Automatic
+                    ? current with { PolicySequence = Math.Max(current.PolicySequence, update.Sequence) }
+                    : current with { Sequence = update.Sequence, CampaignId = update.CampaignId };
+                next = Accepted(links);
+                _state = next;
+                Save(next);
+            }
+            else
             {
-                LinkId = linkId, Instruction = instruction, CampaignId = update.CampaignId, Version = update.Version.ToString(), Feed = update.Feed,
-                ExpectedSha512 = update.ExpectedSha512, NotBefore = update.NotBefore, Automatic = update.Automatic, State = FleetUpdateMachineStates.Waiting, At = now,
-                Links = links,
-            };
-            _state = next;
-            Save(next);
+                next = _state;
+            }
+        }
+
+        if (conflict is not null)
+        {
+            Refuse(linkId, instruction, conflict);
+            return;
         }
 
         _options.Log($"The update to {update.Version} of campaign {update.CampaignId} was accepted"
             + (update.NotBefore is { } start && start > now ? $"; it waits until {start:u}." : "."));
         Publish(next);
         _wake.Writer.TryWrite(true);
+        return;
+
+        FleetUpdateAgentState Accepted(Dictionary<string, FleetUpdateAgentLink> links)
+            => new()
+            {
+                LinkId = linkId, Instruction = instruction, CampaignId = update.CampaignId, Version = update.Version.ToString(), Feed = update.Feed,
+                ExpectedSha512 = update.ExpectedSha512, NotBefore = update.NotBefore, Automatic = update.Automatic, State = FleetUpdateMachineStates.Waiting, At = now,
+                Links = links,
+            };
     }
 
     /// <summary>Takes the cancellation of a campaign: an update that waits is dropped, a switch that waits is withdrawn.</summary>
@@ -408,15 +488,12 @@ public sealed class FleetUpdateAgent : IAsyncDisposable
             _options.Time.GetUtcNow());
         lock (_gate)
         {
-            // A refusal does not replace an update this node accepted; it is reported to the server that asked.
-            if (_state.CampaignId is null || FleetUpdateMachineStates.IsTerminal(_state.State))
-            {
-                _state = _state with
-                {
-                    LinkId = linkId, Instruction = null, CampaignId = instruction.CampaignId, Version = null, State = FleetUpdateMachineStates.Refused, Message = reason, At = report.At,
-                };
-                Save(_state);
-            }
+            // A refusal never replaces a campaign this node accepted, even one that ended (its receipt answers a replay):
+            // it is kept apart, for the server that asked, which reads it again on its next connection.
+            var links = new Dictionary<string, FleetUpdateAgentLink>(_state.Links, StringComparer.Ordinal);
+            links[linkId] = (links.GetValueOrDefault(linkId) ?? new FleetUpdateAgentLink()) with { Refusal = report };
+            _state = _state with { Links = links };
+            Save(_state);
         }
 
         _ = SendAsync(linkId, report);
@@ -528,6 +605,12 @@ internal sealed record FleetUpdateAgentLink
 
     /// <summary>Gets the sequence of the last automatic policy accepted.</summary>
     public long PolicySequence { get; init; }
+
+    /// <summary>Gets how the last campaign of this server ended, once another campaign replaced it; null before.</summary>
+    public FleetUpdateReport? Receipt { get; init; }
+
+    /// <summary>Gets the last instruction of this server the node refused; null before the first.</summary>
+    public FleetUpdateReport? Refusal { get; init; }
 }
 
 /// <summary>What the agent keeps: the instruction it accepted, where it stands, and the sequences of each server.</summary>

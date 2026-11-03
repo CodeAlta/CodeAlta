@@ -115,12 +115,13 @@ public static class UpdateInstructions
             return false;
         }
 
-        // A manifest replayed by the server (an older campaign, or another one under the same number) changes nothing;
-        // the same campaign sent again, on a reconnection, is the one already accepted.
-        if (manifest.Sequence < context.LastSequence
-            || manifest.Sequence == context.LastSequence && !string.Equals(manifest.CampaignId, context.LastCampaignId, StringComparison.Ordinal))
+        // A manifest replayed by the server (an older campaign, another one under the same number, or the one already
+        // accepted) never starts anything: the machine answers the same campaign sent again with what it kept of it.
+        if (manifest.Sequence <= context.LastSequence)
         {
-            reason = $"the manifest of campaign {manifest.Sequence} is older than campaign {context.LastSequence}, the last one this machine accepted";
+            reason = manifest.Sequence == context.LastSequence && string.Equals(manifest.CampaignId, context.LastCampaignId, StringComparison.Ordinal)
+                ? $"campaign {manifest.Sequence} was accepted already: it does not start again"
+                : $"the manifest of campaign {manifest.Sequence} is older than campaign {context.LastSequence}, the last one this machine accepted";
             return false;
         }
 

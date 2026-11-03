@@ -66,16 +66,17 @@ public sealed class UpdateInstructionTests
     }
 
     [TestMethod]
-    public void AReplayedManifestIsRefusedAndTheSameCampaignSentAgainIsNot()
+    public void AReplayedManifestIsRefusedEvenTheOneAccepted()
     {
         using var owner = new Signer();
         var context = Context(owner, running: "4.0.0") with { LastSequence = 5, LastCampaignId = "c5" };
 
         Refused(new FleetUpdateInstruction("c4", owner.Sign(Manifest(owner, "4.0.1", sequence: 4, campaign: "c4"))), context, "older than campaign 5");
         Refused(new FleetUpdateInstruction("other", owner.Sign(Manifest(owner, "4.0.1", sequence: 5, campaign: "other"))), context, "older than campaign 5");
-        Assert.IsTrue(UpdateInstructions.TryVerify(new FleetUpdateInstruction("c5", owner.Sign(Manifest(owner, "4.0.1", sequence: 5, campaign: "c5"))), context, out _, out var reason),
-            reason);
-        Assert.IsTrue(UpdateInstructions.TryVerify(new FleetUpdateInstruction("c6", owner.Sign(Manifest(owner, "4.0.1", sequence: 6, campaign: "c6"))), context, out _, out reason),
+        // The campaign accepted never starts again (a cancelled one, or a rollback done before a later upgrade): the
+        // machine answers it with what it kept of it.
+        Refused(new FleetUpdateInstruction("c5", owner.Sign(Manifest(owner, "4.0.1", sequence: 5, campaign: "c5"))), context, "accepted already");
+        Assert.IsTrue(UpdateInstructions.TryVerify(new FleetUpdateInstruction("c6", owner.Sign(Manifest(owner, "4.0.1", sequence: 6, campaign: "c6"))), context, out _, out var reason),
             reason);
     }
 
