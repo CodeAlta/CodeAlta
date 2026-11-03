@@ -9,6 +9,7 @@ import { useShellLanguage } from "../shellLanguage";
 import type { SpaceProject } from "./SpaceDialog";
 import type { SpaceSectionProps } from "./spaceSection";
 import { maximumSpaceDescription, maximumSpaceName, spaceBrand, spaceColors, spaceNameProblem } from "./spaces";
+import { SpaceServerField } from "../fleet/SpaceServerField";
 
 /**
  * The section "General" of the page of a space: its name, its icon, its color and what it is for, each saved
@@ -63,6 +64,7 @@ export function SpaceGeneral({ space, spaces, hub, canEdit, busy, run }: SpaceSe
         onChange={event => { const value = event.currentTarget.checked; setSearchSaving(true);
           void search.hub!.setExcluded("space", space.id, !value).finally(() => setSearchSaving(false)); }} />
     </Field>}
+    <SpaceServerField spaceId={space.id} epoch={hub.hostEpoch()} disabled={disabled} />
   </Card>;
 }
 

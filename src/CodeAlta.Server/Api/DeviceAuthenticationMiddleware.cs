@@ -3,6 +3,7 @@ using CodeAlta.Server.Identity;
 using CodeAlta.Server.Storage;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.Features;
+using CodeAlta.Fleet.Protocol.Api;
 
 namespace CodeAlta.Server.Api;
 

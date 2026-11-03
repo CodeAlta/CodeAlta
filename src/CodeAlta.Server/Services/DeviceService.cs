@@ -2,6 +2,7 @@ using System.Buffers.Text;
 using System.Security.Cryptography;
 using System.Text;
 using CodeAlta.Fleet.Protocol;
+using CodeAlta.Fleet.Protocol.Api;
 using CodeAlta.Server.Api;
 using CodeAlta.Server.Control;
 using CodeAlta.Server.Identity;

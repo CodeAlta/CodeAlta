@@ -1,4 +1,5 @@
 using CodeAlta.Fleet.Protocol;
+using CodeAlta.Fleet.Protocol.Api;
 using CodeAlta.Server.Api;
 using CodeAlta.Server.Hosting;
 using CodeAlta.Server.Identity;

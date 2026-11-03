@@ -76,7 +76,6 @@ public sealed class NodeApplicationTests
     }
 
     [TestMethod]
-    [DataRow("join", "https://fleet.example", "--token", "abc")]
     [DataRow("update")]
     public async Task CommandsOfTheSurface_SayTheyAreNotImplementedYet(params string[] args)
     {
@@ -99,6 +98,9 @@ public sealed class NodeApplicationTests
     [DataRow("run", "--bind", "not-an-address")]
     [DataRow("remote", "machine")]
     [DataRow("connect")]
+    [DataRow("join", "https://fleet.example")]
+    [DataRow("join", "ftp://fleet.example", "--token", "abc")]
+    [DataRow("join", "--token", "abc")]
     public async Task InvalidCommandLines_ExitWithTwo(params string[] args)
     {
         using var root = new NodeTestRoot();

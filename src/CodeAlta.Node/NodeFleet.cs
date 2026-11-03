@@ -232,3 +232,59 @@ internal sealed class NodeListenerFile
 [JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase, WriteIndented = true)]
 [JsonSerializable(typeof(NodeListenerFile))]
 internal sealed partial class NodeFleetJsonContext : JsonSerializerContext;
+
+/// <summary>
+/// The CodeAlta Servers a running node joined (<c>altanode join</c>): one control connection each, which publishes the
+/// presence and inventory of the machine and the facts of the sessions of the spaces linked to that server. Nothing
+/// connects for a profile that joined none; a link <c>join</c> adds while the node runs is taken within seconds.
+/// </summary>
+internal sealed class NodeServers : IAsyncDisposable
+{
+    private readonly DeviceIdentity _identity;
+    private readonly Fleet.Server.FleetHostPublicationSource _source;
+    private readonly Fleet.Server.FleetServerConnections _connections;
+
+    private NodeServers(DeviceIdentity identity, Fleet.Server.FleetHostPublicationSource source, Fleet.Server.FleetServerConnections connections)
+    {
+        _identity = identity;
+        _source = source;
+        _connections = connections;
+    }
+
+    /// <summary>Gets the connections to the servers.</summary>
+    public Fleet.Server.FleetServerConnections Connections => _connections;
+
+    /// <summary>Starts the connections of the servers of the profile.</summary>
+    /// <param name="node">The running node.</param>
+    /// <param name="name">The name of the node.</param>
+    /// <param name="version">The version of CodeAlta it runs.</param>
+    /// <param name="configure">What changes the options of each connector, for tests; null for none.</param>
+    /// <returns>The connections; dispose them before the node stops.</returns>
+    public static NodeServers Start(NodeHost node, string name, string version,
+        Func<Fleet.Server.FleetConnectorOptions, Fleet.Server.FleetConnectorOptions>? configure = null)
+    {
+        ArgumentNullException.ThrowIfNull(node);
+        var catalog = node.Host.CatalogOptions;
+        var identity = DeviceIdentity.LoadOrCreate(catalog);
+        var source = new Fleet.Server.FleetHostPublicationSource(node.Host, name, version, ["sessions", "moves"]);
+        var connections = new Fleet.Server.FleetServerConnections(new Fleet.Server.FleetServerConnectionsOptions
+        {
+            FleetRoot = catalog.FleetRoot,
+            Identity = identity,
+            Client = new CodeAlta.Fleet.Protocol.FleetClientInfo("node", version, FleetChannelProtocol.OperatingSystemName),
+            Spaces = node.Host.SpaceCatalog,
+            Source = source,
+            Configure = configure,
+        });
+        connections.Start();
+        return new NodeServers(identity, source, connections);
+    }
+
+    /// <inheritdoc />
+    public async ValueTask DisposeAsync()
+    {
+        await _connections.DisposeAsync().ConfigureAwait(false);
+        await _source.DisposeAsync().ConfigureAwait(false);
+        _identity.Dispose();
+    }
+}

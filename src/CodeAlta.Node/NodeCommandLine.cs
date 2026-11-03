@@ -73,6 +73,7 @@ internal sealed class NodeRunOptions
 /// <param name="Permissions">Shows or changes what a paired device may do.</param>
 /// <param name="Moves">Lists the moves of sessions this profile recorded.</param>
 /// <param name="Projects">Lists, adds, clones and removes the projects of the node.</param>
+/// <param name="Join">Enrolls the node in a CodeAlta Server and waits for its approval.</param>
 internal sealed record NodeCommandHandlers(
     Func<NodeRunOptions, ValueTask<int>> Run,
     Func<NodeProfileOptions, ValueTask<int>> Status,
@@ -88,14 +89,15 @@ internal sealed record NodeCommandHandlers(
     Func<NodeDeviceOptions, ValueTask<int>> Revoke,
     Func<NodeDeviceOptions, ValueTask<int>> Permissions,
     Func<NodeProfileOptions, ValueTask<int>> Moves,
-    Func<NodeProjectOptions, ValueTask<int>> Projects)
+    Func<NodeProjectOptions, ValueTask<int>> Projects,
+    Func<NodeJoinOptions, ValueTask<int>> Join)
 {
     /// <summary>Handlers that do nothing, for a tree that only parses.</summary>
     public static NodeCommandHandlers Placeholders { get; } = new(static _ => ValueTask.FromResult(0), static _ => ValueTask.FromResult(0),
         static _ => ValueTask.FromResult(0), static _ => ValueTask.FromResult(0), static _ => ValueTask.FromResult(0), static _ => ValueTask.FromResult(0),
         static _ => ValueTask.FromResult(0), static _ => ValueTask.FromResult(0), static _ => ValueTask.FromResult(0), static _ => ValueTask.FromResult(0),
         static _ => ValueTask.FromResult(0), static _ => ValueTask.FromResult(0), static _ => ValueTask.FromResult(0), static _ => ValueTask.FromResult(0),
-        static _ => ValueTask.FromResult(0));
+        static _ => ValueTask.FromResult(0), static _ => ValueTask.FromResult(0));
 }
 
 /// <summary>The command tree of <c>altanode</c> (<c>doc/fleet/node.md</c>).</summary>
@@ -383,10 +385,32 @@ internal static class NodeCommandLine
             return handlers.Projects(projects);
         });
 
-        var joinCommand = Stub(handlers, "join", "Enroll in a fleet", "Usage: {NAME} <server-url> [--token <enrollment>]");
-        joinCommand.Add("token=", "The enrollment {TOKEN}", static _ => { });
-        joinCommand.Add("<>", "The URL of the server");
-        joinCommand.Add(new HelpOption());
+        var join = new NodeJoinOptions();
+        var joinCommand = new Command("join", "Enroll the node in a CodeAlta Server and wait for its approval")
+        {
+            new CommandUsage("Usage: {NAME} <server-url> --token <enrollment-token> [options]"),
+            _,
+            "Registers the device key of the node with the server, with an enrollment",
+            "token an admin made (Settings > Fleet > Server of CodeAlta Desktop, or the",
+            "server's API), and waits until a controller device approves it. The node",
+            "that runs on the profile then keeps a connection to the server: its",
+            "presence, its machine and the facts of the sessions of the linked spaces",
+            "(state, times, provider and model; never their content). Private",
+            "sessions are never published. Runs beside the node, as its owner.",
+            _,
+            "Options:",
+            { "token=", "The enrollment {TOKEN}", v => join.Token = v },
+            { "name=", "The {NAME} of the node at the server (default: the machine name)", v => join.Name = v },
+            { "space=", "A {SPACE} whose sessions it publishes, by id or name (default: the default space); repeatable", v => join.Spaces.Add(v!) },
+            { "no-wait", "Return once enrolled, without waiting for the approval", v => join.NoWait = v is not null },
+        };
+        AddProfile(joinCommand, join.Profile);
+        joinCommand.Add("<>", "The address of the server");
+        joinCommand.Add((_, words) =>
+        {
+            join.Words.AddRange(words);
+            return handlers.Join(join);
+        });
 
         var logs = new NodeLogOptions();
         var logsCommand = new Command("logs", "Show the node's log")

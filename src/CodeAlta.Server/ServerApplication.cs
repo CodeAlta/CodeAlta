@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Net.Http.Json;
+using CodeAlta.Fleet.Protocol.Api;
 using CodeAlta.Server.Api;
 using CodeAlta.Server.Hosting;
 using CodeAlta.Server.Storage.Sqlite;

@@ -2,6 +2,7 @@ using System.Net;
 using System.Text.Json;
 using System.Threading.Channels;
 using CodeAlta.Fleet.Protocol;
+using CodeAlta.Fleet.Protocol.Api;
 using CodeAlta.Server.Api;
 
 namespace CodeAlta.Server.Tests;

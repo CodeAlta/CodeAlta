@@ -28,6 +28,12 @@ export function SessionOptionsFields({ id, value, context = null, disabled = fal
         labelElement={<span className="composer-selection-label"><AppIcon name="subAgents" size={14} />{t("Sub-sessions")}</span>}
         onChange={event => onChange(storedSessionOptions({ ...options, subSessions: event.currentTarget.checked }))} />
     </FormGroup>
+    <FormGroup className="composer-selection-option" labelFor={`composer-private-${id}`}
+      helperText={t(options.private ? "Never published to a CodeAlta Server, not even its state." : "Its state and model are published to the server of its space, if any; never its content.")}>
+      <Switch id={`composer-private-${id}`} checked={!!options.private} disabled={disabled}
+        labelElement={<span className="composer-selection-label"><AppIcon name="shield" size={14} />{t("Private")}</span>}
+        onChange={event => onChange(storedSessionOptions({ ...options, private: event.currentTarget.checked }))} />
+    </FormGroup>
     {!!context?.contextSizes?.length && <FormGroup label={t("Context size")} labelFor={`composer-context-size-${id}`} helperText={t("The conversation is compacted before it exceeds this size.")}>
       <ContextSizeSelect id={`composer-context-size-${id}`} value={options.contextSize ?? null} context={context} session disabled={disabled}
         onChange={contextSize => onChange(storedSessionOptions({ ...options, contextSize }))} />

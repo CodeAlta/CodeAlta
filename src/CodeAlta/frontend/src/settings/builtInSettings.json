@@ -25,7 +25,8 @@
       { "id": "plugins", "label": "Plugins", "icon": "plugin", "keywords": ["plugin", "extension", "enable"] },
       { "id": "mcp", "label": "MCP Servers", "icon": "server", "keywords": ["mcp", "server", "tools"] } ] },
     { "group": "Fleet", "pages": [
-      { "id": "machines", "label": "Machines", "icon": "remote", "keywords": ["machine", "pair", "altanode", "node", "remote", "fleet"] } ] },
+      { "id": "machines", "label": "Machines", "icon": "remote", "keywords": ["machine", "pair", "altanode", "node", "remote", "fleet"] },
+      { "id": "fleetServer", "label": "Server", "icon": "server", "keywords": ["server", "altaserver", "organization", "enrollment", "approve", "join", "fleet"] } ] },
     { "group": "Advanced", "pages": [
       { "id": "config", "label": "Configuration file", "icon": "config", "keywords": ["config.toml", "toml", "file"] },
       { "id": "storage", "label": "Storage", "icon": "database", "keywords": ["disk", "retention", "delete", "scratchpad", "space"] },

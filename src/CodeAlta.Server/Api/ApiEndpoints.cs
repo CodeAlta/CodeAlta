@@ -6,6 +6,7 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
+using CodeAlta.Fleet.Protocol.Api;
 
 namespace CodeAlta.Server.Api;
 

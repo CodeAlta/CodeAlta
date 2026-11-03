@@ -11,6 +11,7 @@
   <ItemGroup>
     <InternalsVisibleTo Include="CodeAlta.Fleet.Tests" />
     <InternalsVisibleTo Include="CodeAlta.Node.Tests" />
+    <InternalsVisibleTo Include="CodeAlta.Server.Tests" />
   </ItemGroup>
 
   <ItemGroup>

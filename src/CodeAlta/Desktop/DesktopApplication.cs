@@ -313,6 +313,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
         DesktopSessionRetention? retention = null;
         DesktopBookmarks? bookmarkLife = null;
         Fleet.DesktopFleet? fleet = null;
+        Fleet.DesktopFleetServers? fleetServers = null;
         Automations.AutomationService? automations = null;
         DesktopChangesView? changesView = null;
         DesktopEditorView? editorView = null;
@@ -571,6 +572,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                 await CloseStepAsync(closing, "session retention", async () => { if (retention is not null) await retention.DisposeAsync(); }); // Join original archive/retirement work before releasing its owners.
                 await CloseStepAsync(closing, "bookmarks", () => { bookmarkLife?.Dispose(); return ValueTask.CompletedTask; });
                 await CloseStepAsync(closing, "paired machines", async () => { if (fleet is not null) await fleet.DisposeAsync(); }); // Their channels close; their sessions go on where they run.
+                await CloseStepAsync(closing, "servers", async () => { if (fleetServers is not null) await fleetServers.DisposeAsync(); }); // Their control connections close; the servers see this computer offline.
                 await CloseStepAsync(closing, "sessions", async () => { if (workspace is not null) await Task.WhenAll(workspace.CloseImportsAsync(), workspace.CloseSessionsAsync()); });
                 await CloseStepAsync(closing, "automations", async () => { if (automations is not null) await automations.DisposeAsync(); }); // Nothing more is started; sessions end with the host.
                 await CloseStepAsync(closing, "terminals", async () => { if (terminals is not null) await terminals.CloseAsync(); }); // The programs of the terminals end with the application.
@@ -764,6 +766,8 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                 var sessionHosts = new SessionHosts.SessionHostRegistry(new SessionHosts.LocalSessionHost(host));
                 fleet = new Fleet.DesktopFleet(host.CatalogOptions.FleetRoot, sessionHosts.TakeMembership(), Environment.MachineName);
                 fleet.Moves = new Fleet.DesktopMoves(host, fleet, Environment.MachineName, host.CatalogOptions.FleetRoot);
+                // The CodeAlta Servers this instance is linked to: none until a server is created or joined.
+                fleetServers = new Fleet.DesktopFleetServers(host, Environment.MachineName, DesktopCommandLine.Version);
                 // The bookmarks of the sessions of this instance, in its database. A bookmarked session is kept by the
                 // retention of sessions, which deletes nothing before the bookmarks were read.
                 var bookmarks = new CodeAlta.Catalog.Bookmarks.BookmarkService(host.ApplicationDatabase,
@@ -787,11 +791,13 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                 }, TaskScheduler.Default);
                 // The paired machines are reached once the window shows the application.
                 var startedFleet = fleet;
+                var startedServers = fleetServers;
                 // The moves this computer took and a stop left unfinished end first, by its own decisions.
                 _ = shown.Shown.ContinueWith(async _ =>
                 {
                     if (startedFleet.Moves is { } moves) await moves.RecoverAsync(CancellationToken.None).ConfigureAwait(false);
                     await startedFleet.StartAsync(CancellationToken.None).ConfigureAwait(false);
+                    await startedServers.StartAsync(CancellationToken.None).ConfigureAwait(false);
                 }, TaskScheduler.Default).Unwrap();
                 operations = new SessionOperationsService(sessionHosts, host.Commands, epoch) { RemoteControlChanged = shell.NoteRemoteControl };
                 if (shell.ReconnectRemoteControl) DesktopRemoteControl.Reconnect(host.Commands, shell);
@@ -1004,6 +1010,10 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                     builder.AddAppUpdateService(appUpdate);
                     builder.AddWorkspaceService(workspace);
                     builder.AddMachinesService(fleet is null ? new MachinesService() : MachinesService.Create(fleet, epoch, host.ProjectCatalog));
+                    builder.AddFleetServerService(fleetServers is null ? new FleetServerService() : new FleetServerService(fleetServers, epoch)
+                    {
+                        Spaces = host.SpaceCatalog, IsPaired = machineId => fleet?.Find(machineId) is not null,
+                    });
                     builder.AddConfigurationService(new ConfigurationService(host.ModelProviderRegistry, host.PluginRuntime, new DesktopDefaultProvider(host.CatalogOptions), host.CatalogOptions)
                     {
                         PluginProviderTypes = pluginProviderTypes,

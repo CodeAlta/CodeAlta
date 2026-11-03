@@ -20,6 +20,9 @@
     <ProjectReference Include="..\CodeAlta.Agent\CodeAlta.Agent.csproj" />
     <ProjectReference Include="..\CodeAlta.Catalog\CodeAlta.Catalog.csproj" />
     <ProjectReference Include="..\CodeAlta.Hosting\CodeAlta.Hosting.csproj" />
+    <!-- A CodeAlta Server of the test process, which altanode join enrolls in. -->
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+    <ProjectReference Include="..\CodeAlta.Server\CodeAlta.Server.csproj" />
   </ItemGroup>
 
   <ItemGroup>

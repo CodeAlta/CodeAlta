@@ -1,7 +1,6 @@
 using System.Text.Json.Serialization;
-using CodeAlta.Fleet.Protocol;
 
-namespace CodeAlta.Server.Api;
+namespace CodeAlta.Fleet.Protocol.Api;
 
 /// <summary>The body of <c>POST /api/v1/setup</c>, signed with the key it names (signed request headers).</summary>
 /// <param name="Code">The one-time setup code (<c>altaserver setup-code</c>).</param>
@@ -172,6 +171,15 @@ public sealed record AuditVerificationDto(bool Valid, long Count, long? BrokenAt
 /// <param name="SchemaVersion">The version of its database schema.</param>
 public sealed record ServerHealthDto(string Status, string Version, bool SetUp, int SchemaVersion);
 
+/// <summary>A refusal of the REST API, as problem details (RFC 9457) with the stable code and hint of the fleet.</summary>
+/// <param name="Status">The HTTP status.</param>
+/// <param name="Title">The title: the code.</param>
+/// <param name="Detail">The description for people.</param>
+/// <param name="Code">The stable code.</param>
+/// <param name="Hint">What the client should do, or <see langword="null"/>.</param>
+/// <param name="RequestId">The id of the request.</param>
+public sealed record ApiProblemDto(int? Status, string? Title, string? Detail, string? Code, string? Hint, string? RequestId);
+
 /// <summary>The source-generated contracts of the REST API.</summary>
 [JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase, DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull)]
 [JsonSerializable(typeof(SetupRequest))]
@@ -195,5 +203,6 @@ public sealed record ServerHealthDto(string Status, string Version, bool SetUp, 
 [JsonSerializable(typeof(ListResponse<AuditRecordDto>))]
 [JsonSerializable(typeof(AuditVerificationDto))]
 [JsonSerializable(typeof(ServerHealthDto))]
+[JsonSerializable(typeof(ApiProblemDto))]
 [JsonSerializable(typeof(FleetMachineInventory))]
 public sealed partial class ServerApiJsonContext : JsonSerializerContext;
