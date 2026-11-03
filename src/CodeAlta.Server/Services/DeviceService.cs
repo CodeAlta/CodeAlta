@@ -66,6 +66,9 @@ public sealed class DeviceService
         _relays = relays;
     }
 
+    /// <summary>Gets the instruments of enrollments and approvals; null for none.</summary>
+    public Telemetry.ServerMetrics? Metrics { get; init; }
+
     /// <summary>Makes an enrollment token; only a controller device may.</summary>
     /// <param name="actor">The calling device.</param>
     /// <param name="request">The request.</param>
@@ -142,9 +145,11 @@ public sealed class DeviceService
                 _ => (CoordinatorErrorCodes.EnrollmentTokenInvalid, "The enrollment token is not known to this server."),
             };
             await _store.AppendAuditAsync(audit with { Result = code }, cancellationToken).ConfigureAwait(false);
+            Metrics?.Enrollment(code);
             throw outcome == EnrollmentOutcome.DeviceExists ? CoordinatorException.Conflict(code, message) : CoordinatorException.Unauthenticated(code, message);
         }
 
+        Metrics?.Enrollment("enrolled");
         return new EnrollResponse(enrolled!.ToDto(false));
     }
 
@@ -159,7 +164,10 @@ public sealed class DeviceService
     /// <param name="cancellationToken">Cancels the operation.</param>
     /// <returns>The approved device.</returns>
     /// <exception cref="CoordinatorException">The caller is not a controller, the device is unknown or not pending, or the entry is wrong, badly signed or behind the list.</exception>
-    public async Task<DeviceDto> ApproveAsync(DeviceRecord actor, string deviceId, DeviceListChangeRequest? request, RequestOrigin origin, CancellationToken cancellationToken)
+    public Task<DeviceDto> ApproveAsync(DeviceRecord actor, string deviceId, DeviceListChangeRequest? request, RequestOrigin origin, CancellationToken cancellationToken)
+        => CountedAsync("approve", () => ApproveCoreAsync(actor, deviceId, request, origin, cancellationToken));
+
+    private async Task<DeviceDto> ApproveCoreAsync(DeviceRecord actor, string deviceId, DeviceListChangeRequest? request, RequestOrigin origin, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(actor);
         RequireController(actor);
@@ -196,7 +204,10 @@ public sealed class DeviceService
     /// <param name="cancellationToken">Cancels the operation.</param>
     /// <returns>The revoked device.</returns>
     /// <exception cref="CoordinatorException">The caller is not a controller, the device is unknown, revoked or the last controller, or the entry is wrong.</exception>
-    public async Task<DeviceDto> RevokeAsync(DeviceRecord actor, string deviceId, DeviceListChangeRequest? request, RequestOrigin origin, CancellationToken cancellationToken)
+    public Task<DeviceDto> RevokeAsync(DeviceRecord actor, string deviceId, DeviceListChangeRequest? request, RequestOrigin origin, CancellationToken cancellationToken)
+        => CountedAsync("revoke", () => RevokeCoreAsync(actor, deviceId, request, origin, cancellationToken));
+
+    private async Task<DeviceDto> RevokeCoreAsync(DeviceRecord actor, string deviceId, DeviceListChangeRequest? request, RequestOrigin origin, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(actor);
         RequireController(actor);
@@ -233,6 +244,21 @@ public sealed class DeviceService
         await _presence.DisconnectAsync(revoked.Id, new FleetError(FleetErrorCodes.Revoked, null, "The device was revoked.")).ConfigureAwait(false);
         if (_relays is not null) await _relays.CloseDeviceAsync(revoked.Id).ConfigureAwait(false);
         return revoked.ToDto(false);
+    }
+
+    private async Task<DeviceDto> CountedAsync(string operation, Func<Task<DeviceDto>> change)
+    {
+        try
+        {
+            var device = await change().ConfigureAwait(false);
+            Metrics?.DeviceListChange(operation, null);
+            return device;
+        }
+        catch (CoordinatorException exception)
+        {
+            Metrics?.DeviceListChange(operation, exception.Code);
+            throw;
+        }
     }
 
     internal static string HashToken(string token) => Base64Url.EncodeToString(SHA256.HashData(Encoding.UTF8.GetBytes(token)));

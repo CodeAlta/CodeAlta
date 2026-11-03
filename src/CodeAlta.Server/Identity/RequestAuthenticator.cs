@@ -59,6 +59,9 @@ public sealed class RequestAuthenticator
         _maxSkew = maxSkew;
     }
 
+    /// <summary>Gets the instruments that count the refusals; null for none.</summary>
+    public Telemetry.ServerMetrics? Metrics { get; init; }
+
     /// <summary>Authenticates a request of an approved device.</summary>
     /// <param name="request">What the request carries.</param>
     /// <param name="cancellationToken">Cancels the operation.</param>
@@ -67,6 +70,19 @@ public sealed class RequestAuthenticator
     public async ValueTask<DeviceRecord> AuthenticateAsync(SignedRequestData request, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
+        try
+        {
+            return await AuthenticateCoreAsync(request, cancellationToken).ConfigureAwait(false);
+        }
+        catch (CoordinatorException exception)
+        {
+            Metrics?.SignedRequestRefused(exception.Code);
+            throw;
+        }
+    }
+
+    private async ValueTask<DeviceRecord> AuthenticateCoreAsync(SignedRequestData request, CancellationToken cancellationToken)
+    {
         var timestamp = CheckForm(request);
         var device = await _store.GetDeviceAsync(request.DeviceId!, cancellationToken).ConfigureAwait(false);
         // An unknown device and a wrong signature answer the same, so that the answer does not tell which ids exist.
@@ -94,9 +110,17 @@ public sealed class RequestAuthenticator
     {
         ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(key);
-        var timestamp = CheckForm(request);
-        if (!string.Equals(request.DeviceId, key.DeviceId, StringComparison.Ordinal)) throw SignatureInvalid();
-        CheckSignature(request, timestamp, key);
+        try
+        {
+            var timestamp = CheckForm(request);
+            if (!string.Equals(request.DeviceId, key.DeviceId, StringComparison.Ordinal)) throw SignatureInvalid();
+            CheckSignature(request, timestamp, key);
+        }
+        catch (CoordinatorException exception)
+        {
+            Metrics?.SignedRequestRefused(exception.Code);
+            throw;
+        }
     }
 
     private long CheckForm(SignedRequestData request)

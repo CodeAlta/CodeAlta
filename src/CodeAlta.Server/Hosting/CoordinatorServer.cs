@@ -10,6 +10,7 @@ using CodeAlta.Server.Identity;
 using CodeAlta.Server.Services;
 using CodeAlta.Server.Storage;
 using CodeAlta.Server.Storage.Sqlite;
+using CodeAlta.Server.Telemetry;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Hosting.Server;
@@ -55,6 +56,15 @@ public sealed class CoordinatorServerOptions
     /// <summary>Gets what configures the log, or <see langword="null"/> for the console.</summary>
     public Action<ILoggingBuilder>? ConfigureLogging { get; init; }
 
+    /// <summary>
+    /// Gets what gives the value of a variable of the environment, for the standard <c>OTEL_*</c> variables of the
+    /// telemetry; the environment of the process by default (tests give their own).
+    /// </summary>
+    public Func<string, string?> EnvironmentVariable { get; init; } = Environment.GetEnvironmentVariable;
+
+    /// <summary>Gets how often the telemetry reads its metrics and sends its batches; null for the defaults of OpenTelemetry (60 s for metrics, 5 s for spans and logs).</summary>
+    public TimeSpan? TelemetryExportInterval { get; init; }
+
     /// <summary>Gets the default address.</summary>
     public static string DefaultUrl => $"http://127.0.0.1:{ServerPaths.DefaultPort}";
 }
@@ -81,14 +91,17 @@ public sealed class CoordinatorServer : IAsyncDisposable
     private readonly ICoordinatorStore _store;
     private readonly FileStream _lock;
     private readonly ServerPaths _paths;
+    private readonly ServerTelemetry _telemetry;
     private int _disposed;
 
-    private CoordinatorServer(WebApplication app, ICoordinatorStore store, FileStream dataRootLock, ServerPaths paths, IReadOnlyList<Uri> addresses, SetupCode? setupCode)
+    private CoordinatorServer(WebApplication app, ICoordinatorStore store, FileStream dataRootLock, ServerPaths paths, IReadOnlyList<Uri> addresses, SetupCode? setupCode,
+        ServerTelemetry telemetry)
     {
         _app = app;
         _store = store;
         _lock = dataRootLock;
         _paths = paths;
+        _telemetry = telemetry;
         Addresses = addresses;
         SetupCode = setupCode;
     }
@@ -108,6 +121,9 @@ public sealed class CoordinatorServer : IAsyncDisposable
     /// <summary>Gets the services of the server.</summary>
     internal IServiceProvider Services => _app.Services;
 
+    /// <summary>Gets the telemetry of the server.</summary>
+    internal ServerTelemetry Telemetry => _telemetry;
+
     /// <summary>Starts a server.</summary>
     /// <param name="options">The options.</param>
     /// <param name="cancellationToken">Cancels the start.</param>
@@ -123,9 +139,19 @@ public sealed class CoordinatorServer : IAsyncDisposable
         Directory.CreateDirectory(paths.DataRoot);
         var dataRootLock = AcquireLock(paths);
         SqliteCoordinatorStore? store = null;
+        ServerMetrics? metrics = null;
+        ServerTelemetry? telemetry = null;
         try
         {
-            store = new SqliteCoordinatorStore(new SqliteCoordinatorStoreOptions { DatabasePath = paths.DatabasePath, TimeProvider = options.TimeProvider });
+            store = new SqliteCoordinatorStore(new SqliteCoordinatorStoreOptions
+            {
+                DatabasePath = paths.DatabasePath,
+                TimeProvider = options.TimeProvider,
+                ObserveOperation = (operation, duration, failed) => metrics?.StoreOperation(operation, duration, failed),
+            });
+            var created = store;
+            metrics = new ServerMetrics(ServerVersion.Current, () => created.WriteQueueDepth);
+            telemetry = new ServerTelemetry(paths, metrics, options.EnvironmentVariable, options.TelemetryExportInterval);
             await store.InitializeAsync(cancellationToken).ConfigureAwait(false);
             var time = options.TimeProvider;
             var codes = new SetupCodeStore(paths.SetupCodePath, time);
@@ -134,9 +160,13 @@ public sealed class CoordinatorServer : IAsyncDisposable
             if (organization is null) setupCode = codes.GetOrCreate(options.SetupCodeLifetime);
             else codes.Consume();
 
-            var app = Build(options, store, codes);
+            var app = Build(options, store, codes, telemetry);
             try
             {
+                telemetry.SetLog(app.Services.GetRequiredService<ILoggerFactory>().CreateLogger("CodeAlta.Server.Telemetry"));
+                // The fleet's setting applies from the start; the server's own file and environment win over it.
+                telemetry.Apply(organization is null ? null : await store.GetTelemetrySettingsAsync(organization.Id, cancellationToken).ConfigureAwait(false),
+                    organization?.Id);
                 await LogIntegrityAsync(app, store, organization, cancellationToken).ConfigureAwait(false);
                 await app.StartAsync(cancellationToken).ConfigureAwait(false);
             }
@@ -147,12 +177,14 @@ public sealed class CoordinatorServer : IAsyncDisposable
             }
 
             var addresses = app.Services.GetRequiredService<IServer>().Features.Get<IServerAddressesFeature>()!.Addresses.Select(static address => new Uri(address)).ToArray();
-            var server = new CoordinatorServer(app, store, dataRootLock, paths, addresses, setupCode);
+            var server = new CoordinatorServer(app, store, dataRootLock, paths, addresses, setupCode, telemetry);
             server.WriteState(time.GetUtcNow());
             return server;
         }
         catch
         {
+            telemetry?.Dispose();
+            metrics?.Dispose();
             if (store is not null) await store.DisposeAsync().ConfigureAwait(false);
             await dataRootLock.DisposeAsync().ConfigureAwait(false);
             throw;
@@ -186,6 +218,9 @@ public sealed class CoordinatorServer : IAsyncDisposable
         finally
         {
             await _app.DisposeAsync().ConfigureAwait(false);
+            // The last spans, metrics and records of the server go before it ends.
+            _telemetry.Dispose();
+            _telemetry.Metrics.Dispose();
             await _store.DisposeAsync().ConfigureAwait(false);
             try
             {
@@ -239,7 +274,7 @@ public sealed class CoordinatorServer : IAsyncDisposable
         }
     }
 
-    private static WebApplication Build(CoordinatorServerOptions options, SqliteCoordinatorStore store, SetupCodeStore codes)
+    private static WebApplication Build(CoordinatorServerOptions options, SqliteCoordinatorStore store, SetupCodeStore codes, ServerTelemetry telemetry)
     {
         var builder = WebApplication.CreateSlimBuilder(new WebApplicationOptions { ContentRootPath = AppContext.BaseDirectory, Args = [] });
         if (options.ConfigureLogging is not null)
@@ -252,6 +287,9 @@ public sealed class CoordinatorServer : IAsyncDisposable
             // The start and the stop, not a line per request: a request log would name every device's calls.
             builder.Logging.AddFilter("Microsoft.AspNetCore", LogLevel.Warning);
         }
+
+        // The records of the log also go to the collector, when the telemetry sends logs.
+        builder.Logging.AddProvider(telemetry.Runtime);
 
         var urls = options.Urls.Count == 0 ? [CoordinatorServerOptions.DefaultUrl] : options.Urls;
         foreach (var url in urls)
@@ -295,25 +333,40 @@ public sealed class CoordinatorServer : IAsyncDisposable
                 + $"{FleetSignedRequest.DeviceHeader}, {FleetSignedRequest.TimestampHeader}, {FleetSignedRequest.NonceHeader} and {FleetSignedRequest.SignatureHeader}.";
             return Task.CompletedTask;
         }));
+        var metrics = telemetry.Metrics;
         services.AddSingleton(time);
         services.AddSingleton<ICoordinatorStore>(store);
         services.AddSingleton(codes);
+        services.AddSingleton(telemetry);
+        services.AddSingleton(metrics);
         services.AddSingleton(new NonceCache(time, options.MaxClockSkew * 2 + TimeSpan.FromMinutes(1)));
-        services.AddSingleton(provider => new RequestAuthenticator(store, provider.GetRequiredService<NonceCache>(), time, options.MaxClockSkew));
+        services.AddSingleton(provider => new RequestAuthenticator(store, provider.GetRequiredService<NonceCache>(), time, options.MaxClockSkew) { Metrics = metrics });
         services.AddSingleton<PresenceRegistry>();
-        services.AddSingleton<DirectoryHub>();
+        services.AddSingleton(_ => new DirectoryHub { Metrics = metrics });
         services.AddSingleton(provider => new SetupService(store, codes, provider.GetRequiredService<RequestAuthenticator>(), time));
         services.AddSingleton(provider => new RelayHub(store, provider.GetRequiredService<PresenceRegistry>(), provider.GetRequiredService<RequestAuthenticator>(),
-            options.RelayAccess ?? new OrganizationRelayAccess(), options.Relay, time, provider.GetRequiredService<ILoggerFactory>().CreateLogger("CodeAlta.Server.Relay")));
+            options.RelayAccess ?? new OrganizationRelayAccess(), options.Relay, time, provider.GetRequiredService<ILoggerFactory>().CreateLogger("CodeAlta.Server.Relay"))
+        {
+            Metrics = metrics,
+        });
         services.AddSingleton(provider => new DeviceService(store, provider.GetRequiredService<RequestAuthenticator>(), provider.GetRequiredService<PresenceRegistry>(), time,
-            provider.GetRequiredService<RelayHub>()));
-        services.AddSingleton(provider => new PublicationService(store, provider.GetRequiredService<DirectoryHub>(), time));
+            provider.GetRequiredService<RelayHub>()) { Metrics = metrics });
+        services.AddSingleton(provider => new PublicationService(store, provider.GetRequiredService<DirectoryHub>(), time) { Metrics = metrics });
         services.AddSingleton(_ => new MetadataKeyService(store, time));
+        services.AddSingleton(provider => new TelemetrySettingsService(store, provider.GetRequiredService<PresenceRegistry>(), telemetry, time,
+            provider.GetRequiredService<ILoggerFactory>().CreateLogger("CodeAlta.Server.Telemetry")));
+        services.AddSingleton(provider => new OtlpForwarder(telemetry, provider.GetRequiredService<RequestAuthenticator>(),
+            provider.GetRequiredService<ILoggerFactory>().CreateLogger("CodeAlta.Server.Telemetry")));
         services.AddSingleton(provider => new ControlService(store, provider.GetRequiredService<PresenceRegistry>(), provider.GetRequiredService<DirectoryHub>(),
             provider.GetRequiredService<PublicationService>(), provider.GetRequiredService<RelayHub>(), time, options.ConnectionPolicy,
-            provider.GetRequiredService<ILoggerFactory>().CreateLogger("CodeAlta.Server.Control")));
+            provider.GetRequiredService<ILoggerFactory>().CreateLogger("CodeAlta.Server.Control"))
+        {
+            Metrics = metrics,
+            TelemetrySettings = provider.GetRequiredService<TelemetrySettingsService>(),
+        });
 
         var app = builder.Build();
+        app.UseMiddleware<HttpSpanEnricher>();
         app.UseMiddleware<ProblemDetailsMiddleware>();
         app.UseStatusCodePages();
         app.UseWebSockets();

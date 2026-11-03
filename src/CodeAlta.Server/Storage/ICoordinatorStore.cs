@@ -194,6 +194,19 @@ public interface ICoordinatorStore : IAsyncDisposable
     /// <returns>The keys, by epoch.</returns>
     ValueTask<IReadOnlyList<MetadataKeyWithWraps>> ListMetadataKeysAsync(string personId, CancellationToken cancellationToken = default);
 
+    /// <summary>Gets the telemetry setting of an organization.</summary>
+    /// <param name="organizationId">The organization.</param>
+    /// <param name="cancellationToken">Cancels the operation.</param>
+    /// <returns>The setting, or <see langword="null"/> when it has none.</returns>
+    ValueTask<TelemetrySettingsRecord?> GetTelemetrySettingsAsync(string organizationId, CancellationToken cancellationToken = default);
+
+    /// <summary>Replaces the telemetry setting of an organization with a newer one, audited in the same transaction.</summary>
+    /// <param name="settings">The setting.</param>
+    /// <param name="audit">The audit record.</param>
+    /// <param name="cancellationToken">Cancels the operation.</param>
+    /// <returns><see langword="false"/> when the setting held has the same sequence or a later one: nothing was written.</returns>
+    ValueTask<bool> SetTelemetrySettingsAsync(TelemetrySettingsRecord settings, AuditEntry audit, CancellationToken cancellationToken = default);
+
     /// <summary>Appends a record to the audit log, alone (a refusal, a read that is audited).</summary>
     /// <param name="audit">The record.</param>
     /// <param name="cancellationToken">Cancels the operation.</param>

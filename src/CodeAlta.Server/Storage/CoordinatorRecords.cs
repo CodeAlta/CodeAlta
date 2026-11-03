@@ -268,3 +268,14 @@ public sealed record SessionFactsPublication(long Ack, IReadOnlyList<(SessionRec
 /// <param name="Ack">The acknowledged sequence of the stream.</param>
 /// <param name="Applied">Whether the snapshot replaced the one the server held.</param>
 public sealed record InventoryPublication(long Ack, bool Applied);
+
+/// <summary>The telemetry setting of an organization, as a controller device signed it, and the headers only the server holds.</summary>
+/// <param name="OrganizationId">The organization.</param>
+/// <param name="Sequence">The sequence of the setting.</param>
+/// <param name="Payload">The JSON text that was signed.</param>
+/// <param name="Signature">The signature.</param>
+/// <param name="SignerDeviceId">The controller device that signed it.</param>
+/// <param name="ServerHeaders">The headers the server sends to the collector on the server route, as JSON, or null.</param>
+/// <param name="UpdatedAt">When it was set.</param>
+public sealed record TelemetrySettingsRecord(string OrganizationId, long Sequence, string Payload, string Signature, string SignerDeviceId, string? ServerHeaders,
+    DateTimeOffset UpdatedAt);

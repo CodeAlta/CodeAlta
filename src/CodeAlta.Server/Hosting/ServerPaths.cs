@@ -34,4 +34,13 @@ public sealed class ServerPaths
 
     /// <summary>Gets the lock a running server holds, so that one server at a time uses the data root.</summary>
     public string LockPath => Path.Combine(DataRoot, "altaserver.lock");
+
+    /// <summary>
+    /// Gets the owner's telemetry setting of this server (<c>telemetry.json</c>), which wins over the fleet's: it can turn
+    /// telemetry off, refuse the fleet's setting, or name a collector of its own.
+    /// </summary>
+    public string TelemetryPath => Path.Combine(DataRoot, CodeAlta.Fleet.Protocol.FleetLocalTelemetrySettings.FileName);
+
+    /// <summary>Gets the file of the id of this server in its telemetry (<c>service.instance.id</c>), made at its first start.</summary>
+    public string InstanceIdPath => Path.Combine(DataRoot, "instance-id");
 }

@@ -318,8 +318,9 @@ public static class FleetTelemetrySettingsDocuments
             if (string.IsNullOrEmpty(name) || name.Length > MaxHeaderNameLength || !name.All(IsTokenChar)) return $"'{name}' is not the name of a header";
             if (ReservedHeaders.Contains(name) || name.StartsWith("alta-", StringComparison.OrdinalIgnoreCase) || name.StartsWith("proxy-", StringComparison.OrdinalIgnoreCase))
                 return $"the header '{name}' is not one a setting may set";
-            if (value is null || value.Length > MaxHeaderValueLength || value.Any(static c => c is '\r' or '\n' or '\0'))
-                return $"the value of the header '{name}' is at most {MaxHeaderValueLength} characters on one line";
+            // The OTLP exporters take their headers as "name=value,name=value": a value holds no comma.
+            if (value is null || value.Length > MaxHeaderValueLength || value.Any(static c => c is '\r' or '\n' or '\0' or ','))
+                return $"the value of the header '{name}' is at most {MaxHeaderValueLength} characters on one line, without a comma";
         }
 
         return null;
@@ -529,4 +530,5 @@ public static class FleetTelemetryPlanner
 [JsonSerializable(typeof(FleetTelemetrySettings))]
 [JsonSerializable(typeof(FleetSignedTelemetrySettings))]
 [JsonSerializable(typeof(FleetLocalTelemetrySettings))]
+[JsonSerializable(typeof(Dictionary<string, string>))]
 public sealed partial class FleetTelemetryJsonContext : JsonSerializerContext;

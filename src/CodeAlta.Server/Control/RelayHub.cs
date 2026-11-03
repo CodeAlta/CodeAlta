@@ -122,6 +122,9 @@ public sealed class RelayHub
         _logger = logger;
     }
 
+    /// <summary>Gets the instruments of the relays; null for none.</summary>
+    public Telemetry.ServerMetrics? Metrics { get; init; }
+
     /// <summary>Gets how many relays a device has now, offered or open.</summary>
     /// <param name="deviceId">The device.</param>
     /// <returns>The count.</returns>
@@ -200,6 +203,7 @@ public sealed class RelayHub
                 OperationCanceledException => FleetErrorCodes.Cancelled,
                 _ => FleetRelayErrorCodes.TargetOffline,
             };
+            Metrics?.RelayRefused(code);
             // A refused relay leaves a trace too: who tried to reach whom.
             await _store.AppendAuditAsync(origin.Audit("relay.open", actor, target, code), CancellationToken.None).ConfigureAwait(false);
             // The control connection of the target closed under the offer: it is offline as far as the viewer can tell.
@@ -316,6 +320,7 @@ public sealed class RelayHub
                     $"A device has at most {_options.MaxRelaysPerDevice} relays at once.", FleetErrorHints.Retry);
             var relay = new Relay(NewSecret(16), viewer, target, origin, _time.GetUtcNow());
             _relays[relay.Id] = relay;
+            Metrics?.RelayOffered();
             return relay;
         }
     }
@@ -343,6 +348,7 @@ public sealed class RelayHub
     private async Task RunAsync(Relay relay)
     {
         relay.StartedAt = _time.GetUtcNow();
+        Metrics?.RelayOpened();
         using var idle = new CancellationTokenSource();
         idle.CancelAfter(_options.IdleTimeout);
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(relay.End.Token, idle.Token);
@@ -397,6 +403,7 @@ public sealed class RelayHub
     {
         if (!relay.TryFinish(end)) return;
         _relays.TryRemove(new KeyValuePair<string, Relay>(relay.Id, relay));
+        Metrics?.RelayEnded(end, relay.Up, relay.Down);
         foreach (var pair in _tickets.Where(pair => ReferenceEquals(pair.Value.Relay, relay)).ToArray()) _tickets.TryRemove(pair);
         try { await relay.End.CancelAsync().ConfigureAwait(false); }
         catch (ObjectDisposedException) { }
