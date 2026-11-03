@@ -76,7 +76,7 @@ For a machine that should start the node at boot under an account of its own (on
 
 The link works once and expires after 10 minutes (`altanode pair --minutes <n>` gives it more). Pairing again with a new link replaces the machine, for example after its address changed.
 
-A paired computer may see the sessions of the machine, drive them and start new ones. Moving sessions to the machine stays off.
+A paired computer may see the sessions of the machine, drive them and start new ones. Moving sessions to the machine stays off (see [Move a session](#move-a-session)).
 
 ## See and drive its sessions
 
@@ -101,6 +101,26 @@ While a machine is offline, its sessions stay listed with what was last known of
 
 The **+** of the row of a machine in the Explorer opens the same prompt, already set to run on that machine.
 
+## Move a session
+
+A session can move to another machine and go on working there: its conversation, and the work of its branch.
+
+Moves are off until you allow them on the side that receives the session:
+
+- **To a node**: on the machine of the node, give the computer the Move permission with `altanode permissions <device> --allow move`. The same permission lets that computer take sessions of the node back.
+- **To this computer**: in **Settings** > **Fleet** > **Machines**, turn on **Receive moved sessions on this computer**.
+
+To move a session:
+
+1. In the menu of the session, click **Move to machine…**.
+2. Choose the machine: a session of another machine can also come back to **This computer**.
+3. Read what the move meets: a session at work moves once it is idle, a question waits for your answer, and the machine needs a project of the same git repository (**Clone the repository there** offers to make one).
+4. Click **Move**. The session opens where it runs now.
+
+Only a session of a project in a git repository with a remote moves. On the machine, it works in a worktree of its own, on its branch: its commits that are not pushed and its changes that are not committed go with it.
+
+What stays behind: its background jobs, reminders and terminals, and the files that look like secrets (the dialog names them). A move that a lost connection stopped goes on when the machine is back.
+
 ## Manage the devices of a node
 
 On the machine of the node:
@@ -114,7 +134,7 @@ On the machine of the node:
 
 In CodeAlta Desktop, **Forget** on the row of a machine in **Settings** > **Fleet** > **Machines** removes it from this computer; its sessions go on there. To make sure a lost or replaced computer can no longer reach a node, revoke it on the node.
 
-From a terminal, `altanode connect <link>` pairs another profile with a node, and `altanode remote <machine> sessions`, `history`, `send`, `create` and `watch` read and drive the sessions of a paired machine.
+From a terminal, `altanode connect <link>` pairs another profile with a node, and `altanode remote <machine> sessions`, `history`, `send`, `create` and `watch` read and drive the sessions of a paired machine. `altanode remote <machine> move <session>` moves one of them to the node of that profile.
 
 ## Security
 
