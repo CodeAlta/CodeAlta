@@ -9,6 +9,12 @@ cloud, with no Kubernetes.
   for scripts and servers, never required.
 - **One step per machine.** Adding a machine is one command, one scan, or nothing at all when the desktop can reach
   it over SSH.
+- **Managing is as smooth as setting up.** Living with a fleet, at home or in a company, happens in the desktop too:
+  what a machine may do, its projects, providers, updates, logs, telemetry, devices and revocations, the server's
+  people, approvals and backups. A person never has to open a terminal on a machine to manage it. Every state says
+  what it means and every problem comes with the action that fixes it (**Allow automations**, **Update**, **Approve**,
+  **Sign in again**). Home and enterprise share the same pages; what a household does not need stays out of sight
+  until it is used.
 - **Any OS.** Windows, macOS and Linux, x64 and Arm64, for the node and the server. No container runtime required;
   containers when the platform wants them.
 - **No Kubernetes.** A Helm chart can come for organizations that already run it.
