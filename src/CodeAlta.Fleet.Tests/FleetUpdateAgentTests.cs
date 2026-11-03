@@ -42,11 +42,12 @@ public sealed class FleetUpdateAgentTests
     public async Task ACompletedManifestReplayedAfterARefusalIsNotInstalledAgain()
     {
         using var harness = new AgentHarness();
-        harness.Staged = false;
         var agent = harness.Start();
         var c5 = harness.Instruction(harness.Manifest(5, "c5", "4.0.2"));
         await harness.AcceptAsync(agent, LinkA, c5);
         await (agent.Tick() ?? Task.CompletedTask);
+        harness.Running = "4.0.2";
+        agent = harness.Restart(agent);
         Assert.AreEqual(FleetUpdateMachineStates.Updated, agent.Current?.State);
 
         await harness.AcceptAsync(agent, LinkA, harness.Instruction(harness.Manifest(6, "c6", "4.0.3")) with { Manifest = null });
@@ -120,6 +121,50 @@ public sealed class FleetUpdateAgentTests
         Assert.IsNull(agent.Current, "nothing accepted");
         Assert.IsNull(agent.Tick());
         Assert.AreEqual(0, harness.Applied.Count);
+    }
+
+    [TestMethod]
+    public async Task ANodeIsUpdatedOnlyOnceItsTrialConfirmedAndARollbackIsReported()
+    {
+        using var harness = new AgentHarness();
+        var agent = harness.Start();
+        await harness.AcceptAsync(agent, LinkA, harness.Instruction(harness.Manifest(1, "c1", "4.0.2")));
+        await (agent.Tick() ?? Task.CompletedTask);
+        Assert.AreEqual(FleetUpdateMachineStates.Switching, agent.Current?.State);
+
+        // It starts the new version on trial: running it is not enough.
+        harness.Running = "4.0.2";
+        harness.Status = harness.OnTrial("4.0.2");
+        agent = harness.Restart(agent);
+        Assert.AreEqual(FleetUpdateMachineStates.Switching, agent.Current?.State, "not updated before its trial confirmed");
+        Assert.IsNull(agent.Tick());
+        Assert.AreEqual(FleetUpdateMachineStates.Switching, agent.Current?.State);
+
+        // It does not confirm: its launcher rolls it back, and the server is told.
+        harness.Clock.Advance(TimeSpan.FromMinutes(2));
+        harness.Running = "4.0.1";
+        harness.Status = harness.Outcome("4.0.2", UpdateOutcomes.RolledBack, "It did not confirm in time.");
+        agent = harness.Restart(agent);
+        Assert.AreEqual((FleetUpdateMachineStates.RolledBack, "It did not confirm in time."), (agent.Current?.State, agent.Current?.Message));
+    }
+
+    [TestMethod]
+    public async Task ATrialThatConfirmsMakesTheNodeUpdated()
+    {
+        using var harness = new AgentHarness();
+        harness.Staged = false;
+        // It runs the version already, on trial (an update of its own): it is updated once that trial confirmed.
+        harness.Running = "4.0.2";
+        harness.Status = harness.OnTrial("4.0.2");
+        var agent = harness.Start();
+        await harness.AcceptAsync(agent, LinkA, harness.Instruction(harness.Manifest(1, "c1", "4.0.2")));
+        await (agent.Tick() ?? Task.CompletedTask);
+        Assert.AreEqual(FleetUpdateMachineStates.Switching, agent.Current?.State, "running the version on trial is not updated");
+
+        harness.Clock.Advance(TimeSpan.FromSeconds(30));
+        harness.Status = harness.Outcome("4.0.2", UpdateOutcomes.Confirmed, null);
+        Assert.IsNull(agent.Tick());
+        Assert.AreEqual(FleetUpdateMachineStates.Updated, agent.Current?.State);
     }
 }
 
@@ -205,6 +250,13 @@ internal sealed class AgentHarness : IDisposable
             ImmutableHashSet.Create<string>(StringComparer.Ordinal));
 
     public static string Hash(char seed) => Convert.ToBase64String(SHA512.HashData([(byte)seed]));
+
+    /// <summary>Gets the status of a node that runs a version on trial.</summary>
+    public FleetUpdateStatus OnTrial(string version) => new(Running, null, version, "4.0.1", new FleetUpdateTrial(version, Clock.GetUtcNow(), 1), null, [], null);
+
+    /// <summary>Gets the status of a node whose last switch ended.</summary>
+    public FleetUpdateStatus Outcome(string version, string outcome, string? message)
+        => new(Running, null, Running, null, null, null, [], new FleetUpdateOutcome(version, outcome, Clock.GetUtcNow(), message));
 
     public void Dispose()
     {

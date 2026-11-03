@@ -394,7 +394,10 @@ public sealed class FleetUpdateAgent : IAsyncDisposable
             }
 
             var staged = await _options.Apply(request, $"fleet campaign {state.CampaignId}", cancellationToken).ConfigureAwait(false);
-            outcome = staged is null ? FleetUpdateMachineStates.Updated : FleetUpdateMachineStates.Switching;
+            // A version that runs already is updated only once it confirmed; one on trial still may roll back.
+            outcome = staged is null && UpdateVersion.TryParse(state.Version, out var target) && Confirmed(target, _options.Status())
+                ? FleetUpdateMachineStates.Updated
+                : FleetUpdateMachineStates.Switching;
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -438,19 +441,43 @@ public sealed class FleetUpdateAgent : IAsyncDisposable
         Publish(next);
     }
 
-    // What a restart, a switch or a rollback changed: a version that runs now is updated; one rolled back is not.
+    // Whether a version runs and confirmed that it works: it runs, and no trial of it waits for its confirmation.
+    private bool Confirmed(UpdateVersion target, FleetUpdateStatus status)
+        => target.Equals(_options.Running) && !(status.Trial is { } trial && UpdateVersion.TryParse(trial.Version, out var onTrial) && onTrial.Equals(target));
+
+    // How the last switch to a version ended, once a state was reached: rolled back or failed; null otherwise.
+    private static FleetUpdateOutcome? EndedBadly(FleetUpdateStatus status, UpdateVersion target, DateTimeOffset since)
+        => status.LastOutcome is { } last && UpdateVersion.TryParse(last.Version, out var ended) && ended.Equals(target) && last.At >= since.AddSeconds(-1)
+           && last.Outcome is UpdateOutcomes.RolledBack or UpdateOutcomes.Failed
+            ? last
+            : null;
+
+    // What a restart, a switch or a rollback changed: a version that runs and confirmed is updated (one on trial is not
+    // yet); one rolled back is rolled back, even after it was reported updated.
     private void Reconcile(DateTimeOffset now)
     {
         FleetUpdateAgentState next;
         lock (_gate)
         {
             var state = _state;
-            if (state.CampaignId is null || state.Version is null || FleetUpdateMachineStates.IsTerminal(state.State) && state.State != FleetUpdateMachineStates.Cancelled) return;
+            if (state.CampaignId is null || state.Version is null) return;
+            if (FleetUpdateMachineStates.IsTerminal(state.State) && state.State is not (FleetUpdateMachineStates.Cancelled or FleetUpdateMachineStates.Updated)) return;
             if (!UpdateVersion.TryParse(state.Version, out var target)) return;
+            FleetUpdateStatus status;
+            try { status = _options.Status(); }
+            catch (UpdateException) { return; }
             string? outcome = null;
             string? message = null;
-            if (target.Equals(_options.Running))
+            if (state.State == FleetUpdateMachineStates.Updated)
             {
+                if (EndedBadly(status, target, state.At) is not { Outcome: UpdateOutcomes.RolledBack } rolledBack) return;
+                outcome = FleetUpdateMachineStates.RolledBack;
+                message = rolledBack.Message;
+            }
+            else if (target.Equals(_options.Running))
+            {
+                // On trial, it may still roll back: the campaign hears of it once it confirmed.
+                if (!Confirmed(target, status)) return;
                 outcome = FleetUpdateMachineStates.Updated;
             }
             else if (state.State == FleetUpdateMachineStates.Cancelled)
@@ -459,13 +486,9 @@ public sealed class FleetUpdateAgent : IAsyncDisposable
             }
             else if (state.State is FleetUpdateMachineStates.Switching or FleetUpdateMachineStates.Downloading)
             {
-                FleetUpdateStatus status;
-                try { status = _options.Status(); }
-                catch (UpdateException) { return; }
-                if (status.LastOutcome is { } last && UpdateVersion.TryParse(last.Version, out var ended) && ended.Equals(target) && last.At >= state.At.AddSeconds(-1)
-                    && last.Outcome is "rolled_back" or "failed")
+                if (EndedBadly(status, target, state.At) is { } last)
                 {
-                    outcome = last.Outcome == "rolled_back" ? FleetUpdateMachineStates.RolledBack : FleetUpdateMachineStates.Failed;
+                    outcome = last.Outcome == UpdateOutcomes.RolledBack ? FleetUpdateMachineStates.RolledBack : FleetUpdateMachineStates.Failed;
                     message = last.Message;
                 }
                 else if (state.State == FleetUpdateMachineStates.Switching && status.Pending is null && status.Trial is null)

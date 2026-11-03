@@ -6,7 +6,7 @@ namespace CodeAlta.Server.Services;
 
 /// <summary>A node as the campaign sees it now: online or not, and the version it runs.</summary>
 /// <param name="Online">Whether it holds a control connection.</param>
-/// <param name="Running">The version it runs, as its inventory or its last report says; null when unknown.</param>
+/// <param name="Running">The version it runs, as its inventory or its last report says; null when unknown. Never a success: a node is updated once it reports its trial confirmed.</param>
 internal sealed record UpdateCampaignNode(bool Online, string? Running);
 
 /// <summary>The server as the campaign sees it: the version that runs and how its last switch ended.</summary>
@@ -88,13 +88,8 @@ internal sealed class UpdateCampaignEngine(UpdateCampaignLimits limits)
             {
                 if (FleetUpdateMachineStates.IsTerminal(machine.State)) continue;
                 var view = node(machine.DeviceId);
-                // A node that runs the version is done, whether it just switched or ran it already.
-                if (view.Online && Same(view.Running, campaign.TargetVersion))
-                {
-                    Set(machine with { State = FleetUpdateMachineStates.Updated, Running = view.Running, Message = null, UpdatedAt = now });
-                    continue;
-                }
-
+                // A node is done only once it reports the version confirmed (Apply): one that runs it may run it on
+                // trial, and roll back.
                 if (machine.State == FleetUpdateMachineStates.Instructed && view.Online && machine.InstructedAt is { } sent && now - sent >= limits.ResendAfter)
                 {
                     // No report yet: the instruction may have been lost with a connection.
@@ -185,8 +180,11 @@ internal sealed class UpdateCampaignEngine(UpdateCampaignLimits limits)
         ArgumentNullException.ThrowIfNull(machine);
         ArgumentNullException.ThrowIfNull(report);
         if (!FleetUpdateMachineStates.IsReported(report.State) || report.CampaignId != machine.CampaignId) return machine;
-        // A machine done with the campaign stays so; one that switched before a cancellation reached it is updated still.
-        if (FleetUpdateMachineStates.IsTerminal(machine.State) && !(report.State == FleetUpdateMachineStates.Updated && machine.State == FleetUpdateMachineStates.Cancelled))
+        // A machine done with the campaign stays so; one that switched before a cancellation reached it is updated still,
+        // and one updated that rolled back after all is recorded so.
+        if (FleetUpdateMachineStates.IsTerminal(machine.State)
+            && !(report.State == FleetUpdateMachineStates.Updated && machine.State == FleetUpdateMachineStates.Cancelled)
+            && !(report.State == FleetUpdateMachineStates.RolledBack && machine.State == FleetUpdateMachineStates.Updated))
             return machine;
         if (machine.State == report.State && machine.Running == report.Running && machine.Message == report.Message) return machine;
         return machine with { State = report.State, Running = report.Running, Message = Trim(report.Message), UpdatedAt = now };

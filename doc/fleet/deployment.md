@@ -151,8 +151,8 @@ All signed (Authenticode, Apple notarization, NuGet signatures, cosign for image
 - **The campaign.** An owner's controller device asks the server for an update of the fleet: a version (the latest
   both tool packages list, by default), a feed, now or a time (kept in UTC, with the time zone it was chosen in), the
   nodes (all by default). The server keeps it (`update_campaigns`), and at its time asks its nodes over the control
-  connection (`update.instruction`), two at a time; it waits until each node online runs the version, failed or rolled
-  back, then updates itself, last, with the same self-update. A node offline does not hold the campaign: it is pending,
+  connection (`update.instruction`), two at a time; it waits until each node online reports the version confirmed (one
+  that runs it on trial may still roll back, and reports that too), failed or rolled back, then updates itself, last, with the same self-update. A node offline does not hold the campaign: it is pending,
   asked when it reconnects, and the campaign ends **partly done** until it is. A node that goes offline while it
   switches holds the server for ten minutes. A campaign is cancelled until the server's step; one at a time runs.
   States: scheduled, updating nodes, updating server, done, partly done, failed (the server did not update, or every
