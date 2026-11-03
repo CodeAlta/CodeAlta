@@ -277,3 +277,35 @@ test("a short latest turn, a read that fails, a timeline behind another tab, and
     assert.equal(await page.evaluate(firstTurn), 7);
   }, options);
 });
+
+test("a reader leaves the end of a timeline that grows with small turns of the wheel, and comes back to it", { skip: !edge, timeout: 120_000 }, async () => {
+  await withCanvas(async page => {
+    await turnsFrom(page, 9, "the latest turn");
+    assert.equal(await page.evaluate(`${scroller}.dataset.following`), "true");
+    await page.evaluate(`olderFixture.stream()`);
+    try {
+      await page.until(`document.querySelectorAll('#fixture-stream p').length > 3 && ${atEnd}`, "the answer streams in, followed");
+      // Each turn of the wheel moves the view less than the distance at which the end is followed: the growing
+      // answer must not take the reader back to the end between them.
+      for (let notch = 0; notch < 6; notch++) {
+        await wheel(page, -25);
+        await pause(60);
+      }
+      await pause(300);
+      const distance = `(${scroller}.scrollHeight - ${scroller}.clientHeight - ${scroller}.scrollTop)`;
+      assert.equal(await page.evaluate(`${scroller}.dataset.following`), "false", "going up leaves the end");
+      assert.ok(await page.evaluate<number>(distance) > 120, "the view stays where the reader took it");
+      const reading = await page.evaluate<number>(`${scroller}.scrollTop`);
+      await pause(400);
+      assert.equal(await page.evaluate(`${scroller}.scrollTop`), reading, "the answer grows below the reader");
+
+      // Going down to the end follows the answer again.
+      await wheel(page, 4000);
+      await page.until(`${scroller}.dataset.following === 'true'`, "the end followed again");
+      await pause(400);
+      assert.equal(await page.evaluate(atEnd), true, "the growing answer is followed");
+    } finally {
+      await page.evaluate(`olderFixture.stopStream()`);
+    }
+  }, options);
+});
