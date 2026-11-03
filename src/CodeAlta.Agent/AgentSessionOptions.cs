@@ -32,6 +32,13 @@ public sealed record AgentSessionOptions
     [JsonPropertyName("context_size")]
     public long? ContextSize { get; init; }
 
+    /// <summary>
+    /// Gets whether the session is Private (<c>doc/fleet/security-and-privacy.md</c>): it is never published to a CodeAlta
+    /// Server, not even its facts, whatever the space it is in. Off by default; a session created by a Private one is Private.
+    /// </summary>
+    [JsonPropertyName("private")]
+    public bool Private { get; init; }
+
     /// <summary>Gets whether every option is at its default.</summary>
     [JsonIgnore]
     public bool IsDefault => Equals(Default);
@@ -53,5 +60,5 @@ public sealed record AgentSessionOptions
     /// <param name="creator">The options of the session that creates it, or null when no session does (the user, a host).</param>
     /// <returns>The options of the new session.</returns>
     public AgentSessionOptions Within(AgentSessionOptions? creator)
-        => creator is null ? this : this with { SubSessions = SubSessions && creator.SubSessions };
+        => creator is null ? this : this with { SubSessions = SubSessions && creator.SubSessions, Private = Private || creator.Private };
 }

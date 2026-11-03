@@ -16,18 +16,21 @@ namespace CodeAlta.Catalog;
 /// <param name="Identity">The identity the sessions of the space work under; <see langword="null"/> for the usual.</param>
 /// <param name="Tools">The tools the sessions of the space do without; <see langword="null"/> for none.</param>
 /// <param name="Skills">The folders of skills the sessions of the space read besides the others; <see langword="null"/> for none.</param>
-public sealed record SpaceSettings(SpaceNewSessions? NewSessions = null, SpaceIdentity? Identity = null, SpaceTools? Tools = null, SpaceSkills? Skills = null)
+/// <param name="Fleet">The CodeAlta Server the space is linked to; <see langword="null"/> for none.</param>
+public sealed record SpaceSettings(SpaceNewSessions? NewSessions = null, SpaceIdentity? Identity = null, SpaceTools? Tools = null, SpaceSkills? Skills = null,
+    SpaceFleet? Fleet = null)
 {
     /// <summary>Gets settings that set nothing.</summary>
     public static SpaceSettings Empty { get; } = new();
 
     /// <summary>Gets whether nothing is set.</summary>
-    public bool IsEmpty => (NewSessions?.IsEmpty ?? true) && (Identity?.IsEmpty ?? true) && (Tools?.IsEmpty ?? true) && (Skills?.IsEmpty ?? true);
+    public bool IsEmpty => (NewSessions?.IsEmpty ?? true) && (Identity?.IsEmpty ?? true) && (Tools?.IsEmpty ?? true) && (Skills?.IsEmpty ?? true)
+        && (Fleet?.IsEmpty ?? true);
 
     /// <summary>Tells what is wrong with the settings.</summary>
     /// <returns>The first problem found, or <see langword="null"/> when they are valid.</returns>
     public string? Problem()
-        => NewSessions?.Problem() ?? Identity?.Problem() ?? Tools?.Problem() ?? Skills?.Problem();
+        => NewSessions?.Problem() ?? Identity?.Problem() ?? Tools?.Problem() ?? Skills?.Problem() ?? Fleet?.Problem();
 
     /// <summary>
     /// Keeps what is valid of settings read from a file: a value that is not valid is left out, so that one wrong
@@ -35,11 +38,46 @@ public sealed record SpaceSettings(SpaceNewSessions? NewSessions = null, SpaceId
     /// </summary>
     /// <returns>The settings without their invalid values.</returns>
     public SpaceSettings Sanitized()
-        => new(NewSessions?.Sanitized(), Identity?.Sanitized(), Tools?.Sanitized(), Skills?.Sanitized());
+        => new(NewSessions?.Sanitized(), Identity?.Sanitized(), Tools?.Sanitized(), Skills?.Sanitized(), Fleet?.Sanitized());
 
     // Text on one line, without control characters, of at most the length given.
     internal static bool IsLine([System.Diagnostics.CodeAnalysis.NotNullWhen(true)] string? value, int maximum)
         => value is { Length: > 0 } && value.Length <= maximum && value == value.Trim() && !value.Any(char.IsControl);
+}
+
+/// <summary>
+/// The CodeAlta Server a space is linked to (<c>doc/fleet/identity.md</c>, spaces and servers): the sessions of the space
+/// that are not Private publish their facts to it. Only the address and the organization are kept here; the device and
+/// its state are the instance's link to that server.
+/// </summary>
+/// <param name="Server">The address of the server, <c>http://</c> or <c>https://</c>.</param>
+/// <param name="Organization">The id of its organization, once known; <see langword="null"/> otherwise.</param>
+public sealed record SpaceFleet(string? Server = null, string? Organization = null)
+{
+    /// <summary>The longest address of a server.</summary>
+    public const int MaximumServerLength = 2048;
+
+    /// <summary>Gets whether nothing is set: a space without a server.</summary>
+    public bool IsEmpty => Server is null;
+
+    /// <summary>Tells what is wrong with the link.</summary>
+    /// <returns>The first problem found, or <see langword="null"/>.</returns>
+    public string? Problem()
+        => Server is not null && !IsServer(Server)
+            ? $"'{Server}' is not the address of a server (http:// or https://)."
+            : Organization is not null && !SpaceSettings.IsLine(Organization, 128) ? "The organization of a server is one line of at most 128 characters." : null;
+
+    /// <summary>Keeps what is valid.</summary>
+    /// <returns>The link without its invalid values; <see langword="null"/> when no valid server is left.</returns>
+    public SpaceFleet? Sanitized()
+        => IsServer(Server) ? new SpaceFleet(Server!.Trim(), SpaceSettings.IsLine(Organization?.Trim(), 128) ? Organization!.Trim() : null) : null;
+
+    /// <summary>Gets whether a text is the address of a server: absolute, <c>http://</c> or <c>https://</c>, without query.</summary>
+    /// <param name="value">The text.</param>
+    /// <returns>True when it may name a server.</returns>
+    public static bool IsServer(string? value)
+        => value is { Length: > 0 and <= MaximumServerLength } && Uri.TryCreate(value.Trim(), UriKind.Absolute, out var uri) && uri.Scheme is "http" or "https"
+            && !string.IsNullOrEmpty(uri.Host) && string.IsNullOrEmpty(uri.Query) && string.IsNullOrEmpty(uri.UserInfo);
 }
 
 /// <summary>What the new sessions of a space start with.</summary>

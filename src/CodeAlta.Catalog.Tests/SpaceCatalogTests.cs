@@ -297,6 +297,24 @@ public sealed class SpaceCatalogTests
     }
 
     [TestMethod]
+    public async Task TheServerOfASpace_IsWrittenInItsFile_AndAnAddressThatIsNotOneIsRefused()
+    {
+        using var fixture = new Fixture();
+        await fixture.Spaces.CreateAsync("Work");
+        var path = Path.Combine(fixture.Options.SpacesRoot, "work.md");
+        var plain = await File.ReadAllTextAsync(path);
+
+        var linked = await fixture.Spaces.UpdateSettingsAsync("work", current => current with { Fleet = new SpaceFleet("https://fleet.contoso.example", "0190abc") });
+        Assert.IsTrue(linked.Succeeded, linked.Message);
+        StringAssert.Contains(await File.ReadAllTextAsync(path), "fleet:\n  server: \"https://fleet.contoso.example\"\n  organization: 0190abc\n");
+        Assert.AreEqual(new SpaceFleet("https://fleet.contoso.example", "0190abc"), (await fixture.Spaces.GetAsync("work"))!.Settings.Fleet);
+
+        Assert.AreEqual(SpaceChangeStatus.Invalid, (await fixture.Spaces.UpdateSettingsAsync("work", current => current with { Fleet = new SpaceFleet("ftp://fleet") })).Status);
+        Assert.IsTrue((await fixture.Spaces.UpdateSettingsAsync("work", current => current with { Fleet = null })).Succeeded);
+        Assert.AreEqual(plain, await File.ReadAllTextAsync(path), "unlinked, the file is as it was");
+    }
+
+    [TestMethod]
     public async Task TheFallbackOfASpace_IsWrittenWhole_AndReadBack()
     {
         using var fixture = new Fixture();
