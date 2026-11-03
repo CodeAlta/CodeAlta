@@ -61,6 +61,7 @@ internal static class DesktopAltaTools
     /// <param name="windows">The windows the <c>alta window</c> commands use; without them the commands do not exist.</param>
     /// <param name="settings">The settings the <c>alta settings</c> commands list, read, change and open; without them the commands do not exist.</param>
     /// <param name="machineMoves">The moves of sessions to the paired machines, for <c>alta session move</c>; without them the command does not exist.</param>
+    /// <param name="fleet">The fleet the <c>alta fleet</c> commands read; without it the commands do not exist.</param>
     /// <returns>The dispatcher of the commands, for the other callers of the host (its MCP server).</returns>
     /// <exception cref="ArgumentNullException">The host or the reminders are null.</exception>
     internal static AltaCommandDispatcher Attach(CodeAltaHost host, AltaReminderService reminders, PluginAltaServiceBridge? pluginAlta = null, IAltaChangesView? changes = null,
@@ -70,7 +71,7 @@ internal static class DesktopAltaTools
         IAltaCanvasView? canvases = null, CodeAlta.Catalog.Documentation.ShippedDocumentation? documentation = null, IAltaDocumentationView? documentationView = null,
         CodeAlta.Catalog.Bookmarks.BookmarkService? bookmarks = null, Search.DesktopSearch? search = null,
         CodeAlta.Catalog.Reviews.ReviewService? reviews = null, IAltaReviewPolicy? reviewPolicy = null, IAltaWindows? windows = null, IAltaSettings? settings = null,
-        IAltaSessionMachineMoves? machineMoves = null)
+        IAltaSessionMachineMoves? machineMoves = null, IAltaFleet? fleet = null)
     {
         ArgumentNullException.ThrowIfNull(host);
         ArgumentNullException.ThrowIfNull(reminders);
@@ -79,7 +80,7 @@ internal static class DesktopAltaTools
             new CodeAlta.Orchestration.Runtime.Scripts.DeferredCodeModeAgents(() => host.CodeModeAgents), host.CodeModeScripts, host.CodeModeQuestions)
             .WithSpaces(async (sessionId, token) => await host.RuntimeService.GetSessionSpaceFilterAsync(sessionId, token).ConfigureAwait(false));
         var dispatcher = Compose(host, reminders, changes, editor, terminals, automations, worktrees, plugins, workItems, appearance, spaces, commands, canvases, documentation, documentationView, bookmarks, search,
-            reviews, reviewPolicy, windows, codeMode, settings, machineMoves);
+            reviews, reviewPolicy, windows, codeMode, settings, machineMoves, fleet);
         pluginAlta?.SetDispatcher(dispatcher);
         host.Commands.SessionTools = CreateSessionTools(dispatcher, search?.Service, codeMode);
         return dispatcher;
@@ -93,7 +94,7 @@ internal static class DesktopAltaTools
         CodeAlta.Catalog.Documentation.ShippedDocumentation? documentation = null, IAltaDocumentationView? documentationView = null,
         CodeAlta.Catalog.Bookmarks.BookmarkService? bookmarks = null, Search.DesktopSearch? search = null,
         CodeAlta.Catalog.Reviews.ReviewService? reviews = null, IAltaReviewPolicy? reviewPolicy = null, IAltaWindows? windows = null,
-        CodeModeSessionTools? codeMode = null, IAltaSettings? settings = null, IAltaSessionMachineMoves? machineMoves = null)
+        CodeModeSessionTools? codeMode = null, IAltaSettings? settings = null, IAltaSessionMachineMoves? machineMoves = null, IAltaFleet? fleet = null)
     {
         var permissions = host.RuntimeService.Permissions;
         var services = new AltaServiceCollection()
@@ -148,6 +149,7 @@ internal static class DesktopAltaTools
         if (windows is not null) services.Add(windows);
         if (settings is not null) services.Add(settings);
         if (machineMoves is not null) services.Add(machineMoves);
+        if (fleet is not null) services.Add(fleet);
         if (codeMode is not null) services.Add(codeMode);
         if (search is not null) services.Add(search.Service).Add(search.Indexer).Add(search.Store);
         var registry = new AltaCommandRegistry();

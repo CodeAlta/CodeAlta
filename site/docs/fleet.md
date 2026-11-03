@@ -170,7 +170,7 @@ The **+** of the row of a machine in the Explorer opens the same prompt, already
 An agent of a session on this computer can hand part of its work to a session on a machine ("run the iOS tests on the Mac"), and get its final answer back as it does from a session of this computer.
 
 1. On the machine, allow it for the spaces you want: `altanode agents allow --space default`. It is off until you do, and `altanode agents` shows what is allowed.
-2. Ask the agent to do it. It runs `alta session create --machine <name> --stdin` (or, in a script, `agent(prompt, { machine: "<name>" })`). `alta session machines` lists the machines.
+2. Ask the agent to do it. It runs `alta session create --machine <name> --stdin` (or, in a script, `agent(prompt, { machine: "<name>" })`). `alta fleet machine list` lists the machines, with which ones take a session now ([Let agents use the fleet](#let-agents-use-the-fleet)).
 
 The session starts in the project of the same repository on the machine, as a child of the session of the agent: it shows under it in the Explorer and among its child sessions, with the name of the machine, and opens like any session of the machine. Its final answer, or its failure, comes back to the parent, also when this computer was closed meanwhile: the machine keeps it until this computer takes it. The agent can send it more prompts with `alta session send`.
 
@@ -388,6 +388,27 @@ Each machine linked to your server counts the statistics of its sessions, a node
 - **My fleet** shows the machines of your own fleet. **This machine** is the full Statistics page, with its filters and comparisons, for this computer.
 
 A node starts counting with the day it first runs.
+
+## Let agents use the fleet
+
+Ask an agent of CodeAlta Desktop to work with your machines: "run the iOS tests on a Mac that is free", "move this session to the build box", "run the nightly review on the server machine", "how many tokens did my machines use this month". It follows the built-in `codealta-fleet` skill and the `alta fleet` commands:
+
+| The agent | With |
+| --- | --- |
+| Lists the machines with their state, version, labels, readiness and load, and picks one | `alta fleet machine list`, `alta fleet machine show <machine>` |
+| Starts a session on a machine and gets its answer back | `alta session create --machine <machine>` |
+| Lists the sessions of a machine | `alta fleet machine sessions <machine>` |
+| Sees what a move would meet, and moves a session | `alta fleet move status`, `alta fleet move start` |
+| Says where your automations run, places one, runs one now | `alta fleet automation list`, `place`, `run`, `runs` |
+| Reads the statistics, the updates and the health of the fleet | `alta fleet statistics`, `alta fleet update status`, `alta fleet health` |
+| Reads the devices of a machine you manage | `alta fleet machine devices <machine>` |
+| Checks which secrets a machine has, by name only | `alta fleet secret list <machine>` |
+
+An agent works with your access and never more:
+
+- It reads devices, permissions and grants, and does not change them: you do, on the page of the machine.
+- It creates automations disabled, enables none, and places a disabled one only: you enable them in the **Automations** tab. You start an update campaign.
+- Its sandbox and permission mode go with what it starts or drives on another machine. A sandboxed session reads the fleet, and starts, moves or places nothing elsewhere; one whose sandbox does not allow the fleet does not read it either.
 
 ## Security
 

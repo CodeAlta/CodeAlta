@@ -19,7 +19,7 @@ internal sealed partial class BuiltInAltaCommandContributor
             value => machine = value);
         command.Add("clone", "Let the machine clone the repository of the session when it has no project of it.", value => clone = value is not null);
         command.Add("list", "List the machines a session can move to.", value => list = value is not null);
-        command.Add(async (_, _) => await HandleSessionMoveAsync(context, FirstNonEmpty(sessionId, context.Caller.SourceSessionId), machine, clone, list)
+        command.Add(async (_, _) => await HandleSessionMoveAsync(context, FirstNonEmpty(sessionId, context.Caller.SourceSessionId), machine, clone, list, SessionMoveCommandPath)
             .ConfigureAwait(false));
         AddHelpText(
             command,
@@ -37,7 +37,7 @@ internal sealed partial class BuiltInAltaCommandContributor
         return command;
     }
 
-    private static async ValueTask<int> HandleSessionMoveAsync(AltaCommandContext context, string? sessionId, string? machine, bool clone, bool list)
+    private static async ValueTask<int> HandleSessionMoveAsync(AltaCommandContext context, string? sessionId, string? machine, bool clone, bool list, string commandPath)
     {
         if (!context.TryGetRequired<IAltaSessionMachineMoves>(nameof(IAltaSessionMachineMoves), out var moves)) return AltaExitCodes.ServiceUnavailable;
         if (list)
@@ -61,10 +61,11 @@ internal sealed partial class BuiltInAltaCommandContributor
 
         context.ClaimSessionWork(sessionId);
         if (string.IsNullOrWhiteSpace(sessionId))
-            return UsageError(context, "usage.missingSession", "Session id is required outside a session caller.", SessionMoveCommandPath);
+            return UsageError(context, "usage.missingSession", "Session id is required outside a session caller.", commandPath);
         if (NormalizeOptionalText(machine) is not { } target)
-            return UsageError(context, "usage.missingMachine", "Name the machine with --machine <name> (`alta session move --list` lists them).", SessionMoveCommandPath);
+            return UsageError(context, "usage.missingMachine", "Name the machine with --machine <name> (`alta session move --list` lists them).", commandPath);
         sessionId = sessionId.Trim();
+        if (await RefuseMoveOfOtherAsync(context, sessionId).ConfigureAwait(false) is { } refused) return refused;
 
         // A session of this computer keeps to the space of the caller; one of a machine is checked there.
         if (context.Services.Get<SessionRuntimeService>() is { } runtime
