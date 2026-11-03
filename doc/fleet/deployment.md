@@ -67,6 +67,9 @@ Nodes only ever dial out: none of these needs an inbound port on a node.
 | An organization on GCP | **Cloud Run** + **Cloud SQL**, Terraform | Workable: WebSockets end after 60 minutes at most, which reconnection absorbs; billed while connections are open |
 | An organization with Kubernetes | A Helm chart (later) | |
 
+Whatever the recipe, the platform's probes (the container's health check, the load balancer's target check) call the
+server's `/health/live` and `/health/ready` ([observability](observability.md#health-checks)).
+
 Shipped artifacts stay few: one image, one `compose.yaml`, one `azd` template, one Terraform module per cloud. Aspire
 is used to run a server and several nodes together in development, not as the deployment path (its Azure deploy is
 in preview and it has no AWS target).
@@ -140,7 +143,7 @@ All signed (Authenticode, Apple notarization, NuGet signatures, cosign for image
   selected, and once it changes to one newer than the selected version, the pointer is dropped and the installed entry
   point runs; a version chosen older on purpose (`update --version`) stays until the installed one changes.
 - **Trial and rollback.** A new version confirms itself once healthy: a node when it listens and its connections to
-  the servers that approved it are up, the server when it answers its own health request. One that exits first, or does
+  the servers that approved it are up, the server when it answers its own health request (`/api/v1/server/health`). One that exits first, or does
   not confirm within 2 minutes (over 2 starts), or cannot be started, is stopped, marked bad (an update skips it unless
   named) and the previous version starts again. A rollback with a backup is recorded with the move of the pointer and
   kept until the backup is restored: the launcher restores it before it starts anything, and when it cannot, it starts

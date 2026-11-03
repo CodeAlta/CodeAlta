@@ -116,7 +116,11 @@ which the hosts name at three levels; the first that names one wins:
 
 ## Health checks
 
-- The server exposes `/health` (live, ready) and its metrics to the collector: control connections and handshakes,
+- The server answers the probes of load balancers and container platforms without a device: `/health/live` (the process
+  answers; it checks nothing else, so a slow store never restarts it) and `/health/ready`, also served as `/health`
+  (the store is reachable and migrated; 503 otherwise). Each is a status word, cheap, never cached, and says nothing of
+  the organization or the version; `/api/v1/server/health` stays the richer answer for CodeAlta's own clients.
+- The server exposes its metrics to the collector: control connections and handshakes,
   publications and facts, directory watchers, relays (opened, refused, active, bytes, how they ended), enrollments and
   approvals, signed requests refused, store latency, the depth of its writer's queue, the OTLP it forwards; with ASP.NET
   Core's and the runtime's meters.

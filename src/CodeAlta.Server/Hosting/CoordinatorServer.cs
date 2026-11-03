@@ -433,6 +433,7 @@ public sealed class CoordinatorServer : IAsyncDisposable
         app.UseMiddleware<DeviceAuthenticationMiddleware>();
         app.MapOpenApi();
         ApiEndpoints.Map(app);
+        HealthEndpoints.Map(app);
         return app;
     }
 
