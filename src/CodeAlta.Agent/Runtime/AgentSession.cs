@@ -89,6 +89,8 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
     private string? _firstPromptTitle;
     // The assistant texts that stream now, by content: a title or next prompt tag is never shown, not even in part.
     private readonly Dictionary<(string? Attempt, string Content), AgentSessionTitleTag.Filter> _titleFilters = [];
+    // The masking of the texts that stream now, by content, with the attempt whose deltas they are.
+    private readonly Dictionary<(AgentRunId? Run, AgentContentKind Kind, string Content), (string? Attempt, AgentSecretTextStream Text)> _maskedStreams = [];
     private readonly List<AgentEvent> _history;
     private readonly List<AgentConversationMessage> _conversation;
     // For a session read again without all of its journal: the events before _history, read when needed; null when
@@ -396,6 +398,12 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
         {
             var updated = update(_summary);
             if (ReferenceEquals(updated, _summary)) return;
+            // A title or a summary is made of what the user or the model wrote: it is listed here and on the machines that watch the session.
+            if (SecretMasker is { } masker && (masker.Contains(updated.Title) || masker.Contains(updated.Summary)))
+            {
+                updated = updated with { Title = masker.MaskText(updated.Title), Summary = masker.MaskText(updated.Summary) };
+            }
+
             _summary = updated;
             if (persist) await _store.UpsertSessionAsync(_summary, cancellationToken).ConfigureAwait(false);
         }
@@ -692,6 +700,7 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
         finally
         {
             EndRunTrace(trace, failure);
+            ForgetMaskedStreams(run.Id);
             run.Finish = FinishRunAsync(run, admitted, options.RunLifecycle, callerRegistration, failure);
             try { await run.Finish.ConfigureAwait(false); }
             catch (Exception cleanup)
@@ -3039,6 +3048,7 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
     private void RemoveTransientDraftDeltas(string attemptId)
     {
         ForgetTitleFilters(attemptId);
+        ForgetMaskedStreams(attemptId: attemptId);
         lock (_historyGate)
         {
             _historyDeltaCount -= _history.RemoveAll(@event => @event is AgentContentDeltaEvent delta &&
@@ -3366,10 +3376,11 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
             return;
         }
 
-        // What a tool or an agent that runs its own tools wrote, what the model answered: no secret is kept, journaled or shown.
+        // What a tool or an agent that runs its own tools wrote, what the model answered: no secret is kept, journaled or shown,
+        // not even one split between two deltas.
         if (SecretMasker is { } masker)
         {
-            events = masker.MaskEvents(events);
+            events = masker.MaskEvents(MaskStreams(masker, events));
         }
 
         // Whatever compacts the conversation (the session or its provider), the model no longer has the files it read.
@@ -3387,6 +3398,66 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
         foreach (var @event in events)
         {
             Publish(@event);
+        }
+    }
+
+    // The deltas of a content are masked as one text: a delta gives what can be shown, and holds back its end that could
+    // begin a secret until the next delta of that content, or its completed content, tells. A delta that gives nothing is
+    // not shown; what was held back is shown, masked, in a delta just before the completed content.
+    private IReadOnlyList<AgentEvent> MaskStreams(AgentSecretMasker masker, IReadOnlyList<AgentEvent> events)
+    {
+        List<AgentEvent>? masked = null;
+        lock (_maskedStreams)
+        {
+            if (_maskedStreams.Count == 0 && masker.IsEmpty) return events;
+            for (var index = 0; index < events.Count; index++)
+            {
+                var @event = events[index];
+                AgentEvent? before = null;
+                AgentEvent? replacement = @event;
+                if (@event is AgentContentDeltaEvent delta)
+                {
+                    var key = (delta.RunId, delta.Kind, delta.ContentId);
+                    var attempt = TryGetDraftAttemptId(delta.Details, out var attemptId) ? attemptId : null;
+                    // A delta of another attempt starts the text again: what the discarded draft held back is not part of it.
+                    if (!_maskedStreams.TryGetValue(key, out var stream) || !string.Equals(stream.Attempt, attempt, StringComparison.Ordinal))
+                    {
+                        stream = (attempt, masker.CreateStream());
+                        _maskedStreams[key] = stream;
+                    }
+
+                    var shown = stream.Text.Write(delta.Delta);
+                    replacement = shown.Length == 0 ? null : ReferenceEquals(shown, delta.Delta) ? delta : delta with { Delta = shown };
+                }
+                else if (@event is AgentContentCompletedEvent completed && _maskedStreams.Remove((completed.RunId, completed.Kind, completed.ContentId), out var ended)
+                    && ended.Text.Flush() is { Length: > 0 } rest)
+                {
+                    before = new AgentContentDeltaEvent(ProviderId, SessionId, completed.Timestamp, completed.RunId, completed.Kind, completed.ContentId,
+                        completed.ParentActivityId, rest);
+                }
+
+                if (masked is null && before is null && ReferenceEquals(replacement, @event)) continue;
+                masked ??= [.. events.Take(index)];
+                if (before is not null) masked.Add(before);
+                if (replacement is not null) masked.Add(replacement);
+            }
+        }
+
+        return masked ?? events;
+    }
+
+    // Forgets the masking of the texts of a run that ended, or of an attempt whose draft is discarded: their contents are complete or gone.
+    private void ForgetMaskedStreams(AgentRunId? runId = null, string? attemptId = null)
+    {
+        lock (_maskedStreams)
+        {
+            foreach (var (key, stream) in _maskedStreams.ToArray())
+            {
+                if ((runId is not null && key.Run == runId) || (attemptId is not null && string.Equals(stream.Attempt, attemptId, StringComparison.Ordinal)))
+                {
+                    _maskedStreams.Remove(key);
+                }
+            }
         }
     }
 

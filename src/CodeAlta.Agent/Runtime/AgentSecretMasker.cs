@@ -10,8 +10,9 @@ namespace CodeAlta.Agent.Runtime;
 /// telemetry. It reads the values from the store when they change, and never keeps them anywhere else.
 /// </summary>
 /// <remarks>
-/// A value shorter than <see cref="MinimumLength"/> is not masked: masking it would hide ordinary words. A value split
-/// between two deltas of a stream is not masked in the deltas; the completed content that holds it is.
+/// A value shorter than <see cref="MinimumLength"/> is not masked: masking it would hide ordinary words. A text that
+/// comes in parts (the deltas of a stream) is masked through <see cref="CreateStream"/>, which holds back the end of a
+/// part that could begin a secret until the next part tells.
 /// </remarks>
 public sealed class AgentSecretMasker
 {
@@ -55,6 +56,17 @@ public sealed class AgentSecretMasker
     {
         lock (_gate) _readAt = long.MinValue;
     }
+
+    /// <summary>Gets whether there is no secret to mask now.</summary>
+    public bool IsEmpty => Current().Plain.Length == 0;
+
+    /// <summary>
+    /// Creates the masking of one text that comes in parts, such as the deltas of a content: what a part gives is masked
+    /// and can be shown at once, and its end that could begin a secret is held back until a next part, or the end of the
+    /// text (<see cref="AgentSecretTextStream.Flush"/>), says whether it does.
+    /// </summary>
+    /// <returns>The masking of the text, which belongs to its caller.</returns>
+    public AgentSecretTextStream CreateStream() => new(this);
 
     /// <summary>Tells whether a text holds a secret.</summary>
     /// <param name="text">The text.</param>
@@ -228,6 +240,62 @@ public sealed class AgentSecretMasker
         return masked ?? events;
     }
 
+    // Masks a part of a text that comes in parts: each secret it holds whole is masked, and its end that could begin a
+    // secret longer than what is left (never as long as the longest secret) is held back, unless the part is the last.
+    internal string MaskPart(string text, bool last, out string held)
+    {
+        held = string.Empty;
+        var patterns = Current();
+        if (text.Length == 0 || patterns.Plain.Length == 0) return text;
+        StringBuilder? builder = null;
+        var copied = 0;
+        var index = 0;
+        while (index < text.Length)
+        {
+            var next = text.AsSpan(index).IndexOfAny(patterns.FirstCharacters);
+            if (next < 0) break;
+            index += next;
+            var rest = text.AsSpan(index);
+            int? found = null;
+            var open = false;
+            // The longest first: a secret that the rest may still become wins over a shorter one it already holds.
+            foreach (var value in patterns.Plain)
+            {
+                if (rest.Length < value.Length)
+                {
+                    if (!last && value.AsSpan().StartsWith(rest, StringComparison.Ordinal))
+                    {
+                        open = true;
+                        break;
+                    }
+                }
+                else if (rest.StartsWith(value, StringComparison.Ordinal))
+                {
+                    found = value.Length;
+                    break;
+                }
+            }
+
+            if (open)
+            {
+                held = text[index..];
+                return builder is null ? text[..index] : builder.Append(text, copied, index - copied).ToString();
+            }
+
+            if (found is { } length)
+            {
+                (builder ??= new StringBuilder(text.Length)).Append(text, copied, index - copied).Append(Mask);
+                index += length;
+                copied = index;
+                continue;
+            }
+
+            index++;
+        }
+
+        return builder is null ? text : builder.Append(text, copied, text.Length - copied).ToString();
+    }
+
     private JsonElement? MaskElement(JsonElement? element)
     {
         if (element is not { } value) return element;
@@ -277,6 +345,9 @@ public sealed class AgentSecretMasker
         public string[] Plain { get; } = plain;
 
         public string[] Json { get; } = json;
+
+        // The characters a secret starts with: a text is searched for them, not read character by character.
+        public System.Buffers.SearchValues<char> FirstCharacters { get; } = System.Buffers.SearchValues.Create([.. plain.Select(static value => value[0]).Distinct()]);
 
         public static Patterns Of(IReadOnlyCollection<string> values)
         {

@@ -127,6 +127,141 @@ public sealed class SecretMaskingTests
         }
     }
 
+    [TestMethod]
+    public void AStream_MasksASecretSplitAtEveryPosition_AndHoldsBackLessThanTheLongestSecret()
+    {
+        var longer = Secret + "-extended";
+        var masker = new AgentSecretMasker(() => [Secret, longer]);
+        foreach (var (text, expected) in new[] { ($"a {longer} b", "a *** b"), ($"x {Secret}-ext", "x ***-ext"), ($"{Secret}{Secret}", "******"), ("no secret here", "no secret here") })
+        {
+            for (var cut = 0; cut <= text.Length; cut++)
+            {
+                var stream = masker.CreateStream();
+                var shown = stream.Write(text[..cut]);
+                Assert.IsLessThan(longer.Length, stream.HeldLength, $"cut {cut} of '{text}'");
+                shown += stream.Write(text[cut..]);
+                shown += stream.Flush();
+                Assert.AreEqual(expected, shown, $"cut {cut} of '{text}'");
+            }
+
+            var byCharacter = masker.CreateStream();
+            var whole = string.Concat(text.Select(character => byCharacter.Write(character.ToString()))) + byCharacter.Flush();
+            Assert.AreEqual(expected, whole, $"'{text}' one character at a time");
+        }
+    }
+
+    [TestMethod]
+    public async Task ASecretSplitBetweenDeltas_IsNeverShown_WhereverItIsSplit()
+    {
+        const string prefix = "token ";
+        const string suffix = " end";
+        var contents = new List<(string Id, string[] Deltas)>();
+        for (var cut = 1; cut < Secret.Length; cut++)
+        {
+            contents.Add(($"answer-{cut}", [prefix + Secret[..cut], Secret[cut..] + suffix]));
+        }
+
+        var text = prefix + Secret + suffix;
+        contents.Add(("answer-characters", [.. text.Select(static character => character.ToString())]));
+        var executor = new ScriptedTurnExecutor(async (onUpdate, token) =>
+        {
+            foreach (var (id, deltas) in contents)
+            {
+                foreach (var delta in deltas)
+                {
+                    await onUpdate(new AgentTurnDelta { Kind = AgentContentKind.Assistant, ContentId = id, Text = delta }, token);
+                }
+            }
+
+            return new AgentTurnResponse
+            {
+                AssistantMessage = new AgentConversationMessage(AgentConversationRole.Assistant, [.. contents.Select(_ => new AgentMessagePart.Text(text))]),
+                AssistantPartContentIds = [.. contents.Select(static content => content.Id)],
+            };
+        });
+
+        var run = await RunSessionAsync(executor, [], "Show the token.");
+
+        foreach (var (id, _) in contents)
+        {
+            var shown = string.Concat(run.Published.OfType<AgentContentDeltaEvent>().Where(delta => delta.ContentId == id).Select(static delta => delta.Delta));
+            Assert.AreEqual("token *** end", shown, $"The deltas of {id}, as a watch puts them together.");
+        }
+
+        // The summary of the session, its last answer, is listed and journaled masked too.
+        AssertNoSecret(run);
+    }
+
+    private static void AssertNoSecret(SessionRun run)
+    {
+        foreach (var (path, text) in run.Files)
+        {
+            Assert.IsFalse(text.Contains(Secret, StringComparison.Ordinal), $"{path} holds the secret.");
+        }
+
+        Assert.IsFalse(run.Published.Any(static @event => @event.ToJson().Contains(Secret, StringComparison.Ordinal)), "What the user is shown holds no secret.");
+    }
+
+    // Runs one prompt in a session whose secret store holds the secret, and reads back the files of its state and what it published.
+    private static async Task<SessionRun> RunSessionAsync(IModelProviderTurnExecutor executor, IReadOnlyList<AgentToolDefinition> tools, string prompt,
+        Action<string>? prepare = null, bool suggestions = false)
+    {
+        var root = Path.Combine(Path.GetTempPath(), "codealta-masking-" + Guid.NewGuid().ToString("N"));
+        var workspace = Directory.CreateDirectory(Path.Combine(root, "workspace")).FullName;
+        prepare?.Invoke(workspace);
+        var store = new LocalSecretStore(root, new MasterKeySecretProtector(new FileSecretKeyStore(Path.Combine(root, "secrets", "key"))));
+        store.SetSecret("GRAFANA_TOKEN", Secret, "tests");
+        try
+        {
+            var runtime = CreateRuntime(Path.Combine(root, "state"), executor, new AgentSecretMasker(store.GetSecretValues));
+            var published = new List<AgentEvent>();
+            await using (var session = await runtime.CreateSessionAsync(new AgentSessionCreateOptions
+            {
+                ProviderKey = "fixture",
+                Model = "model",
+                WorkingDirectory = workspace,
+                Tools = tools,
+                PromptSuggestions = suggestions,
+                PromptSuggestionInstructions = suggestions ? "End with a <next_prompt> tag." : null,
+                OnPermissionRequest = static (_, _) => Task.FromResult(new AgentPermissionDecision(AgentPermissionDecisionKind.AllowOnce)),
+            }))
+            {
+                using var subscription = session.Subscribe(@event =>
+                {
+                    lock (published) published.Add(@event);
+                });
+                await session.SendAsync(new AgentSendOptions { Input = AgentInput.Text(prompt) });
+            }
+
+            var files = Directory.EnumerateFiles(Path.Combine(root, "state"), "*", SearchOption.AllDirectories).Select(static path => (path, File.ReadAllText(path))).ToArray();
+            Assert.IsTrue(files.Length > 0);
+            lock (published) return new SessionRun(files, [.. published]);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    private sealed record SessionRun(IReadOnlyList<(string Path, string Text)> Files, IReadOnlyList<AgentEvent> Published)
+    {
+        public IEnumerable<string> Journals => Files.Select(static file => file.Text);
+    }
+
+    // Plays its turns in order, then answers; a turn is given the callback of the deltas.
+    private sealed class ScriptedTurnExecutor(params Func<Func<AgentTurnDelta, CancellationToken, ValueTask>, CancellationToken, Task<AgentTurnResponse>>[] turns) : IModelProviderTurnExecutor
+    {
+        private int _turn;
+
+        public Task<AgentTurnResponse> ExecuteTurnAsync(AgentTurnRequest request, Func<AgentTurnDelta, CancellationToken, ValueTask> onUpdate, CancellationToken cancellationToken = default)
+            => _turn < turns.Length
+                ? turns[_turn++](onUpdate, cancellationToken)
+                : Task.FromResult(new AgentTurnResponse
+                {
+                    AssistantMessage = new AgentConversationMessage(AgentConversationRole.Assistant, [new AgentMessagePart.Text("Done.")]),
+                });
+    }
+
     private static AgentRuntime CreateRuntime(string stateRoot, IModelProviderTurnExecutor executor, AgentSecretMasker masker)
         => new(new ModelProviderId("fixture"), "Fixture", new AgentRuntimeOptions
         {
