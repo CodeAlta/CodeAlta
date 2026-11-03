@@ -131,6 +131,25 @@ public sealed class RelayTests
     }
 
     [TestMethod]
+    public async Task AServerThatStopsEndsItsRelaysAtOnce()
+    {
+        await using var rig = await RelayRig.StartAsync();
+        var (viewerTicket, targetTicket) = await rig.OpenAcceptedAsync();
+        using var viewer = await rig.OpenSideAsync(rig.Owner, viewerTicket.Ticket);
+        using var target = await rig.OpenSideAsync(rig.Mac, targetTicket.Ticket);
+        var hello = TestText.Utf8("hello");
+        await viewer.SendAsync(hello, WebSocketMessageType.Binary, true, CancellationToken.None);
+        CollectionAssert.AreEqual(hello, await ReceiveAsync(target, hello.Length));
+
+        // A switch of versions does not wait for the shutdown timeout of the host (30 s) to cut the session channels.
+        var stopping = System.Diagnostics.Stopwatch.StartNew();
+        await rig.Server.Server.DisposeAsync().AsTask().WaitAsync(Waits.Hang);
+        Assert.IsLessThan(TimeSpan.FromSeconds(15), stopping.Elapsed, $"The stop took {stopping.Elapsed}.");
+        Assert.IsTrue(await EndsAsync(viewer));
+        Assert.IsTrue(await EndsAsync(target));
+    }
+
+    [TestMethod]
     public async Task ADeviceHasAtMostItsShareOfRelays()
     {
         await using var rig = await RelayRig.StartAsync(new RelayOptions { MaxRelaysPerDevice = 1 });

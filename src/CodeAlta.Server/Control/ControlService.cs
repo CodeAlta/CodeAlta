@@ -87,6 +87,13 @@ public sealed class ControlService
     /// <summary>Gets the coordinated update of the fleet, which takes the reports of nodes and asks a node that connects; null for none.</summary>
     internal UpdateCampaignService? Updates { get; init; }
 
+    /// <summary>
+    /// Gets what ends every control connection when the server stops (the host's <c>ApplicationStopping</c>): each device
+    /// is told at once that the server stops and reconnects, rather than cut when the host's shutdown timeout aborts the
+    /// requests (a switch of versions, a service manager's stop); none by default.
+    /// </summary>
+    public CancellationToken Stopping { get; init; }
+
     /// <summary>Serves a WebSocket request on <see cref="FleetServerMethods.ControlPath"/>.</summary>
     /// <param name="context">The request.</param>
     /// <returns>A task that completes when the connection ends.</returns>
@@ -103,7 +110,8 @@ public sealed class ControlService
 
         var socket = await context.WebSockets.AcceptWebSocketAsync().ConfigureAwait(false);
         await using var transport = new FleetWebSocketTransport(socket);
-        await ServeAsync(transport, context.Connection.RemoteIpAddress, context.RequestAborted).ConfigureAwait(false);
+        using var ended = CancellationTokenSource.CreateLinkedTokenSource(context.RequestAborted, Stopping);
+        await ServeAsync(transport, context.Connection.RemoteIpAddress, ended.Token).ConfigureAwait(false);
     }
 
     /// <summary>Runs the handshake and the connection on a transport, until the connection ends.</summary>

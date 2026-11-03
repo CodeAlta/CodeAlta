@@ -16,6 +16,7 @@ using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Hosting.Server;
 using Microsoft.AspNetCore.Hosting.Server.Features;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 
 namespace CodeAlta.Server.Hosting;
@@ -395,6 +396,7 @@ public sealed class CoordinatorServer : IAsyncDisposable
             options.RelayAccess ?? new OrganizationRelayAccess(), options.Relay, time, provider.GetRequiredService<ILoggerFactory>().CreateLogger("CodeAlta.Server.Relay"))
         {
             Metrics = metrics,
+            Stopping = provider.GetRequiredService<IHostApplicationLifetime>().ApplicationStopping,
         });
         services.AddSingleton(provider => new DeviceService(store, provider.GetRequiredService<RequestAuthenticator>(), provider.GetRequiredService<PresenceRegistry>(), time,
             provider.GetRequiredService<RelayHub>()) { Metrics = metrics });
@@ -419,6 +421,7 @@ public sealed class CoordinatorServer : IAsyncDisposable
             Metrics = metrics,
             TelemetrySettings = provider.GetRequiredService<TelemetrySettingsService>(),
             Updates = provider.GetRequiredService<UpdateCampaignService>(),
+            Stopping = provider.GetRequiredService<IHostApplicationLifetime>().ApplicationStopping,
         });
 
         var app = builder.Build();
