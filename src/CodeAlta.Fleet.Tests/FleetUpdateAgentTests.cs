@@ -144,6 +144,59 @@ public sealed class FleetUpdateAgentTests
     }
 
     [TestMethod]
+    public async Task ARefusalIsNotSaidBeforeTheCancellationItAcknowledgesIsKept()
+    {
+        using var harness = new AgentHarness();
+        var agent = harness.Start();
+        Assert.IsNotNull(agent.CancelAndReport(LinkA, new FleetUpdateCancel("c0")), "a first cancellation is kept: the checkpoint is on disk");
+        var c1 = harness.Instruction(harness.Manifest(1, "c1", "4.0.2"));
+        using (harness.FailWrites())
+        {
+            // The cancellation comes before its instruction and cannot be kept: it is not acknowledged.
+            Assert.IsNull(agent.CancelAndReport(LinkA, new FleetUpdateCancel("c1")));
+            // The instruction is refused, as cancelled; that refusal is a final state, which the server takes as the
+            // acknowledgement of the cancellation: nothing is said while a restart would forget the cancellation.
+            await harness.AcceptAsync(agent, LinkA, c1);
+            Assert.IsNull(agent.Report(LinkA), "no report on a connection");
+            Assert.IsFalse(harness.Said.Any(said => said.Report.CampaignId == "c1"), "no report sent");
+        }
+
+        // Once the cancellation is kept, the refusal is said, and the cancellation holds across a restart.
+        Assert.AreEqual(("c1", FleetUpdateMachineStates.Refused), (agent.Report(LinkA)?.CampaignId, agent.Report(LinkA)?.State));
+        agent = harness.Restart(agent);
+        await harness.AcceptAsync(agent, LinkA, c1);
+        Assert.IsNull(agent.Current, "the campaign never starts");
+        Assert.IsNull(agent.Tick());
+        Assert.AreEqual(0, harness.Applied.Count);
+    }
+
+    [TestMethod]
+    public async Task ARefusalIsNotSaidForACancellationReceivedWhileTheCheckpointDoesNotRead()
+    {
+        using var harness = new AgentHarness();
+        Directory.CreateDirectory(Path.GetDirectoryName(harness.StatePath)!);
+        File.WriteAllText(harness.StatePath, "{ not json");
+        var agent = harness.Start();
+
+        Assert.IsNull(agent.CancelAndReport(LinkA, new FleetUpdateCancel("c1")), "not kept, not acknowledged");
+        await harness.AcceptAsync(agent, LinkA, harness.Instruction(harness.Manifest(1, "c1", "4.0.2")));
+        Assert.IsNull(agent.Report(LinkA), "its refusal would acknowledge the cancellation");
+        Assert.IsFalse(harness.Said.Any(said => said.Report.CampaignId == "c1"));
+
+        // Another campaign's refusal tells the server why nothing is taken.
+        await harness.AcceptAsync(agent, LinkA, harness.Instruction(harness.Manifest(2, "c2", "4.0.2")));
+        Assert.AreEqual(("c2", FleetUpdateMachineStates.Refused), (agent.Report(LinkA)?.CampaignId, agent.Report(LinkA)?.State));
+        StringAssert.Contains(agent.Report(LinkA)?.Message, "cannot be read");
+
+        // Once the owner resets the file, the cancellation sent again is kept and acknowledged.
+        File.Delete(harness.StatePath);
+        Assert.AreEqual(FleetUpdateMachineStates.Cancelled, agent.CancelAndReport(LinkA, new FleetUpdateCancel("c1"))?.State);
+        await harness.AcceptAsync(agent, LinkA, harness.Instruction(harness.Manifest(1, "c1", "4.0.2")));
+        Assert.IsTrue(harness.Said.Any(said => said.Report is { CampaignId: "c1", State: FleetUpdateMachineStates.Refused }));
+        Assert.IsNull(agent.Current);
+    }
+
+    [TestMethod]
     public async Task ANewerPolicyThatCannotBeKeptStopsTheWorkOfTheFleetUntilItIsKept()
     {
         using var harness = new AgentHarness();
@@ -464,6 +517,9 @@ internal sealed class AgentHarness : IDisposable
 
     public List<string> Logs { get; } = [];
 
+    /// <summary>Gets the reports the agent sent to its servers.</summary>
+    public List<(string LinkId, FleetUpdateReport Report)> Said { get; } = [];
+
     /// <summary>Makes every write of the checkpoint fail until disposed, the file on disk kept as it is (what a restart reads).</summary>
     public IDisposable FailWrites()
     {
@@ -522,6 +578,7 @@ internal sealed class AgentHarness : IDisposable
             Status = () => Status ?? new FleetUpdateStatus(Running, null, null, null, null, null, [], null),
             Time = Clock,
             Log = message => { lock (Logs) Logs.Add(message); },
+            Said = (linkId, report) => { lock (Said) Said.Add((linkId, report)); },
         };
         return new FleetUpdateAgent(configure?.Invoke(options) ?? options);
     }

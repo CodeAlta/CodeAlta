@@ -176,7 +176,9 @@ All signed (Authenticode, Apple notarization, NuGet signatures, cosign for image
   (`fleet/update-campaign.json`) and waits for its time itself, across restarts; nothing runs until that file is
   written, and while it does not read, the node refuses every update of the fleet (the owner fixes it, or deletes it to
   start again as a new node). A newer policy or a cancellation it cannot write holds in memory, and until the write
-  succeeds (tried again) the node takes no instruction, runs no work of the fleet and acknowledges nothing. A version
+  succeeds (tried again) the node takes no instruction, runs no work of the fleet and acknowledges nothing. The server
+  takes any final state as the acknowledgement of a cancellation: the node reports none, a refusal included, for a
+  campaign whose cancellation it received and has not kept; it still refuses the others with the reason. A version
   is confirmed only from a self-update state that reads. A campaign it accepted never starts again: sent again, even after a refusal, it only gets
   where the node stands. A node follows one fleet at a time: another server's instruction is refused while a campaign
   runs, and each server keeps reading how its own last campaign ended. An automatic update waits on each machine, the
