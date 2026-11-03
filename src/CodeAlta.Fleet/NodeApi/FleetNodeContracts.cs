@@ -122,7 +122,32 @@ public sealed record FleetSpaceInfo(string Id, string Name);
 /// <param name="Name">Its name.</param>
 /// <param name="Path">Its folder on the node (paired devices are the owner's).</param>
 /// <param name="Spaces">The spaces it is in; empty for every space.</param>
-public sealed record FleetProjectInfo(string Id, string Name, string Path, IReadOnlyList<string> Spaces);
+public sealed record FleetProjectInfo(string Id, string Name, string Path, IReadOnlyList<string> Spaces)
+{
+    /// <summary>
+    /// Gets the repository key of its checkout (the normalized URL of its <c>origin</c> remote), which recognizes the same
+    /// repository on other machines; null for a folder in no repository with a remote.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? RepositoryKey { get; init; }
+
+    /// <summary>Gets the path of its folder from the root of its checkout, with forward slashes (empty for the root); null without a repository key.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? RepositoryPath { get; init; }
+}
+
+/// <summary>A model a ready provider of the node offers.</summary>
+/// <param name="Id">Its id.</param>
+/// <param name="Name">Its name.</param>
+public sealed record FleetModelInfo(string Id, string Name);
+
+/// <summary>A provider of the node that is ready to run sessions.</summary>
+/// <param name="Key">Its key, which <see cref="FleetModelSelection.ProviderKey"/> names.</param>
+/// <param name="Name">Its name.</param>
+/// <param name="IsDefault">Whether a session that names no provider runs on it.</param>
+/// <param name="DefaultModelId">The model a session takes when it names none; null when the provider chooses.</param>
+/// <param name="Models">Its models, as its last probe listed them.</param>
+public sealed record FleetProviderInfo(string Key, string Name, bool IsDefault, string? DefaultModelId, IReadOnlyList<FleetModelInfo> Models);
 
 /// <summary>The result of <c>node.info</c>.</summary>
 /// <param name="Name">The name of the node.</param>
@@ -133,7 +158,11 @@ public sealed record FleetProjectInfo(string Id, string Name, string Path, IRead
 /// <param name="Projects">The projects of its catalog, archived ones left out.</param>
 /// <param name="Permissions">What the caller may do on it.</param>
 public sealed record FleetNodeInfo(string Name, string DeviceId, string Os, string Version, IReadOnlyList<FleetSpaceInfo> Spaces,
-    IReadOnlyList<FleetProjectInfo> Projects, IReadOnlyList<string> Permissions);
+    IReadOnlyList<FleetProjectInfo> Projects, IReadOnlyList<string> Permissions)
+{
+    /// <summary>Gets the providers of the node that are ready to run sessions; empty for a node that does not say (an older one).</summary>
+    public IReadOnlyList<FleetProviderInfo> Providers { get; init; } = [];
+}
 
 /// <summary>The parameters of <c>sessions.list</c>.</summary>
 /// <param name="Limit">The most sessions to return (1 to 500, 100 by default).</param>

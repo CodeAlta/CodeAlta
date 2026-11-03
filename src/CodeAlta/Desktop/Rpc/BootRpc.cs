@@ -497,6 +497,8 @@ internal sealed record BootClosing(string? Step, int Seconds, bool CanForceExit)
 [JsonSerializable(typeof(MachineActionResult))]
 [JsonSerializable(typeof(MachineNewSessionRequest))]
 [JsonSerializable(typeof(MachineNewSessionResult))]
+[JsonSerializable(typeof(MachineNewSessionChoicesRequest))]
+[JsonSerializable(typeof(MachineNewSessionChoices))]
 [JsonSerializable(typeof(MachinesEvent))]
 [JsonSerializable(typeof(LabelsRequest))]
 [JsonSerializable(typeof(LabelsResponse))]

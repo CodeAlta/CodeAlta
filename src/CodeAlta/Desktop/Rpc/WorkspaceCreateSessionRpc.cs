@@ -53,9 +53,14 @@ internal sealed partial class WorkspaceService
     /// <param name="host">The host of this process.</param>
     /// <param name="epoch">The host epoch that requests must name.</param>
     /// <param name="worktrees">The git worktrees new sessions can work in, or null.</param>
+    /// <param name="locations">
+    /// The repositories of the projects of this computer, which put a session of a paired machine under the project of the
+    /// same repository; null to match the projects of the machines by id and name only.
+    /// </param>
     /// <exception cref="ArgumentNullException"><paramref name="hosts"/> or <paramref name="host"/> is null.</exception>
     /// <exception cref="ArgumentException"><paramref name="epoch"/> is not a canonical epoch.</exception>
-    internal WorkspaceService(SessionHostRegistry hosts, CodeAltaHost host, string epoch, GitWorktreeService? worktrees = null)
+    internal WorkspaceService(SessionHostRegistry hosts, CodeAltaHost host, string epoch, GitWorktreeService? worktrees = null,
+        CodeAlta.Catalog.SessionMoves.RepositoryLocationCache? locations = null)
         : this(host.WorkspaceReads, host.ProjectCatalog, epoch)
     {
         ArgumentNullException.ThrowIfNull(hosts);
@@ -63,8 +68,17 @@ internal sealed partial class WorkspaceService
         var local = hosts.Local;
         _readAllSessions = local.ReadSnapshotAsync;
         var projected = ProjectedSnapshot(local.ReadSnapshotAsync);
-        _read = async token => WithRemoteSessions(await projected(token).ConfigureAwait(false),
-            [.. hosts.Remotes.OfType<CodeAlta.Desktop.Fleet.RemoteSessionHost>()]);
+        _read = async token =>
+        {
+            var snapshot = await projected(token).ConfigureAwait(false);
+            CodeAlta.Desktop.Fleet.RemoteSessionHost[] remotes = [.. hosts.Remotes.OfType<CodeAlta.Desktop.Fleet.RemoteSessionHost>()];
+            if (remotes.Length == 0) return snapshot;
+            // A remote session goes under the project of this catalog in the same repository: the repositories of the
+            // projects here are read when a machine lists sessions in projects that name theirs.
+            var located = locations is null ? static _ => null
+                : await ReadLocalLocationsAsync(snapshot, remotes, locations, token).ConfigureAwait(false);
+            return WithRemoteSessions(snapshot, remotes, located);
+        };
         // A history window is read from the host of its session; its cursor goes back to that host only.
         _readHistory = (sessionId, cursor, token) => hosts.Resolve(sessionId).ReadHistoryPageAsync(sessionId, cursor, token);
         _readHistoryTail = (sessionId, cursor, token) => hosts.Resolve(sessionId).ReadHistoryTailPageAsync(sessionId, cursor, token);

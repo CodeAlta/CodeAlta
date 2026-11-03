@@ -772,7 +772,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                 // The git worktrees sessions can work in: created with a session, listed and removed from the changes of a project.
                 var worktreeConfig = new CodeAltaConfigStore(host.CatalogOptions);
                 var worktrees = new CodeAlta.Catalog.Worktrees.GitWorktreeService(host.CatalogOptions, worktreeConfig);
-                workspace = new WorkspaceService(sessionHosts, host, epoch, worktrees);
+                workspace = new WorkspaceService(sessionHosts, host, epoch, worktrees, fleet.Locations);
                 // The work the first page does not need waits until the window shows the application.
                 var shown = new DesktopStartupGate();
                 workspace.Served = shown.WorkspaceServed;
@@ -995,7 +995,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                     appUpdate ??= StartAppUpdate();
                     builder.AddAppUpdateService(appUpdate);
                     builder.AddWorkspaceService(workspace);
-                    builder.AddMachinesService(fleet is null ? new MachinesService() : new MachinesService(fleet, epoch));
+                    builder.AddMachinesService(fleet is null ? new MachinesService() : MachinesService.Create(fleet, epoch, host.ProjectCatalog));
                     builder.AddConfigurationService(new ConfigurationService(host.ModelProviderRegistry, host.PluginRuntime, new DesktopDefaultProvider(host.CatalogOptions), host.CatalogOptions)
                     {
                         PluginProviderTypes = pluginProviderTypes,

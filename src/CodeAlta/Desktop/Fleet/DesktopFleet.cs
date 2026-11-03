@@ -1,4 +1,5 @@
 using System.Collections.Immutable;
+using CodeAlta.Catalog.SessionMoves;
 using CodeAlta.Desktop.SessionHosts;
 using CodeAlta.Fleet.Client;
 using CodeAlta.Fleet.Identity;
@@ -59,6 +60,12 @@ internal sealed class DesktopFleet : IAsyncDisposable
 
     /// <summary>Raised when a machine was paired or forgotten, or a machine changed its state or its list of sessions.</summary>
     public event Action? Changed;
+
+    /// <summary>
+    /// Gets the repositories of the projects of this computer, which recognize the projects of the paired machines that
+    /// are the same repository (their repository keys).
+    /// </summary>
+    public RepositoryLocationCache Locations { get; } = new();
 
     /// <summary>Gets the hosts of the paired machines, in the order they were paired.</summary>
     public IReadOnlyList<RemoteSessionHost> Hosts => Volatile.Read(ref _hosts);

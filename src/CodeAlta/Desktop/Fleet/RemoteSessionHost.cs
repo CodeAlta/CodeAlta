@@ -58,6 +58,9 @@ internal sealed record RemoteListing(FleetNodeInfo? Info, IReadOnlyList<FleetSes
 /// </summary>
 internal sealed partial class RemoteSessionHost : ISessionHost, IAsyncDisposable
 {
+    // What ReadInfoAsync read of the machine, on which connection.
+    private sealed record FleetNodeInfoRead(FleetNodeClient Client, FleetNodeInfo Info);
+
     private readonly Func<CancellationToken, Task<FleetNodeClient>> _connect;
     private readonly string? _ownKey;
     private readonly string? _ownKeyPrefix;
@@ -74,6 +77,7 @@ internal sealed partial class RemoteSessionHost : ISessionHost, IAsyncDisposable
     private RemoteListing _listing = RemoteListing.Empty;
     private IReadOnlySet<string> _listed = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
     private DateTimeOffset? _lastSeen;
+    private FleetNodeInfoRead? _readInfo;
 
     /// <summary>Creates the host of a paired machine; <see cref="Start"/> starts its connection.</summary>
     /// <param name="machine">The machine.</param>
@@ -255,8 +259,28 @@ internal sealed partial class RemoteSessionHost : ISessionHost, IAsyncDisposable
             token.ThrowIfCancellationRequested();
             if (client.Completion.IsCompleted) return;
             var sessions = await client.ListSessionsAsync(new FleetSessionListParams(_options.ListLimit), token).ConfigureAwait(false);
-            SetListing(new RemoteListing(info, sessions.Sessions, _time.GetUtcNow()));
+            // The machine as it was read last: ReadInfoAsync may have read it again since the connection.
+            var read = Volatile.Read(ref _readInfo);
+            SetListing(new RemoteListing(read is not null && read.Client == client ? read.Info : info, sessions.Sessions, _time.GetUtcNow()));
         }
+    }
+
+    /// <summary>
+    /// Asks the machine what it is now (its projects, its ready providers), for a new session on it: what the connection
+    /// read may be old. The listing keeps what it says.
+    /// </summary>
+    /// <param name="cancellationToken">Cancels the wait.</param>
+    /// <returns>The machine as it describes itself.</returns>
+    /// <exception cref="ObjectDisposedException">The machine is not online.</exception>
+    /// <exception cref="FleetException">The machine refused the call.</exception>
+    public async Task<FleetNodeInfo> ReadInfoAsync(CancellationToken cancellationToken)
+    {
+        var client = RequireClient();
+        var info = await client.GetInfoAsync(cancellationToken).ConfigureAwait(false);
+        // The loop, the one writer of the listing, takes it at its next read of the list, while that connection lasts.
+        Volatile.Write(ref _readInfo, new FleetNodeInfoRead(client, info));
+        RequestRefresh();
+        return info;
     }
 
     private TimeSpan Jitter(TimeSpan wait) => wait + TimeSpan.FromMilliseconds(Random.Shared.Next(0, (int)Math.Min(1000, wait.TotalMilliseconds / 4 + 1)));

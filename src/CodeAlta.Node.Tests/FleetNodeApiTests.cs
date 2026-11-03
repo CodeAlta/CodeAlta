@@ -51,6 +51,9 @@ public sealed class FleetNodeApiTests
         Assert.AreEqual("test-node", info.Name);
         Assert.AreEqual(fixture.Fleet.DeviceId, info.DeviceId);
         Assert.AreEqual(FleetChannelProtocol.OperatingSystemName, info.Os);
+        var ready = info.Providers.Single(provider => provider.Key == "scripted");
+        Assert.IsTrue(ready.IsDefault, "The node says which provider a session that names none runs on.");
+        Assert.IsTrue(ready.Models.Any(model => model.Id == ready.DefaultModelId), "A ready provider lists its models, its default one among them.");
 
         var created = await client.CreateSessionAsync(new FleetCreateSessionParams(Title: "Remote session"), "create-1", token);
         Assert.AreEqual("scripted", created.ProviderKey, "A session that names no provider runs on the default one of the node.");

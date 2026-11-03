@@ -2,6 +2,11 @@ using CodeAlta.Catalog.Worktrees;
 
 namespace CodeAlta.Catalog.SessionMoves;
 
+/// <summary>Where a folder is in a repository that other machines may have too.</summary>
+/// <param name="Key">The repository key (<see cref="RepositoryKey"/>).</param>
+/// <param name="Path">The path of the folder from the root of the checkout, with forward slashes; empty for the root.</param>
+public sealed record RepositoryLocation(string Key, string Path);
+
 /// <summary>
 /// The key that recognizes one repository across machines: the normalized URL of its <c>origin</c> remote, or of its
 /// first remote. <c>git@github.com:CodeAlta/CodeAlta.git</c>, <c>https://github.com/CodeAlta/CodeAlta</c> and
@@ -76,6 +81,34 @@ public static class RepositoryKey
         var url = await GitWorktreeService.RunGitAsync(folder, ["remote", "get-url", first], GitWorktreeService.ReadTimeout, cancellationToken).ConfigureAwait(false);
         return url.Succeeded ? Normalize(FirstLine(url.Output)) : null;
     }
+
+    /// <summary>
+    /// Reads where a folder is in its repository: the repository key and the path of the folder from the root of the
+    /// checkout, which tells a project of a subfolder of a monorepo from the repository itself.
+    /// </summary>
+    /// <param name="folder">The folder of a project.</param>
+    /// <param name="cancellationToken">Stops git.</param>
+    /// <returns>The location; <see langword="null"/> when the folder is in no repository or the repository has no remote.</returns>
+    /// <exception cref="ArgumentException"><paramref name="folder"/> is blank.</exception>
+    /// <exception cref="OperationCanceledException">The token was canceled.</exception>
+    public static async Task<RepositoryLocation?> ReadLocationAsync(string folder, CancellationToken cancellationToken)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(folder);
+        if (!Directory.Exists(folder)) return null;
+        var prefix = await GitWorktreeService.RunGitAsync(folder, ["rev-parse", "--show-prefix"], GitWorktreeService.ReadTimeout, cancellationToken).ConfigureAwait(false);
+        if (!prefix.Succeeded) return null;
+        if (await ReadAsync(folder, cancellationToken).ConfigureAwait(false) is not { } key) return null;
+        return new RepositoryLocation(key, (FirstLine(prefix.Output) ?? string.Empty).Replace('\\', '/').Trim('/'));
+    }
+
+    /// <summary>Whether two locations are the same folder of the same repository, wherever each machine keeps its checkout.</summary>
+    /// <param name="left">A location.</param>
+    /// <param name="right">Another location.</param>
+    /// <returns>Whether both name a location and they are the same one.</returns>
+    public static bool SameLocation(RepositoryLocation? left, RepositoryLocation? right)
+        => left is not null && right is not null && string.Equals(left.Key, right.Key, StringComparison.Ordinal)
+            // A folder of a checkout is named in the case of the file system that has it, which may ignore case.
+            && string.Equals(left.Path, right.Path, StringComparison.OrdinalIgnoreCase);
 
     private static string? FirstLine(string output)
         => output.Split('\n', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries).FirstOrDefault();
