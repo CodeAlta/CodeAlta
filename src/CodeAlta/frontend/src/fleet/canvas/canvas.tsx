@@ -3,6 +3,8 @@ import { fleetServer } from "#neoastra";
 import { LandingShellContext } from "../../landing/landingShell";
 import { useAlta } from "../../pluginScript/PluginScript";
 import { useVisible } from "../../pluginScript/codealta";
+import { settingsNavigation } from "../../settingsNavigation";
+import { machinePageLink } from "../../machines/machines";
 import { FleetCanvas, type FleetCanvasActions, type FleetCanvasApi } from "./FleetCanvas";
 
 // The module of the Fleet canvas, the one the built-in Fleet plugin names with `PluginScript.App("fleet")`. It asks the `fleetServer` service
@@ -24,6 +26,7 @@ export default function Canvas() {
   latest.current = { shell, alta };
   const actions = useMemo<FleetCanvasActions>(() => ({
     openSession: id => latest.current.shell?.openSession(id),
+    openMachine: id => settingsNavigation.open(machinePageLink(id)),
     runCommand: name => latest.current.shell?.run(name) ?? false,
   }), []);
   return <FleetCanvas api={api} visible={visible} actions={actions} />;

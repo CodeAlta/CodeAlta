@@ -161,6 +161,7 @@ public sealed class CodeModeAgentBinding : ICodeModeCallHandler
             SubSessions = !(arguments.TryGetProperty("subSessions", out var subSessions) && subSessions.ValueKind == JsonValueKind.False),
             Worktree = arguments.TryGetProperty("worktree", out var worktree) && worktree.ValueKind == JsonValueKind.True,
             WorktreeBase = String(arguments, "base"),
+            Machine = String(arguments, "machine"),
             Timeout = Timeout(arguments),
             Schema = Schema(arguments),
             BudgetTokens = _budgetTokens,

@@ -132,6 +132,21 @@ public static class FleetNodeMethods
     /// <summary>The records of the moves of the machine.</summary>
     public const string MovesList = "moves.list";
 
+    /// <summary>
+    /// Takes what the sessions agents of the caller started on the node said to their parents (final answers, failures,
+    /// updates), oldest first: they stay until <see cref="AgentsDeliveriesAck"/> acknowledges them.
+    /// </summary>
+    public const string AgentsDeliveriesTake = "agents.deliveries.take";
+
+    /// <summary>Acknowledges deliveries the caller took and delivered: the node forgets them.</summary>
+    public const string AgentsDeliveriesAck = "agents.deliveries.ack";
+
+    /// <summary>The owner's local control, or a device that manages the node: whether agents of other machines may start sessions on it, per space.</summary>
+    public const string ControlAgentsGet = "control.agents.get";
+
+    /// <summary>The owner's local control, or a device that manages the node: changes that policy.</summary>
+    public const string ControlAgentsSet = "control.agents.set";
+
     /// <summary>Copies an automation to the node, which runs it from now on (<see cref="IFleetNodeAutomations"/>).</summary>
     public const string AutomationsPut = "automations.put";
 
@@ -204,6 +219,15 @@ public static class FleetNodeErrorCodes
 
     /// <summary>The secrets of the machine cannot be read or written (what failed is in the message).</summary>
     public const string SecretsUnavailable = "secret.unavailable";
+
+    /// <summary>The node does not accept sessions or prompts from agents of other machines in that space (its owner has not allowed it).</summary>
+    public const string AgentSessionsOff = "agents.off";
+
+    /// <summary>The request of an agent is not signed, or not as the node requires (another device, another machine, too old, seen before).</summary>
+    public const string AgentRequestInvalid = "agents.invalid";
+
+    /// <summary>The request of an agent asks what the node cannot hold (a sandbox it does not have), or more than its policy allows.</summary>
+    public const string AgentRequestDenied = "agents.denied";
 }
 
 /// <summary>The parameters of <c>pair.redeem</c>.</summary>
@@ -308,7 +332,14 @@ public sealed record FleetSessionListParams(int? Limit = null, string? ProjectId
 /// <param name="UpdatedAt">When it last changed.</param>
 /// <param name="State">What it does: <c>working</c>, <c>waiting</c> (a question or a permission waits for a person), <c>idle</c> or <c>archived</c>.</param>
 public sealed record FleetSessionSummary(string Id, string Title, string? ProjectId, string? SpaceId, string? ParentSessionId, string? ProviderKey,
-    string? ModelId, DateTimeOffset CreatedAt, DateTimeOffset UpdatedAt, string State);
+    string? ModelId, DateTimeOffset CreatedAt, DateTimeOffset UpdatedAt, string State)
+{
+    /// <summary>Gets the device id of the machine its parent runs on, for a session an agent of another machine started; null otherwise.</summary>
+    public string? ParentMachineId { get; init; }
+
+    /// <summary>Gets the name of that machine; null otherwise.</summary>
+    public string? ParentMachineName { get; init; }
+}
 
 /// <summary>The result of <c>sessions.list</c>.</summary>
 /// <param name="Sessions">The sessions, the latest activity first.</param>
@@ -467,24 +498,46 @@ public sealed record FleetModelSelection(string? ProviderKey = null, string? Mod
 /// <param name="Prompt">The first prompt; null to create a session that waits for one.</param>
 /// <param name="Selection">The provider and model; null for the defaults of the node.</param>
 public sealed record FleetCreateSessionParams(string? ProjectId = null, string? SpaceId = null, string? Title = null, string? Prompt = null,
-    FleetModelSelection? Selection = null);
+    FleetModelSelection? Selection = null)
+{
+    /// <summary>
+    /// Gets the signed request of the agent that starts the session as the child of its own, on behalf of the person of
+    /// the calling device (<see cref="Protocol.FleetAgentRequestKinds.Start"/>); null for a session a person starts.
+    /// </summary>
+    public Protocol.FleetSignedAgentRequest? Agent { get; init; }
+}
 
 /// <summary>The result of <c>sessions.create</c>.</summary>
 /// <param name="SessionId">The new session.</param>
 /// <param name="ProviderKey">The provider it runs on.</param>
 /// <param name="Send">The admission of its first prompt; null without one.</param>
-public sealed record FleetCreateSessionResult(string SessionId, string ProviderKey, FleetCommandResult? Send);
+public sealed record FleetCreateSessionResult(string SessionId, string ProviderKey, FleetCommandResult? Send)
+{
+    /// <summary>Gets the permission mode a session an agent started runs in, as the node decided it; null for another session.</summary>
+    public string? PermissionMode { get; init; }
+
+    /// <summary>Gets the sandbox profile a session an agent started runs in; null for none.</summary>
+    public string? Sandbox { get; init; }
+}
 
 /// <summary>The parameters of <c>sessions.send</c>. The request's idempotency key is the retry key of the owned command.</summary>
 /// <param name="SessionId">The session.</param>
 /// <param name="Text">The prompt.</param>
 /// <param name="Selection">The model of the turn; null keeps the session's.</param>
-public sealed record FleetSendParams(string SessionId, string Text, FleetModelSelection? Selection = null);
+public sealed record FleetSendParams(string SessionId, string Text, FleetModelSelection? Selection = null)
+{
+    /// <summary>Gets the signed request of the agent that sends it (<see cref="Protocol.FleetAgentRequestKinds.Send"/>); null for a person's prompt.</summary>
+    public Protocol.FleetSignedAgentRequest? Agent { get; init; }
+}
 
 /// <summary>The parameters of <c>sessions.queue</c>.</summary>
 /// <param name="SessionId">The session.</param>
 /// <param name="Text">The prompt to send after the running turn.</param>
-public sealed record FleetQueueParams(string SessionId, string Text);
+public sealed record FleetQueueParams(string SessionId, string Text)
+{
+    /// <summary>Gets the signed request of the agent that queues it (<see cref="Protocol.FleetAgentRequestKinds.Queue"/>); null for a person's prompt.</summary>
+    public Protocol.FleetSignedAgentRequest? Agent { get; init; }
+}
 
 /// <summary>The parameters of <c>sessions.steer</c>, bound to the exact run (<see cref="FleetSessionState"/>).</summary>
 /// <param name="SessionId">The session.</param>
@@ -492,7 +545,11 @@ public sealed record FleetQueueParams(string SessionId, string Text);
 /// <param name="RuntimeInstanceId">The runtime the caller saw.</param>
 /// <param name="AttachmentGeneration">The attachment the caller saw.</param>
 /// <param name="RunId">The run the caller saw.</param>
-public sealed record FleetSteerParams(string SessionId, string Text, Guid RuntimeInstanceId, long AttachmentGeneration, string RunId);
+public sealed record FleetSteerParams(string SessionId, string Text, Guid RuntimeInstanceId, long AttachmentGeneration, string RunId)
+{
+    /// <summary>Gets the signed request of the agent that steers (<see cref="Protocol.FleetAgentRequestKinds.Steer"/>); null for a person's text.</summary>
+    public Protocol.FleetSignedAgentRequest? Agent { get; init; }
+}
 
 /// <summary>
 /// The parameters of <c>sessions.abort</c>: either the send to stop (<see cref="OperationId"/>), or the exact run of the
@@ -713,6 +770,41 @@ public sealed record FleetProjectChange(FleetProjectInfo Project, bool Changed, 
 /// <summary>An empty result.</summary>
 public sealed record FleetEmpty;
 
+/// <summary>
+/// Whether agents of other machines may start sessions on the node and send prompts to its sessions
+/// (<c>doc/fleet/access-control.md</c>, "What the node decides"): never in a space it does not name, which is every space
+/// by default.
+/// </summary>
+/// <param name="Spaces">The spaces where they may.</param>
+/// <param name="Sandbox">The sandbox profile their sessions run in at least; null for the one their parent has.</param>
+/// <param name="AllowBypass">Whether their sessions may bypass permissions (when their parent does); off by default.</param>
+public sealed record FleetAgentPolicyInfo(IReadOnlyList<string> Spaces, string? Sandbox = null, bool AllowBypass = false);
+
+/// <summary>The parameters of <c>agents.deliveries.take</c>.</summary>
+/// <param name="Limit">The most deliveries to take; null for 50.</param>
+public sealed record FleetAgentDeliveryTakeParams(int? Limit = null);
+
+/// <summary>What a session an agent of the caller started said to its parent.</summary>
+/// <param name="Id">The id of the delivery, which the acknowledgement names.</param>
+/// <param name="ChildSessionId">The session that speaks.</param>
+/// <param name="ChildProjectId">Its project on the node, or null.</param>
+/// <param name="ParentSessionId">Its parent, on the caller's machine.</param>
+/// <param name="Kind"><c>answer</c>, <c>error</c>, or an update (<c>progress</c>...).</param>
+/// <param name="Body">What it says.</param>
+/// <param name="RunId">The run it is about, or null.</param>
+/// <param name="ContentId">The content it comes from.</param>
+/// <param name="CreatedAt">When the node kept it.</param>
+public sealed record FleetAgentDelivery(string Id, string ChildSessionId, string? ChildProjectId, string ParentSessionId, string Kind, string Body,
+    string? RunId, string ContentId, DateTimeOffset CreatedAt);
+
+/// <summary>The result of <c>agents.deliveries.take</c>.</summary>
+/// <param name="Deliveries">The deliveries, oldest first.</param>
+public sealed record FleetAgentDeliveryList(IReadOnlyList<FleetAgentDelivery> Deliveries);
+
+/// <summary>The parameters of <c>agents.deliveries.ack</c>.</summary>
+/// <param name="Ids">The deliveries taken and delivered.</param>
+public sealed record FleetAgentDeliveryAckParams(IReadOnlyList<string> Ids);
+
 /// <summary>The source-generated JSON contracts of the node API.</summary>
 [JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase, DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull)]
 [JsonSerializable(typeof(FleetPairRedeemParams))]
@@ -786,4 +878,8 @@ public sealed record FleetEmpty;
 [JsonSerializable(typeof(FleetAutomationRunsParams))]
 [JsonSerializable(typeof(FleetAutomationRunInfo))]
 [JsonSerializable(typeof(FleetAutomationRunList))]
+[JsonSerializable(typeof(FleetAgentPolicyInfo))]
+[JsonSerializable(typeof(FleetAgentDeliveryTakeParams))]
+[JsonSerializable(typeof(FleetAgentDeliveryList))]
+[JsonSerializable(typeof(FleetAgentDeliveryAckParams))]
 public sealed partial class FleetNodeJsonContext : JsonSerializerContext;

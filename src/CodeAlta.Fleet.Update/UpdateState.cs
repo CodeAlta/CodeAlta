@@ -12,6 +12,12 @@ public sealed record UpdateState
     /// <summary>Gets the version the pointer selects (a folder of versions); null for the installed entry point itself.</summary>
     public string? Current { get; init; }
 
+    /// <summary>
+    /// Gets who asked for the version the pointer selects (<see cref="UpdatePending.RequestedBy"/>: <c>local</c>, a device
+    /// that manages the machine, a campaign of the fleet); null when unknown or when nothing is selected.
+    /// </summary>
+    public string? SelectedBy { get; init; }
+
     /// <summary>Gets the version a rollback goes back to; null for the installed entry point.</summary>
     public string? Previous { get; init; }
 

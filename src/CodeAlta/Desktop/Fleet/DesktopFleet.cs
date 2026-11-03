@@ -110,6 +110,16 @@ internal sealed class DesktopFleet : IAsyncDisposable
     public CodeAlta.Fleet.Protocol.FleetSignedAutomationRunRequest SignAutomationRun(CodeAlta.Fleet.Protocol.FleetAutomationRunRequest request)
         => CodeAlta.Fleet.Server.FleetAutomationSigning.SignRun(Identity(), request);
 
+    /// <summary>
+    /// Signs what an agent of this computer asks of another machine with the key of this computer, the one its channels to
+    /// the machines authenticate, so that the machine knows the request comes from this person's device.
+    /// </summary>
+    /// <param name="request">The request.</param>
+    /// <returns>The signed request.</returns>
+    /// <exception cref="ArgumentException">The request does not hold.</exception>
+    public CodeAlta.Fleet.Protocol.FleetSignedAgentRequest SignAgentRequest(CodeAlta.Fleet.Protocol.FleetAgentRequest request)
+        => CodeAlta.Fleet.NodeApi.FleetAgentSigning.Sign(Identity(), request);
+
     /// <summary>Finds the host of a machine.</summary>
     /// <param name="machineId">The device id of the machine.</param>
     /// <returns>Its host; null when no paired machine has that id.</returns>
@@ -332,6 +342,9 @@ internal sealed class DesktopFleet : IAsyncDisposable
             throw new IOException(exception.Message, exception);
         }
     }
+
+    /// <summary>Gets the key of this device, which its channels authenticate (tests sign with it as this device would).</summary>
+    internal DeviceIdentity DeviceKey => Identity();
 
     // The key of this device, created by the first pairing.
     private DeviceIdentity Identity() => _identity ??= DeviceIdentity.LoadOrCreate(_fleetRoot);

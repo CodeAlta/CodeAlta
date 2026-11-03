@@ -154,7 +154,12 @@ public sealed partial class FleetNodeService
         return new FleetSessionListResult([.. page.Select(item => new FleetSessionSummary(item.Session.SessionId, item.Title, item.ProjectId, item.SpaceId,
             item.Session.ParentSessionId ?? item.Session.ViewState?.ParentSessionId, item.Session.ViewState?.ProviderKey ?? item.Session.ProviderKey,
             item.Session.ViewState?.ModelId ?? item.Session.ModelId, item.Session.CreatedAt, item.Session.UpdatedAt,
-            item.Archived ? "archived" : waiting.Contains(item.Session.SessionId) ? "waiting" : atWork.Contains(item.Session.SessionId) ? "working" : "idle"))],
+            item.Archived ? "archived" : waiting.Contains(item.Session.SessionId) ? "waiting" : atWork.Contains(item.Session.SessionId) ? "working" : "idle")
+            {
+                // A session an agent of another machine started names that machine: its parent is there.
+                ParentMachineId = _agents.Find(item.Session.SessionId)?.ParentDeviceId,
+                ParentMachineName = _agents.Find(item.Session.SessionId)?.ParentMachineName,
+            })],
             listed.Count > limit);
     }
 

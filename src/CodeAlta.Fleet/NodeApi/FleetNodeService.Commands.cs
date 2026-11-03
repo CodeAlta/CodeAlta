@@ -20,6 +20,7 @@ public sealed partial class FleetNodeService
             throw new FleetException(FleetErrorCodes.Forbidden, null, "This device may start sessions but not send them prompts.");
         if (parameters.Title is { } title && (string.IsNullOrWhiteSpace(title) || title.Length > MaxTitleLength || title.Any(char.IsControl)))
             throw new FleetException(FleetErrorCodes.InvalidParams, null, $"A title has 1 to {MaxTitleLength} characters.");
+        if (parameters.Agent is not null) return CreateAgentSessionAsync(call, parameters);
         var retryKey = RetryKey(call);
         return Once(call, FleetNodeJsonContext.Default.FleetCreateSessionResult, () => CreateSessionCoreAsync(retryKey, parameters));
     }
@@ -108,8 +109,20 @@ public sealed partial class FleetNodeService
         var retryKey = RetryKey(call);
         RequirePrompt(parameters.Text);
         var session = await RequireSessionAsync(parameters.SessionId, cancellationToken).ConfigureAwait(false);
+        var text = parameters.Text;
+        // An agent's prompt is checked and attributed once: a retry of the same key gets the first receipt.
+        if (parameters.Agent is not null)
+        {
+            return await Once(call, FleetNodeJsonContext.Default.FleetCommandResult, async () =>
+            {
+                var attributed = await AgentPromptAsync(call, parameters.Agent, Protocol.FleetAgentRequestKinds.Send, session.SessionId, text, parameters.Selection,
+                    CancellationToken.None).ConfigureAwait(false);
+                return Admit(_host.Commands.AdmitSend(new OwnedTextSendRequest(retryKey, session.SessionId, attributed), CancellationToken.None));
+            }).ConfigureAwait(false);
+        }
+
         var selection = Selection(parameters.Selection, session.ResolvedProviderKey, session.AgentPromptId);
-        return Admit(_host.Commands.AdmitSend(new OwnedTextSendRequest(retryKey, session.SessionId, parameters.Text) { Selection = selection }, cancellationToken));
+        return Admit(_host.Commands.AdmitSend(new OwnedTextSendRequest(retryKey, session.SessionId, text) { Selection = selection }, cancellationToken));
     }
 
     private async Task<FleetQueueResult> QueueAsync(FleetNodeCall call, FleetQueueParams parameters, CancellationToken cancellationToken)
@@ -120,7 +133,10 @@ public sealed partial class FleetNodeService
         return await Once(call, FleetNodeJsonContext.Default.FleetQueueResult, async () =>
         {
             var session = await RequireSessionAsync(parameters.SessionId, CancellationToken.None).ConfigureAwait(false);
-            var item = await _host.RuntimeService.QueuePromptAsync(session, parameters.Text, "queue", null, CancellationToken.None).ConfigureAwait(false);
+            var text = parameters.Agent is null ? parameters.Text
+                : await AgentPromptAsync(call, parameters.Agent, Protocol.FleetAgentRequestKinds.Queue, session.SessionId, parameters.Text, null, CancellationToken.None)
+                    .ConfigureAwait(false);
+            var item = await _host.RuntimeService.QueuePromptAsync(session, text, "queue", null, CancellationToken.None).ConfigureAwait(false);
             return new FleetQueueResult("queued", item.QueueItemId);
         }).ConfigureAwait(false);
     }
@@ -133,6 +149,17 @@ public sealed partial class FleetNodeService
         var sessionId = await RequireRemoteSessionAsync(parameters.SessionId, cancellationToken).ConfigureAwait(false);
         if (parameters.RuntimeInstanceId == Guid.Empty || parameters.AttachmentGeneration <= 0 || string.IsNullOrWhiteSpace(parameters.RunId))
             throw new FleetException(FleetErrorCodes.InvalidParams, null, "Steering is bound to the runtime, attachment and run of sessions.state.");
+        if (parameters.Agent is not null)
+        {
+            return await Once(call, FleetNodeJsonContext.Default.FleetCommandResult, async () =>
+            {
+                var attributed = await AgentPromptAsync(call, parameters.Agent, Protocol.FleetAgentRequestKinds.Steer, sessionId, parameters.Text, null,
+                    CancellationToken.None).ConfigureAwait(false);
+                return Admit(_host.Commands.AdmitSteer(new OwnedTextSteerRequest(retryKey, sessionId, parameters.RuntimeInstanceId,
+                    parameters.AttachmentGeneration, parameters.RunId, attributed), CancellationToken.None));
+            }).ConfigureAwait(false);
+        }
+
         return Admit(_host.Commands.AdmitSteer(new OwnedTextSteerRequest(retryKey, sessionId, parameters.RuntimeInstanceId,
             parameters.AttachmentGeneration, parameters.RunId, parameters.Text), cancellationToken));
     }

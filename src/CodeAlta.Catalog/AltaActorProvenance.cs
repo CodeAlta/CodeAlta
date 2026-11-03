@@ -29,6 +29,17 @@ public sealed record AltaActorProvenance
     /// <summary>Gets the source agent identifier, when known.</summary>
     public string? SourceAgentId { get; init; }
 
+    /// <summary>
+    /// Gets the device id of the machine the source session runs on, when it is another machine than the one of the
+    /// artifact (an agent of another machine started this session): its answers go back to that machine.
+    /// </summary>
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public string? SourceMachineId { get; init; }
+
+    /// <summary>Gets the name of the machine of <see cref="SourceMachineId"/>, as people know it.</summary>
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public string? SourceMachineName { get; init; }
+
     /// <summary>Gets the plugin runtime key when the actor is a plugin.</summary>
     public string? PluginRuntimeKey { get; init; }
 

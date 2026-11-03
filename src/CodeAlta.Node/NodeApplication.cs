@@ -6,7 +6,7 @@ using CodeAlta.Fleet.Identity;
 using CodeAlta.Fleet.Server;
 using CodeAlta.Fleet.Update;
 using CodeAlta.Hosting;
-using CodeAlta.Node.Service;
+using CodeAlta.Fleet.Update.Service;
 using XenoAtom.CommandLine;
 using XenoAtom.Logging;
 
@@ -49,10 +49,10 @@ internal sealed class NodeApplication
     /// Gets or sets what reads the machine <c>install</c>, <c>uninstall</c> and <c>status</c> work on, for tests (temporary
     /// folders, recorded commands); null for this machine.
     /// </summary>
-    internal Func<NodeServiceEnvironment?>? ServiceEnvironment { get; init; }
+    internal Func<Fleet.Update.Service.ServiceEnvironment?>? ServiceEnvironment { get; init; }
 
     /// <summary>Gets or sets what finds the executable a service starts, for tests; null for the one of this process.</summary>
-    internal Func<NodeExecutable?>? ServiceExecutable { get; init; }
+    internal Func<Fleet.Update.Service.ServiceExecutable?>? ServiceExecutable { get; init; }
 
     /// <summary>Gets the HTTP handler of the calls to a CodeAlta Server (<c>join</c>), for tests; null for the usual one.</summary>
     internal HttpMessageHandler? ServerHandler { get; init; }
@@ -101,7 +101,7 @@ internal sealed class NodeApplication
         try
         {
             var client = new NodeClientCommands(_output, _error) { Stop = ClientStop };
-            var service = new NodeServiceCommands(_output, _error, ServiceEnvironment ?? NodeServiceEnvironment.Current, ServiceExecutable ?? LocateExecutable)
+            var service = new NodeServiceCommands(_output, _error, ServiceEnvironment ?? Fleet.Update.Service.ServiceEnvironment.Current, ServiceExecutable ?? LocateExecutable)
             {
                 Stop = ClientStop,
                 InstalledVersion = InstalledVersion(),
@@ -112,10 +112,11 @@ internal sealed class NodeApplication
             var servers = new NodeServerCommands(_output, _error) { Stop = ClientStop, Handler = ServerHandler };
             var update = new NodeUpdateCommands(_output, _error, Version, InstalledVersion()) { Stop = ClientStop, Handler = UpdateHandler };
             var automations = new NodeAutomationCommands(_output, _error);
+            var agents = new NodeAgentCommands(_output, _error) { Stop = ClientStop };
             return await Create(new NodeCommandHandlers(RunNodeAsync, service.StatusAsync, NotImplementedAsync, client.PairAsync, client.MachinesAsync,
                     client.ConnectAsync, client.RemoteAsync, service.InstallAsync, service.UninstallAsync, logs.RunAsync, devices.DevicesAsync,
                     devices.RevokeAsync, devices.PermissionsAsync, client.MovesAsync, projects.RunAsync, servers.JoinAsync, update.UpdateAsync, automations.RunAsync)
-                { Secrets = new NodeSecretCommands(_output, _error, Console.In).RunAsync })
+                    { Secrets = new NodeSecretCommands(_output, _error, Console.In).RunAsync, Agents = agents.RunAsync })
                 .RunAsync(args, new CommandRunConfig { Out = _output, Error = _error }).ConfigureAwait(false);
         }
         catch (Exception exception)
@@ -134,8 +135,9 @@ internal sealed class NodeApplication
         return (ConfigureHost?.Invoke(options) ?? options).CloneRoot;
     }
 
-    private static NodeExecutable? LocateExecutable()
-        => NodeExecutableLocator.Locate(Environment.ProcessPath, Path.Combine(AppContext.BaseDirectory, "altanode.dll"), static path => File.Exists(path) || Directory.Exists(path));
+    private static Fleet.Update.Service.ServiceExecutable? LocateExecutable()
+        => ServiceExecutableLocator.Locate(UpdateProduct.Node, Environment.ProcessPath, Path.Combine(AppContext.BaseDirectory, UpdateProduct.Node.AssemblyFileName),
+            static path => File.Exists(path) || Directory.Exists(path));
 
     /// <summary>The version of CodeAlta this executable is.</summary>
     internal static string Version

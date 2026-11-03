@@ -118,6 +118,8 @@ The coordinator, for one person or a household.
 - **Replicas and takeover** for lost laptops (S8).
 - **The phone through the server** (the browser channel decided in its sub-plan).
 - **Budgets and alerts**, **health** notifications, basic **audit**.
+- **`alta fleet` and the `codealta-fleet` built-in skill** ([console](console.md#agents-and-scripts)): the commands
+  that map the fleet for agents, and the guidance that makes agents use machines and fleet operations efficiently.
 - **Secrets and variables** ([secrets](secrets.md)): the local store on every host and `${secret:NAME}` references in
   the configuration, a person's secrets sealed to their machines, masking, **Settings > Secrets**.
 - Setup assistant: **Create my server** (this computer, over SSH, a VM), Tailscale and domain recipes.

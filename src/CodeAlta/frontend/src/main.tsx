@@ -281,6 +281,7 @@ import { WorktreeSettings } from "./worktrees/WorktreeSettings";
 import { McpHostSettings } from "./mcpHost/McpHostSettings";
 import { MachinesSettings } from "./machines/MachinesSettings";
 import { SecretsSettings } from "./secrets/SecretsSettings";
+import { readMachinePageLink } from "./machines/machines";
 import { FleetServerSettings } from "./fleet/FleetServerSettings";
 import { FleetApprovals } from "./fleet/FleetApprovals";
 import { RemoteSessionChoice, RunOnChip, useMachines, useRemoteChoices } from "./machines/RunOnChip";
@@ -747,6 +748,9 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
   const [pluginPage, setPluginPage] = useState<PluginSettingsPage | null>(null);
   // The provider Settings > Providers selects when it opens from a link of Settings > Sandbox.
   const [providerFocus, setProviderFocus] = useState<string | null>(null);
+  // The paired machine whose page Settings > Fleet > Machines opens on, from its name in the Fleet canvas; each request is a new ticket.
+  const [machineFocus, setMachineFocus] = useState<Readonly<{ id: string; ticket: number }> | null>(null);
+  const machineTicket = useRef(0);
   const currentSettingsSection = useRef<SettingsSection>(settingsSection);
   currentSettingsSection.current = settingsSection;
   const settingsOrigin = useRef<HTMLElement | null>(null);
@@ -768,6 +772,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
     invalidateCreation();
     focusRestoration.cancel();
     setProviderFocus(null);
+    setMachineFocus(null);
     if (next === "workspace") {
       settingsVisible.current = false;
       setSettingsOpen(false);
@@ -804,6 +809,9 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
       // `plugin/<key>/<canvas>` opens the settings page of a plugin, while the plugin runs in the space the window shows.
       const found = (owned ? allPluginPages : []).find(candidate => pluginPageId(candidate) === page);
       if (found) openPluginSettings(found); else navigate("plugins");
+    } else if (readMachinePageLink(page) !== null) {
+      // `machines/<id>` opens the page of a paired machine.
+      navigate("machines"); setMachineFocus({ id: readMachinePageLink(page)!, ticket: ++machineTicket.current });
     } else {
       // `spaces/<id>/<section>` opens the page of a space at one of its sections.
       const target = readSpacePageLink(page);
@@ -6169,7 +6177,8 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
           onOpenFile={owned ? closeSettings : undefined} />
       : settingsSection === "mcpHost" ? <McpHostSettings epoch={owned ? status!.hostEpoch : null} developer={status?.developerMode ?? false} />
       : settingsSection === "secrets" ? <SecretsSettings epoch={owned ? status!.hostEpoch : null} />
-      : settingsSection === "machines" ? <MachinesSettings epoch={owned ? status!.hostEpoch : null} />
+      : settingsSection === "machines" ? <MachinesSettings key={machineFocus ? `${machineFocus.id}:${machineFocus.ticket}` : ""} epoch={owned ? status!.hostEpoch : null}
+        initialMachine={machineFocus?.id ?? null} />
       : settingsSection === "fleetServer" ? <FleetServerSettings epoch={owned ? status!.hostEpoch : null} />
       : settingsSection === "search" ? <SearchSettings projects={catalog.current?.projects ?? snapshot?.projects ?? []} spaces={spacesState.spaces}
           onMeaningTurnedOn={() => setFollowMeaning(true)}

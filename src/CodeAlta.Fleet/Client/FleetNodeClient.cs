@@ -351,6 +351,61 @@ public sealed class FleetNodeClient : IAsyncDisposable
         => CallAsync(FleetNodeMethods.SessionsSend, new FleetSendParams(sessionId, text, selection), FleetNodeJsonContext.Default.FleetSendParams,
             FleetNodeJsonContext.Default.FleetCommandResult, retryKey ?? NewRetryKey(), cancellationToken);
 
+    /// <summary>Sends a prompt that starts a turn of a session, the prompt of an agent included (<see cref="FleetSendParams.Agent"/>).</summary>
+    /// <param name="parameters">The session, the prompt, and what goes with it.</param>
+    /// <param name="retryKey">The retry key of the command; null for a new key.</param>
+    /// <param name="cancellationToken">Cancels the call; the node may still have admitted the send.</param>
+    /// <returns>The admission.</returns>
+    /// <exception cref="FleetException">The node refused the call.</exception>
+    public Task<FleetCommandResult> SendAsync(FleetSendParams parameters, string? retryKey = null, CancellationToken cancellationToken = default)
+        => CallAsync(FleetNodeMethods.SessionsSend, parameters, FleetNodeJsonContext.Default.FleetSendParams,
+            FleetNodeJsonContext.Default.FleetCommandResult, retryKey ?? NewRetryKey(), cancellationToken);
+
+    /// <summary>Queues a prompt for after the running turn of a session, the prompt of an agent included (<see cref="FleetQueueParams.Agent"/>).</summary>
+    /// <param name="parameters">The session and the prompt.</param>
+    /// <param name="retryKey">The key of the call; null for a new key.</param>
+    /// <param name="cancellationToken">Cancels the call.</param>
+    /// <returns>The queued prompt.</returns>
+    /// <exception cref="FleetException">The node refused the call.</exception>
+    public Task<FleetQueueResult> QueueAsync(FleetQueueParams parameters, string? retryKey = null, CancellationToken cancellationToken = default)
+        => CallAsync(FleetNodeMethods.SessionsQueue, parameters, FleetNodeJsonContext.Default.FleetQueueParams,
+            FleetNodeJsonContext.Default.FleetQueueResult, retryKey ?? NewRetryKey(), cancellationToken);
+
+    /// <summary>Takes what the sessions agents of this device started on the node said to their parents; they stay until acknowledged.</summary>
+    /// <param name="limit">The most to take; null for 50.</param>
+    /// <param name="cancellationToken">Cancels the call.</param>
+    /// <returns>The deliveries, oldest first.</returns>
+    /// <exception cref="FleetException">The node refused the call.</exception>
+    public Task<FleetAgentDeliveryList> TakeAgentDeliveriesAsync(int? limit = null, CancellationToken cancellationToken = default)
+        => CallAsync(FleetNodeMethods.AgentsDeliveriesTake, new FleetAgentDeliveryTakeParams(limit), FleetNodeJsonContext.Default.FleetAgentDeliveryTakeParams,
+            FleetNodeJsonContext.Default.FleetAgentDeliveryList, null, cancellationToken);
+
+    /// <summary>Acknowledges deliveries this device took and delivered: the node forgets them.</summary>
+    /// <param name="ids">The deliveries.</param>
+    /// <param name="cancellationToken">Cancels the call.</param>
+    /// <returns>A task that completes once the node forgot them.</returns>
+    /// <exception cref="FleetException">The node refused the call.</exception>
+    public Task AcknowledgeAgentDeliveriesAsync(IReadOnlyList<string> ids, CancellationToken cancellationToken = default)
+        => CallAsync(FleetNodeMethods.AgentsDeliveriesAck, new FleetAgentDeliveryAckParams(ids), FleetNodeJsonContext.Default.FleetAgentDeliveryAckParams,
+            FleetNodeJsonContext.Default.FleetEmpty, null, cancellationToken);
+
+    /// <summary>The owner's local control, or a device that manages the node: whether agents of other machines may start sessions there.</summary>
+    /// <param name="cancellationToken">Cancels the call.</param>
+    /// <returns>The policy.</returns>
+    /// <exception cref="FleetException">The node refused the call.</exception>
+    public Task<FleetAgentPolicyInfo> GetAgentPolicyAsync(CancellationToken cancellationToken = default)
+        => CallAsync(FleetNodeMethods.ControlAgentsGet, new FleetEmpty(), FleetNodeJsonContext.Default.FleetEmpty, FleetNodeJsonContext.Default.FleetAgentPolicyInfo,
+            null, cancellationToken);
+
+    /// <summary>The owner's local control, or a device that manages the node: changes that policy.</summary>
+    /// <param name="policy">The policy.</param>
+    /// <param name="cancellationToken">Cancels the call.</param>
+    /// <returns>The policy as the node keeps it.</returns>
+    /// <exception cref="FleetException">The node refused the call.</exception>
+    public Task<FleetAgentPolicyInfo> SetAgentPolicyAsync(FleetAgentPolicyInfo policy, CancellationToken cancellationToken = default)
+        => CallAsync(FleetNodeMethods.ControlAgentsSet, policy, FleetNodeJsonContext.Default.FleetAgentPolicyInfo, FleetNodeJsonContext.Default.FleetAgentPolicyInfo,
+            null, cancellationToken);
+
     /// <summary>Queues a prompt for after the running turn of a session.</summary>
     /// <param name="sessionId">The session.</param>
     /// <param name="text">The prompt.</param>

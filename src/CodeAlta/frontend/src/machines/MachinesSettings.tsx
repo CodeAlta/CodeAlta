@@ -17,14 +17,14 @@ type MachinesApi = Pick<typeof machines, "list" | "previewPairing" | "pair" | "f
  * Settings > Fleet > Machines: the machines this computer is paired with and their state, pairing with another one
  * from the link `altanode pair` shows there, and forgetting one.
  */
-export function MachinesSettings({ epoch, api = machines }: { epoch: string | null; api?: MachinesApi }) {
+export function MachinesSettings({ epoch, api = machines, initialMachine = null }: { epoch: string | null; api?: MachinesApi; initialMachine?: string | null }) {
   const { t } = useShellLanguage();
   const { listing, loading, busy, notice, reload, mutate } = useSettingsEditor(options => api.list({ expectedEpoch: epoch ?? "" }, options), `${epoch}`);
   const [pairing, setPairing] = useState(false);
   // Add a machine…: how it is reached, then its setup.
   const [adding, setAdding] = useState(false);
-  // The machine whose page is open, by its id; its row opens it.
-  const [opened, setOpened] = useState<string | null>(null);
+  // The machine whose page is open, by its id; its row opens it, and so does its name in the Fleet canvas.
+  const [opened, setOpened] = useState<string | null>(initialMachine);
   // Whether this computer receives the sessions its machines move here: off until the person turns it on.
   const [receive, setReceive] = useState<boolean | null>(null);
   useEffect(() => {

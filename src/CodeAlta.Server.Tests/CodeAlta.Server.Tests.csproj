@@ -22,4 +22,9 @@
     <ProjectReference Include="..\CodeAlta.Fleet\CodeAlta.Fleet.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- The machine of the service tests, which installs nothing: the same as the tests of altanode use. -->
+    <Compile Include="..\CodeAlta.Fleet.Update.Tests\FakeServiceMachine.cs" Link="FakeServiceMachine.cs" />
+  </ItemGroup>
+
 </Project>

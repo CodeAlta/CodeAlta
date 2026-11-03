@@ -165,6 +165,24 @@ While a machine is offline, its sessions stay listed with what was last known of
 
 The **+** of the row of a machine in the Explorer opens the same prompt, already set to run on that machine.
 
+### Let agents start sessions on it
+
+An agent of a session on this computer can hand part of its work to a session on a machine ("run the iOS tests on the Mac"), and get its final answer back as it does from a session of this computer.
+
+1. On the machine, allow it for the spaces you want: `altanode agents allow --space default`. It is off until you do, and `altanode agents` shows what is allowed.
+2. Ask the agent to do it. It runs `alta session create --machine <name> --stdin` (or, in a script, `agent(prompt, { machine: "<name>" })`). `alta session machines` lists the machines.
+
+The session starts in the project of the same repository on the machine, as a child of the session of the agent: it shows under it in the Explorer and among its child sessions, with the name of the machine, and opens like any session of the machine. Its final answer, or its failure, comes back to the parent, also when this computer was closed meanwhile: the machine keeps it until this computer takes it. The agent can send it more prompts with `alta session send`.
+
+What the session may do:
+
+- At most what the session of the agent has: its space, the tools it does without, its permission mode and its sandbox. The agent cannot give it more.
+- It never bypasses permissions on the machine unless you allow it there: `altanode agents allow --bypass`. When it asks before a command, or asks a question, its parent and its row show that it waits for you, with a notice.
+- `altanode agents allow --sandbox strict` makes the sessions of agents run in that sandbox at least; the machine refuses one it cannot sandbox.
+- Each request is signed by this computer: neither a server nor anyone else can start a session in its name. The machine limits how many sessions and prompts agents send it, and logs each one with the session and the computer that asked.
+
+`altanode agents deny --space <id>` (or `--all`) turns it off again. A Private session never starts a session on another machine.
+
 ## Run your automations on it
 
 An automation of yours can run on a paired machine, or on a machine of your server, by its triggers, while this computer is closed.
@@ -238,12 +256,11 @@ From a terminal, `altanode connect <link>` pairs another profile with a node, an
 
 A CodeAlta Server shows the machines of all your computers, whether they are online, and the sessions they publish, in one place. It never reads their content: a session publishes its state, its provider and model, its times and its counts (turns, tool calls, tokens), never its prompts or answers. Its title travels encrypted with a key that only your approved computers and machines hold: the server cannot read it.
 
-<<<<<<< HEAD
 ### Create my server
 
 In CodeAlta Desktop, open **Settings** > **Fleet** > **Server** and click **Create my server…**. Choose where it runs:
 
-- **On a machine over SSH**, the usual place: an always-on Linux or macOS machine you reach with `ssh`. Give it as `user@host`, and how your machines reach it: **The local network** (`http://host:2586`, the server listens on every network of the machine), or **An address I put in front of it**, a domain or Tailscale Serve that forwards to the server, which then stays on the machine's own loopback. CodeAlta checks the system and .NET there, installs CodeAlta Server, starts it as a service (a `systemd --user` unit with lingering, or a LaunchAgent), checks that it answers from this computer at that address, then reads its setup code over SSH and makes you its owner. Nothing to copy.
+- **On a machine over SSH**, the usual place: an always-on Linux or macOS machine you reach with `ssh`. Give it as `user@host`, and how your machines reach it: **The local network** (`http://host:2586`, the server listens on every network of the machine), or **An address I put in front of it**, a domain or Tailscale Serve that forwards to the server, which then stays on the machine's own loopback. CodeAlta checks the system and .NET there, installs CodeAlta Server, starts it as a service with `altaserver install` (a `systemd --user` unit with lingering, or a LaunchAgent), checks that it answers from this computer at that address, then reads its setup code over SSH and makes you its owner. Nothing to copy.
 - **On this computer**: CodeAlta installs CodeAlta Server here, starts it and makes you its owner.
 - **It runs already**: a server you started with `altaserver run`; give its address, its setup code (`altaserver setup-code` prints it on its machine) and your name.
 
@@ -254,6 +271,24 @@ When the server runs but does not answer from here, the step says what blocks it
 Once you are its owner, **Add your machines** lists the machines this computer manages: **Add** has each join the server from itself, and approves it at once. The six words of each are shown.
 
 When you click **Done**, CodeAlta shows your **recovery key**: 32 words, shown once. Write them down or click **Copy** and keep them somewhere safe, click **I wrote them down**, and type the two words it asks for.
+
+### Run a server as a service
+
+A server you installed yourself (`dotnet tool install -g CodeAlta.Server`) starts again after a restart once it runs as a service:
+
+```sh
+altaserver install --urls http://0.0.0.0:2586
+```
+
+It takes the options of `altaserver run` (`--port`, `--urls`, `--data-root`, `--certificate`) and sets up one service per data root:
+
+| System | What `altaserver install` sets up |
+| --- | --- |
+| Windows | A task at your sign-in that runs the server without a window and starts it again if it stops |
+| macOS | A LaunchAgent of your account |
+| Linux | A `systemd --user` unit, with lingering turned on so that it starts at boot |
+
+`altaserver status` tells whether it runs and whether it will start again after a restart. `altaserver install --dry-run` prints what it would set up, `altaserver uninstall` stops the server and removes the service: the data root stays. `--system --account <name>` starts it at boot under an account of its own, with `sudo` on macOS and Linux. `altaserver update` keeps working under the service.
 
 ### Add machines and computers
 
@@ -282,7 +317,7 @@ A space publishes to a server only when you choose it: **Settings** > **Spaces**
 
 To leave a server, click the trash button of its card, then **Leave**: the server removes what this computer published there (its sessions, their titles, its statistics), its copies of your keys and the automations given to it through that server, and its spaces are unlinked. When the server does not answer, this computer leaves anyway and the page says that what it published stays there.
 
-The **Fleet** canvas (`/fleet`) shows the machines of the server and their sessions, with their titles, as they change. A session of this computer, of a paired machine or of a node of the server opens with **Open**; the others are shown only. `altanode status` says whether the node is connected to its server.
+The **Fleet** canvas (`/fleet`) shows the machines of the server and their sessions, with their titles, as they change; without a server, it shows the machines paired with this computer. A session of this computer, of a paired machine or of a node of the server opens with **Open**; the others are shown only. The name of a paired machine opens its page. `altanode status` says whether the node is connected to its server.
 
 ### Reach machines through the server
 

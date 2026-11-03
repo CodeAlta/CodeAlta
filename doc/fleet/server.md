@@ -124,8 +124,10 @@ Nodes are autonomous: a server that is down stops visibility, relay and sharing,
   running server copies its database to `backups/` (SQLite's backup API, the last five kept), then switches; a new
   version that does not serve within its trial is rolled back and that copy restored
   ([deployment](deployment.md#updates)). In a campaign of the fleet the server takes this step last, after its nodes,
-  and a campaign that a stop interrupted goes on at the next start. Until `altaserver install` exists, the switch works for a server run in the
-  foreground: the process stays and runs the new version as its child.
+  and a campaign that a stop interrupted goes on at the next start. Under the service of `altaserver install`, as in the
+  foreground, the process the service started stays and runs the new version as its child. On Windows, where that
+  service is a task at logon that no signal reaches, `altaserver uninstall` asks the server to stop through a file of
+  its data root (`altaserver.stop`), and the server stops as on Ctrl+C.
 - **A backup is a consistent set**: the database, the blobs it references and the server's own keys (TLS, token
   signing), the keys encrypted. The server holds no key that decrypts Private data, so a backup holds none either.
 - **Restore epochs**: a restored server starts a new epoch. Nodes notice that it is behind them and publish again what

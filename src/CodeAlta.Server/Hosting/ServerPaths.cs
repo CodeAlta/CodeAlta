@@ -35,6 +35,12 @@ public sealed class ServerPaths
     /// <summary>Gets the lock a running server holds, so that one server at a time uses the data root.</summary>
     public string LockPath => Path.Combine(DataRoot, "altaserver.lock");
 
+    /// <summary>
+    /// Gets the file that asks the running server to stop, as Ctrl+C would: <c>altaserver uninstall</c> writes it on
+    /// Windows, where removing the task at logon leaves the server running and no signal reaches it.
+    /// </summary>
+    public string StopRequestPath => Path.Combine(DataRoot, "altaserver.stop");
+
     /// <summary>Gets the folder of the versions of the server (<c>altaserver update</c>): each beside the others, and the pointer.</summary>
     public string VersionsRoot => Path.Combine(DataRoot, "versions");
 

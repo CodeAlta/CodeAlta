@@ -33,15 +33,23 @@ remote machine is its own inventory: a project it does not have can be cloned th
 
 **By an agent.** `alta session create --machine <name|any> ...` creates a child session on another node, for example
 "run the iOS tests on the Mac". The parent and the child keep their link across machines: the child's final answer,
-failure or `<notify-parent>` update comes back to the parent as a host prompt, through the fleet's message route
-(queued by the child's node, then by the server, until the parent's node takes it). The rules of `alta` still hold,
-across machines:
+failure or `<notify-parent>` update comes back to the parent as a host prompt. The child's node keeps it in a durable
+outbox for the device that started the child; that device takes it over its channel to the node (direct or relayed,
+the server stores nothing), delivers it as the answer of a local child, then acknowledges it. The rules of `alta` still
+hold, across machines:
 
+- the request is signed by the device of the person on whose behalf the parent runs, the one its channel to the target
+  authenticates, for that target, a time and a nonce, bound to the space, the project and the prompt; the target
+  verifies it and refuses a replay. A parent that runs on a node has no such device: it starts no session elsewhere
+  until a standing delegation signed by a controller device covers it ([identity](identity.md#agents-acting-for-people));
 - the target is in the caller's space, and that space is linked to the same fleet;
 - the child does without at least the tools its parent does without, never asks the user less, and runs in a
-  sandbox at least as strict (the target refuses what it cannot hold, as `RefuseRunAsync` does locally);
-- the target machine accepts agent-started sessions for that space (**off** by default: a node owner turns it on);
-- every such creation is audited with the parent session, the person and both machines.
+  sandbox at least as strict (the target refuses what it cannot hold, as `RefuseRunAsync` does locally); the target
+  lowers it further to its own policy (`bypassPermissions` only where its owner allows it, a minimum sandbox);
+- the target machine accepts agent-started sessions for that space (**off** by default: a node owner turns it on,
+  `altanode agents allow --space <id>`), within a rate limit per device;
+- the lineage is recorded on both machines, and every such creation is logged with the parent session, the device
+  and both machines.
 
 **Placement.** "Any machine that can" picks among the online nodes of the fleet that have the project (or may clone
 it), have a ready provider for the selection, can hold the sandbox, and match the labels asked (`macos`, `xcode`,
@@ -208,9 +216,12 @@ recoverable:
 
 ## Messages between sessions across machines
 
-`alta session message` and `request` reach sessions on other nodes of the same space, through the same route as
-child answers: queued by the sender's node, carried by the server, delivered as an agent message by the recipient's
-node. Within the rules of the space, and audited.
+`alta session send`, `queue`, `steer`, `message` and `request` reach sessions on other nodes of the same space that the
+person may drive, signed as a start is, and allowed by the same policy of the target. Such a prompt changes no model,
+mode or sandbox; the target attributes it as a peer-agent message unless it goes to the sender's own child, and refuses
+it when the receiving session bypasses permissions and is not that child: a person sends it from the session. An answer comes back by the child's route above. A
+question or a permission request of a remote child marks it, and its parent, as waiting for the person on the parent's
+computer.
 
 ## Automations on the fleet
 

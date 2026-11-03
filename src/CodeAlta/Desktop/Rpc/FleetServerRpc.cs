@@ -47,6 +47,9 @@ internal sealed partial class FleetServerService
     /// <summary>Gets whether this computer reaches a machine: paired with it, or through the relay of a server; null for none.</summary>
     internal Func<string, bool>? IsReachable { get; init; }
 
+    /// <summary>Gets the machines paired with this computer, which the directory shows while no server is linked; null for none.</summary>
+    internal DesktopFleet? Fleet { get; init; }
+
     /// <summary>The servers of this instance and how each stands.</summary>
     [NeoRpcMethod("status")]
     public async Task<FleetServerStatus> StatusAsync(FleetServerRequest request, CancellationToken cancellationToken)
@@ -368,7 +371,13 @@ internal sealed partial class FleetServerService
         var connections = _servers!.Connections;
         var connection = request!.LinkId is { } id ? connections.FirstOrDefault(candidate => candidate.Link.Id == id)
             : connections.FirstOrDefault(static candidate => candidate.Connector?.State == FleetConnectorState.Online) ?? connections.FirstOrDefault();
-        if (connection is null) return FleetDirectoryResult.Refused("no_server");
+        if (connection is null)
+        {
+            // No server: the machines paired with this computer, as this computer reaches them itself.
+            var paired = Fleet?.Hosts.Where(static host => host.IsPaired).Select(FleetPairedMachine.Of).ToArray() ?? [];
+            return paired.Length > 0 ? DescribePaired(paired) : FleetDirectoryResult.Refused("no_server");
+        }
+
         return Describe(connection, _servers.DeviceId, IsPaired ?? (static _ => false), IsReachable ?? IsPaired ?? (static _ => false));
     }
 
@@ -431,6 +440,8 @@ internal sealed partial class FleetServerService
         void OnChanged() => changes.Writer.TryWrite(new FleetServerEvent("changed"));
         _servers!.Changed += OnChanged;
         ChangedLocally += OnChanged;
+        // A paired machine changing its state or its sessions changes the directory shown without a server.
+        if (Fleet is { } fleet) fleet.Changed += OnChanged;
         try
         {
             await foreach (var value in changes.Reader.ReadAllAsync(cancellationToken).ConfigureAwait(false)) yield return value;
@@ -439,6 +450,7 @@ internal sealed partial class FleetServerService
         {
             _servers.Changed -= OnChanged;
             ChangedLocally -= OnChanged;
+            if (Fleet is { } paired) paired.Changed -= OnChanged;
         }
     }
 
@@ -482,6 +494,41 @@ internal sealed partial class FleetServerService
         }).ToArray();
         return new FleetDirectoryResult("ok", connection.Link.Id, connection.Link.Url, connection.Link.OrganizationName, State(connection), machines, sessions);
     }
+
+    /// <summary>
+    /// The machines paired with this computer as the page shows them while no server is linked (status <c>paired</c>):
+    /// each with its state, its version and the sessions it lists, which open here.
+    /// </summary>
+    /// <param name="paired">The paired machines.</param>
+    /// <returns>The directory.</returns>
+    internal static FleetDirectoryResult DescribePaired(IEnumerable<FleetPairedMachine> paired)
+    {
+        var machines = new List<FleetMachineView>();
+        var sessions = new List<FleetSessionView>();
+        foreach (var machine in paired)
+        {
+            var info = machine.Listing.Info;
+            var listed = machine.Listing.Sessions;
+            machines.Add(new FleetMachineView(machine.Id, info?.Name ?? machine.Name, FleetDeviceKinds.Node, info?.Os, info?.Version, machine.State == RemoteMachineState.Online,
+                RemoteSessionHost.Describe(machine.State), listed.Count(static session => session.State == "working"), false, true,
+                [.. info?.Providers.Select(static provider => provider.Name) ?? []], listed.Count, true));
+            sessions.AddRange(listed.Select(session => new FleetSessionView(session.Id, machine.Id, PairedSessionState(session.State), session.ProviderKey, session.ModelId,
+                Time(session.CreatedAt), Time(session.UpdatedAt), 0, 0, true, string.IsNullOrWhiteSpace(session.Title) ? null : session.Title)));
+        }
+
+        return new FleetDirectoryResult("paired", null, null, null, null,
+            [.. machines.OrderBy(static machine => machine.Online ? 0 : 1).ThenBy(static machine => machine.Name, StringComparer.CurrentCultureIgnoreCase)],
+            [.. sessions.OrderByDescending(static session => session.UpdatedAt, StringComparer.Ordinal).Take(500)]);
+    }
+
+    // The state of a session a machine lists (sessions.list), as the directory of a server names it.
+    private static string PairedSessionState(string state) => state switch
+    {
+        "working" => FleetSessionStates.Running,
+        "waiting" => FleetSessionStates.RequiresAction,
+        "archived" => FleetSessionStates.Archived,
+        _ => FleetSessionStates.Idle,
+    };
 
     internal static FleetServerView View(FleetServerConnection connection, IReadOnlyList<SpaceDescriptor> spaces)
     {
@@ -743,6 +790,19 @@ internal sealed record FleetServerDeviceResult(string Status, FleetDeviceView? D
 /// <param name="LinkId">The link of the server; null unlinks the space.</param>
 internal sealed record FleetServerSpaceRequest(string ExpectedEpoch, string SpaceId, string? LinkId);
 
+/// <summary>A machine paired with this computer, as the directory reads it while no server is linked.</summary>
+/// <param name="Id">Its device id.</param>
+/// <param name="Name">The name it was paired with.</param>
+/// <param name="State">Its connection state.</param>
+/// <param name="Listing">What this computer last read of it.</param>
+internal sealed record FleetPairedMachine(string Id, string Name, RemoteMachineState State, RemoteListing Listing)
+{
+    /// <summary>Reads a paired machine from its host.</summary>
+    /// <param name="host">The host of the machine.</param>
+    /// <returns>The machine.</returns>
+    internal static FleetPairedMachine Of(RemoteSessionHost host) => new(host.Machine.DeviceId, host.Machine.Name, host.State, host.Listing);
+}
+
 /// <summary>A machine of the directory.</summary>
 /// <param name="Id">Its device id.</param>
 /// <param name="Name">Its name.</param>
@@ -776,7 +836,9 @@ internal sealed record FleetSessionView(string Id, string MachineId, string Stat
     int Turns, int Tokens, bool CanOpen, string? Title = null);
 
 /// <summary>The directory of a server.</summary>
-/// <param name="Status"><c>ok</c>, <c>no_server</c>, <c>stale_epoch</c> or <c>unavailable</c>.</param>
+/// <param name="Status">
+/// <c>ok</c>, <c>paired</c> (no server: the machines paired with this computer), <c>no_server</c>, <c>stale_epoch</c> or <c>unavailable</c>.
+/// </param>
 /// <param name="LinkId">The link.</param>
 /// <param name="Url">The address of the server.</param>
 /// <param name="Organization">The name of its organization.</param>
