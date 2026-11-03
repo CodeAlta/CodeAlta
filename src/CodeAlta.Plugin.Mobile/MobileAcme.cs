@@ -33,50 +33,46 @@ internal sealed class MobileAcmeException : Exception
 
 /// <summary>
 /// A client of ACME (RFC 8555), the protocol of Let's Encrypt, for one certificate of a domain name at a time: the authority checks this
-/// computer with a challenge of the type the caller answers (<c>tls-alpn-01</c>, which it reads with TLS on port 443 of the name, RFC
-/// 8737), and gives the certificate and its key.
+/// computer with the challenge <c>tls-alpn-01</c>, which it reads with TLS on port 443 of the name (RFC 8737), and gives the
+/// certificate and its key.
 /// </summary>
 internal sealed class MobileAcme
 {
     /// <summary>The directory of Let's Encrypt.</summary>
     internal static Uri LetsEncrypt => new("https://acme-v02.api.letsencrypt.org/directory");
 
-    /// <summary>The challenge Let's Encrypt reads with TLS on port 443 of the name, ALPN <c>acme-tls/1</c> (RFC 8737).</summary>
-    internal const string TlsAlpnChallenge = "tls-alpn-01";
+    // The challenge Let's Encrypt reads with TLS on port 443 of the name, ALPN acme-tls/1 (RFC 8737).
+    private const string TlsAlpnChallenge = "tls-alpn-01";
 
     private static readonly TimeSpan Patience = TimeSpan.FromMinutes(2);
 
     private readonly HttpClient _http;
     private readonly Uri _directory;
-    private readonly Func<TimeSpan, CancellationToken, Task> _delay;
     private string? _nonce;
 
     /// <summary>Creates the client of a directory.</summary>
     /// <param name="http">The client of the requests.</param>
     /// <param name="directory">The directory of the authority.</param>
-    /// <param name="delay">How the client waits between two readings of a state: the tests wait less.</param>
-    internal MobileAcme(HttpClient http, Uri directory, Func<TimeSpan, CancellationToken, Task>? delay = null)
+    internal MobileAcme(HttpClient http, Uri directory)
     {
         ArgumentNullException.ThrowIfNull(http);
         ArgumentNullException.ThrowIfNull(directory);
         _http = http;
         _directory = directory;
-        _delay = delay ?? Task.Delay;
     }
 
     /// <summary>Asks a certificate for a domain name.</summary>
     /// <param name="identifier">The name (<c>pulsar.example.com</c>) the certificate is for.</param>
     /// <param name="accountKey">The key of the account, P-256; the account is made when <paramref name="accountUrl"/> is null.</param>
     /// <param name="accountUrl">The account made before, or null.</param>
-    /// <param name="challenge">The type of the challenge the caller answers, such as <see cref="TlsAlpnChallenge"/>.</param>
     /// <param name="answer">
-    /// Gives the token of the challenge and its key authorization (the token and the thumbprint of the account): the caller answers with
-    /// them until the certificate is given.
+    /// Gives the key authorization of the challenge (its token and the thumbprint of the account): the caller answers with it until the
+    /// certificate is given.
     /// </param>
     /// <param name="cancellationToken">Stops the request.</param>
     /// <returns>The certificate.</returns>
     /// <exception cref="MobileAcmeException">The authority gave no certificate; the message says why.</exception>
-    internal async Task<MobileAcmeCertificate> IssueAsync(string identifier, ECDsa accountKey, string? accountUrl, string challenge, Action<string, string> answer, CancellationToken cancellationToken)
+    internal async Task<MobileAcmeCertificate> IssueAsync(string identifier, ECDsa accountKey, string? accountUrl, Action<string> answer, CancellationToken cancellationToken)
     {
         ArgumentException.ThrowIfNullOrEmpty(identifier);
         ArgumentNullException.ThrowIfNull(accountKey);
@@ -98,7 +94,7 @@ internal sealed class MobileAcme
 
             foreach (var authorization in Urls(order, "authorizations"))
             {
-                await AuthorizeAsync(authorization, challenge, signer, directory, answer, cancellationToken).ConfigureAwait(false);
+                await AuthorizeAsync(authorization, signer, directory, answer, cancellationToken).ConfigureAwait(false);
             }
 
             using var key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
@@ -138,8 +134,7 @@ internal sealed class MobileAcme
         SHA256.HashData(Encoding.UTF8.GetBytes(keyAuthorization), value.AsSpan(2));
         request.CertificateExtensions.Add(new X509Extension(new Oid(AcmeIdentifierOid), value, critical: true));
         using var made = request.CreateSelfSigned(DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow.AddDays(7));
-        // A key made in memory is carried through PKCS#12 once: the TLS of Windows refuses an ephemeral one.
-        return X509CertificateLoader.LoadPkcs12(made.Export(X509ContentType.Pkcs12), null);
+        return MobileTls.Persistable(made);
     }
 
     /// <summary>The OID of the extension <c>acmeIdentifier</c> (RFC 8737).</summary>
@@ -161,7 +156,7 @@ internal sealed class MobileAcme
     }
 
     /// <summary>Base64url without padding, as JOSE writes it.</summary>
-    internal static string Base64Url(ReadOnlySpan<byte> bytes) => Convert.ToBase64String(bytes).TrimEnd('=').Replace('+', '-').Replace('/', '_');
+    internal static string Base64Url(ReadOnlySpan<byte> bytes) => System.Buffers.Text.Base64Url.EncodeToString(bytes);
 
     // The request of the certificate: the name in the alternative names, which is what Let's Encrypt reads.
     private static byte[] SigningRequest(string identifier, ECDsa key)
@@ -174,23 +169,23 @@ internal sealed class MobileAcme
     }
 
     // Answers the challenge of an authorization and waits until the authority read it.
-    private async Task AuthorizeAsync(Uri url, string type, Signer signer, Directory directory, Action<string, string> answer, CancellationToken cancellationToken)
+    private async Task AuthorizeAsync(Uri url, Signer signer, Directory directory, Action<string> answer, CancellationToken cancellationToken)
     {
         JsonObject authorization;
         using (var read = await PostAsync(url, null, signer, directory, cancellationToken).ConfigureAwait(false))
             authorization = await JsonAsync(read, cancellationToken).ConfigureAwait(false);
         if (Text(authorization, "status") == "valid") return;
-        var challenge = (authorization["challenges"] as JsonArray)?.OfType<JsonObject>().FirstOrDefault(item => Text(item, "type") == type)
-            ?? throw new MobileAcmeException($"The authority offers no check of the type {type} for this name.");
+        var challenge = (authorization["challenges"] as JsonArray)?.OfType<JsonObject>().FirstOrDefault(static item => Text(item, "type") == TlsAlpnChallenge)
+            ?? throw new MobileAcmeException($"The authority offers no check of the type {TlsAlpnChallenge} for this name.");
         var token = Text(challenge, "token") ?? throw new MobileAcmeException("The challenge of the authority has no token.");
-        answer(token, token + "." + Thumbprint(signer.Key));
+        answer(token + "." + Thumbprint(signer.Key));
         using (await PostAsync(Url(challenge, "url"), new JsonObject(), signer, directory, cancellationToken).ConfigureAwait(false))
         {
         }
 
         authorization = await WaitAsync(url, signer, directory, static state => state is "valid" or "invalid" or "deactivated" or "expired" or "revoked", cancellationToken).ConfigureAwait(false);
         if (Text(authorization, "status") == "valid") return;
-        var failed = (authorization["challenges"] as JsonArray)?.OfType<JsonObject>().FirstOrDefault(item => Text(item, "type") == type);
+        var failed = (authorization["challenges"] as JsonArray)?.OfType<JsonObject>().FirstOrDefault(static item => Text(item, "type") == TlsAlpnChallenge);
         throw new MobileAcmeException("Let's Encrypt could not check this computer" + Problem(failed?["error"]));
     }
 
@@ -205,7 +200,7 @@ internal sealed class MobileAcme
             if (ended(Text(value, "status"))) return value;
             if (DateTimeOffset.UtcNow > deadline) throw new MobileAcmeException("Let's Encrypt did not answer in time.");
             var wait = read.Headers.RetryAfter?.Delta is { } delta && delta > TimeSpan.Zero && delta < TimeSpan.FromSeconds(10) ? delta : TimeSpan.FromSeconds(1);
-            await _delay(wait, cancellationToken).ConfigureAwait(false);
+            await Task.Delay(wait, cancellationToken).ConfigureAwait(false);
         }
     }
 

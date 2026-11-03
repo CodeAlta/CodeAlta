@@ -1,4 +1,5 @@
 using System.Buffers;
+using System.Net.Security;
 using System.Security.Cryptography.X509Certificates;
 using Microsoft.AspNetCore.Connections;
 
@@ -15,8 +16,11 @@ namespace CodeAlta.Plugin.Mobile;
 /// <param name="FixUrl">The page that fixes the state, when there is one.</param>
 internal sealed record MobileProviderStatus(string State, string? Url, string Detail, string? FixUrl = null)
 {
+    /// <summary>Gets a value indicating whether the provider is at a step that runs (publishing, a sign-in): no problem, only a wait.</summary>
+    public bool Working { get; init; }
+
     /// <summary>A provider that publishes the view, with what it does now.</summary>
-    internal static MobileProviderStatus Pending(string detail) => new("pending", null, detail);
+    internal static MobileProviderStatus Pending(string detail) => new("pending", null, detail) { Working = true };
 
     /// <summary>A provider that serves nothing: the plugin is off.</summary>
     internal static MobileProviderStatus Stopped { get; } = new("stopped", null, "The mobile view is not served.");
@@ -36,11 +40,10 @@ internal sealed record MobileListen(int Port, IMobileServerTls? Tls);
 /// </summary>
 internal interface IMobileServerTls
 {
-    /// <summary>The certificate a handshake gets.</summary>
-    /// <param name="serverName">The name the client asked for (SNI), or null.</param>
+    /// <summary>The certificate, with its chain, a handshake gets.</summary>
     /// <param name="acme">Whether the client asked for <c>acme-tls/1</c>: Let's Encrypt checks this computer.</param>
-    /// <returns>The certificate, with its chain; null when there is none for that handshake (it fails).</returns>
-    (X509Certificate2 Certificate, X509Certificate2Collection Chain)? Certificate(string? serverName, bool acme);
+    /// <returns>The context of the certificate; null when there is none for that handshake (it fails).</returns>
+    SslStreamCertificateContext? Context(bool acme);
 }
 
 /// <summary>What the plugin gives a provider.</summary>
@@ -81,7 +84,7 @@ internal interface IMobileProvider : IAsyncDisposable
     MobileListen Listen(MobileSettings settings);
 
     /// <summary>Why settings cannot work with this provider, or null: checked before they are saved.</summary>
-    string? Refusal(MobileSettings settings);
+    string? Refusal(MobileSettings settings) => null;
 
     /// <summary>Publishes the view the server serves; called with the server listening as <see cref="Listen"/> says.</summary>
     /// <returns>What the provider does now.</returns>
@@ -92,7 +95,7 @@ internal interface IMobileProvider : IAsyncDisposable
 
     /// <summary>Runs an action the tab offers for a state of the provider (<c>signin-github</c>…).</summary>
     /// <returns>Whether the provider knows the action.</returns>
-    Task<bool> ActAsync(string action, CancellationToken cancellationToken);
+    Task<bool> ActAsync(string action, CancellationToken cancellationToken) => Task.FromResult(false);
 }
 
 /// <summary>Helpers of the TLS of a server that serves HTTPS itself.</summary>
@@ -109,6 +112,12 @@ internal static class MobileTls
     {
         if (AsksAcme(clientHello.IsSingleSegment ? clientHello.FirstSpan : clientHello.ToArray())) connection.Items[AcmeItem] = true;
     }
+
+    /// <summary>
+    /// The certificate with its key kept: a key read from PEM or made in memory is ephemeral, which the TLS of Windows refuses, so it is
+    /// carried through PKCS#12 once.
+    /// </summary>
+    internal static X509Certificate2 Persistable(X509Certificate2 certificate) => X509CertificateLoader.LoadPkcs12(certificate.Export(X509ContentType.Pkcs12), null);
 
     /// <summary>Whether a connection asked for <see cref="AcmeProtocol"/>.</summary>
     internal static bool IsAcme(ConnectionContext? connection) => connection?.Items.TryGetValue(AcmeItem, out var value) == true && value is true;

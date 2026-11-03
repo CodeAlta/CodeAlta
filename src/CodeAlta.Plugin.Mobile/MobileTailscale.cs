@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using System.Globalization;
 using System.Text.Json;
 
@@ -167,65 +166,21 @@ internal sealed class MobileTailscale(IMobileTailscaleCli cli)
 internal sealed class MobileTailscaleCli : IMobileTailscaleCli
 {
     private static readonly TimeSpan Patience = TimeSpan.FromSeconds(15);
-    private readonly string? _path = Find();
+    private readonly string? _path = MobileCommandLine.Find("tailscale", OperatingSystem.IsWindows()
+        ? [Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "Tailscale", "tailscale.exe")]
+        : OperatingSystem.IsMacOS()
+            ? ["/Applications/Tailscale.app/Contents/MacOS/Tailscale", "/usr/local/bin/tailscale", "/opt/homebrew/bin/tailscale"]
+            : ["/usr/bin/tailscale", "/usr/local/bin/tailscale"]);
 
     /// <inheritdoc />
     public bool IsInstalled => _path is not null;
 
     /// <inheritdoc />
-    public async Task<MobileCliResult> RunAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
+    /// <remarks>A command that waits (Serve not enabled on the tailnet waits for the admin) is stopped after a while.</remarks>
+    public Task<MobileCliResult> RunAsync(IReadOnlyList<string> args, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(args);
-        if (_path is null) return new(-1, "Tailscale is not installed.");
-        var info = new ProcessStartInfo(_path) { RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false, CreateNoWindow = true };
-        foreach (var arg in args) info.ArgumentList.Add(arg);
-        using var process = Process.Start(info) ?? throw new InvalidOperationException("tailscale did not start.");
-        // The streams are read to their end whatever happens: a command that waits (Serve not enabled on the tailnet waits
-        // for the admin) is stopped after a while, and what it printed still says why.
-        var output = process.StandardOutput.ReadToEndAsync(CancellationToken.None);
-        var errors = process.StandardError.ReadToEndAsync(CancellationToken.None);
-        using var patience = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        patience.CancelAfter(Patience);
-        var timedOut = false;
-        try
-        {
-            await process.WaitForExitAsync(patience.Token).ConfigureAwait(false);
-        }
-        catch (OperationCanceledException)
-        {
-            try { process.Kill(entireProcessTree: true); }
-            catch (InvalidOperationException) { }
-
-            if (cancellationToken.IsCancellationRequested) throw;
-            timedOut = true;
-        }
-
-        var text = await output.ConfigureAwait(false) + await errors.ConfigureAwait(false);
-        return new(timedOut ? -1 : process.ExitCode, text, timedOut);
-    }
-
-    private static string? Find()
-    {
-        var name = OperatingSystem.IsWindows() ? "tailscale.exe" : "tailscale";
-        foreach (var folder in (Environment.GetEnvironmentVariable("PATH") ?? "").Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries))
-        {
-            try
-            {
-                var candidate = Path.Combine(folder.Trim('"'), name);
-                if (File.Exists(candidate)) return candidate;
-            }
-            catch (ArgumentException)
-            {
-                // A folder of the path that is no path.
-            }
-        }
-
-        string[] usual = OperatingSystem.IsWindows()
-            ? [Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "Tailscale", "tailscale.exe")]
-            : OperatingSystem.IsMacOS()
-                ? ["/Applications/Tailscale.app/Contents/MacOS/Tailscale", "/usr/local/bin/tailscale", "/opt/homebrew/bin/tailscale"]
-                : ["/usr/bin/tailscale", "/usr/local/bin/tailscale"];
-        return usual.FirstOrDefault(File.Exists);
+        return _path is null ? Task.FromResult(new MobileCliResult(-1, "Tailscale is not installed.")) : MobileCommandLine.RunAsync(_path, args, Patience, cancellationToken);
     }
 }
 
@@ -287,9 +242,6 @@ internal sealed class MobileTailscaleProvider(IMobileTailscaleCli cli, IMobilePr
 
         _published = null;
     }
-
-    /// <inheritdoc />
-    public Task<bool> ActAsync(string action, CancellationToken cancellationToken) => Task.FromResult(false);
 
     /// <inheritdoc />
     public ValueTask DisposeAsync() => ValueTask.CompletedTask;

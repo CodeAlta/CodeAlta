@@ -242,11 +242,13 @@ public sealed class MobilePlugin : PluginBase
         if (Interlocked.Exchange(ref _server, null) is { } server) await server.DisposeAsync().ConfigureAwait(false);
     }
 
+    private static readonly MobileProviderStatus Publishing = MobileProviderStatus.Pending("Publishing the mobile view…");
+
     // Has the provider publish the view the server serves; with the gate held.
     private async Task PublishAsync(CancellationToken cancellationToken)
     {
         var provider = _provider!;
-        _state = _state with { Provider = MobileProviderStatus.Pending("Publishing the mobile view…") };
+        _state = _state with { Provider = Publishing };
         await ChangedAsync().ConfigureAwait(false);
         MobileProviderStatus status;
         try
@@ -284,7 +286,7 @@ public sealed class MobilePlugin : PluginBase
         }
     }
 
-    // Has the provider publish again: it was installed, signed in, or what kept phones out was fixed since.
+    // Has the provider publish again: the settings changed, it was installed, signed in, or what kept phones out was fixed since.
     private async Task<MobileStatus> RetryAsync(CancellationToken cancellationToken)
     {
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
@@ -379,7 +381,7 @@ public sealed class MobilePlugin : PluginBase
                 await StartServerAsync(CancellationToken.None).ConfigureAwait(false);
             }
 
-            _state = _state with { Provider = MobileProviderStatus.Pending("Publishing the mobile view…") };
+            _state = _state with { Provider = Publishing };
             // The answer is the state of the change itself, read before the provider publishes: one that answers at once would otherwise
             // give the outcome of the publication to some calls and not to others.
             view = Settings();
@@ -389,27 +391,9 @@ public sealed class MobilePlugin : PluginBase
             _gate.Release();
         }
 
-        _ = Tasks.Run("mobile-publish", RepublishAsync, new PluginTaskOptions { SessionRetentionIndependent = true, Description = "Publishes the mobile view." });
+        _ = Tasks.Run("mobile-publish", async ct => await RetryAsync(ct).ConfigureAwait(false), new PluginTaskOptions { SessionRetentionIndependent = true, Description = "Publishes the mobile view." });
         await ChangedAsync().ConfigureAwait(false);
         return view;
-    }
-
-    // Has the provider of now publish the view, once the settings changed or a provider asked for it.
-    private async ValueTask RepublishAsync(CancellationToken cancellationToken)
-    {
-        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
-        try
-        {
-            if (_stopped || _provider is null) return;
-            if (_server is not null) await PublishAsync(cancellationToken).ConfigureAwait(false);
-            else _state = _state with { Provider = new MobileProviderStatus("failed", null, "The mobile view does not listen on this computer, so it is not published.") };
-        }
-        finally
-        {
-            _gate.Release();
-        }
-
-        await ChangedAsync().ConfigureAwait(false);
     }
 
     // Pushes what changed four times a second, and a comment every 15 s so that proxies keep the streams open.
@@ -506,7 +490,7 @@ public sealed class MobilePlugin : PluginBase
     }
 
     private MobileProviderView View(MobileState state)
-        => new(_provider?.Id ?? _settings.Mode, state.Provider.State, state.Provider.Url, state.Provider.Detail, state.Provider.FixUrl);
+        => new(_provider?.Id ?? _settings.Mode, state.Provider.State, state.Provider.Url, state.Provider.Detail, state.Provider.FixUrl, state.Provider.Working);
 
     // The address phones open while the view is served.
     private static string? ServedUrl(MobileState state)
@@ -540,7 +524,7 @@ public sealed class MobilePlugin : PluginBase
             GetState = _ => _state switch
             {
                 var state when ServedUrl(state) is not null => new PluginButtonState { Tone = PluginStatusTone.Success, Tooltip = $"Mobile: served at {state.Provider.Url}" },
-                { Server: "starting" } or { Provider.State: "pending" or "signing-in" } => new PluginButtonState { Badge = PluginButtonBadge.Busy, Tooltip = "Mobile: starting" },
+                { Server: "starting" } or { Provider.Working: true } => new PluginButtonState { Badge = PluginButtonBadge.Busy, Tooltip = "Mobile: starting" },
                 _ => new PluginButtonState { Badge = PluginButtonBadge.Dot, Tooltip = "Mobile: phones cannot connect" },
             },
         };
@@ -708,7 +692,8 @@ internal sealed record MobileEmpty;
 /// <param name="Url">The address phones open, while the view is served.</param>
 /// <param name="Detail">A line for people.</param>
 /// <param name="FixUrl">The page that fixes the state, when there is one.</param>
-internal sealed record MobileProviderView(string Id, string State, string? Url, string Detail, string? FixUrl);
+/// <param name="Working">Whether the provider is at a step that runs: the pages wait, with no problem shown.</param>
+internal sealed record MobileProviderView(string Id, string State, string? Url, string Detail, string? FixUrl, bool Working);
 
 /// <summary>What the Mobile tab shows.</summary>
 /// <param name="Server">What the server does.</param>

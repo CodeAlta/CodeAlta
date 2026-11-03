@@ -6,7 +6,7 @@ import { mobileView, qrPath, quietZone, readStatus, type MobileStatus } from "./
 
 const serving = (overrides: Partial<MobileStatus> = {}, provider: Partial<MobileStatus["provider"]> = {}): MobileStatus => ({
   server: "listening", port: 51234, serverDetail: null,
-  provider: { id: "tailscale", state: "serving", url: "https://pc.tail1.ts.net:8443", detail: "Published on the tailnet.", fixUrl: null, ...provider },
+  provider: { id: "tailscale", state: "serving", url: "https://pc.tail1.ts.net:8443", detail: "Published on the tailnet.", fixUrl: null, working: false, ...provider },
   connectUrl: "https://pc.tail1.ts.net:8443/#k=secret", address: "https://pc.tail1.ts.net:8443", qr: ["101", "010", "111"], ...overrides,
 });
 
@@ -44,8 +44,8 @@ test("through Dev Tunnels: the code of the tunnel, no word of Tailscale, the sig
   assert.deepEqual([missing.intent, missing.fix, missing.retry], ["danger", { label: "Install Dev Tunnels", url: "https://learn.microsoft.com/dev-tunnels" }, true]);
   assert.deepEqual(mobileView(tunnel(out, { state: "failed", url: null, detail: "devtunnel host did not start: boom" })).problems.map(problem => [problem.title, problem.detail]),
     [["The Dev Tunnel did not open.", "devtunnel host did not start: boom"]]);
-  assert.equal(mobileView(tunnel(out, { state: "signing-in", url: null })).waiting, "Waiting for the sign-in in the browser…");
-  assert.equal(mobileView(tunnel(out, { state: "pending", url: null })).waiting, "Dev Tunnels is opening the tunnel.");
+  assert.equal(mobileView(tunnel(out, { state: "signing-in", working: true, url: null })).waiting, "Waiting for the sign-in in the browser…");
+  assert.equal(mobileView(tunnel(out, { state: "pending", working: true, url: null })).waiting, "Dev Tunnels is opening the tunnel.");
   assert.equal(mobileView(serving()).instruction, "Scan it with the camera of the phone. The phone must be signed in to the same tailnet.");
 });
 
@@ -56,7 +56,7 @@ test("on the Internet: the code of the name, Let's Encrypt said while it works, 
   assert.deepEqual([mobileView(internet()).code?.address, mobileView(internet()).problems, mobileView(internet()).instruction],
     ["https://pulsar.example.com", [], "Scan it with the camera of the phone."]);
   const out = { connectUrl: null, address: null, qr: null };
-  assert.equal(mobileView(internet(out, { state: "pending", url: null })).waiting, "Getting a certificate from Let's Encrypt…");
+  assert.equal(mobileView(internet(out, { state: "pending", working: true, url: null })).waiting, "Getting a certificate from Let's Encrypt…");
   const failed = mobileView(internet(out, { state: "certificate-failed", url: null, detail: "Timeout during connect. Check port 443." })).problems;
   assert.deepEqual(failed.map(problem => [problem.title, problem.detail, problem.retry]), [["Let's Encrypt gave no certificate.", "Timeout during connect. Check port 443.", true]]);
   assert.deepEqual(["address-missing", "dns-missing"].map(state => mobileView(internet(out, { state, url: null, detail: "why" })).problems[0].title),
@@ -69,7 +69,7 @@ test("a provider or a state the tab has no words for: the plugin's line under a 
     [["provider", "The phone page could not be published.", "The pigeon got lost.", true]]);
   assert.deepEqual(mobileView(serving({}, { id: "pigeons" })).problems, []);
   assert.equal(mobileView(serving({}, { id: "pigeons" })).instruction, "Scan it with the camera of the phone.");
-  assert.equal(mobileView(serving({ connectUrl: null, address: null, qr: null }, { id: "pigeons", state: "pending" })).waiting, "The phone page is starting.");
+  assert.equal(mobileView(serving({ connectUrl: null, address: null, qr: null }, { id: "pigeons", state: "pending", working: true })).waiting, "The phone page is starting.");
 });
 
 test("served: the code, the address and nothing wrong", () => {
@@ -81,8 +81,8 @@ test("served: the code, the address and nothing wrong", () => {
 });
 
 test("starting: a line that says so, and no problem", () => {
-  assert.equal(mobileView(serving({ server: "starting", connectUrl: null, address: null, qr: null }, { state: "pending" })).waiting, "The phone page is starting.");
-  const pending = mobileView(serving({ connectUrl: null, address: null, qr: null }, { state: "pending" }));
+  assert.equal(mobileView(serving({ server: "starting", connectUrl: null, address: null, qr: null }, { state: "pending", working: true })).waiting, "The phone page is starting.");
+  const pending = mobileView(serving({ connectUrl: null, address: null, qr: null }, { state: "pending", working: true }));
   assert.equal(pending.waiting, "Tailscale is starting to publish the page.");
   assert.deepEqual(pending.problems, []);
 });
@@ -170,7 +170,7 @@ test("Try again asks the provider again and gives the new status, and an action 
   const status = await createMobileApi(fake.rpc).retry();
   assert.deepEqual(fake.calls, ["mobile.retry"]);
   assert.equal(status.provider.state, "serving");
-  fake.answer(serving({}, { id: "devtunnel", state: "signing-in" }));
+  fake.answer(serving({}, { id: "devtunnel", state: "signing-in", working: true }));
   const acted = await createMobileApi(fake.rpc).act("signin-github");
   assert.deepEqual(fake.calls, ["mobile.retry", "mobile.act"], "an action of the provider goes through mobile.act");
   assert.equal(acted.provider.state, "signing-in");

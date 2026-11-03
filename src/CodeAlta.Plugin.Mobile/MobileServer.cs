@@ -105,15 +105,15 @@ internal sealed partial class MobileServer : IAsyncDisposable
                 kestrel.ListenAnyIP(_options.Port, listen => listen.UseHttps(new HttpsConnectionAdapterOptions
                 {
                     TlsClientHelloBytesCallback = MobileTls.Observe,
-                    ServerCertificateSelector = (connection, name) => tls.Certificate(name, MobileTls.IsAcme(connection))?.Certificate,
+                    ServerCertificateSelector = (connection, _) => tls.Context(MobileTls.IsAcme(connection))?.TargetCertificate,
                     OnAuthenticate = (connection, ssl) =>
                     {
                         var acme = MobileTls.IsAcme(connection);
-                        if (tls.Certificate(null, acme) is not { } chosen) return;
+                        if (tls.Context(acme) is not { } chosen) return;
                         // The chain goes with the certificate: a phone that is given the certificate alone may not find who signed it.
                         ssl.ServerCertificateSelectionCallback = null;
                         ssl.ServerCertificate = null;
-                        ssl.ServerCertificateContext = SslStreamCertificateContext.Create(chosen.Certificate, chosen.Chain, offline: true);
+                        ssl.ServerCertificateContext = chosen;
                         if (acme) ssl.ApplicationProtocols = [new SslApplicationProtocol(MobileTls.AcmeProtocol)];
                     },
                 }));

@@ -5,16 +5,6 @@ using System.Threading.Channels;
 
 namespace CodeAlta.Plugin.Mobile;
 
-/// <summary>What the plugin knows of the Dev Tunnel of the mobile view.</summary>
-/// <param name="State">
-/// <c>pending</c>, <c>not-installed</c>, <c>not-signed-in</c>, <c>signing-in</c>, <c>serving</c>, <c>failed</c>, <c>stopped</c>, or
-/// <c>unused</c> (behind Tailscale).
-/// </param>
-/// <param name="Url">The address of the view, while the tunnel serves it.</param>
-/// <param name="Detail">A line for people.</param>
-/// <param name="FixUrl">The page that fixes the state, when there is one.</param>
-internal sealed record MobileDevTunnelStatus(string State, string? Url, string Detail, string? FixUrl = null);
-
 /// <summary>A command of the Dev Tunnels command line that runs until it is stopped: <c>devtunnel host</c>.</summary>
 internal interface IMobileHostedProcess : IAsyncDisposable
 {
@@ -46,7 +36,8 @@ internal interface IMobileDevTunnelCli
 }
 
 /// <summary>
-/// Publishes the mobile view through a Dev Tunnel of Microsoft: a tunnel of the user's account, made once with anonymous access and kept
+/// Publishes the mobile view through a Dev Tunnel of Microsoft (states: <c>not-installed</c>, <c>not-signed-in</c>, <c>serving</c>,
+/// <c>failed</c>): a tunnel of the user's account, made once with anonymous access and kept
 /// (so that its address, which phones keep, does not change), with the port of the view, hosted by <c>devtunnel host</c> while the plugin
 /// runs. The phone needs nothing but a browser; the pairing token of the QR code is what lets it in, as behind Tailscale.
 /// </summary>
@@ -58,11 +49,12 @@ internal sealed partial class MobileDevTunnel(IMobileDevTunnelCli cli, Action<st
     private static readonly TimeSpan Patience = TimeSpan.FromSeconds(30);
 
     /// <summary>What a publication gave: the state, the tunnel to keep in the settings, and the host process that serves it.</summary>
-    internal sealed record Published(MobileDevTunnelStatus Status, string? TunnelId, IMobileHostedProcess? Host);
+    internal sealed record Published(MobileProviderStatus Status, string? TunnelId, IMobileHostedProcess? Host);
 
     /// <summary>
-    /// Publishes <c>http://127.0.0.1:{port}</c>: checks the command line and the sign-in, makes the tunnel when there is none (or the one
-    /// kept is gone), gives it the port, and hosts it until the process of the outcome is disposed.
+    /// Publishes <c>http://127.0.0.1:{port}</c>: checks the command line and the sign-in, makes the tunnel when there is none, gives it the
+    /// port (a tunnel kept that is gone, or that this account cannot change, refuses it: a new one is made), and hosts it until the process
+    /// of the outcome is disposed.
     /// </summary>
     /// <param name="port">The port of the plugin's server on the loopback address.</param>
     /// <param name="tunnelId">The tunnel the settings keep, or null.</param>
@@ -74,7 +66,7 @@ internal sealed partial class MobileDevTunnel(IMobileDevTunnelCli cli, Action<st
         if (!IsSignedIn(user)) return new(NotSignedIn, tunnelId, null);
 
         var made = false;
-        if (tunnelId is null || await cli.RunAsync(["show", tunnelId], Patience, cancellationToken).ConfigureAwait(false) is not { ExitCode: 0, TimedOut: false })
+        if (tunnelId is null)
         {
             (tunnelId, var failure) = await CreateAsync(cancellationToken).ConfigureAwait(false);
             if (failure is not null) return new(failure, null, null);
@@ -84,7 +76,7 @@ internal sealed partial class MobileDevTunnel(IMobileDevTunnelCli cli, Action<st
         var added = await AddPortAsync(tunnelId!, port, cancellationToken).ConfigureAwait(false);
         if (added is not null && !made)
         {
-            // The tunnel kept may be one this account cannot change (made with another account, or expired): a new one is made, once.
+            // The tunnel kept may be gone, or one this account cannot change (made with another account): a new one is made, once.
             log?.Invoke($"Mobile: the Dev Tunnel {tunnelId} refused the port; a new tunnel is made.");
             (tunnelId, var failure) = await CreateAsync(cancellationToken).ConfigureAwait(false);
             if (failure is not null) return new(failure, null, null);
@@ -108,7 +100,7 @@ internal sealed partial class MobileDevTunnel(IMobileDevTunnelCli cli, Action<st
     }
 
     // Makes a tunnel with anonymous access: its id, or why there is none.
-    private async Task<(string? TunnelId, MobileDevTunnelStatus? Failure)> CreateAsync(CancellationToken cancellationToken)
+    private async Task<(string? TunnelId, MobileProviderStatus? Failure)> CreateAsync(CancellationToken cancellationToken)
     {
         var created = await cli.RunAsync(["create", "--allow-anonymous"], Patience, cancellationToken).ConfigureAwait(false);
         var tunnelId = created is { ExitCode: 0, TimedOut: false } ? TunnelIdIn(created.Output) : null;
@@ -117,10 +109,10 @@ internal sealed partial class MobileDevTunnel(IMobileDevTunnelCli cli, Action<st
     }
 
     // Gives the tunnel the port of the view over HTTP; a port it has already is fine. Null when it has it, otherwise why not.
-    private async Task<MobileDevTunnelStatus?> AddPortAsync(string tunnelId, int port, CancellationToken cancellationToken)
+    private async Task<MobileProviderStatus?> AddPortAsync(string tunnelId, int port, CancellationToken cancellationToken)
     {
         var added = await cli.RunAsync(["port", "create", tunnelId, "-p", port.ToString(CultureInfo.InvariantCulture), "--protocol", "http"], Patience, cancellationToken).ConfigureAwait(false);
-        if (added is { ExitCode: 0, TimedOut: false } || Regex.IsMatch(added.Output, "already exists|conflict", RegexOptions.IgnoreCase)) return null;
+        if (added is { ExitCode: 0, TimedOut: false } || PortExists().IsMatch(added.Output)) return null;
         return Failed("devtunnel port create", added);
     }
 
@@ -153,11 +145,10 @@ internal sealed partial class MobileDevTunnel(IMobileDevTunnelCli cli, Action<st
         return IsSignedIn(await cli.RunAsync(["user", "show"], Patience, cancellationToken).ConfigureAwait(false));
     }
 
-    private static MobileDevTunnelStatus NotSignedIn { get; } = new("not-signed-in", null, "Sign in to Dev Tunnels with a Microsoft or GitHub account: CodeAlta opens the page of the account.");
+    private static MobileProviderStatus NotSignedIn { get; } = new("not-signed-in", null, "Sign in to Dev Tunnels with a Microsoft or GitHub account: CodeAlta opens the page of the account.");
 
     /// <summary>Whether a command of the command line failed because the sign-in is missing or no longer accepted.</summary>
-    internal static bool NeedsSignIn(string output)
-        => Regex.IsMatch(output, @"login required|not logged in|unauthorized|\b401\b|token (?:is )?(?:expired|revoked|invalid)|sign in again", RegexOptions.IgnoreCase);
+    internal static bool NeedsSignIn(string output) => SignInRefused().IsMatch(output);
 
     /// <summary>Whether <c>devtunnel user show</c> says a user is signed in.</summary>
     internal static bool IsSignedIn(MobileCliResult result)
@@ -206,7 +197,7 @@ internal sealed partial class MobileDevTunnel(IMobileDevTunnelCli cli, Action<st
         return (url is not null && host.IsRunning ? url : null, output.ToString());
     }
 
-    private MobileDevTunnelStatus Failed(string command, MobileCliResult result)
+    private MobileProviderStatus Failed(string command, MobileCliResult result)
     {
         log?.Invoke($"Mobile: {command} ended with {result.ExitCode}: {result.Output.Trim()}");
         // A sign-in that the account no longer accepts (revoked, expired) while the command line still keeps it: the person signs in again.
@@ -228,6 +219,12 @@ internal sealed partial class MobileDevTunnel(IMobileDevTunnelCli cli, Action<st
 
     private static string LastLine(string text) => text.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).LastOrDefault() ?? "";
 
+    [GeneratedRegex("already exists|conflict", RegexOptions.IgnoreCase)]
+    private static partial Regex PortExists();
+
+    [GeneratedRegex(@"login required|not logged in|unauthorized|\b401\b|token (?:is )?(?:expired|revoked|invalid)|sign in again", RegexOptions.IgnoreCase)]
+    private static partial Regex SignInRefused();
+
     [GeneratedRegex(@"Tunnel ID\s*:\s*(\S+)", RegexOptions.IgnoreCase)]
     private static partial Regex TunnelIdLine();
 
@@ -242,57 +239,17 @@ internal sealed class MobileDevTunnelCli : IMobileDevTunnelCli
     public bool IsInstalled => Find() is not null;
 
     /// <inheritdoc />
-    public async Task<MobileCliResult> RunAsync(IReadOnlyList<string> args, TimeSpan patience, CancellationToken cancellationToken)
+    public Task<MobileCliResult> RunAsync(IReadOnlyList<string> args, TimeSpan patience, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(args);
-        if (Find() is not { } path) return new(-1, "devtunnel is not installed.");
-        using var process = Process.Start(Info(path, args)) ?? throw new InvalidOperationException("devtunnel did not start.");
-        var output = process.StandardOutput.ReadToEndAsync(CancellationToken.None);
-        var errors = process.StandardError.ReadToEndAsync(CancellationToken.None);
-        using var wait = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        wait.CancelAfter(patience);
-        var timedOut = false;
-        try
-        {
-            await process.WaitForExitAsync(wait.Token).ConfigureAwait(false);
-        }
-        catch (OperationCanceledException)
-        {
-            try { process.Kill(entireProcessTree: true); }
-            catch (InvalidOperationException) { }
-
-            if (cancellationToken.IsCancellationRequested) throw;
-            timedOut = true;
-        }
-
-        var text = await output.ConfigureAwait(false) + await errors.ConfigureAwait(false);
-        return new(timedOut ? -1 : process.ExitCode, text, timedOut);
+        return Find() is { } path ? MobileCommandLine.RunAsync(path, args, patience, cancellationToken) : Task.FromResult(new MobileCliResult(-1, "devtunnel is not installed."));
     }
 
     /// <inheritdoc />
     public async Task<int> RunInWindowAsync(IReadOnlyList<string> args, TimeSpan patience, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(args);
-        if (Find() is not { } path) return -1;
-        // Not redirected and with a window: the command line has a console, which the account picker of Windows takes as its parent.
-        var info = new ProcessStartInfo(path) { UseShellExecute = false, CreateNoWindow = false };
-        foreach (var arg in args) info.ArgumentList.Add(arg);
-        using var process = Process.Start(info) ?? throw new InvalidOperationException("devtunnel did not start.");
-        using var wait = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        wait.CancelAfter(patience);
-        try
-        {
-            await process.WaitForExitAsync(wait.Token).ConfigureAwait(false);
-            return process.ExitCode;
-        }
-        catch (OperationCanceledException)
-        {
-            try { process.Kill(entireProcessTree: true); }
-            catch (InvalidOperationException) { }
-
-            if (cancellationToken.IsCancellationRequested) throw;
-            return -1;
-        }
+        return Find() is { } path ? await MobileCommandLine.RunInWindowAsync(path, args, patience, cancellationToken).ConfigureAwait(false) : -1;
     }
 
     /// <inheritdoc />
@@ -300,41 +257,19 @@ internal sealed class MobileDevTunnelCli : IMobileDevTunnelCli
     {
         ArgumentNullException.ThrowIfNull(args);
         var path = Find() ?? throw new InvalidOperationException("devtunnel is not installed.");
-        var process = Process.Start(Info(path, args)) ?? throw new InvalidOperationException("devtunnel did not start.");
+        var process = Process.Start(MobileCommandLine.Info(path, args, redirected: true)) ?? throw new InvalidOperationException("devtunnel did not start.");
         return new Hosted(process);
     }
 
-    private static ProcessStartInfo Info(string path, IReadOnlyList<string> args)
-    {
-        var info = new ProcessStartInfo(path) { RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false, CreateNoWindow = true };
-        foreach (var arg in args) info.ArgumentList.Add(arg);
-        return info;
-    }
-
+    // Looked for at each call: an install is seen without a restart. Beside the path, where winget, Homebrew and the install script put it.
     private static string? Find()
     {
-        var name = OperatingSystem.IsWindows() ? "devtunnel.exe" : "devtunnel";
-        foreach (var folder in (Environment.GetEnvironmentVariable("PATH") ?? "").Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries))
-        {
-            try
-            {
-                var candidate = Path.Combine(folder.Trim('"'), name);
-                if (File.Exists(candidate)) return candidate;
-            }
-            catch (ArgumentException)
-            {
-                // A folder of the path that is no path.
-            }
-        }
-
-        // Where winget, Homebrew and the install script put it, for a CodeAlta started before the path was changed.
         var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-        string[] usual = OperatingSystem.IsWindows()
-            ? [Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Microsoft", "WinGet", "Links", name)]
+        return MobileCommandLine.Find("devtunnel", OperatingSystem.IsWindows()
+            ? [Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Microsoft", "WinGet", "Links", "devtunnel.exe")]
             : OperatingSystem.IsMacOS()
                 ? ["/opt/homebrew/bin/devtunnel", "/usr/local/bin/devtunnel", Path.Combine(home, "bin", "devtunnel")]
-                : [Path.Combine(home, "bin", "devtunnel"), "/usr/local/bin/devtunnel", "/usr/bin/devtunnel"];
-        return usual.FirstOrDefault(File.Exists);
+                : [Path.Combine(home, "bin", "devtunnel"), "/usr/local/bin/devtunnel", "/usr/bin/devtunnel"]);
     }
 
     // The process of devtunnel host: its lines, out and err, go to one channel; disposing it ends the process.
@@ -404,9 +339,10 @@ internal sealed class MobileDevTunnelProvider(IMobileDevTunnelCli cli, IMobilePr
     /// <summary>The id of the provider in the settings.</summary>
     internal const string ProviderId = "devtunnel";
 
-    // The host of the tunnel while it serves, and the port it serves; the sign-in that runs.
+    // The host of the tunnel while it serves; the tunnel and the port it was given, taken off it when the view moves to another port; the
+    // sign-in that runs.
     private IMobileHostedProcess? _host;
-    private int _hostedPort;
+    private (string TunnelId, int Port)? _published;
     private CancellationTokenSource? _signIn;
 
     /// <inheritdoc />
@@ -415,18 +351,15 @@ internal sealed class MobileDevTunnelProvider(IMobileDevTunnelCli cli, IMobilePr
     /// <inheritdoc />
     public MobileListen Listen(MobileSettings settings) => new(settings.Port, null);
 
-    /// <inheritdoc />
-    public string? Refusal(MobileSettings settings) => null;
-
     private MobileDevTunnel Tunnel => new(cli, host.Log);
 
     /// <inheritdoc />
     public async Task<MobileProviderStatus> PublishAsync(CancellationToken cancellationToken)
     {
-        // Try again drops a sign-in that has not ended.
-        if (Interlocked.Exchange(ref _signIn, null) is { } signIn) await signIn.CancelAsync().ConfigureAwait(false);
-        await StopHostAsync(cancellationToken).ConfigureAwait(false);
+        // Try again drops a sign-in that has not ended, and the host of before.
+        await UnpublishAsync(cancellationToken).ConfigureAwait(false);
         var settings = host.Settings;
+        if (_published is { } before && before.Port != settings.Port) await RemovePortAsync(before, cancellationToken).ConfigureAwait(false);
         MobileDevTunnel.Published published;
         try
         {
@@ -434,7 +367,7 @@ internal sealed class MobileDevTunnelProvider(IMobileDevTunnelCli cli, IMobilePr
         }
         catch (Exception exception) when (exception is InvalidOperationException or IOException or System.ComponentModel.Win32Exception)
         {
-            published = new(new MobileDevTunnelStatus("failed", null, "Dev Tunnels could not be asked: " + exception.Message), settings.TunnelId, null);
+            published = new(new MobileProviderStatus("failed", null, "Dev Tunnels could not be asked: " + exception.Message), settings.TunnelId, null);
         }
 
         // The tunnel made now is kept: its address, which phones keep, stays the same at the next start.
@@ -443,19 +376,19 @@ internal sealed class MobileDevTunnelProvider(IMobileDevTunnelCli cli, IMobilePr
         if (published.Host is { } hosted)
         {
             _host = hosted;
-            _hostedPort = settings.Port;
+            _published = (published.TunnelId!, settings.Port);
             host.Run("mobile-tunnel", "Watches the Dev Tunnel of the mobile view.", ct => WatchAsync(hosted, ct));
         }
 
-        var status = published.Status;
-        return new MobileProviderStatus(status.State, status.Url, status.Detail, status.FixUrl);
+        return published.Status;
     }
 
     /// <inheritdoc />
+    /// <remarks>The tunnel and its address stay in the account, for the next start.</remarks>
     public async Task UnpublishAsync(CancellationToken cancellationToken)
     {
         if (Interlocked.Exchange(ref _signIn, null) is { } signIn) await signIn.CancelAsync().ConfigureAwait(false);
-        await StopHostAsync(cancellationToken).ConfigureAwait(false);
+        if (Interlocked.Exchange(ref _host, null) is { } hosted) await hosted.DisposeAsync().ConfigureAwait(false);
     }
 
     /// <inheritdoc />
@@ -467,7 +400,7 @@ internal sealed class MobileDevTunnelProvider(IMobileDevTunnelCli cli, IMobilePr
         Interlocked.Exchange(ref _signIn, run)?.Cancel();
         _ = host.ReportAsync(new MobileProviderStatus("signing-in", null, !github && OperatingSystem.IsWindows()
             ? "Choose your account in the window of Windows that opens, then come back here."
-            : "Sign in in the browser that opens, then come back here."));
+            : "Sign in in the browser that opens, then come back here.") { Working = true });
         host.Run("mobile-devtunnel-signin", "Signs in to Dev Tunnels.", async _ => await SignInAsync(github, run).ConfigureAwait(false));
         return Task.FromResult(true);
     }
@@ -523,18 +456,14 @@ internal sealed class MobileDevTunnelProvider(IMobileDevTunnelCli cli, IMobilePr
         await host.ReportAsync(new MobileProviderStatus("failed", null, "The Dev Tunnel stopped" + (last.Length > 0 ? ": " + last : "."))).ConfigureAwait(false);
     }
 
-    // Stops the host; the tunnel and its address stay in the account, for the next start. A port the view left is taken off it.
-    private async Task StopHostAsync(CancellationToken cancellationToken)
+    // Takes off the tunnel the port the view left; what fails is left, the tunnel serves the new one.
+    private async Task RemovePortAsync((string TunnelId, int Port) left, CancellationToken cancellationToken)
     {
-        if (Interlocked.Exchange(ref _host, null) is not { } hosted) return;
-        await hosted.DisposeAsync().ConfigureAwait(false);
-        if (_hostedPort != host.Settings.Port && host.Settings.TunnelId is { } tunnelId)
+        _published = null;
+        try { await Tunnel.RemovePortAsync(left.TunnelId, left.Port, cancellationToken).ConfigureAwait(false); }
+        catch (Exception exception) when (exception is InvalidOperationException or IOException or System.ComponentModel.Win32Exception)
         {
-            try { await Tunnel.RemovePortAsync(tunnelId, _hostedPort, cancellationToken).ConfigureAwait(false); }
-            catch (Exception exception) when (exception is InvalidOperationException or IOException or System.ComponentModel.Win32Exception)
-            {
-                host.Log($"Mobile: the old port of the Dev Tunnel could not be removed: {exception.Message}");
-            }
+            host.Log($"Mobile: the old port of the Dev Tunnel could not be removed: {exception.Message}");
         }
     }
 

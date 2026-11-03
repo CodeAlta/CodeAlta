@@ -1,4 +1,5 @@
 using System.Net;
+using System.Net.Security;
 using System.Net.Sockets;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
@@ -39,8 +40,8 @@ internal sealed class MobileInternetProvider : IMobileProvider, IMobileServerTls
     private readonly IMobileProviderHost _host;
     private readonly MobileInternetOptions _options;
     private readonly Lock _gate = new();
-    private (X509Certificate2 Certificate, X509Certificate2Collection Chain)? _certificate;
-    private (string Host, X509Certificate2 Certificate)? _challenge;
+    private SslStreamCertificateContext? _certificate;
+    private SslStreamCertificateContext? _challenge;
     private CancellationTokenSource? _work;
 
     /// <summary>Creates the provider.</summary>
@@ -86,7 +87,7 @@ internal sealed class MobileInternetProvider : IMobileProvider, IMobileServerTls
         {
             lock (_gate) _certificate = kept;
             _host.Run("mobile-internet-renew", "Renews the certificate of the mobile view.", ct => RenewLoopAsync(name, work, ct));
-            return Serving(name, kept.Certificate);
+            return Serving(name, kept.TargetCertificate);
         }
 
         // Let's Encrypt takes a while: the certificate is asked in the background, and its outcome reported.
@@ -104,16 +105,9 @@ internal sealed class MobileInternetProvider : IMobileProvider, IMobileServerTls
     public async Task UnpublishAsync(CancellationToken cancellationToken) => await StopWorkAsync().ConfigureAwait(false);
 
     /// <inheritdoc />
-    public Task<bool> ActAsync(string action, CancellationToken cancellationToken) => Task.FromResult(false);
-
-    /// <inheritdoc />
-    public (X509Certificate2 Certificate, X509Certificate2Collection Chain)? Certificate(string? serverName, bool acme)
+    public SslStreamCertificateContext? Context(bool acme)
     {
-        lock (_gate)
-        {
-            if (acme) return _challenge is { } challenge ? (challenge.Certificate, []) : null;
-            return _certificate;
-        }
+        lock (_gate) return acme ? _challenge : _certificate;
     }
 
     /// <inheritdoc />
@@ -142,7 +136,7 @@ internal sealed class MobileInternetProvider : IMobileProvider, IMobileServerTls
             {
                 await Task.Delay(RenewalCheck, linked.Token).ConfigureAwait(false);
                 X509Certificate2? current;
-                lock (_gate) current = _certificate?.Certificate;
+                lock (_gate) current = _certificate?.TargetCertificate;
                 if (current is not null && !EndsSoon(current)) continue;
                 var outcome = await IssueAsync(name, linked.Token).ConfigureAwait(false);
                 if (outcome.State != "serving") _host.Log($"Mobile: the certificate of {name} could not be renewed: {outcome.Detail}");
@@ -164,16 +158,16 @@ internal sealed class MobileInternetProvider : IMobileProvider, IMobileServerTls
         {
             using var account = Account(out var accountUrl);
             var acme = new MobileAcme(_options.AcmeHttp, _options.AcmeDirectory);
-            var issued = await acme.IssueAsync(name, account, accountUrl, MobileAcme.TlsAlpnChallenge, (_, keyAuthorization) =>
+            var issued = await acme.IssueAsync(name, account, accountUrl, keyAuthorization =>
             {
-                var answer = MobileAcme.TlsAlpnCertificate(name, keyAuthorization);
-                lock (_gate) _challenge = (name, answer);
+                var answer = SslStreamCertificateContext.Create(MobileAcme.TlsAlpnCertificate(name, keyAuthorization), [], offline: true);
+                lock (_gate) _challenge = answer;
             }, cancellationToken).ConfigureAwait(false);
             Save(name, account, issued);
-            var loaded = Load(name) ?? throw new MobileAcmeException("The certificate of Let's Encrypt could not be read.");
-            lock (_gate) _certificate = loaded;
+            var made = ContextOf(issued.ChainPem, issued.KeyPem);
+            lock (_gate) _certificate = made;
             _host.Log($"Mobile: Let's Encrypt gave a certificate for {name}.");
-            return Serving(name, loaded.Certificate);
+            return Serving(name, made.TargetCertificate);
         }
         catch (MobileAcmeException exception)
         {
@@ -193,41 +187,44 @@ internal sealed class MobileInternetProvider : IMobileProvider, IMobileServerTls
 
     private string Folder => Path.Combine(_host.Folder, ProviderId);
 
-    private string File(string name) => Path.Combine(Folder, name);
+    private string PathOf(string name) => Path.Combine(Folder, name);
 
     // The certificate kept for the name, when it is valid for it and far from its end; null otherwise.
-    private (X509Certificate2 Certificate, X509Certificate2Collection Chain)? Load(string name)
+    private SslStreamCertificateContext? Load(string name)
     {
-        var chainPath = File(name + ".pem");
-        var keyPath = File(name + ".key");
-        if (!global::System.IO.File.Exists(chainPath) || !global::System.IO.File.Exists(keyPath)) return null;
+        var chainPath = PathOf(name + ".pem");
+        var keyPath = PathOf(name + ".key");
+        if (!File.Exists(chainPath) || !File.Exists(keyPath)) return null;
         try
         {
-            using var pem = X509Certificate2.CreateFromPemFile(chainPath, keyPath);
-            // A key read from PEM is ephemeral, which the TLS of Windows refuses: the certificate is carried through PKCS#12 once.
-            var certificate = X509CertificateLoader.LoadPkcs12(pem.Export(X509ContentType.Pkcs12), null);
-            if (!certificate.MatchesHostname(name) || EndsSoon(certificate) || DateTime.UtcNow < certificate.NotBefore.ToUniversalTime())
-            {
-                certificate.Dispose();
-                return null;
-            }
-
-            var all = new X509Certificate2Collection();
-            all.ImportFromPemFile(chainPath);
-            var chain = new X509Certificate2Collection();
-            foreach (var other in all)
-            {
-                if (other.RawDataMemory.Span.SequenceEqual(certificate.RawDataMemory.Span)) other.Dispose();
-                else chain.Add(other);
-            }
-
-            return (certificate, chain);
+            var context = ContextOf(File.ReadAllText(chainPath), File.ReadAllText(keyPath));
+            var certificate = context.TargetCertificate;
+            if (certificate.MatchesHostname(name) && !EndsSoon(certificate) && DateTime.UtcNow >= certificate.NotBefore.ToUniversalTime()) return context;
+            certificate.Dispose();
+            return null;
         }
         catch (Exception exception) when (exception is CryptographicException or IOException or ArgumentException)
         {
             _host.Log($"Mobile: the certificate kept for {name} could not be read: {exception.Message}");
             return null;
         }
+    }
+
+    // The certificate of a PEM chain and its key, with the rest of the chain: a phone given the certificate alone may not find who signed it.
+    private static SslStreamCertificateContext ContextOf(string chainPem, string keyPem)
+    {
+        X509Certificate2 certificate;
+        using (var pem = X509Certificate2.CreateFromPem(chainPem, keyPem)) certificate = MobileTls.Persistable(pem);
+        var all = new X509Certificate2Collection();
+        all.ImportFromPem(chainPem);
+        var chain = new X509Certificate2Collection();
+        foreach (var other in all)
+        {
+            if (other.RawDataMemory.Span.SequenceEqual(certificate.RawDataMemory.Span)) other.Dispose();
+            else chain.Add(other);
+        }
+
+        return SslStreamCertificateContext.Create(certificate, chain, offline: true);
     }
 
     // The key of the account of Let's Encrypt kept, or a new one.
@@ -237,7 +234,7 @@ internal sealed class MobileInternetProvider : IMobileProvider, IMobileServerTls
         var key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
         try
         {
-            if (JsonNode.Parse(global::System.IO.File.ReadAllText(File("account.json"))) is JsonObject saved && saved["key"] is JsonValue text && text.TryGetValue<string>(out var pkcs8))
+            if (JsonNode.Parse(File.ReadAllText(PathOf("account.json"))) is JsonObject saved && saved["key"] is JsonValue text && text.TryGetValue<string>(out var pkcs8))
             {
                 key.ImportPkcs8PrivateKey(Convert.FromBase64String(pkcs8), out _);
                 url = saved["url"] is JsonValue kept && kept.TryGetValue<string>(out var value) ? value : null;
@@ -262,10 +259,10 @@ internal sealed class MobileInternetProvider : IMobileProvider, IMobileServerTls
 
     private void Write(string name, string content)
     {
-        var path = File(name);
+        var path = PathOf(name);
         var temporary = path + ".tmp";
-        global::System.IO.File.WriteAllText(temporary, content);
-        if (!OperatingSystem.IsWindows()) global::System.IO.File.SetUnixFileMode(temporary, UnixFileMode.UserRead | UnixFileMode.UserWrite);
-        global::System.IO.File.Move(temporary, path, overwrite: true);
+        File.WriteAllText(temporary, content);
+        if (!OperatingSystem.IsWindows()) File.SetUnixFileMode(temporary, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+        File.Move(temporary, path, overwrite: true);
     }
 }

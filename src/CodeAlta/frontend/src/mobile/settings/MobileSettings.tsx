@@ -130,13 +130,10 @@ export function MobileSettings({ api }: { api: MobileSettingsApi }) {
     </Card>
     <Card className="appearance-settings" aria-labelledby="mobile-settings-address">
       <h2 id="mobile-settings-address">{t(page.address)}</h2>
-      {!applied
-        ? <><p className="mobile-settings-address" data-unserved="true">{t(page.unserved)}</p>
-          <p className="settings-field-help">{t(page.apply)}</p></>
-        : settings.address
-          ? <p className="mobile-settings-address"><code>{settings.address}</code></p>
-          : <><p className="mobile-settings-address" data-unserved="true">{t(page.unserved)}</p>
-            <p className="settings-field-help">{settings.serverDetail ?? settings.provider.detail}</p></>}
+      {applied && settings.address
+        ? <p className="mobile-settings-address"><code>{settings.address}</code></p>
+        : <><p className="mobile-settings-address" data-unserved="true">{t(page.unserved)}</p>
+          <p className="settings-field-help">{applied ? settings.serverDetail ?? settings.provider.detail : t(page.apply)}</p></>}
     </Card>
     <Card className="appearance-settings" aria-labelledby="mobile-settings-access">
       <h2 id="mobile-settings-access">{t("Access")}</h2>

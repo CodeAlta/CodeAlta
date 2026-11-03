@@ -9,7 +9,7 @@ export const minimumPort = 1024, maximumPort = 65535;
 export type MobileProviderField = "httpsPort" | "host";
 
 /** The fields of each provider. A provider the page does not know has the port of this computer alone. */
-export const providerFields: Readonly<Record<string, readonly MobileProviderField[]>> = {
+const providerFields: Readonly<Record<string, readonly MobileProviderField[]>> = {
   tailscale: ["httpsPort"],
   devtunnel: [],
   internet: ["host"],

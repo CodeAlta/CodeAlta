@@ -302,8 +302,6 @@ public sealed class MobileInternetTests
 
         internal string Url(string path) => $"http://127.0.0.1:{_port}{path}";
 
-        internal MobileAcme Client() => new(new HttpClient(new SocketsHttpHandler { UseProxy = false }), Directory, (_, _) => Task.Delay(10));
-
         internal static async Task<FakeAcme> StartAsync(TestCertificates certificates)
         {
             var port = FreePort.Next();

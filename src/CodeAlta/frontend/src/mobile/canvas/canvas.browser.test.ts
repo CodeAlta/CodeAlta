@@ -18,7 +18,7 @@ const shots = process.env.CODEALTA_SHOTS ?? "";
 const rows = Array.from({ length: 25 }, (_, y) => Array.from({ length: 25 }, (_, x) => ((x * 7 + y * 3) % 5 < 2) || (x < 7 && y < 7) ? "1" : "0").join(""));
 const status = (overrides: Partial<MobileStatus> = {}, provider: Partial<MobileStatus["provider"]> = {}): MobileStatus => ({
   server: "listening", port: 51234, serverDetail: null,
-  provider: { id: "tailscale", state: "serving", url: "https://workstation.tail1234.ts.net:8443", detail: "Published on the tailnet.", fixUrl: null, ...provider },
+  provider: { id: "tailscale", state: "serving", url: "https://workstation.tail1234.ts.net:8443", detail: "Published on the tailnet.", fixUrl: null, working: false, ...provider },
   connectUrl: "https://workstation.tail1234.ts.net:8443/#k=secret", address: "https://workstation.tail1234.ts.net:8443", qr: rows, ...overrides,
 });
 const unreachable = { connectUrl: null, address: null, qr: null };
@@ -132,7 +132,7 @@ test("the Mobile tab shows the code of the phone page, and what keeps a phone ou
     assert.equal(await evaluate("document.querySelectorAll('.mobile-problem[data-problem=server] button').length"), 0);
 
     // While it starts, a quiet line, no problem.
-    await publish(status({ ...unreachable, server: "starting" }, { state: "pending", detail: "" }));
+    await publish(status({ ...unreachable, server: "starting" }, { state: "pending", working: true, detail: "" }));
     await wait("document.querySelector('.mobile-waiting')", "the starting line");
     assert.deepEqual(await text(".mobile-waiting span"), ["The phone page is starting."]);
     assert.equal(await evaluate("document.querySelectorAll('.mobile-problem').length"), 0);

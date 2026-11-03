@@ -18,6 +18,8 @@ export type MobileProviderStatus = Readonly<{
   detail: string;
   /** The page that fixes it, when there is one. */
   fixUrl: string | null;
+  /** Whether it is at a step that runs (publishing, a sign-in): a wait, no problem. */
+  working: boolean;
 }>;
 
 /** The status of the Mobile plugin. */
@@ -51,7 +53,7 @@ export function readStatus(value: unknown): MobileStatus | null {
     ? value.qr as string[] : null;
   return {
     server, port: typeof value.port === "number" ? value.port : 0, serverDetail: text(value.serverDetail),
-    provider: { id, state, url: text(provider.url), detail: text(provider.detail) ?? "", fixUrl: text(provider.fixUrl) },
+    provider: { id, state, url: text(provider.url), detail: text(provider.detail) ?? "", fixUrl: text(provider.fixUrl), working: provider.working === true },
     connectUrl: text(value.connectUrl), address: text(value.address), qr: rows,
   };
 }
@@ -187,7 +189,6 @@ const providers: Readonly<Record<string, ProviderText>> = {
 
 // A state of a provider the tab has no words for: the plugin's line under a general title. The steps that run are no problem.
 const unknownProblem: ProviderProblem = { title: "The phone page could not be published.", retry: true };
-const steps: ReadonlySet<string> = new Set(["pending", "serving", "signing-in"]);
 
 /** What the tab shows for a status. */
 export function mobileView(status: MobileStatus): MobileView {
@@ -202,7 +203,7 @@ export function mobileView(status: MobileStatus): MobileView {
   }
   const provider = status.provider;
   const words: ProviderText | undefined = providers[provider.id];
-  const problem = steps.has(provider.state) ? undefined : words?.problems[provider.state] ?? (provider.state === "stopped" ? undefined : unknownProblem);
+  const problem = provider.working || provider.state === "serving" ? undefined : words?.problems[provider.state] ?? (provider.state === "stopped" ? undefined : unknownProblem);
   if (problem) {
     problems.push({
       key: "provider", intent: problem.danger ? "danger" : "warning", title: problem.title,
