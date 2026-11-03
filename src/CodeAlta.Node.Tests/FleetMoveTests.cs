@@ -163,6 +163,60 @@ public sealed class FleetMoveTests
     }
 
     [TestMethod]
+    public async Task AnotherDevice_NeitherReadsNorResolvesAMoveItDidNotOffer()
+    {
+        await using var fixture = await MoveFixture.StartAsync(TestContext.CancellationToken);
+        var token = TestContext.CancellationToken;
+        // A second machine the node lets move sessions too.
+        await using var other = await fixture.StartSecondNodeAsync("node-b", token);
+        var sessionId = await fixture.CreateViewerSessionAsync(null);
+        fixture.Write(fixture.ViewerProject, "readme.md", "dirty\n");
+        FleetMoveResult first;
+        await using (var client = await fixture.ConnectAsync(DevicePermissions.View | DevicePermissions.Drive | DevicePermissions.Move, token))
+            first = await fixture.ViewerSender.MoveAsync(sessionId, "move-guarded", new LoseChannelBeforeCommit(client.AsMoveTarget()), "test-node", fixture.NodeRoute,
+                false, token);
+        Assert.AreEqual(SessionMoveState.Offered, first.Status, first.Message);
+        var store = fixture.Fleet.Service.MoveReceiver.Moves.Store;
+        Assert.AreEqual(SessionMoveState.Prepared, store.Read("move-guarded", SessionMoveRole.Target)!.State, "The node prepared the move, not decided yet.");
+
+        // The other machine asks about the viewer's move: it is refused, and the move stays undecided.
+        using (var identity = DeviceIdentity.LoadOrCreate(other.Node.Host.CatalogOptions))
+        await using (var intruder = await FleetNodeClient.ConnectAsync(new PairedMachineStore(other.Node.Host.CatalogOptions.FleetRoot).Find("test-node")!, identity, null, token))
+        {
+            var resolved = await Assert.ThrowsExactlyAsync<FleetException>(() => intruder.AsMoveTarget().StatusAsync(new FleetMoveStatusParams("move-guarded", Resolve: true), token));
+            Assert.AreEqual(FleetErrorCodes.Forbidden, resolved.Error.Code);
+            var read = await Assert.ThrowsExactlyAsync<FleetException>(() => intruder.AsMoveTarget().StatusAsync(new FleetMoveStatusParams("move-guarded"), token));
+            Assert.AreEqual(FleetErrorCodes.Forbidden, read.Error.Code);
+            // A move the node never took is decided by the one that asks: its offer is refused afterwards.
+            var unknown = await intruder.AsMoveTarget().StatusAsync(new FleetMoveStatusParams("move-never-taken", Resolve: true), token);
+            Assert.AreEqual(SessionMoveState.Aborted, unknown.Outcome);
+            Assert.IsEmpty(unknown.Records);
+        }
+
+        Assert.IsNull(store.ReadDecision("move-guarded"), "The move was not decided by another device.");
+        Assert.AreEqual(SessionMoveState.Prepared, store.Read("move-guarded", SessionMoveRole.Target)!.State);
+
+        // The node's owner reads every move of its node.
+        using (var nodeIdentity = DeviceIdentity.LoadOrCreate(fixture.Node.Host.CatalogOptions))
+        await using (var owner = await FleetNodeClient.ConnectAsOwnerAsync(fixture.Fleet.Addresses, nodeIdentity, token))
+        {
+            var status = await owner.AsMoveTarget().StatusAsync(new FleetMoveStatusParams("move-guarded"), token);
+            Assert.IsNull(status.Outcome);
+            Assert.AreEqual(SessionMoveState.Prepared, status.Records.Single(record => record.Role == SessionMoveRole.Target).State);
+        }
+
+        // The device that offered it goes on with it.
+        await using (var client = await fixture.ConnectAsync(DevicePermissions.View | DevicePermissions.Drive | DevicePermissions.Move, token))
+        {
+            var resumed = await fixture.ViewerSender.ResumeAsync(client.AsMoveTarget(), fixture.NodeRoute, token);
+            Assert.AreEqual(SessionMoveState.Finished, resumed.Single().Status, resumed.Single().Message);
+        }
+
+        Assert.IsNotNull(await fixture.Node.Host.RuntimeService.GetSessionWorktreeAsync(sessionId), "The node installed the session.");
+        Assert.IsTrue(fixture.ViewerHost.RuntimeService.Relinquishments.Read(sessionId)!.IsRelinquished);
+    }
+
+    [TestMethod]
     public async Task WithoutTheMovePermission_TheMoveIsRefused_AndNothingIsFrozen()
     {
         await using var fixture = await MoveFixture.StartAsync(TestContext.CancellationToken);
@@ -257,6 +311,24 @@ public sealed class FleetMoveTests
 
         public Task<FleetMoveStepResult> CompleteAsync(FleetMoveRef move, CancellationToken cancellationToken)
             => throw new FleetConnectionClosedException(new FleetConnectionCloseInfo(FleetErrorCodes.ConnectionClosed, "lost", ClosedLocally: false));
+    }
+
+    // A target prepared the move, then the channel fails before the commit reaches it: the move is not decided.
+    private sealed class LoseChannelBeforeCommit(IFleetMoveTarget inner) : IFleetMoveTarget
+    {
+        public Task<FleetMoveOfferResult> OfferAsync(FleetMoveOffer offer, CancellationToken cancellationToken) => inner.OfferAsync(offer, cancellationToken);
+
+        public Task<FleetMoveChunkResult> TransferAsync(FleetMoveChunk chunk, CancellationToken cancellationToken) => inner.TransferAsync(chunk, cancellationToken);
+
+        public Task<FleetMoveStepResult> PrepareAsync(FleetMoveRef move, CancellationToken cancellationToken) => inner.PrepareAsync(move, cancellationToken);
+
+        public Task<FleetMoveStepResult> CommitAsync(FleetMoveRef move, CancellationToken cancellationToken) => throw Lost();
+
+        public Task<FleetMoveStatus> StatusAsync(FleetMoveStatusParams parameters, CancellationToken cancellationToken) => throw Lost();
+
+        public Task<FleetMoveStepResult> CompleteAsync(FleetMoveRef move, CancellationToken cancellationToken) => throw Lost();
+
+        private static FleetConnectionClosedException Lost() => new(new FleetConnectionCloseInfo(FleetErrorCodes.ConnectionClosed, "lost", ClosedLocally: false));
     }
 }
 

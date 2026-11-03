@@ -264,10 +264,30 @@ public sealed class FleetMoveReceiver
     /// <summary>Says the outcome of a move, deciding it first when asked to.</summary>
     /// <param name="moveId">The move.</param>
     /// <param name="resolve">Decides a move not decided yet: it is aborted, and what was prepared goes.</param>
+    /// <param name="callerId">
+    /// The device that asks: only the one that offered the move (its source, or the relay that forwards it) is answered,
+    /// and any for a move this machine has no record of (the source of an offer that never arrived decides it was not
+    /// taken). Null for the node's own owner control, answered for every move.
+    /// </param>
     /// <param name="cancellationToken">Stops the recovery of the move.</param>
     /// <returns>The outcome and the records of this machine.</returns>
-    public async Task<FleetMoveStatus> StatusAsync(string moveId, bool resolve, CancellationToken cancellationToken)
+    /// <exception cref="FleetException">The move id is not valid, or another device offered that move.</exception>
+    public async Task<FleetMoveStatus> StatusAsync(string moveId, bool resolve, string? callerId, CancellationToken cancellationToken)
     {
+        if (callerId is not null)
+        {
+            if (ReadIncoming(RequireMoveId(moveId)) is { } incoming)
+            {
+                if (!string.Equals(incoming.CallerId, callerId, StringComparison.Ordinal))
+                    throw new FleetException(FleetErrorCodes.Forbidden, null, "Another device offered this move.");
+            }
+            // The records of a move whose offer is gone (completed) or of a move this machine gives are its own.
+            else if (Records(Moves.Store, moveId).Count > 0)
+            {
+                throw new FleetException(FleetErrorCodes.Forbidden, null, "This move was not offered by this device.");
+            }
+        }
+
         var decision = resolve ? await Arbiter.ResolveAsync(moveId, cancellationToken).ConfigureAwait(false) : Moves.Store.ReadDecision(moveId);
         // The target ends its side by the same decision: it installs a committed move, removes what an aborted one prepared.
         if (resolve) await Moves.SettleTargetAsync(moveId, Arbiter, cancellationToken).ConfigureAwait(false);
@@ -349,18 +369,22 @@ public sealed class FleetMoveReceiver
         return Path.Combine(Moves.Store.BundlesDirectory, moveId);
     }
 
-    private FleetMoveIncoming RequireIncoming(string moveId, string callerId)
+    private static string RequireMoveId(string moveId)
     {
         try
         {
             SessionMoveTransactionStore.ValidateMoveId(moveId);
+            return moveId;
         }
         catch (ArgumentException exception)
         {
             throw new FleetException(FleetErrorCodes.InvalidParams, null, exception.Message);
         }
+    }
 
-        var incoming = ReadIncoming(moveId) ?? throw new FleetException(FleetErrorCodes.InvalidRequest, null, $"No offer of the move {moveId} was taken.");
+    private FleetMoveIncoming RequireIncoming(string moveId, string callerId)
+    {
+        var incoming = ReadIncoming(RequireMoveId(moveId)) ?? throw new FleetException(FleetErrorCodes.InvalidRequest, null, $"No offer of the move {moveId} was taken.");
         if (!string.Equals(incoming.CallerId, callerId, StringComparison.Ordinal))
             throw new FleetException(FleetErrorCodes.Forbidden, null, "Another device offered this move.");
         return incoming;
@@ -411,7 +435,7 @@ public sealed class FleetMoveReceiver
         public Task<FleetMoveStepResult> CommitAsync(FleetMoveRef move, CancellationToken cancellationToken) => receiver.CommitAsync(move.MoveId, callerId, cancellationToken);
 
         public Task<FleetMoveStatus> StatusAsync(FleetMoveStatusParams parameters, CancellationToken cancellationToken)
-            => receiver.StatusAsync(parameters.MoveId, parameters.Resolve, cancellationToken);
+            => receiver.StatusAsync(parameters.MoveId, parameters.Resolve, callerId, cancellationToken);
 
         public Task<FleetMoveStepResult> CompleteAsync(FleetMoveRef move, CancellationToken cancellationToken) => receiver.CompleteAsync(move.MoveId, callerId, cancellationToken);
     }
