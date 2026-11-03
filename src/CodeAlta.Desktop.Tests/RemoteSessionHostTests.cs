@@ -106,6 +106,14 @@ public sealed class RemoteSessionHostTests
         Assert.AreEqual("test-node", row.MachineName);
         Assert.AreEqual(WorkspaceService.MachineScopePrefix + machine.DeviceId, row.ProjectId);
         Assert.AreEqual(machine.DeviceId, merged.Projects.Single(project => project.Id == row.ProjectId).MachineId);
+
+        // A session this process lists keeps its row, unless it gave the session to the machine that lists it (a move).
+        var copy = new WorkspaceSession(created.SessionId, "Moved", "/here", "scripted", DateTimeOffset.UtcNow, "Moved", false, null, "project", "here", null,
+            DateTimeOffset.UtcNow);
+        var local = new WorkspaceSnapshot(true, [], [copy], false, false, false);
+        Assert.IsNull(WorkspaceService.WithRemoteSessions(local, [host], _ => false).Sessions.Single(session => session.Id == created.SessionId).MachineId);
+        Assert.AreEqual(machine.DeviceId, WorkspaceService.WithRemoteSessions(local, [host], _ => true).Sessions.Single(session => session.Id == created.SessionId).MachineId,
+            "The read-only copy of a moved session gives its row to the live one.");
     }
 
     [TestMethod]

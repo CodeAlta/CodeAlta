@@ -53,9 +53,13 @@ internal sealed class DesktopFleet : IAsyncDisposable
         _membership = membership;
         _deviceName = deviceName;
         _store = new PairedMachineStore(fleetRoot);
-        _createHost = createHost ?? (static (machine, identity) => new RemoteSessionHost(machine, token => FleetNodeClient.ConnectAsync(machine, identity, token),
-            localDeviceId: identity.DeviceId));
+        // A machine may give this computer a session over the channel: the methods of a target are served on it.
+        _createHost = createHost ?? ((machine, identity) => new RemoteSessionHost(machine,
+            token => FleetNodeClient.ConnectAsync(machine, identity, Moves?.Serve(machine), token), localDeviceId: identity.DeviceId));
     }
+
+    /// <summary>Gets or sets the moves of sessions between this computer and its machines; set before <see cref="StartAsync"/>.</summary>
+    public DesktopMoves? Moves { get; set; }
 
     /// <summary>Raised when a machine was paired or forgotten, or a machine changed its state or its list of sessions.</summary>
     public event Action? Changed;

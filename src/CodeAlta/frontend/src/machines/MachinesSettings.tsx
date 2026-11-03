@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Button, Callout, Dialog, DialogBody, DialogFooter, NonIdealState, PopoverNext, Tag, TextArea } from "@blueprintjs/core";
+import { Button, Callout, Dialog, DialogBody, DialogFooter, NonIdealState, PopoverNext, Switch, Tag, TextArea } from "@blueprintjs/core";
 import { machines, type MachinePairPreview, type MachineView } from "#neoastra";
 import { AppIcon } from "../AppIcon";
 import { ActivitySpinner } from "../ActivitySpinner";
@@ -8,7 +8,7 @@ import { useShellLanguage } from "../shellLanguage";
 import type { MessageKey } from "../localization";
 import { machineIntent, machineState, machineStateLabel, orderedMachines, pairingLinkOf, pairingProblem, pairingWords } from "./machines";
 
-type MachinesApi = Pick<typeof machines, "list" | "previewPairing" | "pair" | "forget" | "watch">;
+type MachinesApi = Pick<typeof machines, "list" | "previewPairing" | "pair" | "forget" | "watch" | "moveSettings" | "setReceiveMoves">;
 
 /**
  * Settings > Fleet > Machines: the machines this computer is paired with and their state, pairing with another one
@@ -18,6 +18,14 @@ export function MachinesSettings({ epoch, api = machines }: { epoch: string | nu
   const { t } = useShellLanguage();
   const { listing, loading, busy, notice, reload, mutate } = useSettingsEditor(options => api.list({ expectedEpoch: epoch ?? "" }, options), `${epoch}`);
   const [pairing, setPairing] = useState(false);
+  // Whether this computer receives the sessions its machines move here: off until the person turns it on.
+  const [receive, setReceive] = useState<boolean | null>(null);
+  useEffect(() => {
+    if (!epoch) return;
+    const abort = new AbortController();
+    api.moveSettings({ expectedEpoch: epoch }, { signal: abort.signal }).then(value => { if (value.status === "ok") setReceive(value.receiveMoves); }, () => { });
+    return () => abort.abort();
+  }, [api, epoch, listing]);
   // The host says when a machine changes (its state, its sessions, a pairing elsewhere): the list is read again.
   useEffect(() => {
     if (!epoch) return;
@@ -34,10 +42,16 @@ export function MachinesSettings({ epoch, api = machines }: { epoch: string | nu
     actions={<Button intent="primary" icon={<AppIcon name="plus" size={15} />} disabled={!epoch || !listing} onClick={() => setPairing(true)}>{t("Pair a machine…")}</Button>}>
     {!listing ? <SettingsUnavailable loading={loading} icon="remote" title="Machines unavailable" />
       : listing.machines.length === 0 ? <NonIdealState className="machines-empty" icon={<AppIcon name="remote" size={36} />} title={t("No paired machine.")} />
-      : <ul className="machine-list" aria-label={t("Machines")}>
+      : <><ul className="machine-list" aria-label={t("Machines")}>
         {orderedMachines(listing.machines).map(machine => <MachineRow key={machine.id} machine={machine} busy={busy}
           onForget={() => void mutate(async () => api.forget({ expectedEpoch: epoch ?? "", machineId: machine.id }, { timeoutMilliseconds: 30_000 }))} />)}
-      </ul>}
+      </ul>
+      {receive !== null && <div className="machine-receive">
+        <Switch checked={receive} disabled={busy} label={t("Receive moved sessions on this computer")}
+          onChange={event => { const enabled = event.currentTarget.checked; void api.setReceiveMoves({ expectedEpoch: epoch ?? "", enabled })
+            .then(value => { if (value.status === "ok") setReceive(value.receiveMoves); }, () => { }); }} />
+        <small className="muted-text">{t("Sessions your paired machines move here then run on this computer.")}</small>
+      </div>}</>}
     {pairing && epoch && <PairMachineDialog epoch={epoch} api={api} onClose={paired => { setPairing(false); if (paired) reload(); }} />}
   </SettingsPage>;
 }

@@ -1,4 +1,4 @@
-import type { MachinePairPreview, MachinePairResult, MachineView, WorkspaceProject, WorkspaceSession } from "#neoastra";
+import type { MachineMovePreview, MachinePairPreview, MachinePairResult, MachineView, WorkspaceProject, WorkspaceSession } from "#neoastra";
 import type { MessageKey } from "../localization";
 
 /** The connection state of a paired machine, as the host reports it. */
@@ -63,4 +63,47 @@ export function sessionMachineState(session: Pick<WorkspaceSession, "machineId">
   if (!session.machineId) return null;
   const machine = machines.find(value => value.id === session.machineId);
   return machine ? machineState(machine) : "offline";
+}
+
+/** A machine a session can move to: a paired machine, or this computer (`id` null). */
+export interface MoveTarget { id: string | null; name: string; state: MachineState }
+
+/**
+ * Where a session can move: this computer for a session of a paired machine, and the paired machines it does not run
+ * on, online ones first. A machine that is not online is listed, to say why it cannot be chosen.
+ */
+export function moveTargets(session: Pick<WorkspaceSession, "machineId">, machines: readonly MachineView[], thisComputer: string): MoveTarget[] {
+  const targets: MoveTarget[] = session.machineId ? [{ id: null, name: thisComputer, state: "online" }] : [];
+  for (const machine of orderedMachines(machines))
+    if (machine.id !== session.machineId) targets.push({ id: machine.id, name: machine.name, state: machineState(machine) });
+  return targets;
+}
+
+/** Why a session cannot move, or did not, in words: from the status or the code a preview or a move gives; null when nothing stops it. */
+export function moveProblem(status: string | null | undefined, code?: string | null): MessageKey | null {
+  const reason = status === "refused" || status === "aborted" ? code ?? status : status;
+  switch (reason) {
+    case undefined: case null: case "ok": case "accepted": case "finished": return null;
+    case "offered": case "unreachable": case "machine_offline": return "The machine does not answer: the move goes on when it is back, and the session stays read-only meanwhile.";
+    case "busy": case "working": case "queued": return "The session is at work: it moves once it is idle.";
+    case "waiting": case "interaction_pending": return "The session waits for an answer: answer it before it moves.";
+    case "background_running": return "Background jobs of the session run: they end before it moves.";
+    case "project_missing": return "The machine has no project of this repository.";
+    case "receive_disabled": return "This computer does not receive moved sessions.";
+    case "forbidden": return "This computer may not move sessions to that machine.";
+    case "no_remote": return "The repository has no remote: another machine cannot find it.";
+    case "not_movable": case "not_repository": return "Only a session of a project in a git repository moves to another machine.";
+    case "session_exists": return "The session is already on that machine.";
+    case "moving": case "relinquished": return "The session is moving, or moved already.";
+    case "clone_failed": return "The repository could not be cloned there.";
+    case "payload_too_large": case "too_large": return "The work in progress is too large to move.";
+    default: return "The session could not move.";
+  }
+}
+
+/** Whether a preview lets the move start: an idle session, a target that takes it (or clones it when asked), this computer receiving moves. */
+export function moveReady(preview: MachineMovePreview | null, targetIsHere: boolean, clone: boolean): boolean {
+  if (!preview || preview.status !== "ok" || preview.busy) return false;
+  if (targetIsHere && !preview.receiveMoves) return false;
+  return preview.targetStatus === "accepted" || preview.targetCode === "project_missing" && preview.canClone && clone;
 }

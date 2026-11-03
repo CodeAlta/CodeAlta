@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import type { MachineView } from "#neoastra";
-import { isMachineProject, isRemoteSession, machineIntent, machineState, machineStateLabel, orderedMachines, pairingLinkOf, pairingProblem,
-  pairingWords, sessionMachineState } from "./machines";
+import type { MachineMovePreview, MachineView } from "#neoastra";
+import { isMachineProject, isRemoteSession, machineIntent, machineState, machineStateLabel, moveProblem, moveReady, moveTargets, orderedMachines, pairingLinkOf,
+  pairingProblem, pairingWords, sessionMachineState } from "./machines";
 
 const machine = (change: Partial<MachineView> = {}): MachineView => ({ id: "m1", name: "mac-mini", state: "online", os: "macos", version: "4.0.0",
   address: "mac-mini:2585", fingerprint: "ABCD EFGH", words: "apple river stone cloud amber tiger", sessions: 2, lastSeen: null, problem: null,
@@ -50,4 +50,36 @@ test("A remote session names its machine; a session of this computer names none"
   assert.equal(sessionMachineState({ machineId: "m1" }, [machine()]), "online");
   assert.equal(sessionMachineState({ machineId: "gone" }, [machine()]), "offline", "A machine that is no longer paired shows offline.");
   assert.equal(sessionMachineState({ machineId: null }, [machine()]), null);
+});
+
+const preview = (change: Partial<MachineMovePreview> = {}): MachineMovePreview => ({ status: "ok", message: null, busy: null, jobs: [], secrets: [], unpushedCommits: 0,
+  dirty: false, branch: "main", repositoryKey: "github.com/o/r", targetStatus: "accepted", targetCode: null, targetMessage: null, projectName: "r", projectPath: "/r",
+  canClone: false, targetWarnings: [], receiveMoves: true, machineName: "pc", ...change });
+
+test("A session of this computer moves to its machines; one of a machine moves here or to the others", () => {
+  const paired = [machine({ id: "m1", name: "mac" }), machine({ id: "m2", name: "build", state: "offline" })];
+  assert.deepEqual(moveTargets({ machineId: null }, paired, "pc"), [{ id: "m1", name: "mac", state: "online" }, { id: "m2", name: "build", state: "offline" }]);
+  assert.deepEqual(moveTargets({ machineId: "m1" }, paired, "pc").map(target => target.id), [null, "m2"], "This computer first, never the machine it runs on.");
+});
+
+test("A move starts only when the session is idle and the target takes it", () => {
+  assert.equal(moveReady(preview(), false, false), true);
+  assert.equal(moveReady(preview({ busy: "working" }), false, false), false);
+  assert.equal(moveReady(preview({ status: "no_remote" }), false, false), false);
+  assert.equal(moveReady(preview({ receiveMoves: false }), true, false), false, "This computer receives moves only when the person lets it.");
+  assert.equal(moveReady(preview({ receiveMoves: false }), false, false), true, "The setting is about this computer only.");
+  const missing = preview({ targetStatus: "refused", targetCode: "project_missing", canClone: true });
+  assert.equal(moveReady(missing, false, false), false);
+  assert.equal(moveReady(missing, false, true), true, "A target that can clone takes it once the person asks.");
+  assert.equal(moveReady(null, false, false), false);
+});
+
+test("Each refusal of a move has its words", () => {
+  assert.equal(moveProblem("finished"), null);
+  assert.equal(moveProblem("ok"), null);
+  assert.equal(moveProblem("refused", "working"), "The session is at work: it moves once it is idle.");
+  assert.equal(moveProblem("refused", "forbidden"), "This computer may not move sessions to that machine.");
+  assert.equal(moveProblem("aborted", "project_missing"), "The machine has no project of this repository.");
+  assert.equal(moveProblem("offered", "unreachable"), "The machine does not answer: the move goes on when it is back, and the session stays read-only meanwhile.");
+  assert.equal(moveProblem("refused", "something new"), "The session could not move.");
 });

@@ -167,7 +167,8 @@ export const cloudSessions = Object.freeze({ readiness: unavailable, start: unav
   details: unavailable, send: unavailable, continueHere: unavailable });
 export const mcpHost = Object.freeze({ status: unavailable, setEnabled: unavailable, setTailnet: unavailable });
 export const machines = Object.freeze({ list: async () => ({ status: "unavailable", hostEpoch: null, machines: [] }), refresh: async () => ({ status: "unavailable", hostEpoch: null, machines: [] }),
-  previewPairing: unavailable, pair: unavailable, forget: unavailable, newSession: unavailable, watch: async () => (async function* () { })() });
+  previewPairing: unavailable, pair: unavailable, forget: unavailable, newSession: unavailable, watch: async () => (async function* () { })(),
+  moveSettings: unavailable, setReceiveMoves: unavailable, movePreview: unavailable, moveSession: unavailable });
 // A browser preview neither measures nor edits the user's real profile.
 export const storage = Object.freeze({
   readSettings: async () => ({ status: "unavailable", rootPath: null, settings: null, error: null }),

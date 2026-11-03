@@ -64,7 +64,7 @@ internal sealed partial class WorkspaceService
         _readAllSessions = local.ReadSnapshotAsync;
         var projected = ProjectedSnapshot(local.ReadSnapshotAsync);
         _read = async token => WithRemoteSessions(await projected(token).ConfigureAwait(false),
-            [.. hosts.Remotes.OfType<CodeAlta.Desktop.Fleet.RemoteSessionHost>()]);
+            [.. hosts.Remotes.OfType<CodeAlta.Desktop.Fleet.RemoteSessionHost>()], id => host.RuntimeService.Relinquishments.Read(id) is { IsRelinquished: true });
         // A history window is read from the host of its session; its cursor goes back to that host only.
         _readHistory = (sessionId, cursor, token) => hosts.Resolve(sessionId).ReadHistoryPageAsync(sessionId, cursor, token);
         _readHistoryTail = (sessionId, cursor, token) => hosts.Resolve(sessionId).ReadHistoryTailPageAsync(sessionId, cursor, token);

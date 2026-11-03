@@ -26,3 +26,18 @@
   border-radius: 8px; font-size: 10.5px; line-height: 15px; color: var(--muted); background: color-mix(in srgb, var(--muted) 12%, transparent); }
 .session-machine-chip > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .session-machine-chip[data-state="offline"], .session-machine-chip[data-state="unauthorized"] { opacity: .6; }
+
+/* Receiving moved sessions on this computer, below the machines. */
+.machine-receive { max-width: 820px; margin-top: 14px; display: grid; gap: 2px; }
+.machine-receive .bp6-switch { margin: 0; }
+
+/* Move to machine…: the targets, then what the move meets, then its progress. */
+.move-machine-dialog { width: min(560px, calc(100vw - 32px)); }
+.move-machine-targets .bp6-control { margin-bottom: 4px; }
+.move-machine-target { display: inline-flex; align-items: center; gap: 6px; }
+.move-machine-reading { display: flex; align-items: center; gap: 6px; margin: 6px 0; }
+.move-machine-preview { display: grid; gap: 8px; margin-top: 8px; }
+.move-machine-preview p { margin: 0; overflow-wrap: anywhere; }
+.move-machine-preview .bp6-callout code { margin-left: 4px; }
+.move-machine-preview .bp6-callout ul { margin: 4px 0 0; padding-left: 18px; }
+.move-machine-progress { display: grid; gap: 8px; margin-top: 8px; }
