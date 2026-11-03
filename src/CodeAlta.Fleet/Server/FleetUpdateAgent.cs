@@ -442,8 +442,8 @@ public sealed class FleetUpdateAgent : IAsyncDisposable
                 next = Stopped(next, stopped);
             }
 
-            // A newer policy only takes away: it applies even when it cannot be kept, and the instruction it would
-            // allow is kept, with it, before it runs.
+            // A newer policy only takes away: it applies in memory even when it cannot be kept on disk. What it allows
+            // runs only once an instruction it authorizes is kept, with it (AcceptAsync).
             Save(next);
             _state = next;
         }

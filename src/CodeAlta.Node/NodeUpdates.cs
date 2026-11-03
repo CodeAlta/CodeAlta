@@ -157,11 +157,6 @@ internal sealed class NodeUpdates : IAsyncDisposable
         return await Updater(_options.Http ?? ownHttp!).CheckAsync(request, cancellationToken).ConfigureAwait(false);
     }
 
-    /// <summary>Withdraws the switch that waits, if any (a cancelled campaign of the fleet).</summary>
-    /// <param name="reason">Why.</param>
-    /// <exception cref="UpdateException">The state cannot be written.</exception>
-    public void CancelPending(string reason) => _options.Store.CancelPending(reason);
-
     /// <summary>Withdraws the switch that waits only when a requester asked for it (a cancelled campaign of the fleet).</summary>
     /// <param name="reason">Why.</param>
     /// <param name="requestedBy">Who asked for the switch to withdraw.</param>
