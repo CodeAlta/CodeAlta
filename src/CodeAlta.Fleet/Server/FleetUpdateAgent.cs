@@ -66,7 +66,11 @@ public sealed class FleetUpdateAgent : IAsyncDisposable
     private readonly Dictionary<string, FleetConnector> _connectors = new(StringComparer.Ordinal);
     private readonly Channel<bool> _wake = Channel.CreateBounded<bool>(new BoundedChannelOptions(1) { FullMode = BoundedChannelFullMode.DropWrite });
     private readonly CancellationTokenSource _stop = new();
-    private FleetUpdateAgentState _state;
+    private FleetUpdateAgentState _state = new();
+    // Why the checkpoint kept in StatePath does not read; while it does not, the node takes no update of the fleet and
+    // writes nothing over the file, which the owner fixes or deletes.
+    private string? _unreadable;
+    private bool _loaded;
     private Task _loop = Task.CompletedTask;
     private Task? _applying;
     private int _disposed;
@@ -78,7 +82,8 @@ public sealed class FleetUpdateAgent : IAsyncDisposable
     {
         ArgumentNullException.ThrowIfNull(options);
         _options = options;
-        _state = Load(options.StatePath);
+        lock (_gate) Readable();
+        if (_unreadable is { } problem) _options.Log($"The update of the fleet is off: {problem}");
         Reconcile(options.Time.GetUtcNow());
     }
 
@@ -185,15 +190,17 @@ public sealed class FleetUpdateAgent : IAsyncDisposable
         string? conflict;
         lock (_gate)
         {
+            // Without the checkpoint, a replayed manifest would pass again: nothing is taken until it reads.
+            conflict = Readable() ? null : _unreadable;
             // The same campaign sent again, on a reconnection or as a replay: the server reads where it stands, and
             // nothing starts again, whatever was refused meanwhile.
-            if (ReceiptOf(linkId, instruction.CampaignId) is { } receipt)
+            if (conflict is null && ReceiptOf(linkId, instruction.CampaignId) is { } receipt)
             {
                 _ = SendAsync(linkId, receipt);
                 return;
             }
 
-            conflict = OtherFleet(linkId);
+            conflict ??= OtherFleet(linkId);
         }
 
         if (conflict is not null)
@@ -270,7 +277,7 @@ public sealed class FleetUpdateAgent : IAsyncDisposable
         FleetUpdateAgentState next;
         lock (_gate)
         {
-            conflict = OtherFleet(linkId);
+            conflict = Readable() ? OtherFleet(linkId) : _unreadable;
             if (conflict is null)
             {
                 var links = new Dictionary<string, FleetUpdateAgentLink>(_state.Links, StringComparer.Ordinal);
@@ -282,8 +289,10 @@ public sealed class FleetUpdateAgent : IAsyncDisposable
                     ? current with { PolicySequence = Math.Max(current.PolicySequence, update.Sequence) }
                     : current with { Sequence = update.Sequence, CampaignId = update.CampaignId };
                 next = Accepted(links);
-                _state = next;
-                Save(next);
+                // The checkpoint is on disk before anything runs: one that is not kept would let this manifest, or an
+                // older one, through again after a restart.
+                if (TrySave(next) is { } failure) conflict = failure;
+                else _state = next;
             }
             else
             {
@@ -549,30 +558,64 @@ public sealed class FleetUpdateAgent : IAsyncDisposable
         }
     }
 
-    private static FleetUpdateAgentState Load(string path)
+    // Whether the checkpoint reads, read again while it does not (the owner may have fixed or deleted it); under the gate.
+    private bool Readable()
     {
+        if (_loaded) return true;
+        string? problem;
+        FleetUpdateAgentState? loaded = null;
         try
         {
-            return JsonSerializer.Deserialize(File.ReadAllBytes(path), FleetUpdateAgentJsonContext.Default.FleetUpdateAgentState) ?? new FleetUpdateAgentState();
+            loaded = JsonSerializer.Deserialize(File.ReadAllBytes(_options.StatePath), FleetUpdateAgentJsonContext.Default.FleetUpdateAgentState);
+            problem = loaded is null ? "it holds no state" : null;
         }
-        catch (Exception exception) when (exception is FileNotFoundException or DirectoryNotFoundException or JsonException or IOException or UnauthorizedAccessException)
+        catch (Exception exception) when (exception is FileNotFoundException or DirectoryNotFoundException)
         {
-            return new FleetUpdateAgentState();
+            // None yet: a node that never took an update of the fleet.
+            loaded = new FleetUpdateAgentState();
+            problem = null;
         }
+        catch (Exception exception) when (exception is JsonException or NotSupportedException or IOException or UnauthorizedAccessException)
+        {
+            problem = exception.Message;
+        }
+
+        if (problem is not null)
+        {
+            _unreadable = $"{_options.StatePath} cannot be read ({problem}): this node takes no update of the fleet until it can. Fix the file, or delete it to reset "
+                + "what the node keeps of the fleet's updates (it then takes, as a new node, any campaign a controller signed for a version newer than the one it runs)";
+            return false;
+        }
+
+        _unreadable = null;
+        _state = loaded!;
+        _loaded = true;
+        return true;
     }
 
+    // Keeps a state that changes no authorization (a step of a campaign accepted): a failure is logged.
     private void Save(FleetUpdateAgentState state)
     {
+        if (TrySave(state) is { } failure) _options.Log($"The update of the fleet: {failure}.");
+    }
+
+    // Keeps a state; returns why it could not be kept, or null. Nothing is written over a checkpoint that does not read.
+    private string? TrySave(FleetUpdateAgentState state)
+    {
+        if (_unreadable is { } unreadable) return unreadable;
+        var staging = _options.StatePath + "." + Guid.NewGuid().ToString("N") + ".tmp";
         try
         {
             Directory.CreateDirectory(Path.GetDirectoryName(_options.StatePath)!);
-            var staging = _options.StatePath + "." + Guid.NewGuid().ToString("N") + ".tmp";
             File.WriteAllBytes(staging, JsonSerializer.SerializeToUtf8Bytes(state, FleetUpdateAgentJsonContext.Default.FleetUpdateAgentState));
             File.Move(staging, _options.StatePath, overwrite: true);
+            return null;
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
-            _options.Log($"The update of the fleet could not be kept in {_options.StatePath}: {exception.Message}");
+            try { File.Delete(staging); }
+            catch (Exception cleanup) when (cleanup is IOException or UnauthorizedAccessException) { }
+            return $"the update could not be kept in {_options.StatePath}: {exception.Message}";
         }
     }
 

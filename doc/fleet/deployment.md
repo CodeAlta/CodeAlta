@@ -166,7 +166,8 @@ All signed (Authenticode, Apple notarization, NuGet signatures, cosign for image
   and its download matches the hash signed for its runtime. The server checks the same against the device list it
   holds before its own step. The machine's `update.json` wins: its feeds, or `"fleet": false`, which refuses every
   update of the fleet. A node keeps the instruction it accepted (`fleet/update-campaign.json`) and waits for its time
-  itself, across restarts. A campaign it accepted never starts again: sent again, even after a refusal, it only gets
+  itself, across restarts; nothing runs until that file is written, and while it does not read, the node refuses every
+  update of the fleet (the owner fixes it, or deletes it to start again as a new node). A campaign it accepted never starts again: sent again, even after a refusal, it only gets
   where the node stands (cancelled, updated...). A node follows one fleet at a time: another server's instruction is
   refused while a campaign runs, and each server keeps reading how its own last campaign ended.
 - **Policy.** Signed the same way: **manual** (campaigns only), **pinned** (no campaign to another version), or

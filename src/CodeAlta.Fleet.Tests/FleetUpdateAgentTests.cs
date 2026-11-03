@@ -80,6 +80,47 @@ public sealed class FleetUpdateAgentTests
         var restarted = harness.Restart(agent);
         Assert.AreEqual(("a1", FleetUpdateMachineStates.Cancelled), (restarted.Report(LinkA)?.CampaignId, restarted.Report(LinkA)?.State), "kept across a restart");
     }
+
+    [TestMethod]
+    public async Task ACheckpointThatDoesNotReadRefusesEveryUpdateAndIsLeftAsItIs()
+    {
+        using var harness = new AgentHarness();
+        var agent = harness.Start();
+        await harness.AcceptAsync(agent, LinkA, harness.Instruction(harness.Manifest(6, "c6", "4.0.2")));
+        agent.Cancel(LinkA, new FleetUpdateCancel("c6"));
+        File.WriteAllText(harness.StatePath, "{ not json");
+
+        // Read as empty, the checkpoint would let an older manifest through again.
+        agent = harness.Restart(agent);
+        await harness.AcceptAsync(agent, LinkA, harness.Instruction(harness.Manifest(5, "c5", "4.0.2")));
+        Assert.AreEqual(("c5", FleetUpdateMachineStates.Refused), (agent.Report(LinkA)?.CampaignId, agent.Report(LinkA)?.State));
+        StringAssert.Contains(agent.Report(LinkA)?.Message, "update-campaign.json cannot be read");
+        StringAssert.Contains(agent.Report(LinkA)?.Message, "delete it");
+        Assert.IsNull(agent.Tick());
+        Assert.AreEqual(0, harness.Applied.Count);
+        Assert.AreEqual("{ not json", File.ReadAllText(harness.StatePath), "the owner's file is not replaced");
+
+        // Once the owner resets it, a campaign is taken again.
+        File.Delete(harness.StatePath);
+        await harness.AcceptAsync(agent, LinkA, harness.Instruction(harness.Manifest(7, "c7", "4.0.2")));
+        Assert.AreEqual(("c7", FleetUpdateMachineStates.Waiting), (agent.Report(LinkA)?.CampaignId, agent.Report(LinkA)?.State));
+    }
+
+    [TestMethod]
+    public async Task AnInstructionWhoseCheckpointCannotBeWrittenIsNotTaken()
+    {
+        using var harness = new AgentHarness();
+        // The folder of the checkpoint is a file: nothing can be written there.
+        File.WriteAllText(Path.GetDirectoryName(harness.StatePath)!, "");
+        var agent = harness.Start();
+
+        await harness.AcceptAsync(agent, LinkA, harness.Instruction(harness.Manifest(1, "c1", "4.0.2")));
+        Assert.AreEqual(("c1", FleetUpdateMachineStates.Refused), (agent.Report(LinkA)?.CampaignId, agent.Report(LinkA)?.State));
+        StringAssert.Contains(agent.Report(LinkA)?.Message, "could not be kept");
+        Assert.IsNull(agent.Current, "nothing accepted");
+        Assert.IsNull(agent.Tick());
+        Assert.AreEqual(0, harness.Applied.Count);
+    }
 }
 
 /// <summary>An update agent on a folder of its own, with a controller that signs, a clock and a faked self-update.</summary>
