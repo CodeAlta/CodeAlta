@@ -11,6 +11,21 @@ export const automationPlacementMessages = {
     "Die Maschine dieses Laufs listet seine Sitzung gerade nicht.",
     "この実行のマシンは現在そのセッションを一覧にしていません。",
     "此运行所在的机器当前未列出其会话。"],
+  "Waits for the machine it left": [
+    "Espera a la máquina que dejó",
+    "Attend la machine qu’elle a quittée",
+    "Wartet auf die Maschine, die sie verlassen hat",
+    "移動元のマシンを待っています",
+    "正在等待原来的机器"],
+  "Start anyway…": ["Iniciar de todos modos…", "Démarrer quand même…", "Trotzdem starten…", "このまま開始…", "仍然启动…"],
+  "Start anyway": ["Iniciar de todos modos", "Démarrer quand même", "Trotzdem starten", "このまま開始", "仍然启动"],
+  "Start it on {machine} now?": ["¿Iniciarla ahora en {machine}?", "La démarrer maintenant sur {machine} ?", "Jetzt auf {machine} starten?", "今すぐ {machine} で開始しますか？", "现在在 {machine} 上启动？"],
+  "The machine it left may still run its copy until it answers: both machines may run it meanwhile.": [
+    "La máquina que dejó puede seguir ejecutando su copia hasta que responda: mientras tanto, ambas máquinas pueden ejecutarla.",
+    "La machine qu’elle a quittée peut encore exécuter sa copie jusqu’à ce qu’elle réponde : les deux machines peuvent l’exécuter d’ici là.",
+    "Die Maschine, die sie verlassen hat, kann ihre Kopie noch ausführen, bis sie antwortet: Bis dahin können beide Maschinen sie ausführen.",
+    "移動元のマシンは応答するまでコピーを実行し続ける可能性があります。その間、両方のマシンで実行されることがあります。",
+    "原来的机器在响应之前可能仍会运行其副本：在此期间两台机器都可能运行它。"],
   "A command trigger runs on this computer only.": [
     "Un disparador de comando solo se ejecuta en este ordenador.",
     "Un déclencheur de commande ne s’exécute que sur cet ordinateur.",

@@ -259,8 +259,8 @@ public sealed record AltaFleetMoveStatus(string Status, string? Message, string 
 /// <param name="Enabled">Whether its triggers start it.</param>
 /// <param name="MachineId">The machine it runs on; null for this computer.</param>
 /// <param name="Machine">The name of that machine.</param>
-/// <param name="State"><c>here</c> (it runs on this computer), <c>copied</c>, <c>pending</c> or <c>failed</c> (its copy on the machine).</param>
-/// <param name="Message">Why its copy is pending or failed.</param>
+/// <param name="State"><c>here</c> (it runs on this computer), <c>copied</c>, <c>pending</c>, <c>waiting</c> (for the machine it left to take its copy away) or <c>failed</c> (its copy on the machine).</param>
+/// <param name="Message">Why its copy is pending, waiting or failed.</param>
 public sealed record AltaFleetAutomationPlacement(string Id, string Name, bool Enabled, string? MachineId, string? Machine, string State, string? Message)
 {
     /// <summary>Gets when the machine last took its copy.</summary>

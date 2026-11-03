@@ -38,6 +38,7 @@ function fixture() {
     delete: (request: object) => answer("delete", request, state.mutation),
     setEnabled: (request: object) => answer("setEnabled", request, state.mutation),
     allow: (request: object) => answer("allow", request, state.mutation),
+    startPlaced: (request: object) => answer("startPlaced", request, state.mutation),
     setPaused: (request: object) => answer("setPaused", request, state.mutation),
     run: (request: object) => answer("run", request, state.run),
     runs: (request: object) => answer("runs", request, { status: "ok", runs: [run("completed")] }),
@@ -148,11 +149,12 @@ test("a change is sent to the host and the list is read again before it answers"
   state.mutation = { status: "ok", id: "a", message: null };
   assert.equal((await hub.setEnabled("a", false)).ok, true);
   assert.equal((await hub.allow("a")).ok, true);
+  assert.equal((await hub.startPlaced("a")).ok, true);
   assert.equal((await hub.setPaused(true)).ok, true);
   assert.equal((await hub.remove("a")).ok, true);
   await hub.refresh();
   assert.deepEqual(calls.filter(call => !call.startsWith("list:")), ['setEnabled:{"expectedEpoch":"epoch-1","id":"a","enabled":false}', 'allow:{"expectedEpoch":"epoch-1","id":"a"}',
-    'setPaused:{"expectedEpoch":"epoch-1","paused":true}',
+    'startPlaced:{"expectedEpoch":"epoch-1","id":"a"}', 'setPaused:{"expectedEpoch":"epoch-1","paused":true}',
     'delete:{"expectedEpoch":"epoch-1","id":"a"}', 'refresh:{"expectedEpoch":"epoch-1"}']);
 });
 

@@ -125,6 +125,82 @@ public sealed class DesktopAutomationPlacementTests
     }
 
     [TestMethod]
+    public async Task PlacedElsewhere_WhileItsMachineIsAway_WaitsForItsRemovalThere_KeptAcrossARestart()
+    {
+        var token = TestContext.CancellationToken;
+        await using var handoff = await HandoffFixture.StartAsync(enabled: true, token);
+        var (automations, a, b) = (handoff.Automations, handoff.A, handoff.B);
+        await using (var placement = handoff.Placement())
+        {
+            await placement.SyncAsync(token);
+            Assert.AreEqual(1, a.Node.Puts.Count);
+
+            // The first machine is away when the automation is placed on the second one: the second waits, so that both never run it.
+            handoff.Reach(a, false);
+            Assert.IsNull(await automations.SaveAsync(automations.Snapshot.Find(Id)!.Definition with { RunsOn = b.DeviceId }, null, token));
+            await placement.SyncAsync(token);
+            Assert.AreEqual(0, b.Node.Puts.Count, "not copied while the copy it replaces may still run");
+            var waiting = placement.Status(automations.Snapshot.Find(Id)!)!;
+            Assert.AreEqual(("waiting", b.DeviceId), (waiting.State, waiting.MachineId));
+            StringAssert.Contains(waiting.Message, "takes away its copy");
+        }
+
+        // The removal still waits after a restart: it is kept in its own record.
+        await using (var restarted = handoff.Placement())
+        {
+            await restarted.SyncAsync(token);
+            Assert.AreEqual(0, b.Node.Puts.Count);
+            Assert.IsEmpty(a.Node.Removed);
+
+            // The first machine answers: it takes its copy away, then the second gets its own.
+            handoff.Reach(a, true);
+            await restarted.SyncAsync(token);
+            CollectionAssert.AreEqual(new[] { Id }, a.Node.Removed.ToArray());
+            Assert.AreEqual(1, b.Node.Puts.Count);
+            Assert.AreEqual("copied", restarted.Status(automations.Snapshot.Find(Id)!)!.State);
+            await restarted.SyncAsync(token);
+            Assert.AreEqual(1, a.Node.Removed.Count, "removed once");
+        }
+    }
+
+    [TestMethod]
+    public async Task PlacedElsewhere_ADisabledCopyNeverWaits_APersonStartsAnEnabledOne_AndTheOldCopyIsStillTakenAway()
+    {
+        var token = TestContext.CancellationToken;
+        await using var handoff = await HandoffFixture.StartAsync(enabled: false, token);
+        var (automations, a, b) = (handoff.Automations, handoff.A, handoff.B);
+        await using var placement = handoff.Placement();
+        await placement.SyncAsync(token);
+        Assert.AreEqual(1, a.Node.Puts.Count);
+
+        // Disabled, it runs nowhere by itself: it is copied at once.
+        handoff.Reach(a, false);
+        Assert.IsNull(await automations.SaveAsync(automations.Snapshot.Find(Id)!.Definition with { RunsOn = b.DeviceId }, null, token));
+        await placement.SyncAsync(token);
+        Assert.AreEqual(1, b.Node.Puts.Count);
+        StringAssert.Contains(b.Node.Puts[0].Definition, "enabled = false");
+
+        // Enabled, it waits for the machine it left; the person starts it anyway from the page.
+        Assert.IsNull(await automations.SetEnabledAsync(Id, true, token));
+        await placement.SyncAsync(token);
+        Assert.AreEqual(1, b.Node.Puts.Count);
+        var rpc = new AutomationsService(automations, handoff.First.Host.ProjectCatalog, Epoch, placement: placement);
+        Assert.AreEqual("waiting", (await rpc.ListAsync(new(Epoch), token)).Items.Single().Placement!.State);
+        Assert.AreEqual("ok", rpc.StartPlaced(new(Epoch, Id)).Status);
+        await placement.SyncAsync(token);
+        Assert.AreEqual(2, b.Node.Puts.Count);
+        StringAssert.Contains(b.Node.Puts[1].Definition, "enabled = true");
+        Assert.AreEqual("copied", placement.Status(automations.Snapshot.Find(Id)!)!.State);
+        Assert.AreEqual("refused", rpc.StartPlaced(new(Epoch, Id)).Status, "nothing waits any more");
+
+        // The copy it left is still taken away once its machine answers.
+        Assert.IsEmpty(a.Node.Removed);
+        handoff.Reach(a, true);
+        await placement.SyncAsync(token);
+        CollectionAssert.AreEqual(new[] { Id }, a.Node.Removed.ToArray());
+    }
+
+    [TestMethod]
     public async Task VersionNumbers_NeverGoBelowTheLastSigned_EvenWhenTheClockGoesBack_OrAfterARestart()
     {
         var root = Path.Combine(Path.GetTempPath(), "CodeAlta-placement-numbers-" + Guid.NewGuid().ToString("N"));
@@ -162,6 +238,94 @@ public sealed class DesktopAutomationPlacementTests
             catch (UnauthorizedAccessException) { }
         }
     }
+
+    /// <summary>Two paired machines whose automations are recorded, one automation placed on the first, and machines the test makes reachable or not.</summary>
+    private sealed class HandoffFixture : IAsyncDisposable
+    {
+        private readonly HashSet<string> _away = [];
+
+        private HandoffFixture(FleetNodeFixture first, FleetNodeFixture second, DesktopFleet fleet, AutomationService automations, string fleetRoot, Machine a, Machine b)
+            => (First, Second, Fleet, Automations, FleetRoot, A, B) = (first, second, fleet, automations, fleetRoot, a, b);
+
+        public FleetNodeFixture First { get; }
+
+        public FleetNodeFixture Second { get; }
+
+        public DesktopFleet Fleet { get; }
+
+        public AutomationService Automations { get; }
+
+        public string FleetRoot { get; }
+
+        public Machine A { get; }
+
+        public Machine B { get; }
+
+        public static async Task<HandoffFixture> StartAsync(bool enabled, CancellationToken token)
+        {
+            var nodeA = new RecordingNodeAutomations();
+            var nodeB = new RecordingNodeAutomations();
+            var first = await FleetNodeFixture.StartAsync(token, nodeA);
+            var second = await FleetNodeFixture.StartAsync(token, nodeB);
+            var registry = new SessionHostRegistry(new SessionHostRegistryTests.RecordingSessionHost(null));
+            var fleetRoot = Path.Combine(first.Root, "desktop-fleet");
+            var fleet = new DesktopFleet(fleetRoot, registry.TakeMembership(), "desktop",
+                static (machine, identity) => new RemoteSessionHost(machine, cancellation => FleetNodeClient.ConnectAsync(machine, identity, cancellation), Quick,
+                    localDeviceId: identity.DeviceId));
+            var a = new Machine((await fleet.PairAsync(first.CreatePairingLink(), token)).DeviceId, nodeA);
+            var b = new Machine((await fleet.PairAsync(second.CreatePairingLink(), token)).DeviceId, nodeB);
+            foreach (var (fixture, machine) in new[] { (first, a), (second, b) })
+            {
+                await WaitForAsync(() => fleet.Find(machine.DeviceId)!.State == RemoteMachineState.Online, "the machine to be online", token);
+                fixture.Service.TrustedDevices.SetPermissions(fleet.DeviceId, DevicePermissions.View | DevicePermissions.Start | DevicePermissions.Automate);
+            }
+
+            var global = Path.Combine(first.Root, "desktop-config.toml");
+            File.WriteAllText(global, $$"""
+                [automations.{{Id}}]
+                name = "Nightly"
+                enabled = {{(enabled ? "true" : "false")}}
+                runs_on = "{{a.DeviceId}}"
+                prompt = "Summarize the day."
+                triggers = [{ type = "daily", at = ["23:00"] }]
+                """);
+            var automations = new AutomationService(global, _ => Task.FromResult<IReadOnlyList<ProjectDescriptor>>([]),
+                new AutomationStateStore(Path.Combine(first.Root, "desktop-state", "automations.json"), false), new FakeAutomationRunner(), TimeProvider.System, TimeZoneInfo.Utc);
+            await automations.RefreshAsync();
+            return new HandoffFixture(first, second, fleet, automations, fleetRoot, a, b);
+        }
+
+        // A machine the test made away is not reached: as a machine offline, its removal waits.
+        public void Reach(Machine machine, bool reachable)
+        {
+            lock (_away)
+            {
+                if (reachable) _away.Remove(machine.DeviceId);
+                else _away.Add(machine.DeviceId);
+            }
+        }
+
+        public DesktopAutomationPlacement Placement()
+        {
+            var placement = new DesktopAutomationPlacement(Automations, id =>
+            {
+                lock (_away) return _away.Contains(id) ? null : Fleet.Find(id);
+            }, FleetRoot, () => Fleet.DeviceId, Fleet.SignAutomation);
+            Automations.Placement = placement;
+            return placement;
+        }
+
+        public async ValueTask DisposeAsync()
+        {
+            await Automations.DisposeAsync();
+            await Fleet.DisposeAsync();
+            await Second.DisposeAsync();
+            await First.DisposeAsync();
+        }
+    }
+
+    /// <summary>A paired machine and what it was given.</summary>
+    private sealed record Machine(string DeviceId, RecordingNodeAutomations Node);
 
     /// <summary>A clock the test sets.</summary>
     private sealed class SetClock : TimeProvider

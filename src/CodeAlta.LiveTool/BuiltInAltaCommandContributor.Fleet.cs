@@ -185,7 +185,7 @@ internal sealed partial class BuiltInAltaCommandContributor
     {
         var command = Leaf("list", "List the automations with where each runs: this computer, or a machine and where its copy stands there.");
         command.Add(async (_, _) => await WithFleetFloorAsync(context, () => ValueTask.FromResult(HandleFleetAutomationList(context))).ConfigureAwait(false));
-        AddHelpText(command, "`state` is `here`, `copied` (the machine runs it), `pending` (it is copied once the machine answers) or `failed` (`message` says why).");
+        AddHelpText(command, "`state` is `here`, `copied` (the machine runs it), `pending` (it is copied once the machine answers), `waiting` (it is copied once the machine it left took its copy away; the user may start it anyway in the Automations tab) or `failed` (`message` says why).");
         return command;
     }
 

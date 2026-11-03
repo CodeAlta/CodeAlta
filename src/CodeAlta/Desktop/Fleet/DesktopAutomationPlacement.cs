@@ -14,8 +14,11 @@ namespace CodeAlta.Desktop.Fleet;
 /// <summary>Where an automation placed on a paired machine stands there.</summary>
 /// <param name="MachineId">The machine it runs on.</param>
 /// <param name="MachineName">Its name; null when no paired machine has that id.</param>
-/// <param name="State"><c>copied</c> (the machine has it as it is), <c>pending</c> (it is copied once the machine answers) or <c>failed</c> (the machine refused it).</param>
-/// <param name="Message">Why it is pending or failed; null when copied.</param>
+/// <param name="State">
+/// <c>copied</c> (the machine has it as it is), <c>pending</c> (it is copied once the machine answers), <c>waiting</c> (it is
+/// copied once the machine it left took its copy away, so that both do not run it) or <c>failed</c> (the machine refused it).
+/// </param>
+/// <param name="Message">Why it is pending, waiting or failed; null when copied.</param>
 /// <param name="CopiedAt">When the machine last took it.</param>
 internal sealed record AutomationPlacementStatus(string MachineId, string? MachineName, string State, string? Message, DateTimeOffset? CopiedAt);
 
@@ -28,7 +31,9 @@ internal sealed record AutomationPlacementStatus(string MachineId, string? Machi
 /// <remarks>
 /// One loop does the work, woken by a change of the automations or of the machines, and every half minute: it is the
 /// only writer of the record of what was copied where (<c>fleet/placed-automations.json</c>), so that a change made
-/// while a machine is offline reaches it when it answers.
+/// while a machine is offline reaches it when it answers. A copy that left its machine is recorded apart
+/// (<c>fleet/pending-automation-removals.json</c>) until that machine, or its server, acknowledged its removal; until then
+/// the automation, enabled, is not copied to the machine it moved to, unless a person starts it there anyway.
 /// </remarks>
 internal sealed class DesktopAutomationPlacement : IAutomationPlacement, IAsyncDisposable
 {
@@ -37,6 +42,9 @@ internal sealed class DesktopAutomationPlacement : IAutomationPlacement, IAsyncD
 
     /// <summary>The name of the record of the last version number signed per automation, kept when an automation leaves its machine.</summary>
     public const string NumbersFileName = "automation-version-numbers.json";
+
+    /// <summary>The name of the record of the copies that left their machine and wait to be taken away there.</summary>
+    public const string RemovalsFileName = "pending-automation-removals.json";
 
     private const int RunsKept = 50;
     private static readonly TimeSpan RefreshEvery = TimeSpan.FromSeconds(30);
@@ -57,6 +65,9 @@ internal sealed class DesktopAutomationPlacement : IAutomationPlacement, IAsyncD
     private readonly Dictionary<string, DateTimeOffset> _nextDue = new(StringComparer.Ordinal);
     // The removals given through a server that the server is asked to forget once their machine took them away.
     private readonly HashSet<(string Id, string MachineId)> _forget = [];
+    // The copies that left their machine, by automation and machine, until that machine acknowledged their removal.
+    private readonly Dictionary<(string Id, string MachineId), PendingAutomationRemoval> _removals;
+    private readonly string _removalsPath;
     private readonly string _numbersPath;
     private readonly SemaphoreSlim _signal = new(0, 1);
     private readonly SemaphoreSlim _work = new(1, 1);
@@ -83,6 +94,8 @@ internal sealed class DesktopAutomationPlacement : IAutomationPlacement, IAsyncD
         _path = Path.Combine(fleetRoot, FileName);
         _numbersPath = Path.Combine(fleetRoot, NumbersFileName);
         _numbers = LoadNumbers(_numbersPath);
+        _removalsPath = Path.Combine(fleetRoot, RemovalsFileName);
+        _removals = LoadRemovals(_removalsPath);
         _repositoryOf = repositoryOf ?? RepositoryKey.ReadAsync;
         _placed = Load(_path);
     }
@@ -140,6 +153,36 @@ internal sealed class DesktopAutomationPlacement : IAutomationPlacement, IAsyncD
     internal DateTimeOffset? NextDue(string id)
     {
         lock (_gate) return _nextDue.TryGetValue(id, out var due) ? due : null;
+    }
+
+    /// <summary>
+    /// Lets an automation that waits start on the machine it was placed on, before the machines it left took their copies
+    /// away: a person's choice, since both may run it until they answer. Their removals are still made once they do.
+    /// </summary>
+    /// <param name="id">The automation.</param>
+    /// <returns>Whether it waited for a machine.</returns>
+    internal bool ForceHandoff(string id)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(id);
+        var forced = false;
+        lock (_gate)
+        {
+            foreach (var (key, removal) in _removals.Where(pair => pair.Key.Id == id && !pair.Value.Forced).ToArray())
+            {
+                _removals[key] = removal with { Forced = true };
+                forced = true;
+            }
+
+            if (forced) SaveRemovals();
+        }
+
+        if (forced)
+        {
+            Log($"The automation {id} was started on its machine before the machine it left took its copy away, as a person asked.");
+            Poke();
+        }
+
+        return forced;
     }
 
     /// <summary>The latest runs the machine of an automation reported, newest first.</summary>
@@ -209,36 +252,18 @@ internal sealed class DesktopAutomationPlacement : IAutomationPlacement, IAsyncD
             var placed = snapshot.Entries.Where(static entry => entry.Definition.RunsOn is not null).ToDictionary(static entry => entry.Id, StringComparer.Ordinal);
             var changed = false;
 
-            // What left a machine (deleted, placed elsewhere or back here) is removed there once it answers.
+            // What left a machine (deleted, placed elsewhere or back here) is recorded to be removed there, apart, until that
+            // machine acknowledges it: the record of what is placed then holds the new place only.
             KeyValuePair<string, PlacedAutomation>[] records;
             lock (_gate) records = [.. _placed];
             foreach (var (id, record) in records)
             {
                 if (placed.TryGetValue(id, out var entry) && entry.Definition.RunsOn == record.MachineId && (record.Via is null || !IsPaired(record.MachineId))) continue;
-                if (record.Via is not null)
-                {
-                    changed |= await RemoveThroughServerAsync(id, record, placed.ContainsKey(id), cancellationToken).ConfigureAwait(false);
-                    continue;
-                }
-
-                if (_machines(record.MachineId) is not { CurrentClient: { } client }) continue;
-                try
-                {
-                    await client.RemoveAutomationAsync(id, cancellationToken: cancellationToken).ConfigureAwait(false);
-                    lock (_gate)
-                    {
-                        _placed.Remove(id);
-                        if (!placed.ContainsKey(id)) { _status.Remove(id); _runs.Remove(id); }
-                        Save();
-                    }
-
-                    changed = true;
-                }
-                catch (Exception exception) when (exception is FleetException or IOException or ObjectDisposedException or FleetConnectionClosedException)
-                {
-                    Log($"The automation {id} could not be removed from the machine {record.MachineId}: {exception.Message}");
-                }
+                QueueRemoval(id, record, placed.ContainsKey(id));
+                changed = true;
             }
+
+            changed |= await RemovePendingAsync(placed, cancellationToken).ConfigureAwait(false);
 
             foreach (var entry in placed.Values)
             {
@@ -325,6 +350,7 @@ internal sealed class DesktopAutomationPlacement : IAutomationPlacement, IAsyncD
                 return SetStatus(entry.Id, new(machineId, machineName, "copied", null, record.CopiedAt));
         }
 
+        if (copy.Enabled && Handoff(entry.Id, machineId, machineName) is { } waiting) return SetStatus(entry.Id, waiting);
         try
         {
             // The machine runs what this computer signed for it, numbered after every version it signed of this automation.
@@ -421,7 +447,7 @@ internal sealed class DesktopAutomationPlacement : IAutomationPlacement, IAsyncD
             _work.Release();
         }
 
-        if (Status(entry) is { State: "failed" } status) return failed(status.Message ?? "It could not be given to the machine.");
+        if (Status(entry) is { State: "failed" or "waiting" } status) return failed(status.Message ?? "It could not be given to the machine.");
         var runId = Guid.CreateVersion7().ToString("N");
         var now = DateTimeOffset.UtcNow;
         try
@@ -469,6 +495,7 @@ internal sealed class DesktopAutomationPlacement : IAutomationPlacement, IAsyncD
                     : SetStatus(entry.Id, new(machineId, machineName, "pending", $"Given to the server: {machineName} takes it when it connects.", null));
         }
 
+        if (copy.Enabled && Handoff(entry.Id, machineId, machineName) is { } waiting) return SetStatus(entry.Id, waiting);
         var number = NextNumber(entry.Id);
         try
         {
@@ -571,43 +598,152 @@ internal sealed class DesktopAutomationPlacement : IAutomationPlacement, IAsyncD
         return SetRead(id, runs, held?.NextDue) || changed;
     }
 
-    // Under _work. Takes an automation away from a machine it was given through a server: a signed removal, newer than the version given.
-    private async Task<bool> RemoveThroughServerAsync(string id, PlacedAutomation record, bool stillPlaced, CancellationToken cancellationToken)
+    // Under _work. Records that the copy of a machine is to be taken away there, with the number of its removal reserved
+    // now (a copy given since numbers after it), before the record of what is placed forgets it.
+    private void QueueRemoval(string id, PlacedAutomation record, bool stillPlaced)
     {
-        if (ServerRoute?.Invoke(record.MachineId) is not { } route) return false;
-        using (route)
+        var number = NextNumber(id);
+        lock (_gate)
         {
-            var number = NextNumber(id);
-            try
-            {
-                var removal = _sign(new FleetAutomationVersion(FleetAutomationVersion.CurrentVersion, route.OrganizationId, id, number, record.MachineId, true, false, [], null, null,
-                    null, _deviceId(), string.Empty, DateTimeOffset.UtcNow));
-                await route.PutAsync(removal, cancellationToken).ConfigureAwait(false);
-            }
-            catch (FleetServerException exception) when (exception.Status is System.Net.HttpStatusCode.Conflict or System.Net.HttpStatusCode.NotFound
-                or System.Net.HttpStatusCode.Forbidden)
-            {
-                // The server holds a newer version, or none: nothing of this computer is left to take away there.
-                Log($"The automation {id} was not taken away from {route.MachineName} through its server: {exception.Message}");
-            }
-            catch (Exception exception) when (exception is FleetServerException or HttpRequestException or IOException or ArgumentException or TaskCanceledException
-                && !cancellationToken.IsCancellationRequested)
-            {
-                Log($"The automation {id} could not be taken away from {route.MachineName} through its server: {exception.Message}");
-                return false;
-            }
+            var name = _machines(record.MachineId)?.Machine.Name ?? (_status.TryGetValue(id, out var known) && known.MachineId == record.MachineId ? known.MachineName : null);
+            _removals[(id, record.MachineId)] = new PendingAutomationRemoval(id, record.MachineId, DateTimeOffset.UtcNow) { Number = number, Via = record.Via, MachineName = name };
+            SaveRemovals();
+            _placed.Remove(id);
+            if (!stillPlaced) { _status.Remove(id); _runs.Remove(id); }
+            Save();
+        }
+    }
 
+    // Under _work. Asks again each machine that keeps a copy to be taken away to take it away; a removal is forgotten only
+    // once its machine (or its server) acknowledged it, or the copy is replaced there. Returns whether one was.
+    private async Task<bool> RemovePendingAsync(IReadOnlyDictionary<string, AutomationEntry> placed, CancellationToken cancellationToken)
+    {
+        PendingAutomationRemoval[] pending;
+        lock (_gate) pending = [.. _removals.Values];
+        var changed = false;
+        foreach (var removal in pending)
+        {
+            // Placed on that machine again, the same way: the copy given now replaces the one it had.
+            var done = (placed.TryGetValue(removal.AutomationId, out var entry) && entry.Definition.RunsOn == removal.MachineId
+                    && (removal.Via is null) == IsPaired(removal.MachineId))
+                || (removal.Via is null
+                    ? await RemoveDirectAsync(removal, cancellationToken).ConfigureAwait(false)
+                    : await RemoveThroughServerAsync(removal, cancellationToken).ConfigureAwait(false));
+            if (!done) continue;
             lock (_gate)
             {
-                _numbers[id] = number;
-                _placed.Remove(id);
-                if (!stillPlaced) { _status.Remove(id); _runs.Remove(id); }
-                _forget.Add((id, record.MachineId));
-                Save();
+                if (_removals.TryGetValue((removal.AutomationId, removal.MachineId), out var current) && current.Number == removal.Number)
+                {
+                    _removals.Remove((removal.AutomationId, removal.MachineId));
+                    SaveRemovals();
+                }
+            }
+
+            changed = true;
+        }
+
+        return changed;
+    }
+
+    // Takes a copy away from a paired machine through its node API; true once the machine answered.
+    private async Task<bool> RemoveDirectAsync(PendingAutomationRemoval removal, CancellationToken cancellationToken)
+    {
+        if (_machines(removal.MachineId) is not { CurrentClient: { } client }) return false;
+        try
+        {
+            await client.RemoveAutomationAsync(removal.AutomationId, cancellationToken: cancellationToken).ConfigureAwait(false);
+            Log($"The automation {removal.AutomationId} was taken away from the machine {removal.MachineId}.");
+            return true;
+        }
+        catch (FleetException exception) when (exception.Error.Code == FleetErrorCodes.Forbidden)
+        {
+            // The machine no longer lets this computer give it automations: it runs none this computer gave it.
+            Log($"The machine {removal.MachineId} no longer lets this computer take the automation {removal.AutomationId} away: it no longer runs it either.");
+            return true;
+        }
+        catch (Exception exception) when (exception is FleetException or IOException or ObjectDisposedException or FleetConnectionClosedException)
+        {
+            Log($"The automation {removal.AutomationId} could not be removed from the machine {removal.MachineId}: {exception.Message}");
+            return false;
+        }
+    }
+
+    // Takes a copy away from a machine it was given through a server: a signed removal with the number reserved for it,
+    // then acknowledged once the machine took it away (the server is then asked to forget it), refused it for a newer
+    // version, or the server holds nothing more of it.
+    private async Task<bool> RemoveThroughServerAsync(PendingAutomationRemoval removal, CancellationToken cancellationToken)
+    {
+        var (id, machineId) = (removal.AutomationId, removal.MachineId);
+        if (ServerRoute?.Invoke(machineId) is not { } route) return false;
+        using (route)
+        {
+            if (!removal.Given)
+            {
+                try
+                {
+                    var signed = _sign(new FleetAutomationVersion(FleetAutomationVersion.CurrentVersion, route.OrganizationId, id, removal.Number, machineId, true, false, [], null, null,
+                        null, _deviceId(), string.Empty, DateTimeOffset.UtcNow));
+                    await route.PutAsync(signed, cancellationToken).ConfigureAwait(false);
+                }
+                catch (FleetServerException exception) when (exception.Status is System.Net.HttpStatusCode.Conflict or System.Net.HttpStatusCode.NotFound
+                    or System.Net.HttpStatusCode.Forbidden)
+                {
+                    // The server holds a newer version, or none: nothing of this computer is left to take away there.
+                    Log($"The automation {id} was not taken away from {route.MachineName} through its server: {exception.Message}");
+                    return true;
+                }
+                catch (Exception exception) when (exception is FleetServerException or HttpRequestException or IOException or ArgumentException or TaskCanceledException
+                    && !cancellationToken.IsCancellationRequested)
+                {
+                    Log($"The automation {id} could not be taken away from {route.MachineName} through its server: {exception.Message}");
+                    return false;
+                }
+
+                lock (_gate)
+                {
+                    if (_removals.TryGetValue((id, machineId), out var current) && current.Number == removal.Number)
+                    {
+                        _removals[(id, machineId)] = current with { Given = true };
+                        SaveRemovals();
+                    }
+                }
+            }
+
+            AutomationListDto list;
+            try { list = await route.ListAsync(cancellationToken).ConfigureAwait(false); }
+            catch (Exception exception) when (exception is FleetServerException or HttpRequestException or IOException or TaskCanceledException
+                && !cancellationToken.IsCancellationRequested) { return false; }
+
+            var held = list.Automations.FirstOrDefault(item => item.Id == id && item.MachineId == machineId);
+            // Given to the server, not taken away by the machine yet: asked again at the next look.
+            if (held is { Removed: true, State: not ("applied" or "refused") }) return false;
+            if (held is { Removed: true, State: "applied" })
+            {
+                lock (_gate) _forget.Add((id, machineId));
+                Log($"{route.MachineName} took the automation {id} away.");
+            }
+            else
+            {
+                Log($"The removal of the automation {id} from {route.MachineName} ends: {(held is null ? "the server holds nothing of it" : held.Removed ? "the machine holds a newer version" : "a newer version was given since")}.");
             }
 
             return true;
         }
+    }
+
+    // Why an automation, enabled, is not copied yet to the machine it was placed on: a machine it left may still run its
+    // copy, until it acknowledges its removal or a person starts it anyway. Null when nothing waits.
+    private AutomationPlacementStatus? Handoff(string id, string machineId, string machineName)
+    {
+        string[] before;
+        lock (_gate)
+            before = [.. _removals.Values.Where(removal => removal.AutomationId == id && removal.MachineId != machineId && !removal.Forced)
+                .Select(static removal => removal.MachineName ?? removal.MachineId).Distinct(StringComparer.Ordinal)];
+        if (before.Length == 0) return null;
+        var names = string.Join(", ", before);
+        return new(machineId, machineName, "waiting",
+            $"It waits until {names} takes away its copy, so that both machines never run it: it is copied to {machineName} once {names} answers, or now if you start it anyway.",
+            null);
     }
 
     // Under _work. Asks each server to forget the removals their machines took away (DELETE); one not taken yet waits.
@@ -754,6 +890,43 @@ internal sealed class DesktopAutomationPlacement : IAutomationPlacement, IAsyncD
         }
     }
 
+    private static Dictionary<(string Id, string MachineId), PendingAutomationRemoval> LoadRemovals(string path)
+    {
+        var removals = new Dictionary<(string Id, string MachineId), PendingAutomationRemoval>();
+        try
+        {
+            if (!File.Exists(path)) return removals;
+            using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+            foreach (var removal in JsonSerializer.Deserialize(stream, PlacedAutomationJsonContext.Default.ListPendingAutomationRemoval) ?? [])
+            {
+                if (removal is { AutomationId.Length: > 0, MachineId.Length: > 0 }) removals[(removal.AutomationId, removal.MachineId)] = removal;
+            }
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or JsonException or NotSupportedException)
+        {
+            // Written whole each time (staged, then moved over), it does not tear; one that cannot be read waits for nothing.
+            return new();
+        }
+
+        return removals;
+    }
+
+    // Under the gate.
+    private void SaveRemovals()
+    {
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(_removalsPath)!);
+            var staged = _removalsPath + ".tmp";
+            File.WriteAllText(staged, JsonSerializer.Serialize([.. _removals.Values], PlacedAutomationJsonContext.Default.ListPendingAutomationRemoval));
+            File.Move(staged, _removalsPath, overwrite: true);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            Log("The record of the automations to take away from their machines could not be written: " + exception.Message);
+        }
+    }
+
     private static Dictionary<string, PlacedAutomation> Load(string path)
     {
         try
@@ -805,7 +978,30 @@ internal sealed record PlacedAutomation(string MachineId, string Key, DateTimeOf
     public string? Via { get; init; }
 }
 
+/// <summary>A copy that left its machine and is to be taken away there, kept until that machine acknowledged it.</summary>
+/// <param name="AutomationId">The automation.</param>
+/// <param name="MachineId">The machine that keeps the copy.</param>
+/// <param name="Since">When it left that machine.</param>
+internal sealed record PendingAutomationRemoval(string AutomationId, string MachineId, DateTimeOffset Since)
+{
+    /// <summary>Gets the number of the signed removal, reserved when the copy left: a copy given since numbers after it.</summary>
+    public long Number { get; init; }
+
+    /// <summary>Gets the server link the copy was given through; null for a paired machine on a direct channel.</summary>
+    public string? Via { get; init; }
+
+    /// <summary>Gets the name of the machine when the copy left it; null when unknown.</summary>
+    public string? MachineName { get; init; }
+
+    /// <summary>Gets whether the server holds the signed removal, which the machine has not acknowledged yet.</summary>
+    public bool Given { get; init; }
+
+    /// <summary>Gets whether a person started the automation on its new machine without waiting for this removal; it is still made.</summary>
+    public bool Forced { get; init; }
+}
+
 [JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase)]
 [JsonSerializable(typeof(Dictionary<string, PlacedAutomation>))]
 [JsonSerializable(typeof(Dictionary<string, long>))]
+[JsonSerializable(typeof(List<PendingAutomationRemoval>))]
 internal sealed partial class PlacedAutomationJsonContext : JsonSerializerContext;

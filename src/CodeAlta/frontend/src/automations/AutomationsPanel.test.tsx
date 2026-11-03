@@ -92,8 +92,14 @@ test("a card of an automation that runs on a paired machine names the machine, a
   const html = render({ items: [
     item("copied", { name: "On the mini", runsOn: "mini", placement: placed("copied", null), triggers: [trigger("daily", { at: ["09:00"] })] }),
     item("refused", { name: "Refused", runsOn: "mini", placement: placed("failed", "Mac mini does not let this computer give it automations."), triggers: [trigger("daily", { at: ["09:00"] })] }),
+    item("waiting", { name: "Moved", runsOn: "mini", placement: placed("waiting", "It waits until Laptop takes away its copy."), triggers: [trigger("daily", { at: ["09:00"] })] }),
   ] });
-  const [copied, refused] = cards(html);
+  const [copied, refused, waiting] = cards(html);
+  // Moved while the machine it left is away: it says so, and the user may start it anyway, after a question that says both may run it.
+  assert.match(waiting, /class="automation-card-state" title="It waits until Laptop takes away its copy\."[^>]*>Waits for the machine it left</);
+  assert.match(waiting, /<span class="bp6-button-text">Start anyway…<\/span>/);
+  assert.doesNotMatch(copied, /Start anyway/);
+  for (const locale of locales) assert.ok(translate(locale, "Start it on {machine} now?", { machine: "M" }).includes("M"), locale);
   assert.match(copied, /automation-chip[^>]*>[\s\S]*<span>On Mac mini<\/span>/);
   assert.match(copied, /class="automation-card-state"[^>]*>On Mac mini</, "Its machine fires its schedule: this computer shows where it runs.");
   assert.match(refused, /class="automation-card-state" data-problem="true"[^>]*>Mac mini does not let this computer give it automations\.</);

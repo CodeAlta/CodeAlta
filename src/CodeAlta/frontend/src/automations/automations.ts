@@ -165,6 +165,14 @@ export function placementProblem(item: Pick<AutomationItem, "placement">): strin
 }
 
 /**
+ * Why an automation is not copied yet to the machine it was placed on: the machine it left may still run its copy, until
+ * it takes it away or the user starts it anyway. Null when it waits for no machine.
+ */
+export function placementWait(item: Pick<AutomationItem, "placement">): string | null {
+  return item.placement && item.placement.state === "waiting" ? item.placement.message ?? "" : null;
+}
+
+/**
  * What the sessions of an automation run with besides the defaults, one fact each, as its details list them: an
  * automation that came with a project shows them before the user allows it.
  */

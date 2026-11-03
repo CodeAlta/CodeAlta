@@ -2,7 +2,7 @@
 import type { automations, AutomationInput, AutomationItem, AutomationRunItem, AutomationScriptItem, AutomationsListResponse, AutomationTriggerItem } from "#neoastra";
 
 /** The calls of the host; `scripts` is missing from a host that has no library of scripts. */
-export type AutomationsApi = Pick<typeof automations, "list" | "refresh" | "save" | "delete" | "setEnabled" | "allow" | "setPaused" | "run" | "runs" | "preview" | "watch">
+export type AutomationsApi = Pick<typeof automations, "list" | "refresh" | "save" | "delete" | "setEnabled" | "allow" | "startPlaced" | "setPaused" | "run" | "runs" | "preview" | "watch">
   & Partial<Pick<typeof automations, "scripts">>;
 type Timers = Readonly<{ set: (run: () => void, milliseconds: number) => unknown; clear: (timer: unknown) => void }>;
 
@@ -109,6 +109,8 @@ export function createAutomationsHub(api: AutomationsApi, timers: Timers = { set
     setEnabled: (id: string, enabled: boolean) => change(host => api.setEnabled({ expectedEpoch: host, id, enabled }, { timeoutMilliseconds: 30_000 })),
     /** Allows the triggers of an automation that came with its project to start it, as it is now. */
     allow: (id: string) => change(host => api.allow({ expectedEpoch: host, id }, { timeoutMilliseconds: 15_000 })),
+    /** Starts an automation on the machine it was placed on without waiting for the machine it left: both may run it until that one answers. */
+    startPlaced: (id: string) => change(host => api.startPlaced({ expectedEpoch: host, id }, { timeoutMilliseconds: 15_000 })),
     setPaused: (paused: boolean) => change(host => api.setPaused({ expectedEpoch: host, paused }, { timeoutMilliseconds: 15_000 })),
     /** Runs an automation now. The answer comes once its session exists. */
     async run(id: string): Promise<AutomationOutcome> {
