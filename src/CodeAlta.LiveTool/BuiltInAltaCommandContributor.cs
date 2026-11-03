@@ -799,6 +799,8 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         group.Add(CreateSessionSetWorktreeCommand(context));
         // A host with paired machines (the desktop app) moves sessions to them.
         if (context.Services.Get<IAltaSessionMachineMoves>() is not null) group.Add(CreateSessionMoveCommand(context));
+        // A host whose agents reach other machines lists them for `create --machine` and the prompts sent there.
+        if (context.Services.Get<SessionRuntimeService>()?.RemoteChildren is not null) group.Add(CreateSessionMachinesCommand(context));
         group.Add(CreateSessionTitleCommand(context));
         group.Add(CreateSessionAbortCommand(context));
         group.Add(CreateSessionCompactCommand(context));
@@ -1116,7 +1118,10 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         command.Add("permission-mode=", "The permission mode the session starts in, one its provider offers (default, acceptEdits, bypassPermissions; Claude Code also auto, dontAsk).", value => options.PermissionMode = value);
         command.Add("sandbox=", "The sandbox the session runs in: a profile (workspace, strict, or one of the user's; `alta sandbox list` says what each allows), or `off`. Without it, the settings of the user decide. An agent turns a sandbox on, never off.", value => options.Sandbox = value);
         command.Add("no-sub-sessions", "Create the session without sub-sessions: it cannot create, fork or start sessions of its own, and its instructions do not mention them. For a child that must do its part itself.", value => options.NoSubSessions = value is not null);
-        command.Add(async (_, _) => await HandleSessionCreateAsync(context, options).ConfigureAwait(false));
+        command.Add("machine=", "Start the session on another machine (its name or id, as `alta session machines` lists them), as a child of the calling session.", value => options.Machine = value);
+        command.Add("message=", "With --machine: the first prompt of the session.", value => options.Message = value);
+        command.Add("stdin", "With --machine: read the first prompt of the session from stdin.", value => options.UseStdin = value is not null);
+        command.Add(async (_, _) => await (string.IsNullOrWhiteSpace(options.Machine) ? HandleSessionCreateAsync(context, options) : HandleRemoteSessionCreateAsync(context, options)).ConfigureAwait(false));
         AddHelpText(
             command,
             "A session belongs to one space for its whole life. A session created by a session is in the space of that",
@@ -1143,7 +1148,13 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
             "  `alta session create --project CodeAlta --same-model-as <session-id>`",
             "  `alta session create --project CodeAlta --worktree --base main`",
             "  `alta session create --project CodeAlta --tier quick --no-sub-sessions`",
-            "  `alta session create --global --model-ref codex:gpt-5.5@high`");
+            "  `alta session create --global --model-ref codex:gpt-5.5@high`",
+            "With `--machine` the session starts on another machine, in the project of the same repository (or the one",
+            "`--project` names there), with its first prompt (`--message` or `--stdin`). It is the child of the calling session:",
+            "its final answer comes back here as for a child of this machine. It has at most what the calling session has",
+            "(its space, its tools, its permission mode, its sandbox), and the machine may give it less: it must allow",
+            "sessions started by agents of other machines in that space, which is off until its owner turns it on.",
+            "  `alta session create --machine mac-mini --stdin`");
         return command;
     }
 
@@ -2432,10 +2443,18 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         var includeMetrics = includes.Contains("metrics");
         var reportItems = new SessionReportItem?[ids.Count];
         var buildTasks = new List<Task<SessionReportItem>>(ids.Count);
+        // A session another machine lists is reported as that machine says it.
+        var remoteReports = new List<Task<RemoteSessionReport?>>();
         for (var index = 0; index < ids.Count; index++)
         {
             var id = ids[index];
             var info = resolved is null ? FindSession(infos, id) : resolved[index];
+            if (info is null && runtime.RemoteChildren is { } remote && remote.FindMachineOf(id) is not null)
+            {
+                remoteReports.Add(remote.ReportAsync(id, context.CancellationToken));
+                continue;
+            }
+
             if (info is null)
             {
                 reportItems[index] = SessionReportItem.NotFound(index, id);
@@ -2473,6 +2492,26 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
 
             successCount++;
             WriteSessionResult(context, "alta.session.report.item", item.Info, item.Result, includeResult, includeMetrics);
+        }
+
+        foreach (var report in await Task.WhenAll(remoteReports).ConfigureAwait(false))
+        {
+            if (report is null) continue;
+            successCount++;
+            AltaJsonlWriter.WriteRecord(context.Stdout, new
+            {
+                type = "alta.session.report.item",
+                version = 1,
+                correlationId = context.CorrelationId,
+                sessionId = report.SessionId,
+                machine = report.MachineName,
+                machineId = report.MachineId,
+                title = report.Title,
+                state = report.State,
+                parentSessionId = report.ParentSessionId,
+                updatedAt = report.UpdatedAt,
+                finalAnswer = includeResult ? report.LastAnswer : null,
+            });
         }
 
         WriteSessionReportSummary(context, ids.Count, successCount, diagnosticCount, truncated: false);
@@ -3597,6 +3636,14 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         if (!context.TryGetRequired<SessionRuntimeService>(nameof(SessionRuntimeService), out var runtime))
         {
             return AltaExitCodes.ServiceUnavailable;
+        }
+
+        // A session another machine runs takes the prompt there, under the rules of that machine.
+        if (runtime.RemoteChildren is { } remote
+            && await runtime.TryGetRecoverableSessionAsync(targetSessionId, context.CancellationToken).ConfigureAwait(false) is null
+            && remote.FindMachineOf(targetSessionId) is not null)
+        {
+            return await HandleRemoteSessionSendAsync(context, runtime, remote, targetSessionId, options, kind, promptResult.Prompt!).ConfigureAwait(false);
         }
 
         var infoResult = await ResolveSessionInfoAsync(context, targetSessionId).ConfigureAwait(false);
@@ -7729,6 +7776,12 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         public string? Sandbox { get; set; }
 
         public bool NoSubSessions { get; set; }
+
+        public string? Machine { get; set; }
+
+        public string? Message { get; set; }
+
+        public bool UseStdin { get; set; }
     }
 
     private sealed class SessionForkOptions

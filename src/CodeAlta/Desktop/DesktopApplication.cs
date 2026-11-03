@@ -314,6 +314,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
         DesktopBookmarks? bookmarkLife = null;
         Fleet.DesktopFleet? fleet = null;
         Fleet.DesktopFleetServers? fleetServers = null;
+        Fleet.DesktopRemoteChildren? remoteChildren = null;
         Automations.AutomationService? automations = null;
         Fleet.DesktopAutomationPlacement? placement = null;
         DesktopChangesView? changesView = null;
@@ -573,6 +574,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                 await CloseStepAsync(closing, "session retention", async () => { if (retention is not null) await retention.DisposeAsync(); }); // Join original archive/retirement work before releasing its owners.
                 await CloseStepAsync(closing, "bookmarks", () => { bookmarkLife?.Dispose(); return ValueTask.CompletedTask; });
                 await CloseStepAsync(closing, "placed automations", async () => { if (placement is not null) await placement.DisposeAsync(); }); // What was copied runs on its machines.
+                await CloseStepAsync(closing, "remote children", async () => { if (remoteChildren is not null) await remoteChildren.DisposeAsync(); }); // Their answers wait on their machines.
                 await CloseStepAsync(closing, "paired machines", async () => { if (fleet is not null) await fleet.DisposeAsync(); }); // Their channels close; their sessions go on where they run.
                 await CloseStepAsync(closing, "servers", async () => { if (fleetServers is not null) await fleetServers.DisposeAsync(); }); // Their control connections close; the servers see this computer offline.
                 await CloseStepAsync(closing, "sessions", async () => { if (workspace is not null) await Task.WhenAll(workspace.CloseImportsAsync(), workspace.CloseSessionsAsync()); });
@@ -768,6 +770,9 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                 var sessionHosts = new SessionHosts.SessionHostRegistry(new SessionHosts.LocalSessionHost(host));
                 fleet = new Fleet.DesktopFleet(host.CatalogOptions.FleetRoot, sessionHosts.TakeMembership(), Environment.MachineName);
                 fleet.Moves = new Fleet.DesktopMoves(host, fleet, Environment.MachineName, host.CatalogOptions.FleetRoot);
+                // The sessions agents of this computer start on its machines, and the answers they send back.
+                remoteChildren = new Fleet.DesktopRemoteChildren(host, fleet, Environment.MachineName);
+                host.RuntimeService.RemoteChildren = remoteChildren;
                 // The CodeAlta Servers this instance is linked to: none until a server is created or joined.
                 fleetServers = new Fleet.DesktopFleetServers(host, Environment.MachineName, DesktopCommandLine.Version);
                 // A machine of an organization this computer is not paired with is reached through the relay of its server.
@@ -799,6 +804,8 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                 // The paired machines are reached once the window shows the application.
                 var startedFleet = fleet;
                 var startedServers = fleetServers;
+                var startedChildren = remoteChildren;
+                _ = shown.Shown.ContinueWith(_ => startedChildren.Start(), TaskScheduler.Default);
                 // The moves this computer took and a stop left unfinished end first, by its own decisions.
                 _ = shown.Shown.ContinueWith(async _ =>
                 {
@@ -1130,6 +1137,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                     }, epoch, id => host.Commands.MoveSpaceChatsAsync(id, CodeAlta.Catalog.SpaceDescriptor.DefaultId)) {
                         Fallbacks = () => host.Commands.LastFallbacks,
                         HeldElsewhere = () => host.ExternalSessions?.Held ?? [],
+                        RemoteSessions = () => fleet is { } machines ? [.. machines.Hosts.SelectMany(static machine => machine.Listing.Sessions.Select(session => (machine.MachineId!, session)))] : [],
                         ConfigStore = new CodeAltaConfigStore(host.CatalogOptions),
                         SessionResources = new DesktopSessionResources(host, roots.Home, DesktopPlugins.ForWindow(ui, uiSessions, options.ReviewOwnedCommandPermissions, search: searchRelay, browser: browserHost)).ReadAsync,
                     });

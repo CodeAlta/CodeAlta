@@ -100,6 +100,7 @@ public sealed partial class FleetNodeService : IAsyncDisposable
     private readonly Lock _unreadableGate = new();
     private readonly FleetProjectEditor _projectEditor;
     private readonly HashSet<string> _warnedUnreadable = new(StringComparer.Ordinal);
+    private readonly FleetAgentSessions _agents;
     private int _disposed;
 
     /// <summary>Initializes a new instance of the <see cref="FleetNodeService"/> class.</summary>
@@ -121,6 +122,10 @@ public sealed partial class FleetNodeService : IAsyncDisposable
         _projectEditor = new FleetProjectEditor(options.Host.SpaceCatalog, options.CloneRoot);
         _receipts = new FleetRetryReceipts(options.Host.CatalogOptions.FleetRoot, options.TimeProvider, options.RetryReceiptCapacity,
             Math.Max(options.RetryReceiptCapacity, FleetRetryReceipts.DefaultKeyCapacity), LogWarn);
+        // What the sessions agents of other machines started here say to their parents waits in the outbox of the node.
+        _agents = new FleetAgentSessions(options.Host.CatalogOptions.FleetRoot, options.TimeProvider);
+        options.Host.RuntimeService.RemoteParents = _agents;
+        RestoreAgentRestrictions();
     }
 
     /// <summary>Gets the pairing of the node.</summary>
@@ -254,6 +259,7 @@ public sealed partial class FleetNodeService : IAsyncDisposable
     public async ValueTask DisposeAsync()
     {
         if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
+        if (ReferenceEquals(_host.RuntimeService.RemoteParents, _agents)) _host.RuntimeService.RemoteParents = null;
         foreach (var caller in _callers.Values)
         {
             try { await caller.Connection.CloseAsync("node_stopping").ConfigureAwait(false); }
@@ -290,6 +296,7 @@ public sealed partial class FleetNodeService : IAsyncDisposable
             On(caller, FleetNodeMethods.ControlProjectsRemove, Access.Owner, FleetNodeJsonContext.Default.FleetProjectRef,
                 FleetNodeJsonContext.Default.FleetProjectChange, ControlRemoveProjectAsync);
             RegisterManagementExtras(caller, Access.Owner);
+            RegisterAgentPolicy(caller, Access.Owner);
             // The owner may bring a session to its own node (altanode remote <machine> move), and read its moves.
             RegisterMoves(caller, Access.Owner);
             On(caller, FleetNodeMethods.MovesList, Access.Owner, FleetNodeJsonContext.Default.FleetEmpty, FleetNodeJsonContext.Default.FleetMoveList,
@@ -335,6 +342,7 @@ public sealed partial class FleetNodeService : IAsyncDisposable
         On(caller, FleetNodeMethods.MovesList, Access.View, FleetNodeJsonContext.Default.FleetEmpty, FleetNodeJsonContext.Default.FleetMoveList,
             ListMovesAsync, optionalParams: true);
         RegisterAutomations(caller);
+        RegisterAgents(caller);
         RegisterManagement(caller);
     }
 
@@ -358,6 +366,7 @@ public sealed partial class FleetNodeService : IAsyncDisposable
         On(caller, FleetNodeMethods.ControlProjectsRemove, Access.Manage, FleetNodeJsonContext.Default.FleetProjectRef,
             FleetNodeJsonContext.Default.FleetProjectChange, ControlRemoveProjectAsync);
         RegisterManagementExtras(caller, Access.Manage);
+        RegisterAgentPolicy(caller, Access.Manage);
     }
 
     private void RegisterManagementExtras(FleetNodeCaller caller, Access access)

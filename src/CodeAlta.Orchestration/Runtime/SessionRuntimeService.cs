@@ -5134,11 +5134,31 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
     {
         try
         {
+            // The parent of a session an agent of another machine started runs there: its node keeps the answer for it.
+            if (notification.ParentMachineId is not null)
+            {
+                await RouteToRemoteParentAsync(notification).ConfigureAwait(false);
+                return;
+            }
+
+            if (!await DeliverParentNotificationCoreAsync(notification).ConfigureAwait(false))
+                PublishParentNotificationWarning(notification.SourceSessionId, $"Parent session '{notification.ParentSessionId}' was not found for automatic child-session notification.");
+        }
+        catch (Exception ex) when (!OwnedProviderEventForwarding.HasRetention(ex)
+            && (ex is not OperationCanceledException || _disposed))
+        {
+            PublishParentNotificationWarning(notification.SourceSessionId, $"Automatic parent notification failed without affecting the child session: {ex.Message}");
+        }
+    }
+
+    // Steers the parent's run, else queues the notification for its next turn. False when the parent is not found.
+    private async Task<bool> DeliverParentNotificationCoreAsync(ParentNotificationWork notification)
+    {
+        {
             var parent = await TryResolveSessionForParentDeliveryAsync(notification.ParentSessionId, CancellationToken.None).ConfigureAwait(false);
             if (parent is null)
             {
-                PublishParentNotificationWarning(notification.SourceSessionId, $"Parent session '{notification.ParentSessionId}' was not found for automatic child-session notification.");
-                return;
+                return false;
             }
 
             var prompt = BuildParentPeerAgentMessage(parent, notification);
@@ -5169,7 +5189,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
                             CancellationToken.None)
                         .ConfigureAwait(false);
                     await PersistPromptProvenanceAsync(parent, runId.Value, queued: false, SessionPromptProvenance.ParentNotifyKind, prompt, submittedBy, CancellationToken.None).ConfigureAwait(false);
-                    return;
+                    return true;
                 }
                 catch (Exception ex) when (!OwnedProviderEventForwarding.HasRetention(ex))
                 {
@@ -5179,11 +5199,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
 
             await QueuePromptOwnedBodyAsync(parent, prompt, SessionPromptProvenance.ParentNotifyKind, submittedBy, images: null, CancellationToken.None).ConfigureAwait(false);
             await TryDrainNextQueuedPromptAsync(parent.SessionId).ConfigureAwait(false);
-        }
-        catch (Exception ex) when (!OwnedProviderEventForwarding.HasRetention(ex)
-            && (ex is not OperationCanceledException || _disposed))
-        {
-            PublishParentNotificationWarning(notification.SourceSessionId, $"Automatic parent notification failed without affecting the child session: {ex.Message}");
+            return true;
         }
     }
 
@@ -5413,7 +5429,7 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         [CodeAlta delegated-agent message]
         Source session: {notification.SourceSessionId}
         Source agent/session: {notification.SourceAgentId}
-        Source project: {notification.SourceProjectId ?? "unknown"}
+        Source project: {notification.SourceProjectId ?? "unknown"}{(notification.SourceMachineName is { } machine ? Environment.NewLine + "Source machine: " + machine : "")}
         Target session: {parent.SessionId}
         Kind: {notification.Kind}
         Reply requested: false
@@ -6460,7 +6476,8 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
                 Body: body,
                 RunId: runId,
                 ContentId: contentId,
-                CorrelationId: "auto-parent-" + Guid.NewGuid().ToString("N"));
+                CorrelationId: "auto-parent-" + Guid.NewGuid().ToString("N"),
+                ParentMachineId: CreatedBy?.SourceMachineId);
 
         private static bool ShouldTrackRunId(AgentEvent @event)
         {
@@ -6517,7 +6534,9 @@ public sealed partial class SessionRuntimeService : IAsyncDisposable
         string Body,
         string? RunId,
         string ContentId,
-        string CorrelationId);
+        string CorrelationId,
+        string? ParentMachineId = null,
+        string? SourceMachineName = null);
 
     private sealed class EventProjector
     {

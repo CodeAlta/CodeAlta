@@ -112,9 +112,11 @@ internal sealed class NodeApplication
             var servers = new NodeServerCommands(_output, _error) { Stop = ClientStop, Handler = ServerHandler };
             var update = new NodeUpdateCommands(_output, _error, Version, InstalledVersion()) { Stop = ClientStop, Handler = UpdateHandler };
             var automations = new NodeAutomationCommands(_output, _error);
+            var agents = new NodeAgentCommands(_output, _error) { Stop = ClientStop };
             return await Create(new NodeCommandHandlers(RunNodeAsync, service.StatusAsync, NotImplementedAsync, client.PairAsync, client.MachinesAsync,
                     client.ConnectAsync, client.RemoteAsync, service.InstallAsync, service.UninstallAsync, logs.RunAsync, devices.DevicesAsync,
-                    devices.RevokeAsync, devices.PermissionsAsync, client.MovesAsync, projects.RunAsync, servers.JoinAsync, update.UpdateAsync, automations.RunAsync))
+                    devices.RevokeAsync, devices.PermissionsAsync, client.MovesAsync, projects.RunAsync, servers.JoinAsync, update.UpdateAsync, automations.RunAsync)
+                    { Agents = agents.RunAsync })
                 .RunAsync(args, new CommandRunConfig { Out = _output, Error = _error }).ConfigureAwait(false);
         }
         catch (Exception exception)

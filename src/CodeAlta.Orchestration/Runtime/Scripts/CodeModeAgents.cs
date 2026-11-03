@@ -46,6 +46,12 @@ public sealed record CodeModeAgentRequest(string Prompt)
     /// <summary>Gets the branch or commit a new worktree starts from, or null for the commit the project is on.</summary>
     public string? WorktreeBase { get; init; }
 
+    /// <summary>
+    /// Gets the other machine the session starts on (its name or id), or null for this one: it runs there with at most
+    /// what the script's session has (<see cref="IRemoteChildSessions"/>), in the project of the same repository.
+    /// </summary>
+    public string? Machine { get; init; }
+
     /// <summary>Gets the time the session is given, or null for no limit but the run's.</summary>
     public TimeSpan? Timeout { get; init; }
 
