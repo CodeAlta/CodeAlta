@@ -318,7 +318,13 @@ internal sealed partial class WorkspaceService
 internal sealed record WorkspaceRequest;
 internal sealed record WorkspaceSnapshot(bool Configured, WorkspaceProject[] Projects, WorkspaceSession[] Sessions,
     bool ProjectsTruncated, bool SessionsTruncated, bool DisplayTextTruncated);
-internal sealed record WorkspaceProject(string Id, string Name, string Path, bool Archived);
+internal sealed record WorkspaceProject(string Id, string Name, string Path, bool Archived)
+{
+    // The machine a project that stands for a paired machine groups the sessions of (its sessions of no project of this
+    // catalog); absent for a project of the catalog.
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? MachineId { get; init; }
+}
 internal sealed record WorkspaceSession(string Id, string Title, string? WorkspacePath, string? ProviderKey, DateTimeOffset UpdatedAt,
     string FullTitle, bool FullTitleTruncated, string? ParentSessionId, string? ScopeKind, string? ProjectId, string? LineageIssue,
     DateTimeOffset? CreatedAt, int? MessageCount = null, string? AutomationId = null,
@@ -343,6 +349,22 @@ internal sealed record WorkspaceSession(string Id, string Title, string? Workspa
     // The cloud session the session runs as, or ran as before it was brought back; absent for any other session.
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public WorkspaceSessionCloud? Cloud { get; init; }
+
+    // The paired machine that runs the session; absent for a session of this computer.
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? MachineId { get; init; }
+
+    // The name of that machine.
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? MachineName { get; init; }
+
+    // What the session of that machine did when it was listed: working, waiting or idle.
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? RemoteState { get; init; }
+
+    // The name of its project on that machine.
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? RemoteProject { get; init; }
 }
 
 /// <summary>What the Explorer shows of the cloud session a session runs as, or ran as.</summary>

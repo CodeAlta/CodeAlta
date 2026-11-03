@@ -1,3 +1,4 @@
+using System.Text.Json;
 using System.Text.Json.Serialization;
 
 namespace CodeAlta.Fleet.NodeApi;
@@ -176,7 +177,26 @@ public sealed record FleetSessionState(string SessionId, Guid RuntimeInstanceId,
 /// <param name="SessionId">The session.</param>
 /// <param name="Cursor">The cursor a previous window gave (<see cref="FleetHistoryResult.Next"/>); null for the first window.</param>
 /// <param name="Direction"><c>backward</c> (default: the latest records, then older ones) or <c>forward</c> (from the start).</param>
-public sealed record FleetHistoryParams(string SessionId, string? Cursor = null, string? Direction = null);
+/// <param name="Format">
+/// <c>entries</c> (default: <see cref="FleetHistoryResult.Entries"/>, each record projected and cut) or <c>events</c>
+/// (<see cref="FleetHistoryResult.Events"/>: the journal's own events, which a desktop shows in its timeline).
+/// </param>
+/// <param name="Known">
+/// For the latest <c>events</c> window (backward, no cursor): the stamp a previous one gave; the node answers
+/// <see cref="FleetHistoryResult.Unchanged"/> with no events while the journal still has it.
+/// </param>
+public sealed record FleetHistoryParams(string SessionId, string? Cursor = null, string? Direction = null, string? Format = null, string? Known = null);
+
+/// <summary>An event of the journal of a session, in the <c>events</c> format of <c>sessions.history</c>.</summary>
+/// <param name="Offset">The offset of its record in the journal.</param>
+/// <param name="End">The exclusive end of its record, when the window was read backward; null otherwise.</param>
+/// <param name="Event">The event, as the journal holds it.</param>
+public sealed record FleetHistoryEvent(long Offset, long? End, JsonElement Event);
+
+/// <summary>The journal a window of events was read from.</summary>
+/// <param name="Length">Its length.</param>
+/// <param name="LastWriteUtcTicks">Its last write.</param>
+public sealed record FleetHistoryRevision(long Length, long LastWriteUtcTicks);
 
 /// <summary>One record of the timeline of a session.</summary>
 /// <param name="Offset">Its offset in the journal: its identity in the timeline.</param>
@@ -197,7 +217,20 @@ public sealed record FleetHistoryEntry(long Offset, DateTimeOffset Timestamp, st
 /// <param name="Entries">The records of the window, in the order of the journal.</param>
 /// <param name="Next">The cursor of the next window (older for <c>backward</c>, newer for <c>forward</c>); null when there is none yet.</param>
 /// <param name="HasMore">Whether records remain in that direction.</param>
-public sealed record FleetHistoryResult(IReadOnlyList<FleetHistoryEntry> Entries, string? Next, bool HasMore);
+public sealed record FleetHistoryResult(IReadOnlyList<FleetHistoryEntry> Entries, string? Next, bool HasMore)
+{
+    /// <summary>Gets the events of the window, in the order of the journal, in the <c>events</c> format; null otherwise.</summary>
+    public IReadOnlyList<FleetHistoryEvent>? Events { get; init; }
+
+    /// <summary>Gets the journal a window of events was read from, when the node knows it.</summary>
+    public FleetHistoryRevision? Revision { get; init; }
+
+    /// <summary>Gets the stamp of the journal of the latest window of events, to give back as <see cref="FleetHistoryParams.Known"/>; null when unsure.</summary>
+    public string? Stamp { get; init; }
+
+    /// <summary>Gets whether the journal still has the stamp the request knew: nothing was read.</summary>
+    public bool Unchanged { get; init; }
+}
 
 /// <summary>The parameters of <c>sessions.watch</c>.</summary>
 /// <param name="SessionId">The session.</param>
@@ -228,7 +261,11 @@ public sealed record FleetDisplayLifecycle(string Kind, string? RunId, string? M
 /// <param name="Text">Its text so far, cut at the bound of the display.</param>
 /// <param name="IsComplete">Whether it is complete.</param>
 /// <param name="IsTruncated">Whether it was cut.</param>
-public sealed record FleetDisplayText(string? RunId, string ContentId, string Kind, string Text, bool IsComplete, bool IsTruncated);
+public sealed record FleetDisplayText(string? RunId, string ContentId, string Kind, string Text, bool IsComplete, bool IsTruncated)
+{
+    /// <summary>Gets the retry key of the prompt of a user message, as the node recorded it (<c>fleet:&lt;device&gt;:&lt;key&gt;</c> for a device's); null for other texts.</summary>
+    public string? ClientRequestId { get; init; }
+}
 
 /// <summary>A tool call of the live display.</summary>
 /// <param name="ActivityId">Its activity.</param>

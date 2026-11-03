@@ -103,13 +103,39 @@ public sealed partial class FleetNodeService
             "forward" => false,
             _ => throw new FleetException(FleetErrorCodes.InvalidParams, null, "The direction of a history window is 'backward' or 'forward'."),
         };
+        var events = parameters.Format switch
+        {
+            null or "entries" => false,
+            "events" => true,
+            _ => throw new FleetException(FleetErrorCodes.InvalidParams, null, "The format of a history window is 'entries' or 'events'."),
+        };
         var cursor = parameters.Cursor is null ? null : ParseCursor(sessionId, parameters.Cursor, backward);
         AgentSessionHistoryPage page;
+        string? stamp = null;
         try
         {
-            page = backward
-                ? await _host.WorkspaceReads.ReadHistoryTailPageAsync(sessionId, cursor, cancellationToken).ConfigureAwait(false)
-                : await _host.WorkspaceReads.ReadHistoryPageAsync(sessionId, cursor, cancellationToken).ConfigureAwait(false);
+            if (events && backward)
+            {
+                // The timeline route: the events with the end of their records and the revision, as the desktop reads them.
+                if (cursor is null)
+                {
+                    var known = parameters.Known is { Length: > 0 and <= 512 } value ? value : null;
+                    var tail = await _host.WorkspaceReads.ReadTimelineTailAsync(sessionId, known, cancellationToken).ConfigureAwait(false);
+                    if (tail.Unchanged) return new FleetHistoryResult([], null, false) { Events = [], Stamp = tail.Stamp, Unchanged = true };
+                    page = tail.Page!;
+                    stamp = tail.Stamp;
+                }
+                else
+                {
+                    page = await _host.WorkspaceReads.ReadTimelinePageAsync(sessionId, cursor, cancellationToken).ConfigureAwait(false);
+                }
+            }
+            else
+            {
+                page = backward
+                    ? await _host.WorkspaceReads.ReadHistoryTailPageAsync(sessionId, cursor, cancellationToken).ConfigureAwait(false)
+                    : await _host.WorkspaceReads.ReadHistoryPageAsync(sessionId, cursor, cancellationToken).ConfigureAwait(false);
+            }
         }
         catch (OwnedWorkspaceBusyException)
         {
@@ -127,6 +153,8 @@ public sealed partial class FleetNodeService
         {
             throw new FleetException(FleetErrorCodes.InvalidParams, FleetErrorHints.Refresh, "The history changed since the cursor was given: read it again from its end.");
         }
+
+        if (events) return EventsWindow(sessionId, page, backward, stamp);
 
         // Every record that fits: a window that would pass the budget ends before it, and its cursor resumes there.
         var entries = new List<FleetHistoryEntry>(page.Entries.Count);
@@ -157,6 +185,46 @@ public sealed partial class FleetNodeService
         }
 
         return new FleetHistoryResult(entries, next is null ? null : FormatCursor(next, backward), next is not null);
+    }
+
+    // The journal's own events, as many as fit the budget of a window: one that would pass it ends the window before it
+    // (backward, before the oldest kept; forward, at the first left out), and the cursor resumes there. A window that
+    // is cut has no stamp: the next read of the latest window is a whole one.
+    private static FleetHistoryResult EventsWindow(string sessionId, AgentSessionHistoryPage page, bool backward, string? stamp)
+    {
+        var events = new List<FleetHistoryEvent>(page.Entries.Count);
+        var budget = MaxHistoryWindowBytes;
+        var ordered = backward ? page.Entries.Reverse() : page.Entries;
+        AgentSessionHistoryEntry? stoppedAt = null;
+        foreach (var entry in ordered)
+        {
+            var json = entry.Event.ToJson();
+            if (json.Length * 3 > budget && events.Count > 0)
+            {
+                stoppedAt = entry;
+                break;
+            }
+
+            using var document = JsonDocument.Parse(json);
+            budget -= json.Length * 3;
+            events.Add(new FleetHistoryEvent(entry.Offset, backward ? entry.SourceEnd : null, document.RootElement.Clone()));
+        }
+
+        if (backward) events.Reverse();
+        var next = page.Next;
+        if (stoppedAt is not null && (page.Next ?? (page.Revision is { } revision ? new AgentSessionHistoryCursor(sessionId, revision.Length, revision.LastWriteUtcTicks, 0) : null)) is { } basis)
+        {
+            var offset = backward ? events[0].Offset : stoppedAt.Offset;
+            next = offset > 0 && offset < basis.Length ? basis with { Offset = offset } : next;
+            stamp = null;
+        }
+
+        return new FleetHistoryResult([], next is null ? null : FormatCursor(next, backward), next is not null)
+        {
+            Events = events,
+            Revision = page.Revision is { } read ? new FleetHistoryRevision(read.Length, read.LastWriteUtcTicks) : null,
+            Stamp = stamp,
+        };
     }
 
     private static FleetHistoryEntry Project(AgentSessionHistoryEntry entry)

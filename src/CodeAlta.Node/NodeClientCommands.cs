@@ -101,6 +101,8 @@ internal sealed class NodeClientCommands(TextWriter output, TextWriter error)
         await output.WriteLineAsync().ConfigureAwait(false);
         await output.WriteLineAsync(offer.Link).ConfigureAwait(false);
         await output.WriteLineAsync().ConfigureAwait(false);
+        // The device that pairs shows the same words before it connects: they say the link names this node's key.
+        await output.WriteLineAsync($"The words of this node: {identity.Fingerprint.ToShortWords()}").ConfigureAwait(false);
         await output.WriteLineAsync($"It names {string.Join(", ", offer.Addresses)} and is valid until {offer.ExpiresAt.ToLocalTime():HH:mm}. Waiting... (Ctrl+C stops)")
             .ConfigureAwait(false);
         await output.FlushAsync().ConfigureAwait(false);

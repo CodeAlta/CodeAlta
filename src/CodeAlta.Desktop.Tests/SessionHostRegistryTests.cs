@@ -86,12 +86,46 @@ public sealed class SessionHostRegistryTests
         }, local.Calls.ToArray());
     }
 
+    [TestMethod]
+    public void Membership_AddsAndRemovesHosts_AndResolvesTheSessionsAndOperationsTheyKnow()
+    {
+        var local = new RecordingSessionHost(null);
+        var registry = new SessionHostRegistry(local);
+        var membership = registry.TakeMembership();
+        var remote = new RecordingSessionHost("mac-mini");
+        var operation = Guid.NewGuid();
+
+        membership.Add(remote);
+        Assert.AreSame(local, registry.Resolve(SessionId), "A session the machine does not list stays local.");
+        remote.Listed.Add(SessionId);
+        remote.Operations.Add(operation);
+        Assert.AreSame(remote, registry.Resolve(SessionId));
+        Assert.AreSame(remote, registry.ResolveOperation(operation));
+        Assert.AreSame(local, registry.ResolveOperation(Guid.NewGuid()));
+        Assert.ThrowsExactly<ArgumentException>(() => membership.Add(new RecordingSessionHost("mac-mini")), "One host per machine.");
+        Assert.ThrowsExactly<ArgumentException>(() => membership.Add(new RecordingSessionHost(null)));
+
+        Assert.AreSame(remote, membership.Remove("mac-mini"));
+        Assert.IsNull(membership.Remove("mac-mini"));
+        Assert.AreSame(local, registry.Resolve(SessionId));
+        Assert.AreEqual(0, registry.Remotes.Count);
+        Assert.ThrowsExactly<InvalidOperationException>(() => registry.TakeMembership());
+    }
+
     // A host that records the calls the tests make and refuses the others.
-    private sealed class RecordingSessionHost(string? machineId) : ISessionHost
+    internal sealed class RecordingSessionHost(string? machineId) : ISessionHost
     {
         public List<string> Calls { get; } = [];
 
+        public HashSet<string> Listed { get; } = new(StringComparer.OrdinalIgnoreCase);
+
+        public HashSet<Guid> Operations { get; } = [];
+
         public string? MachineId => machineId;
+
+        public bool Lists(string sessionId) => Listed.Contains(sessionId);
+
+        public bool Admitted(Guid operationId) => Operations.Contains(operationId);
 
         public int ReceiptCapacity => 256;
 

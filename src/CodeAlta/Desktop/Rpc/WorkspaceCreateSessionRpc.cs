@@ -59,10 +59,12 @@ internal sealed partial class WorkspaceService
         : this(host.WorkspaceReads, host.ProjectCatalog, epoch)
     {
         ArgumentNullException.ThrowIfNull(hosts);
-        // The list is the one of the host of this process: the lists of other hosts are merged here once there are some.
+        // The list of the host of this process, with the sessions the paired machines last listed.
         var local = hosts.Local;
         _readAllSessions = local.ReadSnapshotAsync;
-        _read = ProjectedSnapshot(local.ReadSnapshotAsync);
+        var projected = ProjectedSnapshot(local.ReadSnapshotAsync);
+        _read = async token => WithRemoteSessions(await projected(token).ConfigureAwait(false),
+            [.. hosts.Remotes.OfType<CodeAlta.Desktop.Fleet.RemoteSessionHost>()]);
         // A history window is read from the host of its session; its cursor goes back to that host only.
         _readHistory = (sessionId, cursor, token) => hosts.Resolve(sessionId).ReadHistoryPageAsync(sessionId, cursor, token);
         _readHistoryTail = (sessionId, cursor, token) => hosts.Resolve(sessionId).ReadHistoryTailPageAsync(sessionId, cursor, token);

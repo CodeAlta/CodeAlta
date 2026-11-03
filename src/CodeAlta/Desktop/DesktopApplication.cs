@@ -312,6 +312,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
         ReminderService? reminders = null;
         DesktopSessionRetention? retention = null;
         DesktopBookmarks? bookmarkLife = null;
+        Fleet.DesktopFleet? fleet = null;
         Automations.AutomationService? automations = null;
         DesktopChangesView? changesView = null;
         DesktopEditorView? editorView = null;
@@ -569,6 +570,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                 await CloseStepAsync(closing, "MCP server", async () => { if (mcp is not null) await mcp.DisposeAsync(); }); // No client starts a command on a host that is closing.
                 await CloseStepAsync(closing, "session retention", async () => { if (retention is not null) await retention.DisposeAsync(); }); // Join original archive/retirement work before releasing its owners.
                 await CloseStepAsync(closing, "bookmarks", () => { bookmarkLife?.Dispose(); return ValueTask.CompletedTask; });
+                await CloseStepAsync(closing, "paired machines", async () => { if (fleet is not null) await fleet.DisposeAsync(); }); // Their channels close; their sessions go on where they run.
                 await CloseStepAsync(closing, "sessions", async () => { if (workspace is not null) await Task.WhenAll(workspace.CloseImportsAsync(), workspace.CloseSessionsAsync()); });
                 await CloseStepAsync(closing, "automations", async () => { if (automations is not null) await automations.DisposeAsync(); }); // Nothing more is started; sessions end with the host.
                 await CloseStepAsync(closing, "terminals", async () => { if (terminals is not null) await terminals.CloseAsync(); }); // The programs of the terminals end with the application.
@@ -757,8 +759,10 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
             if (!closeRequested.Task.IsCompleted)
             {
                 var epoch = Guid.NewGuid().ToString("D");
-                // The hosts of the sessions the window shows: the host of this process, for now the only one.
+                // The hosts of the sessions the window shows: the host of this process, and one per paired machine, which the
+                // fleet of the instance adds and removes.
                 var sessionHosts = new SessionHosts.SessionHostRegistry(new SessionHosts.LocalSessionHost(host));
+                fleet = new Fleet.DesktopFleet(host.CatalogOptions.FleetRoot, sessionHosts.TakeMembership(), Environment.MachineName);
                 // The bookmarks of the sessions of this instance, in its database. A bookmarked session is kept by the
                 // retention of sessions, which deletes nothing before the bookmarks were read.
                 var bookmarks = new CodeAlta.Catalog.Bookmarks.BookmarkService(host.ApplicationDatabase,
@@ -780,6 +784,9 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                     journalStore.RebuildProgress = null;
                     Mark("application shown, the work after the start begins");
                 }, TaskScheduler.Default);
+                // The paired machines are reached once the window shows the application.
+                var startedFleet = fleet;
+                _ = shown.Shown.ContinueWith(_ => startedFleet.StartAsync(CancellationToken.None), TaskScheduler.Default).Unwrap();
                 operations = new SessionOperationsService(sessionHosts, host.Commands, epoch) { RemoteControlChanged = shell.NoteRemoteControl };
                 if (shell.ReconnectRemoteControl) DesktopRemoteControl.Reconnect(host.Commands, shell);
                 // The reviews of the user: comments on plans, files and changes, kept per checkout in the state folder.
@@ -810,6 +817,8 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                 spaceView.OpenSessionsChanged += host.RuntimeService.SetShownSessions;
                 // A session another process wrote, runs or released: the windows read the sessions again.
                 if (host.ExternalSessions is { } externalSessions) externalSessions.Changed += (_, _) => spaceView.NotifySessionsChanged();
+                // A paired machine that changes its sessions or its state: the windows read the sessions again.
+                fleet.Changed += spaceView.NotifySessionsChanged;
                 canvases?.Attach(host.PluginRuntime, () => spaceView.ShownSpaceId);
                 // The project the catalog lists for a folder; null for none.
                 async Task<string?> ProjectIdOfAsync(string projectPath, CancellationToken token)
@@ -986,6 +995,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                     appUpdate ??= StartAppUpdate();
                     builder.AddAppUpdateService(appUpdate);
                     builder.AddWorkspaceService(workspace);
+                    builder.AddMachinesService(fleet is null ? new MachinesService() : new MachinesService(fleet, epoch));
                     builder.AddConfigurationService(new ConfigurationService(host.ModelProviderRegistry, host.PluginRuntime, new DesktopDefaultProvider(host.CatalogOptions), host.CatalogOptions)
                     {
                         PluginProviderTypes = pluginProviderTypes,

@@ -24,6 +24,10 @@ export function sessionActionAccess(row: WorkspaceSession, target: SessionMenuTa
   // session too. Copying the command that resumes it asks the host to close that process as well, which it refuses
   // while the session works, and copies all the same: the session of an owned window is enough.
   const read = open && exactScope && owned && !!hostEpoch;
+  // A session of a paired machine is opened and driven from its tab; what changes it in the catalog (a rename, a fork,
+  // an archive, a move, a deletion) is done on its machine.
+  if (row.machineId) return { open, rename: false, fork: false, delete: false, archive: false, "remote-control": false, move: false, space: false,
+    "open-vs-code": false, "copy-resume-command": false, "run-in-terminal": false };
   // A session that runs in the cloud has no conversation here yet: what acts on it (a fork, Remote Control, a move of
   // its folder) waits until it is continued here.
   const local = mutate && !inCloud(row);
