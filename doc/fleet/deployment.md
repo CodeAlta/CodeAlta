@@ -131,16 +131,23 @@ All signed (Authenticode, Apple notarization, NuGet signatures, cosign for image
   the service starts) starts the selected version as its child, gives it its arguments and ends with its exit code. A
   version that switches stops with exit code 75 and its launcher starts the next one; a process that ran the installed
   version itself becomes that launcher. The process the service manager started never exits during an update, so the
-  switch does not depend on Task Scheduler, launchd or systemd restarting anything.
+  switch does not depend on Task Scheduler, launchd or systemd restarting anything. One launcher at a time: `run`
+  holds the lease of the folder of versions (`launcher.lock`) from its start to its end, across the selection, the
+  version that runs, its confirmation and its rollback; a second `run` is refused at once, even before the version
+  started has taken the profile or the data root. A version refused because another process holds them (exit code 3)
+  did not run: it neither fails its trial nor counts a start.
 - **Trial and rollback.** A new version confirms itself once healthy: a node when it listens and its connections to
   the servers that approved it are up, the server when it answers its own health request. One that exits first, or does
-  not confirm within 2 minutes (over 2 starts), is stopped, marked bad (an update skips it unless named) and the
-  previous version starts again. Versions other than the selected, the previous and a pending one are pruned.
+  not confirm within 2 minutes (over 2 starts), or cannot be started, is stopped, marked bad (an update skips it unless
+  named) and the previous version starts again. A rollback with a backup is recorded with the move of the pointer and
+  kept until the backup is restored: the launcher restores it before it starts anything, and when it cannot, it starts
+  no version on data that version may not read (exit code 74) and tries again at its next start. Versions other than
+  the selected, the previous and a pending one are pruned.
 - **When.** A node switches when no session works: it refuses new work (`node.updating`, retried by callers) while it
   drains, 10 minutes at most, then takes work again and switches at the next idle moment; `--now` does not wait (its
   running turns stop and stay resumable). The server copies its database first (SQLite's backup API, `backups/`); a
   rollback restores that copy, losing what the new version wrote meanwhile. A switch asked while nothing runs is taken
-  at the next start.
+  at the next start, the server's database copied first there too; no server version is selected without that copy.
 - **The fleet update** (next): the desktop asks the server, the server asks its nodes over the control connection,
   checks their versions (`node.info`, the inventory) and updates itself last, possibly at a set time. Each machine
   runs the same self-update (`ApplyAsync` with the hash a controller device signed). Nodes follow the fleet's update
