@@ -16,7 +16,7 @@ In CodeAlta Desktop, open **Settings** > **Fleet** > **Machines** and click **Ad
 | --- | --- |
 | **Over SSH** | A Linux or macOS computer you reach with `ssh`. CodeAlta does everything there; nothing to type on the machine |
 | **With a pairing link** | CodeAlta Node runs there already: paste the link of `altanode pair` (see [Pair it with CodeAlta Desktop](#pair-it-with-codealta-desktop)) |
-| **Through my server** | The machine joins your CodeAlta Server with one command, and this computer approves it (see [Connect to a CodeAlta Server](#connect-to-a-codealta-server)) |
+| **Through my server** | The machine joins your CodeAlta Server with one command, and you approve it when it shows the same six words (see [Connect to a CodeAlta Server](#connect-to-a-codealta-server)) |
 
 ### Over SSH
 
@@ -292,7 +292,7 @@ It takes the options of `altaserver run` (`--port`, `--urls`, `--data-root`, `--
 
 ### Add machines and computers
 
-- **A machine**: in **Settings** > **Fleet** > **Machines**, **Add a machine…** > **Through my server** shows the command to run on it, `altanode join <address> --token <code>`. This computer made the code: the machine is approved as soon as it comes, and its six words are shown. The **Add a machine…** of the server's card shows the same command for a machine that waits for you to approve it: it appears under the server as a **New device**; click **Approve…**, check that the machine shows the same six words, and click **It shows the same words**.
+- **A machine**: in **Settings** > **Fleet** > **Machines**, **Add a machine…** > **Through my server** shows the command to run on it, `altanode join <address> --token <code>`, which prints the six words of the machine's key. The machines that join list under the command with their words: click **It shows the same words** beside the one whose words the machine printed. Another one is never approved by itself. The **Add a machine…** of the server's card shows the same command for a machine that waits for you to approve it: it appears under the server as a **New device**; click **Approve…**, check that the machine shows the same six words, and click **It shows the same words**.
 - **What waits for you**: when a machine or a computer asks to join, a message comes wherever you are in CodeAlta, with its six words, **Approve** and **Refuse**, and the **Fleet** button of the title bar counts what waits. Approve when the words are the same as on the device.
 - **Another of your computers**: **Join an organization…** with the address of the server and an enrollment code; it shows six words while it waits, and you approve it the same way from a computer already approved. Once approved, it can add and approve machines too. A node never approves anything.
 
