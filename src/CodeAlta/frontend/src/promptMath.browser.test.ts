@@ -9,6 +9,12 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { build } from "esbuild";
 import { browserBaseArgs, browserExecutable, waitForBrowserPort } from "./browserTarget";
 
+// The key of the equation editor: Alt+= (Word's), Ctrl+Alt+= on macOS, where Option+= types ≠ (`commandRegistry.ts`).
+// The modifiers of the DevTools protocol: Alt is 1, Ctrl is 2.
+const mac = process.platform === "darwin";
+const equationKey = mac ? "Ctrl+Alt+=" : "Alt+=";
+const equationModifiers = mac ? 3 : 1;
+
 const edge = browserExecutable;
 
 // The prompt editor alone, in headless Edge: a formula is tinted and previewed while the caret is in it, the equation
@@ -78,8 +84,9 @@ test("the prompt previews the formula at the caret, and the equation editor writ
     // The caret in the formula draws it above it; out of it, the preview goes. The formula is tinted.
     await evaluate("mathFixture.caret(8)");
     assert.equal(await wait("mathFixture.preview()?.drawn"), true);
-    assert.equal(await evaluate("mathFixture.preview().edit"), "Edit equation (Alt+=)");
-    assert.equal(await evaluate("mathFixture.preview().seen"), true, "the frame of the prompt does not clip the preview above it");
+    assert.equal(await evaluate("mathFixture.preview().edit"), `Edit equation (${equationKey})`);
+    // Drawn, the preview is then placed above the formula: it is looked for once it is there.
+    assert.equal(await wait("mathFixture.preview()?.seen"), true, "the frame of the prompt does not clip the preview above it");
     assert.equal(await evaluate("mathFixture.preview().beside"), true, "the button that edits the formula is beside it");
     assert.equal(await wait("mathFixture.tinted() > 0"), true);
     await evaluate("mathFixture.caret(1)");
@@ -97,9 +104,9 @@ test("the prompt previews the formula at the caret, and the equation editor writ
     assert.equal(await wait("mathFixture.editor() === null"), true);
     assert.equal(await evaluate("mathFixture.state.value"), "Area $\\frac{a}{b}$ here");
 
-    // Alt+= at the end of the prompt writes a new equation, displayed on lines of its own, with Ctrl+Enter.
+    // The key of the equation editor at the end of the prompt writes a new equation, displayed on lines of its own, with Ctrl+Enter.
     await evaluate("mathFixture.caret(mathFixture.state.value.length)");
-    for (const type of ["keyDown", "keyUp"]) await command("Input.dispatchKeyEvent", { type, key: "=", code: "Equal", windowsVirtualKeyCode: 187, modifiers: 1 });
+    for (const type of ["keyDown", "keyUp"]) await command("Input.dispatchKeyEvent", { type, key: "=", code: "Equal", windowsVirtualKeyCode: 187, modifiers: equationModifiers });
     assert.equal(await wait("mathFixture.editor()?.field === ''"), true);
     assert.equal(await evaluate("mathFixture.editor().title"), "Insert equation");
     await evaluate("mathFixture.write('x^2')");
@@ -108,12 +115,12 @@ test("the prompt previews the formula at the caret, and the equation editor writ
     assert.equal(await wait("mathFixture.editor() === null"), true);
     // The model writes its own line breaks (CRLF on Windows), as for any line typed in the prompt.
     assert.equal((await evaluate<string>("mathFixture.state.value")).replaceAll("\r\n", "\n"), "Area $\\frac{a}{b}$ here\n$$\nx^2\n$$");
-    // The code editor: a Markdown document previews the formula at the caret and edits it with Alt+=, as the prompt does.
+    // The code editor: a Markdown document previews the formula at the caret and edits it with the same key, as the prompt does.
     // The equation editor gives the focus back to the prompt as it closes, at times after the caret was placed: the caret
     // is placed again until the code editor keeps the focus and previews.
     assert.equal(await wait("mathFixture.editorPreview() || (mathFixture.editorCaret(10), false)"), true);
     assert.ok(await evaluate<number>("mathFixture.editorTinted()") > 0, "the formula of the document is tinted");
-    for (const type of ["keyDown", "keyUp"]) await command("Input.dispatchKeyEvent", { type, key: "=", code: "Equal", windowsVirtualKeyCode: 187, modifiers: 1 });
+    for (const type of ["keyDown", "keyUp"]) await command("Input.dispatchKeyEvent", { type, key: "=", code: "Equal", windowsVirtualKeyCode: 187, modifiers: equationModifiers });
     assert.equal(await wait("mathFixture.editor()?.field === 'E=mc^2'"), true);
     await evaluate("mathFixture.write('\\\\frac{a}{b}')");
     await evaluate("mathFixture.insert()");
@@ -130,7 +137,7 @@ test("the prompt previews the formula at the caret, and the equation editor writ
     await evaluate("mathFixture.editorCaret(15)");
     await new Promise(resolve => setTimeout(resolve, 400));
     assert.deepEqual(await evaluate("[mathFixture.editorPreview(), mathFixture.editorTinted()]"), [false, 0]);
-    for (const type of ["keyDown", "keyUp"]) await command("Input.dispatchKeyEvent", { type, key: "=", code: "Equal", windowsVirtualKeyCode: 187, modifiers: 1 });
+    for (const type of ["keyDown", "keyUp"]) await command("Input.dispatchKeyEvent", { type, key: "=", code: "Equal", windowsVirtualKeyCode: 187, modifiers: equationModifiers });
     await new Promise(resolve => setTimeout(resolve, 500));
     assert.equal(await evaluate("mathFixture.editor()"), null);
     assert.deepEqual(exceptions, []);

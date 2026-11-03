@@ -22,7 +22,7 @@ const read = (path: string) => readFile(new URL(path, import.meta.url), "utf8");
 type Page = Readonly<{
   evaluate: <T = unknown>(expression: string) => Promise<T>;
   command: (method: string, params?: object) => Promise<Record<string, any>>;
-  until: (expression: string, what: string) => Promise<void>;
+  until: (expression: string, what: string, milliseconds?: number) => Promise<void>;
   click: (selector: string) => Promise<void>;
   /** Presses and releases a key; `modifiers` is 2 for Ctrl, 4 for Cmd. */
   key: (name: string, virtual: number, options?: { code?: string; modifiers?: number }) => Promise<void>;
@@ -93,8 +93,8 @@ async function withPage(entry: string, fixture: string, body: (page: Page) => Pr
       const reply = await command("Runtime.evaluate", { expression, returnByValue: true, awaitPromise: true });
       assert.equal(reply.exceptionDetails, undefined, JSON.stringify(reply.exceptionDetails)); return reply.result?.value as T;
     };
-    const until = async (expression: string, what: string) => {
-      const found = await evaluate<boolean>(`new Promise(resolve => { const end = Date.now() + 10000; (function check() { let ok = false; try { ok = !!(${expression}); } catch {} if (ok) resolve(true); else if (Date.now() > end) resolve(false); else setTimeout(check, 25); })(); })`);
+    const until = async (expression: string, what: string, milliseconds = 10_000) => {
+      const found = await evaluate<boolean>(`new Promise(resolve => { const end = Date.now() + ${milliseconds}; (function check() { let ok = false; try { ok = !!(${expression}); } catch {} if (ok) resolve(true); else if (Date.now() > end) resolve(false); else setTimeout(check, 25); })(); })`);
       if (!found) assert.fail(`waited for ${what}; ${problems.join(" | ")}\n${await evaluate<string>("document.body.innerText.slice(0, 900)").catch(() => "")}`);
     };
     // The pointer goes onto the element and presses it there, as a user does: what covers it gets the click instead.
@@ -753,7 +753,9 @@ test("the capture opens the microphone under the policy of the page, gives the c
     const c = "window.captureFixture";
     assert.equal(await evaluate(`${c}.available`), true);
     await evaluate(`${c}.start()`);
-    await until(`${c}.ready === 1 || ${c}.errors.length`, "the microphone open");
+    // The first microphone and audio context of a new browser can take more than ten seconds to open (seen on macOS,
+    // where the next runs open them in less than three): the wait is longer here, below the 30 s of a command.
+    await until(`${c}.ready === 1 || ${c}.errors.length`, "the microphone open", 25_000);
     assert.deepEqual(await evaluate(`${c}.errors`), []);
     await until(`${c}.chunks.length >= 5`, "half a second of audio");
     // A tenth of a second of 16 kHz 16-bit audio, whatever the rate of the system.
