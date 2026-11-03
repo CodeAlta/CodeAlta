@@ -149,11 +149,14 @@ public sealed class ProjectCatalogCacheTests
         await File.WriteAllTextAsync(invalid, (await File.ReadAllTextAsync(invalid)).Replace("id: ", "id: not-an-id-", StringComparison.Ordinal));
         var unparsable = Path.Combine(fixture.Options.ProjectsRoot, "broken.md");
         await File.WriteAllTextAsync(unparsable, "---\nid: [unclosed\npath: {\n---\n");
+        // A Windows path written by hand between double quotes: its single backslashes are invalid YAML escapes.
+        var backslashes = Path.Combine(fixture.Options.ProjectsRoot, "hand-written.md");
+        await File.WriteAllTextAsync(backslashes, "---\nid: 019a0000-0000-7000-8000-000000000001\nname: hand\npath: \"C:\\Users\\someone\\code\"\n---\n");
 
         var load = await fixture.Catalog.LoadReadableAsync();
 
         CollectionAssert.AreEqual(new[] { projects[0].Id, projects[2].Id }, load.Projects.Select(static project => project.Id).ToArray());
-        CollectionAssert.AreEquivalent(new[] { invalid, unparsable }, load.Unreadable.Select(static file => file.SourcePath).ToArray());
+        CollectionAssert.AreEquivalent(new[] { invalid, unparsable, backslashes }, load.Unreadable.Select(static file => file.SourcePath).ToArray());
         Assert.IsTrue(load.Unreadable.All(static file => file.Message.Length > 0));
         await Assert.ThrowsAsync<Exception>(() => fixture.Catalog.LoadAsync(), "LoadAsync still fails on a file it cannot read.");
     }
