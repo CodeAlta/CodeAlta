@@ -156,7 +156,7 @@ windows, asks, permissions, jobs); the node API is that surface, made remote, pl
 | `statistics` | `publish`, `withdraw` (statistics sets, [statistics](statistics.md#publication-rows-not-increments)) |
 | `relay` | `open`, `incoming`, `accept`, `close` |
 | `telemetry` | `settings`: the fleet's telemetry setting, signed by a controller device, sent when a device connects and when an owner changes it ([observability](observability.md#where-telemetry-goes)) |
-| `automations` | `assigned` (the versions a controller device of the machine's person signed, sealed for the machine and the person's controllers, removals included; sent when one is stored for a machine online, and on each connection until acknowledged), `ack` (taken or refused, with the reason), `claim` (a due time, before its run: one run per automation and due time, whatever the machine; a node whose server does not answer runs the time it claimed itself), `runs` (run facts: version, trigger, status, times, session; never the prompt, the answer or what the trigger was about) ([orchestration](orchestration.md#placement-and-dispatch)) |
+| `automations` | `assigned` (the versions a controller device of the machine's person signed, sealed for the machine and the person's controllers, removals included; sent when one is stored for a machine online, and on each connection until acknowledged), `ack` (taken or refused, with the reason), `claim` (a due time, before its run: one run per automation and due time, whatever the machine; a node whose server does not answer runs the time it claimed itself), `runs` (run facts: version, trigger, status, times, session, tokens and cost; never the prompt, the answer or what the trigger was about), `run` (a run asked by hand, signed by a controller device of the person for the machine and a run id, sent to the machine online; the machine refuses a request signed more than minutes away from its time, and runs a run id once) ([orchestration](orchestration.md#placement-and-dispatch)) |
 | `update` | `instruction` (a campaign's signed manifest, or the signed automatic policy and its version), `cancel`, `policy` (the fleet's signed update policy, any mode, sent on each connection and each change), `report` (where the node stands; `updated` once its trial confirmed) ([deployment](deployment.md#updates)) |
 | `ownership` | `commit` (a move), `takeover`, `changed` |
 | `replica` | `append`, `read`, `status` |
@@ -201,7 +201,7 @@ The management plane, and the whole surface of the console ([console](console.md
 - **Automations**: `GET /api/v1/automations` (the caller's person's, per machine: the facts the server reads, where each
   delivery stands, the version as signed), `PUT /api/v1/automations/{id}` (a version or a removal a controller device of
   the machine's owner signed, sealed, never in clear; never replaced by one that is not newer), `DELETE
-  .../{id}?machine=` (forgets a removal the machine acknowledged), `GET .../{id}/runs`.
+  .../{id}?machine=` (forgets a removal the machine acknowledged), `POST .../{id}/run` (a signed run by hand, passed to the machine online), `GET .../{id}/runs`.
 - **Telemetry**: `GET`/`PUT /api/v1/telemetry` reads and sets the fleet's signed telemetry setting (an owner's controller
   device only); `POST /otlp/v1/{traces,metrics,logs}` takes the OTLP of approved devices, signed as the API's calls are,
   and forwards it to the collector ([observability](observability.md#where-telemetry-goes)).

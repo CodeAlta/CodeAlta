@@ -154,7 +154,7 @@ The machine fires its schedules and starts its sessions; **Run now** runs it the
 - Name a provider the machine has, or none for the machine's default one.
 - A command trigger runs on this computer only, and an automation kept in the configuration of a project runs on the machines that have the project.
 
-A machine of your server that is not paired with this computer gets the automation through the server, with no permission to give on the machine: it must be one of your machines. The server keeps it sealed, so it cannot read nor change it, and the machine gets it when it connects. Its details say whether the machine took it or refused it, and why. **Run now** needs the machine paired with this computer; its triggers run it either way, also while the server is away.
+A machine of your server that is not paired with this computer gets the automation through the server, with no permission to give on the machine: it must be one of your machines. The server keeps it sealed, so it cannot read nor change it, and the machine gets it when it connects. Its details say whether the machine took it or refused it, and why. **Run now** asks the machine through the server while it is online; its triggers run it either way, also while the server is away.
 
 On the machine, what it runs is up to it: `fleet/automation-policy.json` in its state root turns automations off (`"enabled": false`) or limits them to account credentials (`"credentials": "account"`: API keys and local models, never a personal plan). A run the machine refuses is listed with its reason. A computer that loses the permission, or is revoked, no longer gets its automations run.
 

@@ -59,6 +59,42 @@ internal sealed partial class NodeAutomations
         return result.Granted ? null : result.Message ?? "This due time was already taken by another run.";
     }
 
+    /// <summary>
+    /// Runs an automation a person asked by hand through the server of a link: the request must verify against the device
+    /// list of that server (a controller device of the owner of this machine, for this machine, signed within minutes of
+    /// its time), and name an automation this node holds from that server. Its run takes the id the request names: a request
+    /// given again is answered by the run it started, never run twice.
+    /// </summary>
+    /// <param name="linkId">The server link it came through.</param>
+    /// <param name="devices">The device list of that server, as this node verified it now.</param>
+    /// <param name="organizationId">The organization of that server.</param>
+    /// <param name="signed">The signed request.</param>
+    /// <param name="cancellationToken">Cancels the start.</param>
+    /// <returns>The run, or why the request was refused.</returns>
+    internal async Task<(AutomationRun? Run, string? Refused)> RunFromServerAsync(string linkId, FleetDeviceListState devices, string? organizationId,
+        FleetSignedAutomationRunRequest signed, CancellationToken cancellationToken)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(linkId);
+        ArgumentNullException.ThrowIfNull(devices);
+        ArgumentNullException.ThrowIfNull(signed);
+        if (DeviceId is not { } self) return (null, "This machine does not know its own device yet.");
+        if (!FleetAutomationRunRequestDocuments.TryVerify(signed, devices, organizationId, self, _options.TimeProvider.GetUtcNow(), out var request, out var reason))
+        {
+            Log($"A run asked through the server was refused: {reason}.");
+            return (null, reason);
+        }
+
+        if (AssignmentOf(request.AutomationId) is not { Via: { } via } || via != linkId)
+        {
+            Log($"A run of {request.AutomationId} asked through the server was refused: this machine holds no such automation from that server.");
+            return (null, "this machine holds no such automation from that server");
+        }
+
+        var run = await Engine.RunAsync(request.AutomationId, request.RunId, cancellationToken).ConfigureAwait(false);
+        if (run is not null) Log($"{request.SignerDeviceId} ran the automation {request.AutomationId} through the server: {run.Status}.");
+        return (run, run is null ? "the automation is not on this machine" : null);
+    }
+
     /// <summary>Reports to the server of a link the runs of the automations it gave this node: all of the latest ones, or only those that changed.</summary>
     /// <param name="linkId">The server link.</param>
     /// <param name="all">Whether to send them all again (the connection is new: the server may have missed some).</param>

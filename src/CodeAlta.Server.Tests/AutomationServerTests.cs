@@ -153,6 +153,49 @@ public sealed class AutomationServerTests
     }
 
     [TestMethod]
+    public async Task ARunAskedByHand_IsPassedSignedToTheMachineOnline_AndRefusedOtherwise()
+    {
+        await using var fixture = await ServerFixture.StartAsync();
+        using var owner = new TestDevice("laptop");
+        using var node = new TestDevice("node");
+        var (setup, _) = await fixture.SetUpWithNodeAsync(owner, node);
+        var organization = setup.Organization.Id;
+        FleetSignedAutomationRunRequest Request(TestDevice signer, string run = "run-7")
+        {
+            var text = FleetAutomationRunRequestDocuments.Serialize(new FleetAutomationRunRequest(FleetAutomationRunRequest.CurrentVersion, organization, Id, node.DeviceId, run,
+                signer.DeviceId, signer.PublicKey, fixture.Clock.Now));
+            return new FleetSignedAutomationRunRequest(text, signer.Sign(FleetAutomationRunRequestDocuments.GetSignedBytes(text)));
+        }
+
+        async Task<ApiAnswer> RunAsync(FleetSignedAutomationRunRequest request) => await fixture.SendAsync(owner, HttpMethod.Post, $"/api/v1/automations/{Id}/run",
+            new RunAutomationRequest(request));
+
+        Assert.AreEqual(HttpStatusCode.NotFound, (await RunAsync(Request(owner))).Status, "the server holds no such automation for the machine");
+        Assert.AreEqual(HttpStatusCode.OK, (await fixture.SendAsync(owner, HttpMethod.Put, $"/api/v1/automations/{Id}",
+            new PutAutomationRequest(Sign(owner, Version(organization, node.DeviceId, 1))))).Status);
+        var offline = await RunAsync(Request(owner));
+        Assert.AreEqual((HttpStatusCode.Conflict, "automation.conflict"), (offline.Status, offline.Code), "a machine offline gets no run");
+
+        var asked = Channel.CreateUnbounded<FleetSignedAutomationRunRequest>();
+        var (connection, _) = await fixture.ConnectAsync(node, connection => connection.SetEventHandler((fleetEvent, _) =>
+        {
+            if (fleetEvent.Event == FleetAutomationMethods.Run)
+                asked.Writer.TryWrite(fleetEvent.Payload!.Value.Deserialize(FleetAutomationRunRequestJsonContext.Default.FleetSignedAutomationRunRequest)!);
+            return ValueTask.CompletedTask;
+        }));
+        await using var _1 = connection;
+        var request = Request(owner);
+        var accepted = await RunAsync(request);
+        Assert.AreEqual(HttpStatusCode.Accepted, accepted.Status, accepted.Body.ToString());
+        Assert.AreEqual(("run-7", "requested", node.DeviceId), (accepted.Read<AutomationRunDto>().RunId, accepted.Read<AutomationRunDto>().Status, accepted.Read<AutomationRunDto>().MachineId));
+        Assert.AreEqual(request, await NextAsync(asked), "the machine gets the request as signed");
+
+        // A request the caller did not sign, or that names another signer, is refused.
+        StringAssert.Contains((await RunAsync(request with { Payload = request.Payload.Replace("run-7", "run-8", StringComparison.Ordinal) })).Body.ToString(), "does not verify");
+        StringAssert.Contains((await RunAsync(Request(node))).Body.ToString(), "does not verify");
+    }
+
+    [TestMethod]
     public async Task ARemovalIsAVersionToo_AndTheServerForgetsItOnceTheMachineTookItAway()
     {
         await using var fixture = await ServerFixture.StartAsync();

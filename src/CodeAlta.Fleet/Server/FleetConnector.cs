@@ -492,6 +492,9 @@ public sealed partial class FleetConnector : IAsyncDisposable
                 case FleetAutomationMethods.Assigned:
                     OnAutomationsAssigned(fleetEvent, stop);
                     break;
+                case FleetAutomationMethods.Run:
+                    OnAutomationRun(fleetEvent, stop);
+                    break;
             }
 
             return ValueTask.CompletedTask;

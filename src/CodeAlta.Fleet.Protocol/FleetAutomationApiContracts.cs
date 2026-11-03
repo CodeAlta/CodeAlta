@@ -24,6 +24,10 @@ public sealed record PutAutomationRequest(FleetSignedAutomationVersion Version);
 public sealed record AutomationDto(string Id, string MachineId, long Number, bool Removed, bool Enabled, IReadOnlyList<string> Triggers, string SignerDeviceId,
     DateTimeOffset UpdatedAt, string State, string? Message, FleetSignedAutomationVersion Version);
 
+/// <summary>The body of <c>POST /api/v1/automations/{id}/run</c>: a run the calling controller device signed for one machine.</summary>
+/// <param name="Request">The signed run request.</param>
+public sealed record RunAutomationRequest(FleetSignedAutomationRunRequest Request);
+
 /// <summary>The automations of the caller.</summary>
 /// <param name="Automations">One per automation and machine.</param>
 public sealed record AutomationListDto(IReadOnlyList<AutomationDto> Automations);
@@ -64,6 +68,8 @@ public sealed record AutomationRunListDto(IReadOnlyList<AutomationRunDto> Runs);
 /// <summary>The source-generated contracts of the automation resources of the REST API.</summary>
 [JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase, DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull)]
 [JsonSerializable(typeof(PutAutomationRequest))]
+[JsonSerializable(typeof(RunAutomationRequest))]
+[JsonSerializable(typeof(AutomationRunDto))]
 [JsonSerializable(typeof(AutomationDto))]
 [JsonSerializable(typeof(AutomationListDto))]
 [JsonSerializable(typeof(AutomationRunListDto))]

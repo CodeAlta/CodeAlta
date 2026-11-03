@@ -135,6 +135,51 @@ internal sealed class FleetAutomationService
         await _automations.DeleteAutomationAsync(actor.OrganizationId, id, machineId, origin.Audit("automation.delete", actor, id), CancellationToken.None).ConfigureAwait(false);
     }
 
+    /// <summary>
+    /// Passes a run the calling controller device asked by hand, and signed, to the machine of an automation it gave
+    /// through this server; the machine verifies the request and reports the run as the others. The server keeps nothing
+    /// of it: a machine that is offline does not get it.
+    /// </summary>
+    /// <param name="actor">The calling device.</param>
+    /// <param name="id">The automation the path names.</param>
+    /// <param name="request">The signed run request.</param>
+    /// <param name="origin">Where the request comes from.</param>
+    /// <param name="cancellationToken">Cancels the operation.</param>
+    /// <returns>The run as asked, <c>requested</c>.</returns>
+    /// <exception cref="CoordinatorException">The caller or the request does not hold, the server holds no such automation for the machine, or the machine is offline.</exception>
+    public async Task<AutomationRunDto> RunAsync(DeviceRecord actor, string id, RunAutomationRequest? request, RequestOrigin origin, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(origin);
+        var person = RequirePersonController(actor);
+        if (request?.Request is not { Payload.Length: > 0, Signature.Length: > 0 } signed) throw Invalid("The request needs a run signed by the calling device.");
+        if (!FleetDevicePublicKey.TryParse(actor.PublicKey, out var key)) throw new InvalidOperationException("The key of a device in the table does not read.");
+        if (!FleetAutomationRunRequestDocuments.TryRead(signed.Payload, out var run, out var reason)) throw Invalid($"The run request does not hold: {reason}.");
+        if (!key.Verify(FleetAutomationRunRequestDocuments.GetSignedBytes(signed.Payload), signed.Signature))
+            throw Invalid("The signature of the run request does not verify with the key of the calling device.");
+        if (run.AutomationId != id) throw Invalid("The run request names another automation than the path.");
+        if (run.SignerDeviceId != actor.Id || run.SignerKey != actor.PublicKey) throw Invalid("The run request must name the device that signs it, with its key.");
+        if (run.OrganizationId != actor.OrganizationId) throw Invalid("The run request must name the organization of the server.");
+        var held = await _automations.GetAutomationAsync(actor.OrganizationId, id, run.MachineId, cancellationToken).ConfigureAwait(false);
+        if (held is null || held.Removed || held.OwnerPersonId != person)
+            throw CoordinatorException.NotFound(CoordinatorErrorCodes.AutomationNotFound, "No automation of yours has this id on this machine.");
+        if (_presence.Get(run.MachineId) is not { } session)
+            throw CoordinatorException.Conflict(CoordinatorErrorCodes.AutomationConflict, "The machine is offline: it runs this automation by its triggers, and by hand once it is online.");
+        try
+        {
+            using var timeout = new CancellationTokenSource(PushTimeout);
+            await session.Connection.SendEventAsync(new FleetEvent(FleetAutomationMethods.Run,
+                JsonSerializer.SerializeToElement(signed, FleetAutomationRunRequestJsonContext.Default.FleetSignedAutomationRunRequest)), timeout.Token).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is FleetException or FleetConnectionClosedException or OperationCanceledException or InvalidOperationException)
+        {
+            throw CoordinatorException.Conflict(CoordinatorErrorCodes.AutomationConflict, "The machine did not take the request: try again once it is online.");
+        }
+
+        _logger.LogInformation("Automation {Automation} was asked to run on {Machine} by {Device} (run {Run})", id, run.MachineId, actor.Id, run.RunId);
+        await _store.AppendAuditAsync(origin.Audit("automation.run", actor, id), CancellationToken.None).ConfigureAwait(false);
+        return new AutomationRunDto(run.RunId, id, run.MachineId, held.Number, "manual", "requested", run.Time, null, null, null, null, null);
+    }
+
     /// <summary>Lists the runs of an automation of the caller's person, as its machines reported them, the newest first.</summary>
     /// <param name="actor">The calling device.</param>
     /// <param name="id">The automation.</param>

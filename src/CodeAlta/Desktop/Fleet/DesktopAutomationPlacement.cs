@@ -93,6 +93,9 @@ internal sealed class DesktopAutomationPlacement : IAutomationPlacement, IAsyncD
     /// </summary>
     internal Func<string, DesktopServerAutomationRoute?>? ServerRoute { get; init; }
 
+    /// <summary>Gets what signs a run asked by hand of a machine reached through a server; null runs none by hand there.</summary>
+    internal Func<FleetAutomationRunRequest, FleetSignedAutomationRunRequest>? SignRun { get; init; }
+
     /// <summary>Gets how often the runs of a placed automation, and where it stands, are read again from its machine or server; tests shorten it.</summary>
     internal TimeSpan RunsReadInterval { get; init; } = RunsReadEvery;
 
@@ -138,8 +141,11 @@ internal sealed class DesktopAutomationPlacement : IAutomationPlacement, IAsyncD
         AutomationRun Failed(string message) => new(Guid.CreateVersion7().ToString("N"), entry.Id, now, "manual")
             { Name = entry.Definition.Name, Status = AutomationRun.Failed, Message = message, EndedAt = now };
         if (entry.Definition.RunsOn is not { } machineId) return Failed("It runs on this computer.");
-        if (_machines(machineId) is not { IsPaired: true } && Route(machineId, static route => route.MachineName) is { } reached)
-            return Failed($"{reached} is reached through a server: it runs this automation by its triggers. Pair it with this computer to run it by hand.");
+        if (_machines(machineId) is not { IsPaired: true } && ServerRoute?.Invoke(machineId) is { } route)
+        {
+            using (route) return await RunThroughServerAsync(entry, machineId, route, Failed, cancellationToken).ConfigureAwait(false);
+        }
+
         if (_machines(machineId) is not { } host) return Failed("No paired machine has the id " + machineId + ".");
         if (host.CurrentClient is not { } client) return Failed($"The machine {host.Machine.Name} is {RemoteSessionHost.Describe(host.State)}: it cannot run it now.");
         try
@@ -370,6 +376,45 @@ internal sealed class DesktopAutomationPlacement : IAutomationPlacement, IAsyncD
             _runs[id] = runs;
             return true;
         }
+    }
+
+    // Asks the machine, through its server, to run the automation now, with a request this computer signs; the run is the
+    // machine's, read with the others. A change not given yet goes first.
+    private async Task<AutomationRun> RunThroughServerAsync(AutomationEntry entry, string machineId, DesktopServerAutomationRoute route, Func<string, AutomationRun> failed,
+        CancellationToken cancellationToken)
+    {
+        if (SignRun is not { } sign) return failed($"{route.MachineName} is reached through a server: it runs this automation by its triggers.");
+        await _work.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            await CopyThroughServerAsync(entry, machineId, route, cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            _work.Release();
+        }
+
+        if (Status(entry) is { State: "failed" } status) return failed(status.Message ?? "It could not be given to the machine.");
+        var runId = Guid.CreateVersion7().ToString("N");
+        var now = DateTimeOffset.UtcNow;
+        try
+        {
+            var signed = sign(new FleetAutomationRunRequest(FleetAutomationRunRequest.CurrentVersion, route.OrganizationId, entry.Id, machineId, runId, string.Empty,
+                string.Empty, now));
+            await route.RunAsync(signed, cancellationToken).ConfigureAwait(false);
+        }
+        catch (FleetServerException exception)
+        {
+            return failed($"{route.MachineName}: {exception.Message}");
+        }
+        catch (Exception exception) when (exception is HttpRequestException or IOException or ArgumentException or TaskCanceledException && !cancellationToken.IsCancellationRequested)
+        {
+            return failed($"The server of {route.MachineName} did not take the request: {exception.Message}");
+        }
+
+        lock (_gate) _runsReadAt.Remove(entry.Id);
+        Poke();
+        return new AutomationRun(runId, entry.Id, now, "manual") { Name = entry.Definition.Name, Status = AutomationRun.Running };
     }
 
     // Under _work. Gives an automation to the server of a machine this computer is not paired with, signed and sealed for

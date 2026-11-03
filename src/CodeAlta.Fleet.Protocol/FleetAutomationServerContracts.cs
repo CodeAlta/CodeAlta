@@ -29,6 +29,12 @@ public static class FleetAutomationMethods
     /// <summary>A machine reports runs (<see cref="FleetAutomationRunFacts"/>); the server keeps them for the owner.</summary>
     public const string Runs = "automations.runs";
 
+    /// <summary>
+    /// The event of a run asked by hand (<see cref="FleetSignedAutomationRunRequest"/>), sent to the machine when it is
+    /// online; the machine verifies the request before it runs the automation, and reports the run as the others.
+    /// </summary>
+    public const string Run = "automations.run";
+
     /// <summary>The feature a server announces in its welcome when it holds automations.</summary>
     public const string Feature = "automations";
 }

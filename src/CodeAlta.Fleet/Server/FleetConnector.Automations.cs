@@ -14,6 +14,12 @@ public sealed partial class FleetConnectorOptions
     /// </summary>
     public Func<FleetAutomationDelivery, CancellationToken, Task>? AutomationsAssigned { get; init; }
 
+    /// <summary>
+    /// Gets what receives a run asked by hand through the server (<see cref="FleetAutomationMethods.Run"/>), as signed: it
+    /// verifies the request before it runs anything. Null ignores it.
+    /// </summary>
+    public Func<FleetSignedAutomationRunRequest, CancellationToken, Task>? AutomationsRun { get; init; }
+
     /// <summary>Gets what is called each time the connection is online, after the deliveries of the welcome; null for nothing.</summary>
     public Func<CancellationToken, Task>? AutomationsOnline { get; init; }
 }
@@ -88,6 +94,15 @@ public sealed partial class FleetConnector
         try { delivery = fleetEvent.Payload?.Deserialize(FleetAutomationServerJsonContext.Default.FleetAutomationDelivery); }
         catch (JsonException) { /* A delivery this machine does not read is not taken: the server sends it again on the next connection. */ }
         if (delivery is { Versions.Count: > 0 }) QueueAutomations(() => receive(delivery, stop), stop);
+    }
+
+    private void OnAutomationRun(FleetEvent fleetEvent, CancellationToken stop)
+    {
+        if (_options.AutomationsRun is not { } run) return;
+        FleetSignedAutomationRunRequest? request = null;
+        try { request = fleetEvent.Payload?.Deserialize(FleetAutomationRunRequestJsonContext.Default.FleetSignedAutomationRunRequest); }
+        catch (JsonException) { /* A request this machine does not read runs nothing. */ }
+        if (request is { Payload.Length: > 0 }) QueueAutomations(() => run(request, stop), stop);
     }
 
     private void OnAutomationsOnline(CancellationToken stop)

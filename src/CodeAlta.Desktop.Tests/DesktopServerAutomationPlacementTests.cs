@@ -48,6 +48,7 @@ public sealed class DesktopServerAutomationPlacementTests
 
             // The machine: its control connection opens what it is given with its own key, and says it took it.
             var given = new ConcurrentQueue<(FleetAutomationVersion Version, FleetAutomationContent? Content)>();
+            var asked = new ConcurrentQueue<FleetAutomationRunRequest>();
             FleetConnector? nodeConnector = null;
             await using var connector = nodeConnector = new FleetConnector(new FleetConnectorOptions
             {
@@ -69,6 +70,13 @@ public sealed class DesktopServerAutomationPlacementTests
 
                     await nodeConnector.AcknowledgeAutomationsAsync(new FleetAutomationAcks(acks), cancellationToken);
                 },
+                AutomationsRun = async (signed, cancellationToken) =>
+                {
+                    var list = await nodeConnector!.Devices.RefreshAsync(cancellationToken);
+                    Assert.IsTrue(FleetAutomationRunRequestDocuments.TryVerify(signed, list, setup.Organization.Id, nodeKey.DeviceId, DateTimeOffset.UtcNow, out var request, out var reason),
+                        reason);
+                    asked.Enqueue(request);
+                },
             });
             connector.Start();
             await WaitForAsync(() => connector.State == FleetConnectorState.Online, "the machine to connect", token);
@@ -89,6 +97,7 @@ public sealed class DesktopServerAutomationPlacementTests
             await automations.RefreshAsync();
             var placement = new DesktopAutomationPlacement(automations, fleet.Find, desktopFleetRoot, () => fleet.DeviceId, fleet.SignAutomation)
             {
+                SignRun = fleet.SignAutomationRun,
                 ServerRoute = machineId => machineId == nodeKey.DeviceId
                     ? new DesktopServerAutomationRoute("link-1", setup.Organization.Id, "mini", new FleetOrganizationDevices(address, desktopKey), desktopKey,
                         new FleetServerClient(address, desktopKey))
@@ -128,7 +137,12 @@ public sealed class DesktopServerAutomationPlacementTests
                     await placement.SyncAsync(token);
                     return placement.Runs(Id).Any(static run => run is { Id: "node-run-1", Status: AutomationRun.Completed, SessionId: "node-session-1" });
                 }, "the run to be listed", token);
-                StringAssert.Contains((await automations.RunAsync(Id, token))!.Message, "reached through a server");
+                // Run now: a request this computer signs goes through the server to the machine, which verifies it.
+                var ran = (await automations.RunAsync(Id, token))!;
+                Assert.AreEqual(AutomationRun.Running, ran.Status, ran.Message);
+                await WaitForAsync(() => !asked.IsEmpty, "the machine to be asked the run", token);
+                Assert.IsTrue(asked.TryDequeue(out var runRequest));
+                Assert.AreEqual((Id, ran.Id, fleet.DeviceId), (runRequest.AutomationId, runRequest.RunId, runRequest.SignerDeviceId));
 
                 // Changed, it is given again, with a newer number; unchanged, it is not.
                 await placement.SyncAsync(token);

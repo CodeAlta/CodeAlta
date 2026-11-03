@@ -96,6 +96,21 @@ public sealed class NodeServerAutomationTests
             Assert.AreEqual(AutomationService.Occurrence(entry.Definition.Triggers[0], Noon.AddMinutes(30)), reported.Occurrence, "the claim of the server keyed the run");
             StringAssert.Contains(provider.LastUserText, "Say hello.");
 
+            // Run now, asked through the server with a request the desktop signs: it runs with the id it names, once.
+            var runId = Guid.CreateVersion7().ToString("N");
+            var request = FleetAutomationSigning.SignRun(desktopKey, new FleetAutomationRunRequest(FleetAutomationRunRequest.CurrentVersion, setup.Organization.Id, Id, nodeId,
+                runId, string.Empty, string.Empty, clock.Now));
+            Assert.AreEqual(("requested", runId), (await desktop.RunAutomationAsync(request, token)) is var asked ? (asked.Status, asked.RunId) : default);
+            var manual = await WaitForAsync(async () => (await desktop.ListAutomationRunsAsync(Id, null, token)).Runs
+                .FirstOrDefault(run => run.RunId == runId && run.Status == AutomationRun.Completed), token);
+            Assert.AreEqual(("manual", nodeId), (manual.Trigger, manual.MachineId));
+            var link = automations.AssignmentOf(Id)!.Via!;
+            var again = await automations.RunFromServerAsync(link, list, setup.Organization.Id, request, token);
+            Assert.AreEqual(runId, again.Run?.Id, "the same request is answered by the run it started");
+            Assert.AreEqual(1, automations.Engine.Runs(Id, 50).Count(run => run.Id == runId));
+            var otherRun = request with { Payload = request.Payload.Replace(runId, Guid.CreateVersion7().ToString("N"), StringComparison.Ordinal) };
+            StringAssert.Contains((await automations.RunFromServerAsync(link, list, setup.Organization.Id, otherRun, token)).Refused, "signature");
+
             // The server is away when the next time comes: the node runs it alone.
             await server.DisposeAsync();
             server = null;
@@ -190,7 +205,7 @@ public sealed class NodeServerAutomationTests
         PublishesSpace = options.PublishesSpace, WatchDirectory = options.WatchDirectory, PendingApprovalRetry = TimeSpan.FromMilliseconds(200),
         MinimumBackoff = TimeSpan.FromMilliseconds(100), MaximumBackoff = TimeSpan.FromSeconds(1), PollInterval = TimeSpan.FromMilliseconds(500),
         DeviceListPinPath = options.DeviceListPinPath, Devices = options.Devices, MetadataKeys = options.MetadataKeys, AcceptRelay = options.AcceptRelay,
-        AutomationsAssigned = options.AutomationsAssigned, AutomationsOnline = options.AutomationsOnline,
+        AutomationsAssigned = options.AutomationsAssigned, AutomationsOnline = options.AutomationsOnline, AutomationsRun = options.AutomationsRun,
     };
 
     private async Task<T> WaitForAsync<T>(Func<Task<T?>> read, CancellationToken cancellationToken) where T : class

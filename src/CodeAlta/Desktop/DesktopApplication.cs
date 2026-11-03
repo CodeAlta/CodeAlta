@@ -884,6 +884,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                 placement = new Fleet.DesktopAutomationPlacement(automations, fleet.Find, host.CatalogOptions.FleetRoot, () => placedFleet.DeviceId, placedFleet.SignAutomation)
                 {
                     ServerRoute = placedServers is null ? null : placedServers.AutomationRoute,
+                    SignRun = placedFleet.SignAutomationRun,
                 };
                 automations.Placement = placement;
                 fleet.Changed += placement.Poke;
