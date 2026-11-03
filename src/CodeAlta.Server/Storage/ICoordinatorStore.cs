@@ -240,7 +240,10 @@ public interface ICoordinatorStore : IAsyncDisposable
     /// <param name="machines">Its machines.</param>
     /// <param name="audit">The audit record.</param>
     /// <param name="cancellationToken">Cancels the operation.</param>
-    /// <returns><see langword="false"/> when a campaign has the same manifest sequence: nothing was written.</returns>
+    /// <returns>
+    /// <see langword="false"/> when a campaign has the same manifest sequence, or the campaign is active and another one of
+    /// the organization is (scheduled or updating): nothing was written.
+    /// </returns>
     ValueTask<bool> CreateUpdateCampaignAsync(UpdateCampaignRecord campaign, IReadOnlyList<UpdateCampaignMachineRecord> machines, AuditEntry? audit,
         CancellationToken cancellationToken = default);
 

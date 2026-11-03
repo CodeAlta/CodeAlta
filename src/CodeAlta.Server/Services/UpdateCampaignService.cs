@@ -126,14 +126,16 @@ internal sealed class UpdateCampaignService : IAsyncDisposable
             throw Invalid($"The manifest signs no hash of {UpdateProduct.Server.RuntimePackageId(runtime)}, the package of this server.");
 
         var organization = actor.OrganizationId;
-        if (await _store.GetUpdatePolicyAsync(organization, cancellationToken).ConfigureAwait(false) is { } held
-            && FleetUpdateDocuments.TryParsePolicy(held.Payload, out var policy, out _) && policy.Mode == FleetUpdateModes.Pinned
-            && !UpdateCampaignEngine.Same(policy.PinnedVersion, manifest.TargetVersion))
-            throw CoordinatorException.Conflict(CoordinatorErrorCodes.UpdateConflict, $"The fleet is pinned to {policy.PinnedVersion}: change its policy first.");
-
+        // Every creation and every change of the policy goes through the gate: the policy read here holds until the
+        // campaign is stored, and no automatic campaign starts meanwhile.
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
+            if (await _store.GetUpdatePolicyAsync(organization, cancellationToken).ConfigureAwait(false) is { } held
+                && FleetUpdateDocuments.TryParsePolicy(held.Payload, out var policy, out _) && policy.Mode == FleetUpdateModes.Pinned
+                && !UpdateCampaignEngine.Same(policy.PinnedVersion, manifest.TargetVersion))
+                throw CoordinatorException.Conflict(CoordinatorErrorCodes.UpdateConflict, $"The fleet is pinned to {policy.PinnedVersion}: change its policy first.");
+
             var recent = await _store.ListUpdateCampaignsAsync(organization, RecentCampaigns, cancellationToken).ConfigureAwait(false);
             if (recent.FirstOrDefault(static campaign => FleetUpdateCampaignStates.IsActive(campaign.State)) is { } running)
                 throw CoordinatorException.Conflict(CoordinatorErrorCodes.UpdateConflict, $"Campaign {running.Sequence} to {running.TargetVersion} runs: cancel it first, or wait for its end.");
@@ -151,7 +153,7 @@ internal sealed class UpdateCampaignService : IAsyncDisposable
             var machines = nodes.Select(device => new UpdateCampaignMachineRecord(campaign.Id, device.Id, FleetUpdateMachineStates.Pending, null, null, null, now)).ToArray();
             var audit = origin.Audit("update.campaign.create", actor, campaign.Id, details: Details(campaign, machines.Length));
             if (!await _store.CreateUpdateCampaignAsync(campaign, machines, audit, cancellationToken).ConfigureAwait(false))
-                throw CoordinatorException.Conflict(CoordinatorErrorCodes.UpdateConflict, "Another campaign has this sequence: read the updates again.");
+                throw CoordinatorException.Conflict(CoordinatorErrorCodes.UpdateConflict, "Another campaign runs or has this sequence: read the updates again.");
             _logger.LogInformation("Update campaign {Sequence} to {Version} from {Feed} for {Count} node(s), {When}, signed by {Device}", campaign.Sequence, campaign.TargetVersion,
                 campaign.Feed, machines.Length, campaign.NotBefore is { } start ? $"at {start:O}" : "now", actor.Id);
             Changed(campaign);
@@ -217,8 +219,17 @@ internal sealed class UpdateCampaignService : IAsyncDisposable
         var record = new UpdatePolicyRecord(actor.OrganizationId, policy.Sequence, signed.Payload, signed.Signature, actor.Id, null, null, _time.GetUtcNow());
         var audit = origin.Audit("update.policy.set", actor, actor.OrganizationId,
             details: $"{{\"seq\":{policy.Sequence},\"mode\":\"{policy.Mode}\"}}");
-        if (!await _store.SetUpdatePolicyAsync(record, audit, cancellationToken).ConfigureAwait(false))
-            throw CoordinatorException.Conflict(CoordinatorErrorCodes.UpdateConflict, "The policy must be numbered after the one held: read it again.");
+        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            if (!await _store.SetUpdatePolicyAsync(record, audit, cancellationToken).ConfigureAwait(false))
+                throw CoordinatorException.Conflict(CoordinatorErrorCodes.UpdateConflict, "The policy must be numbered after the one held: read it again.");
+        }
+        finally
+        {
+            _gate.Release();
+        }
+
         _logger.LogInformation("The update policy {Sequence} of the fleet is {Mode}, set by {Device}", policy.Sequence, policy.Mode, actor.Id);
         _directory.Publish(actor.OrganizationId, new FleetDirectoryChange(FleetServerMethods.ChangeKinds.Update, "policy"));
         Nudge();
@@ -289,10 +300,12 @@ internal sealed class UpdateCampaignService : IAsyncDisposable
     internal async Task TickAsync(CancellationToken cancellationToken)
     {
         if (await _store.GetOrganizationAsync(cancellationToken).ConfigureAwait(false) is not { } organization) return;
-        await CheckPolicyAsync(organization.Id, cancellationToken).ConfigureAwait(false);
+        var feed = await ReadDueFeedAsync(organization.Id, cancellationToken).ConfigureAwait(false);
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
+            // Under the gate, as a campaign a person starts: the automatic policy never starts a second active campaign.
+            if (feed is not null) await CheckPolicyAsync(organization.Id, feed, cancellationToken).ConfigureAwait(false);
             var campaigns = await _store.ListUpdateCampaignsAsync(organization.Id, RecentCampaigns, cancellationToken).ConfigureAwait(false);
             var moving = campaigns.Where(static campaign => FleetUpdateCampaignStates.IsActive(campaign.State) || campaign.State == FleetUpdateCampaignStates.PartlyDone).ToArray();
             if (moving.Length == 0) return;
@@ -389,33 +402,47 @@ internal sealed class UpdateCampaignService : IAsyncDisposable
         return null;
     }
 
-    private async Task CheckPolicyAsync(string organizationId, CancellationToken cancellationToken)
+    // The feed of an automatic policy whose daily check is due, read outside the gate (a feed may take minutes to
+    // answer); null when no check is due.
+    private async Task<FeedRead?> ReadDueFeedAsync(string organizationId, CancellationToken cancellationToken)
     {
         var held = await _store.GetUpdatePolicyAsync(organizationId, cancellationToken).ConfigureAwait(false);
-        if (held is null || !FleetUpdateDocuments.TryParsePolicy(held.Payload, out var policy, out _) || policy.Mode != FleetUpdateModes.Automatic) return;
-        var now = _time.GetUtcNow();
-        if (held.LastCheckAt is { } last && now - last < _options.CheckInterval) return;
-        string message;
+        if (held is null || !FleetUpdateDocuments.TryParsePolicy(held.Payload, out var policy, out _) || policy.Mode != FleetUpdateModes.Automatic) return null;
+        if (held.LastCheckAt is { } last && _time.GetUtcNow() - last < _options.CheckInterval) return null;
         try
         {
-            message = await CheckFeedAsync(held, policy, now, cancellationToken).ConfigureAwait(false);
+            return new FeedRead(held.Sequence, await ReadLatestAsync(policy.Feed ?? UpdateFeeds.NuGetOrg, cancellationToken).ConfigureAwait(false), null);
         }
         catch (UpdateException exception)
         {
-            message = exception.Message;
+            return new FeedRead(held.Sequence, null, exception.Message);
         }
+    }
 
+    // The latest stable version both products list on a feed (each with its tool package listed), or null.
+    private async Task<string?> ReadLatestAsync(string feed, CancellationToken cancellationToken)
+        => _options.ReadLatest is { } read
+            ? await read(feed, cancellationToken).ConfigureAwait(false)
+            : (await UpdateReleases.ListAsync(UpdateFeeds.Open(feed, _http), UpdateReleases.FleetProducts, false, cancellationToken).ConfigureAwait(false)).FirstOrDefault()?.ToString();
+
+    // Under the gate: decides on what the feed listed for the policy still held, and records the check.
+    private async Task CheckPolicyAsync(string organizationId, FeedRead read, CancellationToken cancellationToken)
+    {
+        var held = await _store.GetUpdatePolicyAsync(organizationId, cancellationToken).ConfigureAwait(false);
+        // A policy set while the feed was read is checked at the next step, on its own feed.
+        if (held is null || held.Sequence != read.PolicySequence || !FleetUpdateDocuments.TryParsePolicy(held.Payload, out var policy, out _)
+            || policy.Mode != FleetUpdateModes.Automatic)
+            return;
+        var now = _time.GetUtcNow();
+        var message = read.Error ?? await CheckFeedAsync(held, policy, read.Latest, now, cancellationToken).ConfigureAwait(false);
         await _store.SetUpdatePolicyCheckAsync(organizationId, now, message, cancellationToken).ConfigureAwait(false);
         _logger.LogInformation("The automatic update policy read its feed: {Message}", message);
         _directory.Publish(organizationId, new FleetDirectoryChange(FleetServerMethods.ChangeKinds.Update, "policy"));
     }
 
-    private async Task<string> CheckFeedAsync(UpdatePolicyRecord held, FleetUpdatePolicy policy, DateTimeOffset now, CancellationToken cancellationToken)
+    private async Task<string> CheckFeedAsync(UpdatePolicyRecord held, FleetUpdatePolicy policy, string? latestText, DateTimeOffset now, CancellationToken cancellationToken)
     {
         var feed = policy.Feed ?? UpdateFeeds.NuGetOrg;
-        var latestText = _options.ReadLatest is { } read
-            ? await read(feed, cancellationToken).ConfigureAwait(false)
-            : (await UpdateReleases.ListAsync(UpdateFeeds.Open(feed, _http), UpdateReleases.FleetProducts, false, cancellationToken).ConfigureAwait(false)).FirstOrDefault()?.ToString();
         if (!UpdateVersion.TryParse(latestText, out var latest)) return $"{feed} lists no stable version of the fleet.";
         var organization = held.OrganizationId;
         var campaigns = await _store.ListUpdateCampaignsAsync(organization, RecentCampaigns, cancellationToken).ConfigureAwait(false);
@@ -437,8 +464,9 @@ internal sealed class UpdateCampaignService : IAsyncDisposable
         var campaign = new UpdateCampaignRecord(id, organization, policy.Sequence, true, latest.ToString(), feed, false, start == now ? null : start, policy.TimeZone,
             held.Payload, held.Signature, null, FleetUpdateCampaignStates.Scheduled, FleetUpdateMachineStates.Pending, null, now, now);
         var machines = nodes.Select(node => new UpdateCampaignMachineRecord(id, node.Id, FleetUpdateMachineStates.Pending, null, null, null, now)).ToArray();
-        await _store.CreateUpdateCampaignAsync(campaign, machines, new AuditEntry("update.campaign.create", AuditEntry.Success, null, null, id, null, null,
-            $"{{\"automatic\":true,\"version\":\"{latest}\"}}"), cancellationToken).ConfigureAwait(false);
+        if (!await _store.CreateUpdateCampaignAsync(campaign, machines, new AuditEntry("update.campaign.create", AuditEntry.Success, null, null, id, null, null,
+                $"{{\"automatic\":true,\"version\":\"{latest}\"}}"), cancellationToken).ConfigureAwait(false))
+            return $"{latest} is the latest; another campaign runs.";
         Changed(campaign);
         Nudge();
         return $"{latest} is the latest: the fleet updates at {start:u}.";
@@ -572,6 +600,12 @@ internal sealed class UpdateCampaignService : IAsyncDisposable
         _gate.Dispose();
     }
 }
+
+/// <summary>What the feed of an automatic policy listed when its daily check was due.</summary>
+/// <param name="PolicySequence">The sequence of the policy it was read for.</param>
+/// <param name="Latest">The latest stable version of the fleet it lists, or null.</param>
+/// <param name="Error">Why it could not be read, or null.</param>
+internal sealed record FeedRead(long PolicySequence, string? Latest, string? Error);
 
 /// <summary>The source-generated JSON of the audit details of the updates.</summary>
 [System.Text.Json.Serialization.JsonSerializable(typeof(Dictionary<string, string>))]

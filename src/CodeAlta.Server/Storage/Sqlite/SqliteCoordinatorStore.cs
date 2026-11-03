@@ -618,6 +618,15 @@ public sealed class SqliteCoordinatorStore : ICoordinatorStore
         ArgumentNullException.ThrowIfNull(machines);
         return WriteAsync((connection, transaction) =>
         {
+            // One campaign of an organization is active at a time, whether a person or the automatic policy starts it.
+            if (FleetUpdateCampaignStates.IsActive(campaign.State))
+            {
+                using var active = Create(connection, transaction,
+                    "SELECT COUNT(*) FROM update_campaigns WHERE organization_id = $org AND state IN ('scheduled', 'updating_nodes', 'updating_server')",
+                    ("$org", campaign.OrganizationId));
+                if (Convert.ToInt64(active.ExecuteScalar(), CultureInfo.InvariantCulture) > 0) return false;
+            }
+
             if (!campaign.Automatic)
             {
                 using var exists = Create(connection, transaction, "SELECT COUNT(*) FROM update_campaigns WHERE organization_id = $org AND automatic = 0 AND seq = $seq",
