@@ -62,15 +62,46 @@ Surprise bills are the first complaint of agent users. So budgets ship with the 
 - **One trace across machines**: every request carries `traceparent` ([protocol](protocol.md#envelopes)): a child
   session on another machine, a cross-machine message, a move, an automation started by the server's scheduler. A
   trace survives a move because the session's id stays.
-- **Where traces go**: to the collector the organization names (Grafana Tempo, Azure Monitor, Datadog...), directly
-  from each node or forwarded by the server's OTLP endpoint. The server forwards; it does not store traces.
+- **Spans of the hosts of the fleet**: a node traces its session runs (above), each request of its node API and each
+  move (the method, the caller's device id in short, the outcome and the duration; never the parameters); the server
+  traces each REST request (ASP.NET Core's own spans, named after their route) and each request of a control
+  connection. A relay ticket in a path and every query are removed before export.
 - **At home**: the desktop can start the standalone Aspire Dashboard as a "view traces" window (development-grade, no
   persistence by default) and point the fleet's nodes at it for the time of a diagnosis.
+
+## Where telemetry goes
+
+Traces, metrics and logs go over OTLP to one collector (Grafana, Datadog, Azure Monitor, the Aspire Dashboard...),
+which the hosts name at three levels; the first that names one wins:
+
+| Level | Set by | Where |
+| --- | --- | --- |
+| The machine's own file | The owner of the machine | `telemetry.json` in the fleet folder of a node's state root, or in the server's data root. It can turn telemetry off whatever the fleet says, refuse the fleet's setting, or name a collector of its own |
+| The environment | Whoever starts the process | The standard `OTEL_*` variables; `OTEL_SDK_DISABLED=true` turns everything off |
+| The fleet's setting | An owner, from CodeAlta Desktop | Signed by the owner's controller device, stored by the server, applied by it at once and pushed to every machine over its control connection |
+
+- **The server cannot redirect telemetry.** The fleet's setting is a signed document, as the device list's entries
+  are: a machine applies it only once it verified the signature against the device list it anchored (a controller
+  device of the organization, not removed), and only when it is newer than the one it holds. A server alone can
+  neither forge one nor replay an older one.
+- **Two routes.** *Direct*: each machine sends to the collector, with the headers (API keys) of the setting. *Through
+  the server*: each machine sends OTLP/HTTP to the server's `/otlp/v1/{traces,metrics,logs}`, each request signed with
+  its device key as the REST API's are; the server forwards the bytes to the collector with headers only it holds,
+  which never reach a machine. Machines behind NAT need no collector credential and no way out but the server. The
+  server forwards; it never stores what it forwards.
+- **Resource**: `service.name` (`altanode`, `altaserver`), `service.version`, `service.instance.id` (the device id of a
+  node, a stable id of a server), `host.name`, `os.type`, `codealta.fleet.organization.id` once linked, and
+  `deployment.environment.name` when a level names one.
+- **Applied live**: a new setting rebuilds the export of each host; the previous one sends what it holds first.
 
 ## Logs
 
 - Each node keeps its log as today. Its owner's devices can read it remotely (**Show log** on the machine), over the
-  session channel; logs never go to the server, since they may hold paths and errors from sessions.
+  session channel.
+- **To the collector, when asked**: logs are CodeAlta's own records; they hold no prompt, message or tool content, but
+  they may hold paths and errors. So they go to the collector only when the level that names it turns logs on (the
+  `logs` signal of a setting or of the machine's file, `OTEL_LOGS_EXPORTER=otlp` for the environment), with their
+  category, level and exception. The server only forwards them, as the other signals.
 - What a remote action did is in the audit log and in the session's journal; logs are for diagnosis.
 
 ## Audit is not telemetry
@@ -85,7 +116,11 @@ Surprise bills are the first complaint of agent users. So budgets ship with the 
 
 ## Health checks
 
-- The server exposes `/health` (live, ready) and metrics (connections, relayed bytes, queue depths, store latency) for
-  whatever watches it.
+- The server exposes `/health` (live, ready) and its metrics to the collector: control connections and handshakes,
+  publications and facts, directory watchers, relays (opened, refused, active, bytes, how they ended), enrollments and
+  approvals, signed requests refused, store latency, the depth of its writer's queue, the OTLP it forwards; with ASP.NET
+  Core's and the runtime's meters.
+- A node's metrics: its node API's durations, moves, connections to servers (connects, failures, facts published, the
+  backlog of its outbox), sessions working and devices connected.
 - Machines report health in their heartbeat; the server turns lasting problems into notifications for the machine's
   owner (or the admins of team machines), at most once per problem.

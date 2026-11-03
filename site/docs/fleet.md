@@ -171,6 +171,31 @@ The nodes of your server are reachable from CodeAlta Desktop without pairing and
 - The connection is encrypted from one computer to the other: the server passes it on without being able to read it, and records only who reached which machine, when and how much data went through.
 - Your own computers may see, drive and start sessions on your nodes, as a paired computer does. Other machines of the server may do nothing there yet.
 
+### Send telemetry to a collector
+
+Your server and your nodes can send their traces, metrics and logs to an OpenTelemetry collector (Grafana, Datadog, Azure Monitor, the Aspire Dashboard...), so that you follow their activity and their errors without connecting to them.
+
+1. In CodeAlta Desktop, on the owner's computer, open **Settings** > **Fleet** > **Server**. The card of the server shows **Telemetry**: click **Change…**.
+2. Turn on **Send to a collector** and give the address of the collector (`https://otlp.example:4318`), its protocol, and the signals to send: **Traces**, **Metrics**, **Logs**.
+3. Choose the route:
+   - **Each machine sends to the collector**: each machine needs to reach it; the **Headers** (an API key, say) go to every machine.
+   - **Machines send through this server**: the machines send to the server, which passes everything on to the collector with the headers you give here. They never get these headers and need no other way out. The server keeps nothing of what it passes on.
+4. Add the **Headers** the collector asks for and, if you want, an **Environment** (`production`). Click **Save**.
+
+The server applies the setting at once and sends it to every machine; each machine checks that your computer signed it before it applies it, so the server alone cannot send your machines' telemetry elsewhere. A header you saved shows masked: leave it empty to keep it.
+
+Nothing sent holds your prompts, answers, tool calls or session titles. **Logs** are the records of CodeAlta itself: they may hold file paths and error messages, so they are sent only when you choose them.
+
+The owner of a machine decides last, with the `telemetry.json` file of the machine: `~/.alta/fleet/telemetry.json` for a node, `~/.altaserver/telemetry.json` for the server.
+
+| `telemetry.json` | Effect |
+| --- | --- |
+| `{ "enabled": false }` | Sends nothing, whatever the fleet says |
+| `{ "fleet": false }` | Ignores the fleet's setting |
+| `{ "endpoint": "http://localhost:4318", "signals": ["traces", "metrics", "logs"] }` | Sends to this collector instead |
+
+The standard `OTEL_EXPORTER_OTLP_ENDPOINT` and other `OTEL_*` variables of the service also work, and win over the fleet's setting; `OTEL_SDK_DISABLED=true` turns telemetry off.
+
 ## Security
 
 - **Remote sessions run code on the machine.** A paired computer can start agents there that use its tools, as you would sitting at it. Pair only your own computers, and revoke the ones you no longer use.
