@@ -198,15 +198,27 @@ public sealed class CommandSecretKeyStore : ISecretKeyStore
 
     /// <summary>Tells whether the protected store of this user can be used now, as the store of a new key.</summary>
     /// <param name="kind"><see cref="SecretProtectionKinds.Keychain"/> or <see cref="SecretProtectionKinds.Libsecret"/>.</param>
-    /// <returns><see langword="true"/> when its tool runs and answers.</returns>
+    /// <returns><see langword="true"/> when a key can be written there and read back now.</returns>
+    /// <remarks>
+    /// A read alone is not enough: over SSH, or in a service of macOS, the login Keychain answers a read and refuses a
+    /// write ("User interaction is not allowed"), and such a session keeps its key in a file instead.
+    /// </remarks>
     public static bool IsAvailable(string kind)
     {
         try
         {
             if (kind == SecretProtectionKinds.Libsecret && string.IsNullOrEmpty(Environment.GetEnvironmentVariable("DBUS_SESSION_BUS_ADDRESS"))) return false;
-            var probe = new CommandSecretKeyStore(kind, "probe");
-            probe.Load();
-            return true;
+            var probe = new CommandSecretKeyStore(kind, "probe-" + Guid.NewGuid().ToString("N"));
+            var written = RandomNumberGenerator.GetBytes(8);
+            try
+            {
+                probe.Save(written);
+                return probe.Load() is { } read && read.AsSpan().SequenceEqual(written);
+            }
+            finally
+            {
+                probe.Delete();
+            }
         }
         catch (Exception exception) when (exception is SecretStoreUnavailableException or ArgumentException)
         {
