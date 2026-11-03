@@ -5,7 +5,10 @@ using CodeAlta.Fleet.Protocol;
 using CodeAlta.Fleet.Protocol.Api;
 using CodeAlta.Fleet.Tests.Otlp;
 using CodeAlta.Server.Api;
+using CodeAlta.Server.Control;
 using CodeAlta.Server.Identity;
+using CodeAlta.Server.Services;
+using CodeAlta.Server.Storage;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging.Abstractions;
 
@@ -250,6 +253,81 @@ public sealed class TelemetryTests
 
             Assert.AreEqual(StatusCodes.Status502BadGateway, context.Response.StatusCode);
             Assert.AreEqual(0L, context.Response.Body.Length);
+        }
+    }
+
+    [TestMethod]
+    public async Task TwoSettingsSetAtOnceLeaveTheNewerOneAppliedByTheServer()
+    {
+        await using var fixture = await ServerFixture.StartAsync(telemetryInterval: Interval);
+        using var owner = new TestDevice("Desktop");
+        var setup = await fixture.SetUpAsync(owner);
+        var (store, hold) = HoldFirstTelemetryStore.Wrap(fixture.Server.Store);
+        var service = new TelemetrySettingsService(store, fixture.GetService<PresenceRegistry>(), fixture.Server.Telemetry, fixture.Clock, NullLogger.Instance);
+        var actor = (await fixture.Server.Store.GetDeviceAsync(owner.DeviceId))!;
+        var origin = new RequestOrigin(IPAddress.Loopback, "test");
+        SetTelemetrySettingsRequest Request(long sequence)
+            => new(owner.SignTelemetry(Settings(owner, setup.Organization.Id, sequence, new Uri($"http://127.0.0.1:{10_000 + sequence}"), FleetTelemetryRoutes.Server,
+                [FleetTelemetrySignals.Traces])));
+
+        // The first setting is stored, then held before the server applies it; the second one is set meanwhile.
+        var first = service.SetAsync(actor, Request(1), origin, CancellationToken.None);
+        await hold.Stored.Task.WaitAsync(Waits.Hang);
+        var second = service.SetAsync(actor, Request(2), origin, CancellationToken.None);
+        await Task.WhenAny(second, Task.Delay(300));
+        hold.Release();
+        await first.WaitAsync(Waits.Hang);
+        await second.WaitAsync(Waits.Hang);
+
+        Assert.AreEqual(2L, (await fixture.Server.Store.GetTelemetrySettingsAsync(setup.Organization.Id))?.Sequence);
+        Assert.AreEqual(10_002, fixture.Server.Telemetry.Forward?.Endpoint.Port, "the server applies the setting it stored last, not an older one that applied late");
+    }
+
+    /// <summary>A store whose first <c>SetTelemetrySettingsAsync</c> writes, then holds its answer until the test releases it.</summary>
+    public class HoldFirstTelemetryStore : System.Reflection.DispatchProxy
+    {
+        private readonly TaskCompletionSource _release = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private ICoordinatorStore _inner = null!;
+        private int _calls;
+
+        /// <summary>Gets the task that completes once the first setting is written.</summary>
+        public TaskCompletionSource Stored { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        internal static (ICoordinatorStore Store, HoldFirstTelemetryStore Hold) Wrap(ICoordinatorStore inner)
+        {
+            var store = Create<ICoordinatorStore, HoldFirstTelemetryStore>();
+            var hold = (HoldFirstTelemetryStore)(object)store;
+            hold._inner = inner;
+            return (store, hold);
+        }
+
+        /// <summary>Lets the first setting's answer go.</summary>
+        public void Release() => _release.TrySetResult();
+
+        /// <inheritdoc />
+        protected override object? Invoke(System.Reflection.MethodInfo? targetMethod, object?[]? args)
+        {
+            ArgumentNullException.ThrowIfNull(targetMethod);
+            try
+            {
+                var result = targetMethod.Invoke(_inner, args);
+                if (targetMethod.Name == nameof(ICoordinatorStore.SetTelemetrySettingsAsync) && Interlocked.Increment(ref _calls) == 1)
+                    return new ValueTask<bool>(HoldAsync((ValueTask<bool>)result!));
+                return result;
+            }
+            catch (System.Reflection.TargetInvocationException exception) when (exception.InnerException is not null)
+            {
+                System.Runtime.ExceptionServices.ExceptionDispatchInfo.Throw(exception.InnerException);
+                throw;
+            }
+        }
+
+        private async Task<bool> HoldAsync(ValueTask<bool> stored)
+        {
+            var result = await stored;
+            Stored.TrySetResult();
+            await _release.Task;
+            return result;
         }
     }
 
