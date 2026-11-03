@@ -74,7 +74,15 @@ internal sealed class SessionOperationsService
         _compact = (request, token) => hosts.Resolve(request.SessionId).AdmitCompact(request, token);
         _abortRun = (request, token) => hosts.Resolve(request.SessionId).AdmitAbortRun(request, token);
         _stopBackgroundTask = (sessionId, taskId, token) => hosts.Resolve(sessionId).StopBackgroundTaskAsync(sessionId, taskId, token);
+        // The composer of a session of a paired machine offers what its machine listed; the space checks of this catalog
+        // do not apply to it.
+        _remote = sessionId => hosts.Resolve(sessionId) is Fleet.RemoteSessionHost;
+        _choices = (sessionId, token) => hosts.Resolve(sessionId) is Fleet.RemoteSessionHost remote
+            ? Task.FromResult(remote.SelectionChoices(sessionId))
+            : commands.GetObservedSelectionChoicesAsync(sessionId, token);
     }
+
+    private readonly Func<string, bool>? _remote;
 
     // The seam of the conversation a session shares with VS Code and a terminal: what the host says of it, and what opens
     // an address. Tests give both; nothing else of the service is configured.
@@ -218,7 +226,8 @@ internal sealed class SessionOperationsService
         {
             var choices = _choices is null ? null : await _choices(request.SessionId, cancellationToken).ConfigureAwait(false);
             if (choices is null) return new("unavailable", _epoch, request.SessionId, null, [], []);
-            var space = _commands is null ? null : await _commands.GetSessionSpaceProvidersAsync(request.SessionId, cancellationToken).ConfigureAwait(false);
+            var space = _commands is null || _remote?.Invoke(request.SessionId) == true ? null
+                : await _commands.GetSessionSpaceProvidersAsync(request.SessionId, cancellationToken).ConfigureAwait(false);
             return new("ok", _epoch, request.SessionId,
                 new(choices.Current.ProviderKey, choices.Current.AgentPromptId, choices.Current.ModelId, choices.Current.ReasoningEffort?.ToString())
                     { PermissionMode = choices.Current.PermissionMode },

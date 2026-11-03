@@ -278,6 +278,7 @@ import { reasoningShown } from "./promptSurface/promptSurface";
 import { WorktreeManager } from "./worktrees/WorktreeManager";
 import { WorktreeSettings } from "./worktrees/WorktreeSettings";
 import { McpHostSettings } from "./mcpHost/McpHostSettings";
+import { MachinesSettings } from "./machines/MachinesSettings";
 import { createSpacesHub, type SpacesRequestKind } from "./spaces/spacesHub";
 import { ElsewhereBadge } from "./sessionLeases/ElsewhereBadge";
 import { elsewhereFollowView, elsewhereKind, elsewhereLabel, openSessionIds, type ElsewhereKind } from "./sessionLeases/sessionLeases";
@@ -362,6 +363,7 @@ import "./issues/issues.css";
 import "./worktrees/worktrees.css";
 import "./cloudSessions/cloudSessions.css";
 import "./mcpHost/mcpHost.css";
+import "./machines/machines.css";
 import "./spaces/spaces.css";
 import "./canvases/canvases.css";
 import "./landing/landing.css";
@@ -5799,9 +5801,9 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
                   lifetime: creationGeneration.current, capturePopup: captureReferencePopup, observe: observeReference }) : null}>
               <SessionWorkspace sessionSpaces={sessionSpaces} session={row} canAdmit={admitted} rewinds={rewinds} waitingSubSessions={waitingBelow.get(row.id)} subSessions={workingBelow.get(row.id)}
                 heldElsewhere={elsewhereSessions.get(row.id) ?? null}
-                archive={owned && !row.archived ? { asks: archivableDescendants(catalog.current?.sessions ?? [], row.id).length > 0,
+                archive={owned && !row.archived && !row.machineId ? { asks: archivableDescendants(catalog.current?.sessions ?? [], row.id).length > 0,
                   run: () => { protectNavigation([row.id], () => beginSessionArchive(row, "composer")); },
-                  question: sessionArchiving?.from === "composer" ? sessionArchiveQuestion(row, "top-end") : null } : null} branch={owned ? branchHost : null} bookmarks={owned ? bookmarkHost : null}
+                  question: sessionArchiving?.from === "composer" ? sessionArchiveQuestion(row, "top-end") : null } : null} branch={owned && !row.machineId ? branchHost : null} bookmarks={owned && !row.machineId ? bookmarkHost : null}
                 lineage={lineage && source ? <SessionLineageBanner lineage={lineage} title={source.title}
                   onOpen={source.exists ? () => void openAutomationSession(lineage.sourceId) : undefined} /> : undefined}
                 remoteControlRequest={remoteControlAsk?.sessionId === row.id ? remoteControlAsk.request : null} snapshot={listing} selectedProjectId={tab.projectId}
@@ -6046,6 +6048,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
           project={selectedProject && !selectedProject.archived ? { id: selectedProject.id, name: selectedProject.name } : null}
           onOpenFile={owned ? closeSettings : undefined} />
       : settingsSection === "mcpHost" ? <McpHostSettings epoch={owned ? status!.hostEpoch : null} developer={status?.developerMode ?? false} />
+      : settingsSection === "machines" ? <MachinesSettings epoch={owned ? status!.hostEpoch : null} />
       : settingsSection === "search" ? <SearchSettings projects={catalog.current?.projects ?? snapshot?.projects ?? []} spaces={spacesState.spaces}
           onMeaningTurnedOn={() => setFollowMeaning(true)}
           onOpenCanvas={(() => { const item = canvasCatalog.find(value => value.pluginKey === "builtin:search" && value.id === "search");
@@ -6398,11 +6401,13 @@ function useComposerChrome(epoch: string | null, project: WorkspaceSnapshot["pro
   const openPullRequestSettings = useContext(PullRequestSettingsContext);
   const worktreePath = session?.worktreePath ?? null, worktreeName = session?.worktreeName ?? null, worktreeMissing = session?.worktreeMissing === true;
   const worktreeRoot = session?.worktreeRoot ?? null;
+  // A session of a paired machine works in a folder of that machine: its changes, editor, terminals and worktrees are not here.
+  const remote = !!session?.machineId || !!project?.machineId;
   return useMemo(() => {
     const worktree = sessionWorktree({ worktreePath, worktreeName, worktreeRoot, worktreeMissing });
     // The changes of where the session works: its worktree while the folder is there.
     const shown = worktree && !worktree.missing ? worktree.path : null;
-    return ({ context: id !== undefined && name !== undefined && path !== undefined
+    return ({ context: !remote && id !== undefined && name !== undefined && path !== undefined
     ? <WorkspaceChip epoch={epoch} project={{ id, name, path }} sessionId={sessionId} read={projectGit.status} worktree={worktree} place={place}
       // A session that exists can be sent to another worktree, a new one or the folder of the project; a draft chooses its place itself.
       folderSwitch={switchFolder && epoch && sessionId && !place && !archived ? { running, onSwitch: target => switchFolder(epoch, { id, path }, sessionId, target) } : undefined}
@@ -6418,7 +6423,7 @@ function useComposerChrome(epoch: string | null, project: WorkspaceSnapshot["pro
     {sessionId && !archived && <ReviewComposerStatus epoch={epoch} projectId={id ?? null} checkout={shown} sessionId={sessionId} running={running} />}
     <ComposerStatus epoch={epoch} projectId={id ?? null} sessionId={sessionId} read={composerStatus.read} readMcp={composerStatus.readMcp} /></> : undefined,
   footer: epoch && regions ? <PluginRegionSlot items={regionItems} projectId={id ?? null} sessionId={sessionId} region="footer" /> : undefined });
-  }, [epoch, id, name, path, archived, sessionId, regions, regionItems, showChanges, openTerminal, openEditor, refreshSessions, switchFolder, openPullRequestSettings, worktreePath, worktreeName, worktreeRoot, worktreeMissing, place, running]);
+  }, [epoch, id, name, path, archived, sessionId, regions, regionItems, showChanges, openTerminal, openEditor, refreshSessions, switchFolder, openPullRequestSettings, worktreePath, worktreeName, worktreeRoot, worktreeMissing, place, running, remote]);
 }
 
 // The composer of a session, as a prompt given back to it sees it: the one shown, else the draft stored for the session.

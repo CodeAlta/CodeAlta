@@ -243,7 +243,11 @@ public sealed record FleetDisplayLifecycle(string Kind, string? RunId, string? M
 /// <param name="Text">Its text so far, cut at the bound of the display.</param>
 /// <param name="IsComplete">Whether it is complete.</param>
 /// <param name="IsTruncated">Whether it was cut.</param>
-public sealed record FleetDisplayText(string? RunId, string ContentId, string Kind, string Text, bool IsComplete, bool IsTruncated);
+public sealed record FleetDisplayText(string? RunId, string ContentId, string Kind, string Text, bool IsComplete, bool IsTruncated)
+{
+    /// <summary>Gets the retry key of the prompt of a user message, as the node recorded it (<c>fleet:&lt;device&gt;:&lt;key&gt;</c> for a device's); null for other texts.</summary>
+    public string? ClientRequestId { get; init; }
+}
 
 /// <summary>A tool call of the live display.</summary>
 /// <param name="ActivityId">Its activity.</param>

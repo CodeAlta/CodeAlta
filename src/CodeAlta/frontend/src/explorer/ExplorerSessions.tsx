@@ -58,7 +58,20 @@ export function SessionRowTitle({ session, depth, diagnostic, subAgents, twist, 
     <span className="session-icon session-provider" data-file-tone={logo.icon || logo.symbol ? undefined : "purple"} title={provider ?? undefined}>
       <ProviderIcon providerKey={session.providerKey} size={13} fallback="assistant" /></span>
     <span className="session-title">{diagnostic && <span aria-hidden="true">⚠ </span>}{plainTitle(session.title)}</span>
+    {session.machineId && <MachineChip session={session} />}
     <SubAgentBadge count={(subAgents ?? 0) + (childrenElsewhere?.length ?? 0)} elsewhere={childrenElsewhere?.length ?? 0} /></>;
+}
+
+/** The machine a session runs on, after its title: its name, or the name of its project there under the row of its machine. */
+export function MachineChip({ session }: { session: Pick<WorkspaceSession, "machineId" | "machineName" | "remoteProject" | "remoteState" | "projectId"> }) {
+  const { t } = useShellLanguage();
+  const name = session.machineName ?? session.machineId ?? "";
+  // Under the row of its machine, the chip names its project there, which the machine does not share with this computer.
+  const grouped = session.projectId?.startsWith("machine:") ?? false;
+  const label = grouped ? session.remoteProject : name;
+  if (!label) return null;
+  return <span className="session-machine-chip" data-state={session.remoteState ?? undefined} title={t("Runs on {name}", { name })}>
+    {!grouped && <AppIcon name="remote" size={10} />}<span>{label}</span></span>;
 }
 
 /** What follows the listed sub-agents of a session when it has more, or lists more than at first. */

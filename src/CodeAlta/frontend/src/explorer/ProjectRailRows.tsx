@@ -149,7 +149,22 @@ export function ProjectRailRows({ projects, favorites = 0, selectedId, onSelect,
   // A project listed under several labels: its first row is its own (its forms, the sessions of the selected scope),
   // the others show the same project.
   const listed = new Set<string>();
+  // The row of a paired machine groups its sessions of no project of this catalog: it opens and closes, and offers
+  // nothing that works on a folder of this computer (code editor, changes, terminals, a new session, project actions).
+  const machineRow = (project: WorkspaceProject, place: string) => {
+    const primary = !listed.has(project.id);
+    listed.add(project.id);
+    return <Fragment key={`${place}:${project.id}`}><li className="project-action-row project-machine-row" data-machine={project.machineId ?? undefined}>
+      <button type="button" title={project.name} aria-pressed={selectedId === project.id} aria-expanded={open(project.id)}
+        data-scope={project.id} onClick={event => select(project.id, event.detail > 0)}>
+        {twist(project.id)}
+        <span className="project-icon" data-file-tone="teal"><AppIcon name="remote" size={15} /></span>
+        <strong>{project.name}</strong>{activity?.(project.id)}
+      </button>
+    </li>{primary ? branch(project.id) : null}</Fragment>;
+  };
   const row = (project: WorkspaceProject, place = "", from: string | null = null) => {
+    if (project.machineId) return machineRow(project, place);
     const primary = !listed.has(project.id);
     listed.add(project.id);
     const favorite = !!tree?.favorite(project.id);

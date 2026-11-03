@@ -156,10 +156,9 @@ internal sealed partial class RemoteSessionHost
         // Pictures and attached files are on this machine: the node is not given them, and the send says so.
         if (request.Images is { Count: > 0 } || request.Attachments is { Count: > 0 })
             return new OwnedSessionCommandResult(OwnedSessionCommandOutcome.Failed, null, "attachments_unsupported");
-        var selection = request.Selection is { } chosen
-            ? new FleetModelSelection(chosen.ProviderKey, chosen.ModelId, chosen.AgentPromptId, chosen.ReasoningEffort?.ToString())
-            : null;
-        var result = await client.SendAsync(request.SessionId, request.Text, selection, request.ClientRequestId).ConfigureAwait(false);
+        // The model of a remote session is the one its machine gives it: the selection of the composer here names the
+        // choices this host offered (SelectionChoices), which are the session's own, so nothing is changed on the node.
+        var result = await client.SendAsync(request.SessionId, request.Text, null, request.ClientRequestId).ConfigureAwait(false);
         if (result.Status == "busy")
         {
             // The session works: the prompt waits on the node for the end of the turn, as a send does here.
@@ -183,6 +182,22 @@ internal sealed partial class RemoteSessionHost
             "Failed" => new OwnedSessionCommandResult(OwnedSessionCommandOutcome.Failed, run, result.Code),
             _ => new OwnedSessionCommandResult(OwnedSessionCommandOutcome.Completed, run, result.Code),
         };
+    }
+
+    /// <summary>
+    /// The choices the composer of a remote session offers: the provider, the agent prompt and the model the machine
+    /// listed for it, and nothing else, since a send keeps them.
+    /// </summary>
+    /// <param name="sessionId">The session.</param>
+    /// <returns>The choices; null when the machine does not list the session.</returns>
+    public OwnedSelectionChoices? SelectionChoices(string sessionId)
+    {
+        var session = Listing.Sessions.FirstOrDefault(value => string.Equals(value.Id, sessionId, StringComparison.OrdinalIgnoreCase));
+        if (session is null) return null;
+        var provider = session.ProviderKey ?? "default";
+        var model = session.ModelId is { Length: > 0 } id ? new OwnedModelChoice(id, id, []) : null;
+        return new OwnedSelectionChoices(new OwnedSessionSelection(provider, "default", model?.Id, null), [new OwnedPromptChoice("default", "Default")],
+            model is null ? [] : [model]);
     }
 
     /// <inheritdoc />

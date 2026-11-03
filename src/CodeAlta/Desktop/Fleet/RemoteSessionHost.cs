@@ -59,6 +59,8 @@ internal sealed record RemoteListing(FleetNodeInfo? Info, IReadOnlyList<FleetSes
 internal sealed partial class RemoteSessionHost : ISessionHost, IAsyncDisposable
 {
     private readonly Func<CancellationToken, Task<FleetNodeClient>> _connect;
+    private readonly string? _ownKey;
+    private readonly string? _ownKeyPrefix;
     private readonly RemoteSessionHostOptions _options;
     private readonly TimeProvider _time;
     private readonly CancellationTokenSource _stop = new();
@@ -78,10 +80,16 @@ internal sealed partial class RemoteSessionHost : ISessionHost, IAsyncDisposable
     /// <param name="connect">Opens a channel to the node of the machine.</param>
     /// <param name="options">How it connects again; null for the defaults.</param>
     /// <param name="time">The clock; null for the system's.</param>
+    /// <param name="localDeviceId">
+    /// The device id of this computer: the node records the retry key of a command of this device as
+    /// <c>fleet:&lt;device&gt;:&lt;key&gt;</c>, and the page knows its prompts by the key alone. Null keeps the records as they are.
+    /// </param>
     /// <exception cref="ArgumentNullException"><paramref name="machine"/> or <paramref name="connect"/> is null.</exception>
     public RemoteSessionHost(PairedMachine machine, Func<CancellationToken, Task<FleetNodeClient>> connect, RemoteSessionHostOptions? options = null,
-        TimeProvider? time = null)
+        TimeProvider? time = null, string? localDeviceId = null)
     {
+        _ownKey = localDeviceId is { Length: > 0 } device ? $"fleet:{device}:" : null;
+        _ownKeyPrefix = _ownKey is null ? null : $"\"clientRequestId\":\"{_ownKey}";
         ArgumentNullException.ThrowIfNull(machine);
         ArgumentNullException.ThrowIfNull(connect);
         Machine = machine;
@@ -116,6 +124,24 @@ internal sealed partial class RemoteSessionHost : ISessionHost, IAsyncDisposable
 
     /// <summary>Starts the connection loop.</summary>
     public void Start() => _loop = Task.Run(RunAsync);
+
+    /// <summary>Asks for the list again until it holds a session, or the wait ends.</summary>
+    /// <param name="sessionId">The session.</param>
+    /// <param name="timeout">How long to wait.</param>
+    /// <param name="cancellationToken">Cancels the wait.</param>
+    /// <returns>Whether the machine lists the session.</returns>
+    public async Task<bool> WaitListedAsync(string sessionId, TimeSpan timeout, CancellationToken cancellationToken)
+    {
+        var deadline = _time.GetUtcNow() + timeout;
+        while (!Lists(sessionId))
+        {
+            if (_time.GetUtcNow() > deadline) return false;
+            RequestRefresh();
+            await Task.Delay(TimeSpan.FromMilliseconds(100), _time, cancellationToken).ConfigureAwait(false);
+        }
+
+        return true;
+    }
 
     /// <summary>Asks for the list again now, instead of at the next interval.</summary>
     public void RequestRefresh()

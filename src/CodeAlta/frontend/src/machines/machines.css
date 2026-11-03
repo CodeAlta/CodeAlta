@@ -1,0 +1,28 @@
+/* Settings > Fleet > Machines, and the machine of a session in the Explorer. */
+.machine-list { list-style: none; margin: 0; padding: 0; max-width: 820px; display: grid; gap: 6px; }
+.machine-row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; align-items: center; gap: 10px; padding: 8px 10px;
+  border: 1px solid var(--line); border-radius: 6px; background: var(--panel); }
+.machine-icon { color: var(--muted); display: inline-flex; }
+.machine-row[data-state="online"] .machine-icon { color: var(--green); }
+.machine-main { min-width: 0; display: grid; gap: 2px; }
+.machine-title { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.machine-title strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.machine-details, .machine-problem { font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.machine-fingerprint { font-size: 11px; color: var(--muted); white-space: nowrap; }
+.machine-forget { max-width: 280px; padding: 10px 12px; display: grid; gap: 6px; }
+.machine-forget p { margin: 0; }
+.machines-empty { margin-top: 32px; }
+.pair-machine-dialog { width: min(560px, calc(100vw - 32px)); }
+.pair-machine-field { display: grid; gap: 4px; margin-bottom: 12px; }
+.pair-machine-field > span { color: var(--muted); font-size: 12px; }
+.pair-machine-field textarea { font-family: var(--bp-typography-family-mono); font-size: 12px; word-break: break-all; }
+.pair-machine-preview { display: grid; gap: 8px; margin-bottom: 12px; }
+.pair-machine-preview p { margin: 0; }
+.pair-machine-words { display: flex; flex-wrap: wrap; gap: 6px; }
+.pair-machine-words .bp6-tag { font-family: var(--bp-typography-family-mono); }
+
+/* The machine of a remote session, after its title in the Explorer and in its tab: small, beside the marks. */
+.session-machine-chip { display: inline-flex; align-items: center; gap: 3px; flex: 0 1 auto; min-width: 0; max-width: 40%; margin-left: 4px; padding: 0 5px;
+  border-radius: 8px; font-size: 10.5px; line-height: 15px; color: var(--muted); background: color-mix(in srgb, var(--muted) 12%, transparent); }
+.session-machine-chip > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.session-machine-chip[data-state="offline"], .session-machine-chip[data-state="unauthorized"] { opacity: .6; }

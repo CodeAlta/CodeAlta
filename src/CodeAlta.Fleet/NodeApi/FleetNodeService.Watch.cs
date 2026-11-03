@@ -112,6 +112,6 @@ internal sealed class FleetNodeWatch(string watchId, string sessionId, FleetConn
         => new(WatchId, SessionId, snapshot.Revision, previous, previous is { } sent && snapshot.Revision > sent + 1, snapshot.IsClosed,
             session?.Lifecycle is { } life ? new FleetDisplayLifecycle(life.Kind.ToString(), life.RunId, life.Message) : null,
             session?.QueuedPromptCount, session?.StatusKind?.ToString(), session?.StatusMessage,
-            session is { } value ? [.. value.Text.Select(static text => new FleetDisplayText(text.RunId, text.ContentId, text.Kind.ToString(), text.Text, text.IsComplete, text.IsTruncated))] : [],
+            session is { } value ? [.. value.Text.Select(static text => new FleetDisplayText(text.RunId, text.ContentId, text.Kind.ToString(), text.Text, text.IsComplete, text.IsTruncated) { ClientRequestId = text.ClientRequestId })] : [],
             session is { } tools ? [.. tools.ToolActivities.Select(static tool => new FleetDisplayTool(tool.ActivityId, tool.RunId, tool.Phase.ToString(), tool.Name))] : []);
 }

@@ -114,7 +114,7 @@ internal sealed partial class RemoteSessionHost
         foreach (var value in result.Events ?? [])
         {
             AgentEvent? read;
-            try { read = value.Event.Deserialize(AgentJsonSerializerContext.Default.AgentEvent); }
+            try { read = ReadEvent(value.Event); }
             catch (JsonException) { read = null; }
             // An event this version does not read is left out, as the journal reader of this process leaves it out.
             if (read is null) continue;
@@ -129,6 +129,15 @@ internal sealed partial class RemoteSessionHost
         }
 
         return new AgentSessionHistoryPage(entries, ParseCursor(sessionId, result.Next, backward ? 'b' : 'f'), false) { Revision = revision };
+    }
+
+    // An event of the journal of the node; a prompt this device sent gets back the key the page gave it.
+    private AgentEvent? ReadEvent(JsonElement value)
+    {
+        if (_ownKeyPrefix is null) return value.Deserialize(AgentJsonSerializerContext.Default.AgentEvent);
+        var text = value.GetRawText();
+        if (text.Contains(_ownKeyPrefix, StringComparison.Ordinal)) text = text.Replace(_ownKeyPrefix, "\"clientRequestId\":\"", StringComparison.Ordinal);
+        return JsonSerializer.Deserialize(text, AgentJsonSerializerContext.Default.AgentEvent);
     }
 
     private static string Cursor(char direction, long length, long ticks, long offset)
@@ -165,7 +174,7 @@ internal sealed partial class RemoteSessionHost
                 var first = true;
                 while (await ReadAsync(watch, cancellationToken).ConfigureAwait(false) is { } display)
                 {
-                    yield return ToReplacement(epoch, display, first);
+                    yield return ToReplacement(epoch, display, first, _ownKey);
                     first = false;
                     if (display.IsClosed) break;
                 }
@@ -220,18 +229,25 @@ internal sealed partial class RemoteSessionHost
         }
     }
 
-    internal static RuntimeDisplayReplacement ToReplacement(Guid epoch, FleetSessionDisplay display, bool initial)
+    internal static RuntimeDisplayReplacement ToReplacement(Guid epoch, FleetSessionDisplay display, bool initial, string? ownKey = null)
     {
+        // The display of the node keeps the texts of earlier runs, without their times: the page shows what it does not
+        // find in the loaded timeline after it, so only the run of the session now (the one updated last) is given.
+        var run = display.Lifecycle?.RunId ?? display.Text.LastOrDefault(static text => text.RunId is not null)?.RunId;
         var texts = ImmutableArray.CreateBuilder<RuntimeDisplayText>(display.Text.Count);
         foreach (var text in display.Text)
         {
+            if (run is not null && text.RunId != run) continue;
             if (!Enum.TryParse<AgentContentKind>(text.Kind, out var kind)) continue;
-            texts.Add(new RuntimeDisplayText(text.RunId, text.ContentId, kind, text.Text, text.IsComplete, text.IsTruncated, false));
+            // A prompt this device sent is known to the page by its own key: the echo it shows is then the same message.
+            var key = text.ClientRequestId is { } recorded && ownKey is not null && recorded.StartsWith(ownKey, StringComparison.Ordinal) ? recorded[ownKey.Length..] : text.ClientRequestId;
+            texts.Add(new RuntimeDisplayText(text.RunId, text.ContentId, kind, text.Text, text.IsComplete, text.IsTruncated, false) { ClientRequestId = key });
         }
 
         var tools = ImmutableArray.CreateBuilder<RuntimeDisplayToolActivity>(display.Tools.Count);
         foreach (var tool in display.Tools)
         {
+            if (run is not null && tool.RunId != run) continue;
             if (!Enum.TryParse<AgentActivityPhase>(tool.Phase, out var phase)) continue;
             tools.Add(new RuntimeDisplayToolActivity("fleet", tool.RunId, tool.ActivityId, phase, tool.Name, false));
         }

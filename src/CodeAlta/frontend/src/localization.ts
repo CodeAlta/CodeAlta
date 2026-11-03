@@ -51,6 +51,7 @@ import { mcpSessionMessages } from "./mcpSession/messages";
 import { cloudSessionMessages } from "./cloudSessions/messages";
 import { settingsSearchMessages } from "./settings/messages";
 import { startPromptMessages } from "./startPrompts/messages";
+import { machineMessages } from "./machines/messages";
 // English source keys follow SR's fallback convention. Order: es, fr, de, ja, zh-CN.
 type Row = readonly [string, string, string, string, string];
 function dictionary<T extends Record<string, Row>>(rows: T): Readonly<T> {
@@ -2850,6 +2851,7 @@ export const messages = dictionary({
   ...landingMessages,
   ...statisticsMessages,
   ...worktreeMessages,
+  ...machineMessages,
   ...documentationMessages,
   ...storageMessages,
   ...sessionBranchMessages,

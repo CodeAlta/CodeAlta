@@ -30,7 +30,8 @@ public sealed class RemoteSessionHostTests
         var token = TestContext.CancellationToken;
         await using var fixture = await FleetNodeFixture.StartAsync(token);
         var machine = await fixture.PairViewerAsync(token);
-        await using var host = new RemoteSessionHost(machine, cancellation => FleetNodeClient.ConnectAsync(machine, fixture.ViewerIdentity, cancellation), Quick);
+        await using var host = new RemoteSessionHost(machine, cancellation => FleetNodeClient.ConnectAsync(machine, fixture.ViewerIdentity, cancellation), Quick,
+            localDeviceId: fixture.ViewerIdentity.DeviceId);
         var registry = new SessionHostRegistry(new SessionHostRegistryTests.RecordingSessionHost(null));
         registry.TakeMembership().Add(host);
         host.Start();
@@ -38,7 +39,7 @@ public sealed class RemoteSessionHostTests
         Assert.AreEqual("test-node", host.Listing.Info?.Name);
 
         var created = await host.CreateRemoteSessionAsync(new FleetCreateSessionParams(Title: "Remote session"), "create-1", token);
-        await WaitForAsync(() => host.Lists(created.SessionId), "the new session to be listed", token);
+        Assert.IsTrue(await host.WaitListedAsync(created.SessionId, Patience, token), "The new session is listed once the list is read again.");
         Assert.AreSame(host, registry.Resolve(created.SessionId), "The registry gives a session to the machine that lists it.");
         Assert.AreSame(registry.Local, registry.Resolve(Guid.NewGuid().ToString()), "A session no machine lists is one of this process.");
 
@@ -85,6 +86,8 @@ public sealed class RemoteSessionHostTests
         Assert.IsTrue(tail.Page.Entries.All(static entry => entry.SourceEnd > entry.Offset), "Each record has its end.");
         Assert.IsTrue(tail.Page.Entries.Any(static entry => entry.Event is AgentContentCompletedEvent { Kind: AgentContentKind.User } content
             && content.Content.Contains("Hello node", StringComparison.Ordinal)), "The prompt sent from here is in the journal of the node.");
+        var prompt = tail.Page.Entries.Select(static entry => entry.Event).OfType<AgentContentCompletedEvent>().First(static content => content.Kind == AgentContentKind.User);
+        Assert.AreEqual("send-1", PromptImageHistory.ReadClientRequestId(prompt.Details), "The page finds its prompt by the key it gave it.");
         if (tail.Stamp is { } stamp)
             Assert.IsTrue((await host.ReadTimelineTailAsync(created.SessionId, stamp, token)).Unchanged, "An unchanged journal is not read again.");
         var forward = await host.ReadHistoryPageAsync(created.SessionId, null, token);
@@ -209,10 +212,11 @@ public sealed class RemoteSessionHostTests
     public void ToReplacement_KeepsTheTextsToolsAndLifecycleOfTheNode()
     {
         var display = new FleetSessionDisplay("w", "s", 7, 5, true, false, new FleetDisplayLifecycle("RunSubmitted", "run-1", null), 2, null, null,
-            [new FleetDisplayText("run-1", "c1", "Assistant", "Hi", false, false), new FleetDisplayText(null, "c2", "NoSuchKind", "?", true, false)],
+            [new FleetDisplayText("run-1", "c1", "Assistant", "Hi", false, false) { ClientRequestId = "fleet:me:key-1" }, new FleetDisplayText("run-1", "c2", "NoSuchKind", "?", true, false),
+                new FleetDisplayText("run-0", "c0", "Assistant", "An earlier run", true, false)],
             [new FleetDisplayTool("a1", "run-1", "Started", "shell")]);
 
-        var first = RemoteSessionHost.ToReplacement(Guid.NewGuid(), display, initial: true);
+        var first = RemoteSessionHost.ToReplacement(Guid.NewGuid(), display, initial: true, "fleet:me:");
         var next = RemoteSessionHost.ToReplacement(first.Snapshot.Epoch, display, initial: false);
 
         Assert.IsTrue(first.IsInitial);
@@ -221,8 +225,9 @@ public sealed class RemoteSessionHostTests
         Assert.AreEqual(5, next.PreviousRevision);
         Assert.IsTrue(next.HasGap);
         var session = first.Snapshot.Sessions.Single();
-        Assert.AreEqual(1, session.Text.Length, "A kind this version does not know is left out.");
+        Assert.AreEqual(1, session.Text.Length, "A kind this version does not know, and the texts of earlier runs, are left out.");
         Assert.AreEqual(AgentContentKind.Assistant, session.Text[0].Kind);
+        Assert.AreEqual("key-1", session.Text[0].ClientRequestId, "A text of a prompt of this device has the key the page gave it.");
         Assert.AreEqual("shell", session.ToolActivities.Single().Name);
         Assert.AreEqual(SessionLifecycleEventKind.RunSubmitted, session.Lifecycle?.Kind);
         Assert.AreEqual(2, session.QueuedPromptCount);

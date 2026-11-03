@@ -33,6 +33,11 @@ test("a session in the cloud is renamed, archived and deleted, but neither forke
   assert.deepEqual([back.fork, back.move, back["remote-control"]], [true, true, true]);
 });
 
+test("a session of a paired machine opens, and is changed only on its machine", () => {
+  assert.deepEqual(access({ ...row, machineId: "m1", machineName: "mac-mini" }), { open: true, rename: false, fork: false, delete: false, archive: false,
+    "remote-control": false, move: false, space: false, "open-vs-code": false, "copy-resume-command": false, "run-in-terminal": false });
+});
+
 test("project/global headers are exact; unmatched, archived, stale, read-only and locked rows cannot mutate", () => {
   const global = { ...row, scopeKind: "global", projectId: null };
   const globalTarget = { ...target, projectId: null };
