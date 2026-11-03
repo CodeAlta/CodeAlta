@@ -80,6 +80,18 @@ public sealed class FleetConnectorOptions
 
     /// <summary>Gets what opens the transport to the control address; null opens a WebSocket.</summary>
     public Func<Uri, CancellationToken, Task<IFleetTransport>>? ConnectTransport { get; init; }
+
+    /// <summary>
+    /// Gets what serves a relayed channel the server offers this device (<c>relay.incoming</c>): it is given the stream of
+    /// the relay, which it owns, and runs the node's side of the channel on it. Null declines every relay.
+    /// </summary>
+    public Func<FleetRelayIncoming, Stream, CancellationToken, Task>? AcceptRelay { get; init; }
+
+    /// <summary>Gets the file that pins the first entry of the device list of the server (<see cref="FleetOrganizationDevices"/>); null pins it in memory.</summary>
+    public string? DeviceListPinPath { get; init; }
+
+    /// <summary>Gets what wraps the stream of each relay, for tests that look at the bytes the server pipes; null for none.</summary>
+    public Func<Stream, Stream>? WrapRelayStream { get; init; }
 }
 
 /// <summary>
@@ -107,6 +119,7 @@ public sealed class FleetConnector : IAsyncDisposable
     private readonly CancellationTokenSource _stop = new();
     private readonly Logger _logger = LogManager.GetLogger("CodeAlta.Fleet.Server");
     private readonly Lock _gate = new();
+    private readonly HashSet<Task> _relays = [];
     private Task _loop = Task.CompletedTask;
     private FleetDirectoryView _directory = FleetDirectoryView.Empty;
     private FleetConnectorState _state;
@@ -126,7 +139,11 @@ public sealed class FleetConnector : IAsyncDisposable
         ArgumentNullException.ThrowIfNull(options.Identity);
         _options = options;
         _outbox = FleetPublicationOutbox.Load(options.OutboxPath);
+        Devices = new FleetOrganizationDevices(options.ServerAddress, options.Identity, options.DeviceListPinPath);
     }
+
+    /// <summary>Gets the devices of the organization of the server, as this device verified its signed device list.</summary>
+    public FleetOrganizationDevices Devices { get; }
 
     /// <summary>Raised when <see cref="State"/> changes.</summary>
     public event Action<FleetConnector>? StateChanged;
@@ -165,6 +182,30 @@ public sealed class FleetConnector : IAsyncDisposable
     /// <summary>Asks the connector to read its source again soon: something to publish may have changed.</summary>
     public void Nudge() => _wake.Writer.TryWrite(true);
 
+    /// <summary>
+    /// Opens a relayed stream to another device of the organization (<c>relay.open</c>): the server asks that device,
+    /// and once it accepted, this side opens its WebSocket with its ticket. What runs on the stream is the caller's: the
+    /// whole channel stack, with the device's key pinned, so that the server sees ciphertext only.
+    /// </summary>
+    /// <param name="targetDeviceId">The device to reach.</param>
+    /// <param name="cancellationToken">Cancels the opening.</param>
+    /// <returns>The stream of the relay; the caller owns it.</returns>
+    /// <exception cref="ArgumentException"><paramref name="targetDeviceId"/> is empty.</exception>
+    /// <exception cref="FleetConnectionClosedException">The control connection is not open.</exception>
+    /// <exception cref="FleetException">The server refused the relay (<see cref="FleetRelayErrorCodes"/>, <see cref="FleetErrorCodes.Forbidden"/>).</exception>
+    /// <exception cref="System.Net.WebSockets.WebSocketException">The side of the relay did not open.</exception>
+    public async Task<Stream> OpenRelayAsync(string targetDeviceId, CancellationToken cancellationToken)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(targetDeviceId);
+        var connection = Volatile.Read(ref _connection)
+            ?? throw new FleetConnectionClosedException(new FleetConnectionCloseInfo(FleetErrorCodes.ConnectionClosed, "The control connection to the server is not open.", false));
+        var ticket = await connection.SendRequestAsync(FleetServerMethods.RelayOpen, new FleetRelayOpen(targetDeviceId), FleetServerJsonContext.Default.FleetRelayOpen,
+            FleetServerJsonContext.Default.FleetRelayTicket, null, cancellationToken).ConfigureAwait(false)
+            ?? throw new FleetException(FleetErrorCodes.ProtocolError, null, "The server gave no ticket for the relay.");
+        var stream = await FleetRelayStreams.ConnectAsync(_options.ServerAddress, ticket, _options.Identity, _options.TimeProvider, cancellationToken).ConfigureAwait(false);
+        return _options.WrapRelayStream is { } wrap ? wrap(stream) : stream;
+    }
+
     /// <summary>Stops the connection and waits for the loop to end.</summary>
     /// <returns>A task that completes once stopped.</returns>
     public async ValueTask DisposeAsync()
@@ -173,6 +214,9 @@ public sealed class FleetConnector : IAsyncDisposable
         if (!_stop.IsCancellationRequested) await _stop.CancelAsync().ConfigureAwait(false);
         try { await _loop.ConfigureAwait(false); }
         catch (OperationCanceledException) { }
+        Task[] relays;
+        lock (_gate) relays = [.. _relays];
+        await Task.WhenAll(relays).ConfigureAwait(false);
         SetState(FleetConnectorState.Stopped, LastError);
         _stop.Dispose();
     }
@@ -294,6 +338,12 @@ public sealed class FleetConnector : IAsyncDisposable
                     }
                     catch (JsonException) { /* A change of a newer server this one does not read. */ }
                     break;
+                case FleetServerMethods.RelayIncoming:
+                    FleetRelayIncoming? incoming = null;
+                    try { incoming = fleetEvent.Payload?.Deserialize(FleetServerJsonContext.Default.FleetRelayIncoming); }
+                    catch (JsonException) { /* An offer this device does not read lapses. */ }
+                    if (incoming is { RelayId.Length: > 0 }) Track(Task.Run(() => AnswerRelayAsync(connection, incoming, stop), CancellationToken.None));
+                    break;
             }
 
             return ValueTask.CompletedTask;
@@ -361,6 +411,45 @@ public sealed class FleetConnector : IAsyncDisposable
         if (stop.IsCancellationRequested) await CloseQuietlyAsync(connection).ConfigureAwait(false);
         var completed = await connection.Completion.WaitAsync(TimeSpan.FromSeconds(10)).ConfigureAwait(false);
         return closing ?? (completed.IsClean ? null : new FleetError(completed.Code, FleetErrorHints.Reconnect, completed.Message));
+    }
+
+    // An offered relay, answered beside the reader of the connection: accepted when this device serves relayed
+    // channels, declined otherwise. The handler owns the stream once it opened.
+    private async Task AnswerRelayAsync(FleetConnection connection, FleetRelayIncoming incoming, CancellationToken stop)
+    {
+        try
+        {
+            if (_options.AcceptRelay is not { } accept)
+            {
+                await connection.SendRequestAsync(FleetServerMethods.RelayClose, new FleetRelayClose(incoming.RelayId, "declined"), FleetServerJsonContext.Default.FleetRelayClose,
+                    FleetServerJsonContext.Default.FleetError, null, stop).ConfigureAwait(false);
+                return;
+            }
+
+            var ticket = await connection.SendRequestAsync(FleetServerMethods.RelayAccept, new FleetRelayRef(incoming.RelayId), FleetServerJsonContext.Default.FleetRelayRef,
+                FleetServerJsonContext.Default.FleetRelayTicket, null, stop).ConfigureAwait(false);
+            if (ticket is null) return;
+            var stream = await FleetRelayStreams.ConnectAsync(_options.ServerAddress, ticket, _options.Identity, _options.TimeProvider, stop).ConfigureAwait(false);
+            if (_options.WrapRelayStream is { } wrap) stream = wrap(stream);
+            await accept(incoming, stream, stop).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (stop.IsCancellationRequested)
+        {
+        }
+        catch (Exception exception) when (exception is FleetException or FleetConnectionClosedException or IOException or TimeoutException
+            or System.Net.WebSockets.WebSocketException or HttpRequestException or InvalidOperationException or OperationCanceledException)
+        {
+            if (LogManager.IsInitialized) _logger.Info($"The relay {incoming.RelayId} from {incoming.From} was not served: {exception.Message}");
+        }
+    }
+
+    private void Track(Task relay)
+    {
+        lock (_gate) _relays.Add(relay);
+        _ = relay.ContinueWith(done =>
+        {
+            lock (_gate) _relays.Remove(done);
+        }, CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
     }
 
     // Reads the source and sends what the server lacks: the inventory when it changed, then the facts by batches. Gives how many published sessions run.

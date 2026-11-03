@@ -47,6 +47,12 @@ public sealed class FleetServerConnectionsOptions
 
     /// <summary>Gets what changes the options of each connector, for tests; null for none.</summary>
     public Func<FleetConnectorOptions, FleetConnectorOptions>? Configure { get; init; }
+
+    /// <summary>
+    /// Gets what serves a relayed channel a server offers this instance, with the connector of that server (whose
+    /// <see cref="FleetConnector.Devices"/> say who its organization holds); null declines every relay (a desktop does).
+    /// </summary>
+    public Func<FleetConnector, FleetRelayIncoming, Stream, CancellationToken, Task>? AcceptRelay { get; init; }
 }
 
 /// <summary>
@@ -228,6 +234,7 @@ public sealed class FleetServerConnections : IAsyncDisposable
     {
         var linked = new LinkedSpaces(link.Url, _options.Spaces);
         var source = _options.Source is null ? null : new LinkedSource(_options.Source, linked);
+        FleetConnector? created = null;
         var options = new FleetConnectorOptions
         {
             ServerAddress = link.Address,
@@ -237,9 +244,12 @@ public sealed class FleetServerConnections : IAsyncDisposable
             Source = source,
             PublishesSpace = linked.Contains,
             WatchDirectory = _options.WatchDirectory,
+            DeviceListPinPath = Path.Combine(_store.LinkFolder(link.Id), FleetOrganizationDevices.PinFileName),
+            AcceptRelay = _options.AcceptRelay is { } accept ? (incoming, stream, token) => accept(created!, incoming, stream, token) : null,
         };
         if (_options.Configure is { } configure) options = configure(options);
         var connector = new FleetConnector(options);
+        created = connector;
         var running = new Running(link.Url, connector, source);
         connector.StateChanged += value => OnStateChanged(link.Id, value);
         connector.DirectoryChanged += _ => Changed?.Invoke();

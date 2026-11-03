@@ -137,13 +137,49 @@ public sealed partial class FleetNodeService : IAsyncDisposable
         await ServeAsync(channel, accepted.IsFromThisMachine, cancellationToken).ConfigureAwait(false);
     }
 
+    /// <summary>
+    /// Serves a relayed stream (<c>doc/fleet/protocol.md</c>, Connections): the same channel stack as a direct one, end to
+    /// end with the viewer, then the node API. The viewer may be a paired device, with its permissions, or a member of the
+    /// organization in the signed device list (<paramref name="organization"/>); never the node's own key, and no pairing.
+    /// Failures are logged; they never escape.
+    /// </summary>
+    /// <param name="stream">The stream of the relay; the node owns it.</param>
+    /// <param name="organization">The members of the organization of the server that relays, as this node verified its device list.</param>
+    /// <param name="cancellationToken">Ends the channel.</param>
+    /// <returns>A task that completes once the channel closed.</returns>
+    /// <exception cref="ArgumentNullException">An argument is null.</exception>
+    public async Task ServeRelayedAsync(Stream stream, IDeviceTrustPolicy organization, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(stream);
+        ArgumentNullException.ThrowIfNull(organization);
+        var trust = new Server.FleetCombinedTrust(_trusted, organization);
+        FleetChannel channel;
+        try
+        {
+            channel = await FleetChannelStack.AcceptAsync(stream, new FleetChannelServerOptions
+            {
+                Certificate = _certificate,
+                TrustPolicy = trust,
+            }, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
+        {
+            LogInfo($"A relayed fleet channel was refused: {exception.Message}");
+            return;
+        }
+
+        await ServeAsync(channel, false, trust, cancellationToken).ConfigureAwait(false);
+    }
+
     /// <summary>Serves the node API on an authenticated channel until it closes.</summary>
     /// <param name="channel">The channel, not started.</param>
     /// <param name="fromThisMachine">Whether the channel comes from this machine: the node's own key is admitted only then.</param>
     /// <param name="cancellationToken">Ends the channel.</param>
     /// <returns>A task that completes once the channel closed.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="channel"/> is null.</exception>
-    public async Task ServeAsync(FleetChannel channel, bool fromThisMachine, CancellationToken cancellationToken)
+    public Task ServeAsync(FleetChannel channel, bool fromThisMachine, CancellationToken cancellationToken) => ServeAsync(channel, fromThisMachine, _trusted, cancellationToken);
+
+    private async Task ServeAsync(FleetChannel channel, bool fromThisMachine, IDeviceTrustPolicy trust, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(channel);
         var isOwner = channel.RemoteFingerprint == _options.Identity.Fingerprint;
@@ -156,7 +192,7 @@ public sealed partial class FleetNodeService : IAsyncDisposable
                 return;
             }
 
-            var caller = new FleetNodeCaller(channel.Connection, channel.RemoteDeviceId, channel.RemoteFingerprint, isOwner, channel.Client?.Kind);
+            var caller = new FleetNodeCaller(channel.Connection, channel.RemoteDeviceId, channel.RemoteFingerprint, isOwner, channel.Client?.Kind) { Trust = trust };
             Register(caller);
             if (!_callers.TryAdd(channel.Connection, caller)) return;
             try
@@ -336,13 +372,13 @@ public sealed partial class FleetNodeService : IAsyncDisposable
         }
 
         if (access.OwnerOnly) throw new FleetException(FleetErrorCodes.Forbidden, null, "Only the node's owner, on its machine, may do this.");
-        if (_trusted.IsRevoked(caller.Fingerprint))
+        if (caller.Trust.IsRevoked(caller.Fingerprint))
         {
             _ = caller.Connection.CloseAsync(FleetErrorCodes.Revoked);
             throw new FleetException(FleetErrorCodes.Revoked, null, "This device was revoked by the node.");
         }
 
-        var device = _trusted.FindTrusted(caller.Fingerprint);
+        var device = caller.Trust.FindTrusted(caller.Fingerprint);
         if (access.AnyoneMayCall) return device;
         if (device is null) throw new FleetException(FleetErrorCodes.Unauthenticated, FleetErrorHints.Reauthenticate, "This device is not paired with the node.");
         if ((device.Permissions & access.Required) != access.Required)
@@ -441,6 +477,9 @@ internal sealed class FleetNodeCaller(FleetConnection connection, string deviceI
     public bool IsOwner { get; } = isOwner;
 
     public string? ClientKind { get; } = clientKind;
+
+    /// <summary>Gets the trust the calls of the channel are checked against at each call: the paired devices, and on a relayed channel the members of the organization.</summary>
+    public required IDeviceTrustPolicy Trust { get; init; }
 
     public bool TryAddWatch(FleetNodeWatch watch)
     {

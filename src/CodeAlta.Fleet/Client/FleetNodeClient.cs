@@ -21,9 +21,10 @@ public sealed class FleetNodeClient : IAsyncDisposable
     private readonly FleetChannel _channel;
     private readonly ConcurrentDictionary<string, FleetSessionWatch> _watches = new(StringComparer.Ordinal);
 
-    private FleetNodeClient(FleetChannel channel, Action<FleetConnection>? serve = null)
+    private FleetNodeClient(FleetChannel channel, Action<FleetConnection>? serve = null, Server.FleetChannelPath path = Server.FleetChannelPath.Direct)
     {
         _channel = channel;
+        Path = path;
         channel.Connection.SetEventHandler(OnEventAsync);
         serve?.Invoke(channel.Connection);
         channel.Connection.Start();
@@ -52,6 +53,42 @@ public sealed class FleetNodeClient : IAsyncDisposable
             cancellationToken).ConfigureAwait(false);
         return new FleetNodeClient(channel, serve);
     }
+
+    /// <summary>
+    /// Connects to a node of the organization of a server through its relay: the server asks the node, then splices the
+    /// two sides; inside, TLS goes from this device to the node, pinned to the node's key as the signed device list names
+    /// it (verified here, never taken from the server's table), so the server pipes ciphertext only.
+    /// </summary>
+    /// <param name="connector">The control connection to the server, which opens the relay and verifies the device list.</param>
+    /// <param name="nodeDeviceId">The device of the node.</param>
+    /// <param name="identity">The key of this device.</param>
+    /// <param name="serve">Registers the methods this device serves on the channel, before it starts; null for none.</param>
+    /// <param name="cancellationToken">Cancels the connection.</param>
+    /// <returns>The connected client, whose <see cref="Path"/> is <see cref="Server.FleetChannelPath.Relayed"/>.</returns>
+    /// <exception cref="ArgumentNullException">An argument is null.</exception>
+    /// <exception cref="DeviceAuthenticationException">The node is not a member of the signed device list, presented another key, or refused this device.</exception>
+    /// <exception cref="InvalidDataException">The device list of the server does not verify.</exception>
+    /// <exception cref="FleetException">The server refused the relay, or the connection to it is not open.</exception>
+    /// <exception cref="FleetHandshakeException">The node refused the handshake.</exception>
+    /// <exception cref="System.Net.WebSockets.WebSocketException">The relay did not open.</exception>
+    public static async Task<FleetNodeClient> ConnectRelayedAsync(Server.FleetConnector connector, string nodeDeviceId, DeviceIdentity identity, Action<FleetConnection>? serve,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(connector);
+        ArgumentNullException.ThrowIfNull(nodeDeviceId);
+        ArgumentNullException.ThrowIfNull(identity);
+        // The list is read again at each connection: a node removed since the last one is not reached.
+        var list = await connector.Devices.RefreshAsync(cancellationToken).ConfigureAwait(false);
+        if (!list.Members.TryGetValue(nodeDeviceId, out var node))
+            throw new DeviceAuthenticationException(DeviceAuthenticationFailure.ServerNotTrusted, "The machine is not a member of the signed device list of the organization.");
+        var stream = await connector.OpenRelayAsync(nodeDeviceId, cancellationToken).ConfigureAwait(false);
+        var channel = await FleetChannelStack.ConnectAsync(stream, new FleetChannelClientOptions { Identity = identity, NodeFingerprint = node.Fingerprint },
+            cancellationToken).ConfigureAwait(false);
+        return new FleetNodeClient(channel, serve, Server.FleetChannelPath.Relayed);
+    }
+
+    /// <summary>Gets where the channel goes: straight to the node, or through the relay of a server.</summary>
+    public Server.FleetChannelPath Path { get; }
 
     /// <summary>Gets the target of a move on this node, as a source on this device talks to it (<see cref="Moves.FleetMoveSender"/>).</summary>
     /// <returns>The target.</returns>
