@@ -1,9 +1,13 @@
 using System.Globalization;
+using System.Net;
 using System.Net.Http.Json;
 using CodeAlta.Fleet.Protocol.Api;
+using CodeAlta.Fleet.Update;
 using CodeAlta.Server.Api;
 using CodeAlta.Server.Hosting;
 using CodeAlta.Server.Storage.Sqlite;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using XenoAtom.CommandLine;
 
 namespace CodeAlta.Server;
@@ -21,13 +25,14 @@ public static class ServerExitCodes
     public const int InvalidUsage = 2;
 }
 
-/// <summary>The commands of <c>altaserver</c>: <c>run</c>, <c>status</c>, <c>setup-code</c>.</summary>
+/// <summary>The commands of <c>altaserver</c>: <c>run</c>, <c>status</c>, <c>setup-code</c>, <c>update</c>.</summary>
 public sealed class ServerApplication
 {
     private const string _ = "";
 
     private readonly TextWriter _output;
     private readonly TextWriter _error;
+    private string[] _args = [];
 
     /// <summary>Initializes a new instance of the <see cref="ServerApplication"/> class.</summary>
     /// <param name="output">Where the commands write.</param>
@@ -41,12 +46,31 @@ public sealed class ServerApplication
         _error = error;
     }
 
+    /// <summary>Gets what changes the options of the launcher <c>run</c> hands over to the selected version with, for tests; null for none.</summary>
+    internal Func<UpdateLauncherOptions, UpdateLauncherOptions>? ConfigureLauncher { get; init; }
+
+    /// <summary>Gets what changes the options of the self-update of a running server, for tests; null for none.</summary>
+    internal Func<ServerUpdatesOptions, ServerUpdatesOptions>? ConfigureUpdates { get; init; }
+
+    /// <summary>Gets the HTTP handler of the feeds of <c>update</c>, for tests; null for the usual one.</summary>
+    internal HttpMessageHandler? UpdateHandler { get; init; }
+
+    /// <summary>Gets the folder of the application of this process, for tests; null for <see cref="AppContext.BaseDirectory"/>.</summary>
+    internal string? ApplicationDirectory { get; init; }
+
+    /// <summary>Gets what a test is told once <c>run</c> started its server, with what stops it; null for nothing.</summary>
+    internal Action<CoordinatorServer, Action>? Started { get; init; }
+
+    /// <summary>Gets what changes the options of the server <c>run</c> starts, for tests; null for none.</summary>
+    internal Func<CoordinatorServerOptions, CoordinatorServerOptions>? ConfigureServer { get; init; }
+
     /// <summary>Runs a command line.</summary>
     /// <param name="args">The arguments.</param>
     /// <returns>The exit code (<see cref="ServerExitCodes"/>).</returns>
     public async Task<int> RunAsync(string[] args)
     {
         ArgumentNullException.ThrowIfNull(args);
+        _args = args;
         if (args.Length == 0) args = ["--help"];
         return await CreateApp().RunAsync(args, new CommandRunConfig { Out = _output, Error = _error }).ConfigureAwait(false);
     }
@@ -105,6 +129,33 @@ public sealed class ServerApplication
         AddDataRoot(setupCommand, setup);
         setupCommand.Add((_, _) => SetupCodeAsync(setup));
 
+        var update = new UpdateOptions();
+        var updateCommand = new Command("update", "Update the server to a new version")
+        {
+            new CommandUsage("Usage: {NAME} [--version <v>] [--source <feed>] [--check] [--now] [options]"),
+            _,
+            "Downloads the package of this OS and architecture from a NuGet feed",
+            "(nuget.org by default), checks its hash, and puts it beside the others in",
+            "versions/ of the data root. The running server copies its database to",
+            "backups/, stops and starts the new version; without a running server,",
+            "the next altaserver run starts it. The new version runs on trial: if it",
+            "does not serve within 2 minutes, or crashes, the previous one comes back",
+            "with the database copied before the switch, and the new one is marked",
+            "bad. No .NET SDK is needed. Without --version: the latest release (a",
+            "prerelease when one runs). update.json of the data root sets the feed",
+            "and the allowed feeds: { \"source\": \"<feed>\", \"allowedSources\": [...] }.",
+            _,
+            "Options:",
+            { "version=", "The {VERSION} to install, also an older one", v => update.Version = v },
+            { "source=", "The {FEED}: a NuGet v3 index (https://) or a folder", v => update.Source = v },
+            { "sha512=", "The {HASH} the package must have (base64 or hexadecimal)", v => update.Sha512 = v },
+            { "check", "Only tell whether an update is available", v => update.Check = v is not null },
+            { "now", "Accepted for symmetry with altanode: the server never waits", v => update.Now = v is not null },
+            { "prerelease", "Take a prerelease as the latest version", v => update.Prerelease = v is not null },
+        };
+        AddDataRoot(updateCommand, update);
+        updateCommand.Add((_, _) => UpdateAsync(update));
+
         return new CommandApp("altaserver", config: new CommandConfig { OutputFactory = static _ => DefaultCommandOutput.Instance })
         {
             new CommandUsage("Usage: {NAME} <command> [options]"),
@@ -118,6 +169,7 @@ public sealed class ServerApplication
             runCommand,
             statusCommand,
             setupCommand,
+            updateCommand,
             _,
             "Options:",
             new HelpOption(),
@@ -158,16 +210,36 @@ public sealed class ServerApplication
             }
         }
 
+        // The installed entry point (the tool) hands over to the version altaserver update selected, and passes its exit
+        // code through; a switch that waited for the next start is taken first.
+        var store = new UpdateVersionStore(paths!.VersionsRoot);
+        if (!UpdateLauncher.IsSupervised && !store.Contains(ApplicationDirectory ?? AppContext.BaseDirectory))
+        {
+            try
+            {
+                if (!CoordinatorServer.IsRunning(paths)) store.TakePending(UpdateProduct.Server);
+            }
+            catch (UpdateException exception)
+            {
+                await _error.WriteLineAsync($"altaserver: the versions of {store.Root} could not be read: {exception.Message}").ConfigureAwait(false);
+            }
+
+            if (store.Read().Current is not null) return await RunLauncherAsync(paths, store).ConfigureAwait(false);
+        }
+
         CoordinatorServer server;
+        ServerUpdates? updates = null;
         try
         {
-            server = await CoordinatorServer.StartAsync(new CoordinatorServerOptions
+            var serverOptions = new CoordinatorServerOptions
             {
-                DataRoot = paths!.DataRoot,
+                DataRoot = paths.DataRoot,
                 Urls = urls,
                 CertificatePath = options.Certificate,
                 CertificatePassword = password,
-            }).ConfigureAwait(false);
+                UpdateStatus = () => updates?.Status(),
+            };
+            server = await CoordinatorServer.StartAsync(ConfigureServer?.Invoke(serverOptions) ?? serverOptions).ConfigureAwait(false);
         }
         catch (Exception exception) when (exception is InvalidOperationException or ArgumentException or IOException or System.Security.Cryptography.CryptographicException)
         {
@@ -175,19 +247,186 @@ public sealed class ServerApplication
             return ServerExitCodes.Failure;
         }
 
+        using var restart = new CancellationTokenSource();
         await using (server.ConfigureAwait(false))
         {
-            await _output.WriteLineAsync($"CodeAlta Server {ServerVersion.Current} listens on {string.Join(", ", server.Addresses.Select(static address => address.ToString().TrimEnd('/')))} (data root {paths!.DataRoot}).").ConfigureAwait(false);
+            await _output.WriteLineAsync($"CodeAlta Server {ServerVersion.Current} listens on {string.Join(", ", server.Addresses.Select(static address => address.ToString().TrimEnd('/')))} (data root {paths.DataRoot}).").ConfigureAwait(false);
             if (server.SetupCode is { } code)
             {
                 await _output.WriteLineAsync($"No owner yet. Setup code: {code.Code} (until {code.ExpiresAt.ToLocalTime():t}, from this machine only; altaserver setup-code prints it again).")
                     .ConfigureAwait(false);
             }
 
-            await server.WaitForShutdownAsync().ConfigureAwait(false);
+            // The self-update: a version on trial confirms itself once it serves; a switch altaserver update asks for
+            // copies the database, then stops the server so that its launcher starts the new version.
+            if (UpdateVersion.TryParse(ServerVersion.Current, out var running))
+            {
+                var logger = server.Services.GetRequiredService<ILoggerFactory>().CreateLogger("CodeAlta.Server.Update");
+                var updateOptions = new ServerUpdatesOptions
+                {
+                    Store = store, Running = running, Installed = InstalledVersion(), Healthy = token => ServesAsync(server, token),
+                    Backup = async (target, token) =>
+                    {
+                        var backup = ServerUpdates.BackupPath(paths, target, DateTimeOffset.UtcNow);
+                        await server.BackupDatabaseAsync(backup, token).ConfigureAwait(false);
+                        return backup;
+                    },
+                    RequestRestart = restart.Cancel, PolicyPath = paths.UpdatePolicyPath, Log = message => logger.LogInformation("{Message}", message),
+                };
+                updates = new ServerUpdates(ConfigureUpdates?.Invoke(updateOptions) ?? updateOptions);
+                updates.Start();
+            }
+
+            Started?.Invoke(server, restart.Cancel);
+            await server.WaitForShutdownAsync(restart.Token).ConfigureAwait(false);
+            if (updates is not null) await updates.DisposeAsync().ConfigureAwait(false);
+            if (updates?.RestartRequested == true) await _output.WriteLineAsync("Stopping CodeAlta Server to start its new version...").ConfigureAwait(false);
         }
 
-        return ServerExitCodes.Success;
+        if (updates?.RestartRequested != true) return ServerExitCodes.Success;
+        // A launcher waits for this process and starts the newly selected version; without one, this process becomes it.
+        if (UpdateLauncher.IsSupervised) return UpdateLauncher.RestartExitCode;
+        return await RunLauncherAsync(paths, store).ConfigureAwait(false);
+    }
+
+    // The launcher hop: the selected version runs as a child process of this one, which ends with its exit code. A
+    // rollback restores the database copied before the switch.
+    private async Task<int> RunLauncherAsync(ServerPaths paths, UpdateVersionStore store)
+    {
+        var options = new UpdateLauncherOptions
+        {
+            Store = store, Product = UpdateProduct.Server, Arguments = _args, Installed = InstalledCommand(), InstalledVersion = InstalledVersion(),
+            Log = message => _error.WriteLine("altaserver: " + message),
+            RolledBack = (trial, _) =>
+            {
+                if (trial.Backup is { } backup)
+                {
+                    ServerUpdates.RestoreBackup(paths, backup);
+                    _error.WriteLine($"altaserver: the database copied before {trial.Version} was restored ({backup}).");
+                }
+
+                return Task.CompletedTask;
+            },
+        };
+        if (ConfigureLauncher is not null) options = ConfigureLauncher(options);
+        return await new UpdateLauncher(options).RunAsync().ConfigureAwait(false);
+    }
+
+    // How this process was started, to start the installed entry point again when the pointer returns to it.
+    private UpdateCommand InstalledCommand()
+    {
+        var path = Environment.ProcessPath ?? "altaserver";
+        return string.Equals(Path.GetFileNameWithoutExtension(path), "dotnet", StringComparison.OrdinalIgnoreCase)
+            ? new UpdateCommand(path, [Path.Combine(ApplicationDirectory ?? AppContext.BaseDirectory, UpdateProduct.Server.AssemblyFileName)])
+            : new UpdateCommand(path, []);
+    }
+
+    // The version of the installed entry point: this one, unless this process runs a version of a folder of versions.
+    private string? InstalledVersion()
+    {
+        if (UpdateLauncher.SupervisorInstalledVersion is { } passed) return passed;
+        var directory = Path.TrimEndingDirectorySeparator(ApplicationDirectory ?? AppContext.BaseDirectory);
+        return string.Equals(Path.GetFileName(Path.GetDirectoryName(directory)), "versions", StringComparison.OrdinalIgnoreCase) ? null : ServerVersion.Current;
+    }
+
+    // Whether the server serves: it answers its own health request, on its first address (a wildcard address through
+    // the loopback). Its own certificate is not checked: the request carries nothing and only proves that Kestrel answers.
+    private static async Task<bool> ServesAsync(CoordinatorServer server, CancellationToken cancellationToken)
+    {
+        if (server.Addresses.FirstOrDefault() is not { } address) return false;
+        var builder = new UriBuilder(address);
+        if (IPAddress.TryParse(builder.Host.Trim('[', ']'), out var ip) && (ip.Equals(IPAddress.Any) || ip.Equals(IPAddress.IPv6Any)))
+            builder.Host = ip.Equals(IPAddress.Any) ? "127.0.0.1" : "[::1]";
+        using var handler = new HttpClientHandler { ServerCertificateCustomValidationCallback = HttpClientHandler.DangerousAcceptAnyServerCertificateValidator };
+        using var client = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(5) };
+        try
+        {
+            var health = await client.GetFromJsonAsync(new Uri(builder.Uri, "api/v1/server/health"), ServerApiJsonContext.Default.ServerHealthDto, cancellationToken).ConfigureAwait(false);
+            return health?.Status == "ok";
+        }
+        catch (Exception exception) when (exception is HttpRequestException or TaskCanceledException or System.Text.Json.JsonException)
+        {
+            return false;
+        }
+    }
+
+    private async ValueTask<int> UpdateAsync(UpdateOptions options)
+    {
+        if (!options.TryResolve(_error, out var paths)) return ServerExitCodes.InvalidUsage;
+        if (options.Check && options.Now)
+        {
+            await _error.WriteLineAsync("altaserver: --check changes nothing: --now cannot go with it.").ConfigureAwait(false);
+            return ServerExitCodes.InvalidUsage;
+        }
+
+        var store = new UpdateVersionStore(paths!.VersionsRoot);
+        try
+        {
+            var state = store.Read();
+            var installed = InstalledVersion();
+            var running = UpdateVersion.Parse(state.Current ?? installed ?? ServerVersion.Current);
+            using var http = UpdateHandler is null ? new HttpClient { Timeout = TimeSpan.FromMinutes(10) } : new HttpClient(UpdateHandler, disposeHandler: false);
+            var updater = new SelfUpdater(new SelfUpdaterOptions
+            {
+                Product = UpdateProduct.Server, Store = store, Running = running, Http = http, Policy = UpdateSourcePolicy.Load(paths.UpdatePolicyPath),
+            });
+            var request = new UpdateRequest { Version = options.Version, Source = options.Source, ExpectedSha512 = options.Sha512, Prerelease = options.Prerelease, Now = options.Now };
+            var check = await updater.CheckAsync(request, CancellationToken.None).ConfigureAwait(false);
+            await _output.WriteLineAsync($"Feed: {check.Source} ({check.PackageId}).").ConfigureAwait(false);
+            await _output.WriteLineAsync($"Runs: {running}{(installed is not null && state.Current is not null ? $" (installed {installed})" : "")}; latest: {check.Latest?.ToString() ?? "none"}.")
+                .ConfigureAwait(false);
+            if (check.Note is { } note) await _output.WriteLineAsync(note).ConfigureAwait(false);
+            if (check.Target is not { } target) return ServerExitCodes.Success;
+            if (options.Check)
+            {
+                await _output.WriteLineAsync($"An update to {target} is available: altaserver update{(options.Version is null ? "" : " --version " + target)} installs it.").ConfigureAwait(false);
+                return ServerExitCodes.Success;
+            }
+
+            var staged = await updater.StageAsync(check, request, CancellationToken.None).ConfigureAwait(false);
+            await _output.WriteLineAsync(staged.AlreadyStaged
+                ? $"{target} is staged already in {staged.Path} (its package matches: {staged.Checked})."
+                : $"Downloaded {check.PackageId} {target}, hash checked by the {staged.Checked}, staged in {staged.Path}.").ConfigureAwait(false);
+            store.RequestSwitch(target, options.Now, "local");
+            if (!CoordinatorServer.IsRunning(paths))
+            {
+                await _output.WriteLineAsync($"No server runs on {paths.DataRoot}: the next altaserver run starts {target} on trial.").ConfigureAwait(false);
+                return ServerExitCodes.Success;
+            }
+
+            await _output.WriteLineAsync($"The server of {paths.DataRoot} switches to {target}.").ConfigureAwait(false);
+            var (outcome, message) = await UpdateFollow.FollowAsync(store, target, UpdateLauncher.DefaultTrialLimit + TimeSpan.FromSeconds(60),
+                line => _output.WriteLineAsync(line), CancellationToken.None).ConfigureAwait(false);
+            switch (outcome)
+            {
+                case UpdateFollowOutcome.Confirmed:
+                    await _output.WriteLineAsync("CodeAlta Server " + message).ConfigureAwait(false);
+                    return ServerExitCodes.Success;
+                case UpdateFollowOutcome.Failed:
+                case UpdateFollowOutcome.Withdrawn:
+                    await _error.WriteLineAsync("altaserver update: " + message).ConfigureAwait(false);
+                    return ServerExitCodes.Failure;
+                default:
+                    await _output.WriteLineAsync(message + " altaserver status shows where it stands.").ConfigureAwait(false);
+                    return ServerExitCodes.Success;
+            }
+        }
+        catch (UpdateException exception)
+        {
+            await _error.WriteLineAsync($"altaserver update: {exception.Message}").ConfigureAwait(false);
+            return ServerExitCodes.Failure;
+        }
+    }
+
+    // The versions of the data root, for status: the running server's own, else what the pointer selects.
+    private async Task WriteVersionsAsync(ServerPaths paths, string? runningVersion)
+    {
+        var state = new UpdateVersionStore(paths.VersionsRoot).Read();
+        var installed = InstalledVersion();
+        var running = runningVersion ?? state.Current ?? installed;
+        if (running is null) return;
+        foreach (var line in UpdateStatusReport.Lines(UpdateStatusReport.Describe(state, running, installed), "altaserver"))
+            await _output.WriteLineAsync(line).ConfigureAwait(false);
     }
 
     private async ValueTask<int> StatusAsync(DataRootOptions options)
@@ -196,6 +435,7 @@ public sealed class ServerApplication
         if (!CoordinatorServer.IsRunning(paths!))
         {
             await _output.WriteLineAsync($"No server runs on {paths!.DataRoot}.").ConfigureAwait(false);
+            await WriteVersionsAsync(paths, null).ConfigureAwait(false);
             return ServerExitCodes.Failure;
         }
 
@@ -203,8 +443,11 @@ public sealed class ServerApplication
         if (state is null)
         {
             await _output.WriteLineAsync($"A server holds {paths!.DataRoot} but has not written its state yet (it is starting).").ConfigureAwait(false);
+            await WriteVersionsAsync(paths, null).ConfigureAwait(false);
             return ServerExitCodes.Success;
         }
+
+        await WriteVersionsAsync(paths!, state.Version).ConfigureAwait(false);
 
         await _output.WriteLineAsync($"CodeAlta Server {state.Version}, process {state.ProcessId}, since {state.StartedAt.ToLocalTime():g}").ConfigureAwait(false);
         await _output.WriteLineAsync($"Listens on {string.Join(", ", state.Urls)}").ConfigureAwait(false);
@@ -282,5 +525,20 @@ public sealed class ServerApplication
     private sealed class SetupCodeOptions : DataRootOptions
     {
         public bool Renew { get; set; }
+    }
+
+    private sealed class UpdateOptions : DataRootOptions
+    {
+        public string? Version { get; set; }
+
+        public string? Source { get; set; }
+
+        public string? Sha512 { get; set; }
+
+        public bool Check { get; set; }
+
+        public bool Now { get; set; }
+
+        public bool Prerelease { get; set; }
     }
 }

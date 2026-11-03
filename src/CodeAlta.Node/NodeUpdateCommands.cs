@@ -1,6 +1,4 @@
-using System.Diagnostics;
 using CodeAlta.Fleet.Update;
-using CodeAlta.Hosting;
 
 namespace CodeAlta.Node;
 
@@ -41,9 +39,6 @@ internal sealed class NodeUpdateCommands(TextWriter output, TextWriter error, st
 {
     /// <summary>How long <c>update</c> follows a switch before it leaves the node to it.</summary>
     internal static readonly TimeSpan FollowLimit = UpdateLauncher.DefaultTrialLimit + TimeSpan.FromSeconds(60);
-
-    /// <summary>How long a switch may stay unseen by a running node before <c>update</c> says so.</summary>
-    internal static readonly TimeSpan UnseenLimit = TimeSpan.FromSeconds(15);
 
     /// <summary>Gets or sets what stops the command, for tests; none by default.</summary>
     public CancellationToken Stop { get; init; }
@@ -111,61 +106,20 @@ internal sealed class NodeUpdateCommands(TextWriter output, TextWriter error, st
     // Follows the switch until the new version confirmed, was rolled back, or waits for its sessions.
     private async Task<int> FollowAsync(UpdateVersionStore store, UpdateVersion target)
     {
-        var elapsed = Stopwatch.StartNew();
-        var restarting = false;
-        while (elapsed.Elapsed < FollowLimit)
+        var (outcome, message) = await UpdateFollow.FollowAsync(store, target, FollowLimit, line => output.WriteLineAsync(line), Stop).ConfigureAwait(false);
+        switch (outcome)
         {
-            await Task.Delay(TimeSpan.FromMilliseconds(250), Stop).ConfigureAwait(false);
-            var state = store.Read();
-            if (state.Pending is { } pending && UpdateVersionStore.Same(pending.Version, target))
-            {
-                if (pending.Phase is UpdatePhases.Draining or UpdatePhases.WaitingForIdle && pending.SessionsAtWork > 0)
-                {
-                    await output.WriteLineAsync(pending.Phase == UpdatePhases.Draining
-                        ? $"It waits for {pending.SessionsAtWork} session(s) at work and takes no new work meanwhile (for up to {UpdateDrain.DefaultBound.TotalMinutes:0} minutes, then until the next idle moment). altanode status shows where it stands."
-                        : $"It takes work again and switches at the next idle moment ({pending.SessionsAtWork} session(s) at work). altanode status shows where it stands.")
-                        .ConfigureAwait(false);
-                    return NodeExitCodes.Success;
-                }
-
-                if (pending.Phase == UpdatePhases.Requested && elapsed.Elapsed > UnseenLimit)
-                {
-                    await output.WriteLineAsync($"The node has not taken the switch (a node older than its self-update does not): it starts {target} at its next start.").ConfigureAwait(false);
-                    return NodeExitCodes.Success;
-                }
-
-                continue;
-            }
-
-            if (UpdateVersionStore.Same(state.Current, target))
-            {
-                if (state.Trial is null)
-                {
-                    await output.WriteLineAsync($"CodeAlta Node {target} runs and confirmed that it works.").ConfigureAwait(false);
-                    return NodeExitCodes.Success;
-                }
-
-                if (!restarting)
-                {
-                    restarting = true;
-                    await output.WriteLineAsync($"The node stopped and starts {target} on trial...").ConfigureAwait(false);
-                }
-
-                continue;
-            }
-
-            if (state.LastOutcome is { } outcome && UpdateVersionStore.Same(outcome.Version, target) && outcome.Outcome != UpdateOutcomes.Confirmed)
-            {
-                await error.WriteLineAsync($"altanode update: {target} {(outcome.Outcome == UpdateOutcomes.RolledBack ? "was rolled back" : "failed")}: {outcome.Message}").ConfigureAwait(false);
+            case UpdateFollowOutcome.Confirmed:
+                await output.WriteLineAsync("CodeAlta Node " + message).ConfigureAwait(false);
+                return NodeExitCodes.Success;
+            case UpdateFollowOutcome.Failed:
+            case UpdateFollowOutcome.Withdrawn:
+                await error.WriteLineAsync("altanode update: " + message).ConfigureAwait(false);
                 return NodeExitCodes.Failure;
-            }
-
-            await output.WriteLineAsync($"The switch to {target} was withdrawn.").ConfigureAwait(false);
-            return NodeExitCodes.Failure;
+            default:
+                await output.WriteLineAsync(message + " altanode status shows where it stands.").ConfigureAwait(false);
+                return NodeExitCodes.Success;
         }
-
-        await output.WriteLineAsync($"{target} has not confirmed yet: altanode status shows where it stands.").ConfigureAwait(false);
-        return NodeExitCodes.Success;
     }
 
     // The holder of a profile is a node unless it is CodeAlta Desktop or TUI.

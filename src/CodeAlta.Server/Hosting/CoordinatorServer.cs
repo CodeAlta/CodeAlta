@@ -57,6 +57,9 @@ public sealed class CoordinatorServerOptions
 
     /// <summary>Gets the default address.</summary>
     public static string DefaultUrl => $"http://127.0.0.1:{ServerPaths.DefaultPort}";
+
+    /// <summary>Gets what reads the versions of the server and its self-update (<c>GET /api/v1/server/update</c>); null for the running version alone.</summary>
+    public Func<FleetUpdateStatus?>? UpdateStatus { get; init; }
 }
 
 /// <summary>What a running server writes in its data root, for <c>altaserver status</c>.</summary>
@@ -104,6 +107,17 @@ public sealed class CoordinatorServer : IAsyncDisposable
 
     /// <summary>Gets the store, for tests and tools of the same process.</summary>
     internal ICoordinatorStore Store => _store;
+
+    /// <summary>Copies the database into a new file, while the server runs (before an update).</summary>
+    /// <param name="destinationPath">The file to write; it must not exist.</param>
+    /// <param name="cancellationToken">Cancels the copy.</param>
+    /// <returns>A task that completes once the copy is written.</returns>
+    /// <exception cref="NotSupportedException">The store is not the SQLite one.</exception>
+    /// <exception cref="IOException">The destination exists.</exception>
+    public Task BackupDatabaseAsync(string destinationPath, CancellationToken cancellationToken = default)
+        => _store is SqliteCoordinatorStore sqlite
+            ? sqlite.BackupAsync(destinationPath, cancellationToken)
+            : throw new NotSupportedException("Only the SQLite store is copied by the server.");
 
     /// <summary>Gets the services of the server.</summary>
     internal IServiceProvider Services => _app.Services;
@@ -296,6 +310,7 @@ public sealed class CoordinatorServer : IAsyncDisposable
             return Task.CompletedTask;
         }));
         services.AddSingleton(time);
+        services.AddSingleton(new ServerUpdateStatusSource(options.UpdateStatus));
         services.AddSingleton<ICoordinatorStore>(store);
         services.AddSingleton(codes);
         services.AddSingleton(new NonceCache(time, options.MaxClockSkew * 2 + TimeSpan.FromMinutes(1)));

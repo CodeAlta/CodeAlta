@@ -53,8 +53,9 @@
   </ItemGroup>
 
   <ItemGroup>
-    <!-- The server references the protocol only, never the agent runtime: ArchitectureGuardrailTests checks it. -->
+    <!-- The server references the protocol and the self-update only, never the agent runtime: ArchitectureGuardrailTests checks it. -->
     <ProjectReference Include="..\CodeAlta.Fleet.Protocol\CodeAlta.Fleet.Protocol.csproj" />
+    <ProjectReference Include="..\CodeAlta.Fleet.Update\CodeAlta.Fleet.Update.csproj" />
   </ItemGroup>
 
   <ItemGroup>
