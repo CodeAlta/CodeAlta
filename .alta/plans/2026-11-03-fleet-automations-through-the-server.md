@@ -41,16 +41,24 @@ The authority of an assignment is the authenticated, paired device on a direct c
     machine. A removal is a signed version too (`PUT` with `removed`); `DELETE ?machine=` only forgets a removal the
     machine acknowledged. Personal scope: the caller is a controller device of the person who owns the machine (the node
     checks the same against its anchored list), not an organization owner. `GET /api/v1/automations/{id}/runs`.
-- [ ] **Assignment over the control connection.** A delivery `automations.assigned` (sealed version) and
+- [x] **Assignment over the control connection.** A delivery `automations.assigned` (sealed version) and
   `automations.removed` to the machine; the node acknowledges, verifies the signature against the signed device list
   (`FleetDeviceListVerifier`), and writes its copy as it does for `automations.put`. Offline nodes get it on reconnect
   (the per-node delivery sequence).
-- [ ] **Run facts.** The node publishes runs as facts (`facts.publish`: automation id, version, due time, state, times,
+  - Done with one event, `automations.assigned`, whose versions may be removals; answered by `automations.ack`. The
+    server keeps each version pending until acknowledged and sends the pending ones on each connection (no separate
+    delivery sequence). The node checks the signer again before each run against the list it last verified.
+- [x] **Run facts.** The node publishes runs as facts (`facts.publish`: automation id, version, due time, state, times,
   tokens and cost, never the prompt or the answer); the server keeps them for the console and the desktop lists them
   for machines it reaches only through the server.
-- [ ] **Reconciliation by (automation, due time).** The node's claim store already keys claims by occurrence: the server
+  - Done as `automations.runs` (not `facts.publish`, whose session facts another branch changes): run id, version,
+    trigger, status, times, session id, and a failure reason; resent on each connection. Not done: tokens and cost
+    (the run record of the engine does not carry them yet).
+- [x] **Reconciliation by (automation, due time).** The node's claim store already keys claims by occurrence: the server
   records the claims it learns and refuses a second run of the same occurrence after a takeover; `AutomationClaim.LeaseUntil`
   is the lease it reads.
+  - Done with `automations.claim` before the run starts (`IAutomationClaims.ConfirmAsync`), with a lease; a server that
+    does not answer leaves the node's own claim in force. Leases are not renewed with the server; the reported end closes them.
 - [ ] **Desktop.** **Runs on** offers the machines of the linked server (`DesktopFleet.SyncOrganizationMachinesAsync`
   hosts, `IsPaired == false`), placed through the server rather than `automations.put` on a direct channel.
 - [ ] **Tests.** The multi-host harness: desktop, server and node in one process; a server that is down while a

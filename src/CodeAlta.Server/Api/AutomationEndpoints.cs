@@ -34,9 +34,10 @@ internal static class AutomationEndpoints
                 AuditedAsync(context, "automation.delete", id, async actor =>
                 {
                     await automations.DeleteAsync(actor, id, machine, ApiEndpoints.Origin(context), context.RequestAborted).ConfigureAwait(false);
-                    return Results.NoContent();
+                    return Results.Json(await automations.ListAsync(actor, context.RequestAborted).ConfigureAwait(false), FleetAutomationApiJsonContext.Default.AutomationListDto);
                 }))
-            .WithSummary("Forgets an automation for a machine (?machine=) once the machine took away what it held, after a signed removal.");
+            .Produces<AutomationListDto>()
+            .WithSummary("Forgets an automation for a machine (?machine=) once the machine took away what it held, after a signed removal; answers the automations left.");
 
         api.MapGet("/automations/{id}/runs", async (string id, int? limit, HttpContext context, FleetAutomationService automations) =>
                 Results.Json(await automations.ListRunsAsync(DeviceAuthenticationMiddleware.GetDevice(context), id, limit, context.RequestAborted).ConfigureAwait(false),

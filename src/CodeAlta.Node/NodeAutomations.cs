@@ -117,7 +117,7 @@ internal sealed record NodeAutomationOptions
 /// provider the run would use, and, for an assigned automation, that the device that assigned it may still do so and
 /// that the definition is the one it assigned.
 /// </summary>
-internal sealed class NodeAutomations : IFleetNodeAutomations, IAutomationRunGate, IAsyncDisposable
+internal sealed partial class NodeAutomations : IFleetNodeAutomations, IAutomationRunGate, IAsyncDisposable
 {
     /// <summary>The file of the automations the devices assigned, in the fleet folder of the state root.</summary>
     public const string AssignedFileName = "assigned-automations.toml";
@@ -159,7 +159,7 @@ internal sealed class NodeAutomations : IFleetNodeAutomations, IAutomationRunGat
             // A command runs with the identity of the space of its project, as in CodeAlta Desktop.
             new ShellAutomationCommands(projectId => host.Identities.ResolveAsync(null, projectId).GetAwaiter().GetResult().Environment),
             entry => entry.Definition.Script is { } script ? host.CodeModeScripts.FindHash(script, entry.ProjectPath) : null,
-            new AutomationClaimStore(Path.Combine(_fleetRoot, ClaimsFileName), _options.Holder),
+            new NodeAutomationClaims(new AutomationClaimStore(Path.Combine(_fleetRoot, ClaimsFileName), _options.Holder), this),
             Path.Combine(_fleetRoot, AssignedFileName));
     }
 
@@ -183,7 +183,11 @@ internal sealed class NodeAutomations : IFleetNodeAutomations, IAutomationRunGat
     internal Func<string, FleetDeviceListState?>? ServerDevices { get; set; }
 
     /// <summary>Starts reading the automations and firing their triggers.</summary>
-    internal void Start() => Engine.Start();
+    internal void Start()
+    {
+        Engine.Changed += PokeReports;
+        Engine.Start();
+    }
 
     /// <summary>Gets who assigned an automation; null for one the node was not assigned, or that was taken away.</summary>
     internal NodeAutomationAssignment? AssignmentOf(string id)
@@ -460,7 +464,9 @@ internal sealed class NodeAutomations : IFleetNodeAutomations, IAutomationRunGat
     public async ValueTask DisposeAsync()
     {
         if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
+        Engine.Changed -= PokeReports;
         await Engine.DisposeAsync().ConfigureAwait(false);
+        await StopReportsAsync().ConfigureAwait(false);
     }
 
     internal static FleetAutomationRunInfo Describe(AutomationRun run)

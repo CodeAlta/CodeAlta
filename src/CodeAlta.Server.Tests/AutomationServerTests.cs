@@ -177,7 +177,9 @@ public sealed class AutomationServerTests
         Assert.AreEqual(HttpStatusCode.Conflict, (await fixture.SendAsync(owner, HttpMethod.Delete, delete)).Status, "not taken away yet");
         await connection.SendRequestAsync(FleetAutomationMethods.Ack, JsonSerializer.SerializeToElement(
             new FleetAutomationAcks([new FleetAutomationAck(Id, 2, true, null)]), FleetAutomationServerJsonContext.Default.FleetAutomationAcks));
-        Assert.AreEqual(HttpStatusCode.NoContent, (await fixture.SendAsync(owner, HttpMethod.Delete, delete)).Status);
+        var forgotten = await fixture.SendAsync(owner, HttpMethod.Delete, delete);
+        Assert.AreEqual(HttpStatusCode.OK, forgotten.Status, forgotten.Body.ToString());
+        Assert.AreEqual(0, forgotten.Read<AutomationListDto>().Automations.Count);
         Assert.AreEqual(0, (await ListAsync(fixture, owner)).Count);
     }
 
