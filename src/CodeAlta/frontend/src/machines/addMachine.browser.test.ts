@@ -36,16 +36,26 @@ test("over SSH, the assistant shows each step, says what to do when ssh does not
   }, options);
 });
 
-test("through the server, the machine that joins with the code made here is approved at once, its words shown", { skip: !edge, timeout: 90_000 }, async () => {
+test("through the server, only the node whose words the person confirms is approved, as a node: a node the server planted is not", { skip: !edge, timeout: 90_000 }, async () => {
   await withCanvas(async page => {
     await page.until(`[...document.querySelectorAll('.add-machine-choice')][2]?.disabled === false`, "the server choice");
     await page.evaluate(`[...document.querySelectorAll('.add-machine-choice')][2].click()`);
     await page.until(`document.querySelector('.add-machine-dialog input[readonly]')?.value === 'altanode join https://fleet.example --token JOIN-1234'`, "the command");
+    // The planted node comes first, alone: nothing is approved by itself, it waits with its words like the machine after it.
+    await page.until(`document.querySelectorAll('.add-machine-joining li').length === 2`, "both pending nodes, each with its words");
+    assert.deepEqual(await page.evaluate(`[...document.querySelectorAll('.add-machine-joining li')].map(item => [...item.querySelectorAll('.bp6-tag')].map(tag => tag.textContent).join(' '))`),
+      ["acid acorn actor agent alarm album", "maple orbit tiger cloud amber stone"]);
+    assert.deepEqual(await calls(page), [{ token: "home" }], "no node is approved without the person");
+    await page.shot("add-machine-server-joining");
+
+    // The person approves the one that shows the words altanode join printed on the machine.
+    await page.evaluate(`[...document.querySelectorAll('.add-machine-joining li')][1].querySelector('.bp6-button').click()`);
     await page.until(`document.querySelector('.add-machine-dialog [role=status]')?.textContent.includes('build-box joined Home and is approved.')`, "the approval");
     assert.deepEqual(await page.evaluate(`[...document.querySelectorAll('.add-machine-words .bp6-tag')].map(tag => tag.textContent)`),
       ["maple", "orbit", "tiger", "cloud", "amber", "stone"]);
     await page.shot("add-machine-server-approved");
-    assert.deepEqual(await calls(page), [{ token: "home" }, { approve: "box" }]);
+    assert.deepEqual(await calls(page), [{ token: "home" }, { approve: "box", kind: "node", words: "maple orbit tiger cloud amber stone" }],
+      "the machine of the confirmed words only, as a node: the host signs the key of those words");
     assert.deepEqual(page.problems, []);
   }, options);
 });

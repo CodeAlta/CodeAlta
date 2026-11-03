@@ -277,7 +277,7 @@ public sealed class FleetStatisticsTests
             await desktop.SetUpAsync(server.SetupCode, "Alex", "Desktop");
             using var node = new FleetServerClient(server.BaseAddress, nodeKey);
             await node.EnrollAsync((await desktop.CreateEnrollmentTokenAsync()).Token, "Mac mini");
-            await desktop.ApproveAsync(nodeKey.DeviceId);
+            await desktop.ApproveAsync(nodeKey.DeviceId, FleetDeviceKinds.Node);
             return new StatisticsFixture(server, root, desktopKey, nodeKey, desktop);
         }
 

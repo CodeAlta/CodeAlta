@@ -255,7 +255,7 @@ public sealed class NodeTelemetryTests
                 await Task.Delay(100, token);
             }
 
-            await desktop.ApproveAsync(pending, token);
+            await desktop.ApproveAsync(pending, FleetDeviceKinds.Node, token);
             while (!(await desktop.ListMachinesAsync(token)).Any(static machine => machine.Online))
             {
                 if (DateTime.UtcNow > deadline) Assert.Fail("The node did not connect.");

@@ -19,7 +19,7 @@ type Choice = "ssh" | "link" | "server";
 /**
  * Add a machine…: how the machine is reached, then a checklist that shows what each step checks and changes. Over SSH
  * the desktop installs and pairs by itself; a machine that runs CodeAlta Node already pairs with its link; through a
- * server, the machine runs one command and this computer approves it.
+ * server, the machine runs one command and the person approves it here once it shows the same words.
  */
 export function AddMachineDialog({ epoch, api = machines, serverApi = fleetServer, onPairLink, onClose, onOpen }: {
   epoch: string; api?: AddMachineApi; serverApi?: AddMachineServerApi; onPairLink: () => void; onClose: (added: boolean) => void; onOpen: (machineId: string) => void;
@@ -47,7 +47,7 @@ export function AddMachineDialog({ epoch, api = machines, serverApi = fleetServe
         <ChoiceCard icon="remote" title="With a pairing link"
           description="CodeAlta Node runs there already: paste the link its altanode pair command shows." onClick={() => { onPairLink(); }} />
         <ChoiceCard icon="server" title={server ? "Through my server" : "Through my server"} disabled={!server}
-          description={server ? "The machine joins your server with one command; this computer approves it." : "Create your server first, in Settings > Fleet > Server."}
+          description={server ? "The machine joins your server with one command; you approve it here when it shows the same words." : "Create your server first, in Settings > Fleet > Server."}
           detail={server?.organization ?? undefined} onClick={() => setChoice("server")} />
       </div>
     </DialogBody>}
@@ -187,8 +187,9 @@ function SshSetup({ epoch, api, onBusy, onBack, onClose, onOpen }: {
 }
 
 /**
- * Through my server: a one-time code made here, the command the machine runs, then the machine as it comes: this
- * computer made the code a moment ago, so the one machine that joins with it is approved here at once, its six words shown.
+ * Through my server: a one-time code made here, the command the machine runs, then the nodes that come after the code,
+ * each with the six words of its key. The server lists them, so any of them may be of its own making: the person approves
+ * the one that shows the words `altanode join` printed on the machine, and the host signs that key only, as a node.
  */
 function ServerJoin({ epoch, server, api, onBusy, onBack, onClose }: {
   epoch: string; server: FleetServerView; api: AddMachineServerApi; onBusy: (busy: boolean) => void; onBack: () => void; onClose: (added: boolean) => void;
@@ -197,7 +198,8 @@ function ServerJoin({ epoch, server, api, onBusy, onBack, onClose }: {
   const [token, setToken] = useState<string | null>(null);
   const [problem, setProblem] = useState<{ key: MessageKey; detail?: string | null } | null>(null);
   const [joined, setJoined] = useState<FleetDeviceView | null>(null);
-  const [several, setSeveral] = useState<FleetDeviceView[]>([]);
+  const [pending, setPending] = useState<FleetDeviceView[]>([]);
+  const [approving, setApproving] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const known = useRef<Set<string> | null>(null);
   useEffect(() => { onBusy(false); }, [onBusy]);
@@ -222,18 +224,25 @@ function ServerJoin({ epoch, server, api, onBusy, onBack, onClose }: {
     if (!token || joined) return;
     const abort = new AbortController();
     const timer = setInterval(() => {
-      void api.devices({ expectedEpoch: epoch, linkId: server.id }, { signal: abort.signal, timeoutMilliseconds: 15_000 }).then(async value => {
+      void api.devices({ expectedEpoch: epoch, linkId: server.id }, { signal: abort.signal, timeoutMilliseconds: 15_000 }).then(value => {
         if (abort.signal.aborted || value.status !== "ok") return;
-        const fresh = value.devices.filter(device => device.status === "pending" && device.kind === "node" && !known.current?.has(device.id));
-        if (fresh.length === 1) {
-          const approved = await api.approve({ expectedEpoch: epoch, linkId: server.id, deviceId: fresh[0].id, words: null }, { timeoutMilliseconds: 30_000 });
-          if (approved.status === "ok") setJoined(approved.device ?? fresh[0]);
-          else setProblem({ key: "The server refused the approval.", detail: approved.message });
-        } else if (fresh.length > 1) setSeveral(fresh);
+        // Nothing is approved by itself, not even a node alone: it waits for the person to compare its words with the machine's.
+        setPending(value.devices.filter(device => device.status === "pending" && device.kind === "node" && !known.current?.has(device.id)));
       }, () => { });
     }, 2000);
     return () => { abort.abort(); clearInterval(timer); };
   }, [api, epoch, joined, server.id, token]);
+  async function approve(device: FleetDeviceView) {
+    setApproving(device.id);
+    setProblem(null);
+    try {
+      // The words the person confirmed, as a node: the host signs the key of those words only, never a controller.
+      const approved = await api.approve({ expectedEpoch: epoch, linkId: server.id, deviceId: device.id, words: device.words, kind: "node" }, { timeoutMilliseconds: 30_000 });
+      if (approved.status === "ok") setJoined(approved.device ?? device);
+      else setProblem({ key: "The server refused the approval.", detail: approved.message });
+    } catch { setProblem({ key: "The server does not answer." }); }
+    finally { setApproving(null); }
+  }
   const command = token ? joinCommand(server.url, token) : "";
   return <>
     <DialogBody>
@@ -243,8 +252,14 @@ function ServerJoin({ epoch, server, api, onBusy, onBack, onClose }: {
         <InputGroup readOnly fill value={command} aria-label={t("Command")} onFocus={event => event.currentTarget.select()}
           rightElement={<Button variant="minimal" icon={<AppIcon name={copied ? "check" : "copy"} size={14} />} aria-label={t("Copy")} title={t("Copy")}
             onClick={() => void navigator.clipboard?.writeText(command).then(() => setCopied(true), () => setCopied(false))} />} />
-        <p className="muted-text add-machine-waiting"><ActivitySpinner size={12} /> {t("Waiting for the machine to join {server}. This computer made the code: it approves the machine as soon as it comes.", { server: server.organization ?? server.url })}</p>
-        {several.length > 0 && <Callout compact intent="warning">{t("Several machines came at once: approve the right one in Settings > Fleet > Server.")}</Callout>}
+        <p className="muted-text add-machine-waiting"><ActivitySpinner size={12} /> {t("Waiting for the machine to join {server}. The command prints the words of its key there: approve the machine here when it shows the same words.", { server: server.organization ?? server.url })}</p>
+        {pending.length > 0 && <ul className="add-machine-joining" aria-label={t("Machines that wait")}>
+          {pending.map(device => <li key={device.id}>
+            <span className="add-machine-joining-main"><strong>{device.name}</strong>
+              <span className="pair-machine-words add-machine-words">{keyWords(device.words).map((word, index) => <Tag key={`${index}:${word}`} minimal>{word}</Tag>)}</span></span>
+            <Button size="small" intent="primary" loading={approving === device.id} disabled={approving !== null} text={t("It shows the same words")} onClick={() => void approve(device)} />
+          </li>)}
+        </ul>}
       </>}
       {joined && <Callout compact intent="success" role="status">{t("{name} joined {server} and is approved. It shows these words:", { name: joined.name, server: server.organization ?? server.url })}
         <div className="pair-machine-words add-machine-words">{keyWords(joined.words).map((word, index) => <Tag key={`${index}:${word}`} minimal>{word}</Tag>)}</div></Callout>}

@@ -225,7 +225,7 @@ public sealed class RelayedChannelTests
             var enrollment = await desktop.CreateEnrollmentTokenAsync(null, name, cancellationToken);
             using var client = new FleetServerClient(address, identity);
             await client.EnrollAsync(enrollment.Token, name, cancellationToken);
-            await desktop.ApproveAsync(identity.DeviceId, cancellationToken);
+            await desktop.ApproveAsync(identity.DeviceId, FleetDeviceKinds.Node, cancellationToken);
         }
 
         public FleetConnector Connector(DeviceIdentity identity, string kind, RelayTap? tap)

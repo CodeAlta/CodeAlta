@@ -155,23 +155,19 @@ internal sealed class LocalServerSetup(ILocalProcesses processes, string desktop
         progress(new(LocalServerSteps.Start, "running"));
         List<string> root = request.DataRoot is { Length: > 0 } data ? ["--data-root", data] : [];
         var status = await processes.RunAsync(server, ["status", .. root], cancellationToken).ConfigureAwait(false);
-        var running = status.Succeeded;
         // A service of the user (a task at sign-in on Windows, a LaunchAgent, a systemd --user unit), so that the server starts
         // again after a restart; it starts now too, or, for a server that runs already, once that one exits.
         var service = await processes.RunAsync(server, ["install", "--urls", $"http://127.0.0.1:{request.Port.ToString(CultureInfo.InvariantCulture)}", .. root],
             cancellationToken).ConfigureAwait(false);
         if (!service.Succeeded) throw new SshSetupException(LocalServerSteps.Start, "service_failed", FirstLines(service.Error + service.Output));
-        if (!running)
+        // The claim waits for "Health: ok", also for a server that was there already: status succeeds as soon as a server holds
+        // the data root, before it wrote its state ("it is starting") or answers its health ("Health: no answer ...").
+        var deadline = DateTime.UtcNow + StartTimeout;
+        while (!(status.Succeeded && Serves(status.Output)))
         {
-            var deadline = DateTime.UtcNow + StartTimeout;
-            while (true)
-            {
-                await Task.Delay(TimeSpan.FromMilliseconds(500), cancellationToken).ConfigureAwait(false);
-                status = await processes.RunAsync(server, ["status", .. root], cancellationToken).ConfigureAwait(false);
-                // "Health: ok" once it serves: status also prints "Health: no answer ..." while it starts.
-                if (status.Succeeded && Serves(status.Output)) break;
-                if (DateTime.UtcNow > deadline) throw new SshSetupException(LocalServerSteps.Start, "server_start_failed", FirstLines(status.Output + status.Error));
-            }
+            if (DateTime.UtcNow > deadline) throw new SshSetupException(LocalServerSteps.Start, "server_start_failed", FirstLines(status.Output + status.Error));
+            await Task.Delay(TimeSpan.FromMilliseconds(500), cancellationToken).ConfigureAwait(false);
+            status = await processes.RunAsync(server, ["status", .. root], cancellationToken).ConfigureAwait(false);
         }
 
         var address = ListenAddress(status.Output) ?? new Uri($"http://127.0.0.1:{request.Port.ToString(CultureInfo.InvariantCulture)}");

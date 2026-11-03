@@ -83,7 +83,7 @@ public sealed class FleetStatisticsEndToEndTests
             Assert.AreEqual("ok", joined.Status, joined.Message);
             Assert.AreEqual("ok", (await machineService.LinkSpaceAsync(new FleetServerSpaceRequest(machineEpoch, SpaceDescriptor.DefaultId, joined.Server!.Id), token)).Status);
             var pending = (await service.DevicesAsync(new FleetServerLinkRequest(epoch, linkId), token)).Devices.Single(static device => device.Status == "pending");
-            Assert.AreEqual("ok", (await service.ApproveAsync(new FleetServerDeviceRequest(epoch, linkId, pending.Id), token)).Status);
+            Assert.AreEqual("ok", (await service.ApproveAsync(new FleetServerDeviceRequest(epoch, linkId, pending.Id, null, pending.Kind), token)).Status);
 
             // The machine counts its session, publishes its set once it holds the person's key, and the server sums it.
             var deadline = DateTime.UtcNow + Patience;

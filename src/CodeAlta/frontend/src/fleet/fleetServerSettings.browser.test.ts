@@ -83,7 +83,7 @@ test("a new device of the person is approved in a popover beside its row, once i
     await page.clickText(".fleet-device-confirm .bp6-button", "It shows the same words");
     await page.until(`!document.querySelector('.fleet-device-row[data-status=pending]')`, "approved");
     assert.deepEqual((await page.evaluate(`[...window.fleetFixture.calls]`) as string[]).map(call => JSON.parse(call)),
-      [{ approve: "laptop", words: "otter river robin saddle salmon pearl" }]);
+      [{ approve: "laptop", words: "otter river robin saddle salmon pearl", kind: "controller" }]);
     assert.deepEqual(page.problems, []);
   }, options);
 });

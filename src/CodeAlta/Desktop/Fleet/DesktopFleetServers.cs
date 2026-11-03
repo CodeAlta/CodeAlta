@@ -172,9 +172,10 @@ internal sealed class DesktopFleetServers : IAsyncDisposable
     /// <param name="ownerName">The name of the owner.</param>
     /// <param name="organizationName">The name of the organization; null for the server's default.</param>
     /// <param name="cancellationToken">Cancels the setup.</param>
-    /// <returns>The link, approved.</returns>
+    /// <returns>The link, approved, its device list pinned to the first entry this desktop signed.</returns>
     /// <exception cref="FleetServerException">The server refused the setup.</exception>
     /// <exception cref="HttpRequestException">The server does not answer.</exception>
+    /// <exception cref="IOException">The pin of the device list cannot be written: no link is made.</exception>
     public async Task<FleetServerLink> CreateServerAsync(Uri address, Uri setupAddress, string code, string ownerName, string? organizationName, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(setupAddress);
@@ -184,10 +185,26 @@ internal sealed class DesktopFleetServers : IAsyncDisposable
             ObjectDisposedException.ThrowIf(_disposed, this);
             RequireNoLink(address);
             var identity = Identity();
-            using var client = new FleetServerClient(setupAddress, identity, Handler);
-            var setup = await client.SetUpAsync(code, ownerName, _deviceName, organizationName, cancellationToken).ConfigureAwait(false);
+            var id = FleetServerLinkStore.NewId();
+            var folder = _store.LinkFolder(id);
+            SetupResponse setup;
+            try
+            {
+                // The first entry this desktop signs, and the organization the setup made, anchor the link before it exists:
+                // the connector then refuses a list of the server's making, from its first read on.
+                using var client = new FleetServerClient(setupAddress, identity, Handler);
+                setup = await client.SetUpAsync(code, ownerName, _deviceName, organizationName, Path.Combine(folder, FleetOrganizationDevices.PinFileName), cancellationToken)
+                    .ConfigureAwait(false);
+            }
+            catch
+            {
+                try { if (Directory.Exists(folder)) Directory.Delete(folder, recursive: true); }
+                catch (Exception exception) when (exception is IOException or UnauthorizedAccessException) { /* Nothing reads a folder without its link. */ }
+                throw;
+            }
+
             var now = DateTimeOffset.UtcNow;
-            var link = new FleetServerLink(FleetServerLinkStore.NewId(), FleetServerAddress.Format(address), setup.Organization.Id, setup.Organization.Name, identity.DeviceId,
+            var link = new FleetServerLink(id, FleetServerAddress.Format(address), setup.Organization.Id, setup.Organization.Name, identity.DeviceId,
                 FleetDeviceKinds.Controller, FleetServerLinkStates.Approved, now, now);
             _store.Save(link);
             await EnsureConnectionsAsync(cancellationToken).ConfigureAwait(false);
@@ -432,23 +449,48 @@ internal sealed class DesktopFleetServers : IAsyncDisposable
     }
 
     /// <summary>
-    /// Approves a pending device of a server once the person confirmed it shows the same words, signing the entry of the
-    /// device list that adds its key with this device's key; it gets the keys of the person only then.
+    /// Approves a pending device of a server once the person confirmed its class and that it shows the same words, signing
+    /// the entry of the device list that adds its key as that class with this device's key; it gets the keys of the person only then.
     /// </summary>
     /// <param name="linkId">The link.</param>
     /// <param name="deviceId">The device.</param>
+    /// <param name="kind">The class the person approves it as (<see cref="FleetDeviceKinds.Controller"/> or <see cref="FleetDeviceKinds.Node"/>).</param>
     /// <param name="confirmedWords">The words of its key the person compared; null when none were compared.</param>
     /// <param name="cancellationToken">Cancels the call.</param>
     /// <returns>The device.</returns>
     /// <exception cref="KeyNotFoundException">No such link.</exception>
-    /// <exception cref="FleetDeviceListException">The list does not verify, or the key is not the one whose words were confirmed: nothing was signed.</exception>
+    /// <exception cref="ArgumentException"><paramref name="kind"/> is not a class of device.</exception>
+    /// <exception cref="FleetDeviceListException">The list does not verify, the server lists the device as another class, or the key is not the one whose words were confirmed: nothing was signed.</exception>
     /// <exception cref="FleetServerException">The server refused.</exception>
     /// <exception cref="HttpRequestException">The server does not answer.</exception>
-    public async Task<DeviceDto> ApproveAsync(string linkId, string deviceId, string? confirmedWords, CancellationToken cancellationToken)
+    public async Task<DeviceDto> ApproveAsync(string linkId, string deviceId, string kind, string? confirmedWords, CancellationToken cancellationToken)
     {
         using var client = Client(linkId);
-        var approved = await client.ApproveAsync(deviceId, confirmedWords, cancellationToken).ConfigureAwait(false);
+        var approved = await client.ApproveAsync(deviceId, kind, confirmedWords, cancellationToken).ConfigureAwait(false);
         // The approved device gets its copy of the metadata key at the next publication of this computer.
+        Volatile.Read(ref _connections)?.Find(linkId)?.Connector?.RefreshKeys();
+        return approved;
+    }
+
+    /// <summary>
+    /// Approves at a server a machine this computer paired with, without a person: the device of the key this computer
+    /// pinned for it, as an execution node only. What the machine or the server answers chooses neither the key nor the
+    /// class, so a machine never brings a controller in this way.
+    /// </summary>
+    /// <param name="linkId">The link.</param>
+    /// <param name="machine">The fingerprint of the key of the machine, as pairing pinned it.</param>
+    /// <param name="cancellationToken">Cancels the call.</param>
+    /// <returns>The device.</returns>
+    /// <exception cref="KeyNotFoundException">No such link.</exception>
+    /// <exception cref="ArgumentException"><paramref name="machine"/> is empty.</exception>
+    /// <exception cref="FleetDeviceListException">The list does not verify, or the server lists that device as a controller or with another key: nothing was signed.</exception>
+    /// <exception cref="FleetServerException">The server refused, for example no such device waits.</exception>
+    /// <exception cref="HttpRequestException">The server does not answer.</exception>
+    public async Task<DeviceDto> ApproveMachineAsync(string linkId, DeviceFingerprint machine, CancellationToken cancellationToken)
+    {
+        if (machine.IsEmpty) throw new ArgumentException("The machine has no pinned key.", nameof(machine));
+        using var client = Client(linkId);
+        var approved = await client.ApproveAsync(DeviceIdentity.DeviceIdOf(machine), FleetDeviceKinds.Node, machine, cancellationToken).ConfigureAwait(false);
         Volatile.Read(ref _connections)?.Find(linkId)?.Connector?.RefreshKeys();
         return approved;
     }

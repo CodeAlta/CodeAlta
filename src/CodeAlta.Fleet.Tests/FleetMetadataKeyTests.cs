@@ -118,6 +118,32 @@ public sealed class FleetMetadataKeyTests
     }
 
     [TestMethod]
+    public void ACopyAControllerGaveWhileItWasInTheList_StillOpensAfterItLeft_AndOneNamingALaterListDoesNot()
+    {
+        using var devices = new Devices();
+        var before = devices.ListWithOtherController(removeIt: false);
+        var after = devices.ListWithOtherController(removeIt: true);
+        var key = FleetMetadataKey.Generate();
+        var node = PublicKey(devices.Node);
+        var given = FleetKeyWrap.Wrap(key, node, new FleetKeyGrant("org", "p1", 1, before.Sequence), devices.Other);
+        Assert.AreEqual(key.Id, FleetKeyWrap.Unwrap(given, key.Id, 1, devices.Node, before).Id);
+
+        // The other controller left the list at entry 4: what it gave by the list of entry 3 is still its person's key.
+        var reopened = FleetKeyWrap.Unwrap(given, key.Id, 1, devices.Node, after);
+        Assert.AreEqual(key.Id, reopened.Id);
+        Assert.IsTrue(reopened.Grant!.DeviceListSequence < after.LastRemovalSequence, "stale: it seals nothing new");
+        // A key given to the person's later devices by a controller added after the key was made opens too.
+        var older = FleetMetadataKey.Generate();
+        Assert.AreEqual(older.Id, FleetKeyWrap.Unwrap(FleetKeyWrap.Wrap(older, node, new FleetKeyGrant("org", "p1", 1, 2), devices.Other), older.Id, 1, devices.Node, after).Id);
+
+        // Once gone, it vouches for no list from its removal on, and a stranger for none at all.
+        Assert.ThrowsExactly<InvalidDataException>(() => FleetKeyWrap.Unwrap(FleetKeyWrap.Wrap(key, node, new FleetKeyGrant("org", "p1", 1, after.Sequence), devices.Other), key.Id, 1,
+            devices.Node, after));
+        Assert.ThrowsExactly<InvalidDataException>(() => FleetKeyWrap.Unwrap(FleetKeyWrap.Wrap(key, node, new FleetKeyGrant("org", "p1", 1, before.Sequence), devices.Stranger), key.Id, 1,
+            devices.Node, after));
+    }
+
+    [TestMethod]
     public void TheKeyOfASpaceIsBoundToItsSpace_InItsDescriptorAndItsGrant()
     {
         var key = FleetMetadataKey.Generate();
@@ -190,6 +216,16 @@ public sealed class FleetMetadataKeyTests
             entries.Add(Entry(2, FleetDeviceListEntries.Hash(entries[^1]), FleetDeviceListOperations.Add, Node, FleetDeviceKinds.Node, "org", "p1"));
             entries.Add(Entry(3, FleetDeviceListEntries.Hash(entries[^1]), FleetDeviceListOperations.Add, Other, FleetDeviceKinds.Node, "org", "p1"));
             if (removeOther) entries.Add(Entry(4, FleetDeviceListEntries.Hash(entries[^1]), FleetDeviceListOperations.Remove, Other, null, "org", null));
+            return FleetDeviceListVerifier.VerifyOrThrow(entries, "org");
+        }
+
+        // The laptop, the node, then the other device as a second controller of the person, removed at entry 4 when asked.
+        public FleetDeviceListState ListWithOtherController(bool removeIt)
+        {
+            var entries = new List<FleetSignedDeviceListEntry> { Entry(1, null, FleetDeviceListOperations.Add, Laptop, FleetDeviceKinds.Controller, null, null) };
+            entries.Add(Entry(2, FleetDeviceListEntries.Hash(entries[^1]), FleetDeviceListOperations.Add, Node, FleetDeviceKinds.Node, "org", "p1"));
+            entries.Add(Entry(3, FleetDeviceListEntries.Hash(entries[^1]), FleetDeviceListOperations.Add, Other, FleetDeviceKinds.Controller, "org", "p1"));
+            if (removeIt) entries.Add(Entry(4, FleetDeviceListEntries.Hash(entries[^1]), FleetDeviceListOperations.Remove, Other, null, "org", null));
             return FleetDeviceListVerifier.VerifyOrThrow(entries, "org");
         }
 
