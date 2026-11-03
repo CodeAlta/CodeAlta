@@ -234,10 +234,34 @@ From a terminal, `altanode connect <link>` pairs another profile with a node, an
 
 A CodeAlta Server shows the machines of all your computers, whether they are online, and the sessions they publish, in one place. It never reads their content: a session publishes its state, its provider and model, its times and its counts (turns, tool calls, tokens), never its prompts or answers. Its title travels encrypted with a key that only your approved computers and machines hold: the server cannot read it.
 
-1. On the always-on machine, run `altaserver run`. It prints a one-time setup code (`altaserver setup-code` prints it again).
-2. In CodeAlta Desktop on that machine, open **Settings** > **Fleet** > **Server**, click **Create my server…**, and give its address (`http://127.0.0.1:2586`), the setup code and your name. This computer becomes the owner's.
-3. To add a node, click **Add a machine…** and run the command it shows on the machine: `altanode join <address> --token <code>`. The node appears under the server, **Waiting for approval**: click **Approve** when it shows the same six words as the node.
-4. Another of your computers joins with **Join a server…** and an enrollment code; you approve it the same way from a computer already approved. Once approved, it can add and approve machines too. A node never approves anything.
+### Create my server
+
+In CodeAlta Desktop, open **Settings** > **Fleet** > **Server** and click **Create my server…**. Choose where it runs:
+
+- **On a machine over SSH**, the usual place: an always-on Linux or macOS machine you reach with `ssh`. Give it as `user@host`, and how your machines reach it: **The local network** (`http://host:2586`, the server listens on every network of the machine), or **An address I put in front of it**, a domain or Tailscale Serve that forwards to the server, which then stays on the machine's own loopback. CodeAlta checks the system and .NET there, installs CodeAlta Server, starts it as a service (a `systemd --user` unit with lingering, or a LaunchAgent), checks that it answers from this computer at that address, then reads its setup code over SSH and makes you its owner. Nothing to copy.
+- **On this computer**: CodeAlta installs CodeAlta Server here, starts it and makes you its owner.
+- **It runs already**: a server you started with `altaserver run`; give its address, its setup code (`altaserver setup-code` prints it on its machine) and your name.
+
+Give **Your name** and an **Organization** (**Home** by default). **Advanced** sets the port (2586), the data folder, the install folder and a folder of packages.
+
+When the server runs but does not answer from here, the step says what blocks it: a firewall (on Ubuntu, `sudo ufw allow 2586/tcp` on the machine), a name that does not reach it, or a proxy that does not forward to it. **Try again** goes on from there.
+
+Once you are its owner, **Add your machines** lists the machines this computer manages: **Add** has each join the server from itself, and approves it at once. The six words of each are shown.
+
+### Add machines and computers
+
+- **A machine**: in **Settings** > **Fleet** > **Machines**, **Add a machine…** > **Through my server** shows the command to run on it, `altanode join <address> --token <code>`. This computer made the code: the machine is approved as soon as it comes, and its six words are shown. The **Add a machine…** of the server's card shows the same command for a machine that waits for you to approve it.
+- **What waits for you**: when a machine or a computer asks to join, a message comes wherever you are in CodeAlta, with its six words, **Approve** and **Refuse**, and the **Fleet** button of the title bar counts what waits. Approve when the words are the same as on the device.
+- **Another of your computers**: **Join an organization…** with the address of the server and an enrollment code; you approve it the same way from a computer already approved. Once approved, it can add and approve machines too. A node never approves anything.
+
+### Join an organization
+
+To join the server of your company, open **Settings** > **Fleet** > **Server** and click **Join an organization…**:
+
+1. **Server**: its address, which your administrator gives.
+2. **Sign in**: the one-time enrollment code your administrator made for you.
+3. **Space**: the space that works with the organization, **A new Work space** by default. Its sessions are published to the server: their states and counts, never their content.
+4. **Approval**: an administrator approves this computer; they see the six words shown here beside it.
 
 A space publishes to a server only when you choose it: **Settings** > **Spaces** > the space > **General** > **Server**. `altanode join` links the default space of the node (`--space` chooses others). A session made **Private** in its options (the Agent chip, **More options**) is never published; one made Private later, or whose space you unlink, is removed from the server.
 

@@ -7,6 +7,7 @@ import { SettingsPage, SettingsUnavailable, useSettingsEditor } from "../Setting
 import { useShellLanguage } from "../shellLanguage";
 import type { MessageKey } from "../localization";
 import { CreateServerDialog } from "./CreateServerDialog";
+import { JoinOrganizationDialog } from "./JoinOrganizationDialog";
 import { campaignProgress, campaignStateIntent, campaignStateLabel, canCancelCampaign, emptyUpdateDraft, joinCommand, keyWords, localTimeZone, machineStateIntent,
   machineStateLabel, orderedDevices, policyDraft, policyDraftProblem, policySummary, serverAddressOf, serverConnection, serverConnectionIntent, serverConnectionLabel,
   serverProblem, telemetryDraft, telemetryHeaderEdits, telemetryProblem, telemetrySignals, telemetrySummary, updateDraftProblem, updateProblem, updateStart, type PolicyDraft,
@@ -32,6 +33,8 @@ export function FleetServerSettings({ epoch, api = fleetServer }: { epoch: strin
   const [dialog, setDialog] = useState<"create" | "join" | null>(null);
   // Create my server…: on this computer in one go, or a server that runs already.
   const [creating, setCreating] = useState(false);
+  // Join an organization…: its server, signing in, the space, the approval.
+  const [joining, setJoining] = useState(false);
   const [revision, setRevision] = useState(0);
   // The host says when a link or its connection changes: the page reads them again, and the devices of a server with them.
   useEffect(() => {
@@ -48,7 +51,7 @@ export function FleetServerSettings({ epoch, api = fleetServer }: { epoch: strin
     description="A server shows the machines and sessions of all your computers in one place. It never reads their content."
     notice={notice} loading={loading} busy={busy} onReload={reload}
     actions={servers.length === 0 && listing ? <>
-      <Button icon={<AppIcon name="computer" size={15} />} disabled={!epoch} onClick={() => setDialog("join")}>{t("Join a server…")}</Button>
+      <Button icon={<AppIcon name="computer" size={15} />} disabled={!epoch} onClick={() => setJoining(true)}>{t("Join an organization…")}</Button>
       <Button intent="primary" icon={<AppIcon name="plus" size={15} />} disabled={!epoch} onClick={() => setCreating(true)}>{t("Create my server…")}</Button>
     </> : undefined}>
     {!listing ? <SettingsUnavailable loading={loading} icon="server" title="Servers unavailable" />
@@ -59,6 +62,7 @@ export function FleetServerSettings({ epoch, api = fleetServer }: { epoch: strin
       </div>}
     {listing?.words && <p className="fleet-server-key muted-text">{t("The key of this computer:")} <code>{listing.words}</code></p>}
     {dialog && epoch && <ServerDialog kind={dialog} epoch={epoch} api={api} onClose={linked => { setDialog(null); if (linked) reload(); }} />}
+    {joining && epoch && <JoinOrganizationDialog epoch={epoch} onClose={joined => { setJoining(false); if (joined) reload(); }} />}
     {creating && epoch && <CreateServerDialog epoch={epoch} onExisting={() => { setCreating(false); setDialog("create"); }}
       onClose={created => { setCreating(false); if (created) reload(); }} />}
   </SettingsPage>;
