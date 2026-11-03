@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Button, Callout, Checkbox, Dialog, DialogBody, DialogFooter, HTMLSelect, InputGroup, NonIdealState, PopoverNext, Switch, Tag } from "@blueprintjs/core";
+import { Button, Callout, Checkbox, Dialog, DialogBody, DialogFooter, HTMLSelect, InputGroup, NonIdealState, PopoverNext, Switch, Tag, TextArea } from "@blueprintjs/core";
 import { fleetServer, type FleetDeviceView, type FleetServerView, type FleetTelemetryView, type FleetUpdateCampaignView, type FleetUpdatesView } from "#neoastra";
 import { AppIcon } from "../AppIcon";
 import { ActivitySpinner } from "../ActivitySpinner";
@@ -9,12 +9,12 @@ import type { MessageKey } from "../localization";
 import { CreateServerDialog } from "./CreateServerDialog";
 import { JoinOrganizationDialog } from "./JoinOrganizationDialog";
 import { campaignProgress, campaignStateIntent, campaignStateLabel, canCancelCampaign, emptyUpdateDraft, joinCommand, keyWords, localTimeZone, machineStateIntent,
-  machineStateLabel, orderedDevices, policyDraft, policyDraftProblem, policySummary, recoveryCheckPasses, recoveryCheckPositions, serverAddressOf, serverConnection,
+  machineStateLabel, orderedDevices, policyDraft, policyDraftProblem, policySummary, recoveryCheckPasses, recoveryCheckPositions, recoveryWordCount, serverAddressOf, serverConnection,
   serverConnectionIntent, serverConnectionLabel, serverProblem, telemetryDraft, telemetryHeaderEdits, telemetryProblem, telemetrySignals, telemetrySummary, updateDraftProblem,
   updateProblem, updateStart, type PolicyDraft, type TelemetryDraft, type TelemetrySignal, type UpdateDraft } from "./fleetServer";
 
 export type FleetServerApi = Pick<typeof fleetServer, "status" | "create" | "join" | "leave" | "createToken" | "devices" | "approve" | "revoke" | "watch" | "telemetry"
-  | "setTelemetry" | "updates" | "startUpdate" | "cancelUpdate" | "setUpdatePolicy" | "createRecoveryKey">;
+  | "setTelemetry" | "updates" | "startUpdate" | "cancelUpdate" | "setUpdatePolicy" | "createRecoveryKey" | "recover">;
 
 /** The address a server the person runs on this computer listens on, as `altaserver run` says it. */
 export const localServerAddress = "http://127.0.0.1:2586";
@@ -25,12 +25,13 @@ const devicesPollMilliseconds = 5000;
 /**
  * Settings > Fleet > Server: the CodeAlta Server this computer is linked to and how it stands. Without one: create the server the
  * person runs (its address and the code `altaserver setup-code` prints: this computer becomes the owner's), or join one with an
- * enrollment code. With one: an enrollment code for a machine, the devices that wait for an approval, and leaving it.
+ * enrollment code, or recover with the recovery key when every computer of the person is lost. With one: an enrollment code for
+ * a machine, the devices that wait for an approval, and leaving it.
  */
 export function FleetServerSettings({ epoch, api = fleetServer }: { epoch: string | null; api?: FleetServerApi }) {
   const { t } = useShellLanguage();
   const { listing, loading, busy, notice, reload, mutate } = useSettingsEditor(options => api.status({ expectedEpoch: epoch ?? "" }, options), `${epoch}`);
-  const [dialog, setDialog] = useState<"create" | "join" | null>(null);
+  const [dialog, setDialog] = useState<ServerDialogKind | null>(null);
   // Create my server…: on this computer in one go, or a server that runs already.
   const [creating, setCreating] = useState(false);
   // Join an organization…: its server, signing in, the space, the approval.
@@ -57,7 +58,9 @@ export function FleetServerSettings({ epoch, api = fleetServer }: { epoch: strin
       <Button intent="primary" icon={<AppIcon name="plus" size={15} />} disabled={!epoch} onClick={() => setCreating(true)}>{t("Create my server…")}</Button>
     </> : undefined}>
     {!listing ? <SettingsUnavailable loading={loading} icon="server" title="Servers unavailable" />
-      : servers.length === 0 ? <NonIdealState className="fleet-server-empty" icon={<AppIcon name="server" size={36} />} title={t("Not linked to a server.")} />
+      : servers.length === 0 ? <NonIdealState className="fleet-server-empty" icon={<AppIcon name="server" size={36} />} title={t("Not linked to a server.")}
+        action={<Button variant="minimal" size="small" icon={<AppIcon name="shield" size={14} />} disabled={!epoch} onClick={() => setDialog("recover")}>
+          {t("Recover with the recovery key…")}</Button>} />
       : <div className="fleet-server-list">
         {servers.map(server => <ServerCard key={server.id} server={server} epoch={epoch ?? ""} api={api} busy={busy} revision={revision} words={listing?.words ?? null}
           onRecoveryKey={words => { setRecoveryWords(words); reload(); }}
@@ -66,9 +69,11 @@ export function FleetServerSettings({ epoch, api = fleetServer }: { epoch: strin
       </div>}
     {listing?.words && <p className="fleet-server-key muted-text">{t("The key of this computer:")} <code>{listing.words}</code></p>}
     {dialog && epoch && <ServerDialog kind={dialog} epoch={epoch} api={api} onClose={(linked, words) => { setDialog(null); if (words) setRecoveryWords(words); if (linked) reload(); }} />}
-    {joining && epoch && <JoinOrganizationDialog epoch={epoch} onClose={joined => { setJoining(false); if (joined) reload(); }} />}
+    {joining && epoch && <JoinOrganizationDialog epoch={epoch} onRecover={() => { setJoining(false); setDialog("recover"); }}
+      onClose={joined => { setJoining(false); if (joined) reload(); }} />}
+    {/* A server created here comes with the owner's recovery key: its words are shown next, once. */}
     {creating && epoch && <CreateServerDialog epoch={epoch} onExisting={() => { setCreating(false); setDialog("create"); }}
-      onClose={created => { setCreating(false); if (created) reload(); }} />}
+      onClose={(created, words) => { setCreating(false); if (words) setRecoveryWords(words); if (created) reload(); }} />}
     {recoveryWords && <RecoveryWordsDialog words={recoveryWords} onClose={() => setRecoveryWords(null)} />}
   </SettingsPage>;
 }
@@ -577,9 +582,15 @@ function TokenDialog({ server, epoch, api, onClose }: { server: FleetServerView;
   </Dialog>;
 }
 
-/** Create my server (address, setup code, the owner's name) or Join a server (address, enrollment code). */
+/** What the server dialog does: create a server that runs already, join one with an enrollment code, or recover with the recovery key. */
+type ServerDialogKind = "create" | "join" | "recover";
+
+/**
+ * Create my server (address, setup code, the owner's name), Join a server (address, enrollment code), or Recover with the
+ * recovery key (address, its 32 words): this computer becomes one of the person's, with their keys, when every other is lost.
+ */
 function ServerDialog({ kind, epoch, api, onClose }: {
-  kind: "create" | "join"; epoch: string; api: Pick<FleetServerApi, "create" | "join">; onClose: (linked: boolean, recoveryWords?: string | null) => void;
+  kind: ServerDialogKind; epoch: string; api: Pick<FleetServerApi, "create" | "join" | "recover">; onClose: (linked: boolean, recoveryWords?: string | null) => void;
 }) {
   const { t } = useShellLanguage();
   const [url, setUrl] = useState(kind === "create" ? localServerAddress : "");
@@ -589,7 +600,8 @@ function ServerDialog({ kind, epoch, api, onClose }: {
   const [working, setWorking] = useState(false);
   const [problem, setProblem] = useState<{ key: MessageKey; detail?: string | null } | null>(null);
   const address = serverAddressOf(url);
-  const ready = !!address && !!code.trim() && (kind === "join" || !!owner.trim());
+  const typedWords = keyWords(code).length;
+  const ready = !!address && !!code.trim() && (kind === "join" || kind === "create" && !!owner.trim() || kind === "recover" && typedWords === recoveryWordCount);
   async function submit() {
     if (!ready) return;
     setWorking(true);
@@ -597,6 +609,7 @@ function ServerDialog({ kind, epoch, api, onClose }: {
     try {
       const result = kind === "create"
         ? await api.create({ expectedEpoch: epoch, url: address, code: code.trim(), ownerName: owner.trim(), organizationName: organization.trim() || null }, { timeoutMilliseconds: 60_000 })
+        : kind === "recover" ? await api.recover({ expectedEpoch: epoch, url: address, words: keyWords(code).join(" ") }, { timeoutMilliseconds: 60_000 })
         : await api.join({ expectedEpoch: epoch, url: address, token: code.trim() }, { timeoutMilliseconds: 60_000 });
       const failed = serverProblem(result.status);
       // A new server comes with the owner's recovery key, whose words the page shows next, once.
@@ -606,17 +619,23 @@ function ServerDialog({ kind, epoch, api, onClose }: {
       setProblem({ key: "The server does not answer." });
     } finally { setWorking(false); }
   }
-  return <Dialog isOpen className="fleet-server-dialog" title={t(kind === "create" ? "Create my server" : "Join a server")} canOutsideClickClose={false}
+  return <Dialog isOpen className="fleet-server-dialog" data-kind={kind}
+    title={t(kind === "create" ? "Create my server" : kind === "recover" ? "Recover with the recovery key" : "Join a server")} canOutsideClickClose={false}
     onClose={() => { if (!working) onClose(false); }}>
     <DialogBody>
+      {kind === "recover" && <p className="muted-text">{t("When every computer that held your keys is lost, the 32 words of your recovery key make this computer one of yours again, with your keys.")}</p>}
       <form className="fleet-server-form" onSubmit={event => { event.preventDefault(); void submit(); }}>
         <label><span>{t("Address")}</span>
-          <InputGroup autoFocus={kind === "join"} value={url} disabled={working} placeholder="https://fleet.example" spellCheck={false}
+          <InputGroup autoFocus={kind !== "create"} value={url} disabled={working} placeholder="https://fleet.example" spellCheck={false}
             intent={url.trim() && !address ? "danger" : undefined} onChange={event => setUrl(event.target.value)} /></label>
-        <label><span>{t(kind === "create" ? "Setup code" : "Enrollment code")}</span>
+        {kind === "recover" ? <label><span>{t("Recovery key")}</span>
+          <TextArea fill value={code} disabled={working} rows={4} spellCheck={false} autoComplete="off" aria-label={t("Recovery key")}
+            intent={typedWords > recoveryWordCount ? "danger" : undefined} onChange={event => setCode(event.target.value)} />
+          <small className="muted-text">{t("{count} of {total} words", { count: typedWords, total: recoveryWordCount })}</small></label>
+        : <label><span>{t(kind === "create" ? "Setup code" : "Enrollment code")}</span>
           <InputGroup autoFocus={kind === "create"} value={code} disabled={working} spellCheck={false} autoComplete="off" onChange={event => setCode(event.target.value)} />
           <small className="muted-text">{t(kind === "create" ? "altaserver setup-code prints it on the computer the server runs on."
-            : "An owner of the server makes it; this computer then waits for their approval.")}</small></label>
+            : "An owner of the server makes it; this computer then waits for their approval.")}</small></label>}
         {kind === "create" && <>
           <label><span>{t("Your name")}</span>
             <InputGroup value={owner} disabled={working} onChange={event => setOwner(event.target.value)} /></label>
@@ -630,7 +649,7 @@ function ServerDialog({ kind, epoch, api, onClose }: {
     <DialogFooter actions={<>
       <Button disabled={working} text={t("Cancel")} onClick={() => onClose(false)} />
       <Button intent="primary" disabled={!ready || working} icon={working ? <ActivitySpinner size={14} /> : undefined}
-        text={t(kind === "create" ? "Create" : "Join")} onClick={() => void submit()} />
+        text={t(kind === "create" ? "Create" : kind === "recover" ? "Recover" : "Join")} onClick={() => void submit()} />
     </>} />
   </Dialog>;
 }

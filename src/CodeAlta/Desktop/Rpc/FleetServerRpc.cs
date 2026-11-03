@@ -68,12 +68,15 @@ internal sealed partial class FleetServerService
         {
             var link = await _servers!.CreateServerAsync(address, code, owner, string.IsNullOrWhiteSpace(request.OrganizationName) ? null : request.OrganizationName,
                 cancellationToken).ConfigureAwait(false);
-            // The owner's recovery key is made with the server, its words shown once; when it cannot be made now, the server's card offers it.
-            string? words = null;
-            try { words = await _servers.CreateRecoveryKeyAsync(link.Id, cancellationToken).ConfigureAwait(false); }
-            catch (Exception exception) when (Failure(exception) is not null) { }
-            return Result(link) with { RecoveryWords = words };
+            return Result(link) with { RecoveryWords = await TryCreateRecoveryKeyAsync(link.Id, cancellationToken).ConfigureAwait(false) };
         }).ConfigureAwait(false);
+    }
+
+    // The owner's recovery key is made with the server, its words shown once; when it cannot be made now, the server's card offers it.
+    private async Task<string?> TryCreateRecoveryKeyAsync(string linkId, CancellationToken cancellationToken)
+    {
+        try { return await _servers!.CreateRecoveryKeyAsync(linkId, cancellationToken).ConfigureAwait(false); }
+        catch (Exception exception) when (Failure(exception) is not null) { return null; }
     }
 
     /// <summary>Signs this computer in with the recovery key of a person whose devices are all lost, and gives it their keys.</summary>

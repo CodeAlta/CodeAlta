@@ -2,7 +2,7 @@
 // its telemetry through it. Driven by fleetServerSettings.browser.test.ts through `fleetFixture`: what the page asks is recorded.
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
-import type { FleetDeviceView, FleetServerDeviceRequest, FleetServerView, FleetTelemetryRequest, FleetTelemetryView, FleetUpdateCampaignView, FleetUpdatePolicyRequest,
+import type { FleetDeviceView, FleetServerDeviceRequest, FleetServerRecoverRequest, FleetServerView, FleetTelemetryRequest, FleetTelemetryView, FleetUpdateCampaignView, FleetUpdatePolicyRequest,
   FleetUpdateStartRequest, FleetUpdatesView } from "#neoastra";
 import { ShellLanguageContext } from "../shellLanguage";
 import { FleetServerSettings, type FleetServerApi } from "./FleetServerSettings";
@@ -33,8 +33,18 @@ const campaign = (request: FleetUpdateStartRequest): FleetUpdateCampaignView => 
   machines: updates.machines.filter(machine => !request.machines || request.machines.includes(machine.id)).map(machine => ({ id: machine.id, name: machine.name,
     state: machine.online ? "switching" : "pending", running: machine.version, message: null, online: machine.online })) });
 const unavailable = async () => { throw new Error("not in this fixture"); };
+// Left, the page is empty; the recovery key of the person links it again.
+let linked = true;
 const api: FleetServerApi = {
-  status: async () => ({ status: "ok", servers: [server()], deviceId: "device-1", words: "apple river stone" }),
+  status: async () => ({ status: "ok", servers: linked ? [server()] : [], deviceId: "device-1", words: "apple river stone" }),
+  leave: async () => { calls.push(JSON.stringify({ leave: "home" })); linked = false; return { status: "ok", message: null }; },
+  recover: async (request: FleetServerRecoverRequest) => {
+    calls.push(JSON.stringify({ recover: request.url, words: request.words }));
+    if (request.words !== recoveryWords) return { status: "recovery.refused", server: null, message: null, recoveryWords: null };
+    linked = true;
+    recoveryKey = true;
+    return { status: "ok", server: server(), message: null, recoveryWords: null };
+  },
   devices: async () => ({ status: "ok", devices, message: null }),
   approve: async (request: FleetServerDeviceRequest) => {
     calls.push(JSON.stringify({ approve: request.deviceId, words: request.words }));
@@ -70,7 +80,7 @@ const api: FleetServerApi = {
     return { status: "ok", message: null };
   },
   watch: async () => (async function* () { })(),
-  create: unavailable, join: unavailable, leave: unavailable, createToken: unavailable, revoke: unavailable,
+  create: unavailable, join: unavailable, createToken: unavailable, revoke: unavailable,
 };
 Object.assign(window, { fleetFixture: { calls } });
 

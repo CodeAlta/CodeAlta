@@ -15,7 +15,10 @@ const calls: string[] = [];
 const epoch = "12345678-1234-1234-1234-123456789abc";
 const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 const event = (step: string, state: string, detail: string | null = null, code: string | null = null): MachineSetupEvent =>
-  ({ step, state, detail, code, machineId: null, machineName: null, words: null });
+  ({ step, state, detail, code, machineId: null, machineName: null, words: null, recoveryWords: null });
+// The words of the owner's recovery key, made with the server and given once with the end of the setup.
+const recoveryWords = "acid acorn actor agent alarm album alien alpha amber anchor angel ankle apple apron arena arrow atlas attic autumn award bacon badge bagel baker "
+  + "bamboo banjo barn basil basket beach beacon bear";
 let tries = 0;
 const api: CreateServerApi = {
   createServer: async request => {
@@ -33,7 +36,7 @@ const api: CreateServerApi = {
       yield event("reach", "done", "http://box:2586");
       yield event("claim", "running");
       yield event("claim", "done");
-      yield { ...event("finished", "done"), machineId: "link-1" };
+      yield { ...event("finished", "done"), machineId: "link-1", recoveryWords };
     })();
   },
 };
@@ -72,7 +75,7 @@ function Fixture() {
   return <>
     <FleetApprovals epoch={epoch} api={approvalsApi} onOpen={() => calls.push(JSON.stringify({ open: "fleetServer" }))} />
     {shown === "create" && <CreateServerDialog epoch={epoch} api={api} machinesApi={machinesApi} onExisting={() => calls.push(JSON.stringify({ existing: true }))}
-      onClose={created => calls.push(JSON.stringify({ close: created }))} />}
+      onClose={(created, words) => calls.push(JSON.stringify({ close: created, recoveryWords: words ?? null }))} />}
     {shown === "join" && <JoinOrganizationDialog epoch={epoch} api={joinApi} spaces={spacesApi} onClose={joined => calls.push(JSON.stringify({ closeJoin: joined }))} />}
   </>;
 }

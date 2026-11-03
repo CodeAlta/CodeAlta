@@ -129,6 +129,49 @@ test("the owner makes a recovery key, sees its words once with Copy, and closes 
   }, options);
 });
 
+// Types in a text area as the user does.
+const typeArea = (selector: string, value: string) => `(() => { const area = document.querySelector(${JSON.stringify(selector)});
+  Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set.call(area, ${JSON.stringify(value)});
+  area.dispatchEvent(new Event('input', { bubbles: true })); return true; })()`;
+
+test("a computer without a server recovers with the 32 words of the recovery key from the empty page", { skip: !edge, timeout: 90_000 }, async () => {
+  await withCanvas(async page => {
+    // Leaving the only server empties the page, where Recover with the recovery key… is offered.
+    await page.until(`document.querySelector('button[aria-label="Leave https://fleet.example"]')`, "the card of the server");
+    await page.evaluate(`document.querySelector('button[aria-label="Leave https://fleet.example"]').click()`);
+    await page.clickText(".fleet-server-confirm .bp6-button", "Leave");
+    await page.until(`document.querySelector('.fleet-server-empty')`, "the empty page");
+    await page.clickText(".fleet-server-empty .bp6-button", "Recover with the recovery key…");
+    await page.until(`document.querySelector('.fleet-server-dialog textarea')`, "the recovery dialog");
+    assert.equal(await page.evaluate(`document.querySelector('.fleet-server-dialog .bp6-dialog-header').textContent`), "Recover with the recovery key");
+    const recover = `[...document.querySelectorAll('.fleet-server-dialog .bp6-button')].find(button => button.textContent === 'Recover')`;
+    const words = "acid acorn actor agent alarm album alien alpha amber anchor angel ankle apple apron arena arrow atlas attic autumn award bacon badge bagel baker "
+      + "bamboo banjo barn basil basket beach beacon bear";
+
+    // Recover waits for an address and the 32 words, counted as they are typed.
+    await page.evaluate(type(".fleet-server-dialog input", "https://fleet.example/"));
+    await page.evaluate(typeArea(".fleet-server-dialog textarea", words.split(" ").slice(0, 31).join(" ")));
+    await page.until(`document.querySelector('.fleet-server-dialog small')?.textContent === '31 of 32 words'`, "the count");
+    assert.equal(await page.evaluate(`${recover}.disabled`), true);
+    await page.shot("fleet-recover-dialog");
+
+    // Words that are not a recovery key of the server are refused, and the dialog stays.
+    await page.evaluate(typeArea(".fleet-server-dialog textarea", words.replace("bear", "bird")));
+    await page.until(`${recover}.disabled === false`, "32 words");
+    await page.evaluate(`${recover}.click()`);
+    await page.until(`document.querySelector('.fleet-server-dialog [role=alert]')?.textContent === 'These words are not a recovery key of this server.'`, "refused");
+
+    // The right ones, spaced and on lines as they were written down, link this computer again.
+    await page.evaluate(typeArea(".fleet-server-dialog textarea", ` ${words.split(" ").slice(0, 16).join(" ")}\n${words.split(" ").slice(16).join("  ")} `));
+    await page.evaluate(`${recover}.click()`);
+    await page.until(`!document.querySelector('.fleet-server-dialog')`, "the dialog closes");
+    await page.until(`document.querySelector('.fleet-server-card')`, "the server again");
+    const calls = (await page.evaluate(`[...window.fleetFixture.calls]`) as string[]).map(call => JSON.parse(call)).filter(call => call.recover);
+    assert.deepEqual(calls.map(call => [call.recover, call.words === words]), [["https://fleet.example", false], ["https://fleet.example", true]]);
+    assert.deepEqual(page.problems, []);
+  }, options);
+});
+
 test("the owner's computer sees the telemetry of the fleet and changes it without the page holding a secret", { skip: !edge, timeout: 90_000 }, async () => {
   await withCanvas(async page => {
     // The card of the server says where the machines send, in one line.

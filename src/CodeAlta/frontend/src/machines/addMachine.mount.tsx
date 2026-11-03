@@ -11,7 +11,7 @@ document.documentElement.classList.add("bp6-dark");
 
 const calls: string[] = [];
 const event = (step: string, state: string, detail: string | null = null, code: string | null = null): MachineSetupEvent =>
-  ({ step, state, detail, code, machineId: null, machineName: null, words: null });
+  ({ step, state, detail, code, machineId: null, machineName: null, words: null, recoveryWords: null });
 const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 const api: AddMachineApi = {
   addOverSsh: async request => {
