@@ -448,6 +448,15 @@ public sealed class FleetNodeClient : IAsyncDisposable
         => CallAsync(FleetNodeMethods.ControlLog, new FleetNodeLogParams(lines), FleetNodeJsonContext.Default.FleetNodeLogParams,
             FleetNodeJsonContext.Default.FleetNodeLog, null, cancellationToken);
 
+    /// <summary>The owner's local control, or a device that manages the node: enrolls the node in a server, as <c>altanode join</c> does.</summary>
+    /// <param name="parameters">The server, the one-time enrollment token, and the name of the node there.</param>
+    /// <param name="cancellationToken">Cancels the call.</param>
+    /// <returns>The device of the node at the server, which waits for its approval.</returns>
+    /// <exception cref="FleetException">The node refused the call, or the server refused the enrollment (<see cref="FleetNodeErrorCodes.ServerRefused"/>).</exception>
+    public Task<FleetServerJoinResult> JoinServerAsync(FleetServerJoinParams parameters, CancellationToken cancellationToken = default)
+        => CallAsync(FleetNodeMethods.ControlServersJoin, parameters, FleetNodeJsonContext.Default.FleetServerJoinParams, FleetNodeJsonContext.Default.FleetServerJoinResult,
+            null, cancellationToken);
+
     /// <summary>The longest an update of <see cref="UpdateNodeAsync"/> (a check, or a download) is waited for.</summary>
     public static readonly TimeSpan UpdateTimeout = TimeSpan.FromMinutes(10);
 

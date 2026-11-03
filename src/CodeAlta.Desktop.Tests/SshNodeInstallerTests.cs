@@ -169,7 +169,7 @@ public sealed class SshNodeInstallerTests
     }
 
     /// <summary>An ssh that answers each script in turn, and prints the lines of its output as they come.</summary>
-    private sealed class ScriptedSsh : ISshRunner
+    internal sealed class ScriptedSsh : ISshRunner
     {
         public Queue<SshResult> Answers { get; } = new();
 
@@ -185,5 +185,13 @@ public sealed class SshNodeInstallerTests
 
         public Task<SshResult> CopyAsync(SshTarget target, IReadOnlyList<string> files, string folder, bool acceptNewHostKey, CancellationToken cancellationToken)
             => Task.FromResult(new SshResult(0, "", ""));
+
+        public int Forwards { get; private set; }
+
+        public Task<SshForward> ForwardAsync(SshTarget target, int remotePort, bool acceptNewHostKey, CancellationToken cancellationToken)
+        {
+            Forwards++;
+            return Task.FromResult(new SshForward(40000 + remotePort, static () => { }));
+        }
     }
 }

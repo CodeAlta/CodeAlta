@@ -18,7 +18,7 @@ namespace CodeAlta.Desktop.Rpc;
 /// connections stay in the host: the page sees addresses, names, states, the words of keys and the facts of sessions.
 /// </summary>
 [NeoRpcService("fleetServer", Version = 1)]
-internal sealed class FleetServerService
+internal sealed partial class FleetServerService
 {
     private const int MaximumText = 2048;
     private readonly DesktopFleetServers? _servers;

@@ -1023,7 +1023,17 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                     appUpdate ??= StartAppUpdate();
                     builder.AddAppUpdateService(appUpdate);
                     builder.AddWorkspaceService(workspace);
-                    builder.AddMachinesService(fleet is null ? new MachinesService() : MachinesService.Create(fleet, epoch, host.ProjectCatalog));
+                    var machinesService = fleet is null ? new MachinesService() : MachinesService.Create(fleet, epoch, host.ProjectCatalog);
+                    if (fleet is not null && fleetServers is not null)
+                    {
+                        // A machine this computer manages joins a server this computer owns, and is approved here.
+                        machinesService.ServerAddress = linkId => fleetServers.Connections.FirstOrDefault(connection => connection.Link.Id == linkId)?.Link.Url;
+                        machinesService.CreateJoinCode = async (linkId, token) => (await fleetServers.CreateEnrollmentTokenAsync(linkId, TimeSpan.FromMinutes(10),
+                            "Added from CodeAlta Desktop", token).ConfigureAwait(false)).Token;
+                        machinesService.ApproveDevice = async (linkId, deviceId, token) => await fleetServers.ApproveAsync(linkId, deviceId, token).ConfigureAwait(false);
+                    }
+
+                    builder.AddMachinesService(machinesService);
                     builder.AddFleetServerService(fleetServers is null ? new FleetServerService() : new FleetServerService(fleetServers, epoch)
                     {
                         Spaces = host.SpaceCatalog, IsPaired = machineId => fleet?.Find(machineId) is { IsPaired: true },

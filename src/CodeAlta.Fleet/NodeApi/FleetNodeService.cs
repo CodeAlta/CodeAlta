@@ -366,6 +366,8 @@ public sealed partial class FleetNodeService : IAsyncDisposable
             FleetNodeJsonContext.Default.FleetNodeLog, ControlLogAsync, optionalParams: true);
         On(caller, FleetNodeMethods.ControlUpdate, access, FleetNodeJsonContext.Default.FleetNodeUpdateParams,
             FleetNodeJsonContext.Default.FleetNodeUpdateResult, ControlUpdateAsync, optionalParams: true);
+        On(caller, FleetNodeMethods.ControlServersJoin, access, FleetNodeJsonContext.Default.FleetServerJoinParams,
+            FleetNodeJsonContext.Default.FleetServerJoinResult, ControlJoinServerAsync);
     }
 
     // Who may call a method: anyone on the channel (pairing), the owner's local control, or a trusted device with a permission.

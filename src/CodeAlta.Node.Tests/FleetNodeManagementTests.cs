@@ -112,6 +112,44 @@ public sealed class FleetNodeManagementTests
     }
 
     [TestMethod]
+    public async Task Manager_HasTheNodeJoinAServer_WhichItThenApprovesByTheDeviceTheNodeNamed()
+    {
+        await using var fixture = await ManagedNodeFixture.StartAsync(TestContext.CancellationToken);
+        var token = TestContext.CancellationToken;
+        await using var server = await CodeAlta.Server.Hosting.CoordinatorServer.StartAsync(new CodeAlta.Server.Hosting.CoordinatorServerOptions
+        {
+            DataRoot = Path.Combine(fixture.Root.Root, "server"), Urls = ["http://127.0.0.1:0"], ConfigureLogging = static _ => { },
+        }, token);
+        var address = server.Addresses.First(static uri => uri.Scheme == "http");
+        using var desktop = new CodeAlta.Fleet.Server.FleetServerClient(address, fixture.Owner);
+        await desktop.SetUpAsync(server.SetupCode!.Code, "Alex", "Desktop", "Home", token);
+        var enrollment = await desktop.CreateEnrollmentTokenAsync(null, "managed-node", token);
+        var ownerMachine = await fixture.PairAsync(fixture.Owner, "laptop", manages: false, token);
+        var otherMachine = await fixture.PairAsync(fixture.Other, "phone", manages: false, token);
+        await using var manager = await FleetNodeClient.ConnectAsync(ownerMachine, fixture.Owner, token);
+        await using var other = await FleetNodeClient.ConnectAsync(otherMachine, fixture.Other, token);
+
+        var refused = await Assert.ThrowsExactlyAsync<FleetException>(() => other.JoinServerAsync(new FleetServerJoinParams(address.ToString(), enrollment.Token), token));
+        Assert.AreEqual(FleetErrorCodes.Forbidden, refused.Error.Code, "only a device that manages the node has it join a server");
+
+        var joined = await manager.JoinServerAsync(new FleetServerJoinParams(address.ToString(), enrollment.Token, "build-box"), token);
+        Assert.AreEqual(fixture.Fleet.DeviceId, joined.DeviceId, "the node enrolls with its own key: the device to approve is the node");
+        Assert.AreEqual("build-box", joined.Name);
+        Assert.IsFalse(joined.AlreadyLinked);
+        var link = new CodeAlta.Fleet.Server.FleetServerLinkStore(fixture.Node.Host.CatalogOptions.FleetRoot).List().Single();
+        Assert.AreEqual(CodeAlta.Fleet.Server.FleetServerLinkStates.Pending, link.State);
+        var pending = (await desktop.ListDevicesAsync(token)).Single(static device => device.Status == "pending");
+        Assert.AreEqual(joined.DeviceId, pending.Id);
+        await desktop.ApproveAsync(pending.Id, token);
+        Assert.AreEqual("approved", (await desktop.ListDevicesAsync(token)).Single(device => device.Id == joined.DeviceId).Status);
+
+        Assert.IsTrue((await manager.JoinServerAsync(new FleetServerJoinParams(address.ToString(), "used-token"), token)).AlreadyLinked,
+            "asked again, the node is linked already and enrolls nothing");
+        var bad = await Assert.ThrowsExactlyAsync<FleetException>(() => manager.JoinServerAsync(new FleetServerJoinParams("ftp://nowhere", "x"), token));
+        Assert.AreEqual(FleetErrorCodes.InvalidParams, bad.Error.Code);
+    }
+
+    [TestMethod]
     public async Task NodeManagement_ReadsTheEndOfTheLog_AndAnEmptyOneBeforeTheFirstRun()
     {
         using var root = new NodeTestRoot();

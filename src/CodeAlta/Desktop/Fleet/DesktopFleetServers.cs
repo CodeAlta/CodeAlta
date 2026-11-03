@@ -137,15 +137,32 @@ internal sealed class DesktopFleetServers : IAsyncDisposable
     /// <exception cref="FleetServerException">The server refused the setup.</exception>
     /// <exception cref="HttpRequestException">The server does not answer.</exception>
     /// <exception cref="InvalidOperationException">This instance is linked to that server already.</exception>
-    public async Task<FleetServerLink> CreateServerAsync(Uri address, string code, string ownerName, string? organizationName, CancellationToken cancellationToken)
+    public Task<FleetServerLink> CreateServerAsync(Uri address, string code, string ownerName, string? organizationName, CancellationToken cancellationToken)
+        => CreateServerAsync(address, address, code, ownerName, organizationName, cancellationToken);
+
+    /// <summary>
+    /// Sets up a server through another address than the one its machines use: a port forwarded over SSH to its loopback,
+    /// from which alone it accepts its setup. The link keeps <paramref name="address"/>.
+    /// </summary>
+    /// <param name="address">The address this computer and the machines reach the server at.</param>
+    /// <param name="setupAddress">The address its setup goes to.</param>
+    /// <param name="code">The one-time setup code.</param>
+    /// <param name="ownerName">The name of the owner.</param>
+    /// <param name="organizationName">The name of the organization; null for the server's default.</param>
+    /// <param name="cancellationToken">Cancels the setup.</param>
+    /// <returns>The link, approved.</returns>
+    /// <exception cref="FleetServerException">The server refused the setup.</exception>
+    /// <exception cref="HttpRequestException">The server does not answer.</exception>
+    public async Task<FleetServerLink> CreateServerAsync(Uri address, Uri setupAddress, string code, string ownerName, string? organizationName, CancellationToken cancellationToken)
     {
+        ArgumentNullException.ThrowIfNull(setupAddress);
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
             RequireNoLink(address);
             var identity = Identity();
-            using var client = new FleetServerClient(address, identity, Handler);
+            using var client = new FleetServerClient(setupAddress, identity, Handler);
             var setup = await client.SetUpAsync(code, ownerName, _deviceName, organizationName, cancellationToken).ConfigureAwait(false);
             var now = DateTimeOffset.UtcNow;
             var link = new FleetServerLink(FleetServerLinkStore.NewId(), FleetServerAddress.Format(address), setup.Organization.Id, setup.Organization.Name, identity.DeviceId,

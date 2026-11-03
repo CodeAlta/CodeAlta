@@ -91,6 +91,30 @@ internal interface ISshRunner
     /// <param name="cancellationToken">Stops the copy.</param>
     /// <returns>How it ended.</returns>
     Task<SshResult> CopyAsync(SshTarget target, IReadOnlyList<string> files, string folder, bool acceptNewHostKey, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Forwards a port of this computer's loopback to a port of the loopback of the computer (<c>ssh -L</c>), for as
+    /// long as the result is not disposed: what is sent there comes from the computer itself.
+    /// </summary>
+    /// <param name="target">The computer.</param>
+    /// <param name="remotePort">The port of its loopback.</param>
+    /// <param name="acceptNewHostKey">Whether a host key ssh does not know yet is accepted.</param>
+    /// <param name="cancellationToken">Stops waiting for the forward.</param>
+    /// <returns>The forward, with the port of this computer it listens on.</returns>
+    /// <exception cref="IOException">The forward did not open.</exception>
+    Task<SshForward> ForwardAsync(SshTarget target, int remotePort, bool acceptNewHostKey, CancellationToken cancellationToken);
+}
+
+/// <summary>A port of this computer forwarded to the loopback of a computer over SSH; disposing it closes it.</summary>
+/// <param name="localPort">The port of this computer's loopback.</param>
+/// <param name="close">What closes it.</param>
+internal sealed class SshForward(int localPort, Action close) : IDisposable
+{
+    /// <summary>Gets the port of this computer's loopback.</summary>
+    public int LocalPort { get; } = localPort;
+
+    /// <inheritdoc />
+    public void Dispose() => close();
 }
 
 /// <summary>
@@ -139,6 +163,65 @@ internal sealed class OpenSshRunner : ISshRunner
         }
 
         return new SshResult(0, "", "");
+    }
+
+    /// <inheritdoc />
+    public async Task<SshForward> ForwardAsync(SshTarget target, int remotePort, bool acceptNewHostKey, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(target);
+        var localPort = FreePort();
+        var arguments = Arguments(target, acceptNewHostKey, "");
+        // -N: no command; the forward only. ExitOnForwardFailure: a port taken meanwhile ends ssh, and the wait below sees it.
+        arguments.RemoveAt(arguments.Count - 1);
+        arguments.InsertRange(0, ["-N", "-o", "ExitOnForwardFailure=yes", "-L", $"127.0.0.1:{localPort}:127.0.0.1:{remotePort}"]);
+        var start = new ProcessStartInfo(_ssh) { UseShellExecute = false, CreateNoWindow = true, RedirectStandardInput = true, RedirectStandardOutput = true, RedirectStandardError = true };
+        foreach (var argument in arguments) start.ArgumentList.Add(argument);
+        var process = Process.Start(start) ?? throw new IOException("ssh did not start.");
+        process.BeginOutputReadLine();
+        var error = new StringBuilder();
+        process.ErrorDataReceived += (_, line) => { if (line.Data is not null) lock (error) error.Append(line.Data).Append('\n'); };
+        process.BeginErrorReadLine();
+        void Close()
+        {
+            try { if (!process.HasExited) process.Kill(entireProcessTree: true); }
+            catch (InvalidOperationException) { }
+            process.Dispose();
+        }
+
+        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(30);
+        while (true)
+        {
+            if (process.HasExited)
+            {
+                string why;
+                lock (error) why = error.ToString().Trim();
+                Close();
+                throw new IOException(why.Length > 0 ? why : "ssh ended before the forward opened.");
+            }
+
+            try
+            {
+                using var probe = new System.Net.Sockets.TcpClient();
+                await probe.ConnectAsync(System.Net.IPAddress.Loopback, localPort, cancellationToken).ConfigureAwait(false);
+                return new SshForward(localPort, Close);
+            }
+            catch (System.Net.Sockets.SocketException) when (DateTime.UtcNow < deadline)
+            {
+                await Task.Delay(TimeSpan.FromMilliseconds(250), cancellationToken).ConfigureAwait(false);
+            }
+            catch (System.Net.Sockets.SocketException exception)
+            {
+                Close();
+                throw new IOException("The forward over SSH did not open: " + exception.Message, exception);
+            }
+        }
+    }
+
+    private static int FreePort()
+    {
+        using var listener = new System.Net.Sockets.TcpListener(System.Net.IPAddress.Loopback, 0);
+        listener.Start();
+        return ((System.Net.IPEndPoint)listener.LocalEndpoint).Port;
     }
 
     private List<string> Arguments(SshTarget target, bool acceptNewHostKey, string command)

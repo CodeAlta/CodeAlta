@@ -43,8 +43,9 @@ file, which only the owner of the profile can read, is the credential, with no t
 
 **Managing from a desktop.** A paired device with the `manage` permission calls the same `control.*` methods from
 elsewhere, pairing and stopping the node excepted: status, devices and their permissions, revocations, projects, the log
-(`control.log`) and the self-update (`control.update`, as `altanode update`, its switch recorded as asked by
-`manage:<device>`). It is what the machine page of CodeAlta Desktop uses, so that managing a node never needs its
+(`control.log`), the self-update (`control.update`, as `altanode update`, its switch recorded as asked by
+`manage:<device>`), and joining a server (`control.servers.join`, as `altanode join`, with a token the managing device
+made; the node enrolls with its own key, so that the device approves the node by the id the node gave it). It is what the machine page of CodeAlta Desktop uses, so that managing a node never needs its
 terminal. `manage` is given to the first device that pairs with a node that never had one (the owner's, the one that
 installed it), to the device a pairing link made with `altanode pair --manage` adds, and by a device that has it or the
 owner on the machine (`altanode permissions <device> --allow manage`); a device paired again keeps it. Each call is

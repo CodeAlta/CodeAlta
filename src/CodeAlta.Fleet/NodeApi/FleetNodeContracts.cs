@@ -93,6 +93,9 @@ public static class FleetNodeMethods
     /// <summary>The owner's local control, or a device that manages the node: checks its feed for an update, or installs one.</summary>
     public const string ControlUpdate = "control.update";
 
+    /// <summary>The owner's local control, or a device that manages the node: enrolls the node in a server with a token, as <c>altanode join</c>.</summary>
+    public const string ControlServersJoin = "control.servers.join";
+
     /// <summary>A target: takes the offer of a session (or, as a probe, only says whether it would).</summary>
     public const string MovesOffer = "moves.offer";
 
@@ -168,6 +171,12 @@ public static class FleetNodeErrorCodes
 
     /// <summary>The repository could not be cloned.</summary>
     public const string CloneFailed = "project.clone_failed";
+
+    /// <summary>The server refused the enrollment of the node (a token used, expired or unknown).</summary>
+    public const string ServerRefused = "server.refused";
+
+    /// <summary>The node could not reach the server.</summary>
+    public const string ServerUnreachable = "server.unreachable";
 
     /// <summary>No automation assigned to the node has that id.</summary>
     public const string AutomationNotFound = "automation.not_found";
@@ -704,6 +713,8 @@ public sealed record FleetEmpty;
 [JsonSerializable(typeof(FleetNodeLog))]
 [JsonSerializable(typeof(FleetNodeUpdateParams))]
 [JsonSerializable(typeof(FleetNodeUpdateResult))]
+[JsonSerializable(typeof(FleetServerJoinParams))]
+[JsonSerializable(typeof(FleetServerJoinResult))]
 [JsonSerializable(typeof(FleetMoveOffer))]
 [JsonSerializable(typeof(FleetMoveOfferResult))]
 [JsonSerializable(typeof(FleetMoveChunk))]

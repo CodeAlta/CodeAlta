@@ -58,6 +58,12 @@ internal sealed record SshMachineFacts(string Os, string Architecture, string? R
 {
     /// <summary>Gets the operating system in words.</summary>
     public string OsName => Os switch { "Linux" => "Linux", "Darwin" => "macOS", _ => Os };
+
+    /// <summary>Gets the firewall that runs there and can block a port (<c>ufw</c>); null when none is known.</summary>
+    public string? Firewall { get; init; }
+
+    /// <summary>Gets whether Tailscale is installed there.</summary>
+    public bool Tailscale { get; init; }
 }
 
 /// <summary>A setup that stopped, with what the person should know and do.</summary>
@@ -206,7 +212,8 @@ internal sealed partial class SshNodeInstaller(ISshRunner ssh, string desktopVer
 
     // The system, the architecture and .NET of the computer; POSIX sh, for Linux and macOS. dotnet is looked for where
     // installers put it, and on the PATH of a login shell, which a command run over SSH does not have on macOS.
-    internal const string ProbeScript = """
+    // Its ends of line are those of sh whatever the checkout of this file.
+    internal static readonly string ProbeScript = """
         echo "os=$(uname -s 2>/dev/null)"
         echo "arch=$(uname -m 2>/dev/null)"
         echo "home=$HOME"
@@ -224,9 +231,11 @@ internal sealed partial class SshNodeInstaller(ISshRunner ssh, string desktopVer
         fi
         if command -v loginctl >/dev/null 2>&1; then echo "linger=$(loginctl show-user "$(id -un)" -p Linger --value 2>/dev/null)"; fi
         if pgrep -x alta >/dev/null 2>&1; then echo "desktop=running"; fi
+        if command -v systemctl >/dev/null 2>&1 && systemctl is-active --quiet ufw 2>/dev/null; then echo "firewall=ufw"; fi
+        if command -v tailscale >/dev/null 2>&1; then echo "tailscale=yes"; fi
         if [ -f /etc/alpine-release ]; then echo "libc=musl"; fi
         exit 0
-        """;
+        """.ReplaceLineEndings("\n");
 
     /// <summary>Reads what the probe printed.</summary>
     internal static SshMachineFacts ReadFacts(string output)
@@ -256,7 +265,10 @@ internal sealed partial class SshNodeInstaller(ISshRunner ssh, string desktopVer
         };
         return new SshMachineFacts(os, arch, rid, values.GetValueOrDefault("home") ?? "~", values.GetValueOrDefault("user") ?? "", NullIfEmpty(values.GetValueOrDefault("dotnet")),
             AtLeast10(sdk), AtLeast10(runtime), values.GetValueOrDefault("desktop") == "running", NullIfEmpty(values.GetValueOrDefault("linger")),
-            NullIfEmpty(values.GetValueOrDefault("hostname")));
+            NullIfEmpty(values.GetValueOrDefault("hostname")))
+        {
+            Firewall = NullIfEmpty(values.GetValueOrDefault("firewall")), Tailscale = values.GetValueOrDefault("tailscale") == "yes",
+        };
 
         static string? Newest(string? current, string candidate)
             => current is null || Parse(candidate) > Parse(current) ? candidate : current;
@@ -266,17 +278,20 @@ internal sealed partial class SshNodeInstaller(ISshRunner ssh, string desktopVer
     }
 
     /// <summary>The packages of a folder of this computer: the tool package and, when there, the runtime package of the computer's system.</summary>
-    internal static LocalPackageSet LocalPackages(string folder, string rid)
+    internal static LocalPackageSet LocalPackages(string folder, string rid) => LocalPackages(folder, rid, PackageId);
+
+    /// <summary>The packages of a folder of this computer for a package id: its tool package and the runtime package of the computer's system.</summary>
+    internal static LocalPackageSet LocalPackages(string folder, string rid, string packageId)
     {
         if (!Directory.Exists(folder)) throw Fail(SshSetupSteps.Install, "packages_missing", folder);
         // CodeAlta.Node.<version>.nupkg, and CodeAlta.Node.<rid>.<version>.nupkg: the newest version that has both.
-        var tools = Directory.GetFiles(folder, PackageId + ".*.nupkg").Select(path => (Path: path, Version: VersionOf(Path.GetFileName(path), PackageId)))
+        var tools = Directory.GetFiles(folder, packageId + ".*.nupkg").Select(path => (Path: path, Version: VersionOf(Path.GetFileName(path), packageId)))
             .Where(static file => file.Version is not null).ToArray();
-        var runtimes = Directory.GetFiles(folder, $"{PackageId}.{rid}.*.nupkg").Select(path => (Path: path, Version: VersionOf(Path.GetFileName(path), $"{PackageId}.{rid}")))
+        var runtimes = Directory.GetFiles(folder, $"{packageId}.{rid}.*.nupkg").Select(path => (Path: path, Version: VersionOf(Path.GetFileName(path), $"{packageId}.{rid}")))
             .Where(static file => file.Version is not null).ToArray();
         var best = tools.Where(tool => runtimes.Any(runtime => runtime.Version == tool.Version))
             .OrderByDescending(static tool => tool.Version, Comparer<string?>.Create(static (left, right) => CompareVersions(left!, right!))).FirstOrDefault();
-        if (best.Path is null) throw Fail(SshSetupSteps.Install, "packages_missing", $"{folder} ({PackageId} and {PackageId}.{rid})");
+        if (best.Path is null) throw Fail(SshSetupSteps.Install, "packages_missing", $"{folder} ({packageId} and {packageId}.{rid})");
         return new LocalPackageSet(best.Version!, [best.Path, runtimes.First(runtime => runtime.Version == best.Version).Path]);
     }
 
@@ -304,7 +319,7 @@ internal sealed partial class SshNodeInstaller(ISshRunner ssh, string desktopVer
         return "'" + value.Replace("'", "'\\''", StringComparison.Ordinal) + "'";
     }
 
-    private static string DotnetPrelude(SshMachineFacts facts)
+    internal static string DotnetPrelude(SshMachineFacts facts)
     {
         var dotnet = Quote(facts.Dotnet!);
         // The tool's launcher finds the runtime with DOTNET_ROOT, the folder dotnet really is in (a link of /usr/bin on Ubuntu).
