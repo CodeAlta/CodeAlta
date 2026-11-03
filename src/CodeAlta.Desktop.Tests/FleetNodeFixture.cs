@@ -116,7 +116,8 @@ internal sealed class ScriptedFleetProvider
 {
     internal const string Model = "scripted-model";
 
-    internal ModelProviderDescriptor Descriptor { get; } = new(new ModelProviderId("scripted"), "Scripted") { DefaultModelId = Model, IsDefault = true };
+    // Settable, then registered again, for a test that configures the provider (its default permission mode).
+    internal ModelProviderDescriptor Descriptor { get; set; } = new(new ModelProviderId("scripted"), "Scripted") { DefaultModelId = Model, IsDefault = true };
 
     internal ConcurrentQueue<Func<AgentTurnRequest, CancellationToken, Task<AgentTurnResponse>>> Turns { get; } = new();
 

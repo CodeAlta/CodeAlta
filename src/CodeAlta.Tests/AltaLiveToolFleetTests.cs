@@ -127,6 +127,29 @@ public sealed partial class AltaLiveToolTests
 
         // The user, with no calling session, moves what they want.
         Assert.AreEqual(AltaExitCodes.Success, (await dispatcher.InvokeAsync(["fleet", "move", "start", "someone-else", "--machine", "pc"], caller: AltaCallerIdentity.Cli)).ExitCode);
+
+        // A session of this computer that is not attached runs, once prompted, in the mode it records: one that bypasses
+        // permissions is not moved by an agent that asks, attached or not.
+        var bypassing = await runtime.CreateGlobalSessionAsync(new SessionExecutionOptions
+        {
+            ProviderId = provider.ProviderId, ProviderKey = provider.ProviderId.Value, WorkingDirectory = root.Path, ProjectRoots = [],
+            PermissionMode = SessionPermissionModes.Bypass,
+            OnPermissionRequest = static (_, _) => Task.FromResult(new AgentPermissionDecision(AgentPermissionDecisionKind.AllowOnce)),
+        }, "Bypassing");
+        await runtime.DetachRuntimeSessionAsync(bypassing.SessionId);
+        Assert.AreEqual(SessionPermissionModes.Bypass, await runtime.GetPermissionModeAsync(bypassing.SessionId));
+        var asking = await runtime.CreateGlobalSessionAsync(new SessionExecutionOptions
+        {
+            ProviderId = provider.ProviderId, ProviderKey = provider.ProviderId.Value, WorkingDirectory = root.Path, ProjectRoots = [],
+            PermissionMode = SessionPermissionModes.Ask,
+            OnPermissionRequest = static (_, _) => Task.FromResult(new AgentPermissionDecision(AgentPermissionDecisionKind.AllowOnce)),
+        }, "Asking");
+        var calls = moves.Calls.Count;
+        var detached = await dispatcher.InvokeAsync(["fleet", "move", "start", bypassing.SessionId, "--machine", "pc"],
+            caller: new AltaCallerIdentity { Kind = "agent", SourceSessionId = asking.SessionId });
+        Assert.AreEqual(AltaExitCodes.PolicyDenied, detached.ExitCode, detached.Transcript);
+        StringAssert.Contains(detached.Transcript, "session.moveDenied");
+        Assert.HasCount(calls, moves.Calls);
     }
 
     [TestMethod]

@@ -298,6 +298,32 @@ public sealed class RemoteChildSessionsTests
         Assert.AreEqual("accepted", accepted.Status);
     }
 
+    // The mode a session runs in is the one to hold to, not the one it records: a session without a mode of its own runs
+    // in the one its provider is configured with, which may bypass permissions.
+    [TestMethod]
+    public async Task APromptOfAnAgent_ToASessionThatBypassesPermissionsByItsProvider_IsHeldForAPerson()
+    {
+        var token = TestContext.CancellationToken;
+        await using var two = await TwoHosts.StartAsync(token);
+        two.Node.Service.AgentSessions.WritePolicy(new FleetAgentPolicyInfo(["default"]));
+        two.Node.Provider.Descriptor = two.Node.Provider.Descriptor with { DefaultPermissionMode = SessionPermissionModes.Bypass };
+        two.Node.Provider.Register(two.Node.Host.ModelProviderRegistry);
+        var client = await two.Machine.WaitOnlineAsync(token);
+        var peer = await two.Node.Host.Commands.CreateDraftSessionAsync(null, two.Node.Host.ModelProviderRegistry.ListProviders().Single(static provider => provider.IsEnabled), "Peer");
+        Assert.IsNull((await two.Node.Host.RuntimeService.TryGetRecoverableSessionAsync(peer.SessionId, token))?.PermissionMode, "The session records no mode of its own.");
+        Assert.AreEqual(SessionPermissionModes.Bypass, await two.Node.Host.RuntimeService.GetPermissionModeAsync(peer.SessionId, token));
+
+        var send = new FleetSendParams(peer.SessionId, "Hello")
+        {
+            Agent = FleetAgentSigning.Sign(two.Fleet.DeviceKey, new FleetAgentRequest(FleetAgentRequest.CurrentVersion, FleetAgentRequestKinds.Send,
+                two.Node.NodeIdentity.DeviceId, "", "", DateTimeOffset.UtcNow, "", "parent-x", "desktop-pc", "default", peer.SessionId, null,
+                FleetAgentRequestDocuments.HashText("Hello"), null, new FleetAgentFloor(SessionPermissionModes.Bypass, null, null))),
+        };
+        var exception = await Assert.ThrowsExactlyAsync<FleetException>(() => client.SendAsync(send, Guid.NewGuid().ToString("N"), token));
+        Assert.AreEqual(FleetNodeErrorCodes.AgentRequestDenied, exception.Error.Code, exception.Error.Message);
+        StringAssert.Contains(exception.Error.Message, "bypasses permissions");
+    }
+
     private static FleetSandboxConfinement Workspace => FleetSandboxFloors.ToWire(SandboxConfinement.Of(SandboxProfiles.Resolve(SandboxProfiles.Workspace, [])));
 
     private static RemoteChildRequest Request(string parentId, string prompt)

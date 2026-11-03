@@ -708,8 +708,9 @@ internal sealed partial class BuiltInAltaCommandContributor
             return null;
         if (await runtime.TryGetRecoverableSessionAsync(sessionId, context.CancellationToken).ConfigureAwait(false) is not null)
         {
+            // The caller runs (attached, else taken to ask); the other session runs, once prompted, in the mode it records.
             var own = runtime.GetEffectivePermissionMode(callerId);
-            var theirs = runtime.GetEffectivePermissionMode(sessionId);
+            var theirs = await runtime.GetPermissionModeAsync(sessionId, context.CancellationToken).ConfigureAwait(false);
             return SessionPermissionModes.Rank(theirs) > SessionPermissionModes.Rank(own)
                 ? PermissionDenied(context, "session.moveDenied",
                     $"Session '{sessionId}' runs in '{theirs}', which asks the user less than this session ('{own}'): this session does not move it. Ask the user.")
