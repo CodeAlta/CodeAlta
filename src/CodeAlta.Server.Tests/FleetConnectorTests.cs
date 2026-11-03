@@ -44,7 +44,7 @@ public sealed partial class FleetConnectorTests
         // A node cannot make tokens; only a controller device can.
         Assert.IsTrue((await desktop.ListDevicesAsync()).Any(device => device.Id == nodeKey.DeviceId && device.Status == "pending"));
 
-        var approved = await desktop.ApproveAsync(nodeKey.DeviceId);
+        var approved = await desktop.ApproveAsync(nodeKey.DeviceId, FleetDeviceKinds.Node);
         Assert.AreEqual(("approved", setup.Owner.Id), (approved.Status, approved.OwnerId));
         Assert.AreEqual(2, (await desktop.GetDeviceListAsync()).Count);
         Assert.AreEqual("approved", (await node.GetDeviceAsync()).Status);
@@ -66,10 +66,10 @@ public sealed partial class FleetConnectorTests
 
         var pending = await laptop.EnrollAsync((await fleet.Desktop.CreateEnrollmentTokenAsync()).Token, "Laptop", FleetDeviceKinds.Controller);
         Assert.AreEqual((FleetDeviceKinds.Controller, "pending"), (pending.Kind, pending.Status));
-        Assert.AreEqual("approved", (await fleet.Desktop.ApproveAsync(laptopKey.DeviceId)).Status);
+        Assert.AreEqual("approved", (await fleet.Desktop.ApproveAsync(laptopKey.DeviceId, FleetDeviceKinds.Controller)).Status);
 
         // The laptop approves the node with an entry it signs after the list it verified.
-        var approved = await laptop.ApproveAsync(fleet.NodeKey.DeviceId);
+        var approved = await laptop.ApproveAsync(fleet.NodeKey.DeviceId, FleetDeviceKinds.Node);
         Assert.AreEqual(("approved", FleetDeviceKinds.Node), (approved.Status, approved.Kind));
         var state = await node.ReadVerifiedDeviceListAsync();
         Assert.AreEqual(3L, state.Sequence);
@@ -81,7 +81,7 @@ public sealed partial class FleetConnectorTests
         using var otherKey = DeviceIdentity.LoadOrCreate(Path.Combine(fleet.Root.Path, "other"));
         using (var other = new FleetServerClient(fleet.Server.BaseAddress, otherKey))
             await other.EnrollAsync((await laptop.CreateEnrollmentTokenAsync()).Token, "Other");
-        var refused = await Assert.ThrowsExactlyAsync<FleetDeviceListException>(() => node.ApproveAsync(otherKey.DeviceId));
+        var refused = await Assert.ThrowsExactlyAsync<FleetDeviceListException>(() => node.ApproveAsync(otherKey.DeviceId, FleetDeviceKinds.Node));
         StringAssert.Contains(refused.Message, "not a controller device");
         Assert.AreEqual("pending", (await laptop.GetDeviceAsync(otherKey.DeviceId)).Status);
     }
@@ -97,7 +97,7 @@ public sealed partial class FleetConnectorTests
         // A server that lies: it shows an entry the node signed, which adds a device of its choice after the real ones.
         using var lying = new ForgingHandler(fleet.NodeKey, strangerKey) { InnerHandler = new HttpClientHandler() };
         using var desktop = new FleetServerClient(fleet.Server.BaseAddress, fleet.DesktopKey, lying);
-        var broken = await Assert.ThrowsExactlyAsync<FleetDeviceListException>(() => desktop.ApproveAsync(pcKey.DeviceId));
+        var broken = await Assert.ThrowsExactlyAsync<FleetDeviceListException>(() => desktop.ApproveAsync(pcKey.DeviceId, FleetDeviceKinds.Node));
         Assert.AreEqual((3L, "its signer is not a controller device"), (broken.BrokenAt, broken.Reason));
         Assert.AreEqual("pending", (await fleet.Desktop.GetDeviceAsync(pcKey.DeviceId)).Status, "nothing was signed or sent");
         await Assert.ThrowsExactlyAsync<FleetDeviceListException>(() => desktop.GetTrustedMemberAsync(strangerKey.DeviceId));
@@ -221,7 +221,7 @@ public sealed partial class FleetConnectorTests
         var devices = new FleetOrganizationDevices(fleet.Server.BaseAddress, fleet.DesktopKey, pin, replacing);
         await Assert.ThrowsExactlyAsync<FleetDeviceListException>(() => new FleetMetadataKeyring(devices).RefreshAsync("work", CancellationToken.None));
         using var client = new FleetServerClient(fleet.Server.BaseAddress, fleet.DesktopKey, replacing) { DeviceList = devices };
-        await Assert.ThrowsExactlyAsync<FleetDeviceListException>(() => client.ApproveAsync(pcKey.DeviceId));
+        await Assert.ThrowsExactlyAsync<FleetDeviceListException>(() => client.ApproveAsync(pcKey.DeviceId, FleetDeviceKinds.Node));
         Assert.AreEqual(0, replacing.Writes, "nothing was wrapped or signed after the replaced list");
         Assert.AreEqual(0, (await fleet.Desktop.ListMetadataKeysAsync()).Count);
     }
@@ -232,7 +232,7 @@ public sealed partial class FleetConnectorTests
         await using var fleet = await FleetFixture.StartAsync();
         using var pcKey = DeviceIdentity.LoadOrCreate(Path.Combine(fleet.Root.Path, "pc"));
         using (var pc = new FleetServerClient(fleet.Server.BaseAddress, pcKey)) await pc.EnrollAsync((await fleet.Desktop.CreateEnrollmentTokenAsync()).Token, "PC");
-        await fleet.Desktop.ApproveAsync(pcKey.DeviceId);
+        await fleet.Desktop.ApproveAsync(pcKey.DeviceId, FleetDeviceKinds.Node);
         var before = await fleet.Desktop.GetDeviceListAsync();
         await fleet.Desktop.RevokeAsync(pcKey.DeviceId);
         var pin = Path.Combine(fleet.Root.Path, "link", FleetOrganizationDevices.PinFileName);
@@ -290,7 +290,7 @@ public sealed partial class FleetConnectorTests
         await using var fleet = await FleetFixture.StartAsync();
         using var pcKey = DeviceIdentity.LoadOrCreate(Path.Combine(fleet.Root.Path, "pc"));
         using (var pc = new FleetServerClient(fleet.Server.BaseAddress, pcKey)) await pc.EnrollAsync((await fleet.Desktop.CreateEnrollmentTokenAsync()).Token, "PC");
-        await fleet.Desktop.ApproveAsync(pcKey.DeviceId);
+        await fleet.Desktop.ApproveAsync(pcKey.DeviceId, FleetDeviceKinds.Node);
         var desktopKeys = new FleetMetadataKeyring(new FleetOrganizationDevices(fleet.Server.BaseAddress, fleet.DesktopKey));
         var nodeKeys = new FleetMetadataKeyring(new FleetOrganizationDevices(fleet.Server.BaseAddress, fleet.NodeKey));
         var first = (await desktopKeys.RefreshAsync("work", CancellationToken.None))!;
@@ -363,7 +363,7 @@ public sealed partial class FleetConnectorTests
         await using var fleet = await FleetFixture.StartAsync();
         using var pcKey = DeviceIdentity.LoadOrCreate(Path.Combine(fleet.Root.Path, "pc"));
         using (var pc = new FleetServerClient(fleet.Server.BaseAddress, pcKey)) await pc.EnrollAsync((await fleet.Desktop.CreateEnrollmentTokenAsync()).Token, "PC", FleetDeviceKinds.Controller);
-        await fleet.Desktop.ApproveAsync(pcKey.DeviceId);
+        await fleet.Desktop.ApproveAsync(pcKey.DeviceId, FleetDeviceKinds.Controller);
         var desktopKeys = new FleetMetadataKeyring(new FleetOrganizationDevices(fleet.Server.BaseAddress, fleet.DesktopKey));
         var first = (await desktopKeys.RefreshAsync("work", CancellationToken.None))!;
 
@@ -474,7 +474,7 @@ public sealed partial class FleetConnectorTests
         await WaitForAsync(() => Task.FromResult(connector.State == FleetConnectorState.PendingApproval));
         Assert.AreEqual(FleetErrorCodes.PendingApproval, connector.LastError?.Code);
 
-        await fleet.Desktop.ApproveAsync(fleet.NodeKey.DeviceId);
+        await fleet.Desktop.ApproveAsync(fleet.NodeKey.DeviceId, FleetDeviceKinds.Node);
         await WaitForAsync(() => Task.FromResult(connector.State == FleetConnectorState.Online));
         await WaitForAsync(async () => (await fleet.Desktop.ListSessionsAsync()).Count == 1);
 
@@ -559,7 +559,7 @@ public sealed partial class FleetConnectorTests
             await desktop.SetUpAsync(server.SetupCode, "Alex", "Desktop");
             using var node = new FleetServerClient(server.BaseAddress, nodeKey);
             await node.EnrollAsync((await desktop.CreateEnrollmentTokenAsync()).Token, "Mac mini");
-            if (approve) await desktop.ApproveAsync(nodeKey.DeviceId);
+            if (approve) await desktop.ApproveAsync(nodeKey.DeviceId, FleetDeviceKinds.Node);
             return new FleetFixture(server, root, desktopKey, nodeKey, desktop);
         }
 

@@ -64,7 +64,7 @@ const approvalsApi: FleetApprovalsApi = {
   status: async () => ({ status: "ok", deviceId: "me", words: null, servers: [{ id: "home", url: "https://fleet.example", organization: "Home", link: "approved", connection: "online",
     problem: null, controller: true, spaces: [], recoveryKey: true }] }),
   devices: async () => ({ status: "ok", devices, message: null }),
-  approve: async request => { calls.push(JSON.stringify({ approve: request.deviceId, words: request.words })); devices = devices.map(item => ({ ...item, status: "approved" })); return { status: "ok", device: null, message: null }; },
+  approve: async request => { calls.push(JSON.stringify({ approve: request.deviceId, words: request.words, kind: request.kind })); devices = devices.map(item => ({ ...item, status: "approved" })); return { status: "ok", device: null, message: null }; },
   revoke: async request => { calls.push(JSON.stringify({ refuse: request.deviceId })); return { status: "ok", device: null, message: null }; },
   watch: async () => (async function* () { })(),
 };

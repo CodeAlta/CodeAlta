@@ -64,6 +64,27 @@ public sealed class LocalServerSetupTests
     }
 
     [TestMethod]
+    public async Task AServerThatIsStillStarting_IsClaimedOnlyOnceItServes()
+    {
+        var processes = new ScriptedProcesses();
+        processes.Files.Add(Path.Combine("/t", OperatingSystem.IsWindows() ? "altaserver.exe" : "altaserver"));
+        // altaserver status succeeds while a server holds the data root, before it writes its state or answers its health.
+        processes.Answers.Enqueue(new SshResult(0, "A server holds /data but has not written its state yet (it is starting).\n", ""));
+        processes.Answers.Enqueue(new SshResult(0, "CodeAlta Server starts at your sign-in, once the server that runs now exits.", ""));
+        processes.Answers.Enqueue(new SshResult(0, Starting.ReplaceLineEndings("\n"), ""));
+        processes.Answers.Enqueue(new SshResult(0, Running.ReplaceLineEndings("\n"), ""));
+        processes.Answers.Enqueue(new SshResult(0, "ABCD-EFGH\n", ""));
+        Uri? claimed = null;
+
+        await new LocalServerSetup(processes, "4.0.0").RunAsync(new LocalServerRequest { OwnerName = "Alex", ToolPath = "/t" },
+            (address, _, _) => { claimed = address; return Task.FromResult("link-1"); }, static _ => { }, TestContext.CancellationToken);
+
+        CollectionAssert.AreEqual(new[] { "status", "install --urls http://127.0.0.1:2586", "status", "status", "setup-code" }, processes.Commands.ToArray(),
+            "the claim waits for the health of the server, also for one that was starting already");
+        Assert.AreEqual(new Uri("http://127.0.0.1:2692"), claimed);
+    }
+
+    [TestMethod]
     public async Task AServiceThatCannotBeInstalled_FailsTheStartWithWhatItSaid()
     {
         var processes = new ScriptedProcesses();

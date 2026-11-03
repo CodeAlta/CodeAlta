@@ -131,9 +131,13 @@ public sealed class FleetServerRpcTests
             var pending = devices.Devices.First();
             Assert.AreEqual(("Mac mini", "pending", nodeKey.Fingerprint.ToShortWords()), (pending.Name, pending.Status, pending.Words), "the pending device comes first, with the words of its key");
             Assert.IsFalse(devices.Devices.Any(static device => device.Kind == FleetDeviceKinds.Recovery), "the recovery key is no device to list");
-            var mismatched = await service.ApproveAsync(new FleetServerDeviceRequest(epoch, linkId, pending.Id, "acid acorn actor agent alarm album"), token);
+            var mismatched = await service.ApproveAsync(new FleetServerDeviceRequest(epoch, linkId, pending.Id, "acid acorn actor agent alarm album", pending.Kind), token);
             Assert.AreEqual(FleetDeviceListException.Code, mismatched.Status, "other words than the device's: nothing signed");
-            var approved = await service.ApproveAsync(new FleetServerDeviceRequest(epoch, linkId, pending.Id, pending.Words), token);
+            Assert.AreEqual("invalid_request", (await service.ApproveAsync(new FleetServerDeviceRequest(epoch, linkId, pending.Id, pending.Words), token)).Status,
+                "an approval names the class the person approves");
+            Assert.AreEqual(FleetDeviceListException.Code, (await service.ApproveAsync(new FleetServerDeviceRequest(epoch, linkId, pending.Id, pending.Words,
+                FleetDeviceKinds.Controller), token)).Status, "a machine is not signed in as a controller: nothing signed");
+            var approved = await service.ApproveAsync(new FleetServerDeviceRequest(epoch, linkId, pending.Id, pending.Words, pending.Kind), token);
             Assert.AreEqual(("ok", "approved"), (approved.Status, approved.Device?.Status), approved.Message);
             Assert.AreEqual(true, (await service.StatusAsync(new FleetServerRequest(epoch), token)).Servers.Single().RecoveryKey, "the card says the owner keeps a recovery key");
             Assert.AreEqual(FleetDeviceKinds.Recovery, servers.Connections.Single().Connector!.Devices.Current!.Members[recoveryDeviceId].Kind, "in the signed list");

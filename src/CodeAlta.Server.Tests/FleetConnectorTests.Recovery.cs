@@ -166,7 +166,7 @@ public sealed partial class FleetConnectorTests
         await using var fleet = await FleetFixture.StartAsync();
         using var pcKey = DeviceIdentity.LoadOrCreate(Path.Combine(fleet.Root.Path, "pc"));
         using (var pc = new FleetServerClient(fleet.Server.BaseAddress, pcKey)) await pc.EnrollAsync((await fleet.Desktop.CreateEnrollmentTokenAsync()).Token, "PC", FleetDeviceKinds.Controller);
-        await fleet.Desktop.ApproveAsync(pcKey.DeviceId);
+        await fleet.Desktop.ApproveAsync(pcKey.DeviceId, FleetDeviceKinds.Controller);
         var desktopKeys = new FleetMetadataKeyring(new FleetOrganizationDevices(fleet.Server.BaseAddress, fleet.DesktopKey));
         var first = (await desktopKeys.RefreshAsync("work", CancellationToken.None))!;
 
@@ -198,11 +198,11 @@ public sealed partial class FleetConnectorTests
         Assert.IsFalse((await fleet.Desktop.ListMetadataKeysAsync()).Single().WrappedTo.Contains(laptopKey.DeviceId), "pending: no key");
 
         // The words compared are not the ones of its key: nothing is signed, it stays pending.
-        await Assert.ThrowsExactlyAsync<FleetDeviceListException>(() => fleet.Desktop.ApproveAsync(laptopKey.DeviceId, "otter river robin saddle salmon pearl"));
+        await Assert.ThrowsExactlyAsync<FleetDeviceListException>(() => fleet.Desktop.ApproveAsync(laptopKey.DeviceId, FleetDeviceKinds.Controller, "otter river robin saddle salmon pearl"));
         Assert.AreEqual("pending", (await fleet.Desktop.GetDeviceAsync(laptopKey.DeviceId)).Status);
 
         // The same words on both screens: approved, then it gets its copy.
-        await fleet.Desktop.ApproveAsync(laptopKey.DeviceId, laptopKey.Fingerprint.ToShortWords());
+        await fleet.Desktop.ApproveAsync(laptopKey.DeviceId, FleetDeviceKinds.Controller, laptopKey.Fingerprint.ToShortWords());
         await desktopKeys.RefreshAsync("work", CancellationToken.None);
         Assert.IsTrue((await fleet.Desktop.ListMetadataKeysAsync()).Single().WrappedTo.Contains(laptopKey.DeviceId));
     }

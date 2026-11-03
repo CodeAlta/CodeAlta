@@ -1,4 +1,5 @@
 using CodeAlta.Fleet.Identity;
+using CodeAlta.Fleet.Protocol;
 using CodeAlta.Fleet.Protocol.Api;
 using CodeAlta.Fleet.Server;
 using CodeAlta.Plugin.Statistics;
@@ -101,7 +102,7 @@ public sealed class NodeStatisticsTests
                 .RunAsync(["join", address.ToString(), "--token", enrollment.Token, "--data-root", root.DataRoot, "--name", "test-node", "--no-wait"]);
             Assert.AreEqual(NodeExitCodes.Success, joined);
             var pending = (await desktop.ListDevicesAsync(token)).Single(static device => device.Status == "pending");
-            await desktop.ApproveAsync(pending.Id, token);
+            await desktop.ApproveAsync(pending.Id, FleetDeviceKinds.Node, token);
 
             // The node counts its session from its journal and publishes it; its owner's device reads the sums.
             var days = new StatisticsQueryRequest(DateTime.UtcNow.AddDays(-1).ToString("yyyy-MM-dd"), DateTime.UtcNow.AddDays(1).ToString("yyyy-MM-dd"), null,

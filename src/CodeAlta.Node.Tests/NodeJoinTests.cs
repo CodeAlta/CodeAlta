@@ -1,5 +1,6 @@
 using CodeAlta.Catalog;
 using CodeAlta.Fleet.Identity;
+using CodeAlta.Fleet.Protocol;
 using CodeAlta.Fleet.Server;
 using CodeAlta.Server.Hosting;
 
@@ -63,7 +64,7 @@ public sealed class NodeJoinTests
 
             var pending = (await desktop.ListDevicesAsync(token)).Single(static device => device.Status == "pending");
             Assert.AreEqual("test-node", pending.Name);
-            await desktop.ApproveAsync(pending.Id, token);
+            await desktop.ApproveAsync(pending.Id, FleetDeviceKinds.Node, token);
 
             var deadline = DateTime.UtcNow + Patience;
             while (!(await desktop.ListMachinesAsync(token)).Any(static machine => machine.Online && machine.Inventory.Name == "test-node"))
