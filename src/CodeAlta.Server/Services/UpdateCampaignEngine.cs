@@ -256,6 +256,28 @@ internal sealed class UpdateCampaignEngine(UpdateCampaignLimits limits)
         return (cancelled, [.. cancelled.Where(static machine => machine.CancelPending).Select(static machine => machine.DeviceId)]);
     }
 
+    /// <summary>
+    /// Reconciles the server's step of a campaign, as recorded before a stop, with what the self-update of the server holds:
+    /// a step recorded as asked whose switch the self-update never recorded (no pending switch, no trial, no outcome of
+    /// that version since) was interrupted, and is taken again. The self-update takes the same version idempotently.
+    /// </summary>
+    /// <param name="campaign">The campaign.</param>
+    /// <param name="server">The status of the server's self-update.</param>
+    /// <param name="now">The time.</param>
+    /// <returns>The campaign whose server's step is to be taken again; null when nothing is to be resumed.</returns>
+    public static UpdateCampaignRecord? ResumeServerStep(UpdateCampaignRecord campaign, FleetUpdateStatus server, DateTimeOffset now)
+    {
+        ArgumentNullException.ThrowIfNull(campaign);
+        ArgumentNullException.ThrowIfNull(server);
+        if (campaign.State != FleetUpdateCampaignStates.UpdatingServer || campaign.ServerState is not (FleetUpdateMachineStates.Instructed or FleetUpdateMachineStates.Switching))
+            return null;
+        var target = campaign.TargetVersion;
+        // Running it, switching to it, or done with it since the step was asked: the next step records it.
+        if (Same(server.Running, target) || Same(server.Pending?.Version, target) || Same(server.Trial?.Version, target)) return null;
+        if (server.LastOutcome is { } outcome && Same(outcome.Version, target) && outcome.At >= campaign.UpdatedAt.AddSeconds(-1)) return null;
+        return campaign with { ServerState = FleetUpdateMachineStates.Pending, ServerMessage = null, UpdatedAt = now };
+    }
+
     /// <summary>Gets whether two versions are the same, once normalized.</summary>
     /// <param name="left">A version, or null.</param>
     /// <param name="right">Another.</param>

@@ -58,6 +58,8 @@ internal sealed class UpdateCampaignService : IAsyncDisposable
     private readonly HttpClient _http = new() { Timeout = TimeSpan.FromMinutes(2) };
     private Task _loop = Task.CompletedTask;
     private int _disposed;
+    // Written under the gate only.
+    private bool _serverStepsResumed;
 
     /// <summary>Initializes a new instance of the <see cref="UpdateCampaignService"/> class; <see cref="Start"/> runs it.</summary>
     public UpdateCampaignService(ICoordinatorStore store, PresenceRegistry presence, DirectoryHub directory, ServerUpdateStatusSource server, TimeProvider time,
@@ -366,6 +368,8 @@ internal sealed class UpdateCampaignService : IAsyncDisposable
             // Under the gate, as a campaign a person starts: the automatic policy never starts a second active campaign.
             if (feed is not null) await CheckPolicyAsync(organization.Id, feed, cancellationToken).ConfigureAwait(false);
             var moving = await _store.ListOutstandingUpdateCampaignsAsync(organization.Id, cancellationToken).ConfigureAwait(false);
+            if (!_serverStepsResumed && await ResumeServerStepsAsync(moving, cancellationToken).ConfigureAwait(false))
+                moving = await _store.ListOutstandingUpdateCampaignsAsync(organization.Id, cancellationToken).ConfigureAwait(false);
             if (moving.Count == 0) return;
             var inventory = (await _store.ListMachinesAsync(organization.Id, cancellationToken).ConfigureAwait(false))
                 .ToDictionary(static machine => machine.DeviceId, static machine => machine.ReadInventory()?.AppVersion, StringComparer.Ordinal);
@@ -379,6 +383,28 @@ internal sealed class UpdateCampaignService : IAsyncDisposable
         {
             _gate.Release();
         }
+    }
+
+    // Once, at the first step whose self-update status is known (it starts after this service): the server's step a stop
+    // interrupted before the self-update recorded its switch is taken again. Under the gate, a step asked and its
+    // application happen together, so only a stop leaves one asked and not recorded. Gives whether a campaign changed.
+    private async Task<bool> ResumeServerStepsAsync(IReadOnlyList<UpdateCampaignRecord> campaigns, CancellationToken cancellationToken)
+    {
+        FleetUpdateStatus? status = null;
+        if (_options.ApplyServerUpdate is not null && !_server.TryRead(out status)) return false;
+        _serverStepsResumed = true;
+        // A server that does not update itself fails the step at once when it is taken again.
+        status ??= _server.Read();
+        var changed = false;
+        foreach (var campaign in campaigns)
+        {
+            if (UpdateCampaignEngine.ResumeServerStep(campaign, status, _time.GetUtcNow()) is not { } resumed) continue;
+            await _store.SaveUpdateCampaignAsync(resumed, [], null, cancellationToken).ConfigureAwait(false);
+            _logger.LogInformation("Update campaign {Sequence}: a stop interrupted the server's step before its switch was recorded; it is taken again", campaign.Sequence);
+            changed = true;
+        }
+
+        return changed;
     }
 
     private async Task StepAsync(UpdateCampaignRecord campaign, Dictionary<string, string?> inventory, UpdateCampaignServer server, CancellationToken cancellationToken)
@@ -416,8 +442,9 @@ internal sealed class UpdateCampaignService : IAsyncDisposable
         {
             failure = await ApplyServerAsync(campaign, cancellationToken).ConfigureAwait(false);
         }
-        catch (UpdateException exception)
+        catch (Exception exception) when (exception is UpdateException or HttpRequestException or IOException or UnauthorizedAccessException or InvalidOperationException)
         {
+            // The step was recorded as asked: it fails here rather than stay asked with nothing under way.
             failure = exception.Message;
         }
 

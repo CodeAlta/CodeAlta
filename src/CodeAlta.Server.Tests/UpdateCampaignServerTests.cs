@@ -108,6 +108,53 @@ public sealed class UpdateCampaignServerTests
     }
 
     [TestMethod]
+    public async Task TheServersStepARestartInterruptedBeforeItsSwitchWasRecordedIsTakenAgain()
+    {
+        using var root = new TempDirectory();
+        using var owner = new TestDevice("Desktop");
+        string id;
+        await using (var first = await TestFleet.StartAsync(root: root, owner: owner))
+            id = (await first.CreateCampaignAsync("4.0.2", notBefore: first.Clock.Now.AddHours(1))).Id;
+
+        // The server stopped once it recorded its step as asked, before its self-update recorded the switch.
+        await using (var store = new SqliteCoordinatorStore(new SqliteCoordinatorStoreOptions { DatabasePath = new ServerPaths(root.Path).DatabasePath }))
+        {
+            await store.InitializeAsync();
+            var campaign = await store.GetUpdateCampaignAsync(id) ?? throw new InvalidOperationException("No campaign.");
+            await store.SaveUpdateCampaignAsync(campaign with
+            {
+                State = FleetUpdateCampaignStates.UpdatingServer, ServerState = FleetUpdateMachineStates.Instructed,
+            }, [], null);
+        }
+
+        await using var second = await TestFleet.StartAsync(root: root, owner: owner, setUp: false);
+        Assert.AreEqual("4.0.2", (await second.Server.WaitAppliedAsync()).Version, "the step is taken again");
+        await second.TickAsync();
+        Assert.AreEqual(FleetUpdateCampaignStates.Done, (await second.CampaignAsync(id)).State);
+        Assert.AreEqual(1, second.Server.Applied.Count, "once");
+    }
+
+    [TestMethod]
+    public void AServerStepUnderWayIsNotTakenAgain()
+    {
+        var at = new DateTimeOffset(2026, 11, 3, 8, 0, 0, TimeSpan.Zero);
+        var campaign = new UpdateCampaignRecord("c1", "org", 1, false, "4.0.2", UpdateFeeds.NuGetOrg, false, null, null, "{}", "sig", "desktop",
+            FleetUpdateCampaignStates.UpdatingServer, FleetUpdateMachineStates.Instructed, null, at, at);
+        FleetUpdateStatus Status(FleetUpdatePending? pending = null, FleetUpdateTrial? trial = null, FleetUpdateOutcome? outcome = null, string running = "4.0.1")
+            => new(running, null, null, null, trial, pending, [], outcome);
+        var later = at.AddMinutes(5);
+
+        Assert.AreEqual(FleetUpdateMachineStates.Pending, UpdateCampaignEngine.ResumeServerStep(campaign, Status(), later)?.ServerState, "nothing recorded: taken again");
+        Assert.IsNull(UpdateCampaignEngine.ResumeServerStep(campaign, Status(pending: new("4.0.2", "requested", at, 0, false)), later), "its switch waits");
+        Assert.IsNull(UpdateCampaignEngine.ResumeServerStep(campaign, Status(trial: new("4.0.2", at, 1)), later), "on trial");
+        Assert.IsNull(UpdateCampaignEngine.ResumeServerStep(campaign, Status(running: "4.0.2"), later), "it runs");
+        Assert.IsNull(UpdateCampaignEngine.ResumeServerStep(campaign, Status(outcome: new("4.0.2", "rolled_back", at.AddMinutes(1), null)), later), "it ended");
+        Assert.AreEqual(FleetUpdateMachineStates.Pending,
+            UpdateCampaignEngine.ResumeServerStep(campaign, Status(outcome: new("4.0.2", "failed", at.AddDays(-1), null)), later)?.ServerState, "an outcome of before");
+        Assert.IsNull(UpdateCampaignEngine.ResumeServerStep(campaign with { ServerState = FleetUpdateMachineStates.Pending }, Status(), later), "not asked yet");
+    }
+
+    [TestMethod]
     public async Task TheStoreHoldsOneActiveCampaignPerOrganization()
     {
         await using var fleet = await TestFleet.StartAsync();
