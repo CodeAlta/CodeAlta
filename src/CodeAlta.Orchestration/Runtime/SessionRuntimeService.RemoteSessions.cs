@@ -39,7 +39,15 @@ public interface IRemoteParentNotifications
 /// <param name="RunId">The run of the child it is about, or null.</param>
 /// <param name="ContentId">The content it comes from.</param>
 public sealed record RemoteChildNotification(string ChildSessionId, string? ChildProjectId, string MachineName, string ParentSessionId,
-    string Kind, string Body, string? RunId, string ContentId);
+    string Kind, string Body, string? RunId, string ContentId)
+{
+    /// <summary>
+    /// Gets the identity of the delivery, the same each time the machine gives it again (its machine and its id): a parent
+    /// that took a delivery of that identity is not prompted again with it, across retries and restarts. Null to deliver
+    /// it as it comes.
+    /// </summary>
+    public string? DeliveryId { get; init; }
+}
 
 /// <summary>A machine an agent can start sessions on, or send prompts to.</summary>
 /// <param name="Id">Its device id.</param>
@@ -233,6 +241,9 @@ public interface IRemoteChildSessions
 
 public sealed partial class SessionRuntimeService
 {
+    // The remote deliveries being given to their parent now, by correlation: the same one given twice at once goes once.
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, byte> _remoteDeliveriesInFlight = new(StringComparer.Ordinal);
+
     /// <summary>
     /// Gets or sets where the answers of sessions started by agents of other machines go: the outbox of the node, which
     /// the machine of each parent takes from. Null on a host that accepts no such session; their answers are then dropped
@@ -248,15 +259,45 @@ public sealed partial class SessionRuntimeService
 
     /// <summary>
     /// Delivers to a session of this host what its child on another machine says, as the answer of a child of this host
-    /// is delivered: it steers the running turn of the parent, or is queued for its next one.
+    /// is delivered: it steers the running turn of the parent, or is queued for its next one. A notification with a
+    /// <see cref="RemoteChildNotification.DeliveryId"/> the parent already took, or is taking, is not given again.
     /// </summary>
     /// <param name="notification">What the child says.</param>
-    /// <returns>Whether the parent was found and took it.</returns>
+    /// <returns>Whether the parent was found and took it, now or before.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="notification"/> is null.</exception>
-    public Task<bool> DeliverRemoteChildNotificationAsync(RemoteChildNotification notification)
+    public async Task<bool> DeliverRemoteChildNotificationAsync(RemoteChildNotification notification)
     {
         ArgumentNullException.ThrowIfNull(notification);
-        return DeliverParentNotificationCoreAsync(new ParentNotificationWork(
+        if (NormalizeOptionalText(notification.DeliveryId) is not { } deliveryId)
+            return await DeliverRemoteChildCoreAsync(notification, "remote-parent-" + Guid.NewGuid().ToString("N")).ConfigureAwait(false);
+
+        // The correlation of the prompt is kept with the parent (its prompt provenance): a delivery given again after a
+        // lost acknowledgement, or a restart, finds it there. The id comes from another machine: only its hash is written.
+        var correlationId = "remote-parent-" + Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(deliveryId)))[..32];
+        if (!_remoteDeliveriesInFlight.TryAdd(correlationId, 0)) return true;
+        try
+        {
+            if (await HasPromptOfCorrelationAsync(notification.ParentSessionId, correlationId).ConfigureAwait(false)) return true;
+            return await DeliverRemoteChildCoreAsync(notification, correlationId).ConfigureAwait(false);
+        }
+        finally
+        {
+            _remoteDeliveriesInFlight.TryRemove(correlationId, out _);
+        }
+    }
+
+    // Whether a parent was given, or has queued, a prompt of that correlation.
+    private async Task<bool> HasPromptOfCorrelationAsync(string parentSessionId, string correlationId)
+    {
+        var parent = await TryResolveSessionForParentDeliveryAsync(parentSessionId, CancellationToken.None).ConfigureAwait(false);
+        if (parent is null) return false;
+        var state = await ReadLatestLocalStateAsync(parent.SessionId, parent.CreatedAt, CancellationToken.None).ConfigureAwait(false);
+        return state?.PromptProvenance?.Any(prompt => string.Equals(prompt.SubmittedBy?.CorrelationId, correlationId, StringComparison.Ordinal)) == true
+            || state?.QueuedPrompts?.Any(prompt => string.Equals(prompt.SubmittedBy?.CorrelationId, correlationId, StringComparison.Ordinal)) == true;
+    }
+
+    private Task<bool> DeliverRemoteChildCoreAsync(RemoteChildNotification notification, string correlationId)
+        => DeliverParentNotificationCoreAsync(new ParentNotificationWork(
             SourceSessionId: notification.ChildSessionId,
             SourceProjectId: notification.ChildProjectId,
             SourceAgentId: notification.ChildSessionId,
@@ -265,9 +306,8 @@ public sealed partial class SessionRuntimeService
             Body: notification.Body,
             RunId: notification.RunId,
             ContentId: notification.ContentId,
-            CorrelationId: "remote-parent-" + Guid.NewGuid().ToString("N"),
+            CorrelationId: correlationId,
             SourceMachineName: notification.MachineName));
-    }
 
     /// <summary>
     /// Gets the permission mode a session runs in now, as a mode to compare with others (<see cref="Runtime.SessionPermissionModes.Rank"/>):

@@ -35,8 +35,10 @@ remote machine is its own inventory: a project it does not have can be cloned th
 "run the iOS tests on the Mac". The parent and the child keep their link across machines: the child's final answer,
 failure or `<notify-parent>` update comes back to the parent as a host prompt. The child's node keeps it in a durable
 outbox for the device that started the child; that device takes it over its channel to the node (direct or relayed,
-the server stores nothing), delivers it as the answer of a local child, then acknowledges it. The rules of `alta` still
-hold, across machines:
+the server stores nothing), delivers it as the answer of a local child, then acknowledges it. The device delivers only
+to the parent it recorded for that child on that node, whatever parent the node names, and only once: it records what
+it delivered, and the parent keeps the identity of each delivery with its prompts, so a delivery given again after a
+lost acknowledgement or a restart is acknowledged again, not delivered. The rules of `alta` still hold, across machines:
 
 - the request is signed by the device of the person on whose behalf the parent runs, the one its channel to the target
   authenticates, for that target, a time and a nonce, bound to the space, the project and the prompt; the target

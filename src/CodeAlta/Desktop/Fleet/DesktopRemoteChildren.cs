@@ -24,12 +24,17 @@ internal sealed record DesktopRemoteChild(string ChildSessionId, string MachineI
 /// (<c>doc/fleet/sessions-across-machines.md</c>): each request is signed with the key of this device, which its channels to
 /// those machines authenticate, with the limits of the session of the agent; the machine decides by its own policy. The
 /// lineage of each such session is recorded here too, and a loop takes what those sessions say to their parents from
-/// their machines and delivers it as the answer of a child of this computer is delivered, then acknowledges it.
+/// their machines and delivers it as the answer of a child of this computer is delivered, then acknowledges it. A delivery
+/// reaches only the parent recorded for its child on its machine, and only once: the deliveries delivered are recorded
+/// too, so that one a machine gives again (a lost acknowledgement, a restart) is acknowledged again, not delivered.
 /// </summary>
 internal sealed class DesktopRemoteChildren : IRemoteChildSessions, IAsyncDisposable
 {
     /// <summary>The most remote children this computer remembers; the oldest go first.</summary>
     public const int MaxRemembered = 500;
+
+    /// <summary>The most deliveries this computer remembers having delivered; the oldest go first.</summary>
+    public const int MaxReceived = 2000;
 
     private static readonly TimeSpan OnlineWait = TimeSpan.FromSeconds(10);
     private readonly CodeAltaHost _host;
@@ -42,7 +47,12 @@ internal sealed class DesktopRemoteChildren : IRemoteChildSessions, IAsyncDispos
     private readonly ConcurrentDictionary<string, TaskCompletionSource<RemoteChildAnswer>> _answers = new(StringComparer.OrdinalIgnoreCase);
     private readonly CancellationTokenSource _stop = new();
     private readonly Logger _logger = LogManager.GetLogger("CodeAlta.Desktop.Fleet");
+    private readonly string _receivedPath;
     private List<DesktopRemoteChild> _children;
+    // The deliveries this computer delivered, by machine and id, the oldest first: one taken again (its acknowledgement
+    // was lost, or this computer stopped before it) is acknowledged again, never delivered twice.
+    private readonly List<string> _received;
+    private readonly HashSet<string> _receivedSet;
     private Task _loop = Task.CompletedTask;
 
     /// <summary>Creates the service of an instance; <see cref="Start"/> starts the loop of its deliveries.</summary>
@@ -63,7 +73,10 @@ internal sealed class DesktopRemoteChildren : IRemoteChildSessions, IAsyncDispos
         _time = time ?? TimeProvider.System;
         _interval = interval ?? TimeSpan.FromSeconds(2);
         _path = Path.Combine(host.CatalogOptions.FleetRoot, "agents", "children.json");
-        _children = Read(_path);
+        _receivedPath = Path.Combine(host.CatalogOptions.FleetRoot, "agents", "received.json");
+        _children = Read(_path, DesktopRemoteChildrenJson.Default.ListDesktopRemoteChild);
+        _received = Read(_receivedPath, DesktopRemoteChildrenJson.Default.ListString);
+        _receivedSet = new HashSet<string>(_received, StringComparer.Ordinal);
     }
 
     /// <summary>Raised, on a thread of the pool, when a remote child was started or said something.</summary>
@@ -254,15 +267,28 @@ internal sealed class DesktopRemoteChildren : IRemoteChildSessions, IAsyncDispos
                 var taken = await client.TakeAgentDeliveriesAsync(null, cancellationToken).ConfigureAwait(false);
                 if (taken.Deliveries.Count == 0) continue;
                 var done = new List<string>(taken.Deliveries.Count);
+                var received = new List<string>(taken.Deliveries.Count);
                 foreach (var delivery in taken.Deliveries)
                 {
-                    if (await DeliverAsync(delivery, NameOf(host)).ConfigureAwait(false)) done.Add(delivery.Id);
+                    var key = ReceivedKey(machineId, delivery.Id);
+                    if (HasReceived(key) || received.Contains(key, StringComparer.Ordinal))
+                    {
+                        // Delivered at an earlier round, whose acknowledgement did not reach the machine, or earlier in this one.
+                        done.Add(delivery.Id);
+                        continue;
+                    }
+
+                    if (await DeliverAsync(delivery, machineId, NameOf(host), key).ConfigureAwait(false) is not { } outcome) continue;
+                    done.Add(delivery.Id);
+                    if (outcome) received.Add(key);
                 }
 
+                // Kept before the acknowledgement: what a machine gives again after a lost one, or after a restart, is known.
+                Receive(received);
                 if (done.Count > 0)
                 {
                     await client.AcknowledgeAgentDeliveriesAsync(done, cancellationToken).ConfigureAwait(false);
-                    delivered += done.Count;
+                    delivered += received.Count;
                     Changed?.Invoke();
                 }
             }
@@ -276,29 +302,84 @@ internal sealed class DesktopRemoteChildren : IRemoteChildSessions, IAsyncDispos
         return delivered;
     }
 
-    // A delivery goes to the script that waits for it, else to the parent, which takes it as the answer of a child;
-    // false keeps it in the outbox of the machine for the next round.
-    private async Task<bool> DeliverAsync(FleetAgentDelivery delivery, string machineName)
+    /// <summary>
+    /// Finds the child a delivery of a machine speaks for: the one this computer started on that machine, for the parent
+    /// the delivery names. The machine says who the parent is, and is not believed: a delivery of a child this computer
+    /// did not start there, or for another parent, has no lineage and reaches no session.
+    /// </summary>
+    /// <param name="children">The remote children this computer recorded.</param>
+    /// <param name="machineId">The device id of the machine the delivery was taken from.</param>
+    /// <param name="delivery">The delivery.</param>
+    /// <returns>The recorded child, or null when the delivery matches none.</returns>
+    internal static DesktopRemoteChild? FindLineage(IReadOnlyList<DesktopRemoteChild> children, string machineId, FleetAgentDelivery delivery)
+        => children.FirstOrDefault(child => string.Equals(child.MachineId, machineId, StringComparison.Ordinal)
+            && string.Equals(child.ChildSessionId, delivery.ChildSessionId, StringComparison.OrdinalIgnoreCase)
+            && string.Equals(child.ParentSessionId, delivery.ParentSessionId, StringComparison.OrdinalIgnoreCase));
+
+    // A delivery goes to the script that waits for it, else to the parent this computer recorded, which takes it as the
+    // answer of a child: true once delivered, false when it is dropped (acknowledged all the same), null to keep it in the
+    // outbox of the machine for the next round.
+    private async Task<bool?> DeliverAsync(FleetAgentDelivery delivery, string machineId, string machineName, string key)
     {
-        var child = Children.FirstOrDefault(value => string.Equals(value.ChildSessionId, delivery.ChildSessionId, StringComparison.OrdinalIgnoreCase));
-        if (child?.ForScript == true)
+        if (FindLineage(Children, machineId, delivery) is not { } child)
         {
-            if (delivery.Kind is "answer" or "error" && _answers.TryGetValue(delivery.ChildSessionId, out var answer))
+            Log($"{machineName} gave a {delivery.Kind} of {delivery.ChildSessionId} for {delivery.ParentSessionId}, which this computer did not start there for that session: it is dropped.");
+            return false;
+        }
+
+        if (child.ForScript)
+        {
+            if (delivery.Kind is "answer" or "error" && _answers.TryGetValue(child.ChildSessionId, out var answer))
                 answer.TrySetResult(delivery.Kind == "answer" ? new RemoteChildAnswer("completed", delivery.Body, null) : new RemoteChildAnswer("failed", null, delivery.Body));
             return true;
         }
 
         try
         {
-            if (!await _host.RuntimeService.DeliverRemoteChildNotificationAsync(new RemoteChildNotification(delivery.ChildSessionId, delivery.ChildProjectId, machineName,
-                    delivery.ParentSessionId, delivery.Kind, delivery.Body, delivery.RunId, delivery.ContentId)).ConfigureAwait(false))
-                Log($"The parent session {delivery.ParentSessionId} of {delivery.ChildSessionId} on {machineName} is gone: its {delivery.Kind} is dropped.");
+            if (!await _host.RuntimeService.DeliverRemoteChildNotificationAsync(new RemoteChildNotification(child.ChildSessionId, delivery.ChildProjectId, machineName,
+                    child.ParentSessionId, delivery.Kind, delivery.Body, delivery.RunId, delivery.ContentId) { DeliveryId = key }).ConfigureAwait(false))
+                Log($"The parent session {child.ParentSessionId} of {child.ChildSessionId} on {machineName} is gone: its {delivery.Kind} is dropped.");
             return true;
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
-            Log($"The {delivery.Kind} of {delivery.ChildSessionId} on {machineName} could not be delivered to {delivery.ParentSessionId}: {exception.Message}");
-            return false;
+            Log($"The {delivery.Kind} of {child.ChildSessionId} on {machineName} could not be delivered to {child.ParentSessionId}: {exception.Message}");
+            return null;
+        }
+    }
+
+    private static string ReceivedKey(string machineId, string deliveryId) => machineId + "/" + deliveryId;
+
+    private bool HasReceived(string key)
+    {
+        lock (_gate) return _receivedSet.Contains(key);
+    }
+
+    private void Receive(IReadOnlyList<string> keys)
+    {
+        if (keys.Count == 0) return;
+        lock (_gate)
+        {
+            foreach (var key in keys)
+            {
+                if (_receivedSet.Add(key)) _received.Add(key);
+            }
+
+            if (_received.Count > MaxReceived)
+            {
+                foreach (var forgotten in _received.Take(_received.Count - MaxReceived)) _receivedSet.Remove(forgotten);
+                _received.RemoveRange(0, _received.Count - MaxReceived);
+            }
+
+            try
+            {
+                Write(_receivedPath, JsonSerializer.SerializeToUtf8Bytes(_received, DesktopRemoteChildrenJson.Default.ListString));
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+            {
+                // Held in memory meanwhile; a parent also takes a delivery once by its id (SessionRuntimeService).
+                Log($"The deliveries received could not be written: {exception.Message}");
+            }
         }
     }
 
@@ -394,11 +475,7 @@ internal sealed class DesktopRemoteChildren : IRemoteChildSessions, IAsyncDispos
             if (_children.Count > MaxRemembered) _children.RemoveRange(0, _children.Count - MaxRemembered);
             try
             {
-                Directory.CreateDirectory(Path.GetDirectoryName(_path)!);
-                // Written beside, then moved over: a reader never sees half a file.
-                var staging = _path + ".tmp";
-                File.WriteAllBytes(staging, JsonSerializer.SerializeToUtf8Bytes(_children, DesktopRemoteChildrenJson.Default.ListDesktopRemoteChild));
-                File.Move(staging, _path, overwrite: true);
+                Write(_path, JsonSerializer.SerializeToUtf8Bytes(_children, DesktopRemoteChildrenJson.Default.ListDesktopRemoteChild));
             }
             catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
             {
@@ -410,11 +487,20 @@ internal sealed class DesktopRemoteChildren : IRemoteChildSessions, IAsyncDispos
         Changed?.Invoke();
     }
 
-    private static List<DesktopRemoteChild> Read(string path)
+    // Written beside, then moved over: a reader never sees half a file.
+    private static void Write(string path, byte[] bytes)
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        var staging = path + ".tmp";
+        File.WriteAllBytes(staging, bytes);
+        File.Move(staging, path, overwrite: true);
+    }
+
+    private static List<T> Read<T>(string path, System.Text.Json.Serialization.Metadata.JsonTypeInfo<List<T>> type)
     {
         try
         {
-            return File.Exists(path) ? JsonSerializer.Deserialize(File.ReadAllBytes(path), DesktopRemoteChildrenJson.Default.ListDesktopRemoteChild) ?? [] : [];
+            return File.Exists(path) ? JsonSerializer.Deserialize(File.ReadAllBytes(path), type) ?? [] : [];
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or JsonException)
         {
@@ -430,4 +516,5 @@ internal sealed class DesktopRemoteChildren : IRemoteChildSessions, IAsyncDispos
 
 [JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase, WriteIndented = true)]
 [JsonSerializable(typeof(List<DesktopRemoteChild>))]
+[JsonSerializable(typeof(List<string>))]
 internal sealed partial class DesktopRemoteChildrenJson : JsonSerializerContext;
