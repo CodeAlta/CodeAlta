@@ -162,6 +162,55 @@ public sealed class NodeServiceTests
     }
 
     [TestMethod]
+    public void Locator_StartsAWindowsToolFromTheCmdShimOfDotnet10()
+    {
+        // The layout of a RID-specific tool installed by .NET 10 on Windows: altanode.cmd, no altanode.exe shim.
+        var tools = @"C:\Users\alice\.dotnet\tools";
+        var store = tools + @"\.store\codealta.node\4.0.0\codealta.node.win-x64\4.0.0\tools\net10.0\win-x64\altanode.exe";
+        bool Exists(string path) => path.Replace('\\', '/') is "C:/Users/alice/.dotnet/tools/altanode.cmd" or "C:/Users/alice/.dotnet/tools/.store/codealta.node";
+
+        var fromStore = NodeExecutableLocator.Locate(store, @"C:\any\altanode.dll", Exists)!;
+        Assert.AreEqual(NodeExecutableKind.ToolShim, fromStore.Kind);
+        Assert.AreEqual("C:/Users/alice/.dotnet/tools/altanode.cmd", fromStore.Path.Replace('\\', '/'));
+        Assert.AreEqual(0, fromStore.PrefixArguments.Count);
+        StringAssert.Contains(NodeExecutableLocator.Describe(fromStore), "dotnet tool update");
+
+        // The app host shim of an older tool keeps its name.
+        bool ExistsExe(string path) => path.Replace('\\', '/') is "C:/Users/alice/.dotnet/tools/altanode.exe" or "C:/Users/alice/.dotnet/tools/altanode.cmd";
+        Assert.AreEqual("C:/Users/alice/.dotnet/tools/altanode.exe", NodeExecutableLocator.Locate(store, null, ExistsExe)!.Path.Replace('\\', '/'));
+    }
+
+    [TestMethod]
+    public void Windows_StartsTheCmdShimHeadless_AndRefusesWhatCmdCannotPass()
+    {
+        using var machine = new FakeServiceMachine(NodeServicePlatform.Windows);
+        var manager = new NodeServiceManager(machine.Environment);
+        var shim = new NodeExecutable(NodeExecutableKind.ToolShim, @"C:\Users\alice\.dotnet\tools\altanode.cmd", []);
+        var plan = manager.Plan(Request(machine) with { Executable = shim, RunArguments = ["run", "--port", "2600", "--name", "R&D (lab) box"] });
+        var exec = XDocument.Parse(plan.Definition).Root!.Element(Task + "Actions")!.Element(Task + "Exec")!;
+        Assert.AreEqual(@"C:\Windows\System32\conhost.exe", exec.Element(Task + "Command")!.Value);
+        // Windows runs a .cmd given to CreateProcess through cmd.exe /c, with the command line conhost passes in quotes.
+        Assert.AreEqual(@"--headless C:\Users\alice\.dotnet\tools\altanode.cmd run --port 2600 --name ""R&D (lab) box""", exec.Element(Task + "Arguments")!.Value);
+
+        foreach (var name in new[] { "a&b", "a|b", "a^b", "a<b", "50%", "50% off", "say \"hi\"", "a\nb" })
+        {
+            var refused = Assert.ThrowsExactly<NodeServiceException>(() => manager.Plan(Request(machine) with { Executable = shim, RunArguments = ["run", "--name", name] }), name);
+            StringAssert.Contains(refused.Message, "altanode.cmd");
+        }
+
+        var refusedPath = Assert.ThrowsExactly<NodeServiceException>(() => manager.Plan(Request(machine) with
+        {
+            Executable = shim with { Path = @"C:\Users\R&D\.dotnet\tools\altanode.cmd" },
+        }));
+        StringAssert.Contains(refusedPath.Message, "cmd.exe");
+        // An executable is started directly: cmd.exe never reads its arguments.
+        Assert.IsNotNull(manager.Plan(Request(machine) with
+        {
+            Executable = new NodeExecutable(NodeExecutableKind.Executable, @"C:\altanode\altanode.exe", []), RunArguments = ["run", "--name", "50%&more"],
+        }));
+    }
+
+    [TestMethod]
     public void Linux_InstallsAUserUnit_TurnsLingeringOn_AndRemovesIt()
     {
         using var machine = new FakeServiceMachine(NodeServicePlatform.Linux);

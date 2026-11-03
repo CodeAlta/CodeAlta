@@ -7,8 +7,8 @@ internal enum NodeExecutableKind
     Executable,
 
     /// <summary>
-    /// The shim of a .NET tool (<c>~/.dotnet/tools/altanode</c>): its path stays when <c>dotnet tool update</c> replaces
-    /// the version under <c>.store</c>, so the service follows the updates.
+    /// The shim of a .NET tool (<c>~/.dotnet/tools/altanode</c>, <c>altanode.cmd</c> on Windows): its path stays when
+    /// <c>dotnet tool update</c> replaces the version under <c>.store</c>, so the service follows the updates.
     /// </summary>
     ToolShim,
 
@@ -28,10 +28,11 @@ internal static class NodeExecutableLocator
     private const string ToolStoreFolder = ".store";
 
     /// <summary>
-    /// Finds the executable of this process as a service should start it. A .NET tool runs from its shim
-    /// (<c>~/.dotnet/tools/altanode</c>, an app host that loads the assembly of the installed version from
-    /// <c>.store</c>): the shim is kept, and an executable found under <c>.store</c> is replaced by the shim of its
-    /// tools folder. A process of the <c>dotnet</c> host runs the assembly of <c>altanode</c> with it.
+    /// Finds the executable of this process as a service should start it. A .NET tool runs from its shim in its tools
+    /// folder (<c>~/.dotnet/tools</c>), which <c>dotnet tool update</c> points at the new version under <c>.store</c>: an
+    /// app host of the same name, the symbolic link <c>altanode</c> .NET 10 writes on macOS and Linux, or the batch file
+    /// <c>altanode.cmd</c> it writes on Windows. The shim is kept, and an executable found under <c>.store</c> is replaced
+    /// by the shim of its tools folder. A process of the <c>dotnet</c> host runs the assembly of <c>altanode</c> with it.
     /// </summary>
     /// <param name="processPath">The executable of the process (<see cref="Environment.ProcessPath"/>).</param>
     /// <param name="assemblyPath">The path of the assembly of <c>altanode</c>, for the <c>dotnet</c> host.</param>
@@ -53,6 +54,12 @@ internal static class NodeExecutableLocator
         {
             var shim = System.IO.Path.Combine(toolsRoot, System.IO.Path.GetFileName(processPath));
             if (exists(shim)) return new NodeExecutable(NodeExecutableKind.ToolShim, shim, []);
+            // .NET 10 writes the shim of a RID-specific tool on Windows as a batch file, with no app host beside it.
+            if (processPath.EndsWith(".exe", StringComparison.OrdinalIgnoreCase))
+            {
+                var batch = System.IO.Path.Combine(toolsRoot, fileName + ".cmd");
+                if (exists(batch)) return new NodeExecutable(NodeExecutableKind.ToolShim, batch, []);
+            }
         }
 
         // The shim itself: its folder has the store of the package.

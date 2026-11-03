@@ -174,6 +174,19 @@ internal sealed class NodeServiceManager(NodeServiceEnvironment environment)
     private NodeServicePlan PlanWindows(NodeServiceSpec spec, List<string> notes)
     {
         var env = Environment;
+        if (NodeServiceDefinition.IsWindowsBatchFile(spec.Executable))
+        {
+            // The shim of a .NET 10 tool (altanode.cmd): Windows runs it through cmd.exe, which reads its command line.
+            foreach (var word in new[] { spec.Executable }.Concat(spec.Arguments))
+            {
+                if (NodeServiceDefinition.WindowsBatchUnsafeCharacter(word) is not { } unsafeCharacter) continue;
+                var what = char.IsControl(unsafeCharacter) ? "a control character" : $"'{unsafeCharacter}'";
+                throw new NodeServiceException(word == spec.Executable
+                    ? $"The task would start {spec.Executable} through cmd.exe, which cannot run a path with {what}: install CodeAlta Node in another folder."
+                    : $"The task would start {spec.Executable} through cmd.exe, which cannot pass {what} in '{word}': choose another value.");
+            }
+        }
+
         var task = NodeServiceDefinition.WindowsTaskName(spec.Name);
         var user = env.UserId ?? env.UserDisplayName ?? env.UserName;
         // A path of Windows, written with its separator whatever the OS that makes the plan.
