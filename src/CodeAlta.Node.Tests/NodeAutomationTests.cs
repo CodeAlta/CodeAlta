@@ -100,6 +100,13 @@ public sealed class NodeAutomationTests
         StringAssert.Contains((await RunAsync()).Message, "account credentials only");
         NodeAutomationPolicy.Save(fixture.Node.Host.CatalogOptions.FleetRoot, new NodeAutomationPolicy { Enabled = false });
         StringAssert.Contains((await RunAsync()).Message, "turned them off");
+        // The policy that turned them off breaks: what it said cannot be told, and nothing runs, with account credentials neither.
+        kind = AutomationCredentialKind.Account;
+        File.WriteAllText(Path.Combine(fixture.Node.Host.CatalogOptions.FleetRoot, NodeAutomationPolicy.FileName), "{ \"enabled\": fal");
+        var unreadable = await RunAsync();
+        Assert.AreEqual(AutomationRun.Failed, unreadable.Status);
+        StringAssert.Contains(unreadable.Message, "policy cannot be read");
+        kind = AutomationCredentialKind.Personal;
         NodeAutomationPolicy.Save(fixture.Node.Host.CatalogOptions.FleetRoot, new NodeAutomationPolicy());
 
         // Changed on the node by something else than the device: it does not run as it is now.

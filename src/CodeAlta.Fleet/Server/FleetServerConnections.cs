@@ -469,6 +469,8 @@ public sealed class FleetServerConnections : IAsyncDisposable
             return await _inner.ReadSessionsAsync(cancellationToken).ConfigureAwait(false);
         }
 
+        public ValueTask<IReadOnlyList<FleetLocalSession>> ReadRetainedSessionsAsync(CancellationToken cancellationToken) => _inner.ReadRetainedSessionsAsync(cancellationToken);
+
         public void Dispose() => _inner.Changed -= OnChanged;
 
         private void OnChanged() => Changed?.Invoke();

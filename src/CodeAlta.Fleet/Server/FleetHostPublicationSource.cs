@@ -126,6 +126,37 @@ public sealed class FleetHostPublicationSource : IFleetPublicationSource, IAsync
         return result;
     }
 
+    /// <inheritdoc />
+    public async ValueTask<IReadOnlyList<FleetLocalSession>> ReadRetainedSessionsAsync(CancellationToken cancellationToken)
+    {
+        var movedAway = _host.RuntimeService.Relinquishments.ListRelinquished();
+        if (movedAway.Count == 0) return [];
+        OwnedWorkspaceSnapshot snapshot;
+        try
+        {
+            snapshot = await _host.WorkspaceReads.ReadSnapshotAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch (OwnedWorkspaceBusyException)
+        {
+            return [];
+        }
+
+        var spaces = await _host.SpaceCatalog.LoadAsync(cancellationToken).ConfigureAwait(false);
+        var epochs = Epochs();
+        var result = new List<FleetLocalSession>();
+        foreach (var session in snapshot.Sessions.Where(session => movedAway.Contains(session.SessionId)))
+        {
+            // As it was published while this machine had it: its space, whether it is Private, its epoch here, its project.
+            var isPrivate = session.ViewState?.Options?.Private == true;
+            var (space, _, project) = Describe(session, snapshot, spaces);
+            var projectIdentity = isPrivate || project is null ? null : await FleetProjectKeys.IdentityAsync(project, _repositories, cancellationToken).ConfigureAwait(false);
+            result.Add(new FleetLocalSession(session.SessionId, space, isPrivate, epochs.TryGetValue(session.SessionId, out var epoch) ? epoch : 0, FleetSessionStates.Idle,
+                session.CreatedAt, session.UpdatedAt, ProjectIdentity: projectIdentity));
+        }
+
+        return result;
+    }
+
     // The counts of a session as its journal says them: turns and tool calls of its turns, tokens of its usage records,
     // without what a fork copied from its source or what was made outside CodeAlta (statistics count them the same way).
     // Read again when the session changed, and at most every few seconds while it is at work: a turn that writes many

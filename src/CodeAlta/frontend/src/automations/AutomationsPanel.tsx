@@ -3,12 +3,13 @@ import { Alert, Button, Callout, InputGroup, Menu, MenuDivider, MenuItem, Popove
 import type { AutomationItem, AutomationRunItem, WorkspaceProject, WorkspaceSession } from "#neoastra";
 import { ActivitySpinner } from "../ActivitySpinner";
 import { AppIcon } from "../AppIcon";
+import { ConfirmPopover } from "../ConfirmPopover";
 import { ModelIcon } from "../ProviderIcon";
 import { TriggerIcon } from "./TriggerIcon";
 import { sessionTime, timelineTime } from "../sessionTime";
 import { useShellLanguage } from "../shellLanguage";
 import { AutomationEditor } from "./AutomationEditor";
-import { automationTemplates, describeTrigger, describeTriggers, emptyForm, filterAutomations, formOf, placementLabel, placementProblem, runStatusLabel, runTone, runTriggerLabel, runsWithFacts,
+import { automationTemplates, describeTrigger, describeTriggers, emptyForm, filterAutomations, formOf, placementLabel, placementProblem, placementWait, runStatusLabel, runTone, runTriggerLabel, runsWithFacts,
   timelinePosition, timelineRows, triggerTone, waitsToBeAllowed,
   type AutomationForm, type AutomationScope, type AutomationTemplate } from "./automations";
 import type { AutomationsHub } from "./automationsHub";
@@ -82,20 +83,24 @@ function ScopeTag({ item }: { item: AutomationItem }) {
     <AppIcon name={chat ? "chat" : "folder"} size={13} /><span>{chat ? t("Chat") : item.projectName ?? item.projectFolder}</span></span>;
 }
 
-function AutomationCard({ item, paused, selected, busy, now, onSelect, onRun, onEdit, onToggle, onAllow, onDuplicate, onDelete }: {
+function AutomationCard({ item, paused, selected, busy, now, onSelect, onRun, onEdit, onToggle, onAllow, onStartPlaced, onDuplicate, onDelete }: {
   item: AutomationItem; paused: boolean; selected: boolean; busy: boolean; now: number;
-  onSelect: () => void; onRun: () => void; onEdit: () => void; onToggle: (enabled: boolean) => void; onAllow: () => void; onDuplicate: () => void; onDelete: () => void;
+  onSelect: () => void; onRun: () => void; onEdit: () => void; onToggle: (enabled: boolean) => void; onAllow: () => void; onStartPlaced: () => void; onDuplicate: () => void; onDelete: () => void;
 }) {
   const { t, locale } = useShellLanguage();
+  const [starting, setStarting] = useState(false);
   const tone = triggerTone(item.triggers[0]?.type);
   const next = item.nextRunAt ? sessionTime(item.nextRunAt, locale, now) : null;
   const last = item.lastRun ? sessionTime(item.lastRun.startedAt, locale, now) : null;
   // What keeps it from running as defined, or its triggers from seeing their repository, or its machine from having it.
   const problem = item.problem ?? placementProblem(item) ?? (paused ? null : item.watchProblem);
   const waits = !item.problem && waitsToBeAllowed(item);
+  // The machine it left may still run its copy: it is copied to its new machine once that one takes it away.
+  const handoff = item.problem ? null : placementWait(item);
   const placed = placementLabel(item, t);
   const state = problem ?? (item.running ? t("Running") : item.triggers.length === 0 ? t("Run it when you need it")
-    : waits ? t("Waits for you to allow it") : !item.enabled ? t("Disabled") : placed ?? (paused ? t("Paused") : next ? t("Next {time}", { time: next.label })
+    : waits ? t("Waits for you to allow it") : handoff !== null ? t("Waits for the machine it left") : !item.enabled ? t("Disabled")
+    : placed ?? (paused ? t("Paused") : next ? t("Next {time}", { time: next.label })
     : item.repository ? t("Watches {repository}", { repository: item.repository }) : t("Waits for its event")));
   const menu = <Menu>
     <MenuItem icon={<AppIcon name="edit" size={15} />} text={t("Edit…")} onClick={onEdit} />
@@ -117,10 +122,17 @@ function AutomationCard({ item, paused, selected, busy, now, onSelect, onRun, on
       {placed && <span className="automation-chip" title={item.placement?.message ?? undefined}><AppIcon name="server" size={12} /><span>{placed}</span></span>}
       {item.provider && <span className="automation-chip"><ModelIcon modelId={item.model} providerKey={item.provider} size={12} /><span>{item.model ?? item.provider}</span></span>}</div>
     <div className="automation-card-foot">
-      <span className="automation-card-state" data-problem={problem ? true : undefined} title={problem ?? next?.title}>{state}</span>
+      <span className="automation-card-state" data-problem={problem ? true : undefined} title={problem ?? (handoff || undefined) ?? next?.title}>{state}</span>
       {item.lastRun && <span className="automation-card-last" title={`${t(runStatusLabel(item.lastRun.status))} · ${last?.title ?? ""}`}><RunMark status={item.lastRun.status} />{last?.label}</span>}
       <span className="automation-card-actions">
         {waits && <Button size="small" intent="primary" disabled={busy} title={t("Let its triggers start it")} onClick={onAllow}>{t("Allow")}</Button>}
+        {handoff !== null && <span className="automation-start-anchor">
+          <Button size="small" intent="warning" disabled={busy} onClick={() => setStarting(true)}>{t("Start anyway…")}</Button>
+          {starting && <ConfirmPopover always placement="bottom-end" intent="warning" busy={busy} subject={item.name} confirmLabel={t("Start anyway")}
+            title={t("Start it on {machine} now?", { machine: item.placement?.machineName ?? t("Unavailable machine") })}
+            detail={t("The machine it left may still run its copy until it answers: both machines may run it meanwhile.")}
+            onConfirm={() => { setStarting(false); onStartPlaced(); }} onCancel={() => setStarting(false)} />}
+        </span>}
         <Button variant="minimal" size="small" intent="primary" disabled={busy || !!item.problem} icon={<AppIcon name="play" size={14} />} aria-label={t("Run now")} title={t("Run now")} onClick={onRun} />
         <PopoverNext content={menu} placement="bottom-end"><Button variant="minimal" size="small" icon={<AppIcon name="ellipsis" size={15} />} aria-label={t("Actions for {title}", { title: item.name })} title={t("More")} /></PopoverNext>
       </span>
@@ -292,6 +304,11 @@ export function AutomationsPanel({ hub, projects, sessions, projectId, providers
     const outcome = await during(item.id, () => hub.allow(item.id));
     if (!outcome.ok) setNotice(outcome.message ?? t("The automation could not be saved."));
   }
+  async function startPlaced(item: AutomationItem) {
+    setNotice(null);
+    const outcome = await during(item.id, () => hub.startPlaced(item.id));
+    if (!outcome.ok) setNotice(outcome.message ?? t("The automation could not be saved."));
+  }
   async function toggle(item: AutomationItem, enabled: boolean) {
     setNotice(null);
     const outcome = await during(item.id, () => hub.setEnabled(item.id, enabled));
@@ -338,7 +355,7 @@ export function AutomationsPanel({ hub, projects, sessions, projectId, providers
                 : <ul className="automation-cards">{shown.map(item => <AutomationCard key={item.id} item={item} paused={state.paused} selected={item.id === selected}
                     busy={busy.has(item.id)} now={now} onSelect={() => setSelected(item.id === selected ? null : item.id)} onRun={() => void run(item.id)}
                     onEdit={() => setEditing(formOf(item))} onToggle={enabled => void toggle(item, enabled)} onAllow={() => void allow(item)}
-                    onDuplicate={() => create({ ...formOf(item), id: null, name: t("{name} (copy)", { name: item.name }) })} onDelete={() => setDeleting(item)} />)}</ul>}
+                    onStartPlaced={() => void startPlaced(item)} onDuplicate={() => create({ ...formOf(item), id: null, name: t("{name} (copy)", { name: item.name }) })} onDelete={() => setDeleting(item)} />)}</ul>}
             </section>
           </>}
         <Templates onPick={fromTemplate} chatOnly={projects.length === 0} />

@@ -165,6 +165,34 @@ public sealed class FleetStatisticsTests
     }
 
     [TestMethod]
+    public async Task ASessionMovedAwayWhileDisconnected_StillPublishesTheStatisticsThisMachineCounted()
+    {
+        await using var fleet = await StatisticsFixture.StartAsync();
+        var sessions = new FakeSessions();
+        var statistics = new FakeStatistics();
+        statistics.Set("s1", Usage(Morning, "claude-opus-5-5", 100, 10));
+        sessions.Set(Session("s1", "work"));
+        var outbox = Path.Combine(fleet.Root.Path, "outbox.json");
+        await using (var connector = fleet.NodeConnector(sessions, statistics, static _ => true, outbox))
+        {
+            connector.Start();
+            await WaitForTotalsAsync(fleet, static measures => measures.InputTokens == 100);
+        }
+
+        // Disconnected, the session goes on here, then moves to another machine: this machine no longer owns it, and keeps
+        // what it counted of it, which the other machine leaves out of its own.
+        statistics.Set("s1", Usage(Morning, "claude-opus-5-5", 300, 30));
+        sessions.Set();
+        sessions.SetRetained(Session("s1", "work"));
+        await using (var again = fleet.NodeConnector(sessions, statistics, static _ => true, outbox))
+        {
+            again.Start();
+            var totals = await WaitForTotalsAsync(fleet, static measures => measures.InputTokens == 300);
+            Assert.AreEqual(30L, totals.OutputTokens);
+        }
+    }
+
+    [TestMethod]
     public async Task ASetTheServerRefuses_StopsTheStatisticsOfTheConnection_NeverTheConnection()
     {
         await using var fleet = await StatisticsFixture.StartAsync();
@@ -304,6 +332,7 @@ public sealed class FleetStatisticsTests
     private sealed class FakeSessions : IFleetPublicationSource
     {
         private IReadOnlyList<FleetLocalSession> _sessions = [];
+        private IReadOnlyList<FleetLocalSession> _retained = [];
 
         public event Action? Changed;
 
@@ -313,10 +342,19 @@ public sealed class FleetStatisticsTests
             Changed?.Invoke();
         }
 
+        // Sessions moved to another machine, whose statistics this machine keeps.
+        public void SetRetained(params FleetLocalSession[] sessions)
+        {
+            Volatile.Write(ref _retained, sessions);
+            Changed?.Invoke();
+        }
+
         public ValueTask<FleetMachineInventory> ReadInventoryAsync(CancellationToken cancellationToken)
             => ValueTask.FromResult(new FleetMachineInventory("Mac mini", "macos", "arm64", "4.0.0", ["moves"], null, ["anthropic"]));
 
         public ValueTask<IReadOnlyList<FleetLocalSession>> ReadSessionsAsync(CancellationToken cancellationToken) => ValueTask.FromResult(Volatile.Read(ref _sessions));
+
+        public ValueTask<IReadOnlyList<FleetLocalSession>> ReadRetainedSessionsAsync(CancellationToken cancellationToken) => ValueTask.FromResult(Volatile.Read(ref _retained));
     }
 
     /// <summary>The statistics of sessions a test sets: each set is a new revision.</summary>

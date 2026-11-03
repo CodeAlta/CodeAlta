@@ -151,6 +151,19 @@ internal sealed class AutomationsService
         return _automations!.Allow(request.Id) ? new("ok", request.Id, null) : new("refused", null, "There is no such automation.");
     }
 
+    /// <summary>
+    /// Starts an automation on the machine it was placed on without waiting for the machine it left to take its copy away:
+    /// the person chooses it, knowing both machines may run it until that one answers.
+    /// </summary>
+    [NeoRpcMethod("startPlaced")]
+    public AutomationMutationResponse StartPlaced(AutomationIdRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        if (Refuse(request.ExpectedEpoch) is { } refused) return new(refused, null, null);
+        if (!AutomationDefinition.IsId(request.Id)) return new("invalid_request", null, null);
+        return _placement?.ForceHandoff(request.Id) == true ? new("ok", request.Id, null) : new("refused", null, "It waits for no other machine.");
+    }
+
     /// <summary>Pauses every trigger, or starts them again. Running an automation by hand still works while paused.</summary>
     [NeoRpcMethod("setPaused")]
     public AutomationMutationResponse SetPaused(AutomationPauseRequest request)
@@ -446,7 +459,10 @@ internal sealed record AutomationItem(string Id, string Name, bool Enabled, stri
 /// <summary>Where an automation that runs on a paired machine stands there.</summary>
 /// <param name="MachineId">The machine.</param>
 /// <param name="MachineName">Its name; null when no paired machine has that id.</param>
-/// <param name="State"><c>copied</c>, <c>pending</c> (copied once the machine answers) or <c>failed</c> (the machine refused it, see the message).</param>
+/// <param name="State">
+/// <c>copied</c>, <c>pending</c> (copied once the machine answers), <c>waiting</c> (copied once the machine it left took its
+/// copy away, or when the person starts it anyway) or <c>failed</c> (the machine refused it, see the message).
+/// </param>
 /// <param name="Message">Why it is pending or failed.</param>
 /// <param name="CopiedAt">When the machine last took it.</param>
 internal sealed record AutomationPlacementItem(string MachineId, string? MachineName, string State, string? Message, DateTimeOffset? CopiedAt);

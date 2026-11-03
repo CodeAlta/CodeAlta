@@ -46,6 +46,19 @@ internal sealed class DesktopServerAutomationRoute : IDisposable
         return FleetAutomationSigning.Seal(content, automationId, number, machineId, list, _identity);
     }
 
+    /// <summary>
+    /// Says whether the machine is a node of this computer's person, as the device list of the server verifies it now: the
+    /// authority the server and the machine check for each version this computer signs for it.
+    /// </summary>
+    /// <exception cref="FleetDeviceListException">The device list does not verify.</exception>
+    internal async Task<bool> IsOwnMachineAsync(string machineId, CancellationToken cancellationToken)
+    {
+        var list = await _devices.RefreshAsync(cancellationToken).ConfigureAwait(false);
+        return list.Members.TryGetValue(machineId, out var machine) && machine.Kind == FleetDeviceKinds.Node && !list.Removed.Contains(machineId)
+            && list.Members.TryGetValue(_identity.DeviceId, out var self) && self.Kind == FleetDeviceKinds.Controller && !list.Removed.Contains(self.DeviceId)
+            && self.OwnerId is { } person && string.Equals(machine.OwnerId, person, StringComparison.Ordinal);
+    }
+
     /// <summary>Gives a signed version to the server.</summary>
     internal Task<AutomationDto> PutAsync(FleetSignedAutomationVersion signed, CancellationToken cancellationToken) => _client.PutAutomationAsync(signed, cancellationToken);
 

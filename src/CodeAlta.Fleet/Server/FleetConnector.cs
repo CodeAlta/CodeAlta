@@ -767,11 +767,19 @@ public sealed partial class FleetConnector : IAsyncDisposable
 
     // The statistics of the sessions published, as a set per session: read again when the revision of its facts, its epoch or
     // its project changed, and sent when its set changed. The sessions no longer published have their sets taken back; Private
-    // sessions and those of spaces not linked to this server never had one.
+    // sessions and those of spaces not linked to this server never had one. A session moved to another machine keeps its set:
+    // what this machine counted of it is this machine's, whoever owns the session now, and is still sent when it changed
+    // before the move but was not published yet.
     private async Task PublishStatisticsAsync(FleetConnection connection, IReadOnlyList<FleetLocalSession> all, IReadOnlyList<FleetLocalSession> published,
         CancellationToken stop)
     {
         if (_options.Statistics is not { } source || _statistics is not { } outbox || !_statisticsServed) return;
+        if (_options.Source is { } sessions && await sessions.ReadRetainedSessionsAsync(stop).ConfigureAwait(false) is { Count: > 0 } retained)
+        {
+            all = [.. all, .. retained];
+            published = [.. published, .. retained.Where(IsPublished)];
+        }
+
         var withdrawals = outbox.Withdrawals(all.Where(session => !IsPublished(session)).Select(static session => session.SessionId), MaxStatisticsSetsPerBatch);
         if (withdrawals.Count > 0)
         {

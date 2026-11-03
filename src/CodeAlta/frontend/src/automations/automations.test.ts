@@ -4,7 +4,7 @@ import type { AutomationItem, AutomationRunItem, AutomationTriggerItem } from "#
 import { locales, translate, type Locale, type MessageKey } from "../localization";
 import { defaultSessionSettings } from "../sessionSettings/sessionSettings";
 import { automationTemplates, dayName, denseTimeline, describeTrigger, describeTriggers, emptyForm, filterAutomations, formOf, formProblem, formSettings, inputOf, isSchedule, maximumNameLength,
-  maximumPromptLength, needsProject, newTrigger, openableRun, placementLabel, placementProblem, scriptArgumentsTemplate, runStatusLabel, runTone, runTriggerLabel, runsWithFacts, sessionOrigin, sessionSettingsOf, timelinePosition, timelineRows, triggerIcon, triggerLabel,
+  maximumPromptLength, needsProject, newTrigger, openableRun, placementLabel, placementProblem, placementWait, scriptArgumentsTemplate, runStatusLabel, runTone, runTriggerLabel, runsWithFacts, sessionOrigin, sessionSettingsOf, timelinePosition, timelineRows, triggerIcon, triggerLabel,
   triggerTone, triggerTypes, type AutomationForm } from "./automations";
 
 const english = (key: MessageKey, parameters?: Readonly<Record<string, string | number>>) => translate("en", key, parameters);
@@ -119,6 +119,10 @@ test("an automation of yours can run on a paired machine; one of a project, and 
   assert.equal(placementProblem(item("a", { runsOn: "mini", placement: { machineId: "mini", machineName: "Mac mini", state: "failed", message: "Refused.", copiedAt: null } })), "Refused.");
   assert.equal(placementProblem(item("a", { runsOn: "mini", placement: { machineId: "mini", machineName: "Mac mini", state: "pending", message: "Offline.", copiedAt: null } })), null,
     "A machine that is away is not a problem: it takes the automation when it answers.");
+  const waiting = item("a", { runsOn: "mini", placement: { machineId: "mini", machineName: "Mac mini", state: "waiting", message: "It waits until Laptop takes away its copy.", copiedAt: null } });
+  assert.equal(placementWait(waiting), "It waits until Laptop takes away its copy.");
+  assert.equal(placementProblem(waiting), null, "A machine that waits for the one it left is no problem of its own.");
+  assert.equal(placementWait(item("a", { runsOn: "mini", placement: { machineId: "mini", machineName: "Mac mini", state: "copied", message: null, copiedAt: null } })), null);
   for (const locale of locales) assert.ok(translate(locale, "On {machine}", { machine: "M" }).includes("M"), locale);
 });
 

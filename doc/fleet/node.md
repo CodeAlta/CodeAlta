@@ -132,8 +132,8 @@ labels, its local policy).
   - Each due time is claimed once with a lease (`fleet/automation-claims.json`), so a time fired twice or caught up
     after a restart runs once; a claim is never taken again (at most once).
   - Before a run starts, the node reads its policy (`fleet/automation-policy.json`: automations on or off, credentials
-    `any` or `account` only) and derives the credential kind from how the provider starts; `unknown` is refused, and a
-    refused run is recorded with its reason, without a session.
+    `any` or `account` only; a policy file that cannot be read runs nothing) and derives the credential kind from how
+    the provider starts; `unknown` is refused, and a refused run is recorded with its reason, without a session.
 - **Statistics are counted on nodes.** The statistics engine runs headless too, from the node's first day; the node
   publishes its facts as a versioned set per session ([statistics](statistics.md)).
 - **The node's host can ask.** Unlike today's headless runs of `altacli`, which grant everything (`FullTrust`), a node

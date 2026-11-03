@@ -69,6 +69,7 @@
 .automation-card-state[data-problem] { color: var(--danger, #e76a6e); }
 .automation-card-last { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
 .automation-card-actions { display: inline-flex; align-items: center; gap: 2px; }
+.automation-start-anchor { position: relative; display: inline-flex; }
 .automation-allow > .bp6-callout-body, .automation-allow { display: flex; align-items: center; gap: 10px; }
 .automation-allow span { flex: 1; min-width: 0; }
 

@@ -16,7 +16,8 @@ namespace CodeAlta.Node;
 /// <summary>
 /// The local policy of a node for automations (<c>doc/fleet/access-control.md</c>, "What the node decides"), kept by its
 /// owner in <c>fleet/automation-policy.json</c> of the state root and read again before each run starts, so that a change
-/// applies at once. A file that is missing or cannot be read is the default policy.
+/// applies at once. A missing file is the default policy; a file that cannot be read or does not hold a policy runs
+/// nothing, so that a policy that turned automations off never lets them run by breaking.
 /// </summary>
 internal sealed record NodeAutomationPolicy
 {
@@ -35,21 +36,30 @@ internal sealed record NodeAutomationPolicy
     /// <summary>Gets the credentials its runs may use: <see cref="AnyCredentials"/> (the default, the owner's own machine) or <see cref="AccountCredentials"/>.</summary>
     public string Credentials { get; init; } = AnyCredentials;
 
-    /// <summary>Reads the policy of a fleet folder; the default when the file is missing or cannot be read.</summary>
+    /// <summary>Gets why the file of the policy was not read (it runs nothing then); null for a policy read, or the default of a missing file.</summary>
+    [JsonIgnore]
+    public string? Problem { get; init; }
+
+    /// <summary>Reads the policy of a fleet folder: the default when the file is missing, a policy that runs nothing when it cannot be read.</summary>
     internal static NodeAutomationPolicy Load(string fleetRoot)
     {
+        var path = Path.Combine(fleetRoot, FileName);
         try
         {
-            var path = Path.Combine(fleetRoot, FileName);
             if (!File.Exists(path)) return new();
             using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
-            return JsonSerializer.Deserialize(stream, NodeAutomationJsonContext.Default.NodeAutomationPolicy) ?? new();
+            var policy = JsonSerializer.Deserialize(stream, NodeAutomationJsonContext.Default.NodeAutomationPolicy);
+            if (policy is null) return Closed($"{path} holds no policy");
+            if (policy.Credentials is not (AnyCredentials or AccountCredentials)) return Closed($"{path} names credentials '{policy.Credentials}', neither '{AnyCredentials}' nor '{AccountCredentials}'");
+            return policy;
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or JsonException or NotSupportedException)
         {
-            // An unreadable policy runs nothing it could have refused: the strictest reading.
-            return new() { Credentials = AccountCredentials };
+            // What the owner set cannot be told: it may have turned automations off, so nothing runs until it reads again.
+            return Closed($"{path} cannot be read: {exception.Message}");
         }
+
+        static NodeAutomationPolicy Closed(string problem) => new() { Enabled = false, Credentials = AccountCredentials, Problem = problem };
     }
 
     /// <summary>Writes the policy of a fleet folder, replacing the file at once.</summary>
@@ -207,6 +217,8 @@ internal sealed partial class NodeAutomations : IFleetNodeAutomations, IAutomati
         ArgumentNullException.ThrowIfNull(entry);
         ArgumentNullException.ThrowIfNull(provider);
         var policy = NodeAutomationPolicy.Load(_fleetRoot);
+        if (policy.Problem is { } problem)
+            return $"This machine runs no automations while its policy cannot be read ({problem}): its owner sets it again with altanode automations policy.";
         if (!policy.Enabled) return "This machine runs no automations: its owner turned them off.";
         if (entry.Source.IsAssigned && CheckAssignment(entry) is { } refused) return refused;
 

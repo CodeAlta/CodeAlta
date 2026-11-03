@@ -39,6 +39,34 @@ public sealed class NodeAutomationCommandTests
     }
 
     [TestMethod]
+    public async Task Policy_ThatCannotBeRead_RunsNothing_SaysWhy_AndIsSetAgainByItsOwner()
+    {
+        using var root = new NodeTestRoot();
+        var fleetRoot = FleetRoot(root);
+        Assert.IsTrue(NodeAutomationPolicy.Load(fleetRoot) is { Enabled: true, Credentials: NodeAutomationPolicy.AnyCredentials }, "a missing policy is the default");
+
+        Directory.CreateDirectory(fleetRoot);
+        var path = Path.Combine(fleetRoot, NodeAutomationPolicy.FileName);
+        foreach (var broken in new[] { "{ \"enabled\": fal", "null", "{ \"credentials\": \"everything\" }" })
+        {
+            File.WriteAllText(path, broken);
+            var policy = NodeAutomationPolicy.Load(fleetRoot);
+            Assert.IsFalse(policy.Enabled, $"'{broken}' runs nothing");
+            Assert.AreEqual(NodeAutomationPolicy.AccountCredentials, policy.Credentials);
+        }
+
+        var (code, output, _) = await RunAsync(root, "automations", "policy");
+        Assert.AreEqual(NodeExitCodes.Success, code);
+        StringAssert.Contains(output, "its policy cannot be read");
+        StringAssert.Contains(output, path);
+
+        (code, output, _) = await RunAsync(root, "automations", "policy", "on");
+        Assert.AreEqual(NodeExitCodes.Success, code);
+        StringAssert.Contains(output, "runs the automations given to it");
+        Assert.IsTrue(NodeAutomationPolicy.Load(fleetRoot).Enabled, "what its owner set replaces the broken file");
+    }
+
+    [TestMethod]
     public async Task ListAndRuns_ShowWhatDevicesGave_AndTheirRuns_AsTheNodeWroteThem()
     {
         using var root = new NodeTestRoot();

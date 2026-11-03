@@ -8,7 +8,9 @@ namespace CodeAlta.Node;
 internal sealed partial class NodeAutomations
 {
     private const int RunsReported = 20;
+    // The most runs and the most schedules one report holds: the server refuses a report with more.
     private const int RunsPerReport = 100;
+    private const int SchedulesPerReport = 100;
     private static readonly TimeSpan ClaimTimeout = TimeSpan.FromSeconds(10);
     private static readonly TimeSpan ReportDelay = TimeSpan.FromMilliseconds(500);
 
@@ -156,11 +158,14 @@ internal sealed partial class NodeAutomations
         try
         {
             string[] ids;
+            string[] held;
             Dictionary<string, long> numbers;
             lock (_gate)
             {
                 var given = _assignments.Where(pair => pair.Value.Via == linkId).ToArray();
                 ids = [.. given.Select(static pair => pair.Key)];
+                // What was taken away has no schedule: its tombstone only keeps its number.
+                held = [.. given.Where(static pair => !pair.Value.Removed).Select(static pair => pair.Key)];
                 numbers = given.ToDictionary(static pair => pair.Key, static pair => pair.Value.Number, StringComparer.Ordinal);
             }
 
@@ -182,23 +187,28 @@ internal sealed partial class NodeAutomations
                 }
             }
 
-            // When their schedules are next due here, sent with the first batch, or alone when only they changed.
+            // When their schedules are next due here, sent beside the batches of runs, or alone when only they changed.
             if (!_reportedSchedules.TryGetValue(linkId, out var dues) || all) _reportedSchedules[linkId] = dues = new(StringComparer.Ordinal);
+            var holding = held.ToHashSet(StringComparer.Ordinal);
+            foreach (var id in dues.Keys.Where(id => !holding.Contains(id)).ToArray()) dues.Remove(id);
             var schedules = new List<FleetAutomationSchedule>();
-            foreach (var id in ids)
+            foreach (var id in held)
             {
                 var next = Engine.NextDue(id);
                 if (!dues.TryGetValue(id, out var known) || known != next) schedules.Add(new FleetAutomationSchedule(id, next));
             }
 
-            List<(FleetAutomationRunFact Fact, string Key)[]> batches = changed.Count > 0 ? [.. changed.Chunk(RunsPerReport)] : schedules.Count > 0 ? [[]] : [];
-            foreach (var batch in batches)
+            // Each report within what the server takes: as many runs and as many schedules at most.
+            var runBatches = changed.Chunk(RunsPerReport).ToArray();
+            var scheduleBatches = schedules.Chunk(SchedulesPerReport).ToArray();
+            for (var index = 0; index < Math.Max(runBatches.Length, scheduleBatches.Length); index++)
             {
-                var facts = new FleetAutomationRunFacts([.. batch.Select(static item => item.Fact)]) { Schedules = schedules.Count > 0 ? schedules : null };
+                var batch = index < runBatches.Length ? runBatches[index] : [];
+                var due = index < scheduleBatches.Length ? scheduleBatches[index] : null;
+                var facts = new FleetAutomationRunFacts([.. batch.Select(static item => item.Fact)]) { Schedules = due };
                 if (!await report(linkId, facts, cancellationToken).ConfigureAwait(false)) return;
                 foreach (var (fact, key) in batch) reported[fact.RunId] = key;
-                foreach (var schedule in schedules) dues[schedule.AutomationId] = schedule.NextDue;
-                schedules = [];
+                foreach (var schedule in due ?? []) dues[schedule.AutomationId] = schedule.NextDue;
             }
 
             // Forgets what no longer is among the latest runs.
