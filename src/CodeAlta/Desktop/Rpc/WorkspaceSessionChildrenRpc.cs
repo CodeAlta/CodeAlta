@@ -14,6 +14,22 @@ internal sealed partial class WorkspaceService
     private Func<CancellationToken, Task<OwnedWorkspaceSnapshot>>? _readAllSessions;
     private Func<IReadOnlyCollection<string>, Task<IReadOnlySet<string>>>? _sessionsAtWork;
     private Func<string, string?, string, string, IReadOnlyCollection<string>, Task<OwnedSessionTreeDeletion>>? _deleteSessionTree;
+    // The machines whose sessions agents of this computer started: their rows are children of sessions here.
+    private Func<IReadOnlyList<CodeAlta.Desktop.Fleet.RemoteSessionHost>>? _remoteHosts;
+
+    // The sessions machines list as children of a session of the tree (agents of this computer started them there),
+    // with their machine, one level below their parent; never deleted with the tree, which is of this computer.
+    private IEnumerable<WorkspaceSessionChild> RemoteChildren(string rootId, IEnumerable<(string SessionId, int Depth)> descendants)
+    {
+        if (_remoteHosts?.Invoke() is not { Count: > 0 } remotes) return [];
+        var depths = descendants.ToDictionary(static value => value.SessionId, static value => value.Depth, StringComparer.OrdinalIgnoreCase);
+        depths[rootId] = 0;
+        var empty = new WorkspaceSnapshot(true, [], [], false, false, false);
+        return WithRemoteSessions(empty, remotes).Sessions
+            .Where(session => session.MachineId is not null && session.ParentSessionId is { } parent && depths.ContainsKey(parent))
+            .Take(MaximumShownChildren)
+            .Select(session => new WorkspaceSessionChild(session, session.ParentSessionId!, depths[session.ParentSessionId!] + 1, session.RemoteState is "working" or "waiting"));
+    }
 
     internal WorkspaceService(OwnedSessionWorkspace reads, ProjectCatalog catalog, string epoch,
         Func<IReadOnlyCollection<string>, Task<IReadOnlySet<string>>> sessionsAtWork,
@@ -52,10 +68,14 @@ internal sealed partial class WorkspaceService
             var children = shown.Where(descendant => rows.ContainsKey(descendant.Session.SessionId))
                 .Select(descendant => new WorkspaceSessionChild(rows[descendant.Session.SessionId], descendant.ParentSessionId, descendant.Depth,
                     atWork.Contains(descendant.Session.SessionId)))
+                .Concat(RemoteChildren(root.SessionId, shown.Select(static descendant => (descendant.Session.SessionId, descendant.Depth))))
                 .ToArray();
             var complete = ids.Length <= MaximumDescendants;
+            // Those of other machines are counted with the others; the identities given for a deletion are of this computer only.
+            var remote = children.Where(static child => child.Session.MachineId is not null).ToArray();
             return new("ok", _importEpoch, root.SessionId, rootRow, atWork.Contains(root.SessionId), children, complete ? ids : [],
-                descendants.Count(static descendant => descendant.Depth == 1), descendants.Count, children.Length < descendants.Count);
+                descendants.Count(static descendant => descendant.Depth == 1) + remote.Count(static child => child.Depth == 1), descendants.Count + remote.Length,
+                children.Length - remote.Length < descendants.Count);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
         catch (ObjectDisposedException) { return Reply("closed"); }

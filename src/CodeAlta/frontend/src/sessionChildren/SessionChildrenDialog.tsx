@@ -5,6 +5,7 @@ import { ActivitySpinner } from "../ActivitySpinner";
 import { AppIcon } from "../AppIcon";
 import { AppWindow } from "../AppWindow";
 import { ConfirmPopover } from "../ConfirmPopover";
+import { MachineChip } from "../explorer/ExplorerSessions";
 import { plainTitle } from "../sessionTitle";
 import { useShellLanguage } from "../shellLanguage";
 import { SpaceIcon } from "../spaces/SpaceViews";
@@ -86,6 +87,7 @@ export function SessionChildrenDialog({ title, deleting, read, projects, spaces,
         aria-label={parent ? t("{title}, child of {parent}", { title: name, parent }) : name} onClick={() => onOpen(session)}>
         <span className="reference-icon"><AppIcon name={session.scopeKind === "project" ? "folder" : "chat"} size={14} /></span>
         <span className="session-children-title">{name}</span>
+        {session.machineId && <MachineChip session={session} />}
         {working && <Tag minimal round intent="primary" className="session-children-work">{t("At work")}</Tag>}
         {where(session)}
       </button>

@@ -385,6 +385,20 @@ internal sealed class SpacesService
                     : null,
                 RestoredForRunAt = Restored(session) ? session.RestoredForRunAt!.Value.ToString("O", System.Globalization.CultureInfo.InvariantCulture) : null,
             });
+        // The sessions agents of this computer started on other machines, at work or waiting for the user: shown under
+        // their parent here, so that a question or a permission request there reaches the person where they are.
+        var local = runs.GroupBy(static session => session.SessionId, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(static group => group.Key, static group => group.First(), StringComparer.OrdinalIgnoreCase);
+        var remote = (RemoteSessions?.Invoke() ?? [])
+            .Where(value => value.Session.ParentSessionId is { } parent && local.ContainsKey(parent) && value.Session.State is "working" or "waiting")
+            .Select(value => new SpaceSessionActivity(value.Session.Id,
+                // Listed under the project of its parent's repository, or under its machine when its parent is a chat.
+                value.Session.ProjectId is null ? WorkspaceService.MachineScopePrefix + value.MachineId : local[value.Session.ParentSessionId!].ProjectId ?? WorkspaceService.MachineScopePrefix + value.MachineId,
+                Cut(value.Session.Title, 256), value.Session.State == "working", 0, false, value.Session.State == "waiting",
+                [value.Session.ParentSessionId!, .. Ancestors(value.Session.ParentSessionId!, parents)],
+                SpaceDescriptor.IsValidId(value.Session.SpaceId) ? value.Session.SpaceId : null))
+            .OrderByDescending(static activity => activity.Waiting).ToArray();
+        own = [.. remote.Where(static activity => activity.Waiting), .. own, .. remote.Where(static activity => !activity.Waiting)];
         // The sessions another process runs or shows: read-only here while it holds them.
         var ownIds = sessions.Select(static session => session.SessionId).ToHashSet(StringComparer.OrdinalIgnoreCase);
         var elsewhere = (HeldElsewhere?.Invoke() ?? []).Where(hold => !ownIds.Contains(hold.SessionId))
@@ -400,6 +414,9 @@ internal sealed class SpacesService
 
     /// <summary>Gets the sessions another process holds now; none when null.</summary>
     internal Func<IReadOnlyList<ExternalSessionHold>>? HeldElsewhere { get; init; }
+
+    /// <summary>Gets the sessions the paired machines last listed, with their machine; none when null.</summary>
+    internal Func<IReadOnlyList<(string MachineId, CodeAlta.Fleet.NodeApi.FleetSessionSummary Session)>>? RemoteSessions { get; init; }
 
     /// <summary>How long a fallback of a session is listed with its activity.</summary>
     internal static readonly TimeSpan RecentFallback = TimeSpan.FromMinutes(10);

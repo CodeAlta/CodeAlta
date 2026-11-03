@@ -79,6 +79,16 @@ public sealed class RemoteChildSessionsTests
         StringAssert.Contains(message, "The iOS tests pass.");
         await WaitForAsync(() => two.Node.Service.AgentSessions.Take(two.Fleet.DeviceId, 10).Count == 0, "the delivery to be acknowledged", token);
 
+        // The window shows it as a child of its parent, with its machine: in the list of sessions and in the sub-agents of the parent.
+        var epoch = Guid.NewGuid().ToString("D");
+        var workspace = new CodeAlta.Desktop.Rpc.WorkspaceService(two.Registry, two.Desktop, epoch);
+        var row = (await workspace.SnapshotAsync(new(), token)).Sessions.Single(session => session.Id == childId);
+        Assert.AreEqual((parent.SessionId, two.Machine.MachineId, "test-node"), (row.ParentSessionId, row.MachineId, row.MachineName));
+        var tree = await workspace.SessionChildrenAsync(new(epoch, parent.SessionId), token);
+        Assert.AreEqual("ok", tree.Status);
+        var child = tree.Children.Single();
+        Assert.AreEqual((childId, parent.SessionId, 1, "test-node"), (child.Session.Id, child.ParentSessionId, child.Depth, child.Session.MachineName));
+        CollectionAssert.DoesNotContain(tree.DescendantIds.ToArray(), childId, "A session of another machine is never deleted with the tree of this computer.");
 
         // A message across machines: the parent sends its child another prompt, and gets that answer too.
         await WaitForAsync(() => two.Machine.Listing.Sessions.Any(session => session.Id == childId && session.State == "idle"), "the child to be idle", token);

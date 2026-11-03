@@ -67,6 +67,7 @@ internal sealed partial class WorkspaceService
         // The list of the host of this process, with the sessions the paired machines last listed.
         var local = hosts.Local;
         _readAllSessions = local.ReadSnapshotAsync;
+        _remoteHosts = () => [.. hosts.Remotes.OfType<CodeAlta.Desktop.Fleet.RemoteSessionHost>()];
         var projected = ProjectedSnapshot(local.ReadSnapshotAsync);
         // A session this process gave to a paired machine (a move) gives its row to the one that machine lists.
         Func<string, bool> movedAway = id => host.RuntimeService.Relinquishments.Read(id) is { IsRelinquished: true };
