@@ -75,6 +75,30 @@ public static class FleetNodeMethods
     /// <summary>The owner's local control: changes what a device may do.</summary>
     public const string ControlDevicesPermissions = "control.devices.permissions";
 
+    /// <summary>A target: takes the offer of a session (or, as a probe, only says whether it would).</summary>
+    public const string MovesOffer = "moves.offer";
+
+    /// <summary>A target: receives a chunk of the archive of a bundle, at the length it holds (resumable).</summary>
+    public const string MovesTransfer = "moves.transfer";
+
+    /// <summary>A target: verifies the archive by its hash, unpacks it and prepares the worktree of the session.</summary>
+    public const string MovesPrepare = "moves.prepare";
+
+    /// <summary>A target, arbiter in paired mode: commits a prepared move and installs the session.</summary>
+    public const string MovesCommit = "moves.commit";
+
+    /// <summary>A target: the source says it relinquished the session; the copies of the bundle go.</summary>
+    public const string MovesComplete = "moves.complete";
+
+    /// <summary>The outcome of a move as the arbiter knows it, and the records of the machine (asked by a source after a lost connection).</summary>
+    public const string MovesStatus = "moves.status";
+
+    /// <summary>A source: gives one of its sessions to the caller, or through the caller to another machine (the same id resumes the move).</summary>
+    public const string MovesStart = "moves.start";
+
+    /// <summary>The records of the moves of the machine.</summary>
+    public const string MovesList = "moves.list";
+
     /// <summary>The event of a live display replacement of a watched session (<see cref="FleetSessionDisplay"/>).</summary>
     public const string SessionDisplayEvent = "session.display";
 
@@ -535,4 +559,15 @@ public sealed record FleetEmpty;
 [JsonSerializable(typeof(FleetDevicePermissionsParams))]
 [JsonSerializable(typeof(FleetDeviceChange))]
 [JsonSerializable(typeof(FleetEmpty))]
+[JsonSerializable(typeof(FleetMoveOffer))]
+[JsonSerializable(typeof(FleetMoveOfferResult))]
+[JsonSerializable(typeof(FleetMoveChunk))]
+[JsonSerializable(typeof(FleetMoveChunkResult))]
+[JsonSerializable(typeof(FleetMoveRef))]
+[JsonSerializable(typeof(FleetMoveStepResult))]
+[JsonSerializable(typeof(FleetMoveStatusParams))]
+[JsonSerializable(typeof(FleetMoveStatus))]
+[JsonSerializable(typeof(FleetMoveList))]
+[JsonSerializable(typeof(FleetMoveStartParams))]
+[JsonSerializable(typeof(FleetMoveResult))]
 public sealed partial class FleetNodeJsonContext : JsonSerializerContext;

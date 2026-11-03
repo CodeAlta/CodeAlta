@@ -29,6 +29,35 @@ public sealed record GitPayloadPreparation(string Status, string? Message = null
     public bool Succeeded => Status == GitWorktreeService.Ok;
 }
 
+/// <summary>What a move of a session would ship and leave behind, read without writing (<see cref="GitSessionPayload.PreviewAsync"/>).</summary>
+/// <param name="Status"><c>ok</c>, or why the session cannot move: <c>not_repository</c>, <c>no_remote</c>, <c>git_unavailable</c>, <c>git_failed</c>.</param>
+public sealed record GitPayloadPreview(string Status)
+{
+    /// <summary>Gets what git said of a failure.</summary>
+    public string? Message { get; init; }
+
+    /// <summary>Gets the repository key the target finds its project by.</summary>
+    public string? RepositoryKey { get; init; }
+
+    /// <summary>Gets the folder of the session in the repository, with forward slashes; <c>.</c> for its root.</summary>
+    public string RelativeFolder { get; init; } = ".";
+
+    /// <summary>Gets the branch checked out; null for a detached HEAD.</summary>
+    public string? Branch { get; init; }
+
+    /// <summary>Gets the URL of the remote the key comes from, which a target without the repository could clone.</summary>
+    public string? RemoteUrl { get; init; }
+
+    /// <summary>Gets how many commits no remote has.</summary>
+    public int UnpushedCommits { get; init; }
+
+    /// <summary>Gets whether the working tree has changes.</summary>
+    public bool Dirty { get; init; }
+
+    /// <summary>Gets the changed files that look like secrets, which stay behind.</summary>
+    public IReadOnlyList<string> Secrets { get; init; } = [];
+}
+
 /// <summary>
 /// The git payload of a moved session: what the source ships of its repository beyond what the remote has, and how the
 /// target makes a worktree of it.
@@ -72,6 +101,52 @@ public static class GitSessionPayload
             || name.EndsWith(".pem", StringComparison.Ordinal) || name.EndsWith(".key", StringComparison.Ordinal)
             || name.StartsWith("id_", StringComparison.Ordinal)
             || name.EndsWith(".tfvars", StringComparison.Ordinal) || name.EndsWith(".tfvars.json", StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// Reads, without writing anything, what a move of a session working in a folder would ship and leave behind: its
+    /// repository key, the folder of the project in it, the branch, the URL a target could clone, and the changed files
+    /// that look like secrets.
+    /// </summary>
+    /// <param name="workFolder">The folder the session works in.</param>
+    /// <param name="cancellationToken">Stops git.</param>
+    /// <returns>The preview; its status says why there is none (<c>not_repository</c>, <c>no_remote</c>, <c>git_unavailable</c>...).</returns>
+    /// <exception cref="ArgumentException"><paramref name="workFolder"/> is blank.</exception>
+    /// <exception cref="OperationCanceledException">The token was canceled.</exception>
+    public static async Task<GitPayloadPreview> PreviewAsync(string workFolder, CancellationToken cancellationToken)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(workFolder);
+        if (!Directory.Exists(workFolder)) return new("not_repository");
+        var top = await GitAsync(workFolder, ["rev-parse", "--show-toplevel"], cancellationToken).ConfigureAwait(false);
+        if (!top.Succeeded || FirstLine(top.Output) is not { } rootLine) return new(StatusOf(top, "not_repository"));
+        var root = Path.GetFullPath(rootLine);
+        var key = await RepositoryKey.ReadAsync(root, cancellationToken).ConfigureAwait(false);
+        if (key is null) return new("no_remote") { Message = "The repository has no remote: another machine cannot find it." };
+        var relative = Path.GetRelativePath(root, Path.GetFullPath(workFolder)).Replace('\\', '/');
+        if (relative.StartsWith("..", StringComparison.Ordinal) || Path.IsPathRooted(relative)) relative = ".";
+        var branch = await GitAsync(root, ["symbolic-ref", "--quiet", "--short", "HEAD"], cancellationToken).ConfigureAwait(false);
+        var remote = await GitAsync(root, ["remote", "get-url", "origin"], cancellationToken).ConfigureAwait(false);
+        if (!remote.Succeeded)
+        {
+            var remotes = await GitAsync(root, ["remote"], cancellationToken).ConfigureAwait(false);
+            if (remotes.Succeeded && FirstLine(remotes.Output) is { } first) remote = await GitAsync(root, ["remote", "get-url", first], cancellationToken).ConfigureAwait(false);
+        }
+
+        var unpushed = await GitAsync(root, ["rev-list", "--count", "HEAD", "--not", "--remotes"], cancellationToken).ConfigureAwait(false);
+        var status = await GitAsync(root, ["status", "--porcelain=v1", "-z", "--untracked-files=all", "--no-renames", "--ignore-submodules=none"],
+            cancellationToken).ConfigureAwait(false);
+        if (!status.Succeeded) return new(StatusOf(status, "git_failed")) { Message = Clean(status) };
+        var changed = ParseStatus(status.Output);
+        return new(GitWorktreeService.Ok)
+        {
+            RepositoryKey = key,
+            RelativeFolder = relative,
+            Branch = branch.Succeeded ? FirstLine(branch.Output) : null,
+            RemoteUrl = remote.Succeeded ? FirstLine(remote.Output) : null,
+            UnpushedCommits = unpushed.Succeeded && int.TryParse(FirstLine(unpushed.Output), out var count) ? count : 0,
+            Dirty = changed.Count > 0,
+            Secrets = [.. changed.Where(path => !path.EndsWith('/') && LooksSecret(path))],
+        };
     }
 
     /// <summary>

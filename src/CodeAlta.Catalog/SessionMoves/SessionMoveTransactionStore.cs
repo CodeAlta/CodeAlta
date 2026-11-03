@@ -174,7 +174,14 @@ public sealed class SessionMoveTransactionStore
     /// <summary>Lists the moves that did not end, on both sides.</summary>
     /// <returns>The records; a damaged one is left out.</returns>
     /// <exception cref="IOException">The folder cannot be listed.</exception>
-    public IReadOnlyList<SessionMoveTransaction> ListUnfinished()
+    public IReadOnlyList<SessionMoveTransaction> ListUnfinished() => List(unfinishedOnly: true);
+
+    /// <summary>Lists the records of the moves of this machine, on both sides, the latest first.</summary>
+    /// <returns>The records; a damaged one is left out.</returns>
+    /// <exception cref="IOException">The folder cannot be listed.</exception>
+    public IReadOnlyList<SessionMoveTransaction> List() => [.. List(unfinishedOnly: false).OrderByDescending(static record => record.UpdatedAt)];
+
+    private List<SessionMoveTransaction> List(bool unfinishedOnly)
     {
         if (!System.IO.Directory.Exists(Directory)) return [];
         var found = new List<SessionMoveTransaction>();
@@ -183,7 +190,7 @@ public sealed class SessionMoveTransactionStore
             try
             {
                 if (JsonSerializer.Deserialize(File.ReadAllBytes(path), SessionMoveJsonContext.Default.SessionMoveTransaction) is { } record
-                    && !SessionMoveState.IsFinal(record.State))
+                    && (!unfinishedOnly || !SessionMoveState.IsFinal(record.State)))
                     found.Add(record);
             }
             catch (Exception exception) when (exception is JsonException or IOException or UnauthorizedAccessException)

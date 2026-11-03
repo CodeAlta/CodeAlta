@@ -288,7 +288,7 @@ public sealed partial class SessionRuntimeService
             && Relinquishments.Read(manifest.SessionId) is not { IsRelinquished: true })
             return new("session_exists", null, [$"The session {manifest.SessionId} is already on this machine."]);
 
-        var project = await FindProjectOfRepositoryAsync(manifest.Repository, cancellationToken).ConfigureAwait(false);
+        var project = await FindProjectOfRepositoryAsync(manifest.Repository.Key, manifest.Repository.RelativeFolder, cancellationToken).ConfigureAwait(false);
         if (project is null)
             return new("project_missing", null, [$"No project of this machine is in the repository {manifest.Repository.Key}" +
                 (manifest.Repository.RelativeFolder is "." ? "." : $" at {manifest.Repository.RelativeFolder}.")]);
@@ -448,8 +448,13 @@ public sealed partial class SessionRuntimeService
 
     private static string MachineName(string? machine) => string.IsNullOrWhiteSpace(machine) ? "another machine" : machine.Trim();
 
-    // The project of this machine in the repository of a moved session, at the same folder of the repository.
-    private async Task<ProjectDescriptor?> FindProjectOfRepositoryAsync(SessionMoveRepository repository, CancellationToken cancellationToken)
+    /// <summary>Finds the project of this machine in a repository, at the same folder of the repository: where a moved session goes.</summary>
+    /// <param name="repositoryKey">The repository key (<see cref="RepositoryKey"/>).</param>
+    /// <param name="relativeFolder">The folder of the project in the repository, with forward slashes; <c>.</c> for its root.</param>
+    /// <param name="cancellationToken">Stops the search.</param>
+    /// <returns>The project; null when no project of this machine is there.</returns>
+    /// <exception cref="OperationCanceledException">The token was canceled.</exception>
+    public async Task<ProjectDescriptor?> FindProjectOfRepositoryAsync(string repositoryKey, string relativeFolder, CancellationToken cancellationToken)
     {
         var projects = await _projectCatalog.LoadAsync(cancellationToken).ConfigureAwait(false);
         foreach (var project in projects)
@@ -458,8 +463,8 @@ public sealed partial class SessionRuntimeService
             var root = GitWorktreeService.FindCheckoutRoot(project.ProjectPath);
             if (root is null) continue;
             var relative = Path.GetRelativePath(root, project.ProjectPath).Replace('\\', '/');
-            if (!string.Equals(relative, repository.RelativeFolder, FolderComparison)) continue;
-            if (await RepositoryKey.ReadAsync(project.ProjectPath, cancellationToken).ConfigureAwait(false) == repository.Key) return project;
+            if (!string.Equals(relative, relativeFolder, FolderComparison)) continue;
+            if (await RepositoryKey.ReadAsync(project.ProjectPath, cancellationToken).ConfigureAwait(false) == repositoryKey) return project;
         }
 
         return null;

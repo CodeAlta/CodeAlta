@@ -17,6 +17,19 @@ internal sealed class ScriptedNodeProvider
     /// <summary>Gets the steps of the next turns, in order.</summary>
     internal ConcurrentQueue<Func<AgentTurnRequest, CancellationToken, Task<AgentTurnResponse>>> Turns { get; } = new();
 
+    /// <summary>Gets the working folder of the last turn.</summary>
+    internal string? LastWorkingDirectory { get; private set; }
+
+    /// <summary>Gets the text of the last prompt of the last turn.</summary>
+    internal string LastUserText { get; private set; } = "";
+
+    private void Record(AgentTurnRequest request)
+    {
+        LastWorkingDirectory = request.WorkingDirectory;
+        if (request.Conversation.LastOrDefault(static message => message.Role == AgentConversationRole.User) is { } user)
+            LastUserText = string.Join("\n", user.Parts.OfType<AgentMessagePart.Text>().Select(static part => part.Value));
+    }
+
     internal void Register(ModelProviderRegistry registry) => registry.RegisterOrReplace(Descriptor, () => new Runtime(this));
 
     /// <summary>A step that waits for a gate, then answers.</summary>
@@ -69,6 +82,9 @@ internal sealed class ScriptedNodeProvider
     {
         public Task<AgentTurnResponse> ExecuteTurnAsync(AgentTurnRequest request, Func<AgentTurnDelta, CancellationToken, ValueTask> onUpdate,
             CancellationToken cancellationToken = default)
-            => owner.Turns.TryDequeue(out var step) ? step(request, cancellationToken) : Task.FromResult(Answer("Done."));
+        {
+            owner.Record(request);
+            return owner.Turns.TryDequeue(out var step) ? step(request, cancellationToken) : Task.FromResult(Answer("Done."));
+        }
     }
 }

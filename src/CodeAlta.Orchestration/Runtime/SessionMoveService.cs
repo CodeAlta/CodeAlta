@@ -246,7 +246,25 @@ public sealed class SessionMoveService
     /// <param name="cancellationToken">Stops waiting for the arbiter.</param>
     /// <returns>What each move is now.</returns>
     /// <exception cref="OperationCanceledException">The token was canceled.</exception>
-    public async Task<IReadOnlyList<SessionMoveStepResult>> RecoverAsync(ISessionMoveArbiter arbiter, CancellationToken cancellationToken)
+    public Task<IReadOnlyList<SessionMoveStepResult>> RecoverAsync(ISessionMoveArbiter arbiter, CancellationToken cancellationToken)
+        => RecoverAsync(arbiter, null, null, cancellationToken);
+
+    /// <summary>
+    /// Ends the unfinished moves of one side, or of one side and one other machine, by the decision of their arbiter:
+    /// the moves of a target in paired mode with its own records, those of a source with the arbiter of the machine it
+    /// gave the session to.
+    /// </summary>
+    /// <param name="arbiter">The arbiter of those moves.</param>
+    /// <param name="role">The side (<see cref="SessionMoveRole"/>); null for both.</param>
+    /// <param name="otherMachine">
+    /// The machine at the other end, as the records name it (<see cref="SessionMoveTransaction.ToMachine"/> of a source,
+    /// <see cref="SessionMoveTransaction.FromMachine"/> of a target); null for any.
+    /// </param>
+    /// <param name="cancellationToken">Stops waiting for the arbiter.</param>
+    /// <returns>What each move is now.</returns>
+    /// <exception cref="OperationCanceledException">The token was canceled.</exception>
+    public async Task<IReadOnlyList<SessionMoveStepResult>> RecoverAsync(ISessionMoveArbiter arbiter, string? role, string? otherMachine,
+        CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(arbiter);
         var results = new List<SessionMoveStepResult>();
@@ -255,6 +273,10 @@ public sealed class SessionMoveService
         {
             foreach (var record in Store.ListUnfinished())
             {
+                if (role is not null && record.Role != role) continue;
+                if (otherMachine is not null
+                    && !string.Equals(record.Role == SessionMoveRole.Source ? record.ToMachine : record.FromMachine, otherMachine, StringComparison.Ordinal))
+                    continue;
                 try
                 {
                     if (record.Role == SessionMoveRole.Source)
@@ -284,6 +306,36 @@ public sealed class SessionMoveService
         }
 
         return results;
+    }
+
+    /// <summary>
+    /// The target of one move ends it by the decision of the arbiter, without asking for a commit: it installs a move the
+    /// arbiter committed, and removes what it prepared for one the arbiter aborted (or aborts now, since it never
+    /// committed it). Used when the source asked the arbiter for the outcome, after a lost connection.
+    /// </summary>
+    /// <param name="moveId">The move.</param>
+    /// <param name="arbiter">The arbiter.</param>
+    /// <param name="cancellationToken">Stops waiting for the arbiter.</param>
+    /// <returns>What the move is now on this machine, or <c>missing</c> when this machine has no record of it.</returns>
+    /// <exception cref="IOException">A file cannot be written.</exception>
+    /// <exception cref="OperationCanceledException">The token was canceled.</exception>
+    public async Task<SessionMoveStepResult> SettleTargetAsync(string moveId, ISessionMoveArbiter arbiter, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(arbiter);
+        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            if (Store.Read(moveId, SessionMoveRole.Target) is not { } record) return new("missing", null, []);
+            if (SessionMoveState.IsFinal(record.State) || record.State == SessionMoveState.Committed)
+                return await AdvanceTargetAsync(record, null).ConfigureAwait(false);
+            var decision = await arbiter.ResolveAsync(moveId, cancellationToken).ConfigureAwait(false);
+            return decision is null ? new(record.State, record, ["The arbiter of the move cannot be reached: the move waits."])
+                : await AdvanceTargetAsync(record, decision).ConfigureAwait(false);
+        }
+        finally
+        {
+            _gate.Release();
+        }
     }
 
     // The source of a move, once the arbiter is asked: it relinquishes a committed move, unfreezes an aborted one.
