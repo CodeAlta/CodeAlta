@@ -405,6 +405,9 @@ public sealed class CodeAltaHost : IAsyncDisposable
                 ReadOnlyGlobalState = readOnlyGlobalState,
             };
             Directory.CreateDirectory(catalogOptions.StateRoot);
+            // The secrets of this machine are shared by the hosts of the profile: their values are masked in what the
+            // sessions keep, journal, show and trace.
+            var secretMasker = new AgentSecretMasker(new LocalSecretStore(globalRoot).GetSecretValues);
             var startupScratchpadCleanup = options.StartupScratchpadCleanup;
             if (startupScratchpadCleanup is not null
                 && (!string.Equals(startupScratchpadCleanup.StateRoot, catalogOptions.StateRoot, OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal)
@@ -537,6 +540,7 @@ public sealed class CodeAltaHost : IAsyncDisposable
             agentHub = new AgentHub(modelProviderRegistry, catalogOptions.StateRoot, sessionViewCatalog.JournalStore.ProjectionCache, retentionProtection)
             {
                 JournalFile = sessionJournalFile,
+                SecretMasker = secretMasker,
             };
             var agentSessionCatalog = new AgentSessionCatalog(sessionViewCatalog.JournalStore.CreateSessionStore());
             var projectFileSnapshotCache = new ProjectFileSnapshotCache();

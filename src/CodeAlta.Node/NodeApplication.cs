@@ -322,7 +322,8 @@ internal sealed class NodeApplication
                 Admitted = () =>
                 {
                     telemetry = StartTelemetry(profile, () => running, () => listening, () => linked);
-                    ownsLogging = InitializeLogging && NodeLogging.Initialize(profile.StateRoot, console: true, telemetry.LogWriter);
+                    ownsLogging = InitializeLogging && NodeLogging.Initialize(profile.StateRoot, console: true, telemetry.LogWriter,
+                        new CodeAlta.Agent.Runtime.AgentSecretMasker(new CodeAlta.Catalog.Secrets.LocalSecretStore(profile.GlobalRoot).GetSecretValues));
                 },
             };
             if (ConfigureHost is not null) hostOptions = ConfigureHost(hostOptions);

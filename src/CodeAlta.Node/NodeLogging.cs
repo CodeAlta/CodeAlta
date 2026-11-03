@@ -24,7 +24,14 @@ internal static class NodeLogging
     /// <param name="stateRoot">The state root of the node.</param>
     /// <param name="console">Whether the messages are written to standard output too.</param>
     /// <param name="telemetry">A writer that sends the records to the telemetry of the node, or null.</param>
-    public static bool Initialize(string stateRoot, bool console, LogWriter? telemetry)
+    public static bool Initialize(string stateRoot, bool console, LogWriter? telemetry) => Initialize(stateRoot, console, telemetry, masker: null);
+
+    /// <summary>Sets up the logging of the process, once, with the secrets of the machine masked in its file and on standard output.</summary>
+    /// <param name="stateRoot">The state root of the node.</param>
+    /// <param name="console">Whether the messages are written to standard output too.</param>
+    /// <param name="telemetry">A writer that sends the records to the telemetry of the node, or null.</param>
+    /// <param name="masker">Masks the secrets of the machine; null masks nothing.</param>
+    public static bool Initialize(string stateRoot, bool console, LogWriter? telemetry, CodeAlta.Agent.Runtime.AgentSecretMasker? masker)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(stateRoot);
         if (LogManager.IsInitialized) return false;
@@ -42,8 +49,9 @@ internal static class NodeLogging
             RollingInterval = FileRollingInterval.Daily,
             RetainedFileCountLimit = 10,
             FailureMode = FileLogWriterFailureMode.Ignore,
+            Formatter = Formatter(masker),
         }));
-        if (console) config.RootLogger.Writers.Add(new StreamLogWriter(Console.OpenStandardOutput(), ownsStream: false) { AutoFlush = true });
+        if (console) config.RootLogger.Writers.Add(new StreamLogWriter(Console.OpenStandardOutput(), ownsStream: false) { AutoFlush = true, Formatter = Formatter(masker) });
         // The records the log keeps go to the collector too, when the telemetry of the node sends logs.
         if (telemetry is not null) config.RootLogger.Writers.Add(telemetry);
         config.Loggers.Add("CodeAlta", LogLevel.Info);
@@ -54,6 +62,10 @@ internal static class NodeLogging
             LogManager.GetLogger("CodeAlta.Node").Error(args.Exception, "A task failed and nothing observed its exception.");
         return true;
     }
+
+    private static LogFormatter Formatter(CodeAlta.Agent.Runtime.AgentSecretMasker? masker)
+        => masker is null ? XenoAtom.Logging.Formatters.StandardLogFormatter.Instance
+            : new CodeAlta.Agent.Runtime.AgentSecretMaskingLogFormatter(XenoAtom.Logging.Formatters.StandardLogFormatter.Instance, masker);
 
     /// <summary>Writes the pending messages and shuts the logging down.</summary>
     public static void Shutdown() => LogManager.Shutdown();
