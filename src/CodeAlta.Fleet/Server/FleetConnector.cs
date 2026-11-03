@@ -2,6 +2,7 @@ using System.Buffers.Text;
 using System.Collections.Immutable;
 using System.Text.Json;
 using System.Threading.Channels;
+using CodeAlta.Catalog;
 using CodeAlta.Fleet.Identity;
 using CodeAlta.Fleet.Protocol;
 using XenoAtom.Logging;
@@ -48,10 +49,16 @@ public sealed partial class FleetConnectorOptions
     /// <summary>Gets what the device says of itself in the hello: kind (<c>node</c>, <c>desktop</c>), version, system.</summary>
     public required FleetClientInfo Client { get; init; }
 
-    /// <summary>Gets the metadata key of the device's person at this server, which seals the titles it publishes; null publishes no title.</summary>
+    /// <summary>Gets the metadata keys of the spaces of the device's person at this server, which seal the titles it publishes, each with the key of its space; null publishes no title.</summary>
     public FleetMetadataKeyring? MetadataKeys { get; init; }
 
-    /// <summary>Gets how often the metadata key is read again (to wrap it to new devices of the person); every 30 seconds while there is none.</summary>
+    /// <summary>
+    /// Gets the ids of the spaces of this instance linked to the server, which get a key; null for the spaces of the
+    /// sessions published.
+    /// </summary>
+    public Func<IReadOnlyCollection<string>>? LinkedSpaces { get; init; }
+
+    /// <summary>Gets how often the metadata keys are read again (to wrap them to new devices of the person); every 30 seconds while a space has none.</summary>
     public TimeSpan KeyRefreshInterval { get; init; } = TimeSpan.FromMinutes(5);
 
     /// <summary>Gets what there is to publish; null publishes nothing.</summary>
@@ -161,7 +168,7 @@ public sealed partial class FleetConnectorOptions
 /// Only the sessions of the spaces linked to the server are published (<see cref="FleetConnectorOptions.PublishesSpace"/>),
 /// and never a Private one: no fact, not listed. A session published before that is made Private, or whose space is
 /// unlinked, has its facts withdrawn (<c>facts.withdraw</c>). Facts carry the allow-list, and the title sealed with
-/// the metadata key of the person (<see cref="FleetConnectorOptions.MetadataKeys"/>), which the server cannot read.
+/// the metadata key of the session's space (<see cref="FleetConnectorOptions.MetadataKeys"/>), which the server cannot read.
 /// </para>
 /// <para>One loop owns the connection and the outbox; the source and the callers only wake it.</para>
 /// </remarks>
@@ -261,8 +268,8 @@ public sealed partial class FleetConnector : IAsyncDisposable
     /// <summary>Gets the directory of the organization, as the server last said it (empty without <see cref="FleetConnectorOptions.WatchDirectory"/>).</summary>
     public FleetDirectoryView Directory => Volatile.Read(ref _directory);
 
-    /// <summary>Gets the metadata key of the device's person, which opens the titles of the directory; null while there is none.</summary>
-    public FleetMetadataKey? MetadataKey => _options.MetadataKeys?.Current;
+    /// <summary>Gets the metadata keys of the spaces of the device's person, which open the titles of the directory; null for a connector without keys.</summary>
+    public FleetMetadataKeyring? MetadataKeys => _options.MetadataKeys;
 
     /// <summary>Gets the cursors the outbox believes the server holds.</summary>
     internal FleetPublicationCursors Cursors => _outbox.Cursors;
@@ -706,9 +713,9 @@ public sealed partial class FleetConnector : IAsyncDisposable
             if (ack is not null) _outbox.InventoryAcknowledged(ack.Ack, publication.Publication.Sequence, publication.Hash);
         }
 
-        var key = await ReadKeyAsync(stop).ConfigureAwait(false);
         var all = await source.ReadSessionsAsync(stop).ConfigureAwait(false);
         var sessions = all.Where(IsPublished).ToArray();
+        await ReadKeysAsync(sessions, stop).ConfigureAwait(false);
         // A session published before and not now (made Private, its space unlinked) has its facts taken back; a session
         // gone from the instance (deleted, moved away) keeps them, as statistics keep the facts of deleted sessions.
         var withdrawals = _outbox.Withdrawals(all.Where(session => !IsPublished(session)).Select(static session => session.SessionId), MaxFactsPerBatch);
@@ -727,7 +734,7 @@ public sealed partial class FleetConnector : IAsyncDisposable
         var first = true;
         while (!stop.IsCancellationRequested)
         {
-            var pending = _outbox.Pending(sessions, MaxFactsPerBatch, key);
+            var pending = _outbox.Pending(sessions, MaxFactsPerBatch, KeyOf);
             if (first) _options.Metrics?.Backlog(_options.ServerAddress, pending.Count);
             first = false;
             if (pending.Count == 0) break;
@@ -743,7 +750,7 @@ public sealed partial class FleetConnector : IAsyncDisposable
 
         try
         {
-            await PublishStatisticsAsync(connection, all, sessions, key, stop).ConfigureAwait(false);
+            await PublishStatisticsAsync(connection, all, sessions, stop).ConfigureAwait(false);
         }
         catch (FleetException exception) when (exception is not FleetConnectionClosedException)
         {
@@ -762,7 +769,7 @@ public sealed partial class FleetConnector : IAsyncDisposable
     // its project changed, and sent when its set changed. The sessions no longer published have their sets taken back; Private
     // sessions and those of spaces not linked to this server never had one.
     private async Task PublishStatisticsAsync(FleetConnection connection, IReadOnlyList<FleetLocalSession> all, IReadOnlyList<FleetLocalSession> published,
-        FleetMetadataKey? key, CancellationToken stop)
+        CancellationToken stop)
     {
         if (_options.Statistics is not { } source || _statistics is not { } outbox || !_statisticsServed) return;
         var withdrawals = outbox.Withdrawals(all.Where(session => !IsPublished(session)).Select(static session => session.SessionId), MaxStatisticsSetsPerBatch);
@@ -784,8 +791,8 @@ public sealed partial class FleetConnector : IAsyncDisposable
         foreach (var session in published.OrderBy(static session => session.UpdatedAt))
         {
             if (!revisions.TryGetValue(session.SessionId, out var revision)) continue;
-            // The project travels as a blind index of the person's key: without a key yet, it waits with the titles.
-            var projectKey = key is not null && session.ProjectIdentity is { Length: > 0 } identity ? FleetProjectKeys.Of(key, identity) : null;
+            // The project travels as a blind index of the key of the session's space: without a key yet, it waits with the titles.
+            var projectKey = KeyOf(session) is { } key && session.ProjectIdentity is { Length: > 0 } identity ? FleetProjectKeys.Of(key, identity) : null;
             if (!outbox.NeedsRows(session.SessionId, revision, session.Epoch, projectKey)) continue;
             var read = await source.ReadRowsAsync(session.SessionId, _options.StatisticsFromQuarter, stop).ConfigureAwait(false);
             if (read.Count > MaxStatisticsRowsPerSet)
@@ -824,23 +831,28 @@ public sealed partial class FleetConnector : IAsyncDisposable
 
     private bool IsPublished(FleetLocalSession session) => !session.IsPrivate && _options.PublishesSpace(session.SpaceId);
 
-    // The metadata key, read again when due. A failure leaves the key known before (titles wait without one): facts go on.
-    private async Task<FleetMetadataKey?> ReadKeyAsync(CancellationToken stop)
+    // The key that seals the metadata of a session: the one of its space, or none yet.
+    private FleetMetadataKey? KeyOf(FleetLocalSession session) => _options.MetadataKeys?.CurrentFor(session.SpaceId);
+
+    // The keys of the spaces published, read again when due, sooner while a space has none. A failure leaves the keys known
+    // before (titles wait without one): facts go on.
+    private async Task ReadKeysAsync(IReadOnlyList<FleetLocalSession> published, CancellationToken stop)
     {
-        if (_options.MetadataKeys is not { } keys) return null;
+        if (_options.MetadataKeys is not { } keys) return;
+        var spaces = _options.LinkedSpaces?.Invoke()
+            ?? [.. published.Select(static session => string.IsNullOrWhiteSpace(session.SpaceId) ? SpaceDescriptor.DefaultId : session.SpaceId).Distinct(StringComparer.Ordinal)];
         var now = _options.TimeProvider.GetUtcNow();
-        var due = keys.Current is null ? TimeSpan.FromSeconds(30) : _options.KeyRefreshInterval;
-        if (now.UtcTicks - Volatile.Read(ref _keysReadAt) < due.Ticks) return keys.Current;
+        var due = spaces.Any(space => keys.CurrentFor(space) is null) ? TimeSpan.FromSeconds(30) : _options.KeyRefreshInterval;
+        if (now.UtcTicks - Volatile.Read(ref _keysReadAt) < due.Ticks) return;
         Volatile.Write(ref _keysReadAt, now.UtcTicks);
         try
         {
-            return await keys.RefreshAsync(stop).ConfigureAwait(false);
+            await keys.RefreshAsync(spaces, stop).ConfigureAwait(false);
         }
         catch (Exception exception) when (!stop.IsCancellationRequested && exception is FleetServerException or FleetDeviceListException or InvalidDataException
             or HttpRequestException or System.Security.Cryptography.CryptographicException or TaskCanceledException)
         {
-            if (LogManager.IsInitialized) _logger.Warn($"The metadata key of {FleetServerAddress.Format(_options.ServerAddress)} could not be read: {exception.Message}");
-            return keys.Current;
+            if (LogManager.IsInitialized) _logger.Warn($"The metadata keys of {FleetServerAddress.Format(_options.ServerAddress)} could not be read: {exception.Message}");
         }
     }
 

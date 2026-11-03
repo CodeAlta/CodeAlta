@@ -591,6 +591,34 @@ public sealed partial class McpRuntimeServiceTests
     }
 
     [TestMethod]
+    public async Task Search_StartsAStdioServerWithASecretOfTheMachine_AndNamesItWhenItIsNotSet()
+    {
+        using var project = TempDirectory.Create();
+        WriteTinyServerConfig(project.Path, "tiny", logPath: null, extraEnv: new Dictionary<string, string> { ["MCP_TEST_EXTRA_TOOL"] = "${secret:MCP_TOOL_NAME}" });
+        var store = new CodeAlta.Catalog.Secrets.LocalSecretStore(Path.Combine(_home.Path, ".alta"));
+        try
+        {
+            await using (var service = new McpRuntimeService(_home.Path))
+            {
+                var missing = await service.SearchToolsAsync(new McpRuntimeRequest { ProjectDirectory = project.Path }, serverFilter: "tiny", query: null, CancellationToken.None);
+                StringAssert.Contains(missing.Diagnostics.Single().Message, "references ${secret:MCP_TOOL_NAME}: The secret MCP_TOOL_NAME is not set on this machine.");
+            }
+
+            store.SetSecret("MCP_TOOL_NAME", "from_secret", "tests");
+            await using (var service = new McpRuntimeService(_home.Path))
+            {
+                var search = await service.SearchToolsAsync(new McpRuntimeRequest { ProjectDirectory = project.Path }, serverFilter: "tiny", query: null, CancellationToken.None);
+                Assert.AreEqual(0, search.Diagnostics.Count, string.Join(Environment.NewLine, search.Diagnostics.Select(static diagnostic => diagnostic.Message)));
+                Assert.IsTrue(search.Tools.Any(static tool => tool.Name == "from_secret"));
+            }
+        }
+        finally
+        {
+            store.Delete();
+        }
+    }
+
+    [TestMethod]
     public async Task Search_StartsAStdioServerWithTheEnvironmentOfTheSession_OneServerPerIdentity()
     {
         using var project = TempDirectory.Create();

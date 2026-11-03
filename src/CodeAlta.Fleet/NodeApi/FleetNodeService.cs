@@ -80,8 +80,8 @@ public sealed class FleetNodeServiceOptions
 /// or a change of permissions applies at once. An unpaired client may only redeem the open pairing offer; the node's own
 /// key, from this machine, is the owner's local control (<c>altanode pair</c>, <c>status</c>, <c>devices</c>, <c>revoke</c>, <c>permissions</c>, <c>projects</c>).
 /// A paired device with <see cref="DevicePermissions.Manage"/> calls the same <c>control.*</c> methods from elsewhere,
-/// pairing and stopping the node excepted: the node's status, its devices and what they may do, its projects, its log and
-/// its updates.
+/// pairing and stopping the node excepted: the node's status, its devices and what they may do, its projects, its log,
+/// its updates, and its secrets and variables when the node trusts the device by its own pairing.
 /// </summary>
 public sealed partial class FleetNodeService : IAsyncDisposable
 {
@@ -296,6 +296,8 @@ public sealed partial class FleetNodeService : IAsyncDisposable
             On(caller, FleetNodeMethods.ControlProjectsRemove, Access.Owner, FleetNodeJsonContext.Default.FleetProjectRef,
                 FleetNodeJsonContext.Default.FleetProjectChange, ControlRemoveProjectAsync);
             RegisterManagementExtras(caller, Access.Owner);
+            // The secrets of the machine: its owner, on the machine, manages them.
+            RegisterSecrets(caller, Access.Owner);
             RegisterAgentPolicy(caller, Access.Owner);
             // The owner may bring a session to its own node (altanode remote <machine> move), and read its moves.
             RegisterMoves(caller, Access.Owner);
@@ -366,6 +368,8 @@ public sealed partial class FleetNodeService : IAsyncDisposable
         On(caller, FleetNodeMethods.ControlProjectsRemove, Access.Manage, FleetNodeJsonContext.Default.FleetProjectRef,
             FleetNodeJsonContext.Default.FleetProjectChange, ControlRemoveProjectAsync);
         RegisterManagementExtras(caller, Access.Manage);
+        // And its secrets, for a device paired with the node only: never one trusted through the list of an organization.
+        RegisterSecrets(caller, Access.ManagePaired);
         RegisterAgentPolicy(caller, Access.Manage);
     }
 
@@ -379,8 +383,9 @@ public sealed partial class FleetNodeService : IAsyncDisposable
             FleetNodeJsonContext.Default.FleetServerJoinResult, ControlJoinServerAsync);
     }
 
-    // Who may call a method: anyone on the channel (pairing), the owner's local control, or a trusted device with a permission.
-    private readonly record struct Access(DevicePermissions Required, bool AnyoneMayCall, bool OwnerOnly)
+    // Who may call a method: anyone on the channel (pairing), the owner's local control, or a trusted device with a permission;
+    // PairedOnly asks that the node trust the device itself, by its pairing, and not through the device list of an organization.
+    private readonly record struct Access(DevicePermissions Required, bool AnyoneMayCall, bool OwnerOnly, bool PairedOnly = false)
     {
         public static Access Anyone => new(DevicePermissions.None, true, false);
         public static Access Owner => new(DevicePermissions.None, false, true);
@@ -392,6 +397,7 @@ public sealed partial class FleetNodeService : IAsyncDisposable
         public static Access Automations => new(DevicePermissions.View | DevicePermissions.Automate, false, false);
         public static Access Automate => new(DevicePermissions.View | DevicePermissions.Start | DevicePermissions.Automate, false, false);
         public static Access Manage => new(DevicePermissions.Manage, false, false);
+        public static Access ManagePaired => new(DevicePermissions.Manage, false, false, PairedOnly: true);
     }
 
     private delegate Task<TResult> Handler<TParams, TResult>(FleetNodeCall call, TParams parameters, CancellationToken cancellationToken);
@@ -482,6 +488,8 @@ public sealed partial class FleetNodeService : IAsyncDisposable
         if (device is null) throw new FleetException(FleetErrorCodes.Unauthenticated, FleetErrorHints.Reauthenticate, "This device is not paired with the node.");
         if ((device.Permissions & access.Required) != access.Required)
             throw new FleetException(FleetErrorCodes.Forbidden, null, $"This device may not do this on the node (it needs {string.Join(", ", Describe(access.Required & ~device.Permissions))}).");
+        if (access.PairedOnly && _trusted.FindTrusted(caller.Fingerprint) is null)
+            throw new FleetException(FleetErrorCodes.Forbidden, null, "Only a device paired with the node may do this.");
         return device;
     }
 

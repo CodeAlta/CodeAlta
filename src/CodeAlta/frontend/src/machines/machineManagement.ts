@@ -15,7 +15,7 @@ export function permissionLabel(permission: DevicePermission): { name: MessageKe
     case "start": return { name: "Start", description: "Start sessions there." };
     case "move": return { name: "Move", description: "Move sessions there, and take them back." };
     case "automate": return { name: "Automate", description: "Run its automations there." };
-    case "manage": return { name: "Manage", description: "Change what each device may do, its projects and its updates." };
+    case "manage": return { name: "Manage", description: "Change what each device may do, its projects, its secrets and its updates." };
   }
 }
 
@@ -47,6 +47,8 @@ export function managementProblem(status: MachineManagement["status"] | MachineU
     case "project.not_found": return "The machine no longer has that project.";
     case "project.has_sessions": return "The project still has sessions there: archive or delete them first.";
     case "project.clone_failed": return "The repository could not be cloned there.";
+    case "secret.not_found": return "The machine no longer has that secret.";
+    case "secret.unavailable": return "The machine cannot open its secrets.";
     case "invalid_params": case "invalid_request": return "The machine refused this value.";
     default: return "The machine could not do it.";
   }

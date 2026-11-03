@@ -88,6 +88,8 @@ public sealed class FleetDeviceListException : Exception
 /// that point: an execution node never signs an entry.</item>
 /// <item>A controller adds devices of its own person only (team machines and their signers come later); a removed
 /// device never joins again; the last controller device is never removed.</item>
+/// <item>A person has at most one recovery key in the list; it signs only the entry that adds a controller device of its
+/// person (when every device is lost), never a removal.</item>
 /// </list>
 /// </remarks>
 public static class FleetDeviceListVerifier
@@ -180,7 +182,7 @@ public static class FleetDeviceListVerifier
         if (string.IsNullOrEmpty(payload.OrganizationId) || !string.Equals(payload.OrganizationId, organization, StringComparison.Ordinal))
             return "it names another organization";
         if (!state.Members.TryGetValue(payload.SignerDeviceId, out var signer)) return "its signer is not a member of the list";
-        if (signer.Kind != FleetDeviceKinds.Controller) return "its signer is not a controller device";
+        if (signer.Kind is not (FleetDeviceKinds.Controller or FleetDeviceKinds.Recovery)) return "its signer is not a controller device";
         if (!signer.Key.Verify(signed, entry.Signature)) return "its signature does not verify with the key of its signer";
 
         var members = state.Members;
@@ -189,15 +191,20 @@ public static class FleetDeviceListVerifier
         {
             case FleetDeviceListOperations.Add:
                 if (members.ContainsKey(payload.DeviceId) || removed.Contains(payload.DeviceId)) return "it adds a device that is or was in the list";
-                if (!FleetDeviceKinds.IsKnown(payload.Kind)) return "it adds a device of no known class";
+                if (!FleetDeviceKinds.IsMember(payload.Kind)) return "it adds a device of no known class";
                 if (!FleetDevicePublicKey.TryParse(payload.PublicKey, out var added) || added.DeviceId != payload.DeviceId) return "the added device's key does not give its id";
                 if (string.IsNullOrEmpty(payload.OwnerId)) return "it adds a device without its person";
+                // A recovery key signs in a new controller device of its person, when every device is lost, and nothing else.
+                if (signer.Kind == FleetDeviceKinds.Recovery && payload.Kind != FleetDeviceKinds.Controller) return "a recovery key adds controller devices only";
                 // The person of the first device is the one its first entry names.
                 if (signer.OwnerId is null) members = members.SetItem(signer.DeviceId, signer = signer with { OwnerId = payload.OwnerId });
                 if (!string.Equals(signer.OwnerId, payload.OwnerId, StringComparison.Ordinal)) return "a controller device adds devices of its own person only";
+                if (payload.Kind == FleetDeviceKinds.Recovery && members.Values.Any(member => member.Kind == FleetDeviceKinds.Recovery && member.OwnerId == payload.OwnerId))
+                    return "the person has a recovery key already: the old one leaves the list first";
                 members = members.SetItem(payload.DeviceId, new FleetDeviceListMember(payload.DeviceId, payload.Kind!, added, payload.OwnerId));
                 break;
             case FleetDeviceListOperations.Remove:
+                if (signer.Kind == FleetDeviceKinds.Recovery) return "a recovery key removes no device";
                 if (!members.TryGetValue(payload.DeviceId, out var gone)) return "it removes a device that is not in the list";
                 if (gone.Kind == FleetDeviceKinds.Controller && members.Values.Count(static member => member.Kind == FleetDeviceKinds.Controller) <= 1)
                     return "it removes the last controller device";

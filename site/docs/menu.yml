@@ -5,6 +5,7 @@ doc:
   - {path: principles.md, title: "<i class='bi bi-compass' aria-hidden='true'></i> Principles"}
   - {path: benchmark.md, title: "<i class='bi bi-speedometer2' aria-hidden='true'></i> Harness Benchmark"}
   - {path: model-providers/readme.md, title: "<i class='bi bi-cpu' aria-hidden='true'></i> Model Providers", folder: true}
+  - {path: secrets.md, title: "<i class='bi bi-key' aria-hidden='true'></i> Secrets and Variables"}
   - {path: model-tiers.md, title: "<i class='bi bi-layers' aria-hidden='true'></i> Model Tiers"}
   - {path: prompts.md, title: "<i class='bi bi-chat-square-text' aria-hidden='true'></i> Agent Prompts"}
   - {path: workspace/readme.md, title: "<i class='bi bi-display' aria-hidden='true'></i> Workspace", folder: true}

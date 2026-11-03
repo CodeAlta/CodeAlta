@@ -105,7 +105,7 @@ public sealed class NodeApplicationTests
         var app = Application(root, out var output, out _);
 
         Assert.AreEqual(NodeExitCodes.Success, await app.RunAsync(["--help"]));
-        foreach (var command in new[] { "run", "status", "install", "uninstall", "logs", "pair", "devices", "revoke", "permissions", "join", "machines", "connect", "remote", "update" })
+        foreach (var command in new[] { "run", "status", "install", "uninstall", "logs", "pair", "devices", "revoke", "permissions", "join", "machines", "connect", "remote", "update", "secrets" })
         {
             StringAssert.Contains(output.ToString(), "  " + command + " ");
         }

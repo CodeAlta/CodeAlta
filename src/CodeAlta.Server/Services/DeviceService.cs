@@ -246,6 +246,142 @@ public sealed class DeviceService
         return revoked.ToDto(false);
     }
 
+    /// <summary>
+    /// Records the recovery key of the calling controller device's person (<c>doc/fleet/security-and-privacy.md</c>, keys):
+    /// the entry that adds it to the device list, signed by that device, and the anchor of the list sealed with it.
+    /// </summary>
+    /// <param name="actor">The calling device.</param>
+    /// <param name="request">The key, its entry and its sealed anchor.</param>
+    /// <param name="origin">Where it comes from.</param>
+    /// <param name="cancellationToken">Cancels the operation.</param>
+    /// <returns>The recovery key as a device of the list.</returns>
+    /// <exception cref="CoordinatorException">The caller is not a controller of a person, the request does not read, the entry is wrong or behind the list, or the key exists.</exception>
+    public Task<DeviceDto> AddRecoveryKeyAsync(DeviceRecord actor, CreateRecoveryKeyRequest? request, RequestOrigin origin, CancellationToken cancellationToken)
+        => CountedAsync("recovery_key", () => AddRecoveryKeyCoreAsync(actor, request, origin, cancellationToken));
+
+    private async Task<DeviceDto> AddRecoveryKeyCoreAsync(DeviceRecord actor, CreateRecoveryKeyRequest? request, RequestOrigin origin, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(actor);
+        ArgumentNullException.ThrowIfNull(origin);
+        RequireController(actor);
+        if (actor.OwnerPersonId is null) throw CoordinatorException.Forbidden(FleetErrorCodes.Forbidden, "A recovery key is made by a controller device of a person.");
+        if (request is null || !FleetDevicePublicKey.TryParse(request.PublicKey, out var key) || request.SealedAnchor is not { Length: > 0 and <= 4096 } anchor
+            || anchor.Any(char.IsControl))
+        {
+            throw CoordinatorException.BadRequest(CoordinatorErrorCodes.InvalidBody, "The request needs the public key of the recovery key, the entry that adds it and its sealed anchor.");
+        }
+
+        var (payload, record) = await ReadEntryAsync(actor, request.DeviceListEntry, cancellationToken).ConfigureAwait(false);
+        DeviceListChain.Require(payload.Operation == FleetDeviceListOperations.Add && payload.DeviceId == key.DeviceId && payload.PublicKey == key.Text, "add the recovery key and its key");
+        DeviceListChain.Require(payload.Kind == FleetDeviceKinds.Recovery && payload.OwnerId == actor.OwnerPersonId, "add it as the recovery key of the person of the signing device");
+        var now = _time.GetUtcNow();
+        var device = new DeviceRecord(key.DeviceId, actor.OrganizationId, "Recovery key", FleetDeviceKinds.Recovery, key.Text, key.Fingerprint, actor.OwnerPersonId,
+            DeviceStatuses.Approved, actor.Id, null, now, now, null, 1);
+        var audit = origin.Audit("recovery_key.create", actor, device.Id, details: $"{{\"seq\":{payload.Sequence}}}");
+        var (outcome, added) = await _store.AddDeviceWithEntryAsync(device, record, new RecoveryKeyRecord(device.Id, actor.OrganizationId, actor.OwnerPersonId, anchor, now), audit,
+            cancellationToken).ConfigureAwait(false);
+        ThrowIfNotAdded(outcome);
+        return added!.ToDto(false);
+    }
+
+    /// <summary>
+    /// Signs a new device in with the recovery key of its person, when every device of theirs is lost: the request is signed
+    /// by the new device's key, and the entry that adds it as a controller device of that person by the recovery key.
+    /// </summary>
+    /// <param name="request">The new device and the entry.</param>
+    /// <param name="signed">The signature of the request.</param>
+    /// <param name="origin">Where it comes from.</param>
+    /// <param name="cancellationToken">Cancels the operation.</param>
+    /// <returns>The new device, approved.</returns>
+    /// <exception cref="CoordinatorException">The request does not verify, the entry is not signed by a recovery key of the organization, does not add this device, or is behind the list.</exception>
+    public Task<DeviceDto> RecoverAsync(RecoverRequest? request, SignedRequestData signed, RequestOrigin origin, CancellationToken cancellationToken)
+        => CountedAsync("recover", () => RecoverCoreAsync(request, signed, origin, cancellationToken));
+
+    private async Task<DeviceDto> RecoverCoreAsync(RecoverRequest? request, SignedRequestData signed, RequestOrigin origin, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(signed);
+        ArgumentNullException.ThrowIfNull(origin);
+        if (request is null || !FleetDevicePublicKey.TryParse(request.PublicKey, out var key))
+            throw CoordinatorException.BadRequest(CoordinatorErrorCodes.InvalidBody, "The request needs the public key and the name of the new device, and the entry that adds it.");
+        var name = SetupService.RequireName(request.DeviceName, "deviceName");
+        _authenticator.VerifyWithKey(signed, key);
+        if (request.DeviceListEntry is null || !FleetDeviceListEntries.TryParsePayload(request.DeviceListEntry.Payload, out var claimed))
+            throw CoordinatorException.BadRequest(CoordinatorErrorCodes.EntryInvalid, "The request needs the entry the recovery key signed.");
+        var signer = string.IsNullOrEmpty(claimed!.SignerDeviceId) ? null : await _store.GetDeviceAsync(claimed.SignerDeviceId, cancellationToken).ConfigureAwait(false);
+        if (signer is not { Kind: FleetDeviceKinds.Recovery, Status: DeviceStatuses.Approved, OwnerPersonId: not null }
+            || await _store.GetRecoveryKeyAsync(signer.Id, cancellationToken).ConfigureAwait(false) is null)
+        {
+            throw CoordinatorException.Forbidden(CoordinatorErrorCodes.RecoveryRefused, "The entry is not signed by a recovery key of this server.");
+        }
+
+        var (payload, record) = await ReadEntryAsync(signer, request.DeviceListEntry, cancellationToken).ConfigureAwait(false);
+        DeviceListChain.Require(payload.Operation == FleetDeviceListOperations.Add && payload.DeviceId == key.DeviceId && payload.PublicKey == key.Text
+            && payload.Kind == FleetDeviceKinds.Controller && payload.OwnerId == signer.OwnerPersonId, "add the device that sends it as a controller device of the person of the recovery key");
+        var now = _time.GetUtcNow();
+        var device = new DeviceRecord(key.DeviceId, signer.OrganizationId, name, FleetDeviceKinds.Controller, key.Text, key.Fingerprint, signer.OwnerPersonId,
+            DeviceStatuses.Approved, signer.Id, null, now, now, null, 1);
+        var audit = origin.Audit("device.recover", signer, device.Id, details: $"{{\"seq\":{payload.Sequence}}}");
+        var (outcome, added) = await _store.AddDeviceWithEntryAsync(device, record, null, audit, cancellationToken).ConfigureAwait(false);
+        ThrowIfNotAdded(outcome);
+        return added!.ToDto(false);
+    }
+
+    /// <summary>
+    /// The calling device leaves the server: what it published there (facts and sealed metadata, statistics, inventory,
+    /// run reports), its copies of keys and the automations given to it are withdrawn, and it is refused from then on. A
+    /// controller device that is not the last one sends the entry that removes it from the device list, so that the keys
+    /// it held get new epochs.
+    /// </summary>
+    /// <param name="actor">The calling device.</param>
+    /// <param name="request">The request, with the entry that removes the device, or none.</param>
+    /// <param name="origin">Where it comes from.</param>
+    /// <param name="cancellationToken">Cancels the operation.</param>
+    /// <returns>What was withdrawn.</returns>
+    /// <exception cref="CoordinatorException">The entry is not the removal of the calling device, is badly signed, or is behind the list.</exception>
+    public async Task<LeaveResponse> LeaveAsync(DeviceRecord actor, LeaveRequest? request, RequestOrigin origin, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(actor);
+        ArgumentNullException.ThrowIfNull(origin);
+        DeviceListEntryRecord? record = null;
+        if (request?.DeviceListEntry is { } entry)
+        {
+            RequireController(actor);
+            var (payload, read) = await ReadEntryAsync(actor, entry, cancellationToken).ConfigureAwait(false);
+            DeviceListChain.Require(payload.Operation == FleetDeviceListOperations.Remove && payload.DeviceId == actor.Id, "remove the device that leaves");
+            record = read;
+        }
+
+        var left = await _store.LeaveAsync(actor.Id, record, _time.GetUtcNow(), origin.Audit("device.leave", actor, actor.Id), cancellationToken).ConfigureAwait(false)
+            ?? throw CoordinatorException.Conflict(CoordinatorErrorCodes.EntryConflict, "The device list moved on: read it again and sign an entry that follows its last one.");
+        await _presence.DisconnectAsync(actor.Id, new FleetError(FleetErrorCodes.Revoked, null, "The device left the server.")).ConfigureAwait(false);
+        if (_relays is not null) await _relays.CloseDeviceAsync(actor.Id).ConfigureAwait(false);
+        return left;
+    }
+
+    /// <summary>Gives a recovery key the anchor of the device list it sealed when it was made.</summary>
+    /// <param name="actor">The calling device: the recovery key.</param>
+    /// <param name="cancellationToken">Cancels the operation.</param>
+    /// <returns>The sealed anchor.</returns>
+    /// <exception cref="CoordinatorException">The caller is not a recovery key the server keeps an anchor for.</exception>
+    public async Task<RecoveryAnchorDto> GetRecoveryAnchorAsync(DeviceRecord actor, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(actor);
+        var recovery = actor.Kind == FleetDeviceKinds.Recovery ? await _store.GetRecoveryKeyAsync(actor.Id, cancellationToken).ConfigureAwait(false) : null;
+        if (recovery is null) throw CoordinatorException.NotFound(CoordinatorErrorCodes.RecoveryKeyNotFound, "The calling device is not a recovery key of this server.");
+        return new RecoveryAnchorDto(actor.Id, recovery.SealedAnchor);
+    }
+
+    private static void ThrowIfNotAdded(DeviceListAppendOutcome outcome)
+    {
+        switch (outcome)
+        {
+            case DeviceListAppendOutcome.Conflict:
+                throw CoordinatorException.Conflict(CoordinatorErrorCodes.EntryConflict, "The device list moved on: read it again and sign an entry that follows its last one.");
+            case DeviceListAppendOutcome.DeviceStateChanged:
+                throw CoordinatorException.Conflict(CoordinatorErrorCodes.DeviceExists, "A device with this key is registered already.");
+        }
+    }
+
     private async Task<DeviceDto> CountedAsync(string operation, Func<Task<DeviceDto>> change)
     {
         try

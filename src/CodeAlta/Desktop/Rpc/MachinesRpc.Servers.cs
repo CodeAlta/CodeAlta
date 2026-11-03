@@ -19,8 +19,11 @@ internal sealed partial class MachinesService
     /// <summary>Gets what makes a one-time enrollment code at a server, by the id of its link.</summary>
     internal Func<string, CancellationToken, Task<string>>? CreateJoinCode { get; set; }
 
-    /// <summary>Gets what approves a device at a server, by the id of its link and the device.</summary>
-    internal Func<string, string, CancellationToken, Task>? ApproveDevice { get; set; }
+    /// <summary>
+    /// Gets what approves a device at a server, by the id of its link, the device and the words of its key as the machine
+    /// said them over its pinned channel: the approval signs that key only.
+    /// </summary>
+    internal Func<string, string, string, CancellationToken, Task>? ApproveDevice { get; set; }
 
     /// <summary>Has a machine this computer manages join a server this computer owns, and approves it there.</summary>
     [NeoRpcMethod("joinServer")]
@@ -44,9 +47,11 @@ internal sealed partial class MachinesService
 
         try
         {
-            await approve(linkId, joined.DeviceId, cancellationToken).ConfigureAwait(false);
+            // The words the machine gave over the channel pinned to its key: a server that names another key is refused.
+            await approve(linkId, joined.DeviceId, joined.Words, cancellationToken).ConfigureAwait(false);
         }
         catch (FleetServerException exception) { return new("approve_failed", joined.Name, joined.Words, exception.Message); }
+        catch (FleetDeviceListException exception) { return new("approve_failed", joined.Name, joined.Words, exception.Message); }
         catch (HttpRequestException exception) { return new("approve_failed", joined.Name, joined.Words, exception.Message); }
 
         Changed();

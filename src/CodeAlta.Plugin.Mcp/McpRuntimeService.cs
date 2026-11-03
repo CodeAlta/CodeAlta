@@ -7,6 +7,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Threading.Channels;
+using CodeAlta.Catalog.Secrets;
 using ModelContextProtocol;
 using ModelContextProtocol.Authentication;
 using ModelContextProtocol.Client;
@@ -807,7 +808,7 @@ internal sealed partial class McpRuntimeService : IAsyncDisposable
         var key = effective.Definition.Key;
         if (!context.Policy.IsServerInSpace(key, context.Request.SpaceId) || !IsServerEnabled(context.Policy, key, out var serverPolicy)) return null;
         // The list answers only for a start with the same values: the same variables and headers, the same session variables.
-        if (!TryExpandConnectionFields(effective.Definition, out var definition, out _)) return null;
+        if (!TryExpandConnectionFields(effective.Definition, ReaderOf(context.Request.Home), out var definition, out _)) return null;
         var serverAliasPart = context.ServerAliasParts.TryGetValue(key, out var aliasPart) ? aliasPart : SanitizeAliasPart(key);
         var variant = VariantOf(definition, serverAliasPart, context.Request.Environment);
         var list = new McpToolListCache(McpToolListCache.FolderOf(context.Request.Home)).Read(key, McpToolListCache.Fingerprint(effective.Definition));
@@ -958,12 +959,13 @@ internal sealed partial class McpRuntimeService : IAsyncDisposable
 
         // The tokens of a server are kept under its address as the file writes it, also when a variable is part of it.
         var tokenUrl = effective.Definition.Url;
-        if (!TryExpandConnectionFields(effective.Definition, out var definition, out var missing))
+        var read = ReaderOf(context.Request.Home);
+        if (!TryExpandConnectionFields(effective.Definition, read, out var definition, out var missing))
         {
             return Cache(cacheKey, ServerRuntimeState.Failed(missing));
         }
 
-        var validation = ValidateRuntimeDefinition(definition);
+        var validation = ValidateRuntimeDefinition(definition, read);
         if (validation is not null)
         {
             return Cache(cacheKey, ServerRuntimeState.Failed(validation));
@@ -1066,13 +1068,13 @@ internal sealed partial class McpRuntimeService : IAsyncDisposable
                 Command = definition.Command!,
                 Arguments = definition.Args.ToArray(),
                 WorkingDirectory = definition.Cwd,
-                EnvironmentVariables = StdioEnvironment(definition, request.Environment),
+                EnvironmentVariables = StdioEnvironment(definition, request.Environment, ReaderOf(request.Home)),
                 ShutdownTimeout = CreateStdioShutdownTimeout(timeoutMs),
             };
             return new ObservingClientTransport(new StdioClientTransport(options, NullLoggerFactory.Instance));
         }
 
-        var headers = ExpandDictionary(definition.Headers).ToDictionary(static pair => pair.Key, static pair => pair.Value, StringComparer.Ordinal);
+        var headers = ExpandDictionary(definition.Headers, ReaderOf(request.Home)).ToDictionary(static pair => pair.Key, static pair => pair.Value, StringComparer.Ordinal);
         var httpOptions = new HttpClientTransportOptions
         {
             Name = definition.Key,
@@ -1347,11 +1349,11 @@ internal sealed partial class McpRuntimeService : IAsyncDisposable
     }
 
     // The variables of a stdio server: those of the session first, then those its definition names, which win.
-    private static Dictionary<string, string?> StdioEnvironment(McpServerDefinition definition, CodeAlta.Agent.AgentProcessEnvironment? session)
+    private static Dictionary<string, string?> StdioEnvironment(McpServerDefinition definition, CodeAlta.Agent.AgentProcessEnvironment? session, Func<string, string?> read)
     {
         var variables = new Dictionary<string, string?>(StringComparer.Ordinal);
         session?.ApplyTo(variables);
-        foreach (var (name, value) in ExpandDictionary(definition.Env)) variables[name] = value;
+        foreach (var (name, value) in ExpandDictionary(definition.Env, read)) variables[name] = value;
         return variables;
     }
 
@@ -1385,7 +1387,7 @@ internal sealed partial class McpRuntimeService : IAsyncDisposable
                 .OrderBy(static pair => pair.Key, StringComparer.Ordinal)
                 .Select(static pair => string.Concat(pair.Key, "\0", pair.Value)));
 
-    private static McpRuntimeDiagnostic? ValidateRuntimeDefinition(McpServerDefinition definition)
+    private static McpRuntimeDiagnostic? ValidateRuntimeDefinition(McpServerDefinition definition, Func<string, string?> read)
     {
         if (definition.Transport == McpTransportKind.Stdio)
         {
@@ -1404,7 +1406,7 @@ internal sealed partial class McpRuntimeService : IAsyncDisposable
                 return InvalidTransport(definition, "Stdio MCP servers cannot include OAuth authorization settings.");
             }
 
-            if (TryCreateVariableDiagnostic(definition, definition.Env, "environment variable", out var variableDiagnostic))
+            if (TryCreateVariableDiagnostic(definition, definition.Env, "environment variable", read, out var variableDiagnostic))
             {
                 return variableDiagnostic;
             }
@@ -1455,7 +1457,7 @@ internal sealed partial class McpRuntimeService : IAsyncDisposable
                 };
             }
 
-            if (TryExpandEnvironmentVariables(value, out var expandedValue, out var missingVariable))
+            if (TryExpandEnvironmentVariables(value, read, out var expandedValue, out var missingVariable))
             {
                 if (missingVariable is not null)
                 {
@@ -1532,11 +1534,12 @@ internal sealed partial class McpRuntimeService : IAsyncDisposable
         McpServerDefinition definition,
         IReadOnlyDictionary<string, string> values,
         string fieldKind,
+        Func<string, string?> read,
         out McpRuntimeDiagnostic? diagnostic)
     {
         foreach (var (name, value) in values)
         {
-            if (TryExpandEnvironmentVariables(value, out _, out var missingVariable) && missingVariable is not null)
+            if (TryExpandEnvironmentVariables(value, read, out _, out var missingVariable) && missingVariable is not null)
             {
                 diagnostic = MissingEnvironmentVariable(definition, fieldKind, name, missingVariable);
                 return true;
@@ -1553,13 +1556,20 @@ internal sealed partial class McpRuntimeService : IAsyncDisposable
             Code = "environment_variable_not_found",
             Server = definition.Key,
             Transport = FormatTransport(definition.Transport),
-            Message = $"Invalid MCP server '{definition.Key}': {fieldKind} '{McpRedactor.RedactValue(fieldKind, fieldName)}' references environment variable '{variableName}', but it is not set.",
+            Message = SecretReferences.TryParseLone("${" + variableName + "}", out var reference) && reference.Kind != SecretReferenceKind.Environment
+                ? $"Invalid MCP server '{definition.Key}': {fieldKind} '{McpRedactor.RedactValue(fieldKind, fieldName)}' references {reference}: {SecretReferences.MissingMessage(reference)}"
+                : $"Invalid MCP server '{definition.Key}': {fieldKind} '{McpRedactor.RedactValue(fieldKind, fieldName)}' references environment variable '{variableName}', but it is not set.",
         };
+
+    // Reads a variable of the environment by its name (or env:NAME), and a secret or a variable of the store of the
+    // profile by secret:NAME or var:NAME: ${secret:NAME} and ${var:NAME} are resolved as ${NAME} is.
+    private static Func<string, string?> ReaderOf(McpHome home) => SecretReferenceResolver.ForMachine(home.Root).Read;
 
     // Resolves ${NAME} in the command, its arguments, its folder and the address. The values of environment variables
     // and headers are resolved where they are used, so that a diagnostic can name the one that fails.
     private static bool TryExpandConnectionFields(
         McpServerDefinition definition,
+        Func<string, string?> read,
         out McpServerDefinition expanded,
         [NotNullWhen(false)] out McpRuntimeDiagnostic? diagnostic)
     {
@@ -1567,7 +1577,7 @@ internal sealed partial class McpRuntimeService : IAsyncDisposable
         string? field = null;
         string? Expand(string? value, string fieldName)
         {
-            if (value is null || missing is not null || !TryExpandEnvironmentVariables(value, out var result, out var variable))
+            if (value is null || missing is not null || !TryExpandEnvironmentVariables(value, read, out var result, out var variable))
             {
                 return value;
             }
@@ -1604,19 +1614,19 @@ internal sealed partial class McpRuntimeService : IAsyncDisposable
         return true;
     }
 
-    private static Dictionary<string, string> ExpandDictionary(IReadOnlyDictionary<string, string> values)
+    private static Dictionary<string, string> ExpandDictionary(IReadOnlyDictionary<string, string> values, Func<string, string?> read)
     {
         var expanded = new Dictionary<string, string>(StringComparer.Ordinal);
         foreach (var (key, value) in values)
         {
-            _ = TryExpandEnvironmentVariables(value, out var expandedValue, out _);
+            _ = TryExpandEnvironmentVariables(value, read, out var expandedValue, out _);
             expanded[key] = expandedValue;
         }
 
         return expanded;
     }
 
-    private static bool TryExpandEnvironmentVariables(string value, out string expanded, out string? missingVariable)
+    private static bool TryExpandEnvironmentVariables(string value, Func<string, string?> read, out string expanded, out string? missingVariable)
     {
         var start = value.IndexOf("${", StringComparison.Ordinal);
         if (start < 0)
@@ -1651,7 +1661,7 @@ internal sealed partial class McpRuntimeService : IAsyncDisposable
                 var defaultIndex = variableName.IndexOf(":-", StringComparison.Ordinal);
                 var defaultValue = defaultIndex > 0 ? variableName[(defaultIndex + 2)..] : null;
                 variableName = defaultIndex > 0 ? variableName[..defaultIndex] : variableName;
-                var variableValue = Environment.GetEnvironmentVariable(variableName) ?? defaultValue;
+                var variableValue = read(variableName) ?? defaultValue;
                 if (variableValue is null)
                 {
                     expanded = value;

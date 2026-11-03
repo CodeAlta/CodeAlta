@@ -12,15 +12,23 @@ public sealed class LocalServerSetupTests
         Health: ok, no owner yet (altaserver setup-code), schema 7
         """;
 
+    private const string Starting = """
+        CodeAlta Server 4.0.0, process 1234, since 03/11/2026 15:00
+        Listens on http://127.0.0.1:2692
+        Health: no answer yet (it starts)
+        """;
+
     public TestContext TestContext { get; set; } = null!;
 
     [TestMethod]
-    public async Task OnAComputerWithoutTheServer_InstallsStartsAndClaimsIt_WithTheCodeReadHere()
+    public async Task OnAComputerWithoutTheServer_InstallsItAsAServiceAndClaimsIt_WithTheCodeReadHere()
     {
         var tools = Path.Combine(Path.GetTempPath(), "codealta-server-tools");
         var processes = new ScriptedProcesses();
         processes.Answers.Enqueue(new SshResult(0, "Tool 'codealta.server' was installed.", ""));
         processes.Answers.Enqueue(new SshResult(1, "No server runs on the data root.", ""));
+        processes.Answers.Enqueue(new SshResult(0, "CodeAlta Server starts at your sign-in, and now.", ""));
+        processes.Answers.Enqueue(new SshResult(0, Starting.ReplaceLineEndings("\n"), ""));
         processes.Answers.Enqueue(new SshResult(0, Running.ReplaceLineEndings("\n"), ""));
         processes.Answers.Enqueue(new SshResult(0, "ABCD-EFGH\nValid until 15:30, once, from this machine only.\n", ""));
         processes.OnInstall = () => processes.Files.Add(Path.Combine(tools, OperatingSystem.IsWindows() ? "altaserver.exe" : "altaserver"));
@@ -32,9 +40,11 @@ public sealed class LocalServerSetupTests
 
         Assert.AreEqual("link-1", link);
         Assert.AreEqual((new Uri("http://127.0.0.1:2692"), "ABCD-EFGH"), claimed, "the code goes from the server to the claim without the person");
+        // The server runs as a service of the user (altaserver install), so that it starts again after a restart; the
+        // setup waits until it serves, not only until it answers its status.
         CollectionAssert.AreEqual(new[] { "dotnet tool install CodeAlta.Server --version 4.0.0 --tool-path " + tools,
-            "status --data-root C:\\data\\server", "status --data-root C:\\data\\server", "setup-code --data-root C:\\data\\server" }, processes.Commands.ToArray());
-        CollectionAssert.AreEqual(new[] { "run --port 2692 --data-root C:\\data\\server" }, processes.Started.ToArray());
+            "status --data-root C:\\data\\server", "install --urls http://127.0.0.1:2692 --data-root C:\\data\\server", "status --data-root C:\\data\\server",
+            "status --data-root C:\\data\\server", "setup-code --data-root C:\\data\\server" }, processes.Commands.ToArray());
         Assert.AreEqual("http://127.0.0.1:2692", steps.Single(static step => step is { Step: "start", State: "done" }).Detail);
     }
 
@@ -44,11 +54,26 @@ public sealed class LocalServerSetupTests
         var processes = new ScriptedProcesses();
         processes.Files.Add(Path.Combine("/t", OperatingSystem.IsWindows() ? "altaserver.exe" : "altaserver"));
         processes.Answers.Enqueue(new SshResult(0, Running.ReplaceLineEndings("\n"), ""));
+        processes.Answers.Enqueue(new SshResult(0, "CodeAlta Server starts at your sign-in, once the server that runs now exits.", ""));
         processes.Answers.Enqueue(new SshResult(1, "", "The server already has an owner: there is no setup code."));
         var failure = await Assert.ThrowsExactlyAsync<SshSetupException>(() => new LocalServerSetup(processes, "4.0.0").RunAsync(
             new LocalServerRequest { OwnerName = "Alex", ToolPath = "/t" }, (_, _, _) => Task.FromResult("x"), static _ => { }, TestContext.CancellationToken));
         Assert.AreEqual("server_owned", failure.Code);
-        Assert.AreEqual(0, processes.Started.Count, "a server that runs already is not started again");
+        CollectionAssert.AreEqual(new[] { "status", "install --urls http://127.0.0.1:2586", "setup-code" }, processes.Commands.ToArray(),
+            "a server that runs already keeps running, and gets its service for the next start");
+    }
+
+    [TestMethod]
+    public async Task AServiceThatCannotBeInstalled_FailsTheStartWithWhatItSaid()
+    {
+        var processes = new ScriptedProcesses();
+        processes.Files.Add(Path.Combine("/t", OperatingSystem.IsWindows() ? "altaserver.exe" : "altaserver"));
+        processes.Answers.Enqueue(new SshResult(1, "No server runs on the data root.", ""));
+        processes.Answers.Enqueue(new SshResult(1, "", "Access is denied."));
+        var failure = await Assert.ThrowsExactlyAsync<SshSetupException>(() => new LocalServerSetup(processes, "4.0.0").RunAsync(
+            new LocalServerRequest { OwnerName = "Alex", ToolPath = "/t" }, (_, _, _) => Task.FromResult("x"), static _ => { }, TestContext.CancellationToken));
+        Assert.AreEqual((LocalServerSteps.Start, "service_failed"), (failure.Step, failure.Code));
+        StringAssert.Contains(failure.Message, "Access is denied.");
     }
 
     [TestMethod]
@@ -62,6 +87,7 @@ public sealed class LocalServerSetupTests
         processes.Files.Add(program);
         processes.Lines.AddRange(["@echo off", "\"%~dp0.store\\codealta.server\\4.0.0\\codealta.server.win-x64\\4.0.0\\tools\\net10.0\\win-x64\\altaserver.exe\" %*"]);
         processes.Answers.Enqueue(new SshResult(0, Running.ReplaceLineEndings("\n"), ""));
+        processes.Answers.Enqueue(new SshResult(0, "CodeAlta Server starts at your sign-in.", ""));
         processes.Answers.Enqueue(new SshResult(0, "CODE\n", ""));
         var steps = new List<SshSetupProgress>();
         await new LocalServerSetup(processes, "4.0.0").RunAsync(new LocalServerRequest { OwnerName = "Alex", ToolPath = tools }, (_, _, _) => Task.FromResult("l"), steps.Add,
@@ -93,8 +119,6 @@ public sealed class LocalServerSetupTests
 
         public List<string> Commands { get; } = [];
 
-        public List<string> Started { get; } = [];
-
         public HashSet<string> Files { get; } = new(StringComparer.OrdinalIgnoreCase);
 
         public Action? OnInstall { get; set; }
@@ -105,8 +129,6 @@ public sealed class LocalServerSetupTests
             if (executable == "dotnet") OnInstall?.Invoke();
             return Task.FromResult(Answers.Count > 0 ? Answers.Dequeue() : new SshResult(0, "", ""));
         }
-
-        public void StartDetached(string executable, IReadOnlyList<string> arguments) => Started.Add(string.Join(' ', arguments));
 
         public bool Exists(string path) => Files.Contains(path);
 

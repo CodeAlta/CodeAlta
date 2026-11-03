@@ -15,7 +15,10 @@ const calls: string[] = [];
 const epoch = "12345678-1234-1234-1234-123456789abc";
 const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 const event = (step: string, state: string, detail: string | null = null, code: string | null = null): MachineSetupEvent =>
-  ({ step, state, detail, code, machineId: null, machineName: null, words: null });
+  ({ step, state, detail, code, machineId: null, machineName: null, words: null, recoveryWords: null });
+// The words of the owner's recovery key, made with the server and given once with the end of the setup.
+const recoveryWords = "acid acorn actor agent alarm album alien alpha amber anchor angel ankle apple apron arena arrow atlas attic autumn award bacon badge bagel baker "
+  + "bamboo banjo barn basil basket beach beacon bear";
 let tries = 0;
 const api: CreateServerApi = {
   createServer: async request => {
@@ -33,7 +36,7 @@ const api: CreateServerApi = {
       yield event("reach", "done", "http://box:2586");
       yield event("claim", "running");
       yield event("claim", "done");
-      yield { ...event("finished", "done"), machineId: "link-1" };
+      yield { ...event("finished", "done"), machineId: "link-1", recoveryWords };
     })();
   },
 };
@@ -46,7 +49,8 @@ const machinesApi: CreateServerMachinesApi = {
 const joinApi: JoinOrganizationApi = {
   join: async request => {
     calls.push(JSON.stringify({ joinOrg: request.url, token: request.token }));
-    return { status: "ok", message: null, server: { id: "corp", url: request.url, organization: "Contoso", link: "pending", connection: "pending", problem: null, controller: false, spaces: [] } };
+    return { status: "ok", message: null, recoveryWords: null, server: { id: "corp", url: request.url, organization: "Contoso", link: "pending", connection: "pending", problem: null, controller: false, spaces: [],
+      recoveryKey: null } };
   },
   status: async () => ({ status: "ok", servers: [], deviceId: "me", words: "cabin onion leopard pigeon peach needle" }),
   linkSpace: async request => { calls.push(JSON.stringify({ link: request.spaceId, server: request.linkId })); return { status: "ok", message: null, space: null } as never; },
@@ -58,9 +62,9 @@ const spacesApi: JoinOrganizationSpacesApi = {
 let devices: FleetDeviceView[] = [{ id: "box", name: "build-box", kind: "node", status: "pending", online: true, words: "ruby scarf apple ember camera finch", createdAt: "2026-11-03T00:00:00Z" }];
 const approvalsApi: FleetApprovalsApi = {
   status: async () => ({ status: "ok", deviceId: "me", words: null, servers: [{ id: "home", url: "https://fleet.example", organization: "Home", link: "approved", connection: "online",
-    problem: null, controller: true, spaces: [] }] }),
+    problem: null, controller: true, spaces: [], recoveryKey: true }] }),
   devices: async () => ({ status: "ok", devices, message: null }),
-  approve: async request => { calls.push(JSON.stringify({ approve: request.deviceId })); devices = devices.map(item => ({ ...item, status: "approved" })); return { status: "ok", device: null, message: null }; },
+  approve: async request => { calls.push(JSON.stringify({ approve: request.deviceId, words: request.words })); devices = devices.map(item => ({ ...item, status: "approved" })); return { status: "ok", device: null, message: null }; },
   revoke: async request => { calls.push(JSON.stringify({ refuse: request.deviceId })); return { status: "ok", device: null, message: null }; },
   watch: async () => (async function* () { })(),
 };
@@ -71,7 +75,7 @@ function Fixture() {
   return <>
     <FleetApprovals epoch={epoch} api={approvalsApi} onOpen={() => calls.push(JSON.stringify({ open: "fleetServer" }))} />
     {shown === "create" && <CreateServerDialog epoch={epoch} api={api} machinesApi={machinesApi} onExisting={() => calls.push(JSON.stringify({ existing: true }))}
-      onClose={created => calls.push(JSON.stringify({ close: created }))} />}
+      onClose={(created, words) => calls.push(JSON.stringify({ close: created, recoveryWords: words ?? null }))} />}
     {shown === "join" && <JoinOrganizationDialog epoch={epoch} api={joinApi} spaces={spacesApi} onClose={joined => calls.push(JSON.stringify({ closeJoin: joined }))} />}
   </>;
 }

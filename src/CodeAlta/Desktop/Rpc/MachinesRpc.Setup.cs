@@ -119,7 +119,11 @@ internal sealed record MachineSshRequest(string ExpectedEpoch, string Target, st
 /// <param name="MachineId">The machine, once paired.</param>
 /// <param name="MachineName">Its name.</param>
 /// <param name="Words">The six words of its key.</param>
-internal sealed record MachineSetupEvent(string Step, string State, string? Detail, string? Code, string? MachineId, string? MachineName, string? Words)
+/// <param name="RecoveryWords">
+/// For a server this computer creates, the words of the owner's recovery key made with it, shown once; null when none was made.
+/// </param>
+internal sealed record MachineSetupEvent(string Step, string State, string? Detail, string? Code, string? MachineId, string? MachineName, string? Words,
+    string? RecoveryWords = null)
 {
     internal static MachineSetupEvent Failed(string step, string code, string? detail) => new(step, "failed", detail, code, null, null, null);
 }

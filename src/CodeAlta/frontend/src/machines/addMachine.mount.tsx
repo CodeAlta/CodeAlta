@@ -11,7 +11,7 @@ document.documentElement.classList.add("bp6-dark");
 
 const calls: string[] = [];
 const event = (step: string, state: string, detail: string | null = null, code: string | null = null): MachineSetupEvent =>
-  ({ step, state, detail, code, machineId: null, machineName: null, words: null });
+  ({ step, state, detail, code, machineId: null, machineName: null, words: null, recoveryWords: null });
 const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 const api: AddMachineApi = {
   addOverSsh: async request => {
@@ -35,7 +35,7 @@ let devices: FleetDeviceView[] = [{ id: "me", name: "desktop", kind: "controller
 let polls = 0;
 const serverApi: AddMachineServerApi = {
   status: async () => ({ status: "ok", deviceId: "me", words: null, servers: [{ id: "home", url: "https://fleet.example", organization: "Home", link: "approved",
-    connection: "online", problem: null, controller: true, spaces: [] }] }),
+    connection: "online", problem: null, controller: true, spaces: [], recoveryKey: true }] }),
   createToken: async () => { calls.push(JSON.stringify({ token: "home" })); return { status: "ok", token: "JOIN-1234", expiresAt: null, message: null }; },
   devices: async () => {
     // The machine comes at the second read after the code.

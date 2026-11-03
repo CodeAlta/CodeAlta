@@ -1,4 +1,5 @@
 using CodeAlta.Fleet.Protocol;
+using CodeAlta.Fleet.Protocol.Api;
 
 namespace CodeAlta.Server.Storage;
 
@@ -118,6 +119,39 @@ public interface ICoordinatorStore : IStatisticsFactStore, IAsyncDisposable
     /// <returns>What happened, and the device after it.</returns>
     ValueTask<(DeviceListAppendOutcome Outcome, DeviceRecord? Device)> AppendDeviceListEntryAsync(DeviceListEntryRecord entry, string expectedStatus, string newStatus,
         string? ownerPersonId, AuditEntry audit, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Records a device that joins the device list without enrolling (a recovery key, or the device a recovery key signs
+    /// in), approved, with the signed entry that adds it, if the entry follows the last one and no device has its key.
+    /// </summary>
+    /// <param name="device">The device, approved.</param>
+    /// <param name="entry">The entry that adds it, verified by the caller.</param>
+    /// <param name="recovery">The recovery key it is, with its sealed anchor; null for a device.</param>
+    /// <param name="audit">The audit record.</param>
+    /// <param name="cancellationToken">Cancels the operation.</param>
+    /// <returns>What happened (<see cref="DeviceListAppendOutcome.DeviceStateChanged"/> when the device exists), and the device.</returns>
+    ValueTask<(DeviceListAppendOutcome Outcome, DeviceRecord? Device)> AddDeviceWithEntryAsync(DeviceRecord device, DeviceListEntryRecord entry, RecoveryKeyRecord? recovery,
+        AuditEntry audit, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Withdraws what a device that leaves the server published and was given there, in one transaction: the facts of its
+    /// sessions with their sealed metadata, its statistics, its inventory and cursors, the copies of keys wrapped to it,
+    /// the automations given to it and the runs it reported; the device is revoked, with the entry that removes it from the
+    /// device list when one is given (if it follows the last one).
+    /// </summary>
+    /// <param name="deviceId">The device.</param>
+    /// <param name="entry">The entry that removes it, verified by the caller; null to keep the list as it is.</param>
+    /// <param name="now">The time of the departure.</param>
+    /// <param name="audit">The audit record.</param>
+    /// <param name="cancellationToken">Cancels the operation.</param>
+    /// <returns>What was withdrawn; null when the entry does not follow the last one (nothing changed).</returns>
+    ValueTask<LeaveResponse?> LeaveAsync(string deviceId, DeviceListEntryRecord? entry, DateTimeOffset now, AuditEntry audit, CancellationToken cancellationToken = default);
+
+    /// <summary>Gets the recovery key a device of the list is.</summary>
+    /// <param name="deviceId">The device id of the recovery key.</param>
+    /// <param name="cancellationToken">Cancels the operation.</param>
+    /// <returns>The recovery key, or <see langword="null"/>.</returns>
+    ValueTask<RecoveryKeyRecord?> GetRecoveryKeyAsync(string deviceId, CancellationToken cancellationToken = default);
 
     /// <summary>Refuses a pending device: it becomes revoked without an entry in the device list, which it never joined.</summary>
     /// <param name="deviceId">The device.</param>

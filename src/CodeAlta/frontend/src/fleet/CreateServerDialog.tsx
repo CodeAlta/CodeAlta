@@ -23,10 +23,11 @@ type Where = "ssh" | "local";
  * Create my server: on a machine reached over SSH, the usual place of a server (CodeAlta installs CodeAlta Server
  * there with its service, checks from here that it answers where the machines will reach it, reads its setup code over
  * SSH and claims it), on this computer, or a server that runs already. Then the machines this computer manages join it,
- * each approved at once.
+ * each approved at once. The owner's recovery key is made with the server: its words go to `onClose`, for the page to show
+ * them once.
  */
 export function CreateServerDialog({ epoch, api = fleetServer, machinesApi = machines, onExisting, onClose }: {
-  epoch: string; api?: CreateServerApi; machinesApi?: CreateServerMachinesApi; onExisting: () => void; onClose: (created: boolean) => void;
+  epoch: string; api?: CreateServerApi; machinesApi?: CreateServerMachinesApi; onExisting: () => void; onClose: (created: boolean, recoveryWords?: string | null) => void;
 }) {
   const { t } = useShellLanguage();
   const [where, setWhere] = useState<Where | null>(null);
@@ -43,6 +44,8 @@ export function CreateServerDialog({ epoch, api = fleetServer, machinesApi = mac
   const [steps, setSteps] = useState<Record<string, StepState> | null>(null);
   const [failed, setFailed] = useState<{ step: string; code: string; detail?: string | null } | null>(null);
   const [linkId, setLinkId] = useState<string | null>(null);
+  // The words of the owner's recovery key, made with the server: kept until the dialog closes, then shown once.
+  const [recoveryWords, setRecoveryWords] = useState<string | null>(null);
   const [running, setRunning] = useState(false);
   const abort = useRef<AbortController | null>(null);
   useEffect(() => () => abort.current?.abort(), []);
@@ -75,7 +78,7 @@ export function CreateServerDialog({ epoch, api = fleetServer, machinesApi = mac
   }
 
   function apply(event: MachineSetupEvent) {
-    if (event.step === "finished") { setLinkId(event.machineId ?? null); return; }
+    if (event.step === "finished") { setLinkId(event.machineId ?? null); setRecoveryWords(event.recoveryWords ?? null); return; }
     if (!order.includes(event.step)) return;
     setSteps(current => current && { ...current, [event.step]: { state: event.state === "done" ? "done" : event.state === "failed" ? "failed" : "running",
       detail: event.detail ?? current[event.step]?.detail } });
@@ -84,7 +87,7 @@ export function CreateServerDialog({ epoch, api = fleetServer, machinesApi = mac
 
   const shownHost = computer.replace(/^[^@]*@/u, "").replace(/:\d+$/u, "");
   return <Dialog isOpen className="create-server-dialog" title={t("Create my server")} canOutsideClickClose={!running && where === null} canEscapeKeyClose={!running}
-    onClose={() => { if (!running) onClose(!!linkId); }}>
+    onClose={() => { if (!running) onClose(!!linkId, recoveryWords); }}>
     {where === null && <DialogBody>
       <p className="muted-text">{t("Where does your server run?")}</p>
       <div className="add-machine-choices" role="list">
@@ -150,6 +153,7 @@ export function CreateServerDialog({ epoch, api = fleetServer, machinesApi = mac
         {linkId && <>
           <Callout compact intent="success" role="status">{t(where === "local" ? "Your server runs on this computer, and you are its owner." : "Your server runs on {host}, and you are its owner.",
             { host: shownHost })}</Callout>
+          {recoveryWords && <p className="muted-text create-server-recovery-note">{t("Done shows your recovery key next, once.")}</p>}
           <AddMachines epoch={epoch} linkId={linkId} api={machinesApi} />
         </>}
       </DialogBody>
@@ -157,7 +161,7 @@ export function CreateServerDialog({ epoch, api = fleetServer, machinesApi = mac
         {!running && failed && <Button text={t("Back")} onClick={() => { setSteps(null); setFailed(null); }} />}
         {!running && failed?.code === "host_key_unknown" && <Button intent="primary" text={t("Trust it and try again")} onClick={() => void create(true)} />}
         {!running && failed && failed.code !== "host_key_unknown" && <Button intent="primary" icon={<AppIcon name="refresh" size={14} />} text={t("Try again")} onClick={() => void create(false)} />}
-        {linkId && <Button intent="primary" text={t("Done")} onClick={() => onClose(true)} />}
+        {linkId && <Button intent="primary" text={t("Done")} onClick={() => onClose(true, recoveryWords)} />}
       </>} />
     </>}
   </Dialog>;

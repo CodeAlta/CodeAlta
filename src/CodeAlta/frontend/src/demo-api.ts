@@ -166,6 +166,10 @@ export const externalEditors = Object.freeze({ list: unavailable, set: unavailab
 export const cloudSessions = Object.freeze({ readiness: unavailable, start: unavailable, startState: unavailable, cancelStart: unavailable, bringHere: unavailable,
   details: unavailable, send: unavailable, continueHere: unavailable });
 export const mcpHost = Object.freeze({ status: unavailable, setEnabled: unavailable, setTailnet: unavailable });
+export const secrets = Object.freeze({ list: async () => ({ status: "unavailable", protection: null, secrets: [], variables: [] }),
+  setSecret: async () => ({ status: "unavailable", message: null }), rotateSecret: async () => ({ status: "unavailable", message: null }),
+  deleteSecret: async () => ({ status: "unavailable", message: null }), setVariable: async () => ({ status: "unavailable", message: null }),
+  deleteVariable: async () => ({ status: "unavailable", message: null }) });
 export const machines = Object.freeze({ list: async () => ({ status: "unavailable", hostEpoch: null, machines: [] }), refresh: async () => ({ status: "unavailable", hostEpoch: null, machines: [] }),
   previewPairing: unavailable, pair: unavailable, forget: unavailable, newSession: unavailable, newSessionChoices: unavailable, watch: async () => (async function* () { })(),
   moveSettings: unavailable, setReceiveMoves: unavailable, movePreview: unavailable, moveSession: unavailable });
@@ -329,6 +333,7 @@ export const globalConfig = Object.freeze({
   save: async () => ({ status: "unavailable", revision: null, message: null, line: null, column: null, providersApplied: 0 }),
   providers: async () => ({ status: "unavailable", revision: null, defaultProvider: null, providers: [], providerTypes: [], reasoningEfforts: [], typeDefaults: [], builtIn: [] }),
   saveProvider: async () => ({ status: "unavailable", revision: null, message: null, line: null, column: null, providersApplied: 0 }),
+  keepKeyAsSecret: async () => ({ status: "unavailable", revision: null, message: null, line: null, column: null, providersApplied: 0 }),
   deleteProvider: async () => ({ status: "unavailable", revision: null, message: null, line: null, column: null, providersApplied: 0 }),
   addBuiltInProvider: async () => ({ status: "unavailable", revision: null, message: null, line: null, column: null, providersApplied: 0 }),
   sessionTitles: async () => ({ status: "unavailable", mode: null }),

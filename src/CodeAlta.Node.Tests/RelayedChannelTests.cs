@@ -36,6 +36,11 @@ public sealed class RelayedChannelTests
         Assert.AreEqual(FleetChannelPath.Relayed, client.Path);
         Assert.AreEqual(rig.NodeIdentity.DeviceId, client.NodeDeviceId, "TLS authenticated the node with the key the signed device list names.");
         Assert.AreEqual("test-node", (await client.GetInfoAsync(token)).Name);
+        // A device trusted through the organization never manages the machine: neither its devices nor its secrets.
+        Assert.AreEqual(FleetErrorCodes.Forbidden, (await Assert.ThrowsExactlyAsync<FleetException>(() => client.ListSecretsAsync(token))).Error.Code);
+        Assert.AreEqual(FleetErrorCodes.Forbidden, (await Assert.ThrowsExactlyAsync<FleetException>(() =>
+            client.SetSecretAsync(new FleetSecretSetParams("RELAYED", "value"), cancellationToken: token))).Error.Code);
+        Assert.AreEqual(FleetErrorCodes.Forbidden, (await Assert.ThrowsExactlyAsync<FleetException>(() => client.ListDevicesAsync(token))).Error.Code);
 
         var created = await client.CreateSessionAsync(new FleetCreateSessionParams(Title: Marker + " title"), "create-relayed", token);
         Assert.IsTrue((await client.ListSessionsAsync(cancellationToken: token)).Sessions.Any(session => session.Id == created.SessionId), "The session is listed.");

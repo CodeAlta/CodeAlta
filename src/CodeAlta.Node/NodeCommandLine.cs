@@ -96,6 +96,9 @@ internal sealed record NodeCommandHandlers(
     Func<NodeUpdateOptions, ValueTask<int>> Update,
     Func<NodeAutomationCommandOptions, ValueTask<int>> Automations)
 {
+    /// <summary>Gets what lists, sets, rotates and deletes the secrets and variables of the machine; null for none.</summary>
+    public Func<NodeSecretCommandOptions, ValueTask<int>>? Secrets { get; init; }
+
     /// <summary>Gets what shows or changes whether agents of other machines may start sessions on the node; does nothing by default.</summary>
     public Func<NodeAgentCommandOptions, ValueTask<int>> Agents { get; init; } = static _ => ValueTask.FromResult(0);
 
@@ -422,6 +425,37 @@ internal static class NodeCommandLine
             return handlers.Automations(automations);
         });
 
+        var secrets = new NodeSecretCommandOptions();
+        var secretsCommand = new Command("secrets", "List, set, rotate and delete the secrets and variables of this machine")
+        {
+            new CommandUsage("Usage: {NAME} [list] [options]"),
+            new CommandUsage("       {NAME} set|rotate <name> [options]"),
+            new CommandUsage("       {NAME} delete <name> [options]"),
+            new CommandUsage("       {NAME} set-var <name> <value> [options]"),
+            new CommandUsage("       {NAME} delete-var <name> [options]"),
+            _,
+            "The secrets and variables of this machine, which the configuration names",
+            "with ${secret:NAME}, ${var:NAME} and api_key_secret, as CodeAlta Desktop",
+            "shows them in Settings > Secrets. A secret is never shown again.",
+            "  list        the secrets (name, version, when, by whom) and the variables",
+            "  set         sets a secret, or gives it a new version; rotate needs it set",
+            "  delete      deletes a secret",
+            "  set-var     sets a variable, which is not secret",
+            "  delete-var  deletes a variable",
+            "The value of a secret is read from the standard input, or typed at a",
+            "prompt that does not show it: never given as an argument.",
+            "  echo $TOKEN | altanode secrets set GRAFANA_TOKEN",
+            _,
+            "Options:",
+        };
+        AddProfile(secretsCommand, secrets.Profile);
+        secretsCommand.Add("<>", "The command and its arguments");
+        secretsCommand.Add((_, words) =>
+        {
+            secrets.Words.AddRange(words);
+            return handlers.Secrets?.Invoke(secrets) ?? handlers.NotImplemented("secrets");
+        });
+
         var agents = new NodeAgentCommandOptions();
         var agentsCommand = new Command("agents", "Show or change whether agents of other machines may start sessions here")
         {
@@ -548,6 +582,7 @@ internal static class NodeCommandLine
             permissionsCommand,
             projectsCommand,
             automationsCommand,
+            secretsCommand,
             agentsCommand,
             joinCommand,
             machinesCommand,

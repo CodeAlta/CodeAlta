@@ -134,6 +134,14 @@ internal static class McpExternalVariables
             }
 
             Reason = McpSkipReason.UnknownVariable;
+            // A secret or a variable of the store of this machine: resolved where the server starts, as ${NAME} is.
+            if ((name.StartsWith("secret:", StringComparison.Ordinal) || name.StartsWith("var:", StringComparison.Ordinal))
+                && CodeAlta.Catalog.Secrets.LocalSecretStore.IsName(name[(name.IndexOf(':') + 1)..].ToString()))
+            {
+                builder.Append("${").Append(name).Append('}');
+                return true;
+            }
+
             if (name.StartsWith("env:", StringComparison.Ordinal))
             {
                 var variable = name[4..];

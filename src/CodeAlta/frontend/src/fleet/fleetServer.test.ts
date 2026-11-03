@@ -2,7 +2,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import type { FleetDeviceView, FleetMachineView, FleetServerView, FleetSessionView, FleetTelemetryView, FleetUpdateCampaignView, FleetUpdatePolicyView } from "#neoastra";
 import { campaignProgress, campaignStateIntent, campaignStateLabel, canCancelCampaign, emptyUpdateDraft, fleetGroups, fleetSummary, isVersion, joinCommand, keyWords,
-  machineStateIntent, machineStateLabel, orderedDevices, policyDraft, policyDraftProblem, policySummary, serverAddressOf, serverConnection, serverConnectionIntent,
+  machineStateIntent, machineStateLabel, orderedDevices, policyDraft, policyDraftProblem, policySummary, recoveryCheckPasses, recoveryCheckPositions, serverAddressOf,
+  serverConnection, serverConnectionIntent,
   serverConnectionLabel, serverOfSpace, serverProblem, sessionModel, sessionState, sessionStateLabel, telemetryDraft, telemetryHeaderEdits, telemetryProblem, telemetrySummary,
   updateDraftProblem, updateProblem, updateStart } from "./fleetServer";
 import { changedSessionOptions, storedSessionOptions } from "../sessionSettings/sessionOptions";
@@ -12,7 +13,7 @@ const machine = (id: string, look: Partial<FleetMachineView> = {}): FleetMachine
 const session = (id: string, machineId: string, state: string, updatedAt: string, look: Partial<FleetSessionView> = {}): FleetSessionView => ({ id, machineId, state,
   providerType: "anthropic", model: "claude-opus-5-5", createdAt: "2026-11-03T08:00:00Z", updatedAt, turns: 0, tokens: 0, canOpen: false, title: null, ...look });
 const server = (id: string, look: Partial<FleetServerView> = {}): FleetServerView => ({ id, url: `https://${id}.example`, organization: null, link: "approved",
-  connection: "online", problem: null, controller: true, spaces: [], ...look });
+  connection: "online", problem: null, controller: true, spaces: [], recoveryKey: null, ...look });
 
 test("the connection of a server reads as words and an intent; what the host does not say is offline", () => {
   assert.equal(serverConnection(server("a", { connection: "pending" })), "pending");
@@ -35,6 +36,24 @@ test("the refusals of a server say what to do; an unknown one says the operation
   assert.equal(serverProblem("enrollment.token_used"), "This enrollment code was used already.");
   assert.equal(serverProblem("unreachable"), "The server does not answer.");
   assert.equal(serverProblem("whatever"), "The operation did not complete.");
+  assert.equal(serverProblem("recovery.refused"), "These words are not a recovery key of this server.");
+  assert.equal(serverProblem("device_list.broken"), "The device list of the server does not verify: nothing was signed.");
+});
+
+test("two different words of a recovery key are asked back, in order, and any case or spaces around them pass", () => {
+  for (const draw of [0, 0.2, 0.5, 0.99, 0.999999]) {
+    const [first, second] = recoveryCheckPositions(32, () => draw);
+    assert.ok(first >= 1 && second <= 32 && first < second, `${draw}: ${first}, ${second}`);
+  }
+
+  const values = [0.9, 0.1];
+  assert.deepEqual(recoveryCheckPositions(32, () => values.shift()!), [4, 29], "the two draws, in order");
+  const words = keyWords("acid acorn actor agent");
+  assert.equal(recoveryCheckPasses(words, [2, 4], [" ACORN ", "agent"]), true);
+  assert.equal(recoveryCheckPasses(words, [2, 4], ["acorn", "actor"]), false, "another word");
+  assert.equal(recoveryCheckPasses(words, [2, 4], ["acorn", ""]), false, "a word missing");
+  assert.equal(recoveryCheckPasses(words, [2, 9], ["acorn", ""]), false, "a position beyond the words");
+  assert.equal(recoveryCheckPasses(words, [], []), false);
 });
 
 test("the devices that wait for an approval come first, the latest first; then the approved, then the revoked", () => {

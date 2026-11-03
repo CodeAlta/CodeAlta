@@ -2,8 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { edge, withCanvas } from "../statistics/browserHarness";
 
-const options = { entry: "../machines/machinePage.mount.tsx", fixture: "machineFixture", rpcFixture: "../demo-api.ts", styles: ["../machines/machines.css"], width: 1100,
-  height: 900, reducedMotion: true } as const;
+const options = { entry: "../machines/machinePage.mount.tsx", fixture: "machineFixture", rpcFixture: "../demo-api.ts", styles: ["../machines/machines.css", "../secrets/secrets.css"],
+  width: 1100, height: 900, reducedMotion: true } as const;
 const type = (selector: string, value: string) => `(() => { const input = document.querySelector(${JSON.stringify(selector)});
   Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(input, ${JSON.stringify(value)});
   input.dispatchEvent(new Event('input', { bubbles: true })); return true; })()`;
@@ -52,6 +52,49 @@ test("the computer that manages a machine changes what its devices may do, its p
     assert.deepEqual(page.problems, []);
   }, options);
 });
+
+test("the computer that manages a machine sets, rotates and deletes its secrets and edits its variables, never seeing a value back", { skip: !edge, timeout: 90_000 },
+  async () => {
+    await withCanvas(async page => {
+      const section = ".machine-section[aria-label=Secrets]";
+      await page.until(`document.querySelector('${section} .secrets-empty')`, "the secrets of the machine");
+      assert.equal(await page.evaluate(`document.querySelector('${section} .secrets-empty').textContent`), "No secret on this machine.");
+      assert.equal(await page.evaluate(`document.querySelector('${section} [data-variable=GRAFANA_URL] input').value`), "https://grafana.example");
+
+      // Add a secret…: its name and its value, sent to the machine; the row shows its name, its reference and its version only.
+      await page.clickText(`${section} .bp6-button`, "Add a secret…");
+      await page.until(`document.querySelector('${section} .secret-new[data-kind=secret]')`, "the form");
+      await page.evaluate(type(`${section} .secret-new[data-kind=secret] input[aria-label="Name of the secret"]`, "GRAFANA_TOKEN"));
+      await page.evaluate(type(`${section} .secret-new[data-kind=secret] input[aria-label="Value of the secret"]`, "glsa_value_1"));
+      await page.clickText(`${section} .secret-new[data-kind=secret] .bp6-button`, "Add");
+      await page.until(`document.querySelector('${section} [data-secret=GRAFANA_TOKEN]')?.textContent.includes('Version 1')`, "the secret listed");
+      assert.equal(await page.evaluate(`document.querySelector('${section} [data-secret=GRAFANA_TOKEN] .secret-reference').textContent`), "${secret:GRAFANA_TOKEN}");
+      await page.shot("machine-page-secrets");
+
+      // Rotate: a new value in a popover beside the row, a new version.
+      await page.clickText(`${section} [data-secret=GRAFANA_TOKEN] .bp6-button`, "Rotate");
+      await page.until(`document.querySelector('.secret-rotate input')`, "the new value");
+      await page.evaluate(type(".secret-rotate input", "glsa_value_2"));
+      await page.clickText(".secret-rotate .bp6-button", "Rotate");
+      await page.until(`document.querySelector('${section} [data-secret=GRAFANA_TOKEN]')?.textContent.includes('Version 2')`, "rotated");
+
+      // A variable is edited in place.
+      await page.evaluate(type(`${section} [data-variable=GRAFANA_URL] input`, "https://grafana.example/v2"));
+      await page.clickText(`${section} [data-variable=GRAFANA_URL] .bp6-button`, "Save");
+      await page.until(`!document.querySelector('${section} [data-variable=GRAFANA_URL] .bp6-intent-primary')`, "saved");
+
+      // Delete asks beside the row.
+      await page.evaluate(`document.querySelector('${section} button[aria-label="Delete GRAFANA_TOKEN"]').click()`);
+      await page.until(`[...document.querySelectorAll('.bp6-popover .bp6-button')].some(button => button.textContent === 'Delete')`, "the confirmation");
+      await page.clickText(".bp6-popover .bp6-button", "Delete");
+      await page.until(`document.querySelector('${section} .secrets-empty')`, "deleted");
+
+      assert.equal(await page.evaluate(`document.body.textContent.includes('glsa_value')`), false, "no value of a secret is ever on the page");
+      assert.deepEqual(await calls(page), [{ setSecret: "GRAFANA_TOKEN", machine: "managed" }, { rotateSecret: "GRAFANA_TOKEN" },
+        { setVariable: "GRAFANA_URL", value: "https://grafana.example/v2" }, { deleteSecret: "GRAFANA_TOKEN" }]);
+      assert.deepEqual(page.problems, []);
+    }, options);
+  });
 
 test("giving up managing a machine asks first, and a machine this computer does not manage says how to be given it", { skip: !edge, timeout: 90_000 }, async () => {
   await withCanvas(async page => {

@@ -2,6 +2,7 @@ using System.Runtime.ExceptionServices;
 using CodeAlta.Agent;
 using CodeAlta.Agent.Runtime;
 using CodeAlta.Catalog;
+using CodeAlta.Catalog.Secrets;
 using CodeAlta.Catalog.Skills;
 using CodeAlta.Catalog.Storage;
 using CodeAlta.Orchestration.Runtime;
@@ -404,6 +405,9 @@ public sealed class CodeAltaHost : IAsyncDisposable
                 ReadOnlyGlobalState = readOnlyGlobalState,
             };
             Directory.CreateDirectory(catalogOptions.StateRoot);
+            // The secrets of this machine are shared by the hosts of the profile: their values are masked in what the
+            // sessions keep, journal, show and trace.
+            var secretMasker = new AgentSecretMasker(new LocalSecretStore(globalRoot).GetSecretValues);
             var startupScratchpadCleanup = options.StartupScratchpadCleanup;
             if (startupScratchpadCleanup is not null
                 && (!string.Equals(startupScratchpadCleanup.StateRoot, catalogOptions.StateRoot, OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal)
@@ -536,6 +540,7 @@ public sealed class CodeAltaHost : IAsyncDisposable
             agentHub = new AgentHub(modelProviderRegistry, catalogOptions.StateRoot, sessionViewCatalog.JournalStore.ProjectionCache, retentionProtection)
             {
                 JournalFile = sessionJournalFile,
+                SecretMasker = secretMasker,
             };
             var agentSessionCatalog = new AgentSessionCatalog(sessionViewCatalog.JournalStore.CreateSessionStore());
             var projectFileSnapshotCache = new ProjectFileSnapshotCache();
@@ -580,7 +585,11 @@ public sealed class CodeAltaHost : IAsyncDisposable
                 InheritPermissionMode = options.InheritPermissionModePolicy,
                 ShowsPromptSuggestions = options.ShowsPromptSuggestions,
                 Identities = options.AppliesSpaceIdentities
-                    ? new SessionIdentityResolver(new SpaceCatalog(projectCatalog), projectProfiles: new CodeAltaConfigStore(catalogOptions).LoadProjectCliProfiles)
+                    // The CLI profiles read their ${secret:NAME} and ${var:NAME} from the store of this machine.
+                    ? new SessionIdentityResolver(new SpaceCatalog(projectCatalog),
+                        identity => SpaceIdentityEnvironment.Create(identity, SecretReferenceResolver.ForMachine(catalogOptions.GlobalRoot).Read,
+                            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), OperatingSystem.IsWindows()),
+                        new CodeAltaConfigStore(catalogOptions).LoadProjectCliProfiles)
                     : SessionIdentityResolver.None,
                 AskWhenConversationHeld = options.AskWhenConversationHeld,
                 SandboxBackend = options.SandboxBackend,
