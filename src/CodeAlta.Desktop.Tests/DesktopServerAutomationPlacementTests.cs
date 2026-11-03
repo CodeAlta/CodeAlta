@@ -49,6 +49,9 @@ public sealed class DesktopServerAutomationPlacementTests
             // The machine: its control connection opens what it is given with its own key, and says it took it.
             var given = new ConcurrentQueue<(FleetAutomationVersion Version, FleetAutomationContent? Content)>();
             var asked = new ConcurrentQueue<FleetAutomationRunRequest>();
+            // The machine says it took it only once the test has seen it held for the machine: a fast acknowledgment
+            // would otherwise turn "pending" into "copied" before it is read.
+            var acknowledge = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
             FleetConnector? nodeConnector = null;
             await using var connector = nodeConnector = new FleetConnector(new FleetConnectorOptions
             {
@@ -68,6 +71,7 @@ public sealed class DesktopServerAutomationPlacementTests
                         acks.Add(new FleetAutomationAck(version.AutomationId, version.Number, true, null));
                     }
 
+                    await acknowledge.Task.WaitAsync(cancellationToken);
                     await nodeConnector.AcknowledgeAutomationsAsync(new FleetAutomationAcks(acks), cancellationToken);
                 },
                 AutomationsRun = async (signed, cancellationToken) =>
@@ -110,6 +114,7 @@ public sealed class DesktopServerAutomationPlacementTests
                 // Given to the server, which delivers it to the machine: the server reads none of it.
                 await placement.SyncAsync(token);
                 Assert.AreEqual(("pending", "mini"), (placement.Status(automations.Snapshot.Find(Id)!)!.State, placement.Status(automations.Snapshot.Find(Id)!)!.MachineName));
+                acknowledge.SetResult();
                 await WaitForAsync(() => !given.IsEmpty, "the machine to be given it", token);
                 Assert.IsTrue(given.TryDequeue(out var first));
                 StringAssert.Contains(first.Content!.Definition, "Nightly on the mini");

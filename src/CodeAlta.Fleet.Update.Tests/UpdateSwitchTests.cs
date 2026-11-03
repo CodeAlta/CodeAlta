@@ -523,7 +523,7 @@ public sealed class UpdateSwitchTests
     {
         var state = new UpdateState
         {
-            Current = "4.0.2", Previous = "4.0.1", Trial = new UpdateTrial("4.0.2", DateTimeOffset.UnixEpoch, 1),
+            Current = "4.0.2", SelectedBy = "local", Previous = "4.0.1", Trial = new UpdateTrial("4.0.2", DateTimeOffset.UnixEpoch, 1),
             Pending = new UpdatePending("4.0.3", DateTimeOffset.UnixEpoch, false, UpdatePhases.Draining, DateTimeOffset.UnixEpoch, 2, "local"),
         };
         FleetUpdateStatus status = UpdateStatusReport.Describe(state, "4.0.2", "4.0.0");
@@ -534,6 +534,35 @@ public sealed class UpdateSwitchTests
         StringAssert.Contains(text, "Version: 4.0.2 (selected by altanode update, installed 4.0.0, previous 4.0.1).");
         StringAssert.Contains(text, "on trial");
         StringAssert.Contains(text, "waiting for 2 session(s)");
+    }
+
+    [TestMethod]
+    public void TheStatusSaysWhoSelectedTheVersion()
+    {
+        using var temp = new TempFolder();
+        var store = StoreWith(temp, V1, V2, V3);
+        string Origin() => UpdateStatusReport.Lines(UpdateStatusReport.Describe(store.Read(), store.Read().Current ?? "4.0.0", "4.0.0"), "altanode")[0];
+
+        // A campaign of the fleet: the status names it, not the command of the owner.
+        store.RequestSwitch(V1, now: false, "fleet campaign 3 (c3)");
+        Assert.IsTrue(store.TrySelect(V1, store.Read().Pending!));
+        Assert.AreEqual("fleet campaign 3 (c3)", store.Read().SelectedBy);
+        Assert.AreEqual("Version: 4.0.1 (selected by fleet campaign 3 (c3), installed 4.0.0).", Origin());
+
+        // The owner on the machine.
+        store.RequestSwitch(V2, now: false, "local");
+        Assert.IsTrue(store.TrySelect(V2, store.Read().Pending!));
+        Assert.AreEqual("Version: 4.0.2 (selected by altanode update, installed 4.0.0, previous 4.0.1).", Origin());
+
+        // A device that manages the machine.
+        store.RequestSwitch(V3, now: false, "manage:dev-1");
+        Assert.IsTrue(store.TrySelect(V3, store.Read().Pending!));
+        Assert.AreEqual("Version: 4.0.3 (selected by the managing device dev-1, installed 4.0.0, previous 4.0.2).", Origin());
+
+        // Rolled back, the version that runs again was selected by someone this state no longer knows.
+        store.RollBack("did not confirm");
+        Assert.IsNull(store.Read().SelectedBy);
+        Assert.AreEqual("Version: 4.0.2 (selected by an update, installed 4.0.0).", Origin());
     }
 
     /// <summary>A runner whose starts fail as a test says, for an app host that cannot be started (corrupt, another architecture).</summary>

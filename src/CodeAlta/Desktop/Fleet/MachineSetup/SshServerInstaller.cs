@@ -41,7 +41,8 @@ internal static class SshServerSteps
 
 /// <summary>
 /// Sets up CodeAlta Server on a computer reached over SSH, as its owner would there: connect and probe, install the
-/// tool, run it as a service of the user (a <c>systemd --user</c> unit with lingering, or a LaunchAgent), check from this
+/// tool, run it as a service of the user with <c>altaserver install</c> (a <c>systemd --user</c> unit with lingering, or a
+/// LaunchAgent), check from this
 /// computer that it answers at the address the machines will use, then read its one-time setup code over SSH and claim
 /// it through a port forwarded to its loopback — the setup of a server is accepted from its own machine only — so that
 /// nothing is copied by hand.
@@ -108,7 +109,7 @@ internal sealed class SshServerInstaller(ISshRunner ssh, string desktopVersion)
         progress(new(SshSetupSteps.Install, "done", $"CodeAlta Server {version} · {toolPath}"));
 
         progress(new(SshSetupSteps.Service, "running"));
-        var service = await ssh.RunAsync(target, ServiceScript(facts, toolPath, dataRoot, request.Port, onNetwork), request.AcceptNewHostKey, null, cancellationToken)
+        var service = await ssh.RunAsync(target, ServiceScript(facts, toolPath, request.DataRoot, request.Port, onNetwork), request.AcceptNewHostKey, null, cancellationToken)
             .ConfigureAwait(false);
         if (!service.Succeeded) throw new SshSetupException(SshSetupSteps.Service, "service_failed", Lines(service.Error + service.Output));
         progress(new(SshSetupSteps.Service, "done", (facts.Os == "Linux" ? "systemd --user unit" : "LaunchAgent") + $", port {request.Port}"
@@ -146,39 +147,35 @@ internal sealed class SshServerInstaller(ISshRunner ssh, string desktopVersion)
         return script.ToString();
     }
 
-    // A service of the user that runs altaserver run with its data root, named after it so that two never collide; then
-    // waits until the server answers its own status.
-    private static string ServiceScript(SshMachineFacts facts, string toolPath, string dataRoot, int port, bool onNetwork)
+    // The service of the user that runs altaserver run for the data root, as altaserver install writes it there (a
+    // systemd --user unit with lingering, a LaunchAgent), with the PATH and the DOTNET_ROOT of the prelude; then waits until
+    // the server answers its own status. The default data root has the service of ~/.altaserver; another one a service
+    // named after it, so that two never collide.
+    private static string ServiceScript(SshMachineFacts facts, string toolPath, string? dataRoot, int port, bool onNetwork)
     {
         var script = new StringBuilder(SshNodeInstaller.DotnetPrelude(facts));
         script.Append("TOOLS=").Append(SshNodeInstaller.Quote(toolPath)).Append("\nTOOLS=$(cd \"$TOOLS\" && pwd)\n");
-        script.Append("ROOT=").Append(SshNodeInstaller.Quote(dataRoot)).Append("\nmkdir -p \"$ROOT\"\nROOT=$(cd \"$ROOT\" && pwd)\n");
+        script.Append("ROOT=").Append(SshNodeInstaller.Quote(dataRoot ?? "~/.altaserver")).Append("\nmkdir -p \"$ROOT\"\nROOT=$(cd \"$ROOT\" && pwd)\n");
+        // The service an earlier CodeAlta Desktop wrote itself for this data root goes first: two would contend for it.
         script.Append("ID=$(printf %s \"$ROOT\" | cksum | cut -d' ' -f1)\n");
-        script.Append("URLS=").Append(onNetwork ? $"http://0.0.0.0:{port}" : $"http://127.0.0.1:{port}").Append('\n');
         if (facts.Os == "Linux")
         {
-            script.Append("UNIT=\"altaserver-$ID.service\"\nmkdir -p \"$HOME/.config/systemd/user\"\n");
-            script.Append("cat > \"$HOME/.config/systemd/user/$UNIT\" <<EOF\n");
-            script.Append("# Written by CodeAlta Desktop (Create my server).\n[Unit]\nDescription=CodeAlta Server (altaserver)\nWants=network-online.target\nAfter=network-online.target\n\n");
-            script.Append("[Service]\nType=simple\nExecStart=\"$TOOLS/altaserver\" run --urls $URLS --data-root \"$ROOT\"\nEnvironment=DOTNET_ROOT=$DOTNET_ROOT\nEnvironment=\"PATH=$PATH\"\n");
-            script.Append("Restart=on-failure\nRestartSec=10\nStandardOutput=null\n\n[Install]\nWantedBy=default.target\nEOF\n");
-            script.Append("systemctl --user daemon-reload\nsystemctl --user enable --now \"$UNIT\" 1>&2\nsystemctl --user restart \"$UNIT\"\n");
-            // Lingering: the server runs without a login, and after one.
-            script.Append("if [ \"$(loginctl show-user \"$(id -un)\" -p Linger --value 2>/dev/null)\" != yes ]; then loginctl enable-linger \"$(id -un)\" 1>&2 || echo 'lingering stays off' >&2; fi\n");
+            script.Append("OLD=\"$HOME/.config/systemd/user/altaserver-$ID.service\"\n");
+            script.Append("if grep -qs 'Written by CodeAlta Desktop' \"$OLD\"; then systemctl --user disable --now \"altaserver-$ID.service\" 1>&2 || true; rm -f \"$OLD\"; systemctl --user daemon-reload; fi\n");
         }
         else
         {
-            script.Append("LABEL=\"io.codealta.altaserver-$ID\"\nPLIST=\"$HOME/Library/LaunchAgents/$LABEL.plist\"\nmkdir -p \"$HOME/Library/LaunchAgents\"\n");
-            script.Append("cat > \"$PLIST\" <<EOF\n<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n");
-            script.Append("<plist version=\"1.0\"><dict><key>Label</key><string>$LABEL</string><key>ProgramArguments</key><array><string>$TOOLS/altaserver</string><string>run</string>");
-            script.Append("<string>--urls</string><string>$URLS</string><string>--data-root</string><string>$ROOT</string></array>");
-            script.Append("<key>EnvironmentVariables</key><dict><key>DOTNET_ROOT</key><string>$DOTNET_ROOT</string><key>PATH</key><string>$PATH</string></dict>");
-            script.Append("<key>RunAtLoad</key><true/><key>KeepAlive</key><dict><key>SuccessfulExit</key><false/></dict></dict></plist>\nEOF\n");
-            script.Append("launchctl bootout \"gui/$(id -u)/$LABEL\" 2>/dev/null || true\nlaunchctl bootstrap \"gui/$(id -u)\" \"$PLIST\"\n");
+            script.Append("OLD=\"$HOME/Library/LaunchAgents/io.codealta.altaserver-$ID.plist\"\n");
+            script.Append("if [ -f \"$OLD\" ]; then launchctl bootout \"gui/$(id -u)/io.codealta.altaserver-$ID\" 2>/dev/null || true; rm -f \"$OLD\"; fi\n");
         }
 
+        script.Append("\"$TOOLS/altaserver\" install");
+        if (dataRoot is not null) script.Append(" --data-root \"$ROOT\"");
+        script.Append(" --urls ").Append(onNetwork ? $"http://0.0.0.0:{port}" : $"http://127.0.0.1:{port}").Append(" 1>&2\n");
+
         script.Append("i=0\nwhile [ $i -lt ").Append((int)StartTimeout.TotalSeconds).Append(" ]; do\n");
-        script.Append("  if \"$TOOLS/altaserver\" status --data-root \"$ROOT\" 2>/dev/null | grep -q '^Health:'; then exit 0; fi\n  i=$((i+1)); sleep 1\ndone\n");
+        // "Health: ok" once it serves: status also prints "Health: no answer ..." while it starts.
+        script.Append("  if \"$TOOLS/altaserver\" status --data-root \"$ROOT\" 2>/dev/null | grep -q '^Health: ok'; then exit 0; fi\n  i=$((i+1)); sleep 1\ndone\n");
         script.Append("\"$TOOLS/altaserver\" status --data-root \"$ROOT\" >&2\nexit 1\n");
         return script.ToString();
     }

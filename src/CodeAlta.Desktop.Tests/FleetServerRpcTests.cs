@@ -5,6 +5,7 @@ using CodeAlta.Catalog;
 using CodeAlta.Desktop.Fleet;
 using CodeAlta.Desktop.Rpc;
 using CodeAlta.Fleet.Identity;
+using CodeAlta.Fleet.NodeApi;
 using CodeAlta.Fleet.Protocol;
 using CodeAlta.Fleet.Server;
 using CodeAlta.Orchestration.Hosting;
@@ -24,6 +25,41 @@ public sealed class FleetServerRpcTests
     private static readonly ModelProviderId Provider = new("fleet-fixture");
 
     public TestContext TestContext { get; set; } = null!;
+
+    [TestMethod]
+    public void WithoutAServer_TheDirectoryIsThePairedMachines_WithTheirStateVersionAndSessionsAtWork()
+    {
+        var now = new DateTimeOffset(2026, 11, 3, 10, 0, 0, TimeSpan.Zero);
+        var mini = new FleetPairedMachine("mini-id", "mini as paired", RemoteMachineState.Online, new RemoteListing(
+            new FleetNodeInfo("Mac mini", "mini-id", "macos", "4.0.1", [], [], []) { Providers = [new FleetProviderInfo("codex", "Codex", true, null, [])] },
+            [
+                new FleetSessionSummary("s-works", "Fix the build", "p1", "default", null, "codex", "gpt-6", now, now.AddMinutes(5), "working"),
+                new FleetSessionSummary("s-waits", "", null, "default", null, null, null, now, now.AddMinutes(1), "waiting"),
+                new FleetSessionSummary("s-idle", "Old", null, "default", null, null, null, now, now, "idle"),
+            ], now));
+        var gone = new FleetPairedMachine("box-id", "build box", RemoteMachineState.Offline, RemoteListing.Empty);
+
+        var directory = FleetServerService.DescribePaired([gone, mini]);
+
+        Assert.AreEqual("paired", directory.Status);
+        Assert.IsNull(directory.LinkId, "no server");
+        CollectionAssert.AreEqual(new[] { "Mac mini", "build box" }, directory.Machines.Select(static machine => machine.Name).ToArray(),
+            "online first, named as the machine says, else as it was paired");
+        var online = directory.Machines[0];
+        Assert.AreEqual((true, "online", 1, 3), (online.Online, online.Presence, online.ActiveSessions, online.Sessions), "one session at work of three");
+        Assert.AreEqual(("4.0.1", "macos"), (online.Version, online.Os));
+        Assert.AreEqual((true, true, false), (online.IsPaired, online.IsReachable, online.IsThisComputer));
+        CollectionAssert.AreEqual(new[] { "Codex" }, online.Providers);
+        var offline = directory.Machines[1];
+        Assert.AreEqual((false, "offline", 0), (offline.Online, offline.Presence, offline.ActiveSessions));
+        Assert.IsNull(offline.Version, "never reached since the start");
+        CollectionAssert.AreEqual(new[] { "s-works:running", "s-waits:requires_action", "s-idle:idle" },
+            directory.Sessions.Select(static session => $"{session.Id}:{session.State}").ToArray(), "the latest first, in the states of a server's directory");
+        Assert.IsTrue(directory.Sessions.All(static session => session.CanOpen && session.MachineId == "mini-id"), "a session of a paired machine opens here");
+        Assert.AreEqual("Fix the build", directory.Sessions[0].Title);
+        Assert.IsNull(directory.Sessions[1].Title);
+        Assert.AreEqual(("gpt-6", "codex"), (directory.Sessions[0].Model, directory.Sessions[0].ProviderType));
+    }
 
     [TestMethod]
     public async Task CreateLinkApproveAndFollowTheDirectoryOfAServer()

@@ -1,12 +1,18 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { MachineMovePreview, MachineView } from "#neoastra";
-import { isMachineProject, isRemoteSession, machineIntent, machineRowState, machineState, machineStateLabel, moveProblem, moveReady, moveTargets, orderedMachines, pairingLinkOf,
-  pairingProblem, pairingWords, sessionMachineState } from "./machines";
+import { isMachineProject, isRemoteSession, machineIntent, machinePageLink, machineRowState, machineState, machineStateLabel, moveProblem, moveReady, moveTargets, orderedMachines,
+  pairingLinkOf, pairingProblem, pairingWords, readMachinePageLink, sessionMachineState } from "./machines";
 
 const machine = (change: Partial<MachineView> = {}): MachineView => ({ id: "m1", name: "mac-mini", state: "online", os: "macos", version: "4.0.0",
   address: "mac-mini:2585", fingerprint: "ABCD EFGH", words: "apple river stone cloud amber tiger", sessions: 2, lastSeen: null, problem: null,
   permissions: ["view", "drive"], pairedAt: "2026-11-03T00:00:00Z", paired: true, channel: null, ...change });
+
+test("The page of a paired machine is a page of Settings: machines/<id>", () => {
+  assert.equal(machinePageLink("mini-id"), "machines/mini-id");
+  assert.equal(readMachinePageLink(machinePageLink("mini-id")), "mini-id");
+  for (const other of ["machines", "machines/", "machines/a/b", "spaces/x/general", "fleetServer", `machines/${"x".repeat(65)}`]) assert.equal(readMachinePageLink(other), null, other);
+});
 
 test("A machine's state is one of the four the host reports, offline otherwise", () => {
   assert.equal(machineState(machine()), "online");

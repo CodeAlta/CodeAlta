@@ -1,6 +1,7 @@
 using CodeAlta.Fleet.Identity;
 using CodeAlta.Hosting;
-using CodeAlta.Node.Service;
+using CodeAlta.Fleet.Update;
+using CodeAlta.Fleet.Update.Service;
 
 namespace CodeAlta.Node;
 
@@ -28,7 +29,7 @@ internal sealed class NodeInstallOptions
 /// the user whose logins it uses (<c>doc/fleet/node.md</c>, "Running as a service"); and <c>altanode status</c>, which
 /// tells what the node of a profile does and whether it will still run after a restart or a logout.
 /// </summary>
-internal sealed class NodeServiceCommands(TextWriter output, TextWriter error, Func<NodeServiceEnvironment?> environment, Func<NodeExecutable?> executable)
+internal sealed class NodeServiceCommands(TextWriter output, TextWriter error, Func<ServiceEnvironment?> environment, Func<ServiceExecutable?> executable)
 {
     /// <summary>Gets or sets what stops a call to the node, for tests; none by default.</summary>
     public CancellationToken Stop { get; init; }
@@ -50,8 +51,8 @@ internal sealed class NodeServiceCommands(TextWriter output, TextWriter error, F
         var code = manager.Install(plan, output, error);
         if (code == NodeExitCodes.Success)
         {
-            await output.WriteLineAsync(NodeExecutableLocator.Describe(executable()!)).ConfigureAwait(false);
-            if (held.IsHeld && plan.Spec.Scope == NodeServiceScope.User)
+            await output.WriteLineAsync(ServiceExecutableLocator.Describe(UpdateProduct.Node, executable()!)).ConfigureAwait(false);
+            if (held.IsHeld && plan.Spec.Scope == ServiceScope.User)
             {
                 await output.WriteLineAsync($"{held.Describe()} The service's node starts once that instance exits (one instance runs per profile).")
                     .ConfigureAwait(false);
@@ -75,7 +76,7 @@ internal sealed class NodeServiceCommands(TextWriter output, TextWriter error, F
 
         var installed = manager.Query(plan).Installed;
         var code = manager.Uninstall(plan, output, error);
-        if (code != NodeExitCodes.Success || !installed || !plan.LeavesNodeRunning) return code;
+        if (code != NodeExitCodes.Success || !installed || !plan.LeavesProcessRunning) return code;
         return await StopNodeAsync(options.Run.Profile.Resolve(out _)!).ConfigureAwait(false);
     }
 
@@ -213,13 +214,13 @@ internal sealed class NodeServiceCommands(TextWriter output, TextWriter error, F
         await new NodeServerCommands(output, error).WriteStatusAsync(control.Catalog, control.Status.IsHeld).ConfigureAwait(false);
         if (environment() is { } env)
         {
-            var manager = new NodeServiceManager(env);
+            var manager = new ServiceManager(env);
             try
             {
-                var plan = manager.Plan(Request(profile, options, new NodeRunOptions(), NodeServiceScope.User, null, executable() ?? new NodeExecutable(NodeExecutableKind.Executable, "altanode", [])));
-                foreach (var line in NodeServiceManager.Describe(manager.Query(plan))) await output.WriteLineAsync(line).ConfigureAwait(false);
+                var plan = manager.Plan(Request(profile, options, new NodeRunOptions(), ServiceScope.User, null, executable() ?? new ServiceExecutable(ServiceExecutableKind.Executable, "altanode", [])));
+                foreach (var line in ServiceManager.Describe(manager.Query(plan))) await output.WriteLineAsync(line).ConfigureAwait(false);
             }
-            catch (NodeServiceException exception)
+            catch (ServiceException exception)
             {
                 await output.WriteLineAsync("Service: " + exception.Message).ConfigureAwait(false);
             }
@@ -233,7 +234,7 @@ internal sealed class NodeServiceCommands(TextWriter output, TextWriter error, F
     }
 
     // The manager and the plan of the service the options name, or the exit code of what was reported instead.
-    private async Task<(NodeServiceManager? Manager, NodeServicePlan? Plan, int Failure)> PlanAsync(NodeInstallOptions options, string command)
+    private async Task<(ServiceManager? Manager, ServicePlan? Plan, int Failure)> PlanAsync(NodeInstallOptions options, string command)
     {
         var run = options.Run;
         if (run.Profile.Resolve(out var invalid) is not { } profile) return (null, null, await UsageAsync(invalid!).ConfigureAwait(false));
@@ -265,13 +266,13 @@ internal sealed class NodeServiceCommands(TextWriter output, TextWriter error, F
             return (null, null, NodeExitCodes.Failure);
         }
 
-        var manager = new NodeServiceManager(env);
+        var manager = new ServiceManager(env);
         try
         {
-            var scope = options.System ? NodeServiceScope.System : NodeServiceScope.User;
+            var scope = options.System ? ServiceScope.System : ServiceScope.User;
             return (manager, manager.Plan(Request(profile, run.Profile, run, scope, options.Account, path)), NodeExitCodes.Success);
         }
-        catch (NodeServiceException exception)
+        catch (ServiceException exception)
         {
             await error.WriteLineAsync($"altanode {command}: {exception.Message}").ConfigureAwait(false);
             return (null, null, NodeExitCodes.Failure);
@@ -279,10 +280,10 @@ internal sealed class NodeServiceCommands(TextWriter output, TextWriter error, F
     }
 
     /// <summary>The service a profile and the options of its <c>run</c> ask for.</summary>
-    internal static NodeServiceRequest Request(CodeAltaInstanceProfile profile, NodeProfileOptions profileOptions, NodeRunOptions run, NodeServiceScope scope,
-        string? account, NodeExecutable executable)
+    internal static ServiceRequest Request(CodeAltaInstanceProfile profile, NodeProfileOptions profileOptions, NodeRunOptions run, ServiceScope scope,
+        string? account, ServiceExecutable executable)
     {
-        var name = NodeServiceDefinition.ServiceName(profile.StateRoot, profileOptions.DataRoot is null, profileOptions.Developer);
+        var name = ServiceDefinition.ServiceName(UpdateProduct.Node, profile.StateRoot, profileOptions.DataRoot is null, profileOptions.Developer);
         var arguments = new List<string> { "run" };
         if (profileOptions.Developer) arguments.Add("--dev");
         if (profileOptions.DataRoot is not null) arguments.AddRange(["--data-root", profile.GlobalRoot]);
@@ -293,16 +294,16 @@ internal sealed class NodeServiceCommands(TextWriter output, TextWriter error, F
         if (run.Name is { } nodeName) arguments.AddRange(["--name", nodeName]);
         if (run.Offline) arguments.Add("--offline");
         if (run.NoPlugins) arguments.Add("--no-plugins");
-        var system = scope == NodeServiceScope.System;
-        return new NodeServiceRequest
+        var system = scope == ServiceScope.System;
+        return new ServiceRequest
         {
-            Name = name, Scope = scope, Account = account, Executable = executable, RunArguments = arguments,
+            Product = UpdateProduct.Node, Name = name, Scope = scope, Account = account, Executable = executable, RunArguments = arguments,
             StateRoot = !system || profileOptions.DataRoot is not null ? profile.StateRoot : null,
             StateRootInHome = profileOptions.Developer ? Path.Combine(".alta", CodeAltaInstanceProfile.DeveloperStateDirectoryName) : ".alta",
         };
     }
 
-    private async Task WritePlanAsync(NodeServicePlan plan, bool install)
+    private async Task WritePlanAsync(ServicePlan plan, bool install)
     {
         await output.WriteLineAsync($"altanode {(install ? "install" : "uninstall")} would {(install ? "install" : "remove")} {plan.Kind}: {plan.Location}.").ConfigureAwait(false);
         if (install)

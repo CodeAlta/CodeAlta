@@ -3,6 +3,7 @@ using System.Net;
 using System.Net.Http.Json;
 using CodeAlta.Fleet.Protocol.Api;
 using CodeAlta.Fleet.Update;
+using CodeAlta.Fleet.Update.Service;
 using CodeAlta.Server.Api;
 using CodeAlta.Server.Hosting;
 using CodeAlta.Server.Storage.Sqlite;
@@ -28,7 +29,10 @@ public static class ServerExitCodes
     public const int DataRootInUse = 3;
 }
 
-/// <summary>The commands of <c>altaserver</c>: <c>run</c>, <c>status</c>, <c>setup-code</c>, <c>update</c>.</summary>
+/// <summary>
+/// The commands of <c>altaserver</c>: <c>run</c>, <c>status</c>, <c>install</c>, <c>uninstall</c>, <c>setup-code</c>,
+/// <c>update</c>.
+/// </summary>
 public sealed class ServerApplication
 {
     private const string _ = "";
@@ -66,6 +70,21 @@ public sealed class ServerApplication
 
     /// <summary>Gets what changes the options of the server <c>run</c> starts, for tests; null for none.</summary>
     internal Func<CoordinatorServerOptions, CoordinatorServerOptions>? ConfigureServer { get; init; }
+
+    /// <summary>
+    /// Gets what reads the machine <c>install</c>, <c>uninstall</c> and <c>status</c> work on, for tests (temporary folders,
+    /// recorded commands); null for this machine.
+    /// </summary>
+    internal Func<ServiceEnvironment?>? ServiceEnvironment { get; init; }
+
+    /// <summary>Gets what finds the executable a service starts, for tests; null for the one of this process.</summary>
+    internal Func<ServiceExecutable?>? ServiceExecutable { get; init; }
+
+    /// <summary>Gets how often a running server looks for the request to stop of <c>uninstall</c>.</summary>
+    internal TimeSpan StopRequestInterval { get; init; } = TimeSpan.FromSeconds(1);
+
+    /// <summary>Gets how long <c>uninstall</c> waits for the server it asked to stop.</summary>
+    internal TimeSpan StopPatience { get; init; } = TimeSpan.FromSeconds(60);
 
     /// <summary>Runs a command line.</summary>
     /// <param name="args">The arguments.</param>
@@ -116,6 +135,52 @@ public sealed class ServerApplication
         };
         AddDataRoot(statusCommand, status);
         statusCommand.Add((_, _) => StatusAsync(status));
+
+        var install = new InstallOptions();
+        var installCommand = new Command("install", "Install and start the service of this OS that runs the server")
+        {
+            new CommandUsage("Usage: {NAME} [--user | --system --account <name>] [--dry-run] [run options]"),
+            _,
+            "Installs the service that runs altaserver run with these options, so that",
+            "the server starts again after a restart, and starts it: a task at the",
+            "logon of the user on Windows (without a window, started again if it",
+            "stops), a LaunchAgent on macOS, a systemd --user unit on Linux, with",
+            "lingering turned on so that it starts at boot without a login. One",
+            "service per data root; running install again replaces it with the new",
+            "options. --system installs a LaunchDaemon or a system unit that runs as",
+            "--account, started at boot (run it with sudo). A .NET tool runs from its",
+            "shim, so the service follows dotnet tool update, and altaserver update",
+            "switches versions without the service.",
+            _,
+            "Options:",
+            { "port=", "Listen on http://127.0.0.1:{PORT} (2586 by default)", v => install.Port = v },
+            { "urls=", "The {ADDRESSES} to listen on, separated by ';' (http:// or https://)", v => install.Urls = v },
+            { "certificate=", "A PKCS #12 {FILE} for the https:// addresses", v => install.Certificate = v },
+            { "certificate-password-env=", "The environment {VARIABLE} that holds the certificate's password", v => install.CertificatePasswordVariable = v },
+            { "user", "A service of the current user (the default)", v => install.User = v is not null },
+            { "system", "A service of the system, started at boot, that runs as --account", v => install.System = v is not null },
+            { "account=", "The {ACCOUNT} a --system service runs as", v => install.Account = v },
+            { "dry-run", "Print what would be installed, change nothing", v => install.DryRun = v is not null },
+        };
+        AddDataRoot(installCommand, install);
+        installCommand.Add((_, _) => InstallAsync(install));
+
+        var uninstall = new InstallOptions();
+        var uninstallCommand = new Command("uninstall", "Stop and remove the service; keep the data root")
+        {
+            new CommandUsage("Usage: {NAME} [--user | --system --account <name>] [--dry-run] [options]"),
+            _,
+            "Removes the service install set up for the data root and stops its",
+            "server; the data root, its database and its versions stay.",
+            _,
+            "Options:",
+            { "user", "The service of the current user (the default)", v => uninstall.User = v is not null },
+            { "system", "The service of the system that runs as --account", v => uninstall.System = v is not null },
+            { "account=", "The {ACCOUNT} of the --system service", v => uninstall.Account = v },
+            { "dry-run", "Print what would be removed, change nothing", v => uninstall.DryRun = v is not null },
+        };
+        AddDataRoot(uninstallCommand, uninstall);
+        uninstallCommand.Add((_, _) => UninstallAsync(uninstall));
 
         var setup = new SetupCodeOptions();
         var setupCommand = new Command("setup-code", "Print the one-time setup code of a server without an owner")
@@ -171,6 +236,8 @@ public sealed class ServerApplication
             "Commands:",
             runCommand,
             statusCommand,
+            installCommand,
+            uninstallCommand,
             setupCommand,
             updateCommand,
             _,
@@ -321,8 +388,21 @@ public sealed class ServerApplication
                 updates.Start();
             }
 
+            // altaserver uninstall asks this server to stop through a file of its data root: on Windows, where the service is a
+            // task at logon, no signal reaches it. A request left from before this start is not for it. A version on trial is
+            // confirmed within seconds of serving: one stopped before is rolled back by its launcher, as one that exited.
+            TryDelete(paths.StopRequestPath);
+            using var stopRequested = new CancellationTokenSource();
+            await using var stopWatch = new Timer(_ => { if (File.Exists(paths.StopRequestPath)) stopRequested.Cancel(); }, null, StopRequestInterval, StopRequestInterval);
+            using var shutdown = CancellationTokenSource.CreateLinkedTokenSource(restart.Token, stopRequested.Token);
             Started?.Invoke(server, restart.Cancel);
-            await server.WaitForShutdownAsync(restart.Token).ConfigureAwait(false);
+            await server.WaitForShutdownAsync(shutdown.Token).ConfigureAwait(false);
+            if (stopRequested.IsCancellationRequested && !restart.IsCancellationRequested)
+            {
+                TryDelete(paths.StopRequestPath);
+                await _output.WriteLineAsync("Stopping CodeAlta Server: altaserver uninstall asked it to.").ConfigureAwait(false);
+            }
+
             if (updates is not null) await updates.DisposeAsync().ConfigureAwait(false);
             if (updates?.RestartRequested == true) await _output.WriteLineAsync("Stopping CodeAlta Server to start its new version...").ConfigureAwait(false);
         }
@@ -380,9 +460,7 @@ public sealed class ServerApplication
     private static async Task<bool> ServesAsync(CoordinatorServer server, CancellationToken cancellationToken)
     {
         if (server.Addresses.FirstOrDefault() is not { } address) return false;
-        var builder = new UriBuilder(address);
-        if (IPAddress.TryParse(builder.Host.Trim('[', ']'), out var ip) && (ip.Equals(IPAddress.Any) || ip.Equals(IPAddress.IPv6Any)))
-            builder.Host = ip.Equals(IPAddress.Any) ? "127.0.0.1" : "[::1]";
+        var builder = new UriBuilder(Reachable(address));
         using var handler = new HttpClientHandler { ServerCertificateCustomValidationCallback = HttpClientHandler.DangerousAcceptAnyServerCertificateValidator };
         using var client = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(5) };
         try
@@ -394,6 +472,15 @@ public sealed class ServerApplication
         {
             return false;
         }
+    }
+
+    // An address of the server a client of this machine connects to: a wildcard address (0.0.0.0, [::]) through the loopback.
+    private static Uri Reachable(Uri address)
+    {
+        var builder = new UriBuilder(address);
+        if (IPAddress.TryParse(builder.Host.Trim('[', ']'), out var ip) && (ip.Equals(IPAddress.Any) || ip.Equals(IPAddress.IPv6Any)))
+            builder.Host = ip.Equals(IPAddress.Any) ? "127.0.0.1" : "[::1]";
+        return builder.Uri;
     }
 
     private async ValueTask<int> UpdateAsync(UpdateOptions options)
@@ -484,22 +571,51 @@ public sealed class ServerApplication
     private async ValueTask<int> StatusAsync(DataRootOptions options)
     {
         if (!options.TryResolve(_error, out var paths)) return ServerExitCodes.InvalidUsage;
-        if (!CoordinatorServer.IsRunning(paths!))
+        var code = await WriteStatusAsync(paths!).ConfigureAwait(false);
+        await WriteServiceAsync(options, paths!).ConfigureAwait(false);
+        return code;
+    }
+
+    // Whether the service of the data root is installed, and whether the server will start again after a restart.
+    private async Task WriteServiceAsync(DataRootOptions options, ServerPaths paths)
+    {
+        if ((ServiceEnvironment ?? Fleet.Update.Service.ServiceEnvironment.Current)() is not { } environment)
         {
-            await _output.WriteLineAsync($"No server runs on {paths!.DataRoot}.").ConfigureAwait(false);
+            await _output.WriteLineAsync("Service: altaserver install does not know the service manager of this OS.").ConfigureAwait(false);
+            return;
+        }
+
+        var manager = new ServiceManager(environment);
+        try
+        {
+            var executable = (ServiceExecutable ?? LocateExecutable)() ?? new ServiceExecutable(ServiceExecutableKind.Executable, UpdateProduct.Server.AssemblyName, []);
+            var plan = manager.Plan(ServiceRequestOf(new InstallOptions { DataRoot = options.DataRoot }, paths, ServiceScope.User, executable));
+            foreach (var line in ServiceManager.Describe(manager.Query(plan))) await _output.WriteLineAsync(line).ConfigureAwait(false);
+        }
+        catch (ServiceException exception)
+        {
+            await _output.WriteLineAsync("Service: " + exception.Message).ConfigureAwait(false);
+        }
+    }
+
+    private async Task<int> WriteStatusAsync(ServerPaths paths)
+    {
+        if (!CoordinatorServer.IsRunning(paths))
+        {
+            await _output.WriteLineAsync($"No server runs on {paths.DataRoot}.").ConfigureAwait(false);
             await WriteVersionsAsync(paths, null).ConfigureAwait(false);
             return ServerExitCodes.Failure;
         }
 
-        var state = CoordinatorServer.ReadState(paths!);
+        var state = CoordinatorServer.ReadState(paths);
         if (state is null)
         {
-            await _output.WriteLineAsync($"A server holds {paths!.DataRoot} but has not written its state yet (it is starting).").ConfigureAwait(false);
+            await _output.WriteLineAsync($"A server holds {paths.DataRoot} but has not written its state yet (it is starting).").ConfigureAwait(false);
             await WriteVersionsAsync(paths, null).ConfigureAwait(false);
             return ServerExitCodes.Success;
         }
 
-        await WriteVersionsAsync(paths!, state.Version).ConfigureAwait(false);
+        await WriteVersionsAsync(paths, state.Version).ConfigureAwait(false);
 
         await _output.WriteLineAsync($"CodeAlta Server {state.Version}, process {state.ProcessId}, since {state.StartedAt.ToLocalTime():g}").ConfigureAwait(false);
         await _output.WriteLineAsync($"Listens on {string.Join(", ", state.Urls)}").ConfigureAwait(false);
@@ -509,7 +625,8 @@ public sealed class ServerApplication
             try
             {
                 using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(3) };
-                var health = await client.GetFromJsonAsync($"{address}/api/v1/server/health", ServerApiJsonContext.Default.ServerHealthDto).ConfigureAwait(false);
+                var health = await client.GetFromJsonAsync(new Uri(Reachable(new Uri(address)), "api/v1/server/health"), ServerApiJsonContext.Default.ServerHealthDto)
+                    .ConfigureAwait(false);
                 await _output.WriteLineAsync(health is null ? "Health: no answer" : $"Health: {health.Status}, {(health.SetUp ? "set up" : "no owner yet (altaserver setup-code)")}, schema {health.SchemaVersion}")
                     .ConfigureAwait(false);
             }
@@ -520,6 +637,170 @@ public sealed class ServerApplication
         }
 
         return ServerExitCodes.Success;
+    }
+
+    private async ValueTask<int> InstallAsync(InstallOptions options)
+    {
+        var (manager, plan, failure) = await PlanServiceAsync(options, "install").ConfigureAwait(false);
+        if (manager is null || plan is null) return failure;
+        if (options.DryRun)
+        {
+            await WritePlanAsync(plan, install: true).ConfigureAwait(false);
+            return ServerExitCodes.Success;
+        }
+
+        options.TryResolve(_error, out var paths);
+        var running = CoordinatorServer.IsRunning(paths!) ? CoordinatorServer.ReadState(paths!) : null;
+        var code = manager.Install(plan, _output, _error);
+        if (code != ServiceManager.Success) return ServerExitCodes.Failure;
+        await _output.WriteLineAsync(ServiceExecutableLocator.Describe(UpdateProduct.Server, (ServiceExecutable ?? LocateExecutable)()!)).ConfigureAwait(false);
+        if (running is not null && plan.Spec.Scope == ServiceScope.User)
+        {
+            await _output.WriteLineAsync($"A server already runs on {paths!.DataRoot} (process {running.ProcessId}): the service's server starts once it exits "
+                + "(one server runs per data root).").ConfigureAwait(false);
+        }
+
+        await _output.WriteLineAsync("altaserver status tells whether it runs.").ConfigureAwait(false);
+        return ServerExitCodes.Success;
+    }
+
+    private async ValueTask<int> UninstallAsync(InstallOptions options)
+    {
+        var (manager, plan, failure) = await PlanServiceAsync(options, "uninstall").ConfigureAwait(false);
+        if (manager is null || plan is null) return failure;
+        if (options.DryRun)
+        {
+            await WritePlanAsync(plan, install: false).ConfigureAwait(false);
+            return ServerExitCodes.Success;
+        }
+
+        var installed = manager.Query(plan).Installed;
+        if (manager.Uninstall(plan, _output, _error) != ServiceManager.Success) return ServerExitCodes.Failure;
+        options.TryResolve(_error, out var paths);
+        return installed && plan.LeavesProcessRunning ? await StopServerAsync(paths!).ConfigureAwait(false) : ServerExitCodes.Success;
+    }
+
+    // Stops the server of a data root the service manager leaves running (the task at logon of Windows): it is asked through
+    // its data root, and drains as on Ctrl+C. An instance started by hand, not by the service, is stopped too: it held the
+    // data root the service was for.
+    private async Task<int> StopServerAsync(ServerPaths paths)
+    {
+        if (!CoordinatorServer.IsRunning(paths)) return ServerExitCodes.Success;
+        var state = CoordinatorServer.ReadState(paths);
+        await _output.WriteLineAsync($"Stopping the server of this data root{(state is null ? "" : $" (process {state.ProcessId})")}...").ConfigureAwait(false);
+        try
+        {
+            await File.WriteAllTextAsync(paths.StopRequestPath, DateTimeOffset.UtcNow.ToString("O", CultureInfo.InvariantCulture)).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            await _error.WriteLineAsync($"altaserver uninstall: cannot ask the server to stop ({exception.Message}).").ConfigureAwait(false);
+            return ServerExitCodes.Failure;
+        }
+
+        var deadline = DateTime.UtcNow + StopPatience;
+        while (CoordinatorServer.IsRunning(paths))
+        {
+            if (DateTime.UtcNow > deadline)
+            {
+                TryDelete(paths.StopRequestPath);
+                await _error.WriteLineAsync($"altaserver uninstall: the server still runs after {StopPatience.TotalSeconds:0} s.").ConfigureAwait(false);
+                return ServerExitCodes.Failure;
+            }
+
+            await Task.Delay(TimeSpan.FromMilliseconds(250)).ConfigureAwait(false);
+        }
+
+        await _output.WriteLineAsync("The server stopped.").ConfigureAwait(false);
+        return ServerExitCodes.Success;
+    }
+
+    // The manager and the plan of the service the options name, or the exit code of what was reported instead.
+    private async Task<(ServiceManager? Manager, ServicePlan? Plan, int Failure)> PlanServiceAsync(InstallOptions options, string command)
+    {
+        if (!options.TryResolve(_error, out var paths)) return (null, null, ServerExitCodes.InvalidUsage);
+        string? usage = null;
+        if (options.User && options.System) usage = "--user and --system cannot go together.";
+        else if (options.System && options.Account is null) usage = "--system needs --account <name>, the account the server runs as.";
+        else if (!options.System && options.Account is not null) usage = "--account goes with --system only.";
+        else if (options.Port is not null && (!int.TryParse(options.Port, NumberStyles.None, CultureInfo.InvariantCulture, out var port) || port is < 1 or > 65535))
+            usage = $"--port needs a port from 1 to 65535: '{options.Port}'.";
+        if (usage is not null)
+        {
+            await _error.WriteLineAsync("altaserver: " + usage).ConfigureAwait(false);
+            return (null, null, ServerExitCodes.InvalidUsage);
+        }
+
+        if ((ServiceEnvironment ?? Fleet.Update.Service.ServiceEnvironment.Current)() is not { } environment)
+        {
+            await _error.WriteLineAsync($"altaserver {command}: this OS has no service manager altaserver knows (Windows, macOS and Linux with systemd).").ConfigureAwait(false);
+            return (null, null, ServerExitCodes.Failure);
+        }
+
+        if ((ServiceExecutable ?? LocateExecutable)() is not { } executable)
+        {
+            await _error.WriteLineAsync($"altaserver {command}: the executable of this process cannot be found: run altaserver from its installed path.").ConfigureAwait(false);
+            return (null, null, ServerExitCodes.Failure);
+        }
+
+        var manager = new ServiceManager(environment);
+        try
+        {
+            return (manager, manager.Plan(ServiceRequestOf(options, paths!, options.System ? ServiceScope.System : ServiceScope.User, executable)), ServerExitCodes.Success);
+        }
+        catch (ServiceException exception)
+        {
+            await _error.WriteLineAsync($"altaserver {command}: {exception.Message}").ConfigureAwait(false);
+            return (null, null, ServerExitCodes.Failure);
+        }
+    }
+
+    /// <summary>The service the options of <c>install</c> ask for: <c>altaserver run</c> with the data root and the options of the server.</summary>
+    internal static ServiceRequest ServiceRequestOf(InstallOptions options, ServerPaths paths, ServiceScope scope, ServiceExecutable executable)
+    {
+        var arguments = new List<string> { "run" };
+        if (options.DataRoot is not null) arguments.AddRange(["--data-root", paths.DataRoot]);
+        if (options.Port is { } port) arguments.AddRange(["--port", port]);
+        if (options.Urls is { } urls) arguments.AddRange(["--urls", urls]);
+        if (options.Certificate is { } certificate) arguments.AddRange(["--certificate", Path.GetFullPath(certificate)]);
+        if (options.CertificatePasswordVariable is { } variable) arguments.AddRange(["--certificate-password-env", variable]);
+        var system = scope == ServiceScope.System;
+        return new ServiceRequest
+        {
+            Product = UpdateProduct.Server, Name = ServiceDefinition.ServiceName(UpdateProduct.Server, paths.DataRoot, options.DataRoot is null, developer: false),
+            Scope = scope, Account = options.Account, Executable = executable, RunArguments = arguments,
+            StateRoot = !system || options.DataRoot is not null ? paths.DataRoot : null, StateRootInHome = ".altaserver",
+        };
+    }
+
+    private async Task WritePlanAsync(ServicePlan plan, bool install)
+    {
+        await _output.WriteLineAsync($"altaserver {(install ? "install" : "uninstall")} would {(install ? "install" : "remove")} {plan.Kind}: {plan.Location}.").ConfigureAwait(false);
+        if (install)
+        {
+            await _output.WriteLineAsync().ConfigureAwait(false);
+            await _output.WriteLineAsync($"{plan.DefinitionPath}{(plan.DefinitionIsTemporary ? " (given to the service manager, then deleted)" : "")}:").ConfigureAwait(false);
+            await _output.WriteLineAsync(plan.Definition.TrimEnd()).ConfigureAwait(false);
+            await _output.WriteLineAsync().ConfigureAwait(false);
+        }
+
+        await _output.WriteLineAsync("Commands:").ConfigureAwait(false);
+        foreach (var command in install ? plan.Install : plan.Uninstall) await _output.WriteLineAsync("  " + command).ConfigureAwait(false);
+        if (!install && !plan.DefinitionIsTemporary) await _output.WriteLineAsync($"  (then deletes {plan.DefinitionPath})").ConfigureAwait(false);
+        if (!install && plan.LeavesProcessRunning) await _output.WriteLineAsync("  (then asks the server of the data root to stop)").ConfigureAwait(false);
+        if (install && plan.LingerUser is { } user) await _output.WriteLineAsync($"  loginctl enable-linger {user} (when lingering is off)").ConfigureAwait(false);
+        foreach (var note in plan.Notes) await _output.WriteLineAsync("Note: " + note).ConfigureAwait(false);
+    }
+
+    // The executable a service starts: the shim of the .NET tool, the app host of an archive, or dotnet with the assembly.
+    private ServiceExecutable? LocateExecutable()
+        => ServiceExecutableLocator.Locate(UpdateProduct.Server, Environment.ProcessPath, Path.Combine(ApplicationDirectory ?? AppContext.BaseDirectory, UpdateProduct.Server.AssemblyFileName),
+            static path => File.Exists(path) || Directory.Exists(path));
+
+    private static void TryDelete(string path)
+    {
+        try { File.Delete(path); }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException) { }
     }
 
     private async ValueTask<int> SetupCodeAsync(SetupCodeOptions options)
@@ -544,7 +825,7 @@ public sealed class ServerApplication
         return ServerExitCodes.Success;
     }
 
-    private class DataRootOptions
+    internal class DataRootOptions
     {
         public string? DataRoot { get; set; }
 
@@ -563,7 +844,7 @@ public sealed class ServerApplication
         }
     }
 
-    private sealed class RunOptions : DataRootOptions
+    internal class RunOptions : DataRootOptions
     {
         public string? Port { get; set; }
 
@@ -572,6 +853,18 @@ public sealed class ServerApplication
         public string? Certificate { get; set; }
 
         public string? CertificatePasswordVariable { get; set; }
+    }
+
+    /// <summary>The options of <c>install</c> and <c>uninstall</c>: those of the <c>run</c> the service starts, and whom it runs as.</summary>
+    internal sealed class InstallOptions : RunOptions
+    {
+        public bool User { get; set; }
+
+        public bool System { get; set; }
+
+        public string? Account { get; set; }
+
+        public bool DryRun { get; set; }
     }
 
     private sealed class SetupCodeOptions : DataRootOptions
