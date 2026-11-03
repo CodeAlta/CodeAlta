@@ -9,10 +9,18 @@ namespace CodeAlta.Server.Services;
 /// <param name="Running">The version it runs, as its inventory or its last report says; null when unknown. Never a success: a node is updated once it reports its trial confirmed.</param>
 internal sealed record UpdateCampaignNode(bool Online, string? Running);
 
-/// <summary>The server as the campaign sees it: the version that runs and how its last switch ended.</summary>
+/// <summary>The server as the campaign sees it: the version that runs, the one on trial, and how its last switch ended.</summary>
 /// <param name="Running">The version the server runs.</param>
 /// <param name="LastOutcome">How its last switch ended, or null.</param>
-internal sealed record UpdateCampaignServer(string Running, FleetUpdateOutcome? LastOutcome);
+/// <param name="Trial">The version on trial, which has not confirmed that it works; null for none.</param>
+/// <param name="Known">Whether its self-update reported this (false before it started, or when its state does not read): a version that runs then is not confirmed.</param>
+internal sealed record UpdateCampaignServer(string Running, FleetUpdateOutcome? LastOutcome, string? Trial = null, bool Known = true)
+{
+    /// <summary>Gets whether the server runs a version and that version confirmed that it works (no trial of it waits).</summary>
+    /// <param name="version">The version.</param>
+    /// <returns>Whether it runs, confirmed.</returns>
+    public bool Confirmed(string version) => Known && UpdateCampaignEngine.Same(Running, version) && !UpdateCampaignEngine.Same(Trial, version);
+}
 
 /// <summary>What one step of a campaign decided.</summary>
 /// <param name="Campaign">The campaign after the step.</param>
@@ -141,7 +149,7 @@ internal sealed class UpdateCampaignEngine(UpdateCampaignLimits limits)
         }
 
         if (campaign.State != FleetUpdateCampaignStates.UpdatingServer) return new UpdateCampaignStep(campaign, [.. changed.Values], instruct, false);
-        if (Same(server.Running, campaign.TargetVersion))
+        if (server.Confirmed(campaign.TargetVersion))
         {
             var allUpdated = current.Values.All(static machine => machine.State is FleetUpdateMachineStates.Updated or FleetUpdateMachineStates.Superseded);
             campaign = campaign with
@@ -149,6 +157,15 @@ internal sealed class UpdateCampaignEngine(UpdateCampaignLimits limits)
                 ServerState = FleetUpdateMachineStates.Updated, ServerMessage = null, UpdatedAt = now,
                 State = allUpdated ? FleetUpdateCampaignStates.Done : FleetUpdateCampaignStates.PartlyDone,
             };
+            return new UpdateCampaignStep(campaign, [.. changed.Values], instruct, false);
+        }
+
+        if (Same(server.Running, campaign.TargetVersion))
+        {
+            // It runs the version on trial (or its self-update does not say yet): it may still roll back. The campaign stays
+            // active meanwhile, so that no other one starts; it ends once the trial confirmed, or rolled back.
+            if (campaign.ServerState != FleetUpdateMachineStates.Switching)
+                campaign = campaign with { ServerState = FleetUpdateMachineStates.Switching, ServerMessage = null, UpdatedAt = now };
             return new UpdateCampaignStep(campaign, [.. changed.Values], instruct, false);
         }
 
@@ -166,7 +183,12 @@ internal sealed class UpdateCampaignEngine(UpdateCampaignLimits limits)
         }
 
         if (campaign.ServerState == FleetUpdateMachineStates.Pending)
+        {
+            // The server's own automatic step waits for the signed maintenance window (recorded in NotBefore).
+            if (campaign.Automatic && campaign.NotBefore is { } start && now < start) return new UpdateCampaignStep(campaign, [.. changed.Values], instruct, false);
             return new UpdateCampaignStep(campaign with { ServerState = FleetUpdateMachineStates.Instructed, UpdatedAt = now }, [.. changed.Values], instruct, true);
+        }
+
         return new UpdateCampaignStep(campaign, [.. changed.Values], instruct, false);
     }
 
@@ -217,22 +239,26 @@ internal sealed class UpdateCampaignEngine(UpdateCampaignLimits limits)
     }
 
     /// <summary>
-    /// Withdraws a campaign the update policy no longer allows: one before the server's step is cancelled; one partly done
-    /// keeps what is done, and its machines not done with it are cancelled. The machines asked already keep the cancellation
-    /// due until they acknowledge it.
+    /// Withdraws a campaign the update policy no longer allows: one before the server's step is cancelled, and so is one
+    /// in the server's step whose switch the server has not taken (not asked yet, or withdrawn); one partly done keeps what
+    /// is done, and its machines not done with it are cancelled. The machines asked already keep the cancellation due
+    /// until they acknowledge it. A server's switch already taken (selected, on trial) is not undone: the step ends as it
+    /// ends.
     /// </summary>
     /// <param name="campaign">The campaign.</param>
     /// <param name="machines">Its machines.</param>
     /// <param name="now">The time.</param>
     /// <param name="message">Why, for the campaign and its machines.</param>
+    /// <param name="serverSwitchWithdrawn">Whether the server's own switch of the campaign waited and was withdrawn.</param>
     /// <returns>The campaign, the machines cancelled, and those that were asked already; null when nothing is left to withdraw.</returns>
     public static (UpdateCampaignRecord Campaign, IReadOnlyList<UpdateCampaignMachineRecord> Machines, IReadOnlyList<string> Asked)? Revoke(UpdateCampaignRecord campaign,
-        IReadOnlyList<UpdateCampaignMachineRecord> machines, DateTimeOffset now, string message)
+        IReadOnlyList<UpdateCampaignMachineRecord> machines, DateTimeOffset now, string message, bool serverSwitchWithdrawn)
     {
         ArgumentNullException.ThrowIfNull(campaign);
         ArgumentNullException.ThrowIfNull(machines);
         ArgumentException.ThrowIfNullOrEmpty(message);
-        if (campaign.State is FleetUpdateCampaignStates.Scheduled or FleetUpdateCampaignStates.UpdatingNodes)
+        if (campaign.State is FleetUpdateCampaignStates.Scheduled or FleetUpdateCampaignStates.UpdatingNodes
+            || campaign.State == FleetUpdateCampaignStates.UpdatingServer && (campaign.ServerState == FleetUpdateMachineStates.Pending || serverSwitchWithdrawn))
         {
             var (all, askedAll) = CancelMachines(machines, now, message);
             return (campaign with { State = FleetUpdateCampaignStates.Cancelled, ServerState = FleetUpdateMachineStates.Cancelled, ServerMessage = message, UpdatedAt = now },
