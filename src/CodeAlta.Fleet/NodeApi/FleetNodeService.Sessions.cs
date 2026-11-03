@@ -43,6 +43,7 @@ public sealed partial class FleetNodeService
         {
             Providers = await ReadyProvidersAsync(cancellationToken).ConfigureAwait(false),
             Diagnostics = diagnostics,
+            Update = _options.UpdateStatus?.Invoke(),
         };
     }
 

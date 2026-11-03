@@ -74,6 +74,7 @@ internal sealed class NodeRunOptions
 /// <param name="Moves">Lists the moves of sessions this profile recorded.</param>
 /// <param name="Projects">Lists, adds, clones and removes the projects of the node.</param>
 /// <param name="Join">Enrolls the node in a CodeAlta Server and waits for its approval.</param>
+/// <param name="Update">Downloads a version of the node and switches to it when idle.</param>
 internal sealed record NodeCommandHandlers(
     Func<NodeRunOptions, ValueTask<int>> Run,
     Func<NodeProfileOptions, ValueTask<int>> Status,
@@ -90,14 +91,15 @@ internal sealed record NodeCommandHandlers(
     Func<NodeDeviceOptions, ValueTask<int>> Permissions,
     Func<NodeProfileOptions, ValueTask<int>> Moves,
     Func<NodeProjectOptions, ValueTask<int>> Projects,
-    Func<NodeJoinOptions, ValueTask<int>> Join)
+    Func<NodeJoinOptions, ValueTask<int>> Join,
+    Func<NodeUpdateOptions, ValueTask<int>> Update)
 {
     /// <summary>Handlers that do nothing, for a tree that only parses.</summary>
     public static NodeCommandHandlers Placeholders { get; } = new(static _ => ValueTask.FromResult(0), static _ => ValueTask.FromResult(0),
         static _ => ValueTask.FromResult(0), static _ => ValueTask.FromResult(0), static _ => ValueTask.FromResult(0), static _ => ValueTask.FromResult(0),
         static _ => ValueTask.FromResult(0), static _ => ValueTask.FromResult(0), static _ => ValueTask.FromResult(0), static _ => ValueTask.FromResult(0),
         static _ => ValueTask.FromResult(0), static _ => ValueTask.FromResult(0), static _ => ValueTask.FromResult(0), static _ => ValueTask.FromResult(0),
-        static _ => ValueTask.FromResult(0), static _ => ValueTask.FromResult(0));
+        static _ => ValueTask.FromResult(0), static _ => ValueTask.FromResult(0), static _ => ValueTask.FromResult(0));
 }
 
 /// <summary>The command tree of <c>altanode</c> (<c>doc/fleet/node.md</c>).</summary>
@@ -428,8 +430,39 @@ internal static class NodeCommandLine
         AddProfile(logsCommand, logs.Profile);
         logsCommand.Add((_, _) => handlers.Logs(logs));
 
-        var updateCommand = Stub(handlers, "update", "Update to the version the fleet recommends, when idle", "Usage: {NAME}");
-        updateCommand.Add(new HelpOption());
+        var update = new NodeUpdateOptions();
+        var updateCommand = new Command("update", "Update the node to a new version, when it is idle")
+        {
+            new CommandUsage("Usage: {NAME} [--version <v>] [--source <feed>] [--check] [--now] [options]"),
+            _,
+            "Downloads the package of this OS and architecture from a NuGet feed",
+            "(nuget.org by default), checks its hash, and puts it beside the others in",
+            "fleet/versions of the state root. The node of the profile switches to it",
+            "once no session works: it takes no new work while it waits (10 minutes",
+            "at most, then until the next idle moment), stops and starts the new",
+            "version, which the service keeps running. Without a running node, the",
+            "next altanode run starts it. The new version runs on trial: if it does",
+            "not confirm that it works within 2 minutes, or crashes, the previous one",
+            "comes back and the new one is marked bad. No .NET SDK is needed.",
+            "Without --version: the latest release (a prerelease when one runs).",
+            "fleet/update.json of the state root sets the feed and the allowed feeds:",
+            "{ \"source\": \"<feed>\", \"allowedSources\": [\"<feed>\", ...] }.",
+            _,
+            "Options:",
+            { "version=", "The {VERSION} to install, also an older one", v => update.Version = v },
+            { "source=", "The {FEED}: a NuGet v3 index (https://) or a folder", v => update.Source = v },
+            { "sha512=", "The {HASH} the package must have (base64 or hexadecimal)", v => update.Sha512 = v },
+            { "check", "Only tell whether an update is available", v => update.Check = v is not null },
+            { "now", "Switch without waiting for the sessions at work", v => update.Now = v is not null },
+            { "prerelease", "Take a prerelease as the latest version", v => update.Prerelease = v is not null },
+        };
+        AddProfile(updateCommand, update.Profile);
+        updateCommand.Add("<>", "No argument");
+        updateCommand.Add((_, words) =>
+        {
+            update.Words.AddRange(words);
+            return handlers.Update(update);
+        });
 
         var app = new CommandApp("altanode", config: new CommandConfig { OutputFactory = static _ => DefaultCommandOutput.Instance })
         {
@@ -467,17 +500,6 @@ internal static class NodeCommandLine
             _,
         };
         return app;
-    }
-
-    private static Command Stub(NodeCommandHandlers handlers, string name, string description, string usage)
-    {
-        var command = new Command(name, description + " (not implemented yet)")
-        {
-            new CommandUsage(usage),
-            _,
-        };
-        command.Add((_, _) => handlers.NotImplemented(name));
-        return command;
     }
 
     private static void AddRunOptions(Command command, NodeRunOptions run)

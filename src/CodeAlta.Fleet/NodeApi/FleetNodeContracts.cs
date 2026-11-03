@@ -133,6 +133,9 @@ public static class FleetNodeErrorCodes
     /// <summary>The node accepts no new work (it stops).</summary>
     public const string NodeStopping = "node.stopping";
 
+    /// <summary>The node takes no new work for a moment: it drains its sessions to switch to a new version.</summary>
+    public const string NodeUpdating = "node.updating";
+
     /// <summary>The project, the space, the provider or the model asked for is not available on the node.</summary>
     public const string Unavailable = "unavailable";
 
@@ -214,6 +217,9 @@ public sealed record FleetNodeInfo(string Name, string DeviceId, string Os, stri
 
     /// <summary>Gets what the node could not describe (a project file it cannot read, left out of <see cref="Projects"/>); empty when all is well.</summary>
     public IReadOnlyList<FleetNodeDiagnostic> Diagnostics { get; init; } = [];
+
+    /// <summary>Gets the versions of the node and where its self-update stands; null for a node that does not say (an older one).</summary>
+    public Protocol.FleetUpdateStatus? Update { get; init; }
 }
 
 /// <summary>Something the node could not describe in <c>node.info</c>, which its owner can fix.</summary>
@@ -551,7 +557,14 @@ public sealed record FleetPairingOutcome(string Status, string? DeviceName = nul
 /// <param name="TrustedDevices">How many devices are paired and not revoked.</param>
 /// <param name="RevokedDevices">How many devices were revoked.</param>
 public sealed record FleetNodeStatus(string Name, string DeviceId, string Version, bool AcceptsWork, int SessionsAtWork, int Channels,
-    int TrustedDevices, int RevokedDevices);
+    int TrustedDevices, int RevokedDevices)
+{
+    /// <summary>Gets whether the node refuses new work because it drains to switch versions, not because it stops.</summary>
+    public bool Updating { get; init; }
+
+    /// <summary>Gets the versions of the node and where its self-update stands; null for a node that does not say.</summary>
+    public Protocol.FleetUpdateStatus? Update { get; init; }
+}
 
 /// <summary>A paired device as the owner's local control shows it.</summary>
 /// <param name="DeviceId">Its device id.</param>

@@ -282,6 +282,34 @@ public sealed class UpdateSwitchTests
     }
 
     [TestMethod]
+    public async Task ASwitchThatWaitsIsTakenWhenNothingRuns()
+    {
+        using var temp = new TempFolder();
+        var store = StoreWith(temp, V1, V2);
+        store.RequestSwitch(V3, now: false, "local");
+        Assert.IsNull(store.TakePending(UpdateProduct.Node), "4.0.3 is not staged");
+        Assert.AreEqual(UpdateOutcomes.Failed, store.Read().LastOutcome?.Outcome);
+        Assert.IsNull(store.Read().Pending);
+
+        store.RequestSwitch(V2, now: false, "local");
+        var runner = new FakeRunner(async (process, _) =>
+        {
+            await Task.Delay(20);
+            store.Confirm(V2);
+            await Task.Delay(20);
+            process.Exit(0);
+        });
+        Assert.AreEqual(0, await Launcher(store, runner).RunAsync());
+        Assert.AreEqual("4.0.2", VersionOf(runner.Started.Single()), "the launcher took the switch before it started a version");
+        Assert.AreEqual("4.0.2", store.Read().Current);
+        Assert.IsNull(store.Read().Trial);
+
+        store.RequestSwitch(V2, now: false, "local");
+        Assert.IsNull(store.TakePending(UpdateProduct.Node), "it is selected already");
+        Assert.IsNull(store.Read().Pending);
+    }
+
+    [TestMethod]
     public void ANodeDrainsThenWaitsForTheNextIdleMoment()
     {
         var start = DateTimeOffset.UnixEpoch;

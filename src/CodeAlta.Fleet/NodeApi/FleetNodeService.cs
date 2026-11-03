@@ -34,6 +34,12 @@ public sealed class FleetNodeServiceOptions
     /// <summary>Gets what tells whether the node accepts new work (false once it stops).</summary>
     public Func<bool> AcceptsWork { get; init; } = static () => true;
 
+    /// <summary>Gets what tells whether the node refuses new work because it drains to switch versions (not because it stops).</summary>
+    public Func<bool> Updating { get; init; } = static () => false;
+
+    /// <summary>Gets what reads the versions of the node and its self-update; null for a host that does not update itself.</summary>
+    public Func<Protocol.FleetUpdateStatus?>? UpdateStatus { get; init; }
+
     /// <summary>Gets the addresses a pairing offer names: those the node listens on, as <c>host:port</c>.</summary>
     public Func<IReadOnlyList<string>> PairingAddresses { get; init; } = static () => [];
 
@@ -393,7 +399,9 @@ public sealed partial class FleetNodeService : IAsyncDisposable
 
     private void RequireWork()
     {
-        if (!_options.AcceptsWork()) throw new FleetException(FleetNodeErrorCodes.NodeStopping, FleetErrorHints.Retry, "The node is stopping.");
+        if (_options.AcceptsWork()) return;
+        if (_options.Updating()) throw new FleetException(FleetNodeErrorCodes.NodeUpdating, FleetErrorHints.Retry, "The node is switching to a new version: it takes work again in a moment.");
+        throw new FleetException(FleetNodeErrorCodes.NodeStopping, FleetErrorHints.Retry, "The node is stopping.");
     }
 
     // The idempotency key of a side-effecting call: required, bounded, and namespaced by the device, so that no device

@@ -5,7 +5,7 @@ using System.Runtime.InteropServices;
 namespace CodeAlta.Fleet.Update;
 
 /// <summary>The options of an <see cref="UpdateLauncher"/>.</summary>
-public sealed class UpdateLauncherOptions
+public sealed record UpdateLauncherOptions
 {
     /// <summary>Gets the folder of versions.</summary>
     public required UpdateVersionStore Store { get; init; }
@@ -151,8 +151,11 @@ public sealed class UpdateLauncher
         var store = _options.Store;
         while (true)
         {
+            // Between two versions nothing runs: a switch that waits is taken at once.
+            if (store.TakePending(_options.Product) is { } taken) Log($"Switching to {taken}, which waited for the next start.");
             var state = store.Read();
-            var trial = state.Trial is { } pending && UpdateVersionStore.Same(state.Current, UpdateVersion.Parse(pending.Version)) ? pending : null;
+            var trial = state.Trial is { } selected && UpdateVersion.TryParse(selected.Version, out var trialVersion) && UpdateVersionStore.Same(state.Current, trialVersion)
+                ? selected : null;
             if (trial is not null && trial.Starts >= _options.MaxTrialStarts)
             {
                 await RollBackAsync($"it did not confirm that it works after {trial.Starts} start(s)").ConfigureAwait(false);

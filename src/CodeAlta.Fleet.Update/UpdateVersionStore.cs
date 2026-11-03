@@ -172,6 +172,33 @@ public sealed class UpdateVersionStore
         });
     }
 
+    /// <summary>
+    /// Takes the switch that waits, when no process of the product runs (at start, or in a launcher between two
+    /// versions): a staged version is selected on trial at once, since nothing has to drain; one that is not staged, or
+    /// already selected, is dropped.
+    /// </summary>
+    /// <param name="product">The product.</param>
+    /// <returns>The version selected, or null when none was.</returns>
+    public UpdateVersion? TakePending(UpdateProduct product)
+    {
+        ArgumentNullException.ThrowIfNull(product);
+        if (Read().Pending is not { } pending) return null;
+        if (!UpdateVersion.TryParse(pending.Version, out var version) || !IsStaged(version, product))
+        {
+            CancelPending($"{pending.Version} is not staged in {Root}.");
+            return null;
+        }
+
+        if (Same(Read().Current, version))
+        {
+            CancelPending(null);
+            return null;
+        }
+
+        Select(version);
+        return version;
+    }
+
     /// <summary>Counts a start of the version on trial, before a launcher starts it.</summary>
     /// <returns>The state.</returns>
     public UpdateState CountTrialStart()
@@ -210,7 +237,7 @@ public sealed class UpdateVersionStore
                 Current = state.Previous,
                 Previous = null,
                 Trial = null,
-                Bad = [.. state.Bad.Where(bad => !Same(bad.Version, UpdateVersion.Parse(trial.Version))), new UpdateBadVersion(trial.Version, at, reason)],
+                Bad = [.. state.Bad.Where(bad => !string.Equals(bad.Version, trial.Version, StringComparison.OrdinalIgnoreCase)), new UpdateBadVersion(trial.Version, at, reason)],
                 LastOutcome = new UpdateOutcome(trial.Version, UpdateOutcomes.RolledBack, at, reason),
             };
         });
@@ -248,7 +275,11 @@ public sealed class UpdateVersionStore
         return removed;
     }
 
-    internal static bool Same(string? text, UpdateVersion version) => UpdateVersion.TryParse(text, out var parsed) && parsed.Equals(version);
+    /// <summary>Gets whether a version as the state writes it is a given version.</summary>
+    /// <param name="text">The version as written; null for none.</param>
+    /// <param name="version">The version.</param>
+    /// <returns>Whether the text is that version.</returns>
+    public static bool Same(string? text, UpdateVersion version) => UpdateVersion.TryParse(text, out var parsed) && parsed.Equals(version);
 
     private FileStream AcquireLock()
     {

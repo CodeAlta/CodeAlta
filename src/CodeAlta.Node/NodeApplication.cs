@@ -3,9 +3,12 @@ using System.Net.Sockets;
 using System.Reflection;
 using CodeAlta.Fleet.Channels;
 using CodeAlta.Fleet.Identity;
+using CodeAlta.Fleet.Server;
+using CodeAlta.Fleet.Update;
 using CodeAlta.Hosting;
 using CodeAlta.Node.Service;
 using XenoAtom.CommandLine;
+using XenoAtom.Logging;
 
 namespace CodeAlta.Node;
 
@@ -14,6 +17,7 @@ internal sealed class NodeApplication
 {
     private readonly TextWriter _output;
     private readonly TextWriter _error;
+    private string[] _args = [];
 
     /// <summary>Creates the application.</summary>
     /// <param name="output">Standard output: help, status.</param>
@@ -56,12 +60,25 @@ internal sealed class NodeApplication
     /// <summary>Gets what changes the options of the connectors of the servers of <c>run</c>, for tests; null for none.</summary>
     internal Func<CodeAlta.Fleet.Server.FleetConnectorOptions, CodeAlta.Fleet.Server.FleetConnectorOptions>? ConfigureConnector { get; init; }
 
+    /// <summary>Gets what changes the options of the launcher <c>run</c> hands over to the selected version with, for tests; null for none.</summary>
+    internal Func<UpdateLauncherOptions, UpdateLauncherOptions>? ConfigureLauncher { get; init; }
+
+    /// <summary>Gets what changes the options of the self-update of a running node, for tests; null for none.</summary>
+    internal Func<NodeUpdatesOptions, NodeUpdatesOptions>? ConfigureUpdates { get; init; }
+
+    /// <summary>Gets the HTTP handler of the feeds of <c>update</c>, for tests; null for the usual one.</summary>
+    internal HttpMessageHandler? UpdateHandler { get; init; }
+
+    /// <summary>Gets the folder of the application of this process, for tests; null for <see cref="AppContext.BaseDirectory"/>.</summary>
+    internal string? ApplicationDirectory { get; init; }
+
     /// <summary>Runs a command line.</summary>
     /// <param name="args">The arguments.</param>
     /// <returns>The exit code (<see cref="NodeExitCodes"/>).</returns>
     public async Task<int> RunAsync(string[] args)
     {
         ArgumentNullException.ThrowIfNull(args);
+        _args = args;
         if (args.Length == 0)
         {
             await Create(NodeCommandHandlers.Placeholders).RunAsync(["--help"], new CommandRunConfig { Out = _output, Error = _error }).ConfigureAwait(false);
@@ -84,14 +101,16 @@ internal sealed class NodeApplication
             var service = new NodeServiceCommands(_output, _error, ServiceEnvironment ?? NodeServiceEnvironment.Current, ServiceExecutable ?? LocateExecutable)
             {
                 Stop = ClientStop,
+                InstalledVersion = InstalledVersion(),
             };
             var devices = new NodeDeviceCommands(_output, _error) { Stop = ClientStop };
             var logs = new NodeLogCommand(_output, _error) { Stop = ClientStop };
             var projects = new NodeProjectCommands(_output, _error, CloneRootOf) { Stop = ClientStop };
             var servers = new NodeServerCommands(_output, _error) { Stop = ClientStop, Handler = ServerHandler };
+            var update = new NodeUpdateCommands(_output, _error, Version, InstalledVersion()) { Stop = ClientStop, Handler = UpdateHandler };
             return await Create(new NodeCommandHandlers(RunNodeAsync, service.StatusAsync, NotImplementedAsync, client.PairAsync, client.MachinesAsync,
                     client.ConnectAsync, client.RemoteAsync, service.InstallAsync, service.UninstallAsync, logs.RunAsync, devices.DevicesAsync,
-                    devices.RevokeAsync, devices.PermissionsAsync, client.MovesAsync, projects.RunAsync, servers.JoinAsync))
+                    devices.RevokeAsync, devices.PermissionsAsync, client.MovesAsync, projects.RunAsync, servers.JoinAsync, update.UpdateAsync))
                 .RunAsync(args, new CommandRunConfig { Out = _output, Error = _error }).ConfigureAwait(false);
         }
         catch (Exception exception)
@@ -194,6 +213,69 @@ internal sealed class NodeApplication
             return await UsageAsync("--name: " + exception.Message).ConfigureAwait(false);
         }
 
+        // The installed entry point (the tool, what the service starts) hands over to the version altanode update
+        // selected, and passes its exit code through; a switch that waited for the next start is taken first.
+        var store = NodeUpdatePaths.Store(profile);
+        if (!UpdateLauncher.IsSupervised && !store.Contains(ApplicationDirectory ?? AppContext.BaseDirectory))
+        {
+            try
+            {
+                if (!NodeProfileStatus.Read(profile).IsHeld) store.TakePending(UpdateProduct.Node);
+            }
+            catch (UpdateException exception)
+            {
+                await _error.WriteLineAsync($"altanode: the versions of {store.Root} could not be read: {exception.Message}").ConfigureAwait(false);
+            }
+
+            if (store.Read().Current is not null) return await RunLauncherAsync(store).ConfigureAwait(false);
+        }
+
+        var (exitCode, restart) = await RunInProcessAsync(options, profile, listen, name, store).ConfigureAwait(false);
+        if (!restart) return exitCode;
+        // A launcher waits for this process and starts the newly selected version; without one, this process becomes it.
+        if (UpdateLauncher.IsSupervised) return UpdateLauncher.RestartExitCode;
+        return await RunLauncherAsync(store).ConfigureAwait(false);
+    }
+
+    // The launcher hop: the selected version runs as a child process of this one, which ends with its exit code.
+    private async Task<int> RunLauncherAsync(UpdateVersionStore store)
+    {
+        var options = new UpdateLauncherOptions
+        {
+            Store = store, Product = UpdateProduct.Node, Arguments = _args, Installed = InstalledCommand(), InstalledVersion = InstalledVersion(),
+            Log = message => _error.WriteLine("altanode: " + message),
+        };
+        if (ConfigureLauncher is not null) options = ConfigureLauncher(options);
+        return await new UpdateLauncher(options).RunAsync().ConfigureAwait(false);
+    }
+
+    // How this process was started, to start the installed entry point again when the pointer returns to it.
+    private UpdateCommand InstalledCommand()
+    {
+        var path = Environment.ProcessPath ?? "altanode";
+        return string.Equals(Path.GetFileNameWithoutExtension(path), "dotnet", StringComparison.OrdinalIgnoreCase)
+            ? new UpdateCommand(path, [Path.Combine(ApplicationDirectory ?? AppContext.BaseDirectory, UpdateProduct.Node.AssemblyFileName)])
+            : new UpdateCommand(path, []);
+    }
+
+    // The version of the installed entry point: this one, unless this process runs a version of a folder of versions.
+    private string? InstalledVersion()
+    {
+        if (UpdateLauncher.SupervisorInstalledVersion is { } passed) return passed;
+        var directory = Path.TrimEndingDirectorySeparator(ApplicationDirectory ?? AppContext.BaseDirectory);
+        return string.Equals(Path.GetFileName(Path.GetDirectoryName(directory)), "versions", StringComparison.OrdinalIgnoreCase) ? null : Version;
+    }
+
+    // Whether the node is healthy, for a version on trial: it listens when it should, and its connections to the
+    // servers it joined (and that approved it) are up.
+    private static bool IsHealthy(NodeFleet fleet, NodeListenOptions listen, NodeServers servers)
+        => (!listen.Enabled || fleet.EndPoint is not null)
+            && servers.Connections.Connections.Where(static connection => connection.Link.State == FleetServerLinkStates.Approved)
+                .All(static connection => connection.Connector?.State == FleetConnectorState.Online);
+
+    private async Task<(int ExitCode, bool Restart)> RunInProcessAsync(NodeRunOptions options, CodeAltaInstanceProfile profile, NodeListenOptions listen, string name,
+        UpdateVersionStore store)
+    {
         var ownsLogging = false;
         try
         {
@@ -218,33 +300,48 @@ internal sealed class NodeApplication
                     var status = NodeProfileStatus.Read(profile);
                     await _error.WriteLineAsync($"altanode: the profile {profile.StateRoot} is in use. {status.Describe()}").ConfigureAwait(false);
                     await _error.WriteLineAsync("One CodeAlta instance runs per profile: stop it first, or run the developer instance with --dev.").ConfigureAwait(false);
-                    return NodeExitCodes.ProfileInUse;
+                    return (NodeExitCodes.ProfileInUse, false);
                 }
                 catch (OperationCanceledException) when (stopRequested.IsCancellationRequested)
                 {
                     await _error.WriteLineAsync("altanode: stopped while starting.").ConfigureAwait(false);
-                    return NodeExitCodes.Success;
+                    return (NodeExitCodes.Success, false);
                 }
             }
 
             await using (node.ConfigureAwait(false))
             {
                 NodeFleet fleet;
+                NodeUpdates? updates = null;
                 try
                 {
                     // The node API runs with or without a listener (--no-listen): the servers the node joined relay channels to it.
-                    fleet = NodeFleet.Start(node, listen, name, Version, stopRequested.Cancel);
+                    fleet = NodeFleet.Start(node, listen, name, Version, stopRequested.Cancel, () => updates?.Status());
                 }
                 catch (SocketException exception)
                 {
                     await _error.WriteLineAsync($"altanode: cannot listen on {FleetDirectConnector.Format(listen.Address, listen.Port)}: {exception.Message}").ConfigureAwait(false);
                     await node.StopAsync(hurry.Token).ConfigureAwait(false);
-                    return NodeExitCodes.Failure;
+                    return (NodeExitCodes.Failure, false);
                 }
 
                 using var fleetLifetime = new FleetLifetime(fleet);
                 // The servers the node joined (altanode join): one control connection each, beside the listener or without it.
                 await using var servers = NodeServers.Start(node, fleet.Service, name, Version, ConfigureConnector);
+                // The self-update: a version on trial confirms itself once healthy; a switch altanode update asks for
+                // stops the node when it is idle, so that its launcher starts the new version.
+                if (UpdateVersion.TryParse(Version, out var running))
+                {
+                    var updateOptions = new NodeUpdatesOptions
+                    {
+                        Store = store, Running = running, Installed = InstalledVersion(), SessionsAtWork = node.Host.RuntimeService.CountSessionsAtWork,
+                        PauseAdmission = node.PauseAdmission, Healthy = () => IsHealthy(fleet, listen, servers), RequestRestart = stopRequested.Cancel,
+                        PolicyPath = NodeUpdatePaths.PolicyPath(profile), Log = static message => NodeLog(message),
+                    };
+                    updates = new NodeUpdates(ConfigureUpdates?.Invoke(updateOptions) ?? updateOptions);
+                    updates.Start();
+                }
+
                 using var signals = new NodeSignals(stopRequested.Cancel, hurry.Cancel, static () => Environment.Exit(NodeExitCodes.Failure));
                 Started?.Invoke(node, stopRequested.Cancel);
                 await _output.WriteLineAsync($"CodeAlta Node runs on {profile.StateRoot}. Ctrl+C stops it.").ConfigureAwait(false);
@@ -259,19 +356,25 @@ internal sealed class NodeApplication
                 {
                 }
 
-                await _output.WriteLineAsync("Stopping CodeAlta Node...").ConfigureAwait(false);
+                var restart = updates?.RestartRequested == true;
+                await _output.WriteLineAsync(restart ? "Stopping CodeAlta Node to start its new version..." : "Stopping CodeAlta Node...").ConfigureAwait(false);
+                if (updates is not null) await updates.DisposeAsync().ConfigureAwait(false);
                 // The channels close first: no remote call reaches a runtime that stops.
                 await fleetLifetime.StopAsync().ConfigureAwait(false);
                 await servers.DisposeAsync().ConfigureAwait(false);
                 await node.StopAsync(hurry.Token).ConfigureAwait(false);
+                return (NodeExitCodes.Success, restart);
             }
-
-            return NodeExitCodes.Success;
         }
         finally
         {
             if (ownsLogging) NodeLogging.Shutdown();
         }
+    }
+
+    private static void NodeLog(string message)
+    {
+        if (LogManager.IsInitialized) LogManager.GetLogger("CodeAlta.Node").Info(message);
     }
 
     // Stops the fleet part of the node before the node, and on any way out of run.
