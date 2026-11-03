@@ -1,6 +1,6 @@
 // The state of the CodeAlta Servers of this computer (Settings > Fleet > Server, the server of a space) and of the directory of the
 // Fleet canvas, as words and orders: the host says states and codes, these functions say what the page shows of them.
-import type { FleetDeviceView, FleetMachineView, FleetServerView, FleetSessionView, FleetTelemetryView } from "#neoastra";
+import type { FleetDeviceView, FleetMachineView, FleetServerView, FleetSessionView, FleetTelemetryView, FleetUpdateCampaignView, FleetUpdatePolicyView } from "#neoastra";
 import type { MessageKey } from "../localization";
 
 /** How the control connection of a server stands, as the host reports it; an unknown value is offline. */
@@ -63,6 +63,10 @@ export function serverProblem(status: string): MessageKey | null {
     case "device_list.conflict": return "Another device changed the list meanwhile: try again.";
     case "telemetry.conflict": return "Another owner changed the telemetry meanwhile: try again.";
     case "telemetry.invalid": case "invalid_request": return "The server refused this telemetry setting.";
+    case "update.conflict": return "A campaign runs, or the fleet is pinned: read the updates again.";
+    case "update.invalid": return "The server refused this update.";
+    case "update.not_found": case "update.unsupported_runtime": return "The feed has no such version of CodeAlta Node and Server.";
+    case "update.feed_unavailable": case "update.invalid_source": return "The feed does not answer.";
     default: return "The operation did not complete.";
   }
 }
@@ -198,4 +202,131 @@ export function telemetrySummary(view: FleetTelemetryView): Readonly<{ key: Mess
   if (!view.enabled) return { key: "Off", detail: null };
   const signals = telemetrySignals.filter(signal => view.signals.includes(signal)).join(", ");
   return { key: view.route === "server" ? "Machines send through this server" : "Each machine sends to the collector", detail: `${signals} → ${view.endpoint ?? ""}` };
+}
+
+/** What a refusal of an update says: those of the server, a request the host refused being an update the server would refuse. */
+export function updateProblem(status: string): MessageKey | null {
+  return status === "invalid_request" ? "The server refused this update." : serverProblem(status);
+}
+
+const campaignStates: Record<string, MessageKey> = {
+  scheduled: "Scheduled", updating_nodes: "Updating the machines", updating_server: "Updating the server", done: "Done", partly_done: "Partly done",
+  failed: "Failed", cancelled: "Cancelled",
+};
+
+/** The state of a campaign in words; an unknown one reads as its code would not: "Updating the machines". */
+export function campaignStateLabel(state: string): MessageKey {
+  return campaignStates[state] ?? "Updating the machines";
+}
+
+/** The color of the state of a campaign. */
+export function campaignStateIntent(state: string): "success" | "warning" | "danger" | "primary" | "none" {
+  switch (state) {
+    case "done": return "success";
+    case "partly_done": return "warning";
+    case "failed": return "danger";
+    case "cancelled": return "none";
+    default: return "primary";
+  }
+}
+
+const machineStates: Record<string, MessageKey> = {
+  pending: "Pending", instructed: "Asked", waiting: "Waiting for its time", downloading: "Downloading", switching: "Switching when idle", updated: "Updated",
+  failed: "Failed", rolled_back: "Rolled back", refused: "Refused", cancelled: "Cancelled", superseded: "Superseded",
+};
+
+/** Where a machine stands in a campaign, in words. */
+export function machineStateLabel(state: string): MessageKey {
+  return machineStates[state] ?? "Pending";
+}
+
+/** The color of where a machine stands. */
+export function machineStateIntent(state: string): "success" | "warning" | "danger" | "primary" | "none" {
+  switch (state) {
+    case "updated": return "success";
+    case "failed": case "rolled_back": case "refused": return "danger";
+    case "pending": case "cancelled": case "superseded": return "none";
+    default: return "primary";
+  }
+}
+
+/** Whether a campaign can still be cancelled: before the server's step. */
+export function canCancelCampaign(campaign: Pick<FleetUpdateCampaignView, "state">): boolean {
+  return campaign.state === "scheduled" || campaign.state === "updating_nodes";
+}
+
+/** How many machines of a campaign run its version, of how many. */
+export function campaignProgress(campaign: Pick<FleetUpdateCampaignView, "machines">): Readonly<{ updated: number; total: number }> {
+  const counted = campaign.machines.filter(machine => machine.state !== "superseded");
+  return { updated: counted.filter(machine => machine.state === "updated").length, total: counted.length };
+}
+
+/** The time zone of this computer, as the person chooses times in it. */
+export function localTimeZone(): string {
+  try { return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC"; } catch { return "UTC"; }
+}
+
+/** The update of the fleet a person asks, as the page edits it. */
+export type UpdateDraft = Readonly<{
+  version: string;
+  feed: string;
+  when: "now" | "at";
+  /** The value of a datetime-local field: a date and a time of this computer's time zone. */
+  at: string;
+  /** The machines chosen; null for all. */
+  machines: readonly string[] | null;
+}>;
+
+/** A new update of the fleet: the latest version, of nuget.org, now, on every machine. */
+export const emptyUpdateDraft: UpdateDraft = { version: "", feed: "", when: "now", at: "", machines: null };
+
+/** The time of a draft in UTC (ISO 8601), from the date and the time of this computer; null for now or a time that does not read. */
+export function updateStart(draft: Pick<UpdateDraft, "when" | "at">): string | null {
+  if (draft.when !== "at" || !draft.at) return null;
+  const time = new Date(draft.at);
+  return Number.isNaN(time.getTime()) ? null : time.toISOString();
+}
+
+const versionPattern = /^\d+\.\d+\.\d+(\.\d+)?(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$/u;
+
+/** Whether a text is a version (major.minor.patch, an optional prerelease). */
+export function isVersion(text: string): boolean {
+  return versionPattern.test(text.trim());
+}
+
+/** What is wrong with an update draft, in words; null when the host can sign it. */
+export function updateDraftProblem(draft: UpdateDraft, now: Date = new Date()): MessageKey | null {
+  if (draft.version.trim() && !isVersion(draft.version)) return "This is not a version.";
+  if (draft.when === "at") {
+    const start = updateStart(draft);
+    if (!start) return "Choose a date and a time.";
+    if (new Date(start).getTime() < now.getTime() - 60_000) return "Choose a time to come.";
+  }
+  if (draft.machines && draft.machines.length === 0) return "Choose at least one machine.";
+  return null;
+}
+
+/** The update policy of a fleet as the page edits it. */
+export type PolicyDraft = Readonly<{ mode: "manual" | "pinned" | "automatic"; pinnedVersion: string; feed: string; window: string; timeZone: string }>;
+
+/** The draft of the policy the host gave; a new window takes this computer's time zone. */
+export function policyDraft(policy: FleetUpdatePolicyView, timeZone: string = localTimeZone()): PolicyDraft {
+  const mode = policy.mode === "pinned" || policy.mode === "automatic" ? policy.mode : "manual";
+  return { mode, pinnedVersion: policy.pinnedVersion ?? "", feed: policy.feed ?? "", window: policy.window ?? "", timeZone: policy.timeZone ?? timeZone };
+}
+
+/** What is wrong with a policy draft, in words; null when the host can sign it. */
+export function policyDraftProblem(draft: PolicyDraft): MessageKey | null {
+  if (draft.mode === "pinned" && !isVersion(draft.pinnedVersion)) return "This is not a version.";
+  if (draft.mode === "automatic" && draft.window && !/^([01]\d|2[0-3]):[0-5]\d$/u.test(draft.window)) return "The window starts at a time of the day (HH:mm).";
+  return null;
+}
+
+/** How the policy of a fleet reads in one line. */
+export function policySummary(policy: FleetUpdatePolicyView): Readonly<{ key: MessageKey; detail: string | null }> {
+  switch (policy.mode) {
+    case "pinned": return { key: "Pinned", detail: policy.pinnedVersion };
+    case "automatic": return { key: "Automatic", detail: [policy.feed ?? "nuget.org", policy.window ? `${policy.window} ${policy.timeZone ?? "UTC"}` : null].filter(Boolean).join(" · ") };
+    default: return { key: "Manual", detail: null };
+  }
 }

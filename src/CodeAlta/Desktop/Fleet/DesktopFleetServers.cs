@@ -282,6 +282,66 @@ internal sealed class DesktopFleetServers : IAsyncDisposable
         return await client.SetTelemetryAsync(change, serverHeaders, cancellationToken).ConfigureAwait(false);
     }
 
+    /// <summary>Reads the updates of the fleet of a server: its versions, its policy, its recent campaigns; a controller device only.</summary>
+    /// <param name="linkId">The link.</param>
+    /// <param name="cancellationToken">Cancels the call.</param>
+    /// <returns>The updates, and the machines of the organization with their versions.</returns>
+    /// <exception cref="KeyNotFoundException">No such link.</exception>
+    /// <exception cref="FleetServerException">The server refused.</exception>
+    /// <exception cref="HttpRequestException">The server does not answer.</exception>
+    public async Task<(UpdatesDto Updates, IReadOnlyList<MachineDto> Machines)> GetUpdatesAsync(string linkId, CancellationToken cancellationToken)
+    {
+        using var client = Client(linkId);
+        var updates = await client.GetUpdatesAsync(cancellationToken).ConfigureAwait(false);
+        return (updates, await client.ListMachinesAsync(cancellationToken).ConfigureAwait(false));
+    }
+
+    /// <summary>Starts an update campaign: this device reads the hashes of the feed and signs the manifest.</summary>
+    /// <param name="linkId">The link.</param>
+    /// <param name="change">The campaign.</param>
+    /// <param name="cancellationToken">Cancels the calls.</param>
+    /// <returns>The campaign.</returns>
+    /// <exception cref="KeyNotFoundException">No such link.</exception>
+    /// <exception cref="CodeAlta.Fleet.Update.UpdateException">The feed is not valid or lacks the version.</exception>
+    /// <exception cref="FleetDeviceListException">This device is not a controller device of the verified device list.</exception>
+    /// <exception cref="FleetServerException">The server refused.</exception>
+    /// <exception cref="HttpRequestException">The server or the feed does not answer.</exception>
+    public async Task<UpdateCampaignDto> StartUpdateAsync(string linkId, FleetUpdateCampaignChange change, CancellationToken cancellationToken)
+    {
+        using var client = Client(linkId);
+        return await client.StartUpdateAsync(change, null, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>Cancels an update campaign before the server's step.</summary>
+    /// <param name="linkId">The link.</param>
+    /// <param name="campaignId">The campaign.</param>
+    /// <param name="cancellationToken">Cancels the call.</param>
+    /// <returns>The campaign.</returns>
+    /// <exception cref="KeyNotFoundException">No such link.</exception>
+    /// <exception cref="FleetServerException">The server refused.</exception>
+    /// <exception cref="HttpRequestException">The server does not answer.</exception>
+    public async Task<UpdateCampaignDto> CancelUpdateAsync(string linkId, string campaignId, CancellationToken cancellationToken)
+    {
+        using var client = Client(linkId);
+        return await client.CancelUpdateAsync(campaignId, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>Sets the update policy of the fleet of a server with a policy this device signs.</summary>
+    /// <param name="linkId">The link.</param>
+    /// <param name="change">The policy.</param>
+    /// <param name="cancellationToken">Cancels the calls.</param>
+    /// <returns>The policy as the server holds it.</returns>
+    /// <exception cref="KeyNotFoundException">No such link.</exception>
+    /// <exception cref="ArgumentException">The policy does not hold.</exception>
+    /// <exception cref="FleetDeviceListException">This device is not a controller device of the verified device list.</exception>
+    /// <exception cref="FleetServerException">The server refused.</exception>
+    /// <exception cref="HttpRequestException">The server does not answer.</exception>
+    public async Task<UpdatePolicyDto> SetUpdatePolicyAsync(string linkId, FleetUpdatePolicyChange change, CancellationToken cancellationToken)
+    {
+        using var client = Client(linkId);
+        return await client.SetUpdatePolicyAsync(change, cancellationToken).ConfigureAwait(false);
+    }
+
     /// <summary>Approves a pending device of a server, signing the entry of the device list that adds it with this device's key.</summary>
     /// <param name="linkId">The link.</param>
     /// <param name="deviceId">The device.</param>

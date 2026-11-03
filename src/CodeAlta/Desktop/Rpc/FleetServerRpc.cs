@@ -196,6 +196,97 @@ internal sealed class FleetServerService
         }
     }
 
+    /// <summary>The updates of the fleet of a server: the versions of the server and of each machine, the policy and the recent campaigns.</summary>
+    [NeoRpcMethod("updates")]
+    public async Task<FleetUpdatesResult> UpdatesAsync(FleetServerLinkRequest request, CancellationToken cancellationToken)
+    {
+        if (Refuse(request?.ExpectedEpoch) is { } refused) return new(refused, null, null);
+        if (!FleetServerLinkStore.IsValidId(request!.LinkId)) return new("invalid_request", null, null);
+        try
+        {
+            var (updates, machines) = await _servers!.GetUpdatesAsync(request.LinkId, cancellationToken).ConfigureAwait(false);
+            return new("ok", UpdatesView(updates, machines), null);
+        }
+        catch (Exception exception) when (Failure(exception) is { } failure)
+        {
+            return new(failure.Status, null, failure.Message);
+        }
+    }
+
+    /// <summary>
+    /// Starts an update campaign: this computer reads the feed (the latest version unless one is given, the hash of each
+    /// runtime package) and signs the manifest; the server updates the nodes, then itself.
+    /// </summary>
+    [NeoRpcMethod("startUpdate")]
+    public async Task<FleetUpdateCampaignResult> StartUpdateAsync(FleetUpdateStartRequest request, CancellationToken cancellationToken)
+    {
+        if (Refuse(request?.ExpectedEpoch) is { } refused) return new(refused, null, null);
+        if (!FleetServerLinkStore.IsValidId(request!.LinkId) || request.Version is { Length: > 64 } || request.Feed is { Length: > MaximumText } || request.TimeZone is { Length: > 64 }
+            || request.Machines is { Length: > FleetUpdateDocuments.MaxMachines })
+            return new("invalid_request", null, null);
+        DateTimeOffset? notBefore = null;
+        if (!string.IsNullOrWhiteSpace(request.NotBefore))
+        {
+            if (!DateTimeOffset.TryParse(request.NotBefore, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var parsed)) return new("invalid_request", null, null);
+            notBefore = parsed.ToUniversalTime();
+        }
+
+        try
+        {
+            var change = new FleetUpdateCampaignChange(string.IsNullOrWhiteSpace(request.Version) ? null : request.Version.Trim(),
+                string.IsNullOrWhiteSpace(request.Feed) ? null : request.Feed.Trim(), notBefore, string.IsNullOrWhiteSpace(request.TimeZone) ? null : request.TimeZone,
+                request.Machines is { Length: > 0 } machines ? machines : null, request.Rollback);
+            var campaign = await _servers!.StartUpdateAsync(request.LinkId, change, cancellationToken).ConfigureAwait(false);
+            ChangedLocally?.Invoke();
+            return new("ok", CampaignView(campaign), null);
+        }
+        catch (Exception exception) when (Failure(exception) is { } failure)
+        {
+            return new(failure.Status, null, failure.Message);
+        }
+    }
+
+    /// <summary>Cancels an update campaign before the server's step.</summary>
+    [NeoRpcMethod("cancelUpdate")]
+    public async Task<FleetUpdateCampaignResult> CancelUpdateAsync(FleetUpdateCancelRequest request, CancellationToken cancellationToken)
+    {
+        if (Refuse(request?.ExpectedEpoch) is { } refused) return new(refused, null, null);
+        if (!FleetServerLinkStore.IsValidId(request!.LinkId) || request.CampaignId is not { Length: > 0 and <= 64 }) return new("invalid_request", null, null);
+        try
+        {
+            var campaign = await _servers!.CancelUpdateAsync(request.LinkId, request.CampaignId, cancellationToken).ConfigureAwait(false);
+            ChangedLocally?.Invoke();
+            return new("ok", CampaignView(campaign), null);
+        }
+        catch (Exception exception) when (Failure(exception) is { } failure)
+        {
+            return new(failure.Status, null, failure.Message);
+        }
+    }
+
+    /// <summary>Sets the update policy of the fleet: manual, pinned to a version, or automatic at a maintenance window.</summary>
+    [NeoRpcMethod("setUpdatePolicy")]
+    public async Task<FleetUpdateActionResult> SetUpdatePolicyAsync(FleetUpdatePolicyRequest request, CancellationToken cancellationToken)
+    {
+        if (Refuse(request?.ExpectedEpoch) is { } refused) return new(refused, null);
+        if (!FleetServerLinkStore.IsValidId(request!.LinkId) || !FleetUpdateModes.IsKnown(request.Mode) || request.PinnedVersion is { Length: > 64 }
+            || request.Feed is { Length: > MaximumText } || request.TimeZone is { Length: > 64 } || request.Window is { Length: > 5 })
+            return new("invalid_request", null);
+        try
+        {
+            static string? Text(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+            await _servers!.SetUpdatePolicyAsync(request.LinkId, new FleetUpdatePolicyChange(request.Mode, request.Mode == FleetUpdateModes.Pinned ? Text(request.PinnedVersion) : null,
+                request.Mode == FleetUpdateModes.Automatic ? Text(request.Feed) : null, request.Mode == FleetUpdateModes.Automatic ? Text(request.Window) : null,
+                request.Mode == FleetUpdateModes.Automatic ? Text(request.TimeZone) : null), cancellationToken).ConfigureAwait(false);
+            ChangedLocally?.Invoke();
+            return new("ok", null);
+        }
+        catch (Exception exception) when (Failure(exception) is { } failure)
+        {
+            return new(failure.Status, failure.Message);
+        }
+    }
+
     /// <summary>Links a space to a server, or unlinks it.</summary>
     [NeoRpcMethod("linkSpace")]
     public async Task<FleetServerActionResult> LinkSpaceAsync(FleetServerSpaceRequest request, CancellationToken cancellationToken)
@@ -325,6 +416,31 @@ internal sealed class FleetServerService
 
     private static string Time(DateTimeOffset time) => time.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture);
 
+    /// <summary>The updates of a fleet as the page shows them.</summary>
+    /// <param name="updates">The updates as the server gives them.</param>
+    /// <param name="machines">The machines of the organization.</param>
+    /// <returns>The view.</returns>
+    internal static FleetUpdatesView UpdatesView(UpdatesDto updates, IReadOnlyList<MachineDto> machines)
+    {
+        var policy = updates.Policy.Policy is { } signed && FleetUpdateDocuments.TryParsePolicy(signed.Payload, out var parsed, out _) ? parsed : null;
+        var server = updates.Server;
+        return new FleetUpdatesView(server.Running, server.Pending?.Version, server.LastOutcome is { } outcome ? $"{outcome.Outcome} {outcome.Version}" : null,
+            new FleetUpdatePolicyView(policy?.Mode ?? FleetUpdateModes.Manual, policy?.PinnedVersion, policy?.Feed, policy?.Window, policy?.TimeZone,
+                updates.Policy.LastCheckAt is { } checkedAt ? Time(checkedAt) : null, updates.Policy.LastCheckMessage),
+            [.. updates.Campaigns.Select(CampaignView)],
+            [.. machines.Where(static machine => machine.Kind == FleetDeviceKinds.Node && machine.Status == "approved").OrderBy(static machine => machine.Name, StringComparer.CurrentCultureIgnoreCase)
+                .Select(static machine => new FleetUpdateMachineView(machine.DeviceId, machine.Name, machine.Inventory?.AppVersion?.Split('+')[0], machine.Online))]);
+    }
+
+    /// <summary>A campaign as the page shows it.</summary>
+    /// <param name="campaign">The campaign as the server gives it.</param>
+    /// <returns>The view.</returns>
+    internal static FleetUpdateCampaignView CampaignView(UpdateCampaignDto campaign)
+        => new(campaign.Id, Clamp(campaign.Sequence), campaign.State, campaign.TargetVersion, campaign.Feed, campaign.NotBefore is { } start ? Time(start) : null, campaign.TimeZone,
+            campaign.Automatic, campaign.Rollback, campaign.ServerState, campaign.ServerMessage, Time(campaign.CreatedAt),
+            [.. campaign.Machines.Select(static machine => new FleetUpdateCampaignMachineView(machine.DeviceId, machine.Name, machine.State, machine.Running, machine.Message,
+                machine.Online))]);
+
     /// <summary>The telemetry setting as the page shows it: the values of its headers masked.</summary>
     /// <param name="settings">The setting as the server holds it.</param>
     /// <returns>The view; the defaults of a new setting when there is none.</returns>
@@ -396,6 +512,7 @@ internal sealed class FleetServerService
     private static (string Status, string? Message)? Failure(Exception exception) => exception switch
     {
         FleetServerException refused => (refused.Code, refused.Message),
+        CodeAlta.Fleet.Update.UpdateException update => (update.Code, update.Message),
         FleetDeviceListException broken => (FleetDeviceListException.Code, broken.Message),
         HttpRequestException or TaskCanceledException or TimeoutException => ("unreachable", exception.Message),
         KeyNotFoundException => ("not_found", null),
@@ -566,6 +683,104 @@ internal sealed record FleetDirectoryResult(string Status, string? LinkId, strin
 /// <summary>A change of the servers.</summary>
 /// <param name="Kind"><c>changed</c>.</param>
 internal sealed record FleetServerEvent(string Kind);
+
+/// <summary>A machine of the fleet and the version it runs.</summary>
+/// <param name="Id">Its device.</param>
+/// <param name="Name">Its name.</param>
+/// <param name="Version">The version of CodeAlta it last said it runs, or null.</param>
+/// <param name="Online">Whether it is connected to the server.</param>
+internal sealed record FleetUpdateMachineView(string Id, string Name, string? Version, bool Online);
+
+/// <summary>The update policy of a fleet as the page shows it.</summary>
+/// <param name="Mode"><c>manual</c>, <c>pinned</c> or <c>automatic</c>.</param>
+/// <param name="PinnedVersion">The version of a pinned fleet.</param>
+/// <param name="Feed">The feed an automatic fleet follows; null for nuget.org.</param>
+/// <param name="Window">The start of the maintenance window, HH:mm.</param>
+/// <param name="TimeZone">The time zone of the window.</param>
+/// <param name="LastCheckAt">When an automatic policy last read its feed.</param>
+/// <param name="LastCheckMessage">What it found.</param>
+internal sealed record FleetUpdatePolicyView(string Mode, string? PinnedVersion, string? Feed, string? Window, string? TimeZone, string? LastCheckAt, string? LastCheckMessage);
+
+/// <summary>A machine in a campaign as the page shows it.</summary>
+/// <param name="Id">Its device.</param>
+/// <param name="Name">Its name.</param>
+/// <param name="State">Where it stands.</param>
+/// <param name="Running">The version it runs, when it said so.</param>
+/// <param name="Message">What happened, for a failure or a refusal.</param>
+/// <param name="Online">Whether it is connected.</param>
+internal sealed record FleetUpdateCampaignMachineView(string Id, string Name, string State, string? Running, string? Message, bool Online);
+
+/// <summary>An update campaign as the page shows it.</summary>
+/// <param name="Id">The campaign.</param>
+/// <param name="Sequence">Its number.</param>
+/// <param name="State">Its state.</param>
+/// <param name="TargetVersion">The version it installs.</param>
+/// <param name="Feed">The feed.</param>
+/// <param name="NotBefore">When it starts (UTC, ISO 8601), or null for at once.</param>
+/// <param name="TimeZone">The time zone the time was chosen in.</param>
+/// <param name="Automatic">Whether the automatic policy started it.</param>
+/// <param name="Rollback">Whether a person chose an older version.</param>
+/// <param name="ServerState">Where the server's own update stands.</param>
+/// <param name="ServerMessage">What happened to it.</param>
+/// <param name="CreatedAt">When it was started.</param>
+/// <param name="Machines">Its machines.</param>
+internal sealed record FleetUpdateCampaignView(string Id, int Sequence, string State, string TargetVersion, string Feed, string? NotBefore, string? TimeZone, bool Automatic,
+    bool Rollback, string ServerState, string? ServerMessage, string CreatedAt, FleetUpdateCampaignMachineView[] Machines);
+
+/// <summary>The updates of a fleet as the page shows them.</summary>
+/// <param name="ServerVersion">The version the server runs.</param>
+/// <param name="ServerPending">The version the server switches to, or null.</param>
+/// <param name="ServerLastOutcome">How its last switch ended (outcome and version), or null.</param>
+/// <param name="Policy">The update policy.</param>
+/// <param name="Campaigns">The recent campaigns, the newest first.</param>
+/// <param name="Machines">The nodes and their versions.</param>
+internal sealed record FleetUpdatesView(string ServerVersion, string? ServerPending, string? ServerLastOutcome, FleetUpdatePolicyView Policy, FleetUpdateCampaignView[] Campaigns,
+    FleetUpdateMachineView[] Machines);
+
+/// <summary>The updates of a fleet, or why they could not be read.</summary>
+/// <param name="Status"><c>ok</c>, the code of the server's refusal, <c>unreachable</c>, <c>invalid_request</c>, <c>stale_epoch</c> or <c>unavailable</c>.</param>
+/// <param name="Updates">The updates.</param>
+/// <param name="Message">What the failure said.</param>
+internal sealed record FleetUpdatesResult(string Status, FleetUpdatesView? Updates, string? Message);
+
+/// <summary>A campaign started or cancelled, or why not.</summary>
+/// <param name="Status"><c>ok</c>, or the code of the refusal.</param>
+/// <param name="Campaign">The campaign.</param>
+/// <param name="Message">What the failure said.</param>
+internal sealed record FleetUpdateCampaignResult(string Status, FleetUpdateCampaignView? Campaign, string? Message);
+
+/// <summary>Whether a change of the updates was made.</summary>
+/// <param name="Status"><c>ok</c>, or the code of the refusal.</param>
+/// <param name="Message">What the failure said.</param>
+internal sealed record FleetUpdateActionResult(string Status, string? Message);
+
+/// <summary>An update campaign to start.</summary>
+/// <param name="ExpectedEpoch">The host epoch the page knows.</param>
+/// <param name="LinkId">The link of the server.</param>
+/// <param name="Version">The version; null or empty for the latest.</param>
+/// <param name="Feed">The feed; null or empty for nuget.org.</param>
+/// <param name="NotBefore">When it starts, ISO 8601 with its offset; null for now.</param>
+/// <param name="TimeZone">The time zone the person chose the time in.</param>
+/// <param name="Machines">The device ids of the nodes; null or empty for all.</param>
+/// <param name="Rollback">Whether the person chose an older version.</param>
+internal sealed record FleetUpdateStartRequest(string ExpectedEpoch, string LinkId, string? Version, string? Feed, string? NotBefore, string? TimeZone, string[]? Machines,
+    bool Rollback);
+
+/// <summary>A campaign to cancel.</summary>
+/// <param name="ExpectedEpoch">The host epoch the page knows.</param>
+/// <param name="LinkId">The link of the server.</param>
+/// <param name="CampaignId">The campaign.</param>
+internal sealed record FleetUpdateCancelRequest(string ExpectedEpoch, string LinkId, string CampaignId);
+
+/// <summary>An update policy to set.</summary>
+/// <param name="ExpectedEpoch">The host epoch the page knows.</param>
+/// <param name="LinkId">The link of the server.</param>
+/// <param name="Mode"><c>manual</c>, <c>pinned</c> or <c>automatic</c>.</param>
+/// <param name="PinnedVersion">The version of a pinned fleet.</param>
+/// <param name="Feed">The feed an automatic fleet follows.</param>
+/// <param name="Window">The start of its maintenance window, HH:mm.</param>
+/// <param name="TimeZone">The time zone of the window.</param>
+internal sealed record FleetUpdatePolicyRequest(string ExpectedEpoch, string LinkId, string Mode, string? PinnedVersion, string? Feed, string? Window, string? TimeZone);
 
 /// <summary>A header of the collector, its value masked.</summary>
 /// <param name="Name">Its name.</param>

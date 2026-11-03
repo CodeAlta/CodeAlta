@@ -1,16 +1,18 @@
 import { useEffect, useState } from "react";
 import { Button, Callout, Checkbox, Dialog, DialogBody, DialogFooter, HTMLSelect, InputGroup, NonIdealState, PopoverNext, Switch, Tag } from "@blueprintjs/core";
-import { fleetServer, type FleetDeviceView, type FleetServerView, type FleetTelemetryView } from "#neoastra";
+import { fleetServer, type FleetDeviceView, type FleetServerView, type FleetTelemetryView, type FleetUpdateCampaignView, type FleetUpdatesView } from "#neoastra";
 import { AppIcon } from "../AppIcon";
 import { ActivitySpinner } from "../ActivitySpinner";
 import { SettingsPage, SettingsUnavailable, useSettingsEditor } from "../SettingsPage";
 import { useShellLanguage } from "../shellLanguage";
 import type { MessageKey } from "../localization";
-import { joinCommand, keyWords, orderedDevices, serverAddressOf, serverConnection, serverConnectionIntent, serverConnectionLabel, serverProblem, telemetryDraft,
-  telemetryHeaderEdits, telemetryProblem, telemetrySignals, telemetrySummary, type TelemetryDraft, type TelemetrySignal } from "./fleetServer";
+import { campaignProgress, campaignStateIntent, campaignStateLabel, canCancelCampaign, emptyUpdateDraft, joinCommand, keyWords, localTimeZone, machineStateIntent,
+  machineStateLabel, orderedDevices, policyDraft, policyDraftProblem, policySummary, serverAddressOf, serverConnection, serverConnectionIntent, serverConnectionLabel,
+  serverProblem, telemetryDraft, telemetryHeaderEdits, telemetryProblem, telemetrySignals, telemetrySummary, updateDraftProblem, updateProblem, updateStart, type PolicyDraft,
+  type TelemetryDraft, type TelemetrySignal, type UpdateDraft } from "./fleetServer";
 
 export type FleetServerApi = Pick<typeof fleetServer, "status" | "create" | "join" | "leave" | "createToken" | "devices" | "approve" | "revoke" | "watch" | "telemetry"
-  | "setTelemetry">;
+  | "setTelemetry" | "updates" | "startUpdate" | "cancelUpdate" | "setUpdatePolicy">;
 
 /** The address a server the person runs on this computer listens on, as `altaserver run` says it. */
 export const localServerAddress = "http://127.0.0.1:2586";
@@ -86,6 +88,7 @@ function ServerCard({ server, epoch, api, busy, revision, onLeave }: {
     </div>
     {server.controller && connection !== "revoked" && <ServerDevices server={server} epoch={epoch} api={api} revision={revision} />}
     {server.controller && connection !== "revoked" && <ServerTelemetry server={server} epoch={epoch} api={api} revision={revision} />}
+    {server.controller && connection !== "revoked" && <ServerUpdates server={server} epoch={epoch} api={api} revision={revision} />}
     {token && <TokenDialog server={server} epoch={epoch} api={api} onClose={() => setToken(false)} />}
   </section>;
 }
@@ -237,6 +240,201 @@ function TelemetryDialog({ server, epoch, api, view, onClose }: {
         </div>
         <label><span>{t("Environment")}</span>
           <InputGroup value={draft.environment} disabled={working} placeholder="production" spellCheck={false} onChange={event => update({ environment: event.target.value })} /></label>
+        <button type="submit" hidden />
+      </form>
+      {(problem ?? (invalid ? { key: invalid } : null)) && <Callout compact intent="warning" role="alert">{t((problem ?? { key: invalid! }).key)}
+        {problem?.detail && <div className="muted-text">{problem.detail}</div>}</Callout>}
+    </DialogBody>
+    <DialogFooter actions={<>
+      <Button disabled={working} text={t("Cancel")} onClick={() => onClose(false)} />
+      <Button intent="primary" disabled={!!invalid || working} icon={working ? <ActivitySpinner size={14} /> : undefined} text={t("Save")} onClick={() => void save()} />
+    </>} />
+  </Dialog>;
+}
+
+/**
+ * The updates of the fleet, for an owner's computer: the version of the server and of each machine, the policy, Update the fleet…
+ * and the last campaign with each machine's state. Nodes update first, then the server; the host says when it moves on.
+ */
+function ServerUpdates({ server, epoch, api, revision }: { server: FleetServerView; epoch: string; api: FleetServerApi; revision: number }) {
+  const { t } = useShellLanguage();
+  const [view, setView] = useState<FleetUpdatesView | null>(null);
+  const [dialog, setDialog] = useState<"update" | "policy" | null>(null);
+  const [generation, setGeneration] = useState(0);
+  const [cancelling, setCancelling] = useState(false);
+  const [problem, setProblem] = useState<{ key: MessageKey; detail?: string | null } | null>(null);
+  useEffect(() => {
+    const abort = new AbortController();
+    api.updates({ expectedEpoch: epoch, linkId: server.id }, { signal: abort.signal, timeoutMilliseconds: 20_000 }).then(value => {
+      if (!abort.signal.aborted) setView(value.status === "ok" ? value.updates : null);
+    }, () => { if (!abort.signal.aborted) setView(null); });
+    return () => abort.abort();
+  }, [api, epoch, server.id, revision, generation]);
+  if (!view) return null;
+  const campaign = view.campaigns[0] ?? null;
+  const policy = policySummary(view.policy);
+  async function cancel(target: FleetUpdateCampaignView) {
+    setCancelling(true);
+    setProblem(null);
+    try {
+      const result = await api.cancelUpdate({ expectedEpoch: epoch, linkId: server.id, campaignId: target.id }, { timeoutMilliseconds: 30_000 });
+      if (result.status !== "ok") setProblem({ key: updateProblem(result.status) ?? "The operation did not complete.", detail: result.message });
+      setGeneration(value => value + 1);
+    } catch {
+      setProblem({ key: "The server does not answer." });
+    } finally { setCancelling(false); }
+  }
+  return <div className="fleet-server-updates">
+    <div className="fleet-updates-head">
+      <AppIcon name="download" size={15} />
+      <div className="fleet-telemetry-main">
+        <strong>{t("Updates")}</strong>
+        <span className="muted-text fleet-updates-summary">{t("Server {version}", { version: view.serverVersion })}
+          {view.serverPending ? ` → ${view.serverPending}` : ""} · {t(policy.key)}{policy.detail ? ` · ${policy.detail}` : ""}</span>
+      </div>
+      <Button size="small" variant="minimal" onClick={() => setDialog("policy")}>{t("Policy…")}</Button>
+      <Button size="small" icon={<AppIcon name="download" size={14} />} disabled={!!campaign && canCancelCampaign(campaign)} onClick={() => setDialog("update")}>
+        {t("Update the fleet…")}</Button>
+    </div>
+    {campaign && <CampaignProgress campaign={campaign} cancelling={cancelling} onCancel={() => void cancel(campaign)} />}
+    {problem && <Callout compact intent="warning" role="alert">{t(problem.key)}{problem.detail && <div className="muted-text">{problem.detail}</div>}</Callout>}
+    {dialog === "update" && <UpdateDialog server={server} epoch={epoch} api={api} view={view}
+      onClose={changed => { setDialog(null); if (changed) setGeneration(value => value + 1); }} />}
+    {dialog === "policy" && <PolicyDialog server={server} epoch={epoch} api={api} view={view}
+      onClose={changed => { setDialog(null); if (changed) setGeneration(value => value + 1); }} />}
+  </div>;
+}
+
+/** The last campaign: its version, its state, when it starts, and each machine with its state; Cancel before the server's step. */
+function CampaignProgress({ campaign, cancelling, onCancel }: { campaign: FleetUpdateCampaignView; cancelling: boolean; onCancel: () => void }) {
+  const { t } = useShellLanguage();
+  const progress = campaignProgress(campaign);
+  const start = campaign.notBefore ? new Date(campaign.notBefore) : null;
+  return <div className="fleet-campaign" data-state={campaign.state}>
+    <div className="fleet-campaign-head">
+      <span>{t("CodeAlta {version}", { version: campaign.targetVersion })}</span>
+      <Tag minimal round intent={campaignStateIntent(campaign.state)}>{t(campaignStateLabel(campaign.state))}</Tag>
+      <span className="muted-text">{t("{updated} of {total} machines", { updated: String(progress.updated), total: String(progress.total) })}</span>
+      {start && campaign.state === "scheduled" && <span className="muted-text fleet-campaign-start">
+        {t("At {time}", { time: start.toLocaleString() })}{campaign.timeZone ? ` (${campaign.timeZone})` : ""}</span>}
+      {canCancelCampaign(campaign) && <Button size="small" variant="minimal" intent="danger" disabled={cancelling} onClick={onCancel}>{t("Cancel")}</Button>}
+    </div>
+    <ul className="fleet-campaign-machines">
+      <li key="server"><span>{t("This server")}</span><Tag minimal intent={machineStateIntent(campaign.serverState)}>{t(machineStateLabel(campaign.serverState))}</Tag>
+        {campaign.serverMessage && <span className="muted-text" title={campaign.serverMessage}>{campaign.serverMessage}</span>}</li>
+      {campaign.machines.map(machine => <li key={machine.id} data-machine={machine.id}>
+        <span>{machine.name}</span>
+        <Tag minimal intent={machineStateIntent(machine.state)}>{t(machineStateLabel(machine.state))}</Tag>
+        {!machine.online && machine.state !== "updated" && <span className="muted-text">{t("Offline")}</span>}
+        {machine.running && <span className="muted-text">{machine.running}</span>}
+        {machine.message && <span className="muted-text fleet-campaign-message" title={machine.message}>{machine.message}</span>}
+      </li>)}
+    </ul>
+  </div>;
+}
+
+/** Update the fleet: a version (the latest by default), its feed, now or at a time of this computer, and the machines (all by default). */
+function UpdateDialog({ server, epoch, api, view, onClose }: {
+  server: FleetServerView; epoch: string; api: Pick<FleetServerApi, "startUpdate">; view: FleetUpdatesView; onClose: (changed: boolean) => void;
+}) {
+  const { t } = useShellLanguage();
+  const [draft, setDraft] = useState<UpdateDraft>(() => ({ ...emptyUpdateDraft, feed: view.policy.feed ?? "" }));
+  const [working, setWorking] = useState(false);
+  const [problem, setProblem] = useState<{ key: MessageKey; detail?: string | null } | null>(null);
+  const invalid = updateDraftProblem(draft);
+  const update = (change: Partial<UpdateDraft>) => setDraft(value => ({ ...value, ...change }));
+  const zone = localTimeZone();
+  const chosen = (id: string) => draft.machines === null || draft.machines.includes(id);
+  async function start() {
+    if (invalid) return;
+    setWorking(true);
+    setProblem(null);
+    try {
+      const result = await api.startUpdate({ expectedEpoch: epoch, linkId: server.id, version: draft.version.trim() || null, feed: draft.feed.trim() || null,
+        notBefore: updateStart(draft), timeZone: draft.when === "at" ? zone : null, machines: draft.machines ? [...draft.machines] : null, rollback: false },
+        { timeoutMilliseconds: 180_000 });
+      if (result.status === "ok") { onClose(true); return; }
+      setProblem({ key: updateProblem(result.status) ?? "The operation did not complete.", detail: result.message });
+    } catch {
+      setProblem({ key: "The server does not answer." });
+    } finally { setWorking(false); }
+  }
+  return <Dialog isOpen className="fleet-update-dialog" title={t("Update the fleet")} canOutsideClickClose={false} onClose={() => { if (!working) onClose(false); }}>
+    <DialogBody>
+      <p className="muted-text">{t("The machines update first, a few at a time, then the server. This computer signs what they install.")}</p>
+      <form className="fleet-server-form" onSubmit={event => { event.preventDefault(); void start(); }}>
+        <label><span>{t("Version")}</span>
+          <InputGroup value={draft.version} disabled={working} placeholder={t("The latest")} spellCheck={false} onChange={event => update({ version: event.target.value })} /></label>
+        <label><span>{t("Feed")}</span>
+          <InputGroup value={draft.feed} disabled={working} placeholder="nuget.org" spellCheck={false} onChange={event => update({ feed: event.target.value })} /></label>
+        <div className="fleet-telemetry-choices">
+          <label><span>{t("When")}</span>
+            <HTMLSelect value={draft.when} disabled={working} options={[{ value: "now", label: t("Now") }, { value: "at", label: t("At a time") }]}
+              onChange={event => update({ when: event.currentTarget.value === "at" ? "at" : "now" })} /></label>
+          {draft.when === "at" && <label><span>{t("Time ({zone})", { zone })}</span>
+            <input className="bp6-input" type="datetime-local" value={draft.at} disabled={working} onChange={event => update({ at: event.target.value })} /></label>}
+        </div>
+        <div className="fleet-update-machines" role="group" aria-label={t("Machines")}><span>{t("Machines")}</span>
+          {view.machines.map(machine => <Checkbox key={machine.id} disabled={working} checked={chosen(machine.id)}
+            labelElement={<span>{machine.name} <span className="muted-text">{machine.version ?? "?"}{machine.online ? "" : ` · ${t("Offline")}`}</span></span>}
+            onChange={event => {
+              const next = view.machines.filter(item => item.id === machine.id ? event.currentTarget.checked : chosen(item.id)).map(item => item.id);
+              update({ machines: next.length === view.machines.length ? null : next });
+            }} />)}
+          {view.machines.length === 0 && <span className="muted-text">{t("No machine yet: the server updates itself.")}</span>}
+        </div>
+        <button type="submit" hidden />
+      </form>
+      {(problem ?? (invalid ? { key: invalid } : null)) && <Callout compact intent="warning" role="alert">{t((problem ?? { key: invalid! }).key)}
+        {problem?.detail && <div className="muted-text">{problem.detail}</div>}</Callout>}
+    </DialogBody>
+    <DialogFooter actions={<>
+      <Button disabled={working} text={t("Cancel")} onClick={() => onClose(false)} />
+      <Button intent="primary" disabled={!!invalid || working} icon={working ? <ActivitySpinner size={14} /> : undefined} text={t("Update")} onClick={() => void start()} />
+    </>} />
+  </Dialog>;
+}
+
+/** The update policy of the fleet: manual (campaigns only), pinned to a version, or automatic at a daily maintenance window. */
+function PolicyDialog({ server, epoch, api, view, onClose }: {
+  server: FleetServerView; epoch: string; api: Pick<FleetServerApi, "setUpdatePolicy">; view: FleetUpdatesView; onClose: (changed: boolean) => void;
+}) {
+  const { t } = useShellLanguage();
+  const [draft, setDraft] = useState<PolicyDraft>(() => policyDraft(view.policy));
+  const [working, setWorking] = useState(false);
+  const [problem, setProblem] = useState<{ key: MessageKey; detail?: string | null } | null>(null);
+  const invalid = policyDraftProblem(draft);
+  const update = (change: Partial<PolicyDraft>) => setDraft(value => ({ ...value, ...change }));
+  async function save() {
+    if (invalid) return;
+    setWorking(true);
+    setProblem(null);
+    try {
+      const result = await api.setUpdatePolicy({ expectedEpoch: epoch, linkId: server.id, mode: draft.mode, pinnedVersion: draft.pinnedVersion.trim() || null,
+        feed: draft.feed.trim() || null, window: draft.window || null, timeZone: draft.timeZone || null }, { timeoutMilliseconds: 60_000 });
+      if (result.status === "ok") { onClose(true); return; }
+      setProblem({ key: updateProblem(result.status) ?? "The operation did not complete.", detail: result.message });
+    } catch {
+      setProblem({ key: "The server does not answer." });
+    } finally { setWorking(false); }
+  }
+  return <Dialog isOpen className="fleet-policy-dialog" title={t("Update policy")} canOutsideClickClose={false} onClose={() => { if (!working) onClose(false); }}>
+    <DialogBody>
+      <form className="fleet-server-form" onSubmit={event => { event.preventDefault(); void save(); }}>
+        <label><span>{t("Policy")}</span>
+          <HTMLSelect value={draft.mode} disabled={working} options={[{ value: "manual", label: t("Manual: when I update the fleet") },
+            { value: "pinned", label: t("Pinned: stay on one version") }, { value: "automatic", label: t("Automatic: the latest stable version") }]}
+            onChange={event => update({ mode: event.currentTarget.value === "pinned" ? "pinned" : event.currentTarget.value === "automatic" ? "automatic" : "manual" })} /></label>
+        {draft.mode === "pinned" && <label><span>{t("Version")}</span>
+          <InputGroup value={draft.pinnedVersion} disabled={working} placeholder={view.serverVersion} spellCheck={false}
+            onChange={event => update({ pinnedVersion: event.target.value })} /></label>}
+        {draft.mode === "automatic" && <>
+          <label><span>{t("Feed")}</span>
+            <InputGroup value={draft.feed} disabled={working} placeholder="nuget.org" spellCheck={false} onChange={event => update({ feed: event.target.value })} /></label>
+          <label><span>{t("Maintenance window ({zone})", { zone: draft.timeZone })}</span>
+            <input className="bp6-input" type="time" value={draft.window} disabled={working} onChange={event => update({ window: event.target.value })} /></label>
+          <p className="muted-text">{t("The server reads the feed each day and updates the fleet at this time. Machines check the feed's hash of what they install.")}</p>
+        </>}
         <button type="submit" hidden />
       </form>
       {(problem ?? (invalid ? { key: invalid } : null)) && <Callout compact intent="warning" role="alert">{t((problem ?? { key: invalid! }).key)}
