@@ -87,6 +87,9 @@ public sealed class ControlService
     /// <summary>Gets the coordinated update of the fleet, which takes the reports of nodes and asks a node that connects; null for none.</summary>
     internal UpdateCampaignService? Updates { get; init; }
 
+    /// <summary>Gets what keeps the statistics sets machines publish; null keeps none, and the welcome does not announce them.</summary>
+    internal StatisticsService? Statistics { get; init; }
+
     /// <summary>Serves a WebSocket request on <see cref="FleetServerMethods.ControlPath"/>.</summary>
     /// <param name="context">The request.</param>
     /// <returns>A task that completes when the connection ends.</returns>
@@ -130,7 +133,7 @@ public sealed class ControlService
             {
                 Protocol = Protocol,
                 Policy = _policy,
-                Features = Features,
+                Features = Statistics is null ? Features : [.. Features, FleetStatisticsMethods.Feature],
                 TimeProvider = _time,
                 ResolveCursorsAsync = ResolveCursorsAsync,
             }, verifier, cancellationToken).ConfigureAwait(false);
@@ -231,6 +234,16 @@ public sealed class ControlService
             var result = await _publications.WithdrawFactsAsync(session.Device, withdrawal, token).ConfigureAwait(false);
             return JsonSerializer.SerializeToElement(result, FleetServerJsonContext.Default.FleetFactsWithdrawResult);
         }));
+
+        if (Statistics is { } statistics)
+        {
+            On(FleetStatisticsMethods.Publish, Handler(FleetStatisticsJsonContext.Default.FleetStatisticsPublish, async (publication, token) =>
+                JsonSerializer.SerializeToElement(await statistics.PublishAsync(session.Device, publication, token).ConfigureAwait(false),
+                    FleetStatisticsJsonContext.Default.FleetStatisticsPublishResult)));
+            On(FleetStatisticsMethods.Withdraw, Handler(FleetStatisticsJsonContext.Default.FleetStatisticsWithdraw, async (withdrawal, token) =>
+                JsonSerializer.SerializeToElement(await statistics.WithdrawAsync(session.Device, withdrawal, token).ConfigureAwait(false),
+                    FleetStatisticsJsonContext.Default.FleetStatisticsWithdrawResult)));
+        }
 
         On(FleetServerMethods.DirectoryWatch, async (_, token) =>
         {

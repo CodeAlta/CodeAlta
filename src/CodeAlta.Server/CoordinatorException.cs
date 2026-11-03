@@ -140,4 +140,7 @@ public static class CoordinatorErrorCodes
 
     /// <summary>No campaign of the organization has this id.</summary>
     public const string UpdateNotFound = "update.not_found";
+
+    /// <summary>A statistics query that does not read: its days, its time zone, its groups or its scope.</summary>
+    public const string StatisticsInvalid = "statistics.invalid";
 }
