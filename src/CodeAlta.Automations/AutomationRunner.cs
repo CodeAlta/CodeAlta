@@ -10,7 +10,48 @@ namespace CodeAlta.Automations;
 /// <summary>How a run of an automation ended.</summary>
 /// <param name="Status">One of the status constants of <see cref="AutomationRun"/>.</param>
 /// <param name="Message">Why it did not complete.</param>
-internal sealed record AutomationOutcome(string Status, string? Message = null);
+internal sealed record AutomationOutcome(string Status, string? Message = null)
+{
+    /// <summary>What the session of the run used, as its usage records say; null when it could not be read.</summary>
+    public AutomationUsage? Usage { get; init; }
+}
+
+/// <summary>What the session of a run used: its tokens, and its cost when the provider reported one, in one unit.</summary>
+/// <param name="InputTokens">The input tokens of its requests, the prompt cache included; null when none was reported.</param>
+/// <param name="OutputTokens">The output tokens of its requests; null when none was reported.</param>
+/// <param name="Cost">The cost the provider reported; null when none was, or in more than one unit.</param>
+/// <param name="CostUnit">The unit of <paramref name="Cost"/>: <c>usd</c> unless the provider named another, such as <c>AI credits</c>.</param>
+internal sealed record AutomationUsage(long? InputTokens, long? OutputTokens, double? Cost, string? CostUnit)
+{
+    /// <summary>Sums the usage records of a session.</summary>
+    /// <param name="updates">Its usage records.</param>
+    /// <returns>The sum; null when the records report nothing, or something that does not add up.</returns>
+    internal static AutomationUsage? Sum(IEnumerable<CodeAlta.Agent.Runtime.AgentSessionUsageUpdate> updates)
+    {
+        ArgumentNullException.ThrowIfNull(updates);
+        long? input = null, output = null;
+        double? cost = null;
+        string? unit = null;
+        var units = 0;
+        foreach (var update in updates)
+        {
+            var usage = update.Operation;
+            if (usage.InputTokens is < 0 || usage.OutputTokens is < 0) return null;
+            if (usage.InputTokens is { } read) input = (input ?? 0) + read;
+            if (usage.OutputTokens is { } written) output = (output ?? 0) + written;
+            if (usage.Cost is not { } amount) continue;
+            if (!double.IsFinite(amount) || amount < 0) return null;
+            var named = string.IsNullOrWhiteSpace(usage.CostUnit) ? "usd" : usage.CostUnit.Trim();
+            if (unit is null) { unit = named; units = 1; }
+            else if (!string.Equals(unit, named, StringComparison.OrdinalIgnoreCase)) units++;
+            cost = (cost ?? 0) + amount;
+        }
+
+        // Costs in two units do not add up: the tokens are kept, the cost is not.
+        if (units > 1) (cost, unit) = (null, null);
+        return input is null && output is null && cost is null ? null : new AutomationUsage(input, output, cost is { } total ? Math.Round(total, 10) : null, unit);
+    }
+}
 
 /// <summary>What starting a run gave.</summary>
 /// <param name="SessionId">The session that was created; null when none was.</param>
@@ -177,7 +218,7 @@ internal sealed class AutomationRunner : IAutomationRunner
                     : $"The prompt was not accepted ({admission.Kind.ToString().ToLowerInvariant()}).", null);
             }
 
-            return new(sessionId, null, ObserveAsync(admission.Receipt));
+            return new(sessionId, null, ObserveAsync(admission.Receipt, sessionId));
         }
         catch (OperationCanceledException)
         {
@@ -199,15 +240,30 @@ internal sealed class AutomationRunner : IAutomationRunner
     internal static string SessionTitle(string name, string? detail)
         => AutomationText.Line(detail, MaximumDetailInTitle) is { Length: > 0 } about ? name + " · " + about : name;
 
-    private static async Task<AutomationOutcome> ObserveAsync(OwnedSessionCommandReceipt receipt)
+    private async Task<AutomationOutcome> ObserveAsync(OwnedSessionCommandReceipt receipt, string sessionId)
     {
         var result = await receipt.Completion.ConfigureAwait(false);
-        return result.Outcome switch
+        AutomationOutcome outcome = result.Outcome switch
         {
             OwnedSessionCommandOutcome.Completed => new(AutomationRun.Completed),
             OwnedSessionCommandOutcome.Cancelled => new(AutomationRun.Cancelled),
             _ => new(AutomationRun.Failed, result.Code is { } code ? $"The session did not complete ({code})." : "The session did not complete."),
         };
+        return outcome with { Usage = await ReadUsageAsync(sessionId).ConfigureAwait(false) };
+    }
+
+    // What the session used, from its usage records; a journal that cannot be read now leaves the run without it.
+    private async Task<AutomationUsage?> ReadUsageAsync(string sessionId)
+    {
+        try
+        {
+            return AutomationUsage.Sum(await _host.WorkspaceReads.ReadUsageUpdatesAsync(sessionId, CancellationToken.None).ConfigureAwait(false));
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException or System.Text.Json.JsonException
+            or InvalidOperationException or ObjectDisposedException)
+        {
+            return null;
+        }
     }
 
     private static string FirstLine(string message)

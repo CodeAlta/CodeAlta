@@ -49,6 +49,22 @@ public sealed partial class FleetServerClient
             FleetAutomationApiJsonContext.Default.AutomationListDto, cancellationToken);
     }
 
+    /// <summary>Asks a machine, through the server, to run an automation now, with a run request this device signed.</summary>
+    /// <param name="signed">The signed run request (<see cref="FleetAutomationSigning.SignRun"/>).</param>
+    /// <param name="cancellationToken">Cancels the call.</param>
+    /// <returns>The run as asked.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="signed"/> is null.</exception>
+    /// <exception cref="ArgumentException">The request does not read.</exception>
+    /// <exception cref="FleetServerException">The server refused it: the machine is offline, or the automation is not this device's person's on that machine.</exception>
+    /// <exception cref="HttpRequestException">The server does not answer.</exception>
+    public Task<AutomationRunDto> RunAutomationAsync(FleetSignedAutomationRunRequest signed, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(signed);
+        if (!FleetAutomationRunRequestDocuments.TryRead(signed.Payload, out var request, out var reason)) throw new ArgumentException($"The run request does not hold: {reason}.", nameof(signed));
+        return SendAsync(HttpMethod.Post, $"api/v1/automations/{Uri.EscapeDataString(request.AutomationId)}/run",
+            Body(new RunAutomationRequest(signed), FleetAutomationApiJsonContext.Default.RunAutomationRequest), FleetAutomationApiJsonContext.Default.AutomationRunDto, cancellationToken);
+    }
+
     /// <summary>Lists the runs of an automation as its machines reported them, the newest first.</summary>
     /// <param name="automationId">The automation.</param>
     /// <param name="limit">The most runs; null for the server's default.</param>

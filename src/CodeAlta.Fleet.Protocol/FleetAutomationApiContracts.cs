@@ -22,7 +22,15 @@ public sealed record PutAutomationRequest(FleetSignedAutomationVersion Version);
 /// <param name="Message">Why the machine refused it; null otherwise.</param>
 /// <param name="Version">The version as signed.</param>
 public sealed record AutomationDto(string Id, string MachineId, long Number, bool Removed, bool Enabled, IReadOnlyList<string> Triggers, string SignerDeviceId,
-    DateTimeOffset UpdatedAt, string State, string? Message, FleetSignedAutomationVersion Version);
+    DateTimeOffset UpdatedAt, string State, string? Message, FleetSignedAutomationVersion Version)
+{
+    /// <summary>Gets when a schedule of it is next due on its machine, as the machine last reported it; null when unknown or none.</summary>
+    public DateTimeOffset? NextDue { get; init; }
+}
+
+/// <summary>The body of <c>POST /api/v1/automations/{id}/run</c>: a run the calling controller device signed for one machine.</summary>
+/// <param name="Request">The signed run request.</param>
+public sealed record RunAutomationRequest(FleetSignedAutomationRunRequest Request);
 
 /// <summary>The automations of the caller.</summary>
 /// <param name="Automations">One per automation and machine.</param>
@@ -42,7 +50,20 @@ public sealed record AutomationListDto(IReadOnlyList<AutomationDto> Automations)
 /// <param name="SessionId">The session it started on its machine; null when none.</param>
 /// <param name="Message">Why it failed or was skipped; null otherwise.</param>
 public sealed record AutomationRunDto(string RunId, string AutomationId, string MachineId, long Number, string Trigger, string Status, DateTimeOffset StartedAt,
-    DateTimeOffset? EndedAt, string? Occurrence, DateTimeOffset? LeaseUntil, string? SessionId, string? Message);
+    DateTimeOffset? EndedAt, string? Occurrence, DateTimeOffset? LeaseUntil, string? SessionId, string? Message)
+{
+    /// <summary>Gets the input tokens of its session, the prompt cache included; null when unknown.</summary>
+    public long? InputTokens { get; init; }
+
+    /// <summary>Gets the output tokens of its session; null when unknown.</summary>
+    public long? OutputTokens { get; init; }
+
+    /// <summary>Gets the cost the provider reported for its session, in <see cref="CostUnit"/>; null when none was.</summary>
+    public double? Cost { get; init; }
+
+    /// <summary>Gets the unit of <see cref="Cost"/>: <c>usd</c>, or the one the provider named.</summary>
+    public string? CostUnit { get; init; }
+}
 
 /// <summary>Runs of an automation, the newest first.</summary>
 /// <param name="Runs">The runs.</param>
@@ -51,6 +72,8 @@ public sealed record AutomationRunListDto(IReadOnlyList<AutomationRunDto> Runs);
 /// <summary>The source-generated contracts of the automation resources of the REST API.</summary>
 [JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase, DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull)]
 [JsonSerializable(typeof(PutAutomationRequest))]
+[JsonSerializable(typeof(RunAutomationRequest))]
+[JsonSerializable(typeof(AutomationRunDto))]
 [JsonSerializable(typeof(AutomationDto))]
 [JsonSerializable(typeof(AutomationListDto))]
 [JsonSerializable(typeof(AutomationRunListDto))]

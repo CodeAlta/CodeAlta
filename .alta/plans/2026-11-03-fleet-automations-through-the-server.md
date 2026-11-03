@@ -1,6 +1,6 @@
 ---
 title: Fleet automations through CodeAlta Server (M3b, personal scope)
-status: in-progress
+status: done
 created: 2026-11-03
 summary: What is left after the first part of fleet automations (engine library, automations on altanode, Runs on a paired machine): the server stores each signed automation version and assigns it to a machine linked to it, nodes verify the signature and keep their copies, runs are reported as facts, and the desktop places automations on machines it reaches only through a server.
 ---
@@ -51,19 +51,21 @@ The authority of an assignment is the authenticated, paired device on a direct c
   tokens and cost, never the prompt or the answer); the server keeps them for the console and the desktop lists them
   for machines it reaches only through the server.
   - Done as `automations.runs` (not `facts.publish`, whose session facts another branch changes): run id, version,
-    trigger, status, times, session id, and a failure reason; resent on each connection. Not done: tokens and cost
-    (the run record of the engine does not carry them yet).
+    trigger, status, times, session id, a failure reason, and the tokens and cost of the session (summed from its usage
+    records into the engine's run record when the run ends; migration `0008`); resent on each connection.
 - [x] **Reconciliation by (automation, due time).** The node's claim store already keys claims by occurrence: the server
   records the claims it learns and refuses a second run of the same occurrence after a takeover; `AutomationClaim.LeaseUntil`
   is the lease it reads.
   - Done with `automations.claim` before the run starts (`IAutomationClaims.ConfirmAsync`), with a lease; a server that
-    does not answer leaves the node's own claim in force. Leases are not renewed with the server; the reported end closes them.
+    does not answer leaves the node's own claim in force. While a run works, the node claims its due time again about
+    once a minute, which renews its lease on the server; the reported end closes it.
 - [x] **Desktop.** **Runs on** offers the machines of the linked server (`DesktopFleet.SyncOrganizationMachinesAsync`
   hosts, `IsPaired == false`), placed through the server rather than `automations.put` on a direct channel.
   - Done: `DesktopAutomationPlacement.ServerRoute` (`DesktopFleetServers.AutomationRoute`) seals each version with the
     server's anchored device list and `PUT`s it; where it stands (pending, taken, refused) and its runs come from the
-    server; leaving the machine sends a signed removal. Not done: a run by hand on a machine reached only through a
-    server (it says to pair the machine); the server's tombstone of a removal is not forgotten (`DELETE`) by the desktop.
+    server; leaving the machine sends a signed removal. **Run now** goes through the server as a run request the desktop
+    signs (`POST …/{id}/run`, event `automations.run`); the node verifies it and runs its run id once.
+    Once the machine took a removal away, the desktop asks the server to forget it (`DELETE`).
 - [x] **Tests.** The multi-host harness: desktop, server and node in one process; a server that is down while a
   schedule fires (the node fires it), a hostile server that alters a version (the node refuses it), a revoked device.
   - Done in `NodeServerAutomationTests` (server and node host, the desktop's client), `DesktopServerAutomationPlacementTests`
@@ -72,8 +74,15 @@ The authority of an assignment is the authenticated, paired device on a direct c
 
 ## Smaller follow-ups of the first part
 
-- [ ] The desktop shows the next due time of a placed automation as its machine reports it (`FleetAutomationInfo.NextDue`).
-- [ ] A remote run's session opens from the run list when the machine lists it (today: when it is among the sessions
+- [x] The desktop shows the next due time of a placed automation as its machine reports it (`FleetAutomationInfo.NextDue`).
+  - Done: from `automations.list` on a direct channel; through a server, the node reports its schedules with its runs
+    (`FleetAutomationRunFacts.Schedules`), kept in `automations.next_due` (migration `0008`) and given by `GET`.
+- [x] A remote run's session opens from the run list when the machine lists it (today: when it is among the sessions
   the machine host lists).
-- [ ] Pausing all automations on the desktop does not pause those placed on machines; decide whether it should.
-- [ ] `altanode automations` (list, runs, policy) for the owner on the node, instead of editing the policy file.
+  - Done: a run of another machine with a session is always a link; opening it reads the sessions of the window again,
+    and says so when the machine does not list that session now.
+- [x] Pausing all automations on the desktop does not pause those placed on machines; decide whether it should.
+  - Decided: it does. While paused, the copies are given disabled (a new signed version), and enabled again once
+    resumed. A developer instance, which starts paused, leaves the machines as they are.
+- [x] `altanode automations` (list, runs, policy) for the owner on the node, instead of editing the policy file.
+  - Done on the files of the profile: `list`, `runs [<automation>]`, `policy [on|off|credentials any|account]`.

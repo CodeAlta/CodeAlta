@@ -29,7 +29,11 @@ public static class AutomationDeliveryStates
 /// <param name="DeliveryState">Where its delivery stands (<see cref="AutomationDeliveryStates"/>).</param>
 /// <param name="DeliveryMessage">Why the machine refused it; null otherwise.</param>
 public sealed record AutomationRecord(string OrganizationId, string AutomationId, string MachineId, string OwnerPersonId, long Number, bool Removed, bool Enabled,
-    string Triggers, string Payload, string Signature, string SignerDeviceId, DateTimeOffset UpdatedAt, string DeliveryState, string? DeliveryMessage);
+    string Triggers, string Payload, string Signature, string SignerDeviceId, DateTimeOffset UpdatedAt, string DeliveryState, string? DeliveryMessage)
+{
+    /// <summary>Gets when a schedule of it is next due on its machine, as the machine last reported it.</summary>
+    public DateTimeOffset? NextDue { get; init; }
+}
 
 /// <summary>A run of an automation a machine reported, or a due time it claimed.</summary>
 /// <param name="OrganizationId">The organization.</param>
@@ -51,6 +55,18 @@ public sealed record AutomationRunRecord(string OrganizationId, string RunId, st
 {
     /// <summary>The status of a due time claimed and not reported yet.</summary>
     public const string Claimed = "claimed";
+
+    /// <summary>Gets the input tokens of its session, the prompt cache included; null when unknown.</summary>
+    public long? InputTokens { get; init; }
+
+    /// <summary>Gets the output tokens of its session; null when unknown.</summary>
+    public long? OutputTokens { get; init; }
+
+    /// <summary>Gets the cost the provider reported for its session, in <see cref="CostUnit"/>; null when none was.</summary>
+    public double? Cost { get; init; }
+
+    /// <summary>Gets the unit of <see cref="Cost"/>: <c>usd</c>, or the one the provider named.</summary>
+    public string? CostUnit { get; init; }
 }
 
 /// <summary>What a claim of a due time found.</summary>
@@ -112,8 +128,8 @@ public interface IAutomationStore
     ValueTask<bool> DeleteAutomationAsync(string organizationId, string automationId, string machineId, AuditEntry audit, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Claims a due time of an automation for a run: granted when nobody claimed it, or when this run did already; a due
-    /// time claimed by another run, on any machine, stays its.
+    /// Claims a due time of an automation for a run: granted when nobody claimed it, or when this run did already, whose
+    /// lease is then renewed while it has not ended; a due time claimed by another run, on any machine, stays its.
     /// </summary>
     /// <param name="claim">The run that claims, with its occurrence and lease.</param>
     /// <param name="cancellationToken">Cancels the operation.</param>
@@ -126,6 +142,15 @@ public interface IAutomationStore
     /// <param name="cancellationToken">Cancels the operation.</param>
     /// <returns>How many were written.</returns>
     ValueTask<int> RecordAutomationRunsAsync(IReadOnlyList<AutomationRunRecord> runs, int keep, CancellationToken cancellationToken = default);
+
+    /// <summary>Records when the schedules of automations are next due on their machine, for the versions held for it.</summary>
+    /// <param name="organizationId">The organization.</param>
+    /// <param name="machineId">The machine that reports them.</param>
+    /// <param name="schedules">The automations and their next due times.</param>
+    /// <param name="cancellationToken">Cancels the operation.</param>
+    /// <returns>A task that completes once they are written.</returns>
+    ValueTask SetAutomationNextDueAsync(string organizationId, string machineId, IReadOnlyList<(string AutomationId, DateTimeOffset? NextDue)> schedules,
+        CancellationToken cancellationToken = default);
 
     /// <summary>Lists the runs of an automation, the newest first.</summary>
     /// <param name="organizationId">The organization.</param>

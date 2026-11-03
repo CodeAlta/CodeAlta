@@ -39,6 +39,13 @@ internal static class AutomationEndpoints
             .Produces<AutomationListDto>()
             .WithSummary("Forgets an automation for a machine (?machine=) once the machine took away what it held, after a signed removal; answers the automations left.");
 
+        api.MapPost("/automations/{id}/run", (string id, RunAutomationRequest? request, HttpContext context, FleetAutomationService automations) =>
+                AuditedAsync(context, "automation.run", id, async actor => Results.Json(
+                    await automations.RunAsync(actor, id, request, ApiEndpoints.Origin(context), context.RequestAborted).ConfigureAwait(false),
+                    FleetAutomationApiJsonContext.Default.AutomationRunDto, statusCode: StatusCodes.Status202Accepted)))
+            .Produces<AutomationRunDto>(StatusCodes.Status202Accepted)
+            .WithSummary("Passes a run the calling controller device asked by hand, and signed, to the machine of the automation, when it is online; the machine verifies it and reports the run.");
+
         api.MapGet("/automations/{id}/runs", async (string id, int? limit, HttpContext context, FleetAutomationService automations) =>
                 Results.Json(await automations.ListRunsAsync(DeviceAuthenticationMiddleware.GetDevice(context), id, limit, context.RequestAborted).ConfigureAwait(false),
                     FleetAutomationApiJsonContext.Default.AutomationRunListDto))

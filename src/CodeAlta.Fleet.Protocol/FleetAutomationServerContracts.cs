@@ -29,6 +29,12 @@ public static class FleetAutomationMethods
     /// <summary>A machine reports runs (<see cref="FleetAutomationRunFacts"/>); the server keeps them for the owner.</summary>
     public const string Runs = "automations.runs";
 
+    /// <summary>
+    /// The event of a run asked by hand (<see cref="FleetSignedAutomationRunRequest"/>), sent to the machine when it is
+    /// online; the machine verifies the request before it runs the automation, and reports the run as the others.
+    /// </summary>
+    public const string Run = "automations.run";
+
     /// <summary>The feature a server announces in its welcome when it holds automations.</summary>
     public const string Feature = "automations";
 }
@@ -61,9 +67,18 @@ public sealed record FleetAutomationClaimRequest(string AutomationId, long Numbe
 /// <param name="Message">Why not; null when granted.</param>
 public sealed record FleetAutomationClaimResult(bool Granted, string? Message);
 
-/// <summary>Runs a machine reports.</summary>
-/// <param name="Runs">The runs, the newest last.</param>
-public sealed record FleetAutomationRunFacts(IReadOnlyList<FleetAutomationRunFact> Runs);
+/// <summary>Runs a machine reports, and when the schedules of its automations are next due.</summary>
+/// <param name="Runs">The runs, the newest last; none when only the schedules changed.</param>
+public sealed record FleetAutomationRunFacts(IReadOnlyList<FleetAutomationRunFact> Runs)
+{
+    /// <summary>Gets when the schedules of the automations of the server are next due on the machine; null when unchanged.</summary>
+    public IReadOnlyList<FleetAutomationSchedule>? Schedules { get; init; }
+}
+
+/// <summary>When an automation is next due on its machine, as the machine reads its schedules.</summary>
+/// <param name="AutomationId">The automation.</param>
+/// <param name="NextDue">When a schedule of it is next due; null without one, while disabled or paused.</param>
+public sealed record FleetAutomationSchedule(string AutomationId, DateTimeOffset? NextDue);
 
 /// <summary>The facts of one run: never the prompt, the answer or what the trigger was about.</summary>
 /// <param name="RunId">The run.</param>
@@ -80,6 +95,18 @@ public sealed record FleetAutomationRunFact(string RunId, string AutomationId, l
 
     /// <summary>Gets why it failed or was skipped, in a line; null otherwise.</summary>
     public string? Message { get; init; }
+
+    /// <summary>Gets the input tokens of its session, the prompt cache included; null when unknown.</summary>
+    public long? InputTokens { get; init; }
+
+    /// <summary>Gets the output tokens of its session; null when unknown.</summary>
+    public long? OutputTokens { get; init; }
+
+    /// <summary>Gets the cost the provider reported for its session, in <see cref="CostUnit"/>; null when none was.</summary>
+    public double? Cost { get; init; }
+
+    /// <summary>Gets the unit of <see cref="Cost"/>: <c>usd</c>, or the one the provider named.</summary>
+    public string? CostUnit { get; init; }
 }
 
 /// <summary>The source-generated contracts of the automation methods of the control connection.</summary>

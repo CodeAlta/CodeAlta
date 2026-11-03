@@ -473,6 +473,7 @@ internal sealed partial class NodeAutomations : IFleetNodeAutomations, IAutomati
         => new(run.Id, run.AutomationId, run.StartedAt, run.Trigger, run.Status)
         {
             Name = run.Name, SessionId = run.SessionId, Detail = run.Detail, Message = run.Message, EndedAt = run.EndedAt,
+            InputTokens = run.InputTokens, OutputTokens = run.OutputTokens, Cost = run.Cost, CostUnit = run.CostUnit,
         };
 
     private FleetAutomationInfo Describe(AutomationEntry entry, NodeAutomationAssignment? assignment)
