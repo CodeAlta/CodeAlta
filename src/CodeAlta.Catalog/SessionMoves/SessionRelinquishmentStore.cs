@@ -102,6 +102,28 @@ public sealed class SessionRelinquishmentStore
         static SessionRelinquishment Unreadable() => new() { State = SessionRelinquishment.Relinquished, MoveId = string.Empty };
     }
 
+    /// <summary>Lists the sessions this instance gave to another machine (the frozen ones left out).</summary>
+    /// <returns>Their ids; a file that cannot be read counts as given away.</returns>
+    public IReadOnlySet<string> ListRelinquished()
+    {
+        var found = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        if (!System.IO.Directory.Exists(Directory)) return found;
+        try
+        {
+            foreach (var path in System.IO.Directory.EnumerateFiles(Directory, "*" + Extension, SearchOption.TopDirectoryOnly))
+            {
+                var sessionId = Path.GetFileNameWithoutExtension(path);
+                if (Read(sessionId) is { IsRelinquished: true }) found.Add(sessionId);
+            }
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            // The folder went away meanwhile: what was read stands.
+        }
+
+        return found;
+    }
+
     /// <summary>Freezes a session for a move. The caller holds the lease of the session.</summary>
     /// <param name="sessionId">The session.</param>
     /// <param name="moveId">The move.</param>

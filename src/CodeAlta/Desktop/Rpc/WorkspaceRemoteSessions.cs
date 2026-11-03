@@ -13,7 +13,7 @@ internal sealed partial class WorkspaceService
     // The text bound of the titles of the list, as for the sessions of this process.
     private const int RemoteTitleLength = 256;
 
-    /// <summary>Adds the sessions the paired machines last listed to the snapshot of this process, knowing no repository of its projects.</summary>
+    /// <summary>Adds the sessions the paired machines last listed to the snapshot of this process, knowing no repository of its projects and no move.</summary>
     /// <param name="local">The snapshot of this process.</param>
     /// <param name="remotes">The hosts of the paired machines.</param>
     /// <returns>The snapshot with the remote sessions; <paramref name="local"/> when no machine lists any.</returns>
@@ -24,14 +24,15 @@ internal sealed partial class WorkspaceService
     /// Adds the sessions the paired machines last listed to the snapshot of this process. A remote session goes under the
     /// project of this catalog it belongs to (<see cref="MatchProject"/>), or else under a project that stands for its
     /// machine (<see cref="MachineScopePrefix"/>); each one names its machine. A session this process lists itself keeps
-    /// its row.
+    /// its row, unless this process gave it to the machine that lists it (a move).
     /// </summary>
     /// <param name="local">The snapshot of this process.</param>
     /// <param name="remotes">The hosts of the paired machines.</param>
     /// <param name="localLocation">The repository of a project of this catalog; null when it has none or it is not known.</param>
+    /// <param name="movedAway">Whether this process gave a session to another machine; null for none.</param>
     /// <returns>The snapshot with the remote sessions; <paramref name="local"/> when no machine lists any.</returns>
     internal static WorkspaceSnapshot WithRemoteSessions(WorkspaceSnapshot local, IReadOnlyList<RemoteSessionHost> remotes,
-        Func<WorkspaceProject, RepositoryLocation?> localLocation)
+        Func<WorkspaceProject, RepositoryLocation?> localLocation, Func<string, bool>? movedAway = null)
     {
         ArgumentNullException.ThrowIfNull(local);
         ArgumentNullException.ThrowIfNull(remotes);
@@ -52,7 +53,15 @@ internal sealed partial class WorkspaceService
             var grouped = false;
             foreach (var session in listing.Sessions)
             {
-                if (session.State == "archived" || !known.Add(session.Id)) continue;
+                if (session.State == "archived") continue;
+                if (!known.Add(session.Id))
+                {
+                    // The read-only copy of a session moved to that machine gives its row to the live one.
+                    if (movedAway is null || !movedAway(session.Id) || sessions.FindIndex(value => value.MachineId is null
+                            && string.Equals(value.Id, session.Id, StringComparison.OrdinalIgnoreCase)) is not (>= 0 and var index)) continue;
+                    sessions.RemoveAt(index);
+                }
+
                 var remoteProject = session.ProjectId is { } id && remoteProjects.TryGetValue(id, out var found) ? found : null;
                 var match = MatchProject(session.ProjectId, remoteProject, localProjects, localLocation);
                 if (match is null) grouped = true;

@@ -68,6 +68,8 @@ internal sealed partial class WorkspaceService
         var local = hosts.Local;
         _readAllSessions = local.ReadSnapshotAsync;
         var projected = ProjectedSnapshot(local.ReadSnapshotAsync);
+        // A session this process gave to a paired machine (a move) gives its row to the one that machine lists.
+        Func<string, bool> movedAway = id => host.RuntimeService.Relinquishments.Read(id) is { IsRelinquished: true };
         _read = async token =>
         {
             var snapshot = await projected(token).ConfigureAwait(false);
@@ -77,7 +79,7 @@ internal sealed partial class WorkspaceService
             // projects here are read when a machine lists sessions in projects that name theirs.
             var located = locations is null ? static _ => null
                 : await ReadLocalLocationsAsync(snapshot, remotes, locations, token).ConfigureAwait(false);
-            return WithRemoteSessions(snapshot, remotes, located);
+            return WithRemoteSessions(snapshot, remotes, located, movedAway);
         };
         // A history window is read from the host of its session; its cursor goes back to that host only.
         _readHistory = (sessionId, cursor, token) => hosts.Resolve(sessionId).ReadHistoryPageAsync(sessionId, cursor, token);

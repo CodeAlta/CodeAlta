@@ -202,6 +202,93 @@ internal sealed class MachinesService
         catch (Exception exception) when (exception is IOException or TimeoutException) { return new(RemoteSessionHost.MachineOfflineCode, null, exception.Message); }
     }
 
+    /// <summary>Whether this computer receives sessions moved from its machines, and its name.</summary>
+    [NeoRpcMethod("moveSettings")]
+    public MachineMoveSettings MoveSettings(MachinesRequest request)
+    {
+        if (Refuse(request?.ExpectedEpoch) is { } refused) return new(refused, false, null);
+        if (_fleet!.Moves is not { } moves) return new("unavailable", false, null);
+        return new("ok", moves.ReceivesMoves, moves.MachineName);
+    }
+
+    /// <summary>Lets this computer receive sessions moved from its machines, or not.</summary>
+    [NeoRpcMethod("setReceiveMoves")]
+    public MachineMoveSettings SetReceiveMoves(MachineReceiveMovesRequest request)
+    {
+        if (Refuse(request?.ExpectedEpoch) is { } refused) return new(refused, false, null);
+        if (_fleet!.Moves is not { } moves) return new("unavailable", false, null);
+        try
+        {
+            moves.SetReceivesMoves(request!.Enabled);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            return new("write_failed", moves.ReceivesMoves, moves.MachineName);
+        }
+
+        Changed();
+        return new("ok", moves.ReceivesMoves, moves.MachineName);
+    }
+
+    /// <summary>
+    /// Says what a move of a session to a machine (or to this computer) would meet: whether it is idle, its jobs, what
+    /// stays behind, and whether the target has its project or can clone it.
+    /// </summary>
+    [NeoRpcMethod("movePreview")]
+    public async Task<MachineMovePreview> MovePreviewAsync(MachineMoveRequest request, CancellationToken cancellationToken)
+    {
+        if (Refuse(request?.ExpectedEpoch) is { } refused) return MachineMovePreview.Refused(refused);
+        if (_fleet!.Moves is not { } moves) return MachineMovePreview.Refused("unavailable");
+        var move = request!;
+        if (!Valid(move)) return MachineMovePreview.Refused("invalid_request");
+        try
+        {
+            var preview = await moves.PreviewAsync(move.SessionId, move.SourceMachineId, move.TargetMachineId, cancellationToken).ConfigureAwait(false);
+            var source = preview.Preview;
+            var target = preview.Target;
+            return new(source.Status, null, source.Busy, [.. source.Jobs], [.. source.Secrets], source.UnpushedCommits, source.Dirty, source.Branch, source.RepositoryKey,
+                preview.TargetRefusal ?? target?.Status, target?.Code, target?.Message, target?.ProjectName, target?.ProjectPath, target?.CanClone ?? false,
+                [.. target?.Warnings ?? []], preview.ReceivesMoves, moves.MachineName);
+        }
+        catch (KeyNotFoundException) { return MachineMovePreview.Refused("not_found"); }
+        catch (ObjectDisposedException exception) { return MachineMovePreview.Refused(RemoteSessionHost.MachineOfflineCode, exception.Message); }
+        catch (FleetException exception) { return MachineMovePreview.Refused(exception.Error.Code, exception.Error.Message); }
+        catch (Exception exception) when (exception is IOException or TimeoutException) { return MachineMovePreview.Refused(RemoteSessionHost.MachineOfflineCode, exception.Message); }
+    }
+
+    /// <summary>
+    /// Moves a session from where it runs to a machine, or to this computer: it is frozen where it was, its conversation
+    /// and its work in progress go to the target, and it runs there from then on.
+    /// </summary>
+    [NeoRpcMethod("moveSession")]
+    public async Task<MachineMoveResult> MoveSessionAsync(MachineMoveRequest request, CancellationToken cancellationToken)
+    {
+        if (Refuse(request?.ExpectedEpoch) is { } refused) return MachineMoveResult.Refused(refused);
+        if (_fleet!.Moves is not { } moves) return MachineMoveResult.Refused("unavailable");
+        var move = request!;
+        if (!Valid(move)) return MachineMoveResult.Refused("invalid_request");
+        try
+        {
+            // The move goes on when the page stops waiting: it stays recoverable whatever happens to this request.
+            var result = await moves.MoveAsync(move.SessionId, move.SourceMachineId, move.TargetMachineId, move.CloneRepository, CancellationToken.None)
+                .WaitAsync(cancellationToken).ConfigureAwait(false);
+            return new(result.Status, result.Code, result.Message, result.SessionId, result.Status == "finished" ? move.TargetMachineId : move.SourceMachineId,
+                result.WorkFolder, [.. result.Warnings]);
+        }
+        catch (KeyNotFoundException) { return MachineMoveResult.Refused("not_found"); }
+        catch (ObjectDisposedException exception) { return MachineMoveResult.Refused(RemoteSessionHost.MachineOfflineCode, exception.Message); }
+        catch (FleetException exception) { return MachineMoveResult.Refused(exception.Error.Code, exception.Error.Message); }
+        catch (Exception exception) when (exception is IOException or TimeoutException) { return MachineMoveResult.Refused(RemoteSessionHost.MachineOfflineCode, exception.Message); }
+    }
+
+    private static bool Valid(MachineMoveRequest request)
+        => request.SessionId is { Length: > 0 and <= 128 } && request.SourceMachineId is null or { Length: > 0 and <= 64 }
+            && request.TargetMachineId is null or { Length: > 0 and <= 64 } && !string.Equals(request.SourceMachineId, request.TargetMachineId, StringComparison.Ordinal);
+
+    private event Action? ChangedLocally;
+
+    private void Changed() => ChangedLocally?.Invoke();
+
     /// <summary>Says each time the machines changed (paired, forgotten, a state, a list of sessions): the page reads them again.</summary>
     [NeoRpcMethod("watch")]
     public NeoRpcChannel<MachinesEvent> Watch(MachinesRequest request, CancellationToken cancellationToken)
@@ -214,6 +301,7 @@ internal sealed class MachinesService
         var changes = Channel.CreateBounded<MachinesEvent>(new BoundedChannelOptions(1) { FullMode = BoundedChannelFullMode.DropOldest, SingleReader = true });
         void OnChanged() => changes.Writer.TryWrite(new MachinesEvent("changed"));
         _fleet!.Changed += OnChanged;
+        ChangedLocally += OnChanged;
         try
         {
             await foreach (var value in changes.Reader.ReadAllAsync(cancellationToken).ConfigureAwait(false)) yield return value;
@@ -221,6 +309,7 @@ internal sealed class MachinesService
         finally
         {
             _fleet.Changed -= OnChanged;
+            ChangedLocally -= OnChanged;
         }
     }
 
@@ -361,6 +450,72 @@ internal sealed record MachineNewSessionChoices(string Status, string? MachineNa
 /// <param name="SessionId">The new session.</param>
 /// <param name="Message">What the machine said of a refusal.</param>
 internal sealed record MachineNewSessionResult(string Status, string? SessionId, string? Message);
+
+/// <summary>Whether this computer receives sessions moved from its machines.</summary>
+/// <param name="Status"><c>ok</c>, <c>write_failed</c>, <c>stale_epoch</c> or <c>unavailable</c>.</param>
+/// <param name="ReceiveMoves">Whether it receives them.</param>
+/// <param name="MachineName">The name of this computer, as moved sessions say it.</param>
+internal sealed record MachineMoveSettings(string Status, bool ReceiveMoves, string? MachineName);
+
+/// <summary>Lets this computer receive moved sessions, or not.</summary>
+/// <param name="ExpectedEpoch">The host epoch the page knows.</param>
+/// <param name="Enabled">Whether it receives them.</param>
+internal sealed record MachineReceiveMovesRequest(string ExpectedEpoch, bool Enabled);
+
+/// <summary>A move of a session, or the question of what it would meet.</summary>
+/// <param name="ExpectedEpoch">The host epoch the page knows.</param>
+/// <param name="SessionId">The session.</param>
+/// <param name="SourceMachineId">The machine it runs on; null for this computer.</param>
+/// <param name="TargetMachineId">The machine it goes to; null for this computer.</param>
+/// <param name="CloneRepository">Lets the target clone the repository when it has no project of it.</param>
+internal sealed record MachineMoveRequest(string ExpectedEpoch, string SessionId, string? SourceMachineId, string? TargetMachineId, bool CloneRepository);
+
+/// <summary>What a move would meet.</summary>
+/// <param name="Status">
+/// <c>ok</c>, or why the session cannot move: <c>session_missing</c>, <c>not_movable</c>, <c>no_remote</c>, <c>not_repository</c>,
+/// <c>moving</c>, <c>relinquished</c>, <c>machine_offline</c>, <c>forbidden</c>, <c>not_found</c>, <c>stale_epoch</c>, <c>unavailable</c>.
+/// </param>
+/// <param name="Message">What was said of a refusal.</param>
+/// <param name="Busy">What keeps the session busy (<c>working</c>, <c>waiting</c>, <c>background_running</c>); null when idle.</param>
+/// <param name="Jobs">The background jobs that run: they do not move.</param>
+/// <param name="Secrets">The changed files that look like secrets: they stay.</param>
+/// <param name="UnpushedCommits">How many commits no remote has: they move.</param>
+/// <param name="Dirty">Whether the working tree has changes: they move.</param>
+/// <param name="Branch">The branch.</param>
+/// <param name="RepositoryKey">The repository key the target finds its project by.</param>
+/// <param name="TargetStatus"><c>accepted</c>, <c>refused</c>, <c>forbidden</c> or <c>unreachable</c>; null when not asked.</param>
+/// <param name="TargetCode">Why the target refuses (<c>project_missing</c>, <c>session_exists</c>...).</param>
+/// <param name="TargetMessage">The refusal in words.</param>
+/// <param name="ProjectName">The project of the target the session goes to.</param>
+/// <param name="ProjectPath">Its folder on the target.</param>
+/// <param name="CanClone">Whether the target can clone the repository.</param>
+/// <param name="TargetWarnings">What the target says without refusing.</param>
+/// <param name="ReceiveMoves">Whether this computer receives moved sessions.</param>
+/// <param name="MachineName">The name of this computer.</param>
+internal sealed record MachineMovePreview(string Status, string? Message, string? Busy, string[] Jobs, string[] Secrets, int UnpushedCommits, bool Dirty, string? Branch,
+    string? RepositoryKey, string? TargetStatus, string? TargetCode, string? TargetMessage, string? ProjectName, string? ProjectPath, bool CanClone,
+    string[] TargetWarnings, bool ReceiveMoves, string? MachineName)
+{
+    internal static MachineMovePreview Refused(string status, string? message = null)
+        => new(status, message, null, [], [], 0, false, null, null, null, null, null, null, null, false, [], false, null);
+}
+
+/// <summary>The outcome of a move.</summary>
+/// <param name="Status">
+/// <c>finished</c> (the session runs on the target), <c>aborted</c> or <c>refused</c> (it stays where it was), <c>offered</c>
+/// (the connection was lost after the session was frozen: the move goes on when the machine is back), or a refusal of the
+/// request (<c>machine_offline</c>, <c>not_found</c>, <c>stale_epoch</c>, <c>unavailable</c>, <c>invalid_request</c>).
+/// </param>
+/// <param name="Code">Why it was refused or undone.</param>
+/// <param name="Message">The refusal in words.</param>
+/// <param name="SessionId">The session.</param>
+/// <param name="MachineId">The machine the session runs on now; null for this computer.</param>
+/// <param name="WorkFolder">The folder it works in there.</param>
+/// <param name="Warnings">What went wrong without stopping the move.</param>
+internal sealed record MachineMoveResult(string Status, string? Code, string? Message, string? SessionId, string? MachineId, string? WorkFolder, string[] Warnings)
+{
+    internal static MachineMoveResult Refused(string status, string? message = null) => new(status, null, message, null, null, null, []);
+}
 
 /// <summary>A change of the machines.</summary>
 /// <param name="Kind"><c>changed</c>.</param>

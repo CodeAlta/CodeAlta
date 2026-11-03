@@ -21,12 +21,72 @@ public sealed class FleetNodeClient : IAsyncDisposable
     private readonly FleetChannel _channel;
     private readonly ConcurrentDictionary<string, FleetSessionWatch> _watches = new(StringComparer.Ordinal);
 
-    private FleetNodeClient(FleetChannel channel)
+    private FleetNodeClient(FleetChannel channel, Action<FleetConnection>? serve = null)
     {
         _channel = channel;
         channel.Connection.SetEventHandler(OnEventAsync);
+        serve?.Invoke(channel.Connection);
         channel.Connection.Start();
     }
+
+    /// <summary>
+    /// Connects to a paired machine, trying its addresses in order, and serves methods of this device back on the channel
+    /// (the methods of a target, for a node that gives this device a session: <see cref="Moves.FleetMoveRoutes.Register"/>).
+    /// </summary>
+    /// <param name="machine">The machine.</param>
+    /// <param name="identity">The key of this device.</param>
+    /// <param name="serve">Registers the methods this device serves on the channel, before it starts; null for none.</param>
+    /// <param name="cancellationToken">Cancels the connection.</param>
+    /// <returns>The connected client.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="machine"/> or <paramref name="identity"/> is null.</exception>
+    /// <exception cref="IOException">No address of the machine answered.</exception>
+    /// <exception cref="DeviceAuthenticationException">The machine presented another key, or refused this device (not paired, revoked).</exception>
+    /// <exception cref="FleetHandshakeException">The machine refused the handshake.</exception>
+    public static async Task<FleetNodeClient> ConnectAsync(PairedMachine machine, DeviceIdentity identity, Action<FleetConnection>? serve,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(machine);
+        ArgumentNullException.ThrowIfNull(identity);
+        var (stream, _) = await FleetDirectConnector.ConnectAsync(machine.Addresses, AddressTimeout, cancellationToken).ConfigureAwait(false);
+        var channel = await FleetChannelStack.ConnectAsync(stream, new FleetChannelClientOptions { Identity = identity, NodeFingerprint = machine.Fingerprint },
+            cancellationToken).ConfigureAwait(false);
+        return new FleetNodeClient(channel, serve);
+    }
+
+    /// <summary>Gets the target of a move on this node, as a source on this device talks to it (<see cref="Moves.FleetMoveSender"/>).</summary>
+    /// <returns>The target.</returns>
+    public Moves.IFleetMoveTarget AsMoveTarget() => new Moves.FleetMoveTargetClient(_channel.Connection);
+
+    /// <summary>
+    /// Asks the node to give one of its sessions to this device, or through it to another machine
+    /// (<see cref="FleetMoveStartParams.Via"/>): the node calls the methods of the target back on this channel, which
+    /// this device serves (<see cref="ConnectAsync(PairedMachine, DeviceIdentity, Action{FleetConnection}?, CancellationToken)"/>).
+    /// The same move id again resumes the move; a probe only says what would move.
+    /// </summary>
+    /// <param name="parameters">The session, the move and the target.</param>
+    /// <param name="timeout">How long to wait for the end of the move; null for an hour.</param>
+    /// <param name="cancellationToken">Stops waiting; the move goes on on the node and stays recoverable.</param>
+    /// <returns>The outcome.</returns>
+    /// <exception cref="FleetException">The node refused (<see cref="FleetErrorCodes.Forbidden"/> without the move permission).</exception>
+    /// <exception cref="FleetConnectionClosedException">The channel closed.</exception>
+    /// <exception cref="TimeoutException">The move did not end in time.</exception>
+    public async Task<FleetMoveResult> StartMoveAsync(FleetMoveStartParams parameters, TimeSpan? timeout = null, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(parameters);
+        var result = await _channel.Connection.SendRequestAsync(FleetNodeMethods.MovesStart,
+            JsonSerializer.SerializeToElement(parameters, FleetNodeJsonContext.Default.FleetMoveStartParams),
+            new FleetRequestOptions { Timeout = timeout ?? TimeSpan.FromHours(1) }, cancellationToken).ConfigureAwait(false);
+        return Read(result, FleetNodeJsonContext.Default.FleetMoveResult);
+    }
+
+    /// <summary>Lists the records of the moves of the node.</summary>
+    /// <param name="cancellationToken">Stops waiting.</param>
+    /// <returns>The records, the latest first.</returns>
+    /// <exception cref="FleetException">The node refused.</exception>
+    /// <exception cref="FleetConnectionClosedException">The channel closed.</exception>
+    public Task<FleetMoveList> ListMovesAsync(CancellationToken cancellationToken = default)
+        => CallAsync(FleetNodeMethods.MovesList, new FleetEmpty(), FleetNodeJsonContext.Default.FleetEmpty, FleetNodeJsonContext.Default.FleetMoveList, null,
+            cancellationToken);
 
     /// <summary>Gets the device id of the node.</summary>
     public string NodeDeviceId => _channel.RemoteDeviceId;

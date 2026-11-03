@@ -120,6 +120,9 @@ internal sealed partial class RemoteSessionHost : ISessionHost, IAsyncDisposable
     /// <summary>Gets when the machine last answered; null when it never did since the host started.</summary>
     public DateTimeOffset? LastSeen { get { lock (_gate) return _lastSeen; } }
 
+    /// <summary>Gets the client of the machine while it is online; null otherwise.</summary>
+    internal FleetNodeClient? CurrentClient { get { lock (_gate) return _client; } }
+
     /// <summary>Gets what the host last read of the machine.</summary>
     public RemoteListing Listing => Volatile.Read(ref _listing);
 

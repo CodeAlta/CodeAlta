@@ -8,6 +8,7 @@ using CodeAlta.Fleet.Channels;
 using CodeAlta.Fleet.Identity;
 using CodeAlta.Fleet.Protocol;
 using CodeAlta.Orchestration.Hosting;
+using CodeAlta.Orchestration.Runtime;
 using XenoAtom.Logging;
 
 namespace CodeAlta.Fleet.NodeApi;
@@ -41,6 +42,12 @@ public sealed class FleetNodeServiceOptions
 
     /// <summary>Gets what stops the node gracefully when its owner asks (<c>control.stop</c>); null when the owner cannot stop it this way.</summary>
     public Action? RequestStop { get; init; }
+
+    /// <summary>
+    /// Gets where the node clones a repository a moved session needs and it lacks (<c>&lt;root&gt;/&lt;host&gt;/&lt;owner&gt;/&lt;repo&gt;</c>):
+    /// <c>~/code</c> by default; null clones nothing.
+    /// </summary>
+    public string? CloneRoot { get; init; } = Moves.FleetMoveReceiver.DefaultCloneRoot;
 }
 
 /// <summary>
@@ -80,6 +87,9 @@ public sealed partial class FleetNodeService : IAsyncDisposable
         _trusted = options.TrustedDevices;
         Pairing = new FleetPairingCoordinator(options.Identity, options.TrustedDevices, options.TimeProvider);
         _certificate = options.Identity.CreateTlsCertificate();
+        var moves = new SessionMoveService(options.Host, options.Name);
+        MoveReceiver = new Moves.FleetMoveReceiver(options.Host, moves, options.CloneRoot);
+        MoveSender = new Moves.FleetMoveSender(options.Host, moves);
     }
 
     /// <summary>Gets the pairing of the node.</summary>
@@ -204,6 +214,10 @@ public sealed partial class FleetNodeService : IAsyncDisposable
                 FleetNodeJsonContext.Default.FleetDeviceChange, ControlRevokeDeviceAsync);
             On(caller, FleetNodeMethods.ControlDevicesPermissions, Access.Owner, FleetNodeJsonContext.Default.FleetDevicePermissionsParams,
                 FleetNodeJsonContext.Default.FleetDeviceChange, ControlSetPermissionsAsync);
+            // The owner may bring a session to its own node (altanode remote <machine> move), and read its moves.
+            RegisterMoves(caller, Access.Owner);
+            On(caller, FleetNodeMethods.MovesList, Access.Owner, FleetNodeJsonContext.Default.FleetEmpty, FleetNodeJsonContext.Default.FleetMoveList,
+                ListMovesAsync, optionalParams: true);
             return;
         }
 
@@ -239,6 +253,11 @@ public sealed partial class FleetNodeService : IAsyncDisposable
             FleetNodeJsonContext.Default.FleetAskList, ListAsksAsync);
         On(caller, FleetNodeMethods.SessionsAsksAnswer, Access.Drive, FleetNodeJsonContext.Default.FleetAskAnswerParams,
             FleetNodeJsonContext.Default.FleetAnswerResult, AnswerAskAsync);
+        RegisterMoves(caller, Access.Move);
+        On(caller, FleetNodeMethods.MovesStart, Access.Relocate, FleetNodeJsonContext.Default.FleetMoveStartParams,
+            FleetNodeJsonContext.Default.FleetMoveResult, StartMoveAsync);
+        On(caller, FleetNodeMethods.MovesList, Access.View, FleetNodeJsonContext.Default.FleetEmpty, FleetNodeJsonContext.Default.FleetMoveList,
+            ListMovesAsync, optionalParams: true);
     }
 
     // Who may call a method: anyone on the channel (pairing), the owner's local control, or a trusted device with a permission.
@@ -249,6 +268,8 @@ public sealed partial class FleetNodeService : IAsyncDisposable
         public static Access View => new(DevicePermissions.View, false, false);
         public static Access Drive => new(DevicePermissions.View | DevicePermissions.Drive, false, false);
         public static Access Start => new(DevicePermissions.View | DevicePermissions.Start, false, false);
+        public static Access Move => new(DevicePermissions.Move, false, false);
+        public static Access Relocate => new(DevicePermissions.View | DevicePermissions.Drive | DevicePermissions.Move, false, false);
     }
 
     private delegate Task<TResult> Handler<TParams, TResult>(FleetNodeCall call, TParams parameters, CancellationToken cancellationToken);

@@ -1,5 +1,7 @@
 using System.Globalization;
 using CodeAlta.Catalog;
+using CodeAlta.Catalog.SessionMoves;
+using CodeAlta.Fleet.Moves;
 using CodeAlta.Fleet.Client;
 using CodeAlta.Fleet.Identity;
 using CodeAlta.Fleet.NodeApi;
@@ -51,6 +53,12 @@ internal sealed class NodeRemoteOptions
 
     /// <summary>Gets or sets the project of <c>create</c>.</summary>
     public string? Project { get; set; }
+
+    /// <summary>Gets or sets the move <c>move</c> goes on with; null for a new one.</summary>
+    public string? MoveId { get; set; }
+
+    /// <summary>Gets or sets whether <c>move</c> lets the node clone the repository of the session.</summary>
+    public bool Clone { get; set; }
 
     /// <summary>Gets the words: the machine, the verb and its arguments.</summary>
     public List<string> Words { get; } = [];
@@ -186,7 +194,7 @@ internal sealed class NodeClientCommands(TextWriter output, TextWriter error)
     public async ValueTask<int> RemoteAsync(NodeRemoteOptions options)
     {
         if (options.Profile.Resolve(out var invalid) is not { } profile) return await UsageAsync(invalid!).ConfigureAwait(false);
-        if (options.Words.Count < 2) return await UsageAsync("remote takes a machine and a command: info, sessions, history, send, create, watch.").ConfigureAwait(false);
+        if (options.Words.Count < 2) return await UsageAsync("remote takes a machine and a command: info, sessions, history, send, create, watch, move.").ConfigureAwait(false);
         var catalog = Catalog(profile);
         var store = new PairedMachineStore(catalog);
         var machine = store.Find(options.Words[0]);
@@ -201,7 +209,7 @@ internal sealed class NodeClientCommands(TextWriter output, TextWriter error)
         var valid = verb switch
         {
             "info" or "sessions" => arguments.Length == 0,
-            "history" or "watch" => arguments.Length == 1,
+            "history" or "watch" or "move" => arguments.Length == 1,
             "send" => arguments.Length >= 2,
             "create" => arguments.Length >= 1,
             _ => false,
@@ -211,10 +219,10 @@ internal sealed class NodeClientCommands(TextWriter output, TextWriter error)
             return await UsageAsync(verb switch
             {
                 "info" or "sessions" => $"remote <machine> {verb} takes no argument.",
-                "history" or "watch" => $"remote <machine> {verb} takes a session id.",
+                "history" or "watch" or "move" => $"remote <machine> {verb} takes a session id.",
                 "send" => "remote <machine> send takes a session id and the prompt.",
                 "create" => "remote <machine> create takes the prompt.",
-                _ => $"'{verb}' is not a command of remote: info, sessions, history, send, create, watch.",
+                _ => $"'{verb}' is not a command of remote: info, sessions, history, send, create, watch, move.",
             }).ConfigureAwait(false);
         }
 
@@ -233,9 +241,11 @@ internal sealed class NodeClientCommands(TextWriter output, TextWriter error)
             count = value;
         }
 
+        if (options.MoveId is { } given && (verb != "move" || !IsMoveId(given))) return await UsageAsync("--move-id takes the id of a move of move.").ConfigureAwait(false);
         using var identity = DeviceIdentity.LoadOrCreate(catalog);
         using var stop = CancellationTokenSource.CreateLinkedTokenSource(Stop);
         using var signals = new NodeSignals(stop.Cancel, stop.Cancel, static () => Environment.Exit(NodeExitCodes.Failure));
+        if (verb == "move") return await MoveAsync(profile, machine, identity, arguments[0], options, stop.Token).ConfigureAwait(false);
         await using var client = await FleetNodeClient.ConnectAsync(machine, identity, stop.Token).ConfigureAwait(false);
         switch (verb)
         {
@@ -285,6 +295,82 @@ internal sealed class NodeClientCommands(TextWriter output, TextWriter error)
             }
             default:
                 return await WatchAsync(client, arguments[0], count, stop.Token).ConfigureAwait(false);
+        }
+    }
+
+    public async ValueTask<int> MovesAsync(NodeProfileOptions options)
+    {
+        if (options.Resolve(out var invalid) is not { } profile) return await UsageAsync(invalid!).ConfigureAwait(false);
+        var records = new SessionMoveTransactionStore(Catalog(profile)).List();
+        if (records.Count == 0)
+        {
+            await output.WriteLineAsync("No move of a session was recorded on this profile.").ConfigureAwait(false);
+            return NodeExitCodes.Success;
+        }
+
+        foreach (var record in records)
+        {
+            var detail = record.Reason ?? record.WorkFolder;
+            await output.WriteLineAsync($"{record.UpdatedAt.ToLocalTime():yyyy-MM-dd HH:mm}  {record.Role,-6} {record.State,-9} {record.MoveId}  {record.SessionId}  "
+                + $"{record.FromMachine ?? "?"} -> {record.ToMachine ?? "?"}{(detail is null ? "" : "  " + detail)}").ConfigureAwait(false);
+        }
+
+        return NodeExitCodes.Success;
+    }
+
+    // A session of the machine comes to the node of this profile: the machine calls the target's methods back on the
+    // channel, and this command forwards them to the node through its local control.
+    private async Task<int> MoveAsync(CodeAltaInstanceProfile profile, PairedMachine machine, DeviceIdentity identity, string sessionId, NodeRemoteOptions options,
+        CancellationToken cancellationToken)
+    {
+        var control = NodeLocalControl.Read(profile);
+        if (!control.NodeListens || !control.HasNodeKey)
+        {
+            await error.WriteLineAsync(control.NodeListens ? "altanode remote move: the node has no device key yet." : NotListening("remote move", control))
+                .ConfigureAwait(false);
+            return NodeExitCodes.Failure;
+        }
+
+        var (owner, nodeIdentity) = await control.ConnectAsync(cancellationToken).ConfigureAwait(false);
+        using var ownedIdentity = nodeIdentity;
+        await using var ownedClient = owner;
+        var name = (await owner.GetStatusAsync(cancellationToken).ConfigureAwait(false)).Name;
+        var node = owner.AsMoveTarget();
+        await using var client = await FleetNodeClient.ConnectAsync(machine, identity, connection => FleetMoveRoutes.Register(connection, (_, via) => via is null
+                ? node
+                : throw new FleetException(FleetErrorCodes.Forbidden, null, "This command forwards a move to the node of its profile only.")), cancellationToken)
+            .ConfigureAwait(false);
+        var moveId = options.MoveId ?? "move-" + Guid.NewGuid().ToString("N");
+        await output.WriteLineAsync($"Moving {sessionId} from {machine.Name} to {name} (move {moveId})...").ConfigureAwait(false);
+        await output.FlushAsync(cancellationToken).ConfigureAwait(false);
+        var result = await client.StartMoveAsync(new FleetMoveStartParams(sessionId, moveId, name, CloneRepository: options.Clone), cancellationToken: cancellationToken)
+            .ConfigureAwait(false);
+        foreach (var warning in result.Warnings) await output.WriteLineAsync("  " + warning).ConfigureAwait(false);
+        switch (result.Status)
+        {
+            case SessionMoveState.Finished:
+                await output.WriteLineAsync($"The session runs on {name} now{(result.WorkFolder is { } folder ? $", in {folder}" : "")}.").ConfigureAwait(false);
+                return NodeExitCodes.Success;
+            case SessionMoveState.Offered:
+                await error.WriteLineAsync($"altanode remote move: the move stopped ({result.Code}): {result.Message} Run the command again with --move-id {moveId} to go on.")
+                    .ConfigureAwait(false);
+                return NodeExitCodes.Failure;
+            default:
+                await error.WriteLineAsync($"altanode remote move: {result.Status} ({result.Code}): {result.Message}").ConfigureAwait(false);
+                return NodeExitCodes.Failure;
+        }
+    }
+
+    private static bool IsMoveId(string text)
+    {
+        try
+        {
+            SessionMoveTransactionStore.ValidateMoveId(text);
+            return true;
+        }
+        catch (ArgumentException)
+        {
+            return false;
         }
     }
 

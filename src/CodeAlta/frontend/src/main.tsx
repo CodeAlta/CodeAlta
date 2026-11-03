@@ -282,6 +282,7 @@ import { McpHostSettings } from "./mcpHost/McpHostSettings";
 import { MachinesSettings } from "./machines/MachinesSettings";
 import { RemoteSessionChoice, RunOnChip, useMachines, useRemoteChoices } from "./machines/RunOnChip";
 import { newSessionProblem, noRemoteSelection, remoteSelection, remoteStartBlocker, runOnMachine, runOnTargets, type RemoteSelection } from "./machines/runOn";
+import { MoveToMachineDialog } from "./machines/MoveToMachineDialog";
 import { createSpacesHub, type SpacesRequestKind } from "./spaces/spacesHub";
 import { ElsewhereBadge } from "./sessionLeases/ElsewhereBadge";
 import { elsewhereFollowView, elsewhereKind, elsewhereLabel, openSessionIds, type ElsewhereKind } from "./sessionLeases/sessionLeases";
@@ -985,6 +986,8 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
   // The session whose project is being chosen, with the project it is in when its menu was used.
   const [movingSession, setMovingSession] = useState<SessionMoveDrag | null>(null);
   // The session the window that gives it another space is open for, with the space it is in now.
+  // The session Move to machine… moves, while its window is open.
+  const [machineMove, setMachineMove] = useState<WorkspaceSession | null>(null);
   const [movingToSpace, setMovingToSpace] = useState<Readonly<{ id: string; title: string; projectId: string | null; spaceId: string }> | null>(null);
   // The window of the sessions below a session; `deleting` when Delete led to it.
   const [childrenView, setChildrenView] = useState<Readonly<{ id: string; title: string; deleting: boolean }> | null>(null);
@@ -3964,7 +3967,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
         currentHostEpoch.current ?? null, owned, mutation?.capability.canMutate() ?? false,
         batchDeletion.locked() || renamingBusy || deletingBusy || renamingPending.current || deletingPending.current,
         renameLocked || deleteLocked || !!uncertainRename.current || !!uncertainDelete.current)}
-      onAction={(session, action, focusPrompt) => openScopeSession(scope, session, action, focusPrompt)} onKeep={session => keepSession(scope, session)} menuEntries={session => sessionCanvasEntries(session, project)} actionEntries={session => [...sessionCloudEntries(session), ...sessionBookmarkEntries(session), ...sessionLineageEntries(session), ...sessionReviewEntries(session)]} deleteAsks={confirms.sessionDelete}
+      onAction={(session, action, focusPrompt) => openScopeSession(scope, session, action, focusPrompt)} onKeep={session => keepSession(scope, session)} menuEntries={session => sessionCanvasEntries(session, project)} actionEntries={session => [...sessionCloudEntries(session), ...sessionBookmarkEntries(session), ...sessionLineageEntries(session), ...sessionReviewEntries(session), ...sessionMachineEntries(session)]} deleteAsks={confirms.sessionDelete}
       archiveAsks={session => archivableDescendants(catalog.current?.sessions ?? [], session.id).length > 0}
       spaces={spacesState.available && spacesState.spaces.length > 1}
       drag={session => sessionDragSource(session, scope)}
@@ -4289,6 +4292,10 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
     if (project) showChanges(project, null, sessionCheckout(session), "changes");
   }
   // A session in the cloud has made no change here to review.
+  // A session of a project goes to a paired machine, or from one to this computer or another machine.
+  const sessionMachineEntries = (session: WorkspaceSession): SessionMenuEntry[] => owned && pairedMachines.length > 0 && !session.archived && !inCloud(session)
+    && session.scopeKind === "project" && (!!session.machineId || !!session.projectId)
+    ? [{ key: "move-machine", label: t("Move to machine…"), icon: "remote" as const, onSelect: () => setMachineMove(session) }] : [];
   const sessionReviewEntries = (session: WorkspaceSession): SessionMenuEntry[] => owned && session.projectId && !session.archived && !inCloud(session)
     ? [{ key: "review-changes", label: t("Review changes"), icon: "chat" as const, onSelect: () => reviewSessionChanges(session) }] : [];
   const sessionLineageEntries = (session: WorkspaceSession): SessionMenuEntry[] => {
@@ -5807,6 +5814,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
                   ...sessionBookmarkEntries(session),
                   ...sessionLineageEntries(session),
                   ...sessionReviewEntries(session),
+                  ...sessionMachineEntries(session),
                   ...(projectId === null ? [] : [{ key: "move", label: t("Move to project…"), icon: "folderInput" as const, disabled: !access.move, onSelect: () => runSessionMenuAction("move", session, menu) }]),
                   ...(spacesState.available && spacesState.spaces.length > 1
                     ? [{ key: "space", label: t("Move to space…"), icon: "space" as const, disabled: !access.space, onSelect: () => runSessionMenuAction("space", session, menu) }] : []),
@@ -6230,6 +6238,16 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
       }} onClose={() => setDialog(null)} />}
     {rowDrag.view && <div className="session-drag-ghost" role="presentation" data-over={rowDrag.view.over ? "true" : undefined}
       style={{ left: rowDrag.view.x + 14, top: rowDrag.view.y + 10 }}><AppIcon name="folderInput" size={13} /><span>{rowDrag.view.title}</span></div>}
+    {machineMove && owned && <MoveToMachineDialog epoch={status!.hostEpoch!} session={machineMove} onClose={() => setMachineMove(null)}
+      onMoved={(result, machine) => {
+        setMachineMove(null);
+        showToast({ message: t("The session runs on {machine} now.", { machine }), intent: "success", icon: "tick", timeout: 4000 });
+        // The session opens where it runs now: the list says so once read again.
+        void refreshProjects(creationRefresh.current.signal).then(fresh => {
+          const moved = fresh?.sessions.find(value => value.id === result.sessionId && (value.machineId ?? null) === (result.machineId ?? null));
+          if (moved) revealSession(moved);
+        });
+      }} />}
     {movingToSpace && <MoveToSpaceDialog title={movingToSpace.title} spaces={spacesState.spaces} currentId={movingToSpace.spaceId} busy={movingBusy}
       onMove={space => void moveSessionToSpaceNow(movingToSpace, space)} onClose={() => setMovingToSpace(null)} />}
     {childrenView && <SessionChildrenDialog key={childrenView.id} title={childrenView.title} deleting={childrenView.deleting}

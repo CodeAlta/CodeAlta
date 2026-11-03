@@ -7,6 +7,7 @@ using CodeAlta.Catalog;
 using CodeAlta.Fleet.Channels;
 using CodeAlta.Fleet.Identity;
 using CodeAlta.Fleet.NodeApi;
+using XenoAtom.Logging;
 
 namespace CodeAlta.Node;
 
@@ -100,6 +101,9 @@ internal sealed class NodeFleet : IAsyncDisposable
             addresses = DescribeAddresses(listener.LocalEndPoint);
             var file = Path.Combine(catalog.FleetRoot, ListenerFileName);
             WriteListenerFile(file, new NodeListenerFile { ProcessId = Environment.ProcessId, DeviceId = identity.DeviceId, Port = listener.LocalEndPoint.Port, Addresses = [.. addresses] });
+            // The moves this node took and a stop left unfinished end by its own decisions: a committed one is installed,
+            // one never committed is undone. Those it gave away wait for the device that drove them to come back.
+            _ = RecoverMovesAsync(service);
             return new NodeFleet(identity, service, listener, addresses, file);
         }
         catch
@@ -109,6 +113,27 @@ internal sealed class NodeFleet : IAsyncDisposable
             identity.Dispose();
             throw;
         }
+    }
+
+    private static async Task RecoverMovesAsync(FleetNodeService service)
+    {
+        try
+        {
+            foreach (var result in await Task.Run(() => service.MoveReceiver.RecoverAsync(CancellationToken.None)).ConfigureAwait(false))
+                Log(false, $"Move {result.Transaction?.MoveId} of session {result.Transaction?.SessionId}: {result.Status}. {string.Join(" ", result.Warnings)}");
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException or ObjectDisposedException)
+        {
+            Log(true, $"The unfinished moves could not be recovered: {exception.Message}");
+        }
+    }
+
+    private static void Log(bool warning, string message)
+    {
+        if (!LogManager.IsInitialized) return;
+        var logger = LogManager.GetLogger("CodeAlta.Node");
+        if (warning) logger.Warn(message);
+        else logger.Info(message);
     }
 
     /// <summary>Reads where the node of a profile listens, as it wrote it.</summary>

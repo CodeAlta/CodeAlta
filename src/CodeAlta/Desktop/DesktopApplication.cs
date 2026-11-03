@@ -763,6 +763,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                 // fleet of the instance adds and removes.
                 var sessionHosts = new SessionHosts.SessionHostRegistry(new SessionHosts.LocalSessionHost(host));
                 fleet = new Fleet.DesktopFleet(host.CatalogOptions.FleetRoot, sessionHosts.TakeMembership(), Environment.MachineName);
+                fleet.Moves = new Fleet.DesktopMoves(host, fleet, Environment.MachineName, host.CatalogOptions.FleetRoot);
                 // The bookmarks of the sessions of this instance, in its database. A bookmarked session is kept by the
                 // retention of sessions, which deletes nothing before the bookmarks were read.
                 var bookmarks = new CodeAlta.Catalog.Bookmarks.BookmarkService(host.ApplicationDatabase,
@@ -786,7 +787,12 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                 }, TaskScheduler.Default);
                 // The paired machines are reached once the window shows the application.
                 var startedFleet = fleet;
-                _ = shown.Shown.ContinueWith(_ => startedFleet.StartAsync(CancellationToken.None), TaskScheduler.Default).Unwrap();
+                // The moves this computer took and a stop left unfinished end first, by its own decisions.
+                _ = shown.Shown.ContinueWith(async _ =>
+                {
+                    if (startedFleet.Moves is { } moves) await moves.RecoverAsync(CancellationToken.None).ConfigureAwait(false);
+                    await startedFleet.StartAsync(CancellationToken.None).ConfigureAwait(false);
+                }, TaskScheduler.Default).Unwrap();
                 operations = new SessionOperationsService(sessionHosts, host.Commands, epoch) { RemoteControlChanged = shell.NoteRemoteControl };
                 if (shell.ReconnectRemoteControl) DesktopRemoteControl.Reconnect(host.Commands, shell);
                 // The reviews of the user: comments on plans, files and changes, kept per checkout in the state folder.
@@ -927,7 +933,9 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                     },
                     // The tabs plugins provide: only a host that started its plugins has them.
                     canvases is null ? null : new DesktopAltaCanvases(canvases), documentation, documentationView, bookmarks, search, reviewService,
-                    new RuntimeAltaReviewPolicy(host.RuntimeService), new Windows.DesktopAltaWindows(windows), desktopSettings);
+                    new RuntimeAltaReviewPolicy(host.RuntimeService), new Windows.DesktopAltaWindows(windows), desktopSettings,
+                    // `alta session move`: the sessions of this computer and of its paired machines go from one to another.
+                    fleet?.Moves is { } fleetMoves ? new Fleet.DesktopAltaMachineMoves(fleetMoves, fleet, host) : null);
                 search.AttachCommands(altaCommands);
                 search.AttachSettings(desktopSettings);
                 projectOpening.Attach(async arguments => await altaCommands.InvokeAsync(arguments).ConfigureAwait(false));

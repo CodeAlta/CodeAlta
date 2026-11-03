@@ -115,8 +115,11 @@ public sealed partial class FleetNodeService
         }
 
         var listed = new List<(AgentSessionMetadata Session, string? ProjectId, string? SpaceId, string Title, bool Archived)>();
+        // A session this node gave to another machine runs there: its read-only copy here is not listed.
+        var movedAway = _host.RuntimeService.Relinquishments.ListRelinquished();
         foreach (var session in snapshot.Sessions.OrderByDescending(static value => value.UpdatedAt).ThenByDescending(static value => value.SessionId, StringComparer.Ordinal))
         {
+            if (movedAway.Contains(session.SessionId)) continue;
             var archived = session.ViewState?.Archived == true;
             if (archived && !parameters.IncludeArchived) continue;
             var (kind, project, space) = Scope(session, snapshot);

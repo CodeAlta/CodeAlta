@@ -83,6 +83,8 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         Mutating("session queue"),
         Mutating("session set_agent"),
         Mutating("session set_worktree"),
+        // It gives the session to another machine; a sandboxed session may not (it is not among the commands its sandbox allows).
+        Mutating("session move"),
         Mutating("session title"),
         Disruptive("session abort"),
         Mutating("session compact"),
@@ -795,6 +797,8 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         group.Add(CreateSessionQueueCommand(context));
         group.Add(CreateSessionSetAgentCommand(context));
         group.Add(CreateSessionSetWorktreeCommand(context));
+        // A host with paired machines (the desktop app) moves sessions to them.
+        if (context.Services.Get<IAltaSessionMachineMoves>() is not null) group.Add(CreateSessionMoveCommand(context));
         group.Add(CreateSessionTitleCommand(context));
         group.Add(CreateSessionAbortCommand(context));
         group.Add(CreateSessionCompactCommand(context));
