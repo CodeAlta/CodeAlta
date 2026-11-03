@@ -86,8 +86,13 @@ public sealed record FleetMoveStatusParams(string MoveId, bool Resolve = false, 
 /// <param name="Branch">Its branch there.</param>
 /// <param name="Reason">Why it was undone.</param>
 /// <param name="UpdatedAt">When the state was recorded.</param>
+/// <param name="ToDeviceId">
+/// On a source, the device the move is bound to: the one that drives it on the channel (the target, or the relay that
+/// forwards to <paramref name="Via"/>). Only that device goes on with the move.
+/// </param>
+/// <param name="Via">On a source, the device the relay forwards the move to; null when <paramref name="ToDeviceId"/> is the target.</param>
 public sealed record FleetMoveRecord(string MoveId, string Role, string State, string SessionId, string? FromMachine, string? ToMachine, long Epoch,
-    string? WorkFolder, string? Branch, string? Reason, DateTimeOffset UpdatedAt);
+    string? WorkFolder, string? Branch, string? Reason, DateTimeOffset UpdatedAt, string? ToDeviceId = null, string? Via = null);
 
 /// <summary>The outcome of a move as the arbiter knows it, and the records of the machine.</summary>
 /// <param name="MoveId">The move.</param>

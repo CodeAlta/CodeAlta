@@ -239,6 +239,61 @@ public sealed class SessionBundleMoveTests
     }
 
     [TestMethod]
+    public async Task ACrashBetweenTheFreezeAndTheOfferedRecord_IsUndoneWhenTheSourceStarts()
+    {
+        using var machines = Machines.Create();
+        var provider = new RecordingProvider();
+        string sessionId, bundle;
+        const string moveId = "move-export-crash";
+        await using (var source = await machines.CreateSourceHostAsync(provider))
+        {
+            sessionId = (await source.Commands.CreateDraftSessionAsync(source.CurrentProject, provider.Descriptor, null)).SessionId;
+            await SendAsync(source, sessionId, "One.");
+            // The source stops once the session is frozen and its bundle written, before the move is recorded as offered.
+            var moves = new SessionMoveService(source, "Windows PC") { AfterExportForTesting = static _ => throw new SimulatedCrashException() };
+            await Assert.ThrowsExactlyAsync<SimulatedCrashException>(() => moves.OfferAsync(sessionId, moveId, "Mac mini"));
+            bundle = moves.GetBundleFolder(moveId, SessionMoveRole.Source);
+            Assert.AreEqual(SessionRelinquishment.Frozen, source.RuntimeService.Relinquishments.Read(sessionId)!.State);
+            Assert.IsTrue(Directory.Exists(bundle));
+        }
+
+        await using (var source = await machines.CreateSourceHostAsync(provider))
+        {
+            var moves = new SessionMoveService(source, "Windows PC");
+            var recovered = (await moves.RecoverExportsAsync(CancellationToken.None)).Single();
+
+            Assert.AreEqual(SessionMoveState.Aborted, recovered.Status);
+            Assert.AreEqual(SessionMoveState.Aborted, moves.Store.Read(moveId, SessionMoveRole.Source)!.State);
+            Assert.IsNull(source.RuntimeService.Relinquishments.Read(sessionId), "Nothing was offered to any machine: the session is written here again.");
+            Assert.IsFalse(Directory.Exists(bundle), "The copy of the session goes.");
+            await SendAsync(source, sessionId, "Still here.");
+        }
+    }
+
+    [TestMethod]
+    public async Task AFreezeNoMoveRecords_IsUndoneWhenTheSourceStarts_AndAnOfferedOneIsLeftToItsArbiter()
+    {
+        using var machines = Machines.Create();
+        var provider = new RecordingProvider();
+        await using var source = await machines.CreateSourceHostAsync(provider);
+        var orphan = (await source.Commands.CreateDraftSessionAsync(source.CurrentProject, provider.Descriptor, null)).SessionId;
+        var offered = (await source.Commands.CreateDraftSessionAsync(source.CurrentProject, provider.Descriptor, null)).SessionId;
+        await SendAsync(source, orphan, "One.");
+        await SendAsync(source, offered, "One.");
+        var moves = new SessionMoveService(source, "Windows PC");
+        Assert.AreEqual(SessionMoveState.Offered, (await moves.OfferAsync(offered, "move-offered", "Mac mini")).Status);
+        // A freeze whose move left no record at all (a source that stopped before it recorded anything).
+        Assert.IsTrue(source.RuntimeService.Relinquishments.Freeze(orphan, "move-orphan", "Mac mini"));
+
+        var recovered = await moves.RecoverExportsAsync(CancellationToken.None);
+
+        Assert.AreEqual(SessionMoveState.Aborted, recovered.Single().Status);
+        Assert.IsNull(source.RuntimeService.Relinquishments.Read(orphan));
+        Assert.AreEqual(SessionRelinquishment.Frozen, source.RuntimeService.Relinquishments.Read(offered)!.State,
+            "An offered move may have been committed by its target: only its arbiter undoes it.");
+    }
+
+    [TestMethod]
     public async Task ACrashAfterTheArbiterCommitted_IsFinishedOnBothSides()
     {
         using var machines = Machines.Create();
@@ -289,6 +344,9 @@ public sealed class SessionBundleMoveTests
         Assert.IsNotNull(receipt);
         return await receipt.Completion.WaitAsync(TestDeadlines.Hang);
     }
+
+    // Stands for the end of the process: nothing after it runs.
+    private sealed class SimulatedCrashException : Exception;
 
     // Two machines as two profiles of this computer, each with a clone of one origin as its project.
     private sealed class Machines : IDisposable

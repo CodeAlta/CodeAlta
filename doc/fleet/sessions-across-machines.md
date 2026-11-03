@@ -154,6 +154,12 @@ only" after the person confirms.
   owner), *finished* (the source relinquished). A machine that crashes or loses its connection asks the arbiter for the
   outcome before doing anything: a lost acknowledgement of the commit never makes the source take the session back.
   Only a move that the arbiter never committed is undone (the source unfreezes, the target removes what it prepared).
+  The source records the move (*exporting*) before it freezes the session, and offers it only once it is recorded as
+  *offered*: a move that stopped before then was offered to no machine, so the source undoes it alone when it starts,
+  as it does a freeze that no move of its records names.
+- **A move is bound to devices, not names**: the source records the device it drives the move through, the target
+  and arbiter, or the relay and the device it forwards to. A move goes on only through that route, and recovery asks
+  only that device: a machine that shares the target's name is never offered the session nor asked to commit it.
 - **Relinquishment is persisted** next to the session's lease, so every writer of that machine honors it, `altacli`
   included: a moved session cannot be resumed there by mistake.
 - Parent and children keep their links; a child that stays behind is a cross-machine child.

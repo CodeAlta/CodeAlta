@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Diagnostics;
+using System.IO.Compression;
 using System.Text;
 
 using CodeAlta.Catalog.SessionMoves;
@@ -179,6 +180,76 @@ public sealed class SessionMoveTests
         StringAssert.Contains(await SessionBundle.VerifyAsync(unpacked, read, CancellationToken.None), "journal.jsonl");
         File.WriteAllText(Path.Combine(unpacked, "extra.txt"), "x");
         Assert.IsNotNull(await SessionBundle.VerifyAsync(unpacked, read with { Files = [.. read.Files.Where(static f => f.Path != "journal.jsonl")] }, CancellationToken.None));
+    }
+
+    [TestMethod]
+    public async Task ACompressionBomb_IsRefusedOnTheBytesWritten_AndLeavesNothing()
+    {
+        var home = Directory.CreateDirectory(Path.Combine(Path.GetTempPath(), "CodeAlta-bomb-" + Guid.NewGuid().ToString("N"))).FullName;
+        try
+        {
+            // 8 MiB of zeros compress to a few kilobytes: the archive is small, what it unpacks to is not.
+            using var archive = new MemoryStream();
+            using (var zip = new ZipArchive(archive, ZipArchiveMode.Create, leaveOpen: true))
+            {
+                using (var small = zip.CreateEntry("journal.jsonl").Open()) small.Write("{}\n"u8);
+                using var entry = zip.CreateEntry("attachments/bomb.bin", CompressionLevel.SmallestSize).Open();
+                var zeros = new byte[1024 * 1024];
+                for (var i = 0; i < 8; i++) entry.Write(zeros);
+            }
+
+            Assert.IsLessThan(1024 * 1024, archive.Length);
+            archive.Position = 0;
+            var folder = Path.Combine(home, "bundle");
+            var limits = new SessionBundleLimits(MaximumEntries: 100, MaximumEntryBytes: 1024 * 1024, MaximumTotalBytes: 4 * 1024 * 1024);
+
+            await Assert.ThrowsExactlyAsync<InvalidDataException>(() => SessionBundle.UnpackAsync(archive, folder, limits, CancellationToken.None));
+
+            Assert.IsFalse(Directory.Exists(folder), "What was unpacked before the refusal goes.");
+
+            // The total is bounded too, over entries that are each under their own limit.
+            archive.Position = 0;
+            await Assert.ThrowsExactlyAsync<InvalidDataException>(()
+                => SessionBundle.UnpackAsync(archive, folder, limits with { MaximumEntryBytes = 16 * 1024 * 1024, MaximumTotalBytes = 1024 * 1024 }, CancellationToken.None));
+            Assert.IsFalse(Directory.Exists(folder));
+        }
+        finally
+        {
+            Directory.Delete(home, recursive: true);
+        }
+    }
+
+    [TestMethod]
+    public async Task AnArchiveOfTooManyEntries_IsRefused_AndLeavesNothing()
+    {
+        var home = Directory.CreateDirectory(Path.Combine(Path.GetTempPath(), "CodeAlta-entries-" + Guid.NewGuid().ToString("N"))).FullName;
+        try
+        {
+            using var archive = new MemoryStream();
+            using (var zip = new ZipArchive(archive, ZipArchiveMode.Create, leaveOpen: true))
+            {
+                for (var i = 0; i < 20; i++)
+                {
+                    using var entry = zip.CreateEntry($"attachments/{i}.txt").Open();
+                    entry.Write("x"u8);
+                }
+            }
+
+            archive.Position = 0;
+            var folder = Path.Combine(home, "bundle");
+            var limits = new SessionBundleLimits(MaximumEntries: 10, MaximumEntryBytes: 1024, MaximumTotalBytes: 1024);
+
+            await Assert.ThrowsExactlyAsync<InvalidDataException>(() => SessionBundle.UnpackAsync(archive, folder, limits, CancellationToken.None));
+
+            Assert.IsFalse(Directory.Exists(folder));
+            archive.Position = 0;
+            await SessionBundle.UnpackAsync(archive, folder, limits with { MaximumEntries = 20 }, CancellationToken.None);
+            Assert.HasCount(20, Directory.GetFiles(Path.Combine(folder, "attachments")));
+        }
+        finally
+        {
+            Directory.Delete(home, recursive: true);
+        }
     }
 
     [TestMethod]

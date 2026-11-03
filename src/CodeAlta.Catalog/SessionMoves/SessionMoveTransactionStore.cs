@@ -6,6 +6,12 @@ namespace CodeAlta.Catalog.SessionMoves;
 /// <summary>The states of a move, as each side records them.</summary>
 public static class SessionMoveState
 {
+    /// <summary>
+    /// The source recorded that it freezes the session and makes its bundle, before it does: nothing was offered to any
+    /// machine yet, so a move that stopped here is undone by the source alone.
+    /// </summary>
+    public const string Exporting = "exporting";
+
     /// <summary>The source froze the session and made its bundle.</summary>
     public const string Offered = "offered";
 
@@ -64,6 +70,18 @@ public sealed record SessionMoveTransaction
     [JsonPropertyName("toMachine")]
     public string? ToMachine { get; init; }
 
+    /// <summary>
+    /// Gets, on the source, the device it drives the move through, authenticated by its key: the target, arbiter of the
+    /// move in paired mode, or the machine that relays to it (<see cref="Via"/>). A move goes on with that device only,
+    /// never with a machine of the same name; <see langword="null"/> in a record that does not say, which goes on with none.
+    /// </summary>
+    [JsonPropertyName("toDevice")]
+    public string? ToDeviceId { get; init; }
+
+    /// <summary>Gets, on the source, the device the relay <see cref="ToDeviceId"/> forwards the move to; null when it is the target.</summary>
+    [JsonPropertyName("via")]
+    public string? Via { get; init; }
+
     /// <summary>Gets the epoch the move commits, once known.</summary>
     [JsonPropertyName("epoch")]
     public long Epoch { get; init; }
@@ -103,6 +121,22 @@ public sealed record SessionMoveTransaction
     /// <summary>Gets when the state was recorded.</summary>
     [JsonPropertyName("updatedAt")]
     public DateTimeOffset UpdatedAt { get; init; }
+}
+
+/// <summary>How a source reaches the target of a move: the devices it is bound to for the whole move.</summary>
+/// <param name="DeviceId">The device the source talks to, authenticated by its key: the target, or a relay.</param>
+/// <param name="Via">The device the relay forwards to; null when <paramref name="DeviceId"/> is the target.</param>
+public sealed record SessionMoveRoute(string DeviceId, string? Via = null)
+{
+    /// <summary>Gets whether a record of a source names this route.</summary>
+    /// <param name="record">The record.</param>
+    /// <returns><see langword="true"/> when its device and its relay are those of this route.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="record"/> is null.</exception>
+    public bool Matches(SessionMoveTransaction record)
+    {
+        ArgumentNullException.ThrowIfNull(record);
+        return string.Equals(record.ToDeviceId, DeviceId, StringComparison.Ordinal) && string.Equals(record.Via, Via, StringComparison.Ordinal);
+    }
 }
 
 /// <summary>What the arbiter of a move decided, once and for all.</summary>
@@ -170,6 +204,13 @@ public sealed class SessionMoveTransactionStore
         var path = PathOf(moveId, role);
         return File.Exists(path) ? JsonSerializer.Deserialize(File.ReadAllBytes(path), SessionMoveJsonContext.Default.SessionMoveTransaction) : null;
     }
+
+    /// <summary>Removes the record of a move on one side: a move the source refused before it offered anything.</summary>
+    /// <param name="moveId">The move.</param>
+    /// <param name="role">The side (<see cref="SessionMoveRole"/>).</param>
+    /// <exception cref="ArgumentException">The move or the role is not valid.</exception>
+    /// <exception cref="IOException">The record cannot be removed.</exception>
+    public void Delete(string moveId, string role) => File.Delete(PathOf(moveId, role));
 
     /// <summary>Lists the moves that did not end, on both sides.</summary>
     /// <returns>The records; a damaged one is left out.</returns>

@@ -182,30 +182,96 @@ public static class SessionBundle
         }
     }
 
-    /// <summary>Unpacks an archive made by <see cref="PackAsync"/> into an empty folder; an entry that would leave the folder is refused.</summary>
+    /// <summary>
+    /// Unpacks an archive made by <see cref="PackAsync"/> into an empty folder, within <see cref="SessionBundleLimits.Default"/>;
+    /// an entry that would leave the folder is refused.
+    /// </summary>
     /// <param name="source">The archive.</param>
     /// <param name="bundleFolder">The folder the bundle is written to; created when missing.</param>
     /// <param name="cancellationToken">Stops the unpacking.</param>
     /// <returns>A task that completes once the files are written.</returns>
-    /// <exception cref="InvalidDataException">The archive is not valid, or names a path outside the folder.</exception>
+    /// <exception cref="InvalidDataException">The archive is not valid, names a path outside the folder, or goes past a limit.</exception>
     /// <exception cref="IOException">A file cannot be written.</exception>
     /// <exception cref="OperationCanceledException">The token was canceled.</exception>
-    public static async Task UnpackAsync(Stream source, string bundleFolder, CancellationToken cancellationToken)
+    public static Task UnpackAsync(Stream source, string bundleFolder, CancellationToken cancellationToken)
+        => UnpackAsync(source, bundleFolder, SessionBundleLimits.Default, cancellationToken);
+
+    /// <summary>
+    /// Unpacks an archive made by <see cref="PackAsync"/> into a folder that does not exist or is empty, within limits
+    /// counted on the bytes written; an entry that would leave the folder is refused. When the unpacking fails, what it
+    /// wrote goes.
+    /// </summary>
+    /// <param name="source">The archive.</param>
+    /// <param name="bundleFolder">The folder the bundle is written to; created when missing.</param>
+    /// <param name="limits">The most entries and bytes the archive may unpack to.</param>
+    /// <param name="cancellationToken">Stops the unpacking.</param>
+    /// <returns>A task that completes once the files are written.</returns>
+    /// <exception cref="InvalidDataException">The archive is not valid, names a path outside the folder, or goes past a limit.</exception>
+    /// <exception cref="IOException">A file cannot be written.</exception>
+    /// <exception cref="OperationCanceledException">The token was canceled.</exception>
+    public static async Task UnpackAsync(Stream source, string bundleFolder, SessionBundleLimits limits, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(source);
         ArgumentException.ThrowIfNullOrWhiteSpace(bundleFolder);
+        ArgumentNullException.ThrowIfNull(limits);
+        var created = !Directory.Exists(bundleFolder);
         var root = Directory.CreateDirectory(bundleFolder).FullName;
-        await using var archive = await ZipArchive.CreateAsync(source, ZipArchiveMode.Read, leaveOpen: true, entryNameEncoding: null, cancellationToken).ConfigureAwait(false);
-        foreach (var entry in archive.Entries)
+        try
         {
-            cancellationToken.ThrowIfCancellationRequested();
-            if (entry.FullName.EndsWith('/')) continue;
-            var path = Path.GetFullPath(Path.Combine(root, entry.FullName.Replace('/', Path.DirectorySeparatorChar)));
-            if (!GitWorktreeService.IsWithin(path, root) || path == root) throw new InvalidDataException($"The archive names the path '{entry.FullName}' outside the bundle.");
-            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-            await using var input = await entry.OpenAsync(cancellationToken).ConfigureAwait(false);
-            await using var output = new FileStream(path, FileMode.CreateNew, FileAccess.Write, FileShare.None, BufferSize, FileOptions.Asynchronous);
-            await input.CopyToAsync(output, BufferSize, cancellationToken).ConfigureAwait(false);
+            await using var archive = await ZipArchive.CreateAsync(source, ZipArchiveMode.Read, leaveOpen: true, entryNameEncoding: null, cancellationToken).ConfigureAwait(false);
+            // The count of the central directory is read before anything is written.
+            if (archive.Entries.Count > limits.MaximumEntries)
+                throw new InvalidDataException($"The archive has {archive.Entries.Count} entries, more than the {limits.MaximumEntries} a bundle may have.");
+            var buffer = new byte[BufferSize];
+            long total = 0;
+            foreach (var entry in archive.Entries)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                if (entry.FullName.EndsWith('/')) continue;
+                var path = Path.GetFullPath(Path.Combine(root, entry.FullName.Replace('/', Path.DirectorySeparatorChar)));
+                if (!GitWorktreeService.IsWithin(path, root) || path == root) throw new InvalidDataException($"The archive names the path '{entry.FullName}' outside the bundle.");
+                Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+                await using var input = await entry.OpenAsync(cancellationToken).ConfigureAwait(false);
+                await using var output = new FileStream(path, FileMode.CreateNew, FileAccess.Write, FileShare.None, BufferSize, FileOptions.Asynchronous);
+                // The lengths the archive gives of its entries are not trusted: the bytes are counted as they come.
+                long length = 0;
+                int read;
+                while ((read = await input.ReadAsync(buffer, cancellationToken).ConfigureAwait(false)) > 0)
+                {
+                    length += read;
+                    total += read;
+                    if (length > limits.MaximumEntryBytes)
+                        throw new InvalidDataException($"The entry '{entry.FullName}' unpacks to more than the {limits.MaximumEntryBytes} bytes a file of a bundle may have.");
+                    if (total > limits.MaximumTotalBytes)
+                        throw new InvalidDataException($"The archive unpacks to more than the {limits.MaximumTotalBytes} bytes a bundle may have.");
+                    await output.WriteAsync(buffer.AsMemory(0, read), cancellationToken).ConfigureAwait(false);
+                }
+            }
+        }
+        catch
+        {
+            RemoveUnpacked(root, created);
+            throw;
+        }
+    }
+
+    // What an unpacking that failed wrote goes: the folder when it made it, its content otherwise (it was empty).
+    private static void RemoveUnpacked(string root, bool created)
+    {
+        try
+        {
+            if (created)
+            {
+                Directory.Delete(root, recursive: true);
+                return;
+            }
+
+            foreach (var folder in Directory.EnumerateDirectories(root)) Directory.Delete(folder, recursive: true);
+            foreach (var file in Directory.EnumerateFiles(root)) File.Delete(file);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            // What is left is refused again by the verification of the bundle, and its folder is removed with the move.
         }
     }
 
