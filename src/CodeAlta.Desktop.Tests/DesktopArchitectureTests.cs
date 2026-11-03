@@ -31,7 +31,9 @@ public sealed class DesktopArchitectureTests
                     // The desktop executable is also the sandbox worker of its sessions (--sandbox-worker).
                     or "CodeAlta.Sandbox"
                     // The sessions of the paired machines, through the client of their node API.
-                    or "CodeAlta.Fleet" or "CodeAlta.Fleet.Protocol", reference.Name);
+                    or "CodeAlta.Fleet" or "CodeAlta.Fleet.Protocol"
+                    // The update of the fleet: the hashes of the feed an owner's computer signs, and why a feed was refused.
+                    or "CodeAlta.Fleet.Update", reference.Name);
             Assert.AreNotEqual("altatui", reference.Name);
         }
     }
