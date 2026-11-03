@@ -84,6 +84,12 @@ public interface IFleetServerAutomations
     /// <returns>A task that completes once they are taken or refused.</returns>
     Task AcceptAsync(FleetConnector connector, FleetServerLink link, FleetAutomationDelivery delivery, CancellationToken cancellationToken);
 
+    /// <summary>Is told that the link to a server is gone (the instance left it): what that server gave is taken away.</summary>
+    /// <param name="linkId">The id of the link that is gone.</param>
+    /// <param name="cancellationToken">Cancels the work.</param>
+    /// <returns>A task that completes once it is taken away.</returns>
+    Task ForgetAsync(string linkId, CancellationToken cancellationToken);
+
     /// <summary>Is told that the connection of a server is online again, to report what the server may have missed.</summary>
     /// <param name="connector">The connector of the server.</param>
     /// <param name="link">The link of the server.</param>
@@ -180,6 +186,7 @@ public sealed class FleetServerConnections : IAsyncDisposable
         {
             if (Volatile.Read(ref _running).TryGetValue(linkId, out var running)) await StopAsync(linkId, running).ConfigureAwait(false);
             removed = _store.Remove(linkId);
+            if (removed) await ForgetAsync(linkId).ConfigureAwait(false);
         }
         finally
         {
@@ -252,6 +259,8 @@ public sealed class FleetServerConnections : IAsyncDisposable
             if (link is null || link.State == FleetServerLinkStates.Revoked || !string.Equals(link.Url, value.Url, StringComparison.Ordinal))
             {
                 await StopAsync(id, value).ConfigureAwait(false);
+                // A link another command of the profile removed: the instance left that server.
+                if (link is null) await ForgetAsync(id).ConfigureAwait(false);
                 changed = true;
             }
         }
@@ -308,6 +317,20 @@ public sealed class FleetServerConnections : IAsyncDisposable
         connector.DirectoryChanged += _ => Changed?.Invoke();
         ImmutableInterlocked.Update(ref _running, static (map, item) => map.SetItem(item.Id, item.Running), (Id: link.Id, Running: running));
         connector.Start();
+    }
+
+    // What a server gave is taken away once its link is gone; a failure is logged, the link stays gone.
+    private async Task ForgetAsync(string linkId)
+    {
+        if (_options.Automations is not { } automations) return;
+        try
+        {
+            await automations.ForgetAsync(linkId, _stop.Token).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException or OperationCanceledException)
+        {
+            if (LogManager.IsInitialized) _logger.Warn(exception, "The automations given through a server that is gone could not be taken away");
+        }
     }
 
     private async Task StopAsync(string id, Running running)

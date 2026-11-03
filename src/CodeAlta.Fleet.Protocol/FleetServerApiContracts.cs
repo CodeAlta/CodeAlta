@@ -213,6 +213,45 @@ public sealed record MetadataKeyDto(string Id, int Epoch, string CreatedByDevice
 /// <param name="SealedDescriptor">Which space it is on the devices, sealed with the key; required with <paramref name="Space"/>.</param>
 public sealed record CreateMetadataKeyRequest(string Id, int Epoch, IReadOnlyList<MetadataKeyWrapDto> Wraps, string? Space = null, string? SealedDescriptor = null);
 
+/// <summary>
+/// The body of <c>POST /api/v1/recovery-keys</c>: the recovery key of the calling controller device's person, signed into
+/// the device list by that device, and the anchor of the list sealed with the recovery key, which only it opens.
+/// </summary>
+/// <param name="PublicKey">The public key the recovery key derives: the base64 of its SubjectPublicKeyInfo.</param>
+/// <param name="DeviceListEntry">The entry that adds it, of kind <see cref="FleetDeviceKinds.Recovery"/>, signed by the calling device.</param>
+/// <param name="SealedAnchor">The organization and the hash of the first entry of the list, sealed with the recovery key.</param>
+public sealed record CreateRecoveryKeyRequest(string PublicKey, FleetSignedDeviceListEntry DeviceListEntry, string SealedAnchor);
+
+/// <summary>What the server keeps of a recovery key for itself: the anchor it sealed, read by the recovery key only.</summary>
+/// <param name="DeviceId">The device id of the recovery key in the list.</param>
+/// <param name="SealedAnchor">The sealed anchor.</param>
+public sealed record RecoveryAnchorDto(string DeviceId, string SealedAnchor);
+
+/// <summary>
+/// The body of <c>POST /api/v1/recover</c>, signed by the key of a new device: the entry the person's recovery key signed
+/// to add that device as a controller device of the person, when every device of theirs is lost.
+/// </summary>
+/// <param name="PublicKey">The public key of the new device.</param>
+/// <param name="DeviceName">The name of the new device.</param>
+/// <param name="DeviceListEntry">The entry that adds it, signed by the recovery key.</param>
+public sealed record RecoverRequest(string PublicKey, string DeviceName, FleetSignedDeviceListEntry DeviceListEntry);
+
+/// <summary>
+/// The body of <c>POST /api/v1/devices/self/leave</c>: the calling device leaves the server, which withdraws what it
+/// published (facts and sealed metadata, statistics, inventory, run reports), its copies of keys and the automations given
+/// to it, and refuses it from then on.
+/// </summary>
+/// <param name="DeviceListEntry">The entry that removes the calling device from the device list, signed by itself: a controller device that is not the last one sends it, so that the keys it held get new epochs; null otherwise.</param>
+public sealed record LeaveRequest(FleetSignedDeviceListEntry? DeviceListEntry);
+
+/// <summary>What leaving a server withdrew.</summary>
+/// <param name="Sessions">The sessions whose facts went.</param>
+/// <param name="StatisticsSets">The statistics sets that went.</param>
+/// <param name="KeyCopies">The copies of keys wrapped to the device that went.</param>
+/// <param name="Automations">The automations given to the device that went.</param>
+/// <param name="RemovedFromList">Whether the device left the signed device list too.</param>
+public sealed record LeaveResponse(int Sessions, int StatisticsSets, int KeyCopies, int Automations, bool RemovedFromList);
+
 /// <summary>The body of <c>POST /api/v1/metadata-keys/{id}/wraps</c>: copies of the key for devices that have none.</summary>
 /// <param name="Wraps">The copies.</param>
 public sealed record AddMetadataKeyWrapsRequest(IReadOnlyList<MetadataKeyWrapDto> Wraps);
@@ -328,6 +367,11 @@ public sealed record SetUpdatePolicyRequest(FleetSignedUpdateDocument Policy);
 [JsonSerializable(typeof(ListResponse<MetadataKeyDto>))]
 [JsonSerializable(typeof(CreateMetadataKeyRequest))]
 [JsonSerializable(typeof(AddMetadataKeyWrapsRequest))]
+[JsonSerializable(typeof(CreateRecoveryKeyRequest))]
+[JsonSerializable(typeof(RecoveryAnchorDto))]
+[JsonSerializable(typeof(RecoverRequest))]
+[JsonSerializable(typeof(LeaveRequest))]
+[JsonSerializable(typeof(LeaveResponse))]
 [JsonSerializable(typeof(TelemetrySettingsDto))]
 [JsonSerializable(typeof(SetTelemetrySettingsRequest))]
 [JsonSerializable(typeof(UpdateCampaignDto))]

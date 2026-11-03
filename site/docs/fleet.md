@@ -199,10 +199,19 @@ A CodeAlta Server shows the machines of all your computers, whether they are onl
 
 1. On the always-on machine, run `altaserver run`. It prints a one-time setup code (`altaserver setup-code` prints it again).
 2. In CodeAlta Desktop on that machine, open **Settings** > **Fleet** > **Server**, click **Create my server…**, and give its address (`http://127.0.0.1:2586`), the setup code and your name. This computer becomes the owner's.
-3. To add a node, click **Add a machine…** and run the command it shows on the machine: `altanode join <address> --token <code>`. The node appears under the server, **Waiting for approval**: click **Approve** when it shows the same six words as the node.
-4. Another of your computers joins with **Join a server…** and an enrollment code; you approve it the same way from a computer already approved. Once approved, it can add and approve machines too. A node never approves anything.
+3. CodeAlta then shows your **recovery key**: 32 words, shown once. Write them down or click **Copy** and keep them somewhere safe, click **I wrote them down**, and type the two words it asks for.
+4. To add a node, click **Add a machine…** and run the command it shows on the machine: `altanode join <address> --token <code>`. The node appears under the server as a **New device**: click **Approve…**, check that the node shows the same six words, and click **It shows the same words**.
+5. Another of your computers joins with **Join a server…** and an enrollment code; it shows six words while it waits, and you approve it the same way from a computer already approved. Once approved, it can add and approve machines too. A node never approves anything.
 
-A space publishes to a server only when you choose it: **Settings** > **Spaces** > the space > **General** > **Server**. `altanode join` links the default space of the node (`--space` chooses others). A session made **Private** in its options (the Agent chip, **More options**) is never published; one made Private later, or whose space you unlink, is removed from the server.
+A device gets the keys that open your titles only once one of your computers approved it: the server alone cannot add one.
+
+### Keep your recovery key
+
+The recovery key lets you get your keys back on a new computer if every computer of yours that holds them is lost. The card of the server shows **Recovery key**: **Kept** once you have one. **Make a recovery key…** makes one for a server you created before; **New recovery key…** makes another, and the words you kept before stop working. Without your computers and without these words, what was encrypted for them cannot be read again, by you or by the server.
+
+A space publishes to a server only when you choose it: **Settings** > **Spaces** > the space > **General** > **Server**. `altanode join` links the default space of the node (`--space` chooses others). A session made **Private** in its options (the Agent chip, **More options**) is never published; one made Private later, or whose space you unlink, is removed from the server. Each space has a key of its own, so the titles of one space never open with the key of another.
+
+To leave a server, click the trash button of its card, then **Leave**: the server removes what this computer published there (its sessions, their titles, its statistics), its copies of your keys and the automations given to it through that server, and its spaces are unlinked. When the server does not answer, this computer leaves anyway and the page says that what it published stays there.
 
 The **Fleet** canvas (`/fleet`) shows the machines of the server and their sessions, with their titles, as they change. A session of this computer, of a paired machine or of a node of the server opens with **Open**; the others are shown only. `altanode status` says whether the node is connected to its server.
 

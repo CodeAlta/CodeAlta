@@ -7,12 +7,12 @@ import { SettingsPage, SettingsUnavailable, useSettingsEditor } from "../Setting
 import { useShellLanguage } from "../shellLanguage";
 import type { MessageKey } from "../localization";
 import { campaignProgress, campaignStateIntent, campaignStateLabel, canCancelCampaign, emptyUpdateDraft, joinCommand, keyWords, localTimeZone, machineStateIntent,
-  machineStateLabel, orderedDevices, policyDraft, policyDraftProblem, policySummary, serverAddressOf, serverConnection, serverConnectionIntent, serverConnectionLabel,
-  serverProblem, telemetryDraft, telemetryHeaderEdits, telemetryProblem, telemetrySignals, telemetrySummary, updateDraftProblem, updateProblem, updateStart, type PolicyDraft,
-  type TelemetryDraft, type TelemetrySignal, type UpdateDraft } from "./fleetServer";
+  machineStateLabel, orderedDevices, policyDraft, policyDraftProblem, policySummary, recoveryCheckPasses, recoveryCheckPositions, serverAddressOf, serverConnection,
+  serverConnectionIntent, serverConnectionLabel, serverProblem, telemetryDraft, telemetryHeaderEdits, telemetryProblem, telemetrySignals, telemetrySummary, updateDraftProblem,
+  updateProblem, updateStart, type PolicyDraft, type TelemetryDraft, type TelemetrySignal, type UpdateDraft } from "./fleetServer";
 
 export type FleetServerApi = Pick<typeof fleetServer, "status" | "create" | "join" | "leave" | "createToken" | "devices" | "approve" | "revoke" | "watch" | "telemetry"
-  | "setTelemetry" | "updates" | "startUpdate" | "cancelUpdate" | "setUpdatePolicy">;
+  | "setTelemetry" | "updates" | "startUpdate" | "cancelUpdate" | "setUpdatePolicy" | "createRecoveryKey">;
 
 /** The address a server the person runs on this computer listens on, as `altaserver run` says it. */
 export const localServerAddress = "http://127.0.0.1:2586";
@@ -29,6 +29,8 @@ export function FleetServerSettings({ epoch, api = fleetServer }: { epoch: strin
   const { t } = useShellLanguage();
   const { listing, loading, busy, notice, reload, mutate } = useSettingsEditor(options => api.status({ expectedEpoch: epoch ?? "" }, options), `${epoch}`);
   const [dialog, setDialog] = useState<"create" | "join" | null>(null);
+  // The words of a recovery key just made: shown once, until the person showed they kept them.
+  const [recoveryWords, setRecoveryWords] = useState<string | null>(null);
   const [revision, setRevision] = useState(0);
   // The host says when a link or its connection changes: the page reads them again, and the devices of a server with them.
   useEffect(() => {
@@ -51,17 +53,20 @@ export function FleetServerSettings({ epoch, api = fleetServer }: { epoch: strin
     {!listing ? <SettingsUnavailable loading={loading} icon="server" title="Servers unavailable" />
       : servers.length === 0 ? <NonIdealState className="fleet-server-empty" icon={<AppIcon name="server" size={36} />} title={t("Not linked to a server.")} />
       : <div className="fleet-server-list">
-        {servers.map(server => <ServerCard key={server.id} server={server} epoch={epoch ?? ""} api={api} busy={busy} revision={revision}
-          onLeave={() => void mutate(() => api.leave({ expectedEpoch: epoch ?? "", linkId: server.id }, { timeoutMilliseconds: 30_000 }))} />)}
+        {servers.map(server => <ServerCard key={server.id} server={server} epoch={epoch ?? ""} api={api} busy={busy} revision={revision} words={listing?.words ?? null}
+          onRecoveryKey={words => { setRecoveryWords(words); reload(); }}
+          onLeave={() => void mutate(() => api.leave({ expectedEpoch: epoch ?? "", linkId: server.id }, { timeoutMilliseconds: 30_000 }), undefined,
+            status => status === "left_unreachable" ? { key: "The server did not answer: what this computer published there stays on it.", intent: "warning" } : undefined)} />)}
       </div>}
     {listing?.words && <p className="fleet-server-key muted-text">{t("The key of this computer:")} <code>{listing.words}</code></p>}
-    {dialog && epoch && <ServerDialog kind={dialog} epoch={epoch} api={api} onClose={linked => { setDialog(null); if (linked) reload(); }} />}
+    {dialog && epoch && <ServerDialog kind={dialog} epoch={epoch} api={api} onClose={(linked, words) => { setDialog(null); if (words) setRecoveryWords(words); if (linked) reload(); }} />}
+    {recoveryWords && <RecoveryWordsDialog words={recoveryWords} onClose={() => setRecoveryWords(null)} />}
   </SettingsPage>;
 }
 
 /** One server: its address, organization and connection, then what this computer may do there. */
-function ServerCard({ server, epoch, api, busy, revision, onLeave }: {
-  server: FleetServerView; epoch: string; api: FleetServerApi; busy: boolean; revision: number; onLeave: () => void;
+function ServerCard({ server, epoch, api, busy, revision, words, onRecoveryKey, onLeave }: {
+  server: FleetServerView; epoch: string; api: FleetServerApi; busy: boolean; revision: number; words: string | null; onRecoveryKey: (words: string) => void; onLeave: () => void;
 }) {
   const { t } = useShellLanguage();
   const connection = serverConnection(server);
@@ -76,16 +81,21 @@ function ServerCard({ server, epoch, api, busy, revision, onLeave }: {
           t(server.controller ? "This computer is the owner's" : "This computer is a member")].filter(Boolean).join(" · ")}</div>
         {server.problem && connection !== "online" && <div className="muted-text fleet-server-problem" title={server.problem}>{server.problem}</div>}
         {connection === "pending" && <div className="muted-text">{t("An owner of the server approves this computer from theirs.")}</div>}
+        {connection === "pending" && keyWords(words).length > 0 && <div className="fleet-server-pending-words">
+          <span className="muted-text">{t("Your other computer shows these words before it approves this one:")}</span>
+          <div className="fleet-device-words">{keyWords(words).map((word, index) => <Tag key={`${index}:${word}`} minimal>{word}</Tag>)}</div>
+        </div>}
       </div>
       {server.controller && <Button size="small" icon={<AppIcon name="plus" size={14} />} disabled={busy || connection === "revoked"} onClick={() => setToken(true)}>
         {t("Add a machine…")}</Button>}
       <PopoverNext placement="left" content={<div className="fleet-server-confirm">
         <p>{t("Leave {name}?", { name: server.organization ?? server.url })}</p>
-        <p className="muted-text">{t("This computer stops publishing there; its spaces are unlinked.")}</p>
+        <p className="muted-text">{t("The server removes what this computer published there; its spaces are unlinked.")}</p>
         <Button className="bp6-popover-dismiss" intent="danger" disabled={busy} onClick={onLeave}>{t("Leave")}</Button></div>}>
         <Button variant="minimal" size="small" intent="danger" icon={<AppIcon name="trash" size={15} />} disabled={busy} aria-label={`${t("Leave")} ${server.url}`} title={t("Leave")} />
       </PopoverNext>
     </div>
+    {server.controller && connection !== "revoked" && server.recoveryKey !== null && <ServerRecovery server={server} epoch={epoch} api={api} onMade={onRecoveryKey} />}
     {server.controller && connection !== "revoked" && <ServerDevices server={server} epoch={epoch} api={api} revision={revision} />}
     {server.controller && connection !== "revoked" && <ServerTelemetry server={server} epoch={epoch} api={api} revision={revision} />}
     {server.controller && connection !== "revoked" && <ServerUpdates server={server} epoch={epoch} api={api} revision={revision} />}
@@ -116,7 +126,8 @@ function ServerDevices({ server, epoch, api, revision }: { server: FleetServerVi
   async function act(device: FleetDeviceView, call: "approve" | "revoke") {
     setActing(device.id);
     try {
-      const result = await api[call]({ expectedEpoch: epoch, linkId: server.id, deviceId: device.id }, { timeoutMilliseconds: 30_000 });
+      // An approval names the words the person compared: the host signs the key of those words only.
+      const result = await api[call]({ expectedEpoch: epoch, linkId: server.id, deviceId: device.id, words: call === "approve" ? device.words : null }, { timeoutMilliseconds: 30_000 });
       setProblem(result.status === "ok" ? null : { key: serverProblem(result.status) ?? "The operation did not complete.", detail: result.message });
     } catch { setProblem({ key: "The server does not answer." }); }
     finally { setActing(null); setGeneration(value => value + 1); }
@@ -130,15 +141,21 @@ function ServerDevices({ server, epoch, api, revision }: { server: FleetServerVi
         <AppIcon name={device.kind === "controller" ? "computer" : "remote"} size={15} />
         <div className="fleet-device-main">
           <div className="fleet-device-title"><strong>{device.name}</strong>
-            {device.status === "pending" ? <Tag minimal round intent="warning">{t("Waiting for approval")}</Tag>
+            {device.status === "pending" ? <Tag minimal round intent="warning">{t("New device")}</Tag>
               : device.status === "revoked" ? <Tag minimal round>{t("Revoked")}</Tag>
               : <Tag minimal round intent={device.online ? "success" : "none"}>{t(device.online ? "Online" : "Offline")}</Tag>}</div>
-          {device.status === "pending" && <div className="fleet-device-words">{keyWords(device.words).map((word, index) => <Tag key={`${index}:${word}`} minimal>{word}</Tag>)}</div>}
         </div>
         {device.status === "pending" ? <span className="fleet-device-actions">
           <Button size="small" variant="minimal" disabled={!!acting} onClick={() => void act(device, "revoke")}>{t("Refuse")}</Button>
-          <Button size="small" intent="primary" disabled={!!acting} icon={acting === device.id ? <ActivitySpinner size={12} /> : undefined}
-            title={t("Approve when the machine shows the same words.")} onClick={() => void act(device, "approve")}>{t("Approve")}</Button>
+          {/* It gets a key only once the person saw the same words on both screens. */}
+          <PopoverNext placement="left" content={<div className="fleet-server-confirm fleet-device-confirm">
+            <p>{t("Does {name} show these words?", { name: device.name })}</p>
+            <div className="fleet-device-words">{keyWords(device.words).map((word, index) => <Tag key={`${index}:${word}`} minimal>{word}</Tag>)}</div>
+            <Button className="bp6-popover-dismiss" intent="primary" disabled={!!acting || keyWords(device.words).length === 0}
+              onClick={() => void act(device, "approve")}>{t("It shows the same words")}</Button></div>}>
+            <Button size="small" intent="primary" disabled={!!acting} icon={acting === device.id ? <ActivitySpinner size={12} /> : undefined}
+              title={t("Approve when the machine shows the same words.")}>{t("Approve…")}</Button>
+          </PopoverNext>
         </span> : device.status === "approved" && device.kind !== "controller" ? <PopoverNext placement="left" content={<div className="fleet-server-confirm">
           <p>{t("Revoke {name}?", { name: device.name })}</p>
           <Button className="bp6-popover-dismiss" intent="danger" disabled={!!acting} onClick={() => void act(device, "revoke")}>{t("Revoke")}</Button></div>}>
@@ -147,6 +164,78 @@ function ServerDevices({ server, epoch, api, revision }: { server: FleetServerVi
       </li>)}
     </ul>}
   </div>;
+}
+
+/**
+ * The recovery key of this computer's person at a server, for an owner's computer: whether there is one, and Make one (or a new
+ * one, which the words kept before stop working for, confirmed beside the row).
+ */
+function ServerRecovery({ server, epoch, api, onMade }: { server: FleetServerView; epoch: string; api: FleetServerApi; onMade: (words: string) => void }) {
+  const { t } = useShellLanguage();
+  const [working, setWorking] = useState(false);
+  const [problem, setProblem] = useState<{ key: MessageKey; detail?: string | null } | null>(null);
+  async function make() {
+    setWorking(true);
+    setProblem(null);
+    try {
+      const result = await api.createRecoveryKey({ expectedEpoch: epoch, linkId: server.id }, { timeoutMilliseconds: 30_000 });
+      if (result.status === "ok" && result.words) onMade(result.words);
+      else setProblem({ key: serverProblem(result.status) ?? "The operation did not complete.", detail: result.message });
+    } catch { setProblem({ key: "The server does not answer." }); }
+    finally { setWorking(false); }
+  }
+  const kept = server.recoveryKey === true;
+  return <div className="fleet-server-recovery" data-kept={kept}>
+    <div className="fleet-server-recovery-row">
+      <AppIcon name="shield" size={14} />
+      <span>{t("Recovery key")}</span>
+      <Tag minimal round intent={kept ? "success" : "warning"}>{t(kept ? "Kept" : "None")}</Tag>
+      <span className="fleet-server-recovery-spacer" />
+      {kept ? <PopoverNext placement="left" content={<div className="fleet-server-confirm">
+        <p>{t("Make a new recovery key?")}</p>
+        <p className="muted-text">{t("The words kept now stop working.")}</p>
+        <Button className="bp6-popover-dismiss" intent="danger" disabled={working} onClick={() => void make()}>{t("Make a new one")}</Button></div>}>
+        <Button size="small" variant="minimal" disabled={working} icon={working ? <ActivitySpinner size={12} /> : undefined}>{t("New recovery key…")}</Button>
+      </PopoverNext>
+        : <Button size="small" intent="primary" disabled={working} icon={working ? <ActivitySpinner size={12} /> : undefined} onClick={() => void make()}>
+          {t("Make a recovery key…")}</Button>}
+    </div>
+    {problem && <Callout compact intent="warning" role="alert">{t(problem.key)}{problem.detail && <div className="muted-text">{problem.detail}</div>}</Callout>}
+  </div>;
+}
+
+/**
+ * The words of a recovery key, shown once: Copy, then two of them typed back to show the person kept them. The dialog closes only
+ * then, so that the words are not lost by a click outside it.
+ */
+function RecoveryWordsDialog({ words, onClose }: { words: string; onClose: () => void }) {
+  const { t } = useShellLanguage();
+  const list = keyWords(words);
+  const [positions] = useState(() => recoveryCheckPositions(list.length));
+  const [checking, setChecking] = useState(false);
+  const [answers, setAnswers] = useState(["", ""]);
+  const [copied, setCopied] = useState(false);
+  const passes = recoveryCheckPasses(list, positions, answers);
+  return <Dialog isOpen className="fleet-recovery-dialog" title={t("Recovery key")} canOutsideClickClose={false} canEscapeKeyClose={false} isCloseButtonShown={false}>
+    <DialogBody>
+      {!checking ? <>
+        <p>{t("Write these words down: they are shown once.")}</p>
+        <ol className="fleet-recovery-words" aria-label={t("Recovery key")}>{list.map((word, index) => <li key={`${index}:${word}`}><Tag minimal>{word}</Tag></li>)}</ol>
+        <Button size="small" icon={<AppIcon name={copied ? "check" : "copy"} size={14} />} text={t(copied ? "Copied" : "Copy")}
+          onClick={() => void navigator.clipboard?.writeText(words).then(() => setCopied(true), () => setCopied(false))} />
+      </> : <form className="fleet-server-form fleet-recovery-check" onSubmit={event => { event.preventDefault(); if (passes) onClose(); }}>
+        {positions.map((position, index) => <label key={position}><span>{t("Word {n}", { n: position })}</span>
+          <InputGroup autoFocus={index === 0} value={answers[index]} spellCheck={false} autoComplete="off"
+            intent={answers[index].trim() && !recoveryCheckPasses(list, [position], [answers[index]]) ? "danger" : undefined}
+            onChange={event => { const value = event.target.value; setAnswers(current => current.map((answer, at) => at === index ? value : answer)); }} /></label>)}
+        <button type="submit" hidden />
+      </form>}
+    </DialogBody>
+    <DialogFooter actions={!checking ? <Button intent="primary" text={t("I wrote them down")} onClick={() => setChecking(true)} /> : <>
+      <Button text={t("Back")} onClick={() => { setChecking(false); setAnswers(["", ""]); }} />
+      <Button intent="primary" disabled={!passes} text={t("Done")} onClick={onClose} />
+    </>} />
+  </Dialog>;
 }
 
 const signalLabels: Record<TelemetrySignal, MessageKey> = { traces: "Traces", metrics: "Metrics", logs: "Logs" };
@@ -480,7 +569,9 @@ function TokenDialog({ server, epoch, api, onClose }: { server: FleetServerView;
 }
 
 /** Create my server (address, setup code, the owner's name) or Join a server (address, enrollment code). */
-function ServerDialog({ kind, epoch, api, onClose }: { kind: "create" | "join"; epoch: string; api: Pick<FleetServerApi, "create" | "join">; onClose: (linked: boolean) => void }) {
+function ServerDialog({ kind, epoch, api, onClose }: {
+  kind: "create" | "join"; epoch: string; api: Pick<FleetServerApi, "create" | "join">; onClose: (linked: boolean, recoveryWords?: string | null) => void;
+}) {
   const { t } = useShellLanguage();
   const [url, setUrl] = useState(kind === "create" ? localServerAddress : "");
   const [code, setCode] = useState("");
@@ -499,7 +590,8 @@ function ServerDialog({ kind, epoch, api, onClose }: { kind: "create" | "join"; 
         ? await api.create({ expectedEpoch: epoch, url: address, code: code.trim(), ownerName: owner.trim(), organizationName: organization.trim() || null }, { timeoutMilliseconds: 60_000 })
         : await api.join({ expectedEpoch: epoch, url: address, token: code.trim() }, { timeoutMilliseconds: 60_000 });
       const failed = serverProblem(result.status);
-      if (!failed) { onClose(true); return; }
+      // A new server comes with the owner's recovery key, whose words the page shows next, once.
+      if (!failed) { onClose(true, result.recoveryWords); return; }
       setProblem({ key: failed, detail: result.message });
     } catch {
       setProblem({ key: "The server does not answer." });

@@ -13,7 +13,7 @@ namespace CodeAlta.Server.Tests;
 /// with their versions, its resumption after a dropped connection, and what is never published.
 /// </summary>
 [TestClass]
-public sealed class FleetConnectorTests
+public sealed partial class FleetConnectorTests
 {
     private static readonly DateTimeOffset Created = new(2026, 11, 3, 9, 0, 0, TimeSpan.Zero);
 
@@ -148,6 +148,8 @@ public sealed class FleetConnectorTests
         Volatile.Write(ref linked, ["work"]);
         source.Set(Session("s-a", "work", isPrivate: true), Session("s-b", "home"), Session("s-c", "work"));
         await WaitForAsync(async () => !(await fleet.Desktop.ListSessionsAsync()).Any(session => session.Id == "s-b"));
+        // The server answers the withdrawal before the connector raises its event: wait for the event too.
+        await WaitForAsync(() => Task.FromResult(withdrawn.Count >= 2));
         CollectionAssert.AreEqual(new[] { "s-a", "s-b" }, withdrawn.ToArray());
 
         // A session gone from the machine (deleted) keeps its facts; one made public again is published again.

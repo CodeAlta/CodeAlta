@@ -92,6 +92,34 @@ public sealed class FleetOrganizationDevices
         }
     }
 
+    /// <summary>
+    /// Pins the device list of a link to a first entry this device learned elsewhere than from the server (the anchor a
+    /// recovery key sealed), before its first read: the server then cannot answer a list of its own making.
+    /// </summary>
+    /// <param name="pinPath">The file of the pin in the folder of the link.</param>
+    /// <param name="firstHash">The hash of the first entry.</param>
+    /// <param name="organizationId">The organization of the list.</param>
+    /// <exception cref="ArgumentException">An argument is empty.</exception>
+    /// <exception cref="FleetDeviceListException">The link pinned another first entry already.</exception>
+    /// <exception cref="IOException">The pin cannot be written.</exception>
+    public static void Anchor(string pinPath, string firstHash, string organizationId)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(pinPath);
+        ArgumentException.ThrowIfNullOrEmpty(firstHash);
+        ArgumentException.ThrowIfNullOrEmpty(organizationId);
+        FleetDeviceListPin? held = null;
+        try { held = JsonSerializer.Deserialize(File.ReadAllBytes(pinPath), FleetOrganizationJson.Default.FleetDeviceListPin); }
+        catch (Exception exception) when (exception is FileNotFoundException or DirectoryNotFoundException or JsonException) { }
+        if (held is { Root.Length: > 0 })
+        {
+            if (!string.Equals(held.Root, firstHash, StringComparison.Ordinal)) throw new FleetDeviceListException(1, "the link pinned another first entry already");
+            return;
+        }
+
+        Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(pinPath))!);
+        FleetFiles.WriteAtomically(pinPath, JsonSerializer.SerializeToUtf8Bytes(new FleetDeviceListPin(firstHash, organizationId), FleetOrganizationJson.Default.FleetDeviceListPin));
+    }
+
     // A later list keeps the first entry pinned and every entry up to the checkpoint, unchanged: a removal it verified stays.
     private static void Extends(FleetDeviceListPin anchor, IReadOnlyList<DeviceListEntryDto> entries, FleetDeviceListState list)
     {

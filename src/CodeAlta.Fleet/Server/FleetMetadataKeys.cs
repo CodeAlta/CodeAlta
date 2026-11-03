@@ -423,8 +423,9 @@ public static class FleetKeyWrap
     private static void CheckGrant(JsonElement root, string keyId, FleetKeyGrant grant, string deviceId, FleetDeviceListState list)
     {
         if (!list.Members.TryGetValue(deviceId, out var self)) throw new InvalidDataException("This device is not a member of the device list it verified.");
+        // A controller device gives keys; the recovery key gives the copies it holds to the device it signed in.
         if (FleetSealedJson.Text(root, "signer") is not { Length: > 0 } signerId || !list.Members.TryGetValue(signerId, out var signer)
-            || signer.Kind != FleetDeviceKinds.Controller)
+            || signer.Kind is not (FleetDeviceKinds.Controller or FleetDeviceKinds.Recovery))
         {
             throw new InvalidDataException("The wrapped key was not given by a controller device of the device list.");
         }

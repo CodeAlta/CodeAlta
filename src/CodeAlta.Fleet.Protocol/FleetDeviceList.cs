@@ -15,10 +15,22 @@ public static class FleetDeviceKinds
     /// <summary>A node that runs sessions: it acts only as itself and never signs another device.</summary>
     public const string Node = "node";
 
-    /// <summary>Gets whether a text is a known kind of device.</summary>
+    /// <summary>
+    /// The recovery key of a person (<c>doc/fleet/security-and-privacy.md</c>, keys): a key the person keeps as words,
+    /// with no device behind it. It holds a copy of the person's keys, and signs a new controller device of its person
+    /// into the list when every device is lost; it signs nothing else, and is not a controller device.
+    /// </summary>
+    public const string Recovery = "recovery";
+
+    /// <summary>Gets whether a text is a kind of device that enrolls: a controller device or a node.</summary>
     /// <param name="kind">The text.</param>
     /// <returns>Whether it is <see cref="Controller"/> or <see cref="Node"/>.</returns>
     public static bool IsKnown(string? kind) => kind is Controller or Node;
+
+    /// <summary>Gets whether a text is a kind of member of a device list: a device that enrolls, or a recovery key.</summary>
+    /// <param name="kind">The text.</param>
+    /// <returns>Whether it is <see cref="Controller"/>, <see cref="Node"/> or <see cref="Recovery"/>.</returns>
+    public static bool IsMember(string? kind) => kind is Controller or Node or Recovery;
 }
 
 /// <summary>The operations of an entry of the device list.</summary>

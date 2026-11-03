@@ -64,8 +64,44 @@ internal sealed class FleetServerService
         if (!FleetServerAddress.TryParse(request!.Url, out var address)) return new("invalid_url", null, null);
         if (request.Code is not { Length: > 0 and <= 128 } code || request.OwnerName is not { Length: > 0 and <= 128 } owner || request.OrganizationName is { Length: > 128 })
             return new("invalid_request", null, null);
-        return await ActAsync(async () => Result(await _servers!.CreateServerAsync(address, code, owner, string.IsNullOrWhiteSpace(request.OrganizationName) ? null : request.OrganizationName,
-            cancellationToken).ConfigureAwait(false))).ConfigureAwait(false);
+        return await ActAsync(async () =>
+        {
+            var link = await _servers!.CreateServerAsync(address, code, owner, string.IsNullOrWhiteSpace(request.OrganizationName) ? null : request.OrganizationName,
+                cancellationToken).ConfigureAwait(false);
+            // The owner's recovery key is made with the server, its words shown once; when it cannot be made now, the server's card offers it.
+            string? words = null;
+            try { words = await _servers.CreateRecoveryKeyAsync(link.Id, cancellationToken).ConfigureAwait(false); }
+            catch (Exception exception) when (Failure(exception) is not null) { }
+            return Result(link) with { RecoveryWords = words };
+        }).ConfigureAwait(false);
+    }
+
+    /// <summary>Signs this computer in with the recovery key of a person whose devices are all lost, and gives it their keys.</summary>
+    [NeoRpcMethod("recover")]
+    public async Task<FleetServerResult> RecoverAsync(FleetServerRecoverRequest request, CancellationToken cancellationToken)
+    {
+        if (Refuse(request?.ExpectedEpoch) is { } refused) return new(refused, null, null);
+        if (!FleetServerAddress.TryParse(request!.Url, out var address)) return new("invalid_url", null, null);
+        if (request.Words is not { Length: > 0 and <= 1024 } words) return new("invalid_request", null, null);
+        return await ActAsync(async () => Result(await _servers!.RecoverAsync(address, words, cancellationToken).ConfigureAwait(false))).ConfigureAwait(false);
+    }
+
+    /// <summary>Makes the recovery key of this computer's person at a server: its words, shown once; one made before stops working.</summary>
+    [NeoRpcMethod("createRecoveryKey")]
+    public async Task<FleetRecoveryKeyResult> CreateRecoveryKeyAsync(FleetServerLinkRequest request, CancellationToken cancellationToken)
+    {
+        if (Refuse(request?.ExpectedEpoch) is { } refused) return new(refused, null, null);
+        if (!FleetServerLinkStore.IsValidId(request!.LinkId)) return new("invalid_request", null, null);
+        try
+        {
+            var words = await _servers!.CreateRecoveryKeyAsync(request.LinkId, cancellationToken).ConfigureAwait(false);
+            ChangedLocally?.Invoke();
+            return new("ok", words, null);
+        }
+        catch (Exception exception) when (Failure(exception) is { } failure)
+        {
+            return new(failure.Status, null, failure.Message);
+        }
     }
 
     /// <summary>Joins a server with an enrollment token: the link waits for its approval.</summary>
@@ -86,7 +122,9 @@ internal sealed class FleetServerService
         if (!FleetServerLinkStore.IsValidId(request!.LinkId)) return new("invalid_request", null);
         try
         {
-            return new(await _servers!.LeaveAsync(request.LinkId, cancellationToken).ConfigureAwait(false) ? "ok" : "not_found", null);
+            var (removed, withdrawn) = await _servers!.LeaveAsync(request.LinkId, cancellationToken).ConfigureAwait(false);
+            // Left without the server's answer: what it holds stays there, which the page says.
+            return new(!removed ? "not_found" : withdrawn is null ? "left_unreachable" : "ok", null);
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException)
         {
@@ -121,7 +159,8 @@ internal sealed class FleetServerService
         try
         {
             var devices = await _servers!.ListDevicesAsync(request.LinkId, cancellationToken).ConfigureAwait(false);
-            return new("ok", [.. devices.OrderBy(static device => device.Status == "pending" ? 0 : device.Status == "approved" ? 1 : 2)
+            // The recovery key is a member of the list, not a device: the server's card says whether there is one.
+            return new("ok", [.. devices.Where(static device => device.Kind != FleetDeviceKinds.Recovery).OrderBy(static device => device.Status == "pending" ? 0 : device.Status == "approved" ? 1 : 2)
                 .ThenByDescending(static device => device.CreatedAt).Select(device => DeviceView(device))], null);
         }
         catch (Exception exception) when (Failure(exception) is { } failure)
@@ -130,10 +169,15 @@ internal sealed class FleetServerService
         }
     }
 
-    /// <summary>Approves a pending device: this device signs the entry of the device list that adds it.</summary>
+    /// <summary>
+    /// Approves a pending device once the person confirmed it shows the words of its key: this device signs the entry of the
+    /// device list that adds that key, and the device gets the person's keys only then.
+    /// </summary>
     [NeoRpcMethod("approve")]
     public Task<FleetServerDeviceResult> ApproveAsync(FleetServerDeviceRequest request, CancellationToken cancellationToken)
-        => ChangeDeviceAsync(request, (link, device) => _servers!.ApproveAsync(link, device, cancellationToken));
+        => request?.Words is { Length: > 256 }
+            ? Task.FromResult(new FleetServerDeviceResult("invalid_request", null, null))
+            : ChangeDeviceAsync(request!, (link, device) => _servers!.ApproveAsync(link, device, request!.Words, cancellationToken));
 
     /// <summary>Revokes a device, or refuses a pending one.</summary>
     [NeoRpcMethod("revoke")]
@@ -440,7 +484,8 @@ internal sealed class FleetServerService
     {
         var link = connection.Link;
         return new FleetServerView(link.Id, link.Url, link.OrganizationName, link.State, State(connection), connection.Connector?.LastError?.Message,
-            link.IsController, [.. spaces.Where(space => link.IsServer(space.Settings.Fleet?.Server)).Select(static space => space.Id)]);
+            link.IsController, [.. spaces.Where(space => link.IsServer(space.Settings.Fleet?.Server)).Select(static space => space.Id)],
+            link.IsController ? DesktopFleetServers.HasRecoveryKey(connection) : null);
     }
 
     // The state of a link's connection, as the page names it.
@@ -558,6 +603,7 @@ internal sealed class FleetServerService
         FleetServerException refused => (refused.Code, refused.Message),
         CodeAlta.Fleet.Update.UpdateException update => (update.Code, update.Message),
         FleetDeviceListException broken => (FleetDeviceListException.Code, broken.Message),
+        FleetRecoveryException recovery => ("recovery.refused", recovery.Message),
         HttpRequestException or TaskCanceledException or TimeoutException => ("unreachable", exception.Message),
         KeyNotFoundException => ("not_found", null),
         IOException or UnauthorizedAccessException or InvalidDataException => ("write_failed", exception.Message),
@@ -582,7 +628,9 @@ internal sealed record FleetServerRequest(string ExpectedEpoch);
 /// <param name="Problem">What the last failure said; null when there was none.</param>
 /// <param name="Controller">Whether this device may make tokens and approve devices there.</param>
 /// <param name="Spaces">The spaces that publish to it.</param>
-internal sealed record FleetServerView(string Id, string Url, string? Organization, string Link, string Connection, string? Problem, bool Controller, string[] Spaces);
+/// <param name="RecoveryKey">Whether the person of this computer has a recovery key there, for an owner's computer; null when unknown or not asked.</param>
+internal sealed record FleetServerView(string Id, string Url, string? Organization, string Link, string Connection, string? Problem, bool Controller, string[] Spaces,
+    bool? RecoveryKey = null);
 
 /// <summary>The servers of this instance.</summary>
 /// <param name="Status"><c>ok</c>, <c>stale_epoch</c> or <c>unavailable</c>.</param>
@@ -613,7 +661,20 @@ internal sealed record FleetServerJoinRequest(string ExpectedEpoch, string Url, 
 /// </param>
 /// <param name="Server">The server, once linked.</param>
 /// <param name="Message">What the failure said.</param>
-internal sealed record FleetServerResult(string Status, FleetServerView? Server, string? Message);
+/// <param name="RecoveryWords">The words of the recovery key made with a new server, shown once; null when none was made.</param>
+internal sealed record FleetServerResult(string Status, FleetServerView? Server, string? Message, string? RecoveryWords = null);
+
+/// <summary>A server to recover with the recovery key of a person whose devices are all lost.</summary>
+/// <param name="ExpectedEpoch">The host epoch the page knows.</param>
+/// <param name="Url">The address of the server.</param>
+/// <param name="Words">The words of the recovery key.</param>
+internal sealed record FleetServerRecoverRequest(string ExpectedEpoch, string Url, string Words);
+
+/// <summary>A new recovery key, its words shown once.</summary>
+/// <param name="Status"><c>ok</c>, the code of the server's refusal, <c>device_list.broken</c>, <c>unreachable</c>, <c>not_found</c>, <c>invalid_request</c>, <c>stale_epoch</c> or <c>unavailable</c>.</param>
+/// <param name="Words">The 32 words of the recovery key.</param>
+/// <param name="Message">What the failure said.</param>
+internal sealed record FleetRecoveryKeyResult(string Status, string? Words, string? Message);
 
 /// <summary>A request about one link.</summary>
 /// <param name="ExpectedEpoch">The host epoch the page knows.</param>
@@ -664,7 +725,8 @@ internal sealed record FleetServerDevicesResult(string Status, FleetDeviceView[]
 /// <param name="ExpectedEpoch">The host epoch the page knows.</param>
 /// <param name="LinkId">The id of the link.</param>
 /// <param name="DeviceId">The device.</param>
-internal sealed record FleetServerDeviceRequest(string ExpectedEpoch, string LinkId, string DeviceId);
+/// <param name="Words">For an approval, the words of its key the person compared with the device's screen; null when none were.</param>
+internal sealed record FleetServerDeviceRequest(string ExpectedEpoch, string LinkId, string DeviceId, string? Words = null);
 
 /// <summary>The outcome of an approval or a revocation.</summary>
 /// <param name="Status"><c>ok</c>, the code of the server's refusal, <c>unreachable</c>, <c>not_found</c>, <c>invalid_request</c>, <c>stale_epoch</c> or <c>unavailable</c>.</param>

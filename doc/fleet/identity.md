@@ -75,6 +75,7 @@ to it.
 | From another device | The new device shows a code or QR with its key fingerprint; an existing device compares the short words, signs it into the list and wraps the keys to it. |
 | Device code (headless) | `altanode join https://<server>` shows a code; the person approves it in the desktop (which signs the node in) or on the server's web page. |
 | Linked sign-in or passkey | Proves the person on a new device; that device gets the keys of Private spaces only once another device of the person approves it (the device list never grows by the server alone). |
+| Recovery key | When every device of the person is lost: the words of the recovery key sign the new device in and give it the person's keys, on the device; it then removes the lost ones. |
 
 ### Linked sign-in methods
 
@@ -165,7 +166,11 @@ fleet.
 - Each link has its own device key: the company and the home server cannot correlate the same laptop.
 - A link publishes the space's projects, its machines' inventory for that space, and the metadata of its sessions
   that are not Private ([security](security-and-privacy.md#what-the-server-sees)).
-- Unlinking removes the device from that server and its facts; local sessions stay as they are.
+- Unlinking a space withdraws the facts and statistics of its sessions from that server, and its key seals nothing
+  more there. Leaving a server withdraws everything the machine published there (facts with their sealed metadata,
+  statistics, inventory, run reports), its copies of keys and the automations given to it through that server; a
+  controller device that is not the last one also signs its own removal from the device list, so its keys get new
+  epochs. Local sessions stay as they are.
 - In the file of the space (proposal):
 
 ```yaml

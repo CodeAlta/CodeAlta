@@ -117,6 +117,54 @@ public sealed class FleetDeviceListVerifierTests
     }
 
     [TestMethod]
+    public void ARecoveryKeySignsInANewControllerOfItsPersonAndNothingElse()
+    {
+        using var desktop = new Key();
+        using var recovery = new Key();
+        using var node = new Key();
+        using var laptop = new Key();
+        using var other = new Key();
+        Chain WithRecovery()
+        {
+            var chain = new Chain();
+            chain.Add(desktop.First());
+            chain.Add(desktop, FleetDeviceListOperations.Add, node, FleetDeviceKinds.Node, Owner);
+            chain.Add(desktop, FleetDeviceListOperations.Add, recovery, FleetDeviceKinds.Recovery, Owner);
+            return chain;
+        }
+
+        // Every device lost: the recovery key adds a new controller of its person, which may then remove the lost one.
+        var recovered = WithRecovery();
+        recovered.Add(recovery, FleetDeviceListOperations.Add, laptop, FleetDeviceKinds.Controller, Owner);
+        recovered.Add(laptop, FleetDeviceListOperations.Remove, desktop, null, null);
+        var state = FleetDeviceListVerifier.VerifyOrThrow(recovered.Entries, Organization);
+        Assert.IsTrue(state.IsController(laptop.Id));
+        Assert.IsFalse(state.IsController(recovery.Id), "a recovery key is no controller device");
+        Assert.AreEqual(FleetDeviceKinds.Recovery, state.Members[recovery.Id].Kind);
+
+        var node2 = WithRecovery();
+        node2.Add(recovery, FleetDeviceListOperations.Add, laptop, FleetDeviceKinds.Node, Owner);
+        AssertBroken(node2, 4, "a recovery key adds controller devices only");
+        var removes = WithRecovery();
+        removes.Add(recovery, FleetDeviceListOperations.Remove, node, null, null);
+        AssertBroken(removes, 4, "a recovery key removes no device");
+        var forOther = WithRecovery();
+        forOther.Add(recovery, FleetDeviceListOperations.Add, laptop, FleetDeviceKinds.Controller, "person-2");
+        AssertBroken(forOther, 4, "a controller device adds devices of its own person only");
+        var second = WithRecovery();
+        second.Add(desktop, FleetDeviceListOperations.Add, other, FleetDeviceKinds.Recovery, Owner);
+        AssertBroken(second, 4, "the person has a recovery key already: the old one leaves the list first");
+
+        // A new recovery key once the old one left: the old one signs nothing more.
+        var replaced = WithRecovery();
+        replaced.Add(desktop, FleetDeviceListOperations.Remove, recovery, null, null);
+        replaced.Add(desktop, FleetDeviceListOperations.Add, other, FleetDeviceKinds.Recovery, Owner);
+        Assert.AreEqual(5L, FleetDeviceListVerifier.VerifyOrThrow(replaced.Entries, Organization).Sequence);
+        replaced.Add(recovery, FleetDeviceListOperations.Add, laptop, FleetDeviceKinds.Controller, Owner);
+        AssertBroken(replaced, 6, "its signer is not a member of the list");
+    }
+
+    [TestMethod]
     public void AnEmptyListDoesNotVerify()
     {
         var exception = Assert.ThrowsExactly<FleetDeviceListException>(() => FleetDeviceListVerifier.VerifyOrThrow([], Organization));

@@ -61,6 +61,9 @@ internal sealed class NodeServerAutomations(NodeAutomations automations, DeviceI
     }
 
     /// <inheritdoc />
+    public Task ForgetAsync(string linkId, CancellationToken cancellationToken) => automations.ForgetServerAsync(linkId, cancellationToken);
+
+    /// <inheritdoc />
     public Task OnlineAsync(FleetConnector connector, FleetServerLink link, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(link);

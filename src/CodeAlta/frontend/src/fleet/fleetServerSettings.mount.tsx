@@ -2,16 +2,25 @@
 // its telemetry through it. Driven by fleetServerSettings.browser.test.ts through `fleetFixture`: what the page asks is recorded.
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
-import type { FleetServerView, FleetTelemetryRequest, FleetTelemetryView, FleetUpdateCampaignView, FleetUpdatePolicyRequest, FleetUpdateStartRequest,
-  FleetUpdatesView } from "#neoastra";
+import type { FleetDeviceView, FleetServerDeviceRequest, FleetServerView, FleetTelemetryRequest, FleetTelemetryView, FleetUpdateCampaignView, FleetUpdatePolicyRequest,
+  FleetUpdateStartRequest, FleetUpdatesView } from "#neoastra";
 import { ShellLanguageContext } from "../shellLanguage";
 import { FleetServerSettings, type FleetServerApi } from "./FleetServerSettings";
 
 document.documentElement.classList.add("bp6-dark");
 
 const calls: string[] = [];
-const server: FleetServerView = { id: "home", url: "https://fleet.example", organization: "Home", link: "approved", connection: "online", problem: null, controller: true,
-  spaces: [] };
+// The owner has no recovery key yet; a laptop of theirs waits for its approval.
+let recoveryKey = false;
+const server = (): FleetServerView => ({ id: "home", url: "https://fleet.example", organization: "Home", link: "approved", connection: "online", problem: null, controller: true,
+  spaces: [], recoveryKey });
+const recoveryWords = "acid acorn actor agent alarm album alien alpha amber anchor angel ankle apple apron arena arrow atlas attic autumn award bacon badge bagel baker "
+  + "bamboo banjo barn basil basket beach beacon bear";
+const pending: FleetDeviceView = { id: "laptop", name: "Laptop", kind: "controller", status: "pending", online: false, words: "otter river robin saddle salmon pearl",
+  createdAt: "2026-11-03T08:00:00Z" };
+let devices: FleetDeviceView[] = [pending];
+// The clipboard of the page is recorded, as headless Edge refuses to write the real one.
+Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText: async (text: string) => { calls.push(JSON.stringify({ copied: text })); } } });
 let telemetry: FleetTelemetryView = { enabled: true, endpoint: "https://otlp.example:4318", protocol: "http/protobuf", route: "server", signals: ["traces", "metrics"],
   headers: [{ name: "x-api-key", masked: "••••6789" }], environment: null, updatedAt: null };
 // Two nodes, one offline; no campaign until the page starts one.
@@ -25,8 +34,18 @@ const campaign = (request: FleetUpdateStartRequest): FleetUpdateCampaignView => 
     state: machine.online ? "switching" : "pending", running: machine.version, message: null, online: machine.online })) });
 const unavailable = async () => { throw new Error("not in this fixture"); };
 const api: FleetServerApi = {
-  status: async () => ({ status: "ok", servers: [server], deviceId: "device-1", words: "apple river stone" }),
-  devices: async () => ({ status: "ok", devices: [], message: null }),
+  status: async () => ({ status: "ok", servers: [server()], deviceId: "device-1", words: "apple river stone" }),
+  devices: async () => ({ status: "ok", devices, message: null }),
+  approve: async (request: FleetServerDeviceRequest) => {
+    calls.push(JSON.stringify({ approve: request.deviceId, words: request.words }));
+    devices = devices.map(device => device.id === request.deviceId ? { ...device, status: "approved" } : device);
+    return { status: "ok", device: devices.find(device => device.id === request.deviceId) ?? null, message: null };
+  },
+  createRecoveryKey: async () => {
+    calls.push(JSON.stringify({ recoveryKey: "made" }));
+    recoveryKey = true;
+    return { status: "ok", words: recoveryWords, message: null };
+  },
   telemetry: async () => ({ status: "ok", telemetry, message: null }),
   setTelemetry: async (request: FleetTelemetryRequest) => {
     calls.push(JSON.stringify({ enabled: request.enabled, endpoint: request.endpoint, route: request.route, signals: request.signals, headers: request.headers }));
@@ -51,7 +70,7 @@ const api: FleetServerApi = {
     return { status: "ok", message: null };
   },
   watch: async () => (async function* () { })(),
-  create: unavailable, join: unavailable, leave: unavailable, createToken: unavailable, approve: unavailable, revoke: unavailable,
+  create: unavailable, join: unavailable, leave: unavailable, createToken: unavailable, revoke: unavailable,
 };
 Object.assign(window, { fleetFixture: { calls } });
 

@@ -4,6 +4,7 @@ using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Threading.Channels;
 using CodeAlta.Fleet.Protocol;
+using CodeAlta.Fleet.Protocol.Api;
 using Microsoft.Data.Sqlite;
 
 namespace CodeAlta.Server.Storage.Sqlite;
@@ -332,6 +333,85 @@ public sealed partial class SqliteCoordinatorStore : ICoordinatorStore, IAutomat
             AppendAudit(connection, transaction, audit);
             return (DeviceListAppendOutcome.Appended, changed);
         }, cancellationToken);
+    }
+
+    /// <inheritdoc />
+    public ValueTask<(DeviceListAppendOutcome Outcome, DeviceRecord? Device)> AddDeviceWithEntryAsync(DeviceRecord device, DeviceListEntryRecord entry, RecoveryKeyRecord? recovery,
+        AuditEntry audit, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(device);
+        ArgumentNullException.ThrowIfNull(entry);
+        ArgumentNullException.ThrowIfNull(audit);
+        return WriteAsync<(DeviceListAppendOutcome, DeviceRecord?)>((connection, transaction) =>
+        {
+            var last = ReadLastDeviceListEntry(connection, transaction, entry.OrganizationId);
+            if (last is null || entry.Sequence != last.Sequence + 1) return (DeviceListAppendOutcome.Conflict, null);
+            if (ReadDevice(connection, transaction, device.Id) is { } existing) return (DeviceListAppendOutcome.DeviceStateChanged, existing);
+            if (CountWhere(connection, transaction, "devices", "fingerprint", device.Fingerprint) > 0) return (DeviceListAppendOutcome.DeviceStateChanged, null);
+            InsertDevice(connection, transaction, device);
+            InsertDeviceListEntry(connection, transaction, entry);
+            if (recovery is not null)
+            {
+                Execute(connection, transaction,
+                    "INSERT INTO recovery_keys (device_id, organization_id, person_id, sealed_anchor, created_at) VALUES ($device, $org, $person, $anchor, $created)",
+                    ("$device", recovery.DeviceId), ("$org", recovery.OrganizationId), ("$person", recovery.PersonId), ("$anchor", recovery.SealedAnchor),
+                    ("$created", ToTime(recovery.CreatedAt)));
+            }
+
+            AppendAudit(connection, transaction, audit);
+            return (DeviceListAppendOutcome.Appended, device);
+        }, cancellationToken);
+    }
+
+    /// <inheritdoc />
+    public ValueTask<LeaveResponse?> LeaveAsync(string deviceId, DeviceListEntryRecord? entry, DateTimeOffset now, AuditEntry audit, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(deviceId);
+        ArgumentNullException.ThrowIfNull(audit);
+        return WriteAsync<LeaveResponse?>((connection, transaction) =>
+        {
+            var device = ReadDevice(connection, transaction, deviceId);
+            if (device is null) return new LeaveResponse(0, 0, 0, 0, false);
+            if (entry is not null)
+            {
+                var last = ReadLastDeviceListEntry(connection, transaction, entry.OrganizationId);
+                if (last is null || entry.Sequence != last.Sequence + 1) return null;
+                InsertDeviceListEntry(connection, transaction, entry);
+            }
+
+            var sessions = Execute(connection, transaction, "DELETE FROM sessions WHERE machine_id = $device", ("$device", deviceId));
+            Execute(connection, transaction, "DELETE FROM statistics_rows WHERE device_id = $device", ("$device", deviceId));
+            var sets = Execute(connection, transaction, "DELETE FROM statistics_sets WHERE device_id = $device", ("$device", deviceId));
+            Execute(connection, transaction, "DELETE FROM statistics_publishers WHERE device_id = $device", ("$device", deviceId));
+            var copies = Execute(connection, transaction, "DELETE FROM metadata_key_wraps WHERE device_id = $device", ("$device", deviceId));
+            var automations = Execute(connection, transaction, "DELETE FROM automations WHERE machine_id = $device", ("$device", deviceId));
+            Execute(connection, transaction, "DELETE FROM automation_runs WHERE machine_id = $device", ("$device", deviceId));
+            Execute(connection, transaction, "DELETE FROM machines WHERE device_id = $device", ("$device", deviceId));
+            Execute(connection, transaction, "DELETE FROM publication_cursors WHERE device_id = $device", ("$device", deviceId));
+            if (device.Status != DeviceStatuses.Revoked)
+            {
+                Execute(connection, transaction, "UPDATE devices SET status = $status, revoked_at = $revoked, version = $version WHERE id = $id",
+                    ("$status", DeviceStatuses.Revoked), ("$revoked", ToTime(now)), ("$version", device.Version + 1), ("$id", deviceId));
+            }
+
+            var result = new LeaveResponse(sessions, sets, copies, automations, entry is not null);
+            AppendAudit(connection, transaction, audit with
+            {
+                Details = string.Create(CultureInfo.InvariantCulture,
+                    $"{{\"sessions\":{sessions},\"statisticsSets\":{sets},\"keyCopies\":{copies},\"automations\":{automations},\"removedFromList\":{(entry is null ? "false" : "true")}}}"),
+            });
+            return result;
+        }, cancellationToken);
+    }
+
+    /// <inheritdoc />
+    public ValueTask<RecoveryKeyRecord?> GetRecoveryKeyAsync(string deviceId, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(deviceId);
+        return ReadAsync(connection => QuerySingle(connection, null,
+            "SELECT device_id, organization_id, person_id, sealed_anchor, created_at FROM recovery_keys WHERE device_id = $device",
+            static reader => new RecoveryKeyRecord(reader.GetString(0), reader.GetString(1), reader.GetString(2), reader.GetString(3), FromTime(reader.GetInt64(4))),
+            ("$device", deviceId)), cancellationToken);
     }
 
     /// <inheritdoc />

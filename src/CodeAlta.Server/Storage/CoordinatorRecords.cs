@@ -167,6 +167,14 @@ public sealed record SessionRecord(
 public sealed record MetadataKeyRecord(string Id, string OrganizationId, string PersonId, int Epoch, string CreatedByDeviceId, DateTimeOffset CreatedAt,
     string SpaceId = "", string? SealedDescriptor = null);
 
+/// <summary>The recovery key of a person, as the server keeps it: its device in the list and the anchor it sealed.</summary>
+/// <param name="DeviceId">The device id the recovery key has in the device list.</param>
+/// <param name="OrganizationId">Its organization.</param>
+/// <param name="PersonId">Its person.</param>
+/// <param name="SealedAnchor">The anchor of the device list, sealed with the recovery key.</param>
+/// <param name="CreatedAt">When it was made.</param>
+public sealed record RecoveryKeyRecord(string DeviceId, string OrganizationId, string PersonId, string SealedAnchor, DateTimeOffset CreatedAt);
+
 /// <summary>A metadata key wrapped to one device, as opaque text.</summary>
 /// <param name="KeyId">The key.</param>
 /// <param name="DeviceId">The device it is wrapped to.</param>

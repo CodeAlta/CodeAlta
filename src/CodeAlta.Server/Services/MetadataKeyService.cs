@@ -95,7 +95,9 @@ public sealed class MetadataKeyService
     {
         ArgumentNullException.ThrowIfNull(actor);
         ArgumentNullException.ThrowIfNull(origin);
-        RequireController(actor);
+        // The recovery key of the person gives the copies it holds to the device it signed in, when every device is lost.
+        if (actor.Kind != FleetDeviceKinds.Recovery) RequireController(actor);
+        else if (actor.OwnerPersonId is null) throw CoordinatorException.Forbidden(FleetErrorCodes.Forbidden, "A recovery key without its person gives no key.");
         var key = (await _store.ListMetadataKeysAsync(actor.OwnerPersonId!, cancellationToken).ConfigureAwait(false)).FirstOrDefault(candidate => candidate.Key.Id == keyId)
             ?? throw CoordinatorException.NotFound(CoordinatorErrorCodes.MetadataKeyNotFound, "No metadata key of this person has this id.");
         var mine = key.Wraps.FirstOrDefault(wrap => wrap.DeviceId == actor.Id)
@@ -125,6 +127,9 @@ public sealed class MetadataKeyService
             }
 
             var device = await _store.GetDeviceAsync(wrap.DeviceId, cancellationToken).ConfigureAwait(false);
+            // A device of the person that left the server (or was revoked before its removal reached this list) gets no
+            // copy, without refusing the copies of the others.
+            if (device is { Status: DeviceStatuses.Revoked } && device.OrganizationId == actor.OrganizationId && device.OwnerPersonId == actor.OwnerPersonId) continue;
             if (device is null || device.OrganizationId != actor.OrganizationId || device.Status != DeviceStatuses.Approved || device.OwnerPersonId != actor.OwnerPersonId)
             {
                 throw Invalid("A key is wrapped only to approved devices of its person.");

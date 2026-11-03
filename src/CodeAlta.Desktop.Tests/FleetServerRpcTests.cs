@@ -68,6 +68,16 @@ public sealed class FleetServerRpcTests
             var created = await service.CreateAsync(new FleetServerCreateRequest(epoch, address.ToString(), server.SetupCode!.Code, "Alex", "Home"), token);
             Assert.AreEqual("ok", created.Status, created.Message);
             Assert.AreEqual(("Home", "approved", true), (created.Server!.Organization, created.Server.Link, created.Server.Controller));
+            // The owner's recovery key comes with the server, its words given once to be shown, and it is in the signed list.
+            Assert.AreEqual(32, created.RecoveryWords?.Split(' ').Length, created.Message);
+            Assert.IsTrue(FleetRecoveryKey.TryParse(created.RecoveryWords, out var recoveryKey));
+            string recoveryDeviceId;
+            using (recoveryKey)
+            using (var recoveryIdentity = recoveryKey.CreateIdentity())
+            {
+                recoveryDeviceId = recoveryIdentity.DeviceId;
+            }
+
             var linkId = created.Server.Id;
             Assert.AreEqual("already_linked", (await service.CreateAsync(new FleetServerCreateRequest(epoch, address.ToString(), "x", "Alex"), token)).Status);
 
@@ -84,8 +94,13 @@ public sealed class FleetServerRpcTests
             var devices = await service.DevicesAsync(new FleetServerLinkRequest(epoch, linkId), token);
             var pending = devices.Devices.First();
             Assert.AreEqual(("Mac mini", "pending", nodeKey.Fingerprint.ToShortWords()), (pending.Name, pending.Status, pending.Words), "the pending device comes first, with the words of its key");
-            var approved = await service.ApproveAsync(new FleetServerDeviceRequest(epoch, linkId, pending.Id), token);
+            Assert.IsFalse(devices.Devices.Any(static device => device.Kind == FleetDeviceKinds.Recovery), "the recovery key is no device to list");
+            var mismatched = await service.ApproveAsync(new FleetServerDeviceRequest(epoch, linkId, pending.Id, "acid acorn actor agent alarm album"), token);
+            Assert.AreEqual(FleetDeviceListException.Code, mismatched.Status, "other words than the device's: nothing signed");
+            var approved = await service.ApproveAsync(new FleetServerDeviceRequest(epoch, linkId, pending.Id, pending.Words), token);
             Assert.AreEqual(("ok", "approved"), (approved.Status, approved.Device?.Status), approved.Message);
+            Assert.AreEqual(true, (await service.StatusAsync(new FleetServerRequest(epoch), token)).Servers.Single().RecoveryKey, "the card says the owner keeps a recovery key");
+            Assert.AreEqual(FleetDeviceKinds.Recovery, servers.Connections.Single().Connector!.Devices.Current!.Members[recoveryDeviceId].Kind, "in the signed list");
 
             // The control connection publishes this computer and its session of the linked space, never the Private one.
             var deadline = DateTime.UtcNow + Patience;
@@ -144,6 +159,13 @@ public sealed class FleetServerRpcTests
             Assert.AreEqual("ok", (await service.LeaveAsync(new FleetServerLinkRequest(epoch, linkId), token)).Status);
             Assert.AreEqual(0, (await service.StatusAsync(new FleetServerRequest(epoch), token)).Servers.Length);
             Assert.IsNull((await host.SpaceCatalog.GetAsync(SpaceDescriptor.DefaultId, token))!.Settings.Fleet, "the space is unlinked with the server");
+            // The server withdrew what this computer published, and refuses it from then on.
+            using (var node = new FleetServerClient(address, nodeKey))
+            {
+                Assert.IsFalse((await node.ListMachinesAsync(token)).Any(machine => machine.DeviceId == servers.DeviceId), "the inventory of this computer is gone");
+                Assert.AreEqual("revoked", (await node.GetDeviceAsync(servers.DeviceId, token)).Status);
+                Assert.IsTrue((await node.ListMetadataKeysAsync(token)).All(key => !key.WrappedTo.Contains(servers.DeviceId!)), "its copies of the keys are gone");
+            }
         }
         finally
         {
