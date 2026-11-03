@@ -16,6 +16,7 @@ import { codeModeSettingsMessages } from "./codeModeSettingsMessages";
 import { scriptCardMessages } from "./scriptCard/messages";
 import { resumeCardMessages } from "./resumeCard/messages";
 import { scriptAutomationMessages } from "./automations/scriptAutomationMessages";
+import { automationPlacementMessages } from "./automations/placementMessages";
 import { workflowMessages } from "./workflows/messages";
 import { claudeCliMessages } from "./claudeCli/messages";
 import { pluginProviderMessages } from "./pluginProviders/messages";
@@ -2872,6 +2873,7 @@ export const messages = dictionary({
   ...scriptCardMessages,
   ...resumeCardMessages,
   ...scriptAutomationMessages,
+  ...automationPlacementMessages,
   ...workflowMessages,
   ...claudeCliMessages,
   ...pluginProviderMessages,

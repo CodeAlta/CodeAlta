@@ -57,7 +57,10 @@ internal sealed class FleetNodeFixture : IAsyncDisposable
 
     public PairedMachineStore ViewerMachines { get; }
 
-    public static async Task<FleetNodeFixture> StartAsync(CancellationToken cancellationToken)
+    public static Task<FleetNodeFixture> StartAsync(CancellationToken cancellationToken) => StartAsync(cancellationToken, null);
+
+    /// <summary>Starts the node, with the automations it runs for its devices; null for none.</summary>
+    public static async Task<FleetNodeFixture> StartAsync(CancellationToken cancellationToken, IFleetNodeAutomations? automations)
     {
         var root = Path.Combine(Path.GetTempPath(), "codealta-desktop-fleet-tests", Guid.NewGuid().ToString("N"));
         var global = Path.Combine(root, "global");
@@ -78,7 +81,7 @@ internal sealed class FleetNodeFixture : IAsyncDisposable
         var service = new FleetNodeService(new FleetNodeServiceOptions
         {
             Host = host, Identity = identity, TrustedDevices = new TrustedDeviceStore(nodeFleet, TimeProvider.System), Name = "test-node", Version = "1.0.0",
-            PairingAddresses = () => addresses,
+            PairingAddresses = () => addresses, Automations = automations,
         });
         var listener = FleetDirectListener.Start(new IPEndPoint(IPAddress.Loopback, 0), service.ServeAsync);
         addresses = [FleetDirectConnector.Format(IPAddress.Loopback, listener.LocalEndPoint.Port)];

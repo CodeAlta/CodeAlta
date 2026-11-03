@@ -112,7 +112,7 @@ triggers = [
 
 ## Good to know
 
-- Automations run while CodeAlta Desktop is open, also when it [stays in the notification area](desktop-and-tui.md#runs-in-the-background).
+- Automations run while CodeAlta Desktop is open, also when it [stays in the notification area](desktop-and-tui.md#runs-in-the-background). One set to run on a paired machine (**Runs on**) runs there while this computer is closed: see [Run your automations on it](fleet.md#run-your-automations-on-it).
 - What was due while CodeAlta was closed is skipped. Turn on **Catch up on what was missed while CodeAlta was closed** in an automation to run it at the next start.
 - An automation is stored in **My configuration** (`~/.alta/config.toml`) or in **The project** (`.alta/config.toml` of its folder), which you can commit to share it with your team.
 - An automation that came with a project, written by someone else, waits until you read its prompt and click **Allow**. It asks again when its prompt, triggers or what its sessions run with change, including the command of a trigger.

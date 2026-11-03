@@ -8,8 +8,8 @@ import { TriggerIcon } from "./TriggerIcon";
 import { sessionTime, timelineTime } from "../sessionTime";
 import { useShellLanguage } from "../shellLanguage";
 import { AutomationEditor } from "./AutomationEditor";
-import { automationTemplates, describeTrigger, describeTriggers, emptyForm, filterAutomations, formOf, runStatusLabel, runTone, runTriggerLabel, runsWithFacts, timelinePosition, timelineRows, triggerTone,
-  waitsToBeAllowed,
+import { automationTemplates, describeTrigger, describeTriggers, emptyForm, filterAutomations, formOf, placementLabel, placementProblem, runStatusLabel, runTone, runTriggerLabel, runsWithFacts,
+  timelinePosition, timelineRows, triggerTone, waitsToBeAllowed,
   type AutomationForm, type AutomationScope, type AutomationTemplate } from "./automations";
 import type { AutomationsHub } from "./automationsHub";
 import type { RunProvider } from "../workItems/runsWith";
@@ -90,12 +90,13 @@ function AutomationCard({ item, paused, selected, busy, now, onSelect, onRun, on
   const tone = triggerTone(item.triggers[0]?.type);
   const next = item.nextRunAt ? sessionTime(item.nextRunAt, locale, now) : null;
   const last = item.lastRun ? sessionTime(item.lastRun.startedAt, locale, now) : null;
-  // What keeps it from running as defined, or its triggers from seeing their repository.
-  const problem = item.problem ?? (paused ? null : item.watchProblem);
+  // What keeps it from running as defined, or its triggers from seeing their repository, or its machine from having it.
+  const problem = item.problem ?? placementProblem(item) ?? (paused ? null : item.watchProblem);
   const waits = !item.problem && waitsToBeAllowed(item);
+  const placed = placementLabel(item, t);
   const state = problem ?? (item.running ? t("Running") : item.triggers.length === 0 ? t("Run it when you need it")
-    : waits ? t("Waits for you to allow it") : !item.enabled ? t("Disabled") : paused ? t("Paused") : next ? t("Next {time}", { time: next.label })
-    : item.repository ? t("Watches {repository}", { repository: item.repository }) : t("Waits for its event"));
+    : waits ? t("Waits for you to allow it") : !item.enabled ? t("Disabled") : placed ?? (paused ? t("Paused") : next ? t("Next {time}", { time: next.label })
+    : item.repository ? t("Watches {repository}", { repository: item.repository }) : t("Waits for its event")));
   const menu = <Menu>
     <MenuItem icon={<AppIcon name="edit" size={15} />} text={t("Edit…")} onClick={onEdit} />
     <MenuItem icon={<AppIcon name="copy" size={15} />} text={t("Duplicate")} onClick={onDuplicate} />
@@ -113,6 +114,7 @@ function AutomationCard({ item, paused, selected, busy, now, onSelect, onRun, on
     {item.triggers.length > 0 && <Switch className="automation-card-switch" checked={item.enabled} disabled={busy} aria-label={t("Enabled")} title={t(item.enabled ? "Enabled" : "Disabled")}
       onChange={event => onToggle(event.currentTarget.checked)} />}
     <div className="automation-card-meta"><ScopeTag item={item} />
+      {placed && <span className="automation-chip" title={item.placement?.message ?? undefined}><AppIcon name="server" size={12} /><span>{placed}</span></span>}
       {item.provider && <span className="automation-chip"><ModelIcon modelId={item.model} providerKey={item.provider} size={12} /><span>{item.model ?? item.provider}</span></span>}</div>
     <div className="automation-card-foot">
       <span className="automation-card-state" data-problem={problem ? true : undefined} title={problem ?? next?.title}>{state}</span>
@@ -172,6 +174,8 @@ function AutomationDetail({ hub, item, paused, busy, now, sessions, onRun, onEdi
   const next = item.nextRunAt ? timelineTime(item.nextRunAt, locale) : null;
   const waits = !item.problem && waitsToBeAllowed(item);
   const runsWith = runsWithFacts(item, t);
+  const placed = placementLabel(item, t);
+  const notCopied = !item.problem ? placementProblem(item) : null;
   return <section className="automation-detail" aria-label={item.name}>
     <header>
       <span className="automation-card-glyph" data-file-tone={triggerTone(item.triggers[0]?.type)}><TriggerIcon type={item.triggers[0]?.type} size={20} /></span>
@@ -180,6 +184,7 @@ function AutomationDetail({ hub, item, paused, busy, now, sessions, onRun, onEdi
       <Button icon={<AppIcon name="edit" size={14} />} onClick={onEdit}>{t("Edit")}</Button>
     </header>
     {item.problem && <Callout intent="warning" compact role="alert">{item.problem}</Callout>}
+    {notCopied && <Callout intent="warning" compact role="alert">{notCopied}</Callout>}
     {!item.problem && !paused && item.watchProblem && <Callout intent="warning" compact role="alert">{item.watchProblem}</Callout>}
     {waits && <Callout intent="primary" compact className="automation-allow">
       <span>{t(item.script && item.storeProjectId === null ? "This automation runs a script that changed since you allowed it. Its triggers start it once you allow it again."
@@ -190,7 +195,11 @@ function AutomationDetail({ hub, item, paused, busy, now, sessions, onRun, onEdi
       <dt>{t("Starts")}</dt>
       <dd>{item.triggers.length === 0 ? t("When you run it") : <ul>{item.triggers.map((trigger, index) =>
         <li key={index}><span data-file-tone={triggerTone(trigger.type)}><TriggerIcon type={trigger.type} size={13} /></span>{describeTrigger(trigger, t, locale, true)}</li>)}</ul>}</dd>
-      {item.triggers.length > 0 && <><dt>{t("Next run")}</dt>
+      {/* It runs on its machine, by its triggers there: this computer shows where and whether the machine has it as it is. */}
+      {placed && <><dt>{t("Runs on")}</dt>
+        <dd title={item.placement?.message ?? undefined}>{item.placement?.state === "copied"
+          ? t("Copied to {machine}", { machine: item.placement.machineName ?? t("Unavailable machine") }) : [placed, item.placement?.message].filter(Boolean).join(" · ")}</dd></>}
+      {item.triggers.length > 0 && !placed && <><dt>{t("Next run")}</dt>
         <dd>{waits ? t("Waits for you to allow it") : !item.enabled ? t("Disabled") : paused ? t("Paused") : next?.label ?? t("Waits for its event")}</dd></>}
       {item.repository && <><dt>{t("Repository")}</dt><dd>{item.repository}</dd></>}
       {/* What its sessions run with besides the defaults, which an automation that came with a project shows before it is allowed. */}

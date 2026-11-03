@@ -15,10 +15,10 @@ const trigger = (type: string, change: Partial<AutomationTriggerItem> = {}): Aut
   ({ type, minute: 0, every: 1, at: [], days: [], expression: null, event: "opened", authors: "trusted", command: null, folder: null, ...change });
 const item = (id: string, change: Partial<AutomationItem> = {}): AutomationItem => ({
   id, name: `Automation ${id}`, enabled: true, prompt: "Do the thing.", projectId: "p", projectName: "Alpha", projectFolder: "/p", storeProjectId: null, file: "/home/config.toml",
-  provider: null, model: null, effort: null, agent: null, permissionMode: null, reviewBeforeCommit: null, sandbox: null, catchUp: false, triggers: [], problem: null, nextRunAt: null, running: false, lastRun: null, repository: null, watchProblem: null, allowed: true, script: null, scriptArguments: null, options: null, ...change,
+  provider: null, model: null, effort: null, agent: null, permissionMode: null, reviewBeforeCommit: null, sandbox: null, catchUp: false, triggers: [], problem: null, nextRunAt: null, running: false, lastRun: null, repository: null, watchProblem: null, allowed: true, script: null, scriptArguments: null, options: null, runsOn: null, placement: null, ...change,
 });
 const run = (id: string, change: Partial<AutomationRunItem> = {}): AutomationRunItem =>
-  ({ id, automationId: "a", name: "Nightly", sessionId: null, projectId: "p", startedAt: "2026-10-06T12:00:00Z", endedAt: null, trigger: "daily", detail: null, status: "completed", message: null, ...change });
+  ({ id, automationId: "a", name: "Nightly", sessionId: null, projectId: "p", startedAt: "2026-10-06T12:00:00Z", endedAt: null, trigger: "daily", detail: null, status: "completed", message: null, machineId: null, ...change });
 const projects: WorkspaceProject[] = [{ id: "p", name: "Alpha", path: "/p", archived: false }];
 const session = (id: string): WorkspaceSession => ({
   messageCount: null, automationId: "a", worktreePath: null, worktreeRoot: null, worktreeName: null, worktreeMissing: false, forkedFromSessionId: null, forkedFromTitle: null, forkKind: null, forkTurnCount: 0, rewindCount: 0, archived: false, archivedAt: null, spaceId: null, createdAt: null, id, title: "Nightly", fullTitle: "Nightly", fullTitleTruncated: false, parentSessionId: null, scopeKind: "project", projectId: "p",
@@ -85,6 +85,18 @@ test("a card says what starts its automation, where it runs and what it waits fo
   assert.match(lost, /disabled=""[^>]*aria-label="Run now"|aria-label="Run now"[^>]*disabled=""/);
   assert.match(busy, /class="automation-card-state"[^>]*>Running<[\s\S]*class="automation-card-last" title="Failed/);
   assert.match(html, /Your automations<span class="count">7<\/span>/);
+});
+
+test("a card of an automation that runs on a paired machine names the machine, and what kept it from being copied", () => {
+  const placed = (state: string, message: string | null) => ({ machineId: "mini", machineName: "Mac mini", state, message, copiedAt: null });
+  const html = render({ items: [
+    item("copied", { name: "On the mini", runsOn: "mini", placement: placed("copied", null), triggers: [trigger("daily", { at: ["09:00"] })] }),
+    item("refused", { name: "Refused", runsOn: "mini", placement: placed("failed", "Mac mini does not let this computer give it automations."), triggers: [trigger("daily", { at: ["09:00"] })] }),
+  ] });
+  const [copied, refused] = cards(html);
+  assert.match(copied, /automation-chip[^>]*>[\s\S]*<span>On Mac mini<\/span>/);
+  assert.match(copied, /class="automation-card-state"[^>]*>On Mac mini</, "Its machine fires its schedule: this computer shows where it runs.");
+  assert.match(refused, /class="automation-card-state" data-problem="true"[^>]*>Mac mini does not let this computer give it automations\.</);
 });
 
 test("an automation that came with its project waits for the user, who allows it from its card", () => {

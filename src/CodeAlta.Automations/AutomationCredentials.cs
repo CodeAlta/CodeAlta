@@ -23,10 +23,8 @@ internal enum AutomationCredentialKind
 internal static class AutomationCredentials
 {
     // The types that run with a key of an account when one is configured.
-    private static readonly HashSet<string> KeyTypes = new(StringComparer.OrdinalIgnoreCase)
-    {
-        "openai-chat", "openai-responses", "azure-openai", "anthropic", "google-genai", "mistral", "xai",
-    };
+    private static readonly System.Collections.Frozen.FrozenSet<string> KeyTypes = System.Collections.Frozen.FrozenSet.ToFrozenSet(
+        ["openai-chat", "openai-responses", "azure-openai", "anthropic", "google-genai", "mistral", "xai"], StringComparer.OrdinalIgnoreCase);
 
     /// <summary>The name of a kind as the API and the messages write it.</summary>
     internal static string Name(AutomationCredentialKind kind) => kind switch

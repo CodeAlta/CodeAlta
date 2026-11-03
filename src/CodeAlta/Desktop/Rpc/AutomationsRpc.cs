@@ -27,6 +27,7 @@ internal sealed class AutomationsService
     private readonly AutomationService? _automations;
     private readonly ProjectCatalog? _projects;
     private readonly CodeModeScriptLibrary? _scripts;
+    private readonly Fleet.DesktopAutomationPlacement? _placement;
     private readonly string? _epoch;
 
     /// <summary>Creates an unavailable service for launches without an owned host.</summary>
@@ -39,12 +40,14 @@ internal sealed class AutomationsService
     /// <param name="projects">The host's project catalog, for the names of the projects.</param>
     /// <param name="epoch">The host epoch that requests must name.</param>
     /// <param name="scripts">The library of scripts an automation may run in place of a prompt; null for none.</param>
-    internal AutomationsService(AutomationService automations, ProjectCatalog projects, string epoch, CodeModeScriptLibrary? scripts = null)
+    /// <param name="placement">What copies the automations that run on a paired machine there, and reads their runs; null for none.</param>
+    internal AutomationsService(AutomationService automations, ProjectCatalog projects, string epoch, CodeModeScriptLibrary? scripts = null,
+        Fleet.DesktopAutomationPlacement? placement = null)
     {
         ArgumentNullException.ThrowIfNull(automations);
         ArgumentNullException.ThrowIfNull(projects);
         ArgumentException.ThrowIfNullOrWhiteSpace(epoch);
-        (_automations, _projects, _epoch, _scripts) = (automations, projects, epoch, scripts);
+        (_automations, _projects, _epoch, _scripts, _placement) = (automations, projects, epoch, scripts, placement);
     }
 
     /// <summary>The scripts of the library an automation of a project, or of the user, can run, with their parameters.</summary>
@@ -166,7 +169,8 @@ internal sealed class AutomationsService
         if (Refuse(request.ExpectedEpoch) is { } refused) return new(refused, null);
         if (!AutomationDefinition.IsId(request.Id)) return new("invalid_request", null);
         var run = await _automations!.RunAsync(request.Id, cancellationToken).ConfigureAwait(false);
-        return run is null ? new("not_found", null) : new("ok", Run(run));
+        return run is null ? new("not_found", null)
+            : new("ok", Run(run) with { MachineId = _automations.Snapshot.Find(request.Id)?.Definition.RunsOn });
     }
 
     /// <summary>The runs of one automation, or of all, newest first.</summary>
@@ -176,7 +180,11 @@ internal sealed class AutomationsService
         ArgumentNullException.ThrowIfNull(request);
         if (Refuse(request.ExpectedEpoch) is { } refused) return new(refused, []);
         if (request.Id is { } id && !AutomationDefinition.IsId(id)) return new("invalid_request", []);
-        return new("ok", [.. _automations!.Runs(request.Id, Math.Clamp(request.Limit ?? MaximumRuns, 1, MaximumRuns)).Select(Run)]);
+        var limit = Math.Clamp(request.Limit ?? MaximumRuns, 1, MaximumRuns);
+        // The runs of an automation placed on a machine are those the machine reports.
+        if (request.Id is { } placed && _automations!.Snapshot.Find(placed) is { Definition.RunsOn: { } machine } && _placement is not null)
+            return new("ok", [.. _placement.Runs(placed).Take(limit).Select(run => Run(run) with { MachineId = machine })]);
+        return new("ok", [.. _automations!.Runs(request.Id, limit).Select(Run)]);
     }
 
     /// <summary>The next times a trigger being written would be due, or what is wrong with it.</summary>
@@ -205,6 +213,7 @@ internal sealed class AutomationsService
         var notices = Channel.CreateBounded<int>(new BoundedChannelOptions(1) { FullMode = BoundedChannelFullMode.DropWrite, SingleReader = true });
         void Notify() => notices.Writer.TryWrite(0);
         _automations!.Changed += Notify;
+        if (_placement is not null) _placement.Changed += Notify;
         try
         {
             var revision = 0;
@@ -214,6 +223,7 @@ internal sealed class AutomationsService
         finally
         {
             _automations.Changed -= Notify;
+            if (_placement is not null) _placement.Changed -= Notify;
         }
     }
 
@@ -230,25 +240,47 @@ internal sealed class AutomationsService
             projects = [];
         }
 
+        var remoteRuns = new List<AutomationRunItem>();
         var items = snapshot.Entries.Select(entry =>
         {
             var definition = entry.Definition;
             var project = entry.ProjectId is null ? null : projects.FirstOrDefault(candidate => candidate.Id == entry.ProjectId);
-            var runs = _automations.Runs(entry.Id, 1);
+            AutomationRunItem? lastRun;
+            AutomationPlacementItem? placed = null;
+            var running = _automations.IsRunning(entry.Id);
+            if (definition.RunsOn is { } machine && _placement is not null)
+            {
+                // It runs on its machine: what is known of it is what that machine reports.
+                var runs = _placement.Runs(entry.Id);
+                remoteRuns.AddRange(runs.Take(RecentRuns).Select(run => Run(run) with { MachineId = machine }));
+                lastRun = runs.Count > 0 ? Run(runs[0]) with { MachineId = machine } : null;
+                running = runs.Count > 0 && runs[0].Status == AutomationRun.Running;
+                placed = _placement.Status(entry) is { } status ? new AutomationPlacementItem(status.MachineId, status.MachineName, status.State, status.Message, status.CopiedAt) : null;
+            }
+            else
+            {
+                var runs = _automations.Runs(entry.Id, 1);
+                lastRun = runs.Count > 0 ? Run(runs[0]) : null;
+            }
+
             return new AutomationItem(entry.Id, definition.Name, definition.Enabled, definition.Prompt, entry.ProjectId, project?.DisplayName,
                 entry.ProjectPath ?? definition.Project, entry.Source.ProjectId, entry.Source.FilePath, definition.Model.Provider, definition.Model.Model,
                 definition.Model.Effort?.ToString(), definition.Agent, definition.PermissionMode, definition.ReviewBeforeCommit, definition.Sandbox, definition.CatchUp, [.. definition.Triggers.Select(Trigger)], entry.Problem,
-                _automations.NextDue(entry.Id), _automations.IsRunning(entry.Id), runs.Count > 0 ? Run(runs[0]) : null,
+                _automations.NextDue(entry.Id), running, lastRun,
                 _automations.Repository(entry.Id), definition.Enabled ? _automations.WatchProblem(entry.Id) : null, _automations.IsAllowed(entry))
             {
                 Script = definition.Script,
                 ScriptArguments = definition.ScriptArguments,
                 Options = SessionOptionsChoice.Of(definition.SessionOptions),
+                RunsOn = definition.RunsOn,
+                Placement = placed,
             };
         }).ToArray();
+        IEnumerable<AutomationRunItem> recent = _automations.Runs(null, RecentRuns).Select(Run);
+        if (remoteRuns.Count > 0) recent = recent.Concat(remoteRuns).OrderByDescending(static run => run.StartedAt).Take(RecentRuns);
         return new(status, _automations.Paused, snapshot.Scanned, items,
             [.. snapshot.Faults.Select(static fault => new AutomationFaultItem(fault.Source.FilePath, fault.Source.ProjectId, fault.Key, fault.Message))],
-            [.. _automations.Runs(null, RecentRuns).Select(Run)],
+            [.. recent],
             [.. _automations.Upcoming(TimeSpan.FromHours(24), UpcomingSlots, MaximumUpcoming).Select(static time => new AutomationUpcomingItem(time.Id, time.At))]);
     }
 
@@ -307,6 +339,7 @@ internal sealed class AutomationsService
             PermissionMode = Blank(input.PermissionMode),
             ReviewBeforeCommit = input.ReviewBeforeCommit,
             Sandbox = Blank(input.Sandbox),
+            RunsOn = Blank(input.RunsOn),
             SessionOptions = SessionOptionsChoice.Record(input.Options),
             CatchUp = input.CatchUp,
             Triggers = triggers,
@@ -401,7 +434,21 @@ internal sealed record AutomationItem(string Id, string Name, bool Enabled, stri
 
     /// <summary>The options of its sessions, such as whether they can start sessions of their own.</summary>
     public SessionOptionsChoice? Options { get; init; }
+
+    /// <summary>The paired machine it runs on (its device id); null when it runs on this computer.</summary>
+    public string? RunsOn { get; init; }
+
+    /// <summary>Where it stands on the machine it runs on; null when it runs on this computer.</summary>
+    public AutomationPlacementItem? Placement { get; init; }
 }
+
+/// <summary>Where an automation that runs on a paired machine stands there.</summary>
+/// <param name="MachineId">The machine.</param>
+/// <param name="MachineName">Its name; null when no paired machine has that id.</param>
+/// <param name="State"><c>copied</c>, <c>pending</c> (copied once the machine answers) or <c>failed</c> (the machine refused it, see the message).</param>
+/// <param name="Message">Why it is pending or failed.</param>
+/// <param name="CopiedAt">When the machine last took it.</param>
+internal sealed record AutomationPlacementItem(string MachineId, string? MachineName, string State, string? Message, DateTimeOffset? CopiedAt);
 
 /// <summary>Asks for the scripts an automation can run.</summary>
 /// <param name="ProjectId">The project it runs in, whose scripts come first; null for a chat.</param>
@@ -422,7 +469,11 @@ internal sealed record AutomationScriptParameter(string Name, string? Type, bool
 /// <param name="Trigger"><c>manual</c>, or the type of the trigger that started it.</param>
 /// <param name="Status"><c>running</c>, <c>completed</c>, <c>failed</c>, <c>cancelled</c>, <c>interrupted</c> or <c>skipped</c>.</param>
 internal sealed record AutomationRunItem(string Id, string AutomationId, string? Name, string? SessionId, string? ProjectId, DateTimeOffset StartedAt,
-    DateTimeOffset? EndedAt, string Trigger, string? Detail, string Status, string? Message);
+    DateTimeOffset? EndedAt, string Trigger, string? Detail, string Status, string? Message)
+{
+    /// <summary>The paired machine the run ran on, whose session it is; null for this computer.</summary>
+    public string? MachineId { get; init; }
+}
 
 internal sealed record AutomationFaultItem(string File, string? ProjectId, string Key, string Message);
 
@@ -453,6 +504,9 @@ internal sealed record AutomationInput(string? Id, string Name, bool Enabled, st
 
     /// <summary>The options of its sessions; null for the defaults, every option on.</summary>
     public SessionOptionsChoice? Options { get; init; }
+
+    /// <summary>The paired machine it runs on (its device id); null to run it on this computer. Only for an automation of the user.</summary>
+    public string? RunsOn { get; init; }
 }
 
 /// <param name="StoreProjectId">The project whose configuration holds it; null for the configuration of the user.</param>
