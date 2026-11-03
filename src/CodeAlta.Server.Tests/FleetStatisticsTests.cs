@@ -139,7 +139,7 @@ public sealed class FleetStatisticsTests
         Volatile.Write(ref linked, ["work"]);
         sessions.Set(Session("s-a", "work", isPrivate: true), Session("s-b", "home"));
         await WaitForTotalsAsync(fleet, static measures => measures.InputTokens == 0);
-        // The server answers the withdrawal before the connector raises its event: wait for the event too.
+        // The server shows the withdrawal before its answer reaches the connector, which then tells it.
         await WaitForAsync(() => Task.FromResult(withdrawn.Count >= 2));
         CollectionAssert.AreEqual(new[] { "s-a", "s-b" }, withdrawn.ToArray());
         var audit = await fleet.Server.GetService<ICoordinatorStore>().ListAuditAsync(0, 500);

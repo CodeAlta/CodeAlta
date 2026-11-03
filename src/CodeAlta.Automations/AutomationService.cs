@@ -487,9 +487,20 @@ internal sealed partial class AutomationService : IAsyncDisposable
 
     /// <summary>Runs an automation now, whatever its triggers, and whether or not it is enabled.</summary>
     /// <returns>The run once its session exists or it failed to start; null when there is no such automation.</returns>
-    internal async Task<AutomationRun?> RunAsync(string id, CancellationToken cancellationToken)
+    internal Task<AutomationRun?> RunAsync(string id, CancellationToken cancellationToken) => RunAsync(id, null, cancellationToken);
+
+    /// <summary>
+    /// Runs an automation by hand with the id its run takes, given by who asked it: a run with that id that exists already
+    /// is answered as it is, never started again.
+    /// </summary>
+    /// <param name="id">The automation.</param>
+    /// <param name="runId">The id of the run; null for a new one.</param>
+    /// <param name="cancellationToken">Cancels the start.</param>
+    /// <returns>The run; null for an automation that does not exist.</returns>
+    internal async Task<AutomationRun?> RunAsync(string id, string? runId, CancellationToken cancellationToken)
     {
         if (Snapshot.Find(id) is not { } entry) return null;
+        if (runId is not null && Runs(id, AutomationStateStore.MaximumRuns).FirstOrDefault(run => run.Id == runId) is { } known) return known;
         if (entry.Definition.RunsOn is not null)
         {
             // It runs on the machine it is placed on, which records the run.
@@ -505,7 +516,7 @@ internal sealed partial class AutomationService : IAsyncDisposable
             return refused;
         }
 
-        return await BeginAsync(entry, "manual", null, entry.Definition.Prompt, cancellationToken).ConfigureAwait(false);
+        return await BeginAsync(entry, "manual", null, entry.Definition.Prompt, cancellationToken, runId).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -775,7 +786,11 @@ internal sealed partial class AutomationService : IAsyncDisposable
             waiting |= HoldsCommand(automationId);
         }
 
-        var ended = _state.Update(runId, run => run with { Status = outcome.Status, Message = outcome.Message, EndedAt = _time.GetUtcNow(), SessionId = sessionId ?? run.SessionId });
+        var ended = _state.Update(runId, run => run with
+        {
+            Status = outcome.Status, Message = outcome.Message, EndedAt = _time.GetUtcNow(), SessionId = sessionId ?? run.SessionId,
+            InputTokens = outcome.Usage?.InputTokens, OutputTokens = outcome.Usage?.OutputTokens, Cost = outcome.Usage?.Cost, CostUnit = outcome.Usage?.CostUnit,
+        });
         _claims?.Release(runId, _time.GetUtcNow());
         if (waiting) Wake();
         Changed?.Invoke();

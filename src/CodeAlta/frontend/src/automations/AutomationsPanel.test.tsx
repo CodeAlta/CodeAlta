@@ -151,6 +151,13 @@ test("the recent runs name their automation and open their session while it exis
   assert.match(render({ items: [item("a")] }), /Recent runs<\/h4><p class="automation-empty">No run yet\.<\/p>/);
 });
 
+test("a run of another machine opens its session from the run, also before this window lists it", () => {
+  const html = render({ items: [item("a")], runs: [run("r1", { sessionId: "remote-s", machineId: "mini" }), run("r2", { sessionId: "gone" })] });
+  const [remote, local] = html.split("<li data-tone=").slice(1);
+  assert.match(remote, /^"ok"><button type="button" class="automation-run" title="Open the session">/);
+  assert.match(local, /^"ok"><div class="automation-run">/, "a session of this computer that no longer exists does not open");
+});
+
 test("what could not be read as an automation is listed with its file", () => {
   const html = render({ faults: [{ file: "/p/.alta/config.toml", projectId: "p", key: "broken", message: "An automation has a name." }, { file: "/home/config.toml", projectId: null, key: "", message: "The configuration file could not be read." }] });
   assert.match(html, /Not read as automations[\s\S]*<code>broken<\/code><span>An automation has a name\.<\/span><small title="\/p\/\.alta\/config\.toml">/);

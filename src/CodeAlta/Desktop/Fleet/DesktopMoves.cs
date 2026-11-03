@@ -62,7 +62,7 @@ internal sealed class DesktopMoves
         _fleet = fleet;
         MachineName = machineName;
         _settingsPath = Path.Combine(fleetRoot, SettingsFileName);
-        var moves = new SessionMoveService(host, machineName);
+        var moves = new SessionMoveService(host, machineName) { DeviceIdSource = () => fleet.DeviceId };
         Receiver = new FleetMoveReceiver(host, moves, FleetMoveReceiver.DefaultCloneRoot);
         Sender = new FleetMoveSender(host, moves);
         _receivesMoves = ReadSetting();

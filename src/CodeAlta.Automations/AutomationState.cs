@@ -48,6 +48,18 @@ internal sealed record AutomationRun(string Id, string AutomationId, DateTimeOff
 
     /// <summary>When the run ended.</summary>
     public DateTimeOffset? EndedAt { get; init; }
+
+    /// <summary>The input tokens of the session of the run, once it ended; null when unknown.</summary>
+    public long? InputTokens { get; init; }
+
+    /// <summary>The output tokens of the session of the run, once it ended; null when unknown.</summary>
+    public long? OutputTokens { get; init; }
+
+    /// <summary>The cost the provider reported for the session of the run, in <see cref="CostUnit"/>; null when none was.</summary>
+    public double? Cost { get; init; }
+
+    /// <summary>The unit of <see cref="Cost"/>: <c>usd</c>, or the one the provider named.</summary>
+    public string? CostUnit { get; init; }
 }
 
 /// <summary>What an event trigger has already seen of a repository.</summary>
@@ -145,6 +157,21 @@ internal sealed class AutomationStateStore
         {
             if (_state.AliveAt != _aliveSavedAt) Save();
         }
+    }
+
+    /// <summary>
+    /// Reads the runs kept in a file without opening it for an instance: a run in progress stays as the instance that runs
+    /// it wrote it, and nothing is written.
+    /// </summary>
+    /// <param name="path">The file.</param>
+    /// <param name="automationId">The automation whose runs are asked; null for all.</param>
+    /// <param name="limit">The most runs returned.</param>
+    /// <returns>The runs, newest first; none when the file is missing or cannot be read.</returns>
+    internal static IReadOnlyList<AutomationRun> ReadRuns(string path, string? automationId, int limit)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(path);
+        var runs = Load(path, out _)?.Runs ?? [];
+        return [.. Enumerable.Reverse(runs).Where(run => automationId is null || run.AutomationId == automationId).Take(Math.Max(0, limit))];
     }
 
     /// <summary>The runs, newest first.</summary>

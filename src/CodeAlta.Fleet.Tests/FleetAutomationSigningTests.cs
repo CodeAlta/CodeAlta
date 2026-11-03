@@ -45,6 +45,35 @@ public sealed class FleetAutomationSigningTests
     }
 
     [TestMethod]
+    public void ARunRequestVerifiesForItsMachine_SignedByAControllerOfTheOwner_WithinMinutes()
+    {
+        using var devices = new Devices();
+        var list = devices.List();
+        var now = new DateTimeOffset(2026, 11, 3, 9, 0, 0, TimeSpan.Zero);
+        FleetSignedAutomationRunRequest Sign(DeviceIdentity signer, string machine, DateTimeOffset time)
+            => FleetAutomationSigning.SignRun(signer, new FleetAutomationRunRequest(FleetAutomationRunRequest.CurrentVersion, "org", "daily-1", machine, "run-1", string.Empty,
+                string.Empty, time));
+        string Refused(FleetSignedAutomationRunRequest? signed, FleetDeviceListState? other = null, string machine = "")
+        {
+            Assert.IsFalse(FleetAutomationRunRequestDocuments.TryVerify(signed, other ?? list, "org", machine.Length > 0 ? machine : devices.Node.DeviceId, now, out _, out var reason));
+            return reason;
+        }
+
+        var signed = Sign(devices.Laptop, devices.Node.DeviceId, now.AddMinutes(-2));
+        Assert.IsTrue(FleetAutomationRunRequestDocuments.TryVerify(signed, list, "org", devices.Node.DeviceId, now, out var request, out var why), why);
+        Assert.AreEqual(("daily-1", "run-1", devices.Laptop.DeviceId), (request.AutomationId, request.RunId, request.SignerDeviceId));
+
+        StringAssert.Contains(Refused(signed, machine: devices.Other.DeviceId), "another machine");
+        StringAssert.Contains(Refused(Sign(devices.Laptop, devices.Node.DeviceId, now.AddHours(-1))), "too long ago");
+        StringAssert.Contains(Refused(Sign(devices.Laptop, devices.Node.DeviceId, now.AddHours(1))), "too long ago");
+        StringAssert.Contains(Refused(Sign(devices.Stranger, devices.Node.DeviceId, now)), "not signed by a controller device");
+        StringAssert.Contains(Refused(Sign(devices.Other, devices.Node.DeviceId, now)), "not signed by a controller device");
+        StringAssert.Contains(Refused(Sign(devices.Tablet, devices.Node.DeviceId, now), devices.List(removeTablet: true)), "not signed by a controller device");
+        StringAssert.Contains(Refused(signed with { Payload = signed.Payload.Replace("run-1", "run-2", StringComparison.Ordinal) }), "signature does not verify");
+        StringAssert.Contains(Refused(null), "does not read");
+    }
+
+    [TestMethod]
     public void OnADirectChannelTheVersionVerifiesWithTheKeyItNames()
     {
         using var devices = new Devices();
