@@ -66,6 +66,20 @@ public sealed class UpdateCampaignTests
     }
 
     [TestMethod]
+    public async Task AFleetOnAPrereleaseUpdatesToTheLatestPrereleaseByDefault()
+    {
+        using var root = new TempDirectory();
+        var feed = WriteFeed(root, "4.0.0-alpha.901", "4.0.0-alpha.902");
+        var server = new FakeServerUpdate("4.0.0-alpha.901");
+        await using var fixture = await ServerFixture.StartAsync(updateStatus: server.Status, configure: options => WithUpdates(options, server));
+        await using var fleet = await TestFleet.StartAsync(fixture, root);
+
+        // As each machine's own update: one that runs a prerelease follows the prereleases.
+        var campaign = await fleet.Desktop.StartUpdateAsync(new FleetUpdateCampaignChange(Feed: feed));
+        Assert.AreEqual("4.0.0-alpha.902", campaign.TargetVersion);
+    }
+
+    [TestMethod]
     public async Task ACampaignIsCancelledBeforeTheServersStepAndANewOneFollowsIt()
     {
         using var root = new TempDirectory();

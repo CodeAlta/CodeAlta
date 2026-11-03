@@ -463,7 +463,10 @@ public sealed class FleetServerClient : IDisposable
         }
         else
         {
-            version = (await UpdateReleases.ListAsync(feed, UpdateReleases.FleetProducts, change.Prerelease, cancellationToken).ConfigureAwait(false)).FirstOrDefault()
+            // As the self-update of each machine: a fleet whose server runs a prerelease follows the prereleases.
+            var running = (await GetUpdatesAsync(cancellationToken).ConfigureAwait(false)).Server.Running;
+            var prerelease = change.Prerelease || UpdateVersion.TryParse(running, out var current) && current.IsPrerelease;
+            version = (await UpdateReleases.ListAsync(feed, UpdateReleases.FleetProducts, prerelease, cancellationToken).ConfigureAwait(false)).FirstOrDefault()
                 ?? throw new UpdateException(UpdateErrorCodes.NotFound, $"{feed.Source} lists no version of both CodeAlta.Node and CodeAlta.Server.");
         }
 
