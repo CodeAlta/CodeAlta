@@ -73,7 +73,7 @@ internal sealed partial class BuiltInAltaCommandContributor
             group,
             "The fleet is this computer and the machines it is paired with or reaches through a CodeAlta Server. Every command works with the access of the person of this computer, never more.",
             "Start a session on a machine with `alta session create --machine <name> --project <project-id> --stdin`: it is a child of the calling session, with its sandbox and its permission mode at most; its answer comes back to you. Prompt it with `alta session send <session-id> --stdin`, read it with `alta session report <session-id>`.",
-            "Rules: devices, permissions, grants and policies are read only for agents (a person changes them in Settings > Fleet); an agent places a disabled automation only, and a person enables it; a person starts an update campaign. The fleet is never a way out of a sandbox: a sandboxed session reads the fleet, and every command that starts or changes work elsewhere is refused to it.",
+            "Rules: devices, permissions, grants and policies are read only for agents (a person changes them in Settings > Fleet); an agent places a disabled automation only, and a person enables it; a person starts an update campaign. The fleet is never a way out of a sandbox: a sandboxed session reads the fleet, and every command that starts or changes work elsewhere is refused to it; a sandbox whose profile does not allow the fleet (`fleet = \"never\"`, as `strict`) refuses every command of it (`sandbox.fleetDenied`).",
             "Examples:",
             "  `alta fleet machine list --ready`",
             "  `alta fleet machine show mac-mini`",
@@ -97,7 +97,7 @@ internal sealed partial class BuiltInAltaCommandContributor
         command.Add("label=", "Only the machines with this label; repeat it for several.", value => { if (value is not null) labels.Add(value); });
         command.Add("capability=", "Only the machines that offer this capability, such as `sandbox` or `moves`; repeat it for several.", value => { if (value is not null) capabilities.Add(value); });
         command.Add("provider=", "Only the machines with a ready provider of this name.", value => provider = value);
-        command.Add((_, _) => ValueTask.FromResult(HandleFleetMachineList(context, online, ready, labels, capabilities, provider)));
+        command.Add(async (_, _) => await WithFleetFloorAsync(context, () => ValueTask.FromResult(HandleFleetMachineList(context, online, ready, labels, capabilities, provider))).ConfigureAwait(false));
         AddHelpText(
             command,
             "`readiness` says whether a machine takes a session now: `ready`, `not_allowed` (this computer may not start sessions there), `no_provider`, `updating`, or its state when it is not online. `working` is how many of its sessions work now, its load.",
@@ -111,7 +111,7 @@ internal sealed partial class BuiltInAltaCommandContributor
         string? name = null;
         var command = Leaf("show", "Show one machine now: its state, its projects, its ready providers and models, and where its update stands.");
         command.Add("<machine>", "The machine: its name or its id, as `alta fleet machine list` shows them.", value => name = value);
-        command.Add(async (_, _) => await HandleFleetMachineShowAsync(context, name).ConfigureAwait(false));
+        command.Add(async (_, _) => await WithFleetFloorAsync(context, async () => await HandleFleetMachineShowAsync(context, name).ConfigureAwait(false)).ConfigureAwait(false));
         AddHelpText(
             command,
             "Asks the machine itself. The ids of its projects and the keys of its providers are what `alta session create --machine <name> --project <project-id> --model-ref <provider>:<model>` names.",
@@ -126,7 +126,7 @@ internal sealed partial class BuiltInAltaCommandContributor
         var command = Leaf("sessions", "List the sessions a machine lists, the latest activity first.");
         command.Add("<machine>", "The machine: its name or its id.", value => name = value);
         command.Add("limit=", $"The most sessions to list, up to {MaximumFleetSessions}. Defaults to {DefaultFleetSessions}.", value => limit = value);
-        command.Add(async (_, _) => await HandleFleetMachineSessionsAsync(context, name, limit).ConfigureAwait(false));
+        command.Add(async (_, _) => await WithFleetFloorAsync(context, async () => await HandleFleetMachineSessionsAsync(context, name, limit).ConfigureAwait(false)).ConfigureAwait(false));
         AddHelpText(
             command,
             "Read one with `alta session report <session-id>`; prompt one of your children with `alta session send <session-id> --stdin`: the machine decides what it accepts.",
@@ -139,7 +139,7 @@ internal sealed partial class BuiltInAltaCommandContributor
         string? name = null;
         var command = Leaf("devices", "List the devices paired with a machine this computer manages, and what each may do there. Read only.");
         command.Add("<machine>", "The machine: its name or its id.", value => name = value);
-        command.Add(async (_, _) => await HandleFleetMachineDevicesAsync(context, name).ConfigureAwait(false));
+        command.Add(async (_, _) => await WithFleetFloorAsync(context, async () => await HandleFleetMachineDevicesAsync(context, name).ConfigureAwait(false)).ConfigureAwait(false));
         AddHelpText(
             command,
             "Only a machine that gives this computer the `manage` permission answers (`fleet.notAllowed` otherwise). An agent never changes what a device may do: a person does it in the page of the machine (Settings > Fleet > Machines).",
@@ -156,8 +156,8 @@ internal sealed partial class BuiltInAltaCommandContributor
         command.Add("<session-id>?", "CodeAlta session id. Defaults to the calling agent session when omitted.", value => sessionId = value);
         command.Add("machine=", "The machine: its name or its id; this computer's name brings a session of a machine here.", value => machine = value);
         command.Add("clone", "Let the machine clone the repository of the session when it has no project of it.", value => clone = value is not null);
-        command.Add(async (_, _) => await HandleSessionMoveAsync(context, FirstNonEmpty(sessionId, context.Caller.SourceSessionId), machine, clone, list: false,
-            commandPath: "alta fleet move start").ConfigureAwait(false));
+        command.Add(async (_, _) => await WithFleetFloorAsync(context, async () => await HandleSessionMoveAsync(context, FirstNonEmpty(sessionId, context.Caller.SourceSessionId), machine, clone, list: false,
+            commandPath: "alta fleet move start").ConfigureAwait(false)).ConfigureAwait(false));
         AddHelpText(
             command,
             "Look first with `alta fleet move status <session-id> --machine <name>`. The calling session moves when its turn ends (`scheduled`); another session moves at once, while it is idle.",
@@ -173,7 +173,7 @@ internal sealed partial class BuiltInAltaCommandContributor
         var command = Leaf("status", "Say where a session runs and, with --machine, what a move of it there would meet.");
         command.Add("<session-id>?", "CodeAlta session id. Defaults to the calling agent session when omitted.", value => sessionId = value);
         command.Add("machine=", "The machine it would move to: its name or its id.", value => machine = value);
-        command.Add(async (_, _) => await HandleFleetMoveStatusAsync(context, FirstNonEmpty(sessionId, context.Caller.SourceSessionId), machine).ConfigureAwait(false));
+        command.Add(async (_, _) => await WithFleetFloorAsync(context, async () => await HandleFleetMoveStatusAsync(context, FirstNonEmpty(sessionId, context.Caller.SourceSessionId), machine).ConfigureAwait(false)).ConfigureAwait(false));
         AddHelpText(
             command,
             "`busy` says what keeps the session from moving now; `targetStatus` and `targetCode` say whether the machine takes it (`project_missing`: add --clone to the move when `canClone` is true); `jobs` and `staysBehind` do not move.",
@@ -184,7 +184,7 @@ internal sealed partial class BuiltInAltaCommandContributor
     private static Command CreateFleetAutomationListCommand(AltaCommandContext context)
     {
         var command = Leaf("list", "List the automations with where each runs: this computer, or a machine and where its copy stands there.");
-        command.Add((_, _) => ValueTask.FromResult(HandleFleetAutomationList(context)));
+        command.Add(async (_, _) => await WithFleetFloorAsync(context, () => ValueTask.FromResult(HandleFleetAutomationList(context))).ConfigureAwait(false));
         AddHelpText(command, "`state` is `here`, `copied` (the machine runs it), `pending` (it is copied once the machine answers) or `failed` (`message` says why).");
         return command;
     }
@@ -198,7 +198,7 @@ internal sealed partial class BuiltInAltaCommandContributor
         command.Add("<automation-id>", "Automation id from `alta fleet automation list`.", value => id = value);
         command.Add("machine=", "The machine it runs on: its name or its id.", value => machine = value);
         command.Add("here", "Run it on this computer again.", value => here = value is not null);
-        command.Add(async (_, _) => await HandleFleetAutomationPlaceAsync(context, id, machine, here).ConfigureAwait(false));
+        command.Add(async (_, _) => await WithFleetFloorAsync(context, async () => await HandleFleetAutomationPlaceAsync(context, id, machine, here).ConfigureAwait(false)).ConfigureAwait(false));
         AddHelpText(
             command,
             "The automation runs there by its triggers while this computer is closed. What would run unattended is enabled by a person: an agent places a disabled automation only (`fleet.needsPerson` otherwise), and the machine must let this computer automate.",
@@ -211,7 +211,7 @@ internal sealed partial class BuiltInAltaCommandContributor
         string? id = null;
         var command = AltaSubSessionsGate.Leaf(context, "run", "Run an automation now where it runs, whatever its triggers: the same run as `alta automation run`.");
         command.Add("<automation-id>", "Automation id from `alta fleet automation list`.", value => id = value);
-        command.Add(async (_, _) => await HandleAutomationRunAsync(context, id).ConfigureAwait(false));
+        command.Add(async (_, _) => await WithFleetFloorAsync(context, async () => await HandleAutomationRunAsync(context, id).ConfigureAwait(false)).ConfigureAwait(false));
         AddHelpText(command, "An automation placed on a machine runs there. Follow it with `alta fleet automation runs <automation-id>`.");
         return command;
     }
@@ -223,7 +223,7 @@ internal sealed partial class BuiltInAltaCommandContributor
         var command = Leaf("runs", "List the runs of an automation, newest first, those its machine reported included.");
         command.Add("<automation-id>?", "Automation id. Without it, the runs of all the automations.", value => id = value);
         command.Add("limit=", $"The most runs to list, up to {MaximumAutomationRuns}. Defaults to 20.", value => limit = value);
-        command.Add((_, _) => ValueTask.FromResult(HandleFleetAutomationRuns(context, id, limit)));
+        command.Add(async (_, _) => await WithFleetFloorAsync(context, () => ValueTask.FromResult(HandleFleetAutomationRuns(context, id, limit))).ConfigureAwait(false));
         return command;
     }
 
@@ -242,7 +242,7 @@ internal sealed partial class BuiltInAltaCommandContributor
         command.Add("time-zone=", "The time zone of the days, such as Europe/Paris. Defaults to UTC.", value => timeZone = value);
         command.Add("group-by=", "Up to three of machine, project, provider, model, day, month, separated by commas.", value => groupBy = value);
         command.Add("server=", "The server: the id of its link or its address. Defaults to the one online.", value => server = value);
-        command.Add(async (_, _) => await HandleFleetStatisticsAsync(context, from, to, days, timeZone, groupBy, server).ConfigureAwait(false));
+        command.Add(async (_, _) => await WithFleetFloorAsync(context, async () => await HandleFleetStatisticsAsync(context, from, to, days, timeZone, groupBy, server).ConfigureAwait(false)).ConfigureAwait(false));
         AddHelpText(
             command,
             "The record `alta.fleet.statistics` has the totals; each `alta.fleet.statistics.group` the sums of one group, the largest first. A computer linked to no server has none (`fleet.noServer`).",
@@ -255,7 +255,7 @@ internal sealed partial class BuiltInAltaCommandContributor
         string? server = null;
         var command = Leaf("status", "Read the versions of the server and of its machines, the update policy and the recent campaigns.");
         command.Add("server=", "The server: the id of its link or its address. Defaults to the one online.", value => server = value);
-        command.Add(async (_, _) => await HandleFleetUpdateStatusAsync(context, server).ConfigureAwait(false));
+        command.Add(async (_, _) => await WithFleetFloorAsync(context, async () => await HandleFleetUpdateStatusAsync(context, server).ConfigureAwait(false)).ConfigureAwait(false));
         AddHelpText(command, "The version of one paired machine and where its own update stands is in `alta fleet machine show <machine>`.");
         return command;
     }
@@ -271,7 +271,7 @@ internal sealed partial class BuiltInAltaCommandContributor
     private static Command CreateFleetHealthCommand(AltaCommandContext context)
     {
         var command = Leaf("health", "Say how the fleet stands: each server connection, and each machine that does not take sessions now, with why.");
-        command.Add((_, _) => ValueTask.FromResult(HandleFleetHealth(context)));
+        command.Add(async (_, _) => await WithFleetFloorAsync(context, () => ValueTask.FromResult(HandleFleetHealth(context))).ConfigureAwait(false));
         AddHelpText(command, "The summary `alta.fleet.health` counts the servers online and the machines ready. A machine that is offline or unauthorized needs its owner; one `not_allowed` needs the `start` permission from its owner.");
         return command;
     }
@@ -281,7 +281,7 @@ internal sealed partial class BuiltInAltaCommandContributor
         string? machine = null;
         var command = Leaf("list", "List the secrets and variables of this computer, or of a machine this computer manages, by name: never a value.");
         command.Add("<machine>?", "The machine: its name or its id. Defaults to this computer.", value => machine = value);
-        command.Add(async (_, _) => await HandleFleetSecretListAsync(context, machine).ConfigureAwait(false));
+        command.Add(async (_, _) => await WithFleetFloorAsync(context, async () => await HandleFleetSecretListAsync(context, machine).ConfigureAwait(false)).ConfigureAwait(false));
         AddHelpText(
             command,
             "A session on a machine names a secret of that machine in its configuration as `${secret:NAME}` or `${var:NAME}`: check that the machine has it before you start work there. A machine answers only when it gives this computer the `manage` permission.",
@@ -690,6 +690,14 @@ internal sealed partial class BuiltInAltaCommandContributor
         });
         return AltaExitCodes.Success;
     }
+
+    // The fleet is never a way out of a sandbox (rule 8): a session whose sandbox profile does not allow the fleet, or cannot
+    // be used, runs no command of it, the reads included (SessionRuntimeService.GetFleetFloorAsync). A host without a
+    // runtime has no sandboxed session.
+    private static async ValueTask<int> WithFleetFloorAsync(AltaCommandContext context, Func<ValueTask<int>> run)
+        => context.Services.Get<SessionRuntimeService>() is { } runtime && await RefuseFleetToCallerAsync(context, runtime).ConfigureAwait(false) is { } refused
+            ? refused
+            : await run().ConfigureAwait(false);
 
     // Moving another session is driving it: an agent moves only what asks the user at least as much as it does (a session
     // of this computer), or a child of its own on another machine, so that the fleet gives it no session it could not drive here.

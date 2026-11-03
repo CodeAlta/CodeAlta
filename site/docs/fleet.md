@@ -408,7 +408,7 @@ An agent works with your access and never more:
 
 - It reads devices, permissions and grants, and does not change them: you do, on the page of the machine.
 - It creates automations disabled, enables none, and places a disabled one only: you enable them in the **Automations** tab. You start an update campaign.
-- Its sandbox and permission mode go with what it starts or drives on another machine. A sandboxed session reads the fleet, and starts, moves or places nothing elsewhere.
+- Its sandbox and permission mode go with what it starts or drives on another machine. A sandboxed session reads the fleet, and starts, moves or places nothing elsewhere; one whose sandbox does not allow the fleet does not read it either.
 
 ## Security
 

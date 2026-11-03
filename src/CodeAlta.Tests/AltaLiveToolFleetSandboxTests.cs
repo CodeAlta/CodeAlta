@@ -91,6 +91,34 @@ public sealed partial class AltaLiveToolTests
     }
 
     [TestMethod]
+    public async Task AltaFleet_IsRefusedWholeToAProfileWithoutTheFleet_AndReadOnlyToOneWithIt()
+    {
+        // strict does not allow the fleet: not even its reads, which reach other machines.
+        await using (var strict = await FleetSandboxFixture.CreateAsync("[sandbox]\nall_sessions = \"strict\"\n", new FakeFleet()))
+        {
+            foreach (var arguments in new[] { new[] { "fleet", "machine", "list" }, ["fleet", "machine", "show", "mac-mini"], ["fleet", "health"], ["fleet", "statistics"] })
+            {
+                var refused = await strict.Dispatcher.InvokeAsync(arguments, caller: strict.Agent);
+                Assert.AreEqual(AltaExitCodes.PolicyDenied, refused.ExitCode, string.Join(' ', arguments) + ": " + refused.Transcript);
+                StringAssert.Contains(refused.Transcript, "sandbox.fleetDenied", string.Join(' ', arguments));
+            }
+        }
+
+        // workspace allows it: the reads run, what starts or changes work elsewhere is still refused at the host.
+        await using var workspace = await FleetSandboxFixture.CreateAsync("[sandbox]\nall_sessions = \"workspace\"\n", new FakeFleet());
+        var list = await workspace.Dispatcher.InvokeAsync(["fleet", "machine", "list"], caller: workspace.Agent);
+        Assert.AreEqual(AltaExitCodes.Success, list.ExitCode, list.Transcript);
+        Assert.AreEqual(AltaExitCodes.Success, (await workspace.Dispatcher.InvokeAsync(["fleet", "health"], caller: workspace.Agent)).ExitCode);
+        var place = await workspace.Dispatcher.InvokeAsync(["fleet", "automation", "place", "a-weekly", "--here"], caller: workspace.Agent);
+        Assert.AreEqual(AltaExitCodes.PolicyDenied, place.ExitCode, place.Transcript);
+        Assert.IsFalse(place.Transcript.Contains("sandbox.fleetDenied", StringComparison.Ordinal), "the gate of the sandbox refuses it first");
+
+        // Without a sandbox, as before.
+        await using var free = await FleetSandboxFixture.CreateAsync(null, new FakeFleet());
+        Assert.AreEqual(AltaExitCodes.Success, (await free.Dispatcher.InvokeAsync(["fleet", "machine", "show", "mac-mini"], caller: free.Agent)).ExitCode);
+    }
+
+    [TestMethod]
     public void ASandboxedSession_NeverMovesASession_NorPlacesOrRunsAnAutomation()
     {
         // These run here, outside its sandbox, and start work on a machine that its sandbox does not follow there.
@@ -120,7 +148,7 @@ public sealed partial class AltaLiveToolTests
 
         public AltaCallerIdentity Agent { get; }
 
-        public static async Task<FleetSandboxFixture> CreateAsync(string? config)
+        public static async Task<FleetSandboxFixture> CreateAsync(string? config, IAltaFleet? fleet = null)
         {
             var root = TempDirectory.Create();
             var options = new CatalogOptions { GlobalRoot = root.Path };
@@ -136,7 +164,9 @@ public sealed partial class AltaLiveToolTests
             }, "Parent");
             var remote = new LineageRemoteChildren(parent.SessionId);
             runtime.RemoteChildren = remote;
-            var dispatcher = CreateDispatcher(new AltaServiceCollection().Add(options).Add(runtime).Add(new SessionViewCatalog(options)).Add(new ProjectCatalog(options)));
+            var services = new AltaServiceCollection().Add(options).Add(runtime).Add(new SessionViewCatalog(options)).Add(new ProjectCatalog(options));
+            if (fleet is not null) services.Add(fleet);
+            var dispatcher = CreateDispatcher(services);
             return new FleetSandboxFixture(root, runtime, dispatcher, remote, new AltaCallerIdentity { Kind = "agent", SourceSessionId = parent.SessionId });
         }
 
