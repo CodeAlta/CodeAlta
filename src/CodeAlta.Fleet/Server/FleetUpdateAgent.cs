@@ -77,6 +77,10 @@ public sealed class FleetUpdateAgent : IAsyncDisposable
     // Why the checkpoint kept in StatePath does not read; while it does not, the node takes no update of the fleet and
     // writes nothing over the file, which the owner fixes or deletes.
     private string? _unreadable;
+    // Whether the state in memory is ahead of the checkpoint (a write failed): a cancellation or a policy holds in memory,
+    // but until a write succeeds (retried at each look) the node acknowledges nothing, takes no instruction and runs no
+    // work of the fleet, since a restart would bring back what the file holds.
+    private bool _unsaved;
     private bool _loaded;
     private Task _loop = Task.CompletedTask;
     private Task? _applying;
@@ -116,6 +120,9 @@ public sealed class FleetUpdateAgent : IAsyncDisposable
     {
         lock (_gate)
         {
+            // What is not kept yet is not said: a cancellation reported here would be acknowledged, and a restart would
+            // bring the campaign back. A refusal is no campaign of this node: it is said.
+            if (!Persisted()) return _state.Links.GetValueOrDefault(linkId)?.Refusal;
             // The campaign that runs first; otherwise the last word of this node to that server: how its last campaign
             // ended (kept once another fleet's campaign took over), or the last instruction it refused.
             var active = _state.LinkId == linkId ? ReportOf(_state) : null;
@@ -202,15 +209,15 @@ public sealed class FleetUpdateAgent : IAsyncDisposable
         {
             // Without the checkpoint, a replayed manifest would pass again: nothing is taken until it reads.
             conflict = Readable() ? null : _unreadable;
-            // The same campaign sent again, on a reconnection or as a replay: the server reads where it stands, and
-            // nothing starts again, whatever was refused meanwhile.
+            // The same campaign sent again, on a reconnection or as a replay: the server reads where it stands (once it is
+            // kept), and nothing starts again, whatever was refused meanwhile.
             if (conflict is null && ReceiptOf(linkId, instruction.CampaignId) is { } receipt)
             {
-                _ = SendAsync(linkId, receipt);
+                if (Persisted()) _ = SendAsync(linkId, receipt);
                 return;
             }
 
-            conflict ??= OtherFleet(linkId);
+            conflict ??= CancelledBefore(linkId, instruction.CampaignId) ?? (Persisted() ? null : UnsavedReason) ?? OtherFleet(linkId);
         }
 
         if (conflict is not null)
@@ -295,10 +302,13 @@ public sealed class FleetUpdateAgent : IAsyncDisposable
         StopWork? replaced = null;
         lock (_gate)
         {
-            // A policy or a campaign that came meanwhile wins: the instruction is checked again against it by its next send.
+            // A policy, a campaign or a cancellation that came meanwhile wins: the instruction is checked again against it
+            // by its next send.
             conflict = !Readable() ? _unreadable
-                : !(_state.Links.GetValueOrDefault(linkId) ?? new FleetUpdateAgentLink()).SameAuthority(sequences) ? "the update policy or a campaign of the fleet changed meanwhile"
-                : OtherFleet(linkId);
+                : !Persisted() ? UnsavedReason
+                : CancelledBefore(linkId, instruction.CampaignId)
+                  ?? (!(_state.Links.GetValueOrDefault(linkId) ?? new FleetUpdateAgentLink()).SameAuthority(sequences) ? "the update policy or a campaign of the fleet changed meanwhile"
+                      : OtherFleet(linkId));
             if (conflict is null)
             {
                 var links = new Dictionary<string, FleetUpdateAgentLink>(_state.Links, StringComparer.Ordinal);
@@ -325,6 +335,7 @@ public sealed class FleetUpdateAgent : IAsyncDisposable
                 {
                     replaced = WorkOf(_state);
                     _state = next;
+                    _unsaved = false;
                 }
             }
             else
@@ -445,10 +456,10 @@ public sealed class FleetUpdateAgent : IAsyncDisposable
                 next = Stopped(next, stopped);
             }
 
-            // A newer policy only takes away: it applies in memory even when it cannot be kept on disk. What it allows
-            // runs only once an instruction it authorizes is kept, with it (AcceptAsync).
-            Save(next);
-            _state = next;
+            // A newer policy only takes away: it applies in memory even when it cannot be kept on disk, and until it is
+            // kept the node takes no instruction and runs no work of the fleet (the older policy would come back with a
+            // restart), and acknowledges no campaign it stopped.
+            Commit(next);
         }
 
         work?.Run(_options);
@@ -531,42 +542,75 @@ public sealed class FleetUpdateAgent : IAsyncDisposable
     /// <summary>
     /// Takes the cancellation of a campaign, and acknowledges it to its server with a final state: cancelled, or how the
     /// campaign ended before (sent again until the server hears it, a cancellation finds it done), or cancelled for a
-    /// campaign this node never took. Tests call it directly.
+    /// campaign this node never took. The cancellation is kept on disk before it is acknowledged, also for a campaign
+    /// this node has not taken (its instruction may come after it): that campaign never starts here. Tests call it directly.
     /// </summary>
     /// <param name="linkId">The link of the server.</param>
     /// <param name="cancel">The cancellation.</param>
-    /// <returns>The report sent to the server; null while the checkpoint does not read.</returns>
+    /// <returns>
+    /// The report sent to the server; null while the checkpoint does not read or the cancellation could not be kept (the
+    /// server sends it again: the work of the campaign stops meanwhile all the same).
+    /// </returns>
     internal FleetUpdateReport? CancelAndReport(string linkId, FleetUpdateCancel cancel)
     {
         ArgumentNullException.ThrowIfNull(linkId);
         ArgumentNullException.ThrowIfNull(cancel);
         FleetUpdateAgentState next;
-        StopWork? work;
+        StopWork? work = null;
+        FleetUpdateReport? done = null;
+        bool active, kept;
         lock (_gate)
         {
             if (!Readable()) return null;
-            if (_state.LinkId != linkId || _state.CampaignId != cancel.CampaignId || FleetUpdateMachineStates.IsTerminal(_state.State))
+            var links = new Dictionary<string, FleetUpdateAgentLink>(_state.Links, StringComparer.Ordinal);
+            var link = links.GetValueOrDefault(linkId) ?? new FleetUpdateAgentLink();
+            links[linkId] = link.WithCancelled(cancel.CampaignId);
+            next = _state with { Links = links };
+            active = _state.LinkId == linkId && _state.CampaignId == cancel.CampaignId && !FleetUpdateMachineStates.IsTerminal(_state.State);
+            if (active)
             {
-                var link = _state.Links.GetValueOrDefault(linkId);
-                var done = ReceiptOf(linkId, cancel.CampaignId) is { } receipt && FleetUpdateMachineStates.IsTerminal(receipt.State) ? receipt
-                    : link?.Refusal is { } refusal && refusal.CampaignId == cancel.CampaignId ? refusal
+                // Its work stops at once, even when the cancellation cannot be kept.
+                work = WorkOf(_state);
+                next = Stopped(next, null);
+                Commit(next);
+            }
+            else
+            {
+                done = ReceiptOf(linkId, cancel.CampaignId) is { } receipt && FleetUpdateMachineStates.IsTerminal(receipt.State) ? receipt
+                    : link.Refusal is { } refusal && refusal.CampaignId == cancel.CampaignId ? refusal
                     : new FleetUpdateReport(cancel.CampaignId, FleetUpdateMachineStates.Cancelled, "", _options.Running.ToString(), "This machine had not taken the campaign.",
                         _options.Time.GetUtcNow());
-                _ = SendAsync(linkId, done);
-                return done;
+                // Sent again until the server hears it: kept once.
+                if (!link.Cancelled.Contains(cancel.CampaignId, StringComparer.Ordinal)) Commit(next);
             }
 
-            work = WorkOf(_state);
-            next = Stopped(_state, null);
-            _state = next;
-            Save(next);
+            kept = Persisted();
         }
 
         work?.Run(_options);
-        _options.Log($"Campaign {cancel.CampaignId} was cancelled.");
+        if (active) _options.Log($"Campaign {cancel.CampaignId} was cancelled.");
+        if (!kept)
+        {
+            // No acknowledgement: the server keeps the cancellation due and sends it again.
+            _options.Log($"The cancellation of campaign {cancel.CampaignId} is acknowledged once it is kept in {_options.StatePath}.");
+            return null;
+        }
+
+        if (done is not null)
+        {
+            _ = SendAsync(linkId, done);
+            return done;
+        }
+
         Publish(next);
         return ReportOf(next);
     }
+
+    // Why an instruction of a campaign this node kept the cancellation of is refused, or null.
+    private string? CancelledBefore(string linkId, string campaignId)
+        => _state.Links.GetValueOrDefault(linkId)?.Cancelled.Contains(campaignId, StringComparer.Ordinal) == true
+            ? $"campaign {campaignId} was cancelled before this machine took it"
+            : null;
 
     /// <summary>Looks at the instruction once: notes a switch that ended, or starts the update when its time came. The loop calls it; tests call it directly.</summary>
     /// <returns>The update started, or null.</returns>
@@ -577,6 +621,9 @@ public sealed class FleetUpdateAgent : IAsyncDisposable
         FleetUpdateAgentState state;
         lock (_gate)
         {
+            // Nothing runs from a state that is not kept (a policy or a cancellation held in memory only): the write is
+            // tried again first.
+            if (!Persisted()) return null;
             state = _state;
             if (state.State != FleetUpdateMachineStates.Waiting || state.CampaignId is null || _applying is { IsCompleted: false }) return null;
             if (state.NotBefore is { } start && now < start) return null;
@@ -588,15 +635,13 @@ public sealed class FleetUpdateAgent : IAsyncDisposable
                 var opening = FleetUpdateDocuments.WindowOpening(policy, now);
                 if (opening > now)
                 {
-                    _state = state with { NotBefore = opening };
-                    Save(_state);
+                    Commit(state with { NotBefore = opening });
                     return null;
                 }
             }
 
             state = state with { State = FleetUpdateMachineStates.Downloading, Message = null, At = now };
-            _state = state;
-            Save(state);
+            Commit(state);
             // The download of this campaign stops with the node, and with the campaign.
             var download = CancellationTokenSource.CreateLinkedTokenSource(_stop.Token);
             (_applyStop, _applyCampaign) = (download, state.CampaignId);
@@ -686,8 +731,7 @@ public sealed class FleetUpdateAgent : IAsyncDisposable
             else
             {
                 next = _state with { State = outcome, Message = message, At = _options.Time.GetUtcNow() };
-                _state = next;
-                Save(next);
+                Commit(next);
             }
         }
 
@@ -785,8 +829,7 @@ public sealed class FleetUpdateAgent : IAsyncDisposable
 
             if (outcome is null || outcome == state.State) return;
             next = state with { State = outcome, Message = message, At = now };
-            _state = next;
-            Save(next);
+            Commit(next);
         }
 
         _options.Log($"Campaign {next.CampaignId}: {next.State}{(next.Message is null ? "" : ": " + next.Message)}");
@@ -804,16 +847,21 @@ public sealed class FleetUpdateAgent : IAsyncDisposable
             // it is kept apart, for the server that asked, which reads it again on its next connection.
             var links = new Dictionary<string, FleetUpdateAgentLink>(_state.Links, StringComparer.Ordinal);
             links[linkId] = (links.GetValueOrDefault(linkId) ?? new FleetUpdateAgentLink()) with { Refusal = report };
-            _state = _state with { Links = links };
-            Save(_state);
+            Commit(_state with { Links = links });
         }
 
         _ = SendAsync(linkId, report);
     }
 
+    // Reports where the campaign of a state stands, once that state is kept: a final state acknowledges a cancellation.
     private void Publish(FleetUpdateAgentState state)
     {
         if (state.LinkId is null || ReportOf(state) is not { } report) return;
+        lock (_gate)
+        {
+            if (!Persisted()) return;
+        }
+
         _ = SendAsync(state.LinkId, report);
     }
 
@@ -892,15 +940,38 @@ public sealed class FleetUpdateAgent : IAsyncDisposable
 
         _unreadable = null;
         _state = loaded!;
+        _unsaved = false;
         _loaded = true;
         return true;
     }
 
-    // Keeps a state that changes no authorization (a step of a campaign accepted): a failure is logged.
-    private void Save(FleetUpdateAgentState state)
+    // Makes a state the one in memory and keeps it; a failure is logged, and leaves the state unsaved (see _unsaved).
+    // Under the gate.
+    private void Commit(FleetUpdateAgentState state)
     {
-        if (TrySave(state) is { } failure) _options.Log($"The update of the fleet: {failure}.");
+        _state = state;
+        if (TrySave(state) is { } failure)
+        {
+            if (!_unsaved) _options.Log($"The update of the fleet: {failure}; it takes no update of the fleet until it can.");
+            _unsaved = true;
+        }
+        else
+        {
+            _unsaved = false;
+        }
     }
+
+    // Whether the state in memory is kept, written again first when an earlier write failed. Under the gate.
+    private bool Persisted()
+    {
+        if (!_unsaved) return true;
+        if (TrySave(_state) is not null) return false;
+        _unsaved = false;
+        _options.Log("The update of the fleet: its state is kept again.");
+        return true;
+    }
+
+    private string UnsavedReason => $"the update of the fleet could not be kept in {_options.StatePath}: this node takes no update of the fleet until it can";
 
     // Keeps a state; returns why it could not be kept, or null. Nothing is written over a checkpoint that does not read.
     private string? TrySave(FleetUpdateAgentState state)
@@ -966,6 +1037,21 @@ internal sealed record FleetUpdateAgentLink
 
     /// <summary>Gets the last instruction of this server the node refused; null before the first.</summary>
     public FleetUpdateReport? Refusal { get; init; }
+
+    /// <summary>
+    /// Gets the campaigns of this server whose cancellation the node received, the last <see cref="MaxCancelled"/>: kept
+    /// before the cancellation is acknowledged, so that none of them starts, even one whose instruction comes after it.
+    /// </summary>
+    public IReadOnlyList<string> Cancelled { get; init; } = [];
+
+    /// <summary>The most cancelled campaigns kept for one server.</summary>
+    public const int MaxCancelled = 64;
+
+    /// <summary>Gets this link with the cancellation of a campaign kept.</summary>
+    /// <param name="campaignId">The campaign.</param>
+    /// <returns>The link; this one when it keeps it already.</returns>
+    public FleetUpdateAgentLink WithCancelled(string campaignId)
+        => Cancelled.Contains(campaignId, StringComparer.Ordinal) ? this : this with { Cancelled = [.. Cancelled.Append(campaignId).TakeLast(MaxCancelled)] };
 }
 
 /// <summary>What the agent keeps: the instruction it accepted, where it stands, and the sequences of each server.</summary>
