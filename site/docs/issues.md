@@ -31,7 +31,9 @@ Open it with **Issues** in the title bar (in its **…** menu when the window is
 - Choose the project, then **Issues** or **Pull requests**. The list has the projects of the window's [space](spaces.md).
 - **Open**, **Closed**, **Merged** and **All** are separate lists, most recently updated first.
 - Type words or a number to filter.
-- Select an item to read its description and comments. Double-click it, or use the expand button, for a larger window.
+- The icon of an item tells its type when the service gives one (a bug, a user story, a task, a feature, an epic), and its color tells whether it is open or done; a bug is always red. The tag of its state has the color Azure DevOps gives that state.
+- The people an issue is assigned to are named at the right of its row, below its state; their tooltip says that they are its assignees.
+- Select an item to read its description and comments; for an Azure DevOps bug, its repro steps, system info and acceptance criteria. Double-click it, or use the expand button, for a larger window.
 - What the tab read is kept 5 minutes: going back to a list or an item shows it at once. *Read 3 min ago* says how old it is; the refresh beside it reads it again, and **Reload** in the header reads everything again.
 - The images of descriptions and comments are shown (Azure DevOps for now), read with the same sign-in. An image that cannot be read stays a link with its name; click a shown image to see it larger.
 
