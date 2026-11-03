@@ -1,0 +1,53 @@
+---
+name: codealta-fleet
+description: Use this skill to work with the CodeAlta fleet - the machines this computer is paired with or reaches through a CodeAlta Server - to pick a machine for a task (capabilities, labels, readiness, load), start or steer a session on another machine, move a session, place or run an automation on a machine, and read the statistics, updates, health and devices of the fleet.
+---
+
+# The CodeAlta fleet
+
+The fleet is this computer and the machines it reaches: paired machines, and the machines of an organization through its CodeAlta Server. Use the `alta` tool. Each command answers with JSON records, one per line.
+
+`alta fleet --help` lists the commands of the fleet, and `alta fleet <command> --help` gives the options, the fields of the records and examples of each. This page explains the important ones.
+
+## Pick a machine for a task
+
+1. `alta fleet machine list --ready` lists the machines that take a new session from this computer now. Each record has:
+   - `readiness`: `ready`, `not_allowed` (this computer may not start sessions there), `no_provider`, `updating`, or `offline`, `connecting`, `unauthorized`;
+   - `working`: how many of its sessions work now, its load;
+   - `os`, `capabilities` (`sandbox`, `moves`), `labels` (given by its owner, such as `gpu`), `providers`, `permissions`.
+2. Choose by what the task needs first, then by load: the system (`os` is `macos` for an iOS build), a label (`--label gpu`), a capability (`--capability sandbox`), a provider (`--provider <name>`); among those, the lowest `working`, and `channel` `direct` before `relayed`. Prefer this computer when nothing requires another machine.
+3. `alta fleet machine show <machine>` asks the machine for its projects and its ready providers: the project `id` and the provider `key` are what a session there names. A project whose `repository` is the one you work in is the same repository there.
+
+A machine that is not ready is not chosen. Say why to the user when no machine fits: its owner gives a permission, configures a provider, or brings it online.
+
+## Start and steer work elsewhere
+
+- `alta session create --machine <machine> --project <project-id> --stdin` starts a session there, the prompt on stdin. It is your child: its final answer comes back to you, so do not poll it. Without `--project`, the machine takes its project of the same repository as yours. Name a model with `--model-ref <provider>:<model>`; the model tiers of this computer mean nothing there.
+- `alta session send <session-id> --stdin` prompts it again; `alta session report <session-id>` reads where it stands and its answer.
+- `alta fleet machine sessions <machine>` lists the sessions of a machine; `yours` marks your children.
+
+## Move a session
+
+- `alta fleet move status <session-id> --machine <machine>` says what a move would meet: `busy`, `targetStatus`, `targetCode`, what stays behind.
+- `alta fleet move start <session-id> --machine <machine>` moves it with its conversation and its work in progress; add `--clone` when the machine has no project of its repository and `canClone` is true. Your own session moves when your turn ends: end your turn.
+
+## Automations on machines
+
+- `alta fleet automation list` says where each automation runs, and where its copy stands on its machine.
+- `alta fleet automation place <automation-id> --machine <machine>` makes a disabled automation run on that machine; `--here` brings it back. A person enables it.
+- `alta fleet automation run <automation-id>` runs it now where it runs; `alta fleet automation runs <automation-id>` reads its runs, those its machine reported included.
+
+## Statistics, updates and health
+
+- `alta fleet statistics --days 30 --group-by machine,provider` reads the sums of what the person's machines did (runs, tokens, tool calls, estimated costs) from the server.
+- `alta fleet update status` reads the versions of the server and of its machines, the update policy and the recent campaigns.
+- `alta fleet health` says how each server connection stands, and which machines do not take sessions now, with why.
+- `alta fleet machine devices <machine>` lists the devices of a machine this computer manages and what each may do there.
+
+## Rules
+
+- **Never more power than the person.** Every command has the access of the person of this computer, and a session you start has your permission mode and your sandbox at most.
+- **The fleet is never a way out of a sandbox.** Your sandbox and your permission mode are the floor of what you start or drive on another machine; a sandboxed session reads the fleet and starts, moves or places nothing elsewhere.
+- **Access is read only.** Devices, permissions, grants, pairing and policies are changed by a person, in Settings > Fleet: propose the change, do not look for another way to make it.
+- **What runs unattended waits for a person.** You place a disabled automation only, and a person enables it; a person starts an update campaign (`alta fleet update start` is refused with `fleet.needsPerson`).
+- On `fleet.needsPerson` or `fleet.notAllowed`, stop that step and tell the user what you would do and why. A Private session reaches no other machine.
