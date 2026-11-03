@@ -39,7 +39,7 @@ public sealed class SqliteCoordinatorStoreOptions
 /// another and none needs a retry; reads open pooled connections of their own and never wait for the writer. WAL does
 /// not work on a network file system: the database belongs on a local disk.
 /// </remarks>
-public sealed class SqliteCoordinatorStore : ICoordinatorStore
+public sealed partial class SqliteCoordinatorStore : ICoordinatorStore, IAutomationStore
 {
     private const string MigrationResourcePrefix = "CodeAlta.Server.Storage.Sqlite.Migrations.";
     private const string FactsStream = "facts";

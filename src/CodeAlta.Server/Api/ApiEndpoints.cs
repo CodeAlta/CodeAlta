@@ -193,6 +193,8 @@ internal static class ApiEndpoints
             .Produces<UpdatePolicyDto>()
             .WithSummary("Sets the update policy of the fleet (manual, pinned, automatic) with a policy the calling owner's controller device signed.");
 
+        AutomationEndpoints.Map(api);
+
         app.MapPost(FleetTelemetryPaths.Forward + "/{signal}", (string signal, HttpContext context, OtlpForwarder forwarder) => forwarder.HandleAsync(context, signal))
             .ExcludeFromDescription();
         app.Map(FleetServerMethods.ControlPath, (HttpContext context, ControlService control) => control.HandleAsync(context)).ExcludeFromDescription();

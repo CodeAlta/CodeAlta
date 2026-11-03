@@ -32,10 +32,15 @@ The authority of an assignment is the authenticated, paired device on a direct c
     the person's controllers with `FleetKeyWrap`, open). The node keeps the highest number per automation, removals
     included, so a replayed or older version is refused; an unsigned `automations.put` is refused. The desktop numbers
     versions from the time in milliseconds, so a lost placement record still numbers after what a machine holds.
-- [ ] **Server resources.** `automations` and `runs` in the REST API v1 (`doc/fleet/protocol.md`): `PUT
+- [x] **Server resources.** `automations` and `runs` in the REST API v1 (`doc/fleet/protocol.md`): `PUT
   /api/v1/automations/{id}` stores a signed version (the content sealed to the owner's devices and the assigned machine
   in a Private space, so the server sees only the facts: id, owner, version, machine, schedule kinds, enabled), `GET` lists
   them for the owner, `DELETE` removes. Owner checks as for update campaigns (an owner's controller device).
+  - Done: migration `0006_automations` (the statistics branch `alta/silken-lathe-jqr3` also has a `0006`: the second
+    merged renumbers). The server takes only sealed versions (never a definition in clear), one row per automation and
+    machine. A removal is a signed version too (`PUT` with `removed`); `DELETE ?machine=` only forgets a removal the
+    machine acknowledged. Personal scope: the caller is a controller device of the person who owns the machine (the node
+    checks the same against its anchored list), not an organization owner. `GET /api/v1/automations/{id}/runs`.
 - [ ] **Assignment over the control connection.** A delivery `automations.assigned` (sealed version) and
   `automations.removed` to the machine; the node acknowledges, verifies the signature against the signed device list
   (`FleetDeviceListVerifier`), and writes its copy as it does for `automations.put`. Offline nodes get it on reconnect

@@ -19,7 +19,7 @@ public sealed class ControlService
     public static readonly FleetProtocolRange Protocol = new(1, 1);
 
     /// <summary>The features the server announces in its welcome.</summary>
-    public static readonly IReadOnlyList<string> Features = ["presence", "inventory", "facts", "facts.withdraw", "directory", "relay", "telemetry", "update"];
+    public static readonly IReadOnlyList<string> Features = ["presence", "inventory", "facts", "facts.withdraw", "directory", "relay", "telemetry", "update", FleetAutomationMethods.Feature];
 
     private const int MaxStateLength = 32;
 
@@ -86,6 +86,9 @@ public sealed class ControlService
 
     /// <summary>Gets the coordinated update of the fleet, which takes the reports of nodes and asks a node that connects; null for none.</summary>
     internal UpdateCampaignService? Updates { get; init; }
+
+    /// <summary>Gets the automations of the organization, delivered to a machine that connects and claimed and reported by it; null for none.</summary>
+    internal FleetAutomationService? Automations { get; init; }
 
     /// <summary>
     /// Gets what ends every control connection when the server stops (the host's <c>ApplicationStopping</c>): each device
@@ -174,6 +177,8 @@ public sealed class ControlService
         if (TelemetrySettings is { } telemetry) _ = telemetry.SendCurrentAsync(session);
         // A node in the middle of a campaign is asked again, so that it reports where it stands.
         if (Updates is { } updates) _ = updates.SendCurrentAsync(session);
+        // The automation versions the machine has not taken yet, as their controller devices signed them.
+        if (Automations is { } automations) _ = automations.SendPendingAsync(session);
         try
         {
             using var registration = cancellationToken.Register(static state =>
@@ -254,6 +259,8 @@ public sealed class ControlService
             return JsonSerializer.SerializeToElement(new FleetDirectorySnapshot(machines, sessions, presence), FleetServerJsonContext.Default.FleetDirectorySnapshot);
         });
 
+        if (Automations is { } automations) RegisterAutomations(session, automations, On);
+
         if (_relays is not { } relays) return;
         On(FleetServerMethods.RelayOpen, Handler(FleetServerJsonContext.Default.FleetRelayOpen, async (open, token) =>
         {
@@ -267,6 +274,28 @@ public sealed class ControlService
         On(FleetServerMethods.RelayClose, Handler(FleetServerJsonContext.Default.FleetRelayClose, async (close, _) =>
         {
             await relays.CloseAsync(session.Device, close).ConfigureAwait(false);
+            return null;
+        }));
+    }
+
+    // A machine answers the versions it was given, claims its due times and reports its runs.
+    private static void RegisterAutomations(ControlSession session, FleetAutomationService automations, Action<string, FleetRequestHandler> on)
+    {
+        on(FleetAutomationMethods.Ack, Handler(FleetAutomationServerJsonContext.Default.FleetAutomationAcks, async (acks, token) =>
+        {
+            await automations.AcknowledgeAsync(session.Device, acks, token).ConfigureAwait(false);
+            return null;
+        }));
+
+        on(FleetAutomationMethods.Claim, Handler(FleetAutomationServerJsonContext.Default.FleetAutomationClaimRequest, async (claim, token) =>
+        {
+            var result = await automations.ClaimAsync(session.Device, claim, token).ConfigureAwait(false);
+            return JsonSerializer.SerializeToElement(result, FleetAutomationServerJsonContext.Default.FleetAutomationClaimResult);
+        }));
+
+        on(FleetAutomationMethods.Runs, Handler(FleetAutomationServerJsonContext.Default.FleetAutomationRunFacts, async (facts, token) =>
+        {
+            await automations.RecordRunsAsync(session.Device, facts, token).ConfigureAwait(false);
             return null;
         }));
     }
