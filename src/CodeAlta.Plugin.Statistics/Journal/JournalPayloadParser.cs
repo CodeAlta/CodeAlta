@@ -64,6 +64,7 @@ internal sealed class JournalPayloadParser
             JournalRecordKind.Header => ParseHeader(ref reader),
             JournalRecordKind.State => ParseState(ref reader, line, isFinalBlock, isPromptSeen),
             JournalRecordKind.Workflow => ParseWorkflow(ref reader),
+            JournalRecordKind.Moved => ParseMoved(ref reader),
             _ => null,
         };
     }
@@ -1578,6 +1579,66 @@ internal sealed class JournalPayloadParser
         }
 
         return record;
+    }
+
+    // The move of a session to another machine: its identifier and the names of the two machines.
+    private MoveRecord? ParseMoved(ref Utf8JsonReader reader)
+    {
+        var record = new MoveRecord();
+        while (NextTopLevelProperty(ref reader))
+        {
+            if (!reader.ValueTextEquals("raw"u8))
+            {
+                if (!SkipValue(ref reader))
+                {
+                    break;
+                }
+
+                continue;
+            }
+
+            if (!reader.Read() || reader.TokenType != JsonTokenType.StartObject)
+            {
+                return null;
+            }
+
+            while (reader.Read() && reader.TokenType == JsonTokenType.PropertyName)
+            {
+                var field = reader.ValueTextEquals("moveId"u8) ? 1 : reader.ValueTextEquals("from"u8) ? 2 : reader.ValueTextEquals("to"u8) ? 3 : 0;
+                if (field == 0)
+                {
+                    if (!SkipValue(ref reader))
+                    {
+                        return null;
+                    }
+
+                    continue;
+                }
+
+                if (!reader.Read())
+                {
+                    return null;
+                }
+
+                var value = ReadString(ref reader);
+                if (!SkipCurrent(ref reader))
+                {
+                    return null;
+                }
+
+                switch (field)
+                {
+                    case 1: record.MoveId = value; break;
+                    case 2: record.From = value; break;
+                    default: record.To = value; break;
+                }
+            }
+
+            break;
+        }
+
+        // A move without its identifier cannot be told from another one: it is not one.
+        return string.IsNullOrEmpty(record.MoveId) ? null : record;
     }
 
     // The lineage of a session that starts with the turns of another one: only the time its own records start at is read.

@@ -29,8 +29,9 @@ console queries them by scope.
   (`StatisticsPlugin.CreateForHost`, built in M0).
 - **A machine is the single writer of its facts.** After a move, the new owner counts the session's work from the move
   record on (as a fork counts from `counted_from`), so the journal it imported is never counted again; the facts the
-  old machine counted stay its own. Facts are keyed by machine as well, so a quarter hour split by a move is the merge
-  of both.
+  old machine counted stay its own, and a session that comes back counts there again what that machine did before. The
+  move records name the machines, so each part of a journal is counted by the machine that wrote it. Facts are keyed by
+  machine as well, so a quarter hour split by a move is the merge of both.
 
 ## Publication: rows, not increments
 

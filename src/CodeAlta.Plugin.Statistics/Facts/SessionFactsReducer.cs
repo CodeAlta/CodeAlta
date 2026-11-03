@@ -15,6 +15,10 @@ namespace CodeAlta.Plugin.Statistics.Facts;
 /// <para>A session that starts with the turns of another one (a fork, or the session that keeps what a rewind removed) holds a
 /// copy of their records. Its header says from when its records are its own (<c>forked_from.counted_from</c>): the older ones
 /// were counted in the source session and add no fact here; only the choices in force are followed through them.</para>
+/// <para>A session moved to another machine takes its journal there, and that machine appends the move record
+/// (<c>codealta.sessionMoved</c>). Every machine counts its own: the records another machine wrote are followed for the choices in
+/// force only, as those of a fork. A move that changes which records are this machine's asks for a reading from the start
+/// (<see cref="RestartRequested"/>).</para>
 /// <para>Not thread-safe.</para>
 /// </remarks>
 internal sealed class SessionFactsReducer : IJournalRecordSink
@@ -56,6 +60,13 @@ internal sealed class SessionFactsReducer : IJournalRecordSink
 
     /// <summary>Gets the counters of the oddities the reducer met, for the tests and the harness; they are not facts and are not kept.</summary>
     public ReducerDiagnostics Diagnostics { get; } = new();
+
+    /// <summary>
+    /// Gets a value indicating whether the reading met a move it did not know that changes which records are the work of this
+    /// machine: the records read before it were counted as they should not be, so the journal must be read again from its start,
+    /// given the moves of <see cref="SessionFactsState.Moved"/>. The records after it add nothing; the moves after it are still taken.
+    /// </summary>
+    public bool RestartRequested { get; private set; }
 
     /// <summary>Gets or sets a value indicating whether an open run is closed as interrupted when another run starts.</summary>
     public bool InterruptRunWhenAnotherStarts { get; set; } = true;
@@ -125,7 +136,13 @@ internal sealed class SessionFactsReducer : IJournalRecordSink
     public void OnRecord(JournalRecord record)
     {
         ArgumentNullException.ThrowIfNull(record);
-        if (record.Timestamp is not { } timestamp)
+        if (record is MoveRecord move)
+        {
+            OnMove(move);
+            return;
+        }
+
+        if (RestartRequested || record.Timestamp is not { } timestamp)
         {
             return;
         }
@@ -134,6 +151,21 @@ internal sealed class SessionFactsReducer : IJournalRecordSink
         {
             // The header is the first line of a journal: it is read before the records it tells apart.
             (_state.Inherited ??= new InheritedRecordsState()).CountedFrom = countedFrom;
+        }
+
+        if (_state.Moved is { IsOwn: false })
+        {
+            // A record another machine wrote, counted there. The header still says what the session is.
+            if (record is HeaderRecord header)
+            {
+                ApplyHeader(header);
+            }
+            else
+            {
+                OnInheritedRecord(record);
+            }
+
+            return;
         }
 
         if (_state.Inherited is { } inherited && IsInherited(inherited, record, timestamp))
@@ -277,6 +309,41 @@ internal sealed class SessionFactsReducer : IJournalRecordSink
         {
             _state.Provider = StatisticsProviders.Fold(record.Provider);
         }
+    }
+
+    // ----- the moves of the session between machines -----
+
+    // The records after a move are the work of the machine it went to. A move the reading knows only takes it further; a new one to
+    // the machine of the last move keeps every record where it was; any other changes which records are this machine's.
+    private void OnMove(MoveRecord move)
+    {
+        var moved = _state.Moved ??= new MovedSessionState();
+        if (moved.Met < moved.Moves.Count)
+        {
+            if (string.Equals(moved.Moves[moved.Met].MoveId, move.MoveId, StringComparison.Ordinal))
+            {
+                moved.Met++;
+                return;
+            }
+
+            // Not the moves the reading was given: those it did not meet yet are not the ones of this journal.
+            moved.Moves.RemoveRange(moved.Met, moved.Moves.Count - moved.Met);
+            RestartRequested = true;
+        }
+
+        if (moved.Moves.Count >= SessionFactsState.MaxMoves)
+        {
+            return;
+        }
+
+        var holder = moved.Moves.Count > 0 ? moved.Moves[^1].To : null;
+        if (moved.Moves.Count == 0 || move.To is null || !string.Equals(move.To, holder, StringComparison.Ordinal))
+        {
+            RestartRequested = true;
+        }
+
+        moved.Moves.Add(new MoveState { MoveId = move.MoveId!, From = move.From, To = move.To });
+        moved.Met++;
     }
 
     // ----- runs -----
@@ -549,6 +616,13 @@ internal sealed class SessionFactsReducer : IJournalRecordSink
 
     private void OnHeader(HeaderRecord header, DateTimeOffset timestamp)
     {
+        ApplyHeader(header);
+        CountOrigin(header.CreatedAt ?? timestamp);
+    }
+
+    // What the session is: its kind, its project, its space, its folder, who created it, its title and its first provider.
+    private void ApplyHeader(HeaderRecord header)
+    {
         _state.HasHeader = true;
         _state.SessionKind = header.SessionKind ?? _state.SessionKind;
         _state.ProjectRef = header.ProjectRef ?? _state.ProjectRef;
@@ -564,8 +638,6 @@ internal sealed class SessionFactsReducer : IJournalRecordSink
         {
             _state.Provider = _state.InitialProvider;
         }
-
-        CountOrigin(header.CreatedAt ?? timestamp);
     }
 
     private void CountOrigin(DateTimeOffset at)

@@ -51,6 +51,9 @@ internal sealed class SessionFactsState
     /// <summary>The number of runs of scripts without an end that are remembered.</summary>
     public const int MaxOpenScripts = 64;
 
+    /// <summary>The number of moves to another machine a journal is told apart by; the records after more of them are counted as those before.</summary>
+    public const int MaxMoves = 256;
+
     /// <summary>Gets or sets the version of the facts this state belongs to.</summary>
     public int Version { get; set; } = CurrentVersion;
 
@@ -153,6 +156,12 @@ internal sealed class SessionFactsState
     /// </summary>
     public InheritedRecordsState? Inherited { get; set; }
 
+    /// <summary>
+    /// Gets or sets the moves of the session to another machine its journal holds, which tell the records this machine wrote from
+    /// those it brought. Null for a session that never moved: every record is its own.
+    /// </summary>
+    public MovedSessionState? Moved { get; set; }
+
     /// <summary>Gets or sets the runs of scripts that started and have not ended, oldest first.</summary>
     public List<OpenScriptState> OpenScripts { get; set; } = [];
 
@@ -198,6 +207,54 @@ internal sealed class SessionFactsState
             return new SessionFactsState { Version = 0 };
         }
     }
+}
+
+/// <summary>
+/// The moves of a session between machines, in the order of its journal. A machine counts the records it wrote: the journal it holds
+/// is the one of the machine its last move went to, the records before the first move were written by the machine that move came
+/// from, and those after a move by the machine it went to. A machine is known by its name.
+/// </summary>
+internal sealed class MovedSessionState
+{
+    /// <summary>Gets or sets the moves the journal holds, as far as it was read, oldest first.</summary>
+    public List<MoveState> Moves { get; set; } = [];
+
+    /// <summary>Gets or sets the number of moves the reading met: the records it reads are those after the last of them.</summary>
+    public int Met { get; set; }
+
+    /// <summary>Gets a value indicating whether the records the reading is at are the work of the machine that holds the journal.</summary>
+    [JsonIgnore]
+    public bool IsOwn
+    {
+        get
+        {
+            if (Met >= Moves.Count)
+            {
+                return true;
+            }
+
+            var holder = Moves[^1].To;
+            var writer = Met == 0 ? Moves[0].From : Moves[Met - 1].To;
+            return holder is not null && string.Equals(writer, holder, StringComparison.Ordinal);
+        }
+    }
+
+    /// <summary>Gets the moves without the reading: what a reading of the journal from its start is given.</summary>
+    /// <returns>The copy.</returns>
+    public MovedSessionState Known() => new() { Moves = [.. Moves] };
+}
+
+/// <summary>A move of a session between machines.</summary>
+internal sealed class MoveState
+{
+    /// <summary>Gets or sets the identifier of the move.</summary>
+    public string MoveId { get; set; } = string.Empty;
+
+    /// <summary>Gets or sets the name of the machine the session came from.</summary>
+    public string? From { get; set; }
+
+    /// <summary>Gets or sets the name of the machine the session went to.</summary>
+    public string? To { get; set; }
 }
 
 /// <summary>

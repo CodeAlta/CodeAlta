@@ -17,7 +17,7 @@ public sealed class SessionForkFactsTests
 
     // A turn as a session writes it: the model, a prompt, a request with a cost, a tool call that changes a file, an answer, the
     // end, and the snapshots that follow a turn.
-    private static JournalBuilder Turn(JournalBuilder journal, string run, int minute, long input, double cost)
+    internal static JournalBuilder Turn(JournalBuilder journal, string run, int minute, long input, double cost)
         => journal.ModelChanged(Time(minute, 2), run, "codex", "gpt-6.1-sol")
             .User(Time(minute, 3), run, "a prompt of some words")
             .Usage(Time(minute, 5), run, input: input, output: input / 10, cost: cost, duration: input)
@@ -28,7 +28,7 @@ public sealed class SessionForkFactsTests
             .LocalSnapshot(Time(minute, 21))
             .State(Time(minute, 21));
 
-    private static JournalBuilder Source()
+    internal static JournalBuilder Source()
     {
         var journal = new JournalBuilder(SourceId);
         journal.Header(Time(0), title: "A source").State(Time(0, 1));
@@ -38,7 +38,7 @@ public sealed class SessionForkFactsTests
     }
 
     // What a session did, as the numbers of the statistics say it.
-    private sealed record Spent(
+    internal sealed record Spent(
         long Runs, long RunsStarted, long RunsCompleted, long ActiveMs, long Requests, long InputTokens, long OutputTokens, double Cost,
         long ToolCalls, long LinesAdded, long LinesRemoved, long FilesChanged, long Prompts, long PromptChars, long Answers, long AnswerWords)
     {

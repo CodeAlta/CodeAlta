@@ -54,8 +54,11 @@ Definitions the reducer guarantees:
   the provider reports, not the alias chosen.
 - **Work is counted where it was done.** A fork or the session that keeps what a rewind removed starts with a copy of
   its source's records; its header says from when its records are its own (`forked_from.counted_from`), and the
-  inherited ones only carry the choices in force. Turns made outside CodeAlta (runs whose id starts with `external:`)
-  count nothing. So the totals of a session and its forks are what was spent: nothing twice, nothing lost.
+  inherited ones only carry the choices in force. A session moved to another machine brings its journal, and the move
+  records (`codealta.sessionMoved`) tell which machine wrote each part of it: a machine counts the parts it wrote, and a
+  move it did not know makes it read the session again. Turns made outside CodeAlta (runs whose id starts with
+  `external:`) count nothing. So the totals of a session and its forks, on every machine, are what was spent: nothing
+  twice, nothing lost.
 - **A run of a script** ([Code Mode](codemode.md)) is read from its records, which belong to no turn. It is counted
   when it starts, under the model in force and the sender of the turn it started in; what it did (its outcome,
   duration, calls, steps, sessions, time waiting for the user) is counted when it ends, in the quarter of its end,
