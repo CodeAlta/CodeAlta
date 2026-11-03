@@ -92,6 +92,7 @@ public sealed class NodeServerAutomationTests
             var reported = await WaitForAsync(async () => (await desktop.ListAutomationRunsAsync(Id, null, token)).Runs
                 .FirstOrDefault(static run => run.Status == AutomationRun.Completed), token);
             Assert.AreEqual(("hourly", nodeId, 1L), (reported.Trigger, reported.MachineId, reported.Number));
+            Assert.AreEqual((120L, 30L, 0.002, "usd"), (reported.InputTokens, reported.OutputTokens, reported.Cost, reported.CostUnit), "what the session used, as facts");
             Assert.AreEqual(AutomationService.Occurrence(entry.Definition.Triggers[0], Noon.AddMinutes(30)), reported.Occurrence, "the claim of the server keyed the run");
             StringAssert.Contains(provider.LastUserText, "Say hello.");
 

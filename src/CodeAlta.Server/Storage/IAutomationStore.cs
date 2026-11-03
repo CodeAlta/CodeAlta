@@ -51,6 +51,18 @@ public sealed record AutomationRunRecord(string OrganizationId, string RunId, st
 {
     /// <summary>The status of a due time claimed and not reported yet.</summary>
     public const string Claimed = "claimed";
+
+    /// <summary>Gets the input tokens of its session, the prompt cache included; null when unknown.</summary>
+    public long? InputTokens { get; init; }
+
+    /// <summary>Gets the output tokens of its session; null when unknown.</summary>
+    public long? OutputTokens { get; init; }
+
+    /// <summary>Gets the cost the provider reported for its session, in <see cref="CostUnit"/>; null when none was.</summary>
+    public double? Cost { get; init; }
+
+    /// <summary>Gets the unit of <see cref="Cost"/>: <c>usd</c>, or the one the provider named.</summary>
+    public string? CostUnit { get; init; }
 }
 
 /// <summary>What a claim of a due time found.</summary>

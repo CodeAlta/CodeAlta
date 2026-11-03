@@ -775,7 +775,11 @@ internal sealed partial class AutomationService : IAsyncDisposable
             waiting |= HoldsCommand(automationId);
         }
 
-        var ended = _state.Update(runId, run => run with { Status = outcome.Status, Message = outcome.Message, EndedAt = _time.GetUtcNow(), SessionId = sessionId ?? run.SessionId });
+        var ended = _state.Update(runId, run => run with
+        {
+            Status = outcome.Status, Message = outcome.Message, EndedAt = _time.GetUtcNow(), SessionId = sessionId ?? run.SessionId,
+            InputTokens = outcome.Usage?.InputTokens, OutputTokens = outcome.Usage?.OutputTokens, Cost = outcome.Usage?.Cost, CostUnit = outcome.Usage?.CostUnit,
+        });
         _claims?.Release(runId, _time.GetUtcNow());
         if (waiting) Wake();
         Changed?.Invoke();

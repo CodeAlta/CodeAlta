@@ -91,8 +91,9 @@ internal sealed partial class NodeAutomations
                         SessionId = run.SessionId,
                         // Why a run failed or was skipped, never what it answered nor what its trigger was about.
                         Message = run.Status is AutomationRun.Failed or AutomationRun.Skipped ? run.Message : null,
+                        InputTokens = run.InputTokens, OutputTokens = run.OutputTokens, Cost = run.Cost, CostUnit = run.CostUnit,
                     };
-                    var key = $"{fact.Status}|{fact.EndedAt?.ToUnixTimeMilliseconds()}|{fact.SessionId}|{fact.Number}";
+                    var key = $"{fact.Status}|{fact.EndedAt?.ToUnixTimeMilliseconds()}|{fact.SessionId}|{fact.Number}|{fact.InputTokens}|{fact.OutputTokens}|{fact.Cost}";
                     if (!reported.TryGetValue(run.Id, out var known) || known != key) changed.Add((fact, key));
                 }
             }

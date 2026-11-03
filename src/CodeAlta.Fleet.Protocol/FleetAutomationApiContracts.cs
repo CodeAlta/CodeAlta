@@ -42,7 +42,20 @@ public sealed record AutomationListDto(IReadOnlyList<AutomationDto> Automations)
 /// <param name="SessionId">The session it started on its machine; null when none.</param>
 /// <param name="Message">Why it failed or was skipped; null otherwise.</param>
 public sealed record AutomationRunDto(string RunId, string AutomationId, string MachineId, long Number, string Trigger, string Status, DateTimeOffset StartedAt,
-    DateTimeOffset? EndedAt, string? Occurrence, DateTimeOffset? LeaseUntil, string? SessionId, string? Message);
+    DateTimeOffset? EndedAt, string? Occurrence, DateTimeOffset? LeaseUntil, string? SessionId, string? Message)
+{
+    /// <summary>Gets the input tokens of its session, the prompt cache included; null when unknown.</summary>
+    public long? InputTokens { get; init; }
+
+    /// <summary>Gets the output tokens of its session; null when unknown.</summary>
+    public long? OutputTokens { get; init; }
+
+    /// <summary>Gets the cost the provider reported for its session, in <see cref="CostUnit"/>; null when none was.</summary>
+    public double? Cost { get; init; }
+
+    /// <summary>Gets the unit of <see cref="Cost"/>: <c>usd</c>, or the one the provider named.</summary>
+    public string? CostUnit { get; init; }
+}
 
 /// <summary>Runs of an automation, the newest first.</summary>
 /// <param name="Runs">The runs.</param>

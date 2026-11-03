@@ -459,7 +459,7 @@ internal sealed class DesktopAutomationPlacement : IAutomationPlacement, IAsyncD
                 run.Trigger)
             {
                 Name = _automations.Snapshot.Find(id)?.Definition.Name, SessionId = run.SessionId, Status = run.Status == "claimed" ? AutomationRun.Running : run.Status,
-                Message = run.Message, EndedAt = run.EndedAt,
+                Message = run.Message, EndedAt = run.EndedAt, InputTokens = run.InputTokens, OutputTokens = run.OutputTokens, Cost = run.Cost, CostUnit = run.CostUnit,
             })];
         }
         catch (Exception exception) when (exception is FleetServerException or HttpRequestException or IOException or TaskCanceledException && !cancellationToken.IsCancellationRequested)
@@ -567,6 +567,7 @@ internal sealed class DesktopAutomationPlacement : IAutomationPlacement, IAsyncD
         => new(run.Id, run.AutomationId, run.StartedAt, run.Trigger)
         {
             Name = run.Name, SessionId = run.SessionId, Detail = run.Detail, Status = run.Status, Message = run.Message, EndedAt = run.EndedAt,
+            InputTokens = run.InputTokens, OutputTokens = run.OutputTokens, Cost = run.Cost, CostUnit = run.CostUnit,
         };
 
     // What the machine was given: the definition, whether it is enabled, and the repository of its project, as a signed version.

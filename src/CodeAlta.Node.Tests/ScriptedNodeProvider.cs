@@ -41,8 +41,15 @@ internal sealed class ScriptedNodeProvider
             return Answer(text);
         };
 
+    /// <summary>The usage each answer reports, as a provider does.</summary>
+    internal static readonly AgentOperationUsageSnapshot AnswerUsage = new(Model, InputTokens: 120, OutputTokens: 30, Cost: 0.002);
+
     internal static AgentTurnResponse Answer(string text)
-        => new() { AssistantMessage = new AgentConversationMessage(AgentConversationRole.Assistant, [new AgentMessagePart.Text(text)]) };
+        => new()
+        {
+            AssistantMessage = new AgentConversationMessage(AgentConversationRole.Assistant, [new AgentMessagePart.Text(text)]),
+            Usage = new AgentSessionUsage(LastOperation: AnswerUsage),
+        };
 
     private sealed class Runtime(ScriptedNodeProvider owner) : IAgentModelProviderRuntime
     {

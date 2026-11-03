@@ -48,6 +48,18 @@ internal sealed record AutomationRun(string Id, string AutomationId, DateTimeOff
 
     /// <summary>When the run ended.</summary>
     public DateTimeOffset? EndedAt { get; init; }
+
+    /// <summary>The input tokens of the session of the run, once it ended; null when unknown.</summary>
+    public long? InputTokens { get; init; }
+
+    /// <summary>The output tokens of the session of the run, once it ended; null when unknown.</summary>
+    public long? OutputTokens { get; init; }
+
+    /// <summary>The cost the provider reported for the session of the run, in <see cref="CostUnit"/>; null when none was.</summary>
+    public double? Cost { get; init; }
+
+    /// <summary>The unit of <see cref="Cost"/>: <c>usd</c>, or the one the provider named.</summary>
+    public string? CostUnit { get; init; }
 }
 
 /// <summary>What an event trigger has already seen of a repository.</summary>

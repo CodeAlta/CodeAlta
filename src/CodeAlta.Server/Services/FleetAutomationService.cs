@@ -150,7 +150,10 @@ internal sealed class FleetAutomationService
             throw CoordinatorException.NotFound(CoordinatorErrorCodes.AutomationNotFound, "No automation of yours has this id.");
         var runs = await _automations.ListAutomationRunsAsync(actor.OrganizationId, id, Math.Clamp(limit ?? 50, 1, RunsKept), cancellationToken).ConfigureAwait(false);
         return new AutomationRunListDto([.. runs.Select(static run => new AutomationRunDto(run.RunId, run.AutomationId, run.MachineId, run.Number, run.Trigger, run.Status,
-            run.StartedAt, run.EndedAt, run.Occurrence, run.LeaseUntil, run.SessionId, run.Message))]);
+            run.StartedAt, run.EndedAt, run.Occurrence, run.LeaseUntil, run.SessionId, run.Message)
+        {
+            InputTokens = run.InputTokens, OutputTokens = run.OutputTokens, Cost = run.Cost, CostUnit = run.CostUnit,
+        })]);
     }
 
     /// <summary>Sends a machine that connects the versions it has not taken yet.</summary>
@@ -245,7 +248,13 @@ internal sealed class FleetAutomationService
 
             if (!held) continue;
             records.Add(new AutomationRunRecord(device.OrganizationId, run.RunId, run.AutomationId, device.Id, Math.Max(0, run.Number), run.Trigger, run.Status, null,
-                run.StartedAt, run.EndedAt, run.EndedAt, run.SessionId, Line(run.Message), now));
+                run.StartedAt, run.EndedAt, run.EndedAt, run.SessionId, Line(run.Message), now)
+            {
+                // Facts of what the session used; a value that does not hold is dropped, not the run.
+                InputTokens = run.InputTokens is >= 0 ? run.InputTokens : null, OutputTokens = run.OutputTokens is >= 0 ? run.OutputTokens : null,
+                Cost = run.Cost is { } cost && double.IsFinite(cost) && cost >= 0 && IsUnit(run.CostUnit) ? cost : null,
+                CostUnit = run.Cost is { } priced && double.IsFinite(priced) && priced >= 0 && IsUnit(run.CostUnit) ? run.CostUnit : null,
+            });
         }
 
         if (records.Count > 0) await _automations.RecordAutomationRunsAsync(records, RunsKept, cancellationToken).ConfigureAwait(false);
@@ -288,6 +297,8 @@ internal sealed class FleetAutomationService
         return new AutomationDto(record.AutomationId, record.MachineId, record.Number, record.Removed, record.Enabled, triggers, record.SignerDeviceId, record.UpdatedAt,
             record.DeliveryState, record.DeliveryMessage, new FleetSignedAutomationVersion(record.Payload, record.Signature));
     }
+
+    private static bool IsUnit(string? unit) => unit is { Length: > 0 and <= 32 } && !unit.Any(char.IsControl);
 
     private static string? Line(string? message)
     {

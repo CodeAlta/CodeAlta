@@ -80,6 +80,18 @@ public sealed record FleetAutomationRunFact(string RunId, string AutomationId, l
 
     /// <summary>Gets why it failed or was skipped, in a line; null otherwise.</summary>
     public string? Message { get; init; }
+
+    /// <summary>Gets the input tokens of its session, the prompt cache included; null when unknown.</summary>
+    public long? InputTokens { get; init; }
+
+    /// <summary>Gets the output tokens of its session; null when unknown.</summary>
+    public long? OutputTokens { get; init; }
+
+    /// <summary>Gets the cost the provider reported for its session, in <see cref="CostUnit"/>; null when none was.</summary>
+    public double? Cost { get; init; }
+
+    /// <summary>Gets the unit of <see cref="Cost"/>: <c>usd</c>, or the one the provider named.</summary>
+    public string? CostUnit { get; init; }
 }
 
 /// <summary>The source-generated contracts of the automation methods of the control connection.</summary>

@@ -51,8 +51,8 @@ The authority of an assignment is the authenticated, paired device on a direct c
   tokens and cost, never the prompt or the answer); the server keeps them for the console and the desktop lists them
   for machines it reaches only through the server.
   - Done as `automations.runs` (not `facts.publish`, whose session facts another branch changes): run id, version,
-    trigger, status, times, session id, and a failure reason; resent on each connection. Not done: tokens and cost
-    (the run record of the engine does not carry them yet).
+    trigger, status, times, session id, a failure reason, and the tokens and cost of the session (summed from its usage
+    records into the engine's run record when the run ends; migration `0008`); resent on each connection.
 - [x] **Reconciliation by (automation, due time).** The node's claim store already keys claims by occurrence: the server
   records the claims it learns and refuses a second run of the same occurrence after a takeover; `AutomationClaim.LeaseUntil`
   is the lease it reads.

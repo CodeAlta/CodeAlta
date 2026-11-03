@@ -132,7 +132,7 @@ public sealed class AutomationServerTests
         // The runs, as facts: the claimed one ended, one by hand, and one of an automation the server does not hold, which is ignored.
         var now = fixture.Clock.Now;
         await connection.SendRequestAsync(FleetAutomationMethods.Runs, JsonSerializer.SerializeToElement(new FleetAutomationRunFacts([
-            new FleetAutomationRunFact("run-1", Id, 1, "hourly", "completed", now, now.AddMinutes(2)) { SessionId = "s1" },
+            new FleetAutomationRunFact("run-1", Id, 1, "hourly", "completed", now, now.AddMinutes(2)) { SessionId = "s1", InputTokens = 1200, OutputTokens = 80, Cost = 0.25, CostUnit = "AI credits" },
             new FleetAutomationRunFact("run-3", Id, 1, "manual", "failed", now.AddMinutes(3), now.AddMinutes(3)) { Message = "No provider\nis configured." },
             new FleetAutomationRunFact("run-4", "of-the-profile", 1, "manual", "completed", now, now),
         ]), FleetAutomationServerJsonContext.Default.FleetAutomationRunFacts));
@@ -146,6 +146,7 @@ public sealed class AutomationServerTests
         Assert.AreEqual("run-3,run-10,run-1", string.Join(',', list.Select(static run => run.RunId)));
         var first = list.Single(static run => run.RunId == "run-1");
         Assert.AreEqual(("completed", node.DeviceId, "hourly@2026-11-03T10:00:00Z", "s1"), (first.Status, first.MachineId, first.Occurrence, first.SessionId));
+        Assert.AreEqual((1200L, 80L, 0.25, "AI credits"), (first.InputTokens, first.OutputTokens, first.Cost, first.CostUnit));
         Assert.AreEqual("No provider is configured.", list.Single(static run => run.RunId == "run-3").Message);
         Assert.AreEqual(AutomationRunStatus.Claimed, list.Single(static run => run.RunId == "run-10").Status);
         Assert.AreEqual(HttpStatusCode.NotFound, (await fixture.SendAsync(owner, HttpMethod.Get, "/api/v1/automations/of-the-profile/runs")).Status);
