@@ -16,6 +16,9 @@ internal sealed record UpdateCampaignOptions
     /// <summary>Gets how often the campaigns move on without an event.</summary>
     public TimeSpan Interval { get; init; } = TimeSpan.FromSeconds(5);
 
+    /// <summary>Gets whether <see cref="UpdateCampaignService.Start"/> runs the loop; false leaves every step to <see cref="UpdateCampaignService.TickAsync"/> (tests).</summary>
+    public bool RunLoop { get; init; } = true;
+
     /// <summary>Gets the limits of a campaign.</summary>
     public UpdateCampaignLimits Limits { get; init; } = new();
 
@@ -90,8 +93,11 @@ internal sealed class UpdateCampaignService : IAsyncDisposable
         _engine = new UpdateCampaignEngine(options.Limits);
     }
 
-    /// <summary>Starts moving the campaigns on.</summary>
-    public void Start() => _loop = Task.Run(LoopAsync);
+    /// <summary>Starts moving the campaigns on; it does nothing when the options turn the loop off.</summary>
+    public void Start()
+    {
+        if (_options.RunLoop) _loop = Task.Run(LoopAsync);
+    }
 
     /// <summary>Moves the campaigns on soon (a device connected, a report came).</summary>
     public void Nudge() => _wake.Writer.TryWrite(true);
