@@ -24,7 +24,7 @@ public sealed class SshServerInstallerTests
         var steps = new List<SshSetupProgress>();
 
         var link = await new SshServerInstaller(ssh, "4.0.0+abc").RunAsync(new SshServerSetupRequest { Target = new SshTarget("me", "box.home.arpa", null), Port = 2693,
-            DataRoot = "~/srv/data", ToolPath = "~/srv/tools" }, (address, _) => { checkedAddress = address; return Task.FromResult(true); },
+            DataRoot = "~/srv/data", ToolPath = "~/srv/tools" }, (address, _) => { checkedAddress = address; return Task.FromResult<string?>(null); },
             (address, setup, code, _) => { claimed = (address, setup, code); return Task.FromResult("link-1"); }, steps.Add, TestContext.CancellationToken);
 
         Assert.AreEqual("link-1", link);
@@ -52,9 +52,10 @@ public sealed class SshServerInstallerTests
         ssh.Answers.Enqueue(new SshResult(0, "", ""));
         var claims = 0;
         var failure = await Assert.ThrowsExactlyAsync<SshSetupException>(() => new SshServerInstaller(ssh, "4.0.0").RunAsync(
-            new SshServerSetupRequest { Target = new SshTarget("me", "box", null) }, (_, _) => Task.FromResult(false),
+            new SshServerSetupRequest { Target = new SshTarget("me", "box", null) }, (_, _) => Task.FromResult<string?>("No route to host"),
             (_, _, _, _) => { claims++; return Task.FromResult("x"); }, static _ => { }, TestContext.CancellationToken));
         Assert.AreEqual(("reach", "server_blocked_ufw"), (failure.Step, failure.Code));
+        StringAssert.Contains(failure.Message, "No route to host", "the person sees what this computer met, not only the port");
         Assert.AreEqual(0, claims);
         Assert.AreEqual(0, ssh.Forwards);
     }
@@ -67,9 +68,22 @@ public sealed class SshServerInstallerTests
         ssh.Answers.Enqueue(new SshResult(0, "", ""));
         ssh.Answers.Enqueue(new SshResult(0, "", ""));
         var failure = await Assert.ThrowsExactlyAsync<SshSetupException>(() => new SshServerInstaller(ssh, "4.0.0").RunAsync(
-            new SshServerSetupRequest { Target = new SshTarget("me", "box", null), Address = new Uri("https://fleet.example.com") }, (_, _) => Task.FromResult(false),
+            new SshServerSetupRequest { Target = new SshTarget("me", "box", null), Address = new Uri("https://fleet.example.com") }, (_, _) => Task.FromResult<string?>("No route to host"),
             (_, _, _, _) => Task.FromResult("x"), static _ => { }, TestContext.CancellationToken));
         StringAssert.Contains(ssh.Scripts[2], "\"$TOOLS/altaserver\" install --urls http://127.0.0.1:2586 1>&2\n", "the default data root: the service of ~/.altaserver");
         Assert.AreEqual("server_proxy_unreachable", failure.Code, "what stands in front of the server does not answer");
+    }
+
+    [TestMethod]
+    public async Task ARefusedSignIn_SaysWhatSshSaid_WithoutTheNoticeOfAHostKeyItJustRecorded()
+    {
+        var ssh = new SshNodeInstallerTests.ScriptedSsh();
+        ssh.Answers.Enqueue(new SshResult(SshResult.ConnectionFailed, "",
+            "Warning: Permanently added 'box' (ED25519) to the list of known hosts.\r\nme@box: Permission denied (publickey).\r\n"));
+        var failure = await Assert.ThrowsExactlyAsync<SshSetupException>(() => new SshServerInstaller(ssh, "4.0.0").RunAsync(
+            new SshServerSetupRequest { Target = new SshTarget("me", "box", null), AcceptNewHostKey = true }, (_, _) => Task.FromResult<string?>(null),
+            (_, _, _, _) => Task.FromResult("x"), static _ => { }, TestContext.CancellationToken));
+        Assert.AreEqual(("connect", "auth_failed"), (failure.Step, failure.Code));
+        Assert.AreEqual("me@box: Permission denied (publickey).", failure.Message);
     }
 }

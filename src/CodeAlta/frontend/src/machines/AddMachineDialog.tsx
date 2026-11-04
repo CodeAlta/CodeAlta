@@ -163,7 +163,7 @@ function SshSetup({ epoch, api, onBusy, onBack, onClose, onOpen }: {
           <span className="add-machine-step-icon">{steps[step].state === "running" ? <ActivitySpinner size={14} />
             : <AppIcon name={steps[step].state === "done" ? "checked" : steps[step].state === "failed" ? "error" : "minus"} size={15} />}</span>
           <span className="add-machine-step-main"><strong>{t(stepTitle(step))}</strong>
-            {steps[step].detail && <small className="muted-text">{steps[step].detail}</small>}</span>
+            {steps[step].detail && steps[step].state !== "failed" && <small className="muted-text">{steps[step].detail}</small>}</span>
         </li>)}
       </ol>
       {failure && problem && <Callout compact intent="warning" role="alert" className="add-machine-failure">{t(problem, { host: parsed ?? target })}
