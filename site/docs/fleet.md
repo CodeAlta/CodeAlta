@@ -390,6 +390,10 @@ Each machine linked to your server counts the statistics of its sessions, a node
 
 A node starts counting with the day it first runs.
 
+### Give secrets to your machines
+
+**Settings > Fleet > Secrets and environments** sets the secrets and variables of your machines from the computer that made the server: for all your work, a space, a project or an environment, for the machines you choose, rotated from there. Environments such as `production` run only on the machines they name and can wait for your approval before a run starts. See [Secrets of your machines with a server](secrets.md#secrets-of-your-machines-with-a-server).
+
 ## Let agents use the fleet
 
 Ask an agent of CodeAlta Desktop to work with your machines: "run the iOS tests on a Mac that is free", "move this session to the build box", "run the nightly review on the server machine", "how many tokens did my machines use this month". It follows the built-in `codealta-fleet` skill and the `alta fleet` commands:
@@ -416,6 +420,6 @@ An agent works with your access and never more:
 - **Remote sessions run code on the machine.** A paired computer can start agents there that use its tools, as you would sitting at it. Pair only your own computers, and revoke the ones you no longer use.
 - **Keys are pinned.** Each computer has its own key. Pairing records the key of the other side, and every connection checks it: a machine that presents another key is refused. The six words let you check, at pairing, that the link comes from the machine you think. Through a server, the key comes from the list of devices your own computers signed, never from the server alone, and a device revoked there is refused.
 - **Permission requests wait for a person.** The node never grants a permission request by itself: you answer it from a paired computer or on the machine.
-- **Credentials stay where they are.** Each machine signs in to its providers itself; nothing is copied from your desktop. The keys and tokens a machine needs are its own [secrets](secrets.md#on-a-machine-with-altanode), set on it with `altanode secrets`.
+- **Credentials stay where they are.** Each machine signs in to its providers itself; nothing is copied from your desktop. The keys and tokens a machine needs are its own [secrets](secrets.md#on-a-machine-with-altanode), set on it with `altanode secrets`, or values your computer seals for it through a server, which the server cannot read ([secrets of your machines](secrets.md#secrets-of-your-machines-with-a-server)).
 - **Choose where the node listens.** By default it listens on the machine itself only. `--listen-all` opens it to every network the machine is on: prefer a private network you control.
 - **Tailscale is the simplest safe network.** With [Tailscale](https://tailscale.com) on your computers, bind the node to the machine's Tailscale address (`altanode run --bind 100.x.y.z`) or use `--listen-all`: your computers reach it from anywhere, through an encrypted network only they are on, and nothing is exposed to the internet. Do not forward the node's port on your router.

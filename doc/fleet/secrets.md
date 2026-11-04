@@ -26,9 +26,9 @@ never by the server.
 - **References**: wherever a value of CodeAlta can come from the environment, it can come from the store, by name:
   `${secret:NAME}` and `${var:NAME}` beside `${env:NAME}`, and `api_key_secret = "NAME"` beside `api_key_env`. A
   configuration file never holds a value again.
-- **Scopes**, the narrowest winning: the run's environment, then the project, the space, the team, the organization.
-  A machine's own store comes first for the work of its owner; an organization's policy can require the managed
-  value on its machines.
+- **Scopes**, the narrowest winning: the run's environment, then the project, the space, the person, the team, the
+  organization. A machine's own store comes first for the work of its owner; an organization's policy can require the
+  managed value on its machines.
 - **Write-only**: the desktop and the REST API set a secret, rotate it and delete it; they list its name, scope,
   version, who set it and when, and which machines hold it, never its value.
 
@@ -49,6 +49,13 @@ never by the server.
   backup of it, never holds a value.
 - **A machine allowed later** gets its copy when a person who manages the secret approves it ("give `GRAFANA_TOKEN` to
   `build-mac`"): their device seals it, as it approves a new device.
+- **Each version has a key of its own**, wrapped to each device with a grant the sealing device signs (as metadata keys
+  are), and the value is bound to its id, kind, name, scope, version and whether it is host-only: a server can neither
+  seal a copy a machine takes, nor move a value to another name, scope or version, nor make a host-only value
+  shell-visible. Names, scopes and holders are what the server reads; a space is the opaque id of its metadata key and a
+  project the blind index of its repository, so the server does not learn them.
+- **The server nudges** the machines concerned when a value, an environment or an approval of theirs changes; a machine
+  also reads its copies before each run, and drops those of a server that revoked it.
 
 ## How a run gets them
 
@@ -60,8 +67,10 @@ never by the server.
 - **Masking**: a secret's value is replaced by `***` in tool outputs, journals, logs and telemetry before they are
   written; a value is never sent to the server, never published in facts, never moved with a session.
 - **Environments protect themselves**: an environment can require the approval of named people or teams before a run
-  that uses it starts, limit it to machines with labels, to automations, or to branches. The approval is a person's
-  device signature, as for every remote action.
+  that uses it starts, limit it to machines with labels, to automations, or to branches. Its rules are signed by a
+  controller device of its person, so that a server cannot drop one. The approval is a person's device signature, as
+  for every remote action, bound to the environment and the version of its rules, the machine, the run and a nonce the
+  machine chose, valid for a while; the machine verifies it against its anchored device list and takes it once.
 
 ## Logins are not secrets of the store
 

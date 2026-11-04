@@ -58,6 +58,24 @@ The value of a secret comes from the standard input or the prompt, never from an
 
 From CodeAlta Desktop, a computer paired with the machine that manages it changes the same secrets and variables in the **Secrets** section of the page of the machine (see [Manage a machine from CodeAlta Desktop](fleet.md#manage-a-machine-from-codealta-desktop)). A computer that reaches the machine only through a CodeAlta Server never does.
 
+## Secrets of your machines with a server
+
+With a [CodeAlta Server](fleet.md#connect-to-a-codealta-server), the computer that made it sets the secrets and variables of all your machines in one place: open **Settings > Fleet > Secrets and environments**.
+
+- **Add a value…** takes a secret or a variable, its name and value, where it applies, and the machines that get it.
+- **Where it applies**: **All my work**, a space linked to the server, a project, or an [environment](#environments). A run takes the value of the narrowest: its environment, then its project, its space, then all your work. A secret of the machine itself (**Settings > Secrets** on it, `altanode secrets`) comes first.
+- **Host-side tools only**: the secret goes to providers, MCP servers and plugin tools, never to the agent's shell. A command line profile of a space that refers to it does not get it.
+- Each row shows where the value applies, its version and the machines that hold it. **Rotate** gives it a new value: the machines take it at once when they are online, else before their next run. **Machines** gives it to another machine of yours, or takes it away. A variable shows its value.
+- A machine removed from the server keeps nothing, and the rows of the values it held say **Rotate: a revoked machine held it** until they are rotated.
+
+Your computer seals each value for the machines you choose and for your other computers: the server keeps only sealed copies, and never sees a value. A machine keeps its copies in its protected store, masks them as its own secrets, and the server records which run used which version of a value, never the value.
+
+### Environments
+
+An environment is a set of values with rules, such as `production`. Under **Environments**, give it a name, the labels of the machines it runs on (none for all your machines) and the people who approve its runs (none for no approval). Then set values **Where it applies** is that environment.
+
+An automation uses an environment with `environment = "production"` in its table. Its run starts only on a machine with one of the labels, and, when the environment needs an approval, waits for it: **Runs that wait for you** lists it at the top of the page, and **Approve…** confirms it beside its row. An approval is for that run only. The labels of a machine are in the file `fleet/labels.json` of its profile, a list such as `["prod", "gpu"]`.
+
 ## Agents
 
 Agents list the names with `alta secret list`, to write `${secret:NAME}` in a configuration. They never read a value, and `alta secret set` is refused: ask the user to set it.
