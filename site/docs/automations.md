@@ -123,6 +123,22 @@ triggers = [
 ]
 ```
 
+## Decide what it does without you
+
+An automation runs unattended. Turn on **Autonomy** in the editor to decide what its runs do without a person; the machine that runs them enforces it, whatever the prompt says.
+
+- Its runs read freely. A command or an edit follows the permission mode of its sessions, which must be one that asks: one that allows everything is refused. Any other tool, such as one of an MCP server or a plugin, waits for your approval unless it is listed in **Tools it calls by itself**.
+- **Calls in an hour, at most** stops those tools after that many calls, all runs together: the next call waits for you.
+- A run that waits for you says **Waits for you** in its list of runs, and in its session you answer as for any session. **Minutes an approval waits** stops the run once that time is over, or keeps it waiting. Leave it empty to wait as long as it takes.
+- **Take over** on a run that waits opens its session and makes it yours: nothing stops it any more, and what it asks waits for you.
+- **Try it (dry run)** runs it once, but the tools it calls by itself are not called: each call is recorded on the run instead, under **Recorded, not made**.
+
+```toml
+autonomy = { allowed_tools = ["k8s_restart_pod"], max_calls_per_hour = 3, approval_timeout = 30, on_timeout = "stop", approvers = "owner" }
+```
+
+The approvals go to you, the owner of the automation. On a machine of your [server](fleet.md#run-your-automations-on-it), a run that waits comes to you as a message too.
+
 ## Follow the runs
 
 <figure class="alta-figure my-4">

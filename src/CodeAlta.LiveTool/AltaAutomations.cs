@@ -82,7 +82,21 @@ public sealed record AltaAutomation(string Id, string Name, bool Enabled, string
 {
     /// <summary>Gets the script of the library it runs in place of a prompt; null when it sends its prompt.</summary>
     public string? Script { get; init; }
+
+    /// <summary>Gets what its runs do without a person; null when they run as any session of their permission mode.</summary>
+    public AltaAutomationAutonomy? Autonomy { get; init; }
 }
+
+/// <summary>
+/// What the runs of an automation do without a person: they read, call the tools it lists within a rate, and wait for
+/// a person for anything else, enforced on the machine that runs them.
+/// </summary>
+/// <param name="AllowedTools">The tools of other sources its runs call by themselves; empty for read only.</param>
+/// <param name="MaxCallsPerHour">The most calls of those tools in an hour; null for no limit.</param>
+/// <param name="ApprovalTimeout">The minutes an approval waits before <paramref name="OnTimeout"/>; null to wait as long as it takes.</param>
+/// <param name="OnTimeout"><c>stop</c> to stop the run, or <c>wait</c> to keep waiting.</param>
+/// <param name="Approvers">Who answers its approvals: <c>owner</c>.</param>
+public sealed record AltaAutomationAutonomy(IReadOnlyList<string> AllowedTools, int? MaxCallsPerHour, int? ApprovalTimeout, string OnTimeout, string Approvers);
 
 /// <summary>One time an automation was started.</summary>
 /// <param name="Id">The identifier of the run.</param>
@@ -94,7 +108,7 @@ public sealed record AltaAutomation(string Id, string Name, bool Enabled, string
 /// <param name="EndedAt">When it ended; null while it runs.</param>
 /// <param name="Trigger">What started it: <c>manual</c>, or the kind of the trigger.</param>
 /// <param name="Detail">What the trigger was about, such as the issue that was opened, or the last line its command wrote.</param>
-/// <param name="Status"><c>running</c>, <c>completed</c>, <c>failed</c>, <c>cancelled</c>, <c>interrupted</c> or <c>skipped</c>.</param>
+/// <param name="Status"><c>running</c>, <c>waiting</c> (for the approval of a person), <c>completed</c>, <c>failed</c>, <c>cancelled</c>, <c>interrupted</c> or <c>skipped</c>.</param>
 /// <param name="Message">Why the run failed or was skipped.</param>
 public sealed record AltaAutomationRun(string Id, string AutomationId, string? Name, string? SessionId, string? ProjectId, DateTimeOffset StartedAt,
     DateTimeOffset? EndedAt, string Trigger, string? Detail, string Status, string? Message);

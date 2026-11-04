@@ -61,6 +61,22 @@ public sealed class AutomationHostTests
     }
 
     [TestMethod]
+    public async Task Show_SaysWhatTheRunsOfAnAutomationDoWithoutAPerson()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var autonomy = new AutomationAutonomyItem(["k8s_restart_pod"], 3, 30, "wait", "owner");
+        var saved = await fixture.Rpc.SaveAsync(new(Epoch, Input("Diagnosis") with { Autonomy = autonomy }, null), default);
+        Assert.AreEqual("ok", saved.Status, saved.Message);
+        var plain = await fixture.Rpc.SaveAsync(new(Epoch, Input("Plain"), null), default);
+
+        var shown = (await fixture.One("alta.automation", "automation", "show", saved.Id!)).GetProperty("autonomy");
+        Assert.AreEqual("k8s_restart_pod", shown.GetProperty("allowedTools")[0].GetString());
+        Assert.AreEqual((3, 30, "wait", "owner"), (shown.GetProperty("maxCallsPerHour").GetInt32(), shown.GetProperty("approvalTimeout").GetInt32(),
+            shown.GetProperty("onTimeout").GetString(), shown.GetProperty("approvers").GetString()));
+        Assert.IsFalse((await fixture.One("alta.automation", "automation", "show", plain.Id!)).TryGetProperty("autonomy", out var none) && none.ValueKind != JsonValueKind.Null);
+    }
+
+    [TestMethod]
     public async Task Rpc_Lists_Saves_AndMovesAnAutomationBetweenTheFiles()
     {
         await using var fixture = await Fixture.CreateAsync();

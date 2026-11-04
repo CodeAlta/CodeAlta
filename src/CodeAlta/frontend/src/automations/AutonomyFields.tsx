@@ -34,8 +34,8 @@ export function AutonomyFields({ autonomy, permissionMode, disabled, onChange }:
           onValueChange={value => set({ maxCallsPerHour: Number.isFinite(value) && value > 0 ? Math.round(value) : null })} />
         <label htmlFor="automation-approval-timeout">{t("Minutes an approval waits")}</label>
         <div className="automation-autonomy-timeout">
-          <NumericInput id="automation-approval-timeout" min={1} max={10080} value={autonomy.approvalTimeout ?? 60} disabled={disabled} buttonPosition="none"
-            onValueChange={value => set({ approvalTimeout: Number.isFinite(value) && value > 0 ? Math.round(value) : 1 })} />
+          <NumericInput id="automation-approval-timeout" min={1} max={10080} value={autonomy.approvalTimeout ?? ""} disabled={disabled} buttonPosition="none" placeholder="∞"
+            onValueChange={value => set({ approvalTimeout: Number.isFinite(value) && value > 0 ? Math.round(value) : null })} />
           <HTMLSelect value={autonomy.onTimeout} disabled={disabled} aria-label={t("Minutes an approval waits")} onChange={event => set({ onTimeout: event.target.value })}>
             <option value="stop">{t("then stop the run")}</option><option value="wait">{t("then keep waiting")}</option>
           </HTMLSelect>

@@ -207,6 +207,7 @@ The machine fires its schedules and starts its sessions; **Run now** runs it the
 - Its project is found on the machine by its git repository: the machine needs a checkout of it (`altanode projects clone <url>`). An automation of no project runs as a chat there.
 - **Runs with** lists the providers and models of a paired machine once you choose it in **Runs on**, named as the machine names them; leave it to the defaults for the machine's default provider. **Runs in** lists the projects of this computer: the machine finds its own checkout of the project.
 - A command trigger runs on this computer only, and an automation kept in the configuration of a project runs on the machines that have the project.
+- An automation with [autonomy](automations.md#decide-what-it-does-without-you) waits for you on the machine. Through your server, a run that waits comes as a message; **Take over** on the run is signed by your computer and checked by the machine, and you answer in its session.
 
 A machine of your server that is not paired with this computer gets the automation through the server, with no permission to give on the machine: it must be one of your machines. The server keeps it sealed, so it cannot read nor change it, and the machine gets it when it connects. Its details say whether the machine took it or refused it, and why. **Run now** asks the machine through the server while it is online; its triggers run it either way, also while the server is away.
 
