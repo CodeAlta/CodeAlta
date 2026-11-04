@@ -14,6 +14,8 @@ import { automationTemplates, describeTrigger, describeTriggers, emptyForm, filt
   type AutomationForm, type AutomationScope, type AutomationTemplate } from "./automations";
 import type { AutomationsHub } from "./automationsHub";
 import type { RunProvider } from "../workItems/runsWith";
+import { automationProjects, machineRunProviders } from "../machines/machineProviders";
+import { useRemoteChoices } from "../machines/RunOnChip";
 
 const day = 24 * 60 * 60 * 1000;
 
@@ -173,8 +175,9 @@ function RunList({ runs, sessions, now, named, onOpen }: {
   </ul>;
 }
 
-function AutomationDetail({ hub, item, paused, busy, now, sessions, onRun, onEdit, onAllow, onOpen }: {
+function AutomationDetail({ hub, item, paused, busy, now, sessions, epoch, providers, onRun, onEdit, onAllow, onOpen }: {
   hub: AutomationsHub; item: AutomationItem; paused: boolean; busy: boolean; now: number; sessions: ReadonlyMap<string, WorkspaceSession>;
+  epoch: string | null | undefined; providers: readonly RunProvider[];
   onRun: () => void; onEdit: () => void; onAllow: () => void; onOpen: (sessionId: string, projectId: string | null) => void;
 }) {
   const { t, locale } = useShellLanguage();
@@ -188,7 +191,10 @@ function AutomationDetail({ hub, item, paused, busy, now, sessions, onRun, onEdi
   }, [hub, stamp]);
   const next = item.nextRunAt ? timelineTime(item.nextRunAt, locale) : null;
   const waits = !item.problem && waitsToBeAllowed(item);
-  const runsWith = runsWithFacts(item, t);
+  // Its provider as the machine that runs it names it, else as this computer does.
+  const machine = useRemoteChoices(epoch, item.runsOn ?? null, null).choices;
+  const providerName = (item.runsOn ? machineRunProviders(machine) : providers)?.find(provider => provider.id === item.provider)?.name ?? null;
+  const runsWith = runsWithFacts(item, t, providerName);
   const placed = placementLabel(item, t);
   const notCopied = !item.problem ? placementProblem(item) : null;
   return <section className="automation-detail" aria-label={item.name}>
@@ -267,6 +273,8 @@ export function AutomationsPanel({ hub, projects, sessions, projectId, providers
   onOpenSession: (sessionId: string, projectId: string | null) => void;
 }) {
   const { t } = useShellLanguage();
+  // The projects of this computer: the row of the Explorer that stands for a machine is not one an automation runs in.
+  const ownProjects = useMemo(() => automationProjects(projects), [projects]);
   const state = useSyncExternalStore(hub.subscribe, hub.getSnapshot, hub.getSnapshot);
   // What the host just said happened is not in the future of a clock read half a minute ago.
   const now = Math.max(useNow(visible), Date.now());
@@ -358,11 +366,11 @@ export function AutomationsPanel({ hub, projects, sessions, projectId, providers
                     onStartPlaced={() => void startPlaced(item)} onDuplicate={() => create({ ...formOf(item), id: null, name: t("{name} (copy)", { name: item.name }) })} onDelete={() => setDeleting(item)} />)}</ul>}
             </section>
           </>}
-        <Templates onPick={fromTemplate} chatOnly={projects.length === 0} />
+        <Templates onPick={fromTemplate} chatOnly={ownProjects.length === 0} />
       </div>
       {state.items.length > 0 && <aside className="automations-side">
         {current
-          ? <AutomationDetail hub={hub} item={current} paused={state.paused} busy={busy.has(current.id)} now={now} sessions={byId}
+          ? <AutomationDetail hub={hub} item={current} paused={state.paused} busy={busy.has(current.id)} now={now} sessions={byId} epoch={epoch} providers={providers}
               onRun={() => void run(current.id)} onEdit={() => setEditing(formOf(current))} onAllow={() => void allow(current)} onOpen={onOpenSession} />
           : <section className="automation-detail" aria-label={t("Recent runs")}>
               <h4>{t("Recent runs")}</h4>
@@ -370,7 +378,7 @@ export function AutomationsPanel({ hub, projects, sessions, projectId, providers
             </section>}
       </aside>}
     </div>
-    {editing && <AutomationEditor hub={hub} initial={editing} projects={projects} providers={providers} epoch={epoch} onClose={() => setEditing(null)}
+    {editing && <AutomationEditor hub={hub} initial={editing} projects={ownProjects} providers={providers} epoch={epoch} onClose={() => setEditing(null)}
       onSaved={(id, start) => {
         setEditing(null); setSelected(id);
         if (start) void run(id);

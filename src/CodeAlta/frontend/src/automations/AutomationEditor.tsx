@@ -5,7 +5,8 @@ import type { AutomationScriptItem, AutomationTriggerItem, WorkspaceProject } fr
 import { AppIcon } from "../AppIcon";
 import { AppWindow } from "../AppWindow";
 import { machineState } from "../machines/machines";
-import { useMachines } from "../machines/RunOnChip";
+import { useMachines, useRemoteChoices } from "../machines/RunOnChip";
+import { machineRunProviders, onMachine } from "../machines/machineProviders";
 import { SessionSettingsChip, useSessionSettingsChoices } from "../sessionSettings/SessionSettingsChip";
 import { sessionSettingsApi } from "../sessionSettings/sessionSettingsApi";
 import { useShellLanguage } from "../shellLanguage";
@@ -152,10 +153,17 @@ export function AutomationEditor({ hub, initial, projects, providers, epoch, onC
   const project = projects.find(candidate => candidate.id === form.projectId);
   // The machines this computer reaches: paired ones, and those of a linked server, which gets the automation sealed for them.
   const reachable = useMachines(epoch);
+  // Placed on a machine, it runs with a provider of that machine: the chip lists the machine's providers and models, named as it names them.
+  const machine = useRemoteChoices(epoch, form.runsOn, null).choices;
+  const machineProviders = form.runsOn ? machineRunProviders(machine) : null;
+  const runProviders = machineProviders ?? providers;
   // An automation runs in the space of its project when it is in one, else in the default space: the host reads its catalogs there.
-  const api = useMemo(() => epoch ? sessionSettingsApi(epoch, project?.id ?? null, project?.path ?? null, null) : null, [epoch, project?.id, project?.path]);
+  const api = useMemo(() => {
+    const base = epoch ? sessionSettingsApi(epoch, project?.id ?? null, project?.path ?? null, null) : null;
+    return base && form.runsOn && machine && machineProviders ? onMachine(base, form.runsOn, machine) : base;
+  }, [epoch, project?.id, project?.path, form.runsOn, machine]);
   const settings = sessionSettingsOf(form);
-  const choices = useSessionSettingsChoices(api, providers, null, settings);
+  const choices = useSessionSettingsChoices(api, runProviders, null, settings);
   const [kind, setKind] = useState<"prompt" | "script">(initial.script ? "script" : "prompt");
   const [scripts, setScripts] = useState<readonly AutomationScriptItem[]>([]);
   // The scripts of the project it runs in come first, then yours.
@@ -242,7 +250,7 @@ export function AutomationEditor({ hub, initial, projects, providers, epoch, onC
         </FormGroup> : <ScriptFields scripts={scripts} form={form} disabled={busy} edit={edit} />}
         {/* What its sessions run with: the Agent chip of the composer, and its form. */}
         <FormGroup label={t("Runs with")} className="automation-runs-with">
-          <SessionSettingsChip id="automation" providers={providers} choices={choices} value={settings} disabled={busy} onChange={next => edit(formSettings(next))} />
+          <SessionSettingsChip id="automation" providers={runProviders} choices={choices} value={settings} disabled={busy} onChange={next => edit(formSettings(next))} />
         </FormGroup>
         <div className="automation-editor-switches">
           <Switch checked={form.enabled} disabled={busy} label={t("Enabled")} onChange={event => edit({ enabled: event.currentTarget.checked })} />

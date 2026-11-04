@@ -173,6 +173,8 @@ test("the details say what the sessions run with besides the defaults, the permi
   assert.deepEqual(runsWithFacts(item("c", { options: { subSessions: false } }), english), ["Sub-sessions: Off"]);
   assert.deepEqual(runsWithFacts(item("d", { options: { subSessions: true } }), english), []);
   assert.deepEqual(runsWithFacts(item("c"), english), [], "the defaults say nothing");
+  // Its provider as the machine it runs on names it, or as this computer does.
+  assert.deepEqual(runsWithFacts(item("e", { provider: "codex", runsOn: "mac" }), english, "Codex (Mac mini)"), ["Codex (Mac mini)"]);
 });
 
 test("the list is narrowed by words and by where the automations run", () => {

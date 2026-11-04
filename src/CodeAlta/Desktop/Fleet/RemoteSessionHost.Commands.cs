@@ -188,18 +188,27 @@ internal sealed partial class RemoteSessionHost
 
     /// <summary>
     /// The choices the composer of a remote session offers: the provider, the agent prompt and the model the machine
-    /// listed for it, and nothing else, since a send keeps them.
+    /// listed for it, and nothing else, since a send keeps them. The provider and the model are named as the machine
+    /// names them: a provider of the same key on this computer may be another account, with another name.
     /// </summary>
     /// <param name="sessionId">The session.</param>
     /// <returns>The choices; null when the machine does not list the session.</returns>
     public OwnedSelectionChoices? SelectionChoices(string sessionId)
     {
-        var session = Listing.Sessions.FirstOrDefault(value => string.Equals(value.Id, sessionId, StringComparison.OrdinalIgnoreCase));
+        var listing = Listing;
+        var session = listing.Sessions.FirstOrDefault(value => string.Equals(value.Id, sessionId, StringComparison.OrdinalIgnoreCase));
         if (session is null) return null;
         var provider = session.ProviderKey ?? "default";
-        var model = session.ModelId is { Length: > 0 } id ? new OwnedModelChoice(id, id, []) : null;
+        var described = listing.Info?.Providers.FirstOrDefault(value => string.Equals(value.Key, provider, StringComparison.Ordinal))
+            ?? (session.ProviderKey is null ? listing.Info?.Providers.FirstOrDefault(static value => value.IsDefault) : null);
+        var model = session.ModelId is { Length: > 0 } id
+            ? new OwnedModelChoice(id, described?.Models.FirstOrDefault(value => string.Equals(value.Id, id, StringComparison.Ordinal))?.Name ?? id, [])
+            : null;
         return new OwnedSelectionChoices(new OwnedSessionSelection(provider, "default", model?.Id, null), [new OwnedPromptChoice("default", "Default")],
-            model is null ? [] : [model]);
+            model is null ? [] : [model])
+        {
+            HostProviderName = described?.Name ?? (session.ProviderKey is null ? null : provider),
+        };
     }
 
     /// <inheritdoc />

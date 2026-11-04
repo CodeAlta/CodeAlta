@@ -155,7 +155,7 @@ The sessions of a paired machine are listed in the Explorer with your own, with 
 - A session in a project you also have here, a checkout of the same git repository, is listed under that project, whatever its folder and its name on each computer.
 - The other sessions of the machine are listed under a row named after the machine. That row is there as soon as the machine is paired, sessions or none, and is dimmed while the machine is offline; its tooltip says its state.
 
-Open one: its tab is the tab of any session. You read its timeline as it works, answer its questions and permission requests, send it prompts, steer it and stop it. The provider and the model are the ones the machine gives it.
+Open one: its tab is the tab of any session. You read its timeline as it works, answer its questions and permission requests, send it prompts, steer it and stop it. The provider and the model are the ones the machine gives it, named as the machine names them.
 
 A session of a machine that asks a question, or waits for you to allow a command or a change, is marked as waiting within a few seconds: its row in the Explorer, **wait for you** on the Fleet canvas, and the mark of the **Fleet** button of the title bar.
 
@@ -205,7 +205,7 @@ The machine fires its schedules and starts its sessions; **Run now** runs it the
 - Moved to another machine, or brought back to this computer, while the machine it ran on is offline, an enabled automation waits: its card says **Waits for the machine it left** until that machine takes its copy away, so that both never run it. A machine that refuses to take it away (its copy could not be deleted there) keeps it waiting, and the card says why. **Start anyway…** starts it at once where it is now; both machines may then run it until the old one answers, and it still takes its copy away then.
 - Turning off **Running** in the **Automations** tab pauses the automations on machines too: they get them disabled until you turn it on again.
 - Its project is found on the machine by its git repository: the machine needs a checkout of it (`altanode projects clone <url>`). An automation of no project runs as a chat there.
-- Name a provider the machine has, or none for the machine's default one.
+- **Runs with** lists the providers and models of a paired machine once you choose it in **Runs on**, named as the machine names them; leave it to the defaults for the machine's default provider. **Runs in** lists the projects of this computer: the machine finds its own checkout of the project.
 - A command trigger runs on this computer only, and an automation kept in the configuration of a project runs on the machines that have the project.
 
 A machine of your server that is not paired with this computer gets the automation through the server, with no permission to give on the machine: it must be one of your machines. The server keeps it sealed, so it cannot read nor change it, and the machine gets it when it connects. Its details say whether the machine took it or refused it, and why. **Run now** asks the machine through the server while it is online; its triggers run it either way, also while the server is away.

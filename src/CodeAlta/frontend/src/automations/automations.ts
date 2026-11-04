@@ -176,9 +176,9 @@ export function placementWait(item: Pick<AutomationItem, "placement">): string |
  * What the sessions of an automation run with besides the defaults, one fact each, as its details list them: an
  * automation that came with a project shows them before the user allows it.
  */
-export function runsWithFacts(item: AutomationItem, t: Translate): readonly string[] {
+export function runsWithFacts(item: AutomationItem, t: Translate, providerName: string | null = null): readonly string[] {
   const permission = item.permissionMode ? permissionModeName(item.permissionMode) : null;
-  return [item.provider, item.model, item.effort, item.agent ? t("agent {name}", { name: item.agent }) : null,
+  return [item.provider ? providerName ?? item.provider : null, item.model, item.effort, item.agent ? t("agent {name}", { name: item.agent }) : null,
     item.permissionMode ? `${t("Permissions")}: ${permission ? t(permission) : item.permissionMode}` : null,
     item.reviewBeforeCommit !== null ? `${t("Review before commit")}: ${t(item.reviewBeforeCommit ? "On" : "Off")}` : null,
     item.sandbox ? `${t("Sandbox")}: ${item.sandbox.toLowerCase() === notSandboxed ? t("Off") : item.sandbox}` : null,

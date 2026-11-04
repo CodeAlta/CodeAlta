@@ -273,7 +273,9 @@ internal sealed class SessionOperationsService
                 // asks for another provider before a send.
                 ProviderUnavailable = space is { ProviderAvailable: false } ? true : null,
                 ReplacementProvider = space?.ReplacementProvider,
-                ProviderName = space?.ProviderName,
+                // A session of another machine names its provider as that machine does.
+                ProviderName = choices.HostProviderName ?? space?.ProviderName,
+                MachineProvider = choices.HostProviderName is not null ? true : null,
                 // The providers whose state the composer reports: those of the space of the session.
                 SpaceProviders = space is null ? null : [.. space.Providers.Take(64).Select(static provider => provider.ProviderId.Value)],
             };
@@ -960,6 +962,10 @@ internal sealed record SessionChoicesResponse(string Status, string? Epoch, stri
     // The display name of the provider of the session, as Settings names it; absent when no provider has its key.
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? ProviderName { get; init; }
+    // True when the provider is one of the machine that runs the session: ProviderName names it as that machine does, and
+    // a provider of the same key on this computer is another one.
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? MachineProvider { get; init; }
     // The keys of the enabled providers of the space of the session; absent where the host does not say.
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public IReadOnlyList<string>? SpaceProviders { get; init; }

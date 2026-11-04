@@ -69,6 +69,12 @@ public sealed record OwnedSelectionChoices(OwnedSessionSelection Current, IReadO
     public bool SupportsRemoteControl { get; init; }
 
     /// <summary>
+    /// Gets the name of the provider of the session as the host that runs it names it (another machine, whose providers
+    /// are its own); null when the providers of this computer name it.
+    /// </summary>
+    public string? HostProviderName { get; init; }
+
+    /// <summary>
     /// Gets the tier of models the session runs on (<c>complex</c>, <c>standard</c> or <c>quick</c>), or null for a
     /// model chosen by hand.
     /// </summary>
