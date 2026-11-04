@@ -129,6 +129,67 @@ public sealed class AutomationRunGuardTests
         Assert.AreEqual(1, stopped.Count);
     }
 
+    // A runner whose runs have a guard of their own, asking the given asker, and that complete when the test says.
+    private sealed class GuardedRunner(Asker asker) : IAutomationRunner
+    {
+        internal TaskCompletionSource<AutomationOutcome> Completion { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        internal AutomationRunGuard? Guard { get; private set; }
+
+        public Task<AutomationStart> StartAsync(AutomationEntry entry, string runId, string prompt, string? detail, CancellationToken cancellationToken)
+            => StartAsync(entry, runId, prompt, detail, false, cancellationToken);
+
+        public Task<AutomationStart> StartAsync(AutomationEntry entry, string runId, string prompt, string? detail, bool dryRun, CancellationToken cancellationToken)
+        {
+            Guard = new AutomationRunGuard(entry, new AutomationCallBreaker(), asker.AskAsync, new AutomationClock { Now = Noon }, dryRun);
+            return Task.FromResult(new AutomationStart("session-1", null, Completion.Task) { Guard = Guard });
+        }
+    }
+
+    [TestMethod]
+    public async Task ARunWaitsWhileACallWaitsForAPerson_ATryKeepsItsCalls_AndATakeOverIsSaid()
+    {
+        using var root = new AutomationTempRoot();
+        File.WriteAllText(Path.Combine(root.Path, "config.toml"), """
+            [automations.0199f4c2-6d1e-7c3a-b5f0-2f9c8e4a1d77]
+            name = "Diagnosis"
+            prompt = "Diagnose."
+            autonomy = { allowed_tools = ["k8s_restart_pod"] }
+            """);
+        var asker = new Asker { Held = new(TaskCreationOptions.RunContinuationsAsynchronously) };
+        var runner = new GuardedRunner(asker);
+        await using var service = new AutomationService(Path.Combine(root.Path, "config.toml"), _ => Task.FromResult<IReadOnlyList<CodeAlta.Catalog.ProjectDescriptor>>([]),
+            new AutomationStateStore(Path.Combine(root.Path, "state.json"), false), runner, new AutomationClock { Now = Noon }, TimeZoneInfo.Utc);
+        await service.RefreshAsync();
+        const string Id = "0199f4c2-6d1e-7c3a-b5f0-2f9c8e4a1d77";
+
+        var run = (await service.RunAsync(Id, default))!;
+        var held = runner.Guard!.BeforeToolCallAsync(Call("k8s_delete_namespace"), default).AsTask();
+        Assert.AreEqual(AutomationRun.Waiting, service.Runs(Id, 1)[0].Status, "the run waits for a person");
+        Assert.AreEqual("session-1", service.TakeOver(run.Id));
+        Assert.IsTrue(service.IsTakenOver(run.Id));
+        Assert.AreEqual("Taken over by a person.", service.Runs(Id, 1)[0].Message);
+        asker.Held.SetResult(new(AgentPermissionDecisionKind.AllowOnce));
+        await held;
+        Assert.AreEqual(AutomationRun.Running, service.Runs(Id, 1)[0].Status);
+        runner.Completion.SetResult(new(AutomationRun.Completed));
+        for (var i = 0; i < 200 && service.IsRunning(Id); i++) await Task.Delay(10);
+        Assert.IsNull(service.TakeOver(run.Id), "a run that ended is not taken over");
+
+        // A try, by hand: the allowed tool is a fake, and its call stays on the run.
+        var runner2 = new GuardedRunner(new Asker());
+        await using var trying = new AutomationService(Path.Combine(root.Path, "config.toml"), _ => Task.FromResult<IReadOnlyList<CodeAlta.Catalog.ProjectDescriptor>>([]),
+            new AutomationStateStore(Path.Combine(root.Path, "state2.json"), false), runner2, new AutomationClock { Now = Noon }, TimeZoneInfo.Utc);
+        await trying.RefreshAsync();
+        var (tried, problem) = await trying.TryAsync(Id, -1, null, default);
+        Assert.IsNull(problem);
+        Assert.AreEqual(AutomationService.TryTrigger, tried!.Trigger);
+        Assert.IsTrue(runner2.Guard!.DryRun);
+        await runner2.Guard.BeforeToolCallAsync(Call("k8s_restart_pod"), default);
+        CollectionAssert.AreEqual(new[] { """k8s_restart_pod {"namespace":"shop","pod":"api-7"}""" }, trying.Runs(Id, 1)[0].Calls!.ToArray());
+        runner2.Completion.SetResult(new(AutomationRun.Completed));
+    }
+
     /// <summary>A clock whose timers fire when a test moves it.</summary>
     private sealed class TimerClock(DateTimeOffset start) : TimeProvider
     {

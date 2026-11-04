@@ -28,6 +28,15 @@ internal sealed record AutomationRun(string Id, string AutomationId, DateTimeOff
     /// <summary>A trigger was due while the previous run was still in progress.</summary>
     internal const string Skipped = "skipped";
 
+    /// <summary>The run is in progress and waits for a person: an approval of a call it may not make by itself.</summary>
+    internal const string Waiting = "waiting";
+
+    /// <summary>The most calls a try records.</summary>
+    internal const int MaximumCalls = 50;
+
+    /// <summary>Whether the run is in progress, working or waiting for a person.</summary>
+    internal bool InProgress => Status is Running or Waiting;
+
     /// <summary>The name of the automation when it ran: a run outlives a rename, and its automation.</summary>
     public string? Name { get; init; }
 
@@ -66,6 +75,9 @@ internal sealed record AutomationRun(string Id, string AutomationId, DateTimeOff
 
     /// <summary>The answer a try kept instead of writing it back; null otherwise.</summary>
     public string? Output { get; init; }
+
+    /// <summary>The calls of allowed tools a try recorded instead of making them, as the tool and its arguments; null for none.</summary>
+    public IReadOnlyList<string>? Calls { get; init; }
 }
 
 /// <summary>What an event trigger has already seen of a repository.</summary>
@@ -128,7 +140,7 @@ internal sealed class AutomationStateStore
         // What was in progress when the application stopped did not finish.
         for (var index = 0; index < _state.Runs.Count; index++)
         {
-            if (_state.Runs[index].Status == AutomationRun.Running)
+            if (_state.Runs[index].InProgress)
                 _state.Runs[index] = _state.Runs[index] with { Status = AutomationRun.Interrupted, EndedAt = _state.Runs[index].EndedAt ?? _state.AliveAt };
         }
     }
@@ -213,14 +225,14 @@ internal sealed class AutomationStateStore
             var kept = _state.Runs.Count(candidate => candidate.AutomationId == run.AutomationId);
             for (var index = 0; index < _state.Runs.Count && kept > MaximumRunsPerAutomation; index++)
             {
-                if (_state.Runs[index].AutomationId != run.AutomationId || _state.Runs[index].Status == AutomationRun.Running) continue;
+                if (_state.Runs[index].AutomationId != run.AutomationId || _state.Runs[index].InProgress) continue;
                 _state.Runs.RemoveAt(index--);
                 kept--;
             }
 
             for (var index = 0; index < _state.Runs.Count && _state.Runs.Count > MaximumRuns; index++)
             {
-                if (_state.Runs[index].Status != AutomationRun.Running) _state.Runs.RemoveAt(index--);
+                if (!_state.Runs[index].InProgress) _state.Runs.RemoveAt(index--);
             }
 
             Save();

@@ -50,8 +50,12 @@ internal sealed class AutomationRunGuard : AgentToolInterceptor
     private readonly Func<AgentPermissionRequest, CancellationToken, Task<AgentPermissionDecision>> _ask;
     private readonly TimeProvider _time;
     private readonly System.Collections.Concurrent.ConcurrentDictionary<CancellationTokenSource, byte> _timeouts = new();
+    private readonly Lock _gate = new();
     private int _waiting;
+    private bool _external;
+    private bool _shown;
     private int _takenOver;
+    private int _stopped;
 
     /// <summary>Creates the guard of a run.</summary>
     /// <param name="entry">The automation.</param>
@@ -72,7 +76,10 @@ internal sealed class AutomationRunGuard : AgentToolInterceptor
     internal bool DryRun { get; }
 
     /// <summary>Gets whether a call waits for a person now.</summary>
-    internal bool Waiting => Volatile.Read(ref _waiting) > 0;
+    internal bool Waiting
+    {
+        get { lock (_gate) return _waiting > 0 || _external; }
+    }
 
     /// <summary>Gets whether a person took the run over: what waits for them is no longer timed out.</summary>
     internal bool TakenOver => Volatile.Read(ref _takenOver) != 0;
@@ -85,6 +92,33 @@ internal sealed class AutomationRunGuard : AgentToolInterceptor
 
     /// <summary>Raised when an approval waited too long and the automation stops its runs then, with why.</summary>
     internal event Action<string>? Stopped;
+
+    /// <summary>Says whether an approval of a command or an edit of the session waits now (the host's own guards ask it).</summary>
+    internal void NoteWaiting(bool waiting)
+    {
+        lock (_gate) _external = waiting;
+        Raise();
+    }
+
+    /// <summary>Stops the run, once, with why: an approval waited too long.</summary>
+    internal void Stop(string why)
+    {
+        if (Interlocked.Exchange(ref _stopped, 1) == 0) Stopped?.Invoke(why);
+    }
+
+    // Tells whether the run waits, when that changed.
+    private void Raise()
+    {
+        bool now;
+        lock (_gate)
+        {
+            now = _waiting > 0 || _external;
+            if (now == _shown) return;
+            _shown = now;
+        }
+
+        WaitingChanged?.Invoke(now);
+    }
 
     /// <summary>A person takes the run over: what waits for them waits as long as they take.</summary>
     internal void TakeOver()
@@ -135,8 +169,8 @@ internal sealed class AutomationRunGuard : AgentToolInterceptor
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeout.Token);
         _timeouts[timeout] = 0;
         if (TakenOver) timeout.CancelAfter(Timeout.InfiniteTimeSpan);
-        Interlocked.Increment(ref _waiting);
-        WaitingChanged?.Invoke(true);
+        lock (_gate) _waiting++;
+        Raise();
         AgentPermissionDecision decision;
         try
         {
@@ -149,8 +183,8 @@ internal sealed class AutomationRunGuard : AgentToolInterceptor
         finally
         {
             _timeouts.TryRemove(timeout, out _);
-            Interlocked.Decrement(ref _waiting);
-            WaitingChanged?.Invoke(false);
+            lock (_gate) _waiting--;
+            Raise();
         }
 
         if (decision.Kind is AgentPermissionDecisionKind.AllowOnce or AgentPermissionDecisionKind.AllowAlways or AgentPermissionDecisionKind.AllowForSession)
@@ -158,7 +192,7 @@ internal sealed class AutomationRunGuard : AgentToolInterceptor
         if (timeout.IsCancellationRequested && !cancellationToken.IsCancellationRequested && !TakenOver)
         {
             var why = $"No one answered the call of {tool} within {_autonomy.ApprovalTimeout} minutes: the run stopped.";
-            Stopped?.Invoke(why);
+            Stop(why);
             return AgentToolCallDecision.Block(why);
         }
 

@@ -592,20 +592,22 @@ internal sealed partial class AutomationService
     /// written back to the source.
     /// </summary>
     /// <param name="id">The automation.</param>
-    /// <param name="triggerIndex">Its trigger.</param>
+    /// <param name="triggerIndex">Its trigger; -1 to try it with its own prompt, as by hand (a dry run of its autonomy).</param>
     /// <param name="body">A webhook: the JSON body of the example; null otherwise.</param>
     /// <param name="cancellationToken">Cancels the start.</param>
     /// <returns>The run, or why it did not start.</returns>
     internal async Task<(AutomationRun? Run, string? Problem)> TryAsync(string id, int triggerIndex, string? body, CancellationToken cancellationToken)
     {
         if (Snapshot.Find(id) is not { } entry) return (null, NoSuchAutomation);
-        if (triggerIndex < 0 || triggerIndex >= entry.Definition.Triggers.Count) return (null, "The automation has no such trigger.");
+        if (triggerIndex < -1 || triggerIndex >= entry.Definition.Triggers.Count) return (null, "The automation has no such trigger.");
         if (entry.Problem is { } problem) return (null, problem);
         if (entry.Definition.RunsOn is not null) return (null, "It runs on another machine: try it there, or here before you place it.");
+        // Without an event: its own prompt, the tools its autonomy allows replaced by fakes.
+        if (triggerIndex == -1) return (await BeginAsync(entry, TryTrigger, "Try", entry.Definition.Prompt, cancellationToken).ConfigureAwait(false), null);
         var trigger = entry.Definition.Triggers[triggerIndex];
         var (sample, missing) = await SampleAsync(entry.ProjectId, entry.Definition.Prompt, trigger, body, cancellationToken).ConfigureAwait(false);
         if (sample is null) return (null, missing);
-        var run = await BeginAsync(entry, "try", "Try · " + sample.Detail, sample.Prompt, cancellationToken, reply: sample.Reply is { } target ? target with { Kept = true } : null)
+        var run = await BeginAsync(entry, TryTrigger, "Try · " + sample.Detail, sample.Prompt, cancellationToken, reply: sample.Reply is { } target ? target with { Kept = true } : null)
             .ConfigureAwait(false);
         return (run, null);
     }

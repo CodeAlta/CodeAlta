@@ -967,6 +967,65 @@ public sealed class AutomationHostTests
     }
 
     [TestMethod]
+    [DataRow(false)]
+    [DataRow(true)]
+    public async Task Runner_GuardsTheToolsOfARunWithAutonomyWhileItWorks_AndRefusesAModeThatAllowsEverything(bool approvesEverything)
+    {
+        var root = Directory.CreateTempSubdirectory("codealta-automation-autonomy-").FullName;
+        try
+        {
+            var global = Path.Combine(root, "global");
+            var projectPath = Path.Combine(root, "project");
+            var home = Path.Combine(root, "home");
+            var builtin = Path.Combine(root, "builtin");
+            foreach (var path in new[] { global, projectPath, home, builtin }) Directory.CreateDirectory(path);
+            var provider = new RunnerProvider();
+            await using var host = await CodeAltaHost.CreateAsync(new CodeAltaHostOptions
+            {
+                GlobalRoot = global, CurrentProjectPath = projectPath, DiscoveryScope = new(home, root), BuiltInSkillRoot = builtin,
+                PluginEnvironment = FrozenDictionary<string, string?>.Empty, StartPlugins = false, IsHeadless = true, OwnsLogging = false,
+                AutoApproveOwnedPermissions = approvesEverything,
+                ConfigureModelProviders = registry => registry.RegisterOrReplace(provider.Descriptor, () => new RunnerRuntime(provider)),
+            });
+            var project = await host.ProjectCatalog.UpsertFromPathAsync(projectPath);
+            var runner = new AutomationRunner(host);
+            var entry = new AutomationEntry(new("0199f4c2-6d1e-7c3a-b5f0-2f9c8e4a1d79", "Diagnosis")
+            {
+                Prompt = "Diagnose the incident.", Autonomy = new AutomationAutonomy { AllowedTools = ["k8s_restart_pod"] },
+            }, new AutomationSource(Path.Combine(global, "config.toml"), null, null), project.Id, project.ProjectPath, null);
+
+            var start = await runner.StartAsync(entry, "run-1", entry.Definition.Prompt, null, dryRun: false, default);
+
+            if (approvesEverything)
+            {
+                StringAssert.Contains(start.Problem, "permission mode that asks");
+                Assert.IsNull(start.Completion);
+                Assert.IsNull(host.ToolGuards.Find(start.SessionId!));
+            }
+            else
+            {
+                Assert.IsNull(start.Problem);
+                await provider.Sends.Reader.ReadAsync().AsTask().WaitAsync(Patience);
+                Assert.AreSame(start.Guard, host.ToolGuards.Find(start.SessionId!), "the guard is the session's from its first tool call");
+                Assert.IsFalse(start.Guard!.DryRun);
+                provider.Release.SetResult();
+                Assert.AreEqual(AutomationRun.Completed, (await start.Completion!.WaitAsync(Patience)).Status);
+                Assert.IsNull(host.ToolGuards.Find(start.SessionId!), "it leaves with the run");
+            }
+
+            var workspace = new WorkspaceService(host, Epoch);
+            await workspace.CloseSessionsAsync();
+            await workspace.CloseImportsAsync();
+        }
+        finally
+        {
+            try { Directory.Delete(root, recursive: true); }
+            catch (IOException) { }
+            catch (UnauthorizedAccessException) { }
+        }
+    }
+
+    [TestMethod]
     public async Task Workflows_ListTheLibrary_RunAScriptInANewSession_ListTheRuns_AndAskARunToBeSaved()
     {
         var root = Directory.CreateTempSubdirectory("codealta-workflows-").FullName;
