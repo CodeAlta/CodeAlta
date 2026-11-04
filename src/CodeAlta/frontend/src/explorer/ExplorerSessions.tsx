@@ -12,6 +12,7 @@ import { plainTitle } from "../sessionTitle";
 import { providerHasRemoteControl } from "../remoteControl";
 import { openElsewhereEntries } from "../claudeCodeOpen/openElsewhereEntries";
 import { useShellLanguage } from "../shellLanguage";
+import { sessionRowProviderName } from "../machines/machineProviderNames";
 import { sessionEntries, type SessionListEntry } from "./sessionTree";
 import type { SessionRowDrag } from "./sessionDrag";
 import { SessionLinkRow, SessionOriginLine } from "./sessionFamily";
@@ -46,7 +47,7 @@ export function SessionRowTitle({ session, depth, diagnostic, subAgents, twist, 
   const { t } = useShellLanguage();
   const automated = !!session.automationId;
   const logo = useProviderBrand(session.providerKey);
-  const provider = useContext(ProviderBrandsContext).get(session.providerKey?.toLowerCase() ?? "")?.name ?? session.providerKey;
+  const provider = sessionRowProviderName(session, useContext(ProviderBrandsContext).get(session.providerKey?.toLowerCase() ?? "")?.name);
   // The logo of its provider tells the sessions apart at a glance. A session of a provider of no known brand
   // keeps the icon of a session.
   return <>{twist && <span className="tree-twist session-twist" title={t(twist.collapsed ? "Show the sub-agents" : "Hide the sub-agents")}

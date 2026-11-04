@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import type { MachineNewSessionChoices } from "#neoastra";
 import type { SessionSettingsApi } from "../sessionSettings/sessionSettingsApi";
-import { automationProjects, machineRunProviders, onMachine, sessionProviderName } from "./machineProviderNames";
+import { automationProjects, machineRunProviders, onMachine, sessionProviderName, sessionRowProviderName } from "./machineProviderNames";
 
 const choices = (status = "ok"): Pick<MachineNewSessionChoices, "status" | "providers"> => ({ status, providers: [
   { key: "claude", name: "Claude (Mac mini)", isDefault: true, defaultModelId: "opus", models: [{ id: "opus", name: "Opus" }, { id: "haiku", name: "Haiku" }] },
@@ -17,6 +17,13 @@ test("A session of another machine names its provider as that machine does, neve
   assert.equal(sessionProviderName("claude", { current: { providerKey: "claude" }, providerName: "Claude" }, "Claude Business"), "Claude Business");
   assert.equal(sessionProviderName("claude", { current: { providerKey: "claude" }, providerName: "Claude" }, null), "Claude");
   assert.equal(sessionProviderName(null, undefined, null), null);
+});
+
+test("The row of a session of another machine names its provider as that machine does", () => {
+  assert.equal(sessionRowProviderName({ providerKey: "claude-code", machineId: "mac", machineProviderName: "Claude on the build box" }, "Claude here"), "Claude on the build box");
+  assert.equal(sessionRowProviderName({ providerKey: "claude-code", machineId: "mac" }, "Claude here"), "claude-code", "its key, never this computer's name");
+  assert.equal(sessionRowProviderName({ providerKey: "claude-code" }, "Claude here"), "Claude here", "a session of this computer keeps the name of its configuration");
+  assert.equal(sessionRowProviderName({ providerKey: null }, null), null);
 });
 
 test("An automation placed on a machine runs with the providers and models of that machine", async () => {

@@ -31,6 +31,16 @@ export function automationProjects<T extends Pick<WorkspaceProject, "archived"> 
 }
 
 /**
+ * The name the row of a session in the Explorer gives its provider: for a session of another machine, the name that
+ * machine gives it, never the name of a provider of this computer with the same key; else the name of the configuration
+ * of this computer, then its key.
+ */
+export function sessionRowProviderName(session: Readonly<{ providerKey?: string | null; machineId?: string | null; machineProviderName?: string | null }>,
+  configured: string | null | undefined): string | null {
+  return session.machineId ? session.machineProviderName ?? session.providerKey ?? null : configured ?? session.providerKey ?? null;
+}
+
+/**
  * The name the composer gives the provider of a session: for a session of another machine, the name that machine gives
  * it; else the name of the configuration of this computer, then the one its host gives, then its key. Null without one.
  */
