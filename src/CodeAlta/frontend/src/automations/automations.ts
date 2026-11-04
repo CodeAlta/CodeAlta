@@ -1,6 +1,6 @@
 // What the page knows of an automation without asking the host: how a trigger reads, what a form holds, the
 // templates a new one can start from.
-import type { AutomationInput, AutomationItem, AutomationRunItem, AutomationTriggerItem, SessionOptionsChoice } from "#neoastra";
+import type { AutomationAutonomyItem, AutomationInput, AutomationItem, AutomationRunItem, AutomationTriggerItem, SessionOptionsChoice } from "#neoastra";
 import type { IconName } from "../AppIcon";
 import type { Locale, MessageKey } from "../localization";
 import { permissionModeName } from "../permissionModes";
@@ -173,12 +173,17 @@ export type AutomationForm = Readonly<{
   /** The paired machine it runs on (its id); null for this computer. Only an automation kept in the configuration of the user runs elsewhere. */
   runsOn: string | null;
   triggers: readonly AutomationTriggerItem[];
+  /** What its runs may do without a person; null for an automation that runs as before. */
+  autonomy: AutomationAutonomyItem | null;
 }>;
+
+/** The autonomy a person turns on: read only, no tool of another source allowed yet, approvals to the owner, an hour to answer. */
+export const newAutonomy = (): AutomationAutonomyItem => ({ allowedTools: [], maxCallsPerHour: null, approvalTimeout: 60, onTimeout: "stop", approvers: "owner" });
 
 /** The form of a new automation, in a project or as a chat. */
 export function emptyForm(projectId: string | null): AutomationForm {
   return { id: null, name: "", enabled: true, prompt: "", script: "", scriptArguments: "", projectId, storeInProject: false, provider: "", model: "", effort: "", agent: "", catchUp: false,
-    permissionMode: "", reviewBeforeCommit: null, sandbox: "", options: null, runsOn: null, triggers: [] };
+    permissionMode: "", reviewBeforeCommit: null, sandbox: "", options: null, runsOn: null, triggers: [], autonomy: null };
 }
 
 /** The form of an automation that exists. */
@@ -186,7 +191,7 @@ export function formOf(item: AutomationItem): AutomationForm {
   return { id: item.id, name: item.name, enabled: item.enabled, prompt: item.prompt, script: item.script ?? "", scriptArguments: item.scriptArguments ?? "", projectId: item.projectId, storeInProject: item.storeProjectId !== null,
     provider: item.provider ?? "", model: item.model ?? "", effort: item.effort ?? "", agent: item.agent ?? "", catchUp: item.catchUp,
     permissionMode: item.permissionMode ?? "", reviewBeforeCommit: item.reviewBeforeCommit, sandbox: item.sandbox ?? "", options: storedSessionOptions(item.options),
-    runsOn: item.runsOn ?? null, triggers: item.triggers };
+    runsOn: item.runsOn ?? null, triggers: item.triggers, autonomy: item.autonomy ?? null };
 }
 
 /** The machine an automation runs on, in words: null for this computer. */
@@ -269,6 +274,7 @@ export function inputOf(form: AutomationForm): AutomationInput {
     options: storedSessionOptions(form.options),
     // The configuration of a project runs its automations on the machines that have it.
     runsOn: form.storeInProject ? null : form.runsOn,
+    autonomy: form.autonomy ? { ...form.autonomy, allowedTools: form.autonomy.allowedTools.map(tool => tool.trim()).filter(Boolean) } : null,
     // An automation that is run by hand misses nothing.
     catchUp: form.catchUp && form.triggers.length > 0,
     triggers: form.triggers.map(trigger => ({ ...trigger, at: [...trigger.at].sort(), expression: trigger.type === "cron" ? (trigger.expression ?? "").trim() : null,

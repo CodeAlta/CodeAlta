@@ -378,6 +378,7 @@ internal sealed class AutomationsService
                 Options = SessionOptionsChoice.Of(definition.SessionOptions),
                 RunsOn = definition.RunsOn,
                 Placement = placed,
+                Autonomy = Autonomy(definition.Autonomy),
             };
         }).ToArray();
         IEnumerable<AutomationRunItem> recent = _automations.Runs(null, RecentRuns).Select(Run);
@@ -392,6 +393,9 @@ internal sealed class AutomationsService
         => _automations is null ? "unavailable" : string.Equals(expectedEpoch, _epoch, StringComparison.Ordinal) ? null : "stale_epoch";
 
     private static bool Identifier(string? value) => value is { Length: > 0 and <= 256 } && !value.Any(char.IsControl);
+
+    private static AutomationAutonomyItem? Autonomy(AutomationAutonomy? autonomy)
+        => autonomy is null ? null : new(autonomy.AllowedTools, autonomy.MaxCallsPerHour, autonomy.ApprovalTimeout, autonomy.OnTimeout, autonomy.Approvers);
 
     private static AutomationRunItem Run(AutomationRun run)
         => new(run.Id, run.AutomationId, run.Name, run.SessionId, run.ProjectId, run.StartedAt, run.EndedAt, run.Trigger, run.Detail, run.Status, run.Message)
@@ -457,6 +461,14 @@ internal sealed class AutomationsService
             Sandbox = Blank(input.Sandbox),
             RunsOn = Blank(input.RunsOn),
             SessionOptions = SessionOptionsChoice.Record(input.Options),
+            Autonomy = input.Autonomy is { } autonomy ? new AutomationAutonomy
+            {
+                AllowedTools = [.. (autonomy.AllowedTools ?? []).Select(static tool => tool?.Trim() ?? string.Empty).Where(static tool => tool.Length > 0)],
+                MaxCallsPerHour = autonomy.MaxCallsPerHour,
+                ApprovalTimeout = autonomy.ApprovalTimeout,
+                OnTimeout = Blank(autonomy.OnTimeout) ?? AutomationAutonomy.StopOnTimeout,
+                Approvers = Blank(autonomy.Approvers) ?? AutomationAutonomy.OwnerApprovers,
+            } : null,
             CatchUp = input.CatchUp,
             Triggers = triggers,
         };
@@ -619,7 +631,18 @@ internal sealed record AutomationItem(string Id, string Name, bool Enabled, stri
 
     /// <summary>Where it stands on the machine it runs on; null when it runs on this computer.</summary>
     public AutomationPlacementItem? Placement { get; init; }
+
+    /// <summary>What its runs may do without a person; null for an automation that runs as before.</summary>
+    public AutomationAutonomyItem? Autonomy { get; init; }
 }
+
+/// <summary>What the runs of an automation may do without a person, as the page shows and edits it.</summary>
+/// <param name="AllowedTools">The tools of MCP servers and plugins its runs call by themselves.</param>
+/// <param name="MaxCallsPerHour">The circuit breaker: the most calls of those tools in an hour; null for no limit.</param>
+/// <param name="ApprovalTimeout">How many minutes an approval waits; null for as long as it takes.</param>
+/// <param name="OnTimeout"><c>stop</c> or <c>wait</c>.</param>
+/// <param name="Approvers"><c>owner</c>.</param>
+internal sealed record AutomationAutonomyItem(IReadOnlyList<string> AllowedTools, int? MaxCallsPerHour, int? ApprovalTimeout, string OnTimeout, string Approvers);
 
 /// <summary>Where an automation that runs on a paired machine stands there.</summary>
 /// <param name="MachineId">The machine.</param>
@@ -731,6 +754,9 @@ internal sealed record AutomationInput(string? Id, string Name, bool Enabled, st
 
     /// <summary>The paired machine it runs on (its device id); null to run it on this computer. Only for an automation of the user.</summary>
     public string? RunsOn { get; init; }
+
+    /// <summary>What its runs may do without a person; null for an automation that runs as before.</summary>
+    public AutomationAutonomyItem? Autonomy { get; init; }
 }
 
 /// <param name="StoreProjectId">The project whose configuration holds it; null for the configuration of the user.</param>
