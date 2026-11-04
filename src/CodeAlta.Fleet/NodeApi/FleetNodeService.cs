@@ -306,6 +306,7 @@ public sealed partial class FleetNodeService : IAsyncDisposable
             // The secrets of the machine: its owner, on the machine, manages them.
             RegisterSecrets(caller, Access.Owner);
             RegisterAgentPolicy(caller, Access.Owner);
+            RegisterLabels(caller, Access.Owner);
             // The owner may bring a session to its own node (altanode remote <machine> move), and read its moves.
             RegisterMoves(caller, Access.Owner);
             On(caller, FleetNodeMethods.MovesList, Access.Owner, FleetNodeJsonContext.Default.FleetEmpty, FleetNodeJsonContext.Default.FleetMoveList,
@@ -378,6 +379,7 @@ public sealed partial class FleetNodeService : IAsyncDisposable
         // And its secrets, for a device paired with the node only: never one trusted through the list of an organization.
         RegisterSecrets(caller, Access.ManagePaired);
         RegisterAgentPolicy(caller, Access.Manage);
+        RegisterLabels(caller, Access.Manage);
     }
 
     private void RegisterManagementExtras(FleetNodeCaller caller, Access access)

@@ -176,6 +176,32 @@ public sealed class MachineManagementTests
         Assert.AreEqual((0, null, false), (policy.Spaces.Count, policy.Sandbox, policy.AllowBypass));
     }
 
+    // What altanode labels sets on the machine, set from its page.
+    [TestMethod]
+    public async Task TheComputerThatManagesAMachine_SetsItsLabelsFromItsPage_AndOneThatDoesNotIsRefused()
+    {
+        var token = TestContext.CancellationToken;
+        await using var fixture = await FleetNodeFixture.StartAsync(token);
+        await using var firstComputer = await PairAsync(fixture, "first", token);
+        await using var secondComputer = await PairAsync(fixture, "second", token);
+        var (first, firstService, firstEpoch) = firstComputer;
+        var (second, secondService, secondEpoch) = secondComputer;
+        var firstMachine = first.Hosts.Single().MachineId!;
+        var secondMachine = second.Hosts.Single().MachineId!;
+
+        var none = await firstService.LabelsAsync(new MachineRequest(firstEpoch, firstMachine), token);
+        Assert.AreEqual(("ok", 0), (none.Status, none.Labels.Length), none.Message);
+        Assert.AreEqual("ok", (await firstService.SetLabelsAsync(new MachineLabelsRequest(firstEpoch, firstMachine, [" gpu", "prod", "GPU"]), token)).Status);
+        CollectionAssert.AreEqual(new[] { "gpu", "prod" }, (await firstService.LabelsAsync(new MachineRequest(firstEpoch, firstMachine), token)).Labels);
+        Assert.AreEqual("invalid_params", (await firstService.SetLabelsAsync(new MachineLabelsRequest(firstEpoch, firstMachine, ["two words"]), token)).Status);
+        Assert.AreEqual("stale_epoch", (await firstService.LabelsAsync(new MachineRequest("other", firstMachine), token)).Status);
+
+        // A computer that does not manage the machine reads and changes nothing there.
+        Assert.AreEqual("not_manager", (await secondService.LabelsAsync(new MachineRequest(secondEpoch, secondMachine), token)).Status);
+        Assert.AreEqual("not_manager", (await secondService.SetLabelsAsync(new MachineLabelsRequest(secondEpoch, secondMachine, []), token)).Status);
+        CollectionAssert.AreEqual(new[] { "gpu", "prod" }, (await firstService.LabelsAsync(new MachineRequest(firstEpoch, firstMachine), token)).Labels);
+    }
+
     private static DeviceFingerprint DeviceFingerprintOf(FleetNodeFixture fixture, string deviceId)
         => fixture.Service.TrustedDevices.List(includeRevoked: true).Single(device => device.DeviceId == deviceId).Fingerprint;
 

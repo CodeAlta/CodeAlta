@@ -71,6 +71,9 @@ export function orderedDevices(devices: readonly MachineDeviceView[]): MachineDe
   return [...devices].sort((left, right) => rank(left) - rank(right) || left.pairedAt.localeCompare(right.pairedAt) || left.id.localeCompare(right.id));
 }
 
+/** Whether a text can be a label of a machine: letters, digits, `-`, `_`, `.` and `:`, at most 64, as the machine keeps them. */
+export const isMachineLabel = (label: string): boolean => /^[A-Za-z0-9_.:-]{1,64}$/.test(label);
+
 /** Whether agents of other machines may work on a machine: off until a space lets them in. */
 export const agentsAllowed = (view: Pick<MachineAgentsView, "spaces">): boolean => view.spaces.some(space => space.allowed);
 

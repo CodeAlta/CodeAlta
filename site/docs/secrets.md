@@ -74,7 +74,7 @@ Your computer seals each value for the machines you choose and for your other co
 
 An environment is a set of values with rules, such as `production`. Under **Environments**, give it a name, the labels of the machines it runs on (none for all your machines) and the people who approve its runs (none for no approval). Then set values **Where it applies** is that environment.
 
-An automation uses an environment with `environment = "production"` in its table. Its run starts only on a machine with one of the labels, and, when the environment needs an approval, waits for it: **Runs that wait for you** lists it at the top of the page, and **Approve…** confirms it beside its row. An approval is for that run only. The labels of a machine are in the file `fleet/labels.json` of its profile, a list such as `["prod", "gpu"]`.
+An automation uses an environment with `environment = "production"` in its table. Its run starts only on a machine with one of the labels, and, when the environment needs an approval, waits for it: **Runs that wait for you** lists it at the top of the page, and **Approve…** confirms it beside its row. An approval is for that run only. The labels of a machine are set on its page in **Settings > Fleet > Machines**, or with `altanode labels` on it (see [Label your machines](fleet.md#label-your-machines)).
 
 ## Agents
 

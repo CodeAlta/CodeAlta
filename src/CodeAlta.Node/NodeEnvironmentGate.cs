@@ -26,7 +26,7 @@ internal sealed class NodeEnvironmentGate
 
     private readonly NodeFleetSecrets _secrets;
     private readonly string _usedPath;
-    private readonly string _labelsPath;
+    private readonly string _fleetRoot;
     private readonly Lock _gate = new();
 
     /// <summary>Initializes a new instance of the <see cref="NodeEnvironmentGate"/> class.</summary>
@@ -38,11 +38,8 @@ internal sealed class NodeEnvironmentGate
         ArgumentNullException.ThrowIfNull(catalog);
         _secrets = secrets;
         _usedPath = Path.Combine(catalog.FleetRoot, "approvals-used.json");
-        _labelsPath = Path.Combine(catalog.FleetRoot, LabelsFileName);
+        _fleetRoot = catalog.FleetRoot;
     }
-
-    /// <summary>The file of the labels of the machine, in the fleet folder of its profile: a JSON array of names.</summary>
-    public const string LabelsFileName = "labels.json";
 
     /// <summary>Gets or sets how long a run waits for its approval.</summary>
     public TimeSpan ApprovalWait { get; set; } = DefaultApprovalWait;
@@ -68,7 +65,7 @@ internal sealed class NodeEnvironmentGate
         var (definition, sync) = found;
         if (definition.Automations.Count > 0 && (automationId is null || !definition.Automations.Contains(automationId, StringComparer.Ordinal)))
             return $"The environment '{environment}' is open to some automations only, not to this run.";
-        if (definition.MachineLabels.Count > 0 && !definition.MachineLabels.Intersect(ReadLabels(), StringComparer.OrdinalIgnoreCase).Any())
+        if (definition.MachineLabels.Count > 0 && !definition.MachineLabels.Intersect(FleetMachineLabels.Read(_fleetRoot), StringComparer.OrdinalIgnoreCase).Any())
             return $"The environment '{environment}' runs on machines labeled {string.Join(", ", definition.MachineLabels)}: this machine is not.";
         if (definition.Approvers.Count == 0) return null;
 
@@ -124,22 +121,6 @@ internal sealed class NodeEnvironmentGate
             wait.CancelAfter(left < ApprovalPoll ? left : ApprovalPoll);
             try { await signal.WaitAsync(wait.Token).ConfigureAwait(false); }
             catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested) { }
-        }
-    }
-
-    /// <summary>Reads the labels the owner gave this machine.</summary>
-    /// <returns>The labels; none when the file is missing or does not read.</returns>
-    public IReadOnlyList<string> ReadLabels()
-    {
-        try
-        {
-            return JsonSerializer.Deserialize(File.ReadAllBytes(_labelsPath), NodeEnvironmentJsonContext.Default.ListString) is { } labels
-                ? [.. labels.Where(static label => !string.IsNullOrWhiteSpace(label)).Select(static label => label.Trim())]
-                : [];
-        }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or JsonException)
-        {
-            return [];
         }
     }
 

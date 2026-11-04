@@ -80,7 +80,10 @@ const api: MachinePageApi = {
   },
   setAgentSandbox: async request => { calls.push(JSON.stringify({ agentSandbox: request.sandbox })); agentPolicy.sandbox = request.sandbox ?? null; return { status: "ok", message: null }; },
   setAgentBypass: async request => { calls.push(JSON.stringify({ agentBypass: request.allowed })); agentPolicy.allowBypass = request.allowed; return { status: "ok", message: null }; },
+  labels: async () => ({ status: "ok", message: null, labels: [...labels] }),
+  setLabels: async request => { calls.push(JSON.stringify({ labels: request.labels })); labels = [...request.labels]; return { status: "ok", message: null }; },
 };
+let labels: string[] = ["gpu"];
 const secrets = new Map<string, SecretView & { value: string }>();
 const variables = new Map<string, VariableView>([["GRAFANA_URL", { name: "GRAFANA_URL", value: "https://grafana.example", version: 1, setBy: "build-box owner", setAt: "2026-11-02T09:00:00Z" }]]);
 function setSecret(name: string, value: string) {

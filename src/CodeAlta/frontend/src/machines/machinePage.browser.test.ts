@@ -155,3 +155,22 @@ test("giving up managing a machine asks first, and a machine this computer does 
     assert.deepEqual(page.problems, []);
   }, options);
 });
+
+test("the computer that manages a machine adds and removes its labels on its page", { skip: !edge, timeout: 90_000 }, async () => {
+  await withCanvas(async page => {
+    await page.until(`document.querySelector('.machine-labels .bp6-tag')`, "the labels");
+    assert.deepEqual(await page.evaluate(`[...document.querySelectorAll('.machine-labels .bp6-tag')].map(tag => tag.textContent)`), ["gpu"]);
+    // Labels are typed with commas or spaces; one that is not a label keeps Add off.
+    await page.evaluate(type(".machine-labels input", "bad label!"));
+    await page.until(`document.querySelector('.machine-labels button[type=submit]')?.disabled === true`, "refused");
+    await page.evaluate(type(".machine-labels input", "prod, always-on"));
+    await page.clickText(".machine-labels .bp6-button", "Add");
+    await page.until(`document.querySelectorAll('.machine-labels .bp6-tag').length === 3`, "added");
+    // The cross of a tag removes it.
+    await page.evaluate(`[...document.querySelectorAll('.machine-labels .bp6-tag')].find(tag => tag.textContent === 'gpu').querySelector('button').click()`);
+    await page.until(`document.querySelectorAll('.machine-labels .bp6-tag').length === 2`, "removed");
+    const changes = (await calls(page)).filter(call => "labels" in call);
+    assert.deepEqual(changes, [{ labels: ["gpu", "prod", "always-on"] }, { labels: ["prod", "always-on"] }]);
+    assert.deepEqual(page.problems, []);
+  }, options);
+});

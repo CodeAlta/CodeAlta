@@ -131,6 +131,12 @@ On the machine of the node:
 
 `--space <space>` with `add` or `clone` puts the project in a space too. While the node runs, it makes the change, and keeps a project that still has sessions; otherwise the commands change the catalog of the profile directly.
 
+## Label your machines
+
+Labels such as `gpu`, `prod` or `always-on` say what a machine is for. Its page in CodeAlta Desktop shows them under **Labels**: type one or more, separated by commas or spaces, and **Add**; the cross of a label removes it. On the machine itself, `altanode labels` lists them, `altanode labels add gpu prod` and `altanode labels remove gpu` change them, and `altanode labels set` replaces them all.
+
+A machine linked to a CodeAlta Server publishes its labels there: the **Fleet** canvas shows them on its card, agents find the machines with `alta fleet machine list --label gpu`, and an [environment](secrets.md#environments) that names labels runs only on the machines with one of them. A label is letters, digits, `-`, `_`, `.` and `:`.
+
 ## Pair it with CodeAlta Desktop
 
 1. On the machine of the node, while it runs, type `altanode pair`. It prints a pairing link, `codealta-pair://…`, and six words, then waits.
@@ -232,6 +238,7 @@ In **Settings** > **Fleet** > **Machines**, click the name of a machine to open 
 | --- | --- |
 | **Devices** | Each computer paired with the machine, with a switch per permission: **View**, **Drive**, **Start**, **Move**, **Automate** and **Manage**. **Revoke** (the cross at the end of the row, then **Revoke**) refuses that computer there at once. |
 | **Agents of other machines** | The spaces where agents of other computers may start sessions there and send prompts to its sessions, the sandbox their sessions run in at least, and whether they may bypass permissions ([Let agents start sessions on it](#let-agents-start-sessions-on-it)) |
+| **Labels** | Its [labels](#label-your-machines), which it publishes to its servers: add them, or remove one with its cross |
 | **Projects** | Clone a repository there, add a folder, remove a project |
 | **Providers** | The providers ready on the machine, and its default model. A machine without one cannot start sessions: sign in to a provider on it |
 | **Secrets** | Its [secrets and variables](secrets.md), as **Settings** > **Secrets** shows those of this computer: **Add a secret…**, **Rotate** and **Delete** a secret, edit or delete a variable. A value goes to the machine and is never shown back |

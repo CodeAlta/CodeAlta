@@ -51,4 +51,12 @@ export const fleetSecretMessages = {
     "Diesen Lauf von {environment} auf {machine} genehmigen?",
     "{machine} での {environment} のこの実行を承認しますか?",
     "批准在 {machine} 上的这次 {environment} 运行？"],
+  "{name} publishes its labels to its servers; an environment runs only on the machines with one of its labels.": [
+    "{name} publica sus etiquetas en sus servidores; un entorno solo se ejecuta en las máquinas con una de sus etiquetas.",
+    "{name} publie ses étiquettes sur ses serveurs ; un environnement ne s’exécute que sur les machines qui ont l’une de ses étiquettes.",
+    "{name} veröffentlicht seine Labels an seine Server; eine Umgebung läuft nur auf Maschinen mit einem ihrer Labels.",
+    "{name} はラベルをサーバーに公開します。環境はそのラベルのいずれかを持つマシンでのみ実行されます。",
+    "{name} 将其标签发布到其服务器；环境只在带有其某个标签的机器上运行。"],
+  "No label.": ["Sin etiquetas.", "Aucune étiquette.", "Keine Labels.", "ラベルはありません。", "没有标签。"],
+  "New labels": ["Etiquetas nuevas", "Nouvelles étiquettes", "Neue Labels", "新しいラベル", "新标签"],
 } satisfies Record<string, Row>;

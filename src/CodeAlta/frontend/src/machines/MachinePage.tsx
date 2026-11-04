@@ -8,13 +8,14 @@ import { RemoveButton } from "../SettingsPage";
 import { useShellLanguage } from "../shellLanguage";
 import type { MessageKey } from "../localization";
 import { machineIntent, machineState, machineStateLabel } from "./machines";
-import { agentSandboxChoices, agentsAllowed, confirmsBypass, confirmsLoss, devicePermissions, hasPermission, managementProblem, orderedDevices, permissionLabel, permissionsEditable, projectSource,
+import { parseLabels } from "../fleet/fleetSecrets";
+import { agentSandboxChoices, agentsAllowed, confirmsBypass, confirmsLoss, devicePermissions, hasPermission, isMachineLabel, managementProblem, orderedDevices, permissionLabel, permissionsEditable, projectSource,
   updateSummary, type DevicePermission } from "./machineManagement";
 
 /** The calls of the page of a machine. */
 export type MachinePageApi = Pick<typeof machines, "management" | "setDevicePermission" | "revokeDevice" | "addProject" | "cloneProject" | "removeProject"
   | "readLog" | "updateMachine" | "secrets" | "setSecret" | "rotateSecret" | "deleteSecret" | "setVariable" | "deleteVariable"
-  | "agents" | "setAgentSpace" | "setAgentSandbox" | "setAgentBypass">;
+  | "agents" | "setAgentSpace" | "setAgentSandbox" | "setAgentBypass" | "labels" | "setLabels">;
 
 type Problem = { key: MessageKey; detail?: string | null } | null;
 
@@ -84,6 +85,7 @@ export function MachinePage({ epoch, machine, api = machines, onBack }: { epoch:
         onPermission={(device, permission, allowed) => void change(() => api.setDevicePermission({ expectedEpoch: epoch, machineId: machine.id, deviceId: device.id, permission, allowed }))}
         onRevoke={device => void change(() => api.revokeDevice({ expectedEpoch: epoch, machineId: machine.id, deviceId: device.id }))} />
       <AgentsSection epoch={epoch} machine={machine} api={api} />
+      <LabelsSection epoch={epoch} machine={machine} api={api} />
       <ProjectsSection view={view} busy={busy} machine={machine}
         onAdd={(kind, value, done) => void change(() => kind === "clone"
           ? api.cloneProject({ expectedEpoch: epoch, machineId: machine.id, value }, { timeoutMilliseconds: 15 * 60_000 })
@@ -232,6 +234,59 @@ function AgentsSection({ epoch, machine, api }: { epoch: string; machine: Machin
         <span className="machine-agent-label">{t("Bypass permissions")}</span>
         <BypassSwitch allowed={view.allowBypass} disabled={busy} onChange={value => void run(() => api.setAgentBypass({ ...target, allowed: value }))} />
       </div>
+    </div>}
+  </section>;
+}
+
+/**
+ * The labels of the machine, as `altanode labels` sets them there: it publishes them to its servers, and an environment of
+ * the fleet runs only on the machines with one of its labels. Added from the field, removed from their tag.
+ */
+function LabelsSection({ epoch, machine, api }: { epoch: string; machine: MachineView; api: MachinePageApi }) {
+  const { t } = useShellLanguage();
+  const [labels, setLabels] = useState<readonly string[] | null>(null);
+  const [typed, setTyped] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [problem, setProblem] = useState<Problem>(null);
+  const [generation, setGeneration] = useState(0);
+  useEffect(() => {
+    const abort = new AbortController();
+    api.labels({ expectedEpoch: epoch, machineId: machine.id }, { signal: abort.signal, timeoutMilliseconds: 30_000 }).then(value => {
+      if (abort.signal.aborted) return;
+      const failed = managementProblem(value.status);
+      if (failed) setProblem({ key: failed, detail: value.message }); else setLabels(value.labels);
+    }, () => { if (!abort.signal.aborted) setProblem({ key: "The machine does not answer: it is offline." }); });
+    return () => abort.abort();
+  }, [api, epoch, machine.id, generation]);
+  const save = async (next: string[]) => {
+    setBusy(true);
+    setProblem(null);
+    try {
+      const result = await api.setLabels({ expectedEpoch: epoch, machineId: machine.id, labels: next });
+      const failed = managementProblem(result.status);
+      if (failed) setProblem({ key: failed, detail: result.message }); else setTyped("");
+    } catch {
+      setProblem({ key: "The machine does not answer: it is offline." });
+    } finally {
+      setBusy(false);
+      setGeneration(value => value + 1);
+    }
+  };
+  const added = parseLabels(typed);
+  const valid = added.length > 0 && added.every(isMachineLabel);
+  return <section className="machine-section machine-labels" aria-label={t("Labels")}>
+    <h2>{t("Labels")}</h2>
+    <p className="muted-text">{t("{name} publishes its labels to its servers; an environment runs only on the machines with one of its labels.", { name: machine.name })}</p>
+    {problem && <Callout compact intent="warning" role="alert">{t(problem.key)}{problem.detail && <div className="muted-text">{problem.detail}</div>}</Callout>}
+    {labels && <div className="machine-labels-row">
+      {labels.length === 0 && <span className="muted-text">{t("No label.")}</span>}
+      {labels.map(label => <Tag key={label} minimal onRemove={busy ? undefined : () => void save(labels.filter(other => other !== label))}
+        aria-label={label}>{label}</Tag>)}
+      <form className="machine-labels-add" onSubmit={event => { event.preventDefault(); if (valid && !busy) void save([...labels, ...added]); }}>
+        <InputGroup small value={typed} placeholder="gpu, prod" disabled={busy} intent={typed.trim() && !valid ? "danger" : "none"} aria-label={t("New labels")}
+          onChange={event => setTyped(event.target.value)} />
+        <Button type="submit" size="small" text={t("Add")} disabled={busy || !valid} />
+      </form>
     </div>}
   </section>;
 }

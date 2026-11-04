@@ -67,7 +67,9 @@ public sealed class FleetHostPublicationSource : IFleetPublicationSource, IAsync
             .Where(static type => !string.IsNullOrWhiteSpace(type) && type.Length <= 128)
             .Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).Take(64).ToArray();
         return ValueTask.FromResult(new FleetMachineInventory(_name, FleetChannelProtocol.OperatingSystemName,
-            RuntimeInformation.OSArchitecture.ToString().ToLowerInvariant(), _version, _capabilities, null, providers));
+            RuntimeInformation.OSArchitecture.ToString().ToLowerInvariant(), _version, _capabilities,
+            // The labels its owner gave it, read at each publication: a change is published at the next one.
+            FleetMachineLabels.Read(_host.CatalogOptions.FleetRoot) is { Count: > 0 } labels ? labels : null, providers));
     }
 
     /// <inheritdoc />
