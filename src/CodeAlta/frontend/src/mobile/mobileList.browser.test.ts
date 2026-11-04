@@ -30,6 +30,10 @@ test("the phone lists sub-agents under their parent, folded, and keeps its order
     `(() => { const r = document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect(); return { top: r.top, bottom: r.bottom, left: r.left, right: r.right }; })()`);
   const fits = () => evaluate<boolean>("document.documentElement.scrollWidth <= innerWidth && [...document.querySelectorAll('#sessions .card')].every(c => c.getBoundingClientRect().right <= innerWidth)");
   const pause = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+  // The rows that came in slide to their places: measure once every animation of the page has ended, however loaded the machine is.
+  // (The pulse of a running session never ends: only the animations that end are waited for.)
+  const settled = () => waitFor("document.getAnimations().every(animation => animation.playState !== 'running' || animation.effect?.getTiming().iterations === Infinity)",
+    "the rows slid to their places");
   try {
     await phone.signIn();
 
@@ -49,7 +53,7 @@ test("the phone lists sub-agents under their parent, folded, and keeps its order
     await click('.row[data-id="root"] .subagents');
     await waitFor(`document.querySelectorAll("#sessions .row").length === 7`, "the sub-agents shown");
     assert.deepEqual(await rows(), ["root", "c1", "c2", "c3", "s3", "s4", "o1"]);
-    await pause(400); // the rows that came in have slid to their places
+    await settled();
     assert.equal(await evaluate("JSON.parse(localStorage.getItem('alta.subagents')).root[0]"), true, "the choice is kept on the phone");
     const parent = await box('.row[data-id="root"] .card'), child = await box('.row[data-id="c1"] .card'), elbow = await box('.row[data-id="c1"] .elbow');
     assert.ok(child.left > parent.left && child.left - parent.left <= 16, `a sub-agent is indented a little (${child.left - parent.left} px)`);
@@ -60,7 +64,7 @@ test("the phone lists sub-agents under their parent, folded, and keeps its order
     assert.deepEqual(await texts('.row[data-id="c3"] .meta-item'), ["GPT-6.1 Sol · low", "Plan"], "a sub-agent does not repeat the project of its parent");
     await click('.row[data-id="c3"] .subagents');
     await waitFor(`document.querySelector('.row[data-id="g1"]')`, "the sub-agent of a sub-agent");
-    await pause(400);
+    await settled();
     assert.deepEqual(await rows(), ["root", "c1", "c2", "c3", "g1", "s3", "s4", "o1"]);
     assert.equal(await evaluate("document.querySelector('.row[data-id=\"g1\"]').style.getPropertyValue('--depth')"), "2");
     assert.ok(await fits(), "no horizontal overflow");
