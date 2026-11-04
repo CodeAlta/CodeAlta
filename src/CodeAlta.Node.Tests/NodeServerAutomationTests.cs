@@ -265,6 +265,66 @@ public sealed class NodeServerAutomationTests
     }
 
     [TestMethod]
+    public async Task AMachineOfATeamOpensWhatAMaintainerOfAnotherPersonSealed_AndAnyMaintainerRunsItByHand_NoMember()
+    {
+        var token = TestContext.CancellationToken;
+        using var root = new NodeTestRoot();
+        await using var node = await NodeHost.StartAsync(root.Options() with
+        {
+            Automations = new NodeAutomationOptions
+            {
+                TimeProvider = new NodeClock { Now = Noon }, TimeZone = TimeZoneInfo.Utc, WatchRepositories = false, CredentialKind = static _ => AutomationCredentialKind.Account,
+            },
+        }, token);
+        using var laptop = DeviceIdentity.LoadOrCreate(Path.Combine(root.Root, "laptop"));
+        using var mia = DeviceIdentity.LoadOrCreate(Path.Combine(root.Root, "mia"));
+        using var ada = DeviceIdentity.LoadOrCreate(Path.Combine(root.Root, "ada"));
+        using var max = DeviceIdentity.LoadOrCreate(Path.Combine(root.Root, "max"));
+        using var self = DeviceIdentity.LoadOrCreate(Path.Combine(root.Root, "self"));
+        var time = new DateTimeOffset(2026, 10, 6, 9, 0, 0, TimeSpan.Zero);
+        var entries = new List<FleetSignedDeviceListEntry>();
+        void Add(DeviceIdentity device, string kind, string? owner)
+        {
+            var payload = FleetDeviceListEntries.SerializePayload(new FleetDeviceListEntryPayload(1, entries.Count == 0 ? null : "org", entries.Count + 1,
+                entries.Count == 0 ? null : FleetDeviceListEntries.Hash(entries[^1]), FleetDeviceListOperations.Add, device.DeviceId,
+                Convert.ToBase64String(device.ExportSubjectPublicKeyInfo()), kind, owner, laptop.DeviceId, time));
+            entries.Add(new FleetSignedDeviceListEntry(payload, Base64Url.EncodeToString(laptop.SignData(FleetDeviceListEntries.GetSignedBytes(payload)))));
+        }
+
+        Add(laptop, FleetDeviceKinds.Controller, null);
+        Add(self, FleetDeviceKinds.Node, "p1");
+        Add(mia, FleetDeviceKinds.Controller, "p2");
+        Add(ada, FleetDeviceKinds.Controller, "p4");
+        Add(max, FleetDeviceKinds.Controller, "p3");
+        var list = FleetDeviceListVerifier.VerifyOrThrow(entries, "org");
+        var automations = node.Automations!;
+        automations.DeviceId = self.DeviceId;
+        automations.ServerDevices = _ => list;
+        // The machine p1 enrolled is the team's: Mia and Ada maintain it, Max is a member.
+        var access = FleetAccessState.Empty with
+        {
+            OrganizationId = "org", Number = 1, Teams = FleetAccessState.Empty.Teams.Add("infra", new FleetAccessTeam("infra", ["p2", "p4"], ["p3"], false, ["svc"])),
+            Machines = FleetAccessState.Empty.Machines.Add(self.DeviceId, "infra"),
+        };
+        automations.ServerAccess = _ => access;
+        var sealedText = FleetAutomationSigning.SealForTeam(new FleetAutomationContent(Definition, null), Id, 1, self.DeviceId, "infra", list, access, mia);
+        var signed = FleetAutomationSigning.Sign(mia, new FleetAutomationVersion(FleetAutomationVersion.CurrentVersion, "org", Id, 1, self.DeviceId, false, true, ["hourly"],
+            null, null, sealedText, string.Empty, string.Empty, DateTimeOffset.UtcNow) { Scope = "team:infra" });
+        var outcome = await automations.AcceptFromServerAsync("link-1", list, "org", signed,
+            version => FleetAutomationSigning.TryOpen(version.Sealed, version.AutomationId, version.Number, version.MachineId, self, list, access, out var content, out var reason)
+                ? (content, null) : (null, reason), token);
+        Assert.IsTrue(outcome.Applied, outcome.Message);
+        Assert.IsNull(automations.Check(automations.Engine.Snapshot.Find(Id)!, new CodeAlta.Agent.ModelProviderDescriptor(new("gateway"), "Gateway")));
+
+        FleetSignedAutomationRunRequest Ask(DeviceIdentity device) => FleetAutomationSigning.SignRun(device, new FleetAutomationRunRequest(FleetAutomationRunRequest.CurrentVersion,
+            "org", Id, self.DeviceId, Guid.NewGuid().ToString("N"), string.Empty, string.Empty, Noon));
+        var (_, byAda) = await automations.RunFromServerAsync("link-1", list, "org", Ask(ada), token);
+        Assert.IsFalse(byAda?.Contains("another person", StringComparison.Ordinal) == true, byAda);
+        var (_, byMax) = await automations.RunFromServerAsync("link-1", list, "org", Ask(max), token);
+        StringAssert.Contains(byMax, "another person", "a member does not run what the team runs");
+    }
+
+    [TestMethod]
     public async Task TheAutomationsAServerGaveStopOnceTheNodeLeftItAndAReplayedVersionIsRefused()
     {
         var token = TestContext.CancellationToken;

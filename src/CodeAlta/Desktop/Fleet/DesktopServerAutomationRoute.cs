@@ -52,8 +52,14 @@ internal sealed class DesktopServerAutomationRoute : IDisposable
     internal async Task<string> SealAsync(FleetAutomationContent content, string automationId, long number, string machineId, CancellationToken cancellationToken)
     {
         var list = await _devices.RefreshAsync(cancellationToken).ConfigureAwait(false);
+        // An automation of a team is sealed for its machine and every maintainer of the team, as the access document says.
+        if (TeamId is { } team && Access is { } access)
+            return FleetAutomationSigning.SealForTeam(content, automationId, number, machineId, team, list, await access.RefreshAsync(cancellationToken).ConfigureAwait(false), _identity);
         return FleetAutomationSigning.Seal(content, automationId, number, machineId, list, _identity);
     }
+
+    /// <summary>Gets the access document of the server as this computer verifies it, which seals the automations of a team.</summary>
+    internal FleetOrganizationAccess? Access { get; init; }
 
     /// <summary>
     /// Says whether the machine is a node of this computer's person, as the device list of the server verifies it now: the

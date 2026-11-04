@@ -91,6 +91,38 @@ public sealed class FleetGrantKeysTests
             "org", "nightly", "p1", devices.Bea, list));
     }
 
+    [TestMethod]
+    public void AnAutomationOfATeamOpensOnItsMachineAndOnTheDevicesOfItsMaintainers_OfAnotherPersonThanTheMachine()
+    {
+        using var devices = new Devices();
+        var list = devices.List();
+        // The node was enrolled by p1; the team owns it now, and Bea (p2) and Cy (p3) maintain the team.
+        var team = new FleetAccessTeam("infra", ["p2", "p3"], [], false, ["svc"]);
+        var access = FleetAccessState.Empty with
+        {
+            OrganizationId = "org", Teams = FleetAccessState.Empty.Teams.Add("infra", team), Machines = FleetAccessState.Empty.Machines.Add(devices.Node.DeviceId, "infra"),
+        };
+        var content = new FleetAutomationContent("[automations.deploy]\n", "github.com/codealta/codealta");
+        var sealedText = FleetAutomationSigning.SealForTeam(content, "deploy", 1, devices.Node.DeviceId, "infra", list, access, devices.Bea);
+        Assert.IsFalse(sealedText.Contains("automations.deploy", StringComparison.Ordinal));
+        foreach (var reader in new[] { devices.Node, devices.Bea, devices.Cy })
+        {
+            Assert.IsTrue(FleetAutomationSigning.TryOpen(sealedText, "deploy", 1, devices.Node.DeviceId, reader, list, access, out var opened, out var reason), reason);
+            Assert.AreEqual(content, opened);
+        }
+
+        Assert.IsFalse(FleetAutomationSigning.TryOpen(sealedText, "deploy", 1, devices.Node.DeviceId, devices.Desk, list, access, out _, out _),
+            "the person who enrolled the machine does not read what the team runs on it");
+        Assert.IsFalse(FleetAutomationSigning.TryOpen(sealedText, "deploy", 1, devices.Node.DeviceId, devices.Node, list, null, out _, out var without));
+        StringAssert.Contains(without, "access document");
+        var notMaintainer = access with { Teams = access.Teams.SetItem("infra", team with { Maintainers = ["p3"] }) };
+        Assert.IsFalse(FleetAutomationSigning.TryOpen(sealedText, "deploy", 1, devices.Node.DeviceId, devices.Node, list, notMaintainer, out _, out _),
+            "a copy given by someone who no longer maintains the team");
+        Assert.IsFalse(FleetAutomationSigning.TryOpen(sealedText, "deploy", 2, devices.Node.DeviceId, devices.Node, list, access, out _, out _), "another version");
+        Assert.ThrowsExactly<ArgumentException>(() => FleetAutomationSigning.SealForTeam(content, "deploy", 1, devices.Node.DeviceId, "infra", list, access, devices.Desk),
+            "only a maintainer seals for the team");
+    }
+
     // The founder's laptop, the desk of the owner of the session (p1), their node, Bea (p2) and Cy (p3).
     private sealed class Devices : IDisposable
     {

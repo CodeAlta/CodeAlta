@@ -132,6 +132,63 @@ public static class FleetAutomationSigning
     /// <exception cref="ArgumentNullException"><paramref name="identity"/> or <paramref name="list"/> is null.</exception>
     public static bool TryOpen(string? sealedText, string automationId, long number, string machineId, DeviceIdentity identity, FleetDeviceListState list,
         [NotNullWhen(true)] out FleetAutomationContent? content, [NotNullWhen(false)] out string? reason)
+        => TryOpen(sealedText, automationId, number, machineId, identity, list, null, out content, out reason);
+
+    /// <summary>
+    /// Seals what a version of an automation of a team does (<c>doc/fleet/orchestration.md</c>, scopes): for its machine and the
+    /// controller devices of the team's maintainers, as the access document and the device list this device verified say, so
+    /// that every maintainer reads and changes it, whichever person enrolled the machine. Each copy of the key is signed by
+    /// this device, which a reader accepts only from a maintainer of that team.
+    /// </summary>
+    /// <param name="content">The definition and the repository.</param>
+    /// <param name="automationId">The automation.</param>
+    /// <param name="number">The number of the version.</param>
+    /// <param name="machineId">The machine of the team that runs it.</param>
+    /// <param name="teamId">The team.</param>
+    /// <param name="list">The device list as the signer verified it.</param>
+    /// <param name="access">The access document as the signer verified it.</param>
+    /// <param name="signer">The controller device of a maintainer of the team.</param>
+    /// <returns>The sealed text: <c>{ "alg", "kid", "team", "iv", "ct", "keys": { device: wrapped } }</c>.</returns>
+    /// <exception cref="ArgumentNullException">An argument is null.</exception>
+    /// <exception cref="ArgumentException">The machine is not the team's, or the signer does not maintain it.</exception>
+    public static string SealForTeam(FleetAutomationContent content, string automationId, long number, string machineId, string teamId, FleetDeviceListState list,
+        FleetAccessState access, DeviceIdentity signer)
+    {
+        ArgumentNullException.ThrowIfNull(content);
+        ArgumentException.ThrowIfNullOrEmpty(automationId);
+        ArgumentException.ThrowIfNullOrEmpty(machineId);
+        ArgumentException.ThrowIfNullOrEmpty(teamId);
+        ArgumentNullException.ThrowIfNull(list);
+        ArgumentNullException.ThrowIfNull(access);
+        ArgumentNullException.ThrowIfNull(signer);
+        if (access.TeamOf(machineId) is not { } team || team.Id != teamId) throw new ArgumentException("The machine is not a machine of the team.", nameof(machineId));
+        if (!list.Members.TryGetValue(signer.DeviceId, out var self) || self.Kind != FleetDeviceKinds.Controller || FleetAccessState.RoleIn(team, self.OwnerId) != FleetTeamRoles.Maintainer)
+            throw new ArgumentException("Only a controller device of a maintainer of the team seals its automations.", nameof(signer));
+        if (!list.Members.TryGetValue(machineId, out var machine)) throw new ArgumentException("The machine is not a device of the list.", nameof(machineId));
+        var recipients = list.Members.Values.Where(member => member.DeviceId == machine.DeviceId
+                || member.Kind == FleetDeviceKinds.Controller && member.OwnerId is { } owner && team.Maintainers.Contains(owner, StringComparer.Ordinal))
+            .Where(member => !list.Removed.Contains(member.DeviceId)).Take(MaxRecipients).ToArray();
+        return SealScoped(content, automationId, number, machineId, "team", teamId, recipients, list, signer);
+    }
+
+    /// <summary>
+    /// Opens what a version does, on a device it was sealed for. A personal version opens with a copy of the key given by a
+    /// controller device of this device's person; a version of a team, with a copy given by a maintainer of that team as
+    /// <paramref name="access"/> says. The content must be the one of this automation, number and machine.
+    /// </summary>
+    /// <param name="sealedText">The sealed text of the version.</param>
+    /// <param name="automationId">The automation the version names.</param>
+    /// <param name="number">Its number.</param>
+    /// <param name="machineId">Its machine.</param>
+    /// <param name="identity">The key of this device.</param>
+    /// <param name="list">The device list as this device verified it.</param>
+    /// <param name="access">The access document as this device verified it; null opens personal versions only.</param>
+    /// <param name="content">The content, when it opens.</param>
+    /// <param name="reason">Why it does not open, or null.</param>
+    /// <returns>Whether it opened.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="identity"/> or <paramref name="list"/> is null.</exception>
+    public static bool TryOpen(string? sealedText, string automationId, long number, string machineId, DeviceIdentity identity, FleetDeviceListState list,
+        FleetAccessState? access, [NotNullWhen(true)] out FleetAutomationContent? content, [NotNullWhen(false)] out string? reason)
     {
         ArgumentNullException.ThrowIfNull(identity);
         ArgumentNullException.ThrowIfNull(list);
@@ -161,7 +218,25 @@ public static class FleetAutomationSigning
                 return false;
             }
 
-            var key = FleetKeyWrap.Unwrap(wrapped, keyId, 1, identity, list);
+            FleetMetadataKey key;
+            if (FleetSealedJson.Text(root, "team") is { } teamId)
+            {
+                // A copy of the key of a team's version is given by one of its maintainers, as the signed access document says.
+                if (access?.Teams.GetValueOrDefault(teamId) is not { } team)
+                {
+                    reason = "an automation of a team opens with the access document that names the team";
+                    return false;
+                }
+
+                key = FleetGrantKeys.Unwrap(wrapped, list.OrganizationId ?? string.Empty, automationId, ScopedSubject("team", teamId, number, machineId), identity, list,
+                    signer => FleetAccessState.RoleIn(team, signer.OwnerId) == FleetTeamRoles.Maintainer, TeamKeys);
+                if (key.Id != keyId) throw new InvalidDataException("The copy is the one of another key.");
+            }
+            else
+            {
+                key = FleetKeyWrap.Unwrap(wrapped, keyId, 1, identity, list);
+            }
+
             var plain = new byte[sealedBytes.Length - TagLength];
             using (var aes = new AesGcm(key.Material, TagLength))
             {
@@ -200,6 +275,42 @@ public static class FleetAutomationSigning
             reason = "the sealed definition does not open for this automation, version and machine";
             return false;
         }
+    }
+
+    private static readonly FleetGrantKeys.Purpose TeamKeys = new("codealta-team-automation-key/1", "codealta-team-automation-key-sign/1");
+
+    private static string ScopedSubject(string kind, string id, long number, string machineId)
+        => string.Create(CultureInfo.InvariantCulture, $"{kind}:{id}#{number}#{machineId}");
+
+    // Seals a version of a scope for the devices given, each copy of its key wrapped and signed by the signer under the domain of the scope.
+    private static string SealScoped(FleetAutomationContent content, string automationId, long number, string machineId, string kind, string scopeId,
+        IReadOnlyList<FleetDeviceListMember> recipients, FleetDeviceListState list, DeviceIdentity signer)
+    {
+        if (list.OrganizationId is not { } organization) throw new ArgumentException("The list names no organization yet.", nameof(list));
+        var key = FleetMetadataKey.Generate();
+        var plain = FleetSealedJson.Write(writer =>
+        {
+            writer.WriteString("definition", content.Definition);
+            if (content.Repository is not null) writer.WriteString("repository", content.Repository);
+        });
+        var nonce = RandomNumberGenerator.GetBytes(NonceLength);
+        var sealedBytes = new byte[plain.Length + TagLength];
+        using (var aes = new AesGcm(key.Material, TagLength))
+            aes.Encrypt(nonce, plain, sealedBytes.AsSpan(0, plain.Length), sealedBytes.AsSpan(plain.Length), Associated(key.Id, automationId, number, machineId));
+        CryptographicOperations.ZeroMemory(plain);
+        var subject = ScopedSubject(kind, scopeId, number, machineId);
+        return Encoding.UTF8.GetString(FleetSealedJson.Write(writer =>
+        {
+            writer.WriteString("alg", SealAlgorithm);
+            writer.WriteString("kid", key.Id);
+            writer.WriteString(kind, scopeId);
+            writer.WriteString("iv", Base64Url.EncodeToString(nonce));
+            writer.WriteString("ct", Base64Url.EncodeToString(sealedBytes));
+            writer.WriteStartObject("keys");
+            foreach (var recipient in recipients)
+                writer.WriteString(recipient.DeviceId, FleetGrantKeys.Wrap(key, recipient.Key, organization, automationId, subject, Math.Max(1, list.Sequence), signer, TeamKeys));
+            writer.WriteEndObject();
+        }));
     }
 
     private static byte[] Associated(string keyId, string automationId, long number, string machineId)

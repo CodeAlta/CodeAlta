@@ -74,7 +74,13 @@ internal sealed class FleetAutomationService
     public async Task<AutomationListDto> ListAsync(DeviceRecord actor, CancellationToken cancellationToken)
     {
         var person = RequirePersonController(actor);
-        var records = await _automations.ListAutomationsAsync(actor.OrganizationId, person, cancellationToken).ConfigureAwait(false);
+        var records = (await _automations.ListAutomationsAsync(actor.OrganizationId, person, cancellationToken).ConfigureAwait(false)).ToList();
+        // The automations of the teams this person maintains, whoever of its maintainers gave them: they read, change and run them.
+        foreach (var record in await TeamAutomationsAsync(actor.OrganizationId, person, cancellationToken).ConfigureAwait(false))
+        {
+            if (!records.Any(other => other.AutomationId == record.AutomationId && other.MachineId == record.MachineId)) records.Add(record);
+        }
+
         return new AutomationListDto([.. records.Select(ToDto)]);
     }
 
@@ -185,7 +191,7 @@ internal sealed class FleetAutomationService
         if (run.SignerDeviceId != actor.Id || run.SignerKey != actor.PublicKey) throw Invalid("The run request must name the device that signs it, with its key.");
         if (run.OrganizationId != actor.OrganizationId) throw Invalid("The run request must name the organization of the server.");
         var held = await _automations.GetAutomationAsync(actor.OrganizationId, id, run.MachineId, cancellationToken).ConfigureAwait(false);
-        if (held is null || held.Removed || held.OwnerPersonId != person)
+        if (held is null || held.Removed || held.OwnerPersonId != person && !await MaintainsAsync(actor.OrganizationId, id, person, cancellationToken).ConfigureAwait(false))
             throw CoordinatorException.NotFound(CoordinatorErrorCodes.AutomationNotFound, "No automation of yours has this id on this machine.");
         await RequireOwnedAsync(actor.OrganizationId, id, person, cancellationToken).ConfigureAwait(false);
         if (_presence.Get(run.MachineId) is not { } session)
@@ -251,6 +257,29 @@ internal sealed class FleetAutomationService
         _logger.LogInformation("Run {Run} of automation {Automation} on {Machine} was taken over by {Device}", runId, id, run.MachineId, actor.Id);
         await _store.AppendAuditAsync(origin.Audit("automation.takeover", actor, id), CancellationToken.None).ConfigureAwait(false);
         return new AutomationRunDto(runId, id, run.MachineId, held.Number, "manual", FleetAutomationRunRequest.TakeOverAction, run.Time, null, null, null, null, null);
+    }
+
+    // Whether the person maintains the team that owns an automation.
+    private async Task<bool> MaintainsAsync(string organizationId, string automationId, string person, CancellationToken cancellationToken)
+        => Access is { } access && (await access.ReadAccessAsync(organizationId, cancellationToken).ConfigureAwait(false)) is var snapshot
+            && snapshot.Owner(FleetResourceKinds.Automation, automationId) is { OwnerKind: FleetPrincipalKinds.Team } owner && snapshot.TeamRole(owner.OwnerId, person) == FleetTeamRoles.Maintainer;
+
+    // The versions of the automations owned by the teams a person maintains.
+    private async Task<IReadOnlyList<AutomationRecord>> TeamAutomationsAsync(string organizationId, string person, CancellationToken cancellationToken)
+    {
+        if (Access is not { } access) return [];
+        var snapshot = await access.ReadAccessAsync(organizationId, cancellationToken).ConfigureAwait(false);
+        var ids = snapshot.Owners.Where(owner => owner.ResourceKind == FleetResourceKinds.Automation && owner.OwnerKind == FleetPrincipalKinds.Team
+                && snapshot.TeamRole(owner.OwnerId, person) == FleetTeamRoles.Maintainer).Select(static owner => owner.ResourceId).ToHashSet(StringComparer.Ordinal);
+        if (ids.Count == 0) return [];
+        var found = new List<AutomationRecord>();
+        foreach (var giver in (await _automations.ListAutomationHoldersAsync(organizationId, cancellationToken).ConfigureAwait(false)).Where(holder => ids.Contains(holder.AutomationId))
+            .Select(static holder => holder.PersonId).Distinct(StringComparer.Ordinal))
+        {
+            found.AddRange((await _automations.ListAutomationsAsync(organizationId, giver, cancellationToken).ConfigureAwait(false)).Where(record => ids.Contains(record.AutomationId)));
+        }
+
+        return found;
     }
 
     // An automation given to another owner (doc/fleet/access-control.md, ownership over time) takes no new version and no run

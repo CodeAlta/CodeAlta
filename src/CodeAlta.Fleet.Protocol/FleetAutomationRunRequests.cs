@@ -137,6 +137,25 @@ public static class FleetAutomationRunRequestDocuments
     /// <exception cref="ArgumentNullException"><paramref name="devices"/> is null.</exception>
     public static bool TryVerify(FleetSignedAutomationRunRequest? signed, FleetDeviceListState devices, string? organizationId, string? machineId, DateTimeOffset now,
         [NotNullWhen(true)] out FleetAutomationRunRequest? request, [NotNullWhen(false)] out string? reason)
+        => TryVerify(signed, devices, organizationId, machineId, now, null, out request, out reason);
+
+    /// <summary>
+    /// Verifies a request for a machine of an organization, as <see cref="TryVerify(FleetSignedAutomationRunRequest?, FleetDeviceListState, string?, string?, DateTimeOffset, out FleetAutomationRunRequest?, out string?)"/>
+    /// does, with the rule of who may ask it: on a machine of a team, the maintainers of the team for its automations, as the
+    /// access document the machine verified says.
+    /// </summary>
+    /// <param name="signed">The signed request.</param>
+    /// <param name="devices">The device list as the machine verified and anchored it.</param>
+    /// <param name="organizationId">The organization of the server the machine is linked to.</param>
+    /// <param name="machineId">The device of the machine that verifies.</param>
+    /// <param name="now">The time of the machine.</param>
+    /// <param name="mayAsk">Says whether the person of the signing device may ask it; null for the person the device list names for the machine.</param>
+    /// <param name="request">The request, when it verifies.</param>
+    /// <param name="reason">Why it does not verify, or null.</param>
+    /// <returns>Whether it verifies.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="devices"/> is null.</exception>
+    public static bool TryVerify(FleetSignedAutomationRunRequest? signed, FleetDeviceListState devices, string? organizationId, string? machineId, DateTimeOffset now,
+        Func<string?, bool>? mayAsk, [NotNullWhen(true)] out FleetAutomationRunRequest? request, [NotNullWhen(false)] out string? reason)
     {
         ArgumentNullException.ThrowIfNull(devices);
         request = null;
@@ -149,7 +168,7 @@ public static class FleetAutomationRunRequestDocuments
         if ((now - read.Time).Duration() > MaxSkew) return Refuse("the run request was signed too long ago, or in the future", out reason);
         if (!devices.Members.TryGetValue(read.SignerDeviceId, out var signer) || signer.Kind != FleetDeviceKinds.Controller || devices.Removed.Contains(read.SignerDeviceId))
             return Refuse("the run request is not signed by a controller device of the organization", out reason);
-        if (!devices.Members.TryGetValue(machineId, out var self) || self.OwnerId is null || self.OwnerId != signer.OwnerId)
+        if (mayAsk is not null ? !mayAsk(signer.OwnerId) : !devices.Members.TryGetValue(machineId, out var self) || self.OwnerId is null || self.OwnerId != signer.OwnerId)
             return Refuse("the run request is signed by a device of another person than the owner of this machine", out reason);
         if (read.SignerKey != signer.Key.Text || !signer.Key.Verify(GetSignedBytes(signed.Payload), signed.Signature))
             return Refuse("the signature does not verify with the key the device list holds for its signer", out reason);

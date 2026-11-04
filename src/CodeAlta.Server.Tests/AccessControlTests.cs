@@ -196,8 +196,10 @@ public sealed class AccessControlTests
         var (setup, machine) = await server.SetUpWithNodeAsync(owner, node);
         var (mia, miaId) = await AddPersonAsync(server, owner, setup, "Mia");
         var (max, maxId) = await AddPersonAsync(server, owner, setup, "Max");
+        var (ada, adaId) = await AddPersonAsync(server, owner, setup, "Ada");
         var team = (await server.SendAsync(owner, HttpMethod.Post, "/api/v1/teams", new CreateTeamRequest("Infra"))).Read<TeamDto>();
         await server.SendAsync(owner, HttpMethod.Put, $"/api/v1/teams/{team.Id}/members/{miaId}", new SetTeamMemberRequest(FleetTeamRoles.Maintainer));
+        await server.SendAsync(owner, HttpMethod.Put, $"/api/v1/teams/{team.Id}/members/{adaId}", new SetTeamMemberRequest(FleetTeamRoles.Maintainer));
         await server.SendAsync(owner, HttpMethod.Put, $"/api/v1/teams/{team.Id}/members/{maxId}", new SetTeamMemberRequest(FleetTeamRoles.Member));
         await server.SendAsync(owner, HttpMethod.Delete, $"/api/v1/teams/{team.Id}/members/{setup.Owner.Id}");
         var offer = (await server.SendAsync(owner, HttpMethod.Post, "/api/v1/transfers", new OfferTransferRequest(FleetResourceKinds.Machine, machine.Id, FleetPrincipalKinds.Team,
@@ -214,6 +216,19 @@ public sealed class AccessControlTests
         Assert.AreEqual(HttpStatusCode.OK, put.Status, put.Body.ToString());
         var owned = (await server.SendAsync(mia, HttpMethod.Get, "/api/v1/owners")).Read<AccessListDto<ResourceOwnerDto>>().Items.Single(resource => resource.ResourceId == "deploy");
         Assert.AreEqual((FleetPrincipalKinds.Team, team.Id, miaId), (owned.OwnerKind, owned.OwnerId, owned.AuthorId), "the team owns it from its first version");
+        // Another maintainer lists it and runs it by hand; a member does neither.
+        Assert.IsTrue((await server.SendAsync(ada, HttpMethod.Get, "/api/v1/automations")).Read<AutomationListDto>().Automations.Any(static item => item.Id == "deploy"));
+        Assert.IsFalse((await server.SendAsync(max, HttpMethod.Get, "/api/v1/automations")).Read<AutomationListDto>().Automations.Any(static item => item.Id == "deploy"));
+        RunAutomationRequest Run(TestDevice device)
+        {
+            var text = FleetAutomationRunRequestDocuments.Serialize(new FleetAutomationRunRequest(FleetAutomationRunRequest.CurrentVersion, setup.Organization.Id, "deploy",
+                machine.Id, "run-1", device.DeviceId, device.PublicKey, server.Clock.Now));
+            return new RunAutomationRequest(new FleetSignedAutomationRunRequest(text, device.Sign(FleetAutomationRunRequestDocuments.GetSignedBytes(text))));
+        }
+
+        Assert.AreEqual(HttpStatusCode.Conflict, (await server.SendAsync(ada, HttpMethod.Post, "/api/v1/automations/deploy/run", Run(ada))).Status,
+            "a maintainer may run it: the machine is offline here");
+        Assert.AreEqual(HttpStatusCode.NotFound, (await server.SendAsync(max, HttpMethod.Post, "/api/v1/automations/deploy/run", Run(max))).Status);
         Assert.AreEqual(HttpStatusCode.Forbidden, (await server.SendAsync(max, HttpMethod.Put, "/api/v1/automations/other", Version(max, "other", "team:" + team.Id))).Status,
             "a member gives the team none of its automations");
         Assert.AreEqual(HttpStatusCode.Forbidden, (await server.SendAsync(max, HttpMethod.Put, "/api/v1/automations/mine", Version(max, "mine", null))).Status,

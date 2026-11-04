@@ -63,7 +63,7 @@ internal sealed class NodeServerAutomations(NodeAutomations automations, DeviceI
         {
             // A version that does not read names nothing to answer: the server keeps it pending, and nothing runs.
             if (signed is null || !FleetAutomationVersionDocuments.TryParse(signed.Payload, out var named)) continue;
-            var outcome = await automations.AcceptFromServerAsync(link.Id, devices, organization, signed, version => Open(version, devices), cancellationToken,
+            var outcome = await automations.AcceptFromServerAsync(link.Id, devices, organization, signed, version => Open(version, devices, connector.Access.Current), cancellationToken,
                 connector.Devices.ReadNameAsync).ConfigureAwait(false);
             acks.Add(new FleetAutomationAck(named.AutomationId, named.Number, outcome.Applied, outcome.Message));
         }
@@ -160,8 +160,9 @@ internal sealed class NodeServerAutomations(NodeAutomations automations, DeviceI
         return automations.ReportRunsAsync(link.Id, all: true, cancellationToken);
     }
 
-    private (FleetAutomationContent? Content, string? Reason) Open(FleetAutomationVersion version, FleetDeviceListState devices)
-        => FleetAutomationSigning.TryOpen(version.Sealed, version.AutomationId, version.Number, version.MachineId, identity, devices, out var content, out var reason)
+    // A version of a team opens with the access document of the server, which says who maintains the team.
+    private (FleetAutomationContent? Content, string? Reason) Open(FleetAutomationVersion version, FleetDeviceListState devices, FleetAccessState? access)
+        => FleetAutomationSigning.TryOpen(version.Sealed, version.AutomationId, version.Number, version.MachineId, identity, devices, access, out var content, out var reason)
             ? (content, null)
             : (null, reason);
 

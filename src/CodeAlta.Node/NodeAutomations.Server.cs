@@ -109,6 +109,17 @@ internal sealed partial class NodeAutomations
         lock (_gate) _serverClaims.Remove(runId);
     }
 
+    // Who may ask a run of an automation this node holds from a server: on a machine of a team, any maintainer of the team
+    // for an automation of the team, and the person who gave it for a personal one; on a personal machine, its owner.
+    private Func<string?, bool>? MayAsk(string linkId, FleetSignedAutomationRunRequest signed, FleetDeviceListState devices, string self)
+    {
+        if (ServerAccess?.Invoke(linkId)?.TeamOf(self) is not { } team || !FleetAutomationRunRequestDocuments.TryRead(signed.Payload, out var asked, out _)) return null;
+        if (AssignmentOf(asked.AutomationId) is not { Signed: { } held } || !FleetAutomationVersionDocuments.TryParse(held.Payload, out var version)) return static _ => false;
+        if (version.TeamId == team.Id) return person => FleetAccessState.RoleIn(team, person) == FleetTeamRoles.Maintainer;
+        var giver = devices.Members.TryGetValue(version.SignerDeviceId, out var signer) ? signer.OwnerId : null;
+        return person => person is not null && person == giver;
+    }
+
     /// <summary>
     /// Runs an automation a person asked by hand through the server of a link: the request must verify against the device
     /// list of that server (a controller device of the owner of this machine, for this machine, signed within minutes of
@@ -128,7 +139,8 @@ internal sealed partial class NodeAutomations
         ArgumentNullException.ThrowIfNull(devices);
         ArgumentNullException.ThrowIfNull(signed);
         if (DeviceId is not { } self) return (null, "This machine does not know its own device yet.");
-        if (!FleetAutomationRunRequestDocuments.TryVerify(signed, devices, organizationId, self, _options.TimeProvider.GetUtcNow(), out var request, out var reason))
+        if (!FleetAutomationRunRequestDocuments.TryVerify(signed, devices, organizationId, self, _options.TimeProvider.GetUtcNow(), MayAsk(linkId, signed, devices, self),
+                out var request, out var reason))
         {
             Log($"A run asked through the server was refused: {reason}.");
             return (null, reason);
@@ -168,7 +180,8 @@ internal sealed partial class NodeAutomations
         ArgumentNullException.ThrowIfNull(devices);
         ArgumentNullException.ThrowIfNull(signed);
         if (DeviceId is not { } self) return "This machine does not know its own device yet.";
-        if (!FleetAutomationRunRequestDocuments.TryVerify(signed, devices, organizationId, self, _options.TimeProvider.GetUtcNow(), out var request, out var reason))
+        if (!FleetAutomationRunRequestDocuments.TryVerify(signed, devices, organizationId, self, _options.TimeProvider.GetUtcNow(), MayAsk(linkId, signed, devices, self),
+                out var request, out var reason))
         {
             Log($"A take-over asked through the server was refused: {reason}.");
             return reason;
