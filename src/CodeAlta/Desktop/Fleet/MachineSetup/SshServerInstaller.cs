@@ -62,7 +62,7 @@ internal sealed class SshServerInstaller(ISshRunner ssh, string desktopVersion)
     /// <param name="cancellationToken">Stops the setup.</param>
     /// <returns>The id of the link of this computer to the new server.</returns>
     /// <exception cref="SshSetupException">A step failed; its code says why.</exception>
-    public async Task<string> RunAsync(SshServerSetupRequest request, Func<Uri, CancellationToken, Task<string?>> reachable,
+    public async Task<string> RunAsync(SshServerSetupRequest request, Func<Uri, CancellationToken, Task<ReachProblem?>> reachable,
         Func<Uri, Uri, string, CancellationToken, Task<string>> claim, Action<SshSetupProgress> progress, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
@@ -117,8 +117,9 @@ internal sealed class SshServerInstaller(ISshRunner ssh, string desktopVersion)
 
         progress(new(SshServerSteps.Reach, "running", address.ToString().TrimEnd('/')));
         if (await reachable(address, cancellationToken).ConfigureAwait(false) is { } blocked)
-            throw new SshSetupException(SshServerSteps.Reach, onNetwork ? facts.Firewall == "ufw" ? "server_blocked_ufw" : "server_blocked" : "server_proxy_unreachable",
-                $"{address.ToString().TrimEnd('/')} · {blocked}");
+            throw new SshSetupException(SshServerSteps.Reach, blocked.BlockedHere ? "local_network_blocked"
+                : onNetwork ? facts.Firewall == "ufw" ? "server_blocked_ufw" : "server_blocked" : "server_proxy_unreachable",
+                $"{address.ToString().TrimEnd('/')} · {blocked.Reason}");
         progress(new(SshServerSteps.Reach, "done", address.ToString().TrimEnd('/')));
 
         progress(new(SshServerSteps.Claim, "running"));

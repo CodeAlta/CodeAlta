@@ -43,6 +43,7 @@ export function setupProblem(code: string): MessageKey {
     case "service_failed": return "The service of CodeAlta Node could not be installed on the machine.";
     case "pair_failed": return "The node did not start, or made no pairing link.";
     case "pair_unreachable": return "This computer could not reach the node: check that the machine accepts connections on its port (a firewall), then try again.";
+    case "local_network_blocked": return "macOS keeps CodeAlta from the local network, so it cannot reach {host}: in System Settings > Privacy & Security > Local Network, turn on CodeAlta, then try again.";
     case "invalid_target": return "Give the computer as user@host, or a host of your SSH configuration.";
     case "invalid_path": return "A folder of the machine is a full path, or starts with ~/.";
     default: return "The setup did not go through.";

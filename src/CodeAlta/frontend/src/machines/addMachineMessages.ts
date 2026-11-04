@@ -119,6 +119,12 @@ export const addMachineMessages = {
     "Dieser Computer erreichte den Knoten nicht: Prüfen, ob die Maschine Verbindungen auf ihrem Port annimmt (eine Firewall), dann erneut versuchen.",
     "このコンピューターからノードに接続できませんでした。マシンがそのポートで接続を受け付けるか (ファイアウォール) 確認してから再試行してください。",
     "本机无法连接到该节点：请检查该机器是否在其端口上接受连接（防火墙），然后重试。"],
+  "macOS keeps CodeAlta from the local network, so it cannot reach {host}: in System Settings > Privacy & Security > Local Network, turn on CodeAlta, then try again.": [
+    "macOS impide que CodeAlta acceda a la red local, así que no puede llegar a {host}: en Ajustes del Sistema > Privacidad y seguridad > Red local, activa CodeAlta y vuelve a intentarlo.",
+    "macOS empêche CodeAlta d’accéder au réseau local, il ne peut donc pas atteindre {host} : dans Réglages Système > Confidentialité et sécurité > Réseau local, activez CodeAlta, puis réessayez.",
+    "macOS hält CodeAlta vom lokalen Netzwerk fern, daher erreicht es {host} nicht: In Systemeinstellungen > Datenschutz & Sicherheit > Lokales Netzwerk CodeAlta einschalten, dann erneut versuchen.",
+    "macOS が CodeAlta のローカルネットワークへのアクセスを止めているため、{host} に接続できません。システム設定 > プライバシーとセキュリティ > ローカルネットワークで CodeAlta をオンにしてから再試行してください。",
+    "macOS 阻止了 CodeAlta 访问本地网络，因此无法连接到 {host}：请在“系统设置”>“隐私与安全性”>“本地网络”中打开 CodeAlta，然后重试。"],
   "Give the computer as user@host, or a host of your SSH configuration.": ["Indica el ordenador como usuario@host o un host de tu configuración SSH.", "Donnez l’ordinateur sous la forme user@hôte, ou un hôte de votre configuration SSH.",
     "Den Computer als user@host oder als Host Ihrer SSH-Konfiguration angeben.", "コンピューターを user@host か、SSH 設定のホストで指定してください。", "请以 user@host 的形式，或用你 SSH 配置中的主机来指定计算机。"],
   "A folder of the machine is a full path, or starts with ~/.": ["Una carpeta de la máquina es una ruta completa o empieza por ~/.", "Un dossier de la machine est un chemin complet, ou commence par ~/.",

@@ -92,7 +92,7 @@ internal sealed partial class FleetServerService
     internal ISshRunner? Ssh { get; init; }
 
     /// <summary>Gets whether a server answers at an address from this computer; its health request unless a test says otherwise.</summary>
-    internal Func<Uri, CancellationToken, Task<string?>>? Reachable { get; init; }
+    internal Func<Uri, CancellationToken, Task<ReachProblem?>>? Reachable { get; init; }
 
     /// <summary>
     /// Sets up CodeAlta Server on a computer reached over SSH and makes this computer its owner, saying where each step
@@ -162,32 +162,34 @@ internal sealed partial class FleetServerService
     private static MachineSetupEvent Finished(string linkId, string? recoveryWords) => new("finished", "done", null, null, linkId, null, null, recoveryWords);
 
     // The health request of the server, from this computer, as the machines will reach it: null when it answers, otherwise
-    // what the last attempt met, in the words of the system ("No route to host"), for the person to see.
-    private static async Task<string?> AnswersAsync(Uri address, CancellationToken cancellationToken)
+    // what the last attempt met.
+    private static async Task<ReachProblem?> AnswersAsync(Uri address, CancellationToken cancellationToken)
     {
         using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(10) };
-        string? reason = null;
+        ReachProblem? problem = null;
         for (var attempt = 0; attempt < 3; attempt++)
         {
             try
             {
                 using var response = await http.GetAsync(new Uri(address, "api/v1/server/health"), cancellationToken).ConfigureAwait(false);
                 if (response.IsSuccessStatusCode) return null;
-                reason = $"HTTP {(int)response.StatusCode}";
+                problem = new ReachProblem($"HTTP {(int)response.StatusCode}");
             }
             catch (HttpRequestException exception)
             {
-                reason = exception.InnerException?.Message ?? exception.Message;
+                problem = LocalNetworkAccess.ProblemOf(exception, OperatingSystem.IsMacOS());
+                // macOS refuses at once and again: no need to wait for the other attempts.
+                if (problem.BlockedHere) return problem;
             }
             catch (TaskCanceledException) when (!cancellationToken.IsCancellationRequested)
             {
-                reason = "No answer within 10 s";
+                problem = new ReachProblem("No answer within 10 s");
             }
 
             await Task.Delay(TimeSpan.FromSeconds(2), cancellationToken).ConfigureAwait(false);
         }
 
-        return reason ?? "No answer";
+        return problem ?? new ReachProblem("No answer");
     }
 
     private static bool RemoteFolder(string? path)

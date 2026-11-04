@@ -19,5 +19,6 @@ test("The checklist has five steps, each with its title, and each failure says w
   assert.match(setupProblem("auth_failed"), /ssh-add/u);
   assert.match(setupProblem("host_key_unknown"), /trust it/u);
   assert.match(setupProblem("dotnet_missing"), /\.NET 10/u);
+  assert.match(setupProblem("local_network_blocked"), /Privacy & Security > Local Network/u, "macOS keeps the app from the network: not a firewall of the machine");
   assert.equal(setupProblem("something new"), "The setup did not go through.");
 });
