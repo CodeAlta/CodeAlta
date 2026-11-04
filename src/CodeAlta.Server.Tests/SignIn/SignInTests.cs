@@ -186,13 +186,15 @@ public sealed class SignInTests
     [TestMethod]
     public async Task AMethodTheServerDoesNotOfferIsRefused()
     {
-        await using var server = await ServerFixture.StartAsync();
+        // A server whose Microsoft and Google clients are placeholders (a build without them) does not offer them.
+        await using var server = await ServerFixture.StartAsync(signIn: new SignInOptions
+        {
+            Microsoft = new SignInClient(PublicSignInClients.PlaceholderPrefix + "microsoft"),
+            Google = new SignInClient(PublicSignInClients.PlaceholderPrefix + "google", "secret"),
+        });
         using var owner = new TestDevice("Desktop");
         using var laptop = new TestDevice("Laptop");
         await server.SetUpAsync(owner);
-
-        // A public client of the CodeAlta project that is still a placeholder is not offered (Microsoft, Google); the
-        // CodeAlta GitHub App is registered, so GitHub is.
         var methods = (await server.SendAsync(null, HttpMethod.Get, "/api/v1/sign-in/methods")).Read<SignInMethodsResponse>();
         CollectionAssert.AreEquivalent(new[] { FleetSignInMethods.Passkey, FleetSignInMethods.GitHub }, methods.Methods.Select(static method => method.Id).ToArray());
         var settings = (await server.SendAsync(owner, HttpMethod.Get, "/api/v1/sign-in/settings")).Read<SignInSettingsDto>();
@@ -373,6 +375,9 @@ public sealed class SignInTests
             defaults.GitHub.ClientSecret));
         Assert.AreEqual(PublicSignInClients.GitHubClientId, defaults.GitHub.ClientId);
         Assert.IsFalse(PublicSignInClients.IsPlaceholder(defaults.GitHub.ClientId), "the CodeAlta GitHub App is registered");
+        // The Microsoft app of the CodeAlta project is registered too, a public client without secret.
+        Assert.IsFalse(PublicSignInClients.IsPlaceholder(defaults.Microsoft.ClientId), "the CodeAlta Microsoft app is registered");
+        Assert.IsNull(defaults.Microsoft.ClientSecret);
 
         var variables = new Dictionary<string, string>
         {
@@ -386,6 +391,27 @@ public sealed class SignInTests
         Assert.AreEqual("https://api.github.com/", SignInOptions.FromEnvironment(name => variables.GetValueOrDefault(name)).GitHubApiAddress.AbsoluteUri);
         variables["CODEALTA_SIGNIN_GITHUB_URL"] = "http://github.contoso.example";
         Assert.ThrowsExactly<ArgumentException>(() => SignInOptions.FromEnvironment(name => variables.GetValueOrDefault(name)));
+    }
+
+    [TestMethod]
+    public void TheGoogleClientIsBuiltInOnlyFromTheVariablesOfTheBuild_BothOrNeither()
+    {
+        // The build writes Google's client id and desktop secret from CODEALTA_SIGNIN_GOOGLE_CLIENT_ID and _CLIENT_SECRET (secrets
+        // of the CI, so that the public repository never holds them). The tests run in the environment of the build: with the
+        // variables, the built-in client is theirs; without them, it is a placeholder, and the server does not offer Google.
+        var id = Environment.GetEnvironmentVariable("CODEALTA_SIGNIN_GOOGLE_CLIENT_ID");
+        var secret = Environment.GetEnvironmentVariable("CODEALTA_SIGNIN_GOOGLE_CLIENT_SECRET");
+        Assert.AreEqual(PublicSignInClients.IsPlaceholder(PublicSignInClients.GoogleClientId), PublicSignInClients.IsPlaceholder(PublicSignInClients.GoogleClientSecret),
+            "the id and the secret come together");
+        if (!string.IsNullOrWhiteSpace(id) && !string.IsNullOrWhiteSpace(secret))
+        {
+            Assert.AreEqual(PublicSignInClients.GoogleClientId, id.Trim(), "the build carries the client id it was given");
+            Assert.AreEqual(PublicSignInClients.GoogleClientSecret, secret.Trim(), "the build carries the secret it was given");
+        }
+        else
+        {
+            Assert.IsTrue(PublicSignInClients.IsPlaceholder(PublicSignInClients.GoogleClientId), "a build without the variables has no Google client");
+        }
     }
 
     [TestMethod]

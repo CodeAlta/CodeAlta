@@ -2,12 +2,11 @@ namespace CodeAlta.Server.Identity.SignIn;
 
 /// <summary>
 /// The public sign-in clients the CodeAlta project registers with Microsoft, Google and GitHub (<c>doc/fleet/readme.md</c>,
-/// decision 26), so that any self-hosted server signs people in without a registration of its own. They do not exist
-/// yet: these values are placeholders, and a method whose client id is still a placeholder is not offered. A server
-/// takes the real values from <c>CODEALTA_SIGNIN_&lt;PROVIDER&gt;_CLIENT_ID</c> (and <c>_CLIENT_SECRET</c> for Microsoft and
-/// Google) until a version of CodeAlta Server carries them. GitHub has no secret: its sign-in is the device flow of a
-/// GitHub App, registered from <c>src/CodeAlta.Server/Identity/SignIn/github-app-manifest.json</c>
-/// (<c>doc/fleet/identity.md</c>).
+/// decision 26), so that any self-hosted server signs people in without a registration of its own. A method whose client id
+/// is a placeholder (<see cref="PlaceholderPrefix"/>) is not offered. A server may take other values from
+/// <c>CODEALTA_SIGNIN_&lt;PROVIDER&gt;_CLIENT_ID</c> (and <c>_CLIENT_SECRET</c> for Microsoft and Google). GitHub has no
+/// secret: its sign-in is the device flow of a GitHub App, registered from
+/// <c>src/CodeAlta.Server/Identity/SignIn/github-app-manifest.json</c> (<c>doc/fleet/identity.md</c>).
 /// </summary>
 public static class PublicSignInClients
 {
@@ -19,16 +18,21 @@ public static class PublicSignInClients
     /// platform "Mobile and desktop applications" with the redirect <c>http://127.0.0.1/callback</c> (Entra ignores the port of
     /// a loopback redirect, and the desktop listens on a port of its choice: <c>FleetLoopbackRedirect</c>), public client flows on.
     /// </summary>
-    public const string MicrosoftClientId = PlaceholderPrefix + "microsoft-client-id";
+    public const string MicrosoftClientId = "8d3b8e84-8200-4fff-9272-cc4e01f075b1";
 
-    /// <summary>The OAuth client id of the CodeAlta "Desktop app" client in Google Cloud, with its published consent screen.</summary>
-    public const string GoogleClientId = PlaceholderPrefix + "google-client-id";
+    /// <summary>
+    /// The OAuth client id of the CodeAlta "Desktop app" client in Google Cloud, with its published consent screen. It is not
+    /// in the source: the build takes it from <c>CODEALTA_SIGNIN_GOOGLE_CLIENT_ID</c> (a secret of the repository's CI, so that
+    /// released packages carry it), and a build without it has a placeholder, which does not offer Google.
+    /// </summary>
+    public const string GoogleClientId = PublicSignInBuild.GoogleClientId;
 
     /// <summary>
     /// The client "secret" Google gives a desktop client: Google requires it at the token endpoint, and documents that it
-    /// is not secret for an installed application (the code is still bound to its PKCE verifier).
+    /// is not secret for an installed application (the code is still bound to its PKCE verifier). Like the client id, the
+    /// build takes it from <c>CODEALTA_SIGNIN_GOOGLE_CLIENT_SECRET</c>, so that it is not in the public repository.
     /// </summary>
-    public const string GoogleClientSecret = PlaceholderPrefix + "google-desktop-client-secret";
+    public const string GoogleClientSecret = PublicSignInBuild.GoogleClientSecret;
 
     /// <summary>
     /// The client id of the CodeAlta GitHub App, with "Enable Device Flow" on: the device flow needs no client secret and

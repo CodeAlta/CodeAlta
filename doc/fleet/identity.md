@@ -93,8 +93,12 @@ to it.
   App, the desktop shows the user code and opens `github.com/login/device`, and polls the server, which asks GitHub
   at most once per interval GitHub sets (`slow_down` lengthens it); the device code never leaves the server. A
   company's own GitHub Enterprise Server app is the same, at its address (`CODEALTA_SIGNIN_GITHUB_URL`).
-- No registration per server; the ids are configuration of the server (`CODEALTA_SIGNIN_<PROVIDER>_CLIENT_ID`) until a
-  release carries them, and a method whose id is missing is not offered.
+- No registration per server: every release carries the project's ids (`PublicSignInClients`). A server may replace
+  them (`CODEALTA_SIGNIN_<PROVIDER>_CLIENT_ID`, and `_CLIENT_SECRET` for Microsoft and Google), and a method whose id is
+  missing is not offered. Google's client id and desktop secret ship in the packages but not in the source: the CI build
+  writes them from repository secrets (`CODEALTA_SIGNIN_GOOGLE_CLIENT_ID`, `_CLIENT_SECRET`), so that secret scanners
+  of the public repository have nothing to flag, and a build without them does not offer Google. Google documents that
+  this secret is not confidential for an installed application; the code stays bound to its PKCE verifier.
 - **Registering the GitHub App** is one confirmation in a browser: `pwsh src/CodeAlta.Server/Identity/SignIn/register-github-app.ps1`
   posts `github-app-manifest.json` (public, no permission, no webhook) to the CodeAlta organization, converts the code
   GitHub sends back (`POST /app-manifests/{code}/conversions`) and prints the app id, slug and client id. The owner
