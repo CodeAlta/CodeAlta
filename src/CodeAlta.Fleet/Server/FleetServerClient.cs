@@ -769,12 +769,15 @@ public sealed partial class FleetServerClient : IDisposable
                 throw new FleetDeviceListException(state.Sequence, "the server names another organization than its device list");
             if (!state.IsController(DeviceId))
                 throw new FleetDeviceListException(state.Sequence, "this device is not a controller device of the list, so it signs no entry");
-            // A device of another person is signed only by a device the list already gives to its own person: an entry of
-            // a device not yet bound would bind it to that other person.
-            if (owner is not null && owner != self.OwnerId && state.Members[DeviceId].OwnerId != self.OwnerId)
+            // A device of another person is signed only by a device the list gives to its own person. The owner's first
+            // device, which the list knows by no person yet (its first entry named none), names its own in the entry: else
+            // the entry would give it to the person of the device it adds.
+            var bound = state.Members[DeviceId].OwnerId;
+            var naming = bound is null && state.FirstDeviceId == DeviceId ? self.OwnerId : null;
+            if (owner is not null && owner != self.OwnerId && (bound ?? naming) != self.OwnerId)
                 throw new FleetDeviceListException(state.Sequence, "this device signs a device of another person only once the list gives it to its own person");
             var entry = Sign(new FleetDeviceListEntryPayload(FleetDeviceListEntryPayload.CurrentVersion, organization.Id, state.Sequence + 1, state.LastHash, operation, deviceId,
-                key, kind, owner, DeviceId, Now()));
+                key, kind, owner, DeviceId, Now(), naming));
             if (!FleetDeviceListVerifier.TryAppend(state, entry, organization.Id, out _, out var reason))
                 throw new FleetDeviceListException(state.Sequence + 1, $"the entry this device would sign does not hold ({reason})");
             try

@@ -1,7 +1,9 @@
 using System.Net;
 using System.Text.Json;
+using CodeAlta.Fleet.Identity;
 using CodeAlta.Fleet.Protocol;
 using CodeAlta.Fleet.Protocol.Api;
+using CodeAlta.Fleet.Server;
 using CodeAlta.Server.Identity;
 using CodeAlta.Server.Identity.SignIn;
 using CodeAlta.Server.Storage;
@@ -181,6 +183,61 @@ public sealed class SignInTests
         Assert.AreEqual(SignInErrorCodes.RedirectInvalid, elsewhere.Code);
         var unsigned = await server.SendAsync(thief, HttpMethod.Post, "/api/v1/sign-in/start", new StartSignInRequest(FleetSignInMethods.Company, laptop.PublicKey, Redirect));
         Assert.AreEqual(CoordinatorErrorCodes.SignatureInvalid, unsigned.Code, "the start is signed by the key it names");
+    }
+
+    [TestMethod]
+    public async Task TheOwnerApprovesAPersonsFirstDevice_EvenWhenTheirDesktopIsTheOnlyDeviceOfTheList_AndOnlyTheFirst()
+    {
+        await using var provider = await FakeOidcProvider.StartAsync(clientSecret: "company-secret");
+        await using var server = await ServerFixture.StartAsync(signIn: Options(provider));
+        using var root = new TempDirectory();
+        using var desktopKey = DeviceIdentity.LoadOrCreate(Path.Combine(root.Path, "desktop"));
+        using var owner = TestDevice.From(desktopKey);
+        using var desktop = new FleetServerClient(server.BaseAddress, desktopKey);
+        using var laptop = new TestDevice("Laptop");
+        using var phone = new TestDevice("Second laptop");
+        using var stranger = new TestDevice("Other laptop");
+        // The owner's desktop alone in the device list: no node joined yet, and its first entry names no person.
+        var setup = await server.SetUpAsync(owner);
+        await ConfigureCompanyAsync(server, owner, provider, requireSso: false);
+
+        async Task<CompleteSignInResponse> EnrollAsync(TestDevice device)
+        {
+            var (start, back) = await StartAsync(server, device, FleetSignInMethods.Company);
+            var signedIn = (await CompleteAsync(server, device, start, back)).Read<CompleteSignInResponse>();
+            Assert.AreEqual(HttpStatusCode.Created, (await server.SendAsync(device, HttpMethod.Post, "/api/v1/enroll",
+                new EnrollRequest(string.Empty, device.PublicKey, device.Name, null, signedIn.Grant))).Status);
+            return signedIn;
+        }
+
+        Task<ApiAnswer> ApproveAsync(TestDevice signer, TestDevice device, string person) => server.NextEntryAsync(signer, FleetDeviceListOperations.Add, device.DeviceId,
+            device.PublicKey, FleetDeviceKinds.Controller, person, setup.Organization.Id).ContinueWith(entry => server.SendAsync(signer, HttpMethod.Post,
+                $"/api/v1/devices/{device.DeviceId}/approve", new DeviceListChangeRequest(entry.Result))).Unwrap();
+
+        // An entry that does not name its signer's person would give the owner's desktop to the person it adds: refused.
+        var pat = await EnrollAsync(laptop);
+        Assert.AreEqual(HttpStatusCode.Forbidden, (await ApproveAsync(owner, laptop, pat.Person.Id)).Status);
+
+        // The owner's desktop signs the first device of a person the company sign-in created, naming its own person.
+        Assert.AreEqual(DeviceStatuses.Approved, (await desktop.ApproveAsync(laptop.DeviceId, FleetDeviceKinds.Controller, CancellationToken.None)).Status);
+
+        // Their next device is theirs to approve, not the owner's.
+        Assert.AreEqual(pat.Person.Id, (await EnrollAsync(phone)).Person.Id);
+        Assert.AreEqual(HttpStatusCode.Forbidden, (await ApproveAsync(owner, phone, pat.Person.Id)).Status, "the owner signs only a person's first device");
+        Assert.AreEqual(HttpStatusCode.OK, (await ApproveAsync(laptop, phone, pat.Person.Id)).Status);
+
+        // Another person's first device: the owner again, never another person's device.
+        provider.Account = new FakeAccount("user-9", "kim@contoso.example", "Kim Park", []);
+        var kim = await EnrollAsync(stranger);
+        Assert.AreEqual(HttpStatusCode.Forbidden, (await ApproveAsync(laptop, stranger, kim.Person.Id)).Status, "a member does not sign another person's first device");
+        Assert.AreEqual(DeviceStatuses.Approved, (await desktop.ApproveAsync(stranger.DeviceId, FleetDeviceKinds.Controller, CancellationToken.None)).Status);
+
+        // Every device replays the list with the same rules: the desktop is the owner's, each laptop its person's.
+        var list = (await server.SendAsync(owner, HttpMethod.Get, "/api/v1/device-list")).Read<ListResponse<DeviceListEntryDto>>();
+        var verified = FleetDeviceListVerifier.Verify(list.Items.Select(static item => item.Entry), setup.Organization.Id);
+        Assert.IsTrue(verified.IsValid, verified.Reason);
+        Assert.AreEqual((setup.Owner.Id, pat.Person.Id, pat.Person.Id, kim.Person.Id), (verified.State.Members[owner.DeviceId].OwnerId,
+            verified.State.Members[laptop.DeviceId].OwnerId, verified.State.Members[phone.DeviceId].OwnerId, verified.State.Members[stranger.DeviceId].OwnerId));
     }
 
     [TestMethod]
