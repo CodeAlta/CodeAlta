@@ -69,6 +69,7 @@ internal sealed partial class BuiltInAltaCommandContributor
         var secret = Group("secret", "List the secrets and variables of this computer or of a machine it manages, by name: never a value.");
         secret.Add(CreateFleetSecretListCommand(context));
         group.Add(secret);
+        group.Add(CreateFleetAccessCommand(context));
         AddHelpText(
             group,
             "The fleet is this computer and the machines it is paired with or reaches through a CodeAlta Server. Every command works with the access of the person of this computer, never more.",
