@@ -19,6 +19,12 @@ let devices: MachineDeviceView[] = [
 ];
 // The policy of the machine for agents of other machines: off in every space, as a machine starts.
 const agentPolicy = { spaces: [] as string[], sandbox: null as string | null, allowBypass: false };
+// The people of the organization the machine names, and one who asked to use it.
+const machinePeople = {
+  people: [{ personId: "bea", name: "Bea", permissions: ["view", "drive"] }],
+  asks: [{ personId: "cy", name: "Cy", askedAt: "2026-11-04T09:00:00Z" }],
+  others: [{ personId: "cy", name: "Cy", permissions: [] as string[] }, { personId: "dan", name: "Dan", permissions: [] as string[] }],
+};
 let projects = [{ id: "p1", name: "app", path: "/home/me/code/app", repository: "github.com/me/app" }];
 const view = (id: string): MachineManagement => id === "managed"
   ? { status: "ok", message: null, version: "4.0.0", sessionsAtWork: 0, updating: false, update: { running: "4.0.0", installed: "4.0.0", pendingVersion: null, pendingPhase: null,
@@ -79,6 +85,11 @@ const api: MachinePageApi = {
     return { status: "ok", message: null };
   },
   setAgentSandbox: async request => { calls.push(JSON.stringify({ agentSandbox: request.sandbox })); agentPolicy.sandbox = request.sandbox ?? null; return { status: "ok", message: null }; },
+  people: async () => ({ status: "ok", message: null, people: machinePeople.people, asks: machinePeople.asks, others: machinePeople.others }),
+  setMachinePerson: async request => {
+    calls.push(JSON.stringify({ person: { personId: request.personId, permissions: request.permissions, refuse: request.refuse } }));
+    return { status: "ok", message: null };
+  },
   setAgentBypass: async request => { calls.push(JSON.stringify({ agentBypass: request.allowed })); agentPolicy.allowBypass = request.allowed; return { status: "ok", message: null }; },
   // The providers of the machine: Codex ready, OpenAI skipped for its key, Copilot not signed in. A key typed on the page makes OpenAI ready;
   // the sign-in of Copilot gives a code, and ends at the second wait.

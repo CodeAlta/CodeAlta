@@ -217,6 +217,54 @@ public sealed class NodeServerAutomationTests
     }
 
     [TestMethod]
+    public async Task OnATeamMachine_RunsUseAccountCredentialsOnly_AndAnAutomationOfTheTeamRunsAsOneOfItsServiceIdentities()
+    {
+        var token = TestContext.CancellationToken;
+        using var root = new NodeTestRoot();
+        await using var node = await NodeHost.StartAsync(root.Options() with
+        {
+            Automations = new NodeAutomationOptions
+            {
+                TimeProvider = new NodeClock { Now = Noon }, TimeZone = TimeZoneInfo.Utc, WatchRepositories = false,
+                CredentialKind = static provider => provider.ProviderId.Value == "plan" ? AutomationCredentialKind.Personal : AutomationCredentialKind.Account,
+            },
+        }, token);
+        using var laptop = DeviceIdentity.LoadOrCreate(Path.Combine(root.Root, "laptop"));
+        using var tablet = DeviceIdentity.LoadOrCreate(Path.Combine(root.Root, "tablet"));
+        using var self = DeviceIdentity.LoadOrCreate(Path.Combine(root.Root, "self"));
+        var automations = node.Automations!;
+        automations.DeviceId = self.DeviceId;
+        var list = DeviceList(laptop, tablet, self, removeTablet: false);
+        automations.ServerDevices = _ => list;
+        var team = new FleetAccessTeam("infra", ["p1"], [], false);
+        var access = FleetAccessState.Empty with
+        {
+            OrganizationId = "org", Number = 1, Teams = FleetAccessState.Empty.Teams.Add("infra", team), Machines = FleetAccessState.Empty.Machines.Add(self.DeviceId, "infra"),
+        };
+        automations.ServerAccess = _ => access;
+        var sealedText = FleetAutomationSigning.Seal(new FleetAutomationContent(Definition, null), Id, 1, self.DeviceId, list, tablet);
+        var signed = FleetAutomationSigning.Sign(tablet, new FleetAutomationVersion(FleetAutomationVersion.CurrentVersion, "org", Id, 1, self.DeviceId, false, true, ["hourly"],
+            null, null, sealedText, string.Empty, string.Empty, DateTimeOffset.UtcNow) { Scope = "team:infra" });
+        var outcome = await automations.AcceptFromServerAsync("link-1", list, "org", signed,
+            version => FleetAutomationSigning.TryOpen(version.Sealed, version.AutomationId, version.Number, version.MachineId, self, list, out var content, out var reason)
+                ? (content, null) : (null, reason), token);
+        Assert.IsTrue(outcome.Applied, outcome.Message);
+        var entry = automations.Engine.Snapshot.Find(Id)!;
+        var account = new CodeAlta.Agent.ModelProviderDescriptor(new("gateway"), "Gateway");
+        var plan = new CodeAlta.Agent.ModelProviderDescriptor(new("plan"), "Plan");
+
+        // Without a service identity of the team on, an automation of the team does not run.
+        StringAssert.Contains(automations.Check(entry, account), "service identit");
+        access = access with { Teams = access.Teams.SetItem("infra", team with { Services = ["svc-infra"] }) };
+        Assert.IsNull(automations.Check(entry, account), "it runs as the service identity of the team");
+        // A personal plan never runs on a machine of a team, whatever the machine's own policy says.
+        StringAssert.Contains(automations.Check(entry, plan), "account credentials only");
+        // The machine leaves the team: an automation of the team no longer runs there.
+        access = access with { Machines = access.Machines.Remove(self.DeviceId) };
+        Assert.IsNotNull(automations.Check(entry, account));
+    }
+
+    [TestMethod]
     public async Task TheAutomationsAServerGaveStopOnceTheNodeLeftItAndAReplayedVersionIsRefused()
     {
         var token = TestContext.CancellationToken;

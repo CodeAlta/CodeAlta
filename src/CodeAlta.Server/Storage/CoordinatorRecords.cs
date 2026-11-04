@@ -147,6 +147,7 @@ public sealed record MachineRecord(string DeviceId, string OrganizationId, strin
 /// <param name="OutputTokens">Its output tokens.</param>
 /// <param name="SealedMetadata">Its sealed metadata, which the server cannot read.</param>
 /// <param name="ReceivedAt">When the server received this version.</param>
+/// <param name="PersonId">The person who started it on a team machine, as the machine says; null otherwise.</param>
 public sealed record SessionRecord(
     string Id,
     string OrganizationId,
@@ -163,7 +164,8 @@ public sealed record SessionRecord(
     long InputTokens,
     long OutputTokens,
     string? SealedMetadata,
-    DateTimeOffset ReceivedAt);
+    DateTimeOffset ReceivedAt,
+    string? PersonId = null);
 
 /// <summary>A metadata key of a space of a person: what the server knows of it, never the key itself.</summary>
 /// <param name="Id">The id of the key.</param>

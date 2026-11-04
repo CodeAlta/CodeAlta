@@ -241,6 +241,7 @@ In **Settings** > **Fleet** > **Machines**, click the name of a machine to open 
 | --- | --- |
 | **Devices** | Each computer paired with the machine, with a switch per permission: **View**, **Drive**, **Start**, **Move**, **Automate** and **Manage**. **Revoke** (the cross at the end of the row, then **Revoke**) refuses that computer there at once. |
 | **Agents of other machines** | The spaces where agents of other computers may start sessions there and send prompts to its sessions, the sandbox their sessions run in at least, and whether they may bypass permissions ([Let agents start sessions on it](#let-agents-start-sessions-on-it)) |
+| **People** | The people of your organization who may use it, each on their own sessions, and who asked to ([People and Access](people-and-access.md#people-on-your-own-machines)) |
 | **Labels** | Its [labels](#label-your-machines), which it publishes to its servers: add them, or remove one with its cross |
 | **Projects** | Clone a repository there, add a folder, remove a project |
 | **Providers** | Each provider of the machine and whether it is ready; when it is not, why: no key, the secret of the machine it waits for, not signed in. **Add a provider…** and **Add its key…** take its key here: it goes to the machine encrypted from end to end and is kept in its secrets (`PROVIDER_<KEY>_API_KEY`), never in its configuration. **Sign in…** signs in a provider such as GitHub Copilot or xAI on the machine: its code shows here with **Copy**; enter it on the provider's page in your browser. A provider with its own login on the machine (Codex, Claude Code) is signed in there |
@@ -330,6 +331,7 @@ The card of the server shows **Sign-in**: the ways people sign in on a new compu
 
 - **Link…** adds a way to sign in to you, from a computer already approved: **Add a passkey** (the server's page opens in your browser) or **Link Microsoft**, **Google**, **GitHub** (a code to enter at GitHub, as when you join). An account signs nobody in until someone linked it. The server keeps only the id and the name of a GitHub account, never its login or a token.
 - On the owner's computer, **Change…** turns each method on or off and sets the company's sign-in: its **Issuer** (the OpenID Connect address of Entra ID, Okta, Google Workspace, Keycloak...), the **Client id** and **Client secret** you registered there, with the redirect `http://127.0.0.1` (any port), and the **Groups claim**. The secret is never shown again. People sign in with it the first time without an invitation; their first computer waits for your approval.
+- **Roles from groups** gives a role to the members of a group of your company, by the id of the group in the groups claim: **Add a group**, then choose **Admin**, **Member**, **Auditor** or **Guest**. At each company sign-in a person gets the widest role among their groups, or member when they are in none. No group makes an owner, and owners keep their role.
 - **Require company sign-in** leaves only the company's sign-in for a new computer, and your passkey as the owner's way in.
 
 ### Keep your recovery key

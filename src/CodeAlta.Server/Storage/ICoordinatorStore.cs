@@ -68,6 +68,12 @@ public interface ICoordinatorStore : IStatisticsFactStore, IAsyncDisposable
     /// <returns>The device, or <see langword="null"/>.</returns>
     ValueTask<DeviceRecord?> GetDeviceAsync(string deviceId, CancellationToken cancellationToken = default);
 
+    /// <summary>Gets a device as a request it signs needs it: the device, and whether its person is suspended, in one read.</summary>
+    /// <param name="deviceId">The id of the device.</param>
+    /// <param name="cancellationToken">Cancels the operation.</param>
+    /// <returns>The device, or <see langword="null"/>, and whether the person who owns it is suspended.</returns>
+    ValueTask<(DeviceRecord? Device, bool PersonSuspended)> GetDeviceOfRequestAsync(string deviceId, CancellationToken cancellationToken = default);
+
     /// <summary>Lists the devices of an organization.</summary>
     /// <param name="organizationId">The organization.</param>
     /// <param name="cancellationToken">Cancels the operation.</param>

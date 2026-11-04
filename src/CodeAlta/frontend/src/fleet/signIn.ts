@@ -55,14 +55,19 @@ export interface SignInDraft {
   clientSecret: string;
   displayName: string;
   groupsClaim: string;
+  /** The groups that give a role at each company sign-in. */
+  groupRoles: { group: string; role: string }[];
   requireSso: boolean;
 }
+
+/** The roles a group may give: every role but owner, from the widest. */
+export const groupRoleChoices = ["admin", "member", "auditor", "guest"] as const;
 
 /** The draft of settings as the server holds them. */
 export function signInDraft(view: FleetSignInSettingsView): SignInDraft {
   return {
     enabled: view.methods.filter(method => method.enabled).map(method => method.id), issuer: view.issuer ?? "", clientId: view.clientId ?? "", clientSecret: "",
-    displayName: view.displayName ?? "", groupsClaim: view.groupsClaim || "groups", requireSso: view.requireSso,
+    displayName: view.displayName ?? "", groupsClaim: view.groupsClaim || "groups", groupRoles: (view.groupRoles ?? []).map(role => ({ ...role })), requireSso: view.requireSso,
   };
 }
 
@@ -83,6 +88,9 @@ export function signInDraftProblem(draft: SignInDraft): MessageKey | null {
     return "Company sign-in needs its issuer and client id.";
   }
   if (draft.requireSso && (!hasCompany(draft) || !draft.enabled.includes("company"))) return "Requiring company sign-in needs company sign-in on.";
+  const groups = draft.groupRoles.map(role => role.group.trim());
+  if (groups.some(group => !group)) return "Each group needs its id.";
+  if (new Set(groups).size !== groups.length) return "A group gives one role.";
   return null;
 }
 

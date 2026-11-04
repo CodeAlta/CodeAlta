@@ -58,6 +58,15 @@ public sealed partial class SqliteCoordinatorStore
     }
 
     /// <inheritdoc />
+    public ValueTask<IReadOnlyList<(string AutomationId, string PersonId)>> ListAutomationHoldersAsync(string organizationId, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(organizationId);
+        return ReadAsync(connection => QueryList(connection, null,
+            "SELECT DISTINCT automation_id, owner_person_id FROM automations WHERE organization_id = $org AND removed = 0 ORDER BY automation_id, owner_person_id",
+            static reader => (reader.GetString(0), reader.GetString(1)), ("$org", organizationId)), cancellationToken);
+    }
+
+    /// <inheritdoc />
     public ValueTask<IReadOnlyList<AutomationRecord>> ListPendingAutomationsAsync(string organizationId, string machineId, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrEmpty(organizationId);

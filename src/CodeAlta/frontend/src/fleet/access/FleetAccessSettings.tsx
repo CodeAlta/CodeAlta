@@ -434,8 +434,12 @@ function GrantForm({ context, onClose }: { context: Context; onClose: () => void
   const [subject, setSubject] = useState(subjects[0]?.value ?? "");
   const [capability, setCapability] = useState(grantCapabilities[0].value);
   const content = isContentCapability(capability);
-  const scopes = [...(content ? [] : [{ value: "organization:", label: t("The organization") }, ...overview.teams.map(team => ({ value: `team:${team.id}`, label: t("Team {name}", { name: team.name }) }))]),
-    ...machines.map(machine => ({ value: `resource:machine:${machine.id}`, label: t("Machine: {name}", { name: machine.name }) }))];
+  // The content of a session is granted on that session; its title is sealed again for the grantee on this computer.
+  const ofSession = capability.startsWith("session.");
+  const scopes = ofSession
+    ? overview.sessions.map(session => ({ value: `resource:session:${session.id}`, label: t("Session: {name}", { name: `${session.title} · ${session.machineName}` }) }))
+    : [...(content ? [] : [{ value: "organization:", label: t("The organization") }, ...overview.teams.map(team => ({ value: `team:${team.id}`, label: t("Team {name}", { name: team.name }) }))]),
+      ...machines.map(machine => ({ value: `resource:machine:${machine.id}`, label: t("Machine: {name}", { name: machine.name }) }))];
   const [scope, setScope] = useState("");
   const [sealed, setSealed] = useState(false);
   const chosenScope = scopes.some(item => item.value === scope) ? scope : scopes[0]?.value ?? "";
@@ -443,7 +447,7 @@ function GrantForm({ context, onClose }: { context: Context; onClose: () => void
     const who = parseTarget(subject);
     const where = parseTarget(chosenScope);
     void run(() => api.createGrant({ expectedEpoch: epoch, linkId, subjectKind: who.kind, subjectId: who.id ?? "", capability, scopeKind: where.kind, scopeId: where.id,
-      sealed: content && sealed }, call)).then(ok => { if (ok) onClose(); });
+      sealed: capability === "session.view-content" && sealed }, call)).then(ok => { if (ok) onClose(); });
   };
   return <form className="fleet-secret-new fleet-access-grant" aria-label={t("Add a grant…")} onSubmit={event => { event.preventDefault(); if (subject && chosenScope) submit(); }}>
     <div className="fleet-secret-new-row">
@@ -452,9 +456,10 @@ function GrantForm({ context, onClose }: { context: Context; onClose: () => void
         options={grantCapabilities.map(item => ({ value: item.value, label: t(item.label) }))} />
       <HTMLSelect value={chosenScope} aria-label={t("Where")} disabled={busy || scopes.length === 0} onChange={event => setScope(event.target.value)} options={scopes} />
     </div>
-    {content && <Checkbox checked={sealed} disabled={busy} label={t("The content is sealed from the server (a Private space): a device of its owner gives the keys")}
+    {capability === "session.view-content" && scopes.length > 0 && <Checkbox checked={sealed} disabled={busy} label={t("The content is sealed from the server (a Private space): a device of its owner gives the keys")}
       onChange={event => setSealed(event.currentTarget.checked)} />}
     {content && scopes.length === 0 && <p className="muted-text">{t("Content is granted on one machine or session, never on a whole scope.")}</p>}
+    {ofSession && scopes.length === 0 && <p className="muted-text">{t("Only your own sessions whose title this computer opens are shared from here.")}</p>}
     <div className="fleet-secret-new-row fleet-secret-new-actions">
       <Button variant="minimal" size="small" text={t("Cancel")} disabled={busy} onClick={onClose} />
       <Button type="submit" size="small" intent="primary" text={t("Add")} disabled={busy || !subject || !chosenScope} />

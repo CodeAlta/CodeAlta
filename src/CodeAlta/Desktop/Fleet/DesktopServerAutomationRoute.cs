@@ -37,6 +37,15 @@ internal sealed class DesktopServerAutomationRoute : IDisposable
     /// <summary>Gets the name of the machine.</summary>
     internal string MachineName { get; }
 
+    /// <summary>
+    /// Gets the team of the machine when this computer's person maintains it, as the signed access document this computer
+    /// verified says: what is given to that machine is an automation of the team, which runs as its service identity; null otherwise.
+    /// </summary>
+    internal string? TeamId { get; init; }
+
+    /// <summary>Gets the scope the versions given through this route name: the team of the machine, or none for a personal automation.</summary>
+    internal string? Scope => TeamId is { } team ? FleetAutomationVersion.TeamScopePrefix + team : null;
+
     /// <summary>Seals what a version does for its machine and the controllers of this computer's person, as the device list of the server verifies them now.</summary>
     /// <exception cref="FleetDeviceListException">The device list does not verify.</exception>
     /// <exception cref="ArgumentException">The machine is not in the device list.</exception>

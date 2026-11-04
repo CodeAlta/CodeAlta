@@ -580,6 +580,58 @@ public sealed class SignInTests
         Assert.IsFalse(audit.Any(static record => record.Details?.Contains("company-secret", StringComparison.Ordinal) == true), "the audit log never holds the secret");
     }
 
+    [TestMethod]
+    public async Task TheGroupsOfACompanySignInGiveTheRole_AtEachSignIn_ButNeverMakeOrUnmakeAnOwner()
+    {
+        await using var provider = await FakeOidcProvider.StartAsync(clientSecret: "company-secret");
+        await using var server = await ServerFixture.StartAsync(signIn: Options(provider));
+        using var owner = new TestDevice("Desktop");
+        using var laptop = new TestDevice("Laptop");
+        await server.SetUpAsync(owner);
+        await ConfigureCompanyAsync(server, owner, provider, requireSso: false);
+        var held = (await server.SendAsync(owner, HttpMethod.Get, "/api/v1/sign-in/settings")).Read<SignInSettingsDto>();
+        CompanySignInSettings Company(params GroupRoleDto[] roles) => new(provider.Issuer.AbsoluteUri, provider.ClientId, null, "Contoso", null, roles);
+        var ownerRole = await server.SendAsync(owner, HttpMethod.Put, "/api/v1/sign-in/settings", new SetSignInSettingsRequest(held.Version,
+            [FleetSignInMethods.Company, FleetSignInMethods.Passkey], Company(new GroupRoleDto("g-admins", FleetOrganizationRoles.Owner)), false));
+        Assert.AreEqual((HttpStatusCode.BadRequest, SignInErrorCodes.SettingsInvalid), (ownerRole.Status, ownerRole.Code), "no group makes an owner");
+        var twice = await server.SendAsync(owner, HttpMethod.Put, "/api/v1/sign-in/settings", new SetSignInSettingsRequest(held.Version,
+            [FleetSignInMethods.Company, FleetSignInMethods.Passkey], Company(new GroupRoleDto("g-admins", "admin"), new GroupRoleDto("g-admins", "auditor")), false));
+        Assert.AreEqual(HttpStatusCode.BadRequest, twice.Status, "a group maps to one role");
+        var set = await server.SendAsync(owner, HttpMethod.Put, "/api/v1/sign-in/settings", new SetSignInSettingsRequest(held.Version,
+            [FleetSignInMethods.Company, FleetSignInMethods.Passkey], Company(new GroupRoleDto("g-admins", FleetOrganizationRoles.Admin), new GroupRoleDto("g-audit", FleetOrganizationRoles.Auditor)),
+            false));
+        Assert.AreEqual(HttpStatusCode.OK, set.Status, set.Body.ToString());
+        var mapped = set.Read<SignInSettingsDto>().Company!.GroupRoles!;
+        Assert.AreEqual(2, mapped.Count);
+        // Read again without the mapping, a change keeps it (a client that does not know it); an empty one removes it.
+        var kept = await server.SendAsync(owner, HttpMethod.Put, "/api/v1/sign-in/settings", new SetSignInSettingsRequest(set.Read<SignInSettingsDto>().Version,
+            [FleetSignInMethods.Company, FleetSignInMethods.Passkey], new CompanySignInSettings(provider.Issuer.AbsoluteUri, provider.ClientId, null, "Contoso"), false));
+        Assert.AreEqual(2, kept.Read<SignInSettingsDto>().Company!.GroupRoles!.Count);
+
+        // In g-admins: an admin from the first sign-in; the audit says the groups did it.
+        var (start, back) = await StartAsync(server, laptop, FleetSignInMethods.Company);
+        var signedIn = (await CompleteAsync(server, laptop, start, back)).Read<CompleteSignInResponse>();
+        Assert.AreEqual(PersonRoles.Admin, (await server.Server.Store.GetPersonAsync(signedIn.Person.Id))!.Role);
+        var audit = (await server.SendAsync(owner, HttpMethod.Get, "/api/v1/audit?limit=500")).Read<ListResponse<AuditRecordDto>>().Items;
+        Assert.IsTrue(audit.Any(record => record.Action == "person.role" && record.Target == signedIn.Person.Id && record.Details?.Contains("sign-in", StringComparison.Ordinal) == true));
+
+        // Out of g-admins, in g-audit: an auditor at the next sign-in; in no mapped group: a member.
+        provider.Account = provider.Account with { Groups = ["g-engineering", "g-audit"] };
+        (start, back) = await StartAsync(server, laptop, FleetSignInMethods.Company);
+        await CompleteAsync(server, laptop, start, back);
+        Assert.AreEqual(FleetOrganizationRoles.Auditor, (await server.Server.Store.GetPersonAsync(signedIn.Person.Id))!.Role);
+        provider.Account = provider.Account with { Groups = ["g-engineering"] };
+        (start, back) = await StartAsync(server, laptop, FleetSignInMethods.Company);
+        await CompleteAsync(server, laptop, start, back);
+        Assert.AreEqual(PersonRoles.Member, (await server.Server.Store.GetPersonAsync(signedIn.Person.Id))!.Role);
+
+        // An owner stays an owner whatever their groups say.
+        Assert.AreEqual(HttpStatusCode.OK, (await server.SendAsync(owner, HttpMethod.Put, $"/api/v1/people/{signedIn.Person.Id}/role", new SetRoleRequest(FleetOrganizationRoles.Owner))).Status);
+        (start, back) = await StartAsync(server, laptop, FleetSignInMethods.Company);
+        await CompleteAsync(server, laptop, start, back);
+        Assert.AreEqual(PersonRoles.Owner, (await server.Server.Store.GetPersonAsync(signedIn.Person.Id))!.Role);
+    }
+
     internal static SignInOptions Options(FakeOidcProvider provider) => new()
     {
         AllowLoopbackHttpProviders = true,

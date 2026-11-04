@@ -139,10 +139,15 @@ internal static class AccessEndpoints
             .Produces<GrantDto>()
             .WithSummary("Takes a grant back.");
 
-        api.MapPost("/grants/{id}/keys", (string id, HttpContext context, AccessService access) =>
-                Audited(context, "grant.keys", id, json.GrantDto, actor => access.ConfirmGrantKeysAsync(actor, id, ApiEndpoints.Origin(context), context.RequestAborted)))
+        api.MapPost("/grants/{id}/keys", (string id, ConfirmGrantKeysRequest? request, HttpContext context, AccessService access) =>
+                Audited(context, "grant.keys", id, json.GrantDto, actor => access.ConfirmGrantKeysAsync(actor, id, request, ApiEndpoints.Origin(context), context.RequestAborted)))
             .Produces<GrantDto>()
             .WithSummary("Confirms, from a device of the owner of sealed content, that its keys were wrapped to the subject's devices: the grant then applies.");
+
+        api.MapGet("/grant-keys", (HttpContext context, AccessService access) =>
+                Read(context, json.AccessListDtoGrantKeyDto, actor => access.ListGrantKeysAsync(actor, context.RequestAborted)))
+            .Produces<AccessListDto<GrantKeyDto>>()
+            .WithSummary("What grants of sealed content give the calling device: the sealed metadata of each session and its copy of the key, which only that device opens.");
 
         api.MapGet("/owners", (HttpContext context, AccessService access) =>
                 Read(context, json.AccessListDtoResourceOwnerDto, actor => access.ListOwnersAsync(actor, context.RequestAborted)))
@@ -164,6 +169,11 @@ internal static class AccessEndpoints
                     actor => access.OfferTransferAsync(actor, request, ApiEndpoints.Origin(context), context.RequestAborted), StatusCodes.Status201Created))
             .Produces<TransferDto>(StatusCodes.Status201Created)
             .WithSummary("Offers a machine or an automation to another owner: a person, a team or the organization, who accepts it.");
+
+        api.MapGet("/transfers/{id}/handover", (string id, HttpContext context, AccessService access) =>
+                Read(context, json.TransferHandoverCopyDto, actor => access.GetHandoverAsync(actor, id, context.RequestAborted)))
+            .Produces<TransferHandoverCopyDto>()
+            .WithSummary("What an automation given to the caller's person does, sealed by its former owner's computer, and this device's copy of its key.");
 
         foreach (var (verb, state) in new[] { ("accept", FleetTransferStates.Accepted), ("decline", FleetTransferStates.Declined), ("cancel", FleetTransferStates.Cancelled) })
         {

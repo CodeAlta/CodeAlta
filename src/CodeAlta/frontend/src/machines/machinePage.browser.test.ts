@@ -221,3 +221,23 @@ test("the computer that manages a machine adds and removes its labels on its pag
     assert.deepEqual(page.problems, []);
   }, options);
 });
+
+test("the computer that manages a machine lets in the person who asked, changes what a named person may do, and adds one", { skip: !edge, timeout: 90_000 }, async () => {
+  await withCanvas(async page => {
+    await page.until(`document.querySelector('.machine-people [data-ask="Cy"]')`, "the request");
+    assert.match(await page.evaluate(`document.querySelector('.machine-people [data-ask="Cy"]').textContent`) as string, /Cy asked to use this machine/);
+    await page.clickText(".machine-people [data-ask=\"Cy\"] .bp6-button", "Let in");
+    await page.until(`window.machineFixture.calls.some(call => call.includes('"person"'))`, "let in");
+    // Bea may view and drive: she is given start too.
+    await page.evaluate(`[...document.querySelectorAll('.machine-people [data-person="Bea"] label')].at(-1).click()`);
+    await page.until(`window.machineFixture.calls.filter(call => call.includes('"person"')).length === 2`, "changed");
+    await page.evaluate(choose(".machine-people select", "dan"));
+    await page.until(`window.machineFixture.calls.filter(call => call.includes('"person"')).length === 3`, "added");
+    assert.deepEqual((await calls(page)).filter(call => "person" in call), [
+      { person: { personId: "cy", permissions: ["view", "drive", "start"], refuse: false } },
+      { person: { personId: "bea", permissions: ["view", "drive", "start"], refuse: false } },
+      { person: { personId: "dan", permissions: ["view", "drive", "start"], refuse: false } },
+    ]);
+    assert.deepEqual(page.problems, []);
+  }, options);
+});

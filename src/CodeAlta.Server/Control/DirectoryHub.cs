@@ -24,6 +24,9 @@ public sealed class DirectoryHub
     /// <summary>Gets the instruments of the watchers; null for none.</summary>
     public Telemetry.ServerMetrics? Metrics { get; init; }
 
+    /// <summary>Gets what decides which changes each watcher may see; null sends every change of the organization (tests of the hub alone).</summary>
+    internal Services.DirectoryVisibility? Visibility { get; init; }
+
     /// <summary>Starts sending the changes of the directory to a connection.</summary>
     /// <param name="session">The connection.</param>
     /// <returns>Whether it was not watching already.</returns>
@@ -32,7 +35,7 @@ public sealed class DirectoryHub
     {
         ArgumentNullException.ThrowIfNull(session);
         if (_watchers.ContainsKey(session)) return false;
-        var watcher = new DirectoryWatcher(session, Metrics);
+        var watcher = new DirectoryWatcher(session, Metrics, Visibility);
         if (!_watchers.TryAdd(session, watcher)) return false;
         Metrics?.Watcher(1);
         watcher.Start();
@@ -64,7 +67,7 @@ public sealed class DirectoryHub
         }
     }
 
-    private sealed class DirectoryWatcher(ControlSession session, Telemetry.ServerMetrics? metrics)
+    private sealed class DirectoryWatcher(ControlSession session, Telemetry.ServerMetrics? metrics, Services.DirectoryVisibility? visibility)
     {
         private readonly Channel<FleetDirectoryChange> _queue = Channel.CreateBounded<FleetDirectoryChange>(new BoundedChannelOptions(WatcherCapacity)
         {
@@ -95,6 +98,8 @@ public sealed class DirectoryHub
             {
                 await foreach (var change in _queue.Reader.ReadAllAsync().ConfigureAwait(false))
                 {
+                    // A change this device may not see is not sent: decided when it is sent, with access as it stands then.
+                    if (visibility is not null && !await visibility.SeesAsync(session.Device, change, CancellationToken.None).ConfigureAwait(false)) continue;
                     var payload = JsonSerializer.SerializeToElement(change, FleetServerJsonContext.Default.FleetDirectoryChange);
                     await session.Connection.SendEventAsync(new FleetEvent(FleetServerMethods.DirectoryChanged, payload, null, ++_sequence)).ConfigureAwait(false);
                 }

@@ -88,6 +88,7 @@ export function notificationPhrase(notification: FleetNotificationView): Phrase 
     case "version_behind": return { key: "{machine} runs an older version: {detail}.", values: { machine, detail } };
     case "automation_failing": return { key: "An automation keeps failing on {machine}.", values: { machine } };
     case "policy_refusing": return { key: "The policy of {machine} refuses runs.", values: { machine } };
+    case "access_request": return { key: "Someone of your organization asks to use {machine}: let them in or refuse on its page.", values: { machine } };
     default: return { key: "{machine} has a problem.", values: { machine } };
   }
 }

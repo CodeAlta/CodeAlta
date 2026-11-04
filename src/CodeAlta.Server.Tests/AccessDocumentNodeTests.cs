@@ -66,6 +66,66 @@ public sealed class AccessDocumentNodeTests
         Assert.AreEqual(2, Volatile.Read(ref told), "the node was told of each new version");
     }
 
+    [TestMethod]
+    public async Task AReadAgainVerifiesOnlyTheVersionsAfterTheLastOneVerified_AndStillRefusesOneThatDoesNotFollow()
+    {
+        await using var server = await ServerFixture.StartAsync();
+        using var root = new TempDirectory();
+        using var ownerKey = DeviceIdentity.LoadOrCreate(Path.Combine(root.Path, "owner"));
+        using var owner = new FleetServerClient(server.BaseAddress, ownerKey);
+        await owner.SetUpAsync(server.SetupCode, "Alex", "Desktop", "Acme", CancellationToken.None);
+        // The owner's first approval fixes his person in the device list, as a recovery key does when a server is set up.
+        using var nodeKey = DeviceIdentity.LoadOrCreate(Path.Combine(root.Path, "node"));
+        var enrollment = await owner.CreateEnrollmentTokenAsync(null, "build-box", CancellationToken.None);
+        using (var node = new FleetServerClient(server.BaseAddress, nodeKey)) await node.EnrollAsync(enrollment.Token, "Build box", CancellationToken.None);
+        await owner.ApproveAsync(nodeKey.DeviceId, FleetDeviceKinds.Node, CancellationToken.None);
+        using var recording = new RecordingHandler { InnerHandler = new HttpClientHandler() };
+        var console = new FleetOrganizationAccess(new FleetOrganizationDevices(server.BaseAddress, ownerKey, Path.Combine(root.Path, "link", FleetOrganizationDevices.PinFileName),
+            recording), Path.Combine(root.Path, "link", FleetOrganizationAccess.PinFileName));
+        await console.SignAsync((await console.PrepareAsync(CancellationToken.None))!, CancellationToken.None);
+        await owner.CreateTeamAsync("Infra");
+        await console.SignAsync((await console.PrepareAsync(CancellationToken.None))!, CancellationToken.None);
+        Assert.AreEqual(2, console.Current!.Number);
+        recording.Reads.Clear();
+
+        var held = console.Current;
+        Assert.AreSame(held, await console.RefreshAsync(CancellationToken.None), "nothing new: the state verified before stays");
+        CollectionAssert.AreEqual(new[] { "after=2" }, recording.Reads.ToArray(), "it asks only for what follows the version it verified");
+        var web = await owner.CreateTeamAsync("Web");
+        var third = await console.SignAsync((await console.PrepareAsync(CancellationToken.None))!, CancellationToken.None);
+        Assert.AreEqual(3, third.Number);
+        Assert.IsTrue(third.Teams.ContainsKey(web.Id));
+        Assert.IsFalse(recording.Reads.Contains("after=0"), "never the whole chain again");
+
+        // A server that answers a version which does not follow the one verified is refused, and the state stays.
+        // The first version again, as if it came after the third: its number and its link do not follow.
+        recording.Forged = new AccessDocumentListDto([(await owner.ListAccessDocumentsAsync(0)).Items[0]]);
+        await Assert.ThrowsExactlyAsync<FleetAccessDocumentException>(() => console.RefreshAsync(CancellationToken.None));
+        Assert.AreEqual(3, console.Current!.Number);
+    }
+
+    // Records the reads of the access document, and answers a list of its own once given one.
+    private sealed class RecordingHandler : DelegatingHandler
+    {
+        public System.Collections.Concurrent.ConcurrentQueue<string> Reads { get; } = new();
+
+        public AccessDocumentListDto? Forged { get; set; }
+
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            var uri = request.RequestUri!;
+            if (request.Method != HttpMethod.Get || !uri.AbsolutePath.EndsWith("/api/v1/access/documents", StringComparison.Ordinal))
+                return await base.SendAsync(request, cancellationToken);
+            Reads.Enqueue(uri.Query.TrimStart('?'));
+            if (Forged is not { } forged) return await base.SendAsync(request, cancellationToken);
+            return new HttpResponseMessage(System.Net.HttpStatusCode.OK)
+            {
+                Content = new StringContent(System.Text.Json.JsonSerializer.Serialize(forged, FleetAccessDocumentJsonContext.Default.AccessDocumentListDto), System.Text.Encoding.UTF8,
+                    "application/json"),
+            };
+        }
+    }
+
     private static async Task WaitForAsync(Func<bool> condition, string what)
     {
         var deadline = DateTime.UtcNow + Patience;

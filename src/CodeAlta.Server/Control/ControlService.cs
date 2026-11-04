@@ -278,7 +278,10 @@ public sealed class ControlService
                 .ToArray();
             var sessions = (await _store.ListSessionsAsync(organization, token).ConfigureAwait(false)).Select(static record => record.ToDirectory()).ToArray();
             var presence = _presence.List(organization).Select(static online => online.GetPresence()).ToArray();
-            return JsonSerializer.SerializeToElement(new FleetDirectorySnapshot(machines, sessions, presence), FleetServerJsonContext.Default.FleetDirectorySnapshot);
+            var snapshot = new FleetDirectorySnapshot(machines, sessions, presence);
+            // Each device sees what access lets it see (doc/fleet/access-control.md): the events that follow are filtered alike.
+            if (_directory.Visibility is { } visibility) snapshot = await visibility.FilterAsync(session.Device, snapshot, token).ConfigureAwait(false);
+            return JsonSerializer.SerializeToElement(snapshot, FleetServerJsonContext.Default.FleetDirectorySnapshot);
         });
 
         if (Automations is { } automations) RegisterAutomations(session, automations, On);
@@ -391,7 +394,7 @@ public sealed class ControlService
 
         public async ValueTask<FleetProofVerification> VerifyAsync(FleetHello hello, FleetProofContext context, CancellationToken cancellationToken)
         {
-            var device = await store.GetDeviceAsync(context.DeviceId, cancellationToken).ConfigureAwait(false);
+            var (device, suspended) = await store.GetDeviceOfRequestAsync(context.DeviceId, cancellationToken).ConfigureAwait(false);
             // The proof is checked before the status, so that a pending or revoked answer tells only the holder of the key.
             if (device is null || !FleetDevicePublicKey.TryParse(device.PublicKey, out var key) || !key.Verify(context.GetSignedBytes(), hello.Device.Proof))
             {
@@ -408,7 +411,7 @@ public sealed class ControlService
                     return FleetProofVerification.Reject(new FleetError(FleetErrorCodes.Revoked, null, "The device was revoked."));
             }
 
-            if (device.OwnerPersonId is { } owner && await store.GetPersonAsync(owner, cancellationToken).ConfigureAwait(false) is { IsActive: false })
+            if (suspended)
                 return FleetProofVerification.Reject(new FleetError(FleetErrorCodes.Revoked, null, "The person of this device is suspended."));
             Device = device;
             return FleetProofVerification.Accept();

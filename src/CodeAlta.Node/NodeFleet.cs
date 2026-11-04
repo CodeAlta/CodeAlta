@@ -376,12 +376,15 @@ internal sealed class NodeServers : IAsyncDisposable
         ArgumentNullException.ThrowIfNull(node);
         var catalog = node.Host.CatalogOptions;
         var identity = DeviceIdentity.LoadOrCreate(catalog);
-        var source = new Fleet.Server.FleetHostPublicationSource(node.Host, name, version, ["sessions", "moves"]);
+        var source = new Fleet.Server.FleetHostPublicationSource(node.Host, name, version, ["sessions", "moves"]) { PersonOf = service is null ? null : service.PersonOfSession };
         // The statistics the node counts (its Statistics plugin), published with the facts of its sessions.
         var statistics = Fleet.Server.FleetHostStatisticsSource.ForHost(node.Host);
         NodeFleetSecrets? secrets = null;
         NodeBudgets? budgets = null;
-        var health = new NodeHealth(node);
+        var health = new NodeHealth(node)
+        {
+            AccessRequests = service is null ? null : () => [.. service.People.Read().Asks.Select(static ask => ask.PersonId)],
+        };
         var connections = new Fleet.Server.FleetServerConnections(new Fleet.Server.FleetServerConnectionsOptions
         {
             FleetRoot = catalog.FleetRoot,

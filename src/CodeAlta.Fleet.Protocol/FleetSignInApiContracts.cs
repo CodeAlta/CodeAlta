@@ -150,7 +150,17 @@ public sealed record PasskeyFinishResponse(string RedirectUrl);
 /// <param name="HasClientSecret">Whether a client secret is set; the server never gives it back.</param>
 /// <param name="DisplayName">The name of the provider for people, such as "Contoso".</param>
 /// <param name="GroupsClaim">The claim of the ID token that holds the groups (<c>groups</c> or <c>roles</c>).</param>
-public sealed record CompanySignInDto(string Issuer, string ClientId, bool HasClientSecret, string? DisplayName, string GroupsClaim);
+/// <param name="GroupRoles">The groups that give a role at each company sign-in; empty when roles are set by hand only.</param>
+public sealed record CompanySignInDto(string Issuer, string ClientId, bool HasClientSecret, string? DisplayName, string GroupsClaim,
+    IReadOnlyList<GroupRoleDto>? GroupRoles = null);
+
+/// <summary>
+/// A group of the company's provider and the organization role its members get at each company sign-in (<c>doc/fleet/identity.md</c>,
+/// company SSO): by the group's id, as the groups claim gives it. Never the owner role.
+/// </summary>
+/// <param name="Group">The id of the group (or the app role) in the claim.</param>
+/// <param name="Role">The role: <c>admin</c>, <c>member</c>, <c>auditor</c> or <c>guest</c>.</param>
+public sealed record GroupRoleDto(string Group, string Role);
 
 /// <summary>The sign-in settings of the organization (<c>GET /api/v1/sign-in/settings</c>), for an owner's controller device.</summary>
 /// <param name="Methods">Every method, with whether it is enabled and available.</param>
@@ -168,7 +178,9 @@ public sealed record SignInSettingsDto(IReadOnlyList<SignInMethodDto> Methods, C
 /// <param name="ClientSecret">The client secret; null keeps the one set, empty removes it (a public client with PKCE).</param>
 /// <param name="DisplayName">The name for people, or null.</param>
 /// <param name="GroupsClaim">The claim of the groups; null for <c>groups</c>.</param>
-public sealed record CompanySignInSettings(string Issuer, string ClientId, string? ClientSecret = null, string? DisplayName = null, string? GroupsClaim = null);
+/// <param name="GroupRoles">The groups that give a role at each company sign-in; null keeps the ones set, empty removes them.</param>
+public sealed record CompanySignInSettings(string Issuer, string ClientId, string? ClientSecret = null, string? DisplayName = null, string? GroupsClaim = null,
+    IReadOnlyList<GroupRoleDto>? GroupRoles = null);
 
 /// <summary>The body of <c>PUT /api/v1/sign-in/settings</c>, sent by an owner's controller device.</summary>
 /// <param name="Version">The version it changes (<see cref="SignInSettingsDto.Version"/>).</param>

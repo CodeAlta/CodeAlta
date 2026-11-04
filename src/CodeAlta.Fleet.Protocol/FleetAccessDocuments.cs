@@ -13,11 +13,16 @@ namespace CodeAlta.Fleet.Protocol;
 /// <param name="Maintainers">The people who maintain it.</param>
 /// <param name="Members">Its other members.</param>
 /// <param name="RunsMemberAutomations">Whether its machines run the personal automations of its members.</param>
+/// <param name="Services">
+/// The service identities of the team that are turned on (<c>doc/fleet/orchestration.md</c>, who a run acts as): its
+/// automations run as one of them, and not at all without one; null for none, which writes the format as before.
+/// </param>
 public sealed record FleetAccessTeam(
     [property: JsonPropertyName("id")] string Id,
     [property: JsonPropertyName("maintainers")] IReadOnlyList<string> Maintainers,
     [property: JsonPropertyName("members")] IReadOnlyList<string> Members,
-    [property: JsonPropertyName("runsMemberAutomations")] bool RunsMemberAutomations);
+    [property: JsonPropertyName("runsMemberAutomations")] bool RunsMemberAutomations,
+    [property: JsonPropertyName("services"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<string>? Services = null);
 
 /// <summary>A team machine: the device of the machine and the team that owns it.</summary>
 /// <param name="DeviceId">The device of the machine.</param>
@@ -354,6 +359,10 @@ public static class FleetAccessDocuments
 
             if ((held?.RunsMemberAutomations ?? false) != team.RunsMemberAutomations)
                 lines.Add(team.RunsMemberAutomations ? $"Machines of {Name(team.Id)} run the automations of its members" : $"Machines of {Name(team.Id)} stop running the automations of its members");
+            foreach (var id in (team.Services ?? []).Where(id => held?.Services?.Contains(id, StringComparer.Ordinal) != true))
+                lines.Add($"{Name(team.Id)} runs its automations as {Name(id)}");
+            foreach (var id in (held?.Services ?? []).Where(id => team.Services?.Contains(id, StringComparer.Ordinal) != true))
+                lines.Add($"{Name(team.Id)} no longer runs its automations as {Name(id)}");
         }
 
         foreach (var id in before.Teams.Keys.Where(id => !teams.ContainsKey(id))) lines.Add($"Team {Name(id)} is dissolved");
@@ -380,7 +389,8 @@ public static class FleetAccessDocuments
             && SameSet(left.Teams.Select(TeamKey), right.Teams.Select(TeamKey));
 
         static string TeamKey(FleetAccessTeam team)
-            => $"{team.Id}\n{team.RunsMemberAutomations}\n{string.Join(',', team.Maintainers.Order(StringComparer.Ordinal))}\n{string.Join(',', team.Members.Order(StringComparer.Ordinal))}";
+            => $"{team.Id}\n{team.RunsMemberAutomations}\n{string.Join(',', team.Maintainers.Order(StringComparer.Ordinal))}\n{string.Join(',', team.Members.Order(StringComparer.Ordinal))}"
+                + $"\n{string.Join(',', (team.Services ?? []).Order(StringComparer.Ordinal))}";
     }
 
     /// <summary>Gets whether a state and a version say the same.</summary>
@@ -456,6 +466,8 @@ public static class FleetAccessDocuments
             var people = team.Maintainers.Concat(team.Members).ToList();
             if (people.Count > MaxItems || people.Any(static id => !IsId(id)) || people.Distinct(StringComparer.Ordinal).Count() != people.Count) return "a team names a person twice";
             if (people.Any(suspended.Contains)) return "a suspended person is in a team";
+            if (team.Services is { } services && (services.Count > MaxItems || services.Any(static id => !IsId(id)) || services.Distinct(StringComparer.Ordinal).Count() != services.Count))
+                return "a team names its service identities once each";
         }
 
         var machines = new HashSet<string>(StringComparer.Ordinal);

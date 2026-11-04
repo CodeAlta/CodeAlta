@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { Button, Callout, HTMLSelect, InputGroup, PopoverNext, Switch, Tag } from "@blueprintjs/core";
-import { machines, type MachineAgentsView, type MachineDeviceView, type MachineManagement, type MachineUpdateView, type MachineView, type SecretsList } from "#neoastra";
+import { machines, type MachinePeopleView, type MachineAgentsView, type MachineDeviceView, type MachineManagement, type MachineUpdateView, type MachineView, type SecretsList } from "#neoastra";
 import { AppIcon } from "../AppIcon";
 import { SecretsBody, type SecretsActions } from "../secrets/SecretsSettings";
 import { ActivitySpinner } from "../ActivitySpinner";
@@ -16,7 +16,7 @@ import { agentSandboxChoices, agentsAllowed, confirmsBypass, confirmsLoss, devic
 /** The calls of the page of a machine. */
 export type MachinePageApi = Pick<typeof machines, "management" | "setDevicePermission" | "revokeDevice" | "addProject" | "cloneProject" | "removeProject"
   | "readLog" | "updateMachine" | "secrets" | "setSecret" | "rotateSecret" | "deleteSecret" | "setVariable" | "deleteVariable"
-  | "agents" | "setAgentSpace" | "setAgentSandbox" | "setAgentBypass" | "labels" | "setLabels" | "providers" | "setProvider" | "providerSignIn" | "providerSignInWait">;
+  | "agents" | "setAgentSpace" | "setAgentSandbox" | "setAgentBypass" | "people" | "setMachinePerson" | "labels" | "setLabels" | "providers" | "setProvider" | "providerSignIn" | "providerSignInWait">;
 
 type Problem = { key: MessageKey; detail?: string | null } | null;
 
@@ -86,6 +86,7 @@ export function MachinePage({ epoch, machine, api = machines, onBack }: { epoch:
         onPermission={(device, permission, allowed) => void change(() => api.setDevicePermission({ expectedEpoch: epoch, machineId: machine.id, deviceId: device.id, permission, allowed }))}
         onRevoke={device => void change(() => api.revokeDevice({ expectedEpoch: epoch, machineId: machine.id, deviceId: device.id }))} />
       <AgentsSection epoch={epoch} machine={machine} api={api} />
+      <PeopleSection epoch={epoch} machine={machine} api={api} />
       <LabelsSection epoch={epoch} machine={machine} api={api} />
       <ProjectsSection view={view} busy={busy} machine={machine}
         onAdd={(kind, value, done) => void change(() => kind === "clone"
@@ -168,6 +169,67 @@ function PermissionSwitch({ device, permission, disabled, onChange }: { device: 
   }
 
   return <Switch className="machine-permission" checked={checked} aria-label={label} disabled={disabled} onChange={event => onChange(event.currentTarget.checked)} />;
+}
+
+/**
+ * The people of the organization the machine lets in (its own list, which the server cannot change): each named person with
+ * what they may do there, on their own sessions only; who asked to use it, with Let in and Refuse; and Add a person….
+ */
+function PeopleSection({ epoch, machine, api }: { epoch: string; machine: MachineView; api: MachinePageApi }) {
+  const { t, locale } = useShellLanguage();
+  const [view, setView] = useState<MachinePeopleView | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [problem, setProblem] = useState<Problem>(null);
+  const [generation, setGeneration] = useState(0);
+  useEffect(() => {
+    const abort = new AbortController();
+    api.people({ expectedEpoch: epoch, machineId: machine.id }, { signal: abort.signal, timeoutMilliseconds: 30_000 }).then(value => {
+      if (abort.signal.aborted) return;
+      const failed = managementProblem(value.status);
+      if (failed) setProblem({ key: failed, detail: value.message }); else setView(value);
+    }, () => { if (!abort.signal.aborted) setProblem({ key: "The machine does not answer: it is offline." }); });
+    return () => abort.abort();
+  }, [api, epoch, machine.id, generation]);
+  const set = async (personId: string, permissions: string[] | null, refuse = false) => {
+    setBusy(true);
+    setProblem(null);
+    try {
+      const result = await api.setMachinePerson({ expectedEpoch: epoch, machineId: machine.id, personId, permissions, refuse });
+      const failed = managementProblem(result.status);
+      if (failed) setProblem({ key: failed, detail: result.message });
+    } catch {
+      setProblem({ key: "The machine does not answer: it is offline." });
+    } finally {
+      setBusy(false);
+      setGeneration(value => value + 1);
+    }
+  };
+  const all = ["view", "drive", "start"];
+  if (!view && !problem) return null;
+  return <section className="machine-section machine-people" aria-label={t("People")}>
+    <h2>{t("People")}</h2>
+    <p className="muted-text">{t("People of your organization who may use {name}, each on their own sessions only.", { name: machine.name })}</p>
+    {problem && <Callout compact intent="warning" role="alert">{t(problem.key)}{problem.detail && <div className="muted-text">{problem.detail}</div>}</Callout>}
+    {view && <>
+      {view.asks.map(ask => <div key={ask.personId} className="machine-person machine-person-ask" data-ask={ask.name}>
+        <span>{t("{name} asked to use this machine on {date}.", { name: ask.name, date: new Date(ask.askedAt).toLocaleString(locale, { dateStyle: "medium", timeStyle: "short" }) })}</span>
+        <Button size="small" intent="primary" disabled={busy} text={t("Let in")} onClick={() => void set(ask.personId, all)} />
+        <Button size="small" variant="minimal" disabled={busy} text={t("Refuse")} onClick={() => void set(ask.personId, null, true)} />
+      </div>)}
+      {view.people.map(person => <div key={person.personId} className="machine-person" data-person={person.name}>
+        <span className="machine-person-name">{person.name}</span>
+        {all.map(permission => <Switch key={permission} className="machine-permission" inline label={t(permissionLabel(permission as DevicePermission).name)}
+          checked={person.permissions.includes(permission)} disabled={busy} onChange={event => {
+            const next = event.currentTarget.checked ? [...person.permissions, permission] : person.permissions.filter(value => value !== permission);
+            void set(person.personId, next.length > 0 ? next : null);
+          }} />)}
+        <RemoveButton name={person.name} disabled={busy} onRemove={() => void set(person.personId, null)} />
+      </div>)}
+      {view.others.length > 0 && <HTMLSelect value="" disabled={busy} aria-label={t("Add a person…")}
+        options={[{ value: "", label: t("Add a person…") }, ...view.others.map(person => ({ value: person.personId, label: person.name }))]}
+        onChange={event => { if (event.currentTarget.value) void set(event.currentTarget.value, all); }} />}
+    </>}
+  </section>;
 }
 
 /**

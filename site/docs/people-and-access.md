@@ -27,7 +27,7 @@ Until then they are listed as **Invited**. People who sign in with your company'
 | **Auditor** | Reads the audit log, statistics and who can do what; changes nothing |
 | **Guest** | Only what is shared with them |
 
-Change a role with the menu on the row of the person. No role reads what others did not share: an owner or an admin sees that a session exists and what it costs, never what it says. The organization always keeps an owner.
+Change a role with the menu on the row of the person. With your company's sign-in, **Roles from groups** can give them instead, by the id of each group (see [Fleet](fleet.md)). No role reads what others did not share: an owner or an admin sees that a session exists and what it costs, never what it says. The organization always keeps an owner.
 
 ## Teams and team machines
 
@@ -37,18 +37,32 @@ Click **New team…** and add its members. A team has **maintainers**, who run i
 - **Its machines run the automations of its members**: off by default. Its maintainers' automations run there either way.
 - **Dissolve** gives what the team owned to the organization.
 
+## People on your own machines
+
+Your machines are yours: the people of your organization see and use them only when you let them. When someone tries, their first try becomes a request: the Fleet button tells you, and the page of the machine (**Settings** > **Fleet** > **Machines**, then the machine) shows it under **People**, with **Let in** and **Refuse**. **Add a person…** lets someone in before they ask, and the switches beside each name set what they may do: view, drive and start sessions. A person you let in sees and drives only the sessions they started there, never yours. The machine keeps this list itself: the server cannot add anyone to it.
+
 ## Owners and transfers
 
 Every machine and automation has one owner: a person, a team or the organization. **Machines and automations** lists them; **Give to…** offers one to another owner, who accepts or declines it under **Waiting for you**. An automation that changes owner is **Paused** until its new owner clicks **Resume**.
+
+- Given to a person from your computer, an automation goes with what it does, sealed for their computers only. **Resume** on their computer adds it to their automations there (add its project to CodeAlta first), and it leaves your computer and your machines.
+- Given to a team or the organization, or left by a person who left, it keeps only its facts: what it does stays sealed for its former owner, so its new owner makes it again.
 
 ## Grants
 
 A grant gives a person or a team one capability somewhere: on the organization, a team, or one machine. **Add a grant…** chooses who, what and where; the trash icon takes it back.
 
-- Reading content (a session, the log of a machine) is granted on one machine or session, never on a whole team or the organization.
-- In a Private space the server cannot read that content: the grant shows **Waiting for keys** until a computer of the owner gives them, with **Confirm keys**.
+- Reading content (a session, the log of a machine) is granted on one machine or session, never on a whole team or the organization. **Read a session** lists your own sessions whose title your computer opens.
+- The server cannot read what a session says. Check **The content is sealed from the server** and the grant shows **Waiting for keys**; on a computer of yours, **Confirm keys** seals the session for the grantee's computers only. The session and its title then appear in the grantee's **Fleet** page, until the grant is taken back.
 
 **Service identities** are what team and organization automations run as. A new one stays off until a person turns it on.
+
+### Automations of a team
+
+An automation you send to a machine of a team you maintain (its **Runs on**) becomes an automation of the team: the team owns it, and its maintainers change it.
+
+- It runs only while the team has a service identity turned on, once that change is signed (see [Sign what machines follow](#sign-what-machines-follow)).
+- A machine of a team runs automations with account credentials only: an API key or a gateway, never a personal plan such as a Claude, Codex or Copilot subscription.
 
 ## Sign what machines follow
 

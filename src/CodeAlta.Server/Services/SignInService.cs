@@ -10,8 +10,8 @@ using Microsoft.AspNetCore.Http;
 namespace CodeAlta.Server.Services;
 
 /// <summary>
-/// The hook that will give people roles from the groups of their company sign-in (milestone 4,
-/// <c>doc/fleet/access-control.md</c>). The groups are stored at every sign-in; today no role follows from them.
+/// The hook that gives people roles from the groups of their company sign-in (<c>doc/fleet/identity.md</c>, company SSO).
+/// The groups are stored at every sign-in; <see cref="GroupRoleMapper"/> applies the groups an organization maps.
 /// </summary>
 public interface ISignInRoleMapper
 {
@@ -22,11 +22,50 @@ public interface ISignInRoleMapper
     string? MapRole(PersonRecord person, IReadOnlyList<string> groups);
 }
 
-/// <summary>The mapping of milestone 3: groups are kept, roles stay as they are.</summary>
+/// <summary>The mapping of an organization that maps no group: groups are kept, roles stay as they are.</summary>
 public sealed class KeepRolesMapper : ISignInRoleMapper
 {
     /// <inheritdoc />
     public string? MapRole(PersonRecord person, IReadOnlyList<string> groups) => null;
+}
+
+/// <summary>
+/// The role the groups of a company sign-in give (<c>doc/fleet/identity.md</c>, company SSO): the widest role among the
+/// groups the person is in, a member when they are in none; an owner keeps their role, which no group gives or takes.
+/// </summary>
+public sealed class GroupRoleMapper : ISignInRoleMapper
+{
+    private readonly IReadOnlyDictionary<string, string> _roles;
+
+    /// <summary>Initializes a new instance of the <see cref="GroupRoleMapper"/> class.</summary>
+    /// <param name="roles">The groups and their roles.</param>
+    /// <exception cref="ArgumentNullException"><paramref name="roles"/> is null.</exception>
+    public GroupRoleMapper(IEnumerable<GroupRoleDto> roles)
+    {
+        ArgumentNullException.ThrowIfNull(roles);
+        _roles = roles.Where(static role => role.Role != PersonRoles.Owner).ToDictionary(static role => role.Group, static role => role.Role, StringComparer.Ordinal);
+    }
+
+    /// <inheritdoc />
+    public string? MapRole(PersonRecord person, IReadOnlyList<string> groups)
+    {
+        ArgumentNullException.ThrowIfNull(person);
+        ArgumentNullException.ThrowIfNull(groups);
+        if (person.Role == PersonRoles.Owner) return null;
+        var widest = groups.Select(group => _roles.GetValueOrDefault(group)).OfType<string>()
+            .OrderBy(static role => IndexOf(role)).FirstOrDefault();
+        return widest ?? PersonRoles.Member;
+    }
+
+    private static int IndexOf(string role)
+    {
+        for (var index = 0; index < FleetOrganizationRoles.All.Count; index++)
+        {
+            if (FleetOrganizationRoles.All[index] == role) return index;
+        }
+
+        return int.MaxValue;
+    }
 }
 
 /// <summary>
@@ -42,6 +81,7 @@ public sealed class KeepRolesMapper : ISignInRoleMapper
 /// </summary>
 public sealed class SignInService : IDisposable
 {
+    private const int MaxGroupRoles = 200;
     private static readonly string[] DefaultEnabled = [FleetSignInMethods.Passkey, FleetSignInMethods.Microsoft, FleetSignInMethods.Google, FleetSignInMethods.GitHub];
 
     private readonly ICoordinatorStore _store;
@@ -79,8 +119,11 @@ public sealed class SignInService : IDisposable
         _passkeys = new PasskeyCeremonies(signIn, store, time);
     }
 
-    /// <summary>Gets the mapping of groups to roles.</summary>
+    /// <summary>Gets the mapping of groups to roles when the organization maps none; the groups it maps replace it.</summary>
     public ISignInRoleMapper Roles { get; init; } = new KeepRolesMapper();
+
+    /// <summary>Gets the access control that applies the role the groups give, or null where nothing applies it.</summary>
+    internal AccessService? Access { get; init; }
 
     /// <summary>Lists the methods a person may sign in with now; needs no device.</summary>
     /// <param name="cancellationToken">Cancels the read.</param>
@@ -139,7 +182,8 @@ public sealed class SignInService : IDisposable
             if (claim.Length > 64 || claim.Any(static c => !char.IsAsciiLetterOrDigit(c) && c is not ('_' or '-' or '.' or ':' or '/')))
                 throw Invalid("The groups claim is not the name of a claim.");
             var name = string.IsNullOrWhiteSpace(given.DisplayName) ? null : SetupService.RequireName(given.DisplayName, "displayName");
-            company = new CompanyDocument(issuer.AbsoluteUri.TrimEnd('/'), given.ClientId.Trim(), name, claim);
+            var groupRoles = given.GroupRoles is null ? held.Document.Company?.GroupRoles : GroupRoles(given.GroupRoles);
+            company = new CompanyDocument(issuer.AbsoluteUri.TrimEnd('/'), given.ClientId.Trim(), name, claim, groupRoles is { Length: > 0 } ? groupRoles : null);
             if (given.ClientSecret is not null) secret = given.ClientSecret.Length == 0 ? null : given.ClientSecret;
             if (secret is { Length: > 2048 }) throw Invalid("The client secret is too long.");
             // A provider that does not answer is refused now rather than at the first sign-in of a person.
@@ -417,8 +461,16 @@ public sealed class SignInService : IDisposable
                 "Your organization requires its company sign-in.", cancellationToken, person.Id).ConfigureAwait(false);
         }
 
-        // The groups of a company sign-in are kept with its login; milestone 4 applies the role the mapping gives, which keeps roles today.
-        if (login is not null) Roles.MapRole(person, ReadGroups(login.Groups));
+        // The groups of a company sign-in are kept with its login, and give the role the organization maps them to.
+        if (login is not null && attempt.Method == FleetSignInMethods.Company && person.IsActive)
+        {
+            var mapper = settings.Document.Company?.GroupRoles is { Length: > 0 } map ? new GroupRoleMapper(map) : Roles;
+            if (mapper.MapRole(person, ReadGroups(login.Groups)) is { } role && role != person.Role && FleetOrganizationRoles.IsKnown(role) && Access is { } access)
+            {
+                await access.ApplyGroupRoleAsync(person, role, new AuditEntry("person.role", AuditEntry.Success, person.Id, deviceId, person.Id, origin.SourceAddress,
+                    origin.RequestId, $"{{\"from\":\"{person.Role}\",\"to\":\"{role}\",\"by\":\"sign-in\"}}"), cancellationToken).ConfigureAwait(false);
+            }
+        }
 
         var devices = await _store.ListDevicesAsync(attempt.OrganizationId, cancellationToken).ConfigureAwait(false);
         var hasDevices = devices.Any(other => other.OwnerPersonId == person.Id && other.Kind == FleetDeviceKinds.Controller && other.Status == DeviceStatuses.Approved);
@@ -627,7 +679,7 @@ public sealed class SignInService : IDisposable
 
     private SignInSettingsDto ToDto(HeldSettings settings)
         => new(Describe(settings.Document), settings.Document.Company is { } company
-                ? new CompanySignInDto(company.Issuer, company.ClientId, settings.Secret is not null, company.DisplayName, company.GroupsClaim)
+                ? new CompanySignInDto(company.Issuer, company.ClientId, settings.Secret is not null, company.DisplayName, company.GroupsClaim, company.GroupRoles ?? [])
                 : null,
             settings.Document.RequireSso, settings.Document.BreakGlassPersonId, settings.Version, settings.UpdatedAt);
 
@@ -673,6 +725,24 @@ public sealed class SignInService : IDisposable
 
     private static string Truncate(string text) => text.Length <= 128 ? text : text[..128];
 
+    // The groups an owner maps: each once, to a role other than owner, by an id of the claim.
+    private static GroupRoleDto[] GroupRoles(IReadOnlyList<GroupRoleDto> given)
+    {
+        if (given.Count > MaxGroupRoles) throw Invalid($"At most {MaxGroupRoles} groups give roles.");
+        var roles = new GroupRoleDto[given.Count];
+        for (var index = 0; index < given.Count; index++)
+        {
+            var group = given[index]?.Group?.Trim();
+            if (string.IsNullOrEmpty(group) || group.Length > 256 || group.Any(char.IsControl)) throw Invalid("A group is named by its id in the groups claim.");
+            if (given[index].Role is not (PersonRoles.Admin or PersonRoles.Member or FleetOrganizationRoles.Auditor or FleetOrganizationRoles.Guest))
+                throw Invalid("A group gives the role admin, member, auditor or guest; never owner.");
+            roles[index] = new GroupRoleDto(group, given[index].Role);
+        }
+
+        if (roles.Select(static role => role.Group).Distinct(StringComparer.Ordinal).Count() != roles.Length) throw Invalid("A group gives one role.");
+        return roles;
+    }
+
     private static IReadOnlyList<string> ReadGroups(string? groups)
         => groups is null ? [] : JsonSerializer.Deserialize(groups, SignInSettingsJsonContext.Default.StringArray) ?? [];
 
@@ -691,7 +761,8 @@ internal sealed record SignInSettingsDocument(string[] Enabled, CompanyDocument?
 /// <param name="ClientId">The client id.</param>
 /// <param name="DisplayName">Its name for people.</param>
 /// <param name="GroupsClaim">The claim of the groups.</param>
-internal sealed record CompanyDocument(string Issuer, string ClientId, string? DisplayName, string GroupsClaim);
+/// <param name="GroupRoles">The groups that give a role, or null.</param>
+internal sealed record CompanyDocument(string Issuer, string ClientId, string? DisplayName, string GroupsClaim, GroupRoleDto[]? GroupRoles = null);
 
 /// <summary>What the audit log records of a change of the settings, never a secret.</summary>
 internal sealed record SignInSettingsAudit(string[] Enabled, string? Issuer, bool RequireSso);

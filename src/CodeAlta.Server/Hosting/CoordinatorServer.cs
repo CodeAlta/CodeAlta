@@ -419,7 +419,8 @@ public sealed class CoordinatorServer : IAsyncDisposable
         services.AddSingleton(new NonceCache(time, options.MaxClockSkew * 2 + TimeSpan.FromMinutes(1)));
         services.AddSingleton(provider => new RequestAuthenticator(store, provider.GetRequiredService<NonceCache>(), time, options.MaxClockSkew) { Metrics = metrics });
         services.AddSingleton<PresenceRegistry>();
-        services.AddSingleton(_ => new DirectoryHub { Metrics = metrics });
+        services.AddSingleton(new DirectoryVisibility(store, store, time));
+        services.AddSingleton(provider => new DirectoryHub { Metrics = metrics, Visibility = provider.GetRequiredService<DirectoryVisibility>() });
         services.AddSingleton(provider => new SetupService(store, codes, provider.GetRequiredService<RequestAuthenticator>(), time));
         services.AddSingleton(provider => new RelayHub(store, provider.GetRequiredService<PresenceRegistry>(), provider.GetRequiredService<RequestAuthenticator>(),
             options.RelayAccess ?? new OrganizationRelayAccess(), options.Relay, time, provider.GetRequiredService<ILoggerFactory>().CreateLogger("CodeAlta.Server.Relay"))
@@ -430,7 +431,7 @@ public sealed class CoordinatorServer : IAsyncDisposable
         var signIn = options.SignIn ?? SignInOptions.FromEnvironment(options.EnvironmentVariable);
         services.AddSingleton(new SignInAttempts(time, signIn.MaxPendingAttempts));
         services.AddSingleton(provider => new SignInService(store, store, provider.GetRequiredService<RequestAuthenticator>(), provider.GetRequiredService<SignInAttempts>(),
-            signIn, time));
+            signIn, time) { Access = provider.GetRequiredService<AccessService>() });
         services.AddSingleton(provider => new DeviceService(store, provider.GetRequiredService<RequestAuthenticator>(), provider.GetRequiredService<PresenceRegistry>(), time,
             provider.GetRequiredService<RelayHub>()) { Metrics = metrics, SignInGrants = provider.GetRequiredService<SignInAttempts>(), SignInStore = store });
         services.AddSingleton(provider => new PublicationService(store, provider.GetRequiredService<DirectoryHub>(), time) { Metrics = metrics });
@@ -456,7 +457,10 @@ public sealed class CoordinatorServer : IAsyncDisposable
             }));
         services.AddSingleton(provider =>
         {
-            var access = new AccessService(store, store, store, provider.GetRequiredService<NotificationService>(), time);
+            var access = new AccessService(store, store, store, provider.GetRequiredService<NotificationService>(), time)
+            {
+                Visibility = provider.GetRequiredService<DirectoryVisibility>(),
+            };
             var devices = provider.GetRequiredService<DeviceService>();
             var presence = provider.GetRequiredService<PresenceRegistry>();
             var relays = provider.GetRequiredService<RelayHub>();
@@ -475,6 +479,7 @@ public sealed class CoordinatorServer : IAsyncDisposable
         services.AddSingleton(provider => new FleetAutomationService(store, store, provider.GetRequiredService<PresenceRegistry>(), time,
             provider.GetRequiredService<ILoggerFactory>().CreateLogger("CodeAlta.Server.Automations"))
         {
+            Access = store,
             // The approvals of an automation go to its owner, the members of the team that owns it, and who is granted them.
             Notifications = provider.GetRequiredService<NotificationService>(),
             ApprovalRecipients = (automation, token) => provider.GetRequiredService<AccessService>().ApproversOfAsync(automation.OrganizationId, automation.AutomationId,

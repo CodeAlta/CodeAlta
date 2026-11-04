@@ -626,8 +626,9 @@ internal sealed class DesktopAutomationPlacement : IAutomationPlacement, IAsyncD
             // The server reads only the facts beside it: what it does is sealed for the machine and this person's controllers.
             var sealedText = await route.SealAsync(new FleetAutomationContent(AutomationConfig.Write(string.Empty, copy), repository), entry.Id, number, machineId,
                 cancellationToken).ConfigureAwait(false);
+            // Given to a machine of a team its person maintains, it is an automation of that team (doc/fleet/orchestration.md, scopes).
             var signed = _sign(new FleetAutomationVersion(FleetAutomationVersion.CurrentVersion, route.OrganizationId, entry.Id, number, machineId, false, copy.Enabled,
-                TriggerKinds(copy), null, null, sealedText, _deviceId(), string.Empty, DateTimeOffset.UtcNow));
+                TriggerKinds(copy), null, null, sealedText, _deviceId(), string.Empty, DateTimeOffset.UtcNow) { Scope = route.Scope });
             await route.PutAsync(signed, cancellationToken).ConfigureAwait(false);
             lock (_gate) _numbers[entry.Id] = number;
         }
