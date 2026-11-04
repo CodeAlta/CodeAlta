@@ -1049,7 +1049,7 @@ public sealed partial class SqliteCoordinatorStore : ICoordinatorStore, IAutomat
             ("$previous", previous), ("$hash", hash));
     }
 
-    private const string PersonColumns = "SELECT id, organization_id, display_name, role, created_at";
+    private const string PersonColumns = "SELECT id, organization_id, display_name, role, created_at, status, suspended_at";
     private const string DeviceColumns =
         "SELECT id, organization_id, name, kind, public_key, fingerprint, owner_person_id, status, enrolled_by_device_id, enrollment_token_id, created_at, approved_at, revoked_at, version";
     private const string DeviceListColumns = "SELECT organization_id, seq, device_id, operation, signer_device_id, payload, signature, hash, recorded_at";
@@ -1063,7 +1063,8 @@ public sealed partial class SqliteCoordinatorStore : ICoordinatorStore, IAutomat
             static reader => new OrganizationRecord(reader.GetString(0), reader.GetString(1), FromTime(reader.GetInt64(2))));
 
     private static PersonRecord ReadPerson(SqliteDataReader reader)
-        => new(reader.GetString(0), reader.GetString(1), reader.GetString(2), reader.GetString(3), FromTime(reader.GetInt64(4)));
+        => new(reader.GetString(0), reader.GetString(1), reader.GetString(2), reader.GetString(3), FromTime(reader.GetInt64(4)), reader.GetString(5),
+            GetNullableTime(reader, 6));
 
     private static DeviceRecord? ReadDevice(SqliteConnection connection, SqliteTransaction? transaction, string deviceId)
         => QuerySingle(connection, transaction, DeviceColumns + " FROM devices WHERE id = $id", ReadDeviceRow, ("$id", deviceId));
@@ -1093,8 +1094,10 @@ public sealed partial class SqliteCoordinatorStore : ICoordinatorStore, IAutomat
             reader.GetString(10), reader.GetString(11));
 
     private static void InsertPerson(SqliteConnection connection, SqliteTransaction transaction, PersonRecord person)
-        => Execute(connection, transaction, "INSERT INTO people (id, organization_id, display_name, role, created_at) VALUES ($id, $org, $name, $role, $created)",
-            ("$id", person.Id), ("$org", person.OrganizationId), ("$name", person.DisplayName), ("$role", person.Role), ("$created", ToTime(person.CreatedAt)));
+        => Execute(connection, transaction,
+            "INSERT INTO people (id, organization_id, display_name, role, created_at, status, suspended_at) VALUES ($id, $org, $name, $role, $created, $status, $suspended)",
+            ("$id", person.Id), ("$org", person.OrganizationId), ("$name", person.DisplayName), ("$role", person.Role), ("$created", ToTime(person.CreatedAt)),
+            ("$status", person.Status), ("$suspended", ToNullableTime(person.SuspendedAt)));
 
     private static void InsertDevice(SqliteConnection connection, SqliteTransaction transaction, DeviceRecord device)
         => Execute(connection, transaction,
