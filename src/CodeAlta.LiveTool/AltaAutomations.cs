@@ -66,7 +66,38 @@ public interface IAltaAutomations
     /// </returns>
     Task<AltaAutomationChange> TakeOverAsync(string runId, CancellationToken cancellationToken)
         => Task.FromResult(new AltaAutomationChange("refused", null, "This host takes no run over."));
+
+    /// <summary>
+    /// A person takes a run over on a machine of a server by the ids its server gave them, for a run of an automation they
+    /// answer the approvals of without holding it here (a team's): the request is signed by this computer, and the server
+    /// and the machine check that its person may.
+    /// </summary>
+    /// <param name="runId">The run.</param>
+    /// <param name="machineId">The machine that runs it.</param>
+    /// <param name="automationId">The automation.</param>
+    /// <param name="cancellationToken">Cancels before the request is passed on.</param>
+    /// <returns>The status <c>ok</c>, or <c>refused</c> with the reason.</returns>
+    Task<AltaAutomationChange> TakeOverAsync(string runId, string machineId, string automationId, CancellationToken cancellationToken)
+        => Task.FromResult(new AltaAutomationChange("refused", null, "This host takes no run of another machine over."));
+
+    /// <summary>
+    /// Lists the runs that wait for this person: those of this computer, and those of the machines of the servers that told
+    /// them a run of an automation they answer the approvals of waits.
+    /// </summary>
+    /// <param name="cancellationToken">Cancels the reads of the servers.</param>
+    /// <returns>The runs, the newest first.</returns>
+    Task<IReadOnlyList<AltaWaitingRun>> ListWaitingAsync(CancellationToken cancellationToken) => Task.FromResult<IReadOnlyList<AltaWaitingRun>>([]);
 }
+
+/// <summary>A run that waits for the person: an approval of a call it may not make by itself.</summary>
+/// <param name="RunId">The run.</param>
+/// <param name="AutomationId">Its automation.</param>
+/// <param name="Name">The name of the automation, when known.</param>
+/// <param name="MachineId">The machine that runs it; null for this computer.</param>
+/// <param name="Machine">The name of that machine.</param>
+/// <param name="SessionId">Its session, when known here.</param>
+/// <param name="Since">When it started waiting, or started.</param>
+public sealed record AltaWaitingRun(string RunId, string AutomationId, string? Name, string? MachineId, string? Machine, string? SessionId, DateTimeOffset Since);
 
 /// <summary>An automation.</summary>
 /// <param name="Id">Its identifier, a GUID.</param>

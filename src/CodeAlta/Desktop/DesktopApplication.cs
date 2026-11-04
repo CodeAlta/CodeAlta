@@ -963,7 +963,8 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                 };
                 var altaCommands = DesktopAltaTools.Attach(host, reminders.Reminders, pluginAlta, changesView, editorView,
                     new DesktopAltaTerminals(terminals, acceptsInput: !options.ReviewOwnedCommandPermissions),
-                    new DesktopAltaAutomations(automations, host.ProjectCatalog, acceptsCommands: !options.ReviewOwnedCommandPermissions, placement), worktrees, pluginWorkshop, workItems, new DesktopAltaAppearance(shell), spaceView,
+                    new DesktopAltaAutomations(automations, host.ProjectCatalog, acceptsCommands: !options.ReviewOwnedCommandPermissions, placement,
+                        fleetServers is { } waitingServers ? waitingServers.WaitingRunsAsync : null), worktrees, pluginWorkshop, workItems, new DesktopAltaAppearance(shell), spaceView,
                     // A command a session starts in the background, what it types in a terminal, the command it gives an
                     // automation and the plugin it builds are reviewed by nobody: only a session whose requests are all
                     // approved does any of it. A caller that is no session (a client of the MCP server) has the policy

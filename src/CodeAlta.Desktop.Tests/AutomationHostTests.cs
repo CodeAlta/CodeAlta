@@ -76,6 +76,11 @@ public sealed class AutomationHostTests
         var unknown = await fixture.Run(["automation", "takeover", "run-1"], caller: user);
         Assert.AreEqual(AltaExitCodes.NotFound, unknown.Code, unknown.Text);
         Assert.AreEqual(AltaExitCodes.Usage, (await fixture.Run(["automation", "takeover"], caller: user)).Code);
+        Assert.AreEqual(AltaExitCodes.Usage, (await fixture.Run(["automation", "takeover", "run-1", "--machine", "node-1"], caller: user)).Code, "a machine goes with its automation");
+        var remote = await fixture.Run(["automation", "takeover", "run-1", "--machine", "node-1", "--automation", "0199f4c2-6d1e-7c3a-b5f0-2f9c8e4a1d77"], caller: user);
+        StringAssert.Contains(remote.Text, "reached from no fleet", "without a fleet, a run of a machine of a server is not taken over");
+        var waiting = await fixture.Run(["automation", "waiting"], caller: user);
+        Assert.AreEqual((AltaExitCodes.Success, 0), (waiting.Code, Of(waiting.Records, "alta.automation.waiting").Length));
     }
 
     [TestMethod]

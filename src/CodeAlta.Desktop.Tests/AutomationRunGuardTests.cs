@@ -238,6 +238,12 @@ public sealed class AutomationRunGuardTests
         Assert.AreEqual(("not_found", (string?)null), await TakeOver("run-unknown") is var unknown ? (unknown.Status, unknown.SessionId) : default);
         Assert.AreEqual(("ok", "session-1"), await TakeOver(run.Id) is var taken ? (taken.Status, taken.SessionId) : default);
         Assert.IsTrue(service.IsTakenOver(run.Id));
+        // What waits for the person: this run, and the run of a team on a machine of a server, which a server told them of.
+        var teamRun = new CodeAlta.LiveTool.AltaWaitingRun("run-team", Id, null, "node-1", "Build box", null, Noon.AddMinutes(-5));
+        var alta = new DesktopAltaAutomations(service, null!, true, null, _ => Task.FromResult<IReadOnlyList<CodeAlta.LiveTool.AltaWaitingRun>>([teamRun]));
+        var listed = await alta.ListWaitingAsync(default);
+        Assert.AreEqual(("run-team", "node-1"), (listed.Single(other => other.MachineId is not null).RunId, listed.Single(other => other.MachineId is not null).MachineId));
+        Assert.AreEqual(run.Id, listed.Single(other => other.MachineId is null).RunId);
         Assert.AreEqual("Taken over by a person.", service.Runs(Id, 1)[0].Message);
         asker.Held.SetResult(new(AgentPermissionDecisionKind.AllowOnce));
         await held;

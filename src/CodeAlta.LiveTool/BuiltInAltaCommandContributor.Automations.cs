@@ -37,6 +37,7 @@ internal sealed partial class BuiltInAltaCommandContributor
         group.Add(CreateAutomationEnableCommand(context, enable: false));
         group.Add(CreateAutomationDeleteCommand(context));
         group.Add(CreateAutomationTakeOverCommand(context));
+        group.Add(CreateAutomationWaitingCommand(context));
         AddHelpText(
             group,
             "An automation has a name, a prompt and triggers; each run starts a new session in its project, or a chat, and sends it the prompt. It is kept in the configuration of the user or of its project, so it outlives this session, unlike a reminder.",
@@ -104,12 +105,43 @@ internal sealed partial class BuiltInAltaCommandContributor
         return command;
     }
 
+    private static Command CreateAutomationWaitingCommand(AltaCommandContext context)
+    {
+        var command = Leaf("waiting", "List the runs that wait for the user: on this computer, and on the machines of their servers.");
+        command.Add(async (_, _) => await HandleAutomationWaitingAsync(context).ConfigureAwait(false));
+        AddHelpText(command, "A run of a machine of a server is one the server told the user waits for their approval, such as a run of a team they are in. The user takes it over with `alta automation takeover <run-id> --machine <id> --automation <id>`.");
+        return command;
+    }
+
+    private static async ValueTask<int> HandleAutomationWaitingAsync(AltaCommandContext context)
+    {
+        if (!TryGetAutomations(context, out var automations))
+        {
+            return AltaExitCodes.ServiceUnavailable;
+        }
+
+        foreach (var run in await automations.ListWaitingAsync(context.CancellationToken).ConfigureAwait(false))
+        {
+            AltaJsonlWriter.WriteRecord(context.Stdout, new
+            {
+                type = "alta.automation.waiting", version = 1, correlationId = context.CorrelationId, runId = run.RunId, automationId = run.AutomationId, name = run.Name,
+                machineId = run.MachineId, machine = run.Machine, sessionId = run.SessionId, since = run.Since,
+            });
+        }
+
+        return AltaExitCodes.Success;
+    }
+
     private static Command CreateAutomationTakeOverCommand(AltaCommandContext context)
     {
         string? id = null;
+        string? machine = null;
+        string? automation = null;
         var command = Leaf("takeover", "Take a run that waits for a person over, for the user: what it asks then waits for them, and no timeout stops it.");
-        command.Add("<run-id>", "Run id from `alta automation runs`.", value => id = value);
-        command.Add(async (_, _) => await HandleAutomationTakeOverAsync(context, id).ConfigureAwait(false));
+        command.Add("<run-id>", "Run id from `alta automation runs` or `alta automation waiting`.", value => id = value);
+        command.Add("machine=", "The machine of a server that runs it, for a run of an automation not held here (`alta automation waiting`).", value => machine = value);
+        command.Add("automation=", "Its automation, with --machine.", value => automation = value);
+        command.Add(async (_, _) => await HandleAutomationTakeOverAsync(context, id, machine, automation).ConfigureAwait(false));
         AddHelpText(command, "Only the user takes a run over, from the Automations tab or the phone: an agent is refused (`automation.needsPerson`). What a run of autonomy asks is the user's to answer.");
         return command;
     }
@@ -363,7 +395,7 @@ internal sealed partial class BuiltInAltaCommandContributor
         return AltaExitCodes.Failure;
     }
 
-    private static async ValueTask<int> HandleAutomationTakeOverAsync(AltaCommandContext context, string? id)
+    private static async ValueTask<int> HandleAutomationTakeOverAsync(AltaCommandContext context, string? id, string? machine, string? automation)
     {
         if (!TryGetAutomations(context, out var automations))
         {
@@ -382,7 +414,16 @@ internal sealed partial class BuiltInAltaCommandContributor
                 "A person takes a run over, in the Automations tab or on the phone: tell the user the run waits for them.");
         }
 
-        var result = await automations.TakeOverAsync(runId, context.CancellationToken).ConfigureAwait(false);
+        var machineId = NormalizeOptionalText(machine);
+        var automationId = NormalizeOptionalText(automation);
+        if ((machineId is null) != (automationId is null))
+        {
+            return UsageError(context, "usage.missingAutomation", "--machine and --automation go together.", "alta automation takeover");
+        }
+
+        var result = machineId is not null && automationId is not null
+            ? await automations.TakeOverAsync(runId, machineId, automationId, context.CancellationToken).ConfigureAwait(false)
+            : await automations.TakeOverAsync(runId, context.CancellationToken).ConfigureAwait(false);
         if (result.Status == "not_found")
         {
             return NotFound(context, "automation.runNotFound", $"Run '{runId}' was not found. List the runs with `alta automation runs`.");

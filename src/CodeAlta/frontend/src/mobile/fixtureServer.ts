@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
+import type { WaitingRun } from "./contract";
 import type { ApprovalAutomation, ApprovalRequest, ApprovalResult, Ask, AskResult, BackgroundJob, Live, Options, PromptSelection, Session, SessionChoices, Space, TimelineEvent } from "./contract";
 
 /** The policy the plugin's server sets on the page (the contract of the phone page). */
@@ -47,6 +48,8 @@ export async function startFixtureServer(files: Readonly<Record<string, Readonly
     approvalResult: null as ApprovalResult | null,
     /** The run of the automation that started each session, as the page of its requests says it. */
     automations: new Map<string, ApprovalAutomation>(),
+    /** The runs that wait for the person, which the home page lists. */
+    waiting: [] as WaitingRun[],
     /** What the next take-over answers; null: it is taken over. */
     takeOverResult: null as Readonly<{ ok: boolean; error: string | null }> | null,
     /** The messages a page of the latest events holds, as the plugin pages them; null: a page holds them all. */
@@ -151,6 +154,13 @@ export async function startFixtureServer(files: Readonly<Record<string, Readonly
       return response.end(found.body);
     }
     if (path === "/api/projects") return send(response, 200, { projects: state.projects, default: "p1", error: null });
+    if (path === "/api/automations/waiting") return send(response, 200, { runs: state.waiting, error: null });
+    if (path === "/api/automations/takeover") {
+      const result = state.takeOverResult ?? { ok: true, error: null };
+      state.takeOverResult = null;
+      if (result.ok) state.waiting = state.waiting.filter(run => run.runId !== (body as { runId: string }).runId);
+      return send(response, 200, result);
+    }
     if (path === "/api/options") return send(response, 200, state.options);
     const jobPath = /^\/api\/sessions\/([^/]+)\/jobs(?:\/([^/]+)(\/stop)?)?$/.exec(path);
     if (jobPath) {

@@ -3,6 +3,7 @@ import { ApiError, browserStore, createApi, failureText, signedOutMessage, Signe
 import { applyAppearance, fontStepKey, nextFontStep, readFontStep, readTheme, themeKey, type Theme } from "./appearance";
 import { coalesce, composerView } from "./composer";
 import { createApprovalPanel } from "./approvalPanel";
+import { createWaitingRuns } from "./waitingRuns";
 import { createAskPanel } from "./askPanel";
 import { createBackgroundJobs } from "./backgroundJobs";
 import { isBusy, type Live, type Options, type ProjectList, type PromptMode, type SessionChoices, type Space, type TimelineEvent } from "./contract";
@@ -143,6 +144,8 @@ export function startMobile(window: Window & typeof globalThis) {
   }
 
   const sessionList = createSessionList({ window, list, sessions, store, visible: () => !$("home").hidden });
+  // The runs that wait for the person, read with the list: of this computer, and of the machines of their servers.
+  const waitingRuns = createWaitingRuns({ document, root: $("waiting"), api, host });
   function renderList() {
     if (signedOut) return;
     sessionList.render();
@@ -169,6 +172,7 @@ export function startMobile(window: Window & typeof globalThis) {
       }
       if (!await readOn(filter, startedAt, pageSize)) return;
       renderList();
+      void waitingRuns.read();
       showScope();
       if (!sessions.list().length) note.textContent = listError
         || (filter.length > 1 ? "No sessions in these projects." : filter.length ? "No sessions in this project." : "No sessions yet.");

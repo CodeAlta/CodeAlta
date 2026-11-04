@@ -264,6 +264,32 @@ public sealed class MobileServerTests
     }
 
     [TestMethod]
+    public async Task TheRunsThatWaitForThePerson_AreListed_AndATeamRunOfAServerMachineIsTakenOverFromThePhone()
+    {
+        await using var fixture = await Fixture.StartAsync();
+        await fixture.SignInAsync();
+        fixture.Alta.Answer("automation waiting", new JsonObject
+        {
+            ["type"] = "alta.automation.waiting", ["runId"] = "run-9", ["automationId"] = "0199f4c2-6d1e-7c3a-b5f0-2f9c8e4a1d77", ["name"] = null, ["machineId"] = "node-1",
+            ["machine"] = "Build box", ["sessionId"] = null, ["since"] = "2026-11-04T12:00:00+00:00",
+        });
+        var page = JsonNode.Parse(await fixture.Client.GetStringAsync("/api/automations/waiting"))!;
+        Assert.AreEqual(("run-9", "node-1", "Build box"), ((string?)page["runs"]![0]!["runId"], (string?)page["runs"]![0]!["machineId"], (string?)page["runs"]![0]!["machine"]));
+
+        fixture.Alta.Answer("automation takeover", new JsonObject { ["type"] = "alta.automation.takenOver", ["runId"] = "run-9" });
+        var taken = JsonNode.Parse(await (await fixture.PostAsync("/api/automations/takeover",
+            new JsonObject { ["runId"] = "run-9", ["machineId"] = "node-1", ["automationId"] = "0199f4c2-6d1e-7c3a-b5f0-2f9c8e4a1d77" })).Content.ReadAsStringAsync())!;
+        Assert.AreEqual((true, (string?)null), ((bool)taken["ok"]!, (string?)taken["error"]));
+        CollectionAssert.AreEqual(new[] { "automation", "takeover", "run-9", "--machine", "node-1", "--automation", "0199f4c2-6d1e-7c3a-b5f0-2f9c8e4a1d77" },
+            fixture.Alta.CallsOf("automation takeover").Single(), "the computer signs it for the person");
+        Assert.IsTrue(fixture.Alta.Options.Last()?.OnBehalfOfUser);
+        var half = JsonNode.Parse(await (await fixture.PostAsync("/api/automations/takeover", new JsonObject { ["runId"] = "run-9", ["machineId"] = "node-1" })).Content.ReadAsStringAsync())!;
+        Assert.IsFalse((bool)half["ok"]!, "a machine without its automation names no run");
+        Assert.AreEqual(1, fixture.Alta.CallsOf("automation takeover").Length);
+        Assert.AreEqual(HttpStatusCode.Unauthorized, (await new HttpClient { BaseAddress = fixture.Client.BaseAddress }.GetAsync("/api/automations/waiting")).StatusCode);
+    }
+
+    [TestMethod]
     public async Task ThePermissionRequests_AreForThePhonesThatSignedIn()
     {
         await using var fixture = await Fixture.StartAsync();

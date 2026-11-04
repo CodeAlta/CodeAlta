@@ -172,6 +172,21 @@ test("the phone page shows what sessions ask permission for, and answers it", { 
     assert.equal(takeOvers().length, 2);
     server.state.automations.delete("s1");
 
+    // A run of a team on a machine of the server waits for the person: the home page lists it, and the phone takes it over.
+    server.state.waiting = [{ runId: "run-9", automationId: "0199f4c2-6d1e-7c3a-b5f0-2f9c8e4a1d77", name: "Incident diagnosis", machineId: "node-1", machine: "Build box",
+      sessionId: null, since: "2026-11-04T12:00:00Z" }];
+    await evaluate(`location.hash = "#/"`);
+    await evaluate(`document.querySelector("#refresh, [aria-label='Refresh']")?.click()`);
+    await waitFor(shown('#waiting .waiting-card[data-run="run-9"]'), "the run that waits, above the sessions");
+    assert.equal(await text("#waiting .waiting-line > span:last-child"), "Incident diagnosis on Build box waits for your approval.");
+    await shot("05-home-waiting.png");
+    await click('#waiting [data-action="takeover"]');
+    await waitFor(`/You took the run over: answer it in its session on Build box/.test(document.querySelector("#waiting .ask-note")?.textContent ?? "")`, "the team run taken over");
+    assert.deepEqual(server.requests.filter(r => r.method === "POST" && r.path === "/api/automations/takeover").map(r => r.body),
+      [{ runId: "run-9", machineId: "node-1", automationId: "0199f4c2-6d1e-7c3a-b5f0-2f9c8e4a1d77" }]);
+    await evaluate(`location.hash = "#/session/s1"`);
+    await waitFor(`document.querySelector("#approval")`, "back on the session");
+
     // What a session sends is text, never markup.
     const marked = { ...next, id: "44444444-4444-4444-8444-444444444444", grantRoot: `<img src=x onerror="window.hacked=1">`, reason: "<b>bold</b>" };
     server.state.approvals.set("s1", [marked]);
