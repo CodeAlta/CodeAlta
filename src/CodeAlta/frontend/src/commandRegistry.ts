@@ -9,7 +9,7 @@ export type CommandId =
   | "providers" | "models" | "logs" | "mcp" | "config" | "focusSidebar" | "toggleNavigator" | "focusPrompt" | "focusAskFile" | "modelSelector"
   | "usage" | "sessionInfo" | "reminders" | "messagePrevious" | "messageNext" | "messageFirst" | "messageLatest" | "bookmarkPrevious" | "bookmarkNext" | "bookmarkSession"
   | "attachFiles" | "attachFolder" | "attachIssues"
-  | "expandPrompt" | "insertEquation" | "dictate" | "send" | "steer" | "abort" | "closeTab" | "previousTab" | "nextTab" | "reopenTab" | "moveTabToNewWindow" | "clearQueue" | "compact" | "fork" | "rewind"
+  | "expandPrompt" | "insertEquation" | "dictate" | "send" | "steer" | "abort" | "closeTab" | "previousTab" | "nextTab" | "reopenTab" | "moveTabToNewWindow" | "clearQueue" | "compact" | "fork" | "rewind" | "archiveSession"
   | "newSession" | "browseSessions" | "searchSessions" | "toggleNotes" | "previousSession" | "nextSession"
   | "previousProject" | "nextProject" | "renameProject" | "refreshStatuses" | "zoomIn" | "zoomOut" | "resetZoom" | "exit"
   | "spaces" | "newSpace" | "goToSpace" | "previousSpace" | "nextSpace" | "moveSession" | "reviewChanges"
@@ -97,8 +97,11 @@ export const commandDefinitions: readonly CommandDefinition[] = Object.freeze([
   { id: "abort", name: "abort", label: "Abort", description: "Stop the running turn.", category: "Session", keys: ["F8"], search: "stop cancel" },
   { id: "clearQueue", name: "clear_queue", label: "Clear Queue", description: "Remove every queued prompt.", category: "Session", keys: ["F10"] },
   { id: "compact", name: "compact", label: "Compact", description: "Compact the conversation of the idle session.", category: "Session", keys: ["Ctrl+F11"] },
-  { id: "fork", name: "fork", label: "Fork Session", description: "Continue from a point of the session in a new session.", category: "Session", search: "branch duplicate copy clone" },
+  // Not Ctrl+Shift+F, the search in the files of the code editor: B for the branch a fork makes of the conversation.
+  { id: "fork", name: "fork", label: "Fork Session", description: "Continue from a point of the session in a new session.", category: "Session", keys: ["Ctrl+Shift+B"], search: "branch duplicate copy clone" },
   { id: "rewind", name: "rewind", label: "Rewind Session", description: "Take the session back to an earlier turn.", category: "Session", search: "undo roll back revert" },
+  { id: "archiveSession", name: "archive", label: "Archive Session", description: "Archive the selected session: it leaves the Explorer and keeps its history.", category: "Session",
+    keys: ["Ctrl+Shift+A"], search: "hide put away done finished close" },
   { id: "reviewChanges", name: "review_changes", label: "Review Changes", description: "Comment on the changes of the session's checkout, then submit the review.", category: "Session",
     search: "review comment diff changes approve request" },
   { id: "bookmarkSession", name: "bookmark", label: "Bookmark Session", description: "Bookmark or remove the bookmark of this session.", category: "Session", search: "bookmark mark save favorite star pin keep" },

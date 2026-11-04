@@ -52,7 +52,7 @@ The Explorer lists the projects of the space the window shows. **Chats**, at the
 - The `…` button or a right-click (`Ctrl`+click on macOS) opens the menu of a project or a session.
 - The `+` button adds a folder as a project (see [Open a project](#open-a-project)).
 
-On the row of a session, `F2` renames it, `F` forks it, `A` archives it, and `Delete` or `Backspace` deletes it, as **Rename…**, **Fork…**, **Archive** and **Delete…** of its menu do.
+On the row of a session, `F2` renames it and `Delete` or `Backspace` deletes it, as **Rename…** and **Delete…** of its menu do. `Ctrl`+`Shift`+`B` forks a session and `Ctrl`+`Shift`+`A` archives it, as **Fork…** and **Archive** do: the session of the row that has the keyboard, or from anywhere else, the prompt included, the selected session.
 
 The menu of a session also has:
 

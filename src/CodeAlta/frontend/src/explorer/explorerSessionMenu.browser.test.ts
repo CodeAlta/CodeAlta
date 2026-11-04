@@ -120,13 +120,26 @@ test("the keys of a session row outside the selected scope do what the lines of 
     await page.evaluate(`explorerFixture.setButtons([]); explorerFixture.render()`);
     await page.until(`document.querySelectorAll('.session-row').length === 4`, "the rows");
     await page.evaluate(`document.querySelector('[data-scope="chats"] .session-actions-trigger[aria-label*="(ID: chat-1)"]').closest('.session-row').firstElementChild.focus()`);
-    // The fixture allows renaming and deleting, not forking or archiving: those keys do nothing, nor does R.
+    // The fixture allows renaming and deleting, not forking or archiving; a letter alone is no key of the row.
     await page.key("f", 70, "f"); await page.key("a", 65, "a"); await page.key("r", 82, "r");
     await page.key("F2", 113);
     await page.until(`explorerFixture.state.actions.length === 1`, "F2 on the row");
     await page.key("Backspace", 8);
     await page.until(`explorerFixture.state.actions.length === 2`, "Backspace on the row");
     assert.deepEqual(await page.evaluate(`explorerFixture.state.actions`), [{ session: "chat-1", action: "rename" }, { session: "chat-1", action: "delete" }]);
+
+    // Forking and archiving allowed: a letter alone still does nothing (it is the prompt's, #322); Ctrl+Shift+B and
+    // Ctrl+Shift+A, the keys of Fork Session and Archive Session, fork and archive the session of the row.
+    await page.evaluate(`explorerFixture.state.access = { fork: true, archive: true }; explorerFixture.state.actions.length = 0`);
+    await page.key("f", 70, "f"); await page.key("a", 65, "a");
+    const shifted = async (letter: string, code: number) => {
+      for (const type of ["keyDown", "keyUp"]) await page.command("Input.dispatchKeyEvent", { type, key: letter, code: `Key${letter}`, windowsVirtualKeyCode: code, modifiers: 2 | 8 });
+    };
+    await shifted("B", 66);
+    await page.until(`explorerFixture.state.actions.length === 1`, "Ctrl+Shift+B on the row");
+    await shifted("A", 65);
+    await page.until(`explorerFixture.state.actions.length === 2`, "Ctrl+Shift+A on the row");
+    assert.deepEqual(await page.evaluate(`explorerFixture.state.actions`), [{ session: "chat-1", action: "fork" }, { session: "chat-1", action: "archive" }]);
   }, options);
 });
 
@@ -170,7 +183,7 @@ test("a menu with no line of a plugin is as it was, and a line a plugin cannot u
     await openMenu(page, "chats", "chat-1");
     await page.until(`explorerFixture.state.reads.some(read => read.place === 'SessionMenu' && read.sessionId === 'chat-1')`, "the host asked about the row");
     assert.deepEqual(await menuLines(page), ["Open session", "Rename…", "Fork…", "Archive", "Delete…"]);
-    assert.deepEqual(await menuKeys(page), ["", "F2", "F", "A", "Delete"], "the keys of the row, at the end of their lines");
+    assert.deepEqual(await menuKeys(page), ["", "F2", "CtrlShiftB", "CtrlShiftA", "Delete"], "the keys of the row, at the end of their lines");
     assert.equal(await page.evaluate(`document.querySelectorAll('.session-tab-popup .bp6-menu-divider').length`), 0, "no separator without a line under it");
     await page.key("Escape", 27);
     await page.until(`!document.querySelector('.session-tab-popup')`, "the menu closed");

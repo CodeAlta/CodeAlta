@@ -245,7 +245,8 @@ Both apps use the same shortcuts and slash commands unless noted.
 | Abort the running turn | `F8` or `/abort` |
 | [Dictate a prompt](speech.md) (desktop) | `F9` |
 | Compact idle session | `Ctrl+F11` or `/compact` |
-| [Fork a session, or rewind it](sessions/readme.md#fork-and-rewind) to an earlier turn (desktop) | `/fork`, `/rewind` |
+| [Fork a session, or rewind it](sessions/readme.md#fork-and-rewind) to an earlier turn (desktop) | `Ctrl+Shift+B` or `/fork`, `/rewind` |
+| [Archive the selected session](sessions/readme.md#archive-a-session) (desktop) | `Ctrl+Shift+A` or `/archive` |
 | Clear prompt queue | `F10` |
 | Previous/next user or assistant message | `F3` / `F4` |
 | Switch tabs | `Ctrl+Alt+Left` / `Ctrl+Alt+Right` (also `Ctrl+Shift+Tab` / `Ctrl+Tab` and `Ctrl+PageUp` / `Ctrl+PageDown` in the desktop app) |

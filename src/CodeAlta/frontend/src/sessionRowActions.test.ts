@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { WorkspaceProject, WorkspaceSession } from "#neoastra";
-import { isSessionContextKey, isSessionDeleteKey, menuFocusIndex, sessionRowShortcut, restoreSessionMenuFocus, sessionActionAccess, type SessionMenuTarget } from "./sessionRowActions";
+import { isSessionContextKey, isSessionDeleteKey, isSessionRowKeyTarget, menuFocusIndex, sessionRowGesture, sessionRowShortcut, restoreSessionMenuFocus, sessionActionAccess, type SessionMenuTarget } from "./sessionRowActions";
 
 const project: WorkspaceProject = { id: "p", name: "Project", path: "/p", archived: false };
 const row: WorkspaceSession = { messageCount: null, automationId: null, worktreePath: null, worktreeRoot: null, worktreeName: null, worktreeMissing: false, forkedFromSessionId: null, forkedFromTitle: null, forkKind: null, forkTurnCount: 0, rewindCount: 0, archived: false, archivedAt: null, spaceId: null, createdAt: null, id: "s", title: "Title", fullTitle: "Title", fullTitleTruncated: false,
@@ -105,14 +105,37 @@ test("Delete or Backspace alone, pressed once, asks to delete the session of a r
   for (const other of ["d", "Enter"]) assert.equal(isSessionDeleteKey({ ...key, key: other }, false), false, other);
 });
 
-test("F2, F and A alone, pressed once, rename, fork and archive the session of a row", () => {
+test("F2 alone, and the keys of Fork Session and Archive Session, pressed once, rename, fork and archive the session of a row", () => {
   const key = { key: "F2", altKey: false, ctrlKey: false, metaKey: false, shiftKey: false, repeat: false };
   assert.equal(sessionRowShortcut(key, false), "rename");
-  assert.equal(sessionRowShortcut({ ...key, key: "F" }, false), "fork");
-  assert.equal(sessionRowShortcut({ ...key, key: "a" }, false), "archive");
   assert.equal(sessionRowShortcut(key, true), null, "not while a text is being composed");
   assert.equal(sessionRowShortcut({ ...key, repeat: true }, false), null, "a key held down acts once");
   for (const modifier of ["altKey", "ctrlKey", "metaKey", "shiftKey"] as const)
     assert.equal(sessionRowShortcut({ ...key, [modifier]: true }, false), null, modifier);
-  for (const other of ["r", "d", "Delete", "Enter", "x"]) assert.equal(sessionRowShortcut({ ...key, key: other }, false), null, other);
+  // With Shift held, the browser names the letter in upper case.
+  const fork = { ...key, key: "B", ctrlKey: true, shiftKey: true }, archive = { ...key, key: "A", ctrlKey: true, shiftKey: true };
+  for (const mac of [false, true]) {
+    assert.equal(sessionRowShortcut(fork, false, mac), "fork");
+    assert.equal(sessionRowShortcut(archive, false, mac), "archive");
+    assert.equal(sessionRowShortcut({ ...archive, repeat: true }, false, mac), null, "a key held down archives once");
+    assert.equal(sessionRowShortcut(archive, true, mac), null, "not while a text is being composed");
+    for (const modifier of ["altKey", "metaKey"] as const) assert.equal(sessionRowShortcut({ ...archive, [modifier]: true }, false, mac), null, modifier);
+  }
+  assert.deepEqual([sessionRowGesture("fork", false), sessionRowGesture("archive", false)], ["Ctrl+Shift+B", "Ctrl+Shift+A"], "the menu shows the keys that work");
+  // A letter alone is typed into the prompt, where a click on a row sends the keyboard (#322): it never forks or archives.
+  for (const other of ["f", "F", "a", "A", "b", "r", "d", "Delete", "Enter", "x"]) assert.equal(sessionRowShortcut({ ...key, key: other }, false), null, other);
+  assert.equal(sessionRowShortcut({ ...key, key: "a", ctrlKey: true }, false), null, "Ctrl+A selects, it does not archive");
+});
+
+test("the keys of a row are its own on its button, in a list that marks its rows", () => {
+  type Fake = { parentElement: Fake | null; firstElementChild: Fake | null; hasAttribute: (name: string) => boolean };
+  const node = (parent: Fake | null, marked = false): Fake => ({ parentElement: parent, firstElementChild: null, hasAttribute: name => marked && name === "data-session-keys" });
+  const marked = node(null, true), unmarked = node(null);
+  const button = node(marked), trigger = node(marked), other = node(unmarked);
+  marked.firstElementChild = button; unmarked.firstElementChild = other;
+  const target = (value: Fake | null) => isSessionRowKeyTarget(value as unknown as Element | null);
+  assert.equal(target(button), true);
+  assert.equal(target(trigger), false, "the button of the actions of the row is not its row");
+  assert.equal(target(other), false, "a row of another list");
+  assert.equal(target(null), false);
 });

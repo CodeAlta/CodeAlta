@@ -86,7 +86,7 @@ test("the selected-scope Explorer menu reads plugins below App's provider and ac
       await until(`${entries}.some(item=>item.textContent.trim()==='Statistics of this session')`, "the plugin line under the production provider");
       // Each entry with the key of its row shortcut, shown at its end.
       assert.deepEqual(await evaluate(`${entries}.map(item=>[item.querySelector('.bp6-fill').textContent.trim(), item.querySelector('.bp6-menu-item-label')?.textContent ?? ''].filter(Boolean).join(' | '))`),
-        ["Open session", "Rename… | F2", "Fork… | F", ...(move ? ["Review changes", "Move to project…"] : []), "Archive | A", "Delete… | Delete", "Open Board", "Statistics of this session"]);
+        ["Open session", "Rename… | F2", "Fork… | CtrlShiftB", ...(move ? ["Review changes", "Move to project…"] : []), "Archive | CtrlShiftA", "Delete… | Delete", "Open Board", "Statistics of this session"]);
       assert.equal(await evaluate("document.querySelectorAll('.session-tab-popup .bp6-menu-divider').length"), 2, "canvas and plugin groups keep their dividers");
     };
     const assertReads = async (projectId: string | null, sessionId: string) => {
@@ -149,6 +149,19 @@ test("the selected-scope Explorer menu reads plugins below App's provider and ac
     assert.equal(await evaluate("document.querySelector('.session-tab-popup')"), null);
     assert.equal(await evaluate(`document.activeElement===${row("one")}.firstElementChild`), true);
 
+    // A click of the mouse on a row gives the keyboard to the prompt (#307): the letters typed there are the prompt's,
+    // and the key that archives, shown in the menu, archives the selected session from there (#322).
+    const box = await evaluate(`(() => { const box = ${row("one")}.firstElementChild.getBoundingClientRect(); return { x: box.left + 30, y: box.top + box.height / 2 }; })()`);
+    assert.equal(await evaluate(`document.elementFromPoint(${box.x}, ${box.y})?.closest('.session-row')?.dataset.sessionId`), "one", "the row is under the pointer");
+    for (const type of ["mousePressed", "mouseReleased"]) await command("Input.dispatchMouseEvent", { type, x: box.x, y: box.y, button: "left", clickCount: 1 });
+    await until("!!document.activeElement?.closest('#session-prompt')", "the click gives the keyboard to the prompt of the session");
+    await key("a", 97, "a"); await key("f", 102, "f"); await frames();
+    assert.equal(await evaluate("!!document.activeElement?.closest('#session-prompt')"), true, "the letters stay in the prompt");
+    assert.equal(await evaluate("settingsShellFixture.sessionArchives.length"), 0, "a letter alone archives nothing");
+    for (const type of ["keyDown", "keyUp"]) await command("Input.dispatchKeyEvent", { type, key: "A", code: "KeyA", windowsVirtualKeyCode: 65, modifiers: 2 | 8 });
+    await until("settingsShellFixture.sessionArchives.length===1", "Ctrl+Shift+A in the prompt archives the selected session");
+    assert.deepEqual(await evaluate("settingsShellFixture.sessionArchives.map(({ sessionId, withChildren }) => ({ sessionId, withChildren }))"), [{ sessionId: "one", withChildren: false }]);
+
     // Chats is now the selected scope, not ExplorerSessions' off-scope list. Its nonselected row has no project context.
     await evaluate("document.querySelector('.project-root-list button[data-scope=\"\"]').click()");
     await until(`!!${row("chat-1")}`, "Chats is the selected scope");
@@ -170,6 +183,7 @@ test("the selected-scope Explorer menu reads plugins below App's provider and ac
     await evaluate(`${entries}.find(item=>item.textContent.trim()==='Open session').click()`);
     await until(`${row("chat-2")}.firstElementChild.getAttribute('aria-pressed')==='true' && !document.querySelector('.session-tab-popup')`, "Open session keeps its original action");
     assert.equal(await evaluate("selectedMenuFixture.state.invoked.length"), 2);
+
     assert.deepEqual(exceptions, []);
   } finally {
     if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ id: 9999, method: "Browser.close" }));

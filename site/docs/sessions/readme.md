@@ -131,7 +131,7 @@ Open the **Fork or rewind** window with:
 
 - `/fork` or `/rewind`, from the search or by typing `/` in an empty prompt;
 - **Fork from here** or **Rewind to here** on one of your prompts in the timeline (beside **Copy**, or in its right-click menu);
-- **Fork…** in the **Actions** menu of a session in the Explorer.
+- **Fork…** in the **Actions** menu of a session in the Explorer, or `Ctrl`+`Shift`+`B` (the selected session, or the session of the row that has the keyboard).
 
 The window lists the points, newest first: **End of the session**, then one row per turn. Select one and the window says what the action does there, for example "Turns 4 to 9 (6 turns) are removed from this session". **Only my prompts** is on at first: it hides the turns started by another agent, an answer to a question or a background job.
 
@@ -163,7 +163,7 @@ Agents can fork and rewind too: see [Fork or rewind by an agent](delegation.md#f
 
 ## Archive a session
 
-Archive a session you are done with for now but may come back to. In CodeAlta Desktop, choose **Archive** in the menu of the session: it leaves the Explorer and its tab closes. Its history, project and space are kept.
+Archive a session you are done with for now but may come back to. In CodeAlta Desktop, choose **Archive** in the menu of the session, or press `Ctrl`+`Shift`+`A` (the selected session, or the session of the row that has the keyboard): it leaves the Explorer and its tab closes. Its history, project and space are kept.
 
 - A session with child sessions asks first: **Archive with its N child sessions**, or **Archive this session only**.
 - Only an idle session can be archived, with idle sessions below it: none may run, wait for an answer or have queued prompts.

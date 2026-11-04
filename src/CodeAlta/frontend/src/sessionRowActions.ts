@@ -1,5 +1,6 @@
 import type { WorkspaceProject, WorkspaceSession } from "#neoastra";
 import { inCloud } from "./cloudSessions/cloudSessions";
+import { commandDefinitions, commandKeys, isMacPlatform, resolveCommandKey } from "./commandRegistry";
 
 export type SessionMenuTarget = { id: string; projectId: string | null; hostEpoch: string | null };
 export type SessionAction = "open" | "rename" | "fork" | "delete" | "archive" | "remote-control" | "move" | "space"
@@ -51,18 +52,32 @@ export function isSessionDeleteKey(event: Readonly<{ key: string; altKey: boolea
 }
 
 /**
- * The action a key pressed on the row of a session asks for: F2 renames it, as it renames a project, a file or a
- * terminal, F forks it and A archives it. The key alone, pressed once, without a modifier; Delete has its own key.
+ * The action a key pressed on the row of a session asks for: F2 alone renames it, as it renames a project, a file or a
+ * terminal; the keys of the **Fork Session** and **Archive Session** commands fork and archive it, the session of that
+ * row rather than the selected one. A letter alone is no shortcut there: it is typed into the prompt (#322).
+ * Pressed once, not while a text is being composed; Delete has its own key.
  */
 export function sessionRowShortcut(event: Readonly<{ key: string; altKey: boolean; ctrlKey: boolean; metaKey: boolean; shiftKey: boolean; repeat: boolean }>,
-  composing: boolean): "rename" | "fork" | "archive" | null {
-  if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey || event.repeat || composing) return null;
-  if (event.key === "F2") return "rename";
-  switch (event.key.toLowerCase()) {
-    case "f": return "fork";
-    case "a": return "archive";
-    default: return null;
-  }
+  composing: boolean, mac = isMacPlatform()): "rename" | "fork" | "archive" | null {
+  if (event.repeat || composing) return null;
+  if (event.key === "F2") return event.altKey || event.ctrlKey || event.metaKey || event.shiftKey ? null : "rename";
+  const command = resolveCommandKey(event, false, "none", mac).command;
+  return command === "fork" ? "fork" : command === "archiveSession" ? "archive" : null;
+}
+
+/** The key that forks or archives a session, shown at the end of its line in the menu of a row: that of its command. */
+export function sessionRowGesture(action: "fork" | "archive", mac = isMacPlatform()): string {
+  const id = action === "fork" ? "fork" : "archiveSession";
+  return commandKeys(commandDefinitions.find(command => command.id === id)!, mac)[0];
+}
+
+/**
+ * Whether the keyboard is on the row of a session (its own button, in a list that marks its rows with
+ * `data-session-keys`), where the keys of {@link sessionRowShortcut} act on the session of that row.
+ */
+export function isSessionRowKeyTarget(target: Element | null): boolean {
+  const row = target?.parentElement;
+  return !!row && row.hasAttribute("data-session-keys") && row.firstElementChild === target;
 }
 
 export function menuFocusIndex(key: string, current: number, count: number): number | null {

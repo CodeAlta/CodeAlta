@@ -164,7 +164,7 @@ import { sessionHierarchy } from "./sessionHierarchy";
 import type { SessionMenuEntry } from "./SessionTabMenu";
 import { plainTitle } from "./sessionTitle";
 import { KeyGesture } from "./KeyGesture";
-import { isSessionContextKey, isSessionDeleteKey, restoreSessionMenuFocus, sessionRowShortcut, sessionActionAccess, sessionMoveAccess, type SessionAction, type SessionMenuTarget } from "./sessionRowActions";
+import { isSessionContextKey, isSessionDeleteKey, isSessionRowKeyTarget, restoreSessionMenuFocus, sessionRowGesture, sessionRowShortcut, sessionActionAccess, sessionMoveAccess, type SessionAction, type SessionMenuTarget } from "./sessionRowActions";
 import { providerHasRemoteControl, type RemoteControlOpenRequest } from "./remoteControl";
 import { copyResumeCommand, isOpenElsewhereAction, openElsewhereCommandAction, openSessionInVsCode, opensElsewhere, runSessionInTerminal,
   readClaudeCodeConversation, type OpenElsewhereAction } from "./claudeCodeOpen/claudeCodeOpen";
@@ -3379,6 +3379,8 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
       case "send": case "abort": case "clearQueue": case "compact":
         return ownedSession && composerCommandBlock(command, composerControlState(composerControl(command)), t) === null;
       case "fork": case "rewind": return ownedSession && currentProjectWritable();
+      // The selected session, as its menu archives it, under the same locks.
+      case "archiveSession": return ownedSession && !!selectedSession && !selectedSession.archived && !sessionArchiveBusy && selectedSessionAccess(selectedSession).archive;
       case "reviewChanges": return ownedSession && !!selectedSession?.projectId;
       case "expandPrompt": case "insertEquation": case "focusPrompt": return view === "workspace" && !fileTabs.active;
       // The composer in front attaches, when it can (an editable session or a new-session draft).
@@ -3544,6 +3546,8 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
       case "nextPrompt": composerCommand(command); break;
       case "steer": break;
       case "fork": case "rewind": openSessionBranch(command); break;
+      // Its question, when it has child sessions, is asked beside the ⋯ of its composer, which is in front.
+      case "archiveSession": if (selectedSession) { const row = selectedSession; protectNavigation([row.id], () => beginSessionArchive(row, "composer")); } break;
       case "reviewChanges": if (selectedSession) reviewSessionChanges(selectedSession); break;
       // The remaining commands share their implementation with the older shortcut actions of the same name.
       default: runShortcut(command as ShortcutAction);
@@ -3612,6 +3616,8 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
       if (!commandChord.current && event.key === "Tab" && target?.closest("[data-file-tab-keys]")) return;
       // A list that renames its own rows (the files of the code editor) keeps F2.
       if (!commandChord.current && event.key === "F2" && target?.closest("[data-rename-keys]")) return;
+      // The row of a session forks and archives its own session with the keys of Fork Session and Archive Session.
+      if (!commandChord.current && isSessionRowKeyTarget(target) && sessionRowShortcut(event, false)) return;
       // A rendered page (the Documentation tab, a Markdown preview, a plan under review) finds in itself with Ctrl+F,
       // which searches the sessions everywhere else.
       if (!commandChord.current && findKeyKept(event, target)) return;
@@ -4182,7 +4188,8 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
     beginSessionDelete(row);
   }
 
-  // F2, F and A on the row of a session do what **Rename**, **Fork** and **Archive** of its menu do.
+  // F2 and the keys of Fork Session and Archive Session on the row of a session do what **Rename**, **Fork** and
+  // **Archive** of its menu do.
   function runSessionRowShortcut(action: "rename" | "fork" | "archive", row: WorkspaceSession) {
     protectNavigation([row.id], () => {
       if (snapshot?.sessions.filter(session => session.id === row.id).length !== 1 || currentSnapshot.current !== snapshot
@@ -5672,7 +5679,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
                 selectedScope.current, selectedProject, currentHostEpoch.current ?? null, owned,
                 mutation?.capability.canMutate() ?? false, batchDeletion.locked() || renamingBusy || deletingBusy || renamingPending.current || deletingPending.current,
                 renameLocked || deleteLocked || !!uncertainRename.current || !!uncertainDelete.current);
-              return <div className={`session-row${menu ? " menu-open" : ""}`} key={session.id} data-session-id={session.id} data-family-id={session.id} data-rename-keys {...sessionDragSource(session, projectId)}
+              return <div className={`session-row${menu ? " menu-open" : ""}`} key={session.id} data-session-id={session.id} data-family-id={session.id} data-rename-keys data-session-keys {...sessionDragSource(session, projectId)}
                 onContextMenu={event => {
                   const target = event.target as HTMLElement;
                   if (target.closest("input, textarea, select, [contenteditable='true'], .session-actions-menu")) return;
@@ -5682,8 +5689,9 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
                 onKeyDown={event => {
                   const editing = !!(event.target as HTMLElement).closest("input, textarea, select, [contenteditable='true']");
                   const composing = event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229;
-                  // Delete, Backspace, F2, F and A on a row do what the same entries of its menu do; the row keeps F2 from
-                  // Rename Project (data-rename-keys), as the lists of files and terminals do.
+                  // Delete, Backspace, F2 and the keys of Fork Session and Archive Session on a row do what the same entries
+                  // of its menu do, for its session; the row keeps F2 from Rename Project (data-rename-keys), as the lists of
+                  // files and terminals do, and the other keys from their commands (data-session-keys).
                   if (isSessionDeleteKey(event, composing) && event.target === event.currentTarget.firstElementChild) {
                     event.preventDefault(); event.stopPropagation();
                     deleteSessionFromRow(session);
@@ -5723,7 +5731,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
                 items={[
                   { key: "open", label: t("Open session"), icon: "open", onSelect: () => runSessionMenuAction("open", session, menu) },
                   { key: "rename", label: t("Rename…"), icon: "edit", endNode: <KeyGesture gesture="F2" />, disabled: !access.rename, onSelect: () => runSessionMenuAction("rename", session, menu) },
-                  { key: "fork", label: t("Fork…"), icon: "branch", endNode: <KeyGesture gesture="F" />, disabled: !access.fork, onSelect: () => runSessionMenuAction("fork", session, menu) },
+                  { key: "fork", label: t("Fork…"), icon: "branch", endNode: <KeyGesture gesture={sessionRowGesture("fork")} />, disabled: !access.fork, onSelect: () => runSessionMenuAction("fork", session, menu) },
                   ...(providerHasRemoteControl(providerLogos.get(session.providerKey?.toLowerCase() ?? "")?.type)
                     ? [{ key: "remote-control", label: t("Remote Control…"), icon: "remote" as const, disabled: !access["remote-control"], onSelect: () => runSessionMenuAction("remote-control", session, menu) }] : []),
                   ...openElsewhereEntries(t, session, providerLogos.get(session.providerKey?.toLowerCase() ?? "")?.type, access, action => runSessionMenuAction(action, session, menu)),
@@ -5734,7 +5742,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
                   ...(projectId === null ? [] : [{ key: "move", label: t("Move to project…"), icon: "folderInput" as const, disabled: !access.move, onSelect: () => runSessionMenuAction("move", session, menu) }]),
                   ...(spacesState.available && spacesState.spaces.length > 1
                     ? [{ key: "space", label: t("Move to space…"), icon: "space" as const, disabled: !access.space, onSelect: () => runSessionMenuAction("space", session, menu) }] : []),
-                  { key: "archive", label: archivableDescendants(catalog.current?.sessions ?? [], session.id).length > 0 ? t("Archive…") : t("Archive"), icon: "archive", endNode: <KeyGesture gesture="A" />,
+                  { key: "archive", label: archivableDescendants(catalog.current?.sessions ?? [], session.id).length > 0 ? t("Archive…") : t("Archive"), icon: "archive", endNode: <KeyGesture gesture={sessionRowGesture("archive")} />,
                     disabled: !access.archive || sessionArchiveBusy, onSelect: () => runSessionMenuAction("archive", session, menu) },
                   { key: "delete", label: confirms.sessionDelete ? `${t("Delete")}…` : t("Delete"), icon: "trash", endNode: <KeyGesture gesture="Delete" />, danger: true, disabled: !access.delete, onSelect: () => runSessionMenuAction("delete", session, menu) },
                   ...sessionCanvasEntries(session, selectedProject),
