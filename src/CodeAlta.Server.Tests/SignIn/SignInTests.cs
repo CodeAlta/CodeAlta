@@ -575,7 +575,7 @@ public sealed class SignInTests
 
         // The owner's passkey and Microsoft link, a member created by company sign-in with a device and a passkey of their own.
         await RegisterPasskeyAsync(server, owner, ownerKey, origin);
-        var (link, linkBack) = await StartAsync(server, owner, FleetSignInMethods.Microsoft, FleetSignInPurposes.Link);
+        var (link, linkBack) = await StartAsync(server, owner, FleetSignInMethods.Microsoft, FleetSignInPurposes.Link, await ConfirmAsync(server, owner, ownerKey));
         Assert.AreEqual(HttpStatusCode.OK, (await CompleteAsync(server, owner, link, linkBack)).Status);
         await ConfigureCompanyAsync(server, owner, provider, requireSso: false);
         provider.Account = new FakeAccount("member-1", "sam@contoso.example", "Sam", ["g-engineering"]);
@@ -586,7 +586,7 @@ public sealed class SignInTests
         var entry = await server.NextEntryAsync(owner, FleetDeviceListOperations.Add, memberLaptop.DeviceId, memberLaptop.PublicKey, FleetDeviceKinds.Controller, member.Person.Id,
             setup.Organization.Id);
         Assert.AreEqual(HttpStatusCode.OK, (await server.SendAsync(owner, HttpMethod.Post, $"/api/v1/devices/{memberLaptop.DeviceId}/approve", new DeviceListChangeRequest(entry))).Status);
-        await RegisterPasskeyAsync(server, memberLaptop, memberKey, origin);
+        await RegisterPasskeyAsync(server, memberLaptop, memberKey, origin, await ConfirmWithAsync(server, memberLaptop, FleetSignInMethods.Company));
         Assert.AreEqual(HttpStatusCode.Forbidden, (await server.SendAsync(memberLaptop, HttpMethod.Get, "/api/v1/sign-in/settings")).Status, "a member does not read the settings");
 
         await ConfigureCompanyAsync(server, owner, provider, requireSso: true);
@@ -846,7 +846,7 @@ public sealed class SignInTests
         Assert.AreEqual((HttpStatusCode.Conflict, SignInErrorCodes.LastWayIn), Answer(last), last.Body.ToString());
 
         // With a passkey beside it, the account goes: it signs nobody in any more.
-        await RegisterPasskeyAsync(server, owner, passkey, server.BaseAddress.GetLeftPart(UriPartial.Authority));
+        await RegisterPasskeyAsync(server, owner, passkey, server.BaseAddress.GetLeftPart(UriPartial.Authority), await ConfirmWithAsync(server, owner, FleetSignInMethods.Microsoft));
         var removed = await server.SendAsync(owner, HttpMethod.Delete, $"/api/v1/sign-in/logins/{microsoft.Id}");
         Assert.AreEqual(HttpStatusCode.OK, removed.Status, removed.Body.ToString());
         CollectionAssert.AreEqual(new[] { FleetSignInMethods.Passkey }, removed.Read<ListResponse<SignInLoginDto>>().Items.Select(static login => login.Method).ToArray());
@@ -890,7 +890,7 @@ public sealed class SignInTests
         var entry = await server.NextEntryAsync(owner, FleetDeviceListOperations.Add, laptop.DeviceId, laptop.PublicKey, FleetDeviceKinds.Controller, pat, setup.Organization.Id);
         var approved = await server.SendAsync(owner, HttpMethod.Post, $"/api/v1/devices/{laptop.DeviceId}/approve", new DeviceListChangeRequest(entry));
         Assert.AreEqual(HttpStatusCode.OK, approved.Status, approved.Body.ToString());
-        await RegisterPasskeyAsync(server, laptop, passkey, server.BaseAddress.GetLeftPart(UriPartial.Authority));
+        await RegisterPasskeyAsync(server, laptop, passkey, server.BaseAddress.GetLeftPart(UriPartial.Authority), await ConfirmWithAsync(server, laptop, FleetSignInMethods.Company));
 
         // The company's account is the organization's: neither Pat nor an admin removes it here (that is deprovisioning the person).
         var mine = (await server.SendAsync(laptop, HttpMethod.Get, "/api/v1/sign-in/logins")).Read<ListResponse<SignInLoginDto>>().Items;
@@ -908,6 +908,191 @@ public sealed class SignInTests
         var removed = await server.SendAsync(owner, HttpMethod.Delete, $"/api/v1/sign-in/logins/{patsKeys.Single(static login => login.Method == FleetSignInMethods.Passkey).Id}?person={pat}");
         Assert.AreEqual(HttpStatusCode.OK, removed.Status, removed.Body.ToString());
         Assert.AreEqual(FleetSignInMethods.Company, (await server.SendAsync(laptop, HttpMethod.Get, "/api/v1/sign-in/logins")).Read<ListResponse<SignInLoginDto>>().Items.Single().Method);
+    }
+
+    [TestMethod]
+    public async Task ThePasskeyPageIsAtTheHttpsAddressATrustedProxyServes_AndOnlyATrustedOne()
+    {
+        // Tailscale Serve or Caddy ends TLS and forwards plain HTTP to the server on the loopback.
+        await using var behind = await ServerFixture.StartAsync(configure: options => new Hosting.CoordinatorServerOptions
+        {
+            DataRoot = options.DataRoot, Urls = options.Urls, TimeProvider = options.TimeProvider, ConfigureLogging = options.ConfigureLogging,
+            EnvironmentVariable = options.EnvironmentVariable, TrustedProxies = ["127.0.0.1", "::1"],
+        });
+        using var laptop = new TestDevice("Laptop");
+        using var owner = new TestDevice("Desktop");
+        using var other = new TestDevice("Other desktop");
+        await behind.SetUpAsync(owner);
+        static void Proxied(HttpRequestMessage message) => message.Headers.Add("X-Forwarded-Proto", "https");
+        var start = await behind.SendAsync(laptop, HttpMethod.Post, "/api/v1/sign-in/start", new StartSignInRequest(FleetSignInMethods.Passkey, laptop.PublicKey, Redirect),
+            tamper: Proxied);
+        Assert.AreEqual(HttpStatusCode.OK, start.Status, start.Body.ToString());
+        StringAssert.StartsWith(start.Read<StartSignInResponse>().AuthorizationUrl, $"https://{behind.BaseAddress.Authority}/sign-in/passkey#");
+
+        // Without a trusted proxy, a caller's header names no scheme.
+        await using var direct = await ServerFixture.StartAsync();
+        await direct.SetUpAsync(other);
+        var told = await direct.SendAsync(laptop, HttpMethod.Post, "/api/v1/sign-in/start", new StartSignInRequest(FleetSignInMethods.Passkey, laptop.PublicKey, Redirect),
+            tamper: Proxied);
+        StringAssert.StartsWith(told.Read<StartSignInResponse>().AuthorizationUrl, $"http://{direct.BaseAddress.Authority}/sign-in/passkey#");
+    }
+
+    [TestMethod]
+    public async Task TheLastWayInCountsWhatSignsInNow_AndRequiringCompanySignInNeedsTheBreakGlassOwnersPasskey()
+    {
+        await using var provider = await FakeOidcProvider.StartAsync();
+        await using var server = await ServerFixture.StartAsync(signIn: Options(provider));
+        using var owner = new TestDevice("Desktop");
+        using var key = new SoftwareAuthenticator();
+        await server.SetUpAsync(owner);
+        var origin = server.BaseAddress.GetLeftPart(UriPartial.Authority);
+        var (link, linkBack) = await StartAsync(server, owner, FleetSignInMethods.Microsoft, FleetSignInPurposes.Link);
+        Assert.AreEqual(HttpStatusCode.OK, (await CompleteAsync(server, owner, link, linkBack)).Status);
+        async Task<ApiAnswer> RequireSsoAsync(string confirmation)
+        {
+            var held = (await server.SendAsync(owner, HttpMethod.Get, "/api/v1/sign-in/settings")).Read<SignInSettingsDto>();
+            return await server.SendAsync(owner, HttpMethod.Put, "/api/v1/sign-in/settings", new SetSignInSettingsRequest(held.Version,
+                [FleetSignInMethods.Company, FleetSignInMethods.Passkey, FleetSignInMethods.Microsoft],
+                new CompanySignInSettings(provider.Issuer.AbsoluteUri, provider.ClientId, held.Company is null ? string.Empty : null, "Contoso", AllowedDomains: ["contoso.example"]),
+                true, Confirmation: confirmation));
+        }
+
+        // Requiring company sign-in needs a passkey of the break-glass owner: their Microsoft account would sign nobody in then.
+        var withoutPasskey = await RequireSsoAsync(await ConfirmWithAsync(server, owner, FleetSignInMethods.Microsoft));
+        Assert.AreEqual((HttpStatusCode.BadRequest, SignInErrorCodes.SettingsInvalid), Answer(withoutPasskey), withoutPasskey.Body.ToString());
+        await RegisterPasskeyAsync(server, owner, key, origin, await ConfirmWithAsync(server, owner, FleetSignInMethods.Microsoft));
+        var required = await RequireSsoAsync(await ConfirmAsync(server, owner, key));
+        Assert.AreEqual(HttpStatusCode.OK, required.Status, required.Body.ToString());
+
+        // The owner has no recovery key: the passkey is their last way in that signs in while company sign-in is required.
+        var logins = (await server.SendAsync(owner, HttpMethod.Get, "/api/v1/sign-in/logins")).Read<ListResponse<SignInLoginDto>>().Items;
+        var passkey = logins.Single(static login => login.Method == FleetSignInMethods.Passkey);
+        var refused = await server.SendAsync(owner, HttpMethod.Delete, $"/api/v1/sign-in/logins/{passkey.Id}");
+        Assert.AreEqual((HttpStatusCode.Conflict, SignInErrorCodes.LastWayIn), Answer(refused), refused.Body.ToString());
+
+        // The Microsoft account, which signs nobody in now, goes.
+        var microsoft = logins.Single(static login => login.Method == FleetSignInMethods.Microsoft);
+        Assert.AreEqual(HttpStatusCode.OK, (await server.SendAsync(owner, HttpMethod.Delete, $"/api/v1/sign-in/logins/{microsoft.Id}")).Status);
+    }
+
+    [TestMethod]
+    public async Task APasskeyIsAddedOnlyAtTheSignedCompletion_AndARevokedDeviceAddsNone()
+    {
+        await using var server = await ServerFixture.StartAsync();
+        using var owner = new TestDevice("Desktop");
+        using var laptop = new TestDevice("Laptop");
+        using var ownerKey = new SoftwareAuthenticator();
+        using var stolen = new SoftwareAuthenticator();
+        var setup = await server.SetUpAsync(owner);
+        var origin = server.BaseAddress.GetLeftPart(UriPartial.Authority);
+        await RegisterPasskeyAsync(server, owner, ownerKey, origin);
+
+        // The owner's laptop, a second controller device of theirs, signed in with the passkey and approved.
+        var start = (await server.SendAsync(laptop, HttpMethod.Post, "/api/v1/sign-in/start", new StartSignInRequest(FleetSignInMethods.Passkey, laptop.PublicKey, Redirect)))
+            .Read<StartSignInResponse>();
+        var grant = (await CompleteAsync(server, laptop, start, await PasskeyCeremonyAsync(server, start, "get", options => ownerKey.Get(options, origin))))
+            .Read<CompleteSignInResponse>().Grant;
+        Assert.AreEqual(HttpStatusCode.Created, (await server.SendAsync(laptop, HttpMethod.Post, "/api/v1/enroll", new EnrollRequest(string.Empty, laptop.PublicKey, laptop.Name, null, grant))).Status);
+        var entry = await server.NextEntryAsync(owner, FleetDeviceListOperations.Add, laptop.DeviceId, laptop.PublicKey, FleetDeviceKinds.Controller, setup.Owner.Id, setup.Organization.Id);
+        Assert.AreEqual(HttpStatusCode.OK, (await server.SendAsync(owner, HttpMethod.Post, $"/api/v1/devices/{laptop.DeviceId}/approve", new DeviceListChangeRequest(entry))).Status);
+
+        // The laptop registers a passkey; its browser ends the ceremony: nothing is added before the laptop's signed completion.
+        var register = (await server.SendAsync(laptop, HttpMethod.Post, "/api/v1/sign-in/start", new StartSignInRequest(FleetSignInMethods.Passkey, laptop.PublicKey, Redirect,
+            FleetSignInPurposes.Link, await ConfirmAsync(server, laptop, ownerKey)))).Read<StartSignInResponse>();
+        var created = await PasskeyCeremonyAsync(server, register, "create", options => stolen.Create(options, origin));
+        Assert.AreEqual(1, (await ((ISignInStore)server.Server.Store).ListPasskeysAsync(setup.Owner.Id)).Count, "the ceremony alone adds nothing");
+
+        // A second registration the laptop started waits for its page.
+        var other = (await server.SendAsync(laptop, HttpMethod.Post, "/api/v1/sign-in/start", new StartSignInRequest(FleetSignInMethods.Passkey, laptop.PublicKey, Redirect,
+            FleetSignInPurposes.Link, await ConfirmAsync(server, laptop, ownerKey)))).Read<StartSignInResponse>();
+
+        // The laptop is revoked meanwhile: its completion adds no passkey, and the attempt that waits is forgotten.
+        var removal = await server.NextEntryAsync(owner, FleetDeviceListOperations.Remove, laptop.DeviceId, null, null, null, setup.Organization.Id);
+        Assert.AreEqual(HttpStatusCode.OK, (await server.SendAsync(owner, HttpMethod.Post, $"/api/v1/devices/{laptop.DeviceId}/revoke", new DeviceListChangeRequest(removal))).Status);
+        var completed = await CompleteAsync(server, laptop, register, created);
+        Assert.AreNotEqual(HttpStatusCode.OK, completed.Status, completed.Body.ToString());
+        Assert.AreEqual(1, (await ((ISignInStore)server.Server.Store).ListPasskeysAsync(setup.Owner.Id)).Count, "a revoked device adds no way in");
+        var page = await server.SendAsync(null, HttpMethod.Post, "/api/v1/sign-in/passkey/options", new PasskeyOptionsRequest(other.AttemptId));
+        Assert.AreEqual(SignInErrorCodes.AttemptInvalid, page.Code, "the page of a revoked device has nothing to finish");
+    }
+
+    [TestMethod]
+    public async Task AConfirmationIsAFreshSignInAtTheProvider_NotTheSessionItKeeps()
+    {
+        await using var provider = await FakeOidcProvider.StartAsync();
+        await using var server = await ServerFixture.StartAsync(signIn: Options(provider));
+        using var owner = new TestDevice("Desktop");
+        await server.SetUpAsync(owner);
+        var (link, linkBack) = await StartAsync(server, owner, FleetSignInMethods.Microsoft, FleetSignInPurposes.Link);
+        Assert.AreEqual(HttpStatusCode.OK, (await CompleteAsync(server, owner, link, linkBack)).Status);
+
+        // The provider is asked to authenticate the person again: an ordinary sign-in lets them choose an account only.
+        var (confirm, back) = await StartAsync(server, owner, FleetSignInMethods.Microsoft, FleetSignInPurposes.Confirm);
+        var asked = provider.Authorizations.Last();
+        Assert.AreEqual(("login", "0"), (asked.GetValueOrDefault("prompt"), asked.GetValueOrDefault("max_age")));
+        Assert.AreEqual(HttpStatusCode.OK, (await CompleteAsync(server, owner, confirm, back)).Status, "signed in again now");
+        using var stranger = new TestDevice("Stranger");
+        await StartAsync(server, stranger, FleetSignInMethods.Microsoft);
+        Assert.AreEqual(("select_account", null), (provider.Authorizations.Last().GetValueOrDefault("prompt"), provider.Authorizations.Last().GetValueOrDefault("max_age")));
+
+        // A provider that answers with the session the browser kept an hour ago confirms nothing.
+        provider.SessionStartedAt = DateTimeOffset.UtcNow - TimeSpan.FromHours(1);
+        provider.IgnoresReauthentication = true;
+        (confirm, back) = await StartAsync(server, owner, FleetSignInMethods.Microsoft, FleetSignInPurposes.Confirm);
+        var stale = await CompleteAsync(server, owner, confirm, back);
+        Assert.AreEqual(SignInErrorCodes.NotFresh, stale.Code, stale.Body.ToString());
+
+        // Nor one that does not say when the person signed in, once max_age was asked.
+        provider.IgnoresReauthentication = false;
+        provider.IssuesAuthTime = false;
+        (confirm, back) = await StartAsync(server, owner, FleetSignInMethods.Microsoft, FleetSignInPurposes.Confirm);
+        Assert.AreEqual(SignInErrorCodes.NotFresh, (await CompleteAsync(server, owner, confirm, back)).Code);
+
+        // An ordinary sign-in on a new device needs no fresh authentication.
+        provider.SessionStartedAt = DateTimeOffset.UtcNow - TimeSpan.FromHours(1);
+        using var laptop = new TestDevice("Laptop");
+        var (enroll, enrollBack) = await StartAsync(server, laptop, FleetSignInMethods.Microsoft);
+        Assert.AreEqual(HttpStatusCode.OK, (await CompleteAsync(server, laptop, enroll, enrollBack)).Status);
+    }
+
+    [TestMethod]
+    public async Task AWayInIsAddedOnlyWithOneThePersonHas_OrAsTheirFirstSoonAfterTheDeviceJoined()
+    {
+        await using var provider = await FakeOidcProvider.StartAsync();
+        await using var server = await ServerFixture.StartAsync(signIn: Options(provider));
+        using var owner = new TestDevice("Desktop");
+        using var key = new SoftwareAuthenticator();
+        await server.SetUpAsync(owner);
+        var origin = server.BaseAddress.GetLeftPart(UriPartial.Authority);
+
+        // The first way in, soon after the setup: the device's signature is enough.
+        await RegisterPasskeyAsync(server, owner, key, origin);
+
+        // Another one is not: a stolen device key would add an account of the thief, then confirm with it.
+        var alone = await server.SendAsync(owner, HttpMethod.Post, "/api/v1/sign-in/start",
+            new StartSignInRequest(FleetSignInMethods.Microsoft, owner.PublicKey, Redirect, FleetSignInPurposes.Link));
+        Assert.AreEqual((HttpStatusCode.Forbidden, SignInErrorCodes.ConfirmationRequired), Answer(alone), alone.Body.ToString());
+        Assert.AreEqual(SignInErrorCodes.ConfirmationRequired, (await server.SendAsync(owner, HttpMethod.Post, "/api/v1/sign-in/start",
+            new StartSignInRequest(FleetSignInMethods.Microsoft, owner.PublicKey, Redirect, FleetSignInPurposes.Link, "asc_guessed"))).Code);
+
+        // With a sign-in of the passkey the person has, from this device, it is linked; that confirmation works once.
+        var confirmation = await ConfirmAsync(server, owner, key);
+        var (link, back) = await StartAsync(server, owner, FleetSignInMethods.Microsoft, FleetSignInPurposes.Link, confirmation);
+        Assert.AreEqual(HttpStatusCode.OK, (await CompleteAsync(server, owner, link, back)).Status);
+        Assert.AreEqual(SignInErrorCodes.ConfirmationRequired, (await server.SendAsync(owner, HttpMethod.Post, "/api/v1/sign-in/start",
+            new StartSignInRequest(FleetSignInMethods.Google, owner.PublicKey, Redirect, FleetSignInPurposes.Link, confirmation))).Code);
+
+        // A person with no way in, on a device that joined long ago: no first way in from its key alone.
+        await using var other = await ServerFixture.StartAsync(signIn: Options(provider));
+        using var old = new TestDevice("Old desktop");
+        await other.SetUpAsync(old);
+        other.Clock.Advance(TimeSpan.FromHours(2));
+        var expired = await other.SendAsync(old, HttpMethod.Post, "/api/v1/sign-in/start",
+            new StartSignInRequest(FleetSignInMethods.Passkey, old.PublicKey, Redirect, FleetSignInPurposes.Link));
+        Assert.AreEqual((HttpStatusCode.Forbidden, SignInErrorCodes.FirstWayInExpired), Answer(expired), expired.Body.ToString());
+
+        var audit = (await server.SendAsync(owner, HttpMethod.Get, "/api/v1/audit?limit=500")).Read<ListResponse<AuditRecordDto>>().Items;
+        Assert.AreEqual(3, audit.Count(static record => record.Action == "sign_in.start" && record.Result == SignInErrorCodes.ConfirmationRequired), "refusals are audited");
     }
 
     internal static SignInOptions Options(FakeOidcProvider provider) => new()
@@ -953,13 +1138,18 @@ public sealed class SignInTests
         return set.Read<SignInSettingsDto>();
     }
 
-    // The owner signs in again from their device with a passkey of theirs (one registered here): the confirmation it gives.
+    // The owner signs in again from their device with a passkey of theirs (the first one this device registered, or one
+    // registered here as their first way in): the confirmation it gives.
     private static async Task<string> ConfirmAsync(ServerFixture server, TestDevice owner, SoftwareAuthenticator? key = null)
     {
         var origin = server.BaseAddress.GetLeftPart(UriPartial.Authority);
-        using var registered = key is null ? new SoftwareAuthenticator() : null;
-        var authenticator = key ?? registered!;
-        if (key is null) await RegisterPasskeyAsync(server, owner, authenticator, origin);
+        var authenticator = key ?? owner.Passkey;
+        if (authenticator is null)
+        {
+            authenticator = new SoftwareAuthenticator();
+            await RegisterPasskeyAsync(server, owner, authenticator, origin);
+        }
+
         var start = (await server.SendAsync(owner, HttpMethod.Post, "/api/v1/sign-in/start",
             new StartSignInRequest(FleetSignInMethods.Passkey, owner.PublicKey, Redirect, FleetSignInPurposes.Confirm))).Read<StartSignInResponse>();
         var back = await PasskeyCeremonyAsync(server, start, "get", options => authenticator.Get(options, origin));
@@ -970,9 +1160,19 @@ public sealed class SignInTests
         return answer.Grant!;
     }
 
-    private static async Task<(StartSignInResponse Start, Uri Back)> StartAsync(ServerFixture server, TestDevice device, string method, string? purpose = null)
+    // The person of a device signs in again with an account linked to them, through the fake provider: the confirmation it gives.
+    private static async Task<string> ConfirmWithAsync(ServerFixture server, TestDevice device, string method)
     {
-        var started = await server.SendAsync(device, HttpMethod.Post, "/api/v1/sign-in/start", new StartSignInRequest(method, device.PublicKey, Redirect, purpose));
+        var (start, back) = await StartAsync(server, device, method, FleetSignInPurposes.Confirm);
+        var confirmed = await CompleteAsync(server, device, start, back);
+        Assert.AreEqual(HttpStatusCode.OK, confirmed.Status, confirmed.Body.ToString());
+        return confirmed.Read<CompleteSignInResponse>().Grant!;
+    }
+
+    private static async Task<(StartSignInResponse Start, Uri Back)> StartAsync(ServerFixture server, TestDevice device, string method, string? purpose = null,
+        string? confirmation = null)
+    {
+        var started = await server.SendAsync(device, HttpMethod.Post, "/api/v1/sign-in/start", new StartSignInRequest(method, device.PublicKey, Redirect, purpose, confirmation));
         Assert.AreEqual(HttpStatusCode.OK, started.Status, started.Body.ToString());
         var start = started.Read<StartSignInResponse>();
         return (start, await FakeOidcProvider.AuthorizeAsync(start.AuthorizationUrl));
@@ -995,12 +1195,18 @@ public sealed class SignInTests
         return back;
     }
 
-    private static async Task RegisterPasskeyAsync(ServerFixture server, TestDevice device, SoftwareAuthenticator authenticator, string origin)
+    // A passkey registered from a device: the person's first way in, or with a sign-in of one they have (the passkey this
+    // device registered first, unless the test gives the confirmation of another method).
+    private static async Task RegisterPasskeyAsync(ServerFixture server, TestDevice device, SoftwareAuthenticator authenticator, string origin, string? confirmation = null)
     {
-        var start = (await server.SendAsync(device, HttpMethod.Post, "/api/v1/sign-in/start",
-            new StartSignInRequest(FleetSignInMethods.Passkey, device.PublicKey, Redirect, FleetSignInPurposes.Link))).Read<StartSignInResponse>();
+        if (confirmation is null && device.Passkey is { } held && held != authenticator) confirmation = await ConfirmAsync(server, device, held);
+        var started = await server.SendAsync(device, HttpMethod.Post, "/api/v1/sign-in/start",
+            new StartSignInRequest(FleetSignInMethods.Passkey, device.PublicKey, Redirect, FleetSignInPurposes.Link, confirmation));
+        Assert.AreEqual(HttpStatusCode.OK, started.Status, started.Body.ToString());
+        var start = started.Read<StartSignInResponse>();
         var back = await PasskeyCeremonyAsync(server, start, "create", options => authenticator.Create(options, origin));
         var linked = await CompleteAsync(server, device, start, back);
         Assert.AreEqual(HttpStatusCode.OK, linked.Status, linked.Body.ToString());
+        device.Passkey ??= authenticator;
     }
 }

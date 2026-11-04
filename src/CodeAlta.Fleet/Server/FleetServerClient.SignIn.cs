@@ -58,10 +58,27 @@ public sealed partial class FleetServerClient
     /// <exception cref="FleetServerException">The server refused: the method is not offered, company sign-in is required, the redirect is not a loopback.</exception>
     /// <exception cref="HttpRequestException">The server does not answer.</exception>
     public Task<StartSignInResponse> StartSignInAsync(string method, string? redirectUri, string purpose, CancellationToken cancellationToken = default)
+        => StartSignInAsync(method, redirectUri, purpose, null, cancellationToken);
+
+    /// <summary>
+    /// Starts a sign-in as <see cref="StartSignInAsync(string, string?, string, CancellationToken)"/> does, with the
+    /// confirmation a link needs: a sign-in of this device's person with a way in they have (<see cref="FleetSignInPurposes.Confirm"/>).
+    /// </summary>
+    /// <param name="method">The method (<see cref="FleetSignInMethods"/>).</param>
+    /// <param name="redirectUri">The loopback address this device listens on; null for a method that uses a device code.</param>
+    /// <param name="purpose">Why (<see cref="FleetSignInPurposes"/>).</param>
+    /// <param name="confirmation">The confirmation, for a link that is not the person's first way in; null otherwise.</param>
+    /// <param name="cancellationToken">Cancels the call.</param>
+    /// <returns>The attempt, the address to open and the state the browser brings back, or the code to enter.</returns>
+    /// <exception cref="ArgumentException">The method is empty, or the redirect is empty for a method that needs one.</exception>
+    /// <exception cref="FleetServerException">The server refused: the method is not offered, a link needs a confirmation, company sign-in is required.</exception>
+    /// <exception cref="HttpRequestException">The server does not answer.</exception>
+    public Task<StartSignInResponse> StartSignInAsync(string method, string? redirectUri, string purpose, string? confirmation, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(method);
         if (!FleetSignInMethods.UsesDeviceCode(method)) ArgumentException.ThrowIfNullOrWhiteSpace(redirectUri);
-        return SendAsync(HttpMethod.Post, "api/v1/sign-in/start", Body(new StartSignInRequest(method, PublicKey, redirectUri, purpose), FleetSignInJsonContext.Default.StartSignInRequest),
+        return SendAsync(HttpMethod.Post, "api/v1/sign-in/start",
+            Body(new StartSignInRequest(method, PublicKey, redirectUri, purpose, confirmation), FleetSignInJsonContext.Default.StartSignInRequest),
             FleetSignInJsonContext.Default.StartSignInResponse, cancellationToken);
     }
 

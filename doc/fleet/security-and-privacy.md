@@ -154,7 +154,8 @@ analysis of Matrix showed a malicious server exploiting exactly that).
   on its loopback only, behind what terminates TLS in front of it (Tailscale Serve, Caddy, a platform), or `https://`
   with a certificate; an `http://` address beyond the loopback is refused at the start unless its owner forces it
   (`--allow-insecure-http`), which the desktop's **Create my server** does only for the unencrypted local network
-  chosen explicitly.
+  chosen explicitly. Those addresses are the only ones: Kestrel's own endpoint settings (environment, `appsettings.json`)
+  are ignored, and what the server listens on once started is checked by the same rule.
 - **A server's own certificate** (`--own-certificate`): without a certificate authority, the server makes a
   self-signed key once, kept sealed with its key ring in the data root and never replaced by itself. Its clients pin
   the SHA-256 of that public key (`sha256:…`, given beside the address as `https://host:port#pin=…`), as devices pin

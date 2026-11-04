@@ -46,9 +46,16 @@ internal sealed partial class FleetServerService
             {
                 if (!FleetServerLinkStore.IsValidId(request.LinkId) || request.Purpose is not (null or FleetSignInPurposes.Link or FleetSignInPurposes.Confirm))
                     return new("invalid_request", null, null);
-                code = request.Purpose == FleetSignInPurposes.Confirm
-                    ? await _servers!.StartConfirmCodeAsync(request.LinkId, request.Method, cancellationToken).ConfigureAwait(false)
-                    : await _servers!.StartLinkCodeAsync(request.LinkId, request.Method, cancellationToken).ConfigureAwait(false);
+                if (request.Purpose == FleetSignInPurposes.Confirm)
+                {
+                    code = await _servers!.StartConfirmCodeAsync(request.LinkId, request.Method, cancellationToken).ConfigureAwait(false);
+                }
+                else
+                {
+                    // A link that is not the person's first way in: they sign in again with one they have first.
+                    var confirmation = await ConfirmForLinkAsync(request.LinkId, request.ConfirmWith, request.ConfirmHandle, cancellationToken).ConfigureAwait(false);
+                    code = await _servers!.StartLinkCodeAsync(request.LinkId, request.Method, confirmation, cancellationToken).ConfigureAwait(false);
+                }
             }
             else
             {
@@ -105,7 +112,10 @@ internal sealed partial class FleetServerService
         if (!FleetServerLinkStore.IsValidId(request!.LinkId) || !FleetSignInMethods.IsKnown(request.Method)) return new("invalid_request", null);
         try
         {
-            await _servers!.LinkSignInAsync(request.LinkId, request.Method, request.Handle, cancellationToken).ConfigureAwait(false);
+            // A method through the browser takes the confirmation here; one with a code took it when its code started.
+            var confirmation = FleetSignInMethods.UsesDeviceCode(request.Method) ? null
+                : await ConfirmForLinkAsync(request.LinkId, request.ConfirmWith, request.ConfirmHandle, cancellationToken).ConfigureAwait(false);
+            await _servers!.LinkSignInAsync(request.LinkId, request.Method, request.Handle, confirmation, cancellationToken).ConfigureAwait(false);
             return new("ok", null);
         }
         catch (DesktopSignInException exception) { return new(exception.Code, exception.Message); }
@@ -215,10 +225,12 @@ internal sealed partial class FleetServerService
     public async Task<FleetServerActionResult> ApproveSignInChangeAsync(FleetSignInApprovalRequest request, CancellationToken cancellationToken)
     {
         if (Refuse(request?.ExpectedEpoch) is { } refused) return new(refused, null);
-        if (!FleetServerLinkStore.IsValidId(request!.LinkId) || request.ApprovalId is not { Length: > 0 and <= 128 }) return new("invalid_request", null);
+        // The digest of the change the page showed: what this computer signs, or nothing.
+        if (!FleetServerLinkStore.IsValidId(request!.LinkId) || request.ApprovalId is not { Length: > 0 and <= 128 } || request.Digest is not { Length: > 0 and <= 128 })
+            return new("invalid_request", null);
         try
         {
-            await _servers!.ApproveSignInChangeAsync(request.LinkId, request.ApprovalId, cancellationToken).ConfigureAwait(false);
+            await _servers!.ApproveSignInChangeAsync(request.LinkId, request.ApprovalId, request.Digest, cancellationToken).ConfigureAwait(false);
             return new("ok", null);
         }
         catch (InvalidOperationException exception) { return new("sign_in.approval_mismatch", exception.Message); }
@@ -228,11 +240,25 @@ internal sealed partial class FleetServerService
     // The way of confirming a change of the company sign-in by an approval on another computer of the person.
     private const string ConfirmOnDevice = "device";
 
-    // A change to approve as the page shows it: what it sets, never the client secret (only whether it changes).
+    // The person signs in again with a way in they have before linking another one: its confirmation, or null for none asked.
+    private async Task<string?> ConfirmForLinkAsync(string linkId, string? confirmWith, string? confirmHandle, CancellationToken cancellationToken)
+    {
+        if (confirmWith is null) return null;
+        if (!FleetSignInMethods.IsKnown(confirmWith)) throw new DesktopSignInException("invalid_request", "The way to sign in again is not a sign-in method.");
+        return await _servers!.ConfirmSignInAsync(linkId, confirmWith, confirmHandle, cancellationToken).ConfigureAwait(false);
+    }
+
+    // A change to approve as the page shows it: every field that decides who signs in, never the client secret (only whether
+    // it changes), and the digest this computer computed of exactly that, which the page sends back to approve it.
     private static FleetSignInApprovalView ApprovalView(SignInApprovalDto approval)
-        => new(approval.Id, approval.RequesterName ?? approval.RequesterDeviceId, approval.Change.Issuer, approval.Change.ClientId, approval.Change.ClientSecretSha256 is not null,
-            [.. approval.Change.AllowedDomains ?? []], [.. approval.Change.AllowedTenants ?? []], approval.Change.RequireSso, [.. approval.Change.EnabledMethods],
-            Time(approval.ExpiresAt));
+    {
+        var change = approval.Change;
+        return new(approval.Id, approval.RequesterName ?? approval.RequesterDeviceId, change.Issuer, change.ClientId, change.ClientSecretSha256 is not null,
+            [.. change.AllowedDomains ?? []], [.. change.AllowedTenants ?? []], change.RequireSso, [.. change.EnabledMethods], Time(approval.ExpiresAt),
+            FleetSignInApprovals.Digest(change), change.DisplayName, change.GroupsClaim,
+            change.GroupRoles is { } roles ? [.. roles.Select(static role => new FleetSignInGroupRoleView(role.Group, role.Role))] : null,
+            change.ClientSecretSha256 is { Length: 0 }, change.BreakGlassPersonId, !change.EnabledMethods.Contains(FleetSignInMethods.Company));
+    }
 
     /// <summary>The sign-in settings as the page shows them: never the client secret, only whether one is set.</summary>
     /// <param name="settings">The settings as the server gives them.</param>
@@ -287,7 +313,10 @@ internal sealed record FleetSignInJoinResult(string Status, FleetServerView? Ser
 /// <param name="Url">The address of the server to join; null for a link.</param>
 /// <param name="LinkId">The link whose person links the account; null to join.</param>
 /// <param name="Purpose"><c>confirm</c> for a sign-in that confirms a change of the settings; null to link (with a link) or join.</param>
-internal sealed record FleetSignInCodeRequest(string ExpectedEpoch, string Method, string? Url, string? LinkId, string? Purpose = null);
+/// <param name="ConfirmWith">For a link, the method the person signs in again with first (one they have); null for their first way in.</param>
+/// <param name="ConfirmHandle">The handle of the <c>confirm</c> code of <paramref name="ConfirmWith"/>, for GitHub; null otherwise.</param>
+internal sealed record FleetSignInCodeRequest(string ExpectedEpoch, string Method, string? Url, string? LinkId, string? Purpose = null, string? ConfirmWith = null,
+    string? ConfirmHandle = null);
 
 /// <summary>The code a person enters at the provider to finish a sign-in (GitHub).</summary>
 /// <param name="Handle">What <c>joinWithSignIn</c>, <c>linkSignIn</c> and <c>openSignInPage</c> name it by.</param>
@@ -312,7 +341,9 @@ internal sealed record FleetSignInPageRequest(string ExpectedEpoch, string Handl
 /// <param name="LinkId">The id of the link.</param>
 /// <param name="Method">The method; <c>passkey</c> registers a passkey.</param>
 /// <param name="Handle">The handle of <c>startSignInCode</c>, for GitHub; null otherwise.</param>
-internal sealed record FleetSignInLinkRequest(string ExpectedEpoch, string LinkId, string Method, string? Handle = null);
+/// <param name="ConfirmWith">The method the person signs in again with first (one they have), for a method through the browser; null for their first way in.</param>
+/// <param name="ConfirmHandle">The handle of the <c>confirm</c> code of <paramref name="ConfirmWith"/>, for GitHub; null otherwise.</param>
+internal sealed record FleetSignInLinkRequest(string ExpectedEpoch, string LinkId, string Method, string? Handle = null, string? ConfirmWith = null, string? ConfirmHandle = null);
 
 /// <summary>A method of the organization as an owner sees it.</summary>
 /// <param name="Id">The method.</param>
@@ -376,14 +407,23 @@ internal sealed record FleetSignInSettingsResult(string Status, FleetSignInSetti
 /// <param name="RequireSso">Whether it requires company sign-in.</param>
 /// <param name="Enabled">The methods it enables.</param>
 /// <param name="ExpiresAt">When it stops waiting.</param>
+/// <param name="Digest">The digest this computer computed of the change shown, which <c>approveSignInChange</c> names.</param>
+/// <param name="DisplayName">The name of the company's provider it sets, or null.</param>
+/// <param name="GroupsClaim">The claim of the groups it sets, or null for <c>groups</c>.</param>
+/// <param name="GroupRoles">The roles the groups give that it sets; null keeps the ones set, empty removes them.</param>
+/// <param name="SecretRemoved">Whether it removes the client secret.</param>
+/// <param name="BreakGlassPersonId">The break-glass owner it names; null for the person of the computer that asks (yours).</param>
+/// <param name="CompanyOff">Whether company sign-in is off after it.</param>
 internal sealed record FleetSignInApprovalView(string Id, string RequestedBy, string? Issuer, string? ClientId, bool SecretChanges, string[] AllowedDomains, string[] AllowedTenants,
-    bool RequireSso, string[] Enabled, string ExpiresAt);
+    bool RequireSso, string[] Enabled, string ExpiresAt, string Digest, string? DisplayName, string? GroupsClaim, FleetSignInGroupRoleView[]? GroupRoles, bool SecretRemoved,
+    string? BreakGlassPersonId, bool CompanyOff);
 
 /// <summary>A change to approve from this computer.</summary>
 /// <param name="ExpectedEpoch">The host epoch the page knows.</param>
 /// <param name="LinkId">The link of the server.</param>
 /// <param name="ApprovalId">The approval.</param>
-internal sealed record FleetSignInApprovalRequest(string ExpectedEpoch, string LinkId, string ApprovalId);
+/// <param name="Digest">The digest of the change the page showed (<see cref="FleetSignInApprovalView.Digest"/>): this computer signs that change or nothing.</param>
+internal sealed record FleetSignInApprovalRequest(string ExpectedEpoch, string LinkId, string ApprovalId, string Digest);
 
 /// <summary>A change of how people sign in to an organization.</summary>
 /// <param name="ExpectedEpoch">The host epoch the page knows.</param>

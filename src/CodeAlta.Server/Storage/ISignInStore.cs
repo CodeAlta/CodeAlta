@@ -46,7 +46,37 @@ public enum LoginLinkOutcome
 
     /// <summary>It is linked to another person.</summary>
     LinkedElsewhere,
+
+    /// <summary>The device that adds it is no longer an approved controller device of the person, or the person no longer acts.</summary>
+    DeviceNotApproved,
+
+    /// <summary>It was to be the first way in of the person, who has one now.</summary>
+    NotFirst,
 }
+
+/// <summary>What happened to the addition of a passkey to a person.</summary>
+public enum PasskeyAddOutcome
+{
+    /// <summary>It was added.</summary>
+    Added,
+
+    /// <summary>The credential is registered already.</summary>
+    Exists,
+
+    /// <summary>The device that adds it is no longer an approved controller device of the person, or the person no longer acts.</summary>
+    DeviceNotApproved,
+
+    /// <summary>It was to be the first way in of the person, who has one now.</summary>
+    NotFirst,
+}
+
+/// <summary>
+/// Who adds a way to sign in to a person, checked in the same write as the addition: the device must still be an approved
+/// controller device of that person, the person must act, and a first way in must still be the first.
+/// </summary>
+/// <param name="DeviceId">The device that adds it.</param>
+/// <param name="FirstWayIn">Whether it is the person's first way in, added without a confirmation.</param>
+public sealed record WayInAddition(string DeviceId, bool FirstWayIn);
 
 /// <summary>What happened to the removal of a way to sign in.</summary>
 public enum LoginRemovalOutcome
@@ -59,6 +89,35 @@ public enum LoginRemovalOutcome
 
     /// <summary>It is the last way in of the person, which the caller asked to keep.</summary>
     LastWayIn,
+
+    /// <summary>The sign-in settings changed since the caller read them: what signs in may have changed too.</summary>
+    SettingsChanged,
+
+    /// <summary>It is the last passkey of the break-glass owner while company sign-in is required.</summary>
+    BreakGlassPasskey,
+}
+
+/// <summary>
+/// What a removal of a way to sign in keeps, checked in the same write against the settings it was computed from: the
+/// ways in that sign a new device in under those settings, not every one stored.
+/// </summary>
+/// <param name="SettingsVersion">The version of the sign-in settings the rule was computed from (0 for the defaults).</param>
+/// <param name="UsableMethods">The methods that sign the person in under them (company sign-in required leaves fewer).</param>
+/// <param name="KeepOwnersLastWayIn">Whether the person is an owner, who keeps a usable way in unless they have a recovery key.</param>
+/// <param name="KeepBreakGlassPasskey">Whether the person is the break-glass owner while company sign-in is required, who keeps a passkey.</param>
+public sealed record WayInRemoval(long SettingsVersion, IReadOnlyCollection<string> UsableMethods, bool KeepOwnersLastWayIn, bool KeepBreakGlassPasskey);
+
+/// <summary>What happened to a change of the sign-in settings.</summary>
+public enum SignInSettingsWriteOutcome
+{
+    /// <summary>They were set.</summary>
+    Set,
+
+    /// <summary>The version moved on.</summary>
+    VersionMoved,
+
+    /// <summary>Company sign-in is required, and its break-glass owner has no passkey.</summary>
+    BreakGlassWithoutPasskey,
 }
 
 /// <summary>
@@ -79,6 +138,18 @@ public interface ISignInStore
     /// <param name="cancellationToken">Cancels the write.</param>
     /// <returns>Whether they were set; false when the version moved on.</returns>
     ValueTask<bool> SetSignInSettingsAsync(SignInSettingsRecord settings, AuditEntry audit, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Sets the sign-in settings, when the version held is the one before and, while company sign-in is required, its
+    /// break-glass owner has a passkey, in the same write.
+    /// </summary>
+    /// <param name="settings">The settings, numbered after the ones held (1 for the first).</param>
+    /// <param name="breakGlassPersonId">The break-glass owner while company sign-in is required; null otherwise.</param>
+    /// <param name="audit">The audit event.</param>
+    /// <param name="cancellationToken">Cancels the write.</param>
+    /// <returns>What happened.</returns>
+    ValueTask<SignInSettingsWriteOutcome> SetSignInSettingsAsync(SignInSettingsRecord settings, string? breakGlassPersonId, AuditEntry audit,
+        CancellationToken cancellationToken = default);
 
     /// <summary>Finds a linked account by its issuer and subject.</summary>
     /// <param name="organizationId">The organization.</param>
@@ -101,21 +172,29 @@ public interface ISignInStore
     /// <returns>What happened.</returns>
     ValueTask<LoginLinkOutcome> LinkLoginAsync(LoginRecord login, AuditEntry audit, CancellationToken cancellationToken = default);
 
-    /// <summary>Removes an account linked to a person: it signs nobody in afterwards.</summary>
+    /// <summary>Links an account to a person from one of their devices, checked in the same write (<see cref="WayInAddition"/>).</summary>
     /// <param name="login">The login.</param>
-    /// <param name="keepLastWayIn">Whether to refuse when it is the last account or passkey of its person, checked in the same write.</param>
+    /// <param name="addition">The device that links it, and whether it is the person's first way in.</param>
     /// <param name="audit">The audit event.</param>
     /// <param name="cancellationToken">Cancels the write.</param>
     /// <returns>What happened.</returns>
-    ValueTask<LoginRemovalOutcome> RemoveLoginAsync(LoginRecord login, bool keepLastWayIn, AuditEntry audit, CancellationToken cancellationToken = default);
+    ValueTask<LoginLinkOutcome> LinkLoginAsync(LoginRecord login, WayInAddition addition, AuditEntry audit, CancellationToken cancellationToken = default);
+
+    /// <summary>Removes an account linked to a person: it signs nobody in afterwards.</summary>
+    /// <param name="login">The login.</param>
+    /// <param name="rule">What the removal keeps, checked in the same write.</param>
+    /// <param name="audit">The audit event.</param>
+    /// <param name="cancellationToken">Cancels the write.</param>
+    /// <returns>What happened.</returns>
+    ValueTask<LoginRemovalOutcome> RemoveLoginAsync(LoginRecord login, WayInRemoval rule, AuditEntry audit, CancellationToken cancellationToken = default);
 
     /// <summary>Removes a passkey of a person: it signs nobody in afterwards.</summary>
     /// <param name="passkey">The passkey.</param>
-    /// <param name="keepLastWayIn">Whether to refuse when it is the last account or passkey of its person, checked in the same write.</param>
+    /// <param name="rule">What the removal keeps, checked in the same write.</param>
     /// <param name="audit">The audit event.</param>
     /// <param name="cancellationToken">Cancels the write.</param>
     /// <returns>What happened.</returns>
-    ValueTask<LoginRemovalOutcome> RemovePasskeyAsync(PasskeyRecord passkey, bool keepLastWayIn, AuditEntry audit, CancellationToken cancellationToken = default);
+    ValueTask<LoginRemovalOutcome> RemovePasskeyAsync(PasskeyRecord passkey, WayInRemoval rule, AuditEntry audit, CancellationToken cancellationToken = default);
 
     /// <summary>Records a sign-in of a linked account: its email, name and groups as the provider gave them now.</summary>
     /// <param name="login">The login as it is now.</param>
@@ -137,6 +216,14 @@ public interface ISignInStore
     /// <param name="cancellationToken">Cancels the write.</param>
     /// <returns>Whether it was added; false when the credential exists.</returns>
     ValueTask<bool> AddPasskeyAsync(PasskeyRecord passkey, AuditEntry audit, CancellationToken cancellationToken = default);
+
+    /// <summary>Adds a passkey to a person from one of their devices, checked in the same write (<see cref="WayInAddition"/>).</summary>
+    /// <param name="passkey">The passkey.</param>
+    /// <param name="addition">The device that registers it, and whether it is the person's first way in.</param>
+    /// <param name="audit">The audit event.</param>
+    /// <param name="cancellationToken">Cancels the write.</param>
+    /// <returns>What happened.</returns>
+    ValueTask<PasskeyAddOutcome> AddPasskeyAsync(PasskeyRecord passkey, WayInAddition addition, AuditEntry audit, CancellationToken cancellationToken = default);
 
     /// <summary>Finds a passkey by its credential id.</summary>
     /// <param name="credentialId">The credential id, base64url.</param>

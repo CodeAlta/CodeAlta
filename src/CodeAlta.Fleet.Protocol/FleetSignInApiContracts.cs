@@ -88,7 +88,11 @@ public sealed record SignInMethodsResponse(string? Organization, IReadOnlyList<S
 /// that uses a device code.
 /// </param>
 /// <param name="Purpose">Why (<see cref="FleetSignInPurposes"/>); <see cref="FleetSignInPurposes.Enroll"/> when absent.</param>
-public sealed record StartSignInRequest(string Method, string PublicKey, string? RedirectUri, string? Purpose = null);
+/// <param name="Confirmation">
+/// For a link: the confirmation of a sign-in of the person with a way in they already have (<see cref="FleetSignInPurposes.Confirm"/>),
+/// from the same device, used once. A link needs it unless it is the person's first way in, linked soon after the device joined.
+/// </param>
+public sealed record StartSignInRequest(string Method, string PublicKey, string? RedirectUri, string? Purpose = null, string? Confirmation = null);
 
 /// <summary>A sign-in that started.</summary>
 /// <param name="AttemptId">The attempt, which only its device completes.</param>

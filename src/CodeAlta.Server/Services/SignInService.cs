@@ -131,6 +131,9 @@ public sealed class SignInService : IDisposable
     /// <summary>Gets the access control that applies the role the groups give, or null where nothing applies it.</summary>
     internal AccessService? Access { get; init; }
 
+    /// <summary>Gets the reverse proxies the server trusts, whose forwarded scheme names the address of its passkey page; null for none.</summary>
+    internal Hosting.TrustedProxies? Proxies { get; init; }
+
     /// <summary>Lists the methods a person may sign in with now; needs no device.</summary>
     /// <param name="cancellationToken">Cancels the read.</param>
     /// <returns>The methods.</returns>
@@ -223,6 +226,9 @@ public sealed class SignInService : IDisposable
             var keeper = breakGlass is null ? null : await _store.GetPersonAsync(breakGlass, cancellationToken).ConfigureAwait(false);
             if (keeper is null || keeper.OrganizationId != actor.OrganizationId || keeper.Role != PersonRoles.Owner)
                 throw Invalid("The break-glass person must be an owner of the organization.");
+            // Their way in is a passkey: without one, company sign-in required would leave the organization to its provider.
+            if ((await _signIn.ListPasskeysAsync(keeper.Id, cancellationToken).ConfigureAwait(false)).Count == 0)
+                throw Invalid("The break-glass owner needs a passkey before company sign-in is required: add one in Link….");
             // The break-glass owner keeps the way in that company sign-in replaces: a passkey.
             if (!enabled.Contains(FleetSignInMethods.Passkey)) enabled = [.. enabled, FleetSignInMethods.Passkey];
         }
@@ -239,9 +245,14 @@ public sealed class SignInService : IDisposable
             held.Version + 1, _time.GetUtcNow());
         var details = JsonSerializer.Serialize(new SignInSettingsAudit(enabled, company?.Issuer, request.RequireSso, company?.AllowedDomains, company?.AllowedTenants),
             SignInSettingsJsonContext.Default.SignInSettingsAudit);
-        if (!await _signIn.SetSignInSettingsAsync(record, origin.Audit("sign_in.settings.set", actor, actor.OrganizationId, details: details), cancellationToken)
-                .ConfigureAwait(false))
-            throw CoordinatorException.Conflict(SignInErrorCodes.SettingsInvalid, "The sign-in settings changed meanwhile: read them again.");
+        switch (await _signIn.SetSignInSettingsAsync(record, document.BreakGlassPersonId, origin.Audit("sign_in.settings.set", actor, actor.OrganizationId, details: details),
+                    cancellationToken).ConfigureAwait(false))
+        {
+            case SignInSettingsWriteOutcome.VersionMoved:
+                throw CoordinatorException.Conflict(SignInErrorCodes.SettingsInvalid, "The sign-in settings changed meanwhile: read them again.");
+            case SignInSettingsWriteOutcome.BreakGlassWithoutPasskey:
+                throw Invalid("The break-glass owner needs a passkey before company sign-in is required: add one in Link….");
+        }
         return ToDto(new HeldSettings(document, secret, record.Version, record.UpdatedAt));
     }
 
@@ -270,6 +281,7 @@ public sealed class SignInService : IDisposable
             ?? throw CoordinatorException.NotFound(CoordinatorErrorCodes.NotSetUp, "The server is not set up.");
 
         string? linking = null;
+        var firstWayIn = false;
         if (purpose is FleetSignInPurposes.Link or FleetSignInPurposes.Confirm)
         {
             // A link or a confirmation is made by a person on one of their approved controller devices, never by a device the server does not know.
@@ -277,6 +289,7 @@ public sealed class SignInService : IDisposable
             if (actor.Id != key.DeviceId || actor.Kind != FleetDeviceKinds.Controller || actor.OwnerPersonId is null)
                 throw CoordinatorException.Forbidden(FleetErrorCodes.Forbidden, "A sign-in method is linked from an approved controller device of its person.");
             linking = actor.OwnerPersonId;
+            if (purpose == FleetSignInPurposes.Link) firstWayIn = await RequireLinkAuthorityAsync(actor, request.Confirmation, origin, cancellationToken).ConfigureAwait(false);
         }
         else
         {
@@ -298,7 +311,11 @@ public sealed class SignInService : IDisposable
         {
             if (request.Method == FleetSignInMethods.Passkey)
             {
-                url = new Uri($"{context.Request.Scheme}://{context.Request.Host}{context.Request.PathBase}/sign-in/passkey#{Uri.EscapeDataString(id)}");
+                // Behind a proxy that ends TLS (Tailscale Serve, Caddy), the browser reaches the page at https://, which only a
+                // trusted proxy says; the passkey ceremony needs that secure origin.
+                var scheme = Proxies is { Any: true } proxies ? proxies.SchemeOf(context.Connection.RemoteIpAddress, context.Request.Headers, context.Request.Scheme)
+                    : context.Request.Scheme;
+                url = new Uri($"{scheme}://{context.Request.Host}{context.Request.PathBase}/sign-in/passkey#{Uri.EscapeDataString(id)}");
             }
             else if (deviceFlow)
             {
@@ -308,8 +325,9 @@ public sealed class SignInService : IDisposable
             }
             else
             {
+                // A confirmation is a fresh sign-in at the provider, never the session the browser keeps there.
                 url = await _external.BuildAuthorizationUrlAsync(Provider(request.Method, settings.Document.Company, settings.Secret)!, redirect, state, nonce,
-                    SignInAttempts.Challenge(verifier), cancellationToken).ConfigureAwait(false);
+                    SignInAttempts.Challenge(verifier), purpose == FleetSignInPurposes.Confirm, cancellationToken).ConfigureAwait(false);
             }
         }
         catch (ExternalSignInException exception)
@@ -320,9 +338,9 @@ public sealed class SignInService : IDisposable
         var attempt = new SignInAttempt
         {
             Id = id, OrganizationId = organization.Id, Method = request.Method, Purpose = purpose, DeviceId = key.DeviceId, PublicKey = key.Text,
-            LinkingPersonId = linking,
+            LinkingPersonId = linking, FirstWayIn = firstWayIn,
             RedirectUri = redirect, State = state, Nonce = nonce, CodeVerifier = verifier,
-            ExpiresAt = now + lifetime,
+            ExpiresAt = now + lifetime, StartedAt = now,
             DeviceCode = device?.DeviceCode, PollInterval = device?.Interval ?? 5,
             // GitHub's interval is the time between two requests for a token, the first one included.
             NextPollAt = now + TimeSpan.FromSeconds(device?.Interval ?? 0),
@@ -383,6 +401,7 @@ public sealed class SignInService : IDisposable
                     .ConfigureAwait(false);
             person = await _store.GetPersonAsync(attempt.PasskeyPersonId, cancellationToken).ConfigureAwait(false)
                 ?? throw new InvalidOperationException("A passkey without its person.");
+            if (attempt.Purpose == FleetSignInPurposes.Link) await AddPendingPasskeyAsync(attempt, person, origin, signed.DeviceId, cancellationToken).ConfigureAwait(false);
         }
         else
         {
@@ -390,7 +409,7 @@ public sealed class SignInService : IDisposable
             try
             {
                 identity = await _external.RedeemAsync(Provider(attempt.Method, settings.Document.Company, settings.Secret)!, request.Code, attempt.RedirectUri, attempt.CodeVerifier,
-                    attempt.Nonce, cancellationToken).ConfigureAwait(false);
+                    attempt.Nonce, attempt.Purpose == FleetSignInPurposes.Confirm ? attempt.StartedAt : null, cancellationToken).ConfigureAwait(false);
             }
             catch (ExternalSignInException exception)
             {
@@ -458,6 +477,37 @@ public sealed class SignInService : IDisposable
         return new PollSignInResponse(false, result.Interval, await FinishAsync(attempt, settings, person, login, origin, signed.DeviceId, cancellationToken).ConfigureAwait(false));
     }
 
+    // A new way to sign in becomes a factor of its own (a later confirmation, a new device): the device key alone, which a
+    // thief may hold, does not add one. A person who has a way in proves it again first, from this device; a person who has
+    // none links their first one soon after the device joined, when its key was just proved by the setup code or by another
+    // device. Returns whether the link is of the first way in, which its completion checks again.
+    private async Task<bool> RequireLinkAuthorityAsync(DeviceRecord actor, string? confirmation, RequestOrigin origin, CancellationToken cancellationToken)
+    {
+        var person = actor.OwnerPersonId!;
+        if (await HasWayInAsync(person, cancellationToken).ConfigureAwait(false))
+        {
+            if (_attempts.TakeConfirmation(confirmation, actor.Id) is { } confirmed && confirmed.PersonId == person && confirmed.OrganizationId == actor.OrganizationId)
+                return false;
+            throw await RefuseStartAsync(origin, actor, SignInErrorCodes.ConfirmationRequired,
+                "Adding a way to sign in needs you to sign in again with one you have, from this device.", cancellationToken).ConfigureAwait(false);
+        }
+
+        if (actor.ApprovedAt is { } approved && _time.GetUtcNow() - approved <= _options.FirstWayInWindow) return true;
+        throw await RefuseStartAsync(origin, actor, SignInErrorCodes.FirstWayInExpired,
+            "A first way to sign in is linked soon after this device joined the server: link it from a device of yours that just joined.", cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task<bool> HasWayInAsync(string personId, CancellationToken cancellationToken)
+        => (await _signIn.ListLoginsAsync(personId, cancellationToken).ConfigureAwait(false)).Count > 0
+            || (await _signIn.ListPasskeysAsync(personId, cancellationToken).ConfigureAwait(false)).Count > 0;
+
+    private async Task<CoordinatorException> RefuseStartAsync(RequestOrigin origin, DeviceRecord actor, string code, string message, CancellationToken _)
+    {
+        await _store.AppendAuditAsync(new AuditEntry("sign_in.start", code, actor.OwnerPersonId, actor.Id, FleetSignInPurposes.Link, origin.SourceAddress, origin.RequestId),
+            CancellationToken.None).ConfigureAwait(false);
+        return CoordinatorException.Forbidden(code, message);
+    }
+
     // Only the key that started an attempt completes it: a new device is not in the table yet, so its key is the attempt's;
     // and a link completes only from a device that is still an approved controller of its person.
     private async Task RequireStartingDeviceAsync(SignInAttempt pending, SignedRequestData signed, CancellationToken cancellationToken)
@@ -470,6 +520,30 @@ public sealed class SignInService : IDisposable
             throw CoordinatorException.Forbidden(FleetErrorCodes.Forbidden, "A sign-in method is linked from an approved controller device of its person.");
         }
     }
+
+    // The passkey the page registered becomes a way in now, by the signed completion of the device that started it, and
+    // only if that device is still an approved controller of the acting person, in the same write.
+    private async Task AddPendingPasskeyAsync(SignInAttempt attempt, PersonRecord person, RequestOrigin origin, string deviceId, CancellationToken cancellationToken)
+    {
+        if (attempt.PendingPasskey is not { } passkey || passkey.PersonId != person.Id)
+            throw await RefuseAsync(origin, deviceId, attempt.Method, SignInErrorCodes.PasskeyInvalid, "The passkey sign-in did not finish.", cancellationToken).ConfigureAwait(false);
+        var outcome = await _signIn.AddPasskeyAsync(passkey, new WayInAddition(attempt.DeviceId, attempt.FirstWayIn),
+            new AuditEntry("passkey.add", AuditEntry.Success, person.Id, attempt.DeviceId, person.Id, origin.SourceAddress, origin.RequestId), cancellationToken).ConfigureAwait(false);
+        if (outcome != PasskeyAddOutcome.Added) throw await AdditionRefusedAsync(outcome == PasskeyAddOutcome.Exists ? null : outcome == PasskeyAddOutcome.NotFirst, origin, deviceId,
+            attempt.Method, person.Id, cancellationToken).ConfigureAwait(false);
+    }
+
+    // A way in that was not added: a passkey registered already (null), the device no longer approved (false), or a first
+    // way in another one came before (true).
+    private async Task<CoordinatorException> AdditionRefusedAsync(bool? notFirst, RequestOrigin origin, string deviceId, string method, string personId,
+        CancellationToken cancellationToken) => notFirst switch
+    {
+        null => await RefuseAsync(origin, deviceId, method, SignInErrorCodes.PasskeyInvalid, "This passkey is registered already.", cancellationToken, personId).ConfigureAwait(false),
+        true => await RefuseAsync(origin, deviceId, method, SignInErrorCodes.ConfirmationRequired,
+            "Adding a way to sign in needs you to sign in again with one you have, from this device.", cancellationToken, personId).ConfigureAwait(false),
+        false => await RefuseAsync(origin, deviceId, method, FleetErrorCodes.Forbidden, "A sign-in method is linked from an approved controller device of its person.",
+            cancellationToken, personId).ConfigureAwait(false),
+    };
 
     // What every sign-in that proved a person ends with: the company sign-in rule, the groups, the audit, and the grant of an enrollment.
     private async Task<CompleteSignInResponse> FinishAsync(SignInAttempt attempt, HeldSettings settings, PersonRecord person, LoginRecord? login, RequestOrigin origin,
@@ -559,8 +633,9 @@ public sealed class SignInService : IDisposable
             {
                 var person = await _store.GetPersonAsync(attempt.LinkingPersonId!, context.RequestAborted).ConfigureAwait(false)
                     ?? throw new InvalidOperationException("A link without its person.");
-                await _passkeys.CompleteRegistrationAsync(person, request.CredentialJson, state, context,
-                    new AuditEntry("passkey.add", AuditEntry.Success, person.Id, attempt.DeviceId, person.Id, origin.SourceAddress, origin.RequestId)).ConfigureAwait(false);
+                // Verified here, added only by the signed completion of the device (CompleteAsync): the page proves the
+                // authenticator, never that the device may still add a way in.
+                attempt.PendingPasskey = await _passkeys.VerifyRegistrationAsync(person, request.CredentialJson, state, context).ConfigureAwait(false);
                 attempt.PasskeyPersonId = person.Id;
             }
             else
@@ -630,22 +705,39 @@ public sealed class SignInService : IDisposable
             throw CoordinatorException.Forbidden(SignInErrorCodes.ManagedByOrganization,
                 "A company account is managed by your organization: an admin removes the person in People and access.");
 
-        // An owner keeps a way in while nothing else lets them back in when every device is lost.
-        var keepLast = person.Role == PersonRoles.Owner && !(await _store.ListDevicesAsync(person.OrganizationId, cancellationToken).ConfigureAwait(false))
-            .Any(device => device.Kind == FleetDeviceKinds.Recovery && device.Status == DeviceStatuses.Approved && device.OwnerPersonId == person.Id);
+        // An owner keeps a way in that signs them in under the settings now while nothing else lets them back in when every
+        // device is lost, and the break-glass owner a passkey while company sign-in is required: checked in the write,
+        // against the settings it was judged by, read again when they moved on meanwhile.
         var method = login?.Method ?? FleetSignInMethods.Passkey;
         var audit = origin.Audit("sign_in.login.remove", actor, person.Id, details: $"{{\"method\":\"{method}\"}}");
-        var outcome = login is not null
-            ? await _signIn.RemoveLoginAsync(login, keepLast, audit, cancellationToken).ConfigureAwait(false)
-            : await _signIn.RemovePasskeyAsync(passkey!, keepLast, audit, cancellationToken).ConfigureAwait(false);
+        var outcome = LoginRemovalOutcome.SettingsChanged;
+        for (var tries = 0; tries < 3 && outcome == LoginRemovalOutcome.SettingsChanged; tries++)
+        {
+            var settings = await ReadSettingsAsync(person.OrganizationId, cancellationToken).ConfigureAwait(false);
+            var rule = new WayInRemoval(settings.Version, UsableMethods(settings.Document, person.Id), person.Role == PersonRoles.Owner,
+                settings.Document.RequireSso && settings.Document.BreakGlassPersonId == person.Id);
+            outcome = login is not null
+                ? await _signIn.RemoveLoginAsync(login, rule, audit, cancellationToken).ConfigureAwait(false)
+                : await _signIn.RemovePasskeyAsync(passkey!, rule, audit, cancellationToken).ConfigureAwait(false);
+        }
+
         return outcome switch
         {
             LoginRemovalOutcome.Removed => await LoginsOfAsync(person, cancellationToken).ConfigureAwait(false),
             LoginRemovalOutcome.LastWayIn => throw CoordinatorException.Conflict(SignInErrorCodes.LastWayIn,
-                "This is the last way this owner signs in, and they have no recovery key: make the recovery key first, or link another way to sign in."),
+                "This is the last way this owner signs in now, and they have no recovery key: make the recovery key first, or link another way to sign in."),
+            LoginRemovalOutcome.BreakGlassPasskey => throw CoordinatorException.Conflict(SignInErrorCodes.LastWayIn,
+                "This is the break-glass owner's last passkey while company sign-in is required: add another passkey first."),
+            LoginRemovalOutcome.SettingsChanged => throw CoordinatorException.Conflict(SignInErrorCodes.SettingsInvalid, "The sign-in settings keep changing: try again."),
             _ => throw CoordinatorException.NotFound(SignInErrorCodes.LoginNotFound, "No way to sign in of this person has this id."),
         };
     }
+
+    // The methods that sign a person in on a new device under the settings: the enabled and available ones, and, while
+    // company sign-in is required, company sign-in, with the passkeys of the break-glass owner.
+    private IReadOnlyCollection<string> UsableMethods(SignInSettingsDocument document, string personId)
+        => [.. Describe(document).Where(static method => method.Enabled && method.Available).Select(static method => method.Id)
+            .Where(method => !document.RequireSso || method == FleetSignInMethods.Company || method == FleetSignInMethods.Passkey && personId == document.BreakGlassPersonId)];
 
     // The person whose ways in a call reads or removes: the calling device's own, or another of the organization for a
     // device whose person manages the people (an owner, an admin).
@@ -701,8 +793,11 @@ public sealed class SignInService : IDisposable
         {
             var person = await _store.GetPersonAsync(attempt.LinkingPersonId!, cancellationToken).ConfigureAwait(false) ?? throw new InvalidOperationException("A link without its person.");
             var login = new LoginRecord(attempt.OrganizationId, person.Id, attempt.Method, identity.Issuer, identity.Subject, identity.Email, name, groups, now, now);
-            var outcome = await _signIn.LinkLoginAsync(login, new AuditEntry("sign_in.link", AuditEntry.Success, person.Id, deviceId, attempt.Method, origin.SourceAddress,
-                origin.RequestId), cancellationToken).ConfigureAwait(false);
+            // The device is still an approved controller of the acting person, and a first way in still the first, in the same write.
+            var outcome = await _signIn.LinkLoginAsync(login, new WayInAddition(attempt.DeviceId, attempt.FirstWayIn), new AuditEntry("sign_in.link", AuditEntry.Success, person.Id,
+                deviceId, attempt.Method, origin.SourceAddress, origin.RequestId), cancellationToken).ConfigureAwait(false);
+            if (outcome is LoginLinkOutcome.DeviceNotApproved or LoginLinkOutcome.NotFirst)
+                throw await AdditionRefusedAsync(outcome == LoginLinkOutcome.NotFirst, origin, attempt.DeviceId, attempt.Method, person.Id, cancellationToken).ConfigureAwait(false);
             if (outcome == LoginLinkOutcome.LinkedElsewhere)
                 throw await RefuseAsync(origin, deviceId, attempt.Method, SignInErrorCodes.LinkedElsewhere, "This account is linked to another person of the organization.",
                     cancellationToken, person.Id).ConfigureAwait(false);
@@ -833,7 +928,8 @@ public sealed class SignInService : IDisposable
         var status = code switch
         {
             SignInErrorCodes.MethodDisabled or SignInErrorCodes.SsoRequired or SignInErrorCodes.NotLinked or SignInErrorCodes.LinkedElsewhere
-                or SignInErrorCodes.IdentityNotAllowed => StatusCodes.Status403Forbidden,
+                or SignInErrorCodes.IdentityNotAllowed or SignInErrorCodes.ConfirmationRequired or SignInErrorCodes.FirstWayInExpired or FleetErrorCodes.Forbidden
+                => StatusCodes.Status403Forbidden,
             SignInErrorCodes.ProviderUnavailable => StatusCodes.Status502BadGateway,
             _ => StatusCodes.Status401Unauthorized,
         };
@@ -993,8 +1089,7 @@ public sealed class SignInService : IDisposable
 
     private static bool IsTenant(string value) => value.Length <= 64 && value.All(static c => char.IsAsciiLetterOrDigit(c) || c is '-' or '.' or '_');
 
-    private static bool IsEntraId(Uri issuer) => issuer.Host.Equals("login.microsoftonline.com", StringComparison.OrdinalIgnoreCase)
-        || issuer.Host.Equals("login.microsoft.com", StringComparison.OrdinalIgnoreCase) || issuer.Host.Equals("sts.windows.net", StringComparison.OrdinalIgnoreCase);
+    private static bool IsEntraId(Uri issuer) => ExternalSignInClient.IsMicrosoftHost(issuer);
 
     private static bool CryptographicEquals(string left, string right)
         => System.Security.Cryptography.CryptographicOperations.FixedTimeEquals(System.Text.Encoding.UTF8.GetBytes(left), System.Text.Encoding.UTF8.GetBytes(right));

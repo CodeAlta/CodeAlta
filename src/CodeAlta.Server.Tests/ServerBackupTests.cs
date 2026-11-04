@@ -94,6 +94,27 @@ public sealed class ServerBackupTests
         Assert.IsTrue(File.Exists(empty));
     }
 
+    [TestMethod]
+    public async Task NoBackupIsDeleted_WhileTheStateOfTheUpdatesDoesNotRead()
+    {
+        using var root = new TempDirectory();
+        var paths = new ServerPaths(root.Path);
+        Directory.CreateDirectory(paths.BackupsRoot);
+        var trial = Path.Combine(paths.BackupsRoot, "before-4.0.1-4.0.0-20261102-120000.sqlite3");
+        await OlderBackupAsync(trial, "trial-client-secret", null);
+
+        // A state that is there but does not read may name a trial that rolls back to this copy: nothing is deleted.
+        Directory.CreateDirectory(paths.VersionsRoot);
+        File.WriteAllText(Path.Combine(paths.VersionsRoot, "state.json"), "{\"trial\":{\"version\":");
+        var tool = new StringWriter();
+        var toolError = new StringWriter();
+        var app = new ServerApplication(TextWriter.Synchronized(tool), TextWriter.Synchronized(toolError));
+        Assert.AreEqual(ServerExitCodes.Failure, await app.RunAsync(["backups", "--delete-unsealed", "--data-root", root.Path]), tool.ToString());
+        Assert.IsTrue(File.Exists(trial), "the rollback of a trial may need it");
+        StringAssert.Contains(toolError.ToString(), "state.json");
+        Assert.ThrowsExactly<UpdateException>(() => ServerBackups.DeleteUnsealed(paths));
+    }
+
     // A database as a version before the sealing kept it: the columns in clear, holding what it was given.
     private static async Task OlderBackupAsync(string path, string? clientSecret, string? headers)
     {

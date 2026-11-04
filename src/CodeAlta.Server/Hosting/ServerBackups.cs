@@ -23,7 +23,6 @@ public static class ServerBackups
     public static IReadOnlyList<ServerBackup> List(ServerPaths paths)
     {
         ArgumentNullException.ThrowIfNull(paths);
-        if (!Directory.Exists(paths.BackupsRoot)) return [];
         UpdateState? state = null;
         try
         {
@@ -33,6 +32,13 @@ public static class ServerBackups
         {
             // Versions that do not read keep every backup: none is said to be the trial's.
         }
+
+        return List(paths, state);
+    }
+
+    private static IReadOnlyList<ServerBackup> List(ServerPaths paths, UpdateState? state)
+    {
+        if (!Directory.Exists(paths.BackupsRoot)) return [];
 
         string? Trial(string path)
         {
@@ -53,15 +59,36 @@ public static class ServerBackups
     /// <returns>Their files.</returns>
     public static IReadOnlyList<string> FindUnsealed(ServerPaths paths) => [.. List(paths).Where(static backup => backup.Unsealed).Select(static backup => backup.Path)];
 
-    /// <summary>Deletes the backups that keep a secret in clear, but the one a version on trial rolls back to.</summary>
+    /// <summary>
+    /// Deletes the backups that keep a secret in clear, but the one a version on trial rolls back to. The state of the
+    /// updates that names the trial is read strictly, under its lock so that no update starts or ends a trial meanwhile:
+    /// a state that is there and does not read deletes nothing, since it may name a trial whose rollback needs a copy.
+    /// </summary>
     /// <param name="paths">The files of the server.</param>
     /// <returns>The files deleted, and those kept for a trial.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="paths"/> is null.</exception>
+    /// <exception cref="UpdateException">The state of the updates exists and cannot be read, or its lock cannot be taken: nothing was deleted.</exception>
     /// <exception cref="IOException">A backup could not be deleted.</exception>
     public static (IReadOnlyList<string> Deleted, IReadOnlyList<ServerBackup> Kept) DeleteUnsealed(ServerPaths paths)
     {
+        ArgumentNullException.ThrowIfNull(paths);
+        // A data root that never updated has no state, and no lock to make for it.
+        if (!Directory.Exists(paths.VersionsRoot)) return DeleteUnsealed(paths, null);
+        var versions = new UpdateVersionStore(paths.VersionsRoot);
+        (IReadOnlyList<string>, IReadOnlyList<ServerBackup>) result = default;
+        versions.Change(held =>
+        {
+            result = DeleteUnsealed(paths, versions.ReadOrThrow());
+            return held;
+        });
+        return result;
+    }
+
+    private static (IReadOnlyList<string> Deleted, IReadOnlyList<ServerBackup> Kept) DeleteUnsealed(ServerPaths paths, UpdateState? state)
+    {
         var deleted = new List<string>();
         var kept = new List<ServerBackup>();
-        foreach (var backup in List(paths).Where(static backup => backup.Unsealed))
+        foreach (var backup in List(paths, state).Where(static backup => backup.Unsealed))
         {
             if (backup.KeptForTrial is not null)
             {
