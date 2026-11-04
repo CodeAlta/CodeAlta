@@ -136,8 +136,9 @@ internal sealed class NodeFleet : IAsyncDisposable
                 // Its providers, their readiness, a key typed on the desktop kept in the secrets of the machine, and their device-code sign-in.
                 Providers = new NodeProviders(node.Host, node.ModelCatalog),
                 // A session that names an environment is admitted as a run of an automation is, once the node joined a server.
-                AdmitEnvironment = (environment, runId, title, token) => node.Automations?.Environments is { } gate
-                    ? gate.AdmitAsync(environment, runId, null, title, token)
+                // What the session is about stays here: the approval it asks names the run only.
+                AdmitEnvironment = (environment, runId, _, token) => node.Automations?.Environments is { } gate
+                    ? gate.AdmitAsync(environment, runId, null, token)
                     : Task.FromResult(CodeAlta.Orchestration.Runtime.EnvironmentAdmissionResult.Refused($"This machine runs no session in the environment '{environment}': it joined no server.")),
                 // A prompt sent through the node API starts a run the budgets of the machine admit first, once it joined a server.
                 AdmitBudget = (run, held, token) => node.Budgets is { } budgets

@@ -197,7 +197,8 @@ public sealed class BudgetTests
         var admission = gate.AdmitAsync(new FleetBudgetRun("run-1", "Deploy", null, null), () => held.TrySetResult(), TestContext.CancellationToken);
         await held.Task.WaitAsync(Patience, TestContext.CancellationToken);
         var hold = await WaitForAsync(async () => (await fleet.Manager.ListHoldsAsync(CancellationToken.None)).Holds.FirstOrDefault(), TestContext.CancellationToken);
-        Assert.AreEqual((FleetBudgetHoldStates.Waiting, "run-1", "Deploy", fleet.NodeKey.DeviceId), (hold.Status, hold.RunId, hold.Title, hold.MachineId));
+        // The hold names the run, never what it is about: the server does not read the titles of sessions.
+        Assert.AreEqual((FleetBudgetHoldStates.Waiting, "run-1", (string?)null, fleet.NodeKey.DeviceId), (hold.Status, hold.RunId, hold.Title, hold.MachineId));
         Assert.IsFalse(admission.IsCompleted, "the run waits");
 
         // A Continue anyway the server makes up, or one the machine signs, is refused: only the owner's controller device signs it.

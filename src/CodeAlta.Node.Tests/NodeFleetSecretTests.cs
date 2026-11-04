@@ -82,10 +82,11 @@ public sealed class NodeFleetSecretTests
                 setup.Organization.Id, Id, nodeId, runId, string.Empty, string.Empty, DateTimeOffset.UtcNow)), token);
             var waiting = await WaitForAsync(async () => (await manager.ListApprovalsAsync(token)).Approvals.FirstOrDefault(approval => approval.RunId == runId), token);
             Assert.AreEqual((FleetApprovalStates.Pending, "production", nodeId), (waiting.Status, waiting.EnvironmentName, waiting.MachineId));
+            Assert.IsNull(waiting.Title, "the server never reads what the run is about");
             Assert.IsNull((await desktop.ListAutomationRunsAsync(Id, null, token)).Runs.FirstOrDefault(run => run.RunId == runId && run.SessionId is not null),
                 "no session starts before the approval");
 
-            await manager.ApproveAsync(waiting.Id, token);
+            await manager.ApproveAsync(waiting.Id, FleetSecretsManager.ReviewOf(waiting), token);
             var completed = await WaitForAsync(async () => (await desktop.ListAutomationRunsAsync(Id, null, token)).Runs
                 .FirstOrDefault(run => run.RunId == runId && run.Status == AutomationRun.Completed && run.SessionId is not null), token);
             var sessionId = completed.SessionId!;

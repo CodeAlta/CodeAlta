@@ -19,7 +19,7 @@ public sealed record FleetBudgetLink(string LinkId, FleetOrganizationDevices Dev
 
 /// <summary>A run that a budget may limit: a session of the machine, in a space, of a project.</summary>
 /// <param name="RunId">The run, which a Continue anyway is bound to.</param>
-/// <param name="Title">What the run is, for the owner.</param>
+/// <param name="Title">What the run is, for the owner on this machine: a hold the server records names the run only, never its title.</param>
 /// <param name="SpaceId">The space of the session on this machine; null for the default one.</param>
 /// <param name="ProjectIdentity">What recognizes its project on the person's machines (<see cref="FleetProjectKeys.IdentityAsync"/>); null for none.</param>
 public sealed record FleetBudgetRun(string RunId, string? Title, string? SpaceId, string? ProjectIdentity);
@@ -187,7 +187,7 @@ public sealed class FleetBudgetGate
             {
                 using var client = Client(link);
                 hold = hold is null
-                    ? await client.RequestBudgetHoldAsync(budget.BudgetId, new RequestFleetBudgetHoldRequest(run.RunId, nonce, budget.Number, period.StartQuarter, Title(run.Title)),
+                    ? await client.RequestBudgetHoldAsync(budget.BudgetId, new RequestFleetBudgetHoldRequest(run.RunId, nonce, budget.Number, period.StartQuarter, Title: null),
                         cancellationToken).ConfigureAwait(false)
                     : await client.GetBudgetHoldAsync(hold.Id, cancellationToken).ConfigureAwait(false);
             }
@@ -282,13 +282,6 @@ public sealed class FleetBudgetGate
 
     private static FleetServerClient Client(FleetBudgetLink link)
         => new(link.Devices.ServerAddress, link.Devices.Identity, link.Devices.Handler) { DeviceList = link.Devices };
-
-    private static string? Title(string? title)
-    {
-        if (string.IsNullOrWhiteSpace(title)) return null;
-        var kept = new string([.. title.Where(static c => !char.IsControl(c))]).Trim();
-        return kept.Length > 200 ? kept[..200] : kept;
-    }
 
     private static void Log(string message)
     {

@@ -438,7 +438,7 @@ internal sealed partial class NodeAutomations : IFleetNodeAutomations, IAutomati
     {
         ArgumentNullException.ThrowIfNull(entry);
         return Environments is { } environments
-            ? environments.AdmitAsync(environment, runId, entry.Definition.Id, entry.Definition.Name, cancellationToken)
+            ? environments.AdmitAsync(environment, runId, entry.Definition.Id, cancellationToken)
             : Task.FromResult(CodeAlta.Orchestration.Runtime.EnvironmentAdmissionResult.Refused($"This machine runs no automation in the environment '{environment}': it joined no server."));
     }
 

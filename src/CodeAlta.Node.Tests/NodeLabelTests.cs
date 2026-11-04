@@ -94,13 +94,58 @@ public sealed class NodeLabelTests
             await WaitForAsync(async () => (await desktop.ListMachinesAsync(token)).Any(static machine => machine.Online) ? "online" : null, token);
             await manager.PutEnvironmentAsync("gpu-only", [], ["gpu"], [], false, token);
             var gate = node.Automations!.Environments!;
-            StringAssert.Contains((await gate.AdmitAsync("gpu-only", Guid.CreateVersion7().ToString("N"), null, "A run", token)).Problem, "machines labeled gpu");
+            StringAssert.Contains((await gate.AdmitAsync("gpu-only", Guid.CreateVersion7().ToString("N"), null, token)).Problem, "machines labeled gpu");
 
             // The owner labels the machine: the server lists the label at the next publication, and the environment admits the run.
             FleetMachineLabels.Write(node.Host.CatalogOptions.FleetRoot, ["gpu"]);
             var listed = await WaitForAsync(async () => (await desktop.ListMachinesAsync(token)).FirstOrDefault(machine => machine.Inventory.Labels?.Contains("gpu") == true), token);
             Assert.AreEqual(nodeId, listed.DeviceId);
-            Assert.IsNull((await gate.AdmitAsync("gpu-only", Guid.CreateVersion7().ToString("N"), null, "A run", token)).Problem);
+            Assert.IsNull((await gate.AdmitAsync("gpu-only", Guid.CreateVersion7().ToString("N"), null, token)).Problem);
+        }
+        finally
+        {
+            await servers.DisposeAsync();
+        }
+    }
+
+    [TestMethod]
+    public async Task TheApprovalARunAsks_NamesNoTitleTheServerCouldRead()
+    {
+        var token = TestContext.CancellationToken;
+        using var root = new NodeTestRoot();
+        await using var server = await CoordinatorServer.StartAsync(new CoordinatorServerOptions
+        {
+            DataRoot = Path.Combine(root.Root, "server"), Urls = ["http://127.0.0.1:0"], ConfigureLogging = static _ => { }, EnvironmentVariable = static _ => null,
+        }, token);
+        var address = server.Addresses.First(static uri => uri.Scheme == "http");
+        using var desktopKey = DeviceIdentity.LoadOrCreate(Path.Combine(root.Root, "desktop-fleet"));
+        using var desktop = new FleetServerClient(address, desktopKey);
+        await desktop.SetUpAsync(server.SetupCode!.Code, "Alex", "Desktop", "Home", token);
+        var enrollment = await desktop.CreateEnrollmentTokenAsync(null, "test-node", token);
+        Assert.AreEqual(NodeExitCodes.Success, await new NodeApplication(TextWriter.Null, TextWriter.Null) { InitializeLogging = false, ServiceEnvironment = static () => null }
+            .RunAsync(["join", address.ToString(), "--token", enrollment.Token, "--data-root", root.DataRoot, "--name", "test-node", "--no-wait"]));
+        var nodeId = (await desktop.ListDevicesAsync(token)).Single(static device => device.Status == "pending").Id;
+        await desktop.ApproveAsync(nodeId, FleetDeviceKinds.Node, token);
+        await using var node = await NodeHost.StartAsync(root.Options() with
+        {
+            Automations = new NodeAutomationOptions { TimeZone = TimeZoneInfo.Utc, WatchRepositories = false, CredentialKind = static _ => AutomationCredentialKind.Account },
+        }, token);
+        var servers = NodeServers.Start(node, null, "test-node", "1.0.0", Fast);
+        using var waiting = CancellationTokenSource.CreateLinkedTokenSource(token);
+        try
+        {
+            var manager = new FleetSecretsManager(new FleetOrganizationDevices(address, desktopKey, Path.Combine(root.Root, "desktop-link", FleetOrganizationDevices.PinFileName)));
+            await WaitForAsync(async () => (await desktop.ListMachinesAsync(token)).Any(static machine => machine.Online) ? "online" : null, token);
+            var person = (await manager.Devices.RefreshAsync(token)).Members[desktopKey.DeviceId].OwnerId!;
+            await manager.PutEnvironmentAsync("production", [person], [], [], false, token);
+
+            // The run waits for its approval; what the server holds of it names the run, never what it is about.
+            var admission = node.Automations!.Environments!.AdmitAsync("production", "run-private", null, waiting.Token);
+            var asked = await WaitForAsync(async () => (await manager.ListApprovalsAsync(token)).Approvals.FirstOrDefault(static approval => approval.RunId == "run-private"), token);
+            Assert.IsNull(asked.Title, "the server never reads the title of a run");
+            await waiting.CancelAsync();
+            try { await admission; }
+            catch (OperationCanceledException) { }
         }
         finally
         {

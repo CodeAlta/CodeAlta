@@ -52,16 +52,19 @@ internal sealed class NodeEnvironmentGate
     /// <param name="environment">The name of the environment.</param>
     /// <param name="runId">The run.</param>
     /// <param name="automationId">The automation of the run; null for a session.</param>
-    /// <param name="title">What the run is, for the approver.</param>
     /// <param name="cancellationToken">Cancels the wait.</param>
     /// <returns>What admitted the run, or why it may not start.</returns>
-    public async Task<EnvironmentAdmissionResult> AdmitAsync(string environment, string runId, string? automationId, string? title, CancellationToken cancellationToken)
+    /// <remarks>
+    /// The approval asked names the run, never what it is about: a title is descriptive metadata the server never reads
+    /// (<c>doc/fleet/security-and-privacy.md</c>, what the server sees).
+    /// </remarks>
+    public async Task<EnvironmentAdmissionResult> AdmitAsync(string environment, string runId, string? automationId, CancellationToken cancellationToken)
     {
-        var problem = await AdmitCoreAsync(environment, runId, automationId, title, cancellationToken).ConfigureAwait(false);
+        var problem = await AdmitCoreAsync(environment, runId, automationId, cancellationToken).ConfigureAwait(false);
         return problem.Admission is { } admission ? new EnvironmentAdmissionResult(null, admission) : EnvironmentAdmissionResult.Refused(problem.Problem!);
     }
 
-    private async Task<(string? Problem, EnvironmentAdmission? Admission)> AdmitCoreAsync(string environment, string runId, string? automationId, string? title,
+    private async Task<(string? Problem, EnvironmentAdmission? Admission)> AdmitCoreAsync(string environment, string runId, string? automationId,
         CancellationToken cancellationToken)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(environment);
@@ -81,7 +84,7 @@ internal sealed class NodeEnvironmentGate
         FleetApprovalDto asked;
         try
         {
-            asked = await sync.RequestApprovalAsync(definition.EnvironmentId, new RequestFleetApprovalRequest(runId, nonce, definition.Number, automationId, title), cancellationToken)
+            asked = await sync.RequestApprovalAsync(definition.EnvironmentId, new RequestFleetApprovalRequest(runId, nonce, definition.Number, automationId, Title: null), cancellationToken)
                 .ConfigureAwait(false);
         }
         catch (Exception exception) when (exception is FleetServerException or HttpRequestException)
