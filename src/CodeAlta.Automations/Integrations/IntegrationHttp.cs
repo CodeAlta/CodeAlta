@@ -11,11 +11,20 @@ namespace CodeAlta.Automations.Integrations;
 /// <param name="Problem">Why it failed, never with a credential in it; null when it did not.</param>
 internal readonly record struct IntegrationResult<T>(T? Value, string? Problem)
 {
+    /// <summary>
+    /// Gets whether the failure may pass by itself: the tool did not answer in time, could not be reached, asked to slow down
+    /// or failed on its side (5xx). A call refused for what it asks (not found, not allowed) is not.
+    /// </summary>
+    public bool Transient { get; init; }
+
     /// <summary>A result that holds a value.</summary>
     internal static IntegrationResult<T> Of(T value) => new(value, null);
 
     /// <summary>A result that failed.</summary>
     internal static IntegrationResult<T> Fail(string problem) => new(default, problem);
+
+    /// <summary>A result that failed for now: the same call may succeed later.</summary>
+    internal static IntegrationResult<T> FailForNow(string problem) => new(default, problem) { Transient = true };
 }
 
 /// <summary>The requests the clients of other tools share: JSON in and out, bounded answers, problems without credentials.</summary>
@@ -58,16 +67,22 @@ internal static class IntegrationHttp
                 }
             }
 
-            if (!response.IsSuccessStatusCode) return IntegrationResult<T>.Fail(Refusal(service, response.StatusCode, root));
+            if (!response.IsSuccessStatusCode)
+            {
+                return response.StatusCode is HttpStatusCode.TooManyRequests or HttpStatusCode.RequestTimeout || (int)response.StatusCode >= 500
+                    ? IntegrationResult<T>.FailForNow(Refusal(service, response.StatusCode, root))
+                    : IntegrationResult<T>.Fail(Refusal(service, response.StatusCode, root));
+            }
+
             return read(root, response.StatusCode);
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
-            return IntegrationResult<T>.Fail($"{service} did not answer within {Timeout.TotalSeconds:0} seconds.");
+            return IntegrationResult<T>.FailForNow($"{service} did not answer within {Timeout.TotalSeconds:0} seconds.");
         }
         catch (HttpRequestException exception)
         {
-            return IntegrationResult<T>.Fail($"{service} could not be reached: {Line(exception.Message)}");
+            return IntegrationResult<T>.FailForNow($"{service} could not be reached: {Line(exception.Message)}");
         }
     }
 

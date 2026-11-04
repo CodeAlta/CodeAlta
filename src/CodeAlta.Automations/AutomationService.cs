@@ -116,6 +116,14 @@ internal sealed partial class AutomationService : IAsyncDisposable
         ArgumentNullException.ThrowIfNull(zone);
         (_globalConfigPath, _projects, _state, _runner, _time, _zone, _feed) = (globalConfigPath, projects, state, runner, time, zone, feed);
         _aliveBefore = state.AliveAt;
+        // The sessions of the runs keep the guard of their automation as it is now, a try staying a try, after their run too.
+        if (runner is AutomationRunner concrete)
+        {
+            // The calls of the hour of the allowed tools are kept with the state: a restart does not give them again.
+            concrete.Breaker = new AutomationCallBreaker(state);
+            concrete.Origin = (automationId, runId) => (Snapshot.Entries.FirstOrDefault(entry => entry.Id == automationId),
+                _state.Run(runId) is { } run ? run.Trigger == TryTrigger : null);
+        }
     }
 
     /// <summary>Raised, on any thread, when the automations, their runs or their state changed.</summary>
@@ -782,7 +790,7 @@ internal sealed partial class AutomationService : IAsyncDisposable
         var started = _state.Update(run.Id, current => current.Status == AutomationRun.Held
                 ? current with { SessionId = start.SessionId, Status = AutomationRun.Running, Message = null }
                 : current with { SessionId = start.SessionId }) ?? run with { SessionId = start.SessionId };
-        if (start.Guard is { } guard) Follow(run.Id, guard);
+        if (start.Guard is { } guard) Follow(entry, run.Id, guard);
         Changed?.Invoke();
         var observer = ObserveAsync(run.Id, entry, start.Completion, reply);
         lock (_gate)

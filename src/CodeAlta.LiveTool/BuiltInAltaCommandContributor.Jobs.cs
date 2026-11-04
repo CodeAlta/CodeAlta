@@ -116,6 +116,12 @@ internal sealed partial class BuiltInAltaCommandContributor
             return AltaExitCodes.ServiceUnavailable;
         }
 
+        // The end of a job starts a turn of the session it belongs to: one outside the run of a guarded session is refused it.
+        if (NormalizeOptionalText(options.SessionId) is { } jobSession && await RefuseOutsideGuardAsync(context, jobSession).ConfigureAwait(false) is { } unguarded)
+        {
+            return unguarded;
+        }
+
         if (options.Command is not null && options.UseStdin)
         {
             return UsageError(context, "usage.commandConflict", "Use either --command or --stdin, not both.", path);

@@ -380,8 +380,8 @@ internal sealed class AutomationsService
         if (Refuse(request.ExpectedEpoch) is { } refused) return new(refused, null, null);
         if (!AutomationDefinition.IsId(request.Id) || !Identifier(request.MachineId) || !Identifier(request.RunId)) return new("invalid_request", null, null);
         if (_placement is null) return new("refused", "Its machine is reached from no fleet here.", null);
-        var problem = await _placement.TakeOverAsync(request.Id, request.MachineId, request.RunId, cancellationToken).ConfigureAwait(false);
-        return problem is null ? new("ok", null, null) : new("refused", problem, null);
+        var (status, message, _) = (await _placement.TakeOverAsync(request.Id, request.MachineId, request.RunId, cancellationToken).ConfigureAwait(false)).Status();
+        return new(status, message, null);
     }
 
     /// <summary>The next times a trigger being written would be due, or what is wrong with it.</summary>

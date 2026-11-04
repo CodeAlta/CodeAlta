@@ -39,6 +39,10 @@ internal sealed class HookService
     private const int MaxHeaderLength = 2048;
     private const int MaxLabelLength = 120;
     private const int PendingPerConnection = 100;
+    // The most waiting events read to choose the next batch among: those handed and not answered yet come first.
+    private const int MaxListedPending = 1000;
+    // How long an event handed and not answered waits before it is handed again on the same connection (a retry).
+    private static readonly TimeSpan HandAgainAfter = TimeSpan.FromMinutes(1);
     private const string Alphabet = "abcdefghijklmnopqrstuvwxyz234567";
     private static readonly TimeSpan PushTimeout = TimeSpan.FromSeconds(5);
     private static readonly TimeSpan ExpireEvery = TimeSpan.FromMinutes(1);
@@ -54,6 +58,8 @@ internal sealed class HookService
     private readonly ILogger _logger;
     private readonly Lock _gate = new();
     private readonly Dictionary<string, (long Minute, int Count)> _rates = new(StringComparer.Ordinal);
+    // When each event waiting for an answer was handed to its machine, in memory: a restart hands them again.
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, DateTimeOffset> _handed = new(StringComparer.Ordinal);
     private DateTimeOffset _expiredAt;
 
     /// <summary>Initializes a new instance of the <see cref="HookService"/> class.</summary>
@@ -170,13 +176,17 @@ internal sealed class HookService
         {
             if (kept.Count == MaxHeaders) break;
             var lower = name.ToLowerInvariant();
-            if (Dropped.Contains(lower) || lower.StartsWith("x-forwarded-", StringComparison.Ordinal) || lower.StartsWith("proxy-", StringComparison.Ordinal)) continue;
+            // The headers of the event and of its signature only: what a sender authenticates itself with is never stored.
+            if (Dropped.Contains(lower) || lower.StartsWith("x-forwarded-", StringComparison.Ordinal) || lower.StartsWith("proxy-", StringComparison.Ordinal)
+                || !FleetHookHeaders.IsKept(lower)) continue;
             var value = values.ToString();
             if (value.Length <= MaxHeaderLength) kept[lower] = value;
         }
 
-        // A sender that retries keeps its id and its body; a forged event with a known id has another body.
-        var named = kept.GetValueOrDefault("webhook-id") ?? kept.GetValueOrDefault("x-github-delivery") ?? kept.GetValueOrDefault("x-request-id") ?? string.Empty;
+        // A sender that retries keeps its id and its body; a forged event with a known id has another body. Only an id the sender
+        // signs (webhook-id of Standard Webhooks) tells two events apart: a header it does not sign, such as X-GitHub-Delivery,
+        // would make one event many.
+        var named = kept.GetValueOrDefault("webhook-id") ?? string.Empty;
         var key = Convert.ToHexStringLower(SHA256.HashData([.. Encoding.UTF8.GetBytes(named + "\n"), .. body]));
         var record = new HookEventRecord(hook.OrganizationId, Guid.CreateVersion7().ToString("N"), hook.HookId, hook.MachineId, key, now, now + Waits, HookEventStates.Pending,
             null, null, JsonSerializer.Serialize(kept, HookStorageJsonContext.Default.DictionaryStringString), body);
@@ -200,13 +210,24 @@ internal sealed class HookService
         try
         {
             await ExpireAsync(_time.GetUtcNow()).ConfigureAwait(false);
-            var pending = await _hooks.ListPendingHookEventsAsync(session.Device.OrganizationId, session.Device.Id, _time.GetUtcNow(), PendingPerConnection).ConfigureAwait(false);
-            if (pending.Count > 0) await PushAsync(session, pending).ConfigureAwait(false);
+            // A new connection: what was handed before and not answered is handed again.
+            await DrainAsync(session, fresh: true).ConfigureAwait(false);
         }
         catch (Exception exception) when (exception is ObjectDisposedException or InvalidOperationException or Microsoft.Data.Sqlite.SqliteException)
         {
             _logger.LogDebug("The hook events were not sent to {Device}: {Reason}", session.Device.Id, exception.Message);
         }
+    }
+
+    // Hands the machine the next events that wait, a batch at a time: those it was not handed, or was handed long enough ago that
+    // its answer is not coming (a retry), unless the connection is new. Called when it connects and each time it answers, so
+    // that a backlog larger than a batch drains on one connection.
+    private async Task DrainAsync(ControlSession session, bool fresh)
+    {
+        var now = _time.GetUtcNow();
+        var pending = await _hooks.ListPendingHookEventsAsync(session.Device.OrganizationId, session.Device.Id, now, MaxListedPending).ConfigureAwait(false);
+        var next = pending.Where(item => fresh || !_handed.TryGetValue(item.DeliveryId, out var at) || now - at >= HandAgainAfter).Take(PendingPerConnection).ToArray();
+        if (next.Length > 0) await PushAsync(session, next).ConfigureAwait(false);
     }
 
     /// <summary>Records what a machine did with the events it was given, and forgets their content.</summary>
@@ -221,11 +242,48 @@ internal sealed class HookService
         if (acks?.Acks is not { Count: > 0 and <= 1000 } list || list.Any(static ack => ack is not { DeliveryId.Length: > 0 and <= 64 }))
             throw CoordinatorException.BadRequest(CoordinatorErrorCodes.PublicationInvalid, "hooks.ack needs one answer per event.");
         var now = _time.GetUtcNow();
+        var retried = false;
         foreach (var ack in list)
         {
+            // Not taken for now (its source did not answer the machine): the event stays, and is given again, until it expires.
+            if (ack.Retry == true)
+            {
+                retried = true;
+                _logger.LogInformation("{Device} will take the hook event {Delivery} later", device.Id, ack.DeliveryId);
+                continue;
+            }
+
+            _handed.TryRemove(ack.DeliveryId, out _);
             var message = ack.Message is { } text ? text.ReplaceLineEndings(" ").Trim() is var line && line.Length > 500 ? line[..500] : line : null;
             await _hooks.AnswerHookEventAsync(device.OrganizationId, device.Id, ack.DeliveryId, ack.Accepted ? HookEventStates.Accepted : HookEventStates.Refused, message, now,
                 cancellationToken).ConfigureAwait(false);
+        }
+
+        if (_presence.Get(device.Id) is not { } session) return;
+        // Its answers free room for the events that wait beyond a batch.
+        try
+        {
+            await DrainAsync(session, fresh: false).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is ObjectDisposedException or InvalidOperationException or Microsoft.Data.Sqlite.SqliteException)
+        {
+            _logger.LogDebug("The hook events were not sent to {Device}: {Reason}", device.Id, exception.Message);
+        }
+
+        // An event it takes later is handed again once it had time to (its source may answer then), whatever else happens.
+        if (retried) _ = HandAgainLaterAsync(session);
+    }
+
+    private async Task HandAgainLaterAsync(ControlSession session)
+    {
+        try
+        {
+            await Task.Delay(HandAgainAfter, _time).ConfigureAwait(false);
+            if (_presence.Get(session.Device.Id) is { } current) await DrainAsync(current, fresh: false).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is ObjectDisposedException or InvalidOperationException or Microsoft.Data.Sqlite.SqliteException)
+        {
+            _logger.LogDebug("The hook events were not handed again to {Device}: {Reason}", session.Device.Id, exception.Message);
         }
     }
 
@@ -235,6 +293,7 @@ internal sealed class HookService
         {
             foreach (var item in events)
             {
+                _handed[item.DeliveryId] = _time.GetUtcNow();
                 var headers = item.Headers is { } json ? JsonSerializer.Deserialize(json, HookStorageJsonContext.Default.DictionaryStringString) ?? [] : [];
                 var payload = new FleetHookEvent(item.DeliveryId, item.HookId, item.ReceivedAt, headers, Convert.ToBase64String(item.Body ?? []));
                 using var timeout = new CancellationTokenSource(PushTimeout);
@@ -255,6 +314,12 @@ internal sealed class HookService
         {
             if (now - _expiredAt < ExpireEvery && now >= _expiredAt) return;
             _expiredAt = now;
+        }
+
+        // An event handed longer ago than any waits is answered or expired: its mark goes.
+        foreach (var (deliveryId, at) in _handed)
+        {
+            if (now - at > Waits) _handed.TryRemove(deliveryId, out _);
         }
 
         var expired = await _hooks.ExpireHookEventsAsync(now, now - KeptFor, CancellationToken.None).ConfigureAwait(false);

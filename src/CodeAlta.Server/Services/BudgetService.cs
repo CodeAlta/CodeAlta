@@ -123,7 +123,10 @@ internal sealed class BudgetService
     /// <summary>Lists the budgets of the owner of the calling machine, with what the machine holds of each: the machine verifies them and keeps those that cover its runs.</summary>
     /// <param name="actor">The calling machine.</param>
     /// <param name="cancellationToken">Cancels the read.</param>
-    /// <returns>The budgets, those taken away left out.</returns>
+    /// <returns>
+    /// The budgets, those taken away as their signed removal: a machine keeps every budget it verified until a newer signed
+    /// version, a removal included, replaces it.
+    /// </returns>
     public async Task<FleetMachineBudgetListDto> ListForMachineAsync(DeviceRecord actor, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(actor);
@@ -131,7 +134,7 @@ internal sealed class BudgetService
         var budgets = await _budgets.ListBudgetsAsync(actor.OrganizationId, actor.OwnerPersonId, cancellationToken).ConfigureAwait(false);
         var now = _time.GetUtcNow();
         var listed = new List<FleetMachineBudgetDto>();
-        foreach (var budget in budgets.Where(static budget => !budget.Removed))
+        foreach (var budget in budgets)
         {
             if (!FleetBudgetDocuments.TryRead(budget.Payload, out var definition, out _)) continue;
             if (definition.ScopeKind == FleetBudgetScopeKinds.Machine && definition.ScopeId != actor.Id) continue;

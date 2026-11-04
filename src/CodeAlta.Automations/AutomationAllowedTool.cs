@@ -8,7 +8,8 @@ namespace CodeAlta.Automations;
 
 /// <summary>
 /// What an allowed tool must be, and stay within, to run without a person (<c>doc/fleet/orchestration.md</c>, "Autonomy and
-/// approvals"): its <b>pinned implementation</b> (the hash of its definition, and the version of its server), the
+/// approvals"): its <b>pinned definition</b> (the hash of its definition, and the version its server reports: what the tool
+/// says it is, not its code, which a server can change without changing either; the machine's owner answers for its code), the
 /// <b>bounds</b> of its arguments, and its <b>preconditions</b>: read-only tools it calls first, whose answer must say what
 /// they expect. A call that does not hold its pin or bounds waits for a person; one whose precondition fails is not made.
 /// </summary>

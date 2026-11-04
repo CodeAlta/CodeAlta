@@ -776,10 +776,20 @@ public sealed class FleetNodeClient : IAsyncDisposable
     /// <param name="id">The automation.</param>
     /// <param name="cancellationToken">Cancels the call.</param>
     /// <returns>The run, once its session exists or it failed to start.</returns>
-    /// <exception cref="FleetException">The node refused the call (<see cref="FleetNodeErrorCodes.AutomationNotFound"/>).</exception>
-    public Task<FleetAutomationRunInfo> TryAutomationAsync(string id, CancellationToken cancellationToken = default)
-        => CallAsync(FleetNodeMethods.AutomationsRun, new FleetAutomationRef(id) { DryRun = true }, FleetNodeJsonContext.Default.FleetAutomationRef,
-            FleetNodeJsonContext.Default.FleetAutomationRunInfo, NewRetryKey(), cancellationToken);
+    /// <exception cref="FleetException">The node refused the call (<see cref="FleetNodeErrorCodes.AutomationNotFound"/>), or does not know tries
+    /// (<see cref="FleetErrorCodes.MethodNotFound"/>): nothing ran then.</exception>
+    public async Task<FleetAutomationRunInfo> TryAutomationAsync(string id, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            return await CallAsync(FleetNodeMethods.AutomationsTry, new FleetAutomationRef(id), FleetNodeJsonContext.Default.FleetAutomationRef,
+                FleetNodeJsonContext.Default.FleetAutomationRunInfo, NewRetryKey(), cancellationToken).ConfigureAwait(false);
+        }
+        catch (FleetException exception) when (exception.Error.Code == FleetErrorCodes.MethodNotFound)
+        {
+            throw new FleetException(FleetErrorCodes.MethodNotFound, null, "This machine runs a version of CodeAlta that cannot try an automation: nothing ran. Update it, then try again.");
+        }
+    }
 
     /// <summary>Lists the runs of the automations assigned to the node, newest first.</summary>
     /// <param name="id">The automation; null for all the assigned ones.</param>

@@ -53,6 +53,39 @@ public sealed class AltaCommandRegistry
             .ToArray();
     }
 
+    /// <summary>The command of a plugin that calls a tool for its caller, and checks that call as the tool itself.</summary>
+    private const string McpToolCallPath = "mcp tool call";
+
+    // A session whose tool calls a guard checks (the run of an automation, what it may do without a person) runs a command of
+    // a plugin that changes something only as the guard allows a call of a tool named `alta <path>` with its arguments: a
+    // command is never a way around the guard. `alta mcp tool call` checks the tool it calls, as the tool of the session.
+    private async ValueTask<string?> CheckGuardedPluginCommandAsync(AltaCommandContext context, string? path, IReadOnlyList<string> args)
+    {
+        if (context.Caller.Kind != "agent" || context.Caller.SourceSessionId is not { Length: > 0 } sessionId || string.IsNullOrWhiteSpace(path)
+            || string.Equals(path, McpToolCallPath, StringComparison.OrdinalIgnoreCase)
+            || context.Services.Get<CodeAlta.Orchestration.Runtime.SessionRuntimeService>()?.ToolGuards is not { } guards)
+            return null;
+        var contributionContext = new AltaCommandContributionContext { Invocation = context };
+        var policy = _contributors.OfType<PluginAltaCommandContributor>().SelectMany(contributor => contributor.GetCommandPolicies(contributionContext))
+            .FirstOrDefault(candidate => string.Equals(candidate.Path, path, StringComparison.OrdinalIgnoreCase));
+        // The guard of the session is looked up for a command of a plugin that changes something only.
+        if (policy is not { IsMutating: true } || await guards.FindAsync(sessionId, context.CancellationToken).ConfigureAwait(false) is null) return null;
+        using var buffer = new MemoryStream();
+        using (var writer = new System.Text.Json.Utf8JsonWriter(buffer))
+        {
+            writer.WriteStartObject();
+            writer.WriteStartArray("args");
+            foreach (var arg in args) writer.WriteStringValue(arg);
+            writer.WriteEndArray();
+            writer.WriteEndObject();
+        }
+
+        using var arguments = System.Text.Json.JsonDocument.Parse(buffer.ToArray());
+        using var schema = System.Text.Json.JsonDocument.Parse("""{"type":"object","properties":{"args":{"type":"array","items":{"type":"string"}}}}""");
+        var spec = new AgentToolSpec("alta " + policy.Path, $"The command `alta {policy.Path}` of a plugin.", schema.RootElement.Clone());
+        return await guards.CheckAsync(sessionId, spec, arguments.RootElement.Clone(), context.Cwd, context.CancellationToken).ConfigureAwait(false);
+    }
+
     private static string RootOf(string path)
     {
         var space = path.IndexOf(' ', StringComparison.Ordinal);
@@ -306,6 +339,13 @@ public sealed class AltaCommandRegistry
                 // Its commands work in its own folder, never in one the call names: a folder its sandbox writes would
                 // have them read there what runs here (the MCP servers of a `.mcp.json`).
                 context = context with { Cwd = await AltaSandboxGate.FolderOfCallerAsync(context).ConfigureAwait(false) };
+            }
+
+            // A command of a plugin that changes something is, for the guard of the caller's session, one of its tool calls.
+            if (await CheckGuardedPluginCommandAsync(context, parseResult.ResolvedCommandPath, args).ConfigureAwait(false) is { } guarded)
+            {
+                AltaJsonlWriter.WriteError(context.Stderr, context.CorrelationId, "guard.refused", AltaExitCodes.PolicyDenied, guarded);
+                return CaptureResult(AltaExitCodes.PolicyDenied, context, stopwatch.Elapsed, isHelp: false, error: guarded);
             }
 
             var runApp = CreateCommandApp(context);

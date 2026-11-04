@@ -50,6 +50,12 @@ export const fleetBudgetMessages = {
   "You took the run over: answer it in its session on {machine}.": ["Tomaste el control de la ejecución: respóndela en su sesión en {machine}.",
     "Vous avez pris la main sur l’exécution : répondez dans sa session sur {machine}.", "Sie haben den Lauf übernommen: Antworten Sie in seiner Sitzung auf {machine}.",
     "実行を引き継ぎました。{machine} 上のセッションで回答してください。", "你已接管该运行：在 {machine} 上的会话中作答。"],
+  "You asked to take the run over on {machine}: it has not confirmed it yet, and an approval that waits too long may still stop the run.": [
+    "Pediste tomar el control de la ejecución en {machine}: aún no lo ha confirmado, y una aprobación que espera demasiado aún puede detener la ejecución.",
+    "Vous avez demandé à prendre la main sur l’exécution sur {machine} : elle ne l’a pas encore confirmé, et une approbation qui attend trop longtemps peut encore arrêter l’exécution.",
+    "Sie haben gebeten, den Lauf auf {machine} zu übernehmen: Er hat es noch nicht bestätigt, und eine zu lange wartende Freigabe kann den Lauf noch beenden.",
+    "{machine} で実行の引き継ぎを依頼しました。まだ確認されていないため、待ち時間が長すぎる承認によって実行が停止する可能性があります。",
+    "你已请求接管 {machine} 上的运行：它尚未确认，等待过久的批准仍可能停止该运行。"],
   "{budget} reached its limit.": ["{budget} alcanzó su límite.", "{budget} a atteint sa limite.", "{budget} hat seine Grenze erreicht.", "{budget} は上限に達しました。", "{budget} 已达到上限。"],
   "{machine} is low on disk space: {detail} MB left.": ["A {machine} le queda poco espacio en disco: {detail} MB libres.", "{machine} manque d’espace disque : {detail} Mo restants.",
     "{machine} hat wenig Speicherplatz: {detail} MB frei.", "{machine} のディスク空き容量が少なくなっています: 残り {detail} MB。", "{machine} 磁盘空间不足：剩余 {detail} MB。"],

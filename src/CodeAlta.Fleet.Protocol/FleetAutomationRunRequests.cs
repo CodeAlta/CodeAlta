@@ -49,8 +49,19 @@ public sealed record FleetAutomationRunRequest(
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? Action { get; init; }
 
-    /// <summary>The version of the format this library writes.</summary>
+    /// <summary>The version of the format of a request to run the automation, or to take a run over.</summary>
     public const int CurrentVersion = 1;
+
+    /// <summary>
+    /// The version of the format of a try (<see cref="TryAction"/>): a machine that does not know tries reads version 1 only, so
+    /// it refuses the request rather than ignore its action and run the automation for real (<c>doc/fleet/protocol.md</c>, "Versions").
+    /// </summary>
+    public const int TryVersion = 2;
+
+    /// <summary>Gets the version of the format of a request with an action.</summary>
+    /// <param name="action">The action; null to run the automation.</param>
+    /// <returns><see cref="TryVersion"/> for a try, <see cref="CurrentVersion"/> otherwise.</returns>
+    public static int VersionFor(string? action) => action == TryAction ? TryVersion : CurrentVersion;
 }
 
 /// <summary>A run request as it travels: the exact JSON text the signer signed, and the signature.</summary>
@@ -104,7 +115,7 @@ public static class FleetAutomationRunRequestDocuments
         try { read = JsonSerializer.Deserialize(payload, FleetAutomationRunRequestJsonContext.Default.FleetAutomationRunRequest); }
         catch (JsonException) { return false; }
         if (read is null) return false;
-        if (read.Version != FleetAutomationRunRequest.CurrentVersion)
+        if (read.Version is not (FleetAutomationRunRequest.CurrentVersion or FleetAutomationRunRequest.TryVersion))
         {
             reason = $"version {read.Version.ToString(CultureInfo.InvariantCulture)} of the run request is not known";
             return false;
@@ -120,6 +131,13 @@ public static class FleetAutomationRunRequestDocuments
         if (read.Action is not (null or FleetAutomationRunRequest.TakeOverAction or FleetAutomationRunRequest.TryAction))
         {
             reason = "the action of the run request is not known";
+            return false;
+        }
+
+        // A try is of its own format, which a machine that does not know tries refuses: never read as a run, nor a run as a try.
+        if (read.Version != FleetAutomationRunRequest.VersionFor(read.Action))
+        {
+            reason = "a try is a request of version 2, and a request of version 2 is a try";
             return false;
         }
 

@@ -188,6 +188,61 @@ public sealed class NodeAutomationTests
         StringAssert.Contains(refused.Message, "account credentials only");
     }
 
+    // A try is a method of its own (doc/fleet/protocol.md, "Versions"): a node that does not know it answers method_not_found,
+    // and the device says so rather than run the automation for real.
+    [TestMethod]
+    public async Task ATry_IsAMethodOfItsOwn_ThatTheNodeRunsAsATry()
+    {
+        var token = TestContext.CancellationToken;
+        using var root = new NodeTestRoot();
+        await using var fixture = await AutomationFixture.StartAsync(root, new ScriptedNodeProvider(), new NodeClock { Now = Noon }, token);
+        var machine = await fixture.PairAsync(DevicePermissions.View | DevicePermissions.Start | DevicePermissions.Automate, token);
+        await using var client = await FleetNodeClient.ConnectAsync(machine, fixture.ViewerIdentity, token);
+        await client.PutAutomationAsync(fixture.Signed(Definition("Tried", "Hello."), 1), cancellationToken: token);
+
+        var tried = await client.TryAutomationAsync(Id, token);
+        Assert.AreEqual("try", tried.Trigger, tried.Message);
+        Assert.AreEqual("try", (await client.ListAutomationRunsAsync(Id, cancellationToken: token)).Runs.Single(run => run.Id == tried.Id).Trigger);
+    }
+
+    // Account credentials hold for the whole run (doc/fleet/orchestration.md, "Credentials of unattended runs"): its session that
+    // changes provider, a model tier or a fallback, and the sessions it starts resolve only to account providers.
+    [TestMethod]
+    public async Task AccountCredentials_HoldForTheSessionsOfARun_ItsChildren_AndAChangeOfProvider()
+    {
+        var token = TestContext.CancellationToken;
+        using var root = new NodeTestRoot();
+        var provider = new ScriptedNodeProvider();
+        await using var fixture = await AutomationFixture.StartAsync(root, provider, new NodeClock { Now = Noon }, token,
+            descriptor => descriptor.ProviderId.Value == "personal" ? AutomationCredentialKind.Personal : AutomationCredentialKind.Account);
+        NodeAutomationPolicy.Save(fixture.Node.Host.CatalogOptions.FleetRoot, new NodeAutomationPolicy { Credentials = NodeAutomationPolicy.AccountCredentials });
+        var machine = await fixture.PairAsync(DevicePermissions.View | DevicePermissions.Start | DevicePermissions.Automate, token);
+        await using var client = await FleetNodeClient.ConnectAsync(machine, fixture.ViewerIdentity, token);
+        await client.PutAutomationAsync(fixture.Signed(Definition("Unattended", "Hello."), 1), cancellationToken: token);
+        var run = await client.RunAutomationAsync(Id, cancellationToken: token);
+        Assert.AreNotEqual(AutomationRun.Failed, run.Status, run.Message);
+        var host = fixture.Node.Host;
+        var sessionId = run.SessionId ?? (await WaitForAsync(async () => (await client.ListAutomationRunsAsync(Id, cancellationToken: token)).Runs
+            .FirstOrDefault(candidate => candidate.Id == run.Id && candidate.SessionId is not null), token)).SessionId!;
+        var session = (await host.RuntimeService.TryGetRecoverableSessionAsync(sessionId, token))!;
+        var child = await host.Commands.CreateDraftSessionAsync(null, provider.Descriptor, "Child", new CodeAlta.Catalog.AltaActorProvenance
+        {
+            Kind = CodeAlta.Catalog.AltaActorProvenance.WorkflowKind, SourceSessionId = sessionId, CreatedAt = DateTimeOffset.UtcNow,
+        }, null, null, null, null, null, null);
+        var plain = await host.Commands.CreateDraftSessionAsync(null, provider.Descriptor, "Plain", null, null, null, null, null, null, null);
+        var gate = host.RuntimeService.ProviderGate;
+        Assert.IsNotNull(gate, "the node checks the provider of every attachment of a session");
+        // A provider of the machine that runs with a personal plan (only its descriptor is read here).
+        host.ModelProviderRegistry.RegisterOrReplace(new CodeAlta.Agent.ModelProviderDescriptor(new("personal"), "Personal"), static () => throw new NotSupportedException());
+
+        // The run's session that changes provider, and its child, are refused a personal plan; an account provider is theirs.
+        StringAssert.Contains(await gate(session, "personal", token), "account credentials");
+        StringAssert.Contains(await gate(child, "personal", token), "account credentials");
+        Assert.IsNull(await gate(child, provider.Descriptor.ProviderId.Value, token));
+        // A session that no automation started keeps the providers of the machine.
+        Assert.IsNull(await gate(plain, "personal", token));
+    }
+
     // The signed policy of the organization of the space a run goes to (doc/fleet/security-and-privacy.md, policies and the kill
     // switch) applies to the node's own automations too, not only to those a server delivered: its providers, its models, its
     // account credentials.
