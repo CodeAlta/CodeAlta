@@ -128,7 +128,7 @@ public sealed class FleetBudgetGate
                     return new FleetBudgetAdmission($"The budget '{budget.Name}' is reached: the run does not start.", continued);
                 }
 
-                var problem = await HoldAsync(link, state, budget, period, run, held, cancellationToken).ConfigureAwait(false);
+                var problem = await HoldAsync(link, state, budget, period, run, scope, held, cancellationToken).ConfigureAwait(false);
                 if (problem is not null) return new FleetBudgetAdmission(problem, continued);
                 continued.Add(budget.BudgetId);
             }
@@ -175,8 +175,8 @@ public sealed class FleetBudgetGate
     }
 
     // A run that waits for a person: the server records the hold, the owner continues it anyway (signed) or stops it.
-    private async Task<string?> HoldAsync(FleetBudgetLink link, LinkState state, FleetBudgetDefinition budget, FleetBudgetPeriod period, FleetBudgetRun run, Action? held,
-        CancellationToken cancellationToken)
+    private async Task<string?> HoldAsync(FleetBudgetLink link, LinkState state, FleetBudgetDefinition budget, FleetBudgetPeriod period, FleetBudgetRun run,
+        FleetBudgetRunScope scope, Action? held, CancellationToken cancellationToken)
     {
         var nonce = Base64Url.EncodeToString(RandomNumberGenerator.GetBytes(16));
         var deadline = _time.GetUtcNow() + HoldWait;
@@ -233,9 +233,18 @@ public sealed class FleetBudgetGate
             await RefreshAsync(link, state, cancellationToken).ConfigureAwait(false);
             // The machine keeps every budget it verified: one it no longer has is one it cannot tell, and the run waits.
             var kept = state.Budgets().FirstOrDefault(candidate => candidate.Id == budget.BudgetId);
-            if (kept is not null && link.Devices.Current is { } list && FleetBudgetDocuments.TryVerify(kept.Signed, list, link.Devices.Identity.DeviceId, out var current, out _)
-                && (current.Number != budget.Number || await CheckAsync(link, state, kept, current, cancellationToken).ConfigureAwait(false) is null))
-                return null;
+            if (kept is not null && link.Devices.Current is { } list && FleetBudgetDocuments.TryVerify(kept.Signed, list, link.Devices.Identity.DeviceId, out var current, out _))
+            {
+                // A new version decides again, as for a new run, never by itself: one that no longer covers the run, or that it is
+                // not reached under, starts it; one that stops refuses it; otherwise the run waits for its owner.
+                if (current.Number != budget.Number && !FleetBudgetDocuments.Covers(current, scope)) return null;
+                if (await CheckAsync(link, state, kept, current, cancellationToken).ConfigureAwait(false) is null) return null;
+                if (current.Number != budget.Number && current.Reached == FleetBudgetReachedActions.Stop)
+                {
+                    Log($"The run {run.RunId} does not start: the budget '{current.Name}' is reached and stops its runs now.");
+                    return $"The budget '{current.Name}' is reached: the run does not start.";
+                }
+            }
 
             var left = deadline - _time.GetUtcNow();
             if (left <= TimeSpan.Zero) return $"The budget '{budget.Name}' is reached and nobody continued the run in time.";

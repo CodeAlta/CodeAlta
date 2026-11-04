@@ -351,6 +351,45 @@ public sealed class BudgetTests
         StringAssert.Contains(admission.Problem, "nobody continued the run in time");
     }
 
+    // A new version of the budget of a held run decides again, as for a new run: a rename or a lower limit keeps it waiting,
+    // a limit it is no longer reached under starts it, and a version that stops refuses it. A version change alone authorizes nothing.
+    [TestMethod]
+    public async Task ANewVersionOfTheBudgetOfAHeldRun_DecidesAgain_ItReleasesNothingByItself()
+    {
+        await using var fleet = await BudgetFixture.StartAsync();
+        var budget = await fleet.Manager.PutAsync(null, Settings(100), CancellationToken.None);
+        using (var other = new FleetServerClient(fleet.Server.BaseAddress, fleet.OtherKey))
+            Assert.AreEqual(100, (await other.AskAllowanceAsync(budget.Id, new FleetAllowanceRequest(1, 0, 100))).Granted);
+        var gate = fleet.Gate(new FakeSpend());
+        var held = new TaskCompletionSource();
+        var admission = gate.AdmitAsync(new FleetBudgetRun("run-1", null, null, null), () => held.TrySetResult(), TestContext.CancellationToken);
+        await held.Task.WaitAsync(Patience, TestContext.CancellationToken);
+
+        // Renamed, then given a lower limit: still reached, the run waits.
+        await fleet.Manager.PutAsync(budget.Id, Settings(100) with { Name = "Renamed" }, CancellationToken.None);
+        gate.Changed();
+        await fleet.Manager.PutAsync(budget.Id, Settings(50) with { Name = "Renamed" }, CancellationToken.None);
+        gate.Changed();
+        await Task.Delay(TimeSpan.FromMilliseconds(600), TestContext.CancellationToken);
+        Assert.IsFalse(admission.IsCompleted, "a new version that is still reached releases nothing");
+
+        // A limit it is no longer reached under: the run starts.
+        await fleet.Manager.PutAsync(budget.Id, Settings(10_000) with { Name = "Renamed" }, CancellationToken.None);
+        gate.Changed();
+        Assert.IsNull((await admission.WaitAsync(Patience, TestContext.CancellationToken)).Problem);
+
+        // A version that stops runs refuses a held one.
+        var second = await fleet.Manager.PutAsync(null, Settings(100) with { Name = "Second" }, CancellationToken.None);
+        using (var other = new FleetServerClient(fleet.Server.BaseAddress, fleet.OtherKey))
+            await other.AskAllowanceAsync(second.Id, new FleetAllowanceRequest(1, 0, 100));
+        var waiting = new TaskCompletionSource();
+        var stopped = gate.AdmitAsync(new FleetBudgetRun("run-2", null, null, null), () => waiting.TrySetResult(), TestContext.CancellationToken);
+        await waiting.Task.WaitAsync(Patience, TestContext.CancellationToken);
+        await fleet.Manager.PutAsync(second.Id, Settings(100) with { Name = "Second", Reached = FleetBudgetReachedActions.Stop }, CancellationToken.None);
+        gate.Changed();
+        StringAssert.Contains((await stopped.WaitAsync(Patience, TestContext.CancellationToken)).Problem, "is reached");
+    }
+
     // What the server gives of an enforced budget is not signed: the machine never holds more than its signed limit, and what it
     // spent itself reaching the limit holds the run, whatever allowance the server gives.
     [TestMethod]
