@@ -9,6 +9,7 @@ using CodeAlta.Fleet.NodeApi;
 using CodeAlta.Fleet.Protocol;
 using CodeAlta.Fleet.Server;
 using CodeAlta.Orchestration.Hosting;
+using CodeAlta.Orchestration.Runtime;
 using XenoAtom.Logging;
 
 namespace CodeAlta.Node;
@@ -217,6 +218,12 @@ internal sealed partial class NodeAutomations : IFleetNodeAutomations, IAutomati
     /// </summary>
     internal Func<string, FleetAccessState?>? ServerAccess { get; set; }
 
+    /// <summary>
+    /// Gets or sets what gives the signed access documents of all the server links of the node as it last verified them: what
+    /// says whether this machine is a team's or the organization's, whatever gave an automation; null names none.
+    /// </summary>
+    internal Func<IEnumerable<FleetAccessState?>>? ServerAccesses { get; set; }
+
     /// <summary>Starts reading the automations and firing their triggers.</summary>
     internal void Start()
     {
@@ -274,7 +281,7 @@ internal sealed partial class NodeAutomations : IFleetNodeAutomations, IAutomati
         var kind = _options.CredentialKind?.Invoke(provider) ?? Classify(provider);
         if (kind == AutomationCredentialKind.Unknown)
             return $"The credential the provider '{provider.ProviderId.Value}' runs with cannot be told: an unattended run uses a provider whose credential is known.";
-        if (kind == AutomationCredentialKind.Personal && (team is not null || organizationMachine))
+        if (kind == AutomationCredentialKind.Personal && (team is not null || organizationMachine || IsSharedMachine()))
             return $"The provider '{provider.ProviderId.Value}' runs with a personal plan, and a machine of a team or of the organization runs automations with account credentials only.";
         if (kind == AutomationCredentialKind.Personal && policy.Credentials != NodeAutomationPolicy.AnyCredentials)
             return $"The provider '{provider.ProviderId.Value}' runs with a personal plan, and this machine runs automations with account credentials only.";
@@ -294,6 +301,43 @@ internal sealed partial class NodeAutomations : IFleetNodeAutomations, IAutomati
         if (rules.AccountCredentials == true && CredentialKindOf(provider) == AutomationCredentialKind.Personal)
             return $"The provider '{provider.ProviderId.Value}' runs with a personal plan, and the policy of the organization runs every automation with account credentials.";
         return null;
+    }
+
+    /// <inheritdoc />
+    public AutomationRunLimits LimitsFor(AutomationEntry entry, ModelProviderDescriptor provider, string spaceId)
+    {
+        ArgumentNullException.ThrowIfNull(entry);
+        ArgumentNullException.ThrowIfNull(provider);
+        // The limits a session of the fleet keeps to (doc/fleet/security-and-privacy.md, policies and the kill switch): those of
+        // the policy of the server the automation came through, else of the server the space of the run is linked to.
+        if (RulesOf(entry, spaceId) is not { } rules) return AutomationRunLimits.None;
+        var definition = entry.Definition;
+        if (rules.ToolsOff is { Count: > 0 } off && off.Select(AgentToolPatterns.Validate).FirstOrDefault(static error => error is not null) is { } invalid)
+            return AutomationRunLimits.Refused($"The tools the policy of the organization turns off do not read: {invalid}");
+
+        var mode = definition.PermissionMode;
+        if (rules.PermissionMode is { } ceiling)
+        {
+            var rank = SessionPermissionModes.Rank(ceiling);
+            if (mode is not null && SessionPermissionModes.Rank(mode) > rank)
+                return AutomationRunLimits.Refused($"This automation runs in the permission mode '{mode}', and the policy of the organization allows '{ceiling}' at most.");
+            if (mode is null)
+            {
+                // The widest mode the provider offers within the ceiling, when its default is above it.
+                var choices = _host.Commands.GetNewSessionPermissionModes(provider.ProviderId.Value);
+                if (SessionPermissionModes.Rank(choices.DefaultMode) > rank)
+                {
+                    mode = choices.Modes.Where(candidate => SessionPermissionModes.Rank(candidate) <= rank).OrderByDescending(SessionPermissionModes.Rank).FirstOrDefault();
+                    if (mode is null)
+                        return AutomationRunLimits.Refused($"The provider '{provider.ProviderId.Value}' offers no permission mode as narrow as '{ceiling}', which the policy of the organization requires.");
+                }
+            }
+        }
+
+        var sandbox = definition.Sandbox ?? rules.Sandbox;
+        if (FleetPolicyGuard.SandboxProblem(sandbox, rules, _host.RuntimeService.ReadSandboxSettings().Profiles) is { } problem)
+            return AutomationRunLimits.Refused($"This automation cannot run here: {problem}.");
+        return new AutomationRunLimits(null, mode, sandbox, rules.ToolsOff is { Count: > 0 } tools ? tools : null);
     }
 
     // The rules that apply to a run of an automation in a space; null when no signed policy says anything there.
@@ -383,6 +427,12 @@ internal sealed partial class NodeAutomations : IFleetNodeAutomations, IAutomati
 
         return stopped;
     }
+
+    // Whether a signed access document of a server of this machine says it is a team's or the organization's: a shared machine,
+    // which runs every automation with account credentials, whatever gave it (a server, a device paired directly, its owner).
+    private bool IsSharedMachine()
+        => DeviceId is { } self && ServerAccesses?.Invoke() is { } documents
+            && documents.Any(access => access is not null && (access.TeamOf(self) is not null || access.IsOrganizationMachine(self)));
 
     // Whether this machine is the organization's, whether the automation is the organization's, and the service identities the
     // organization turned on, as the access document of the server it came through says.

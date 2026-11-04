@@ -236,6 +236,9 @@ public sealed class AutomationRunGuardTests
         Assert.AreEqual(AutomationRun.Waiting, service.Runs(Id, 1)[0].Status, "the run waits for a person");
         // A person takes it over by the id of the run alone, as the phone does.
         Assert.AreEqual(("not_found", (string?)null), await TakeOver("run-unknown") is var unknown ? (unknown.Status, unknown.SessionId) : default);
+        // Named for another automation, the run is not taken over: what authorized the request was about that other automation.
+        Assert.IsNull(service.TakeOver(run.Id, "0199f4c2-6d1e-7c3a-b5f0-2f9c8e4a1d78"));
+        Assert.IsFalse(service.IsTakenOver(run.Id));
         Assert.AreEqual(("ok", "session-1"), await TakeOver(run.Id) is var taken ? (taken.Status, taken.SessionId) : default);
         Assert.IsTrue(service.IsTakenOver(run.Id));
         // What waits for the person: this run, and the run of a team on a machine of a server, which a server told them of.

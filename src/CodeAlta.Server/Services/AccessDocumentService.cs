@@ -1,4 +1,3 @@
-using System.Collections.Immutable;
 using CodeAlta.Fleet.Protocol;
 using CodeAlta.Fleet.Protocol.Api;
 using CodeAlta.Server.Storage;
@@ -138,23 +137,12 @@ internal sealed class AccessDocumentService
         var model = await ModelAsync(organizationId, snapshot, last, 1, cancellationToken).ConfigureAwait(false);
         var before = FleetAccessState.Empty;
         FleetAccessDocument? held = null;
-        if (last is not null && FleetAccessDocuments.TryParse(last.Payload, out held))
-        {
-            before = new FleetAccessState(organizationId, held.Number, last.Hash, held.DeviceListSequence, [.. held.Owners], [.. held.Signers],
-                held.Teams.ToDictionary(static team => team.Id, StringComparer.Ordinal).ToImmutableDictionary(StringComparer.Ordinal),
-                held.Machines.ToDictionary(static machine => machine.DeviceId, static machine => machine.TeamId, StringComparer.Ordinal).ToImmutableDictionary(StringComparer.Ordinal),
-                [.. held.Suspended])
-            {
-                OrganizationMachines = [.. held.OrganizationMachines ?? []], OrganizationServices = [.. held.OrganizationServices ?? []],
-                Automations = (held.Automations ?? []).ToImmutableDictionary(static automation => automation.Id, StringComparer.Ordinal),
-                Approvers = FleetAccessState.ApproversOf(held.Approvers),
-                ApproversUntil = FleetAccessState.UntilOf(held.Approvers),
-            };
-        }
+        // What the last version says, as machines read it, to say what the next one changes.
+        if (last is not null && FleetAccessDocuments.TryParse(last.Payload, out held)) before = FleetAccessDocuments.StateOf(held, last.Hash, last.Hash);
 
         // A home server with no team and nobody suspended has nothing for machines to verify: its first version waits for a need.
         var needed = last is not null || model.Teams.Count > 0 || model.Suspended.Count > 0 || model.OrganizationMachines is not null || model.Automations is not null
-            || model.Approvers is { Count: > 0 };
+            || model.Approvers is { Count: > 0 } || model.PersonalMachines is not null;
         var names = (await _store.ListDevicesAsync(organizationId, cancellationToken).ConfigureAwait(false)).ToDictionary(static device => device.Id, static device => device.Name,
             StringComparer.Ordinal);
         foreach (var person in snapshot.People) names[person.Id] = person.DisplayName;
@@ -166,7 +154,10 @@ internal sealed class AccessDocumentService
         return new AccessDocumentStateDto(last?.Number ?? 0, signer is null ? null : snapshot.Person(signer)?.DisplayName, last?.RecordedAt, pending);
     }
 
-    /// <summary>The next version as the server's model says it: active owners, active admins, living teams of active people, team machines, suspended people.</summary>
+    /// <summary>
+    /// The next version as the server's model says it: active owners, active admins, living teams of active people, team machines,
+    /// suspended people, and the personal machines given to another person.
+    /// </summary>
     private async Task<FleetAccessDocument> ModelAsync(string organizationId, AccessSnapshot snapshot, AccessDocumentRecord? last, long listSequence,
         CancellationToken cancellationToken)
     {
@@ -198,6 +189,13 @@ internal sealed class AccessDocumentService
         var machines = snapshot.Owners.Where(owner => owner.ResourceKind == FleetResourceKinds.Machine && owner.OwnerKind == FleetPrincipalKinds.Team && living.Contains(owner.OwnerId)
                 && approved.Contains(owner.ResourceId))
             .OrderBy(static owner => owner.ResourceId, StringComparer.Ordinal).Select(static owner => new FleetAccessMachine(owner.ResourceId, owner.OwnerId)).ToList();
+        // The personal machines given to another person than the one the device list names for them: machines take their owner
+        // from the signed document, never from the server's word.
+        var listed = devices.Where(static device => device.Status == DeviceStatuses.Approved).ToDictionary(static device => device.Id, static device => device.OwnerPersonId,
+            StringComparer.Ordinal);
+        var personalMachines = snapshot.Owners.Where(owner => owner.ResourceKind == FleetResourceKinds.Machine && owner.OwnerKind == FleetPrincipalKinds.Person
+                && listed.TryGetValue(owner.ResourceId, out var named) && named != owner.OwnerId)
+            .OrderBy(static owner => owner.ResourceId, StringComparer.Ordinal).Select(static owner => new FleetAccessPersonalMachine(owner.ResourceId, owner.OwnerId)).ToArray();
         var approvers = await _service.DocumentApproversAsync(organizationId, snapshot, cancellationToken).ConfigureAwait(false);
         return new FleetAccessDocument(FleetAccessDocument.CurrentVersion, organizationId, (last?.Number ?? 0) + 1, last?.Hash, listSequence,
             [.. active.Where(static person => person.Role == FleetOrganizationRoles.Owner).Select(static person => person.Id).Order(StringComparer.Ordinal)],
@@ -209,6 +207,7 @@ internal sealed class AccessDocumentService
         {
             // Who else takes the runs of an automation over, for machines to check; a version without any leaves the field out.
             Approvers = approvers.Count > 0 ? approvers : null,
+            PersonalMachines = personalMachines.Length > 0 ? personalMachines : null,
         };
     }
 

@@ -76,6 +76,55 @@ public sealed class FleetPolicyNodeTests
         await client.CreateSessionAsync(new FleetCreateSessionParams(Title: "Again"), "create-7", token);
     }
 
+    [TestMethod]
+    public async Task APromptThatSwitchesTheSessionToAProviderTheRulesDoNotAllow_IsRefused()
+    {
+        var token = TestContext.CancellationToken;
+        await using var fixture = await FleetNodeFixture.StartAsync(token);
+        new ScriptedFleetProvider { Descriptor = new(new CodeAlta.Agent.ModelProviderId("team-gateway"), "Team gateway", "anthropic") { DefaultModelId = "claude-opus-5-5" } }
+            .Register(fixture.Host.ModelProviderRegistry);
+        new ScriptedFleetProvider { Descriptor = new(new CodeAlta.Agent.ModelProviderId("personal"), "Personal plan", "codex") { DefaultModelId = "gpt-6.1" } }
+            .Register(fixture.Host.ModelProviderRegistry);
+        var policy = FleetPolicyState.Empty with { Number = 1, LastHash = "h1", Rules = new FleetPolicyRules(Providers: ["anthropic"]) };
+        fixture.Service.Policy = new FleetPolicyGuard(fixture.NodeIdentity.DeviceId, () => [new FleetPolicySource("https://fleet.example", policy, null, static _ => true)]);
+        await using var client = await FleetNodeClient.ConnectAsync(await fixture.PairViewerAsync(token), fixture.ViewerIdentity, token);
+        var created = await client.CreateSessionAsync(new FleetCreateSessionParams(Title: "Work", Selection: new FleetModelSelection("team-gateway")), "create-1", token);
+
+        // The next prompt names the provider of a personal plan and one of its models: the rules allow neither.
+        var switched = await Assert.ThrowsExactlyAsync<FleetException>(() => client.SendAsync(created.SessionId, "go on", retryKey: "send-1",
+            selection: new FleetModelSelection("personal", "gpt-6.1"), cancellationToken: token));
+        Assert.AreEqual(FleetNodeErrorCodes.PolicyRefused, switched.Error.Code);
+        StringAssert.Contains(switched.Message, "anthropic");
+        Assert.AreEqual("accepted", (await client.SendAsync(created.SessionId, "go on", retryKey: "send-2", cancellationToken: token)).Status, "its own provider goes on");
+    }
+
+    [TestMethod]
+    public async Task APromptThatWaitedForItsBudget_IsNotSent_WhenAStopCameMeanwhile()
+    {
+        var token = TestContext.CancellationToken;
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var waiting = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        await using var fixture = await FleetNodeFixture.StartAsync(token, null, async (_, held, _) =>
+        {
+            held();
+            waiting.TrySetResult();
+            await release.Task.ConfigureAwait(false);
+            return FleetBudgetAdmission.Admitted;
+        });
+        FleetPolicyState? policy = null;
+        fixture.Service.Policy = new FleetPolicyGuard(fixture.NodeIdentity.DeviceId, () => [new FleetPolicySource("https://fleet.example", policy, null, static _ => true)]);
+        await using var client = await FleetNodeClient.ConnectAsync(await fixture.PairViewerAsync(token), fixture.ViewerIdentity, token);
+        var created = await client.CreateSessionAsync(new FleetCreateSessionParams(Title: "Work"), "create-1", token);
+        Assert.AreEqual(FleetBudgetCommandStatuses.Held, (await client.SendAsync(created.SessionId, "held work", retryKey: "send-1", cancellationToken: token)).Status);
+        await waiting.Task.WaitAsync(Patience, token);
+
+        // The owner stops the fleet while it waits; then its budget lets it go.
+        policy = FleetPolicyState.Empty with { Number = 1, LastHash = "h1", Stop = new FleetPolicyStop(FleetPolicyStopScopes.Fleet, [], [], "A leaked key") };
+        release.SetResult();
+        await Task.Delay(TimeSpan.FromMilliseconds(500), token);
+        Assert.IsFalse(fixture.Provider.Prompts.Any(static prompt => prompt.Contains("held work", StringComparison.Ordinal)), "a stop reaches the work that waited for its admission");
+    }
+
     // A stop the node holds (kept from before, read at its start) ends work under way at the next check of the node, though no
     // newer version came after the work started.
     [TestMethod]

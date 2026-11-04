@@ -114,6 +114,13 @@ public sealed record TrustedDevice(
     /// </summary>
     [System.Text.Json.Serialization.JsonIgnore]
     public bool OwnSessionsOnly { get; init; }
+
+    /// <summary>
+    /// Gets the organization of <see cref="PersonId"/>, when the node trusts the device through an organization: a person's id is
+    /// unique within one organization only, so that what a machine linked to several keeps for a person is kept for this pair.
+    /// </summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public string? OrganizationId { get; init; }
 }
 
 /// <summary>Says which device keys a connection accepts.</summary>

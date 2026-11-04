@@ -64,9 +64,12 @@ public sealed class FleetOrganizationDevices
     /// <summary>Gets the pin of the server's own certificate (<see cref="FleetServerCertificates"/>), or null for one that validates as usual.</summary>
     public string? CertificatePin { get; init; }
 
-    /// <summary>Creates a client of the server, signed by this device, that checks the pin of its certificate when it has one.</summary>
+    /// <summary>
+    /// Creates a client of the server, signed by this device, that checks the pin of its certificate when it has one and reads
+    /// the device list through this anchor: the one way a node or a desktop makes a client of a link it holds.
+    /// </summary>
     /// <returns>The client; the caller disposes it.</returns>
-    internal FleetServerClient CreateClient() => new(ServerAddress, Identity, Handler, null, CertificatePin);
+    public FleetServerClient CreateClient() => new(ServerAddress, Identity, Handler, null, CertificatePin) { DeviceList = this };
 
     /// <summary>
     /// Reads the device list from the server again, verifies it, and checks it against the anchor: the same first entry,
@@ -263,7 +266,8 @@ public static class FleetDeviceListMembers
 /// <summary>
 /// The trust a node gives, on a relayed channel, to the members of the signed device list of its organization, read with the
 /// signed access document (<c>doc/fleet/access-control.md</c>, what the node decides): on a personal machine, the owner's own
-/// controller devices get the permissions of a paired device; on a team machine, the controller devices of the team's members
+/// controller devices get the permissions of a paired device (the owner the document names once the machine was given to another
+/// person, the device list's otherwise); on a team machine, the controller devices of the team's members
 /// view, drive and start their own sessions, and its maintainers also manage it, whoever the device list names as its owner;
 /// any other member is known but may do nothing; a device the list removed, or of a person the document suspended, is refused.
 /// </summary>
@@ -296,10 +300,12 @@ public sealed class FleetOrganizationTrust(Func<FleetDeviceListState?> list, str
             {
                 PersonId = member.OwnerId,
                 OwnSessionsOnly = true,
+                OrganizationId = current.OrganizationId,
             };
         }
 
-        var owner = current.Members.TryGetValue(selfDeviceId, out var self) ? self.OwnerId : null;
+        // The owner of the machine: the person the signed document names when it was given to another person, else the list's.
+        var owner = FleetAccessState.OwnerOfMachine(document, selfDeviceId, current);
         var own = owner is not null && member.OwnerId == owner && member.Kind == FleetDeviceKinds.Controller;
         // Another person's controller device gets nothing from the organization here; the people the machine names get what
         // its owner gave them, on their own sessions (FleetNamedPeopleTrust), and a first try asks the owner.
@@ -309,6 +315,7 @@ public sealed class FleetOrganizationTrust(Func<FleetDeviceListState?> list, str
         {
             PersonId = other ? member.OwnerId : null,
             OwnSessionsOnly = other,
+            OrganizationId = current.OrganizationId,
         };
     }
 

@@ -285,7 +285,7 @@ public sealed class FleetBudgetGate
     }
 
     private static FleetServerClient Client(FleetBudgetLink link)
-        => new(link.Devices.ServerAddress, link.Devices.Identity, link.Devices.Handler) { DeviceList = link.Devices };
+        => link.Devices.CreateClient();
 
     private static void Log(string message)
     {

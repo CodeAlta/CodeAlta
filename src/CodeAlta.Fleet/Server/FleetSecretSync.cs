@@ -89,7 +89,7 @@ public sealed class FleetSecretSync
     /// <exception cref="HttpRequestException">The server does not answer.</exception>
     public async Task<FleetApprovalDto> RequestApprovalAsync(string environmentId, RequestFleetApprovalRequest request, CancellationToken cancellationToken)
     {
-        using var client = new FleetServerClient(_devices.ServerAddress, _devices.Identity, _devices.Handler, null, _devices.CertificatePin) { DeviceList = _devices };
+        using var client = _devices.CreateClient();
         return await client.RequestApprovalAsync(environmentId, request, cancellationToken).ConfigureAwait(false);
     }
 
@@ -101,7 +101,7 @@ public sealed class FleetSecretSync
     /// <exception cref="HttpRequestException">The server does not answer.</exception>
     public async Task<FleetApprovalDto> GetApprovalAsync(string approvalId, CancellationToken cancellationToken)
     {
-        using var client = new FleetServerClient(_devices.ServerAddress, _devices.Identity, _devices.Handler, null, _devices.CertificatePin) { DeviceList = _devices };
+        using var client = _devices.CreateClient();
         return await client.GetApprovalAsync(approvalId, cancellationToken).ConfigureAwait(false);
     }
 
@@ -123,7 +123,7 @@ public sealed class FleetSecretSync
         {
             list = await _devices.RefreshAsync(cancellationToken).ConfigureAwait(false);
             if (list.Removed.Contains(_devices.Identity.DeviceId)) return Revoke();
-            using var client = new FleetServerClient(_devices.ServerAddress, _devices.Identity, _devices.Handler, null, _devices.CertificatePin) { DeviceList = _devices };
+            using var client = _devices.CreateClient();
             held = await client.ListHeldSecretsAsync(cancellationToken).ConfigureAwait(false);
             environments = await client.ListEnvironmentsAsync(cancellationToken).ConfigureAwait(false);
         }
@@ -207,7 +207,7 @@ public sealed class FleetSecretSync
     {
         ArgumentNullException.ThrowIfNull(uses);
         if (uses.Count == 0) return;
-        using var client = new FleetServerClient(_devices.ServerAddress, _devices.Identity, _devices.Handler, null, _devices.CertificatePin) { DeviceList = _devices };
+        using var client = _devices.CreateClient();
         await client.PublishSecretUsesAsync(uses, cancellationToken).ConfigureAwait(false);
     }
 

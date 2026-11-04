@@ -442,7 +442,8 @@ function Grants({ context }: { context: Context }) {
           <span className="fleet-secret-tags">{grant.status === "pending_keys" && <Tag minimal intent="warning">{t("Waiting for keys")}</Tag>}</span>
           <span className="secret-actions">
             {grant.status === "pending_keys" && <Button size="small" disabled={busy} text={t("Confirm keys")}
-              onClick={() => void run(() => api.confirmGrantKeys({ expectedEpoch: epoch, linkId, id: grant.id }, call))} />}
+              onClick={() => void run(() => api.confirmGrantKeys({ expectedEpoch: epoch, linkId, id: grant.id, subjectKind: grant.subjectKind, subjectId: grant.subjectId,
+                capability: grant.capability, scopeId: grant.scopeId ?? null }, call))} />}
             <Button size="small" variant="minimal" intent="danger" icon={<AppIcon name="trash" size={14} />} aria-label={t("Remove the grant of {name}", { name: grant.subjectName })}
               disabled={busy} onClick={() => void run(() => api.revokeGrant({ expectedEpoch: epoch, linkId, id: grant.id }, call))} />
           </span>
@@ -482,7 +483,7 @@ function GrantForm({ context, onClose }: { context: Context; onClose: () => void
         options={grantCapabilities.map(item => ({ value: item.value, label: t(item.label) }))} />
       {scopes.length > 0 && <HTMLSelect value={chosenScope} aria-label={t("Where")} disabled={busy} onChange={event => setScope(event.target.value)} options={scopes} />}
     </div>
-    {capability === "session.view-content" && scopes.length > 0 && <Checkbox checked={sealed} disabled={busy} label={t("The content is sealed from the server (a Private space): a device of its owner gives the keys")}
+    {capability === "session.view-content" && scopes.length > 0 && <Checkbox checked={sealed} disabled={busy} label={t("The title is sealed from the server (a Private space): a device of its owner gives its key")}
       onChange={event => setSealed(event.currentTarget.checked)} />}
     {content && !ofSession && scopes.length === 0 && <p className="muted-text">{t("Content is granted on one machine or session, never on a whole scope.")}</p>}
     {ofSession && scopes.length === 0 && <p className="muted-text">{t("Only your own sessions whose title this computer opens are shared from here.")}</p>}

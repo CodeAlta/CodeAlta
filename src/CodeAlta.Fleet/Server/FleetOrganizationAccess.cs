@@ -31,6 +31,7 @@ public sealed class FleetOrganizationAccess
     private readonly SemaphoreSlim _refresh = new(1, 1);
     private FleetAccessState? _current;
     private AccessPin? _checkpoint;
+    private bool _verifiedHere;
     // Each version verified in this process, by number: the policy names the version its signer read, and is checked against it.
     private System.Collections.Immutable.ImmutableDictionary<long, FleetAccessState> _history = System.Collections.Immutable.ImmutableDictionary<long, FleetAccessState>.Empty;
 
@@ -43,6 +44,7 @@ public sealed class FleetOrganizationAccess
         ArgumentNullException.ThrowIfNull(devices);
         Devices = devices;
         _pinPath = pinPath;
+        _current = Kept();
     }
 
     /// <summary>Gets the anchored device list of the link.</summary>
@@ -77,7 +79,8 @@ public sealed class FleetOrganizationAccess
             using var client = Devices.CreateClient();
             // Verified before in this process: only the versions after it are read, each checked to follow the one before it. An
             // answer that does not start right after it (a gap, a fork, a server that lists from the start) is verified whole below.
-            if (Volatile.Read(ref _current) is { Number: > 0, OrganizationId: { } known } held
+            // A version kept in the pin decides before the first read, which verifies the whole chain: the policy needs its history.
+            if (_verifiedHere && Volatile.Read(ref _current) is { Number: > 0, OrganizationId: { } known } held
                 && await client.ListAccessDocumentsAsync(held.Number, cancellationToken).ConfigureAwait(false) is var after
                 && (after.Items.Count == 0 || FleetAccessDocuments.TryParse(after.Items[0].Document.Payload, out var first) && first.Number == held.Number + 1))
             {
@@ -93,7 +96,7 @@ public sealed class FleetOrganizationAccess
                     Volatile.Write(ref _history, Volatile.Read(ref _history).SetItem(next.Number, next));
                 }
 
-                WritePin(new AccessPin(extended.FirstHash!, extended.Number, extended.LastHash!));
+                WritePin(new AccessPin(extended.FirstHash!, extended.Number, extended.LastHash!) { Last = after.Items[^1].Document });
                 Volatile.Write(ref _current, extended);
                 Changed?.Invoke(extended);
                 return extended;
@@ -127,10 +130,12 @@ public sealed class FleetOrganizationAccess
             }
 
             var previous = Volatile.Read(ref _current);
-            if (state.Number > 0) WritePin(new AccessPin(state.FirstHash!, state.Number, state.LastHash!));
+            var firstHere = !_verifiedHere;
+            if (state.Number > 0) WritePin(new AccessPin(state.FirstHash!, state.Number, state.LastHash!) { Last = listed.Items[^1].Document });
             Volatile.Write(ref _history, history.ToImmutable());
             Volatile.Write(ref _current, state);
-            if (previous is null || previous.Number != state.Number) Changed?.Invoke(state);
+            _verifiedHere = true;
+            if (previous is null || firstHere || previous.Number != state.Number || previous.LastHash != state.LastHash) Changed?.Invoke(state);
             return state;
         }
         finally
@@ -162,7 +167,10 @@ public sealed class FleetOrganizationAccess
         var signed = document with { DeviceListSequence = Math.Max(devices.Sequence, state.DeviceListSequence), SignerDeviceId = Devices.Identity.DeviceId, Time = DateTimeOffset.UtcNow };
         var names = draft.Names;
         var changes = FleetAccessDocuments.Describe(state, signed, id => names.TryGetValue(id, out var name) ? name : null);
-        return new FleetAccessDraft(signed, changes.Count == 0 ? ["The first version of the access document"] : changes);
+        // Never a reassuring line for a change this device does not describe: the first version says so, any other one too.
+        return new FleetAccessDraft(signed, changes.Count > 0 ? changes
+            : state.Number == 0 ? ["The first version of the access document"]
+            : ["A change this version of CodeAlta does not describe: do not sign it unless you know what it changes"]);
     }
 
     /// <summary>Signs a version this device prepared and gives it to the server, then reads the chain again.</summary>
@@ -180,6 +188,26 @@ public sealed class FleetOrganizationAccess
         using (var client = Devices.CreateClient())
             await client.AppendAccessDocumentAsync(signed, cancellationToken).ConfigureAwait(false);
         return await RefreshAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    // The version the pin keeps, as this device verified it: it decides while the server is unreachable after a restart (who
+    // is suspended, the team of this machine), until the first read verifies the chain again. One that does not hash to the tip
+    // of the pin is not trusted.
+    private FleetAccessState? Kept()
+    {
+        try
+        {
+            if (ReadPin() is not { Number: > 0, Last: { } last } pin || FleetAccessDocuments.Hash(last) != pin.Tip
+                || !FleetAccessDocuments.TryParse(last.Payload, out var document) || document.Number != pin.Number)
+                return null;
+            var state = FleetAccessDocuments.StateOf(document, pin.Tip, pin.Root);
+            Volatile.Write(ref _history, Volatile.Read(ref _history).SetItem(state.Number, state));
+            return state;
+        }
+        catch (FleetAccessDocumentException)
+        {
+            return null;
+        }
     }
 
     private static AccessPin? Newer(AccessPin? stored, AccessPin? held)
@@ -210,7 +238,7 @@ public sealed class FleetOrganizationAccess
         if (_pinPath is null) return;
         try
         {
-            if (ReadPin() is { } stored && stored.Number >= pin.Number) return;
+            if (ReadPin() is { } stored && (stored.Number > pin.Number || stored.Number == pin.Number && stored.Last is not null)) return;
             Directory.CreateDirectory(Path.GetDirectoryName(_pinPath)!);
             FleetFiles.WriteAtomically(_pinPath, JsonSerializer.SerializeToUtf8Bytes(pin, FleetAccessPinJson.Default.AccessPin));
         }
@@ -225,7 +253,11 @@ public sealed class FleetOrganizationAccess
 /// <param name="Root">The hash of its first version.</param>
 /// <param name="Number">The number of the last version accepted.</param>
 /// <param name="Tip">Its hash.</param>
-internal sealed record AccessPin(string Root, long Number, string Tip);
+internal sealed record AccessPin(string Root, long Number, string Tip)
+{
+    /// <summary>Gets the version at the tip, signed, as this device verified it; null in a pin written before it was kept.</summary>
+    public FleetSignedAccessDocument? Last { get; init; }
+}
 
 [JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase, WriteIndented = true)]
 [JsonSerializable(typeof(AccessPin))]

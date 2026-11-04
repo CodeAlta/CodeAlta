@@ -39,6 +39,9 @@ public static class FleetSessionStates
 /// Never published: its statistics carry its blind index only.
 /// </param>
 /// <param name="PersonId">The person who started it here through a team membership (a team machine); null otherwise.</param>
+/// <param name="PersonOrganizationId">
+/// The organization of <paramref name="PersonId"/>: only its server is told the person, a person's id being unique within one organization.
+/// </param>
 public sealed record FleetLocalSession(
     string SessionId,
     string? SpaceId,
@@ -52,7 +55,8 @@ public sealed record FleetLocalSession(
     FleetSessionCounts? Counts = null,
     string? Title = null,
     string? ProjectIdentity = null,
-    string? PersonId = null);
+    string? PersonId = null,
+    string? PersonOrganizationId = null);
 
 /// <summary>What an instance has to publish to its servers: the inventory of the machine and its sessions.</summary>
 public interface IFleetPublicationSource

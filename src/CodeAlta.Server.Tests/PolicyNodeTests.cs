@@ -88,6 +88,78 @@ public sealed class PolicyNodeTests
         Assert.IsTrue(kept.Current!.Stops(nodeKey.DeviceId, null));
     }
 
+    [TestMethod]
+    public async Task AnAdminNoLongerASigner_SignsNoNewVersion_EvenAgainstTheAccessDocumentTheyStillSignedIn()
+    {
+        await using var server = await ServerFixture.StartAsync();
+        using var root = new TempDirectory();
+        using var ownerKey = DeviceIdentity.LoadOrCreate(Path.Combine(root.Path, "owner"));
+        using var beaKey = DeviceIdentity.LoadOrCreate(Path.Combine(root.Path, "bea"));
+        using var owner = new FleetServerClient(server.BaseAddress, ownerKey);
+        await owner.SetUpAsync(server.SetupCode, "Alex", "Desktop", "Acme", CancellationToken.None);
+        var invitation = await owner.InvitePersonAsync(new Fleet.Protocol.Api.InvitePersonRequest("Bea"));
+        using (var bea = new FleetServerClient(server.BaseAddress, beaKey)) await bea.EnrollAsync(invitation.Token, "Bea laptop", FleetDeviceKinds.Controller, CancellationToken.None);
+        await owner.ApproveAsync(beaKey.DeviceId, FleetDeviceKinds.Controller, CancellationToken.None);
+        await owner.SetPersonRoleAsync(invitation.Person.Id, FleetOrganizationRoles.Admin);
+        var access = new FleetOrganizationAccess(new FleetOrganizationDevices(server.BaseAddress, ownerKey, Path.Combine(root.Path, "owner-link", FleetOrganizationDevices.PinFileName)),
+            Path.Combine(root.Path, "owner-link", FleetOrganizationAccess.PinFileName));
+        await access.SignAsync((await access.PrepareAsync(CancellationToken.None))!, CancellationToken.None);
+
+        // Bea, an admin who signs, stops the fleet; the machine verifies it.
+        var beaConsole = Console(server.BaseAddress, beaKey, Path.Combine(root.Path, "bea-link"));
+        var stopped = await beaConsole.SignAsync(await beaConsole.PrepareAsync(FleetPolicyRules.None, new FleetPolicyStop(FleetPolicyStopScopes.Fleet, [], [], "Incident"), null,
+            CancellationToken.None), CancellationToken.None);
+        using var forging = new AppendingHandler { InnerHandler = new HttpClientHandler() };
+        var machine = Console(server.BaseAddress, ownerKey, Path.Combine(root.Path, "machine-link"), forging);
+        Assert.AreEqual("Incident", (await machine.RefreshAsync(CancellationToken.None)).Stop?.Reason);
+
+        // She is no longer an admin, and the owner signs it. With the server, she then signs a version that lifts the stop,
+        // against the access document she still signed in, after the version before it.
+        await owner.SetPersonRoleAsync(invitation.Person.Id, FleetOrganizationRoles.Member);
+        await access.SignAsync((await access.PrepareAsync(CancellationToken.None))!, CancellationToken.None);
+        Assert.IsFalse(access.Current!.IsSigner(invitation.Person.Id));
+        var lifted = new FleetPolicyDocument(FleetPolicyDocument.CurrentVersion, stopped.OrganizationId!, stopped.Number + 1, stopped.LastHash, stopped.DeviceListSequence,
+            stopped.AccessNumber, FleetPolicyRules.None, null, beaKey.DeviceId, DateTimeOffset.UtcNow);
+        var text = FleetPolicyDocuments.Serialize(lifted);
+        var signed = new FleetSignedPolicyDocument(text, System.Buffers.Text.Base64Url.EncodeToString(beaKey.SignData(FleetPolicyDocuments.GetSignedBytes(text))));
+        forging.Appended = new PolicyDocumentDto(lifted.Number, FleetPolicyDocuments.Hash(signed), signed, DateTimeOffset.UtcNow);
+
+        // The machine that verified the stop keeps it, in this process and after a restart.
+        var refused = await Assert.ThrowsExactlyAsync<FleetPolicyDocumentException>(() => machine.RefreshAsync(CancellationToken.None));
+        StringAssert.Contains(refused.Message, "signs no more");
+        Assert.AreEqual("Incident", machine.Current?.Stop?.Reason, "a version signed by someone who signs no more is not taken");
+        var restarted = Console(server.BaseAddress, ownerKey, Path.Combine(root.Path, "machine-link"), forging);
+        await Assert.ThrowsExactlyAsync<FleetPolicyDocumentException>(() => restarted.RefreshAsync(CancellationToken.None));
+        Assert.AreEqual("Incident", restarted.Current?.Stop?.Reason);
+
+        // The owner signs the next version: it holds, and the stop is lifted only by it.
+        forging.Appended = null;
+        var owners = Console(server.BaseAddress, ownerKey, Path.Combine(root.Path, "owner-link"));
+        await owners.SignAsync(await owners.PrepareAsync(FleetPolicyRules.None, null, null, CancellationToken.None), CancellationToken.None);
+        Assert.IsNull((await machine.RefreshAsync(CancellationToken.None)).Stop);
+    }
+
+    [TestMethod]
+    public async Task AKeptPolicyThatDoesNotRead_StopsTheWorkOfTheFleet_AndIsNotReplacedByWhatTheServerSays()
+    {
+        using var root = new TempDirectory();
+        using var nodeKey = DeviceIdentity.LoadOrCreate(Path.Combine(root.Path, "node"));
+        var path = Path.Combine(root.Path, "node-link", FleetOrganizationPolicy.PinFileName);
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        File.WriteAllText(path, "{ \"root\": \"abc\", \"number\": 3, \"rules\": ");
+
+        // The rules and the stop it held, and the checkpoint of the chain, are lost: the work of the fleet stops, and says how to repair it.
+        var policy = new FleetOrganizationPolicy(new FleetOrganizationAccess(new FleetOrganizationDevices(new Uri("http://127.0.0.1:9"), nodeKey)), path);
+        var halt = new FleetPolicyGuard(nodeKey.DeviceId, () => [new FleetPolicySource("server", policy.Current, null, static _ => true)]).Halt;
+        Assert.IsNotNull(halt, "an established policy that does not read is no reason to run without one");
+        StringAssert.Contains(halt.Stop.Reason, path);
+
+        // The chain of the server would be trusted without the lost checkpoint: it is not read until the file is repaired.
+        var refused = await Assert.ThrowsExactlyAsync<FleetPolicyDocumentException>(() => policy.RefreshAsync(CancellationToken.None));
+        StringAssert.Contains(refused.Message, path);
+        Assert.AreEqual("{ \"root\": \"abc\", \"number\": 3, \"rules\": ", File.ReadAllText(path), "the file stays as it is, for its repair");
+    }
+
     private static FleetOrganizationPolicy Console(Uri server, DeviceIdentity identity, string folder, HttpMessageHandler? handler = null)
     {
         var devices = new FleetOrganizationDevices(server, identity, Path.Combine(folder, FleetOrganizationDevices.PinFileName), handler);
@@ -102,6 +174,24 @@ public sealed class PolicyNodeTests
         {
             if (timeout.IsCancellationRequested) Assert.Fail($"Timed out waiting: {what}.");
             await Task.Delay(50);
+        }
+    }
+
+    // Answers the list of the policy with a version of its own after the ones the server holds, as a server that takes it would.
+    private sealed class AppendingHandler : DelegatingHandler
+    {
+        public PolicyDocumentDto? Appended { get; set; }
+
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            var response = await base.SendAsync(request, cancellationToken);
+            if (Appended is not { } appended || request.Method != HttpMethod.Get || !request.RequestUri!.AbsolutePath.EndsWith("/api/v1/policies", StringComparison.Ordinal))
+                return response;
+            var list = await response.Content.ReadFromJsonAsync(FleetPolicyDocumentJsonContext.Default.PolicyDocumentListDto, cancellationToken);
+            return new HttpResponseMessage(response.StatusCode)
+            {
+                Content = JsonContent.Create(new PolicyDocumentListDto([.. list!.Items, appended]), FleetPolicyDocumentJsonContext.Default.PolicyDocumentListDto),
+            };
         }
     }
 

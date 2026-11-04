@@ -66,6 +66,16 @@ public sealed record FleetAccessMachine(
     [property: JsonPropertyName("team")] string TeamId);
 
 /// <summary>
+/// A personal machine given to another person than the one the device list names for it (<c>doc/fleet/access-control.md</c>,
+/// ownership over time): machines take the person named here as its owner, whom the device list does not say.
+/// </summary>
+/// <param name="DeviceId">The device of the machine.</param>
+/// <param name="PersonId">The person who owns it now.</param>
+public sealed record FleetAccessPersonalMachine(
+    [property: JsonPropertyName("device")] string DeviceId,
+    [property: JsonPropertyName("person")] string PersonId);
+
+/// <summary>
 /// One version of the signed access document of an organization (<c>doc/fleet/access-control.md</c>, what the node decides):
 /// who owns and signs for the organization, its teams, its team machines and its suspended people, signed by the controller
 /// device of a signer. Versions form a chain, as the device list does: each names the hash of the one before and the next
@@ -121,6 +131,14 @@ public sealed record FleetAccessDocument(
     [JsonPropertyName("approvers")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public IReadOnlyList<FleetAccessApprovers>? Approvers { get; init; }
+
+    /// <summary>
+    /// Gets the personal machines whose owner is another person than the one the device list names for them: given to that
+    /// person, who accepted. Null for none, which a version without them says by leaving the field out.
+    /// </summary>
+    [JsonPropertyName("personalMachines")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyList<FleetAccessPersonalMachine>? PersonalMachines { get; init; }
 }
 
 /// <summary>A version of the access document as it travels and is stored: the exact JSON text signed, and the signature.</summary>
@@ -185,6 +203,12 @@ public sealed record FleetAccessState(
         => (approvers ?? []).Where(static item => item.Until is { Count: > 0 })
             .ToImmutableDictionary(static item => item.AutomationId, static item => item.Until!.ToImmutableDictionary(StringComparer.Ordinal), StringComparer.Ordinal);
 
+    /// <summary>Lists the owners of the personal machines a version names, by device.</summary>
+    /// <param name="machines">The personal machines of a version; null for none.</param>
+    /// <returns>The person by device.</returns>
+    public static ImmutableDictionary<string, string> PersonalMachinesOf(IReadOnlyList<FleetAccessPersonalMachine>? machines)
+        => (machines ?? []).ToImmutableDictionary(static machine => machine.DeviceId, static machine => machine.PersonId, StringComparer.Ordinal);
+
     /// <summary>Lists the approvers of a version, by automation.</summary>
     /// <param name="approvers">The approvers of a version; null for none.</param>
     /// <returns>The people by automation.</returns>
@@ -239,6 +263,34 @@ public sealed record FleetAccessState(
         FleetPrincipalKinds.Organization => IsSigner(personId),
         _ => false,
     };
+
+    /// <summary>Gets the person who owns each personal machine given to another person than the one the device list names, by device.</summary>
+    public ImmutableDictionary<string, string> PersonalMachines { get; init; } = ImmutableDictionary.Create<string, string>(StringComparer.Ordinal);
+
+    /// <summary>
+    /// Gets the person who owns a personal machine: the one this document names when the machine was given to another person,
+    /// otherwise the one the device list names for it. A machine decides from it who its owner is: whose devices manage it,
+    /// whose automations it runs.
+    /// </summary>
+    /// <param name="machineId">The device of the machine.</param>
+    /// <param name="devices">The device list, as the machine verified it.</param>
+    /// <returns>The person, or null when the list does not name the machine or a person for it.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="devices"/> is null.</exception>
+    public string? MachineOwner(string machineId, FleetDeviceListState devices) => OwnerOfMachine(this, machineId, devices);
+
+    /// <summary>Gets the person who owns a personal machine, as <see cref="MachineOwner"/> says, also before any access document.</summary>
+    /// <param name="access">The access document, as the machine verified it; null for none: the device list decides alone.</param>
+    /// <param name="machineId">The device of the machine.</param>
+    /// <param name="devices">The device list, as the machine verified it.</param>
+    /// <returns>The person, or null when neither names one.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="devices"/> is null.</exception>
+    public static string? OwnerOfMachine(FleetAccessState? access, string? machineId, FleetDeviceListState devices)
+    {
+        ArgumentNullException.ThrowIfNull(devices);
+        if (string.IsNullOrEmpty(machineId)) return null;
+        if (access is not null && access.PersonalMachines.TryGetValue(machineId, out var person)) return person;
+        return devices.Members.TryGetValue(machineId, out var member) ? member.OwnerId : null;
+    }
 
     /// <summary>Gets whether a machine is the organization's.</summary>
     /// <param name="deviceId">The device of the machine.</param>
@@ -381,20 +433,38 @@ public static class FleetAccessDocuments
         reason = Check(state, signed, devices, organizationId, out var document);
         if (reason is not null) return false;
         var hash = Hash(signed!);
-        next = new FleetAccessState(document!.OrganizationId, document.Number, hash, document.DeviceListSequence,
+        next = StateOf(document!, hash, state.FirstHash ?? hash);
+        return true;
+    }
+
+    /// <summary>
+    /// Gets the state a version leaves: each version says the whole document. For a version the caller verified before and kept
+    /// in a place it trusts (the pin of its link), so that what it says decides while the server is unreachable after a restart.
+    /// </summary>
+    /// <param name="document">The version.</param>
+    /// <param name="hash">Its hash.</param>
+    /// <param name="firstHash">The hash of the first version of its chain.</param>
+    /// <returns>The state.</returns>
+    /// <exception cref="ArgumentNullException">An argument is null.</exception>
+    public static FleetAccessState StateOf(FleetAccessDocument document, string hash, string firstHash)
+    {
+        ArgumentNullException.ThrowIfNull(document);
+        ArgumentNullException.ThrowIfNull(hash);
+        ArgumentNullException.ThrowIfNull(firstHash);
+        return new FleetAccessState(document.OrganizationId, document.Number, hash, document.DeviceListSequence,
             [.. document.Owners], [.. document.Signers],
             document.Teams.ToImmutableDictionary(static team => team.Id, StringComparer.Ordinal),
             document.Machines.ToImmutableDictionary(static machine => machine.DeviceId, static machine => machine.TeamId, StringComparer.Ordinal),
             [.. document.Suspended])
         {
-            FirstHash = state.FirstHash ?? hash,
+            FirstHash = firstHash,
             OrganizationMachines = [.. document.OrganizationMachines ?? []],
             OrganizationServices = [.. document.OrganizationServices ?? []],
             Automations = (document.Automations ?? []).ToImmutableDictionary(static automation => automation.Id, StringComparer.Ordinal),
             Approvers = FleetAccessState.ApproversOf(document.Approvers),
             ApproversUntil = FleetAccessState.UntilOf(document.Approvers),
+            PersonalMachines = FleetAccessState.PersonalMachinesOf(document.PersonalMachines),
         };
-        return true;
     }
 
     /// <summary>Reads a signed version and checks it was signed by a given device, apart from the chain: what a server checks before it keeps one.</summary>
@@ -497,6 +567,28 @@ public static class FleetAccessDocuments
             if (automation.Paused && held?.Paused != true) lines.Add($"The automation {Name(automation.Id)} waits for its owner to resume it");
             if (!automation.Paused && held?.Paused == true) lines.Add($"The automation {Name(automation.Id)} is resumed");
         }
+
+        // An entry left out takes the restriction of its owner away: the automation goes back to who gives it versions.
+        var kept = (after.Automations ?? []).Select(static automation => automation.Id).ToHashSet(StringComparer.Ordinal);
+        foreach (var held in before.Automations.Values.Where(held => !kept.Contains(held.Id)).OrderBy(static held => held.Id, StringComparer.Ordinal))
+        {
+            var owner = held.OwnerKind == FleetPrincipalKinds.Organization ? "the organization's" : $"{Name(held.OwnerId)}'s";
+            lines.Add($"The automation {Name(held.Id)} is no longer {owner}: it goes back to who gives it versions" + (held.Paused ? ", and is no longer paused" : string.Empty));
+        }
+
+        // A personal machine given to another person: its owner's devices manage it, and the person the device list names no longer does.
+        var personal = FleetAccessState.PersonalMachinesOf(after.PersonalMachines);
+        foreach (var (device, person) in personal.OrderBy(static pair => pair.Key, StringComparer.Ordinal))
+        {
+            if (!before.PersonalMachines.TryGetValue(device, out var held) || held != person)
+                lines.Add($"{Name(device)} is {Name(person)}'s: their devices manage it, and it runs their automations");
+        }
+
+        foreach (var (device, held) in before.PersonalMachines.Where(pair => !personal.ContainsKey(pair.Key)).OrderBy(static pair => pair.Key, StringComparer.Ordinal))
+            lines.Add(after.Machines.Any(machine => machine.DeviceId == device) || after.OrganizationMachines?.Contains(device, StringComparer.Ordinal) == true
+                ? $"{Name(device)} is no longer {Name(held)}'s"
+                : $"{Name(device)} is no longer {Name(held)}'s: the person the device list names for it owns it again");
+
         var approvers = FleetAccessState.ApproversOf(after.Approvers);
         foreach (var (automation, people) in approvers.OrderBy(static pair => pair.Key, StringComparer.Ordinal))
         {
@@ -532,7 +624,9 @@ public static class FleetAccessDocuments
             && SameSet(left.Teams.Select(TeamKey), right.Teams.Select(TeamKey))
             && SameSet(left.OrganizationMachines ?? [], right.OrganizationMachines ?? []) && SameSet(left.OrganizationServices ?? [], right.OrganizationServices ?? [])
             && SameSet((left.Automations ?? []).Select(AutomationKey), (right.Automations ?? []).Select(AutomationKey))
-            && SameSet(Approvals(left), Approvals(right));
+            && SameSet(Approvals(left), Approvals(right))
+            && SameSet((left.PersonalMachines ?? []).Select(static machine => machine.DeviceId + "\n" + machine.PersonId),
+                (right.PersonalMachines ?? []).Select(static machine => machine.DeviceId + "\n" + machine.PersonId));
 
         static string AutomationKey(FleetAccessAutomation automation) => $"{automation.Id}\n{automation.OwnerKind}\n{automation.OwnerId}\n{automation.Paused}";
 
@@ -561,6 +655,7 @@ public static class FleetAccessDocuments
             {
                 Until = state.ApproversUntil.TryGetValue(pair.Key, out var ends) && ends.Count > 0 ? ends : null,
             })],
+            PersonalMachines = [.. state.PersonalMachines.Select(static pair => new FleetAccessPersonalMachine(pair.Key, pair.Value))],
         }, document);
     }
 
@@ -649,6 +744,15 @@ public static class FleetAccessDocuments
         {
             if (machine is null || !IsId(machine.DeviceId) || !machines.Add(machine.DeviceId) || !teams.Contains(machine.TeamId ?? string.Empty))
                 return "a team machine does not name a team of the version, or is named twice";
+        }
+
+        if (document.PersonalMachines is { } personal)
+        {
+            var organization = new HashSet<string>(document.OrganizationMachines ?? [], StringComparer.Ordinal);
+            var given = new HashSet<string>(StringComparer.Ordinal);
+            if (personal.Count > MaxItems || personal.Any(machine => machine is null || !IsId(machine.DeviceId) || !IsId(machine.PersonId) || !given.Add(machine.DeviceId)))
+                return "a personal machine is named twice, or does not name its person";
+            if (given.Any(id => machines.Contains(id) || organization.Contains(id))) return "a machine is both a person's and a team's or the organization's";
         }
 
         if (document.Approvers is { } approvers)

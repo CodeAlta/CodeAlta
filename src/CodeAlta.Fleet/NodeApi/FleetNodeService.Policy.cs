@@ -109,12 +109,18 @@ public sealed partial class FleetNodeService
         return rules;
     }
 
-    // A prompt that chooses a model is checked against the rules of the space of its session.
-    private void RequirePolicyModel(string? spaceId, string? modelId)
+    // A prompt is checked against the rules of the space of its session with the provider and the model it runs with: those it
+    // names, else the session's. A selection that names another provider is checked as a start is, so that a session started
+    // with an allowed provider cannot go on with one the rules do not allow.
+    private void RequirePolicySelection(CodeAlta.Catalog.SessionViewDescriptor session, FleetModelSelection? selection)
     {
         RequireNotHalted();
-        if (modelId is null || Policy?.RulesFor(spaceId) is not { } rules) return;
-        if (!rules.AllowsModel(modelId)) throw Refused($"The policy of the organization allows only these models: {string.Join(", ", rules.Models!)}; not '{modelId}'.");
+        if (Policy?.RulesFor(session.SpaceId) is not { } rules) return;
+        var providerKey = selection?.ProviderKey ?? session.ResolvedProviderKey;
+        var provider = _host.ModelProviderRegistry.ListProviders().FirstOrDefault(value => string.Equals(value.ProviderId.Value, providerKey, StringComparison.Ordinal));
+        var switched = !string.Equals(providerKey, session.ResolvedProviderKey, StringComparison.Ordinal);
+        var model = selection?.ModelId ?? (switched ? provider?.DefaultModelId : null);
+        if (FleetPolicyGuard.Refusal(rules, provider?.ProviderType, providerKey, model) is { } refusal) throw Refused(refusal);
     }
 
     // The widest permission mode the provider offers within the policy; null when its default already is.
@@ -129,41 +135,7 @@ public sealed partial class FleetNodeService
     }
 
     // Why a sandbox breaks the floor and the network of the rules; null when it holds.
-    private string? PolicySandboxProblem(string? sandbox, FleetPolicyRules rules)
-    {
-        if (rules.Sandbox is null && rules.Network is null) return null;
-        if (sandbox is null || string.Equals(sandbox, SandboxProfiles.Off, StringComparison.OrdinalIgnoreCase))
-            return "the policy of the organization requires a sandbox";
-        var profiles = _host.RuntimeService.ReadSandboxSettings().Profiles;
-        SandboxConfinement chosen;
-        try
-        {
-            chosen = SandboxConfinement.Of(SandboxProfiles.Resolve(sandbox, profiles));
-        }
-        catch (SandboxProfileException)
-        {
-            return $"this machine has no sandbox profile '{sandbox}'";
-        }
-
-        if (rules.Sandbox is { } floorName)
-        {
-            SandboxConfinement floor;
-            try
-            {
-                floor = SandboxConfinement.Of(SandboxProfiles.Resolve(floorName, profiles));
-            }
-            catch (SandboxProfileException)
-            {
-                return $"this machine has no sandbox profile '{floorName}', which the policy of the organization requires";
-            }
-
-            if (chosen.WeakerThan(floor) is { } weaker) return $"the profile '{sandbox}' is weaker than '{floorName}', which the policy of the organization requires: {weaker}";
-        }
-
-        if (rules.Network is { } network && FleetPolicyDocuments.Networks.IndexOf(SandboxConfinement.NetworkName(chosen.Network)) > FleetPolicyDocuments.Networks.IndexOf(network))
-            return $"the network of the profile '{sandbox}' is wider than '{network}', which the policy of the organization allows";
-        return null;
-    }
+    private string? PolicySandboxProblem(string? sandbox, FleetPolicyRules rules) => FleetPolicyGuard.SandboxProblem(sandbox, rules, _host.RuntimeService.ReadSandboxSettings().Profiles);
 
     // The sandbox of the rules, given to a session before its first prompt; a session that cannot have it is never sent one.
     private async Task ApplyPolicySandboxAsync(string sessionId, FleetPolicyRules rules)
@@ -176,19 +148,6 @@ public sealed partial class FleetNodeService
     }
 
     private static FleetException Refused(string message) => new(FleetNodeErrorCodes.PolicyRefused, null, message);
-}
-
-file static class NetworkIndex
-{
-    public static int IndexOf(this IReadOnlyList<string> list, string value)
-    {
-        for (var index = 0; index < list.Count; index++)
-        {
-            if (string.Equals(list[index], value, StringComparison.Ordinal)) return index;
-        }
-
-        return list.Count;
-    }
 }
 
 /// <summary>

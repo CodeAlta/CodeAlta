@@ -377,7 +377,10 @@ internal sealed class NodeServers : IAsyncDisposable
         ArgumentNullException.ThrowIfNull(node);
         var catalog = node.Host.CatalogOptions;
         var identity = DeviceIdentity.LoadOrCreate(catalog);
-        var source = new Fleet.Server.FleetHostPublicationSource(node.Host, name, version, ["sessions", "moves"]) { PersonOf = service is null ? null : service.PersonOfSession };
+        var source = new Fleet.Server.FleetHostPublicationSource(node.Host, name, version, ["sessions", "moves"]) {
+            PersonOf = service is null ? null : service.PersonOfSession,
+            PersonOrganizationOf = service is null ? null : service.OrganizationOfSession,
+        };
         // The providers that run with the key of an account, which the server checks automations of a team or the organization against.
         if (node.Automations is { } classifier) source.IsAccountProvider = provider => classifier.CredentialKindOf(provider) == CodeAlta.Automations.AutomationCredentialKind.Account;
         // The statistics the node counts (its Statistics plugin), published with the facts of its sessions.
@@ -414,7 +417,8 @@ internal sealed class NodeServers : IAsyncDisposable
             // The budgets and holds of the owner: the runs that wait read them again at once.
             BudgetsChanged = _ => budgets?.Changed(),
             // A newer access document: the sessions people it suspends started on this machine stop, their channels close.
-            AccessChanged = service is null ? null : (linkId, access) => { _ = ApplyAccessAsync(service, access); },
+            // A machine given to another owner also ends the pairings and the people its former owner gave it.
+            AccessChanged = service is null ? null : (linkId, access) => { _ = ApplyAccessAsync(service, access, connections?.Find(linkId)?.Connector?.Devices.Current); },
             // A newer policy: a stop of the kill switch ends the work of the fleet here and refuses more, until a version lifts it.
             PolicyChanged = (_, _) => { _ = ApplyPolicyAsync(service, node.Automations); },
             // Access read again: the providers of the teams and of the organization this machine runs with, their keys opened here.
@@ -422,6 +426,10 @@ internal sealed class NodeServers : IAsyncDisposable
             // The problems of the machine travel with its heartbeat; the server tells its owner of those that last.
             Health = health.Read,
         });
+        // A person named on this machine before organizations were kept is of its organization while it is linked to one only.
+        if (service is not null)
+            service.People.SoleOrganization = () => connections.Connections.Select(static connection => connection.Link.OrganizationId).OfType<string>().Distinct(StringComparer.Ordinal)
+                .ToArray() is [var sole] ? sole : null;
         secrets = new NodeFleetSecrets(node.Host, connections);
         budgets = new NodeBudgets(connections, source, statistics);
         node.Budgets = budgets;
@@ -436,6 +444,7 @@ internal sealed class NodeServers : IAsyncDisposable
             Fleet.Server.FleetConnector? ConnectorOf(string linkId) => connections.Find(linkId)?.Connector;
             automations.ServerDevices = linkId => ConnectorOf(linkId)?.Devices.Current;
             automations.ServerAccess = linkId => ConnectorOf(linkId)?.Access.Current;
+            automations.ServerAccesses = () => connections.Connections.Select(static connection => connection.Connector?.Access.Current);
             automations.ServerClaim = (linkId, claim, token) => ConnectorOf(linkId) is { } connector
                 ? connector.ClaimAutomationAsync(claim, token)
                 : Task.FromResult<CodeAlta.Fleet.Protocol.FleetAutomationClaimResult?>(null);
@@ -522,11 +531,11 @@ internal sealed class NodeServers : IAsyncDisposable
     }
 
     // Applied beside the connection that verified the document; a failure is logged, the next version applies again.
-    private static async Task ApplyAccessAsync(FleetNodeService service, CodeAlta.Fleet.Protocol.FleetAccessState access)
+    private static async Task ApplyAccessAsync(FleetNodeService service, CodeAlta.Fleet.Protocol.FleetAccessState access, CodeAlta.Fleet.Protocol.FleetDeviceListState? devices)
     {
         try
         {
-            await service.ApplyAccessAsync(access, CancellationToken.None).ConfigureAwait(false);
+            await service.ApplyAccessAsync(access, devices, CancellationToken.None).ConfigureAwait(false);
         }
         catch (Exception exception) when (exception is IOException or InvalidOperationException or ObjectDisposedException)
         {

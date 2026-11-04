@@ -52,6 +52,47 @@ public sealed class NodeScopeProvidersTests
     }
 
     [TestMethod]
+    public async Task AnOlderVersion_OrAProviderTakenAway_IsNotInstalledAgain_AlsoAfterARestart()
+    {
+        var token = TestContext.CancellationToken;
+        using var root = new NodeTestRoot();
+        await using var node = await NodeHost.StartAsync(root.Options(), token);
+        var catalog = node.Host.CatalogOptions;
+        using var identity = DeviceIdentity.LoadOrCreate(Path.Combine(root.Root, "self"));
+        var store = new LocalSecretStore(Path.Combine(root.Root, "secrets"), new PlainProtector());
+        var config = new CodeAltaConfigStore(catalog);
+        var providers = new NodeScopeProviders(catalog, store, identity);
+        ScopeProviderDto Provider(long version) => new("infra-gateway", FleetPrincipalKinds.Team, "infra", "Infra gateway", "openai-responses",
+            $"https://gateway.example/v{version}", ["gpt-6.1"], version, "p2", DateTimeOffset.UtcNow, ["self"]);
+        (string? Endpoint, string? Key) Installed()
+        {
+            var definition = config.LoadGlobalProviderDefinitions(includeDisabled: true).SingleOrDefault(static definition => definition.ProviderKey == "infra-gateway");
+            return (definition?.ApiUrl, store.TryGetSecret(NodeScopeProviders.SecretName("infra-gateway"), out var key) ? key : null);
+        }
+
+        providers.Apply("link-1", [(Provider(2), "sk-2")]);
+        Assert.AreEqual(("https://gateway.example/v2", "sk-2"), Installed());
+
+        // A genuine copy of version 1 replayed by the server: the machine keeps version 2.
+        CollectionAssert.AreEqual(new[] { "infra-gateway" }, providers.Apply("link-1", [(Provider(1), "sk-1")]).ToArray());
+        Assert.AreEqual(("https://gateway.example/v2", "sk-2"), Installed(), "a rotation is not rolled back");
+
+        // Taken away, then version 2 given again: it does not come back.
+        Assert.AreEqual(0, providers.Apply("link-1", []).Count);
+        Assert.AreEqual(0, providers.Apply("link-1", [(Provider(2), "sk-2")]).Count, "a removed provider is not resurrected");
+        Assert.AreEqual(((string?)null, (string?)null), Installed());
+
+        // After a restart of the machine, the checkpoints hold; a newer version comes in.
+        providers = new NodeScopeProviders(catalog, store, identity);
+        Assert.AreEqual(0, providers.Apply("link-1", [(Provider(2), "sk-2")]).Count);
+        CollectionAssert.AreEqual(new[] { "infra-gateway" }, providers.Apply("link-1", [(Provider(3), "sk-3")]).ToArray());
+        Assert.AreEqual(("https://gateway.example/v3", "sk-3"), Installed());
+        providers = new NodeScopeProviders(catalog, store, identity);
+        providers.Apply("link-1", [(Provider(1), "sk-1")]);
+        Assert.AreEqual(("https://gateway.example/v3", "sk-3"), Installed());
+    }
+
+    [TestMethod]
     public async Task AProviderOfTheTeam_RunsAtOnce_TakesARotatedKey_AndStopsOnceTakenAway()
     {
         var token = TestContext.CancellationToken;
@@ -83,6 +124,15 @@ public sealed class NodeScopeProvidersTests
         var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(60);
         while (Registered() && DateTime.UtcNow < deadline) await Task.Delay(100, token);
         Assert.IsFalse(Registered(), "a provider taken away is no longer usable");
+    }
+
+    [TestMethod]
+    public void TwoProvidersWhoseIdsReadAlike_NeverShareTheSecretOfTheirKey()
+    {
+        Assert.AreEqual("CODEALTA_PROVIDER_MY_GATEWAY", NodeScopeProviders.SecretName("my-gateway"), "an id of words joined by dashes reads in its name");
+        var names = new[] { "my-gateway", "my_gateway", "My-Gateway", "my--gateway", "-my-gateway", "my-gateway-" }.Select(NodeScopeProviders.SecretName).ToArray();
+        Assert.AreEqual(names.Length, names.Distinct(StringComparer.OrdinalIgnoreCase).Count(), string.Join(", ", names));
+        Assert.IsTrue(names.All(LocalSecretStore.IsName), string.Join(", ", names));
     }
 
     // Keeps values as they are: the protection of the machine is not what this test is about.

@@ -122,6 +122,51 @@ public sealed class FleetPolicyGuard
         return null;
     }
 
+    /// <summary>Says why a sandbox breaks the floor and the network of rules, with the profiles of this machine; null when it holds.</summary>
+    /// <param name="sandbox">The name of the profile of the sandbox; null or <c>off</c> for none.</param>
+    /// <param name="rules">The rules.</param>
+    /// <param name="profiles">The sandbox profiles of this machine.</param>
+    /// <returns>The refusal, or null.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="rules"/> or <paramref name="profiles"/> is null.</exception>
+    public static string? SandboxProblem(string? sandbox, FleetPolicyRules rules, IReadOnlyList<CodeAlta.Sandbox.SandboxProfile> profiles)
+    {
+        ArgumentNullException.ThrowIfNull(rules);
+        ArgumentNullException.ThrowIfNull(profiles);
+        if (rules.Sandbox is null && rules.Network is null) return null;
+        if (sandbox is null || string.Equals(sandbox, CodeAlta.Sandbox.SandboxProfiles.Off, StringComparison.OrdinalIgnoreCase))
+            return "the policy of the organization requires a sandbox";
+        CodeAlta.Sandbox.SandboxConfinement chosen;
+        try
+        {
+            chosen = CodeAlta.Sandbox.SandboxConfinement.Of(CodeAlta.Sandbox.SandboxProfiles.Resolve(sandbox, profiles));
+        }
+        catch (CodeAlta.Sandbox.SandboxProfileException)
+        {
+            return $"this machine has no sandbox profile '{sandbox}'";
+        }
+
+        if (rules.Sandbox is { } floorName)
+        {
+            CodeAlta.Sandbox.SandboxConfinement floor;
+            try
+            {
+                floor = CodeAlta.Sandbox.SandboxConfinement.Of(CodeAlta.Sandbox.SandboxProfiles.Resolve(floorName, profiles));
+            }
+            catch (CodeAlta.Sandbox.SandboxProfileException)
+            {
+                return $"this machine has no sandbox profile '{floorName}', which the policy of the organization requires";
+            }
+
+            if (chosen.WeakerThan(floor) is { } weaker) return $"the profile '{sandbox}' is weaker than '{floorName}', which the policy of the organization requires: {weaker}";
+        }
+
+        if (rules.Network is { } network
+            && FleetPolicyDocuments.Networks.IndexOf(CodeAlta.Sandbox.SandboxConfinement.NetworkName(chosen.Network)) is var at
+            && (at < 0 ? FleetPolicyDocuments.Networks.Count : at) > FleetPolicyDocuments.Networks.IndexOf(network))
+            return $"the network of the profile '{sandbox}' is wider than '{network}', which the policy of the organization allows";
+        return null;
+    }
+
     /// <summary>Gets the narrower of two permission modes, by the order of <see cref="FleetPolicyDocuments.PermissionModes"/>; null when both are.</summary>
     /// <param name="left">A mode, or null for no limit.</param>
     /// <param name="right">Another mode, or null for no limit.</param>

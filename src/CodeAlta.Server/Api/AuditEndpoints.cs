@@ -68,7 +68,7 @@ internal static class AuditEndpoints
         return query!;
     }
 
-    private static async Task ExportAsync(HttpContext context, ICoordinatorStore store, DeviceRecord actor, FleetAuditQuery query, string format, TimeProvider time)
+    internal static async Task ExportAsync(HttpContext context, ICoordinatorStore store, DeviceRecord actor, FleetAuditQuery query, string format, TimeProvider time)
     {
         var names = await AuditNames.ReadAsync(store, actor.OrganizationId, context.RequestAborted).ConfigureAwait(false);
         var csv = format == FleetAuditExportFormats.Csv;
@@ -106,6 +106,12 @@ internal static class AuditEndpoints
         catch (OperationCanceledException)
         {
             result = "cancelled";
+            throw;
+        }
+        catch
+        {
+            // Any other end (the connection broke, the store failed) is a failure: the range written so far is recorded with it.
+            result = "failure";
             throw;
         }
         finally

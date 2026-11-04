@@ -109,6 +109,13 @@ public sealed partial class FleetNodeService
                 return;
             }
 
+            // A stop that came while the approval was awaited reaches the session: nothing is sent.
+            if (Policy?.Halt is { } halt)
+            {
+                LogInfo($"The session {session.SessionId} was not sent its prompt once admitted to the environment '{environment}': {halt.Describe(_options.Name)}");
+                return;
+            }
+
             _host.Identities.Environments.Admit(session.SessionId, admission);
             if (parameters.Prompt is { } prompt)
             {
@@ -175,7 +182,7 @@ public sealed partial class FleetNodeService
         var retryKey = RetryKey(call);
         RequirePrompt(parameters.Text);
         var session = await RequireSessionAsync(parameters.SessionId, cancellationToken).ConfigureAwait(false);
-        RequirePolicyModel(session.SpaceId, parameters.Selection?.ModelId);
+        RequirePolicySelection(session, parameters.Selection);
         var text = parameters.Text;
         // An agent's prompt is checked and attributed once: a retry of the same key gets the first receipt.
         if (parameters.Agent is not null)

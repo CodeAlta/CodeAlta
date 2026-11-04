@@ -41,7 +41,7 @@ export const grantCapabilities: readonly { value: string; label: MessageKey }[] 
   { value: "statistics.view-per-person", label: "See statistics per person" },
   { value: "audit.read", label: "Read the audit log" },
   { value: "machine.logs", label: "Read the log of a machine" },
-  { value: "session.view-content", label: "Read a session" },
+  { value: "session.view-content", label: "See a session and its title" },
 ]);
 
 /** Gets whether a capability opens content: it is granted on one resource only, never on a scope. */

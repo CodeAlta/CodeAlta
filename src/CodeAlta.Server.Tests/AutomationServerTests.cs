@@ -261,6 +261,10 @@ public sealed class AutomationServerTests
             "another automation or run");
         // A request to run reads as before: no action is written.
         Assert.IsFalse(TakeOver(null).Payload.Contains("action", StringComparison.Ordinal));
+        // A run the machine did not report for this automation is not forwarded: the take-over is bound to the run of the automation it names.
+        var other = await fixture.SendAsync(owner, HttpMethod.Post, $"/api/v1/automations/{Id}/runs/run-of-another/takeover",
+            new RunAutomationRequest(TakeOver(FleetAutomationRunRequest.TakeOverAction, "run-of-another")));
+        Assert.AreEqual(HttpStatusCode.NotFound, other.Status, other.Body.ToString());
     }
 
     [TestMethod]

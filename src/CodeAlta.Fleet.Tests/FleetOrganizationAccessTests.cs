@@ -83,6 +83,58 @@ public sealed class FleetOrganizationAccessTests
     }
 
     [TestMethod]
+    public async Task ATeamStopStillReachesATeamMachine_RestartedWhileItsServerIsGone()
+    {
+        using var world = new World();
+        using var folder = new TestFolder();
+        var pin = Path.Combine(folder.Path, "link", FleetOrganizationAccess.PinFileName);
+        var server = world.Server();
+        server.Documents.Add(world.Sign(world.Desktop, 1, null, owners: ["p1"], teams: [new FleetAccessTeam("t1", ["p2"], [], false)],
+            machines: [new FleetAccessMachine(world.Node.DeviceId, "t1")], suspended: ["p3"]));
+        await new FleetOrganizationAccess(new FleetOrganizationDevices(new Uri("http://server.test/"), world.Node, null, server), pin).RefreshAsync(CancellationToken.None);
+
+        // Restarted offline: the version it verified decides before any read, as the policy it kept does.
+        var restarted = new FleetOrganizationAccess(new FleetOrganizationDevices(new Uri("http://127.0.0.1:9/"), world.Node), pin);
+        Assert.AreEqual(("t1", true), (restarted.Current?.TeamOf(world.Node.DeviceId)?.Id, restarted.Current?.IsSuspended("p3")));
+        var stop = FleetPolicyState.Empty with { Number = 1, Stop = new FleetPolicyStop(FleetPolicyStopScopes.Teams, [], ["t1"]) };
+        Assert.IsTrue(stop.Stops(world.Node.DeviceId, restarted.Current), "a team stop reaches the team machine offline");
+        Assert.IsTrue(stop.Stops(world.Node.DeviceId, null), "an access document not known is no personal machine: the strictest reading");
+
+        // A pin whose kept version was changed is not trusted: nothing decides before the next read.
+        var text = File.ReadAllText(pin).Replace("t1", "t2", StringComparison.Ordinal);
+        File.WriteAllText(pin, text);
+        Assert.IsNull(new FleetOrganizationAccess(new FleetOrganizationDevices(new Uri("http://127.0.0.1:9/"), world.Node), pin).Current);
+    }
+
+    [TestMethod]
+    public async Task APersonalMachineGivenToAnotherPerson_GivesTheNewOwnerTheTrustOfItsOwner_AndTakesItFromTheFormerOwner()
+    {
+        using var world = new World();
+        var server = world.Server();
+        var devices = new FleetOrganizationDevices(new Uri("http://server.test/"), world.Node, null, server);
+        var access = new FleetOrganizationAccess(devices);
+        var trust = new FleetOrganizationTrust(() => devices.Current, world.Node.DeviceId, () => access.Current);
+
+        // Alex (p1) gave his node to Mia (p2), who accepted: the device list still names Alex, the signed document names Mia.
+        // The field is written into the signed text by hand, as a signer of a newer version writes it.
+        server.Documents.Add(world.Sign(world.Desktop, 1, null, owners: ["p1"],
+            extra: $$"""
+                "personalMachines":[{"device":"{{world.Node.DeviceId}}","person":"p2"}]
+                """));
+        await devices.RefreshAsync(CancellationToken.None);
+        var state = await access.RefreshAsync(CancellationToken.None);
+
+        var mia = trust.FindTrusted(world.Mia.Fingerprint);
+        Assert.AreEqual((FleetPairingCoordinator.DefaultPermissions, (string?)null, false), (mia?.Permissions, mia?.PersonId, mia?.OwnSessionsOnly),
+            "the new owner's controller devices get the trust of the owner of the machine");
+        var alex = trust.FindTrusted(world.Desktop.Fingerprint);
+        Assert.AreEqual((DevicePermissions.None, "p1", true), (alex?.Permissions, alex?.PersonId, alex?.OwnSessionsOnly),
+            "the former owner is another person of the organization there now");
+        Assert.IsNull(FleetAutomationVersionDocuments.CheckAccess("p2", world.Node.DeviceId, devices.Current!, state), "the machine runs its new owner's automations");
+        Assert.IsNotNull(FleetAutomationVersionDocuments.CheckAccess("p1", world.Node.DeviceId, devices.Current!, state), "and no more its former owner's");
+    }
+
+    [TestMethod]
     public void ATeamMachineRunsTheAutomationsOfItsMaintainers_ThoseOfItsMembersWhenAllowed_AndNoneOfASuspendedPerson()
     {
         using var world = new World();
@@ -163,10 +215,12 @@ public sealed class FleetOrganizationAccessTests
         }
 
         public AccessDocumentDto Sign(DeviceIdentity signer, long number, AccessDocumentDto? previous, IReadOnlyList<string> owners, IReadOnlyList<string>? signers = null,
-            IReadOnlyList<FleetAccessTeam>? teams = null, IReadOnlyList<FleetAccessMachine>? machines = null, IReadOnlyList<string>? suspended = null)
+            IReadOnlyList<FleetAccessTeam>? teams = null, IReadOnlyList<FleetAccessMachine>? machines = null, IReadOnlyList<string>? suspended = null, string? extra = null)
         {
             var document = new FleetAccessDocument(1, "org", number, previous?.Hash, 4, owners, signers ?? [], teams ?? [], machines ?? [], suspended ?? [], signer.DeviceId, Time);
             var text = FleetAccessDocuments.Serialize(document);
+            // A field of a newer minor of the format, as its signer wrote it into the text it signs.
+            if (extra is not null) text = text[..^1] + "," + extra.Trim() + "}";
             var signed = new FleetSignedAccessDocument(text, Base64Url.EncodeToString(signer.SignData(FleetAccessDocuments.GetSignedBytes(text))));
             return new AccessDocumentDto(number, FleetAccessDocuments.Hash(signed), signed, Time);
         }

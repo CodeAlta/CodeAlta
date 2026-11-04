@@ -747,7 +747,10 @@ public sealed partial class FleetConnector : IAsyncDisposable
             if (ack is not null) _outbox.InventoryAcknowledged(ack.Ack, publication.Publication.Sequence, publication.Hash);
         }
 
-        var all = await source.ReadSessionsAsync(stop).ConfigureAwait(false);
+        // The person of a session is told to the server of their organization only: another one has its own people with these ids.
+        var organization = Devices.Current?.OrganizationId;
+        var all = (await source.ReadSessionsAsync(stop).ConfigureAwait(false))
+            .Select(session => session.PersonOrganizationId is { } of && of != organization ? session with { PersonId = null, PersonOrganizationId = null } : session).ToArray();
         var sessions = all.Where(IsPublished).ToArray();
         await ReadKeysAsync(sessions, stop).ConfigureAwait(false);
         // A session published before and not now (made Private, its space unlinked) has its facts taken back; a session

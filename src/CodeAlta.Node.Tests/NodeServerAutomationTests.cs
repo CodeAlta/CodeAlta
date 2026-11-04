@@ -180,6 +180,39 @@ public sealed class NodeServerAutomationTests
     }
 
     [TestMethod]
+    public async Task APersonalMachineGivenToAnotherPerson_TakesNoRunRequestFromItsFormerOwner()
+    {
+        var token = TestContext.CancellationToken;
+        using var root = new NodeTestRoot();
+        await using var node = await NodeHost.StartAsync(root.Options() with
+        {
+            Automations = new NodeAutomationOptions { TimeProvider = new NodeClock { Now = Noon }, TimeZone = TimeZoneInfo.Utc, WatchRepositories = false },
+        }, token);
+        using var laptop = DeviceIdentity.LoadOrCreate(Path.Combine(root.Root, "laptop"));
+        using var tablet = DeviceIdentity.LoadOrCreate(Path.Combine(root.Root, "tablet"));
+        using var self = DeviceIdentity.LoadOrCreate(Path.Combine(root.Root, "self"));
+        var automations = node.Automations!;
+        automations.DeviceId = self.DeviceId;
+        var list = DeviceList(laptop, tablet, self, removeTablet: false);
+        var access = FleetAccessState.Empty with { OrganizationId = "org", Number = 1, Owners = ["p1"] };
+        automations.ServerAccess = _ => access;
+        var now = Noon;
+        var run = FleetAutomationSigning.SignRun(laptop, new FleetAutomationRunRequest(FleetAutomationRunRequest.CurrentVersion, "org", Id, self.DeviceId, "run-1",
+            string.Empty, string.Empty, now));
+        var takeOver = FleetAutomationSigning.SignRun(laptop, new FleetAutomationRunRequest(FleetAutomationRunRequest.CurrentVersion, "org", Id, self.DeviceId, "run-1",
+            string.Empty, string.Empty, now) { Action = FleetAutomationRunRequest.TakeOverAction });
+
+        // The person the device list names owns the machine: the requests of their device verify (the machine holds no such automation).
+        StringAssert.Contains((await automations.RunFromServerAsync("link-1", list, "org", run, token)).Refused, "holds no such automation");
+        StringAssert.Contains(automations.TakeOverFromServer("link-1", list, "org", takeOver), "holds no such automation");
+
+        // Given to Mia (p2): the signed document names her, and the requests of the former owner are refused.
+        access = access with { Number = 2, PersonalMachines = access.PersonalMachines.Add(self.DeviceId, "p2") };
+        StringAssert.Contains((await automations.RunFromServerAsync("link-1", list, "org", run, token)).Refused, "another person than the owner");
+        StringAssert.Contains(automations.TakeOverFromServer("link-1", list, "org", takeOver), "another person than the owner");
+    }
+
+    [TestMethod]
     public void AnotherPersonTakesARunOver_WhenTheSignedAccessDocumentSaysSo()
     {
         var access = FleetAccessState.Empty with

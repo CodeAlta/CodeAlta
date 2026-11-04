@@ -108,6 +108,39 @@ public sealed class AuditTests
     }
 
     [TestMethod]
+    public async Task AnExportThatFailsWhileItWrites_IsAuditedAsAFailure()
+    {
+        await using var server = await ServerFixture.StartAsync();
+        using var owner = new TestDevice("Alex desktop");
+        using var node = new TestDevice("Home server");
+        await server.SetUpWithNodeAsync(owner, node);
+        var store = server.GetService<ICoordinatorStore>();
+        var actor = (await store.GetDeviceAsync(owner.DeviceId))!;
+        var context = new Microsoft.AspNetCore.Http.DefaultHttpContext { RequestServices = new NoServices() };
+        context.Response.Body = new FailingStream();
+
+        await Assert.ThrowsExactlyAsync<IOException>(() => CodeAlta.Server.Api.AuditEndpoints.ExportAsync(context, store, actor, new FleetAuditQuery { Limit = FleetAuditQuery.MaxPage },
+            FleetAuditExportFormats.Csv, TimeProvider.System));
+        var exported = (await PageAsync(server, owner, new FleetAuditQuery { Actions = ["audit.export"] })).Items.Single();
+        Assert.AreEqual("failure", exported.Result, "an export that did not complete is not recorded as one that did");
+    }
+
+    private sealed class NoServices : IServiceProvider
+    {
+        public object? GetService(Type serviceType) => null;
+    }
+
+    // A response whose connection breaks: every write fails.
+    private sealed class FailingStream : MemoryStream
+    {
+        public override void Write(byte[] buffer, int offset, int count) => throw new IOException("The connection broke.");
+
+        public override ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken cancellationToken = default) => throw new IOException("The connection broke.");
+
+        public override Task WriteAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken) => throw new IOException("The connection broke.");
+    }
+
+    [TestMethod]
     public async Task AnAuditorReadsAndExports_AMemberDoesNeither()
     {
         await using var server = await ServerFixture.StartAsync();

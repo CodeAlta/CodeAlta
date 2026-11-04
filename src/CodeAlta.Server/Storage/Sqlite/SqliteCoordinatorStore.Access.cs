@@ -245,7 +245,10 @@ public sealed partial class SqliteCoordinatorStore : IAccessStore
         return WriteAsync((connection, transaction) =>
         {
             var held = QuerySingle(connection, transaction, ScopeProviderColumns + " WHERE p.id = $id", ReadScopeProvider, ("$id", provider.Id));
-            if (held is not null && (held.OrganizationId != provider.OrganizationId || held.Version >= provider.Version)) return false;
+            // Never another organization's, never moved to another owner, never replaced by a version that is not newer.
+            if (held is not null && (held.OrganizationId != provider.OrganizationId || held.OwnerKind != provider.OwnerKind || held.OwnerId != provider.OwnerId
+                    || held.Version >= provider.Version))
+                return false;
             Execute(connection, transaction, "INSERT INTO scope_providers (id, organization_id, owner_kind, owner_id, name, type, endpoint, models, version, sealed, " +
                 "updated_by_person_id, updated_at) VALUES ($id, $org, $kind, $owner, $name, $type, $endpoint, $models, $version, $sealed, $by, $at) " +
                 "ON CONFLICT (id) DO UPDATE SET owner_kind = excluded.owner_kind, owner_id = excluded.owner_id, name = excluded.name, type = excluded.type, " +

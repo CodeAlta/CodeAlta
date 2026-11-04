@@ -547,7 +547,7 @@ public sealed partial class FleetNodeService : IAsyncDisposable
             if (device is { PersonId: { } person, OwnSessionsOnly: true, Permissions: DevicePermissions.None } && _trusted.FindTrusted(caller.Fingerprint) is null
                 && (access.Required & (DevicePermissions.View | DevicePermissions.Start)) != 0)
             {
-                People.Ask(person, device.DeviceId);
+                People.Ask(person, device.DeviceId, device.OrganizationId);
                 throw new FleetException(FleetErrorCodes.Forbidden, null, "The owner of this machine was asked to let you use it: try again once they did.");
             }
 

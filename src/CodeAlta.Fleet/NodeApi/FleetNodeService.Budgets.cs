@@ -100,6 +100,8 @@ public sealed partial class FleetNodeService
                 return new FleetCommandResult(FleetBudgetCommandStatuses.Reached, Code: FleetBudgetCommandStatuses.Reached);
             }
 
+            // A stop that came while the budgets decided reaches it: checked again right before it is sent.
+            RequireNotHalted();
             return Admitted(runId, send);
         }
 
@@ -136,6 +138,13 @@ public sealed partial class FleetNodeService
                 return;
             }
 
+            // A stop of the kill switch that came while it waited reaches it: it is never sent.
+            if (Policy?.Halt is { } halt)
+            {
+                LogInfo($"The prompt of the session {sessionId} that waited for its budget was not sent: {halt.Describe(_options.Name)}");
+                return;
+            }
+
             var result = Admitted(runId, send);
             LogInfo($"The prompt of the session {sessionId} was sent once its budget let it ({result.Status}).");
         }
@@ -160,8 +169,11 @@ public sealed partial class FleetNodeService
         var session = await _host.RuntimeService.TryGetRecoverableSessionAsync(queued.SessionId, cancellationToken).ConfigureAwait(false);
         var project = session?.ProjectRef is { Length: > 0 } projectId ? await _host.ProjectCatalog.GetByIdAsync(projectId, cancellationToken).ConfigureAwait(false) : null;
         var decided = await admit(new FleetNodeBudgetRun(queued.QueueItemId, session?.Title, session?.SpaceId, project), static () => { }, cancellationToken).ConfigureAwait(false);
-        if (decided.Problem is { } problem) LogInfo($"The queued prompt {queued.QueueItemId} of the session {queued.SessionId} was not sent: {problem}");
-        return decided.Problem;
+        // The work of the fleet waits on a stop, checked once its admission is decided: a person's own work at the machine goes on.
+        var problem = decided.Problem
+            ?? (Policy?.Halt is { } halt && Work.List().Any(item => item.SessionId == queued.SessionId) ? halt.Describe(_options.Name) : null);
+        if (problem is not null) LogInfo($"The queued prompt {queued.QueueItemId} of the session {queued.SessionId} was not sent: {problem}");
+        return problem;
     }
 
     private FleetCommandResult Admitted(string runId, Func<FleetCommandResult> send)
