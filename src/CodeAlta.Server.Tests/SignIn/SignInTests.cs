@@ -40,6 +40,7 @@ public sealed class SignInTests
         var authorization = provider.Authorizations.Last();
         Assert.AreEqual((provider.ClientId, Redirect, "S256"), (authorization["client_id"], authorization["redirect_uri"], authorization["code_challenge_method"]));
         Assert.IsFalse(string.IsNullOrEmpty(authorization["nonce"]), "an OpenID Connect sign-in carries a nonce");
+        Assert.AreEqual("select_account", authorization.GetValueOrDefault("prompt"), "the person chooses the account of the company, not the browser's last one");
         Assert.AreEqual(start.State, FakeOidcProvider.Query(back, "state"));
 
         var completed = await CompleteAsync(server, laptop, start, back);

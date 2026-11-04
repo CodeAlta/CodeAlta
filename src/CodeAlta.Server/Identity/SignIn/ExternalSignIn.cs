@@ -128,7 +128,8 @@ public sealed class ExternalSignInClient : IDisposable
             new("code_challenge", codeChallenge), new("code_challenge_method", "S256"),
         };
         query.Add(new("nonce", nonce));
-        if (provider.Method is "microsoft" or "google") query.Add(new("prompt", "select_account"));
+        // The browser may hold several accounts of the provider: the person chooses, rather than the one signed in last.
+        if (provider.Method is "microsoft" or "google" or "company") query.Add(new("prompt", "select_account"));
         var builder = new UriBuilder(endpoint);
         var existing = builder.Query.TrimStart('?');
         builder.Query = (existing.Length > 0 ? existing + "&" : string.Empty) + string.Join('&', query.Select(static pair => pair.Key + "=" + Uri.EscapeDataString(pair.Value)));
