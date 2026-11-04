@@ -343,6 +343,23 @@ internal sealed partial class DesktopFleetServers : IAsyncDisposable
         return await client.ListDevicesAsync(cancellationToken).ConfigureAwait(false);
     }
 
+    /// <summary>
+    /// Counts the entries of the device list of a server that a newer version of CodeAlta wrote and this one skipped
+    /// (<c>doc/fleet/protocol.md</c>, versions): they gave no trust here, and updating CodeAlta reads them.
+    /// </summary>
+    /// <param name="linkId">The link.</param>
+    /// <param name="cancellationToken">Cancels the call.</param>
+    /// <returns>How many entries were skipped.</returns>
+    /// <exception cref="KeyNotFoundException">No such link.</exception>
+    /// <exception cref="FleetDeviceListException">The list does not verify.</exception>
+    /// <exception cref="FleetServerException">The server refused.</exception>
+    /// <exception cref="HttpRequestException">The server does not answer.</exception>
+    public async Task<int> CountSkippedDeviceListEntriesAsync(string linkId, CancellationToken cancellationToken)
+    {
+        using var client = Client(linkId);
+        return (await client.ReadVerifiedDeviceListAsync(cancellationToken: cancellationToken).ConfigureAwait(false)).Skipped.Count;
+    }
+
     /// <summary>Reads the telemetry setting of the fleet of a server, with the headers only the server holds; an owner's controller device only.</summary>
     /// <param name="linkId">The link.</param>
     /// <param name="cancellationToken">Cancels the call.</param>

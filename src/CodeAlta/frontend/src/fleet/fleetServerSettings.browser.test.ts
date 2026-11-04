@@ -32,6 +32,21 @@ test("Invite a computer… shows the address and the code alone, each with Copy;
   }, options);
 });
 
+test("the devices say when entries of the device list come from a newer version of CodeAlta, which this one skipped", { skip: !edge, timeout: 90_000 }, async () => {
+  await withCanvas(async page => {
+    await page.until(`document.querySelector('.fleet-device-row')`, "the devices");
+    assert.equal(await page.evaluate(`document.querySelector('.fleet-device-list-skipped')`), null, "nothing to say while none is skipped");
+    // A newer version extended the list: the next read of the devices says it, and how to read them.
+    await page.evaluate(`window.fleetFixture.skip(2)`);
+    await page.clickText(".fleet-device-row .bp6-button", "Approve…");
+    await page.clickText(".bp6-popover .bp6-button", "It shows the same words");
+    await page.until(`document.querySelector('.fleet-device-list-skipped')`, "the skipped entries");
+    assert.equal(await page.evaluate(`document.querySelector('.fleet-device-list-skipped').textContent`),
+      "2 entries of the device list come from a newer version of CodeAlta and were skipped: update CodeAlta.");
+    assert.deepEqual(page.problems, []);
+  }, options);
+});
+
 test("the owner's computer updates the fleet at a time it chooses, follows the campaign, cancels it and sets the policy", { skip: !edge, timeout: 90_000 }, async () => {
   await withCanvas(async page => {
     // The card of the server says its version and its policy.

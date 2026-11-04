@@ -131,6 +131,8 @@ function ServerCard({ server, epoch, api, busy, revision, words, onRecoveryKey, 
 function ServerDevices({ server, epoch, api, revision }: { server: FleetServerView; epoch: string; api: FleetServerApi; revision: number }) {
   const { t } = useShellLanguage();
   const [devices, setDevices] = useState<readonly FleetDeviceView[] | null>(null);
+  // Entries a newer version of CodeAlta wrote in the device list: this one skipped them, so they give no trust here.
+  const [skipped, setSkipped] = useState(0);
   const [problem, setProblem] = useState<{ key: MessageKey; detail?: string | null } | null>(null);
   const [acting, setActing] = useState<string | null>(null);
   const [generation, setGeneration] = useState(0);
@@ -138,7 +140,7 @@ function ServerDevices({ server, epoch, api, revision }: { server: FleetServerVi
     const abort = new AbortController();
     api.devices({ expectedEpoch: epoch, linkId: server.id }, { signal: abort.signal, timeoutMilliseconds: 20_000 }).then(value => {
       if (abort.signal.aborted) return;
-      if (value.status === "ok") { setDevices(value.devices); setProblem(null); } else setProblem({ key: serverProblem(value.status) ?? "The operation did not complete.", detail: value.message });
+      if (value.status === "ok") { setDevices(value.devices); setSkipped(value.skippedEntries ?? 0); setProblem(null); } else setProblem({ key: serverProblem(value.status) ?? "The operation did not complete.", detail: value.message });
     }, () => { if (!abort.signal.aborted) setProblem({ key: "The server does not answer." }); });
     return () => abort.abort();
     // The server announces no enrollment: the list is read again with each read of the page (Reload, a change) and now and then.
@@ -162,6 +164,9 @@ function ServerDevices({ server, epoch, api, revision }: { server: FleetServerVi
   const ordered = orderedDevices(devices ?? []);
   return <div className="fleet-server-devices">
     {problem && <Callout compact intent="warning" role="alert">{t(problem.key)}{problem.detail && <div className="muted-text">{problem.detail}</div>}</Callout>}
+    {skipped > 0 && <Callout compact intent="warning" className="fleet-device-list-skipped">
+      {skipped === 1 ? t("An entry of the device list comes from a newer version of CodeAlta and was skipped: update CodeAlta.")
+        : t("{count} entries of the device list come from a newer version of CodeAlta and were skipped: update CodeAlta.", { count: skipped })}</Callout>}
     {ordered.length > 0 && <ul className="fleet-device-list" aria-label={t("Devices")}>
       {ordered.map(device => <li key={device.id} className="fleet-device-row" data-status={device.status}>
         <AppIcon name={device.kind === "controller" ? "computer" : "remote"} size={15} />

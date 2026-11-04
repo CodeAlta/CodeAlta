@@ -53,7 +53,7 @@ const directory = async () => ({ status: "ok", linkId: "home", url: "https://fle
   machines: [{ id: "desktop", name: "This PC", isThisComputer: true }, { id: "mac", name: "Mac mini", isThisComputer: false }],
   sessions: [{ id: "s-local", machineId: "desktop", state: "requires_action" }, ...(waitingRun ? [{ id: "s-mac", machineId: "mac", state: "requires_action" }] : [])] }) as never;
 const buttonApi: FleetApprovalsApi = {
-  status, devices: async () => ({ status: "ok", devices: [], message: null }), approve: ok as never, revoke: ok as never, watch: async () => (async function* () { })(),
+  status, devices: async () => ({ status: "ok", devices: [], message: null, skippedEntries: 0 }), approve: ok as never, revoke: ok as never, watch: async () => (async function* () { })(),
   budgets: api.budgets, continueRun: api.continueRun, stopRun: api.stopRun, readNotification: api.readNotification, directory,
 };
 // The width of the page of the Settings window: about 1250 CSS pixels in a window of 1600, about 430 in one of 900.

@@ -19,6 +19,8 @@ const recoveryWords = "acid acorn actor agent alarm album alien alpha amber anch
 const pending: FleetDeviceView = { id: "laptop", name: "Laptop", kind: "controller", status: "pending", online: false, words: "otter river robin saddle salmon pearl",
   createdAt: "2026-11-03T08:00:00Z" };
 let devices: FleetDeviceView[] = [pending];
+// Entries of the device list a newer version wrote, which the host skipped; a test sets them.
+let skippedEntries = 0;
 // The clipboard of the page is recorded, as headless Edge refuses to write the real one.
 Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText: async (text: string) => { calls.push(JSON.stringify({ copied: text })); } } });
 let telemetry: FleetTelemetryView = { enabled: true, endpoint: "https://otlp.example:4318", protocol: "http/protobuf", route: "server", signals: ["traces", "metrics"],
@@ -55,7 +57,7 @@ const api: FleetServerApi = {
     recoveryKey = true;
     return { status: "ok", server: server(), message: null, recoveryWords: null };
   },
-  devices: async () => ({ status: "ok", devices, message: null }),
+  devices: async () => ({ status: "ok", devices, message: null, skippedEntries }),
   approve: async (request: FleetServerDeviceRequest) => {
     calls.push(JSON.stringify({ approve: request.deviceId, words: request.words, kind: request.kind }));
     devices = devices.map(device => device.id === request.deviceId ? { ...device, status: "approved" } : device);
@@ -118,7 +120,7 @@ const api: FleetServerApi = {
   createToken: async () => { calls.push(JSON.stringify({ token: "home" })); return { status: "ok", token: "JOIN-5678", expiresAt: null, message: null }; },
   create: unavailable, join: unavailable, revoke: unavailable, signInMethods: unavailable, joinWithSignIn: unavailable,
 };
-Object.assign(window, { fleetFixture: { calls } });
+Object.assign(window, { fleetFixture: { calls, skip: (count: number) => { skippedEntries = count; } } });
 
 createRoot(document.getElementById("root")!).render(<StrictMode>
   <ShellLanguageContext.Provider value={{ locale: "en", choice: "en", setLanguage: () => {} }}>

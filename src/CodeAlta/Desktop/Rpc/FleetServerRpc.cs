@@ -171,9 +171,14 @@ internal sealed partial class FleetServerService
         try
         {
             var devices = await _servers!.ListDevicesAsync(request.LinkId, cancellationToken).ConfigureAwait(false);
+            // Entries a newer version wrote, which this one skipped: the card says to update CodeAlta. A list that does not
+            // verify is said where this computer signs after it; the devices are listed all the same.
+            var skipped = 0;
+            try { skipped = await _servers.CountSkippedDeviceListEntriesAsync(request.LinkId, cancellationToken).ConfigureAwait(false); }
+            catch (FleetDeviceListException) { }
             // The recovery key is a member of the list, not a device: the server's card says whether there is one.
             return new("ok", [.. devices.Where(static device => device.Kind != FleetDeviceKinds.Recovery).OrderBy(static device => device.Status == "pending" ? 0 : device.Status == "approved" ? 1 : 2)
-                .ThenByDescending(static device => device.CreatedAt).Select(device => DeviceView(device))], null);
+                .ThenByDescending(static device => device.CreatedAt).Select(device => DeviceView(device))], null, skipped);
         }
         catch (Exception exception) when (Failure(exception) is { } failure)
         {
@@ -796,7 +801,8 @@ internal sealed record FleetDeviceView(string Id, string Name, string Kind, stri
 /// <param name="Status"><c>ok</c>, the code of the server's refusal, <c>unreachable</c>, <c>not_found</c>, <c>invalid_request</c>, <c>stale_epoch</c> or <c>unavailable</c>.</param>
 /// <param name="Devices">The devices, the pending ones first.</param>
 /// <param name="Message">What the failure said.</param>
-internal sealed record FleetServerDevicesResult(string Status, FleetDeviceView[] Devices, string? Message);
+/// <param name="SkippedEntries">How many entries of the device list a newer version of CodeAlta wrote, which this one skipped: none gives trust here.</param>
+internal sealed record FleetServerDevicesResult(string Status, FleetDeviceView[] Devices, string? Message, int SkippedEntries = 0);
 
 /// <summary>A request about a device of a server.</summary>
 /// <param name="ExpectedEpoch">The host epoch the page knows.</param>

@@ -44,7 +44,7 @@ const serverApi: AddMachineServerApi = {
       createdAt: "2026-11-03T00:00:00Z" }];
     if (polls === 5) devices = [...devices, { id: "box", name: "build-box", kind: "node", status: "pending", online: true, words: "maple orbit tiger cloud amber stone",
       createdAt: "2026-11-03T00:00:01Z" }];
-    return { status: "ok", devices, message: null };
+    return { status: "ok", devices, message: null, skippedEntries: 0 };
   },
   approve: async request => {
     calls.push(JSON.stringify({ approve: request.deviceId, kind: request.kind, words: request.words }));
