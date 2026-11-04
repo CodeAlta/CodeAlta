@@ -1,7 +1,9 @@
 /* Settings > Fleet > Server, the server of a space, and the Fleet canvas. */
 .fleet-server-list { display: grid; gap: 10px; max-width: 820px; }
 .fleet-server-card { border: 1px solid var(--line); border-radius: 6px; background: var(--panel); padding: 8px 10px; display: grid; gap: 8px; }
-.fleet-server-head { display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; align-items: center; gap: 10px; }
+/* The name keeps room for itself: in a narrow window the buttons of the card go under it. */
+.fleet-server-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; }
+.fleet-server-head > .fleet-server-main { flex: 1 1 220px; }
 .fleet-server-icon { color: var(--muted); display: inline-flex; }
 .fleet-server-card[data-connection="online"] .fleet-server-icon { color: var(--green); }
 .fleet-server-main { min-width: 0; display: grid; gap: 2px; }
@@ -36,6 +38,15 @@
 .fleet-server-form { display: grid; gap: 12px; }
 .fleet-server-form > label:not(.bp6-control) { display: grid; gap: 4px; }
 .fleet-token-dialog p { margin: 0 0 8px; }
+.fleet-token-field { display: grid; gap: 4px; margin: 0 0 10px; }
+.fleet-server-spaces { display: grid; gap: 4px; padding-left: 28px; }
+.fleet-server-spaces p { margin: 0 0 0 22px; }
+.fleet-server-spaces-head { display: flex; align-items: center; gap: 8px; color: var(--muted); }
+.fleet-server-spaces-head > strong { color: var(--text); font-weight: 500; }
+.fleet-server-spaces-list { display: flex; flex-wrap: wrap; gap: 2px 16px; margin-left: 22px; }
+.fleet-server-spaces-list .bp6-control { margin: 0; }
+.fleet-token-field > span { font-weight: 600; }
+.fleet-token-code input { font-family: var(--code-font, ui-monospace, monospace); font-size: 15px; letter-spacing: 0.04em; }
 .fleet-server-telemetry { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 8px; padding-left: 28px; color: var(--muted); }
 .fleet-telemetry-main { min-width: 0; display: flex; align-items: baseline; gap: 8px; }
 .fleet-telemetry-main strong { color: var(--text); font-weight: 500; }

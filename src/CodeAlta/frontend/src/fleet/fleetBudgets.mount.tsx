@@ -28,7 +28,7 @@ let overview: FleetBudgetsOverview = {
 };
 const ok = async () => ({ status: "ok", message: null });
 const status = async () => ({ status: "ok", servers: [{ id: "home", url: "https://fleet.example", organization: "Home", link: "approved", connection: "online", problem: null,
-  controller: true, spaces: [], recoveryKey: true }], deviceId: "desktop", words: "apple river stone" });
+  controller: true, spaces: [], recoveryKey: true }], deviceId: "desktop", words: "apple river stone", personName: null });
 const continueRun = async (request: FleetSecretRefRequest) => {
   calls.push(JSON.stringify({ continue: request.id }));
   overview = { ...overview, holds: overview.holds.map(hold => hold.id === request.id ? { ...hold, status: "continued" } : hold) };

@@ -6,7 +6,15 @@ import { ActivitySpinner } from "../ActivitySpinner";
 import { useShellLanguage } from "../shellLanguage";
 import type { MessageKey } from "../localization";
 import { joinCommand, keyWords } from "../fleet/fleetServer";
-import { setupProblem, setupSteps, sshTargetOf, stepTitle, type SetupStep } from "./addMachine";
+import { hostKeyOf, setupProblem, setupSteps, sshTargetOf, stepTitle, type SetupStep } from "./addMachine";
+
+/** What a failed step of a setup over SSH said: the SSH key of a computer ssh does not know yet, else the words of the step. */
+export function SetupFailureDetail({ code, detail }: { code: string; detail: string | null | undefined }) {
+  const { t } = useShellLanguage();
+  const key = hostKeyOf(code, detail);
+  if (key) return <div className="add-machine-host-key"><span className="muted-text">{t("Its SSH key:")}</span> <code>{key}</code></div>;
+  return detail ? <pre className="add-machine-detail">{detail}</pre> : null;
+}
 
 /** The calls of the assistant. */
 export type AddMachineApi = Pick<typeof machines, "addOverSsh">;
@@ -167,7 +175,7 @@ function SshSetup({ epoch, api, onBusy, onBack, onClose, onOpen }: {
         </li>)}
       </ol>
       {failure && problem && <Callout compact intent="warning" role="alert" className="add-machine-failure">{t(problem, { host: parsed ?? target })}
-        {failure.detail && <pre className="add-machine-detail">{failure.detail}</pre>}</Callout>}
+        <SetupFailureDetail code={failure.code} detail={failure.detail} /></Callout>}
       {outcome?.machineId && <Callout compact intent="success" role="status">
         {t("{name} is paired with this computer and managed from here.", { name: outcome.name ?? parsed ?? target })}
         {outcome.words && <div className="pair-machine-words add-machine-words">{keyWords(outcome.words).map((word, index) => <Tag key={`${index}:${word}`} minimal>{word}</Tag>)}</div>}
@@ -176,8 +184,10 @@ function SshSetup({ epoch, api, onBusy, onBack, onClose, onOpen }: {
     <DialogFooter actions={<>
       {running && <Button text={t("Cancel")} onClick={() => { abort.current?.abort(); setRunning(false); setSteps(null); }} />}
       {!running && failure && <Button text={t("Back")} onClick={() => { setSteps(null); setOutcome(null); }} />}
-      {!running && failure?.code === "host_key_unknown" && <Button intent="primary" text={t("Trust it and try again")} onClick={() => void start(true)} />}
-      {!running && failure && failure.code !== "host_key_unknown" && <Button intent="primary" icon={<AppIcon name="refresh" size={14} />} text={t("Try again")} onClick={() => void start(false)} />}
+      {!running && failure?.code === "host_key_unknown" && <Button intent="primary" text={t("Trust it and start over")} title={t("Every step runs again from the first one.")}
+        onClick={() => void start(true)} />}
+      {!running && failure && failure.code !== "host_key_unknown" && <Button intent="primary" icon={<AppIcon name="refresh" size={14} />} text={t("Start over")}
+        title={t("Every step runs again from the first one.")} onClick={() => void start(false)} />}
       {outcome?.machineId && <>
         <Button text={t("Done")} onClick={() => onClose(true)} />
         <Button intent="primary" text={t("Open its page")} onClick={() => onOpen(outcome.machineId!)} />

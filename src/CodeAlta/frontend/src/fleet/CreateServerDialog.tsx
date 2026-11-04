@@ -8,16 +8,20 @@ import type { MessageKey } from "../localization";
 import { keyWords } from "./fleetServer";
 import { managesMachine } from "../machines/machineManagement";
 import { sshTargetOf } from "../machines/addMachine";
+import { SetupFailureDetail } from "../machines/AddMachineDialog";
 import { localServerSteps, organizationUrlOf, serverSetupProblem, serverStepTitle, sshServerSteps } from "./createServer";
+import { ServerSpaces, type ServerSpacesApi, type ServerSpacesListApi } from "./ServerSpaces";
 
 /** The calls of the dialog on the servers. */
-export type CreateServerApi = Pick<typeof fleetServer, "createServer">;
+export type CreateServerApi = Pick<typeof fleetServer, "createServer" | "status">;
 
 /** The calls of the dialog on the machines, to add them to the new server. */
 export type CreateServerMachinesApi = Pick<typeof machines, "list" | "joinServer">;
 
 type StepState = { state: "waiting" | "running" | "done" | "failed"; detail?: string | null };
 type Where = "ssh" | "local";
+// A server just created has no space linked yet.
+const noSpaces: readonly string[] = [];
 
 /**
  * Create my server: on a machine reached over SSH, the usual place of a server (CodeAlta installs CodeAlta Server
@@ -26,8 +30,9 @@ type Where = "ssh" | "local";
  * each approved at once. The owner's recovery key is made with the server: its words go to `onClose`, for the page to show
  * them once.
  */
-export function CreateServerDialog({ epoch, api = fleetServer, machinesApi = machines, onExisting, onClose }: {
-  epoch: string; api?: CreateServerApi; machinesApi?: CreateServerMachinesApi; onExisting: () => void; onClose: (created: boolean, recoveryWords?: string | null) => void;
+export function CreateServerDialog({ epoch, api = fleetServer, machinesApi = machines, spacesApi, onExisting, onClose }: {
+  epoch: string; api?: CreateServerApi; machinesApi?: CreateServerMachinesApi; spacesApi?: { link: ServerSpacesApi; list: ServerSpacesListApi };
+  onExisting: () => void; onClose: (created: boolean, recoveryWords?: string | null) => void;
 }) {
   const { t } = useShellLanguage();
   const [where, setWhere] = useState<Where | null>(null);
@@ -49,6 +54,13 @@ export function CreateServerDialog({ epoch, api = fleetServer, machinesApi = mac
   const [running, setRunning] = useState(false);
   const abort = useRef<AbortController | null>(null);
   useEffect(() => () => abort.current?.abort(), []);
+  // The owner's name starts as the full name of the person signed in to this computer: changed at will, kept once typed.
+  useEffect(() => {
+    const reading = new AbortController();
+    api.status({ expectedEpoch: epoch }, { signal: reading.signal, timeoutMilliseconds: 10_000 })
+      .then(value => { if (!reading.signal.aborted && value.personName) setOwner(current => current || value.personName!); }, () => { });
+    return () => reading.abort();
+  }, [api, epoch]);
   const order = where === "local" ? localServerSteps : sshServerSteps;
   const computer = sshTargetOf(target);
   const url = organizationUrlOf(address);
@@ -149,18 +161,22 @@ export function CreateServerDialog({ epoch, api = fleetServer, machinesApi = mac
           </li>)}
         </ol>
         {failed && <Callout compact intent="warning" role="alert" className="add-machine-failure">{t(serverSetupProblem(failed.code), { host: shownHost || computer, port })}
-          {failed.detail && <pre className="add-machine-detail">{failed.detail}</pre>}</Callout>}
+          <SetupFailureDetail code={failed.code} detail={failed.detail} /></Callout>}
         {linkId && <>
           <Callout compact intent="success" role="status">{t(where === "local" ? "Your server runs on this computer, and you are its owner." : "Your server runs on {host}, and you are its owner.",
             { host: shownHost })}</Callout>
           {recoveryWords && <p className="muted-text create-server-recovery-note">{t("Done shows your recovery key next, once.")}</p>}
+          {/* The owner's own sessions show on the server only from a linked space: offered here, all of them in one click. */}
+          <ServerSpaces epoch={epoch} linkId={linkId} linked={noSpaces} api={spacesApi?.link} spaces={spacesApi?.list} />
           <AddMachines epoch={epoch} linkId={linkId} api={machinesApi} />
         </>}
       </DialogBody>
       <DialogFooter actions={<>
         {!running && failed && <Button text={t("Back")} onClick={() => { setSteps(null); setFailed(null); }} />}
-        {!running && failed?.code === "host_key_unknown" && <Button intent="primary" text={t("Trust it and try again")} onClick={() => void create(true)} />}
-        {!running && failed && failed.code !== "host_key_unknown" && <Button intent="primary" icon={<AppIcon name="refresh" size={14} />} text={t("Try again")} onClick={() => void create(false)} />}
+        {!running && failed?.code === "host_key_unknown" && <Button intent="primary" text={t("Trust it and start over")} title={t("Every step runs again from the first one.")}
+          onClick={() => void create(true)} />}
+        {!running && failed && failed.code !== "host_key_unknown" && <Button intent="primary" icon={<AppIcon name="refresh" size={14} />} text={t("Start over")}
+          title={t("Every step runs again from the first one.")} onClick={() => void create(false)} />}
         {linkId && <Button intent="primary" text={t("Done")} onClick={() => onClose(true, recoveryWords)} />}
       </>} />
     </>}

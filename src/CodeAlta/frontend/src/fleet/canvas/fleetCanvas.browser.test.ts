@@ -28,5 +28,8 @@ test("without a server, the Fleet canvas shows the paired machines and opens the
     assert.deepEqual(await calls(page), [{ machine: "mini-id" }]);
     await page.clickText(".fleet-session-open .bp6-button", "Open");
     assert.deepEqual((await calls(page)).at(-1), { session: "s-works" }, "a session of a paired machine opens in a tab");
+    // Settings is one click away: the page of the machines, while no server is linked.
+    await page.clickText(".fleet-canvas-settings", "Settings");
+    assert.deepEqual((await calls(page)).at(-1), { settings: "machines" });
   }, options);
 });

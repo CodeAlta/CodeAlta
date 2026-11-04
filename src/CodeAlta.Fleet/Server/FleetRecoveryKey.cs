@@ -69,6 +69,24 @@ public sealed class FleetRecoveryKey : IDisposable
         return true;
     }
 
+    /// <summary>
+    /// Finds the first word, as the person typed them, that is no word of the list of recovery keys: what a typo makes, said by
+    /// its position so that the person checks that word without the words being shown again.
+    /// </summary>
+    /// <param name="words">The words, separated as <see cref="TryParse"/> takes them.</param>
+    /// <returns>The position of that word, from 1; 0 when every word is of the list (or there are none).</returns>
+    public static int UnknownWordPosition(string? words)
+    {
+        if (string.IsNullOrWhiteSpace(words) || words.Length > 1024) return 0;
+        var parts = words.Split([' ', '\t', '\r', '\n', ',', '-', '.'], StringSplitOptions.RemoveEmptyEntries);
+        for (var index = 0; index < parts.Length; index++)
+        {
+            if (!WordValues.ContainsKey(parts[index])) return index + 1;
+        }
+
+        return 0;
+    }
+
     /// <summary>Gets the key of the recovery key in the device list: the same for the same words, on any device.</summary>
     /// <returns>The identity, in memory only; dispose it when done.</returns>
     public DeviceIdentity CreateIdentity()

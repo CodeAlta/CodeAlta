@@ -79,7 +79,7 @@ internal sealed class SshServerInstaller(ISshRunner ssh, string desktopVersion)
             catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested) { throw new SshSetupException(SshSetupSteps.Connect, "unreachable", "No answer within 45 s."); }
         }
 
-        if (probe.ExitCode == SshResult.ConnectionFailed) throw new SshSetupException(SshSetupSteps.Connect, SshNodeInstaller.ConnectionCode(probe.Error), Lines(probe.Error));
+        if (probe.ExitCode == SshResult.ConnectionFailed) throw await SshNodeInstaller.ConnectionFailureAsync(ssh, target, probe.Error, cancellationToken).ConfigureAwait(false);
         var facts = SshNodeInstaller.ReadFacts(probe.Output);
         progress(new(SshSetupSteps.Connect, "done", $"{facts.User}@{facts.Hostname ?? target.Host}"));
 

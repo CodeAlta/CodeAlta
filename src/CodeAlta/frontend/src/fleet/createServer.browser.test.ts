@@ -17,6 +17,8 @@ test("Create my server leads with a machine over SSH, says what blocks it from h
     await page.evaluate(`document.querySelector('.create-server-dialog .add-machine-choice').click()`);
     await page.until(`document.querySelector('.create-server-dialog input[aria-label=Computer]')`, "the form");
     await page.evaluate(type(".create-server-dialog input[aria-label=Computer]", "me@box"));
+    // The owner's name starts as the full name of the person signed in to this computer.
+    assert.equal(await page.evaluate(`document.querySelector(".create-server-dialog input[aria-label='Your name']").value`), "Alex Example");
     await page.evaluate(type(".create-server-dialog input[aria-label='Your name']", "Alex"));
     assert.equal(await page.evaluate(`document.querySelector('.create-server-reach code').textContent`), "http://box:2586", "the address the machines will use");
     await page.clickText(".create-server-dialog .bp6-button", "Create my server");
@@ -24,19 +26,45 @@ test("Create my server leads with a machine over SSH, says what blocks it from h
     await page.until(`document.querySelector('.create-server-dialog .add-machine-failure')`, "the reach fails");
     assert.match(await page.evaluate(`document.querySelector('.add-machine-failure').textContent`) as string, /firewall of box blocks port 2586\. On box, run sudo ufw allow 2586\/tcp/u);
     await page.shot("create-server-blocked");
-    await page.clickText(".create-server-dialog .bp6-button", "Try again");
+    await page.clickText(".create-server-dialog .bp6-button", "Start over");
     await page.until(`document.querySelector('.create-server-dialog [role=status]')?.textContent === 'Your server runs on box, and you are its owner.'`, "the server is claimed");
+    // The owner's own sessions show on the server once a space is linked: offered right away, all spaces in one click.
+    await page.until(`document.querySelectorAll('.create-server-dialog .fleet-server-spaces input[type=checkbox]').length === 2`, "the spaces of the person");
+    await page.clickText(".create-server-dialog .fleet-server-spaces .bp6-button", "Link all my spaces");
+    await page.until(`[...document.querySelectorAll('.create-server-dialog .fleet-server-spaces input')].every(input => input.checked)`, "every space linked");
     await page.clickText(".create-server-machines .bp6-button", "Add");
     await page.until(`document.querySelector('.create-server-joined')?.textContent.startsWith('Joined')`, "the machine joined");
     await page.shot("create-server-done");
-    assert.deepEqual((await calls(page)).filter(call => call.ssh || call.join), [{ ssh: "me@box", address: null, port: 2586 }, { ssh: "me@box", address: null, port: 2586 },
-      { join: "mac", link: "link-1" }]);
+    assert.deepEqual((await calls(page)).filter(call => call.ssh || call.join || call.link), [{ ssh: "me@box", address: null, port: 2586 }, { ssh: "me@box", address: null, port: 2586 },
+      { link: "default", server: "link-1" }, { link: "home", server: "link-1" }, { join: "mac", link: "link-1" }]);
     // The owner's recovery key came with the server: Done gives its words to the page, which shows them once.
     assert.equal(await page.evaluate(`document.querySelector('.create-server-dialog .create-server-recovery-note')?.textContent`), "Done shows your recovery key next, once.");
     await page.clickText(".create-server-dialog .bp6-button", "Done");
     const closed = (await calls(page)).find(call => "close" in call);
     assert.equal(closed?.close, true);
     assert.equal((closed?.recoveryWords as string).split(" ").length, 32, "the 32 words of the recovery key");
+    assert.deepEqual(page.problems, []);
+  }, options);
+});
+
+test("Connect to my server speaks to the owner, links every space of the person, and is approved by another computer of theirs", { skip: !edge, timeout: 90_000 }, async () => {
+  await withCanvas(async page => {
+    await page.evaluate(`window.serverFixture.show('joinOwn')`);
+    await page.until(`document.querySelector('.join-organization-dialog.join-organization-own input')`, "the address");
+    assert.equal(await page.evaluate(`document.querySelector('.join-organization-dialog .bp6-dialog-header').textContent`), "Connect to my server");
+    assert.doesNotMatch(await page.evaluate(`document.querySelector('.join-organization-dialog').textContent`) as string, /administrator/u, "at home, the person is their own administrator");
+    await page.evaluate(type(".join-organization-dialog input", "http://box:2586"));
+    await page.clickText(".join-organization-dialog .bp6-button", "Next");
+    await page.until(`document.querySelector('.join-organization-dialog input[aria-label="Enrollment code"]')`, "the code");
+    assert.match(await page.evaluate(`document.querySelector('.join-organization-dialog p').textContent`) as string, /Invite a computer/u);
+    await page.evaluate(type(".join-organization-dialog input", "CODE-2"));
+    await page.clickText(".join-organization-dialog .bp6-button", "Sign in");
+    await page.until(`document.querySelectorAll('.join-organization-spaces input[type=checkbox]').length === 2`, "the spaces of the person");
+    assert.deepEqual(await page.evaluate(`[...document.querySelectorAll('.join-organization-spaces input')].map(input => input.checked)`), [true, true], "all of them at first");
+    await page.shot("join-own-server-spaces");
+    await page.clickText(".join-organization-dialog .bp6-button", "Link the spaces");
+    await page.until(`document.querySelector('.join-organization-dialog [role=status]')?.textContent.includes('Another of your computers approves this one.')`, "the approval");
+    assert.deepEqual((await calls(page)).filter(call => call.link || call.space), [{ link: "default", server: "corp" }, { link: "home", server: "corp" }], "no new Work space");
     assert.deepEqual(page.problems, []);
   }, options);
 });

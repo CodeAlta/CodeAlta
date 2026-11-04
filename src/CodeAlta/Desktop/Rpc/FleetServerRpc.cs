@@ -47,6 +47,9 @@ internal sealed partial class FleetServerService
     /// <summary>Gets whether this computer reaches a machine: paired with it, or through the relay of a server; null for none.</summary>
     internal Func<string, bool>? IsReachable { get; init; }
 
+    /// <summary>Gets the full name of the person signed in to this computer, which the setup of a server proposes as the owner's; null for none.</summary>
+    internal Func<string?>? PersonName { get; init; }
+
     /// <summary>Gets the machines paired with this computer, which the directory shows while no server is linked; null for none.</summary>
     internal DesktopFleet? Fleet { get; init; }
 
@@ -56,7 +59,7 @@ internal sealed partial class FleetServerService
     {
         if (Refuse(request?.ExpectedEpoch) is { } refused) return new(refused, [], null, null);
         var spaces = Spaces is null ? [] : await Spaces.LoadAsync(cancellationToken).ConfigureAwait(false);
-        return new("ok", [.. _servers!.Connections.Select(connection => View(connection, spaces))], _servers.DeviceId, _servers.Words);
+        return new("ok", [.. _servers!.Connections.Select(connection => View(connection, spaces))], _servers.DeviceId, _servers.Words) { PersonName = PersonName?.Invoke() };
     }
 
     /// <summary>Sets a server up with its setup code: this desktop becomes the owner's controller device.</summary>
@@ -89,6 +92,9 @@ internal sealed partial class FleetServerService
         if (Refuse(request?.ExpectedEpoch) is { } refused) return new(refused, null, null);
         if (!FleetServerAddress.TryParse(request!.Url, out var address)) return new("invalid_url", null, null);
         if (request.Words is not { Length: > 0 and <= 1024 } words) return new("invalid_request", null, null);
+        // A word that is no word of a recovery key is said by its position: the person checks that one, and no word is repeated.
+        if (FleetRecoveryKey.UnknownWordPosition(words) is > 0 and var position)
+            return new("recovery.unknown_word", null, position.ToString(System.Globalization.CultureInfo.InvariantCulture));
         return await ActAsync(async () => Result(await _servers!.RecoverAsync(address, words, cancellationToken).ConfigureAwait(false))).ConfigureAwait(false);
     }
 
@@ -687,7 +693,11 @@ internal sealed record FleetServerView(string Id, string Url, string? Organizati
 /// <param name="Servers">The servers, in the order they were linked.</param>
 /// <param name="DeviceId">The device id of this computer, once its key exists.</param>
 /// <param name="Words">The words of its key.</param>
-internal sealed record FleetServerStatus(string Status, FleetServerView[] Servers, string? DeviceId, string? Words);
+internal sealed record FleetServerStatus(string Status, FleetServerView[] Servers, string? DeviceId, string? Words)
+{
+    /// <summary>Gets the full name of the person signed in to this computer, which the setup of a server proposes as the owner's name; null for none.</summary>
+    public string? PersonName { get; init; }
+}
 
 /// <summary>A server to set up with its setup code.</summary>
 /// <param name="ExpectedEpoch">The host epoch the page knows.</param>

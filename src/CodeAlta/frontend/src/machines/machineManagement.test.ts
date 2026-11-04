@@ -1,8 +1,34 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import type { MachineDeviceView } from "#neoastra";
-import { agentSandboxChoices, agentsAllowed, confirmsBypass, confirmsLoss, devicePermissions, hasPermission, managementProblem, managesMachine, orderedDevices, permissionLabel, permissionsEditable, projectSource,
-  updateSummary } from "./machineManagement";
+import type { MachineDeviceView, MachineProviderStatusView } from "#neoastra";
+import { agentSandboxChoices, agentsAllowed, confirmsBypass, confirmsLoss, devicePermissions, hasPermission, managementProblem, managesMachine, newProviderKey, orderedDevices, permissionLabel,
+  permissionsEditable, projectSource, providerFix, providerProblem, providerState, providerStateLabel, updateSummary } from "./machineManagement";
+
+const provider = (change: Partial<MachineProviderStatusView> = {}): MachineProviderStatusView => ({ key: "openai", name: "OpenAI", type: "openai-responses", enabled: true,
+  state: "not_ready", reason: "key_missing", detail: null, credential: "key", keySecret: null, signIn: false, isDefault: false, model: null, apiUrl: null, ...change });
+
+test("a provider the machine skipped says why, with the secret or the variable it waits for, instead of only in its log", () => {
+  assert.deepEqual(providerProblem(provider({ reason: "secret_missing", detail: "PROVIDER_OPENAI_API_KEY" })),
+    { key: "Its key is the secret {name} of the machine, which is not set.", values: { name: "PROVIDER_OPENAI_API_KEY" } });
+  assert.deepEqual(providerProblem(provider({ detail: "OPENAI_API_KEY" })), { key: "It has no key: the variable {name} is not set on the machine.", values: { name: "OPENAI_API_KEY" } });
+  assert.deepEqual(providerProblem(provider()), { key: "It has no key." });
+  assert.deepEqual(providerProblem(provider({ reason: "sign_in_needed", credential: "sign_in" })), { key: "It is not signed in on the machine." });
+  assert.deepEqual(providerProblem(provider({ state: "failed", reason: "start_failed", detail: "401 Unauthorized" })), { key: "It did not start: {detail}", values: { detail: "401 Unauthorized" } });
+  assert.equal(providerProblem(provider({ state: "ready", reason: null })), null);
+  assert.equal(providerProblem(provider({ state: "preparing", reason: null })), null);
+  assert.equal(providerState(provider({ state: "something new" })), "not_ready");
+  assert.equal(providerStateLabel("preparing"), "Preparing…");
+});
+
+test("each provider offers what makes it ready: its key, its sign-in with a code, or nothing for its own login on the machine", () => {
+  assert.equal(providerFix(provider()), "key");
+  assert.equal(providerFix(provider({ credential: "sign_in", signIn: true })), "sign_in");
+  assert.equal(providerFix(provider({ credential: "sign_in", signIn: false })), null, "Codex signs in with a browser on the machine");
+  assert.equal(providerFix(provider({ credential: "cli" })), null);
+  assert.equal(newProviderKey("anthropic", ["openai"]), "anthropic");
+  assert.equal(newProviderKey("anthropic", ["Anthropic", "anthropic-2"]), "anthropic-3");
+  assert.equal(managementProblem("provider.sign_in_unsupported"), "This provider does not sign in with a code: sign in on the machine itself.");
+});
 
 const device = (change: Partial<MachineDeviceView> = {}): MachineDeviceView => ({ id: "d1", name: "laptop", fingerprint: "ABCD EFGH IJKL", permissions: ["view", "drive", "start"],
   pairedAt: "2026-11-01T00:00:00Z", revokedAt: null, channels: 0, isThisComputer: false, ...change });
