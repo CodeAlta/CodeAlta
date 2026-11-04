@@ -194,15 +194,9 @@ internal sealed partial class AccessService
                 (name, implied) = (device.Name, device.OwnerPersonId);
                 break;
             case FleetResourceKinds.Automation:
-                foreach (var person in snapshot.People)
-                {
-                    var automations = await _automations.ListAutomationsAsync(organizationId, person.Id, cancellationToken).ConfigureAwait(false);
-                    if (automations.Any(automation => automation.AutomationId == id && !automation.Removed))
-                    {
-                        implied = person.Id;
-                        break;
-                    }
-                }
+                // One read for the organization, never one per person.
+                implied = (await _automations.ListAutomationHoldersAsync(organizationId, cancellationToken).ConfigureAwait(false))
+                    .Where(holder => holder.AutomationId == id && snapshot.Person(holder.PersonId) is not null).Select(static holder => holder.PersonId).FirstOrDefault();
 
                 if (implied is null && snapshot.Owner(kind, id) is null) return null;
                 break;
@@ -231,12 +225,10 @@ internal sealed partial class AccessService
         var hosts = new HashSet<string>(machines.Select(static machine => machine.DeviceId), StringComparer.Ordinal);
         foreach (var device in devices.Where(device => device.Status == DeviceStatuses.Approved && (device.Kind == FleetDeviceKinds.Node || hosts.Contains(device.Id))))
             Add(FleetResourceKinds.Machine, device.Id, device.Name, device.OwnerPersonId, null);
-        foreach (var person in snapshot.People)
+        var people = snapshot.People.Select(static person => person.Id).ToHashSet(StringComparer.Ordinal);
+        foreach (var (automationId, personId) in await _automations.ListAutomationHoldersAsync(organizationId, cancellationToken).ConfigureAwait(false))
         {
-            foreach (var automation in await _automations.ListAutomationsAsync(organizationId, person.Id, cancellationToken).ConfigureAwait(false))
-            {
-                if (!automation.Removed) Add(FleetResourceKinds.Automation, automation.AutomationId, null, person.Id, person.Id);
-            }
+            if (people.Contains(personId)) Add(FleetResourceKinds.Automation, automationId, null, personId, personId);
         }
 
         foreach (var owner in snapshot.Owners.Where(owner => !resources.ContainsKey((owner.ResourceKind, owner.ResourceId))))

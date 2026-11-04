@@ -215,6 +215,22 @@ public sealed partial class SqliteCoordinatorStore : ICoordinatorStore, IAutomat
     }
 
     /// <inheritdoc />
+    public ValueTask<(DeviceRecord? Device, bool PersonSuspended)> GetDeviceOfRequestAsync(string deviceId, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(deviceId);
+        return ReadAsync(connection =>
+        {
+            (DeviceRecord? Device, bool PersonSuspended) found = (null, false);
+            using var command = connection.CreateCommand();
+            command.CommandText = DeviceOfRequestColumns + " FROM devices d LEFT JOIN people p ON p.id = d.owner_person_id WHERE d.id = $id";
+            command.Parameters.AddWithValue("$id", deviceId);
+            using var reader = command.ExecuteReader();
+            if (reader.Read()) found = (ReadDeviceRow(reader), !reader.IsDBNull(14) && reader.GetString(14) != CodeAlta.Fleet.Protocol.FleetPersonStatuses.Active);
+            return found;
+        }, cancellationToken);
+    }
+
+    /// <inheritdoc />
     public ValueTask<IReadOnlyList<DeviceRecord>> ListDevicesAsync(string organizationId, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrEmpty(organizationId);
@@ -1053,6 +1069,9 @@ public sealed partial class SqliteCoordinatorStore : ICoordinatorStore, IAutomat
     private const string DeviceColumns =
         "SELECT id, organization_id, name, kind, public_key, fingerprint, owner_person_id, status, enrolled_by_device_id, enrollment_token_id, created_at, approved_at, revoked_at, version";
     private const string DeviceListColumns = "SELECT organization_id, seq, device_id, operation, signer_device_id, payload, signature, hash, recorded_at";
+    // The columns of a device, then the status of its person: what each signed request reads at once.
+    private const string DeviceOfRequestColumns = "SELECT d.id, d.organization_id, d.name, d.kind, d.public_key, d.fingerprint, d.owner_person_id, d.status, " +
+        "d.enrolled_by_device_id, d.enrollment_token_id, d.created_at, d.approved_at, d.revoked_at, d.version, p.status";
     private const string SessionColumns =
         "SELECT id, organization_id, machine_id, epoch, version, state, created_at, updated_at, provider_type, model, turns, tool_calls, input_tokens, output_tokens, sealed_metadata, received_at, person_id";
     private const string AuditColumns =

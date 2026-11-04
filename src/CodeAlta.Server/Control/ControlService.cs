@@ -381,7 +381,7 @@ public sealed class ControlService
 
         public async ValueTask<FleetProofVerification> VerifyAsync(FleetHello hello, FleetProofContext context, CancellationToken cancellationToken)
         {
-            var device = await store.GetDeviceAsync(context.DeviceId, cancellationToken).ConfigureAwait(false);
+            var (device, suspended) = await store.GetDeviceOfRequestAsync(context.DeviceId, cancellationToken).ConfigureAwait(false);
             // The proof is checked before the status, so that a pending or revoked answer tells only the holder of the key.
             if (device is null || !FleetDevicePublicKey.TryParse(device.PublicKey, out var key) || !key.Verify(context.GetSignedBytes(), hello.Device.Proof))
             {
@@ -398,7 +398,7 @@ public sealed class ControlService
                     return FleetProofVerification.Reject(new FleetError(FleetErrorCodes.Revoked, null, "The device was revoked."));
             }
 
-            if (device.OwnerPersonId is { } owner && await store.GetPersonAsync(owner, cancellationToken).ConfigureAwait(false) is { IsActive: false })
+            if (suspended)
                 return FleetProofVerification.Reject(new FleetError(FleetErrorCodes.Revoked, null, "The person of this device is suspended."));
             Device = device;
             return FleetProofVerification.Accept();

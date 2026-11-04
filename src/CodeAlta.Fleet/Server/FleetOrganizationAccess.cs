@@ -68,6 +68,27 @@ public sealed class FleetOrganizationAccess
         try
         {
             using var client = new FleetServerClient(Devices.ServerAddress, Devices.Identity, Devices.Handler);
+            // Verified before in this process: only the versions after it are read, each checked to follow the one before it.
+            if (Volatile.Read(ref _current) is { Number: > 0, OrganizationId: { } known } held)
+            {
+                var after = await client.ListAccessDocumentsAsync(held.Number, cancellationToken).ConfigureAwait(false);
+                if (after.Items.Count == 0) return held;
+                var needs = FleetAccessDocuments.TryParse(after.Items[^1].Document.Payload, out var newest) ? newest.DeviceListSequence : long.MaxValue;
+                var list = Devices.Current is { } current && current.Sequence >= needs ? current : await Devices.RefreshAsync(cancellationToken).ConfigureAwait(false);
+                var extended = held;
+                foreach (var item in after.Items)
+                {
+                    if (!FleetAccessDocuments.TryAppend(extended, item.Document, list, known, out var next, out var reason))
+                        throw new FleetAccessDocumentException(extended.Number + 1, reason);
+                    extended = next;
+                }
+
+                WritePin(new AccessPin(extended.FirstHash!, extended.Number, extended.LastHash!));
+                Volatile.Write(ref _current, extended);
+                Changed?.Invoke(extended);
+                return extended;
+            }
+
             var listed = await client.ListAccessDocumentsAsync(0, cancellationToken).ConfigureAwait(false);
             var devices = Devices.Current;
             var needed = listed.Items.Count == 0 ? 0 : FleetAccessDocuments.TryParse(listed.Items[^1].Document.Payload, out var last) ? last.DeviceListSequence : long.MaxValue;
