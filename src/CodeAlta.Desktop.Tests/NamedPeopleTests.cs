@@ -60,6 +60,40 @@ public sealed class NamedPeopleTests
         }
     }
 
+    [TestMethod]
+    public async Task APersonOfAnotherOrganizationWithTheSameId_GetsNothingOfThePersonTheMachineNamed()
+    {
+        var token = TestContext.CancellationToken;
+        await using var fixture = await FleetNodeFixture.StartAsync(token);
+        using var beaKey = DeviceIdentity.LoadOrCreate(Path.Combine(fixture.Root, "bea"));
+        using var otherKey = DeviceIdentity.LoadOrCreate(Path.Combine(fixture.Root, "other-bea"));
+        // The machine is linked to two organizations; each has a person with the id "bea".
+        var acme = new OtherPeople("acme") { [beaKey.Fingerprint] = ("bea", beaKey.DeviceId) };
+        var globex = new OtherPeople("globex") { [otherKey.Fingerprint] = ("bea", otherKey.DeviceId) };
+        await using (var bea = await ConnectAsync(fixture, acme, beaKey, token)) await Assert.ThrowsExactlyAsync<FleetException>(() => bea.ListSessionsAsync(null, token));
+        fixture.Service.People.Set(new FleetNodePeopleChange("bea", ["view", "drive", "start"]));
+        FleetCreateSessionResult created;
+        await using (var bea = await ConnectAsync(fixture, acme, beaKey, token))
+            created = await bea.CreateSessionAsync(new FleetCreateSessionParams(Title: "Bea's work"), "create-bea", token);
+
+        // Globex's "bea" is not the person the owner named, and sees nothing of her sessions.
+        await using (var other = await ConnectAsync(fixture, globex, otherKey, token))
+        {
+            var refused = await Assert.ThrowsExactlyAsync<FleetException>(() => other.ListSessionsAsync(null, token));
+            Assert.AreEqual(FleetErrorCodes.Forbidden, refused.Error.Code, "named in another organization, not in this one");
+        }
+
+        fixture.Service.People.Set(new FleetNodePeopleChange("bea", ["view", "drive", "start"], OrganizationId: "globex"));
+        await using (var other = await ConnectAsync(fixture, globex, otherKey, token))
+        {
+            Assert.AreEqual(0, (await other.ListSessionsAsync(null, token)).Sessions.Count, "the sessions of Acme's Bea are not hers");
+            await Assert.ThrowsExactlyAsync<FleetException>(() => other.GetSessionStateAsync(created.SessionId, token));
+        }
+
+        // A suspension in Globex stops nothing of Acme's Bea.
+        Assert.AreEqual(0, (await fixture.Service.ApplyAccessAsync(FleetAccessState.Empty with { OrganizationId = "globex", Suspended = ["bea"] }, token)).Count);
+    }
+
     private static async Task<FleetNodeClient> ConnectAsync(FleetNodeFixture fixture, IDeviceTrustPolicy trust, DeviceIdentity identity, CancellationToken token)
     {
         using var listener = new TcpListener(IPAddress.Loopback, 0);
@@ -73,11 +107,14 @@ public sealed class NamedPeopleTests
     }
 
     // The trust of the organization on a personal machine for the controller devices of other people: nothing, with their person.
-    private sealed class OtherPeople : Dictionary<DeviceFingerprint, (string Person, string DeviceId)>, IDeviceTrustPolicy
+    private sealed class OtherPeople(string? organizationId = null) : Dictionary<DeviceFingerprint, (string Person, string DeviceId)>, IDeviceTrustPolicy
     {
         public TrustedDevice? FindTrusted(DeviceFingerprint fingerprint)
             => TryGetValue(fingerprint, out var member)
-                ? new TrustedDevice(member.DeviceId, member.DeviceId, fingerprint, DevicePermissions.None, DateTimeOffset.UnixEpoch, null) { PersonId = member.Person, OwnSessionsOnly = true }
+                ? new TrustedDevice(member.DeviceId, member.DeviceId, fingerprint, DevicePermissions.None, DateTimeOffset.UnixEpoch, null)
+                {
+                    PersonId = member.Person, OwnSessionsOnly = true, OrganizationId = organizationId,
+                }
                 : null;
 
         public bool IsRevoked(DeviceFingerprint fingerprint) => false;

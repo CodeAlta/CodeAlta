@@ -299,6 +299,7 @@ public sealed class FleetOrganizationTrust(Func<FleetDeviceListState?> list, str
             {
                 PersonId = member.OwnerId,
                 OwnSessionsOnly = true,
+                OrganizationId = current.OrganizationId,
             };
         }
 
@@ -312,6 +313,7 @@ public sealed class FleetOrganizationTrust(Func<FleetDeviceListState?> list, str
         {
             PersonId = other ? member.OwnerId : null,
             OwnSessionsOnly = other,
+            OrganizationId = current.OrganizationId,
         };
     }
 

@@ -42,17 +42,31 @@ public sealed class FleetNodePeople
     /// <summary>Raised after a person asked to be let in for the first time.</summary>
     public event Action? Asked;
 
-    /// <summary>Gets what a person may do on the machine, or null when the machine does not name them.</summary>
+    /// <summary>
+    /// Gets or sets what gives the organization of the machine when it is linked to exactly one: a person named before their
+    /// organization was kept is that organization's; on a machine of several, they are nobody's until named again. Null: none.
+    /// </summary>
+    public Func<string?>? SoleOrganization { get; set; }
+
+    /// <summary>Gets what a person of an organization may do on the machine, or null when the machine does not name them.</summary>
     /// <param name="personId">The person.</param>
+    /// <param name="organizationId">Their organization: a person's id is unique within one only; null for a device of no organization.</param>
     /// <returns>Their permissions, or null.</returns>
-    public DevicePermissions? Named(string personId)
+    public DevicePermissions? Named(string personId, string? organizationId)
     {
         lock (_gate)
         {
-            return _state.People.FirstOrDefault(person => person.PersonId == personId) is { } named
+            return _state.People.FirstOrDefault(person => person.PersonId == personId && Same(person.OrganizationId, organizationId)) is { } named
                 && DevicePermissionNames.TryParse(named.Permissions, out var permissions, out _) ? permissions & Allowed : null;
         }
     }
+
+    // Whether what the machine keeps for a person of an organization is for this one: the same organization, or one kept
+    // before organizations were, on a machine of a single organization.
+    private bool Same(string? kept, string? organizationId)
+        => string.Equals(kept, organizationId, StringComparison.Ordinal) || kept is null && organizationId is not null && SoleOrganization?.Invoke() == organizationId;
+
+    private static string RefusalKey(string personId, string? organizationId) => organizationId is null ? personId : organizationId + "/" + personId;
 
     /// <summary>Reads the people and the requests.</summary>
     /// <returns>What the node holds.</returns>
@@ -64,16 +78,18 @@ public sealed class FleetNodePeople
     /// <summary>Records that a person the machine does not name tried to use it, once, unless its owner refused them.</summary>
     /// <param name="personId">The person.</param>
     /// <param name="deviceId">The device they asked from.</param>
+    /// <param name="organizationId">Their organization; null for a device of no organization.</param>
     /// <returns>Whether the request is new.</returns>
-    public bool Ask(string personId, string deviceId)
+    public bool Ask(string personId, string deviceId, string? organizationId)
     {
         ArgumentException.ThrowIfNullOrEmpty(personId);
         ArgumentException.ThrowIfNullOrEmpty(deviceId);
         lock (_gate)
         {
-            if (_state.Refused.Contains(personId, StringComparer.Ordinal) || _state.Asks.Any(ask => ask.PersonId == personId)
-                || _state.People.Any(person => person.PersonId == personId)) return false;
-            _state = _state with { Asks = [.. _state.Asks.TakeLast(MaxEntries - 1), new FleetNodeAsk(personId, deviceId, _time.GetUtcNow())] };
+            if (_state.Refused.Contains(RefusalKey(personId, organizationId), StringComparer.Ordinal)
+                || _state.Asks.Any(ask => ask.PersonId == personId && Same(ask.OrganizationId, organizationId))
+                || _state.People.Any(person => person.PersonId == personId && Same(person.OrganizationId, organizationId))) return false;
+            _state = _state with { Asks = [.. _state.Asks.TakeLast(MaxEntries - 1), new FleetNodeAsk(personId, deviceId, _time.GetUtcNow(), organizationId)] };
             Save();
         }
 
@@ -95,14 +111,21 @@ public sealed class FleetNodePeople
             throw new ArgumentException($"A person may view, drive and start their own sessions: '{unknown ?? string.Join(",", names)}' is not one of those.", nameof(change));
         lock (_gate)
         {
-            var people = _state.People.Where(person => person.PersonId != change.PersonId).ToList();
-            var refused = _state.Refused.Where(id => id != change.PersonId).ToList();
+            // The organization of the person: the one named, else the one of their request, else the only one of the machine.
+            var asked = _state.Asks.Where(ask => ask.PersonId == change.PersonId).Select(static ask => ask.OrganizationId).Distinct(StringComparer.Ordinal).ToArray();
+            if (change.OrganizationId is null && asked.Length > 1)
+                throw new ArgumentException("People of several organizations have this id: name the organization of the person.", nameof(change));
+            var organization = change.OrganizationId ?? (asked.Length == 1 ? asked[0] : SoleOrganization?.Invoke());
+            var people = _state.People.Where(person => !(person.PersonId == change.PersonId && string.Equals(person.OrganizationId, organization, StringComparison.Ordinal))).ToList();
+            var key = RefusalKey(change.PersonId, organization);
+            var refused = _state.Refused.Where(id => id != key).ToList();
             if (permissions != DevicePermissions.None)
-                people.Add(new FleetNodePerson(change.PersonId, DevicePermissionNames.Format(permissions), _time.GetUtcNow()));
+                people.Add(new FleetNodePerson(change.PersonId, DevicePermissionNames.Format(permissions), _time.GetUtcNow(), organization));
             else if (change.Refuse)
-                refused.Add(change.PersonId);
+                refused.Add(key);
             if (people.Count > MaxEntries || refused.Count > MaxEntries) throw new ArgumentException($"A machine names at most {MaxEntries} people.", nameof(change));
-            _state = new PeopleState(people, [.. _state.Asks.Where(ask => ask.PersonId != change.PersonId)], refused);
+            _state = new PeopleState(people, [.. _state.Asks.Where(ask => !(ask.PersonId == change.PersonId && string.Equals(ask.OrganizationId, organization, StringComparison.Ordinal)))],
+                refused);
             Save();
             return new FleetNodePeopleInfo([.. _state.People], [.. _state.Asks], [.. _state.Refused]);
         }
@@ -144,7 +167,7 @@ public sealed class FleetNamedPeopleTrust(IDeviceTrustPolicy organization, Fleet
     public TrustedDevice? FindTrusted(DeviceFingerprint fingerprint)
     {
         var device = organization.FindTrusted(fingerprint);
-        return device is { PersonId: { } person, Permissions: DevicePermissions.None, OwnSessionsOnly: true } && people.Named(person) is { } named
+        return device is { PersonId: { } person, Permissions: DevicePermissions.None, OwnSessionsOnly: true } && people.Named(person, device.OrganizationId) is { } named
             ? device with { Permissions = named }
             : device;
     }

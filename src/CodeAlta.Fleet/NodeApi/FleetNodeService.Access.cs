@@ -44,6 +44,11 @@ public sealed partial class FleetNodeService
     /// <returns>The person, or null.</returns>
     public string? PersonOfSession(string sessionId) => Principals.PersonOf(sessionId);
 
+    /// <summary>Gets the organization of the person who started a session here through a team membership; null otherwise.</summary>
+    /// <param name="sessionId">The session.</param>
+    /// <returns>The organization, or null.</returns>
+    public string? OrganizationOfSession(string sessionId) => Principals.OrganizationOf(sessionId);
+
     /// <summary>
     /// Applies a newer access document of an organization: the sessions people it suspends started here are stopped, and their
     /// open channels closed. A node calls it once its server link verified the document.
@@ -56,9 +61,10 @@ public sealed partial class FleetNodeService
     {
         ArgumentNullException.ThrowIfNull(access);
         var stopped = new List<string>();
-        foreach (var (sessionId, personId) in Principals.List())
+        foreach (var (sessionId, personId, organizationId) in Principals.List())
         {
-            if (!access.IsSuspended(personId)) continue;
+            // A person of another organization with the same id is not the one suspended; one kept before organizations were may be.
+            if (!access.IsSuspended(personId) || organizationId is not null && organizationId != access.OrganizationId) continue;
             cancellationToken.ThrowIfCancellationRequested();
             try
             {
@@ -85,14 +91,14 @@ public sealed partial class FleetNodeService
     {
         if (device is not { OwnSessionsOnly: true }) return;
         if (SessionIdOf(parameters) is not { } sessionId) return;
-        if (!Principals.Owns(sessionId, device.PersonId))
+        if (!Principals.Owns(sessionId, device.PersonId, device.OrganizationId))
             throw new FleetException(FleetNodeErrorCodes.SessionNotFound, null, "No session of yours has this id on this machine.");
     }
 
     // Records that a person started a session here through a team membership: they alone see and drive it.
     private void RecordPrincipal(TrustedDevice? device, string sessionId)
     {
-        if (device is { OwnSessionsOnly: true, PersonId: { } person }) Principals.Record(sessionId, person);
+        if (device is { OwnSessionsOnly: true, PersonId: { } person }) Principals.Record(sessionId, person, device.OrganizationId);
     }
 
     private static string? SessionIdOf(object parameters) => parameters switch
@@ -134,10 +140,12 @@ internal sealed class FleetSessionPrincipals
         _items = Load(_path);
     }
 
-    public bool Owns(string sessionId, string? personId)
+    // A person's id is unique within one organization only: a session is theirs for the same person of the same organization.
+    public bool Owns(string sessionId, string? personId, string? organizationId)
     {
         if (personId is null) return false;
-        lock (_gate) return _items.Any(item => item.SessionId == sessionId && item.PersonId == personId);
+        lock (_gate)
+            return _items.Any(item => item.SessionId == sessionId && item.PersonId == personId && string.Equals(item.OrganizationId, organizationId, StringComparison.Ordinal));
     }
 
     public string? PersonOf(string sessionId)
@@ -145,17 +153,22 @@ internal sealed class FleetSessionPrincipals
         lock (_gate) return _items.FirstOrDefault(item => item.SessionId == sessionId)?.PersonId;
     }
 
-    public IReadOnlyList<(string SessionId, string PersonId)> List()
+    public string? OrganizationOf(string sessionId)
     {
-        lock (_gate) return [.. _items.Select(static item => (item.SessionId, item.PersonId))];
+        lock (_gate) return _items.FirstOrDefault(item => item.SessionId == sessionId)?.OrganizationId;
     }
 
-    public void Record(string sessionId, string personId)
+    public IReadOnlyList<(string SessionId, string PersonId, string? OrganizationId)> List()
+    {
+        lock (_gate) return [.. _items.Select(static item => (item.SessionId, item.PersonId, item.OrganizationId))];
+    }
+
+    public void Record(string sessionId, string personId, string? organizationId)
     {
         lock (_gate)
         {
             if (_items.Any(item => item.SessionId == sessionId)) return;
-            _items.Add(new FleetSessionPrincipal(sessionId, personId));
+            _items.Add(new FleetSessionPrincipal(sessionId, personId, organizationId));
             if (_items.Count > MaxSessions) _items.RemoveRange(0, _items.Count - MaxSessions);
             Directory.CreateDirectory(Path.GetDirectoryName(_path)!);
             FleetFiles.WriteAtomically(_path, JsonSerializer.SerializeToUtf8Bytes(_items, FleetSessionPrincipalJson.Default.ListFleetSessionPrincipal));
@@ -178,7 +191,8 @@ internal sealed class FleetSessionPrincipals
 /// <summary>A session and the person who started it.</summary>
 /// <param name="SessionId">The session.</param>
 /// <param name="PersonId">The person.</param>
-internal sealed record FleetSessionPrincipal(string SessionId, string PersonId);
+/// <param name="OrganizationId">The organization of the person; null for a session recorded before it was kept.</param>
+internal sealed record FleetSessionPrincipal(string SessionId, string PersonId, string? OrganizationId = null);
 
 [JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase, WriteIndented = true)]
 [JsonSerializable(typeof(List<FleetSessionPrincipal>))]

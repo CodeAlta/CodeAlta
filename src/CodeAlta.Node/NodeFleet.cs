@@ -376,7 +376,10 @@ internal sealed class NodeServers : IAsyncDisposable
         ArgumentNullException.ThrowIfNull(node);
         var catalog = node.Host.CatalogOptions;
         var identity = DeviceIdentity.LoadOrCreate(catalog);
-        var source = new Fleet.Server.FleetHostPublicationSource(node.Host, name, version, ["sessions", "moves"]) { PersonOf = service is null ? null : service.PersonOfSession };
+        var source = new Fleet.Server.FleetHostPublicationSource(node.Host, name, version, ["sessions", "moves"]) {
+            PersonOf = service is null ? null : service.PersonOfSession,
+            PersonOrganizationOf = service is null ? null : service.OrganizationOfSession,
+        };
         // The providers that run with the key of an account, which the server checks automations of a team or the organization against.
         if (node.Automations is { } classifier) source.IsAccountProvider = provider => classifier.CredentialKindOf(provider) == CodeAlta.Automations.AutomationCredentialKind.Account;
         // The statistics the node counts (its Statistics plugin), published with the facts of its sessions.
@@ -417,6 +420,10 @@ internal sealed class NodeServers : IAsyncDisposable
             // The problems of the machine travel with its heartbeat; the server tells its owner of those that last.
             Health = health.Read,
         });
+        // A person named on this machine before organizations were kept is of its organization while it is linked to one only.
+        if (service is not null)
+            service.People.SoleOrganization = () => connections.Connections.Select(static connection => connection.Link.OrganizationId).OfType<string>().Distinct(StringComparer.Ordinal)
+                .ToArray() is [var sole] ? sole : null;
         secrets = new NodeFleetSecrets(node.Host, connections);
         budgets = new NodeBudgets(connections, source, statistics);
         node.Budgets = budgets;
