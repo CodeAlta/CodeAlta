@@ -51,7 +51,7 @@ itself are in [security and privacy](security-and-privacy.md).
 | Organization provider and its secret | A team or the organization | Organization | API keys or gateway keys for unattended work ([orchestration](orchestration.md#credentials-of-unattended-runs)) |
 | Secret, variable, environment | Its scope (a person, a space, a project, a team, the organization) | The scope's | Named values runs ask for; environments with approvals ([secrets](secrets.md)) |
 | Budget | The owner of the scope it limits | Person, machine, project, team, organization | |
-| Policy bundle | The organization | Organization | Signed by the policy key ([security](security-and-privacy.md#policies-and-the-kill-switch)) |
+| Policy (and its kill switch) | The organization | Organization | Signed by a controller device of a signer ([security](security-and-privacy.md#policies-and-the-kill-switch)) |
 | Statistics facts | The owner of the session or run they measure | Wherever the session was | Visibility by role and policy ([statistics](statistics.md#who-sees-what)) |
 | Plugin distributed to the organization | The organization | Organization | Installed on members' instances by policy |
 | Enrollment token | Its creator | Organization | Single use |
@@ -80,8 +80,8 @@ A project's access is a graph, not a tree: a project can be granted to several t
 
 | Role | Can | Cannot, unless granted |
 | --- | --- | --- |
-| **Owner** | Everything: people, teams, roles, SSO, policies (with the policy key), the organization | Read content not owned by them or shared with them |
-| **Admin** | People, teams, team machines, projects, organization automations and providers, budgets, audit; policies, signed by a policy device | Same |
+| **Owner** | Everything: people, teams, roles, SSO, policies and the kill switch (signed by their device), the organization | Read content not owned by them or shared with them |
+| **Admin** | People, teams, team machines, projects, organization automations and providers, budgets, audit; policies and the kill switch when the access document makes them a signer | Same |
 | **Member** | Their devices and machines, their sessions and automations, shares, the channels of their projects, the team resources their team roles give | Administer |
 | **Auditor** | Read the audit log, fleet facts and statistics as policy allows | Read content; change anything |
 | **Guest** | What is shared with them | Machines, channels, automations they were not invited to |

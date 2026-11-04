@@ -76,14 +76,17 @@ flowchart LR
 | **Statistics** | Today's Statistics canvas with a scope: this machine, my fleet, a team, the organization, an automation, a machine ([statistics](statistics.md#in-the-console)) |
 | **People and access** | People, teams, roles, grants, service identities, transfers, devices, enrollment tokens, who can do what |
 | **Providers and secrets** | Organization providers and gateways; the secrets, variables and environments of each scope, which machines hold them, approvals that wait, rotation ([secrets](secrets.md)) |
-| **Policies and budgets** | The signed policy bundle, its rules and versions, budgets and their consumption |
-| **Audit** | The audit log, filtered and exported |
+| **Policies and budgets** | The signed policy, its rules and versions, the kill switch, budgets and their consumption |
+| **Audit** | The audit log, filtered and exported, and the check of its chain |
 | **Server** | Health, version, connections, storage, backups and restore, updates, sign-in methods, SSO |
 
 - **Updates** today: the Fleet canvas shows the version of each machine; Settings > Fleet > Server shows the server's
   version and policy, **Update the fleet…** (a version, now or at a time, the machines), the last campaign with each
   machine's state and **Cancel**, and **Policy…** ([deployment](deployment.md#updates)). Machines paired directly,
   without a server, are updated on them (`altanode update`).
+- **Policies and audit** today: Settings > Fleet > Policies (the kill switch first, set and lifted by a signer in one
+  confirmed action; the rules; the versions) and Settings > Fleet > Audit (the timeline by day with its filters, the
+  check of the chain, exports in CSV and JSON Lines); while a stop holds, the title bar of the window says so.
 
 - Each canvas exists in the application scope; some also in a project's scope (the automations, runs and statistics of
   a project) or a machine's.

@@ -53,4 +53,4 @@ its tests. The protocol only gains: optional query parameters of `GET /api/v1/au
       enforced on nodes and desktops; tests (stop offline, unverifiable version refused, lift).
 - [x] 7. Policies and the kill switch in CodeAlta Desktop (Settings > Fleet > Policies): rules, versions, sign; Stop
       with its popover; the banner; `alta fleet policy` (read only).
-- [ ] 8. User guide, `doc/fleet`, the `codealta-fleet` skill.
+- [x] 8. User guide, `doc/fleet`, the `codealta-fleet` skill.

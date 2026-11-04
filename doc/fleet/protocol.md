@@ -209,6 +209,14 @@ The management plane, and the whole surface of the console ([console](console.md
   `decline`, `cancel`), `access/review`, `access/proposals` (changes agents propose), and the signed access document:
   `GET /api/v1/access/documents?after=`, `GET /api/v1/access/draft`, `POST /api/v1/access/documents`. The event
   `access.changed` tells devices to read again ([access control](access-control.md#the-signed-access-document)).
+- **Policy**: `GET /api/v1/policies?after=` (the versions of the signed policy, its rules and its kill switch, which every
+  device verifies) and `POST /api/v1/policies` (the next version, signed by the calling controller device of a signer). The
+  event `policy.changed` tells devices to read again ([security](security-and-privacy.md#policies-and-the-kill-switch)).
+- **Audit**: `GET /api/v1/audit` (filters `action` (exact or a prefix, several with commas), `person`, `device`,
+  `result` (`success`, `failure` or a code), `target`, `address`, `from`, `to`, `q`; `after` for the oldest first,
+  `before` with `order=desc`), `GET /api/v1/audit/verify` (the check of the whole chain and its head), `GET
+  /api/v1/audit/export?format=csv|jsonl` (what the filters select, oldest first; audited itself). `audit.read` and
+  `audit.export`.
 - **Hooks**: `GET /api/v1/hooks` (the caller's person's, with their paths and the events that wait), `POST /api/v1/hooks` (a hook for
   one of the person's machines, for `incident_io` or `webhook`), `DELETE .../{id}`, `GET .../{id}/events` (facts: when, state,
   what the machine said), and the ingress `POST /api/v1/hooks/{id}`, which takes no device: a tool pushes there, 256 KB and 60

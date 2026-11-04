@@ -83,4 +83,4 @@ Agents read people and access with `alta fleet access show`, `people`, `teams`, 
 
 ## Access review
 
-Owners, admins and auditors click **Copy who can do what (CSV)** to copy every role, team role, grant and owner, for a review. Every change of access is in the audit log of the server, refused attempts included.
+Owners, admins and auditors click **Copy who can do what (CSV)** to copy every role, team role, grant and owner, for a review. Every change of access is in the [audit log](policies-and-audit.md#read-the-audit-log) of the server, refused attempts included.

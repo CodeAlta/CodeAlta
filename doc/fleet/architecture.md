@@ -106,7 +106,7 @@ merge, only facts to replay.
 | Which node owns a session, and its ownership epoch | The server (the source node in paired mode) | Nodes: their own sessions' epochs |
 | A node's inventory: projects, capabilities, providers' readiness | The node | The server: the last publication |
 | Presence (who and what is online) | The server, in memory | Clients: what they watch |
-| People, teams, roles, grants, policies | The server (admins); policies signed by a policy device | Nodes: the policies that apply to them |
+| People, teams, roles, grants, policies | The server (admins); policies signed by a signer's controller device | Nodes: the policies that apply to them, kept as they verified them |
 | Automations, their signed versions, runs' records | The server (versions signed by their editors' devices) | Nodes: the automations assigned to them |
 | Statistics facts | The machine that counted them | The server: the latest version of each row |
 | Shares, project channels, messages | The server | Devices: caches |

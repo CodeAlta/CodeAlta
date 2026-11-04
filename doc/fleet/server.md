@@ -68,7 +68,7 @@ which mints tokens and never clones).
 | `deliveries` | Queued messages per node, with sequence and time to live |
 | `replicas` | Per session: epoch, acknowledged offset, blob reference |
 | `channels`, `messages`, `shares` | Collaboration |
-| `policies`, `wrapped_keys` | Signed bundles; keys wrapped to devices |
+| `policy_documents`, `wrapped_keys` | The versions of the signed policy and its kill switch, as signed; keys wrapped to devices |
 | `statistics_publishers`, `statistics_sets`, `statistics_rows` | Statistics published by machines: the generation of each machine, the set of the highest version per machine and session (epoch, version, project key), its rows per quarter hour, family, dimension and measure; roll-ups to come |
 | `audit` | The audit log, append-only, chained |
 
