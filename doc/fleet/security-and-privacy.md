@@ -73,7 +73,7 @@ snapshot never grants a whole space.
 | **Snapshot key** (random, one per snapshot) | Encrypts one shared snapshot; it opens that snapshot and nothing later |
 | **Recovery key** (256 bits, shown once as 32 words) | Restores a person's keys on a new device when every device is lost, decrypting locally. It derives a key that is a member of the device list, of a class of its own: the person's keys are wrapped to it as to a device, and it signs a new controller device of its person in, nothing else. The server keeps the anchor of the list (its organization and first entry) sealed with it, which a recovering device pins. In a Private space, losing every device and this key loses the sealed data, which the UI says plainly; a Managed space may also escrow its members' keys with the organization (wrapped to its signers), which then restores a member's access |
 | **Organization key** (Managed spaces) | Encrypts shared content at rest on the server; held by the server or a KMS |
-| **Policy key** (ES256) | Signs policy bundles; held by the Owner's device at home, admin devices or an HSM in companies, never by the server |
+| **Signer devices** (their device keys) | Sign the versions of the policy and its kill switch: the controller devices of the owners and of the admins who sign, as the access document lists them; never the server |
 
 - The server knows a space only by an opaque id. Which space a key is for on the devices (the space's id there) is
   sealed with that key, so the devices of a person agree on it without the server learning it: a device that links a
@@ -259,13 +259,26 @@ Starting or driving a session on another machine is remote code execution, by de
 
 ## Policies and the kill switch
 
-- **Policy bundles**: `{ version, notBefore, notAfter, rules, signature }`, signed with the policy key. A node applies
-  a stricter rule at once (even unsigned, such as **pause**), and a looser one only when it is signed and newer than
-  the one it has. A node caches the last good bundle.
-- **Rules**: allowed providers and models, minimum sandbox, tools turned off, network egress, who may start where,
-  maximum session length, budgets, required approval modes, what must be published.
-- **Kill switch**, by level: pause a session; pause a machine (no new remote work); revoke a machine; pause the
-  fleet; revoke a person (every delegation and refresh token).
+- **The policy is a signed chain** (`codealta-policy/1`), as the access document is: each version names the hash of the
+  one before, the entry of the device list and the version of the access document its signer read, and is signed by a
+  controller device of a signer of that access version (an owner, or an admin who signs; before any access document, the
+  person who set the server up). The server checks and relays versions, and writes none. A device pins the chain per
+  server, keeps the version it verified in the folder of the link, and applies it from there while the server is away
+  and after a restart. Every rule and every stop is signed: a version that does not verify is refused and changes
+  nothing, so a server can withhold a version (deny service) but never forge, loosen or roll one back. Ordering is the
+  chain's, so versions carry no validity window.
+- **Rules**, each optional, narrowing the work of the fleet (sessions started from another device, agents of other
+  machines, automations) in the spaces linked to the server, never what a person does at a machine: allowed kinds of
+  providers and models, a sandbox floor, network egress, tools turned off, whether people and agents start work on
+  other machines, the longest session, the widest permission mode, the facts team machines must publish (never content,
+  Private sessions included), account credentials for every automation. Budgets stay their own signed documents
+  ([observability](observability.md#budgets-and-alerts)). A node checks a start before the session exists and refuses it
+  with the reason; a desktop refuses what its agents would start elsewhere.
+- **Kill switch**, by level: pause a session; **stop** the work of the fleet on every machine, on chosen machines or on
+  the machines of chosen teams (a stop in a version of the policy: the machines it reaches end the remote, agent and
+  automation sessions under way, refuse new ones, and keep what people do at the machine; lifting it is the next
+  version); revoke a machine; revoke a person (every delegation and refresh token). Setting and lifting a stop are
+  audited (`policy.stop`, `policy.lift`).
 - **Dead man's switch**: a node that cannot renew its credential stops accepting remote work and keeps its local work.
 
 ## Threat model
@@ -292,6 +305,10 @@ Starting or driving a session on another machine is remote code execution, by de
   `traceparent`.
 - **Tamper-evident**: records chained by hash, batches signed; exported to syslog, OpenTelemetry logs, a webhook or
   files; retention set by the organization. No content in Private spaces.
+- **Read and exported** by owners, admins and auditors (`audit.read`, `audit.export`): filtered pages in both orders,
+  the check of the whole chain with the hash of its head, and exports of a filtered range in CSV (for spreadsheets) and
+  JSON Lines (every field as recorded, so an export of the whole log verifies without the server); each export is
+  audited itself.
 - The audit log is not telemetry: complete, retained, append-only; telemetry is sampled and disposable
   ([observability](observability.md)).
 

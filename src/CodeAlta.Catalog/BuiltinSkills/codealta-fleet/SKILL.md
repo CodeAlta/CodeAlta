@@ -1,6 +1,6 @@
 ---
 name: codealta-fleet
-description: Use this skill to work with the CodeAlta fleet - the machines this computer is paired with or reaches through a CodeAlta Server - to pick a machine for a task (capabilities, labels, readiness, load), start or steer a session on another machine, move a session, place or run an automation on a machine, read the statistics, updates, health and devices of the fleet, and read people and access (roles, teams, grants, owners) to propose a change for a person to apply.
+description: Use this skill to work with the CodeAlta fleet - the machines this computer is paired with or reaches through a CodeAlta Server - to pick a machine for a task (capabilities, labels, readiness, load), start or steer a session on another machine, move a session, place or run an automation on a machine, read the statistics, updates, health and devices of the fleet, read people and access (roles, teams, grants, owners) to propose a change for a person to apply, read the signed policy of the organization and its kill switch, and read and check the audit log.
 ---
 
 # The CodeAlta fleet
@@ -66,11 +66,22 @@ At a CodeAlta Server, `alta fleet access` reads who is who and who may do what, 
 
 A team machine runs the sessions of its team's members, each seeing only their own, and the automations of the team, which its maintainers publish to it (**Publish to** in the editor of an automation): they run as a service identity of the team, with account credentials only, never a personal plan. A machine of the organization runs the automations of the organization the same way. When a machine refuses work with `not_allowed`, read `alta fleet access show` and `owners` to say who can help.
 
+## Policy and the kill switch
+
+- `alta fleet policy show` says the rules of the organization this computer verified (providers, models, sandbox, network, tools off, who starts where, the longest session, the permission mode) and the `stop` of its kill switch while one holds, with `stopsThisComputer`.
+- Read it before starting work on another machine: a machine refuses what the policy does not allow with `policy.refused` and its reason, and every new piece of work with `fleet.stopped` while a stop reaches it. Do not retry or try another machine of the same stop: tell the user, who lifts the stop in Settings > Fleet > Policies.
+
+## Audit log
+
+- `alta fleet audit list` reads who did what, newest first: `--action team.` (an action or a prefix), `--person`, `--device`, `--result failure`, `--since`/`--until`, `--q` words; `--before <sequence>` reads the next page. Owners, admins and auditors read it.
+- `alta fleet audit verify` checks the chain of hashes: `valid`, the number of `records`, the `head` hash, or `brokenAt`. A broken chain is for the user at once.
+- A person exports the log (CSV, JSON Lines) in Settings > Fleet > Audit: no command writes a file.
+
 ## Rules
 
 - **Never more power than the person.** Every command has the access of the person of this computer, and a session you start has your permission mode and your sandbox at most.
 - **The fleet is never a way out of a sandbox.** Your sandbox and your permission mode are the floor of what you start or drive on another machine; a sandboxed session reads the fleet and starts, moves or places nothing elsewhere, and one whose sandbox does not allow the fleet (`sandbox.fleetDenied`, as `strict`) does not even read it.
-- **Access is read only.** Devices, permissions, roles, teams, grants, transfers, pairing and policies are changed by a person, in Settings > Fleet: propose the change with `alta fleet access propose`, do not look for another way to make it.
+- **Access is read only.** Devices, permissions, roles, teams, grants, transfers, pairing, policies and the kill switch are changed by a person, in Settings > Fleet: propose the change with `alta fleet access propose`, do not look for another way to make it.
 - **Secrets are names.** You never read, set or send the value of a secret, nor put one in a prompt: the user sets it, here or on the machine.
 - **What runs unattended waits for a person.** An automation you create stays disabled, you enable none (`automation.needsPerson`), and you place a disabled one only: a person enables it; a person starts an update campaign (`alta fleet update start` is refused with `fleet.needsPerson`).
 - On `fleet.needsPerson` or `fleet.notAllowed`, stop that step and tell the user what you would do and why. A Private session reaches no other machine.

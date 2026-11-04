@@ -85,6 +85,17 @@ internal interface IAutomationRunGate
     string? Check(AutomationEntry entry, ModelProviderDescriptor provider);
 
     /// <summary>
+    /// Whether a run may start in its space with a provider and a model, once both are known: what the work in that space must
+    /// keep to (the signed policy of the organization it is linked to, on a machine of a fleet).
+    /// </summary>
+    /// <param name="entry">The automation.</param>
+    /// <param name="provider">The provider the run would start with.</param>
+    /// <param name="modelId">The model it would use.</param>
+    /// <param name="spaceId">The space of the run.</param>
+    /// <returns>Why the run may not start; null when it may.</returns>
+    string? CheckModel(AutomationEntry entry, ModelProviderDescriptor provider, string modelId, string spaceId) => null;
+
+    /// <summary>
     /// Admits a run to the environment its automation names (<c>doc/fleet/secrets.md</c>, environments): its rules hold
     /// on this machine and, when it requires one, an approver approved this run. It may wait for the approval.
     /// </summary>
@@ -244,6 +255,7 @@ internal sealed class AutomationRunner : IAutomationRunner
                     : $"The provider '{provider.ProviderId.Value}' offers no model at the moment.");
             }
 
+            if (_gate?.CheckModel(entry, provider, model.Id, spaceId) is { } ruled) return Refuse(ruled);
             if (definition.Model.Effort is { } effort && model.SupportedReasoningEfforts is { } supported && !supported.Contains(effort))
                 return Refuse($"The model '{model.Id}' has no reasoning effort '{effort.ToString().ToLowerInvariant()}'.");
 

@@ -410,6 +410,8 @@ internal sealed class NodeServers : IAsyncDisposable
             BudgetsChanged = _ => budgets?.Changed(),
             // A newer access document: the sessions people it suspends started on this machine stop, their channels close.
             AccessChanged = service is null ? null : (linkId, access) => { _ = ApplyAccessAsync(service, access); },
+            // A newer policy: a stop of the kill switch ends the work of the fleet here and refuses more, until a version lifts it.
+            PolicyChanged = (_, _) => { _ = ApplyPolicyAsync(service, node.Automations); },
             // Access read again: the providers of the teams and of the organization this machine runs with, their keys opened here.
             AccessRead = linkId => _ = RefreshProvidersAsync(providers, connections, linkId),
             // The problems of the machine travel with its heartbeat; the server tells its owner of those that last.
@@ -435,9 +437,65 @@ internal sealed class NodeServers : IAsyncDisposable
             automations.ServerReport = (linkId, facts, token) => ConnectorOf(linkId) is { } connector ? connector.ReportAutomationRunsAsync(facts, token) : Task.FromResult(false);
         }
 
+        // The signed policies of the servers, as this node verified them and kept them: read at each request of the fleet.
+        var guard = new Fleet.Server.FleetPolicyGuard(identity.DeviceId, () => connections.Connections.Select(static connection => connection.Connector).OfType<Fleet.Server.FleetConnector>());
+        if (service is not null) service.Policy = guard;
+        if (node.Automations is { } governed)
+        {
+            governed.Policy = guard;
+            governed.ServerPolicy = linkId => connections.Find(linkId)?.Connector?.Policy.Current;
+        }
+
         connections.Start();
         secrets.Start();
-        return new NodeServers(identity, source, connections, statistics, secrets) { Health = health };
+        // The policies kept apply from the start, whether the servers answer or not.
+        _ = ApplyPolicyAsync(service, node.Automations);
+        var servers = new NodeServers(identity, source, connections, statistics, secrets) { Health = health };
+        servers.WatchPolicy(service, node.Automations);
+        return servers;
+    }
+
+    private readonly CancellationTokenSource _stopping = new();
+
+    // The policies held, applied to the work under way every half minute: a stop the node holds ends work that started before
+    // the node read it (as at its start), and the longest time a policy gives a session of the fleet or a run ends them after it.
+    private void WatchPolicy(FleetNodeService? service, NodeAutomations? automations)
+        => _ = Task.Run(async () =>
+        {
+            using var timer = new PeriodicTimer(TimeSpan.FromSeconds(30));
+            try
+            {
+                while (await timer.WaitForNextTickAsync(_stopping.Token).ConfigureAwait(false))
+                {
+                    try
+                    {
+                        if (service is not null) await service.EnforcePolicyAsync(_stopping.Token).ConfigureAwait(false);
+                        if (automations is not null) await automations.EnforcePolicyAsync(_stopping.Token).ConfigureAwait(false);
+                    }
+                    catch (Exception exception) when (exception is IOException or InvalidOperationException or ObjectDisposedException)
+                    {
+                        if (LogManager.IsInitialized) LogManager.GetLogger("CodeAlta.Node").Warn($"The policy could not be applied to the work under way: {exception.Message}");
+                    }
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                // The node stops.
+            }
+        });
+
+    // Applied beside the connection that verified the policy; a failure is logged, the next version applies again.
+    private static async Task ApplyPolicyAsync(FleetNodeService? service, NodeAutomations? automations)
+    {
+        try
+        {
+            if (service is not null) await service.ApplyPolicyAsync(CancellationToken.None).ConfigureAwait(false);
+            if (automations?.Policy?.Halt is { } halt) await automations.StopRunsAsync(halt.Describe("this machine"), CancellationToken.None).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is IOException or InvalidOperationException or ObjectDisposedException)
+        {
+            if (LogManager.IsInitialized) LogManager.GetLogger("CodeAlta.Node").Warn($"The policy could not be applied: {exception.Message}");
+        }
     }
 
     /// <summary>Gets the problems of the machine its heartbeats report.</summary>
@@ -503,6 +561,7 @@ internal sealed class NodeServers : IAsyncDisposable
     /// <inheritdoc />
     public async ValueTask DisposeAsync()
     {
+        await _stopping.CancelAsync().ConfigureAwait(false);
         await Secrets.DisposeAsync().ConfigureAwait(false);
         await _connections.DisposeAsync().ConfigureAwait(false);
         await _source.DisposeAsync().ConfigureAwait(false);

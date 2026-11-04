@@ -13,7 +13,7 @@ const calls: string[] = [];
 // The owner has no recovery key yet; a laptop of theirs waits for its approval.
 let recoveryKey = false;
 const server = (): FleetServerView => ({ id: "home", url: "https://fleet.example", organization: "Home", link: "approved", connection: "online", problem: null, controller: true,
-  spaces: [], recoveryKey, shareUrl: null });
+  spaces: [], recoveryKey, shareUrl: null, stop: null });
 const recoveryWords = "acid acorn actor agent alarm album alien alpha amber anchor angel ankle apple apron arena arrow atlas attic autumn award bacon badge bagel baker "
   + "bamboo banjo barn basil basket beach beacon bear";
 const pending: FleetDeviceView = { id: "laptop", name: "Laptop", kind: "controller", status: "pending", online: false, words: "otter river robin saddle salmon pearl",

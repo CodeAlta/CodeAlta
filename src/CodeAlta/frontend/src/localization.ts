@@ -63,6 +63,8 @@ import { fleetMessages } from "./fleet/messages";
 import { fleetSecretMessages } from "./fleet/secretsMessages";
 import { fleetBudgetMessages } from "./fleet/budgetsMessages";
 import { fleetAccessMessages } from "./fleet/access/accessMessages";
+import { fleetAuditMessages } from "./fleet/audit/auditMessages";
+import { fleetPoliciesMessages } from "./fleet/policies/policiesMessages";
 import { signInMessages } from "./fleet/signInMessages";
 // English source keys follow SR's fallback convention. Order: es, fr, de, ja, zh-CN.
 type Row = readonly [string, string, string, string, string];
@@ -2875,6 +2877,8 @@ export const messages = dictionary({
   ...fleetSecretMessages,
   ...fleetBudgetMessages,
   ...fleetAccessMessages,
+  ...fleetAuditMessages,
+  ...fleetPoliciesMessages,
   ...signInMessages,
   ...documentationMessages,
   ...storageMessages,

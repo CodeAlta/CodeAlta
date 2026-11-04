@@ -256,6 +256,8 @@ internal sealed partial class NodeAutomations : IFleetNodeAutomations, IAutomati
         if (policy.Problem is { } problem)
             return $"This machine runs no automations while its policy cannot be read ({problem}): its owner sets it again with altanode automations policy.";
         if (!policy.Enabled) return "This machine runs no automations: its owner turned them off.";
+        // The kill switch of an organization stops every run of this machine until a signed version lifts it.
+        if (Policy?.Halt is { } halt) return halt.Describe("this machine");
         if (entry.Source.IsAssigned && CheckAssignment(entry) is { } refused) return refused;
 
         // Who a run acts as (doc/fleet/orchestration.md): an automation of a team runs on a machine of that team, as one of the
@@ -276,7 +278,110 @@ internal sealed partial class NodeAutomations : IFleetNodeAutomations, IAutomati
             return $"The provider '{provider.ProviderId.Value}' runs with a personal plan, and a machine of a team or of the organization runs automations with account credentials only.";
         if (kind == AutomationCredentialKind.Personal && policy.Credentials != NodeAutomationPolicy.AnyCredentials)
             return $"The provider '{provider.ProviderId.Value}' runs with a personal plan, and this machine runs automations with account credentials only.";
+
         return null;
+    }
+
+    /// <inheritdoc />
+    public string? CheckModel(AutomationEntry entry, ModelProviderDescriptor provider, string modelId, string spaceId)
+    {
+        ArgumentNullException.ThrowIfNull(entry);
+        ArgumentNullException.ThrowIfNull(provider);
+        // The signed policy of an organization: the one of the server an automation came through, else the one of the server
+        // the space of the run is linked to, for this machine's own automations too.
+        if (RulesOf(entry, spaceId) is not { } rules) return null;
+        if (FleetPolicyGuard.Refusal(rules, provider.ProviderType, provider.ProviderId.Value, modelId) is { } refusal) return refusal;
+        if (rules.AccountCredentials == true && CredentialKindOf(provider) == AutomationCredentialKind.Personal)
+            return $"The provider '{provider.ProviderId.Value}' runs with a personal plan, and the policy of the organization runs every automation with account credentials.";
+        return null;
+    }
+
+    // The rules that apply to a run of an automation in a space; null when no signed policy says anything there.
+    private FleetPolicyRules? RulesOf(AutomationEntry entry, string? spaceId)
+        => AssignmentOf(entry.Id)?.Via is { } via
+            ? ServerPolicy?.Invoke(via) is { Number: > 0 } signed ? signed.Rules : null
+            : Policy?.RulesFor(spaceId);
+
+    /// <summary>
+    /// Applies the signed policies to the runs under way: while a stop reaches this machine every run is stopped (also one that
+    /// started before the node read the stop, as at its start); otherwise a run that ran longer than the policy of its space
+    /// allows. The node calls it on a timer, so that the policy it holds reaches runs whatever started them and whenever.
+    /// </summary>
+    /// <param name="cancellationToken">Cancels before the next run is stopped.</param>
+    /// <returns>The sessions stopped.</returns>
+    internal async Task<IReadOnlyList<string>> EnforcePolicyAsync(CancellationToken cancellationToken)
+    {
+        if (Policy?.Halt is { } halt)
+        {
+            var halted = await StopRunsAsync(halt.Describe("this machine"), cancellationToken).ConfigureAwait(false);
+            if (halted.Count > 0 && LogManager.IsInitialized) _logger.Info($"The kill switch of {halt.Server} stopped runs under way: {string.Join(", ", halted)}.");
+            return halted;
+        }
+
+        if (Policy is null && ServerPolicy is null) return [];
+        var now = _options.TimeProvider.GetUtcNow();
+        var stopped = new List<string>();
+        IReadOnlyList<SpaceDescriptor>? spaces = null;
+        foreach (var run in Engine.Runs(null, 500))
+        {
+            if (run.Status is not (AutomationRun.Running or AutomationRun.Waiting or AutomationRun.Held) || run.SessionId is not { } sessionId) continue;
+            if (Engine.Snapshot.Find(run.AutomationId) is not { } entry) continue;
+            // The space of the run, as its runner chose it: the one of its project, the default one otherwise.
+            spaces ??= await _host.SpaceCatalog.LoadAsync(cancellationToken).ConfigureAwait(false);
+            var project = entry.ProjectId is { } projectId ? await _host.ProjectCatalog.GetByIdAsync(projectId, cancellationToken).ConfigureAwait(false) : null;
+            var spaceId = SpaceCatalog.ResolveSessionSpace(null, project, spaces);
+            if (RulesOf(entry, spaceId)?.MaxSessionMinutes is not { } minutes || now - run.StartedAt <= TimeSpan.FromMinutes(minutes)) continue;
+            if (await StopAsync(sessionId, "The policy of the organization stops a run after the longest time of a session.", cancellationToken).ConfigureAwait(false))
+                stopped.Add(sessionId);
+        }
+
+        if (stopped.Count > 0 && LogManager.IsInitialized) _logger.Info($"Runs past the longest time of their policy were stopped: {string.Join(", ", stopped)}.");
+        return stopped;
+    }
+
+    private async Task<bool> StopAsync(string sessionId, string reason, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await _host.RuntimeService.AbortTreeAsync(sessionId, reason, cancellationToken).ConfigureAwait(false);
+            return true;
+        }
+        catch (Exception exception) when (exception is InvalidOperationException or KeyNotFoundException or IOException)
+        {
+            if (LogManager.IsInitialized) _logger.Warn($"The run of session {sessionId} could not be stopped by the policy: {exception.Message}");
+            return false;
+        }
+    }
+
+    /// <summary>Gets or sets the signed policies of the servers of the node: a stop refuses every run; null while it joined none.</summary>
+    internal FleetPolicyGuard? Policy { get; set; }
+
+    /// <summary>Gets or sets the policy of a server, by the id of its link, as the node verified it; null while it joined none.</summary>
+    internal Func<string, FleetPolicyState?>? ServerPolicy { get; set; }
+
+    /// <summary>Stops the runs under way: a stop of the kill switch reached this machine.</summary>
+    /// <param name="reason">Why, recorded by each session stopped.</param>
+    /// <param name="cancellationToken">Cancels before the next run is stopped.</param>
+    /// <returns>The sessions stopped.</returns>
+    internal async Task<IReadOnlyList<string>> StopRunsAsync(string reason, CancellationToken cancellationToken)
+    {
+        var stopped = new List<string>();
+        foreach (var run in Engine.Runs(null, 500))
+        {
+            if (run.Status is not (AutomationRun.Running or AutomationRun.Waiting or AutomationRun.Held) || run.SessionId is not { } sessionId) continue;
+            cancellationToken.ThrowIfCancellationRequested();
+            try
+            {
+                await _host.RuntimeService.AbortTreeAsync(sessionId, reason, cancellationToken).ConfigureAwait(false);
+                stopped.Add(sessionId);
+            }
+            catch (Exception exception) when (exception is InvalidOperationException or KeyNotFoundException or IOException)
+            {
+                if (LogManager.IsInitialized) _logger.Warn($"The run of session {sessionId} could not be stopped by the kill switch: {exception.Message}");
+            }
+        }
+
+        return stopped;
     }
 
     // Whether this machine is the organization's, whether the automation is the organization's, and the service identities the

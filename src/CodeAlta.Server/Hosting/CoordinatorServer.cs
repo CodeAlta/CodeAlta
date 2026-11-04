@@ -521,6 +521,7 @@ public sealed class CoordinatorServer : IAsyncDisposable
             return access;
         });
         services.AddSingleton(provider => new AccessDocumentService(store, store, provider.GetRequiredService<AccessService>(), time));
+        services.AddSingleton(provider => new PolicyService(store, store, store, provider.GetRequiredService<NotificationService>(), time));
         services.AddSingleton(provider => new FleetAutomationService(store, store, provider.GetRequiredService<PresenceRegistry>(), time,
             provider.GetRequiredService<ILoggerFactory>().CreateLogger("CodeAlta.Server.Automations"))
         {

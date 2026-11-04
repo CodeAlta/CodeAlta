@@ -5,7 +5,7 @@ import { waitingApprovals } from "./approvals";
 import { localServerSteps, organizationUrlOf, serverSetupProblem, serverStepTitle, sshServerSteps } from "./createServer";
 import { joinSteps, organizationAddressOf } from "./joinOrganization";
 
-const server = (id: string): FleetServerView => ({ id, url: `https://${id}.example`, organization: id, link: "approved", connection: "online", problem: null, controller: true, spaces: [], recoveryKey: null, shareUrl: null });
+const server = (id: string): FleetServerView => ({ id, url: `https://${id}.example`, organization: id, link: "approved", connection: "online", problem: null, controller: true, spaces: [], recoveryKey: null, shareUrl: null, stop: null });
 const device = (id: string, status: string, createdAt: string): FleetDeviceView => ({ id, name: id, kind: "node", status, online: true, words: "a b c d e f", createdAt });
 
 test("A server is set up over SSH in six checked steps, on this computer in four", () => {

@@ -18,8 +18,6 @@ namespace CodeAlta.Server.Api;
 /// </summary>
 internal static class ApiEndpoints
 {
-    private const int MaxAuditPage = 500;
-
     public static void Map(WebApplication app)
     {
         var api = app.MapGroup("/api/v1").WithTags("v1");
@@ -178,24 +176,6 @@ internal static class ApiEndpoints
             .Produces<MetadataKeyDto>()
             .WithSummary("Adds copies of a metadata key, wrapped by a controller device that holds it, for devices of its person that have none.");
 
-        api.MapGet("/audit", async (long? after, int? limit, HttpContext context, ICoordinatorStore store, AccessService access) =>
-            {
-                await access.RequireOrganizationAsync(DeviceAuthenticationMiddleware.GetDevice(context), "audit.read", context.RequestAborted).ConfigureAwait(false);
-                var size = Math.Clamp(limit ?? 100, 1, MaxAuditPage);
-                var records = await store.ListAuditAsync(Math.Max(0, after ?? 0), size, context.RequestAborted).ConfigureAwait(false);
-                var next = records.Count == size ? records[^1].Sequence.ToString(System.Globalization.CultureInfo.InvariantCulture) : null;
-                return new ListResponse<AuditRecordDto>(records.Select(static record => record.ToDto()).ToArray(), next);
-            })
-            .WithSummary("The audit log, by sequence; 'after' is the cursor of the next page.");
-
-        api.MapGet("/audit/verify", async (HttpContext context, ICoordinatorStore store, AccessService access) =>
-            {
-                await access.RequireOrganizationAsync(DeviceAuthenticationMiddleware.GetDevice(context), "audit.read", context.RequestAborted).ConfigureAwait(false);
-                var verification = await store.VerifyAuditAsync(context.RequestAborted).ConfigureAwait(false);
-                return new AuditVerificationDto(verification.IsValid, verification.Count, verification.BrokenAt);
-            })
-            .WithSummary("Checks the hash chain of the audit log.");
-
         api.MapGet("/telemetry", (HttpContext context, TelemetrySettingsService telemetry)
                 => telemetry.GetAsync(DeviceAuthenticationMiddleware.GetDevice(context), context.RequestAborted))
             .WithSummary("The telemetry setting of the fleet, signed by a controller device, and the headers only the server holds; for an owner's controller device.");
@@ -246,6 +226,8 @@ internal static class ApiEndpoints
         SignInEndpoints.Map(api, app);
         BudgetEndpoints.Map(api);
         AccessEndpoints.Map(api);
+        AuditEndpoints.Map(api);
+        PolicyEndpoints.Map(api);
 
         app.MapPost(FleetTelemetryPaths.Forward + "/{signal}", (string signal, HttpContext context, OtlpForwarder forwarder) => forwarder.HandleAsync(context, signal))
             .ExcludeFromDescription();

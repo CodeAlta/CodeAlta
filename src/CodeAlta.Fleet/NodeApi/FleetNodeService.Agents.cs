@@ -144,8 +144,15 @@ public sealed partial class FleetNodeService
         }
 
         var provider = ResolveProvider(parameters.Selection?.ProviderKey, project?.ProjectPath);
-        var permissionMode = AgentPermissionMode(provider.ProviderId.Value, limits.PermissionMode, policy);
-        var sandbox = AgentSandbox(limits, policy.Sandbox);
+        // The policy of the organization of the space narrows what the node allows: never more than either.
+        var rules = RequirePolicyStart(request.SpaceId, provider, parameters.Selection?.ModelId, agent: true);
+        var permissionMode = AgentPermissionMode(provider.ProviderId.Value, Server.FleetPolicyGuard.NarrowerMode(limits.PermissionMode, rules?.PermissionMode), policy);
+        var sandbox = AgentSandbox(limits, policy.Sandbox ?? rules?.Sandbox);
+        if (rules is not null && PolicySandboxProblem(sandbox, rules) is { } sandboxProblem)
+            throw Refused($"{_options.Name} cannot run the session: {sandboxProblem}.");
+        IReadOnlyList<string> toolsOff = [.. limits.DisabledTools.Concat(rules?.ToolsOff ?? []).Distinct(StringComparer.Ordinal)];
+        if (toolsOff.Select(AgentToolPatterns.Validate).FirstOrDefault(static error => error is not null) is { } invalidTools)
+            throw Refused($"The tools the policy of the organization turns off do not read: {invalidTools}");
         var sessionId = Guid.NewGuid().ToString();
         var createdBy = new AltaActorProvenance
         {
@@ -158,7 +165,7 @@ public sealed partial class FleetNodeService
         };
 
         // The tools it does without are known before it attaches, and kept with its lineage across restarts of the node.
-        _host.RuntimeService.SetDisabledToolPatterns(sessionId, limits.DisabledTools.Count > 0 ? limits.DisabledTools : null);
+        _host.RuntimeService.SetDisabledToolPatterns(sessionId, toolsOff.Count > 0 ? toolsOff : null);
         SessionViewDescriptor session;
         try
         {
@@ -172,7 +179,8 @@ public sealed partial class FleetNodeService
         }
 
         _agents.Add(new FleetAgentChild(session.SessionId, request.ParentSessionId, call.Caller.DeviceId, request.ParentMachineName, request.SpaceId,
-            limits.DisabledTools, request.Nonce, _options.TimeProvider.GetUtcNow()));
+            toolsOff, request.Nonce, _options.TimeProvider.GetUtcNow()));
+        Work.Record(session.SessionId, request.SpaceId, "agent", _options.TimeProvider.GetUtcNow());
         if (sandbox is not null)
         {
             var set = await _host.Commands.SetSandboxAsync(session.SessionId, sandbox).ConfigureAwait(false);
@@ -285,6 +293,8 @@ public sealed partial class FleetNodeService
         if (selection is not null)
             throw new FleetException(FleetNodeErrorCodes.AgentRequestDenied, null, "An agent of another machine does not change the model or the mode of a session.");
         RequireAgentSpace(request.SpaceId);
+        if (Policy?.RulesFor(request.SpaceId) is { AgentStarts: false })
+            throw Refused("The policy of the organization lets no agent start work on another machine, nor prompt it.");
         var session = await RequireViewedSessionAsync(sessionId, cancellationToken).ConfigureAwait(false);
         if (!SameId(session.SpaceId ?? "default", request.SpaceId))
             throw new FleetException(FleetNodeErrorCodes.AgentRequestDenied, null, "An agent reaches only the sessions of its own space.");

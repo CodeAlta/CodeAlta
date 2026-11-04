@@ -151,6 +151,8 @@ internal static class DesktopAltaTools
         if (machineMoves is not null) services.Add(machineMoves);
         if (fleet is not null) services.Add(fleet);
         if (fleet is IAltaFleetAccess access) services.Add(access);
+        if (fleet is IAltaFleetAudit audit) services.Add(audit);
+        if (fleet is IAltaFleetPolicy policy) services.Add(policy);
         if (codeMode is not null) services.Add(codeMode);
         if (search is not null) services.Add(search.Service).Add(search.Indexer).Add(search.Store);
         var registry = new AltaCommandRegistry();

@@ -777,6 +777,8 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                 host.RuntimeService.RemoteChildren = remoteChildren;
                 // The CodeAlta Servers this instance is linked to: none until a server is created or joined.
                 fleetServers = new Fleet.DesktopFleetServers(host, Environment.MachineName, DesktopCommandLine.Version);
+                // An agent of this computer starts no work elsewhere when a stop reaches it or its organization says so.
+                remoteChildren.Policy = fleetServers.Policy;
                 // A machine of an organization this computer is not paired with is reached through the relay of its server.
                 fleet.RelayRoute = fleetServers.FindRoute;
                 var followedServers = fleetServers;
@@ -1087,6 +1089,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                         Spaces = host.SpaceCatalog, IsPaired = machineId => fleet?.Find(machineId) is { IsPaired: true },
                         IsReachable = machineId => fleet?.Find(machineId) is not null, Fleet = fleet,
                         PersonName = CodeAlta.Desktop.Fleet.PersonName.ReadOnce(),
+                        ChooseSavePath = shell.ChooseSavePathAsync,
                     });
                     builder.AddConfigurationService(new ConfigurationService(host.ModelProviderRegistry, host.PluginRuntime, new DesktopDefaultProvider(host.CatalogOptions), host.CatalogOptions)
                     {

@@ -235,7 +235,8 @@ public sealed record AuditRecord(long Sequence, DateTimeOffset RecordedAt, Audit
 /// <param name="IsValid">Whether every record names the hash of the one before and has its own hash.</param>
 /// <param name="Count">How many records were checked.</param>
 /// <param name="BrokenAt">The sequence of the first record that does not hold, or <see langword="null"/>.</param>
-public sealed record AuditVerification(bool IsValid, long Count, long? BrokenAt);
+/// <param name="HeadHash">The hash of the last record that holds; <see langword="null"/> when none does.</param>
+public sealed record AuditVerification(bool IsValid, long Count, long? BrokenAt, string? HeadHash = null);
 
 /// <summary>What happened to an enrollment.</summary>
 public enum EnrollmentOutcome

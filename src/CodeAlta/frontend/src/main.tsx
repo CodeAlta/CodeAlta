@@ -287,6 +287,9 @@ import { FleetServerSettings } from "./fleet/FleetServerSettings";
 import { FleetSecretsSettings } from "./fleet/FleetSecretsSettings";
 import { FleetBudgetsSettings } from "./fleet/FleetBudgetsSettings";
 import { FleetAccessSettings } from "./fleet/access/FleetAccessSettings";
+import { FleetAuditSettings } from "./fleet/audit/FleetAuditSettings";
+import { FleetPoliciesSettings } from "./fleet/policies/FleetPoliciesSettings";
+import { FleetStopIndicator } from "./fleet/policies/FleetStopIndicator";
 import { FleetApprovals, showHeldStartToast } from "./fleet/FleetApprovals";
 import { fleetCanvasOf } from "./fleet/approvals";
 import { RemoteSessionChoice, RunOnChip, useMachines, useRemoteChoices } from "./machines/RunOnChip";
@@ -382,6 +385,8 @@ import "./fleet/fleet.css";
 import "./fleet/fleetSecrets.css";
 import "./fleet/fleetBudgets.css";
 import "./fleet/access/fleetAccess.css";
+import "./fleet/audit/fleetAudit.css";
+import "./fleet/policies/fleetPolicies.css";
 import "./spaces/spaces.css";
 import "./canvases/canvases.css";
 import "./landing/landing.css";
@@ -5619,6 +5624,8 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
         </WindowBrand>
         {!secondary && <div className="window-actions">
           {/* The Fleet button opens the Fleet canvas, whose Settings button is one click away; Settings while its plugin does not run. */}
+          {/* While a signed stop of the kill switch holds, the window says so wherever one looks. */}
+          <FleetStopIndicator epoch={owned ? status!.hostEpoch : null} onOpen={() => navigate("fleetPolicies")} />
           <FleetApprovals epoch={owned ? status!.hostEpoch : null} active={!!fileTabs.active && !!fleetCanvas && showsCanvas(fileTabs.active, fleetCanvas)}
             onOpen={() => { if (fleetCanvas) openCanvasHere(fleetCanvas); else navigate("fleetServer"); }} />
           <PluginButtons place="TitleBar" context={pluginButtonContext} />
@@ -6201,6 +6208,8 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
       : settingsSection === "fleetSecrets" ? <FleetSecretsSettings epoch={owned ? status!.hostEpoch : null} />
       : settingsSection === "fleetBudgets" ? <FleetBudgetsSettings epoch={owned ? status!.hostEpoch : null} />
       : settingsSection === "fleetAccess" ? <FleetAccessSettings epoch={owned ? status!.hostEpoch : null} />
+      : settingsSection === "fleetAudit" ? <FleetAuditSettings epoch={owned ? status!.hostEpoch : null} />
+      : settingsSection === "fleetPolicies" ? <FleetPoliciesSettings epoch={owned ? status!.hostEpoch : null} />
       : settingsSection === "search" ? <SearchSettings projects={catalog.current?.projects ?? snapshot?.projects ?? []} spaces={spacesState.spaces}
           onMeaningTurnedOn={() => setFollowMeaning(true)}
           onOpenCanvas={(() => { const item = canvasCatalog.find(value => value.pluginKey === "builtin:search" && value.id === "search");

@@ -171,7 +171,9 @@ public sealed class FleetServerRpcTests
             while (true)
             {
                 directory = service.Directory(new FleetServerDirectoryRequest(epoch));
-                if (directory.Machines.Any(static machine => machine.IsThisComputer && machine.Online) && directory.Sessions.Any(static session => session.Id == "chat-1")) break;
+                // The title opens once the key of the space reached this computer, which may come a moment after the facts.
+                if (directory.Machines.Any(static machine => machine.IsThisComputer && machine.Online)
+                    && directory.Sessions.Any(static session => session.Id == "chat-1" && session.Title == "A chat")) break;
                 if (DateTime.UtcNow > deadline) Assert.Fail($"The directory did not show this computer and its session: {directory.Connection}.");
                 await Task.Delay(100, token);
             }

@@ -354,6 +354,12 @@ public interface ICoordinatorStore : IStatisticsFactStore, IAsyncDisposable
     /// <returns>The records, by sequence.</returns>
     ValueTask<IReadOnlyList<AuditRecord>> ListAuditAsync(long afterSequence, int limit, CancellationToken cancellationToken = default);
 
+    /// <summary>Finds records of the audit log by their filters, in either order, a page at a time.</summary>
+    /// <param name="query">The filters, the cursor and the order; its limit is the size of the page (100 when absent).</param>
+    /// <param name="cancellationToken">Cancels the operation.</param>
+    /// <returns>The records, in the order asked.</returns>
+    ValueTask<IReadOnlyList<AuditRecord>> QueryAuditAsync(FleetAuditQuery query, CancellationToken cancellationToken = default);
+
     /// <summary>Checks the hash chain of the whole audit log.</summary>
     /// <param name="cancellationToken">Cancels the operation.</param>
     /// <returns>Whether it holds, and where it breaks.</returns>

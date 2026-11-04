@@ -19,6 +19,7 @@ doc:
   - {path: automations.md, title: "<i class='bi bi-lightning-charge' aria-hidden='true'></i> Automations"}
   - {path: fleet.md, title: "<i class='bi bi-pc-display-horizontal' aria-hidden='true'></i> Fleet"}
   - {path: people-and-access.md, title: "<i class='bi bi-people' aria-hidden='true'></i> People and Access"}
+  - {path: policies-and-audit.md, title: "<i class='bi bi-shield-check' aria-hidden='true'></i> Policies and Audit"}
   - {path: command-line.md, title: "<i class='bi bi-terminal' aria-hidden='true'></i> Command Line"}
   - {path: search.md, title: "<i class='bi bi-search' aria-hidden='true'></i> Search"}
   - {path: speech.md, title: "<i class='bi bi-mic' aria-hidden='true'></i> Speech to Prompt"}

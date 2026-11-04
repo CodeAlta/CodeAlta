@@ -476,6 +476,8 @@ Ask an agent of CodeAlta Desktop to work with your machines: "run the iOS tests 
 | Reads the devices of a machine you manage | `alta fleet machine devices <machine>` |
 | Checks which secrets a machine has, by name only | `alta fleet secret list <machine>` |
 | Reads people, roles, teams, grants and owners, and proposes a change for you to apply | `alta fleet access show`, `people`, `owners`, `propose` |
+| Reads the policy of your organization and whether its kill switch holds | `alta fleet policy show` |
+| Reads and checks the audit log | `alta fleet audit list`, `alta fleet audit verify` |
 
 An agent works with your access and never more:
 
@@ -484,6 +486,8 @@ An agent works with your access and never more:
 - Its sandbox and permission mode go with what it starts or drives on another machine. A sandboxed session reads the fleet, and starts, moves or places nothing elsewhere; one whose sandbox does not allow the fleet does not read it either.
 
 ## Security
+
+- **One action stops everything.** The [kill switch](policies-and-audit.md#the-kill-switch) of your server stops the work of the fleet on every machine or on the ones you choose, and the machines keep it while the server is away.
 
 - **Remote sessions run code on the machine.** A paired computer can start agents there that use its tools, as you would sitting at it. Pair only your own computers, and revoke the ones you no longer use.
 - **Keys are pinned.** Each computer has its own key. Pairing records the key of the other side, and every connection checks it: a machine that presents another key is refused. The six words let you check, at pairing, that the link comes from the machine you think. Through a server, the key comes from the list of devices your own computers signed, never from the server alone, and a device revoked there is refused.

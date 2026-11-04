@@ -99,6 +99,12 @@ internal sealed class TestDevice : IFleetHandshakeSigner, IDisposable
     public FleetSignedDeviceListEntry FirstEntry(DateTimeOffset time)
         => SignEntry(new FleetDeviceListEntryPayload(1, null, 1, null, FleetDeviceListOperations.Add, DeviceId, PublicKey, FleetDeviceKinds.Controller, null, DeviceId, time));
 
+    public FleetSignedPolicyDocument SignPolicy(FleetPolicyDocument document)
+    {
+        var text = FleetPolicyDocuments.Serialize(document with { SignerDeviceId = DeviceId });
+        return new FleetSignedPolicyDocument(text, Sign(FleetPolicyDocuments.GetSignedBytes(text)));
+    }
+
     public FleetSignedTelemetrySettings SignTelemetry(FleetTelemetrySettings settings)
     {
         var text = FleetTelemetrySettingsDocuments.Serialize(settings);
@@ -119,7 +125,8 @@ internal sealed record ApiAnswer(HttpStatusCode Status, JsonElement Body)
     {
         TypeInfoResolverChain = { ServerApiJsonContext.Default, FleetServerJsonContext.Default, FleetDeviceListJsonContext.Default, FleetTelemetryJsonContext.Default,
             FleetAutomationApiJsonContext.Default, FleetSecretsApiJsonContext.Default, FleetEnvironmentJsonContext.Default, FleetSignInJsonContext.Default,
-            FleetBudgetsApiJsonContext.Default, FleetAccessApiJsonContext.Default, FleetAccessDocumentJsonContext.Default, FleetHookApiJsonContext.Default },
+            FleetBudgetsApiJsonContext.Default, FleetAccessApiJsonContext.Default, FleetAccessDocumentJsonContext.Default, FleetHookApiJsonContext.Default,
+            FleetPolicyDocumentJsonContext.Default },
     };
 }
 
@@ -221,6 +228,22 @@ internal sealed class ServerFixture : IAsyncDisposable
         var text = await response.Content.ReadAsStringAsync();
         var json = string.IsNullOrEmpty(text) ? default : JsonDocument.Parse(text).RootElement.Clone();
         return new ApiAnswer(response.StatusCode, json);
+    }
+
+    /// <summary>Gets a path, signed by a device, and gives the answer as text with its content type and file name: what an export answers.</summary>
+    public async Task<(HttpStatusCode Status, string Text, string? ContentType, string? FileName)> GetTextAsync(TestDevice device, string path)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Get, path);
+        var time = Clock.Now.ToUnixTimeMilliseconds();
+        var nonce = FleetSignedRequest.CreateNonce();
+        var signed = FleetSignedRequest.GetSignedBytes("GET", path, time, nonce, FleetSignedRequest.HashBody([]), device.DeviceId);
+        request.Headers.Add(FleetSignedRequest.DeviceHeader, device.DeviceId);
+        request.Headers.Add(FleetSignedRequest.TimestampHeader, time.ToString(System.Globalization.CultureInfo.InvariantCulture));
+        request.Headers.Add(FleetSignedRequest.NonceHeader, nonce);
+        request.Headers.Add(FleetSignedRequest.SignatureHeader, device.Sign(signed));
+        using var response = await Http.SendAsync(request);
+        return (response.StatusCode, await response.Content.ReadAsStringAsync(), response.Content.Headers.ContentType?.MediaType,
+            response.Content.Headers.ContentDisposition?.FileName?.Trim('"'));
     }
 
     /// <summary>Posts bytes, signed by a device unless none is given, and gives the status of the answer.</summary>

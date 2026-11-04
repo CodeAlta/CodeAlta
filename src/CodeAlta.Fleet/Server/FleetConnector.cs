@@ -241,6 +241,7 @@ public sealed partial class FleetConnector : IAsyncDisposable
 
         Devices = options.Devices ?? options.MetadataKeys?.Devices ?? new FleetOrganizationDevices(options.ServerAddress, options.Identity, options.DeviceListPinPath) { CertificatePin = options.CertificatePin };
         InitializeAccess();
+        InitializePolicy();
     }
 
     /// <summary>Gets the devices of the organization of the server, as this device verified its signed device list.</summary>
@@ -525,6 +526,11 @@ public sealed partial class FleetConnector : IAsyncDisposable
                     break;
                 case Protocol.Api.FleetAccessMethods.Changed:
                     RefreshAccess(stop);
+                    // Who signs the policy follows the access document.
+                    RefreshPolicy(stop);
+                    break;
+                case FleetPolicyMethods.Changed:
+                    RefreshPolicy(stop);
                     break;
             }
 
@@ -542,6 +548,8 @@ public sealed partial class FleetConnector : IAsyncDisposable
             OnAutomationsOnline(stop);
             // The access document, again on each connection: a version signed while this device was away applies now.
             RefreshAccess(stop);
+            // The policy and its kill switch too.
+            RefreshPolicy(stop);
 
             var lastPresence = DateTimeOffset.MinValue;
             var lastRead = DateTimeOffset.MinValue;
@@ -865,7 +873,16 @@ public sealed partial class FleetConnector : IAsyncDisposable
         StatisticsPublished?.Invoke(this, result);
     }
 
-    private bool IsPublished(FleetLocalSession session) => !session.IsPrivate && _options.PublishesSpace(session.SpaceId);
+    private bool IsPublished(FleetLocalSession session) => (!session.IsPrivate || RequiresFacts) && _options.PublishesSpace(session.SpaceId);
+
+    // On a machine of the organization (a team machine, as its signed access document says), a policy that requires the
+    // facts of its spaces publishes those of Private sessions too: their facts, never their content.
+    private bool RequiresFacts => Policy?.Current?.Rules.PublishFacts == true && Access?.Current?.Machines.ContainsKey(_options.Identity.DeviceId) == true;
+
+    /// <summary>Gets whether a space of this instance is linked to the server: its work follows the policy of the server's organization.</summary>
+    /// <param name="spaceId">The space; null for the default one.</param>
+    /// <returns>Whether it is linked.</returns>
+    public bool LinksSpace(string? spaceId) => _options.PublishesSpace(spaceId);
 
     // The key that seals the metadata of a session: the one of its space, or none yet.
     private FleetMetadataKey? KeyOf(FleetLocalSession session) => _options.MetadataKeys?.CurrentFor(session.SpaceId);

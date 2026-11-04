@@ -31,6 +31,8 @@ public sealed class FleetOrganizationAccess
     private readonly SemaphoreSlim _refresh = new(1, 1);
     private FleetAccessState? _current;
     private AccessPin? _checkpoint;
+    // Each version verified in this process, by number: the policy names the version its signer read, and is checked against it.
+    private System.Collections.Immutable.ImmutableDictionary<long, FleetAccessState> _history = System.Collections.Immutable.ImmutableDictionary<long, FleetAccessState>.Empty;
 
     /// <summary>Initializes a new instance of the <see cref="FleetOrganizationAccess"/> class.</summary>
     /// <param name="devices">The anchored device list of the same link.</param>
@@ -48,6 +50,11 @@ public sealed class FleetOrganizationAccess
 
     /// <summary>Gets the document as last verified; null before the first read, and <see cref="FleetAccessState.Empty"/> while the organization signed none.</summary>
     public FleetAccessState? Current => Volatile.Read(ref _current);
+
+    /// <summary>Gets the document at a version this device verified in this process, or null.</summary>
+    /// <param name="number">The number of the version.</param>
+    /// <returns>The document as that version left it, or null.</returns>
+    public FleetAccessState? At(long number) => Volatile.Read(ref _history).GetValueOrDefault(number);
 
     /// <summary>Raised after a read verified a newer version than the one held.</summary>
     public event Action<FleetAccessState>? Changed;
@@ -83,6 +90,7 @@ public sealed class FleetOrganizationAccess
                     if (!FleetAccessDocuments.TryAppend(extended, item.Document, list, known, out var next, out var reason))
                         throw new FleetAccessDocumentException(extended.Number + 1, reason);
                     extended = next;
+                    Volatile.Write(ref _history, Volatile.Read(ref _history).SetItem(next.Number, next));
                 }
 
                 WritePin(new AccessPin(extended.FirstHash!, extended.Number, extended.LastHash!));
@@ -96,9 +104,17 @@ public sealed class FleetOrganizationAccess
             var needed = listed.Items.Count == 0 ? 0 : FleetAccessDocuments.TryParse(listed.Items[^1].Document.Payload, out var last) ? last.DeviceListSequence : long.MaxValue;
             if (devices is null || devices.Sequence < needed) devices = await Devices.RefreshAsync(cancellationToken).ConfigureAwait(false);
             var organization = devices.OrganizationId ?? (listed.Items.Count == 0 ? string.Empty : throw new FleetAccessDocumentException(1, "the device list names no organization yet"));
-            var verification = FleetAccessDocuments.Verify(listed.Items.Select(static item => item.Document), devices, organization);
-            if (!verification.IsValid) throw new FleetAccessDocumentException(verification.BrokenAt!.Value, verification.Reason!);
-            var state = verification.State;
+            // Replayed one version at a time, so that each one is kept for the policy that names it.
+            var state = FleetAccessState.Empty;
+            var history = System.Collections.Immutable.ImmutableDictionary.CreateBuilder<long, FleetAccessState>();
+            foreach (var item in listed.Items)
+            {
+                if (!FleetAccessDocuments.TryAppend(state, item.Document, devices, organization, out var next, out var reason))
+                    throw new FleetAccessDocumentException(state.Number + 1, reason);
+                state = next;
+                history[state.Number] = state;
+            }
+
             var anchor = Newer(ReadPin(), _checkpoint);
             if (anchor is not null && anchor.Number > 0)
             {
@@ -112,6 +128,7 @@ public sealed class FleetOrganizationAccess
 
             var previous = Volatile.Read(ref _current);
             if (state.Number > 0) WritePin(new AccessPin(state.FirstHash!, state.Number, state.LastHash!));
+            Volatile.Write(ref _history, history.ToImmutable());
             Volatile.Write(ref _current, state);
             if (previous is null || previous.Number != state.Number) Changed?.Invoke(state);
             return state;

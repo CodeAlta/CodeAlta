@@ -295,7 +295,7 @@ public sealed class SqliteCoordinatorStoreTests
             Assert.AreEqual(6, records.Count);
             Assert.AreEqual(string.Empty, records[0].PreviousHash);
             for (var index = 1; index < records.Count; index++) Assert.AreEqual(records[index - 1].Hash, records[index].PreviousHash);
-            Assert.AreEqual(new AuditVerification(true, 6, null), await store.VerifyAuditAsync());
+            Assert.AreEqual(new AuditVerification(true, 6, null, records[^1].Hash), await store.VerifyAuditAsync(), "the head is the hash of the last record");
             Assert.AreEqual(2, (await store.ListAuditAsync(4, 100)).Count);
         }
 
@@ -309,7 +309,9 @@ public sealed class SqliteCoordinatorStoreTests
 
         await using (var store = await OpenAsync(root, clock))
         {
-            Assert.AreEqual(new AuditVerification(false, 3, 3), await store.VerifyAuditAsync());
+            var broken = await store.VerifyAuditAsync();
+            Assert.AreEqual((false, 3L, (long?)3), (broken.IsValid, broken.Count, broken.BrokenAt));
+            Assert.IsNotNull(broken.HeadHash, "the head is the last record that holds");
         }
 
         await using (var connection = new SqliteConnection($"Data Source={Path.Combine(root.Path, "test.sqlite3")};Pooling=False"))

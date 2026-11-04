@@ -794,6 +794,8 @@ internal sealed partial class DesktopFleetServers : IAsyncDisposable
             Configure = _configure,
             // A budget reached, a run that waits, a notification: the pages and the Fleet button read them again.
             BudgetsChanged = _ => OnChanged(),
+            // A newer policy, a stop of the kill switch or its lift: the banner and the pages read it again.
+            PolicyChanged = (_, _) => OnChanged(),
             // An automation this person gave away and that its new owner took: off this computer, and so off its machines.
             AccessRead = linkId =>
             {
@@ -830,6 +832,15 @@ internal sealed partial class DesktopFleetServers : IAsyncDisposable
     }
 
     // The key of this device: the one of pairing, made on first use.
+    /// <summary>
+    /// Gets the signed policies of the servers of this computer as it verified and kept them (<c>doc/fleet/security-and-privacy.md</c>,
+    /// policies and the kill switch): whether a stop reaches it, and the rules of the organization of a space.
+    /// </summary>
+    public FleetPolicyGuard Policy => LazyInitializer.EnsureInitialized(ref _policy,
+        () => new FleetPolicyGuard(Identity().DeviceId, () => Connections.Select(static connection => connection.Connector).OfType<FleetConnector>()));
+
+    private FleetPolicyGuard? _policy;
+
     private DeviceIdentity Identity()
     {
         if (Volatile.Read(ref _identity) is { } identity) return identity;

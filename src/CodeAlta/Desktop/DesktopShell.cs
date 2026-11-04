@@ -1,5 +1,6 @@
 using NeoAstra;
 using NeoAstra.Desktop;
+using NeoAstra.Desktop.Dialogs;
 using NeoAstra.Desktop.Menus;
 using NeoAstra.Desktop.Tray;
 using XenoAtom.Logging;
@@ -129,6 +130,41 @@ internal sealed class DesktopShell
         try
         {
             return await DesktopFolderPicker.PickAsync(DialogOwner?.Invoke() ?? _window, Dialogs, title, initialDirectory, cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            Volatile.Write(ref _pickingFolder, 0);
+        }
+    }
+
+    /// <summary>
+    /// Lets the user choose where to save a file with the dialog of the operating system: its full path, or null when they
+    /// cancel, when another dialog is open or when this system has none. Choosing writes nothing.
+    /// </summary>
+    /// <param name="title">The title of the dialog.</param>
+    /// <param name="suggestedName">The name of the file the dialog proposes.</param>
+    /// <param name="kind">The name of the kind of file, such as <c>CSV</c>.</param>
+    /// <param name="extension">Its extension, without a dot.</param>
+    /// <param name="cancellationToken">Cancels the wait where the platform dialog can be canceled.</param>
+    /// <returns>The chosen path, or null.</returns>
+    internal async Task<string?> ChooseSavePathAsync(string title, string suggestedName, string kind, string extension, CancellationToken cancellationToken)
+    {
+        if (Dialogs is not { } dialogs || Interlocked.CompareExchange(ref _pickingFolder, 1, 0) != 0) return null;
+        try
+        {
+            var downloads = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Downloads");
+            var initial = DesktopFolderPicker.ExistingDirectory(downloads);
+            var result = await dialogs.SaveFileAsync(new NeoFileDialogOptions
+            {
+                Owner = DialogOwner?.Invoke() ?? _window, Title = title, SuggestedFileName = suggestedName, InitialDirectory = initial,
+                Filters = [new NeoFileDialogFilter(kind, [extension])], Scope = new NeoFileScope(DesktopFolderPicker.Roots(initial)),
+            }, cancellationToken).ConfigureAwait(false);
+            return result.Status == NeoDesktopStatus.Success && result.Value is { Length: > 0 } path && Path.IsPathFullyQualified(path) ? path : null;
+        }
+        catch (Exception exception) when (exception is OperationCanceledException or ArgumentException or InvalidOperationException or IOException
+            or UnauthorizedAccessException or NotSupportedException)
+        {
+            return null;
         }
         finally
         {

@@ -299,8 +299,8 @@ public sealed partial class AltaLiveToolTests
             .Add<IAltaFleet>(new FakeFleet()).Add<IAltaAutomations>(new FakeAutomations()).Add<IAltaSessionMachineMoves>(new RecordingMachineMoves()));
         var commands = dispatcher.Describe(AltaCallerIdentity.Cli, root.Path).Where(static command => command.Path.StartsWith("fleet ", StringComparison.Ordinal)).ToArray();
         // Fifteen commands of machines, moves, automations, statistics, updates, health and secrets; eleven of access (`fleet access`);
-        // one of hooks.
-        Assert.HasCount(27, commands);
+        // one of hooks; two of the audit log; one of the policy.
+        Assert.HasCount(30, commands);
         foreach (var command in commands)
         {
             Assert.IsNotNull(command.Policy, command.Path);

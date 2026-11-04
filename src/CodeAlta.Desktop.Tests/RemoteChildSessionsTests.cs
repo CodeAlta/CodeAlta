@@ -325,6 +325,32 @@ public sealed class RemoteChildSessionsTests
         Assert.IsFalse(prompts.Any(static prompt => prompt.Contains("Forged", StringComparison.Ordinal)), "A delivery of a lineage this computer did not record reaches no session.");
     }
 
+    // The signed policy of the organization of the space (doc/fleet/security-and-privacy.md, policies and the kill switch): this
+    // computer refuses itself what an agent would start or send elsewhere, before any machine is asked.
+    [TestMethod]
+    public async Task AStopOrAPolicyWithoutAgentsElsewhere_RefusesAChildOnThisComputer_BeforeAnyMachineIsAsked()
+    {
+        var token = TestContext.CancellationToken;
+        await using var two = await TwoHosts.StartAsync(token);
+        var parent = await two.CreateParentAsync(token);
+        two.Node.Service.AgentSessions.WritePolicy(new FleetAgentPolicyInfo(["default"]));
+        CodeAlta.Fleet.Protocol.FleetPolicyState policy = CodeAlta.Fleet.Protocol.FleetPolicyState.Empty with
+        {
+            Number = 1, Rules = new CodeAlta.Fleet.Protocol.FleetPolicyRules(AgentStarts: false),
+        };
+        two.Children.Policy = new CodeAlta.Fleet.Server.FleetPolicyGuard("desktop-device", () => [new CodeAlta.Fleet.Server.FleetPolicySource("https://fleet.example", policy, null,
+            static _ => true)]);
+
+        var refused = await two.Children.CreateAsync(Request(parent.SessionId, "Run the iOS tests."), token);
+        Assert.AreEqual(("refused", "policy_refused"), (refused.Status, refused.Code), refused.Message);
+        policy = policy with { Number = 2, Rules = CodeAlta.Fleet.Protocol.FleetPolicyRules.None,
+            Stop = new CodeAlta.Fleet.Protocol.FleetPolicyStop(CodeAlta.Fleet.Protocol.FleetPolicyStopScopes.Fleet, [], [], "A leaked key") };
+        var stopped = await two.Children.CreateAsync(Request(parent.SessionId, "Run the iOS tests."), token);
+        Assert.AreEqual("policy_refused", stopped.Code);
+        StringAssert.Contains(stopped.Message, "A leaked key");
+        Assert.AreEqual(0, two.Node.Service.AgentSessions.Children.Count, "Nothing was started.");
+    }
+
     [TestMethod]
     public void TheLineageOfADelivery_IsTheChildRecordedOnItsMachine_ForItsParent()
     {
