@@ -1554,6 +1554,133 @@ public sealed class AgentToolsTests
     }
 
     [TestMethod]
+    public void AgentToolBridge_CreateOpenAIStrictInputSchema_WritesOneOfAsAnyOf()
+    {
+        // The selectors of an MCP tool: OpenAI strict mode refuses the oneOf of its items with HTTP 400.
+        using var schema = JsonDocument.Parse(
+            """
+            {
+              "type": "object",
+              "properties": {
+                "matches": {
+                  "type": "array",
+                  "description": "Series selectors.",
+                  "items": {
+                    "oneOf": [
+                      { "type": "string", "description": "A series selector." },
+                      {
+                        "type": "object",
+                        "description": "Label filters.",
+                        "properties": { "filters": { "type": "array", "items": { "type": "string" }, "minItems": 1 } },
+                        "required": ["filters"]
+                      }
+                    ]
+                  }
+                },
+                "mode": { "description": "How to match.", "oneOf": [{ "const": "all" }, { "const": "any" }] },
+                "limit": {
+                  "anyOf": [{ "type": "integer" }, { "type": "string" }],
+                  "oneOf": [{ "type": "integer" }, { "pattern": "^[0-9]+$" }]
+                }
+              },
+              "required": ["limit"]
+            }
+            """);
+
+        var strict = AgentToolBridge.CreateOpenAIStrictInputSchema(schema.RootElement);
+
+        Assert.IsFalse(HasSchemaKeyword(strict, "oneOf"));
+        var properties = strict.GetProperty("properties");
+        var matches = properties.GetProperty("matches");
+        Assert.AreEqual("[\"array\",\"null\"]", matches.GetProperty("type").GetRawText());
+        Assert.AreEqual("Series selectors.", matches.GetProperty("description").GetString());
+        var branches = matches.GetProperty("items").GetProperty("anyOf").EnumerateArray().ToArray();
+        Assert.AreEqual(2, branches.Length);
+        Assert.AreEqual("{\"type\":\"string\",\"description\":\"A series selector.\"}", branches[0].GetRawText());
+        Assert.AreEqual("object", branches[1].GetProperty("type").GetString());
+        Assert.AreEqual("Label filters.", branches[1].GetProperty("description").GetString());
+        Assert.AreEqual("filters", branches[1].GetProperty("required")[0].GetString());
+        Assert.IsFalse(branches[1].GetProperty("additionalProperties").GetBoolean());
+        var filters = branches[1].GetProperty("properties").GetProperty("filters");
+        Assert.AreEqual("string", filters.GetProperty("items").GetProperty("type").GetString());
+        Assert.AreEqual("minItems: 1", filters.GetProperty("description").GetString());
+
+        // An optional property may be null, as with an anyOf.
+        var mode = properties.GetProperty("mode");
+        Assert.AreEqual("How to match.", mode.GetProperty("description").GetString());
+        Assert.AreEqual(
+            "[{\"const\":\"all\"},{\"const\":\"any\"},{\"type\":\"null\"}]",
+            mode.GetProperty("anyOf").GetRawText());
+
+        // Beside an anyOf, the oneOf goes to the description.
+        var limit = properties.GetProperty("limit");
+        Assert.AreEqual("[{\"type\":\"integer\"},{\"type\":\"string\"}]", limit.GetProperty("anyOf").GetRawText());
+        StringAssert.StartsWith(limit.GetProperty("description").GetString(), "oneOf: [");
+    }
+
+    [TestMethod]
+    public void AgentToolBridge_CreateOpenAIStrictInputSchema_WritesOneOfAsAnyOfInDefinitionsAndAdditionalProperties()
+    {
+        using var schema = JsonDocument.Parse(
+            """
+            {
+              "type": "object",
+              "properties": {
+                "steps": { "type": "array", "items": { "$ref": "#/$defs/step" } },
+                "flag": { "$ref": "#/definitions/flag" },
+                "values": {
+                  "description": "Values by name.",
+                  "additionalProperties": { "oneOf": [{ "type": "string" }, { "type": "number" }] }
+                }
+              },
+              "required": ["steps", "flag", "values"],
+              "$defs": {
+                "step": {
+                  "type": "object",
+                  "properties": {
+                    "value": { "description": "A text or a count.", "oneOf": [{ "type": "string" }, { "type": "integer" }] }
+                  },
+                  "required": ["value"]
+                }
+              },
+              "definitions": {
+                "flag": { "oneOf": [{ "type": "boolean" }, { "type": "null" }] }
+              }
+            }
+            """);
+
+        var strict = AgentToolBridge.CreateOpenAIStrictInputSchema(schema.RootElement);
+
+        Assert.IsFalse(HasSchemaKeyword(strict, "oneOf"));
+        var step = strict.GetProperty("$defs").GetProperty("step");
+        var value = step.GetProperty("properties").GetProperty("value");
+        Assert.AreEqual("A text or a count.", value.GetProperty("description").GetString());
+        Assert.AreEqual("[{\"type\":\"string\"},{\"type\":\"integer\"}]", value.GetProperty("anyOf").GetRawText());
+        // A definition is an object of strict mode too.
+        Assert.AreEqual("value", step.GetProperty("required")[0].GetString());
+        Assert.IsFalse(step.GetProperty("additionalProperties").GetBoolean());
+        Assert.AreEqual(
+            "{\"anyOf\":[{\"type\":\"boolean\"},{\"type\":\"null\"}]}",
+            strict.GetProperty("definitions").GetProperty("flag").GetRawText());
+
+        var values = strict.GetProperty("properties").GetProperty("values");
+        Assert.AreEqual("Values by name.", values.GetProperty("description").GetString());
+        Assert.AreEqual(
+            "{\"anyOf\":[{\"type\":\"string\"},{\"type\":\"number\"}]}",
+            values.GetProperty("additionalProperties").GetRawText());
+        Assert.AreEqual("{\"$ref\":\"#/$defs/step\"}", strict.GetProperty("properties").GetProperty("steps").GetProperty("items").GetRawText());
+    }
+
+    private static bool HasSchemaKeyword(JsonElement schema, string keyword)
+        => schema.ValueKind switch
+        {
+            JsonValueKind.Object => schema.EnumerateObject().Any(property =>
+                property.NameEquals(keyword) || HasSchemaKeyword(property.Value, keyword)),
+            JsonValueKind.Array => schema.EnumerateArray().Any(item => HasSchemaKeyword(item, keyword)),
+            _ => false,
+        };
+
+    [TestMethod]
     public void AgentToolBridge_CreateInputSchemaWithoutTypeUnions_GivesEachTypeItsOwnSchema()
     {
         using var schema = JsonDocument.Parse(

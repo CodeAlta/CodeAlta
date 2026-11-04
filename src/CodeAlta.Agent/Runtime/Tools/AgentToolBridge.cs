@@ -317,7 +317,8 @@ public static class AgentToolBridge
         if (forceNullable &&
             schema.ValueKind == JsonValueKind.Object &&
             !schema.TryGetProperty("type", out _) &&
-            !schema.TryGetProperty("anyOf", out _))
+            !schema.TryGetProperty("anyOf", out _) &&
+            !schema.TryGetProperty("oneOf", out _))
         {
             writer.WriteStartObject();
             writer.WritePropertyName("anyOf");
@@ -345,6 +346,7 @@ public static class AgentToolBridge
             ? GetRequiredPropertyNames(schema)
             : null;
         var shouldWriteAdditionalPropertiesFalse = isObjectShape;
+        var hasAnyOf = schema.TryGetProperty("anyOf", out _);
         var wroteProperties = false;
 
         writer.WriteStartObject();
@@ -398,10 +400,40 @@ public static class AgentToolBridge
                 continue;
             }
 
-            if (property.NameEquals("oneOf") || property.NameEquals("allOf"))
+            // Strict mode refuses oneOf: an anyOf of the same schemas accepts every value the oneOf accepts, and the
+            // tool still checks its arguments. Beside an anyOf, it goes to the description like the keywords refused.
+            if (property.NameEquals("oneOf"))
+            {
+                if (hasAnyOf)
+                {
+                    extraDescriptionLines.Add($"{property.Name}: {property.Value.GetRawText()}");
+                    continue;
+                }
+
+                writer.WritePropertyName("anyOf");
+                WriteSchemaVariantArray(writer, property.Value, appendNullVariant: forceNullable);
+                continue;
+            }
+
+            if (property.NameEquals("allOf"))
             {
                 writer.WritePropertyName(property.Name);
                 WriteSchemaVariantArray(writer, property.Value, appendNullVariant: false);
+                continue;
+            }
+
+            if ((property.NameEquals("$defs") || property.NameEquals("definitions")) &&
+                property.Value.ValueKind == JsonValueKind.Object)
+            {
+                writer.WritePropertyName(property.Name);
+                writer.WriteStartObject();
+                foreach (var definition in property.Value.EnumerateObject())
+                {
+                    writer.WritePropertyName(definition.Name);
+                    WriteOpenAIStrictSchema(writer, definition.Value, forceNullable: false);
+                }
+
+                writer.WriteEndObject();
                 continue;
             }
 
@@ -409,7 +441,8 @@ public static class AgentToolBridge
             {
                 if (!shouldWriteAdditionalPropertiesFalse)
                 {
-                    property.WriteTo(writer);
+                    writer.WritePropertyName(property.Name);
+                    WriteOpenAIStrictSchema(writer, property.Value, forceNullable: false);
                 }
 
                 continue;
