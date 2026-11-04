@@ -25,7 +25,7 @@ internal sealed class NodeBudgets
         ArgumentNullException.ThrowIfNull(connections);
         Gate = new FleetBudgetGate(() => [.. connections.Connections.Where(static connection => connection.Connector is not null)
             .Select(connection => new FleetBudgetLink(connection.Link.Id, connection.Connector!.Devices, connection.Connector.MetadataKeys,
-                Path.Combine(connections.Store.LinkFolder(connection.Link.Id), FileName)))], new FleetBudgetLocalSpend(sessions, statistics));
+                Path.Combine(connections.Store.LinkFolder(connection.Link.Id), FileName)) { Access = connection.Connector.Access })], new FleetBudgetLocalSpend(sessions, statistics));
     }
 
     /// <summary>Gets the gate.</summary>

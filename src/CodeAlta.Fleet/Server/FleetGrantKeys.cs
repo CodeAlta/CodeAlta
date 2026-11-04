@@ -75,13 +75,60 @@ public static class FleetGrantKeys
     /// <exception cref="InvalidDataException">The copy is not for this device, grant or session, is not signed by the owner of the session, or does not open.</exception>
     public static FleetSessionMetadata Open(string sealedText, string wrapped, string organizationId, string grantId, string sessionId, string machineId, DeviceIdentity identity,
         FleetDeviceListState list)
+        => Open(sealedText, wrapped, organizationId, grantId, sessionId, machineId, identity, list, null);
+
+    /// <summary>
+    /// Opens the metadata a grant gives this device, as
+    /// <see cref="Open(string, string, string, string, string, string, DeviceIdentity, FleetDeviceListState)"/> does, signed by a
+    /// controller device of the owner the signed access document names for the machine of the session once it was given to another
+    /// person (<see cref="FleetAccessState.OwnerOfMachine"/>), never of the person the device list names any more.
+    /// </summary>
+    /// <param name="sealedText">The sealed metadata.</param>
+    /// <param name="wrapped">The copy of its key for this device.</param>
+    /// <param name="organizationId">The organization.</param>
+    /// <param name="grantId">The grant.</param>
+    /// <param name="sessionId">The session.</param>
+    /// <param name="machineId">The machine of the session, whose owner signs the copy.</param>
+    /// <param name="identity">The key of this device.</param>
+    /// <param name="list">The device list as this device verified it.</param>
+    /// <param name="access">The access document as this device verified it; null for none.</param>
+    /// <returns>The metadata.</returns>
+    /// <exception cref="ArgumentNullException">An argument but <paramref name="access"/> is null.</exception>
+    /// <exception cref="InvalidDataException">The copy is not for this device, grant or session, is not signed by the owner of the session, or does not open.</exception>
+    public static FleetSessionMetadata Open(string sealedText, string wrapped, string organizationId, string grantId, string sessionId, string machineId, DeviceIdentity identity,
+        FleetDeviceListState list, FleetAccessState? access)
+        => Open(sealedText, wrapped, organizationId, grantId, sessionId, machineId, identity, list, access, null);
+
+    /// <summary>
+    /// Opens the metadata a grant gives this device, as
+    /// <see cref="Open(string, string, string, string, string, string, DeviceIdentity, FleetDeviceListState, FleetAccessState?)"/> does; on a
+    /// machine of a team, which has no person of its own, the copy is signed by a controller device of the person who started the
+    /// session there, a maintainer or a member of that team (<see cref="FleetAccessState.HoldsKeysOf"/>), never of another person.
+    /// </summary>
+    /// <param name="sealedText">The sealed metadata.</param>
+    /// <param name="wrapped">The copy of its key for this device.</param>
+    /// <param name="organizationId">The organization.</param>
+    /// <param name="grantId">The grant.</param>
+    /// <param name="sessionId">The session.</param>
+    /// <param name="machineId">The machine of the session, whose owner signs the copy.</param>
+    /// <param name="identity">The key of this device.</param>
+    /// <param name="list">The device list as this device verified it.</param>
+    /// <param name="access">The access document as this device verified it; null for none.</param>
+    /// <param name="personId">The person who started the session on its machine (<see cref="Protocol.Api.GrantKeyDto.PersonId"/>); null for none, which a team machine refuses.</param>
+    /// <returns>The metadata.</returns>
+    /// <exception cref="ArgumentNullException">An argument but <paramref name="access"/> or <paramref name="personId"/> is null.</exception>
+    /// <exception cref="InvalidDataException">The copy is not for this device, grant or session, is not signed by the owner of the session, or does not open.</exception>
+    public static FleetSessionMetadata Open(string sealedText, string wrapped, string organizationId, string grantId, string sessionId, string machineId, DeviceIdentity identity,
+        FleetDeviceListState list, FleetAccessState? access, string? personId)
     {
         ArgumentNullException.ThrowIfNull(sealedText);
         ArgumentNullException.ThrowIfNull(wrapped);
         ArgumentNullException.ThrowIfNull(identity);
         ArgumentNullException.ThrowIfNull(list);
-        var key = Unwrap(wrapped, organizationId, grantId, sessionId, identity, list, signer => list.Members.TryGetValue(machineId, out var machine) && machine.OwnerId is not null
-            && machine.OwnerId == signer.OwnerId, Grants);
+        var key = Unwrap(wrapped, organizationId, grantId, sessionId, identity, list, signer => list.Members.TryGetValue(machineId, out var machine)
+            && (machine.Kind == FleetDeviceKinds.Node && access?.TeamOf(machineId) is not null
+                ? personId is not null && signer.OwnerId == personId && FleetAccessState.HoldsKeysOf(access, machine, personId)
+                : FleetAccessState.OwnerOfMachine(access, machineId, list) is { } owner && owner == signer.OwnerId), Grants);
         return key.TryOpen(sessionId, sealedText, out var metadata) && metadata is not null
             ? metadata
             : throw new InvalidDataException("The metadata of the grant does not open with its key.");

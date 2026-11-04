@@ -147,6 +147,26 @@ public sealed partial class FleetNodeService
         return revoked;
     }
 
+    /// <summary>
+    /// Gets or sets what says whether the signed access document of an organization grants a person of it the content of a
+    /// session of this machine (<c>session.view-content</c>, by organization, person and session): their devices read that
+    /// session live here, never drive it. Null grants nothing.
+    /// </summary>
+    public Func<string?, string, string, bool>? ContentGrants { get; set; }
+
+    // A device of a person of an organization granted the content of the session a read names, but whose rights here do not
+    // reach it (not their session, not a device of the owner): it reads that session only, for this call.
+    private (TrustedDevice Device, string SessionId)? ContentReader(FleetNodeCaller caller, JsonElement? parameters)
+    {
+        if (caller.IsOwner || ContentGrants is not { } grants || parameters is not { ValueKind: JsonValueKind.Object } read
+            || !read.TryGetProperty("sessionId", out var named) || named.ValueKind != JsonValueKind.String || named.GetString() is not { Length: > 0 } sessionId)
+            return null;
+        if (caller.Trust.IsRevoked(caller.Fingerprint) || _trusted.FindTrusted(caller.Fingerprint) is not null) return null;
+        if (caller.Trust.FindTrusted(caller.Fingerprint) is not { PersonId: { } person, OwnSessionsOnly: true } device) return null;
+        if (Principals.Owns(sessionId, person, device.OrganizationId) || !grants(device.OrganizationId, person, sessionId)) return null;
+        return (device with { Permissions = DevicePermissions.View }, sessionId);
+    }
+
     // A device that sees its own sessions only reaches a session its person started here; others are not shown to exist.
     private void RequireOwnSession(TrustedDevice? device, object parameters)
     {

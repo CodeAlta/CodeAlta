@@ -115,6 +115,9 @@ public sealed class AccessControlTests
         var active = await server.SendAsync(owner, HttpMethod.Post, $"/api/v1/grants/{pending.Id}/keys", keys);
         Assert.AreEqual(HttpStatusCode.OK, active.Status, active.Body.ToString());
         Assert.AreEqual(FleetGrantStatuses.Active, active.Read<GrantDto>().Status);
+        // The machine of the session lets the grantee read its conversation once the access document names them.
+        StringAssert.Contains((await server.SendAsync(owner, HttpMethod.Get, "/api/v1/access/draft")).Body.ToString(),
+            "\"readers\":[{\"session\":\"s1\",\"people\":[\"" + maxId + "\"]}]");
         var given = (await server.SendAsync(max, HttpMethod.Get, "/api/v1/grant-keys")).Read<AccessListDto<GrantKeyDto>>().Items.Single();
         Assert.AreEqual((pending.Id, "s1", machine.Id, "sealed", "wrapped"), (given.GrantId, given.SessionId, given.MachineId, given.Sealed, given.Wrapped));
         Assert.AreEqual(0, (await server.SendAsync(mia, HttpMethod.Get, "/api/v1/grant-keys")).Read<AccessListDto<GrantKeyDto>>().Items.Count, "nothing for another person");
@@ -259,6 +262,16 @@ public sealed class AccessControlTests
         var (cy, _) = await AddPersonAsync(server, owner, setup, "Cy");
         Assert.AreEqual(HttpStatusCode.NotFound, (await server.SendAsync(cy, HttpMethod.Get, "/api/v1/automations/deploy/runs")).Status, "not someone of no team");
         Assert.AreEqual(HttpStatusCode.NotFound, (await server.SendAsync(cy, HttpMethod.Post, "/api/v1/automations/deploy/run", Run(cy))).Status);
+
+        // A grant of automation.run lets its grantee run it by hand: the server passes the request on, and the next version of the
+        // access document names them for the machine, which checks the signed request against it.
+        var granted = await server.SendAsync(mia, HttpMethod.Post, "/api/v1/grants",
+            new CreateGrantRequest(FleetPrincipalKinds.Person, maxId, "automation.run", FleetScopeKinds.Resource, "automation:deploy"));
+        Assert.AreEqual(HttpStatusCode.Created, granted.Status, granted.Body.ToString());
+        Assert.AreEqual(HttpStatusCode.Conflict, (await server.SendAsync(max, HttpMethod.Post, "/api/v1/automations/deploy/run", Run(max))).Status,
+            "a person granted to run it runs it by hand: the machine is offline here");
+        var runners = (await server.SendAsync(owner, HttpMethod.Get, "/api/v1/access/draft")).Body.ToString();
+        StringAssert.Contains(runners, "\"runners\":[{\"automation\":\"deploy\",\"people\":[\"" + maxId + "\"]}]", "machines read who runs it in the signed document");
         Assert.AreEqual(HttpStatusCode.Forbidden, (await server.SendAsync(max, HttpMethod.Put, "/api/v1/automations/other", Version(max, "other", "team:" + team.Id))).Status,
             "a member gives the team none of its automations");
         Assert.AreEqual(HttpStatusCode.Forbidden, (await server.SendAsync(max, HttpMethod.Put, "/api/v1/automations/mine", Version(max, "mine", null))).Status,

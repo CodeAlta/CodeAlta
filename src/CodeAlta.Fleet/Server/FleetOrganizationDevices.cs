@@ -269,7 +269,8 @@ public static class FleetDeviceListMembers
 /// controller devices get the permissions of a paired device (the owner the document names once the machine was given to another
 /// person, the device list's otherwise); on a team machine, the controller devices of the team's members
 /// view, drive and start their own sessions, and its maintainers also manage it, whoever the device list names as its owner;
-/// any other member is known but may do nothing; a device the list removed, or of a person the document suspended, is refused.
+/// on a machine of the organization, its owners and the admins who sign do as maintainers do; any other member is known but
+/// may do nothing; a device the list removed, or of a person the document suspended, is refused.
 /// </summary>
 /// <param name="list">Gives the list as last verified; null refuses everyone.</param>
 /// <param name="selfDeviceId">The device of this node, never trusted through the list.</param>
@@ -297,6 +298,19 @@ public sealed class FleetOrganizationTrust(Func<FleetDeviceListState?> list, str
                 _ => DevicePermissions.None,
             };
             return new TrustedDevice(member.DeviceId, member.DeviceId, fingerprint, permissions, DateTimeOffset.UnixEpoch, null)
+            {
+                PersonId = member.OwnerId,
+                OwnSessionsOnly = true,
+                OrganizationId = current.OrganizationId,
+            };
+        }
+
+        // A machine of the organization has no person for owner: its owners and the admins who sign manage it, as they give it its
+        // automations and ask its runs, each on their own sessions; the person the device list names is one of the organization.
+        if (member.Kind == FleetDeviceKinds.Controller && document?.IsOrganizationMachine(selfDeviceId) == true)
+        {
+            return new TrustedDevice(member.DeviceId, member.DeviceId, fingerprint, document.IsSigner(member.OwnerId) ? TeamMaintainerPermissions : DevicePermissions.None,
+                DateTimeOffset.UnixEpoch, null)
             {
                 PersonId = member.OwnerId,
                 OwnSessionsOnly = true,

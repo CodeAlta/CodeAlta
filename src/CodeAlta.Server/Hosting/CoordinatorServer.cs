@@ -502,11 +502,12 @@ public sealed class CoordinatorServer : IAsyncDisposable
             DevicesChanged = organization => provider.GetRequiredService<AccessService>().Changed(organization),
         });
         services.AddSingleton(provider => new PublicationService(store, provider.GetRequiredService<DirectoryHub>(), time) { Metrics = metrics });
-        services.AddSingleton(_ => new MetadataKeyService(store, time));
-        services.AddSingleton(provider => new FleetSecretService(store, store, time) { Presence = provider.GetRequiredService<PresenceRegistry>() });
-        services.AddSingleton(provider => new NotificationService(store, store, time) { Presence = provider.GetRequiredService<PresenceRegistry>() });
+        // A machine given to another person answers to its owner record: its keys, values, environments, budgets and hooks follow it.
+        services.AddSingleton(_ => new MetadataKeyService(store, time) { Access = store });
+        services.AddSingleton(provider => new FleetSecretService(store, store, time) { Presence = provider.GetRequiredService<PresenceRegistry>(), Access = store });
+        services.AddSingleton(provider => new NotificationService(store, store, time) { Presence = provider.GetRequiredService<PresenceRegistry>(), Access = store });
         services.AddSingleton(provider => new BudgetService(store, store, provider.GetRequiredService<NotificationService>(), time,
-            provider.GetRequiredService<ILoggerFactory>().CreateLogger("CodeAlta.Server.Budgets")));
+            provider.GetRequiredService<ILoggerFactory>().CreateLogger("CodeAlta.Server.Budgets")) { Access = store });
         services.AddSingleton(provider => new StatisticsService(store, time) { Metrics = metrics, Published = provider.GetRequiredService<BudgetService>().EvaluateAsync });
         services.AddSingleton(provider => new HealthService(store, store, provider.GetRequiredService<NotificationService>(), provider.GetRequiredService<PresenceRegistry>(),
             provider.GetRequiredService<ServerUpdateStatusSource>(), time, provider.GetRequiredService<ILoggerFactory>().CreateLogger("CodeAlta.Server.Health"), options.Health));
@@ -556,7 +557,7 @@ public sealed class CoordinatorServer : IAsyncDisposable
                 automation.OwnerPersonId, person, token),
         });
         services.AddSingleton(provider => new HookService(store, store, provider.GetRequiredService<PresenceRegistry>(), time,
-            provider.GetRequiredService<ILoggerFactory>().CreateLogger("CodeAlta.Server.Hooks")));
+            provider.GetRequiredService<ILoggerFactory>().CreateLogger("CodeAlta.Server.Hooks")) { Access = store });
         services.AddSingleton(provider => new ControlService(store, provider.GetRequiredService<PresenceRegistry>(), provider.GetRequiredService<DirectoryHub>(),
             provider.GetRequiredService<PublicationService>(), provider.GetRequiredService<RelayHub>(), time, options.ConnectionPolicy,
             provider.GetRequiredService<ILoggerFactory>().CreateLogger("CodeAlta.Server.Control"))

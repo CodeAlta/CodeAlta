@@ -426,6 +426,10 @@ internal sealed class NodeServers : IAsyncDisposable
             // The problems of the machine travel with its heartbeat; the server tells its owner of those that last.
             Health = health.Read,
         });
+        // The people the signed access document of an organization grants the content of a session of this machine read it here.
+        if (service is not null)
+            service.ContentGrants = (organization, person, session) => organization is not null && connections.Connections.Any(connection =>
+                connection.Link.OrganizationId == organization && connection.Connector?.Access.Current?.Reads(session, person, DateTimeOffset.UtcNow) == true);
         // A person named on this machine before organizations were kept is of its organization while it is linked to one only.
         if (service is not null)
             service.People.SoleOrganization = () => connections.Connections.Select(static connection => connection.Link.OrganizationId).OfType<string>().Distinct(StringComparer.Ordinal)

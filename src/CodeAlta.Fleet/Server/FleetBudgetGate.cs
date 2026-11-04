@@ -15,7 +15,14 @@ namespace CodeAlta.Fleet.Server;
 /// <param name="Devices">The device list the machine anchored, whose key and HTTP handler the calls use too.</param>
 /// <param name="Keys">The metadata keys of the person's spaces, which name the space and the project of a run as the server knows them; null names none.</param>
 /// <param name="StatePath">The file the budgets of the link are kept in, so that a machine offline or restarted still holds its allowances; null keeps them in memory.</param>
-public sealed record FleetBudgetLink(string LinkId, FleetOrganizationDevices Devices, FleetMetadataKeyring? Keys, string? StatePath);
+public sealed record FleetBudgetLink(string LinkId, FleetOrganizationDevices Devices, FleetMetadataKeyring? Keys, string? StatePath)
+{
+    /// <summary>
+    /// Gets the signed access document of the server, as the machine verified it: once it gives the machine to another person,
+    /// the budgets of that person hold there, and those of the person the device list names no more. Null reads the device list alone.
+    /// </summary>
+    public FleetOrganizationAccess? Access { get; init; }
+}
 
 /// <summary>A run that a budget may limit: a session of the machine, in a space, of a project.</summary>
 /// <param name="RunId">The run, which a Continue anyway is bound to.</param>
@@ -121,10 +128,12 @@ public sealed class FleetBudgetGate
             var state = _states.GetOrAdd(link.LinkId, _ => LinkState.Load(link.StatePath));
             await RefreshAsync(link, state, cancellationToken).ConfigureAwait(false);
             if (link.Devices.Current is not { } list) continue;
-            var scope = ScopeOf(link, list, run);
+            var access = link.Access?.Current;
+            var scope = ScopeOf(link, list, access, run);
             foreach (var kept in state.Budgets())
             {
-                if (!FleetBudgetDocuments.TryVerify(kept.Signed, list, link.Devices.Identity.DeviceId, out var budget, out _) || !FleetBudgetDocuments.Covers(budget, scope)) continue;
+                if (!FleetBudgetDocuments.TryVerify(kept.Signed, list, access, link.Devices.Identity.DeviceId, out var budget, out _) || !FleetBudgetDocuments.Covers(budget, scope))
+                    continue;
                 if (await CheckAsync(link, state, kept, budget, cancellationToken).ConfigureAwait(false) is not { } period) continue;
                 if (budget.Reached == FleetBudgetReachedActions.Stop)
                 {
@@ -237,7 +246,7 @@ public sealed class FleetBudgetGate
             await RefreshAsync(link, state, cancellationToken).ConfigureAwait(false);
             // The machine keeps every budget it verified: one it no longer has is one it cannot tell, and the run waits.
             var kept = state.Budgets().FirstOrDefault(candidate => candidate.Id == budget.BudgetId);
-            if (kept is not null && link.Devices.Current is { } list && FleetBudgetDocuments.TryVerify(kept.Signed, list, link.Devices.Identity.DeviceId, out var current, out _))
+            if (kept is not null && link.Devices.Current is { } list && FleetBudgetDocuments.TryVerify(kept.Signed, list, link.Access?.Current, link.Devices.Identity.DeviceId, out var current, out _))
             {
                 // A new version decides again, as for a new run, never by itself: one that no longer covers the run, or that it is
                 // not reached under, starts it; one that stops refuses it; otherwise the run waits for its owner.
@@ -289,7 +298,7 @@ public sealed class FleetBudgetGate
             // What the server says is taken only as a newer version this machine verifies: what it leaves out, what does not
             // verify and an older version change nothing that the machine verified (a removal is a signed version too).
             if (link.Devices.Current is { } list)
-                state.Merge(listed, signed => FleetBudgetDocuments.TryVerify(signed, list, link.Devices.Identity.DeviceId, out var budget, out _) ? budget : null);
+                state.Merge(listed, signed => FleetBudgetDocuments.TryVerify(signed, list, link.Access?.Current, link.Devices.Identity.DeviceId, out var budget, out _) ? budget : null);
         }
         catch (Exception exception) when (!cancellationToken.IsCancellationRequested
             && exception is FleetServerException or HttpRequestException or OperationCanceledException or FleetDeviceListException)
@@ -298,11 +307,14 @@ public sealed class FleetBudgetGate
         }
     }
 
-    private static FleetBudgetRunScope ScopeOf(FleetBudgetLink link, FleetDeviceListState list, FleetBudgetRun run)
+    private static FleetBudgetRunScope ScopeOf(FleetBudgetLink link, FleetDeviceListState list, FleetAccessState? access, FleetBudgetRun run)
     {
         var machine = link.Devices.Identity.DeviceId;
-        var owner = list.Members.TryGetValue(machine, out var self) ? self.OwnerId : null;
-        var key = link.Keys?.CurrentFor(run.SpaceId);
+        // The owner the signed access document names once the machine was given to another person, else the device list's; a
+        // machine of a team has none, and a run names no person whose space it is: only the budgets of the machine cover it.
+        var team = access?.TeamOf(machine) is not null;
+        var owner = team ? null : FleetAccessState.OwnerOfMachine(access, machine, list);
+        var key = link.Keys?.CurrentFor(run.SpaceId, null);
         var project = key is not null && run.ProjectIdentity is { Length: > 0 } identity ? FleetProjectKeys.Of(key, identity) : null;
         return new FleetBudgetRunScope(machine, owner, key?.Grant?.SpaceId, project);
     }
@@ -486,12 +498,16 @@ public sealed class FleetBudgetLocalSpend : IFleetBudgetSpend
             case FleetBudgetScopeKinds.Machine:
                 return true;
             case FleetBudgetScopeKinds.Space:
-                return link.Keys?.CurrentFor(session.SpaceId)?.Grant?.SpaceId is { } space && space == budget.ScopeId;
+                return KeyOf(link, session)?.Grant?.SpaceId is { } space && space == budget.ScopeId;
             case FleetBudgetScopeKinds.Project:
-                return link.Keys?.CurrentFor(session.SpaceId) is { } key && session.ProjectIdentity is { Length: > 0 } identity
+                return KeyOf(link, session) is { } key && session.ProjectIdentity is { Length: > 0 } identity
                     && FleetProjectKeys.Of(key, identity) == budget.ScopeId;
             default:
                 return false;
         }
     }
+
+    // The key of the space of a session, as it seals it: on a machine of a team, the one of its person, of this server's organization.
+    private static FleetMetadataKey? KeyOf(FleetBudgetLink link, FleetLocalSession session)
+        => link.Keys?.CurrentFor(session.SpaceId, session.PersonOrganizationId is { } of && of == link.Devices.Current?.OrganizationId ? session.PersonId : null);
 }

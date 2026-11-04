@@ -360,7 +360,14 @@ public sealed record ConfirmGrantKeysRequest(string Sealed, IReadOnlyList<GrantK
 /// <param name="MachineId">The machine of the session, whose owner gave the key.</param>
 /// <param name="Sealed">The sealed metadata.</param>
 /// <param name="Wrapped">The copy of its key for the calling device.</param>
-public sealed record GrantKeyDto(string GrantId, string SessionId, string MachineId, string Sealed, string Wrapped);
+public sealed record GrantKeyDto(string GrantId, string SessionId, string MachineId, string Sealed, string Wrapped)
+{
+    /// <summary>
+    /// Gets the person who started the session on its machine, as the machine published it; null for none, or a server that does
+    /// not say. On a machine of a team, the copy holds only when a device of that person, of the team, gave it.
+    /// </summary>
+    public string? PersonId { get; init; }
+}
 
 /// <summary>A list of items of access control.</summary>
 /// <typeparam name="T">The type of the items.</typeparam>

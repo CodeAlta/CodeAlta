@@ -154,7 +154,7 @@ internal sealed class NodeFleetSecrets : IAsyncDisposable
     }
 
     private FleetSecretSync Sync(string linkId, FleetConnector connector)
-        => new(linkId, connector.Devices, connector.MetadataKeys, _store, ProjectsAsync);
+        => new(linkId, connector.Devices, connector.MetadataKeys, _store, ProjectsAsync) { Access = () => connector.Access.Current };
 
     private async Task SyncLinkAsync(string linkId, FleetConnector connector, CancellationToken cancellationToken)
     {

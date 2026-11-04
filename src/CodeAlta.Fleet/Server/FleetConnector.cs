@@ -887,8 +887,10 @@ public sealed partial class FleetConnector : IAsyncDisposable
     /// <returns>Whether it is linked.</returns>
     public bool LinksSpace(string? spaceId) => _options.PublishesSpace(spaceId);
 
-    // The key that seals the metadata of a session: the one of its space, or none yet.
-    private FleetMetadataKey? KeyOf(FleetLocalSession session) => _options.MetadataKeys?.CurrentFor(session.SpaceId);
+    // The key that seals the metadata of a session: the one of its space, or none yet; on a machine of a team, the one of the space
+    // of the person who started it there, and none without such a person (its person is of this server's organization only).
+    private FleetMetadataKey? KeyOf(FleetLocalSession session)
+        => _options.MetadataKeys?.CurrentFor(session.SpaceId, session.PersonOrganizationId is { } of && of == Devices.Current?.OrganizationId ? session.PersonId : null);
 
     // The keys of the spaces published, read again when due, sooner while a space has none. A failure leaves the keys known
     // before (titles wait without one): facts go on.
@@ -898,7 +900,11 @@ public sealed partial class FleetConnector : IAsyncDisposable
         var spaces = _options.LinkedSpaces?.Invoke()
             ?? [.. published.Select(static session => string.IsNullOrWhiteSpace(session.SpaceId) ? SpaceDescriptor.DefaultId : session.SpaceId).Distinct(StringComparer.Ordinal)];
         var now = _options.TimeProvider.GetUtcNow();
-        var due = spaces.Any(space => keys.CurrentFor(space) is null) ? TimeSpan.FromSeconds(30) : _options.KeyRefreshInterval;
+        // On a machine of a team, a session lacks a key while its person has none here yet; one without a person never gets one.
+        var lacking = Access?.Current?.TeamOf(_options.Identity.DeviceId) is not null
+            ? published.Any(session => session.PersonOrganizationId is not null && session.PersonId is not null && KeyOf(session) is null)
+            : spaces.Any(space => keys.CurrentFor(space) is null);
+        var due = lacking ? TimeSpan.FromSeconds(30) : _options.KeyRefreshInterval;
         if (now.UtcTicks - Volatile.Read(ref _keysReadAt) < due.Ticks) return;
         Volatile.Write(ref _keysReadAt, now.UtcTicks);
         try

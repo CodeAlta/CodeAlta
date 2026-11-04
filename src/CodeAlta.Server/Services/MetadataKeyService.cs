@@ -11,7 +11,8 @@ namespace CodeAlta.Server.Services;
 /// titles a key seals nor which space it is (an opaque id, and a descriptor sealed with the key).
 /// </summary>
 /// <remarks>
-/// The server checks who may hold a copy (approved devices of the same person) as its tables say; devices wrap only to
+/// The server checks who may hold a copy (approved devices of the same person, and the machines of the teams the person
+/// maintains or is a member of) as its tables say; devices wrap only to
 /// the keys of the signed device list they verified, so a device the server added by itself never gets a copy.
 /// </remarks>
 public sealed class MetadataKeyService
@@ -37,16 +38,31 @@ public sealed class MetadataKeyService
         _time = time;
     }
 
-    /// <summary>Lists the metadata keys of the calling device's person, each with the copy wrapped to that device.</summary>
+    /// <summary>Gets the access model, whose owner records say who owns a machine given to another person; null reads the device records alone.</summary>
+    public IAccessStore? Access { get; init; }
+
+    /// <summary>
+    /// Lists the metadata keys of the calling device's person (the owner of a machine given to them), each with the copy wrapped to
+    /// that device; on a machine of a team, those of the maintainers and the members of the team, never those of the person the
+    /// device list names by that alone.
+    /// </summary>
     /// <param name="actor">The calling device.</param>
     /// <param name="cancellationToken">Cancels the operation.</param>
     /// <returns>The keys.</returns>
     public async Task<ListResponse<MetadataKeyDto>> ListAsync(DeviceRecord actor, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(actor);
-        if (actor.OwnerPersonId is null) return new([]);
-        var keys = await _store.ListMetadataKeysAsync(actor.OwnerPersonId, cancellationToken).ConfigureAwait(false);
-        return new([.. keys.Select(key => ToDto(key.Key, key.Wraps.FirstOrDefault(wrap => wrap.DeviceId == actor.Id)?.Wrapped, key.Wraps.Select(static wrap => wrap.DeviceId)))]);
+        IReadOnlyList<string> people = actor.Kind == FleetDeviceKinds.Node
+            ? MachineOwners.KeyPeopleOf(await MachineOwners.ReadAsync(Access, actor.OrganizationId, cancellationToken).ConfigureAwait(false), actor)
+            : actor.OwnerPersonId is { } own ? [own] : [];
+        var listed = new List<MetadataKeyDto>();
+        foreach (var person in people)
+        {
+            var keys = await _store.ListMetadataKeysAsync(person, cancellationToken).ConfigureAwait(false);
+            listed.AddRange(keys.Select(key => ToDto(key.Key, key.Wraps.FirstOrDefault(wrap => wrap.DeviceId == actor.Id)?.Wrapped, key.Wraps.Select(static wrap => wrap.DeviceId))));
+        }
+
+        return new(listed);
     }
 
     /// <summary>Records a new metadata key of the calling controller device's person, wrapped to its devices, the caller included.</summary>
@@ -118,6 +134,9 @@ public sealed class MetadataKeyService
         if (wraps.Select(static wrap => wrap?.DeviceId).Distinct(StringComparer.Ordinal).Count() != wraps.Count) throw Invalid("A device gets one wrap of a key.");
         var now = _time.GetUtcNow();
         var records = new List<MetadataKeyWrapRecord>(wraps.Count);
+        // A machine given to another person is theirs: their devices give it keys, those of the person the device list names no more;
+        // a machine of a team takes the keys of its maintainers and members only.
+        var snapshot = await MachineOwners.ReadAsync(Access, actor.OrganizationId, cancellationToken).ConfigureAwait(false);
         foreach (var wrap in wraps)
         {
             if (wrap is null || string.IsNullOrEmpty(wrap.DeviceId) || string.IsNullOrEmpty(wrap.Wrapped) || wrap.Wrapped.Length > MaxWrappedLength
@@ -127,10 +146,11 @@ public sealed class MetadataKeyService
             }
 
             var device = await _store.GetDeviceAsync(wrap.DeviceId, cancellationToken).ConfigureAwait(false);
+            var holds = device is not null && MachineOwners.HoldsKeysOf(snapshot, device, actor.OwnerPersonId);
             // A device of the person that left the server (or was revoked before its removal reached this list) gets no
             // copy, without refusing the copies of the others.
-            if (device is { Status: DeviceStatuses.Revoked } && device.OrganizationId == actor.OrganizationId && device.OwnerPersonId == actor.OwnerPersonId) continue;
-            if (device is null || device.OrganizationId != actor.OrganizationId || device.Status != DeviceStatuses.Approved || device.OwnerPersonId != actor.OwnerPersonId)
+            if (device is { Status: DeviceStatuses.Revoked } && device.OrganizationId == actor.OrganizationId && holds) continue;
+            if (device is null || device.OrganizationId != actor.OrganizationId || device.Status != DeviceStatuses.Approved || !holds)
             {
                 throw Invalid("A key is wrapped only to approved devices of its person.");
             }

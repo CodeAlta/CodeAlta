@@ -363,6 +363,25 @@ public static class FleetKeyWrap
     /// <exception cref="ArgumentNullException">An argument is <see langword="null"/>.</exception>
     /// <exception cref="InvalidDataException">The copy is not for this device, this key, this epoch or this space, its signer is not a controller device of this device's person, it uses an unknown algorithm, or it does not open.</exception>
     public static FleetMetadataKey Unwrap(string wrapped, string keyId, int epoch, string? space, DeviceIdentity identity, FleetDeviceListState list)
+        => Unwrap(wrapped, keyId, epoch, space, identity, list, null);
+
+    /// <summary>
+    /// Opens a copy of a key wrapped to this device, as <see cref="Unwrap(string, string, int, string?, DeviceIdentity, FleetDeviceListState)"/>
+    /// does, with the person of this device the signed access document names once this machine was given to another person
+    /// (<see cref="FleetAccessState.PersonOf"/>): the copies its new owner's devices give open, those of the person the device
+    /// list names no more.
+    /// </summary>
+    /// <param name="wrapped">The wrapped key.</param>
+    /// <param name="keyId">The id the key must have.</param>
+    /// <param name="epoch">The epoch the server lists the key at, which the grant must name.</param>
+    /// <param name="space">The space the server lists the key for, which the grant must name; null for a key of the person.</param>
+    /// <param name="identity">The key of this device.</param>
+    /// <param name="list">The device list as this device verified it.</param>
+    /// <param name="access">The access document as this device verified it; null for none.</param>
+    /// <returns>The key, with its grant.</returns>
+    /// <exception cref="ArgumentNullException">An argument but <paramref name="space"/> or <paramref name="access"/> is <see langword="null"/>.</exception>
+    /// <exception cref="InvalidDataException">The copy is not for this device, this key, this epoch or this space, its signer is not a controller device of this device's person, it uses an unknown algorithm, or it does not open.</exception>
+    public static FleetMetadataKey Unwrap(string wrapped, string keyId, int epoch, string? space, DeviceIdentity identity, FleetDeviceListState list, FleetAccessState? access)
     {
         ArgumentNullException.ThrowIfNull(wrapped);
         ArgumentNullException.ThrowIfNull(keyId);
@@ -378,7 +397,7 @@ public static class FleetKeyWrap
             var grant = ReadGrant(root) ?? throw new InvalidDataException("The wrapped key carries no signed grant.");
             if (grant.Epoch != epoch) throw new InvalidDataException("The wrapped key was given for another epoch than the one the server lists.");
             if (!string.Equals(grant.SpaceId, space, StringComparison.Ordinal)) throw new InvalidDataException("The wrapped key was given for another space than the one the server lists.");
-            CheckGrant(root, keyId, grant, identity.DeviceId, list);
+            CheckGrant(root, keyId, grant, identity.DeviceId, list, access);
             var epk = FleetSealedJson.Bytes(root, "epk");
             var nonce = FleetSealedJson.Bytes(root, "iv");
             var sealedBytes = FleetSealedJson.Bytes(root, "ct");
@@ -425,6 +444,22 @@ public static class FleetKeyWrap
     /// <returns>Whether the grant holds.</returns>
     /// <exception cref="ArgumentNullException">An argument but <paramref name="space"/> is null.</exception>
     public static bool IsGranted(string wrapped, string keyId, int epoch, string? space, string deviceId, FleetDeviceListState list)
+        => IsGranted(wrapped, keyId, epoch, space, deviceId, list, null);
+
+    /// <summary>
+    /// Tells whether a copy of a key was given to a device, as <see cref="IsGranted(string, string, int, string?, string, FleetDeviceListState)"/>
+    /// does, with the person of that device the signed access document names once the machine was given to another person.
+    /// </summary>
+    /// <param name="wrapped">The wrapped key.</param>
+    /// <param name="keyId">The id the key must have.</param>
+    /// <param name="epoch">The epoch the grant must name.</param>
+    /// <param name="space">The space the grant must name; null for a key of the person.</param>
+    /// <param name="deviceId">The device the copy must be for.</param>
+    /// <param name="list">The device list as this device verified it.</param>
+    /// <param name="access">The access document as this device verified it; null for none.</param>
+    /// <returns>Whether the grant holds.</returns>
+    /// <exception cref="ArgumentNullException">An argument but <paramref name="space"/> or <paramref name="access"/> is null.</exception>
+    public static bool IsGranted(string wrapped, string keyId, int epoch, string? space, string deviceId, FleetDeviceListState list, FleetAccessState? access)
     {
         ArgumentNullException.ThrowIfNull(wrapped);
         ArgumentNullException.ThrowIfNull(keyId);
@@ -436,7 +471,7 @@ public static class FleetKeyWrap
             var root = document.RootElement;
             if (FleetSealedJson.Text(root, "alg") != Algorithm || FleetSealedJson.Text(root, "kid") != keyId || FleetSealedJson.Text(root, "to") != deviceId) return false;
             if (ReadGrant(root) is not { } grant || grant.Epoch != epoch || !string.Equals(grant.SpaceId, space, StringComparison.Ordinal)) return false;
-            CheckGrant(root, keyId, grant, deviceId, list);
+            CheckGrant(root, keyId, grant, deviceId, list, access);
             return true;
         }
         catch (Exception exception) when (exception is JsonException or InvalidDataException or CryptographicException or FormatException)
@@ -455,10 +490,14 @@ public static class FleetKeyWrap
                 ? new FleetKeyGrant(organization, person, (int)epoch, sequence) { SpaceId = space }
                 : null;
 
-    // The signer vouches for the copy: a controller device of the verified list, of this device's person, for this list.
-    private static void CheckGrant(JsonElement root, string keyId, FleetKeyGrant grant, string deviceId, FleetDeviceListState list)
+    // The signer vouches for the copy: a controller device of the verified list, of this device's person, for this list. The
+    // person of a machine given to another person is the one the signed access document names, never the list's any more. A
+    // machine of a team has no person of its own: it takes the keys of its maintainers and members, and the values of its
+    // maintainers only, as the document says, never those of the person the device list names by that alone.
+    private static void CheckGrant(JsonElement root, string keyId, FleetKeyGrant grant, string deviceId, FleetDeviceListState list, FleetAccessState? access)
     {
-        if (!list.Members.TryGetValue(deviceId, out var self)) throw new InvalidDataException("This device is not a member of the device list it verified.");
+        if (!list.Members.TryGetValue(deviceId, out var member)) throw new InvalidDataException("This device is not a member of the device list it verified.");
+        var self = member with { OwnerId = FleetAccessState.PersonOf(access, member) };
         // A controller device gives keys; the recovery key gives the copies it holds to the device it signed in. The signer is
         // read from the history of the list: one that left later still vouches for the copies it gave by the list of an entry
         // before its removal (they stay readable, and are stale: they seal nothing new), never for a list from its removal on.
@@ -468,10 +507,17 @@ public static class FleetKeyWrap
             throw new InvalidDataException("The wrapped key was not given by a controller device of the device list.");
         }
 
+        if (member.Kind == FleetDeviceKinds.Node && access?.TeamOf(deviceId) is not null)
+        {
+            if (signer.OwnerId is null || signer.OwnerId != grant.PersonId) throw new InvalidDataException("The wrapped key was given for another person.");
+            var holds = FleetSecretSealing.IsValueScope(grant.SpaceId) ? FleetAccessState.HoldsValuesOf(access, member, grant.PersonId)
+                : FleetAccessState.HoldsKeysOf(access, member, grant.PersonId);
+            if (!holds) throw new InvalidDataException("The wrapped key was given by a person the team of this machine gives no such role.");
+        }
         // The first device names its person by the first entry it signs: until then, it gives keys to itself only.
-        if (signer.DeviceId != deviceId && (signer.OwnerId is null || signer.OwnerId != self.OwnerId))
+        else if (signer.DeviceId != deviceId && (signer.OwnerId is null || signer.OwnerId != self.OwnerId))
             throw new InvalidDataException("The wrapped key was given by a controller device of another person.");
-        if (self.OwnerId is not null && self.OwnerId != grant.PersonId || signer.OwnerId is not null && signer.OwnerId != grant.PersonId)
+        else if (self.OwnerId is not null && self.OwnerId != grant.PersonId || signer.OwnerId is not null && signer.OwnerId != grant.PersonId)
             throw new InvalidDataException("The wrapped key was given for another person.");
         if (list.OrganizationId is not null && list.OrganizationId != grant.OrganizationId) throw new InvalidDataException("The wrapped key was given for another organization.");
         if (grant.DeviceListSequence > list.Sequence) throw new InvalidDataException("The wrapped key names a device list newer than the one this device verified.");

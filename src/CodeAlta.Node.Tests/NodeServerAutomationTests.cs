@@ -389,6 +389,19 @@ public sealed class NodeServerAutomationTests
         var (_, byMax) = await automations.RunFromServerAsync("link-1", list, "org", Ask(max), token);
         StringAssert.Contains(byMax, "another person", "a member does not run what the team runs");
 
+        // Granted automation.run, as the signed access document names him: the machine takes his request; once the grant ends, no more.
+        var granted = access with
+        {
+            Runners = FleetAccessState.ApproversOf([new FleetAccessApprovers(Id, ["p3"])]),
+            RunnersUntil = FleetAccessState.UntilOf([new FleetAccessApprovers(Id, ["p3"]) { Until = new Dictionary<string, DateTimeOffset> { ["p3"] = Noon.AddHours(1) } }]),
+        };
+        automations.ServerAccess = _ => granted;
+        var (_, byGrant) = await automations.RunFromServerAsync("link-1", list, "org", Ask(max), token);
+        Assert.IsFalse(byGrant?.Contains("another person", StringComparison.Ordinal) == true, byGrant);
+        automations.ServerAccess = _ => granted with { RunnersUntil = FleetAccessState.UntilOf([new FleetAccessApprovers(Id, ["p3"]) { Until = new Dictionary<string, DateTimeOffset> { ["p3"] = Noon.AddHours(-1) } }]) };
+        StringAssert.Contains((await automations.RunFromServerAsync("link-1", list, "org", Ask(max), token)).Refused, "another person", "a grant that ended runs nothing");
+        automations.ServerAccess = _ => access;
+
         // Ada opens it in her editor and saves it: her newer version, sealed for the team, is taken; a member's is not.
         FleetSignedAutomationVersion Edited(DeviceIdentity device, long number, string name) => FleetAutomationSigning.Sign(device, new FleetAutomationVersion(
             FleetAutomationVersion.CurrentVersion, "org", Id, number, self.DeviceId, false, true, ["hourly"], null, null,

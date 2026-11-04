@@ -204,7 +204,8 @@ public static class FleetAutomationSigning
 
     /// <summary>
     /// Opens what a version does, on a device it was sealed for. A personal version opens with a copy of the key given by a
-    /// controller device of this device's person; a version of a team, with a copy given by a maintainer of that team as
+    /// controller device of this device's person (the owner <paramref name="access"/> names once the machine was given to another
+    /// person); a version of a team, with a copy given by a maintainer of that team as
     /// <paramref name="access"/> says. The content must be the one of this automation, number and machine.
     /// </summary>
     /// <param name="sealedText">The sealed text of the version.</param>
@@ -278,7 +279,8 @@ public static class FleetAutomationSigning
             }
             else
             {
-                key = FleetKeyWrap.Unwrap(wrapped, keyId, 1, identity, list);
+                // A personal version: on a machine given to another person, its new owner's devices give the key.
+                key = FleetKeyWrap.Unwrap(wrapped, keyId, 1, null, identity, list, access);
             }
 
             var plain = new byte[sealedBytes.Length - TagLength];

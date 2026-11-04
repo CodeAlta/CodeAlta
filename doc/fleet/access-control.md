@@ -140,11 +140,17 @@ version. The server keeps a model (roles, teams, owners) that answers the REST A
 version; a signer's console says what changes as it reads it and signs it, and changes made by a maintainer who is not a
 signer wait for one. On a team machine each member sees and drives only the sessions they started there, and its
 maintainers manage it; a suspended person's devices are refused, their sessions there stopped and their automations
-refused. The document also names, per automation, who answers its approvals besides the person who placed it (the
+refused. A team machine has no person of its own, whoever enrolled it: its budgets, environments, values and hooks are
+those of its maintainers, and its maintainers and members give it the metadata keys of their spaces, with which it seals
+the sessions each started there, and nothing for a session without such a person. The person the device list names gets
+nothing of it without a role in the team, and one who leaves the team (signed) seals from then on with a new epoch the
+machine does not hold. The document also names, per automation, who answers its approvals besides the person who placed it (the
 members of the team that owns it, those granted `automation.approve`, each grant with an end date named with its end):
 a machine takes a run over for them, until that end by its own clock, or for a member of its team when it is a team
-machine, and for nobody else than its owner otherwise. A change of approvers reaches machines only once a signer signs
-the next version.
+machine, and for nobody else than its owner otherwise. It names in the same way who runs an automation by hand besides
+who placed it and the maintainers of its team: those granted `automation.run`; a member of a team runs its
+automations by such a grant only. A change of approvers or runners reaches machines only once a signer signs the next
+version.
 
 A request to run something on a node is valid only when signed by an entitled person's device: a start or a prompt
 directly; an automation's run through the version of the automation an editor signed, the trigger being only the
@@ -162,7 +168,10 @@ event that the signed definition accepts. The first start by a new person asks t
   who enrolled it: the machine takes its owner from the signed document (whose devices manage it, whose automations it runs),
   never from the server's word. Once a signed version gives a machine another owner, the machine revokes the devices paired
   with it under the former owner, except the new owner's own, and forgets the people it named: its new owner pairs and names
-  again.
+  again. Everything the machine takes from a person follows that owner too: budgets, environments and values, hooks, the
+  metadata keys it seals with, and the grants of its sessions, signed by the new owner's devices only. The former owner's
+  devices stop giving it keys and values, and seal from then on with a new epoch the machine does not hold. A machine given
+  to the organization has no person for owner: its owners and the admins who sign manage it, each on their own sessions.
 - **A person leaves** (or is deprovisioned by SCIM): their devices and delegations are revoked; what they owned in team
   or organization scopes (automations, workflow scripts, organization providers) goes to the scope's team or to a named
   successor, paused until that owner resumes it; their personal machines leave the fleet; what they shared stays
@@ -187,7 +196,9 @@ In a Private space, access to sealed data is a key operation, not only a flag:
 
 - granting a person or a team `view-content` on sealed data wraps exactly the keys of what is granted to their devices
   (a session's replica key, a snapshot's key, a channel's key), never a key that opens more
-  ([keys](security-and-privacy.md#keys)); revoking it starts a new key epoch for what they held;
+  ([keys](security-and-privacy.md#keys)); revoking it starts a new key epoch for what they held. In 4.0 a grant of a
+  session's content wraps the key of its title only, and the grantee reads its conversation live through the machine that
+  holds it, which checks the grant in the signed access document (its `readers`); replicas of a session come later;
 - the server cannot do either: a device that holds the keys does it (the console, when an authorized person approves);
   a grant made while no such device is online stays **pending** and says so.
 

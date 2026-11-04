@@ -76,13 +76,28 @@ public static class FleetSecretSealing
     /// <returns>The devices, the controller devices first.</returns>
     /// <exception cref="ArgumentNullException">An argument is null.</exception>
     public static IReadOnlyList<FleetDeviceListMember> Recipients(FleetDeviceListState list, string personId, IEnumerable<string> machines)
+        => Recipients(list, null, personId, machines);
+
+    /// <summary>
+    /// Gives the devices a value of a person goes to, as <see cref="Recipients(FleetDeviceListState, string, IEnumerable{string})"/>
+    /// does, with the machines the signed access document gives that person (<see cref="FleetAccessState.PersonOf"/>) and the
+    /// machines of the teams they maintain (<see cref="FleetAccessState.HoldsValuesOf"/>), and without the machines it gives
+    /// another person or a team they do not maintain.
+    /// </summary>
+    /// <param name="list">The device list as the signer verified it.</param>
+    /// <param name="access">The access document as the signer verified it; null for none.</param>
+    /// <param name="personId">The person.</param>
+    /// <param name="machines">The machines allowed to use the value.</param>
+    /// <returns>The devices, the controller devices first.</returns>
+    /// <exception cref="ArgumentNullException">An argument but <paramref name="access"/> is null.</exception>
+    public static IReadOnlyList<FleetDeviceListMember> Recipients(FleetDeviceListState list, FleetAccessState? access, string personId, IEnumerable<string> machines)
     {
         ArgumentNullException.ThrowIfNull(list);
         ArgumentNullException.ThrowIfNull(personId);
         ArgumentNullException.ThrowIfNull(machines);
         var wanted = machines.ToHashSet(StringComparer.Ordinal);
         return [.. list.Members.Values
-            .Where(member => !list.Removed.Contains(member.DeviceId) && member.OwnerId == personId
+            .Where(member => !list.Removed.Contains(member.DeviceId) && FleetAccessState.HoldsValuesOf(access, member, personId)
                 && (member.Kind == FleetDeviceKinds.Controller || wanted.Contains(member.DeviceId) && member.Kind != FleetDeviceKinds.Recovery))
             .OrderBy(static member => member.Kind == FleetDeviceKinds.Controller ? 0 : 1).ThenBy(static member => member.DeviceId, StringComparer.Ordinal)
             .Take(MaxRecipients)];
@@ -97,7 +112,19 @@ public static class FleetSecretSealing
     /// <param name="list">The device list as this device verified it.</param>
     /// <returns>The device ids; none when this device holds no copy or the server gives no copies of the holders.</returns>
     /// <exception cref="ArgumentNullException">An argument is null.</exception>
-    public static IReadOnlyList<string> GrantedHolders(FleetSecretDto secret, FleetDeviceListState list)
+    public static IReadOnlyList<string> GrantedHolders(FleetSecretDto secret, FleetDeviceListState list) => GrantedHolders(secret, list, null);
+
+    /// <summary>
+    /// Gives the holders of the current version of a value that a controller device of the person gave it to, as
+    /// <see cref="GrantedHolders(FleetSecretDto, FleetDeviceListState)"/> does, a machine being of the person the signed access
+    /// document names once it was given to another person.
+    /// </summary>
+    /// <param name="secret">The value as the server lists it for a controller device, with the copies of its holders.</param>
+    /// <param name="list">The device list as this device verified it.</param>
+    /// <param name="access">The access document as this device verified it; null for none.</param>
+    /// <returns>The device ids; none when this device holds no copy or the server gives no copies of the holders.</returns>
+    /// <exception cref="ArgumentNullException">An argument but <paramref name="access"/> is null.</exception>
+    public static IReadOnlyList<string> GrantedHolders(FleetSecretDto secret, FleetDeviceListState list, FleetAccessState? access)
     {
         ArgumentNullException.ThrowIfNull(secret);
         ArgumentNullException.ThrowIfNull(list);
@@ -111,7 +138,7 @@ public static class FleetSecretSealing
                 using var document = JsonDocument.Parse(sealedCopy);
                 var root = document.RootElement;
                 if (FleetSealedJson.Text(root, "alg") == Algorithm && FleetSealedJson.Text(root, "kid") == keyId && FleetSealedJson.Text(root, "wrap") is { } wrapped
-                    && FleetKeyWrap.IsGranted(wrapped, keyId, secret.Version, GrantScope(secret.Id), deviceId, list))
+                    && FleetKeyWrap.IsGranted(wrapped, keyId, secret.Version, GrantScope(secret.Id), deviceId, list, access))
                     granted.Add(deviceId);
             }
             catch (JsonException)
@@ -141,7 +168,7 @@ public static class FleetSecretSealing
     /// <summary>Seals a value for devices of the list, one copy each.</summary>
     /// <param name="value">The value.</param>
     /// <param name="binding">What the copies are bound to.</param>
-    /// <param name="recipients">The devices (<see cref="Recipients"/>), which must be of the signer's person.</param>
+    /// <param name="recipients">The devices (<see cref="Recipients(FleetDeviceListState, string, IEnumerable{string})"/>), which must be of the signer's person.</param>
     /// <param name="list">The device list as the signer verified it.</param>
     /// <param name="signer">The key of the controller device that seals and signs the grants.</param>
     /// <returns>The copies.</returns>
@@ -149,6 +176,24 @@ public static class FleetSecretSealing
     /// <exception cref="ArgumentException">The value is empty or too long, the signer is not a controller device of the list with its person, a recipient is of another person, or the list names no organization.</exception>
     public static IReadOnlyList<FleetSecretCopyDto> Seal(string value, FleetSecretBinding binding, IReadOnlyList<FleetDeviceListMember> recipients, FleetDeviceListState list,
         DeviceIdentity signer)
+        => Seal(value, binding, recipients, list, null, signer);
+
+    /// <summary>
+    /// Seals a value for devices of the list, one copy each, as
+    /// <see cref="Seal(string, FleetSecretBinding, IReadOnlyList{FleetDeviceListMember}, FleetDeviceListState, DeviceIdentity)"/> does, a
+    /// machine being of the person the signed access document names once it was given to another person.
+    /// </summary>
+    /// <param name="value">The value.</param>
+    /// <param name="binding">What the copies are bound to.</param>
+    /// <param name="recipients">The devices (<see cref="Recipients(FleetDeviceListState, FleetAccessState?, string, IEnumerable{string})"/>), which must be of the signer's person.</param>
+    /// <param name="list">The device list as the signer verified it.</param>
+    /// <param name="access">The access document as the signer verified it; null for none.</param>
+    /// <param name="signer">The key of the controller device that seals and signs the grants.</param>
+    /// <returns>The copies.</returns>
+    /// <exception cref="ArgumentNullException">An argument but <paramref name="access"/> is null.</exception>
+    /// <exception cref="ArgumentException">The value is empty or too long, the signer is not a controller device of the list with its person, a recipient is of another person, or the list names no organization.</exception>
+    public static IReadOnlyList<FleetSecretCopyDto> Seal(string value, FleetSecretBinding binding, IReadOnlyList<FleetDeviceListMember> recipients, FleetDeviceListState list,
+        FleetAccessState? access, DeviceIdentity signer)
     {
         ArgumentNullException.ThrowIfNull(value);
         ArgumentNullException.ThrowIfNull(binding);
@@ -160,7 +205,7 @@ public static class FleetSecretSealing
         if (!list.Members.TryGetValue(signer.DeviceId, out var self) || self.Kind != FleetDeviceKinds.Controller || self.OwnerId is not { } person)
             throw new ArgumentException("Only a controller device of the list, with its person, seals a value.", nameof(signer));
         if (list.OrganizationId is not { } organization) throw new ArgumentException("The list names no organization yet.", nameof(list));
-        if (recipients.Count is 0 or > MaxRecipients || recipients.Any(recipient => recipient.OwnerId != person || list.Removed.Contains(recipient.DeviceId)))
+        if (recipients.Count is 0 or > MaxRecipients || recipients.Any(recipient => !FleetAccessState.HoldsValuesOf(access, recipient, person) || list.Removed.Contains(recipient.DeviceId)))
             throw new ArgumentException($"A value goes to 1 to {MaxRecipients} devices of the signer's person that the list holds.", nameof(recipients));
         var key = FleetMetadataKey.Generate(new FleetKeyGrant(organization, person, binding.Version, Math.Max(1, list.Sequence)) { SpaceId = GrantScope(binding.SecretId) });
         var plain = Encoding.UTF8.GetBytes(value);
@@ -196,9 +241,27 @@ public static class FleetSecretSealing
     /// <exception cref="ArgumentNullException">An argument but <paramref name="copy"/> is null.</exception>
     public static bool TryOpen(string? copy, FleetSecretBinding binding, DeviceIdentity identity, FleetDeviceListState list,
         [NotNullWhen(true)] out string? value, [NotNullWhen(false)] out string? reason)
+        => TryOpen(copy, binding, identity, list, null, out value, out reason);
+
+    /// <summary>
+    /// Opens the copy of a value sealed for this device, as <see cref="TryOpen(string?, FleetSecretBinding, DeviceIdentity, FleetDeviceListState, out string?, out string?)"/>
+    /// does, with the person of this machine the signed access document names once it was given to another person: the values
+    /// of its new owner open, those of the person the device list names no more.
+    /// </summary>
+    /// <param name="copy">The sealed copy.</param>
+    /// <param name="binding">What the server lists the value as.</param>
+    /// <param name="identity">The key of this device.</param>
+    /// <param name="list">The device list as this device verified it.</param>
+    /// <param name="access">The access document as this device verified it; null for none.</param>
+    /// <param name="value">The value, when it opens.</param>
+    /// <param name="reason">Why it does not open, or null.</param>
+    /// <returns>Whether it opened.</returns>
+    /// <exception cref="ArgumentNullException">An argument but <paramref name="copy"/> or <paramref name="access"/> is null.</exception>
+    public static bool TryOpen(string? copy, FleetSecretBinding binding, DeviceIdentity identity, FleetDeviceListState list, FleetAccessState? access,
+        [NotNullWhen(true)] out string? value, [NotNullWhen(false)] out string? reason)
     {
         value = null;
-        if (!TryOpenKey(copy, binding, identity, list, out var key, out var parts, out reason)) return false;
+        if (!TryOpenKey(copy, binding, identity, list, access, out var key, out var parts, out reason)) return false;
         value = Decrypt(key, parts, binding, keep: true);
         if (value is not null) return true;
         reason = "the value does not open for this name, scope and version";
@@ -240,6 +303,25 @@ public static class FleetSecretSealing
     /// <exception cref="ArgumentException">This device is not a controller device of the list, or the recipient is of another person or removed.</exception>
     /// <exception cref="InvalidDataException">The copy of this device does not open.</exception>
     public static FleetSecretCopyDto Regrant(string own, FleetSecretBinding binding, FleetDeviceListMember recipient, DeviceIdentity identity, FleetDeviceListState list)
+        => Regrant(own, binding, recipient, identity, list, null);
+
+    /// <summary>
+    /// Gives a device allowed later its copy of the current version, as
+    /// <see cref="Regrant(string, FleetSecretBinding, FleetDeviceListMember, DeviceIdentity, FleetDeviceListState)"/> does, a machine
+    /// being of the person the signed access document names once it was given to another person.
+    /// </summary>
+    /// <param name="own">The copy of this device.</param>
+    /// <param name="binding">What the server lists the value as.</param>
+    /// <param name="recipient">The device that gets a copy, of the same person.</param>
+    /// <param name="identity">The key of this controller device.</param>
+    /// <param name="list">The device list as this device verified it.</param>
+    /// <param name="access">The access document as this device verified it; null for none.</param>
+    /// <returns>The copy of the recipient.</returns>
+    /// <exception cref="ArgumentNullException">An argument but <paramref name="access"/> is null.</exception>
+    /// <exception cref="ArgumentException">This device is not a controller device of the list, or the recipient is of another person or removed.</exception>
+    /// <exception cref="InvalidDataException">The copy of this device does not open.</exception>
+    public static FleetSecretCopyDto Regrant(string own, FleetSecretBinding binding, FleetDeviceListMember recipient, DeviceIdentity identity, FleetDeviceListState list,
+        FleetAccessState? access)
     {
         ArgumentNullException.ThrowIfNull(own);
         ArgumentNullException.ThrowIfNull(binding);
@@ -248,9 +330,9 @@ public static class FleetSecretSealing
         ArgumentNullException.ThrowIfNull(list);
         if (!list.Members.TryGetValue(identity.DeviceId, out var self) || self.Kind != FleetDeviceKinds.Controller || self.OwnerId is null)
             throw new ArgumentException("Only a controller device of the list gives a copy.", nameof(identity));
-        if (recipient.OwnerId != self.OwnerId || list.Removed.Contains(recipient.DeviceId))
+        if (!FleetAccessState.HoldsValuesOf(access, recipient, self.OwnerId) || list.Removed.Contains(recipient.DeviceId))
             throw new ArgumentException("A copy goes to a device of the same person that the list holds.", nameof(recipient));
-        if (!TryOpenKey(own, binding, identity, list, out var key, out var parts, out var reason)) throw new InvalidDataException($"The copy of this device does not open: {reason}.");
+        if (!TryOpenKey(own, binding, identity, list, null, out var key, out var parts, out var reason)) throw new InvalidDataException($"The copy of this device does not open: {reason}.");
         // The value is checked before it is given: a copy that does not open for this binding is never passed on.
         if (Decrypt(key, parts, binding, keep: false) is null) throw new InvalidDataException("The copy of this device does not open for this name, scope and version.");
         var grant = key.Grant! with { DeviceListSequence = Math.Max(1, list.Sequence) };
@@ -258,7 +340,7 @@ public static class FleetSecretSealing
             FleetKeyWrap.Wrap(key, recipient.Key, grant, identity)));
     }
 
-    private static bool TryOpenKey(string? copy, FleetSecretBinding binding, DeviceIdentity identity, FleetDeviceListState list,
+    private static bool TryOpenKey(string? copy, FleetSecretBinding binding, DeviceIdentity identity, FleetDeviceListState list, FleetAccessState? access,
         [NotNullWhen(true)] out FleetMetadataKey? key, out (byte[] Nonce, byte[] Sealed) parts, [NotNullWhen(false)] out string? reason)
     {
         ArgumentNullException.ThrowIfNull(binding);
@@ -286,7 +368,7 @@ public static class FleetSecretSealing
                 return false;
             }
 
-            key = FleetKeyWrap.Unwrap(wrapped, keyId, binding.Version, GrantScope(binding.SecretId), identity, list);
+            key = FleetKeyWrap.Unwrap(wrapped, keyId, binding.Version, GrantScope(binding.SecretId), identity, list, access);
             parts = (nonce, sealedBytes);
             reason = null;
             return true;
@@ -315,6 +397,9 @@ public static class FleetSecretSealing
 
     // The grant of a key names the value it is for: a copy of one value never opens as a copy of another.
     private static string GrantScope(string secretId) => GrantPrefix + secretId;
+
+    // Whether the scope a grant names is the one of a value, which a team machine takes from its maintainers only.
+    internal static bool IsValueScope(string? scope) => scope is not null && scope.StartsWith(GrantPrefix, StringComparison.Ordinal);
 
     private static byte[] Associated(string keyId, FleetSecretBinding binding)
         => Encoding.UTF8.GetBytes(string.Create(CultureInfo.InvariantCulture,
