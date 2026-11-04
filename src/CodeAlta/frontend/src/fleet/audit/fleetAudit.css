@@ -1,0 +1,48 @@
+/* Settings > Fleet > Audit: the timeline of the audit log, by day, its filters, the check of its chain and its exports. */
+.fleet-audit-card { container-type: inline-size; display: flex; flex-direction: column; gap: 10px; }
+.fleet-audit-head { flex-wrap: wrap; gap: 8px; }
+.fleet-audit-actions { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-left: auto; }
+.fleet-audit-hint { margin: 0; font-size: 12px; }
+.fleet-audit-check code, .fleet-audit-details code { font-family: var(--bp-typography-family-mono); font-size: 11px; }
+.fleet-audit-exported { display: flex; align-items: center; gap: 8px; }
+.fleet-audit-exported-text { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.fleet-audit-filters { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.fleet-audit-search { flex: 1 1 14rem; min-width: 10rem; }
+.fleet-audit-days { display: inline-flex; align-items: center; gap: 4px; }
+.fleet-audit-days input { width: 9.5rem; }
+.fleet-audit-empty { margin: 4px 0; }
+.fleet-audit-days-list, .fleet-audit-list { list-style: none; margin: 0; padding: 0; }
+.fleet-audit-days-list { display: flex; flex-direction: column; gap: 12px; }
+.fleet-audit-day-title { margin: 0 0 4px; font-size: 12px; font-weight: 600; color: var(--muted); text-transform: none; letter-spacing: 0.01em; }
+.fleet-audit-list { display: flex; flex-direction: column; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); overflow: hidden; }
+.fleet-audit-row + .fleet-audit-row { border-top: 1px solid var(--line); }
+.fleet-audit-summary { display: grid; grid-template-columns: 6rem 10px minmax(0, 3fr) minmax(0, 2fr); align-items: center; gap: 10px; width: 100%; margin: 0;
+  padding: 6px 10px; border: 0; border-radius: 0; box-shadow: none; appearance: none; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.fleet-audit-summary:hover { background: color-mix(in srgb, var(--line) 35%, transparent); }
+.fleet-audit-summary:focus-visible { outline: 2px solid var(--accent, #4c90f0); outline-offset: -2px; }
+.fleet-audit-time { font-family: var(--bp-typography-family-mono); font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.fleet-audit-mark { width: 8px; height: 8px; border-radius: 50%; background: var(--bp-intent-success-rest, #238551); }
+.fleet-audit-mark.is-refused { background: var(--bp-intent-danger-rest, #cd4246); }
+.fleet-audit-what { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+.fleet-audit-label { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fleet-audit-code { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; color: var(--muted); background: none; box-shadow: none;
+  padding: 0; }
+.fleet-audit-who { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
+.fleet-audit-result { flex: 0 0 auto; max-width: 12rem; overflow: hidden; text-overflow: ellipsis; }
+.fleet-audit-details { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 4px 12px; margin: 0; padding: 4px 10px 10px calc(6rem + 30px); font-size: 12px; }
+.fleet-audit-details dt { color: var(--muted); }
+.fleet-audit-details dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+.fleet-audit-json { margin: 0; padding: 6px 8px; max-height: 16rem; overflow: auto; font-size: 11px; border-radius: 4px; background: color-mix(in srgb, var(--line) 30%, transparent); }
+.fleet-audit-older { align-self: center; }
+.fleet-audit-closed { padding: 24px 0; }
+@container (max-width: 600px) {
+  .fleet-audit-summary { grid-template-columns: 10px minmax(0, 1fr) max-content; grid-template-rows: auto auto; row-gap: 2px; }
+  .fleet-audit-mark { grid-column: 1; grid-row: 1; }
+  .fleet-audit-what { grid-column: 2; grid-row: 1; }
+  .fleet-audit-code { display: none; }
+  .fleet-audit-time { grid-column: 3; grid-row: 1; justify-self: end; }
+  .fleet-audit-who { grid-column: 2 / -1; grid-row: 2; }
+  .fleet-audit-details { padding-left: 30px; grid-template-columns: minmax(0, 1fr); }
+  .fleet-audit-details dt { margin-top: 4px; }
+  .fleet-audit-actions { margin-left: 0; }
+}

@@ -1,0 +1,184 @@
+// What Settings > Fleet > Audit shows of the audit log of a server, without the DOM: the kinds of actions a person filters by,
+// the periods, the days the timeline is grouped by, the words of the actions, and what a result means.
+import type { FleetAuditFilters, FleetAuditItem } from "#neoastra";
+import type { MessageKey } from "../../localization";
+
+/** A kind of action the page filters by: the prefixes of the actions it holds. */
+export type AuditCategory = Readonly<{ id: string; label: MessageKey; actions: readonly string[] }>;
+
+/** The kinds of actions, in the order of the filter; the first one holds everything. */
+export const auditCategories: readonly AuditCategory[] = Object.freeze([
+  { id: "all", label: "Everything", actions: [] },
+  { id: "sign-in", label: "Sign-in", actions: ["sign_in.", "passkey.", "server.setup"] },
+  { id: "devices", label: "Devices and machines", actions: ["device.", "enrollment_token.", "recovery_key.", "metadata_key.", "relay."] },
+  { id: "access", label: "People and access", actions: ["person.", "team.", "grant.", "service_identity.", "owner.", "transfer.", "access.", "access_document."] },
+  { id: "policies", label: "Policies and the kill switch", actions: ["policy.", "telemetry.", "update.policy."] },
+  { id: "automations", label: "Automations", actions: ["automation.", "hook.", "environment."] },
+  { id: "secrets", label: "Secrets", actions: ["secret."] },
+  { id: "budgets", label: "Budgets", actions: ["budget."] },
+  { id: "updates", label: "Updates", actions: ["update.campaign."] },
+  { id: "sessions", label: "Sessions and facts", actions: ["session.", "statistics.", "facts."] },
+  { id: "audit", label: "Exports of the log", actions: ["audit."] },
+]);
+
+/** The periods of the filter. */
+export type AuditPeriod = "any" | "day" | "week" | "month" | "custom";
+
+/** The results of the filter. */
+export type AuditOutcome = "any" | "success" | "failure";
+
+/** What the page filters by, as the person sets it. */
+export type AuditFilterState = Readonly<{ category: string; person: string; outcome: AuditOutcome; period: AuditPeriod; from: string; to: string; text: string }>;
+
+/** No filter: the whole log. */
+export const noFilter: AuditFilterState = Object.freeze({ category: "all", person: "", outcome: "any", period: "any", from: "", to: "", text: "" });
+
+/** Whether a filter narrows the log. */
+export function isFiltered(state: AuditFilterState): boolean {
+  return state.category !== "all" || state.person !== "" || state.outcome !== "any" || state.period !== "any" || state.text.trim() !== "";
+}
+
+const day = 24 * 60 * 60 * 1000;
+
+/**
+ * The filters a request carries for what the person set, at a time: a period counts back from now; a custom one runs from
+ * the start of its first day to the end of its last, in the time zone of this computer. Null when a custom day does not read.
+ */
+export function toFilters(state: AuditFilterState, now: Date): FleetAuditFilters | null {
+  const category = auditCategories.find(item => item.id === state.category);
+  let from: string | null = null;
+  let to: string | null = null;
+  if (state.period === "day" || state.period === "week" || state.period === "month") {
+    const back = state.period === "day" ? day : state.period === "week" ? 7 * day : 30 * day;
+    from = new Date(now.getTime() - back).toISOString();
+  } else if (state.period === "custom") {
+    const start = state.from ? localDay(state.from) : null;
+    const end = state.to ? localDay(state.to) : null;
+    if (state.from && !start || state.to && !end) return null;
+    if (start && end && end.getTime() < start.getTime()) return null;
+    from = start ? start.toISOString() : null;
+    to = end ? new Date(end.getTime() + day).toISOString() : null;
+  }
+
+  const text = state.text.trim();
+  return {
+    actions: category && category.actions.length > 0 ? [...category.actions] : null,
+    personId: state.person || null, deviceId: null, result: state.outcome === "any" ? null : state.outcome, target: null, address: null, from, to,
+    text: text.length > 0 ? text.slice(0, 256) : null,
+  };
+}
+
+// A day typed as yyyy-mm-dd, at midnight here; null when it is not a day.
+function localDay(text: string): Date | null {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(text);
+  if (!match) return null;
+  const date = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
+  return date.getFullYear() === Number(match[1]) && date.getMonth() === Number(match[2]) - 1 && date.getDate() === Number(match[3]) ? date : null;
+}
+
+/** A day of the timeline and its records, newest first. */
+export type AuditDay = Readonly<{ key: string; date: Date; items: readonly FleetAuditItem[] }>;
+
+/** Groups records, newest first, by the day they were recorded here. */
+export function groupByDay(items: readonly FleetAuditItem[]): AuditDay[] {
+  const days: { key: string; date: Date; items: FleetAuditItem[] }[] = [];
+  for (const item of items) {
+    const time = new Date(item.recordedAt);
+    const key = `${time.getFullYear()}-${time.getMonth() + 1}-${time.getDate()}`;
+    const last = days[days.length - 1];
+    if (last && last.key === key) last.items.push(item);
+    else days.push({ key, date: new Date(time.getFullYear(), time.getMonth(), time.getDate()), items: [item] });
+  }
+
+  return days;
+}
+
+/** How a day is named: today, yesterday, or its date. */
+export function dayName(date: Date, now: Date): "today" | "yesterday" | "date" {
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  const time = date.getTime();
+  return time === today ? "today" : time === today - day ? "yesterday" : "date";
+}
+
+/** Whether a record tells of an action that succeeded. */
+export function succeeded(item: Pick<FleetAuditItem, "result">): boolean {
+  return item.result === "success";
+}
+
+/** The words of the actions people meet most; another action shows its code. */
+export const actionLabels: Readonly<Record<string, MessageKey>> = Object.freeze({
+  "server.setup": "Set the server up",
+  "sign_in.start": "Started a sign-in",
+  "sign_in.complete": "Signed in",
+  "sign_in.link": "Linked a sign-in method",
+  "sign_in.settings.set": "Changed the sign-in methods",
+  "passkey.add": "Added a passkey",
+  "device.enroll": "Enrolled a device",
+  "device.approve": "Approved a device",
+  "device.refuse": "Refused a device",
+  "device.revoke": "Revoked a device",
+  "device.leave": "Left the organization",
+  "device.recover": "Recovered with the recovery key",
+  "enrollment_token.create": "Made an enrollment code",
+  "recovery_key.create": "Made a recovery key",
+  "metadata_key.create": "Made a key of a space",
+  "metadata_key.wrap": "Gave a key of a space to devices",
+  "relay.open": "Opened a channel to a machine",
+  "person.invite": "Invited a person",
+  "person.role": "Changed the role of a person",
+  "person.deprovision": "Deprovisioned a person",
+  "team.create": "Created a team",
+  "team.update": "Changed a team",
+  "team.dissolve": "Dissolved a team",
+  "team.member": "Changed a member of a team",
+  "team.member.remove": "Took a person out of a team",
+  "grant.create": "Granted access",
+  "grant.revoke": "Took a grant back",
+  "grant.keys": "Gave the keys of a grant",
+  "transfer.offer": "Offered a transfer",
+  "transfer.accept": "Accepted a transfer",
+  "transfer.decline": "Declined a transfer",
+  "transfer.cancel": "Cancelled a transfer",
+  "owner.resume": "Resumed what they own",
+  "access.propose": "An agent proposed a change of access",
+  "access.proposal.decide": "Decided on a proposal of an agent",
+  "access_document.sign": "Signed the access document",
+  "policy.sign": "Signed a policy",
+  "policy.stop": "Stopped the work of the fleet",
+  "policy.lift": "Let the work of the fleet go on",
+  "telemetry.set": "Changed the telemetry of the fleet",
+  "update.policy.set": "Changed the update policy",
+  "update.campaign.create": "Started an update of the fleet",
+  "update.campaign.cancel": "Cancelled an update of the fleet",
+  "automation.put": "Saved an automation",
+  "automation.delete": "Deleted an automation",
+  "automation.run": "Ran an automation",
+  "automation.takeover": "Took a run over",
+  "hook.create": "Created a hook",
+  "hook.delete": "Deleted a hook",
+  "environment.set": "Changed an environment",
+  "environment.approve": "Approved a run in an environment",
+  "secret.set": "Set a secret",
+  "secret.delete": "Deleted a secret",
+  "secret.grant": "Gave a secret to machines",
+  "budget.set": "Set a budget",
+  "budget.continue": "Let a run go on past a budget",
+  "budget.stop": "Stopped a run at a budget",
+  "session.withdraw": "Withdrew a session from the server",
+  "audit.export": "Exported the audit log",
+});
+
+/** The first and the last characters of a hash, enough to compare it by eye. */
+export function shortHash(hash: string): string {
+  return hash.length <= 16 ? hash : `${hash.slice(0, 8)}…${hash.slice(-6)}`;
+}
+
+/** The details of a record, indented when they are JSON, else as they are. */
+export function formatDetails(details: string | null | undefined): string | null {
+  if (!details) return null;
+  try {
+    return JSON.stringify(JSON.parse(details), null, 2);
+  } catch {
+    return details;
+  }
+}
