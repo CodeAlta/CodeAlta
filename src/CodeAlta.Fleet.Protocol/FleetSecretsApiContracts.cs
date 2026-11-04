@@ -2,6 +2,16 @@ using System.Text.Json.Serialization;
 
 namespace CodeAlta.Fleet.Protocol.Api;
 
+/// <summary>The events of the control connection about the named values of the fleet.</summary>
+public static class FleetSecretMethods
+{
+    /// <summary>
+    /// Sent to a machine when a value it holds or may hold changed (set, rotated, given, taken away, deleted), an
+    /// environment of its person changed, or an approval of one of its runs was given: it reads its copies again. No payload.
+    /// </summary>
+    public const string Changed = "secrets.changed";
+}
+
 /// <summary>The kinds of named values of the fleet (<c>doc/fleet/secrets.md</c>, the model).</summary>
 public static class FleetSecretKinds
 {

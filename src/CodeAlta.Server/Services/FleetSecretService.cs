@@ -3,6 +3,7 @@ using System.Security.Cryptography;
 using System.Text.Json;
 using CodeAlta.Fleet.Protocol;
 using CodeAlta.Fleet.Protocol.Api;
+using CodeAlta.Server.Control;
 using CodeAlta.Server.Storage;
 
 namespace CodeAlta.Server.Services;
@@ -51,6 +52,9 @@ internal sealed class FleetSecretService
         _secrets = secrets;
         _time = time;
     }
+
+    /// <summary>Gets the devices online, which are told when their values change (<see cref="FleetSecretMethods.Changed"/>); null tells none.</summary>
+    public PresenceRegistry? Presence { get; init; }
 
     /// <summary>Lists the values of the calling controller device's person: what is known of each, with the copy sealed for the caller.</summary>
     /// <param name="actor">The calling device.</param>
@@ -114,6 +118,7 @@ internal sealed class FleetSecretService
                     held is null ? "No value has this id: set version 1." : $"The value is at version {held.Secret.Version}: the next version is {held.Secret.Version + 1}, of the same name and scope.");
         }
 
+        Notify([.. copies.Select(static copy => copy.DeviceId), .. held?.Copies.Select(static copy => copy.DeviceId) ?? []], actor.Id);
         return await GetDtoAsync(actor, id, cancellationToken).ConfigureAwait(false);
     }
 
@@ -137,6 +142,7 @@ internal sealed class FleetSecretService
         var audit = origin.Audit("secret.grant", actor, id, details: Details(entry.Secret, ("devices", string.Join(' ', copies.Select(static copy => copy.DeviceId)))));
         if (await _secrets.AddFleetSecretCopiesAsync(actor.OrganizationId, id, request.Version, copies, audit, cancellationToken).ConfigureAwait(false) is null)
             throw CoordinatorException.Conflict(CoordinatorErrorCodes.SecretConflict, $"The value is at version {entry.Secret.Version}: give copies of that version.");
+        Notify([.. copies.Select(static copy => copy.DeviceId)], actor.Id);
         return await GetDtoAsync(actor, id, cancellationToken).ConfigureAwait(false);
     }
 
@@ -156,6 +162,7 @@ internal sealed class FleetSecretService
         if (deviceId == actor.Id) throw Invalid("A controller device keeps its copy of the values of its person.");
         await _secrets.RemoveFleetSecretCopyAsync(actor.OrganizationId, id, deviceId, origin.Audit("secret.withdraw", actor, id,
             details: Details(entry.Secret, ("device", deviceId))), cancellationToken).ConfigureAwait(false);
+        Notify([deviceId], actor.Id);
         return await GetDtoAsync(actor, id, cancellationToken).ConfigureAwait(false);
     }
 
@@ -173,6 +180,7 @@ internal sealed class FleetSecretService
         var entry = await GetOwnAsync(actor, id, cancellationToken).ConfigureAwait(false);
         await _secrets.DeleteFleetSecretAsync(actor.OrganizationId, id, origin.Audit("secret.delete", actor, id, details: Details(entry.Secret)), cancellationToken)
             .ConfigureAwait(false);
+        Notify([.. entry.Copies.Select(static copy => copy.DeviceId)], actor.Id);
         return await ListAsync(actor, cancellationToken).ConfigureAwait(false);
     }
 
@@ -262,6 +270,9 @@ internal sealed class FleetSecretService
                 ("labels", string.Join(' ', definition.MachineLabels)), ("automations", string.Join(' ', definition.Automations))));
         if (!await _secrets.PutFleetEnvironmentAsync(record, audit, cancellationToken).ConfigureAwait(false))
             throw CoordinatorException.Conflict(CoordinatorErrorCodes.EnvironmentConflict, "The environment held is as new, or another environment of the person has this name.");
+        // The machines of the person read their environments again.
+        Notify([.. (await _store.ListDevicesAsync(actor.OrganizationId, cancellationToken).ConfigureAwait(false))
+            .Where(device => device.OwnerPersonId == actor.OwnerPersonId && device.Status == DeviceStatuses.Approved).Select(static device => device.Id)], actor.Id);
         return ToDto(record);
     }
 
@@ -353,6 +364,7 @@ internal sealed class FleetSecretService
                 origin.Audit("environment.approve", actor, id, details: Json(("environment", environment.Name), ("machine", approval.MachineId), ("run", approval.RunId))),
                 cancellationToken).ConfigureAwait(false))
             throw CoordinatorException.Conflict(CoordinatorErrorCodes.ApprovalConflict, "The approval was given already.");
+        Notify([approval.MachineId], actor.Id);
         return ToDto(approval with { Status = FleetApprovalStates.Approved, ApprovalPayload = signed.Payload, ApprovalSignature = signed.Signature, ApproverDeviceId = actor.Id,
             ApprovedAt = now }, environment.Name);
     }
@@ -438,6 +450,30 @@ internal sealed class FleetSecretService
     private async Task<IReadOnlySet<string>> RevokedAsync(DeviceRecord actor, CancellationToken cancellationToken)
         => (await _store.ListDevicesAsync(actor.OrganizationId, cancellationToken).ConfigureAwait(false))
             .Where(static device => device.Status == DeviceStatuses.Revoked).Select(static device => device.Id).ToHashSet(StringComparer.Ordinal);
+
+    // Tells the devices online that their values changed, but the one that changed them; one that is offline reads them when it runs next.
+    private void Notify(IEnumerable<string> devices, string except)
+    {
+        if (Presence is not { } presence) return;
+        foreach (var device in devices.Distinct(StringComparer.Ordinal))
+        {
+            if (device == except || presence.Get(device) is not { } session) continue;
+            _ = TellAsync(session);
+        }
+    }
+
+    private static async Task TellAsync(ControlSession session)
+    {
+        try
+        {
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+            await session.Connection.SendEventAsync(new FleetEvent(FleetSecretMethods.Changed, null), timeout.Token).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is FleetException or FleetConnectionClosedException or OperationCanceledException or InvalidOperationException)
+        {
+            // The machine reads its values again before its next run in any case.
+        }
+    }
 
     // The key the server records for the device that sends the request verifies what it signed.
     private static bool VerifiedBy(DeviceRecord actor, byte[] signed, string? signature)

@@ -411,7 +411,7 @@ public sealed class CoordinatorServer : IAsyncDisposable
             provider.GetRequiredService<RelayHub>()) { Metrics = metrics });
         services.AddSingleton(provider => new PublicationService(store, provider.GetRequiredService<DirectoryHub>(), time) { Metrics = metrics });
         services.AddSingleton(_ => new MetadataKeyService(store, time));
-        services.AddSingleton(_ => new FleetSecretService(store, store, time));
+        services.AddSingleton(provider => new FleetSecretService(store, store, time) { Presence = provider.GetRequiredService<PresenceRegistry>() });
         services.AddSingleton(_ => new StatisticsService(store, time) { Metrics = metrics });
         services.AddSingleton(provider => new TelemetrySettingsService(store, provider.GetRequiredService<PresenceRegistry>(), telemetry, time,
             provider.GetRequiredService<ILoggerFactory>().CreateLogger("CodeAlta.Server.Telemetry")));

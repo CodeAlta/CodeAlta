@@ -234,6 +234,77 @@ public sealed class FleetSecretsTests
             (await fleet.AuditAsync("environment.")).Select(static record => record.Action).Distinct().ToArray());
     }
 
+    [TestMethod]
+    public async Task AMachine_TakesItsValuesByScope_TheRotationAtItsNextRefresh_AndNothingOnceRevoked()
+    {
+        await using var fleet = await SecretsFixture.StartAsync();
+        const string Repository = "repo:github.com/example/fleet-fixture";
+        // The key of the space: made by the desktop, held by the node; the server knows the space by an opaque id only.
+        var spaceKey = (await new FleetMetadataKeyring(fleet.Manager.Devices).RefreshAsync("default", CancellationToken.None))!;
+        var nodeDevices = new FleetOrganizationDevices(fleet.Server.BaseAddress, fleet.NodeKey, Path.Combine(fleet.Root.Path, "node-link", FleetOrganizationDevices.PinFileName));
+        var nodeKeys = new FleetMetadataKeyring(nodeDevices);
+        Assert.AreEqual(spaceKey.Id, (await nodeKeys.RefreshAsync("default", CancellationToken.None))?.Id);
+        var space = new FleetSecretScopeDto(FleetSecretScopeKinds.Space, spaceKey.Grant!.SpaceId);
+        var project = new FleetSecretScopeDto(FleetSecretScopeKinds.Project, FleetProjectKeys.Of(spaceKey, Repository));
+        var staging = await fleet.Manager.PutEnvironmentAsync("staging", [], [], [], false, CancellationToken.None);
+        var machines = new[] { fleet.NodeKey.DeviceId };
+        var person = await fleet.Manager.SetAsync(FleetSecretKinds.Secret, "TOKEN", new FleetSecretScopeDto(FleetSecretScopeKinds.Person), "person-value", false, machines, CancellationToken.None);
+        await fleet.Manager.SetAsync(FleetSecretKinds.Secret, "TOKEN", space, "space-value", false, machines, CancellationToken.None);
+        await fleet.Manager.SetAsync(FleetSecretKinds.Secret, "TOKEN", project, "project-value", false, machines, CancellationToken.None);
+        await fleet.Manager.SetAsync(FleetSecretKinds.Secret, "TOKEN", new FleetSecretScopeDto(FleetSecretScopeKinds.Environment, staging.Id), "staging-value", false, machines,
+            CancellationToken.None);
+        await fleet.Manager.SetAsync(FleetSecretKinds.Secret, "TOKEN", new FleetSecretScopeDto(FleetSecretScopeKinds.Project, FleetProjectKeys.Of(spaceKey, "repo:github.com/example/other")),
+            "other-project", false, machines, CancellationToken.None);
+        await fleet.Manager.SetAsync(FleetSecretKinds.Variable, "GRAFANA_URL", space, "https://grafana.example", false, machines, CancellationToken.None);
+
+        using var nodeRoot = new TempDirectory();
+        var store = new CodeAlta.Catalog.Secrets.LocalSecretStore(nodeRoot.Path, new CodeAlta.Catalog.Secrets.MasterKeySecretProtector(
+            new CodeAlta.Catalog.Secrets.FileSecretKeyStore(Path.Combine(nodeRoot.Path, "secrets", "key"))));
+        var sync = new FleetSecretSync("link-1", nodeDevices, nodeKeys, store,
+            _ => Task.FromResult<IReadOnlyList<FleetSecretProject>>([new FleetSecretProject("local-project", Repository)]));
+        var result = await sync.SyncAsync(CancellationToken.None);
+        Assert.AreEqual((5, 0, false), (result.Taken, result.Refused.Count, result.Revoked), string.Join("; ", result.Refused));
+        Assert.AreEqual("staging", sync.Environments.Single().Key);
+        string Resolve(CodeAlta.Catalog.Secrets.SecretScope scope, string text = "${secret:TOKEN}")
+            => CodeAlta.Catalog.Secrets.SecretReferenceResolver.ForScope(nodeRoot.Path, scope, shell: true).Resolve(text);
+        Assert.AreEqual("staging-value", Resolve(new("default", "local-project", "staging")));
+        Assert.AreEqual("project-value", Resolve(new("default", "local-project", null)));
+        Assert.AreEqual("space-value", Resolve(new("default", "another-project", null)));
+        Assert.AreEqual("person-value", Resolve(new("home", null, null)));
+        Assert.AreEqual("https://grafana.example", Resolve(new("default", null, null), "${var:GRAFANA_URL}"));
+        Assert.IsFalse(store.ListFleetCopies().Any(static copy => copy.ScopeId is null && copy.ScopeKind == "project"), "a project this machine does not have is not kept");
+
+        // A rotation reaches the machine at its next refresh; the old version is no longer masked nor given.
+        await fleet.Manager.RotateAsync(person.Id, "person-rotated", CancellationToken.None);
+        await sync.SyncAsync(CancellationToken.None);
+        Assert.AreEqual("person-rotated", Resolve(new("home", null, null)));
+        Assert.IsFalse(store.GetSecretValues().Contains("person-value"));
+        Assert.IsTrue(store.GetSecretValues().Contains("person-rotated"));
+
+        // A copy no controller device of the person gave is refused, and not kept.
+        var list = await fleet.NodeListAsync();
+        using var rogue = DeviceIdentity.LoadOrCreate(Path.Combine(fleet.Root.Path, "rogue"));
+        FleetDevicePublicKey.TryParse(Convert.ToBase64String(rogue.ExportSubjectPublicKeyInfo()), out var rogueKey);
+        var forgedList = list with { Members = list.Members.Add(rogue.DeviceId, new FleetDeviceListMember(rogue.DeviceId, FleetDeviceKinds.Controller, rogueKey!, list.Members[fleet.NodeKey.DeviceId].OwnerId)) };
+        var binding = new FleetSecretBinding("forged", FleetSecretKinds.Secret, "INJECTED", FleetSecretScopeKinds.Person, null, 1, false);
+        var forged = FleetSecretSealing.Seal("attacker", binding, [list.Members[fleet.NodeKey.DeviceId]], forgedList, rogue).Single();
+        await ((IFleetSecretStore)fleet.Server.GetService<ICoordinatorStore>()).PutFleetSecretAsync(new FleetSecretRecord("forged", list.OrganizationId!,
+            list.Members[fleet.NodeKey.DeviceId].OwnerId!, FleetSecretKinds.Secret, "INJECTED", FleetSecretScopeKinds.Person, string.Empty, false, 1, rogue.DeviceId, null,
+            DateTimeOffset.UtcNow, DateTimeOffset.UtcNow), [new FleetSecretCopyRecord("forged", fleet.NodeKey.DeviceId, 1, forged.Sealed, rogue.DeviceId, DateTimeOffset.UtcNow)],
+            new AuditEntry("test.forge", AuditEntry.Success, null, null, null, null, null));
+        var withForged = await sync.SyncAsync(CancellationToken.None);
+        StringAssert.StartsWith(withForged.Refused.Single(), "INJECTED:");
+        Assert.IsFalse(store.ListFleetCopies().Any(static copy => copy.Name == "INJECTED"));
+
+        // Revoked, the machine takes every value of that server away.
+        await fleet.Desktop.RevokeAsync(fleet.NodeKey.DeviceId);
+        var revoked = await sync.SyncAsync(CancellationToken.None);
+        Assert.IsTrue(revoked.Revoked);
+        Assert.AreEqual(0, store.ListFleetCopies().Count);
+        Assert.IsFalse(CodeAlta.Catalog.Secrets.SecretReferenceResolver.ForMachine(nodeRoot.Path).TryGet(
+            new CodeAlta.Catalog.Secrets.SecretReference(CodeAlta.Catalog.Secrets.SecretReferenceKind.Secret, "TOKEN"), out _));
+    }
+
     // The files of the data root, the database and its log included, read while the server holds them open.
     private static bool DataRootHolds(ServerFixture server, string text)
     {
