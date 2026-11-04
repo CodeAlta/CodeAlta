@@ -186,6 +186,18 @@ public static class CoordinatorErrorCodes
     /// <summary>No automation of the caller's person has this id.</summary>
     public const string AutomationNotFound = "automation.not_found";
 
+    /// <summary>A hook asked for that does not hold: its machine or its source.</summary>
+    public const string HookInvalid = "hook.invalid";
+
+    /// <summary>A person who has as many hooks as they may.</summary>
+    public const string HookConflict = "hook.conflict";
+
+    /// <summary>No hook has this address, or none of the caller's person has this id.</summary>
+    public const string HookNotFound = "hook.not_found";
+
+    /// <summary>A hook that received as many events as it takes in a minute.</summary>
+    public const string HookBusy = "hook.busy";
+
     /// <summary>A statistics query that does not read: its days, its time zone, its groups or its scope.</summary>
     public const string StatisticsInvalid = "statistics.invalid";
 

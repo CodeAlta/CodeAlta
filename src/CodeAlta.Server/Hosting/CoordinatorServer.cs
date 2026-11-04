@@ -393,6 +393,7 @@ public sealed class CoordinatorServer : IAsyncDisposable
             json.SerializerOptions.TypeInfoResolverChain.Insert(5, FleetSecretsApiJsonContext.Default);
             json.SerializerOptions.TypeInfoResolverChain.Add(FleetSignInJsonContext.Default);
             json.SerializerOptions.TypeInfoResolverChain.Add(FleetBudgetsApiJsonContext.Default);
+            json.SerializerOptions.TypeInfoResolverChain.Add(FleetHookApiJsonContext.Default);
             json.SerializerOptions.DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull;
         });
         services.AddProblemDetails();
@@ -451,6 +452,8 @@ public sealed class CoordinatorServer : IAsyncDisposable
             }));
         services.AddSingleton(provider => new FleetAutomationService(store, store, provider.GetRequiredService<PresenceRegistry>(), time,
             provider.GetRequiredService<ILoggerFactory>().CreateLogger("CodeAlta.Server.Automations")));
+        services.AddSingleton(provider => new HookService(store, store, provider.GetRequiredService<PresenceRegistry>(), time,
+            provider.GetRequiredService<ILoggerFactory>().CreateLogger("CodeAlta.Server.Hooks")));
         services.AddSingleton(provider => new ControlService(store, provider.GetRequiredService<PresenceRegistry>(), provider.GetRequiredService<DirectoryHub>(),
             provider.GetRequiredService<PublicationService>(), provider.GetRequiredService<RelayHub>(), time, options.ConnectionPolicy,
             provider.GetRequiredService<ILoggerFactory>().CreateLogger("CodeAlta.Server.Control"))
@@ -459,6 +462,7 @@ public sealed class CoordinatorServer : IAsyncDisposable
             TelemetrySettings = provider.GetRequiredService<TelemetrySettingsService>(),
             Updates = provider.GetRequiredService<UpdateCampaignService>(),
             Automations = provider.GetRequiredService<FleetAutomationService>(),
+            Hooks = provider.GetRequiredService<HookService>(),
             Stopping = provider.GetRequiredService<IHostApplicationLifetime>().ApplicationStopping,
             Statistics = provider.GetRequiredService<StatisticsService>(),
             Health = provider.GetRequiredService<HealthService>(),
