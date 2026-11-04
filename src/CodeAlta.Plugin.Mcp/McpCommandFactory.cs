@@ -486,6 +486,11 @@ internal static class McpCommandFactory
                 return unlisted;
             }
 
+            if (await RefuseByGuardAsync(context, options, serverKey, toolName, argumentsJson).ConfigureAwait(false) is { } guarded)
+            {
+                return guarded;
+            }
+
             var diagnostics = new List<McpRuntimeDiagnostic>();
             var result = await CallToolAsync(context, options, await CreateRuntimeRequestAsync(context, options).ConfigureAwait(false), serverKey, toolName, arguments, diagnostics).ConfigureAwait(false);
             foreach (var diagnostic in diagnostics)
@@ -962,6 +967,38 @@ internal static class McpCommandFactory
 
         await using var runtime = CreateRuntime(options);
         return await runtime.CallToolAsync(request, server, tool, arguments, diagnostics, context.CancellationToken).ConfigureAwait(false);
+    }
+
+    // A call the session makes through the command is checked as its own calls of that tool are (the guard of the run of an
+    // automation): with the tool as the session has it, so that what the guard allows by name, pin and bounds is the same, and
+    // never a way around it. A tool that cannot be described is not called: its call could not be checked.
+    private static async ValueTask<int?> RefuseByGuardAsync(PluginAltaCommandContext context, McpCommandFactoryOptions options, string serverKey, string toolName,
+        string? argumentsJson)
+    {
+        if (context.CheckSourceToolCallAsync is not { } check)
+        {
+            return null;
+        }
+
+        var diagnostics = new List<McpRuntimeDiagnostic>();
+        McpRuntimeTool? described;
+        await using (var runtime = CreateRuntime(options))
+        {
+            described = await runtime.DescribeToolAsync(await CreateRuntimeRequestAsync(context, options).ConfigureAwait(false), serverKey, toolName, diagnostics,
+                context.CancellationToken).ConfigureAwait(false);
+        }
+
+        if (described is null)
+        {
+            return WriteError(context, "tool_call_refused",
+                $"The tool {toolName} of the MCP server {serverKey} could not be described, so its call cannot be checked as the calls of this session are: it was not made."
+                + (diagnostics.FirstOrDefault() is { } first ? " " + first.Message : string.Empty));
+        }
+
+        var spec = McpPlugin.CreateAgentTool(described, ResolveProjectDirectory(context, options), options.Home, null).Spec;
+        return await check(spec, ParseArgumentsObject(argumentsJson), context.CancellationToken).ConfigureAwait(false) is { } refused
+            ? WriteError(context, "tool_call_refused", refused)
+            : null;
     }
 
     // The space of the session that calls the command; null for the user, who is not limited to a space.

@@ -46,6 +46,36 @@ public sealed class SessionToolGuards
     /// <returns>The guard; null when the session has none.</returns>
     public AgentToolInterceptor? Find(string sessionId) => !string.IsNullOrWhiteSpace(sessionId) && _guards.TryGetValue(sessionId, out var guard) ? guard : null;
 
+    /// <summary>Gets the guard every tool call of a session goes through now, or null.</summary>
+    /// <param name="sessionId">The session.</param>
+    /// <param name="cancellationToken">Cancels the lookup.</param>
+    /// <returns>The guard; null when the session has none.</returns>
+    public ValueTask<AgentToolInterceptor?> FindAsync(string sessionId, CancellationToken cancellationToken) => ValueTask.FromResult(Find(sessionId));
+
+    /// <summary>
+    /// Checks a call of a tool that a session makes otherwise than as a tool call of its own (through a command of <c>alta</c>),
+    /// as its guard checks its own calls: a command is never a way around the guard of a session. The guard may wait for a
+    /// person. A guard that would change the arguments of the call refuses it: only a tool call of the session runs with them.
+    /// </summary>
+    /// <param name="sessionId">The session that makes the call.</param>
+    /// <param name="spec">The tool, as the session has it.</param>
+    /// <param name="arguments">The arguments of the call.</param>
+    /// <param name="workingDirectory">The folder the session works in; null for the current one.</param>
+    /// <param name="cancellationToken">Cancels the check, and what it waits for.</param>
+    /// <returns>Why the call is not made; null to make it, also when the session has no guard.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="spec"/> is null.</exception>
+    public async ValueTask<string?> CheckAsync(string sessionId, AgentToolSpec spec, System.Text.Json.JsonElement arguments, string? workingDirectory,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(spec);
+        if (await FindAsync(sessionId, cancellationToken).ConfigureAwait(false) is not { } guard) return null;
+        var invocation = new AgentToolInvocation(new ModelProviderId("alta"), sessionId, "alta-" + Guid.NewGuid().ToString("N"), spec.Name, arguments);
+        var decision = await guard.BeforeToolCallAsync(AgentToolHookCall.Create(invocation, spec, workingDirectory, AgentToolHookCapabilities.Block), cancellationToken)
+            .ConfigureAwait(false);
+        return decision.BlockMessage
+            ?? (decision.Arguments is not null ? $"The guard of this session would change the arguments of this call of {spec.Name}: make it as a tool call of the session." : null);
+    }
+
     /// <summary>The hooks of a session: those of the plugins, when there are, then the guard the session has at each call.</summary>
     /// <param name="scope">The session.</param>
     /// <param name="plugins">The hooks of the plugins for it; null for none.</param>

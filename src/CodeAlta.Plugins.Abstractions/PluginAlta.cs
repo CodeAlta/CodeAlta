@@ -108,6 +108,16 @@ public sealed record PluginAltaCommandContext
     public Func<CancellationToken, ValueTask<IReadOnlyList<string>?>>? ResolveSourceSandboxMcpServersAsync { get; init; }
 
     /// <summary>
+    /// Gets what checks a call of a tool that the session that calls the command makes through it, as the host checks the
+    /// tool calls of that session (the guard an automation gives the session of its runs: what it may call without a
+    /// person, which may wait for one): it is given the tool as the session has it and the arguments of the call, and
+    /// answers why the call is not made, or <see langword="null"/> to make it. A command that calls a tool for the caller
+    /// (<c>alta mcp tool call</c>) asks it first, so that a command is never a way around the guard of the session.
+    /// <see langword="null"/> where nothing checks the calls of the caller.
+    /// </summary>
+    public Func<CodeAlta.Agent.AgentToolSpec, System.Text.Json.JsonElement, CancellationToken, ValueTask<string?>>? CheckSourceToolCallAsync { get; init; }
+
+    /// <summary>
     /// Gets what asks the user to allow what the command would do, on the card of the session that calls it, in every
     /// permission mode for a request no mode answers (<see cref="CodeAlta.Agent.AgentSkillPermissionRequest"/>). The host
     /// gives the request the session and its provider. The answer is

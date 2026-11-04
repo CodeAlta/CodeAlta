@@ -13,6 +13,12 @@ public sealed partial class SessionRuntimeService
     /// </summary>
     public Func<SessionToolHookScope, AgentToolInterceptor?>? ToolInterceptorOf { get; set; }
 
+    /// <summary>
+    /// Gets or sets the guards the host gives sessions (<see cref="SessionToolGuards"/>), which also check what a session calls
+    /// through a command of <c>alta</c> rather than as a tool call of its own; <see langword="null"/> for none.
+    /// </summary>
+    public SessionToolGuards? ToolGuards { get; set; }
+
     private async ValueTask<AgentToolInterceptor?> CreateToolInterceptorAsync(SessionViewDescriptor session, ProjectDescriptor? project,
         string? workingDirectory, CancellationToken cancellationToken)
     {

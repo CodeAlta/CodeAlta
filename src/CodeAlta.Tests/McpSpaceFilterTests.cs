@@ -158,6 +158,59 @@ public sealed partial class McpRuntimeServiceTests
     }
 
     [TestMethod]
+    public async Task ACallThroughTheCommand_GoesThroughTheGuardOfTheSession_AsTheToolOfTheSession()
+    {
+        using var project = TempDirectory.Create();
+        WriteTinyServerConfig(project.Path, "tiny", logPath: null);
+        WriteProjectPolicy(project.Path, """
+            [plugins.mcp]
+            direct_exposure = "allowlist"
+
+            [plugins.mcp.servers.tiny]
+            direct_tools = ["echo"]
+            allowed_tools = ["echo"]
+            """);
+        var plugin = new McpPlugin(createPresentation: null, _home.Path);
+        var contribution = plugin.GetAltaCommands().Single();
+        var checkedCalls = new List<(string Tool, string Arguments)>();
+        string? refusal = "The automation may not call mcp__tiny__echo by itself.";
+        async Task<(int ExitCode, string Stdout)> RunAsync(params string[] args)
+        {
+            var stdout = new StringWriter(CultureInfo.InvariantCulture);
+            var stderr = new StringWriter(CultureInfo.InvariantCulture);
+            var context = CreateAltaContext(stdout, stderr, project.Path, "session-1") with
+            {
+                CheckSourceToolCallAsync = (spec, arguments, _) =>
+                {
+                    checkedCalls.Add((spec.Name, arguments.GetRawText()));
+                    return ValueTask.FromResult(refusal);
+                },
+            };
+            var app = new CommandApp("alta", "test") { contribution.CreateCommandNode(context) };
+            return (await app.RunAsync(["mcp", .. args], new CommandRunConfig { Out = TextWriter.Null, Error = stderr }), stdout.ToString());
+        }
+
+        // The guard of the session sees the call as the tool of the session, with its arguments, and refuses it: nothing is called.
+        var (refusedExit, refused) = await RunAsync("tool", "call", "--server", "tiny", "--tool", "echo", "--arguments", "{\"text\":\"hi\"}");
+        Assert.AreEqual(1, refusedExit, refused);
+        Assert.DoesNotContain("\"type\":\"alta.mcp.tool.call\"", refused);
+        using (var error = JsonDocument.Parse(refused.Trim().Split('\n').Last()))
+        {
+            Assert.AreEqual("tool_call_refused", error.RootElement.GetProperty("code").GetString());
+            Assert.AreEqual(refusal, error.RootElement.GetProperty("message").GetString());
+        }
+
+        Assert.AreEqual(("mcp__tiny__echo", "{\"text\":\"hi\"}"), checkedCalls.Single());
+
+        // Allowed by the guard, the call is made.
+        refusal = null;
+        var (allowedExit, allowed) = await RunAsync("tool", "call", "--server", "tiny", "--tool", "echo", "--arguments", "{\"text\":\"hi\"}");
+        Assert.AreEqual(0, allowedExit, allowed);
+        Assert.Contains("\"type\":\"alta.mcp.tool.call\"", allowed);
+        Assert.HasCount(2, checkedCalls);
+    }
+
+    [TestMethod]
     public async Task ASessionThatMayNotStartPrograms_NeitherAddsNorTurnsOnAServer()
     {
         using var project = TempDirectory.Create();
