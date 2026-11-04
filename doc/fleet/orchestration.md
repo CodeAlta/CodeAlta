@@ -127,9 +127,12 @@ their own use, under their vendor's terms. So:
 - **Organization providers**: an admin or a team maintainer defines a provider once (type, endpoint, models). Its key
   is sealed by their computer to the keys of the machines of that scope, as the signed device list and the signed access
   document say; the server stores and relays only these sealed copies. A machine opens its copy only when it was given
-  by someone who answers for the scope in the access document it verified, keeps the key in its protected store, and
-  adds the provider to its configuration with that key; a provider taken away is removed with its key. A provider of the
-  machine's own with the same id is never replaced. Rotation is a new version of the provider, sealed again. With a
+  by someone who answers for the scope in the access document it verified, and signed over the whole definition it
+  installs (owner, type, endpoint, models), so that a server cannot point a genuine key at another endpoint; it keeps the
+  key in its protected store and adds the provider to its configuration with that key; a provider taken away is removed
+  with its key. Versions only move forward on a machine: an older copy, or one at or below a version taken away, is
+  refused. A provider keeps the scope it was made for. A provider of the machine's own with the same id is never
+  replaced. Rotation is a new version of the provider, sealed again. With a
   gateway, each scope or automation gets its own virtual key, so costs and limits follow ownership.
 - **Other credentials of a run** (Jira, Grafana, Kubernetes, Slack, Git) are the machine's own, scoped to what its runs
   may do: a machine inside the infrastructure holds read-only monitoring access and the narrow write role of its
