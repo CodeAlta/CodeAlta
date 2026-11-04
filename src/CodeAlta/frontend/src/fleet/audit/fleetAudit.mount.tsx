@@ -43,7 +43,7 @@ let brokenAt: number | null = null;
 
 const api: FleetAuditApi = {
   status: async () => ({ status: "ok", servers: [{ id: "home", url: "https://fleet.example", organization: "Example", link: "approved", connection: "online", problem: null,
-    controller: true, spaces: [], recoveryKey: true }], deviceId: "desktop", words: "apple river stone", personName: null }) as never,
+    controller: true, spaces: [], recoveryKey: true, stop: null }], deviceId: "desktop", words: "apple river stone", personName: null }) as never,
   access: async () => access,
   audit: async request => {
     calls.push(JSON.stringify({ audit: { filters: request.filters, before: request.before } }));

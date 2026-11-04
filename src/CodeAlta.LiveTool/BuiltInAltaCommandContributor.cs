@@ -337,6 +337,7 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         if (fleet) policies.AddRange(FleetPolicies);
         if (fleet) policies.AddRange(FleetAccessPolicies);
         if (fleet) policies.AddRange(FleetAuditPolicies);
+        if (fleet) policies.AddRange(FleetPolicyPolicies);
         if (secrets) policies.AddRange(SecretPolicies);
         return policies;
     }

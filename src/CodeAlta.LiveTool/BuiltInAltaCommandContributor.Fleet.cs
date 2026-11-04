@@ -72,6 +72,7 @@ internal sealed partial class BuiltInAltaCommandContributor
         group.Add(secret);
         group.Add(CreateFleetAccessCommand(context));
         group.Add(CreateFleetAuditCommand(context));
+        group.Add(CreateFleetPolicyCommand(context));
         var hook = Group("hook", "List the hooks of a server: the addresses tools such as incident.io push their signed events to, for one machine each, and what the machine did with them.");
         hook.Add(CreateFleetHookListCommand(context));
         group.Add(hook);

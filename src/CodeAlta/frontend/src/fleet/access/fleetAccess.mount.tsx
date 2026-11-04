@@ -52,7 +52,7 @@ const record = (name: string) => async (request: Record<string, unknown>) => {
 };
 const api: FleetAccessApi = {
   status: async () => ({ status: "ok", servers: [{ id: "home", url: "https://home.example", organization: "Home", link: "approved", connection: "online", problem: null,
-    controller: true, spaces: [], recoveryKey: true }], deviceId: "desktop", words: "apple river stone", personName: null }) as never,
+    controller: true, spaces: [], recoveryKey: true, stop: null }], deviceId: "desktop", words: "apple river stone", personName: null }) as never,
   access: async () => overview,
   invitePerson: async request => { calls.push(JSON.stringify({ invite: { name: request.name, role: request.role } }));
     return { status: "ok", message: null, token: "aet_example-code", expiresAt: "2026-11-07T09:00:00Z", serverUrl: "https://home.example" }; },

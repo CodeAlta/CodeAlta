@@ -51,6 +51,6 @@ its tests. The protocol only gains: optional query parameters of `GET /api/v1/au
 - [x] 5. Policies on the server: migration 0017, endpoints, `policy.changed`, audit; tests.
 - [x] 6. Policies on machines: anchored chain kept on disk, refresh on connection and notification, the stop and the rules
       enforced on nodes and desktops; tests (stop offline, unverifiable version refused, lift).
-- [ ] 7. Policies and the kill switch in CodeAlta Desktop (Settings > Fleet > Policies): rules, versions, sign; Stop
+- [x] 7. Policies and the kill switch in CodeAlta Desktop (Settings > Fleet > Policies): rules, versions, sign; Stop
       with its popover; the banner; `alta fleet policy` (read only).
 - [ ] 8. User guide, `doc/fleet`, the `codealta-fleet` skill.

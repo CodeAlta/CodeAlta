@@ -1,0 +1,29 @@
+/* Settings > Fleet > Policies: the kill switch, the rules and the versions of the signed policy; the stop in the title bar. */
+.fleet-policy-switch.is-stopped { border: 1px solid color-mix(in srgb, var(--red, #cd4246) 45%, var(--line)); }
+.fleet-policy-stopped { display: flex; flex-direction: column; gap: 4px; }
+.fleet-policy-stopped strong { font-size: 14px; }
+.fleet-policy-reason { overflow-wrap: anywhere; white-space: pre-wrap; }
+.fleet-policy-running { display: flex; align-items: center; gap: 6px; margin: 0; }
+.fleet-policy-stop-form, .fleet-policy-lift-form { display: flex; flex-direction: column; gap: 8px; width: min(26rem, calc(100vw - 32px)); box-sizing: border-box; }
+.fleet-policy-stop-form .bp6-radio-group .bp6-control { margin-bottom: 4px; }
+.fleet-policy-choices { display: flex; flex-direction: column; gap: 2px; max-height: 12rem; overflow: auto; padding: 4px 6px; border: 1px solid var(--line); border-radius: 6px; }
+.fleet-policy-choices .bp6-control { margin: 0; }
+.fleet-policy-stop-form p, .fleet-policy-lift-form p { margin: 0; font-size: 12px; }
+.fleet-policy-confirm-actions { display: flex; gap: 6px; justify-content: flex-end; }
+.fleet-policy-rules { container-type: inline-size; }
+.fleet-policy-form { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 18px; margin: 8px 0 0; padding: 0; border: 0; min-width: 0; }
+.fleet-policy-field { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.fleet-policy-label { font-weight: 600; font-size: 12px; }
+.fleet-policy-hint { font-size: 11px; }
+.fleet-policy-field .bp6-html-select { width: 100%; }
+.fleet-policy-switches { grid-column: 1 / -1; display: flex; flex-direction: column; gap: 4px; }
+.fleet-policy-switches .bp6-control { margin: 0; }
+.fleet-policy-actions { display: flex; gap: 8px; margin-top: 12px; }
+.fleet-policy-review { max-width: 440px; }
+.fleet-policy-versions { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.fleet-policy-version { padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); }
+.fleet-policy-version-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 4px; }
+.fleet-stop-indicator { white-space: nowrap; font-weight: 600; }
+@container (max-width: 560px) {
+  .fleet-policy-form { grid-template-columns: minmax(0, 1fr); }
+}

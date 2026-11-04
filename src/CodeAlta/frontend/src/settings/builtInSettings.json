@@ -31,7 +31,8 @@
       { "id": "fleetSecrets", "label": "Secrets and environments", "icon": "secret", "keywords": ["secret", "variable", "environment", "approval", "rotate", "token", "fleet"] },
       { "id": "fleetBudgets", "label": "Budgets", "icon": "usage", "keywords": ["budget", "limit", "cost", "tokens", "spend", "alert", "notification", "health", "fleet"] },
       { "id": "fleetAccess", "label": "People and access", "icon": "user", "keywords": ["people", "person", "invite", "role", "owner", "admin", "member", "auditor", "team", "grant", "transfer", "deprovision", "access", "fleet"] },
-      { "id": "fleetAudit", "label": "Audit", "icon": "logs", "keywords": ["audit", "log", "history", "who", "export", "csv", "json", "verify", "chain", "hash", "compliance", "fleet"] } ] },
+      { "id": "fleetAudit", "label": "Audit", "icon": "logs", "keywords": ["audit", "log", "history", "who", "export", "csv", "json", "verify", "chain", "hash", "compliance", "fleet"] },
+      { "id": "fleetPolicies", "label": "Policies", "icon": "shield", "keywords": ["policy", "policies", "rule", "kill switch", "stop", "pause", "emergency", "provider", "model", "sandbox", "network", "permission", "fleet"] } ] },
     { "group": "Advanced", "pages": [
       { "id": "config", "label": "Configuration file", "icon": "config", "keywords": ["config.toml", "toml", "file"] },
       { "id": "storage", "label": "Storage", "icon": "database", "keywords": ["disk", "retention", "delete", "scratchpad", "space"] },

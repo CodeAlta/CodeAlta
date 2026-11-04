@@ -56,10 +56,10 @@ const joinApi: JoinOrganizationApi = {
     // A server without an owner refuses an enrollment code: what was typed is its setup code.
     if (request.token.startsWith("SETUP")) return { status: "enrollment.server_not_set_up", message: "This server has no owner yet: set it up with its setup code.", recoveryWords: null, server: null };
     return { status: "ok", message: null, recoveryWords: null, server: { id: "corp", url: request.url, organization: "Contoso", link: "pending", connection: "pending", problem: null, controller: false, spaces: [],
-      recoveryKey: null } };
+      recoveryKey: null, stop: null } };
   },
   status: async () => ({ status: "ok", servers: joinApproved ? [{ id: "corp", url: "https://fleet.contoso.com", organization: "Contoso", link: "approved", connection: "online", problem: null,
-    controller: false, spaces: [], recoveryKey: null } as never] : [], deviceId: "me", words: "cabin onion leopard pigeon peach needle", personName: null }),
+    controller: false, spaces: [], recoveryKey: null, stop: null } as never] : [], deviceId: "me", words: "cabin onion leopard pigeon peach needle", personName: null }),
   // A server whose address names SSO offers its company sign-in and a passkey, one that names GitHub offers GitHub; the others offer none, and take an enrollment code.
   signInMethods: async request => request.url.includes("everything")
     ? { status: "ok", organization: "Contoso", ssoRequired: false, message: null, methods: [{ id: "company", name: "Contoso", breakGlass: false }, { id: "passkey", name: "Passkey", breakGlass: false },
@@ -85,7 +85,7 @@ const joinApi: JoinOrganizationApi = {
       }
     }
     return { status: "ok", person: "Sam", hasDevices: request.method === "github", message: null, server: { id: "corp", url: request.url, organization: "Contoso",
-      link: "pending", connection: "pending", problem: null, controller: false, spaces: [], recoveryKey: null } };
+      link: "pending", connection: "pending", problem: null, controller: false, spaces: [], recoveryKey: null, stop: null } };
   },
   openSignInPage: async request => { calls.push(JSON.stringify({ openPage: request.handle })); opened = true; return { status: "ok", message: null }; },
   linkSpace: async request => { calls.push(JSON.stringify({ link: request.spaceId, server: request.linkId })); return { status: "ok", message: null, space: null } as never; },
@@ -97,7 +97,7 @@ const spacesApi: JoinOrganizationSpacesApi = {
 let devices: FleetDeviceView[] = [{ id: "box", name: "build-box", kind: "node", status: "pending", online: true, words: "ruby scarf apple ember camera finch", createdAt: "2026-11-03T00:00:00Z" }];
 const approvalsApi: FleetApprovalsApi = {
   status: async () => ({ status: "ok", deviceId: "me", words: null, personName: null, servers: [{ id: "home", url: "https://fleet.example", organization: "Home", link: "approved", connection: "online",
-    problem: null, controller: true, spaces: [], recoveryKey: true }] }),
+    problem: null, controller: true, spaces: [], recoveryKey: true, stop: null }] }),
   devices: async () => ({ status: "ok", devices, message: null }),
   approve: async request => { calls.push(JSON.stringify({ approve: request.deviceId, words: request.words, kind: request.kind })); devices = devices.map(item => ({ ...item, status: "approved" })); return { status: "ok", device: null, message: null }; },
   revoke: async request => { calls.push(JSON.stringify({ refuse: request.deviceId })); return { status: "ok", device: null, message: null }; },

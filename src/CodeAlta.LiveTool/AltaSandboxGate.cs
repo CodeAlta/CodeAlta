@@ -40,6 +40,8 @@ internal static class AltaSandboxGate
         "fleet access proposals",
         // The audit log is read, as access is: it holds no content, and the command writes no file.
         "fleet audit list", "fleet audit verify",
+        // The policy is read, as access is.
+        "fleet policy show",
     }.ToFrozenSet(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>Gets the sandbox of a session, or null when it is not sandboxed.</summary>

@@ -543,7 +543,7 @@ internal sealed partial class FleetServerService
         var link = connection.Link;
         return new FleetServerView(link.Id, link.Url, link.OrganizationName, link.State, State(connection), connection.Connector?.LastError?.Message,
             link.IsController, [.. spaces.Where(space => link.IsServer(space.Settings.Fleet?.Server)).Select(static space => space.Id)],
-            link.IsController ? DesktopFleetServers.HasRecoveryKey(connection) : null);
+            link.IsController ? DesktopFleetServers.HasRecoveryKey(connection) : null, Banner(connection));
     }
 
     // The state of a link's connection, as the page names it.
@@ -687,8 +687,9 @@ internal sealed record FleetServerRequest(string ExpectedEpoch);
 /// <param name="Controller">Whether this device may make tokens and approve devices there.</param>
 /// <param name="Spaces">The spaces that publish to it.</param>
 /// <param name="RecoveryKey">Whether the person of this computer has a recovery key there, for an owner's computer; null when unknown or not asked.</param>
+/// <param name="Stop">The stop of the kill switch the policy of the server holds, as this computer verified it; null while the work of the fleet goes on.</param>
 internal sealed record FleetServerView(string Id, string Url, string? Organization, string Link, string Connection, string? Problem, bool Controller, string[] Spaces,
-    bool? RecoveryKey = null);
+    bool? RecoveryKey = null, FleetPolicyBanner? Stop = null);
 
 /// <summary>The servers of this instance.</summary>
 /// <param name="Status"><c>ok</c>, <c>stale_epoch</c> or <c>unavailable</c>.</param>
