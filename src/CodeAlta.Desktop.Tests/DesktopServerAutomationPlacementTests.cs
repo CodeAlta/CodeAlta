@@ -25,6 +25,25 @@ public sealed class DesktopServerAutomationPlacementTests
     public TestContext TestContext { get; set; } = null!;
 
     [TestMethod]
+    public void AnAutomationGivenToAMachineOfATeamItsPersonMaintains_IsAnAutomationOfThatTeam()
+    {
+        var devices = FleetDeviceListState.Empty with
+        {
+            Members = FleetDeviceListState.Empty.Members.Add("desk", new FleetDeviceListMember("desk", FleetDeviceKinds.Controller, null!, "mia"))
+                .Add("max-desk", new FleetDeviceListMember("max-desk", FleetDeviceKinds.Controller, null!, "max")),
+        };
+        var access = FleetAccessState.Empty with
+        {
+            Teams = FleetAccessState.Empty.Teams.Add("infra", new FleetAccessTeam("infra", ["mia"], ["max"], true)),
+            Machines = FleetAccessState.Empty.Machines.Add("box", "infra"),
+        };
+        Assert.AreEqual("infra", DesktopFleetServers.MaintainedTeamOf(access, devices, "desk", "box"));
+        Assert.IsNull(DesktopFleetServers.MaintainedTeamOf(access, devices, "max-desk", "box"), "a member gives the machine personal automations");
+        Assert.IsNull(DesktopFleetServers.MaintainedTeamOf(access, devices, "desk", "mini"), "a personal machine");
+        Assert.IsNull(DesktopFleetServers.MaintainedTeamOf(null, devices, "desk", "box"), "no document verified yet");
+    }
+
+    [TestMethod]
     public async Task RunsOn_AMachineOfTheServer_GivesItSealedThroughTheServer_ShowsItsRuns_AndTakesItAway()
     {
         var token = TestContext.CancellationToken;

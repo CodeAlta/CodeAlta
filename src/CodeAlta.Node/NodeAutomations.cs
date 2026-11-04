@@ -245,12 +245,31 @@ internal sealed partial class NodeAutomations : IFleetNodeAutomations, IAutomati
         if (!policy.Enabled) return "This machine runs no automations: its owner turned them off.";
         if (entry.Source.IsAssigned && CheckAssignment(entry) is { } refused) return refused;
 
+        // Who a run acts as (doc/fleet/orchestration.md): an automation of a team runs on a machine of that team, as one of the
+        // service identities the signed access document says the team turned on; a machine of a team runs no personal plan.
+        var (team, scope) = TeamsOf(entry);
+        if (scope is not null && team?.Id != scope) return "This automation of a team runs on a machine of that team only.";
+        if (scope is not null && team!.Services is not { Count: > 0 })
+            return "The automations of a team run as one of its service identities: a maintainer turns one on in People and access, and a signer signs it for machines.";
+
         var kind = _options.CredentialKind?.Invoke(provider) ?? Classify(provider);
         if (kind == AutomationCredentialKind.Unknown)
             return $"The credential the provider '{provider.ProviderId.Value}' runs with cannot be told: an unattended run uses a provider whose credential is known.";
+        if (kind == AutomationCredentialKind.Personal && team is not null)
+            return $"The provider '{provider.ProviderId.Value}' runs with a personal plan, and a machine of a team runs automations with account credentials only.";
         if (kind == AutomationCredentialKind.Personal && policy.Credentials != NodeAutomationPolicy.AnyCredentials)
             return $"The provider '{provider.ProviderId.Value}' runs with a personal plan, and this machine runs automations with account credentials only.";
         return null;
+    }
+
+    // The team of this machine, as the access document of the server an automation came through says, and the team the
+    // automation is of (its signed scope); both null for an automation of this machine's own, or one of a personal machine.
+    private (FleetAccessTeam? Machine, string? Automation) TeamsOf(AutomationEntry entry)
+    {
+        if (!entry.Source.IsAssigned || AssignmentOf(entry.Id) is not { Via: { } link } assignment || DeviceId is not { } self) return (null, null);
+        var team = ServerAccess?.Invoke(link)?.TeamOf(self);
+        var scope = assignment.Signed is { } signed && FleetAutomationVersionDocuments.TryParse(signed.Payload, out var version) ? version.TeamId : null;
+        return (team, scope);
     }
 
     /// <summary>Gets or sets what admits a run to an environment of the fleet; null until the node joined a server, and then no run uses one.</summary>

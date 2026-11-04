@@ -97,8 +97,7 @@ internal sealed class FleetAutomationService
         if (machine is null || machine.OrganizationId != actor.OrganizationId || machine.Kind != FleetDeviceKinds.Node)
             throw CoordinatorException.NotFound(CoordinatorErrorCodes.DeviceNotFound, "No machine of the organization has this id.");
         if (machine.Status != DeviceStatuses.Approved) throw CoordinatorException.Conflict(CoordinatorErrorCodes.DeviceState, "The machine is not a member of the device list.");
-        if (!string.Equals(machine.OwnerPersonId, person, StringComparison.Ordinal))
-            throw CoordinatorException.Forbidden(FleetErrorCodes.Forbidden, "A person gives automations to the machines they own only.");
+        var team = await TeamGivenAsync(actor.OrganizationId, version, machine, person, cancellationToken).ConfigureAwait(false);
         if (!version.Removed) await RequireOwnedAsync(actor.OrganizationId, version.AutomationId, person, cancellationToken).ConfigureAwait(false);
 
         var record = new AutomationRecord(actor.OrganizationId, version.AutomationId, version.MachineId, person, version.Number, version.Removed, version.Enabled,
@@ -110,6 +109,14 @@ internal sealed class FleetAutomationService
             var held = await _automations.GetAutomationAsync(actor.OrganizationId, version.AutomationId, version.MachineId, cancellationToken).ConfigureAwait(false);
             throw CoordinatorException.Conflict(CoordinatorErrorCodes.AutomationConflict,
                 $"The server holds version {held?.Number ?? version.Number} of this automation for this machine: a version is never replaced by one that is not newer.");
+        }
+
+        // An automation of a team is the team's from its first version: its maintainers change it, and its runs act as the team.
+        if (team is not null && !version.Removed && Access is { } access
+            && (await access.ReadAccessAsync(actor.OrganizationId, cancellationToken).ConfigureAwait(false)).Owner(FleetResourceKinds.Automation, version.AutomationId) is null)
+        {
+            await access.PutResourceOwnerAsync(new ResourceOwnerRecord(actor.OrganizationId, FleetResourceKinds.Automation, version.AutomationId, FleetPrincipalKinds.Team, team, person,
+                null, false, _time.GetUtcNow()), origin.Audit("owner.set", actor, version.AutomationId, details: $"{{\"team\":\"{team}\"}}"), CancellationToken.None).ConfigureAwait(false);
         }
 
         _logger.LogInformation("Automation {Automation} version {Number} for {Machine} was {Action} by {Device}", version.AutomationId, version.Number, version.MachineId,
@@ -191,8 +198,36 @@ internal sealed class FleetAutomationService
     {
         if (Access is not { } access) return;
         var snapshot = await access.ReadAccessAsync(organizationId, cancellationToken).ConfigureAwait(false);
-        if (snapshot.Owner(FleetResourceKinds.Automation, automationId) is { } owner && !(owner.OwnerKind == FleetPrincipalKinds.Person && owner.OwnerId == person))
+        if (snapshot.Owner(FleetResourceKinds.Automation, automationId) is { } owner && !(owner.OwnerKind == FleetPrincipalKinds.Person && owner.OwnerId == person)
+            && !(owner.OwnerKind == FleetPrincipalKinds.Team && snapshot.TeamRole(owner.OwnerId, person) == FleetTeamRoles.Maintainer))
             throw CoordinatorException.Forbidden(FleetErrorCodes.Forbidden, "This automation was given to another owner: its former owner only takes it off their machines.");
+    }
+
+    // Who may give a machine a version (doc/fleet/orchestration.md, scopes): its owner, for a personal machine; for a machine of a
+    // team, a maintainer of that team, and a member when the team runs the automations of its members. An automation of a team
+    // (scope team:<id>) is signed by a maintainer of that team for one of its machines. Gives the team of a version of a team.
+    private async Task<string?> TeamGivenAsync(string organizationId, FleetAutomationVersion version, DeviceRecord machine, string person, CancellationToken cancellationToken)
+    {
+        var snapshot = Access is { } access ? await access.ReadAccessAsync(organizationId, cancellationToken).ConfigureAwait(false) : null;
+        var held = snapshot?.Owner(FleetResourceKinds.Machine, machine.Id) is { OwnerKind: FleetPrincipalKinds.Team } owner ? owner.OwnerId : null;
+        var role = held is null ? null : snapshot!.TeamRole(held, person);
+        if (version.TeamId is { } team)
+        {
+            if (held != team || role != FleetTeamRoles.Maintainer)
+                throw CoordinatorException.Forbidden(FleetErrorCodes.Forbidden, "An automation of a team is given by one of its maintainers to a machine of that team.");
+            return team;
+        }
+
+        if (held is null)
+        {
+            if (!string.Equals(machine.OwnerPersonId, person, StringComparison.Ordinal))
+                throw CoordinatorException.Forbidden(FleetErrorCodes.Forbidden, "A person gives automations to the machines they own only.");
+            return null;
+        }
+
+        if (role == FleetTeamRoles.Maintainer || role == FleetTeamRoles.Member && snapshot!.Teams.FirstOrDefault(other => other.Id == held)?.RunsMemberAutomations == true)
+            return null;
+        throw CoordinatorException.Forbidden(FleetErrorCodes.Forbidden, "A machine of a team takes the automations of its maintainers, and of its members when the team allows it.");
     }
 
     /// <summary>Lists the runs of an automation of the caller's person, as its machines reported them, the newest first.</summary>

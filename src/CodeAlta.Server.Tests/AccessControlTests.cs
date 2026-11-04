@@ -188,6 +188,51 @@ public sealed class AccessControlTests
     }
 
     [TestMethod]
+    public async Task AMaintainerGivesATeamMachineAnAutomationOfTheTeam_WhichTheTeamOwns_AndTheDocumentNamesTheIdentityItRunsAs()
+    {
+        await using var server = await ServerFixture.StartAsync();
+        using var owner = new TestDevice("Alex desktop");
+        using var node = new TestDevice("Build box");
+        var (setup, machine) = await server.SetUpWithNodeAsync(owner, node);
+        var (mia, miaId) = await AddPersonAsync(server, owner, setup, "Mia");
+        var (max, maxId) = await AddPersonAsync(server, owner, setup, "Max");
+        var team = (await server.SendAsync(owner, HttpMethod.Post, "/api/v1/teams", new CreateTeamRequest("Infra"))).Read<TeamDto>();
+        await server.SendAsync(owner, HttpMethod.Put, $"/api/v1/teams/{team.Id}/members/{miaId}", new SetTeamMemberRequest(FleetTeamRoles.Maintainer));
+        await server.SendAsync(owner, HttpMethod.Put, $"/api/v1/teams/{team.Id}/members/{maxId}", new SetTeamMemberRequest(FleetTeamRoles.Member));
+        await server.SendAsync(owner, HttpMethod.Delete, $"/api/v1/teams/{team.Id}/members/{setup.Owner.Id}");
+        var offer = (await server.SendAsync(owner, HttpMethod.Post, "/api/v1/transfers", new OfferTransferRequest(FleetResourceKinds.Machine, machine.Id, FleetPrincipalKinds.Team,
+            team.Id))).Read<TransferDto>();
+        Assert.AreEqual(HttpStatusCode.OK, (await server.SendAsync(mia, HttpMethod.Post, $"/api/v1/transfers/{offer.Id}/accept")).Status);
+        PutAutomationRequest Version(TestDevice signer, string id, string? scope)
+        {
+            var text = FleetAutomationVersionDocuments.Serialize(new FleetAutomationVersion(FleetAutomationVersion.CurrentVersion, setup.Organization.Id, id, 1, machine.Id, false,
+                true, ["hourly"], null, null, "{\"sealed\":\"for the machine\"}", signer.DeviceId, signer.PublicKey, server.Clock.Now) { Scope = scope });
+            return new PutAutomationRequest(new FleetSignedAutomationVersion(text, signer.Sign(FleetAutomationVersionDocuments.GetSignedBytes(text))));
+        }
+
+        var put = await server.SendAsync(mia, HttpMethod.Put, "/api/v1/automations/deploy", Version(mia, "deploy", "team:" + team.Id));
+        Assert.AreEqual(HttpStatusCode.OK, put.Status, put.Body.ToString());
+        var owned = (await server.SendAsync(mia, HttpMethod.Get, "/api/v1/owners")).Read<AccessListDto<ResourceOwnerDto>>().Items.Single(resource => resource.ResourceId == "deploy");
+        Assert.AreEqual((FleetPrincipalKinds.Team, team.Id, miaId), (owned.OwnerKind, owned.OwnerId, owned.AuthorId), "the team owns it from its first version");
+        Assert.AreEqual(HttpStatusCode.Forbidden, (await server.SendAsync(max, HttpMethod.Put, "/api/v1/automations/other", Version(max, "other", "team:" + team.Id))).Status,
+            "a member gives the team none of its automations");
+        Assert.AreEqual(HttpStatusCode.Forbidden, (await server.SendAsync(max, HttpMethod.Put, "/api/v1/automations/mine", Version(max, "mine", null))).Status,
+            "nor its own, while the team does not run those of its members");
+        Assert.AreEqual(HttpStatusCode.Forbidden, (await server.SendAsync(owner, HttpMethod.Put, "/api/v1/automations/mine", Version(owner, "mine", null))).Status,
+            "the machine is the team's now, not its former owner's");
+        Assert.AreEqual(HttpStatusCode.Forbidden, (await server.SendAsync(mia, HttpMethod.Put, "/api/v1/automations/web", Version(mia, "web", "team:web"))).Status,
+            "an automation of a team goes to a machine of that team");
+
+        // The service identity of the team, once on, is in the next version of the document that machines follow.
+        var identity = (await server.SendAsync(mia, HttpMethod.Post, "/api/v1/service-identities",
+            new CreateServiceIdentityRequest("infra-bot", FleetPrincipalKinds.Team, team.Id))).Read<ServiceIdentityDto>();
+        var enabled = await server.SendAsync(mia, HttpMethod.Post, $"/api/v1/service-identities/{identity.Id}/enable");
+        Assert.AreEqual(HttpStatusCode.OK, enabled.Status, enabled.Body.ToString());
+        var draft = (await server.SendAsync(owner, HttpMethod.Get, "/api/v1/access/draft")).Read<AccessDocumentDraftDto>();
+        CollectionAssert.AreEqual(new[] { identity.Id }, draft.Document.Teams.Single().Services!.ToArray());
+    }
+
+    [TestMethod]
     public async Task AMachineGoesToATeamOnceAMaintainerAcceptsIt_AndAnAutomationTakenWaitsPaused()
     {
         await using var server = await ServerFixture.StartAsync();

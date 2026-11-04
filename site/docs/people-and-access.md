@@ -57,6 +57,13 @@ A grant gives a person or a team one capability somewhere: on the organization, 
 
 **Service identities** are what team and organization automations run as. A new one stays off until a person turns it on.
 
+### Automations of a team
+
+An automation you send to a machine of a team you maintain (its **Runs on**) becomes an automation of the team: the team owns it, and its maintainers change it.
+
+- It runs only while the team has a service identity turned on, once that change is signed (see [Sign what machines follow](#sign-what-machines-follow)).
+- A machine of a team runs automations with account credentials only: an API key or a gateway, never a personal plan such as a Claude, Codex or Copilot subscription.
+
 ## Sign what machines follow
 
 Machines never take teams, team machines or suspensions from the server alone: they follow them once an owner or an admin signs them. When something changed, **Waiting for you** lists it under **Changes machines do not follow yet**. Click **Review and sign…**: your computer reads the changes itself, lists them, and signs them with its key when you click **Sign**. A change made by a maintainer who is not an admin waits there too.
