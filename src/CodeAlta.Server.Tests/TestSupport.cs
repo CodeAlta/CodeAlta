@@ -99,6 +99,12 @@ internal sealed class TestDevice : IFleetHandshakeSigner, IDisposable
     public FleetSignedDeviceListEntry FirstEntry(DateTimeOffset time)
         => SignEntry(new FleetDeviceListEntryPayload(1, null, 1, null, FleetDeviceListOperations.Add, DeviceId, PublicKey, FleetDeviceKinds.Controller, null, DeviceId, time));
 
+    public FleetSignedPolicyDocument SignPolicy(FleetPolicyDocument document)
+    {
+        var text = FleetPolicyDocuments.Serialize(document with { SignerDeviceId = DeviceId });
+        return new FleetSignedPolicyDocument(text, Sign(FleetPolicyDocuments.GetSignedBytes(text)));
+    }
+
     public FleetSignedTelemetrySettings SignTelemetry(FleetTelemetrySettings settings)
     {
         var text = FleetTelemetrySettingsDocuments.Serialize(settings);
@@ -119,7 +125,8 @@ internal sealed record ApiAnswer(HttpStatusCode Status, JsonElement Body)
     {
         TypeInfoResolverChain = { ServerApiJsonContext.Default, FleetServerJsonContext.Default, FleetDeviceListJsonContext.Default, FleetTelemetryJsonContext.Default,
             FleetAutomationApiJsonContext.Default, FleetSecretsApiJsonContext.Default, FleetEnvironmentJsonContext.Default, FleetSignInJsonContext.Default,
-            FleetBudgetsApiJsonContext.Default, FleetAccessApiJsonContext.Default, FleetAccessDocumentJsonContext.Default, FleetHookApiJsonContext.Default },
+            FleetBudgetsApiJsonContext.Default, FleetAccessApiJsonContext.Default, FleetAccessDocumentJsonContext.Default, FleetHookApiJsonContext.Default,
+            FleetPolicyDocumentJsonContext.Default },
     };
 }
 

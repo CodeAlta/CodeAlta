@@ -239,4 +239,10 @@ public static class CoordinatorErrorCodes
 
     /// <summary>A version of the signed access document does not hold, or does not follow the last one.</summary>
     public const string AccessDocumentInvalid = "access_document.invalid";
+
+    /// <summary>A version of the signed policy does not hold.</summary>
+    public const string PolicyInvalid = "policy.invalid";
+
+    /// <summary>Another version of the policy was signed meanwhile: read it again.</summary>
+    public const string PolicyConflict = "policy.conflict";
 }

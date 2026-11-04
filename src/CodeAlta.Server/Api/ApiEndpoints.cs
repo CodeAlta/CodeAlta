@@ -226,6 +226,7 @@ internal static class ApiEndpoints
         BudgetEndpoints.Map(api);
         AccessEndpoints.Map(api);
         AuditEndpoints.Map(api);
+        PolicyEndpoints.Map(api);
 
         app.MapPost(FleetTelemetryPaths.Forward + "/{signal}", (string signal, HttpContext context, OtlpForwarder forwarder) => forwarder.HandleAsync(context, signal))
             .ExcludeFromDescription();
