@@ -27,4 +27,10 @@
     <Compile Include="..\CodeAlta.Fleet.Update.Tests\FakeServiceMachine.cs" Link="FakeServiceMachine.cs" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- The registration of the CodeAlta GitHub App, run against a fake of GitHub. -->
+    <None Include="..\CodeAlta.Server\Identity\SignIn\register-github-app.ps1" Link="GitHubApp\register-github-app.ps1" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\CodeAlta.Server\Identity\SignIn\github-app-manifest.json" Link="GitHubApp\github-app-manifest.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
 </Project>

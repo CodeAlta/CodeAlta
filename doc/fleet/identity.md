@@ -95,6 +95,12 @@ to it.
   company's own GitHub Enterprise Server app is the same, at its address (`CODEALTA_SIGNIN_GITHUB_URL`).
 - No registration per server; the ids are configuration of the server (`CODEALTA_SIGNIN_<PROVIDER>_CLIENT_ID`) until a
   release carries them, and a method whose id is missing is not offered.
+- **Registering the GitHub App** is one confirmation in a browser: `pwsh src/CodeAlta.Server/Identity/SignIn/register-github-app.ps1`
+  posts `github-app-manifest.json` (public, no permission, no webhook) to the CodeAlta organization, converts the code
+  GitHub sends back (`POST /app-manifests/{code}/conversions`) and prints the app id, slug and client id. The owner
+  then turns on **Enable Device Flow** in the app's settings, which a manifest cannot set, and puts the client id in
+  `PublicSignInClients.GitHubClientId`. The client secret, webhook secret and private key of the conversion are not
+  needed, and not kept unless `-SaveCredentialsTo` names a file.
 - A linked method signs in only once a person linked it from one of their devices; an account nobody linked signs
   nobody in.
 - Sign-in on the server's own web pages (a browser, the phone) needs an application the admin registers with the
