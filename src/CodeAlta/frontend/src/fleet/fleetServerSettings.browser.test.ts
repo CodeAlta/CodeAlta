@@ -9,6 +9,9 @@ const choose = (selector: string, value: string) => `(() => { const select = doc
   Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set.call(select, ${JSON.stringify(value)});
   select.dispatchEvent(new Event('change', { bubbles: true })); return true; })()`;
 
+// What the page asked the host, in order.
+const calls = async (page: { evaluate: (script: string) => Promise<unknown> }) => (await page.evaluate(`[...window.fleetFixture.calls]`) as string[]).map(call => JSON.parse(call));
+
 // Types in an input as the user does: React reads the input event.
 const type = (selector: string, value: string) => `(() => { const input = document.querySelector(${JSON.stringify(selector)});
   Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(input, ${JSON.stringify(value)});
@@ -227,6 +230,47 @@ test("a computer without a server recovers with the 32 words of the recovery key
     await page.until(`document.querySelector('.fleet-server-card')`, "the server again");
     const calls = (await page.evaluate(`[...window.fleetFixture.calls]`) as string[]).map(call => JSON.parse(call)).filter(call => call.recover);
     assert.deepEqual(calls.map(call => [call.recover, call.words === words]), [["https://fleet.example", false], ["https://fleet.example", false], ["https://fleet.example", true]]);
+    assert.deepEqual(page.problems, []);
+  }, options);
+});
+
+test("each linked account has its mark and a remove button asking beside the row; a company account has none, and Link… still offers an account already linked", { skip: !edge, timeout: 90_000 }, async () => {
+  await withCanvas(async page => {
+    await page.until(`document.querySelector('.fleet-sign-in-summary')`, "the sign-in of the server");
+    await page.evaluate(`window.fleetFixture.logins()`);
+    await page.clickText(".fleet-server-sign-in .bp6-button", "Link…");
+    await page.clickText(".bp6-menu-item", "Add a passkey");
+    await page.until(`document.querySelectorAll('.fleet-sign-in-logins .bp6-tag').length === 3`, "the ways in of the person");
+    assert.deepEqual(await page.evaluate(`[...document.querySelectorAll('.fleet-sign-in-login')].map(row => [row.textContent, !!row.querySelector('svg'),
+      row.querySelector('.fleet-sign-in-login-remove')?.getAttribute('aria-label') ?? null])`), [
+      ["Company sign-in · alex@contoso.example", true, null],
+      ["Microsoft · alex@outlook.com", true, "Remove Microsoft · alex@outlook.com"],
+      ["Passkey · Passkey on Windows", true, "Remove Passkey · Passkey on Windows"]], "each with its mark; the company's account without a remove button");
+    assert.equal(await page.evaluate(`document.querySelector('.fleet-sign-in-login .bp6-tag').title`),
+      "Managed by your organization: an admin removes a person in People and access");
+
+    // Link… still offers an account already linked: linking it again refreshes its name.
+    await page.clickText(".fleet-server-sign-in .bp6-button", "Link…");
+    await page.until(`[...document.querySelectorAll('.bp6-menu-item')].some(item => item.textContent === 'Link Microsoft')`, "Microsoft offered again");
+    await page.clickText(".fleet-server-sign-in .bp6-button", "Link…");
+    await page.until(`!document.querySelector('.bp6-menu-item')`, "the menu closed");
+
+    // Remove asks beside the row; Remove does it, and the row lists what is left.
+    await page.evaluate(`document.querySelector('[aria-label="Remove Microsoft · alex@outlook.com"]').click()`);
+    await page.until(`document.querySelector('.confirm-form strong')?.textContent === 'Remove Microsoft from your ways to sign in?'`, "the question");
+    assert.equal(await page.evaluate(`document.querySelector('.confirm-form .confirm-subject').textContent`), "alex@outlook.com");
+    await page.shot("fleet-sign-in-remove");
+    await page.clickText(".confirm-form .bp6-button", "Remove");
+    await page.until(`document.querySelectorAll('.fleet-sign-in-logins .bp6-tag').length === 2 && !document.querySelector('.confirm-form')`, "removed");
+
+    // The last way in of an owner without a recovery key stays: the question says why, and Cancel leaves it.
+    await page.evaluate(`document.querySelector('[aria-label="Remove Passkey · Passkey on Windows"]').click()`);
+    await page.until(`document.querySelector('.confirm-form')`, "the question");
+    await page.clickText(".confirm-form .bp6-button", "Remove");
+    await page.until(`document.querySelector('.confirm-form .confirm-error')?.textContent.startsWith('This is your last way to sign in')`, "why it stays");
+    await page.clickText(".confirm-form .bp6-button", "Cancel");
+    await page.until(`!document.querySelector('.confirm-form')`, "cancelled");
+    assert.deepEqual((await calls(page)).filter(call => call.removeLogin), [{ removeLogin: "a_microsoft" }, { removeLogin: "p_windows" }]);
     assert.deepEqual(page.problems, []);
   }, options);
 });

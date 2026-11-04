@@ -119,7 +119,15 @@ const api: FleetServerApi = {
       calls.push(JSON.stringify({ linkCancelled: request.method }));
       return { status: "sign_in.cancelled", message: null };
     }
-    logins = [...logins, { method: request.method, name: request.method === "passkey" ? "Passkey on Windows" : "alex@example.com", createdAt: "2026-11-04T08:00:00Z", lastUsedAt: null }];
+    logins = [...logins, { method: request.method, name: request.method === "passkey" ? "Passkey on Windows" : "alex@example.com", createdAt: "2026-11-04T08:00:00Z", lastUsedAt: null,
+      id: request.method === "passkey" ? "p_windows" : `a_${request.method}` }];
+    return { status: "ok", message: null };
+  },
+  // As the server: the last way in of an owner without a recovery key stays.
+  removeSignInLogin: async (request: { loginId: string }) => {
+    calls.push(JSON.stringify({ removeLogin: request.loginId }));
+    if (logins.filter(login => login.method !== "company").length <= 1 && !recoveryKey) return { status: "sign_in.last_way_in", message: null };
+    logins = logins.filter(login => login.id !== request.loginId);
     return { status: "ok", message: null };
   },
   openSignInPage: async (request: { handle: string }) => { calls.push(JSON.stringify({ openPage: request.handle })); return { status: "ok", message: null }; },
@@ -128,6 +136,10 @@ const api: FleetServerApi = {
   create: unavailable, join: unavailable, revoke: unavailable, signInMethods: unavailable, joinWithSignIn: unavailable,
 };
 Object.assign(window, { fleetFixture: { calls, skip: (count: number) => { skippedEntries = count; },
+  // A person who signs in with the company's account and a Microsoft account (a passkey is linked by the test).
+  logins: () => { logins = [
+    { method: "company", name: "alex@contoso.example", createdAt: "2026-11-01T08:00:00Z", lastUsedAt: null, id: "a_company" },
+    { method: "microsoft", name: "alex@outlook.com", createdAt: "2026-11-02T08:00:00Z", lastUsedAt: null, id: "a_microsoft" }]; },
   ask: () => { approvals = [{ id: "approval-1", requestedBy: "Office desktop", issuer: "https://login.contoso.example", clientId: "contoso-client", secretChanges: true,
     allowedDomains: ["contoso.example"], allowedTenants: [], requireSso: true, enabled: ["company", "passkey"], expiresAt: "2026-11-04T12:10:00Z" }]; } } });
 

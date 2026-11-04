@@ -1,3 +1,6 @@
+using System.Buffers.Text;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using CodeAlta.Fleet.Protocol;
@@ -585,17 +588,94 @@ public sealed class SignInService : IDisposable
     /// <param name="actor">The calling device.</param>
     /// <param name="cancellationToken">Cancels the read.</param>
     /// <returns>The linked accounts and passkeys.</returns>
-    public async Task<ListResponse<SignInLoginDto>> ListLoginsAsync(DeviceRecord actor, CancellationToken cancellationToken)
+    public Task<ListResponse<SignInLoginDto>> ListLoginsAsync(DeviceRecord actor, CancellationToken cancellationToken) => ListLoginsAsync(actor, null, cancellationToken);
+
+    /// <summary>Lists the sign-in methods linked to a person: the calling device's, or another one's for an owner or an admin.</summary>
+    /// <param name="actor">The calling device.</param>
+    /// <param name="personId">The person; null for the calling device's.</param>
+    /// <param name="cancellationToken">Cancels the read.</param>
+    /// <returns>The linked accounts and passkeys, each with the id that removes it.</returns>
+    /// <exception cref="CoordinatorException">The caller may not read another person's, or there is no such person.</exception>
+    public async Task<ListResponse<SignInLoginDto>> ListLoginsAsync(DeviceRecord actor, string? personId, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(actor);
-        if (actor.OwnerPersonId is null) return new ListResponse<SignInLoginDto>([]);
-        var logins = await _signIn.ListLoginsAsync(actor.OwnerPersonId, cancellationToken).ConfigureAwait(false);
-        var passkeys = await _signIn.ListPasskeysAsync(actor.OwnerPersonId, cancellationToken).ConfigureAwait(false);
+        if (actor.OwnerPersonId is null && personId is null) return new ListResponse<SignInLoginDto>([]);
+        return await LoginsOfAsync(await PersonOfLoginsAsync(actor, personId, cancellationToken).ConfigureAwait(false), cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Removes a way a person signs in, a linked account or a passkey: it signs nobody in afterwards. The calling device's
+    /// own person, or another one for an owner or an admin. A company account belongs to the organization (removing a
+    /// person is deprovisioning, in People and access); the last way in of an owner without a recovery key stays.
+    /// </summary>
+    /// <param name="actor">The calling device.</param>
+    /// <param name="id">The id of the way in (<see cref="SignInLoginDto.Id"/>).</param>
+    /// <param name="personId">The person; null for the calling device's.</param>
+    /// <param name="origin">Where the request came from.</param>
+    /// <param name="cancellationToken">Cancels the removal.</param>
+    /// <returns>The ways the person signs in now.</returns>
+    /// <exception cref="CoordinatorException">The caller may not; no way in has this id; it is a company account; or it is the last way in of an owner without a recovery key.</exception>
+    public async Task<ListResponse<SignInLoginDto>> RemoveLoginAsync(DeviceRecord actor, string id, string? personId, RequestOrigin origin, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(actor);
+        ArgumentNullException.ThrowIfNull(origin);
+        if (actor.Kind != FleetDeviceKinds.Controller || actor.OwnerPersonId is null)
+            throw CoordinatorException.Forbidden(FleetErrorCodes.Forbidden, "A way to sign in is removed from a controller device of a person.");
+        var person = await PersonOfLoginsAsync(actor, personId, cancellationToken).ConfigureAwait(false);
+        var login = (await _signIn.ListLoginsAsync(person.Id, cancellationToken).ConfigureAwait(false)).FirstOrDefault(login => LoginId(login) == id);
+        var passkey = login is not null ? null
+            : (await _signIn.ListPasskeysAsync(person.Id, cancellationToken).ConfigureAwait(false)).FirstOrDefault(passkey => PasskeyId(passkey) == id);
+        if (login is null && passkey is null) throw CoordinatorException.NotFound(SignInErrorCodes.LoginNotFound, "No way to sign in of this person has this id.");
+        if (login?.Method == FleetSignInMethods.Company)
+            throw CoordinatorException.Forbidden(SignInErrorCodes.ManagedByOrganization,
+                "A company account is managed by your organization: an admin removes the person in People and access.");
+
+        // An owner keeps a way in while nothing else lets them back in when every device is lost.
+        var keepLast = person.Role == PersonRoles.Owner && !(await _store.ListDevicesAsync(person.OrganizationId, cancellationToken).ConfigureAwait(false))
+            .Any(device => device.Kind == FleetDeviceKinds.Recovery && device.Status == DeviceStatuses.Approved && device.OwnerPersonId == person.Id);
+        var method = login?.Method ?? FleetSignInMethods.Passkey;
+        var audit = origin.Audit("sign_in.login.remove", actor, person.Id, details: $"{{\"method\":\"{method}\"}}");
+        var outcome = login is not null
+            ? await _signIn.RemoveLoginAsync(login, keepLast, audit, cancellationToken).ConfigureAwait(false)
+            : await _signIn.RemovePasskeyAsync(passkey!, keepLast, audit, cancellationToken).ConfigureAwait(false);
+        return outcome switch
+        {
+            LoginRemovalOutcome.Removed => await LoginsOfAsync(person, cancellationToken).ConfigureAwait(false),
+            LoginRemovalOutcome.LastWayIn => throw CoordinatorException.Conflict(SignInErrorCodes.LastWayIn,
+                "This is the last way this owner signs in, and they have no recovery key: make the recovery key first, or link another way to sign in."),
+            _ => throw CoordinatorException.NotFound(SignInErrorCodes.LoginNotFound, "No way to sign in of this person has this id."),
+        };
+    }
+
+    // The person whose ways in a call reads or removes: the calling device's own, or another of the organization for a
+    // device whose person manages the people (an owner, an admin).
+    private async Task<PersonRecord> PersonOfLoginsAsync(DeviceRecord actor, string? personId, CancellationToken cancellationToken)
+    {
+        if (personId is not null && personId != actor.OwnerPersonId
+            && (Access is not { } access || !await access.MayManagePeopleAsync(actor, cancellationToken).ConfigureAwait(false)))
+            throw CoordinatorException.Forbidden(FleetErrorCodes.Forbidden, "Only an owner or an admin manages how another person signs in.");
+        var person = await _store.GetPersonAsync(personId ?? actor.OwnerPersonId!, cancellationToken).ConfigureAwait(false);
+        return person is not null && person.OrganizationId == actor.OrganizationId
+            ? person
+            : throw CoordinatorException.NotFound(SignInErrorCodes.LoginNotFound, "No person of the organization has this id.");
+    }
+
+    private async Task<ListResponse<SignInLoginDto>> LoginsOfAsync(PersonRecord person, CancellationToken cancellationToken)
+    {
+        var logins = await _signIn.ListLoginsAsync(person.Id, cancellationToken).ConfigureAwait(false);
+        var passkeys = await _signIn.ListPasskeysAsync(person.Id, cancellationToken).ConfigureAwait(false);
         return new ListResponse<SignInLoginDto>([
-            .. logins.Select(static login => new SignInLoginDto(login.Method, login.Name, login.CreatedAt, login.LastSignInAt)),
-            .. passkeys.Select(static passkey => new SignInLoginDto(FleetSignInMethods.Passkey, passkey.Name, passkey.CreatedAt, passkey.LastUsedAt)),
+            .. logins.Select(static login => new SignInLoginDto(login.Method, login.Name, login.CreatedAt, login.LastSignInAt, LoginId(login))),
+            .. passkeys.Select(static passkey => new SignInLoginDto(FleetSignInMethods.Passkey, passkey.Name, passkey.CreatedAt, passkey.LastUsedAt, PasskeyId(passkey))),
         ]);
     }
+
+    // The ids of the ways in: opaque, so that the list shows neither the issuer and subject of an account nor the id of a credential.
+    private static string LoginId(LoginRecord login) => "a_" + ShortHash(login.Issuer + "\n" + login.Subject);
+
+    private static string PasskeyId(PasskeyRecord passkey) => "p_" + ShortHash(passkey.CredentialId);
+
+    private static string ShortHash(string text) => Base64Url.EncodeToString(SHA256.HashData(Encoding.UTF8.GetBytes(text)))[..22];
 
     /// <inheritdoc />
     public void Dispose()

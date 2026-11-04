@@ -73,6 +73,15 @@ public static class SignInErrorCodes
 
     /// <summary>The company's provider proved an identity outside the domains and tenants the owner named.</summary>
     public const string IdentityNotAllowed = "sign_in.identity_not_allowed";
+
+    /// <summary>No way to sign in of the person has this id.</summary>
+    public const string LoginNotFound = "sign_in.login_not_found";
+
+    /// <summary>The way to sign in is the last one of an owner who has no recovery key: removing it could lock the server out.</summary>
+    public const string LastWayIn = "sign_in.last_way_in";
+
+    /// <summary>A company account belongs to the organization: an admin removes the person in People and access, not the account.</summary>
+    public const string ManagedByOrganization = "sign_in.managed_by_organization";
 }
 
 /// <summary>A sign-in that waits for the browser.</summary>

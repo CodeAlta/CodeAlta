@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import type { FleetSignInSettingsView } from "#neoastra";
-import { allowedValues, orderedSignInMethods, signInCode, signInDraft, signInDraftProblem, signInProblem, signInSummary } from "./signIn";
+import { allowedValues, orderedSignInMethods, removableLogin, signInCode, signInDraft, signInDraftProblem, signInProblem, signInSummary } from "./signIn";
 
 const settings = (look: Partial<FleetSignInSettingsView> = {}): FleetSignInSettingsView => ({ methods: [
   { id: "company", name: "Contoso", enabled: true, available: true }, { id: "passkey", name: "Passkey", enabled: true, available: true },
@@ -60,6 +60,16 @@ test("the refusals of sign-in say what to do, and the other statuses are left to
   assert.equal(signInProblem("sign_in.denied"), "The sign-in was refused at the provider.");
   assert.equal(signInProblem("sign_in.expired"), "The code expired before it was entered: start the sign-in again.");
   assert.equal(signInProblem("unreachable"), null);
+  assert.equal(signInProblem("sign_in.last_way_in"), "This is your last way to sign in, and you have no recovery key: make your recovery key first, or link another way.");
+  assert.equal(signInProblem("sign_in.managed_by_organization"), "Managed by your organization: an admin removes a person in People and access");
+  assert.equal(signInProblem("sign_in.login_not_found"), "This way to sign in was removed already.");
+});
+
+test("a linked account or a passkey is removed from the row; a company account is the organization's, and an older server gives no id", () => {
+  const login = (method: string, id: string | null = "a_1") => ({ method, name: "alex@example.com", createdAt: "2026-11-04T08:00:00Z", lastUsedAt: null, id });
+  for (const method of ["passkey", "microsoft", "google", "github"]) assert.equal(removableLogin(login(method)), true, method);
+  assert.equal(removableLogin(login("company")), false);
+  assert.equal(removableLogin(login("microsoft", null)), false);
 });
 
 test("a GitHub code is shown only when it is a short printable code with an https:// page", () => {

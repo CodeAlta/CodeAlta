@@ -78,6 +78,42 @@ public sealed partial class SqliteCoordinatorStore : ISignInStore
     }
 
     /// <inheritdoc />
+    public ValueTask<LoginRemovalOutcome> RemoveLoginAsync(LoginRecord login, bool keepLastWayIn, AuditEntry audit, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(login);
+        ArgumentNullException.ThrowIfNull(audit);
+        return WriteAsync((connection, transaction) =>
+        {
+            if (keepLastWayIn && WaysIn(connection, transaction, login.PersonId) <= 1) return LoginRemovalOutcome.LastWayIn;
+            var removed = Execute(connection, transaction, "DELETE FROM logins WHERE organization_id = $org AND issuer = $issuer AND subject = $subject AND person_id = $person",
+                ("$org", login.OrganizationId), ("$issuer", login.Issuer), ("$subject", login.Subject), ("$person", login.PersonId));
+            if (removed == 0) return LoginRemovalOutcome.NotFound;
+            AppendAudit(connection, transaction, audit);
+            return LoginRemovalOutcome.Removed;
+        }, cancellationToken);
+    }
+
+    /// <inheritdoc />
+    public ValueTask<LoginRemovalOutcome> RemovePasskeyAsync(PasskeyRecord passkey, bool keepLastWayIn, AuditEntry audit, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(passkey);
+        ArgumentNullException.ThrowIfNull(audit);
+        return WriteAsync((connection, transaction) =>
+        {
+            if (keepLastWayIn && WaysIn(connection, transaction, passkey.PersonId) <= 1) return LoginRemovalOutcome.LastWayIn;
+            var removed = Execute(connection, transaction, "DELETE FROM passkeys WHERE credential_id = $id AND person_id = $person",
+                ("$id", passkey.CredentialId), ("$person", passkey.PersonId));
+            if (removed == 0) return LoginRemovalOutcome.NotFound;
+            AppendAudit(connection, transaction, audit);
+            return LoginRemovalOutcome.Removed;
+        }, cancellationToken);
+    }
+
+    // The accounts and passkeys of a person: the ways they sign in, beside their devices and their recovery key.
+    private static long WaysIn(SqliteConnection connection, SqliteTransaction transaction, string personId)
+        => CountWhere(connection, transaction, "logins", "person_id", personId) + CountWhere(connection, transaction, "passkeys", "person_id", personId);
+
+    /// <inheritdoc />
     public ValueTask UpdateLoginAsync(LoginRecord login, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(login);

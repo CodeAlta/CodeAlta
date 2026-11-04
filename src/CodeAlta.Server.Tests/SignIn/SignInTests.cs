@@ -731,6 +731,92 @@ public sealed class SignInTests
         Assert.AreEqual(PersonRoles.Owner, (await server.Server.Store.GetPersonAsync(signedIn.Person.Id))!.Role);
     }
 
+    [TestMethod]
+    public async Task APersonRemovesALinkedAccount_WhichThenSignsNobodyIn_ButNeverTheLastWayInOfAnOwnerWithoutARecoveryKey()
+    {
+        await using var provider = await FakeOidcProvider.StartAsync(clientSecret: "company-secret");
+        await using var server = await ServerFixture.StartAsync(signIn: Options(provider));
+        using var owner = new TestDevice("Desktop");
+        using var laptop = new TestDevice("Laptop");
+        using var recovery = new TestDevice("Recovery key");
+        using var passkey = new SoftwareAuthenticator();
+        var setup = await server.SetUpAsync(owner);
+        var (link, linkBack) = await StartAsync(server, owner, FleetSignInMethods.Microsoft, FleetSignInPurposes.Link);
+        Assert.AreEqual(HttpStatusCode.OK, (await CompleteAsync(server, owner, link, linkBack)).Status);
+        async Task<IReadOnlyList<SignInLoginDto>> LoginsAsync() => (await server.SendAsync(owner, HttpMethod.Get, "/api/v1/sign-in/logins")).Read<ListResponse<SignInLoginDto>>().Items;
+        var microsoft = (await LoginsAsync()).Single();
+        Assert.IsFalse(string.IsNullOrEmpty(microsoft.Id), "each way to sign in has an id to remove it by");
+        Assert.IsFalse(microsoft.Id!.Contains(provider.Issuer.Host, StringComparison.Ordinal), "the id does not show the issuer or the subject of the account");
+
+        // The only way in of an owner without a recovery key stays: removing it could lock the server out.
+        var last = await server.SendAsync(owner, HttpMethod.Delete, $"/api/v1/sign-in/logins/{microsoft.Id}");
+        Assert.AreEqual((HttpStatusCode.Conflict, SignInErrorCodes.LastWayIn), Answer(last), last.Body.ToString());
+
+        // With a passkey beside it, the account goes: it signs nobody in any more.
+        await RegisterPasskeyAsync(server, owner, passkey, server.BaseAddress.GetLeftPart(UriPartial.Authority));
+        var removed = await server.SendAsync(owner, HttpMethod.Delete, $"/api/v1/sign-in/logins/{microsoft.Id}");
+        Assert.AreEqual(HttpStatusCode.OK, removed.Status, removed.Body.ToString());
+        CollectionAssert.AreEqual(new[] { FleetSignInMethods.Passkey }, removed.Read<ListResponse<SignInLoginDto>>().Items.Select(static login => login.Method).ToArray());
+        var (start, back) = await StartAsync(server, laptop, FleetSignInMethods.Microsoft);
+        Assert.AreEqual((HttpStatusCode.Forbidden, SignInErrorCodes.NotLinked), Answer(await CompleteAsync(server, laptop, start, back)));
+        Assert.AreEqual((HttpStatusCode.NotFound, SignInErrorCodes.LoginNotFound),
+            Answer(await server.SendAsync(owner, HttpMethod.Delete, $"/api/v1/sign-in/logins/{microsoft.Id}")), "removed once");
+
+        // The passkey is now the last way in; with a recovery key, it may go too.
+        var key = (await LoginsAsync()).Single();
+        Assert.AreEqual(SignInErrorCodes.LastWayIn, (await server.SendAsync(owner, HttpMethod.Delete, $"/api/v1/sign-in/logins/{key.Id}")).Code);
+        var entry = await server.NextEntryAsync(owner, FleetDeviceListOperations.Add, recovery.DeviceId, recovery.PublicKey, FleetDeviceKinds.Recovery, setup.Owner.Id, setup.Organization.Id);
+        Assert.AreEqual(HttpStatusCode.Created, (await server.SendAsync(owner, HttpMethod.Post, "/api/v1/recovery-keys", new CreateRecoveryKeyRequest(recovery.PublicKey, entry, "sealed-anchor"))).Status);
+        Assert.AreEqual(HttpStatusCode.OK, (await server.SendAsync(owner, HttpMethod.Delete, $"/api/v1/sign-in/logins/{key.Id}")).Status);
+        Assert.AreEqual(0, (await LoginsAsync()).Count);
+
+        var audit = (await server.SendAsync(owner, HttpMethod.Get, "/api/v1/audit?limit=500")).Read<ListResponse<AuditRecordDto>>().Items;
+        Assert.AreEqual(2, audit.Count(static record => record.Action == "sign_in.login.remove" && record.Result == "success"));
+        Assert.AreEqual(2, audit.Count(static record => record.Action == "sign_in.login.remove" && record.Result == SignInErrorCodes.LastWayIn));
+    }
+
+    [TestMethod]
+    public async Task AnAdminRemovesAnotherPersonsWayIn_AMemberDoesNot_AndACompanyAccountIsManagedByTheOrganization()
+    {
+        await using var provider = await FakeOidcProvider.StartAsync(clientSecret: "company-secret");
+        await using var server = await ServerFixture.StartAsync(signIn: Options(provider));
+        using var owner = new TestDevice("Desktop");
+        using var node = new TestDevice("Mac mini");
+        using var laptop = new TestDevice("Laptop");
+        using var passkey = new SoftwareAuthenticator();
+        var (setup, _) = await server.SetUpWithNodeAsync(owner, node);
+        await ConfigureCompanyAsync(server, owner, provider, requireSso: false);
+
+        // Pat joins through the company's sign-in on their laptop, which the owner approves; Pat adds a passkey.
+        provider.Account = new FakeAccount("user-2", "pat@contoso.example", "Pat Lee", []);
+        var (start, back) = await StartAsync(server, laptop, FleetSignInMethods.Company);
+        var signedIn = (await CompleteAsync(server, laptop, start, back)).Read<CompleteSignInResponse>();
+        var pat = signedIn.Person.Id;
+        Assert.AreEqual(HttpStatusCode.Created, (await server.SendAsync(laptop, HttpMethod.Post, "/api/v1/enroll",
+            new EnrollRequest(string.Empty, laptop.PublicKey, laptop.Name, null, signedIn.Grant))).Status);
+        var entry = await server.NextEntryAsync(owner, FleetDeviceListOperations.Add, laptop.DeviceId, laptop.PublicKey, FleetDeviceKinds.Controller, pat, setup.Organization.Id);
+        var approved = await server.SendAsync(owner, HttpMethod.Post, $"/api/v1/devices/{laptop.DeviceId}/approve", new DeviceListChangeRequest(entry));
+        Assert.AreEqual(HttpStatusCode.OK, approved.Status, approved.Body.ToString());
+        await RegisterPasskeyAsync(server, laptop, passkey, server.BaseAddress.GetLeftPart(UriPartial.Authority));
+
+        // The company's account is the organization's: neither Pat nor an admin removes it here (that is deprovisioning the person).
+        var mine = (await server.SendAsync(laptop, HttpMethod.Get, "/api/v1/sign-in/logins")).Read<ListResponse<SignInLoginDto>>().Items;
+        var company = mine.Single(static login => login.Method == FleetSignInMethods.Company);
+        Assert.AreEqual((HttpStatusCode.Forbidden, SignInErrorCodes.ManagedByOrganization),
+            Answer(await server.SendAsync(laptop, HttpMethod.Delete, $"/api/v1/sign-in/logins/{company.Id}")));
+        Assert.AreEqual(SignInErrorCodes.ManagedByOrganization, (await server.SendAsync(owner, HttpMethod.Delete, $"/api/v1/sign-in/logins/{company.Id}?person={pat}")).Code);
+
+        // A member neither reads nor removes another person's ways in; an owner does.
+        var owners = (await server.SendAsync(owner, HttpMethod.Get, "/api/v1/sign-in/logins")).Read<ListResponse<SignInLoginDto>>().Items;
+        Assert.AreEqual(HttpStatusCode.Forbidden, (await server.SendAsync(laptop, HttpMethod.Get, $"/api/v1/sign-in/logins?person={setup.Owner.Id}")).Status);
+        Assert.AreEqual(HttpStatusCode.Forbidden, (await server.SendAsync(laptop, HttpMethod.Delete, $"/api/v1/sign-in/logins/{owners[0].Id}?person={setup.Owner.Id}")).Status);
+        var patsKeys = (await server.SendAsync(owner, HttpMethod.Get, $"/api/v1/sign-in/logins?person={pat}")).Read<ListResponse<SignInLoginDto>>().Items;
+        CollectionAssert.AreEquivalent(new[] { FleetSignInMethods.Company, FleetSignInMethods.Passkey }, patsKeys.Select(static login => login.Method).ToArray());
+        var removed = await server.SendAsync(owner, HttpMethod.Delete, $"/api/v1/sign-in/logins/{patsKeys.Single(static login => login.Method == FleetSignInMethods.Passkey).Id}?person={pat}");
+        Assert.AreEqual(HttpStatusCode.OK, removed.Status, removed.Body.ToString());
+        Assert.AreEqual(FleetSignInMethods.Company, (await server.SendAsync(laptop, HttpMethod.Get, "/api/v1/sign-in/logins")).Read<ListResponse<SignInLoginDto>>().Items.Single().Method);
+    }
+
     internal static SignInOptions Options(FakeOidcProvider provider) => new()
     {
         AllowLoopbackHttpProviders = true,

@@ -96,11 +96,17 @@ internal static class SignInEndpoints
             .Produces<SignInApprovalDto>()
             .WithSummary("Approves a change of the company sign-in that another device of the caller's person asks for, with the approval the caller signed.");
 
-        signIn.MapGet("/logins", async (HttpContext context, SignInService service)
-                => Results.Json(await service.ListLoginsAsync(DeviceAuthenticationMiddleware.GetDevice(context), context.RequestAborted).ConfigureAwait(false),
+        signIn.MapGet("/logins", async (string? person, HttpContext context, SignInService service)
+                => Results.Json(await service.ListLoginsAsync(DeviceAuthenticationMiddleware.GetDevice(context), person, context.RequestAborted).ConfigureAwait(false),
                     FleetSignInJsonContext.Default.ListResponseSignInLoginDto))
             .Produces<ListResponse<SignInLoginDto>>()
-            .WithSummary("The sign-in methods and passkeys linked to the calling device's person.");
+            .WithSummary("The sign-in methods and passkeys linked to the calling device's person, or to another person (?person=) for an owner or an admin.");
+
+        signIn.MapDelete("/logins/{id}", (string id, string? person, HttpContext context, SignInService service) =>
+                AuditedAsync(context, "sign_in.login.remove", actor => service.RemoveLoginAsync(actor, id, person, ApiEndpoints.Origin(context), context.RequestAborted),
+                    FleetSignInJsonContext.Default.ListResponseSignInLoginDto))
+            .Produces<ListResponse<SignInLoginDto>>()
+            .WithSummary("Removes a linked account or a passkey: it signs nobody in afterwards. Not a company account, nor the last way in of an owner without a recovery key.");
 
         // The server's own sign-in page, for passkeys: WebAuthn runs in a browser, at the origin of the server.
         app.MapGet("/sign-in/passkey", (HttpContext context) => Page(context, PasskeyPage.Html, "text/html; charset=utf-8")).ExcludeFromDescription();

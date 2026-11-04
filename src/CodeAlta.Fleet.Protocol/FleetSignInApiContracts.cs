@@ -365,7 +365,8 @@ public sealed partial class FleetSignInApprovalJsonContext : JsonSerializerConte
 /// <param name="Name">What the person sees of it: an email, a GitHub login, the name of a passkey.</param>
 /// <param name="CreatedAt">When it was linked.</param>
 /// <param name="LastUsedAt">When it last signed in, or null.</param>
-public sealed record SignInLoginDto(string Method, string Name, DateTimeOffset CreatedAt, DateTimeOffset? LastUsedAt);
+/// <param name="Id">What removes it (<c>DELETE /api/v1/sign-in/logins/{id}</c>): opaque, it shows neither the account's issuer nor its subject; null from a server before it.</param>
+public sealed record SignInLoginDto(string Method, string Name, DateTimeOffset CreatedAt, DateTimeOffset? LastUsedAt, string? Id = null);
 
 /// <summary>The source-generated contracts of sign-in.</summary>
 [JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase, DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull)]
