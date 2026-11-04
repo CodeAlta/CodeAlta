@@ -35,6 +35,7 @@ internal sealed class AccessDocumentService
         _service = service;
         _time = time;
         service.DocumentState = StateAsync;
+        service.SignsNext = SignsNextAsync;
     }
 
     /// <summary>Lists the versions after a number, for any approved device of the organization: nodes verify them themselves.</summary>
@@ -60,6 +61,8 @@ internal sealed class AccessDocumentService
     {
         var (snapshot, person) = await _service.ReadAsync(actor, cancellationToken).ConfigureAwait(false);
         if (!AccessPolicy.IsSigner(snapshot, person.Id)) throw AccessService.Denied("Only the devices of owners and admins sign the access document.");
+        if (!await SignsNextAsync(actor.OrganizationId, snapshot, person.Id, cancellationToken).ConfigureAwait(false))
+            throw AccessService.Denied("An owner signs first: the last signed version does not list this person as an owner or an admin who signs.");
         var documents = await _access.ListAccessDocumentsAsync(actor.OrganizationId, 0, cancellationToken).ConfigureAwait(false);
         var last = await _store.GetLastDeviceListEntryAsync(actor.OrganizationId, cancellationToken).ConfigureAwait(false);
         var draft = await ModelAsync(actor.OrganizationId, snapshot, documents.Count == 0 ? null : documents[^1], last?.Sequence ?? 1, cancellationToken).ConfigureAwait(false);
@@ -85,7 +88,8 @@ internal sealed class AccessDocumentService
     public async Task<AccessDocumentDto> AppendAsync(DeviceRecord actor, AppendAccessDocumentRequest? request, RequestOrigin origin, CancellationToken cancellationToken)
     {
         var (snapshot, person) = await _service.ReadAsync(actor, cancellationToken).ConfigureAwait(false);
-        if (!AccessPolicy.IsSigner(snapshot, person.Id)) throw AccessService.Denied("Only the devices of owners and admins sign the access document.");
+        if (!AccessPolicy.IsSigner(snapshot, person.Id) || !await SignsNextAsync(actor.OrganizationId, snapshot, person.Id, cancellationToken).ConfigureAwait(false))
+            throw AccessService.Denied("Only the devices of the owners and admins the last signed version lists sign the next one.");
         if (!FleetDevicePublicKey.TryParse(actor.PublicKey, out var key)) throw new InvalidOperationException("The key of a device in the table does not read.");
         if (!FleetAccessDocuments.TryReadSigned(request?.Document, key, out var document, out var reason)) throw Invalid(reason);
         if (document.OrganizationId != actor.OrganizationId) throw Invalid("it names another organization");
@@ -105,6 +109,22 @@ internal sealed class AccessDocumentService
             throw CoordinatorException.Conflict(CoordinatorErrorCodes.AccessConflict, "Another version was signed meanwhile: read the draft again and sign it.");
         _service.Changed(actor.OrganizationId);
         return ToDto(record);
+    }
+
+    /// <summary>
+    /// Whether a person's devices sign the next version, as the chain says it: an owner or admin of the last version who is
+    /// not suspended there, or, before the first version, the person who set the server up.
+    /// </summary>
+    private async Task<bool> SignsNextAsync(string organizationId, AccessSnapshot snapshot, string personId, CancellationToken cancellationToken)
+    {
+        if (snapshot.Person(personId) is not { IsActive: true }) return false;
+        var documents = await _access.ListAccessDocumentsAsync(organizationId, 0, cancellationToken).ConfigureAwait(false);
+        if (documents.Count > 0)
+            return FleetAccessDocuments.TryParse(documents[^1].Payload, out var last) && !last.Suspended.Contains(personId, StringComparer.Ordinal)
+                && (last.Owners.Contains(personId, StringComparer.Ordinal) || last.Signers.Contains(personId, StringComparer.Ordinal));
+        var entries = await _store.ListDeviceListAsync(organizationId, cancellationToken).ConfigureAwait(false);
+        var list = FleetDeviceListVerifier.Verify(entries.Select(static entry => new FleetSignedDeviceListEntry(entry.Payload, entry.Signature)), organizationId).State;
+        return list.FirstDeviceId is { } first && list.Tenures.TryGetValue(first, out var tenure) && tenure.Member.OwnerId == personId;
     }
 
     /// <summary>Where the document stands for People and access: its last version, and what the model says that machines do not see yet.</summary>

@@ -65,6 +65,12 @@ internal sealed partial class AccessService
     /// <summary>Gets where the signed access document stands, for a person; set once the document service exists.</summary>
     public Func<string, AccessSnapshot, CancellationToken, Task<AccessDocumentStateDto>>? DocumentState { get; set; }
 
+    /// <summary>
+    /// Gets whether a person's devices sign the next version of the access document, as the chain says it (the owners and
+    /// admins of the last version, the founder for the first); set once the document service exists.
+    /// </summary>
+    public Func<string, AccessSnapshot, string, CancellationToken, Task<bool>>? SignsNext { get; set; }
+
     /// <summary>Reads what the calling device's person is and may do.</summary>
     /// <param name="actor">The calling controller device.</param>
     /// <param name="cancellationToken">Cancels the read.</param>
@@ -76,8 +82,9 @@ internal sealed partial class AccessService
         var devices = await _store.ListDevicesAsync(actor.OrganizationId, cancellationToken).ConfigureAwait(false);
         var now = _time.GetUtcNow();
         var document = DocumentState is { } state ? await state(actor.OrganizationId, snapshot, cancellationToken).ConfigureAwait(false) : new AccessDocumentStateDto(0, null, null, []);
-        return new AccessSelfDto(ToDto(snapshot, person, devices), AccessPolicy.OrganizationCapabilities(snapshot, person.Id, now), IsAdvanced(snapshot), document,
-            AccessPolicy.IsSigner(snapshot, person.Id));
+        var signer = AccessPolicy.IsSigner(snapshot, person.Id)
+            && (SignsNext is not { } signs || await signs(actor.OrganizationId, snapshot, person.Id, cancellationToken).ConfigureAwait(false));
+        return new AccessSelfDto(ToDto(snapshot, person, devices), AccessPolicy.OrganizationCapabilities(snapshot, person.Id, now), IsAdvanced(snapshot), document, signer);
     }
 
     /// <summary>Lists the people of the organization with their roles, status and teams.</summary>

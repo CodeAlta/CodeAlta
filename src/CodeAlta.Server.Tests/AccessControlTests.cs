@@ -206,8 +206,12 @@ public sealed class AccessControlTests
 
         // An admin signs what changes in teams; who signs changes only by an owner's device.
         Assert.AreEqual(HttpStatusCode.OK, (await server.SendAsync(owner, HttpMethod.Put, $"/api/v1/people/{beaId}/role", new SetRoleRequest(FleetOrganizationRoles.Admin))).Status);
-        var adminSigns = await SignDraftAsync(server, bea);
-        Assert.AreEqual((HttpStatusCode.BadRequest, CoordinatorErrorCodes.AccessDocumentInvalid), (adminSigns.Status, adminSigns.Code), adminSigns.Body.ToString());
+        Assert.IsFalse((await server.SendAsync(bea, HttpMethod.Get, "/api/v1/access/self")).Read<AccessSelfDto>().Signer, "an admin signs once an owner signed them in");
+        Assert.AreEqual(HttpStatusCode.Forbidden, (await server.SendAsync(bea, HttpMethod.Get, "/api/v1/access/draft")).Status);
+        var forgedByAdmin = await server.SendAsync(owner, HttpMethod.Get, "/api/v1/access/draft");
+        var adminSigns = await server.SendAsync(bea, HttpMethod.Post, "/api/v1/access/documents", new AppendAccessDocumentRequest(Sign(bea,
+            forgedByAdmin.Read<AccessDocumentDraftDto>().Document with { SignerDeviceId = bea.DeviceId, Time = server.Clock.Now })));
+        Assert.AreEqual(HttpStatusCode.Forbidden, adminSigns.Status, adminSigns.Body.ToString());
         Assert.AreEqual(HttpStatusCode.Created, (await SignDraftAsync(server, owner)).Status);
         await server.SendAsync(bea, HttpMethod.Patch, $"/api/v1/teams/{team.Id}", new UpdateTeamRequest(RunsMemberAutomations: true));
         var second = await SignDraftAsync(server, bea);
