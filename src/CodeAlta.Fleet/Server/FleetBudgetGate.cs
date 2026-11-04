@@ -191,9 +191,15 @@ public sealed class FleetBudgetGate
                         cancellationToken).ConfigureAwait(false)
                     : await client.GetBudgetHoldAsync(hold.Id, cancellationToken).ConfigureAwait(false);
             }
-            catch (FleetServerException exception) when (exception.Code is "budget_hold.conflict" or "budget.not_found")
+            catch (FleetServerException exception) when (exception.Code == "budget_hold.conflict")
             {
-                return exception.Code == "budget.not_found" ? null : $"The run waits for the budget '{budget.Name}' with another hold already.";
+                return $"The run waits for the budget '{budget.Name}' with another hold already.";
+            }
+            catch (FleetServerException exception) when (exception.Code == "budget.not_found")
+            {
+                // A server that no longer knows the budget releases nothing: only a signed removal, or a version that is not reached,
+                // lets the run start (read below), else the run waits as for a server that does not answer.
+                hold = null;
             }
             catch (Exception exception) when (!cancellationToken.IsCancellationRequested && exception is FleetServerException or HttpRequestException or OperationCanceledException)
             {
@@ -221,9 +227,9 @@ public sealed class FleetBudgetGate
 
             // Reached no more (a new period, a higher limit, an allowance given): the run starts.
             await RefreshAsync(link, state, cancellationToken).ConfigureAwait(false);
+            // The machine keeps every budget it verified: one it no longer has is one it cannot tell, and the run waits.
             var kept = state.Budgets().FirstOrDefault(candidate => candidate.Id == budget.BudgetId);
-            if (kept is null) return null;
-            if (link.Devices.Current is { } list && FleetBudgetDocuments.TryVerify(kept.Signed, list, link.Devices.Identity.DeviceId, out var current, out _)
+            if (kept is not null && link.Devices.Current is { } list && FleetBudgetDocuments.TryVerify(kept.Signed, list, link.Devices.Identity.DeviceId, out var current, out _)
                 && (current.Number != budget.Number || await CheckAsync(link, state, kept, current, cancellationToken).ConfigureAwait(false) is null))
                 return null;
 
@@ -262,7 +268,11 @@ public sealed class FleetBudgetGate
             timeout.CancelAfter(ReadTimeout);
             if (link.Devices.Current is null) await link.Devices.RefreshAsync(timeout.Token).ConfigureAwait(false);
             using var client = Client(link);
-            state.Replace((await client.ListMachineBudgetsAsync(timeout.Token).ConfigureAwait(false)).Budgets);
+            var listed = (await client.ListMachineBudgetsAsync(timeout.Token).ConfigureAwait(false)).Budgets;
+            // What the server says is taken only as a newer version this machine verifies: what it leaves out, what does not
+            // verify and an older version change nothing that the machine verified (a removal is a signed version too).
+            if (link.Devices.Current is { } list)
+                state.Merge(listed, signed => FleetBudgetDocuments.TryVerify(signed, list, link.Devices.Identity.DeviceId, out var budget, out _) ? budget : null);
         }
         catch (Exception exception) when (!cancellationToken.IsCancellationRequested
             && exception is FleetServerException or HttpRequestException or OperationCanceledException or FleetDeviceListException)
@@ -332,20 +342,27 @@ public sealed class FleetBudgetGate
             lock (_gate) return [.. _budgets.Values];
         }
 
-        public void Replace(IReadOnlyList<FleetMachineBudgetDto> budgets)
+        /// <summary>
+        /// Takes what the server says of the budgets: a version it verifies, for the budget it names, newer than the one kept
+        /// (or the same, whose allowance and state the server updates). A budget the server leaves out, a version that does
+        /// not verify, and an older one keep what is kept: only a newer signed version, a removal included, changes a budget.
+        /// </summary>
+        public void Merge(IReadOnlyList<FleetMachineBudgetDto> budgets, Func<FleetSignedBudget?, FleetBudgetDefinition?> verify)
         {
             lock (_gate)
             {
-                var next = new Dictionary<string, KeptBudget>(StringComparer.Ordinal);
                 foreach (var budget in budgets)
                 {
+                    if (verify(budget.Signed) is not { } incoming || incoming.BudgetId != budget.Id) continue;
+                    var known = _budgets.GetValueOrDefault(budget.Id);
+                    var knownNumber = known is not null && verify(known.Signed) is { } held ? held.Number : (long?)null;
+                    if (knownNumber > incoming.Number) continue;
                     // The allowance the server says, or more when this machine was given more since (a read raced a grant).
                     var period = FleetStatisticsFamilies.QuarterOf(budget.Usage.PeriodStart);
-                    var allowance = _budgets.TryGetValue(budget.Id, out var known) && known.PeriodStart == period ? Math.Max(known.Allowance, budget.Allowance) : budget.Allowance;
-                    next[budget.Id] = new KeptBudget { Id = budget.Id, Signed = budget.Signed, PeriodStart = period, Allowance = allowance, State = budget.Usage.State };
+                    var allowance = known is not null && known.PeriodStart == period ? Math.Max(known.Allowance, budget.Allowance) : budget.Allowance;
+                    _budgets[budget.Id] = new KeptBudget { Id = budget.Id, Signed = budget.Signed, PeriodStart = period, Allowance = allowance, State = budget.Usage.State };
                 }
 
-                _budgets = next;
                 Save();
             }
         }
