@@ -115,6 +115,14 @@ public sealed class NodeServerAutomationTests
             var otherRun = request with { Payload = request.Payload.Replace(runId, Guid.CreateVersion7().ToString("N"), StringComparison.Ordinal) };
             StringAssert.Contains((await automations.RunFromServerAsync(link, list, setup.Organization.Id, otherRun, token)).Refused, "signature");
 
+            // A take-over is not a run, nor a run a take-over; a take-over names a run of autonomy in progress.
+            var takeOver = FleetAutomationSigning.SignRun(desktopKey, new FleetAutomationRunRequest(FleetAutomationRunRequest.CurrentVersion, setup.Organization.Id, Id, nodeId,
+                runId, string.Empty, string.Empty, clock.Now) { Action = FleetAutomationRunRequest.TakeOverAction });
+            StringAssert.Contains((await automations.RunFromServerAsync(link, list, setup.Organization.Id, takeOver, token)).Refused, "takes a run over");
+            Assert.AreEqual("the request does not take a run over", automations.TakeOverFromServer(link, list, setup.Organization.Id, request));
+            Assert.AreEqual("no run of this automation with autonomy is in progress with this id", automations.TakeOverFromServer(link, list, setup.Organization.Id, takeOver));
+            StringAssert.Contains(automations.TakeOverFromServer(link, list, setup.Organization.Id, takeOver with { Signature = request.Signature }), "signature");
+
             // A long run: while it works, the node renews the lease of its due time with the server.
             var gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
             var working = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);

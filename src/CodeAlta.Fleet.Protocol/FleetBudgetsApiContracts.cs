@@ -133,6 +133,9 @@ public static class FleetNotificationKinds
 
     /// <summary>A machine has a problem that lasts (<see cref="FleetHealthKinds"/>).</summary>
     public const string Health = "health";
+
+    /// <summary>A run of an automation waits for an approval of the person (<c>doc/fleet/orchestration.md</c>, "Autonomy and approvals").</summary>
+    public const string Approval = "approval";
 }
 
 /// <summary>

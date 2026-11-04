@@ -35,6 +35,13 @@ public static class FleetAutomationMethods
     /// </summary>
     public const string Run = "automations.run";
 
+    /// <summary>
+    /// The event of a take-over of a run in progress asked by a person (<see cref="FleetSignedAutomationRunRequest"/> whose
+    /// action is <see cref="FleetAutomationRunRequest.TakeOverAction"/>), sent to the machine when it is online; the machine
+    /// verifies it as a run asked by hand before the run waits for that person.
+    /// </summary>
+    public const string TakeOver = "automations.takeOver";
+
     /// <summary>The feature a server announces in its welcome when it holds automations.</summary>
     public const string Feature = "automations";
 }

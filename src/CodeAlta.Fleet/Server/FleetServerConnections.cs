@@ -118,6 +118,14 @@ public interface IFleetServerAutomations
     /// <returns>A task that completes once the event was taken or refused, and answered.</returns>
     Task HookEventAsync(FleetConnector connector, FleetServerLink link, FleetHookEvent received, CancellationToken cancellationToken) => Task.CompletedTask;
 
+    /// <summary>Takes a run in progress over for the person who asked it through a server, once the signed request verifies.</summary>
+    /// <param name="connector">The connector of the server.</param>
+    /// <param name="link">The link of the server.</param>
+    /// <param name="request">The signed request, whose action is <see cref="FleetAutomationRunRequest.TakeOverAction"/>.</param>
+    /// <param name="cancellationToken">Cancels the work.</param>
+    /// <returns>A task that completes once the run was taken over or the request refused.</returns>
+    Task TakeOverAsync(FleetConnector connector, FleetServerLink link, FleetSignedAutomationRunRequest request, CancellationToken cancellationToken) => Task.CompletedTask;
+
     /// <summary>Is told that the connection of a server is online again, to report what the server may have missed.</summary>
     /// <param name="connector">The connector of the server.</param>
     /// <param name="link">The link of the server.</param>
@@ -338,6 +346,7 @@ public sealed class FleetServerConnections : IAsyncDisposable
             AutomationsOnline = _options.Automations is { } online ? token => online.OnlineAsync(created!, link, token) : null,
             AutomationsRun = _options.Automations is { } runs ? (request, token) => runs.RunAsync(created!, link, request, token) : null,
             HookEvent = _options.Automations is { } hooks ? (received, token) => hooks.HookEventAsync(created!, link, received, token) : null,
+            AutomationsTakeOver = _options.Automations is { } takeOvers ? (request, token) => takeOvers.TakeOverAsync(created!, link, request, token) : null,
             SecretsChanged = _options.SecretsChanged is { } changed ? () => changed(link.Id) : null,
             BudgetsChanged = _options.BudgetsChanged is { } budgets ? () => budgets(link.Id) : null,
             Health = _options.Health,

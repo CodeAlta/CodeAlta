@@ -451,7 +451,11 @@ public sealed class CoordinatorServer : IAsyncDisposable
                 Limits = new UpdateCampaignLimits { MaxConcurrent = Math.Max(1, options.UpdateConcurrency), OfflineGrace = options.UpdateOfflineGrace },
             }));
         services.AddSingleton(provider => new FleetAutomationService(store, store, provider.GetRequiredService<PresenceRegistry>(), time,
-            provider.GetRequiredService<ILoggerFactory>().CreateLogger("CodeAlta.Server.Automations")));
+            provider.GetRequiredService<ILoggerFactory>().CreateLogger("CodeAlta.Server.Automations"))
+        {
+            // The approvals of a person's automations go to that person; teams and on-call resolvers come with access control.
+            Notifications = provider.GetRequiredService<NotificationService>(),
+        });
         services.AddSingleton(provider => new HookService(store, store, provider.GetRequiredService<PresenceRegistry>(), time,
             provider.GetRequiredService<ILoggerFactory>().CreateLogger("CodeAlta.Server.Hooks")));
         services.AddSingleton(provider => new ControlService(store, provider.GetRequiredService<PresenceRegistry>(), provider.GetRequiredService<DirectoryHub>(),
