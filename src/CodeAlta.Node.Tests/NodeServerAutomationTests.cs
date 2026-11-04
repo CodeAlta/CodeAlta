@@ -356,8 +356,10 @@ public sealed class NodeServerAutomationTests
         var entry = automations.Engine.Snapshot.Find(Id)!;
         var account = new CodeAlta.Agent.ModelProviderDescriptor(new("gateway"), "Gateway");
         StringAssert.Contains(automations.Check(entry, account), "service identit");
+        Assert.IsNull(automations.ActingAs("link-1", Id), "without one, it acts as nobody");
         access = access with { OrganizationServices = ["svc-org"] };
         Assert.IsNull(automations.Check(entry, account));
+        Assert.AreEqual("svc-org", automations.ActingAs("link-1", Id), "its runs say they acted as the service identity of the organization");
         StringAssert.Contains(automations.Check(entry, new CodeAlta.Agent.ModelProviderDescriptor(new("plan"), "Plan")), "account credentials only");
     }
 

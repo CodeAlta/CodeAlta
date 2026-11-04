@@ -276,6 +276,16 @@ internal sealed class FleetAutomationService
                 $"On {machine.ReadInventory().Name}, the provider '{version.Provider}' does not run with the key of an account: an automation of a team or of the organization runs with account credentials only.");
     }
 
+    // The service identity a machine says a run acted as, kept when it is one the owner of the automation turned on.
+    private async Task<string?> ActingAsAsync(string organizationId, FleetAutomationRunFact run, CancellationToken cancellationToken)
+    {
+        if (run.ActingAs is not { Length: > 0 and <= 128 } identity || Access is not { } access) return null;
+        var snapshot = await access.ReadAccessAsync(organizationId, cancellationToken).ConfigureAwait(false);
+        return snapshot.Owner(FleetResourceKinds.Automation, run.AutomationId) is { } owner
+            && snapshot.ServiceIdentities.Any(other => other.Id == identity && other.Enabled && other.OwnerKind == owner.OwnerKind && other.OwnerId == owner.OwnerId)
+            ? identity : null;
+    }
+
     // Whether the person answers for an automation of a scope: a maintainer of its team, an owner or admin for the organization.
     private async Task<bool> MaintainsAsync(string organizationId, string automationId, string person, CancellationToken cancellationToken)
         => Access is { } access && (await access.ReadAccessAsync(organizationId, cancellationToken).ConfigureAwait(false)) is var snapshot
@@ -368,13 +378,14 @@ internal sealed class FleetAutomationService
     {
         var person = RequirePersonController(actor);
         var records = await _automations.ListAutomationsAsync(actor.OrganizationId, person, cancellationToken).ConfigureAwait(false);
-        if (!records.Any(record => record.AutomationId == id))
+        // Its runs are read by the person who gave it, and by those who answer for its team or for the organization.
+        if (!records.Any(record => record.AutomationId == id) && !await MaintainsAsync(actor.OrganizationId, id, person, cancellationToken).ConfigureAwait(false))
             throw CoordinatorException.NotFound(CoordinatorErrorCodes.AutomationNotFound, "No automation of yours has this id.");
         var runs = await _automations.ListAutomationRunsAsync(actor.OrganizationId, id, Math.Clamp(limit ?? 50, 1, RunsKept), cancellationToken).ConfigureAwait(false);
         return new AutomationRunListDto([.. runs.Select(static run => new AutomationRunDto(run.RunId, run.AutomationId, run.MachineId, run.Number, run.Trigger, run.Status,
             run.StartedAt, run.EndedAt, run.Occurrence, run.LeaseUntil, run.SessionId, run.Message)
         {
-            InputTokens = run.InputTokens, OutputTokens = run.OutputTokens, Cost = run.Cost, CostUnit = run.CostUnit,
+            InputTokens = run.InputTokens, OutputTokens = run.OutputTokens, Cost = run.Cost, CostUnit = run.CostUnit, ActingAs = run.ActingAs,
         })]);
     }
 
@@ -477,10 +488,25 @@ internal sealed class FleetAutomationService
                 InputTokens = run.InputTokens is >= 0 ? run.InputTokens : null, OutputTokens = run.OutputTokens is >= 0 ? run.OutputTokens : null,
                 Cost = run.Cost is { } cost && double.IsFinite(cost) && cost >= 0 && IsUnit(run.CostUnit) ? cost : null,
                 CostUnit = run.Cost is { } priced && double.IsFinite(priced) && priced >= 0 && IsUnit(run.CostUnit) ? run.CostUnit : null,
+                ActingAs = await ActingAsAsync(device.OrganizationId, run, cancellationToken).ConfigureAwait(false),
             });
         }
 
+        // Who a run of a team or of the organization acted as is in the audit log, once per run.
+        var audited = new List<AutomationRunRecord>();
+        foreach (var group in records.Where(static run => run.ActingAs is not null).GroupBy(static run => run.AutomationId, StringComparer.Ordinal))
+        {
+            var seen = (await _automations.ListAutomationRunsAsync(device.OrganizationId, group.Key, RunsKept, cancellationToken).ConfigureAwait(false))
+                .Where(static run => run.ActingAs is not null).Select(static run => run.RunId).ToHashSet(StringComparer.Ordinal);
+            audited.AddRange(group.Where(run => !seen.Contains(run.RunId)));
+        }
+
         if (records.Count > 0) await _automations.RecordAutomationRunsAsync(records, RunsKept, cancellationToken).ConfigureAwait(false);
+        foreach (var run in audited)
+        {
+            await _store.AppendAuditAsync(new AuditEntry("automation.run_as", AuditEntry.Success, null, device.Id, run.AutomationId, null, null,
+                $"{{\"run\":\"{run.RunId}\",\"as\":\"{run.ActingAs}\"}}"), CancellationToken.None).ConfigureAwait(false);
+        }
         // A run that waits for an approval is told to who answers it: the facts only, never what the run asks.
         if (Notifications is { } notifications)
         {

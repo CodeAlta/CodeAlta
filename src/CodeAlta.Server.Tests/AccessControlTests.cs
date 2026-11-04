@@ -257,6 +257,17 @@ public sealed class AccessControlTests
         Assert.AreEqual(HttpStatusCode.OK, enabled.Status, enabled.Body.ToString());
         var draft = (await server.SendAsync(owner, HttpMethod.Get, "/api/v1/access/draft")).Read<AccessDocumentDraftDto>();
         CollectionAssert.AreEqual(new[] { identity.Id }, draft.Document.Teams.Single().Services!.ToArray());
+
+        // A run of the team's automation says which identity it acted as: kept on the run and in the audit when the team has it on.
+        var automations = server.GetService<CodeAlta.Server.Services.FleetAutomationService>();
+        var box = (await server.GetService<ICoordinatorStore>().GetDeviceAsync(node.DeviceId))!;
+        await automations.RecordRunsAsync(box, new FleetAutomationRunFacts([
+            new FleetAutomationRunFact("run-a", "deploy", 1, "schedule", "succeeded", server.Clock.Now, server.Clock.Now) { ActingAs = identity.Id },
+            new FleetAutomationRunFact("run-b", "deploy", 1, "schedule", "succeeded", server.Clock.Now, server.Clock.Now) { ActingAs = "svc-unknown" }]), CancellationToken.None);
+        var runs = (await server.SendAsync(ada, HttpMethod.Get, "/api/v1/automations/deploy/runs")).Read<AutomationRunListDto>().Runs.ToDictionary(static run => run.RunId);
+        Assert.AreEqual((identity.Id, null), (runs["run-a"].ActingAs, runs["run-b"].ActingAs));
+        var audit = (await server.SendAsync(owner, HttpMethod.Get, "/api/v1/audit?limit=500")).Read<ListResponse<AuditRecordDto>>().Items;
+        Assert.AreEqual(1, audit.Count(record => record.Action == "automation.run_as" && record.Details?.Contains(identity.Id, StringComparison.Ordinal) == true));
     }
 
     [TestMethod]

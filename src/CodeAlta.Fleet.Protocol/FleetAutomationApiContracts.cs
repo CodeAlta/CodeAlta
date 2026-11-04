@@ -58,6 +58,9 @@ public sealed record AutomationRunDto(string RunId, string AutomationId, string 
     /// <summary>Gets the output tokens of its session; null when unknown.</summary>
     public long? OutputTokens { get; init; }
 
+    /// <summary>Gets the service identity it ran as, for an automation of a team or of the organization; null for a personal one.</summary>
+    public string? ActingAs { get; init; }
+
     /// <summary>Gets the cost the provider reported for its session, in <see cref="CostUnit"/>; null when none was.</summary>
     public double? Cost { get; init; }
 

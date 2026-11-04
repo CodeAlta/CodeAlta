@@ -197,6 +197,16 @@ internal sealed partial class NodeAutomations
         return null;
     }
 
+    // The service identity the runs of an automation of a team or of the organization act as: the first one the signed access
+    // document says its scope turned on; null for a personal automation.
+    internal string? ActingAs(string linkId, string automationId)
+    {
+        if (AssignmentOf(automationId) is not { Signed: { } signed } || !FleetAutomationVersionDocuments.TryParse(signed.Payload, out var version)) return null;
+        var access = ServerAccess?.Invoke(linkId);
+        if (version.IsOrganizationScope) return access?.OrganizationServices.FirstOrDefault();
+        return version.TeamId is { } team ? access?.Teams.GetValueOrDefault(team)?.Services?.FirstOrDefault() : null;
+    }
+
     /// <summary>Reports to the server of a link the runs of the automations it gave this node: all of the latest ones, or only those that changed.</summary>
     /// <param name="linkId">The server link.</param>
     /// <param name="all">Whether to send them all again (the connection is new: the server may have missed some).</param>
@@ -233,8 +243,9 @@ internal sealed partial class NodeAutomations
                         // Why a run failed or was skipped, never what it answered nor what its trigger was about.
                         Message = run.Status is AutomationRun.Failed or AutomationRun.Skipped ? run.Message : null,
                         InputTokens = run.InputTokens, OutputTokens = run.OutputTokens, Cost = run.Cost, CostUnit = run.CostUnit,
+                        ActingAs = ActingAs(linkId, id),
                     };
-                    var key = $"{fact.Status}|{fact.EndedAt?.ToUnixTimeMilliseconds()}|{fact.SessionId}|{fact.Number}|{fact.InputTokens}|{fact.OutputTokens}|{fact.Cost}";
+                    var key = $"{fact.Status}|{fact.EndedAt?.ToUnixTimeMilliseconds()}|{fact.SessionId}|{fact.Number}|{fact.InputTokens}|{fact.OutputTokens}|{fact.Cost}|{fact.ActingAs}";
                     if (!reported.TryGetValue(run.Id, out var known) || known != key) changed.Add((fact, key));
                 }
             }

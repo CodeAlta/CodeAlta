@@ -114,6 +114,9 @@ public sealed record FleetAutomationRunFact(string RunId, string AutomationId, l
 
     /// <summary>Gets the unit of <see cref="Cost"/>: <c>usd</c>, or the one the provider named.</summary>
     public string? CostUnit { get; init; }
+
+    /// <summary>Gets the service identity it ran as, for an automation of a team or of the organization; null for a personal one.</summary>
+    public string? ActingAs { get; init; }
 }
 
 /// <summary>The source-generated contracts of the automation methods of the control connection.</summary>
