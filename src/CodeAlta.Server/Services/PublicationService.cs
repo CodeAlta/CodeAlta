@@ -99,7 +99,7 @@ public sealed class PublicationService
             if (counts.Turns < 0 || counts.ToolCalls < 0 || counts.InputTokens < 0 || counts.OutputTokens < 0) throw Invalid("The counts of a session cannot be negative.");
             records.Add(new SessionRecord(Text(fact.SessionId, "sessionId", required: true, MaxIdLength)!, device.OrganizationId, device.Id, fact.Epoch, fact.Version,
                 Text(fact.State, "state", required: true)!, fact.CreatedAt, fact.UpdatedAt, Text(fact.ProviderType, "providerType"), Text(fact.Model, "model"),
-                counts.Turns, counts.ToolCalls, counts.InputTokens, counts.OutputTokens, fact.SealedMetadata, now));
+                counts.Turns, counts.ToolCalls, counts.InputTokens, counts.OutputTokens, fact.SealedMetadata, now, Text(fact.PersonId, "personId", required: false, MaxIdLength)));
         }
 
         var result = await _store.PublishSessionFactsAsync(device.Id, publication.Sequence, records, cancellationToken).ConfigureAwait(false);

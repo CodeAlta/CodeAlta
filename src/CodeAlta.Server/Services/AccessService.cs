@@ -611,9 +611,16 @@ internal sealed partial class AccessService
         return (snapshot, person);
     }
 
-    /// <summary>Tells the devices of the organization that access changed.</summary>
+    /// <summary>Gets what lists the directory per caller, which reads access again once it changed; null for none.</summary>
+    public DirectoryVisibility? Visibility { get; init; }
+
+    /// <summary>Tells the devices of the organization that access changed, and has the directory read access again.</summary>
     /// <param name="organizationId">The organization.</param>
-    internal void Changed(string organizationId) => _notifications.TellOrganization(organizationId, FleetAccessMethods.Changed);
+    internal void Changed(string organizationId)
+    {
+        Visibility?.Invalidate(organizationId);
+        _notifications.TellOrganization(organizationId, FleetAccessMethods.Changed);
+    }
 
     internal void Require(AccessSnapshot snapshot, PersonRecord person, string capability, AccessTarget target)
     {

@@ -14,6 +14,11 @@ public sealed partial class FleetNodeService
     /// <summary>Gets who started each session here through a team membership, kept in the fleet folder of the node.</summary>
     internal FleetSessionPrincipals Principals => LazyInitializer.EnsureInitialized(ref _principals, () => new FleetSessionPrincipals(_host.CatalogOptions.FleetRoot));
 
+    /// <summary>Gets the person who started a session here through a team membership, which the directory of the server shows it to; null otherwise.</summary>
+    /// <param name="sessionId">The session.</param>
+    /// <returns>The person, or null.</returns>
+    public string? PersonOfSession(string sessionId) => Principals.PersonOf(sessionId);
+
     /// <summary>
     /// Applies a newer access document of an organization: the sessions people it suspends started here are stopped, and their
     /// open channels closed. A node calls it once its server link verified the document.

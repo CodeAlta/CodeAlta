@@ -418,7 +418,8 @@ public sealed class CoordinatorServer : IAsyncDisposable
         services.AddSingleton(new NonceCache(time, options.MaxClockSkew * 2 + TimeSpan.FromMinutes(1)));
         services.AddSingleton(provider => new RequestAuthenticator(store, provider.GetRequiredService<NonceCache>(), time, options.MaxClockSkew) { Metrics = metrics });
         services.AddSingleton<PresenceRegistry>();
-        services.AddSingleton(_ => new DirectoryHub { Metrics = metrics });
+        services.AddSingleton(new DirectoryVisibility(store, store, time));
+        services.AddSingleton(provider => new DirectoryHub { Metrics = metrics, Visibility = provider.GetRequiredService<DirectoryVisibility>() });
         services.AddSingleton(provider => new SetupService(store, codes, provider.GetRequiredService<RequestAuthenticator>(), time));
         services.AddSingleton(provider => new RelayHub(store, provider.GetRequiredService<PresenceRegistry>(), provider.GetRequiredService<RequestAuthenticator>(),
             options.RelayAccess ?? new OrganizationRelayAccess(), options.Relay, time, provider.GetRequiredService<ILoggerFactory>().CreateLogger("CodeAlta.Server.Relay"))
@@ -455,7 +456,10 @@ public sealed class CoordinatorServer : IAsyncDisposable
             }));
         services.AddSingleton(provider =>
         {
-            var access = new AccessService(store, store, store, provider.GetRequiredService<NotificationService>(), time);
+            var access = new AccessService(store, store, store, provider.GetRequiredService<NotificationService>(), time)
+            {
+                Visibility = provider.GetRequiredService<DirectoryVisibility>(),
+            };
             var devices = provider.GetRequiredService<DeviceService>();
             var presence = provider.GetRequiredService<PresenceRegistry>();
             var relays = provider.GetRequiredService<RelayHub>();

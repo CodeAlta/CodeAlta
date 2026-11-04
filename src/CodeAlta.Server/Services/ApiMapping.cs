@@ -21,7 +21,7 @@ internal static class ApiMapping
 
     public static FleetSessionFact ToFact(this SessionRecord session)
         => new(session.Id, session.Epoch, session.Version, session.State, session.CreatedAt, session.UpdatedAt, session.ProviderType, session.Model,
-            new FleetSessionCounts(session.Turns, session.ToolCalls, session.InputTokens, session.OutputTokens), session.SealedMetadata);
+            new FleetSessionCounts(session.Turns, session.ToolCalls, session.InputTokens, session.OutputTokens), session.SealedMetadata, session.PersonId);
 
     public static FleetDirectorySession ToDirectory(this SessionRecord session) => new(session.MachineId, session.ToFact());
 

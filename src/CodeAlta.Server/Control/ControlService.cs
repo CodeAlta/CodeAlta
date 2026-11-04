@@ -274,7 +274,10 @@ public sealed class ControlService
                 .ToArray();
             var sessions = (await _store.ListSessionsAsync(organization, token).ConfigureAwait(false)).Select(static record => record.ToDirectory()).ToArray();
             var presence = _presence.List(organization).Select(static online => online.GetPresence()).ToArray();
-            return JsonSerializer.SerializeToElement(new FleetDirectorySnapshot(machines, sessions, presence), FleetServerJsonContext.Default.FleetDirectorySnapshot);
+            var snapshot = new FleetDirectorySnapshot(machines, sessions, presence);
+            // Each device sees what access lets it see (doc/fleet/access-control.md): the events that follow are filtered alike.
+            if (_directory.Visibility is { } visibility) snapshot = await visibility.FilterAsync(session.Device, snapshot, token).ConfigureAwait(false);
+            return JsonSerializer.SerializeToElement(snapshot, FleetServerJsonContext.Default.FleetDirectorySnapshot);
         });
 
         if (Automations is { } automations) RegisterAutomations(session, automations, On);

@@ -88,7 +88,7 @@ internal sealed class FleetPublicationOutbox
         foreach (var session in sessions)
         {
             var fact = new FleetSessionFact(session.SessionId, session.Epoch, 0, session.State, session.CreatedAt, session.UpdatedAt, session.ProviderType, session.Model,
-                session.Counts);
+                session.Counts, PersonId: session.PersonId);
             var key = keyOf?.Invoke(session);
             var title = key is null ? null : session.Title;
             var hash = Hash(fact, title is null ? null : $"{key!.Id}\n{title}");
