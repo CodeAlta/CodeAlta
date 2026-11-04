@@ -170,7 +170,9 @@ internal sealed class HookService
         {
             if (kept.Count == MaxHeaders) break;
             var lower = name.ToLowerInvariant();
-            if (Dropped.Contains(lower) || lower.StartsWith("x-forwarded-", StringComparison.Ordinal) || lower.StartsWith("proxy-", StringComparison.Ordinal)) continue;
+            // The headers of the event and of its signature only: what a sender authenticates itself with is never stored.
+            if (Dropped.Contains(lower) || lower.StartsWith("x-forwarded-", StringComparison.Ordinal) || lower.StartsWith("proxy-", StringComparison.Ordinal)
+                || !FleetHookHeaders.IsKept(lower)) continue;
             var value = values.ToString();
             if (value.Length <= MaxHeaderLength) kept[lower] = value;
         }

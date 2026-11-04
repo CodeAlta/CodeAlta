@@ -61,6 +61,41 @@ public sealed class HookServerTests
         while (events.Reader.TryRead(out var extra)) CollectionAssert.Contains(new[] { receipt.DeliveryId, forged.DeliveryId }, extra.DeliveryId, "no other event was handed");
     }
 
+    // What a sender authenticates itself with (a bearer token, an API key) is no part of the event: the ingress keeps the headers
+    // of the event and of its signature only, so that no credential is ever stored in clear while the event waits.
+    [TestMethod]
+    public async Task TheIngress_KeepsTheHeadersOfTheEventAndItsSignature_NeverACredential()
+    {
+        await using var fixture = await ServerFixture.StartAsync();
+        using var owner = new TestDevice("laptop");
+        using var node = new TestDevice("node");
+        await fixture.SetUpWithNodeAsync(owner, node);
+        var hook = await CreateAsync(fixture, owner, node.DeviceId, HookSources.Webhook);
+        const string Canary = "canary-0f9e8d7c6b5a";
+
+        using var request = new HttpRequestMessage(HttpMethod.Post, hook.Path) { Content = new ByteArrayContent(Encoding.UTF8.GetBytes(Body)) };
+        request.Content.Headers.ContentType = new MediaTypeHeaderValue("application/json");
+        request.Headers.TryAddWithoutValidation("Authorization", "Bearer " + Canary);
+        request.Headers.TryAddWithoutValidation("X-Api-Key", Canary);
+        request.Headers.TryAddWithoutValidation("X-Gitlab-Token", Canary);
+        request.Headers.TryAddWithoutValidation("X-Custom-Secret", Canary);
+        request.Headers.TryAddWithoutValidation("Sentry-Hook-Signature", "abcdef");
+        request.Headers.TryAddWithoutValidation("X-Hub-Signature-256", "sha256=abcdef");
+        request.Headers.TryAddWithoutValidation("X-GitHub-Event", "issues");
+        request.Headers.TryAddWithoutValidation("webhook-timestamp", "1800000000");
+        using (var response = await fixture.Http.SendAsync(request)) Assert.AreEqual(HttpStatusCode.Accepted, response.StatusCode);
+
+        var store = fixture.GetService<CodeAlta.Server.Storage.ICoordinatorStore>();
+        var device = await store.GetDeviceAsync(node.DeviceId, CancellationToken.None);
+        var stored = (await ((CodeAlta.Server.Storage.IHookStore)store).ListPendingHookEventsAsync(device!.OrganizationId, node.DeviceId, fixture.Clock.GetUtcNow(), 10)).Single();
+        Assert.DoesNotContain(Canary, stored.Headers ?? string.Empty, "no credential is kept");
+        var headers = JsonSerializer.Deserialize<Dictionary<string, string>>(stored.Headers!)!;
+        foreach (var kept in new[] { "content-type", "sentry-hook-signature", "x-hub-signature-256", "x-github-event", "webhook-timestamp" })
+            Assert.IsTrue(headers.ContainsKey(kept), kept);
+        foreach (var dropped in new[] { "authorization", "x-api-key", "x-gitlab-token", "x-custom-secret" })
+            Assert.IsFalse(headers.ContainsKey(dropped), dropped);
+    }
+
     [TestMethod]
     public async Task AMachineOffline_GetsItsEventsWhenItConnects_WithinADay()
     {
