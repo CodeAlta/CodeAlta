@@ -46,7 +46,9 @@ public sealed record SandboxConfinement(
     /// a folder, a variable or an MCP server the floor does not give, a folder the floor denies and this one does not,
     /// commands outside the sandbox or the fleet where the floor has none. Folders compare as written, case included, so
     /// that the same profile compares the same on two machines; a folder written otherwise, or only in another case, is
-    /// taken as another one, which is the stricter reading on a file system that tells case apart.
+    /// taken as another one, which is the stricter reading on a file system that tells case apart. <c>\</c> and <c>/</c>
+    /// are the same separator only in a Windows path (a drive or a share) and in the <c>~\</c> of the home folder: on Linux
+    /// and macOS <c>\</c> is a character of a file name.
     /// </summary>
     /// <param name="floor">The confinement to be at least as strict as.</param>
     /// <returns>Why it is weaker, for a person; null when it is at least as strict.</returns>
@@ -111,12 +113,25 @@ public sealed record SandboxConfinement(
         return name.EndsWith(domain, StringComparison.OrdinalIgnoreCase) && name.Length > domain.Length;
     }
 
-    // The first entry of a list that another does not have, folders compared as written whatever their separators.
+    // The first entry of a list that another does not have, folders compared as written.
     private static string? Missing(IReadOnlyList<string> entries, IReadOnlyList<string> within, StringComparer comparer)
     {
         var known = new HashSet<string>(within.Select(Path), comparer);
         return entries.FirstOrDefault(entry => !known.Contains(Path(entry)));
     }
 
-    private static string Path(string entry) => entry.Trim().Replace('\\', '/').TrimEnd('/');
+    // A folder as written, with the separators of the system it names: `\` separates folders in a Windows path (a drive
+    // or a share), and `~\` is the home folder on every system (SandboxPolicyBuilder), but on Linux and macOS `\` is an
+    // ordinary character of a file name, where `/srv/a\b` is not `/srv/a/b`. Any other `\` stays as written, so that two
+    // paths that may name different folders are taken as different, which refuses rather than gives what a floor does not.
+    private static string Path(string entry)
+    {
+        var path = entry.Trim();
+        if (IsWindowsPath(path)) return path.Replace('\\', '/').TrimEnd('/');
+        if (path.StartsWith(@"~\", StringComparison.Ordinal)) path = string.Concat("~/", path.AsSpan(2));
+        return path.TrimEnd('/');
+    }
+
+    private static bool IsWindowsPath(string path)
+        => path.StartsWith(@"\\", StringComparison.Ordinal) || (path.Length >= 2 && char.IsAsciiLetter(path[0]) && path[1] == ':');
 }
