@@ -645,6 +645,7 @@ internal sealed partial class DesktopFleetServers : IAsyncDisposable
             }
 
             if (_source is { } source) await source.DisposeAsync().ConfigureAwait(false);
+            DisposeCodes();
             _statistics?.Dispose();
             _identity?.Dispose();
         }

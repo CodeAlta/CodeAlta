@@ -46,6 +46,7 @@ const machinesApi: CreateServerMachinesApi = {
     paired: true, channel: "direct" }] }),
   joinServer: async request => { calls.push(JSON.stringify({ join: request.machineId, link: request.linkId })); return { status: "ok", name: "mac-mini", words: "maple orbit tiger cloud amber stone", message: null }; },
 };
+let opened = false;
 const joinApi: JoinOrganizationApi = {
   join: async request => {
     calls.push(JSON.stringify({ joinOrg: request.url, token: request.token }));
@@ -53,15 +54,31 @@ const joinApi: JoinOrganizationApi = {
       recoveryKey: null } };
   },
   status: async () => ({ status: "ok", servers: [], deviceId: "me", words: "cabin onion leopard pigeon peach needle" }),
-  // A server whose address names SSO offers its company sign-in and a passkey; the others offer none, and take an enrollment code.
+  // A server whose address names SSO offers its company sign-in and a passkey, one that names GitHub offers GitHub; the others offer none, and take an enrollment code.
   signInMethods: async request => request.url.includes("sso")
     ? { status: "ok", organization: "Contoso", ssoRequired: false, message: null, methods: [{ id: "passkey", name: "Passkey", breakGlass: false }, { id: "company", name: "Contoso", breakGlass: false }] }
-    : { status: "ok", organization: null, ssoRequired: false, message: null, methods: [] },
-  joinWithSignIn: async request => {
-    calls.push(JSON.stringify({ joinSignIn: request.url, method: request.method }));
-    return { status: "ok", person: "Sam", hasDevices: false, message: null, server: { id: "corp", url: request.url, organization: "Contoso", link: "pending", connection: "pending", problem: null,
-      controller: false, spaces: [], recoveryKey: null } };
+    : request.url.includes("github")
+      ? { status: "ok", organization: "Contoso", ssoRequired: false, message: null, methods: [{ id: "github", name: "GitHub", breakGlass: false }] }
+      : { status: "ok", organization: null, ssoRequired: false, message: null, methods: [] },
+  // GitHub gives a code first, entered at GitHub; the join waits until the page of the code opened (the person entered it), or Cancel.
+  startSignInCode: async request => {
+    calls.push(JSON.stringify({ startCode: request.url, method: request.method }));
+    return { status: "ok", message: null, code: { handle: "0123456789abcdef0123456789abcdef", userCode: "WDJB-MJHT", url: "https://github.com/login/device",
+      expiresAt: "2026-11-04T12:15:00Z" } };
   },
+  joinWithSignIn: async (request, options) => {
+    calls.push(JSON.stringify({ joinSignIn: request.url, method: request.method, handle: request.handle }));
+    if (request.method === "github") {
+      while (!opened && !options?.signal?.aborted) await new Promise(resolve => setTimeout(resolve, 20));
+      if (options?.signal?.aborted) {
+        calls.push(JSON.stringify({ joinCancelled: request.method }));
+        return { status: "sign_in.cancelled", person: null, hasDevices: false, message: null, server: null };
+      }
+    }
+    return { status: "ok", person: "Sam", hasDevices: request.method === "github", message: null, server: { id: "corp", url: request.url, organization: "Contoso",
+      link: "pending", connection: "pending", problem: null, controller: false, spaces: [], recoveryKey: null } };
+  },
+  openSignInPage: async request => { calls.push(JSON.stringify({ openPage: request.handle })); opened = true; return { status: "ok", message: null }; },
   linkSpace: async request => { calls.push(JSON.stringify({ link: request.spaceId, server: request.linkId })); return { status: "ok", message: null, space: null } as never; },
 };
 const spacesApi: JoinOrganizationSpacesApi = {

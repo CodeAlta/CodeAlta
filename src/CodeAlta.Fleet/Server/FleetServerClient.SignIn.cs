@@ -5,7 +5,8 @@ using CodeAlta.Fleet.Protocol.Api;
 namespace CodeAlta.Fleet.Server;
 
 // Sign-in (doc/fleet/identity.md): a person proves who they are through the system browser of this device, which comes
-// back to its loopback address, and this device enrolls with the grant the server gives; or links a method to its person.
+// back to its loopback address (or, for GitHub, by entering a code at GitHub while this device polls the server), and
+// this device enrolls with the grant the server gives; or links a method to its person.
 public sealed partial class FleetServerClient
 {
     /// <summary>Reads the ways a person may sign in to a server now; the call needs no device.</summary>
@@ -28,19 +29,23 @@ public sealed partial class FleetServerClient
             ?? throw new FleetServerException(response.StatusCode, FleetServerException.HttpErrorCode, null, "The server answered no sign-in methods.");
     }
 
-    /// <summary>Starts a sign-in through the system browser: the server gives the address to open, which comes back to <paramref name="redirectUri"/>.</summary>
+    /// <summary>
+    /// Starts a sign-in through the system browser: the server gives the address to open, which comes back to
+    /// <paramref name="redirectUri"/>; or, for a method that uses a device code, the page and the code the person enters
+    /// there (<see cref="StartSignInResponse.UserCode"/>).
+    /// </summary>
     /// <param name="method">The method (<see cref="FleetSignInMethods"/>).</param>
-    /// <param name="redirectUri">The loopback address this device listens on.</param>
+    /// <param name="redirectUri">The loopback address this device listens on; null for a method that uses a device code.</param>
     /// <param name="purpose">Why (<see cref="FleetSignInPurposes"/>): to enroll this device, or to link a method from it.</param>
     /// <param name="cancellationToken">Cancels the call.</param>
-    /// <returns>The attempt, the address to open and the state the browser brings back.</returns>
-    /// <exception cref="ArgumentException">The method or the redirect is empty.</exception>
+    /// <returns>The attempt, the address to open and the state the browser brings back, or the code to enter.</returns>
+    /// <exception cref="ArgumentException">The method is empty, or the redirect is empty for a method that needs one.</exception>
     /// <exception cref="FleetServerException">The server refused: the method is not offered, company sign-in is required, the redirect is not a loopback.</exception>
     /// <exception cref="HttpRequestException">The server does not answer.</exception>
-    public Task<StartSignInResponse> StartSignInAsync(string method, string redirectUri, string purpose, CancellationToken cancellationToken = default)
+    public Task<StartSignInResponse> StartSignInAsync(string method, string? redirectUri, string purpose, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(method);
-        ArgumentException.ThrowIfNullOrWhiteSpace(redirectUri);
+        if (!FleetSignInMethods.UsesDeviceCode(method)) ArgumentException.ThrowIfNullOrWhiteSpace(redirectUri);
         return SendAsync(HttpMethod.Post, "api/v1/sign-in/start", Body(new StartSignInRequest(method, PublicKey, redirectUri, purpose), FleetSignInJsonContext.Default.StartSignInRequest),
             FleetSignInJsonContext.Default.StartSignInResponse, cancellationToken);
     }
@@ -56,6 +61,16 @@ public sealed partial class FleetServerClient
     public Task<CompleteSignInResponse> CompleteSignInAsync(string attemptId, string code, string state, CancellationToken cancellationToken = default)
         => SendAsync(HttpMethod.Post, "api/v1/sign-in/complete", Body(new CompleteSignInRequest(attemptId, code, state), FleetSignInJsonContext.Default.CompleteSignInRequest),
             FleetSignInJsonContext.Default.CompleteSignInResponse, cancellationToken);
+
+    /// <summary>Asks the server whether the person entered the code of a sign-in that uses one; wait the interval it answers between two polls.</summary>
+    /// <param name="attemptId">The attempt.</param>
+    /// <param name="cancellationToken">Cancels the call.</param>
+    /// <returns>Pending with the interval, or what the sign-in gave.</returns>
+    /// <exception cref="FleetServerException">The server refused: the person refused, the code expired, the account is linked to nobody.</exception>
+    /// <exception cref="HttpRequestException">The server does not answer.</exception>
+    public Task<PollSignInResponse> PollSignInAsync(string attemptId, CancellationToken cancellationToken = default)
+        => SendAsync(HttpMethod.Post, "api/v1/sign-in/poll", Body(new PollSignInRequest(attemptId), FleetSignInJsonContext.Default.PollSignInRequest),
+            FleetSignInJsonContext.Default.PollSignInResponse, cancellationToken);
 
     /// <summary>Registers this device as a pending controller device of the person who signed in on it, with the grant of that sign-in.</summary>
     /// <param name="grant">The grant (<see cref="CompleteSignInResponse.Grant"/>).</param>

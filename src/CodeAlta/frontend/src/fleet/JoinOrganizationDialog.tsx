@@ -7,10 +7,11 @@ import { useShellLanguage } from "../shellLanguage";
 import type { MessageKey } from "../localization";
 import { keyWords, serverProblem } from "./fleetServer";
 import { joinSteps, organizationAddressOf, type JoinStep } from "./joinOrganization";
-import { orderedSignInMethods, signInProblem } from "./signIn";
+import { orderedSignInMethods, signInCode, signInProblem, type SignInCode as Code } from "./signIn";
+import { SignInCode } from "./SignInCode";
 
 /** The calls of the dialog. */
-export type JoinOrganizationApi = Pick<typeof fleetServer, "join" | "linkSpace" | "status" | "signInMethods" | "joinWithSignIn">;
+export type JoinOrganizationApi = Pick<typeof fleetServer, "join" | "linkSpace" | "status" | "signInMethods" | "joinWithSignIn" | "startSignInCode" | "openSignInPage">;
 
 /** How long the browser may take before the sign-in is given up: the server's attempt lives ten minutes. */
 const signInTimeoutMilliseconds = 11 * 60_000;
@@ -20,7 +21,8 @@ export type JoinOrganizationSpacesApi = Pick<typeof spacesApi, "list" | "create"
 
 /**
  * Join an organization: the address of the company's server, then signing in to it — through the system browser with a
- * method the server offers (its company sign-in, a passkey, a linked Microsoft, Google or GitHub account), or with the
+ * method the server offers (its company sign-in, a passkey, a linked Microsoft, Google or GitHub account; GitHub shows a
+ * code to enter at GitHub while this computer waits), or with the
  * one-time enrollment code an administrator gives — then the space whose sessions it sees (a new Work space by default),
  * and the approval this computer waits for, with the six words of its key: from another computer of the person, or from
  * the owner for a person's first one. A person whose computers are all lost starts from here too: `onRecover` goes to the
@@ -42,6 +44,7 @@ export function JoinOrganizationDialog({ epoch, api = fleetServer, spaces = spac
   const [methods, setMethods] = useState<FleetSignInMethodView[] | null>(null);
   const [useCode, setUseCode] = useState(false);
   const [waiting, setWaiting] = useState<string | null>(null);
+  const [deviceCode, setDeviceCode] = useState<Code | null>(null);
   const [byOwnDevice, setByOwnDevice] = useState(false);
   const browser = useRef<AbortController | null>(null);
   const url = organizationAddressOf(address);
@@ -67,7 +70,17 @@ export function JoinOrganizationDialog({ epoch, api = fleetServer, spaces = spac
     setWaiting(method.id);
     setProblem(null);
     try {
-      const result = await api.joinWithSignIn({ expectedEpoch: epoch, url, method: method.id }, { signal: abort.signal, timeoutMilliseconds: signInTimeoutMilliseconds });
+      // GitHub: a code to enter at GitHub first, then the wait for it under its handle.
+      let handle: string | null = null;
+      if (method.id === "github") {
+        const started = await api.startSignInCode({ expectedEpoch: epoch, method: method.id, url, linkId: null }, { signal: abort.signal, timeoutMilliseconds: 30_000 });
+        if (abort.signal.aborted) return;
+        const code = started.status === "ok" ? signInCode(started.code) : null;
+        if (!code) { setProblem({ key: signInProblem(started.status) ?? serverProblem(started.status) ?? "The operation did not complete.", detail: started.message }); return; }
+        setDeviceCode(code);
+        handle = code.handle;
+      }
+      const result = await api.joinWithSignIn({ expectedEpoch: epoch, url, method: method.id, handle }, { signal: abort.signal, timeoutMilliseconds: signInTimeoutMilliseconds });
       if (abort.signal.aborted) return;
       if (result.status !== "ok" || !result.server) {
         setProblem({ key: signInProblem(result.status) ?? serverProblem(result.status) ?? "The operation did not complete.", detail: result.message });
@@ -81,9 +94,7 @@ export function JoinOrganizationDialog({ epoch, api = fleetServer, spaces = spac
     } catch {
       if (!abort.signal.aborted) setProblem({ key: "The server does not answer." });
     } finally {
-      if (browser.current === abort) browser.current = null;
-      setWaiting(null);
-      setBusy(false);
+      if (browser.current === abort) { browser.current = null; setWaiting(null); setDeviceCode(null); setBusy(false); }
     }
   }
 
@@ -91,6 +102,7 @@ export function JoinOrganizationDialog({ epoch, api = fleetServer, spaces = spac
     browser.current?.abort();
     browser.current = null;
     setWaiting(null);
+    setDeviceCode(null);
     setBusy(false);
     setProblem({ key: "The sign-in was cancelled." });
   }
@@ -162,7 +174,8 @@ export function JoinOrganizationDialog({ epoch, api = fleetServer, spaces = spac
               text={method.breakGlass ? t("Owner's passkey") : t("Continue with {method}", { method: method.id === "passkey" ? t("Passkey") : method.name })}
               onClick={() => void signInWith(method)} />)}
           </div>}
-        {waiting && <Callout compact intent="primary" role="status" icon={<AppIcon name="shield" size={16} />}>{t("Finish signing in in your browser…")}</Callout>}
+        {waiting && (deviceCode ? <SignInCode epoch={epoch} code={deviceCode} api={api} />
+          : <Callout compact intent="primary" role="status" icon={<AppIcon name="shield" size={16} />}>{t("Finish signing in in your browser…")}</Callout>)}
       </>}
       {step === "signin" && useCode && <>
         <p className="muted-text">{t("Sign in to {server} with the one-time enrollment code your administrator made for you. This computer then waits for their approval.", { server: url })}</p>

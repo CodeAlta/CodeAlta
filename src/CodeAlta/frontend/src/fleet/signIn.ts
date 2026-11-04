@@ -1,4 +1,4 @@
-import type { FleetSignInMethodView, FleetSignInSettingsView } from "#neoastra";
+import type { FleetSignInCodeView, FleetSignInMethodView, FleetSignInSettingsView } from "#neoastra";
 import type { MessageKey } from "../localization";
 
 /** The sign-in methods a server may offer, in the order the page shows them. */
@@ -17,6 +17,8 @@ export function orderedSignInMethods(methods: readonly FleetSignInMethodView[]):
 export function signInProblem(status: string): MessageKey | null {
   switch (status) {
     case "sign_in.cancelled": return "The sign-in was cancelled.";
+    case "sign_in.denied": return "The sign-in was refused at the provider.";
+    case "sign_in.expired": return "The code expired before it was entered: start the sign-in again.";
     case "sign_in.browser": return "The browser of this computer did not open the sign-in.";
     case "sign_in.timeout": case "sign_in.invalid_attempt": return "The sign-in took too long: start it again.";
     case "sign_in.method_disabled": return "This server does not offer this sign-in.";
@@ -30,6 +32,18 @@ export function signInProblem(status: string): MessageKey | null {
       return "The sign-in did not verify: start it again.";
     default: return null;
   }
+}
+
+/** The code of a GitHub sign-in, as the page shows it, with the handle the host continues it with. */
+export type SignInCode = Readonly<{ handle: string; userCode: string; url: string }>;
+
+/** The code the host gave, when it is one to show: a short printable code and an https:// page (or one on the loopback, in tests); null otherwise. */
+export function signInCode(view: FleetSignInCodeView | null | undefined): SignInCode | null {
+  if (!view || typeof view.userCode !== "string" || !/^[\x21-\x7e]{1,64}$/u.test(view.userCode) || typeof view.handle !== "string" || !/^[0-9a-f]{8,64}$/u.test(view.handle)) return null;
+  let url: URL;
+  try { url = new URL(view.url); } catch { return null; }
+  const loopback = url.protocol === "http:" && ["127.0.0.1", "localhost", "[::1]"].includes(url.hostname);
+  return url.protocol === "https:" || loopback ? { handle: view.handle, userCode: view.userCode, url: url.href } : null;
 }
 
 /** The settings of sign-in as the form edits them. */

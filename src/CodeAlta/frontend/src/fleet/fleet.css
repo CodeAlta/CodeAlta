@@ -116,6 +116,8 @@
 .join-organization-spaces .bp6-control { margin-bottom: 6px; }
 .join-organization-methods { display: flex; flex-direction: column; gap: 8px; margin: 4px 0 10px; }
 .join-organization-methods.muted-text { flex-direction: row; align-items: center; gap: 8px; }
+.fleet-sign-in-code p { margin: 0 0 6px; }
+.fleet-sign-in-code-actions { display: flex; flex-wrap: wrap; gap: 6px; }
 .fleet-server-sign-in { display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; align-items: start; gap: 8px; padding-left: 28px; color: var(--muted); }
 .fleet-sign-in-main { min-width: 0; display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; }
 .fleet-sign-in-main strong { color: var(--text); font-weight: 500; }

@@ -311,7 +311,7 @@ It takes the options of `altaserver run` (`--port`, `--urls`, `--data-root`, `--
 To join the server of your company, open **Settings** > **Fleet** > **Server** and click **Join an organization…**:
 
 1. **Server**: its address, which your administrator gives.
-2. **Sign in**: click **Continue with** a method the server offers: your company's sign-in, a passkey, or a Microsoft, Google or GitHub account you linked. Your browser opens; once you are signed in there, it sends you back to CodeAlta. **Use an enrollment code instead** takes the one-time code your administrator made for you.
+2. **Sign in**: click **Continue with** a method the server offers: your company's sign-in, a passkey, or a Microsoft, Google or GitHub account you linked. Your browser opens; once you are signed in there, it sends you back to CodeAlta. With GitHub, CodeAlta shows a code instead: click **Copy the code and open GitHub**, paste the code on GitHub's page and approve, and CodeAlta goes on by itself; **Cancel** stops the wait. **Use an enrollment code instead** takes the one-time code your administrator made for you.
 3. **Space**: the space that works with the organization, **A new Work space** by default. Its sessions are published to the server: their states and counts, never their content.
 4. **Approval**: another of your computers approves this one, or, for your first computer, an administrator; they see the six words shown here beside it.
 
@@ -321,7 +321,7 @@ Signing in proves who you are; it does not let this computer in by itself. A dev
 
 The card of the server shows **Sign-in**: the ways people sign in on a new computer, and the ones linked to you.
 
-- **Link…** adds a way to sign in to you, from a computer already approved: **Add a passkey** (the server's page opens in your browser) or **Link Microsoft**, **Google**, **GitHub**. An account signs nobody in until someone linked it.
+- **Link…** adds a way to sign in to you, from a computer already approved: **Add a passkey** (the server's page opens in your browser) or **Link Microsoft**, **Google**, **GitHub** (a code to enter at GitHub, as when you join). An account signs nobody in until someone linked it. The server keeps only the id and the name of a GitHub account, never its login or a token.
 - On the owner's computer, **Change…** turns each method on or off and sets the company's sign-in: its **Issuer** (the OpenID Connect address of Entra ID, Okta, Google Workspace, Keycloak...), the **Client id** and **Client secret** you registered there, with the redirect `http://127.0.0.1` (any port), and the **Groups claim**. The secret is never shown again. People sign in with it the first time without an invitation; their first computer waits for your approval.
 - **Require company sign-in** leaves only the company's sign-in for a new computer, and your passkey as the owner's way in.
 - Microsoft, Google and GitHub show **Not registered yet** until CodeAlta's own sign-in applications for them exist.
