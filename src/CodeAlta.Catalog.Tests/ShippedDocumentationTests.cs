@@ -315,7 +315,7 @@ public sealed class ShippedDocumentationTests
         StringAssert.Contains(first, "[plugins](plugins/readme.md)");
         StringAssert.Contains(first, "[the docs](readme.md)");
         // What is no shipped page stays what it was: an address of the site, of the web, a path that leaves the guide, a file.
-        StringAssert.Contains(first, "[a release](https://codealta.github.io/news/1.6/)");
+        StringAssert.Contains(first, "[a release](https://codealta.io/news/1.6/)");
         StringAssert.Contains(first, "[the web](https://example.com/a.md)");
         StringAssert.Contains(first, "[outside](../../outside.md)");
         StringAssert.Contains(first, "[a file](src/Program.cs)");

@@ -65,7 +65,7 @@ provider_keys = ["openrouter"]
 host_suffixes = ["openrouter.ai"]
 
 [rules.headers]
-default = { "HTTP-Referer" = "https://codealta.github.io", "X-OpenRouter-Title" = "CodeAlta" }
+default = { "HTTP-Referer" = "https://codealta.io", "X-OpenRouter-Title" = "CodeAlta" }
 
 # The categories of OpenRouter (https://openrouter.ai/docs/app-attribution), at most two of its list, by application:
 # CodeAlta Desktop is a desktop application for programming, CodeAlta TUI and CLI coding agents of the terminal.

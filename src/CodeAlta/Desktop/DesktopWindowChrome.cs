@@ -121,7 +121,7 @@ internal sealed class DesktopWindowChrome : IAsyncDisposable
         var privateData = Path.Combine(dataRoot, "desktop");
         Directory.CreateDirectory(privateData);
         return NeoDesktopServices.CreateSystem("org.codealta.desktop", "CodeAlta", DesktopCommandLine.Version,
-            privateData, ["https://codealta.github.io"], [privateData], [privateData], [NeoOpenFileIntent.TextDocument], dispatcher);
+            privateData, ["https://codealta.io"], [privateData], [privateData], [NeoOpenFileIntent.TextDocument], dispatcher);
     }
 
     /// <summary>Resolves the capabilities of the main view for this platform.</summary>

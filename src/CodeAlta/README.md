@@ -3,8 +3,8 @@
 This project builds CodeAlta Desktop: the .NET tool package `CodeAlta`, command `alta`.
 
 This page is for people who build and change the app. To use it, see the
-[user documentation](https://codealta.github.io) and
-[Desktop and TUI](https://codealta.github.io/docs/desktop-and-tui/). How the app behaves in detail
+[user documentation](https://codealta.io) and
+[Desktop and TUI](https://codealta.io/docs/desktop-and-tui/). How the app behaves in detail
 (the host, the RPC between host and page, the page, windows, security boundaries) is described
 in [`doc/desktop.md`](../../doc/desktop.md).
 
