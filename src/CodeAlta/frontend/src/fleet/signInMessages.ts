@@ -37,6 +37,10 @@ export const signInMessages = {
     "Niemand auf diesem Server hat dieses Konto verknüpft: melde dich an einem deiner Computer an und verknüpfe es zuerst.",
     "このサーバーではこのアカウントをリンクした人がいません。まず自分のコンピューターでサインインしてリンクしてください。",
     "此服务器上没有人关联过此账户：请先在你的一台计算机上登录并关联它。"],
+  "This {method} account is not one of yours here: use {ways}.": [
+    "Esta cuenta de {method} no es una de las tuyas aquí: usa {ways}.", "Ce compte {method} n’est pas l’un des vôtres ici : utilisez {ways}.",
+    "Dieses {method}-Konto gehört hier nicht dir: Verwende {ways}.", "この {method} アカウントは、ここではあなたのものではありません。{ways} を使ってください。",
+    "此 {method} 账户在这里不属于你：请使用 {ways}。"],
   "This account is linked to another person of the organization.": ["Esta cuenta está vinculada a otra persona de la organización.",
     "Ce compte est lié à une autre personne de l’organisation.", "Dieses Konto ist mit einer anderen Person der Organisation verknüpft.",
     "このアカウントは組織の別のユーザーにリンクされています。", "此账户已关联到组织中的另一个人。"],
