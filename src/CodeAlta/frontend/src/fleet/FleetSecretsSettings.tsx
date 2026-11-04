@@ -144,7 +144,7 @@ function ValueRow({ secret, overview, busy, rotate, give, withdraw, remove }: {
       <Tag minimal>{t(scope.key, { name: scope.name ?? "" })}</Tag>
       <Tag minimal>{t("Version {version}", { version: String(secret.version) })}</Tag>
       {variable && <Tag minimal intent="primary">{t("Variable")}</Tag>}
-      {secret.hostOnly && <Tag minimal intent="warning">{t("Host-side tools only")}</Tag>}
+      {secret.hostOnly && <Tag minimal intent="warning" title={t("Given to MCP servers and plugin tools, never to the agent's shell.")}>{t("MCP servers and plugin tools only")}</Tag>}
       {needsRotation(secret) && <Tag minimal intent="danger" title={secret.flagged.map(holder => holder.name).join(", ")}>{t("Rotate: a revoked machine held it")}</Tag>}
     </span>
     <span className="secret-meta" title={holders.join(", ")}>
@@ -183,7 +183,7 @@ function ValueRow({ secret, overview, busy, rotate, give, withdraw, remove }: {
   </li>;
 }
 
-/** The form that sets a value: its kind, name and value, its scope, whether host-side tools only get it, and its machines. */
+/** The form that sets a value: its kind, name and value, its scope, whether only MCP servers and plugin tools get it, and its machines. */
 function NewValueForm({ overview, busy, onSave, onCancel }: {
   overview: FleetSecretsOverview; busy: boolean; onCancel: () => void;
   onSave: (request: { kind: string; name: string; scopeKind: string; scopeId: string | null; value: string; hostOnly: boolean; machines: string[] }) => Promise<void>;
@@ -219,7 +219,7 @@ function NewValueForm({ overview, busy, onSave, onCancel }: {
     <div className="fleet-secret-new-row">
       <HTMLSelect value={scope} disabled={busy} aria-label={t("Where it applies")} onChange={event => setScope(event.target.value)}
         options={scopes.map(option => ({ value: option.value, label: t(option.label, { name: option.name ?? "" }) }))} />
-      {kind === "secret" && <Checkbox className="fleet-secret-host-only" label={t("Host-side tools only")} checked={hostOnly} disabled={busy}
+      {kind === "secret" && <Checkbox className="fleet-secret-host-only" label={t("Only for MCP servers and plugin tools, never the agent's shell")} checked={hostOnly} disabled={busy}
         onChange={event => setHostOnly((event.target as HTMLInputElement).checked)} />}
     </div>
     <div className="fleet-secret-new-row" role="group" aria-label={t("Machines")}>

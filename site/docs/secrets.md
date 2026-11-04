@@ -64,7 +64,7 @@ With a [CodeAlta Server](fleet.md#connect-to-a-codealta-server), the computer th
 
 - **Add a value…** takes a secret or a variable, its name and value, where it applies, and the machines that get it.
 - **Where it applies**: **All my work**, a space linked to the server, a project, or an [environment](#environments). A run takes the value of the narrowest: its environment, then its project, its space, then all your work. A secret of the machine itself (**Settings > Secrets** on it, `altanode secrets`) comes first.
-- **Host-side tools only**: the secret goes to providers, MCP servers and plugin tools, never to the agent's shell. A command line profile of a space that refers to it does not get it.
+- **Only for MCP servers and plugin tools, never the agent's shell**: the secret goes to providers, MCP servers and plugin tools, never to the agent's shell nor to the commands it runs. Its row says **MCP servers and plugin tools only**. A command line profile of a space that refers to it does not get it.
 - Each row shows where the value applies, its version and the machines that hold it. **Rotate** gives it a new value: the machines take it at once when they are online, else before their next run. **Machines** gives it to another machine of yours, or takes it away. A variable shows its value.
 - A machine removed from the server keeps nothing, and the rows of the values it held say **Rotate: a revoked machine held it** until they are rotated.
 

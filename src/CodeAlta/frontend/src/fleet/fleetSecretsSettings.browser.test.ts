@@ -24,7 +24,7 @@ test("the values of a server show their scope, machines and rotation, and a valu
         [...row.querySelectorAll('.fleet-secret-tags .bp6-tag')].map(tag => tag.textContent)])`) as [string, string[]][];
       assert.deepEqual(tags, [
         ["GRAFANA_SERVICE_ACCOUNT_TOKEN_PRODUCTION", ["All my work", "Version 2", "Rotate: a revoked machine held it"]],
-        ["DEPLOY_TOKEN", ["Environment: production", "Version 1", "Host-side tools only"]],
+        ["DEPLOY_TOKEN", ["Environment: production", "Version 1", "MCP servers and plugin tools only"]],
         ["GRAFANA_URL", ["Space: Work", "Version 1", "Variable"]],
       ]);
       assert.match(await page.evaluate(`document.querySelector('[data-fleet-secret=DEPLOY_TOKEN] .secret-meta').textContent`) as string, /^On Mac mini, Linux box · Set /);
@@ -40,6 +40,10 @@ test("the values of a server show their scope, machines and rotation, and a valu
       await page.evaluate(type(".fleet-secret-new input[aria-label=Name]", "SENTRY_TOKEN"));
       await page.evaluate(type(".fleet-secret-new input[aria-label=Value]", "sntrys_0123456789"));
       await page.evaluate(choose(".fleet-secret-new select[aria-label='Where it applies']", "project:api"));
+      // What host-only means is said where it is chosen: given to MCP servers and plugin tools, never to the agent's shell.
+      assert.equal(await page.evaluate(`document.querySelector('.fleet-secret-host-only').textContent`), "Only for MCP servers and plugin tools, never the agent's shell");
+      assert.equal(await page.evaluate(`document.querySelector('[data-fleet-secret=DEPLOY_TOKEN] .fleet-secret-tags .bp6-tag:last-child').title`),
+        "Given to MCP servers and plugin tools, never to the agent's shell.");
       await page.evaluate(`document.querySelector('.fleet-secret-host-only input').click()`);
       await page.evaluate(`[...document.querySelectorAll('.fleet-secret-new [role=group] label')].find(label => label.textContent === 'Linux box').querySelector('input').click()`);
       await page.shot("fleet-secrets-add");
