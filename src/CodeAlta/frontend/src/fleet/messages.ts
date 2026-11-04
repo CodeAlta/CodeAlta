@@ -7,6 +7,8 @@ export const fleetMessages = {
   "CodeAlta Server": ["CodeAlta Server", "CodeAlta Server", "CodeAlta Server", "CodeAlta Server", "CodeAlta Server"],
   "A server shows the machines and sessions of all your computers in one place. It never reads their content.": ["Un servidor muestra las máquinas y sesiones de todos tus ordenadores en un solo lugar. Nunca lee su contenido.", "Un serveur montre les machines et les sessions de tous vos ordinateurs en un seul endroit. Il ne lit jamais leur contenu.", "Ein Server zeigt die Maschinen und Sitzungen all Ihrer Computer an einem Ort. Ihren Inhalt liest er nie.", "サーバーは、すべてのコンピューターのマシンとセッションを 1 か所に表示します。その内容は読みません。", "服务器在一处显示你所有计算机的机器和会话，但从不读取其内容。"],
   "Servers unavailable": ["Servidores no disponibles", "Serveurs indisponibles", "Server nicht verfügbar", "サーバーを利用できません", "服务器不可用"],
+  "Create a server for your machines, or join the server of your organization.": ["Crea un servidor para tus máquinas o únete al servidor de tu organización.", "Créez un serveur pour vos machines, ou rejoignez celui de votre organisation.",
+    "Einen Server für Ihre Maschinen erstellen oder dem Server Ihrer Organisation beitreten.", "マシン用のサーバーを作成するか、組織のサーバーに参加します。", "为你的机器创建服务器，或加入你所在组织的服务器。"],
   "Not linked to a server.": ["Sin vincular a un servidor.", "Relié à aucun serveur.", "Mit keinem Server verbunden.", "サーバーにリンクされていません。", "未关联服务器。"],
   "Create my server…": ["Crear mi servidor…", "Créer mon serveur…", "Meinen Server einrichten…", "自分のサーバーを作成…", "创建我的服务器…"],
   "Create my server": ["Crear mi servidor", "Créer mon serveur", "Meinen Server einrichten", "自分のサーバーを作成", "创建我的服务器"],

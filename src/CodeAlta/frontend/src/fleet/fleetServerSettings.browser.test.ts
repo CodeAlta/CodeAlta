@@ -141,6 +141,8 @@ test("a computer without a server recovers with the 32 words of the recovery key
     await page.evaluate(`document.querySelector('button[aria-label="Leave https://fleet.example"]').click()`);
     await page.clickText(".fleet-server-confirm .bp6-button", "Leave");
     await page.until(`document.querySelector('.fleet-server-empty')`, "the empty page");
+    assert.match(await page.evaluate(`document.querySelector('.fleet-server-empty').textContent`) as string, /Create a server for your machines, or join/u,
+      "the empty page says what the two buttons above do");
     await page.clickText(".fleet-server-empty .bp6-button", "Recover with the recovery key…");
     await page.until(`document.querySelector('.fleet-server-dialog textarea')`, "the recovery dialog");
     assert.equal(await page.evaluate(`document.querySelector('.fleet-server-dialog .bp6-dialog-header').textContent`), "Recover with the recovery key");
