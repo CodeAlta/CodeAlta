@@ -83,7 +83,8 @@
 .fleet-session-model { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .fleet-session-title { font-weight: 500; }
 .fleet-session-time { width: 120px; white-space: nowrap; }
-.fleet-session-open { width: 72px; text-align: right; }
+/* Room for its icon and Open in any system font (macOS needs 73 px) and longer words of other languages. */
+.fleet-session-open { width: 104px; text-align: right; white-space: nowrap; }
 
 /* Create my server: the machines this computer manages, each added to the new server. */
 .create-server-dialog { width: min(620px, calc(100vw - 32px)); }

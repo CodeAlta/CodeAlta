@@ -16,6 +16,11 @@ test("without a server, the Fleet canvas shows the paired machines and opens the
     // The name fits its card: the button keeps the line of the title.
     assert.equal(await page.evaluate(`(() => { const name = document.querySelector('.fleet-machine-open'); const title = name.closest('.fleet-machine-title');
       return name.getBoundingClientRect().height <= title.getBoundingClientRect().height && name.scrollWidth <= name.clientWidth; })()`), true);
+    // Open keeps one line, with room to spare for a wider system font or a longer word (on macOS it wrapped as "Op / en").
+    const room = await page.evaluate<{ cell: number; natural: number; height: number }>(`(() => { const open = document.querySelector('.fleet-session-open .bp6-button');
+      const cell = open.closest('td'); const style = getComputedStyle(cell); open.style.whiteSpace = 'nowrap'; const natural = open.getBoundingClientRect().width; open.style.whiteSpace = '';
+      return { cell: cell.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight), natural, height: open.getBoundingClientRect().height }; })()`);
+    assert.ok(room.cell - room.natural >= 16 && room.height <= 30, JSON.stringify(room));
     await page.shot("fleet-canvas-paired");
 
     await page.clickText(".fleet-machine-open", "Mac mini");
