@@ -33,7 +33,7 @@ public static class PublicSignInClients
     /// The client id of the CodeAlta GitHub App, with "Enable Device Flow" on: the device flow needs no client secret and
     /// no redirect.
     /// </summary>
-    public const string GitHubClientId = PlaceholderPrefix + "github-client-id";
+    public const string GitHubClientId = "Iv23lipXnKCrRFkcoegA";
 
     /// <summary>Gets whether a client id is a placeholder (or missing).</summary>
     /// <param name="clientId">The client id.</param>

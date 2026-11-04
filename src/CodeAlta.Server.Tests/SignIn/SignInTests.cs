@@ -191,9 +191,10 @@ public sealed class SignInTests
         using var laptop = new TestDevice("Laptop");
         await server.SetUpAsync(owner);
 
-        // The public clients of the CodeAlta project are placeholders until they are registered: their methods are not offered.
+        // A public client of the CodeAlta project that is still a placeholder is not offered (Microsoft, Google); the
+        // CodeAlta GitHub App is registered, so GitHub is.
         var methods = (await server.SendAsync(null, HttpMethod.Get, "/api/v1/sign-in/methods")).Read<SignInMethodsResponse>();
-        CollectionAssert.AreEqual(new[] { FleetSignInMethods.Passkey }, methods.Methods.Select(static method => method.Id).ToArray());
+        CollectionAssert.AreEquivalent(new[] { FleetSignInMethods.Passkey, FleetSignInMethods.GitHub }, methods.Methods.Select(static method => method.Id).ToArray());
         var settings = (await server.SendAsync(owner, HttpMethod.Get, "/api/v1/sign-in/settings")).Read<SignInSettingsDto>();
         Assert.IsFalse(settings.Methods.Single(static method => method.Id == FleetSignInMethods.Microsoft).Available);
 
@@ -370,7 +371,8 @@ public sealed class SignInTests
         var defaults = SignInOptions.FromEnvironment(static _ => null);
         Assert.AreEqual(("https://github.com/", "https://api.github.com/", (string?)null), (defaults.GitHubAddress.AbsoluteUri, defaults.GitHubApiAddress.AbsoluteUri,
             defaults.GitHub.ClientSecret));
-        Assert.IsTrue(PublicSignInClients.IsPlaceholder(defaults.GitHub.ClientId));
+        Assert.AreEqual(PublicSignInClients.GitHubClientId, defaults.GitHub.ClientId);
+        Assert.IsFalse(PublicSignInClients.IsPlaceholder(defaults.GitHub.ClientId), "the CodeAlta GitHub App is registered");
 
         var variables = new Dictionary<string, string>
         {
