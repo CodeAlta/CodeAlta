@@ -514,6 +514,15 @@ public static class FleetAccessDocuments
             if (automation.Paused && held?.Paused != true) lines.Add($"The automation {Name(automation.Id)} waits for its owner to resume it");
             if (!automation.Paused && held?.Paused == true) lines.Add($"The automation {Name(automation.Id)} is resumed");
         }
+
+        // An entry left out takes the restriction of its owner away: the automation goes back to who gives it versions.
+        var kept = (after.Automations ?? []).Select(static automation => automation.Id).ToHashSet(StringComparer.Ordinal);
+        foreach (var held in before.Automations.Values.Where(held => !kept.Contains(held.Id)).OrderBy(static held => held.Id, StringComparer.Ordinal))
+        {
+            var owner = held.OwnerKind == FleetPrincipalKinds.Organization ? "the organization's" : $"{Name(held.OwnerId)}'s";
+            lines.Add($"The automation {Name(held.Id)} is no longer {owner}: it goes back to who gives it versions" + (held.Paused ? ", and is no longer paused" : string.Empty));
+        }
+
         var approvers = FleetAccessState.ApproversOf(after.Approvers);
         foreach (var (automation, people) in approvers.OrderBy(static pair => pair.Key, StringComparer.Ordinal))
         {

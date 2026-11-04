@@ -167,7 +167,10 @@ public sealed class FleetOrganizationAccess
         var signed = document with { DeviceListSequence = Math.Max(devices.Sequence, state.DeviceListSequence), SignerDeviceId = Devices.Identity.DeviceId, Time = DateTimeOffset.UtcNow };
         var names = draft.Names;
         var changes = FleetAccessDocuments.Describe(state, signed, id => names.TryGetValue(id, out var name) ? name : null);
-        return new FleetAccessDraft(signed, changes.Count == 0 ? ["The first version of the access document"] : changes);
+        // Never a reassuring line for a change this device does not describe: the first version says so, any other one too.
+        return new FleetAccessDraft(signed, changes.Count > 0 ? changes
+            : state.Number == 0 ? ["The first version of the access document"]
+            : ["A change this version of CodeAlta does not describe: do not sign it unless you know what it changes"]);
     }
 
     /// <summary>Signs a version this device prepared and gives it to the server, then reads the chain again.</summary>

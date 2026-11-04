@@ -183,6 +183,12 @@ public sealed class FleetAccessDocumentsTests
         var state = FleetAccessDocuments.Verify(chain, world.Devices, Organization).State;
         Assert.AreEqual("bea", state.Automations["nightly"].OwnerId);
 
+        // A draft that leaves the automation out gives it back to whoever gives it versions: the signer reads it, alone or among other changes.
+        CollectionAssert.AreEqual(new[] { "The automation nightly is no longer Bea's: it goes back to who gives it versions, and is no longer paused" },
+            FleetAccessDocuments.Describe(state, Document(3, Hash(chain), 4, owners: ["alex"], signers: ["ada"]), id => id == "bea" ? "Bea" : null).ToArray());
+        CollectionAssert.AreEqual(new[] { "Bea becomes an admin who signs", "The automation nightly is no longer Bea's: it goes back to who gives it versions, and is no longer paused" },
+            FleetAccessDocuments.Describe(state, Document(3, Hash(chain), 4, owners: ["alex"], signers: ["ada", "bea"]), id => id == "bea" ? "Bea" : null).ToArray());
+
         // The node of Alex: his own version of it no longer runs; Bea's does not either while it waits.
         StringAssert.Contains(FleetAutomationVersionDocuments.CheckAccess("alex", world.Node.Id, world.Devices, state, "nightly"), "another owner");
         Assert.AreEqual(FleetAutomationVersionDocuments.WaitsForOwner, FleetAutomationVersionDocuments.CheckAccess("bea", world.Node.Id, world.Devices, state, "nightly"));
