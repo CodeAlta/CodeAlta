@@ -52,6 +52,12 @@ test("A toast is above a window of the app and can be clicked there, and goes ba
     const hit = `(() => { const button = [...document.querySelectorAll(".app-toaster .bp6-toast .bp6-button")].find(b => b.textContent === "Approve");
       const r = button.getBoundingClientRect(); const top = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2); return !!top && button.contains(top); })()`;
     await page.until(hit, "the button of the toast to be what a press there reaches, not the window");
+    // At the top right of the window, as wide as a toast is.
+    const box = await page.evaluate<{ left: number; right: number; width: number; viewport: number }>(`(() => { const r = document.querySelector(".app-toaster .bp6-toast").getBoundingClientRect();
+      return { left: r.left, right: r.right, width: r.width, viewport: innerWidth }; })()`);
+    assert.ok(box.width > 200 && box.right > box.viewport - 40 && box.left > box.viewport / 3, JSON.stringify(box));
+    // The layer over the window lets a press beside the toasts reach the window.
+    assert.equal(await page.evaluate<string>(`document.elementFromPoint(20, innerHeight - 20)?.id ?? ""`), "window");
     await page.evaluate(`document.elementFromPoint(...(() => { const r = document.querySelector(".app-toaster .bp6-toast .bp6-button").getBoundingClientRect(); return [r.left + 4, r.top + 4]; })()).click()`);
     assert.equal(await page.evaluate<number>("window.acted"), 1);
 
