@@ -17,7 +17,7 @@ import { campaignProgress, campaignStateIntent, campaignStateLabel, canCancelCam
 
 export type FleetServerApi = Pick<typeof fleetServer, "status" | "create" | "join" | "leave" | "createToken" | "devices" | "approve" | "revoke" | "watch" | "telemetry"
   | "setTelemetry" | "updates" | "startUpdate" | "cancelUpdate" | "setUpdatePolicy" | "createRecoveryKey" | "recover" | "signInMethods" | "joinWithSignIn" | "signInSettings"
-  | "setSignInSettings" | "linkSignIn" | "startSignInCode" | "openSignInPage">;
+  | "setSignInSettings" | "linkSignIn" | "startSignInCode" | "openSignInPage" | "approveSignInChange">;
 
 /** The address a server the person runs on this computer listens on, as `altaserver run` says it. */
 export const localServerAddress = "http://127.0.0.1:2586";

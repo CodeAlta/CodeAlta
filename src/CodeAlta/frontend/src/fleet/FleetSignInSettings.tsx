@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Button, Callout, Dialog, DialogBody, DialogFooter, HTMLSelect, InputGroup, Menu, MenuItem, PopoverNext, Switch, Tag } from "@blueprintjs/core";
-import { fleetServer, type FleetServerView, type FleetSignInLoginView, type FleetSignInSettingsView } from "#neoastra";
+import { fleetServer, type FleetServerView, type FleetSignInApprovalView, type FleetSignInLoginView, type FleetSignInSettingsView } from "#neoastra";
 import { AppIcon } from "../AppIcon";
 import { ActivitySpinner } from "../ActivitySpinner";
 import { useShellLanguage } from "../shellLanguage";
@@ -10,7 +10,10 @@ import { allowedValues, groupRoleChoices, hasCompany, linkableMethods, signInCod
 import { SignInCode } from "./SignInCode";
 
 /** The calls of the sign-in of a server. */
-export type FleetSignInApi = Pick<typeof fleetServer, "signInSettings" | "setSignInSettings" | "linkSignIn" | "startSignInCode" | "openSignInPage">;
+export type FleetSignInApi = Pick<typeof fleetServer, "signInSettings" | "setSignInSettings" | "linkSignIn" | "startSignInCode" | "openSignInPage" | "approveSignInChange">;
+
+// How often an owner's computer reads again whether another computer of theirs asks it to approve a change.
+const approvalsPollMilliseconds = 15_000;
 
 const methodNames: Record<string, string> = { microsoft: "Microsoft", google: "Google", github: "GitHub" };
 
@@ -23,6 +26,9 @@ export function ServerSignIn({ server, epoch, api = fleetServer, revision }: { s
   const { t } = useShellLanguage();
   const [settings, setSettings] = useState<FleetSignInSettingsView | null>(null);
   const [logins, setLogins] = useState<readonly FleetSignInLoginView[] | null>(null);
+  // Changes of the company sign-in another computer of this person asks this one to approve.
+  const [approvals, setApprovals] = useState<readonly FleetSignInApprovalView[]>([]);
+  const [approving, setApproving] = useState<string | null>(null);
   const [editing, setEditing] = useState(false);
   const [linking, setLinking] = useState<string | null>(null);
   const [deviceCode, setDeviceCode] = useState<Code | null>(null);
@@ -36,9 +42,28 @@ export function ServerSignIn({ server, epoch, api = fleetServer, revision }: { s
       if (abort.signal.aborted) return;
       setSettings(value.status === "ok" ? value.settings : null);
       setLogins(value.status === "ok" ? value.logins : null);
+      setApprovals(value.status === "ok" ? value.approvals ?? [] : []);
     }, () => { if (!abort.signal.aborted) { setSettings(null); setLogins(null); } });
     return () => abort.abort();
   }, [api, epoch, server.id, revision, generation]);
+  // An owner's computer reads again now and then: another of their computers may ask it to approve a change.
+  const owner = !!settings;
+  useEffect(() => {
+    if (!owner) return;
+    const timer = setInterval(() => setGeneration(value => value + 1), approvalsPollMilliseconds);
+    return () => clearInterval(timer);
+  }, [owner]);
+
+  async function approve(approval: FleetSignInApprovalView) {
+    setApproving(approval.id);
+    setProblem(null);
+    try {
+      const result = await api.approveSignInChange({ expectedEpoch: epoch, linkId: server.id, approvalId: approval.id }, { timeoutMilliseconds: 30_000 });
+      if (result.status !== "ok") setProblem({ key: signInProblem(result.status) ?? serverProblem(result.status) ?? "The operation did not complete.", detail: result.message });
+    } catch {
+      setProblem({ key: "The server does not answer." });
+    } finally { setApproving(null); setGeneration(value => value + 1); }
+  }
 
   async function link(method: string) {
     const abort = new AbortController();
@@ -91,6 +116,18 @@ export function ServerSignIn({ server, epoch, api = fleetServer, revision }: { s
       </span>
       {linking && (deviceCode ? <SignInCode epoch={epoch} code={deviceCode} api={api} onCancel={cancelLink} />
         : <span className="muted-text">{t("Finish signing in in your browser…")}</span>)}
+      {approvals.map(approval => <Callout key={approval.id} compact intent="primary" className="fleet-sign-in-approval">
+        <div>{t("{device} asks to change the company sign-in.", { device: approval.requestedBy })}</div>
+        <ul className="muted-text">
+          <li>{approval.issuer ? `${approval.issuer} · ${approval.clientId ?? ""}` : t("Company sign-in removed")}</li>
+          {approval.allowedDomains.length > 0 && <li>{t("Email domains let in")}: {approval.allowedDomains.join(", ")}</li>}
+          {approval.allowedTenants.length > 0 && <li>{t("Tenant ids let in")}: {approval.allowedTenants.join(", ")}</li>}
+          {approval.requireSso && <li>{t("Require company sign-in")}</li>}
+          {approval.secretChanges && <li>{t("A new client secret")}</li>}
+        </ul>
+        <Button size="small" intent="primary" disabled={!!approving} icon={approving === approval.id ? <ActivitySpinner size={12} /> : undefined}
+          text={t("Approve")} onClick={() => void approve(approval)} />
+      </Callout>)}
       {problem && <Callout compact intent="warning" role="alert">{t(problem.key)}{problem.detail && <div className="muted-text">{problem.detail}</div>}</Callout>}
     </div>
     <PopoverNext placement="bottom-end" content={<Menu>
@@ -140,6 +177,8 @@ function SignInDialog({ server, epoch, api, view, logins, onClose }: {
   const [working, setWorking] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const [confirmCode, setConfirmCode] = useState<Code | null>(null);
+  // The way the change waits to be confirmed: a method to sign in again with, or "device" for another computer's approval.
+  const [waitingOn, setWaitingOn] = useState<string | null>(null);
   const [problem, setProblem] = useState<{ key: MessageKey; detail?: string | null } | null>(null);
   // The methods the owner may confirm with: the ones linked to them, once each.
   const confirmWith = [...new Set(logins.map(login => login.method))];
@@ -149,6 +188,7 @@ function SignInDialog({ server, epoch, api, view, logins, onClose }: {
   async function save(method: string | null = null) {
     if (invalid) return;
     setWorking(true);
+    setWaitingOn(method);
     setProblem(null);
     try {
       // GitHub confirms with a code to enter at GitHub, shown here while the host waits for it.
@@ -173,7 +213,7 @@ function SignInDialog({ server, epoch, api, view, logins, onClose }: {
       setProblem({ key: signInProblem(result.status) ?? serverProblem(result.status) ?? "The operation did not complete.", detail: result.message });
     } catch {
       setProblem({ key: "The server does not answer." });
-    } finally { setWorking(false); setConfirmCode(null); }
+    } finally { setWorking(false); setConfirmCode(null); setWaitingOn(null); }
   }
   const company = view.methods.find(method => method.id === "company");
   return <Dialog isOpen className="fleet-sign-in-dialog" title={t("How people sign in")} canOutsideClickClose={false} onClose={() => { if (!working) onClose(false); }}>
@@ -216,12 +256,13 @@ function SignInDialog({ server, epoch, api, view, logins, onClose }: {
         <button type="submit" hidden />
       </form>
       {confirming && <Callout compact intent="primary" role="status" className="fleet-sign-in-confirm">
-        {t("Changing the company sign-in needs you to sign in again.")}
-        {confirmWith.length === 0 ? <div className="muted-text">{t("Link a passkey or an account first with Link…, then save again.")}</div>
-          : <div className="fleet-sign-in-confirm-methods">{confirmWith.map(method => <Button key={method} size="small" disabled={working}
-            text={t("Continue with {method}", { method: method === "passkey" ? t("Passkey") : methodNames[method] ?? method })} onClick={() => void save(method)} />)}</div>}
+        {t("Changing the company sign-in needs you to sign in again, or to approve it on another of your computers.")}
+        <div className="fleet-sign-in-confirm-methods">{confirmWith.map(method => <Button key={method} size="small" disabled={working}
+          text={t("Continue with {method}", { method: method === "passkey" ? t("Passkey") : methodNames[method] ?? method })} onClick={() => void save(method)} />)}
+          <Button size="small" disabled={working} text={t("Approve on another of my computers")} onClick={() => void save("device")} /></div>
         {working && confirmCode && <SignInCode epoch={epoch} code={confirmCode} api={api} />}
-        {working && !confirmCode && <div className="muted-text">{t("Finish signing in in your browser…")}</div>}
+        {working && waitingOn === "device" && <div className="muted-text">{t("On another of your computers, approve the change in Settings > Fleet > Server.")}</div>}
+        {working && !confirmCode && waitingOn && waitingOn !== "device" && <div className="muted-text">{t("Finish signing in in your browser…")}</div>}
       </Callout>}
       {(problem ?? (invalid ? { key: invalid } : null)) && <Callout compact intent="warning" role="alert">{t((problem ?? { key: invalid! }).key)}
         {problem?.detail && <div className="muted-text">{problem.detail}</div>}</Callout>}

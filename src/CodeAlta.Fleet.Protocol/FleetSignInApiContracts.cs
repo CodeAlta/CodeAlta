@@ -1,3 +1,7 @@
+using System.Buffers.Text;
+using System.Security.Cryptography;
+using System.Text;
+using System.Text.Json;
 using System.Text.Json.Serialization;
 
 namespace CodeAlta.Fleet.Protocol.Api;
@@ -207,8 +211,154 @@ public sealed record CompanySignInSettings(string Issuer, string ClientId, strin
 /// device, used once: needed when the change touches the company sign-in (its provider, its secret, who it lets in,
 /// whether it is on or required, the break-glass owner).
 /// </param>
+/// <param name="ApprovalId">
+/// Instead of <paramref name="Confirmation"/>: an approval of exactly this change that another controller device of the
+/// caller's person signed (<c>POST /api/v1/sign-in/settings/approvals</c>), used once.
+/// </param>
 public sealed record SetSignInSettingsRequest(long Version, IReadOnlyList<string> EnabledMethods, CompanySignInSettings? Company, bool RequireSso,
-    string? BreakGlassPersonId = null, string? Confirmation = null);
+    string? BreakGlassPersonId = null, string? Confirmation = null, string? ApprovalId = null);
+
+/// <summary>
+/// A change of the sign-in settings as an approver sees it, and as its digest covers it: the client secret given only as
+/// its SHA-256 (base64url), so that no approval and no other device ever holds it.
+/// </summary>
+/// <param name="Version">The version the change starts from.</param>
+/// <param name="EnabledMethods">The methods enabled.</param>
+/// <param name="Issuer">The issuer of the company's provider, or null when the change removes it.</param>
+/// <param name="ClientId">Its client id, or null.</param>
+/// <param name="ClientSecretSha256">The SHA-256 of a new client secret, empty to remove it, null to keep the one set.</param>
+/// <param name="DisplayName">Its name for people, or null.</param>
+/// <param name="GroupsClaim">Its groups claim, or null.</param>
+/// <param name="GroupRoles">The roles its groups give, or null to keep them.</param>
+/// <param name="AllowedDomains">The email domains it lets in, or null.</param>
+/// <param name="AllowedTenants">The tenant ids it lets in, or null.</param>
+/// <param name="RequireSso">Whether company sign-in is required.</param>
+/// <param name="BreakGlassPersonId">The break-glass owner, or null.</param>
+public sealed record SignInChangeDto(long Version, IReadOnlyList<string> EnabledMethods, string? Issuer, string? ClientId, string? ClientSecretSha256, string? DisplayName,
+    string? GroupsClaim, IReadOnlyList<GroupRoleDto>? GroupRoles, IReadOnlyList<string>? AllowedDomains, IReadOnlyList<string>? AllowedTenants, bool RequireSso,
+    string? BreakGlassPersonId);
+
+/// <summary>A change of the company sign-in that waits for another device of its owner to approve it.</summary>
+/// <param name="Id">The approval.</param>
+/// <param name="Status"><c>pending</c> or <c>approved</c>.</param>
+/// <param name="RequesterDeviceId">The device that asks for the change, which alone applies it.</param>
+/// <param name="RequesterName">Its name.</param>
+/// <param name="Change">The change.</param>
+/// <param name="Digest">The digest of the change (<see cref="FleetSignInApprovals.Digest"/>), which the approver checks and signs.</param>
+/// <param name="ExpiresAt">When it stops working.</param>
+/// <param name="ApprovedBy">The device that approved it, once approved.</param>
+public sealed record SignInApprovalDto(string Id, string Status, string RequesterDeviceId, string? RequesterName, SignInChangeDto Change, string Digest,
+    DateTimeOffset ExpiresAt, string? ApprovedBy = null);
+
+/// <summary>
+/// What a controller device signs to approve a change of the company sign-in that another device of its person asks for:
+/// <c>{ "v", "org", "approval", "requester", "digest", "signer", "time" }</c>.
+/// </summary>
+/// <param name="Version">The version of the format: 1.</param>
+/// <param name="OrganizationId">The organization.</param>
+/// <param name="ApprovalId">The approval.</param>
+/// <param name="RequesterDeviceId">The device that asks for the change.</param>
+/// <param name="Digest">The digest of the change, as the approver computed it from what it was shown.</param>
+/// <param name="SignerDeviceId">The approving device.</param>
+/// <param name="Time">When it approved.</param>
+public sealed record FleetSignInApproval(
+    [property: JsonPropertyName("v")] int Version,
+    [property: JsonPropertyName("org")] string OrganizationId,
+    [property: JsonPropertyName("approval")] string ApprovalId,
+    [property: JsonPropertyName("requester")] string RequesterDeviceId,
+    [property: JsonPropertyName("digest")] string Digest,
+    [property: JsonPropertyName("signer")] string SignerDeviceId,
+    [property: JsonPropertyName("time")] DateTimeOffset Time);
+
+/// <summary>A signed approval: the exact text signed, and the signature.</summary>
+/// <param name="Payload">The JSON of a <see cref="FleetSignInApproval"/>.</param>
+/// <param name="Signature">The ECDSA P-256 signature of <see cref="FleetSignInApprovals.GetSignedBytes"/>, r and s in base64url.</param>
+public sealed record FleetSignedSignInApproval(string Payload, string Signature);
+
+/// <summary>The digests and the signed approvals of changes of the company sign-in (<c>doc/fleet/identity.md</c>, confirming dangerous actions).</summary>
+public static class FleetSignInApprovals
+{
+    private const string SignDomain = "codealta-sign-in-approval/1\n";
+    private const string DigestDomain = "codealta-sign-in-change/1\n";
+
+    /// <summary>Describes a change as an approver sees it: the client secret by its SHA-256 only.</summary>
+    /// <param name="request">The change.</param>
+    /// <returns>The description.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="request"/> is null.</exception>
+    public static SignInChangeDto Describe(SetSignInSettingsRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        var company = request.Company;
+        var secret = company?.ClientSecret is { } given ? given.Length == 0 ? string.Empty : Base64Url.EncodeToString(SHA256.HashData(Encoding.UTF8.GetBytes(given))) : null;
+        return new SignInChangeDto(request.Version, [.. request.EnabledMethods], company?.Issuer, company?.ClientId, secret, company?.DisplayName, company?.GroupsClaim,
+            company?.GroupRoles is { } roles ? [.. roles] : null, company?.AllowedDomains is { } domains ? [.. domains] : null,
+            company?.AllowedTenants is { } tenants ? [.. tenants] : null, request.RequireSso, request.BreakGlassPersonId);
+    }
+
+    /// <summary>Gets the digest of a change: what an approval binds to, whatever device computes it.</summary>
+    /// <param name="change">The change.</param>
+    /// <returns>The base64url of the SHA-256 of its canonical JSON.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="change"/> is null.</exception>
+    public static string Digest(SignInChangeDto change)
+    {
+        ArgumentNullException.ThrowIfNull(change);
+        var json = JsonSerializer.Serialize(change, FleetSignInApprovalJsonContext.Default.SignInChangeDto);
+        return Base64Url.EncodeToString(SHA256.HashData(Encoding.UTF8.GetBytes(DigestDomain + json)));
+    }
+
+    /// <summary>Writes the text of an approval, the text its signer signs.</summary>
+    /// <param name="approval">The approval.</param>
+    /// <returns>The JSON text.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="approval"/> is null.</exception>
+    public static string Serialize(FleetSignInApproval approval)
+    {
+        ArgumentNullException.ThrowIfNull(approval);
+        return JsonSerializer.Serialize(approval, FleetSignInApprovalJsonContext.Default.FleetSignInApproval);
+    }
+
+    /// <summary>Reads the text of an approval.</summary>
+    /// <param name="payload">The JSON text.</param>
+    /// <param name="approval">The approval, or null.</param>
+    /// <returns>Whether it reads with its fields.</returns>
+    public static bool TryParse(string? payload, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out FleetSignInApproval? approval)
+    {
+        approval = null;
+        if (string.IsNullOrEmpty(payload) || payload.Length > 4096) return false;
+        try
+        {
+            approval = JsonSerializer.Deserialize(payload, FleetSignInApprovalJsonContext.Default.FleetSignInApproval);
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
+
+        if (approval is null || string.IsNullOrEmpty(approval.OrganizationId) || string.IsNullOrEmpty(approval.ApprovalId) || string.IsNullOrEmpty(approval.RequesterDeviceId)
+            || string.IsNullOrEmpty(approval.Digest) || string.IsNullOrEmpty(approval.SignerDeviceId))
+        {
+            approval = null;
+            return false;
+        }
+
+        return true;
+    }
+
+    /// <summary>Gets the bytes a signer signs for an approval.</summary>
+    /// <param name="payload">The JSON text of the approval.</param>
+    /// <returns>The UTF-8 of a domain line and the text.</returns>
+    /// <exception cref="ArgumentException"><paramref name="payload"/> is null or empty.</exception>
+    public static byte[] GetSignedBytes(string payload)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(payload);
+        return Encoding.UTF8.GetBytes(SignDomain + payload);
+    }
+}
+
+/// <summary>The source-generated contracts of the approvals of sign-in changes; the order of their fields is the one of their digest.</summary>
+[JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase, DefaultIgnoreCondition = JsonIgnoreCondition.Never)]
+[JsonSerializable(typeof(SignInChangeDto))]
+[JsonSerializable(typeof(FleetSignInApproval))]
+public sealed partial class FleetSignInApprovalJsonContext : JsonSerializerContext;
 
 /// <summary>A sign-in method linked to a person.</summary>
 /// <param name="Method">The method.</param>
@@ -233,4 +383,7 @@ public sealed record SignInLoginDto(string Method, string Name, DateTimeOffset C
 [JsonSerializable(typeof(SignInSettingsDto))]
 [JsonSerializable(typeof(SetSignInSettingsRequest))]
 [JsonSerializable(typeof(ListResponse<SignInLoginDto>))]
+[JsonSerializable(typeof(SignInApprovalDto))]
+[JsonSerializable(typeof(ListResponse<SignInApprovalDto>))]
+[JsonSerializable(typeof(FleetSignedSignInApproval))]
 public sealed partial class FleetSignInJsonContext : JsonSerializerContext;

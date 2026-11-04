@@ -126,9 +126,12 @@ internal sealed partial class FleetServerService
         {
             var logins = await _servers!.ListSignInLoginsAsync(request.LinkId, cancellationToken).ConfigureAwait(false);
             FleetSignInSettingsView? settings = null;
+            FleetSignInApprovalView[] approvals = [];
             try
             {
                 settings = SettingsView(await _servers.GetSignInSettingsAsync(request.LinkId, cancellationToken).ConfigureAwait(false));
+                // The changes of the company sign-in another computer of this person asks this one to approve.
+                approvals = [.. (await _servers.ListSignInApprovalsAsync(request.LinkId, cancellationToken).ConfigureAwait(false)).Select(ApprovalView)];
             }
             catch (FleetServerException exception) when (exception.Code == FleetErrorCodes.Forbidden)
             {
@@ -136,7 +139,7 @@ internal sealed partial class FleetServerService
             }
 
             return new("ok", settings, [.. logins.Select(static login => new FleetSignInLoginView(login.Method, login.Name, Time(login.CreatedAt),
-                login.LastUsedAt is { } used ? Time(used) : null))], null);
+                login.LastUsedAt is { } used ? Time(used) : null))], null, approvals);
         }
         catch (Exception exception) when (Failure(exception) is { } failure)
         {
@@ -154,7 +157,7 @@ internal sealed partial class FleetServerService
             || request.DisplayName is { Length: > 128 } || request.GroupsClaim is { Length: > 64 } || request.AllowedDomains is { Length: > 50 }
             || request.AllowedTenants is { Length: > 50 } || request.AllowedDomains?.Any(static value => value is null or { Length: > 253 }) == true
             || request.AllowedTenants?.Any(static value => value is null or { Length: > 64 }) == true
-            || request.ConfirmWith is not null && !FleetSignInMethods.IsKnown(request.ConfirmWith)
+            || request.ConfirmWith is not null && !FleetSignInMethods.IsKnown(request.ConfirmWith) && request.ConfirmWith != ConfirmOnDevice
             || request.GroupRoles is { Length: > 200 } || request.GroupRoles?.Any(static role => role is null || role.Group is not { Length: > 0 and <= 256 } || role.Role is not { Length: <= 16 }) == true)
             return new("invalid_request", null, [], null);
         var company = string.IsNullOrWhiteSpace(request.Issuer) && string.IsNullOrWhiteSpace(request.ClientId)
@@ -165,12 +168,14 @@ internal sealed partial class FleetServerService
                 request.AllowedDomains ?? [], request.AllowedTenants ?? []);
         try
         {
-            // A change of the company sign-in asks the person to sign in again first: the page names the method once the server asked.
-            var confirmation = request.ConfirmWith is { } method
-                ? await _servers!.ConfirmSignInAsync(request.LinkId, method, request.Handle, cancellationToken).ConfigureAwait(false)
-                : null;
-            var settings = await _servers!.SetSignInSettingsAsync(request.LinkId,
-                new SetSignInSettingsRequest(request.Version, enabled, company, request.RequireSso, Confirmation: confirmation), cancellationToken).ConfigureAwait(false);
+            // A change of the company sign-in asks the person to sign in again first, or another of their computers to approve
+            // exactly this change: the page names the way once the server asked.
+            var change = new SetSignInSettingsRequest(request.Version, enabled, company, request.RequireSso);
+            if (request.ConfirmWith == ConfirmOnDevice)
+                change = change with { ApprovalId = await _servers!.ApproveOnAnotherDeviceAsync(request.LinkId, change, cancellationToken).ConfigureAwait(false) };
+            else if (request.ConfirmWith is { } method)
+                change = change with { Confirmation = await _servers!.ConfirmSignInAsync(request.LinkId, method, request.Handle, cancellationToken).ConfigureAwait(false) };
+            var settings = await _servers!.SetSignInSettingsAsync(request.LinkId, change, cancellationToken).ConfigureAwait(false);
             return new("ok", SettingsView(settings), [], null);
         }
         catch (DesktopSignInException exception) { return new(exception.Code, null, [], exception.Message); }
@@ -180,6 +185,33 @@ internal sealed partial class FleetServerService
             return new(failure.Status, null, [], failure.Message);
         }
     }
+
+    /// <summary>
+    /// Approves, from this computer, a change of the company sign-in another computer of this person asks for: this computer
+    /// checks the change against its digest and signs it.
+    /// </summary>
+    [NeoRpcMethod("approveSignInChange")]
+    public async Task<FleetServerActionResult> ApproveSignInChangeAsync(FleetSignInApprovalRequest request, CancellationToken cancellationToken)
+    {
+        if (Refuse(request?.ExpectedEpoch) is { } refused) return new(refused, null);
+        if (!FleetServerLinkStore.IsValidId(request!.LinkId) || request.ApprovalId is not { Length: > 0 and <= 128 }) return new("invalid_request", null);
+        try
+        {
+            await _servers!.ApproveSignInChangeAsync(request.LinkId, request.ApprovalId, cancellationToken).ConfigureAwait(false);
+            return new("ok", null);
+        }
+        catch (InvalidOperationException exception) { return new("sign_in.approval_mismatch", exception.Message); }
+        catch (Exception exception) when (Failure(exception) is { } failure) { return new(failure.Status, failure.Message); }
+    }
+
+    // The way of confirming a change of the company sign-in by an approval on another computer of the person.
+    private const string ConfirmOnDevice = "device";
+
+    // A change to approve as the page shows it: what it sets, never the client secret (only whether it changes).
+    private static FleetSignInApprovalView ApprovalView(SignInApprovalDto approval)
+        => new(approval.Id, approval.RequesterName ?? approval.RequesterDeviceId, approval.Change.Issuer, approval.Change.ClientId, approval.Change.ClientSecretSha256 is not null,
+            [.. approval.Change.AllowedDomains ?? []], [.. approval.Change.AllowedTenants ?? []], approval.Change.RequireSso, [.. approval.Change.EnabledMethods],
+            Time(approval.ExpiresAt));
 
     /// <summary>The sign-in settings as the page shows them: never the client secret, only whether one is set.</summary>
     /// <param name="settings">The settings as the server gives them.</param>
@@ -301,7 +333,29 @@ internal sealed record FleetSignInLoginView(string Method, string Name, string C
 /// <param name="Settings">The settings of the organization, for an owner; null for a member.</param>
 /// <param name="Logins">The methods linked to this computer's person.</param>
 /// <param name="Message">What the failure said.</param>
-internal sealed record FleetSignInSettingsResult(string Status, FleetSignInSettingsView? Settings, FleetSignInLoginView[] Logins, string? Message);
+/// <param name="Approvals">For an owner, the changes of the company sign-in other computers of theirs ask this one to approve.</param>
+internal sealed record FleetSignInSettingsResult(string Status, FleetSignInSettingsView? Settings, FleetSignInLoginView[] Logins, string? Message,
+    FleetSignInApprovalView[]? Approvals = null);
+
+/// <summary>A change of the company sign-in another computer of this person asks this one to approve.</summary>
+/// <param name="Id">The approval.</param>
+/// <param name="RequestedBy">The computer that asks.</param>
+/// <param name="Issuer">The issuer it sets, or null to remove the company sign-in.</param>
+/// <param name="ClientId">The client id it sets.</param>
+/// <param name="SecretChanges">Whether it sets or removes the client secret.</param>
+/// <param name="AllowedDomains">The email domains it lets in.</param>
+/// <param name="AllowedTenants">The tenant ids it lets in.</param>
+/// <param name="RequireSso">Whether it requires company sign-in.</param>
+/// <param name="Enabled">The methods it enables.</param>
+/// <param name="ExpiresAt">When it stops waiting.</param>
+internal sealed record FleetSignInApprovalView(string Id, string RequestedBy, string? Issuer, string? ClientId, bool SecretChanges, string[] AllowedDomains, string[] AllowedTenants,
+    bool RequireSso, string[] Enabled, string ExpiresAt);
+
+/// <summary>A change to approve from this computer.</summary>
+/// <param name="ExpectedEpoch">The host epoch the page knows.</param>
+/// <param name="LinkId">The link of the server.</param>
+/// <param name="ApprovalId">The approval.</param>
+internal sealed record FleetSignInApprovalRequest(string ExpectedEpoch, string LinkId, string ApprovalId);
 
 /// <summary>A change of how people sign in to an organization.</summary>
 /// <param name="ExpectedEpoch">The host epoch the page knows.</param>

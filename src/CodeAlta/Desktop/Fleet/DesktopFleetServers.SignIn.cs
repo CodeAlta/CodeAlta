@@ -266,6 +266,73 @@ internal sealed partial class DesktopFleetServers
         return await client.SetSignInSettingsAsync(request, cancellationToken).ConfigureAwait(false);
     }
 
+    /// <summary>
+    /// Asks another computer of this computer's person to approve a change of the company sign-in, and waits until it did
+    /// (at most the 10 minutes an approval waits).
+    /// </summary>
+    /// <param name="linkId">The link.</param>
+    /// <param name="change">The change, as it will be applied.</param>
+    /// <param name="cancellationToken">Cancels the wait (the person gave up).</param>
+    /// <returns>The id of the approval, to apply the change with.</returns>
+    /// <exception cref="KeyNotFoundException">No such link.</exception>
+    /// <exception cref="DesktopSignInException">The approval did not come before it expired.</exception>
+    /// <exception cref="FleetServerException">The server refused.</exception>
+    /// <exception cref="HttpRequestException">The server does not answer.</exception>
+    public async Task<string> ApproveOnAnotherDeviceAsync(string linkId, SetSignInSettingsRequest change, CancellationToken cancellationToken)
+    {
+        using var client = Client(linkId);
+        var asked = await client.RequestSignInApprovalAsync(change, cancellationToken).ConfigureAwait(false);
+        while (true)
+        {
+            if (DateTimeOffset.UtcNow >= asked.ExpiresAt) throw new DesktopSignInException("sign_in.timeout", "No other computer approved the change in time: start it again.");
+            await Task.Delay(ApprovalPollInterval, cancellationToken).ConfigureAwait(false);
+            SignInApprovalDto read;
+            try
+            {
+                read = await client.GetSignInApprovalAsync(asked.Id, cancellationToken).ConfigureAwait(false);
+            }
+            catch (FleetServerException exception) when (exception.Code == "sign_in.invalid_attempt")
+            {
+                throw new DesktopSignInException("sign_in.timeout", "No other computer approved the change in time: start it again.");
+            }
+
+            if (read.Status == "approved") return asked.Id;
+        }
+    }
+
+    /// <summary>Gets how often a change that waits for an approval is read again.</summary>
+    internal TimeSpan ApprovalPollInterval { get; init; } = TimeSpan.FromSeconds(2);
+
+    /// <summary>Lists the changes of the company sign-in that wait for an approval of this computer's person at a server.</summary>
+    /// <param name="linkId">The link.</param>
+    /// <param name="cancellationToken">Cancels the call.</param>
+    /// <returns>The approvals other computers of the person ask for.</returns>
+    /// <exception cref="KeyNotFoundException">No such link.</exception>
+    /// <exception cref="FleetServerException">The server refused.</exception>
+    /// <exception cref="HttpRequestException">The server does not answer.</exception>
+    public async Task<IReadOnlyList<SignInApprovalDto>> ListSignInApprovalsAsync(string linkId, CancellationToken cancellationToken)
+    {
+        using var client = Client(linkId);
+        return [.. (await client.ListSignInApprovalsAsync(cancellationToken).ConfigureAwait(false)).Where(approval => approval.RequesterDeviceId != client.DeviceId && approval.Status == "pending")];
+    }
+
+    /// <summary>Approves from this computer a change of the company sign-in another computer of its person asks for.</summary>
+    /// <param name="linkId">The link.</param>
+    /// <param name="approvalId">The approval.</param>
+    /// <param name="cancellationToken">Cancels the call.</param>
+    /// <returns>A task that completes once approved.</returns>
+    /// <exception cref="KeyNotFoundException">No such link, or no such approval.</exception>
+    /// <exception cref="InvalidOperationException">The change shown is not the one the server would apply: nothing was signed.</exception>
+    /// <exception cref="FleetServerException">The server refused.</exception>
+    /// <exception cref="HttpRequestException">The server does not answer.</exception>
+    public async Task ApproveSignInChangeAsync(string linkId, string approvalId, CancellationToken cancellationToken)
+    {
+        using var client = Client(linkId);
+        var approval = (await client.ListSignInApprovalsAsync(cancellationToken).ConfigureAwait(false)).FirstOrDefault(approval => approval.Id == approvalId)
+            ?? throw new KeyNotFoundException("No change waits for this approval.");
+        await client.ApproveSignInChangeAsync(approval, cancellationToken).ConfigureAwait(false);
+    }
+
     /// <summary>Lists the sign-in methods linked to the person of this computer at a server.</summary>
     /// <param name="linkId">The link.</param>
     /// <param name="cancellationToken">Cancels the call.</param>

@@ -47,6 +47,24 @@ test("the devices say when entries of the device list come from a newer version 
   }, options);
 });
 
+test("another computer of the owner asks to change the company sign-in: this one shows the change and approves it", { skip: !edge, timeout: 90_000 }, async () => {
+  await withCanvas(async page => {
+    await page.until(`document.querySelector('.fleet-sign-in-summary')`, "the sign-in of the server");
+    await page.evaluate(`window.fleetFixture.ask()`);
+    // The row reads again now and then; Link… and back is not needed: a change of the page reads it at once.
+    await page.clickText(".fleet-server-sign-in .bp6-button", "Link…");
+    await page.clickText(".bp6-menu-item", "Add a passkey");
+    await page.until(`document.querySelector('.fleet-sign-in-approval')`, "the change to approve");
+    assert.deepEqual(await page.evaluate(`[...document.querySelectorAll('.fleet-sign-in-approval li')].map(item => item.textContent)`),
+      ["https://login.contoso.example · contoso-client", "Email domains let in: contoso.example", "Require company sign-in", "A new client secret"]);
+    assert.match(await page.evaluate(`document.querySelector('.fleet-sign-in-approval').textContent`) as string, /^Office desktop asks to change the company sign-in\./u);
+    await page.clickText(".fleet-sign-in-approval .bp6-button", "Approve");
+    await page.until(`!document.querySelector('.fleet-sign-in-approval')`, "approved");
+    assert.ok((await page.evaluate(`[...window.fleetFixture.calls]`) as string[]).some(call => call.includes('"approved":"approval-1"')));
+    assert.deepEqual(page.problems, []);
+  }, options);
+});
+
 test("the owner's computer updates the fleet at a time it chooses, follows the campaign, cancels it and sets the policy", { skip: !edge, timeout: 90_000 }, async () => {
   await withCanvas(async page => {
     // The card of the server says its version and its policy.

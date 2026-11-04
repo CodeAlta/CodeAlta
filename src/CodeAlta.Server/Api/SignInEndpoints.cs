@@ -72,6 +72,30 @@ internal static class SignInEndpoints
             .Produces<SignInSettingsDto>()
             .WithSummary("Changes the sign-in methods, the company's OpenID Connect provider and whether people must use it; for an owner's controller device.");
 
+        signIn.MapPost("/settings/approvals", (SetSignInSettingsRequest? request, HttpContext context, SignInService service) =>
+                AuditedAsync(context, "sign_in.approval.request", actor => service.RequestApprovalAsync(actor, request, ApiEndpoints.Origin(context), context.RequestAborted),
+                    FleetSignInJsonContext.Default.SignInApprovalDto))
+            .Produces<SignInApprovalDto>()
+            .WithSummary("Asks another controller device of the caller's owner to approve a change of the company sign-in; for an owner's controller device.");
+
+        signIn.MapGet("/settings/approvals", async (HttpContext context, SignInService service)
+                => Results.Json(await service.ListApprovalsAsync(DeviceAuthenticationMiddleware.GetDevice(context), context.RequestAborted).ConfigureAwait(false),
+                    FleetSignInJsonContext.Default.ListResponseSignInApprovalDto))
+            .Produces<ListResponse<SignInApprovalDto>>()
+            .WithSummary("The changes of the company sign-in that wait for an approval of the caller's person.");
+
+        signIn.MapGet("/settings/approvals/{id}", async (string id, HttpContext context, SignInService service)
+                => Results.Json(await service.GetApprovalAsync(DeviceAuthenticationMiddleware.GetDevice(context), id, context.RequestAborted).ConfigureAwait(false),
+                    FleetSignInJsonContext.Default.SignInApprovalDto))
+            .Produces<SignInApprovalDto>()
+            .WithSummary("A change that waits for an approval, or was approved.");
+
+        signIn.MapPost("/settings/approvals/{id}/approve", (string id, FleetSignedSignInApproval? request, HttpContext context, SignInService service) =>
+                AuditedAsync(context, "sign_in.approval.approve", actor => service.ApproveAsync(actor, id, request, ApiEndpoints.Origin(context), context.RequestAborted),
+                    FleetSignInJsonContext.Default.SignInApprovalDto))
+            .Produces<SignInApprovalDto>()
+            .WithSummary("Approves a change of the company sign-in that another device of the caller's person asks for, with the approval the caller signed.");
+
         signIn.MapGet("/logins", async (HttpContext context, SignInService service)
                 => Results.Json(await service.ListLoginsAsync(DeviceAuthenticationMiddleware.GetDevice(context), context.RequestAborted).ConfigureAwait(false),
                     FleetSignInJsonContext.Default.ListResponseSignInLoginDto))

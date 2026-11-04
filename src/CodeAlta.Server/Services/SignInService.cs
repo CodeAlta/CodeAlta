@@ -227,11 +227,10 @@ public sealed class SignInService : IDisposable
         var document = new SignInSettingsDocument(enabled, company, request.RequireSso, request.RequireSso ? breakGlass : null);
         // Changing the company sign-in is a dangerous action: the owner signed in again from this device a few minutes ago.
         // The confirmation is taken last, so that a change refused for another reason does not use it up.
-        if (ChangesCompanySignIn(held.Document, document, !string.Equals(secret, held.Secret, StringComparison.Ordinal))
-            && _attempts.TakeConfirmation(request.Confirmation, actor.Id)?.PersonId != owner.Id)
+        if (ChangesCompanySignIn(held.Document, document, !string.Equals(secret, held.Secret, StringComparison.Ordinal)) && !IsConfirmed(request, actor, owner))
         {
             throw CoordinatorException.Forbidden(SignInErrorCodes.ConfirmationRequired,
-                "Changing the company sign-in needs you to sign in again: confirm with a passkey or an account linked to you.", "confirm");
+                "Changing the company sign-in needs you to sign in again, or to approve it on another of your devices.", "confirm");
         }
         var record = new SignInSettingsRecord(actor.OrganizationId, JsonSerializer.Serialize(document, SignInSettingsJsonContext.Default.SignInSettingsDocument), secret,
             held.Version + 1, _time.GetUtcNow());
@@ -760,6 +759,109 @@ public sealed class SignInService : IDisposable
     }
 
     private static CoordinatorException Invalid(string message) => CoordinatorException.BadRequest(SignInErrorCodes.SettingsInvalid, message);
+
+    // A change of the company sign-in is confirmed by a fresh sign-in of its owner from this device, or by an approval of
+    // exactly this change that another controller device of the owner signed; either works once.
+    private bool IsConfirmed(SetSignInSettingsRequest request, DeviceRecord actor, PersonRecord owner)
+    {
+        if (request.ApprovalId is { } id)
+        {
+            var approval = _attempts.TakeApproval(id, actor.Id);
+            return approval is not null && approval.PersonId == owner.Id && approval.OrganizationId == actor.OrganizationId
+                && CryptographicEquals(approval.Digest, FleetSignInApprovals.Digest(FleetSignInApprovals.Describe(request with { Confirmation = null, ApprovalId = null })));
+        }
+
+        return _attempts.TakeConfirmation(request.Confirmation, actor.Id)?.PersonId == owner.Id;
+    }
+
+    /// <summary>
+    /// Asks another controller device of the caller's person to approve a change of the company sign-in: the change, its
+    /// client secret by its hash only, waits 10 minutes for <see cref="ApproveAsync"/>.
+    /// </summary>
+    /// <param name="actor">The calling device, which alone applies the change once approved.</param>
+    /// <param name="request">The change, as it will be sent to <c>PUT /api/v1/sign-in/settings</c>.</param>
+    /// <param name="origin">Where it comes from.</param>
+    /// <param name="cancellationToken">Cancels the operation.</param>
+    /// <returns>The approval that waits.</returns>
+    /// <exception cref="CoordinatorException">The caller is not an owner's controller device, the change does not read, or too many wait.</exception>
+    public async Task<SignInApprovalDto> RequestApprovalAsync(DeviceRecord actor, SetSignInSettingsRequest? request, RequestOrigin origin, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(origin);
+        var owner = await RequireOwnerAsync(actor, cancellationToken).ConfigureAwait(false);
+        if (request?.EnabledMethods is null) throw Invalid("The request needs the change to approve.");
+        var change = FleetSignInApprovals.Describe(request with { Confirmation = null, ApprovalId = null });
+        var approval = new SignInApprovalRequest
+        {
+            Id = SignInAttempts.NewSecret(), OrganizationId = actor.OrganizationId, PersonId = owner.Id, RequesterDeviceId = actor.Id, RequesterName = actor.Name, Change = change,
+            Digest = FleetSignInApprovals.Digest(change), ExpiresAt = _time.GetUtcNow() + ConfirmationLifetime,
+        };
+        if (!_attempts.AddApproval(approval)) throw new CoordinatorException(StatusCodes.Status503ServiceUnavailable, SignInErrorCodes.Busy, "Too many changes wait for an approval.");
+        await _store.AppendAuditAsync(origin.Audit("sign_in.approval.request", actor, actor.OrganizationId, details: $"{{\"digest\":\"{approval.Digest}\"}}"), cancellationToken)
+            .ConfigureAwait(false);
+        return ToDto(approval);
+    }
+
+    /// <summary>Lists the changes of the company sign-in that wait for an approval of the caller's person.</summary>
+    /// <param name="actor">The calling device.</param>
+    /// <param name="cancellationToken">Cancels the operation.</param>
+    /// <returns>The approvals.</returns>
+    /// <exception cref="CoordinatorException">The caller is not an owner's controller device.</exception>
+    public async Task<ListResponse<SignInApprovalDto>> ListApprovalsAsync(DeviceRecord actor, CancellationToken cancellationToken)
+    {
+        var owner = await RequireOwnerAsync(actor, cancellationToken).ConfigureAwait(false);
+        return new ListResponse<SignInApprovalDto>([.. _attempts.ListApprovals(owner.Id).Where(approval => approval.OrganizationId == actor.OrganizationId).Select(ToDto)]);
+    }
+
+    /// <summary>Reads an approval of the caller's person.</summary>
+    /// <param name="actor">The calling device.</param>
+    /// <param name="id">The approval.</param>
+    /// <param name="cancellationToken">Cancels the operation.</param>
+    /// <returns>The approval.</returns>
+    /// <exception cref="CoordinatorException">The caller is not an owner's controller device, or no approval of their person has that id.</exception>
+    public async Task<SignInApprovalDto> GetApprovalAsync(DeviceRecord actor, string id, CancellationToken cancellationToken)
+    {
+        var owner = await RequireOwnerAsync(actor, cancellationToken).ConfigureAwait(false);
+        return ToDto(RequireApproval(id, owner, actor));
+    }
+
+    /// <summary>
+    /// Approves a change of the company sign-in with the approval this device signed: another controller device of the person
+    /// who asks, which computed the digest of the change from what it was shown.
+    /// </summary>
+    /// <param name="actor">The approving device.</param>
+    /// <param name="id">The approval.</param>
+    /// <param name="signed">The signed approval.</param>
+    /// <param name="origin">Where it comes from.</param>
+    /// <param name="cancellationToken">Cancels the operation.</param>
+    /// <returns>The approval, approved.</returns>
+    /// <exception cref="CoordinatorException">The caller is not an owner's controller device, is the device that asks, the approval is unknown, or the signed approval does not hold.</exception>
+    public async Task<SignInApprovalDto> ApproveAsync(DeviceRecord actor, string id, FleetSignedSignInApproval? signed, RequestOrigin origin, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(origin);
+        var owner = await RequireOwnerAsync(actor, cancellationToken).ConfigureAwait(false);
+        var approval = RequireApproval(id, owner, actor);
+        if (approval.RequesterDeviceId == actor.Id)
+            throw CoordinatorException.Forbidden(FleetErrorCodes.Forbidden, "Another of your devices approves the change: the one that asks for it does not.");
+        if (signed is null || string.IsNullOrEmpty(signed.Signature) || !FleetSignInApprovals.TryParse(signed.Payload, out var parsed)
+            || !FleetDevicePublicKey.TryParse(actor.PublicKey, out var key) || !key.Verify(FleetSignInApprovals.GetSignedBytes(signed.Payload), signed.Signature))
+            throw Invalid("The approval is not signed by the calling device.");
+        if (parsed.Version != 1 || parsed.OrganizationId != actor.OrganizationId || parsed.ApprovalId != approval.Id || parsed.RequesterDeviceId != approval.RequesterDeviceId
+            || parsed.SignerDeviceId != actor.Id || !CryptographicEquals(parsed.Digest, approval.Digest) || (parsed.Time - _time.GetUtcNow()).Duration() > TimeSpan.FromMinutes(5))
+            throw Invalid("The approval is not of this change, or not of now.");
+        approval.ApprovedBy = actor.Id;
+        await _store.AppendAuditAsync(origin.Audit("sign_in.approval.approve", actor, approval.RequesterDeviceId,
+            details: $"{{\"digest\":\"{approval.Digest}\",\"signature\":\"{signed.Signature}\"}}"), cancellationToken).ConfigureAwait(false);
+        return ToDto(approval);
+    }
+
+    private SignInApprovalRequest RequireApproval(string id, PersonRecord owner, DeviceRecord actor)
+        => _attempts.FindApproval(id) is { } approval && approval.PersonId == owner.Id && approval.OrganizationId == actor.OrganizationId
+            ? approval
+            : throw CoordinatorException.NotFound(SignInErrorCodes.AttemptInvalid, "No change waits for an approval with this id: it was used, or it expired.");
+
+    private static SignInApprovalDto ToDto(SignInApprovalRequest approval)
+        => new(approval.Id, approval.ApprovedBy is null ? "pending" : "approved", approval.RequesterDeviceId, approval.RequesterName, approval.Change, approval.Digest,
+            approval.ExpiresAt, approval.ApprovedBy);
 
     // What makes a change one of the company sign-in: its provider, its secret, who it lets in, the roles its groups
     // give, whether it is on or required, and the break-glass owner. The other methods are turned on and off without a confirmation.

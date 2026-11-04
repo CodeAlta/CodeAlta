@@ -27,6 +27,7 @@ export function signInProblem(status: string): MessageKey | null {
     case "sign_in.linked_elsewhere": return "This account is linked to another person of the organization.";
     case "sign_in.provider_unavailable": return "The sign-in provider does not answer.";
     case "sign_in.invalid_settings": return "These sign-in settings do not hold.";
+    case "sign_in.approval_mismatch": return "The change shown is not the one the server would apply: nothing was approved.";
     case "sign_in.identity_not_allowed": return "This account is not of the domains or tenants your organization lets in.";
     case "sign_in.code_refused": case "sign_in.invalid_token": case "sign_in.wrong_audience": case "sign_in.wrong_issuer": case "sign_in.wrong_nonce":
     case "sign_in.token_expired": case "sign_in.invalid_passkey": case "sign_in.state_mismatch": case "sign_in.invalid_grant":
