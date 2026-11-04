@@ -238,7 +238,7 @@ public sealed class AutomationServerTests
 
         FleetSignedAutomationRunRequest TakeOver(string? action, string run = "run-9")
         {
-            var text = FleetAutomationRunRequestDocuments.Serialize(new FleetAutomationRunRequest(FleetAutomationRunRequest.CurrentVersion, organization, Id, node.DeviceId, run,
+            var text = FleetAutomationRunRequestDocuments.Serialize(new FleetAutomationRunRequest(FleetAutomationRunRequest.VersionFor(action), organization, Id, node.DeviceId, run,
                 owner.DeviceId, owner.PublicKey, fixture.Clock.Now) { Action = action });
             return new FleetSignedAutomationRunRequest(text, owner.Sign(FleetAutomationRunRequestDocuments.GetSignedBytes(text)));
         }

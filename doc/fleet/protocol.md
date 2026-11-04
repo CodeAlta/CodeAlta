@@ -127,9 +127,16 @@ follows carries the state.
   any other 4.x, because machines update at different times (a campaign updates the nodes before the server).
 - Within 4.x, fields are only added, never repurposed or removed; unknown fields and events are ignored; an unknown
   method answers `method_not_found`. Features are announced (`features` in the welcome), never inferred from a version.
+- **What a machine must obey for safety is never an optional field that an older machine ignores.** A try that fakes
+  tools, the autonomy that guards a run, a confinement: an older machine that skips the field would do the unsafe thing
+  (run the try for real, run the automation unguarded). Such a feature comes with something the older machine refuses: a
+  method of its own (`automations.try`, answered `method_not_found`), a feature the machine announces and the sender
+  requires, or, for a signed document a server relays, a format version the older machine does not read (a try is a run
+  request of version 2, a version of an automation with autonomy is of version 2). Senders refuse a machine without it, and
+  say why, rather than send it something it would half understand.
 - `protocol {min, max}` in the handshake; a breaking change is a new major version, announced in the release notes.
 - **Signed documents** (device-list entries, the access document, settings and policies) keep their format version
-  within 4.x and grow by fields only; a verifier reads past the fields it does not know. A device *replays* the device
+  within 4.x and grow by fields only, but for a document an older machine must refuse (above); a verifier reads past the fields it does not know. A device *replays* the device
   list tolerantly: an authentic entry (chain, organization, a controller signer and its signature hold) whose operation,
   device class or addition its rules do not understand stays in the chain without effect, adds no member, and is shown
   as skipped; the removal of such a device still counts as a removal. What a device *signs* and what a server *keeps*

@@ -162,6 +162,23 @@ public sealed class NodeAutomationTests
         StringAssert.Contains(forbidden.Message, "automate");
     }
 
+    // A try is a method of its own (doc/fleet/protocol.md, "Versions"): a node that does not know it answers method_not_found,
+    // and the device says so rather than run the automation for real.
+    [TestMethod]
+    public async Task ATry_IsAMethodOfItsOwn_ThatTheNodeRunsAsATry()
+    {
+        var token = TestContext.CancellationToken;
+        using var root = new NodeTestRoot();
+        await using var fixture = await AutomationFixture.StartAsync(root, new ScriptedNodeProvider(), new NodeClock { Now = Noon }, token);
+        var machine = await fixture.PairAsync(DevicePermissions.View | DevicePermissions.Start | DevicePermissions.Automate, token);
+        await using var client = await FleetNodeClient.ConnectAsync(machine, fixture.ViewerIdentity, token);
+        await client.PutAutomationAsync(fixture.Signed(Definition("Tried", "Hello."), 1), cancellationToken: token);
+
+        var tried = await client.TryAutomationAsync(Id, token);
+        Assert.AreEqual("try", tried.Trigger, tried.Message);
+        Assert.AreEqual("try", (await client.ListAutomationRunsAsync(Id, cancellationToken: token)).Runs.Single(run => run.Id == tried.Id).Trigger);
+    }
+
     // Account credentials hold for the whole run (doc/fleet/orchestration.md, "Credentials of unattended runs"): its session that
     // changes provider, a model tier or a fallback, and the sessions it starts resolve only to account providers.
     [TestMethod]

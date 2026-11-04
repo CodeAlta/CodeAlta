@@ -87,7 +87,8 @@ public sealed record FleetAutomationRef(string Id)
 {
     /// <summary>
     /// Gets whether <c>automations.run</c> tries the automation: a dry run, whose tools it calls by itself are replaced by
-    /// fakes that record their calls on the run. Null or false: a run.
+    /// fakes that record their calls on the run. Null or false: a run. A node still reads it, but a device tries with
+    /// <c>automations.try</c>, which a node that does not know tries refuses instead of ignoring this field.
     /// </summary>
     public bool? DryRun { get; init; }
 }

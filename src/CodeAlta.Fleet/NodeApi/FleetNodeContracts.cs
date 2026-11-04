@@ -186,6 +186,12 @@ public static class FleetNodeMethods
     /// <summary>Runs an assigned automation now.</summary>
     public const string AutomationsRun = "automations.run";
 
+    /// <summary>
+    /// Tries an assigned automation now: a dry run, whose tools it calls by itself record their calls instead of making them. A
+    /// method of its own, so that a node that does not know tries answers <c>method_not_found</c> rather than run it for real.
+    /// </summary>
+    public const string AutomationsTry = "automations.try";
+
     /// <summary>The runs of the assigned automations, newest first.</summary>
     public const string AutomationsRuns = "automations.runs";
 
