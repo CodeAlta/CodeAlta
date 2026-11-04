@@ -1,3 +1,4 @@
+using System.Collections.Immutable;
 using System.Buffers.Text;
 using CodeAlta.Automations;
 using CodeAlta.Fleet.Identity;
@@ -168,6 +169,27 @@ public sealed class NodeServerAutomationTests
             await servers.DisposeAsync();
             if (server is not null) await server.DisposeAsync();
         }
+    }
+
+    [TestMethod]
+    public void AnotherPersonTakesARunOver_WhenTheSignedAccessDocumentSaysSo()
+    {
+        var access = FleetAccessState.Empty with
+        {
+            Teams = new Dictionary<string, FleetAccessTeam> { ["infra"] = new("infra", ["mia"], ["max"], false) }.ToImmutableDictionary(StringComparer.Ordinal),
+            Machines = new Dictionary<string, string> { ["team-node"] = "infra" }.ToImmutableDictionary(StringComparer.Ordinal),
+            Suspended = ["old"],
+            Approvers = FleetAccessState.ApproversOf([new FleetAccessApprovers("a1", ["oncall", "old"])]),
+        };
+        var takeOver = new FleetAutomationRunRequest(FleetAutomationRunRequest.CurrentVersion, "org", "a1", "node", "run-1", "d", "k", Noon) { Action = FleetAutomationRunRequest.TakeOverAction };
+
+        Assert.IsTrue(NodeAutomations.MayTakeOver(access, "node", takeOver, "oncall"), "an approver the document names");
+        Assert.IsFalse(NodeAutomations.MayTakeOver(access, "node", takeOver with { AutomationId = "a2" }, "oncall"), "for that automation only");
+        Assert.IsFalse(NodeAutomations.MayTakeOver(access, "node", takeOver, "old"), "a suspended person");
+        Assert.IsTrue(NodeAutomations.MayTakeOver(access, "team-node", takeOver with { AutomationId = "a2" }, "max"), "a member of the team of a team machine");
+        Assert.IsFalse(NodeAutomations.MayTakeOver(access, "node", takeOver with { AutomationId = "a2" }, "max"), "not on a machine of another");
+        Assert.IsFalse(NodeAutomations.MayTakeOver(access, "node", takeOver with { Action = null }, "oncall"), "a run by hand stays the owner's");
+        Assert.IsFalse(NodeAutomations.MayTakeOver(null, "node", takeOver, "oncall"), "no document: nobody else");
     }
 
     [TestMethod]

@@ -154,21 +154,27 @@ internal sealed partial class NodeAutomations
 
     /// <summary>
     /// Takes a run in progress over for the person who asked it through the server of a link: the request must verify as a
-    /// run asked by hand does (a controller device of the owner of this machine, for this machine, within minutes), take a
-    /// run over, and name a run of an automation this node holds from that server. The run then waits for that person.
+    /// run asked by hand does (a controller device of the owner of this machine, or of a person the signed access document
+    /// lets take the run over, for this machine, within minutes), take a run over, and name a run of an automation this node
+    /// holds from that server. The run then waits for that person.
     /// </summary>
     /// <param name="linkId">The server link it came through.</param>
     /// <param name="devices">The device list of that server, as this node verified it now.</param>
     /// <param name="organizationId">The organization of that server.</param>
     /// <param name="signed">The signed request.</param>
+    /// <param name="access">
+    /// The signed access document as this node verified it: the approvers it names for the automation, and the people of the
+    /// team of this machine when it is a team's, take a run over too; null: only the owner of this machine.
+    /// </param>
     /// <returns>Why the request was refused; null once the run was taken over.</returns>
-    internal string? TakeOverFromServer(string linkId, FleetDeviceListState devices, string? organizationId, FleetSignedAutomationRunRequest signed)
+    internal string? TakeOverFromServer(string linkId, FleetDeviceListState devices, string? organizationId, FleetSignedAutomationRunRequest signed, FleetAccessState? access = null)
     {
         ArgumentException.ThrowIfNullOrEmpty(linkId);
         ArgumentNullException.ThrowIfNull(devices);
         ArgumentNullException.ThrowIfNull(signed);
         if (DeviceId is not { } self) return "This machine does not know its own device yet.";
-        if (!FleetAutomationRunRequestDocuments.TryVerify(signed, devices, organizationId, self, _options.TimeProvider.GetUtcNow(), out var request, out var reason))
+        if (!FleetAutomationRunRequestDocuments.TryVerify(signed, devices, organizationId, self, _options.TimeProvider.GetUtcNow(),
+                (read, person) => MayTakeOver(access, self, read, person), out var request, out var reason))
         {
             Log($"A take-over asked through the server was refused: {reason}.");
             return reason;
@@ -180,6 +186,20 @@ internal sealed partial class NodeAutomations
         Log($"{request.SignerDeviceId} took the run {request.RunId} of the automation {request.AutomationId} over through the server.");
         return null;
     }
+
+    /// <summary>
+    /// Gets whether a person who does not own this machine takes a run of it over: the signed access document names them among
+    /// the approvers of the automation, or this is a team machine and they are of its team. A suspended person takes nothing
+    /// over, and nothing else than a take-over is let through.
+    /// </summary>
+    /// <param name="access">The signed access document as this node verified it; null: nobody.</param>
+    /// <param name="machineId">The device of this machine.</param>
+    /// <param name="request">The request, as read.</param>
+    /// <param name="personId">The person of the device that signed it.</param>
+    /// <returns>Whether they may.</returns>
+    internal static bool MayTakeOver(FleetAccessState? access, string machineId, FleetAutomationRunRequest request, string personId)
+        => request.Action == FleetAutomationRunRequest.TakeOverAction && access is not null && !access.IsSuspended(personId)
+            && (access.Approves(request.AutomationId, personId) || access.TeamOf(machineId) is { } team && FleetAccessState.RoleIn(team, personId) is not null);
 
     /// <summary>Reports to the server of a link the runs of the automations it gave this node: all of the latest ones, or only those that changed.</summary>
     /// <param name="linkId">The server link.</param>

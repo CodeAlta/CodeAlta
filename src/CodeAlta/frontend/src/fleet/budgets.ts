@@ -78,6 +78,7 @@ export function notificationPhrase(notification: FleetNotificationView): Phrase 
   switch (notification.kind) {
     case "budget.warning": return { key: "{budget} used 80% of its limit.", values: { budget } };
     case "budget.reached": return { key: "{budget} reached its limit.", values: { budget } };
+    case "approval": return { key: "A run on {machine} waits for your approval.", values: { machine } };
   }
 
   switch (notification.problem) {
@@ -90,6 +91,12 @@ export function notificationPhrase(notification: FleetNotificationView): Phrase 
     case "policy_refusing": return { key: "The policy of {machine} refuses runs.", values: { machine } };
     default: return { key: "{machine} has a problem.", values: { machine } };
   }
+}
+
+/** The run a notification says waits for the person, which they take over from it; null for another notification. */
+export function approvalRun(notification: FleetNotificationView): Readonly<{ automationId: string; machineId: string; runId: string }> | null {
+  return notification.kind === "approval" && notification.subject && notification.machineId && notification.detail
+    ? { automationId: notification.subject, machineId: notification.machineId, runId: notification.detail } : null;
 }
 
 /** The intent of a notification, from its severity. */

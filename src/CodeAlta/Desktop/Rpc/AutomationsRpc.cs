@@ -302,6 +302,22 @@ internal sealed class AutomationsService
         return new(status, message, sessionId);
     }
 
+    /// <summary>
+    /// Takes a run that waits on a machine of a server over, by the ids of the message of that server: for a person who answers
+    /// the approvals of an automation without having placed it (a member of the team that owns it, a person granted to approve
+    /// it), as for its owner. The server and the machine check who may.
+    /// </summary>
+    [NeoRpcMethod("takeOverOnMachine")]
+    public async Task<AutomationTakeOverResponse> TakeOverOnMachineAsync(AutomationTakeOverOnMachineRequest request, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        if (Refuse(request.ExpectedEpoch) is { } refused) return new(refused, null, null);
+        if (!AutomationDefinition.IsId(request.Id) || !Identifier(request.MachineId) || !Identifier(request.RunId)) return new("invalid_request", null, null);
+        if (_placement is null) return new("refused", "Its machine is reached from no fleet here.", null);
+        var problem = await _placement.TakeOverAsync(request.Id, request.MachineId, request.RunId, cancellationToken).ConfigureAwait(false);
+        return problem is null ? new("ok", null, null) : new("refused", problem, null);
+    }
+
     /// <summary>The next times a trigger being written would be due, or what is wrong with it.</summary>
     [NeoRpcMethod("preview")]
     public AutomationPreviewResponse Preview(AutomationPreviewRequest request)
@@ -707,6 +723,11 @@ internal sealed record AutomationRunItem(string Id, string AutomationId, string?
 /// <param name="Id">The automation.</param>
 /// <param name="RunId">Its run in progress.</param>
 internal sealed record AutomationTakeOverRequest(string? ExpectedEpoch, string Id, string RunId);
+
+/// <param name="Id">The automation.</param>
+/// <param name="MachineId">The machine that runs it.</param>
+/// <param name="RunId">Its run that waits.</param>
+internal sealed record AutomationTakeOverOnMachineRequest(string? ExpectedEpoch, string Id, string MachineId, string RunId);
 
 /// <param name="Message">Why the run was not taken over.</param>
 /// <param name="SessionId">The session of the run to open, for a run of this computer; null for a run of another machine.</param>

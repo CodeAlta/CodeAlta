@@ -25,6 +25,13 @@ internal sealed class FleetAutomationService
     /// </summary>
     internal Func<AutomationRecord, CancellationToken, Task<IReadOnlyList<string>>>? ApprovalRecipients { get; init; }
 
+    /// <summary>
+    /// Gets or sets whether a person who did not place an automation answers its approvals, and so takes its runs over: a
+    /// member of the team that owns it, a person granted to approve it. Null: only the person who placed it. The machine
+    /// checks it again against the signed access document.
+    /// </summary>
+    internal Func<AutomationRecord, string, CancellationToken, Task<bool>>? MayTakeOver { get; init; }
+
     /// <summary>Gets or sets the notifications of the people, which tell them a run waits for their approval; null tells nobody.</summary>
     internal NotificationService? Notifications { get; init; }
 
@@ -221,8 +228,9 @@ internal sealed class FleetAutomationService
         if (run.SignerDeviceId != actor.Id || run.SignerKey != actor.PublicKey) throw Invalid("The take-over must name the device that signs it, with its key.");
         if (run.OrganizationId != actor.OrganizationId) throw Invalid("The take-over must name the organization of the server.");
         var held = await _automations.GetAutomationAsync(actor.OrganizationId, id, run.MachineId, cancellationToken).ConfigureAwait(false);
-        if (held is null || held.Removed || held.OwnerPersonId != person)
-            throw CoordinatorException.NotFound(CoordinatorErrorCodes.AutomationNotFound, "No automation of yours has this id on this machine.");
+        if (held is null || held.Removed
+            || held.OwnerPersonId != person && (MayTakeOver is not { } may || !await may(held, person, cancellationToken).ConfigureAwait(false)))
+            throw CoordinatorException.NotFound(CoordinatorErrorCodes.AutomationNotFound, "No automation whose approvals you answer has this id on this machine.");
         if (_presence.Get(run.MachineId) is not { } session)
             throw CoordinatorException.Conflict(CoordinatorErrorCodes.AutomationConflict, "The machine is offline: its run goes on as its automation says until it is online.");
         try
@@ -365,7 +373,8 @@ internal sealed class FleetAutomationService
         }
 
         if (records.Count > 0) await _automations.RecordAutomationRunsAsync(records, RunsKept, cancellationToken).ConfigureAwait(false);
-        // A run that waits for an approval is told to who answers it: the facts only, never what the run asks.
+        // A run that waits for an approval is told to who answers it: the facts only, never what the run asks. The subject is
+        // the automation and the detail the run, which a person takes over from the message.
         if (Notifications is { } notifications)
         {
             foreach (var run in records.Where(static run => run.Status == WaitingStatus))
@@ -375,7 +384,7 @@ internal sealed class FleetAutomationService
                 foreach (var person in recipients.Distinct(StringComparer.Ordinal))
                 {
                     await notifications.NotifyAsync(device.OrganizationId, person, "approval:" + run.RunId, FleetNotificationKinds.Approval, "warning", null, device.Id, null,
-                        run.AutomationId, "A run waits for your approval: open its session to answer it, or take it over.", cancellationToken).ConfigureAwait(false);
+                        run.AutomationId, run.RunId, cancellationToken).ConfigureAwait(false);
                 }
             }
         }

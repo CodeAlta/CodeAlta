@@ -207,7 +207,7 @@ The management plane, and the whole surface of the console ([console](console.md
   `teams` (and `.../{id}/members/{personId}`), `service-identities`, `grants` (`POST .../{id}/keys` once a device of the
   owner of sealed content wrapped its keys), `owners` (`POST .../{kind}/{id}/resume`), `transfers` (`.../accept`,
   `decline`, `cancel`), `access/review`, `access/proposals` (changes agents propose), and the signed access document:
-  `GET /api/v1/access/documents?after=`, `GET /api/v1/access/draft`, `POST /api/v1/access/documents`. The event
+  `GET /api/v1/access/documents?after=`, `GET /api/v1/access/draft`, `POST /api/v1/access/documents`; a version may name `approvers` (per automation, the people who answer its approvals and take its runs over), left out when it names none. The event
   `access.changed` tells devices to read again ([access control](access-control.md#the-signed-access-document)).
 - **Hooks**: `GET /api/v1/hooks` (the caller's person's, with their paths and the events that wait), `POST /api/v1/hooks` (a hook for
   one of the person's machines, for `incident_io` or `webhook`), `DELETE .../{id}`, `GET .../{id}/events` (facts: when, state,

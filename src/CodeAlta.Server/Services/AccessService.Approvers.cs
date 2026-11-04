@@ -1,4 +1,5 @@
 using CodeAlta.Fleet.Protocol;
+using CodeAlta.Server.Storage;
 
 namespace CodeAlta.Server.Services;
 
@@ -24,5 +25,48 @@ internal sealed partial class AccessService
         var (ownerKind, ownerId) = snapshot.Owner(FleetResourceKinds.Automation, automationId) is { } own ? (own.OwnerKind, own.OwnerId) : (FleetPrincipalKinds.Person, personId);
         var approvers = AccessPolicy.Approvers(snapshot, AccessTarget.Resource(FleetResourceKinds.Automation, automationId, ownerKind, ownerId), _time.GetUtcNow());
         return approvers.Count > 0 ? approvers : [personId];
+    }
+
+    /// <summary>Gets whether a person answers the approvals of an automation, and so takes its runs over.</summary>
+    /// <param name="organizationId">The organization.</param>
+    /// <param name="automationId">The automation.</param>
+    /// <param name="ownerPersonId">The person whose signed version the server holds.</param>
+    /// <param name="personId">The person who asks.</param>
+    /// <param name="cancellationToken">Cancels the read.</param>
+    /// <returns>Whether they do.</returns>
+    internal async Task<bool> ApprovesAsync(string organizationId, string automationId, string ownerPersonId, string personId, CancellationToken cancellationToken)
+        => personId == ownerPersonId || (await ApproversOfAsync(organizationId, automationId, ownerPersonId, cancellationToken).ConfigureAwait(false)).Contains(personId, StringComparer.Ordinal);
+
+    /// <summary>
+    /// Lists, for the signed access document, who answers the approvals of each automation besides the person who placed it:
+    /// what machines check before they let someone else take a run over. A grant that expires is left out: the document is
+    /// signed, and would keep it past its end.
+    /// </summary>
+    /// <param name="organizationId">The organization.</param>
+    /// <param name="snapshot">The access of the organization.</param>
+    /// <param name="cancellationToken">Cancels the read.</param>
+    /// <returns>The approvers by automation, in a stable order; empty for none.</returns>
+    internal async Task<IReadOnlyList<FleetAccessApprovers>> DocumentApproversAsync(string organizationId, AccessSnapshot snapshot, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(snapshot);
+        var placedBy = new SortedDictionary<string, string>(StringComparer.Ordinal);
+        foreach (var person in snapshot.People)
+        {
+            foreach (var automation in await _automations.ListAutomationsAsync(organizationId, person.Id, cancellationToken).ConfigureAwait(false))
+            {
+                if (!automation.Removed) placedBy.TryAdd(automation.AutomationId, automation.OwnerPersonId);
+            }
+        }
+
+        var list = new List<FleetAccessApprovers>();
+        foreach (var (automationId, personId) in placedBy)
+        {
+            var (ownerKind, ownerId) = snapshot.Owner(FleetResourceKinds.Automation, automationId) is { } own ? (own.OwnerKind, own.OwnerId) : (FleetPrincipalKinds.Person, personId);
+            var people = AccessPolicy.Approvers(snapshot, AccessTarget.Resource(FleetResourceKinds.Automation, automationId, ownerKind, ownerId), DateTimeOffset.MaxValue)
+                .Where(id => id != personId).Order(StringComparer.Ordinal).ToList();
+            if (people.Count > 0) list.Add(new FleetAccessApprovers(automationId, people));
+        }
+
+        return list;
     }
 }

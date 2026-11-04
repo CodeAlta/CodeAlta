@@ -498,17 +498,33 @@ internal sealed class DesktopAutomationPlacement : IAutomationPlacement, IAsyncD
     /// <param name="runId">The run.</param>
     /// <param name="cancellationToken">Cancels the request.</param>
     /// <returns>Why it was not passed on; null once the machine was asked.</returns>
-    internal async Task<string?> TakeOverAsync(AutomationEntry entry, string runId, CancellationToken cancellationToken)
+    internal Task<string?> TakeOverAsync(AutomationEntry entry, string runId, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(entry);
-        if (entry.Definition.RunsOn is not { } machineId) return "It runs on this computer.";
+        return entry.Definition.RunsOn is not { } machineId ? Task.FromResult<string?>("It runs on this computer.") : TakeOverAsync(entry.Id, machineId, runId, cancellationToken);
+    }
+
+    /// <summary>
+    /// Takes a run in progress of an automation on a machine of a server over, by the ids a message of that server gives: for
+    /// a person who answers its approvals without having placed it, such as a member of the team that owns it. The request is
+    /// signed by this computer; the server and the machine check that its person answers the approvals of the automation.
+    /// </summary>
+    /// <param name="automationId">The automation.</param>
+    /// <param name="machineId">The machine that runs it.</param>
+    /// <param name="runId">The run.</param>
+    /// <param name="cancellationToken">Cancels the request.</param>
+    /// <returns>Why it was not passed on; null once the machine was asked.</returns>
+    internal async Task<string?> TakeOverAsync(string automationId, string machineId, string runId, CancellationToken cancellationToken)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(automationId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(machineId);
         if (SignRun is not { } sign || ServerRoute?.Invoke(machineId) is not { } route)
             return "Its machine is reached through no server online: open its session on the machine to answer it.";
         using (route)
         {
             try
             {
-                await route.TakeOverAsync(sign(new FleetAutomationRunRequest(FleetAutomationRunRequest.CurrentVersion, route.OrganizationId, entry.Id, machineId, runId,
+                await route.TakeOverAsync(sign(new FleetAutomationRunRequest(FleetAutomationRunRequest.CurrentVersion, route.OrganizationId, automationId, machineId, runId,
                     string.Empty, string.Empty, DateTimeOffset.UtcNow) { Action = FleetAutomationRunRequest.TakeOverAction }), cancellationToken).ConfigureAwait(false);
                 return null;
             }

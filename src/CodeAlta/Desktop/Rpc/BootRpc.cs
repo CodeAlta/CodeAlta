@@ -865,6 +865,7 @@ internal sealed record BootClosing(string? Step, int Seconds, bool CanForceExit)
 [JsonSerializable(typeof(AutomationHookResponse))]
 [JsonSerializable(typeof(AutomationHookAddressRequest))]
 [JsonSerializable(typeof(AutomationTakeOverRequest))]
+[JsonSerializable(typeof(AutomationTakeOverOnMachineRequest))]
 [JsonSerializable(typeof(AutomationTakeOverResponse))]
 [JsonSerializable(typeof(WorkflowsRequest))]
 [JsonSerializable(typeof(WorkflowScriptsRequest))]

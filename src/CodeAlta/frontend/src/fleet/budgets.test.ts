@@ -1,12 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { FleetBudgetsOverview, FleetBudgetView, FleetNotificationView } from "#neoastra";
-import { budgetIntent, budgetScopeLabel, budgetScopeOptions, formatAmount, newNotifications, notificationPhrase, parseLimit, usedShare, waitingHolds } from "./budgets";
+import { approvalRun, budgetIntent, budgetScopeLabel, budgetScopeOptions, formatAmount, newNotifications, notificationPhrase, parseLimit, usedShare, waitingHolds } from "./budgets";
 
 const budget = (change: Partial<FleetBudgetView>): FleetBudgetView => ({ id: "b1", name: "Home", scopeKind: "person", scopeId: null, scopeLabel: "", measure: "tokens",
   limit: 1_000_000, used: 0, granted: 0, period: "month", mode: "enforced", reached: "hold", state: "ok", periodEnd: "2026-12-01T00:00:00Z", version: 1, ...change });
 const note = (change: Partial<FleetNotificationView>): FleetNotificationView => ({ id: "n1", kind: "health", severity: "warning", budget: null, machine: "Mac mini", problem: null,
-  subject: null, detail: null, createdAt: "2026-11-04T10:00:00Z", resolved: false, read: false, ...change });
+  subject: null, detail: null, createdAt: "2026-11-04T10:00:00Z", resolved: false, read: false, machineId: null, ...change });
 const overview: FleetBudgetsOverview = {
   status: "ok", message: null, budgets: [], timeZone: "Europe/Paris",
   holds: [
@@ -56,4 +56,10 @@ test("a notification says what happened, with the names this computer gives", ()
   assert.deepEqual(notificationPhrase(note({ problem: "sign_in_failed", subject: "anthropic" })).key, "The sign-in of {subject} failed on {machine}.");
   assert.deepEqual(notificationPhrase(note({ problem: "offline", detail: "7" })).values, { machine: "Mac mini", detail: "7" });
   assert.equal(notificationPhrase(note({ problem: "something new" })).key, "{machine} has a problem.");
+  // A run that waits for the person says so, and names the run they take over from it.
+  const approval = note({ kind: "approval", subject: "a1", detail: "run-9", machineId: "node-1" });
+  assert.deepEqual(notificationPhrase(approval), { key: "A run on {machine} waits for your approval.", values: { machine: "Mac mini" } });
+  assert.deepEqual(approvalRun(approval), { automationId: "a1", machineId: "node-1", runId: "run-9" });
+  assert.equal(approvalRun(note({ kind: "approval", subject: "a1", detail: "run-9" })), null, "an older server names no machine");
+  assert.equal(approvalRun(note({ problem: "disk_low", subject: "a1", detail: "900", machineId: "node-1" })), null);
 });

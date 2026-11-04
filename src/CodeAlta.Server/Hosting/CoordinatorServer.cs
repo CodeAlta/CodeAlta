@@ -479,6 +479,8 @@ public sealed class CoordinatorServer : IAsyncDisposable
             Notifications = provider.GetRequiredService<NotificationService>(),
             ApprovalRecipients = (automation, token) => provider.GetRequiredService<AccessService>().ApproversOfAsync(automation.OrganizationId, automation.AutomationId,
                 automation.OwnerPersonId, token),
+            MayTakeOver = (automation, person, token) => provider.GetRequiredService<AccessService>().ApprovesAsync(automation.OrganizationId, automation.AutomationId,
+                automation.OwnerPersonId, person, token),
         });
         services.AddSingleton(provider => new HookService(store, store, provider.GetRequiredService<PresenceRegistry>(), time,
             provider.GetRequiredService<ILoggerFactory>().CreateLogger("CodeAlta.Server.Hooks")));

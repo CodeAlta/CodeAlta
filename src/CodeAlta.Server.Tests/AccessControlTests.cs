@@ -168,6 +168,25 @@ public sealed class AccessControlTests
         var resumed = await server.SendAsync(mia, HttpMethod.Post, "/api/v1/owners/automation/nightly/resume");
         Assert.AreEqual(HttpStatusCode.OK, resumed.Status, resumed.Body.ToString());
         Assert.IsFalse(resumed.Read<ResourceOwnerDto>().Paused);
+
+        // The team answers its approvals: the access document names who else than Max takes its runs over, for its machine.
+        var draft = (await server.SendAsync(owner, HttpMethod.Get, "/api/v1/access/draft")).Read<AccessDocumentDraftDto>();
+        Assert.AreEqual(("nightly", miaId), (draft.Document.Approvers!.Single().AutomationId, draft.Document.Approvers!.Single().People.Single()),
+            "the maintainer of the team; Max placed it, the admins are not asked");
+        Assert.IsTrue((await server.SendAsync(owner, HttpMethod.Get, "/api/v1/access/self")).Read<AccessSelfDto>().Document.Pending
+            .Any(line => line.Contains("answers the approvals of", StringComparison.Ordinal)));
+        Task<ApiAnswer> TakeOverAsync(TestDevice device)
+        {
+            var text = FleetAutomationRunRequestDocuments.Serialize(new FleetAutomationRunRequest(FleetAutomationRunRequest.CurrentVersion, setup.Organization.Id, "nightly", machine.Id,
+                "run-1", device.DeviceId, device.PublicKey, server.Clock.Now) { Action = FleetAutomationRunRequest.TakeOverAction });
+            return server.SendAsync(device, HttpMethod.Post, "/api/v1/automations/nightly/runs/run-1/takeover",
+                new RunAutomationRequest(new FleetSignedAutomationRunRequest(text, device.Sign(FleetAutomationRunRequestDocuments.GetSignedBytes(text)))));
+        }
+
+        var byMia = await TakeOverAsync(mia);
+        Assert.AreEqual(HttpStatusCode.Conflict, byMia.Status, byMia.Body.ToString());
+        StringAssert.Contains(byMia.Body.ToString(), "offline", "Mia may: the machine is offline, so it is not passed on");
+        Assert.AreEqual(HttpStatusCode.NotFound, (await TakeOverAsync(owner)).Status, "an owner of the organization manages it, but answers none of its approvals");
     }
 
     [TestMethod]
