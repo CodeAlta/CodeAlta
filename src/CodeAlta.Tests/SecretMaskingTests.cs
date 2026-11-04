@@ -307,6 +307,24 @@ public sealed class SecretMaskingTests
     }
 
     [TestMethod]
+    public async Task APermissionRequest_IsAskedMasked_AsTheCallIsShown()
+    {
+        // The person who answers reads the request, here or on another computer: the command holds the secret the model wrote.
+        var executor = new ScriptedTurnExecutor((_, _) => Task.FromResult(Call("shell_command", new { command = $"echo the token is {Secret}" })));
+        var asked = new List<AgentPermissionRequest>();
+
+        var run = await RunSessionAsync(executor, [], "Print the token.", onPermission: (request, _) =>
+        {
+            lock (asked) asked.Add(request);
+            return Task.FromResult(new AgentPermissionDecision(AgentPermissionDecisionKind.Deny));
+        });
+
+        var command = asked.OfType<AgentCommandPermissionRequest>().Single();
+        Assert.AreEqual("echo the token is ***", command.Command);
+        AssertNoSecret(run);
+    }
+
+    [TestMethod]
     public async Task ASuggestedNextPrompt_IsToldMasked()
     {
         var executor = new ScriptedTurnExecutor((_, _) => Task.FromResult(new AgentTurnResponse
@@ -340,7 +358,7 @@ public sealed class SecretMaskingTests
 
     // Runs one prompt in a session whose secret store holds the secret, and reads back the files of its state and what it published.
     private static async Task<SessionRun> RunSessionAsync(IModelProviderTurnExecutor executor, IReadOnlyList<AgentToolDefinition> tools, string prompt,
-        Action<string>? prepare = null, bool suggestions = false)
+        Action<string>? prepare = null, bool suggestions = false, AgentPermissionRequestHandler? onPermission = null)
     {
         var root = Path.Combine(Path.GetTempPath(), "codealta-masking-" + Guid.NewGuid().ToString("N"));
         var workspace = Directory.CreateDirectory(Path.Combine(root, "workspace")).FullName;
@@ -359,7 +377,7 @@ public sealed class SecretMaskingTests
                 Tools = tools,
                 PromptSuggestions = suggestions,
                 PromptSuggestionInstructions = suggestions ? "End with a <next_prompt> tag." : null,
-                OnPermissionRequest = static (_, _) => Task.FromResult(new AgentPermissionDecision(AgentPermissionDecisionKind.AllowOnce)),
+                OnPermissionRequest = onPermission ?? (static (_, _) => Task.FromResult(new AgentPermissionDecision(AgentPermissionDecisionKind.AllowOnce))),
             }))
             {
                 using var subscription = session.Subscribe(@event =>
