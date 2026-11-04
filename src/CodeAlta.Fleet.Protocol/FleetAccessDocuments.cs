@@ -27,7 +27,16 @@ public sealed record FleetAccessTeam(
 /// <param name="People">The people.</param>
 public sealed record FleetAccessApprovers(
     [property: JsonPropertyName("automation")] string AutomationId,
-    [property: JsonPropertyName("people")] IReadOnlyList<string> People);
+    [property: JsonPropertyName("people")] IReadOnlyList<string> People)
+{
+    /// <summary>
+    /// Gets when the approval of some of its people ends, by person: a grant with an end date. A machine refuses them from
+    /// that time. Null, or a person missing here: no end.
+    /// </summary>
+    [JsonPropertyName("until")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyDictionary<string, DateTimeOffset>? Until { get; init; }
+}
 
 /// <summary>A team machine: the device of the machine and the team that owns it.</summary>
 /// <param name="DeviceId">The device of the machine.</param>
@@ -130,12 +139,25 @@ public sealed record FleetAccessState(
     /// <summary>Gets the people who answer the approvals of each automation and take its runs over, besides who placed it, by automation.</summary>
     public ImmutableDictionary<string, ImmutableHashSet<string>> Approvers { get; init; } = ImmutableDictionary.Create<string, ImmutableHashSet<string>>(StringComparer.Ordinal);
 
-    /// <summary>Gets whether the document names a person among those who answer the approvals of an automation and take its runs over.</summary>
+    /// <summary>Gets when the approval of a person for an automation ends, by automation then person; a person missing has no end.</summary>
+    public ImmutableDictionary<string, ImmutableDictionary<string, DateTimeOffset>> ApproversUntil { get; init; } =
+        ImmutableDictionary.Create<string, ImmutableDictionary<string, DateTimeOffset>>(StringComparer.Ordinal);
+
+    /// <summary>Gets whether the document names a person among those who answer the approvals of an automation and take its runs over, at a time.</summary>
     /// <param name="automationId">The automation.</param>
     /// <param name="personId">The person.</param>
-    /// <returns>Whether it names them, and they are not suspended.</returns>
-    public bool Approves(string? automationId, string? personId)
-        => automationId is not null && personId is not null && !IsSuspended(personId) && Approvers.TryGetValue(automationId, out var people) && people.Contains(personId);
+    /// <param name="now">The time of the machine: an approval with an end date holds before it only.</param>
+    /// <returns>Whether it names them, they are not suspended, and their approval has not ended.</returns>
+    public bool Approves(string? automationId, string? personId, DateTimeOffset now)
+        => automationId is not null && personId is not null && !IsSuspended(personId) && Approvers.TryGetValue(automationId, out var people) && people.Contains(personId)
+            && !(ApproversUntil.TryGetValue(automationId, out var ends) && ends.TryGetValue(personId, out var end) && now >= end);
+
+    /// <summary>Lists when the approvals of a version end, by automation then person.</summary>
+    /// <param name="approvers">The approvers of a version; null for none.</param>
+    /// <returns>The ends.</returns>
+    public static ImmutableDictionary<string, ImmutableDictionary<string, DateTimeOffset>> UntilOf(IReadOnlyList<FleetAccessApprovers>? approvers)
+        => (approvers ?? []).Where(static item => item.Until is { Count: > 0 })
+            .ToImmutableDictionary(static item => item.AutomationId, static item => item.Until!.ToImmutableDictionary(StringComparer.Ordinal), StringComparer.Ordinal);
 
     /// <summary>Lists the approvers of a version, by automation.</summary>
     /// <param name="approvers">The approvers of a version; null for none.</param>
@@ -314,6 +336,7 @@ public static class FleetAccessDocuments
         {
             FirstHash = state.FirstHash ?? hash,
             Approvers = FleetAccessState.ApproversOf(document.Approvers),
+            ApproversUntil = FleetAccessState.UntilOf(document.Approvers),
         };
         return true;
     }
@@ -401,8 +424,13 @@ public static class FleetAccessDocuments
         var approvers = FleetAccessState.ApproversOf(after.Approvers);
         foreach (var (automation, people) in approvers.OrderBy(static pair => pair.Key, StringComparer.Ordinal))
         {
-            foreach (var id in people.Where(id => !before.Approves(automation, id)).Order(StringComparer.Ordinal))
-                lines.Add($"{Name(id)} answers the approvals of {Name(automation)} and takes its runs over");
+            var ends = FleetAccessState.UntilOf(after.Approvers).GetValueOrDefault(automation);
+            DateTimeOffset? EndAfter(string id) => ends is not null && ends.TryGetValue(id, out var end) ? end : null;
+            foreach (var id in people.Where(id => !(before.Approvers.TryGetValue(automation, out var held) && held.Contains(id))
+                    || End(before, automation, id) != EndAfter(id)).Order(StringComparer.Ordinal))
+                lines.Add(ends?.TryGetValue(id, out var end) == true
+                    ? $"{Name(id)} answers the approvals of {Name(automation)} and takes its runs over until {end.ToString("u", System.Globalization.CultureInfo.InvariantCulture)}"
+                    : $"{Name(id)} answers the approvals of {Name(automation)} and takes its runs over");
         }
 
         foreach (var (automation, people) in before.Approvers.OrderBy(static pair => pair.Key, StringComparer.Ordinal))
@@ -429,7 +457,8 @@ public static class FleetAccessDocuments
             && SameSet(Approvals(left), Approvals(right));
 
         static IEnumerable<string> Approvals(FleetAccessDocument document)
-            => (document.Approvers ?? []).SelectMany(static item => item.People.Select(person => item.AutomationId + "\n" + person));
+            => (document.Approvers ?? []).SelectMany(static item => item.People.Select(person => item.AutomationId + "\n" + person + "\n"
+                + (item.Until?.TryGetValue(person, out var end) == true ? end.ToUnixTimeMilliseconds().ToString(System.Globalization.CultureInfo.InvariantCulture) : string.Empty)));
 
         static string TeamKey(FleetAccessTeam team)
             => $"{team.Id}\n{team.RunsMemberAutomations}\n{string.Join(',', team.Maintainers.Order(StringComparer.Ordinal))}\n{string.Join(',', team.Members.Order(StringComparer.Ordinal))}";
@@ -446,9 +475,16 @@ public static class FleetAccessDocuments
         return SaySame(new FleetAccessDocument(1, document.OrganizationId, 0, null, 0, [.. state.Owners], [.. state.Signers], [.. state.Teams.Values],
             [.. state.Machines.Select(static pair => new FleetAccessMachine(pair.Key, pair.Value))], [.. state.Suspended], document.SignerDeviceId, document.Time)
         {
-            Approvers = [.. state.Approvers.Select(static pair => new FleetAccessApprovers(pair.Key, [.. pair.Value]))],
+            Approvers = [.. state.Approvers.Select(pair => new FleetAccessApprovers(pair.Key, [.. pair.Value])
+            {
+                Until = state.ApproversUntil.TryGetValue(pair.Key, out var ends) && ends.Count > 0 ? ends : null,
+            })],
         }, document);
     }
+
+    // When the approval of a person for an automation ends in a state; null for no end.
+    private static DateTimeOffset? End(FleetAccessState state, string automation, string person)
+        => state.ApproversUntil.TryGetValue(automation, out var ends) && ends.TryGetValue(person, out var end) ? end : null;
 
     private static bool SameSet(IEnumerable<string> left, IEnumerable<string> right)
         => new HashSet<string>(left, StringComparer.Ordinal).SetEquals(right);
@@ -530,6 +566,7 @@ public static class FleetAccessDocuments
                     || item.People.Any(static id => !IsId(id)) || item.People.Distinct(StringComparer.Ordinal).Count() != item.People.Count)
                     return "the approvers of an automation do not hold";
                 if (item.People.Any(suspended.Contains)) return "a suspended person answers approvals";
+                if (item.Until is { } until && until.Keys.Any(person => !item.People.Contains(person, StringComparer.Ordinal))) return "the approvers of an automation do not hold";
             }
         }
 

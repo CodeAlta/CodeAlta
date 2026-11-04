@@ -187,17 +187,20 @@ public sealed class NodeServerAutomationTests
             Teams = new Dictionary<string, FleetAccessTeam> { ["infra"] = new("infra", ["mia"], ["max"], false) }.ToImmutableDictionary(StringComparer.Ordinal),
             Machines = new Dictionary<string, string> { ["team-node"] = "infra" }.ToImmutableDictionary(StringComparer.Ordinal),
             Suspended = ["old"],
-            Approvers = FleetAccessState.ApproversOf([new FleetAccessApprovers("a1", ["oncall", "old"])]),
+            Approvers = FleetAccessState.ApproversOf([new FleetAccessApprovers("a1", ["oncall", "old", "temp"])]),
+            ApproversUntil = FleetAccessState.UntilOf([new FleetAccessApprovers("a1", ["temp"]) { Until = new Dictionary<string, DateTimeOffset> { ["temp"] = Noon.AddHours(1) } }]),
         };
         var takeOver = new FleetAutomationRunRequest(FleetAutomationRunRequest.CurrentVersion, "org", "a1", "node", "run-1", "d", "k", Noon) { Action = FleetAutomationRunRequest.TakeOverAction };
 
-        Assert.IsTrue(NodeAutomations.MayTakeOver(access, "node", takeOver, "oncall"), "an approver the document names");
-        Assert.IsFalse(NodeAutomations.MayTakeOver(access, "node", takeOver with { AutomationId = "a2" }, "oncall"), "for that automation only");
-        Assert.IsFalse(NodeAutomations.MayTakeOver(access, "node", takeOver, "old"), "a suspended person");
-        Assert.IsTrue(NodeAutomations.MayTakeOver(access, "team-node", takeOver with { AutomationId = "a2" }, "max"), "a member of the team of a team machine");
-        Assert.IsFalse(NodeAutomations.MayTakeOver(access, "node", takeOver with { AutomationId = "a2" }, "max"), "not on a machine of another");
-        Assert.IsFalse(NodeAutomations.MayTakeOver(access, "node", takeOver with { Action = null }, "oncall"), "a run by hand stays the owner's");
-        Assert.IsFalse(NodeAutomations.MayTakeOver(null, "node", takeOver, "oncall"), "no document: nobody else");
+        Assert.IsTrue(NodeAutomations.MayTakeOver(access, "node", takeOver, "oncall", Noon), "an approver the document names");
+        Assert.IsFalse(NodeAutomations.MayTakeOver(access, "node", takeOver with { AutomationId = "a2" }, "oncall", Noon), "for that automation only");
+        Assert.IsFalse(NodeAutomations.MayTakeOver(access, "node", takeOver, "old", Noon), "a suspended person");
+        Assert.IsTrue(NodeAutomations.MayTakeOver(access, "team-node", takeOver with { AutomationId = "a2" }, "max", Noon), "a member of the team of a team machine");
+        Assert.IsFalse(NodeAutomations.MayTakeOver(access, "node", takeOver with { AutomationId = "a2" }, "max", Noon), "not on a machine of another");
+        Assert.IsFalse(NodeAutomations.MayTakeOver(access, "node", takeOver with { Action = null }, "oncall", Noon), "a run by hand stays the owner's");
+        Assert.IsFalse(NodeAutomations.MayTakeOver(null, "node", takeOver, "oncall", Noon), "no document: nobody else");
+        Assert.IsTrue(NodeAutomations.MayTakeOver(access, "node", takeOver, "temp", Noon.AddMinutes(59)), "granted until a time, before it");
+        Assert.IsFalse(NodeAutomations.MayTakeOver(access, "node", takeOver, "temp", Noon.AddHours(1)), "and not from it, by the clock of the machine");
     }
 
     [TestMethod]

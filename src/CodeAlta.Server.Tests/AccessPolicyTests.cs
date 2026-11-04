@@ -129,6 +129,22 @@ public sealed class AccessPolicyTests
     }
 
     [TestMethod]
+    public void AnApproverByGrantsWithAnEnd_IsListedWithTheLatestEnd_AndNotOnceItPassed()
+    {
+        var access = Snapshot(
+            people: [Person("bea", FleetOrganizationRoles.Member), Person("cy", FleetOrganizationRoles.Member), Person("dan", FleetOrganizationRoles.Member)],
+            grants: [Grant("g1", FleetPrincipalKinds.Person, "cy", "automation.approve", FleetScopeKinds.Resource, "automation:a1", expires: Now.AddDays(1)),
+                Grant("g2", FleetPrincipalKinds.Person, "cy", "automation.approve", FleetScopeKinds.Resource, "automation:a1", expires: Now.AddDays(3)),
+                Grant("g3", FleetPrincipalKinds.Person, "dan", "automation.approve", FleetScopeKinds.Resource, "automation:a1"),
+                Grant("g4", FleetPrincipalKinds.Person, "dan", "automation.approve", FleetScopeKinds.Resource, "automation:a1", expires: Now.AddDays(1))]);
+        var automation = AccessTarget.Resource(FleetResourceKinds.Automation, "a1", FleetPrincipalKinds.Person, "bea");
+
+        CollectionAssert.AreEqual(new (string, DateTimeOffset?)[] { ("bea", null), ("cy", Now.AddDays(3)), ("dan", null) },
+            AccessPolicy.ApproversWithEnds(access, automation, Now).ToArray(), "its owner and a grant without an end have none; the latest end of the grants");
+        CollectionAssert.AreEqual(new (string, DateTimeOffset?)[] { ("bea", null), ("dan", null) }, AccessPolicy.ApproversWithEnds(access, automation, Now.AddDays(4)).ToArray());
+    }
+
+    [TestMethod]
     public void TheOnCallOfARotation_IsTheTurnOfTheTime_SkippingWhoLeftTheTeamOrIsSuspended()
     {
         var access = Snapshot(

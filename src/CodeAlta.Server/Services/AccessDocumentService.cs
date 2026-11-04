@@ -143,6 +143,7 @@ internal sealed class AccessDocumentService
                 [.. held.Suspended])
             {
                 Approvers = FleetAccessState.ApproversOf(held.Approvers),
+                ApproversUntil = FleetAccessState.UntilOf(held.Approvers),
             };
         }
 

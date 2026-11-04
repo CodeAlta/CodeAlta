@@ -60,8 +60,9 @@ internal sealed partial class AccessService
 
     /// <summary>
     /// Lists, for the signed access document, who answers the approvals of each automation besides the person who placed it:
-    /// what machines check before they let someone else take a run over. A grant that expires is left out: the document is
-    /// signed, and would keep it past its end.
+    /// what machines check before they let someone else take a run over. A person who holds it by grants with an end date only
+    /// is named with that end, after which machines refuse them by their own clock; a change of approvers reaches machines
+    /// once a signer signs the next version.
     /// </summary>
     /// <param name="organizationId">The organization.</param>
     /// <param name="snapshot">The access of the organization.</param>
@@ -80,12 +81,15 @@ internal sealed partial class AccessService
         }
 
         var list = new List<FleetAccessApprovers>();
+        var now = _time.GetUtcNow();
         foreach (var (automationId, personId) in placedBy)
         {
             var (ownerKind, ownerId) = snapshot.Owner(FleetResourceKinds.Automation, automationId) is { } own ? (own.OwnerKind, own.OwnerId) : (FleetPrincipalKinds.Person, personId);
-            var people = AccessPolicy.Approvers(snapshot, AccessTarget.Resource(FleetResourceKinds.Automation, automationId, ownerKind, ownerId), DateTimeOffset.MaxValue)
-                .Where(id => id != personId).Order(StringComparer.Ordinal).ToList();
-            if (people.Count > 0) list.Add(new FleetAccessApprovers(automationId, people));
+            var people = AccessPolicy.ApproversWithEnds(snapshot, AccessTarget.Resource(FleetResourceKinds.Automation, automationId, ownerKind, ownerId), now)
+                .Where(approver => approver.PersonId != personId).OrderBy(static approver => approver.PersonId, StringComparer.Ordinal).ToList();
+            if (people.Count == 0) continue;
+            var ends = people.Where(static approver => approver.Until is not null).ToDictionary(static approver => approver.PersonId, static approver => approver.Until!.Value, StringComparer.Ordinal);
+            list.Add(new FleetAccessApprovers(automationId, [.. people.Select(static approver => approver.PersonId)]) { Until = ends.Count > 0 ? ends : null });
         }
 
         return list;

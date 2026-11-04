@@ -46,6 +46,8 @@ Every machine and automation has one owner: a person, a team or the organization
 
 A grant gives a person or a team one capability somewhere: on the organization, a team, or one machine. **Add a grant…** chooses who, what and where; the trash icon takes it back.
 
+- Who answers the approvals of an automation and takes its runs over (the people of the team that owns it, a grant to approve it) reaches its machine only once an owner or an admin signs the next version of the access document ([Sign what machines follow](#sign-what-machines-follow)). A grant with an end date is signed with its end, and the machine refuses it from then, by its own clock.
+
 - Reading content (a session, the log of a machine) is granted on one machine or session, never on a whole team or the organization.
 - In a Private space the server cannot read that content: the grant shows **Waiting for keys** until a computer of the owner gives them, with **Confirm keys**.
 
