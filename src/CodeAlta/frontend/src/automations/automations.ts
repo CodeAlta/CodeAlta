@@ -59,7 +59,7 @@ export const waitsToBeAllowed = (item: Readonly<{ allowed: boolean; triggers: re
 export function newTrigger(type: TriggerType): AutomationTriggerItem {
   return { type, minute: 0, every: 1, at: type === "daily" || type === "weekly" ? ["09:00"] : [], days: type === "weekly" ? ["mon"] : [],
     expression: type === "cron" ? "0 9 * * 1-5" : null, event: type === "jira" ? "created" : "opened", authors: "trusted",
-    command: type === "command" ? "" : null, folder: null };
+    command: type === "command" ? "" : null, folder: null, integration: null };
 }
 
 /** The name of a day in the language of the page, short: "Mon". */

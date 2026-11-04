@@ -309,10 +309,16 @@ internal sealed class AutomationsService
     private static AutomationRunItem Run(AutomationRun run)
         => new(run.Id, run.AutomationId, run.Name, run.SessionId, run.ProjectId, run.StartedAt, run.EndedAt, run.Trigger, run.Detail, run.Status, run.Message);
 
-    private static AutomationTriggerItem Trigger(AutomationTrigger trigger)
+    internal static AutomationTriggerItem Trigger(AutomationTrigger trigger)
         => new(trigger.KindName, trigger.Minute, trigger.Every, [.. trigger.At.Select(static time => time.ToString())],
             [.. trigger.Days.Select(static day => AutomationTrigger.DayNames[(int)day])], trigger.Expression, trigger.Event,
-            trigger.Authors == AutomationAuthors.Anyone ? "anyone" : "trusted", trigger.Command, trigger.Folder);
+            trigger.Authors == AutomationAuthors.Anyone ? "anyone" : "trusted", trigger.Command, trigger.Folder)
+        {
+            Integration = trigger.IsIntegration
+                ? new AutomationIntegrationItem(trigger.Site, trigger.Email, trigger.Token, trigger.JiraProject, trigger.Query, trigger.AppToken, trigger.BotToken,
+                    trigger.Channel, trigger.Match, trigger.ApiKey, trigger.Hook, trigger.Secret, trigger.Signature, trigger.SignatureHeader, trigger.Fields, trigger.Reply)
+                : null,
+        };
 
     // False: the request is not one the page sends. A problem: what the user wrote is refused, with the reason.
     private static bool TryRead(AutomationInput input, out AutomationDefinition? definition, out string? problem)
@@ -365,7 +371,7 @@ internal sealed class AutomationsService
         return true;
     }
 
-    private static bool TryRead(AutomationTriggerItem item, out AutomationTrigger? trigger)
+    internal static bool TryRead(AutomationTriggerItem item, out AutomationTrigger? trigger)
     {
         trigger = null;
         if (!AutomationTrigger.TryParseKind(item.Type, out var kind) || item.At is null || item.Days is null || item.At.Count > 24 || item.Days.Count > 7
@@ -388,6 +394,37 @@ internal sealed class AutomationsService
 
         times.Sort();
         days.Sort();
+        var integration = new AutomationTrigger(kind).IsIntegration ? item.Integration : null;
+        if (integration is not null && (integration.Fields is null || integration.Fields.Count > AutomationTrigger.MaximumFields * 2
+            || new[] { integration.Site, integration.Email, integration.Token, integration.JiraProject, integration.Query, integration.AppToken, integration.BotToken, integration.Channel,
+                integration.Match, integration.ApiKey, integration.Hook, integration.Secret, integration.Signature, integration.SignatureHeader }.Any(static text => text is { Length: > AutomationTrigger.MaximumQueryLength * 2 })))
+            return false;
+        if (integration is not null)
+        {
+            var events = AutomationTrigger.Events(kind);
+            trigger = new AutomationTrigger(kind)
+            {
+                Event = events.Contains(item.Event) ? item.Event : events[0],
+                Site = Blank(integration.Site)?.TrimEnd('/'),
+                Email = Blank(integration.Email),
+                Token = Blank(integration.Token),
+                JiraProject = Blank(integration.JiraProject),
+                Query = Blank(integration.Query),
+                AppToken = Blank(integration.AppToken),
+                BotToken = Blank(integration.BotToken),
+                Channel = Blank(integration.Channel),
+                Match = Blank(integration.Match),
+                ApiKey = Blank(integration.ApiKey),
+                Hook = Blank(integration.Hook),
+                Secret = Blank(integration.Secret),
+                Signature = kind == AutomationTriggerKind.Webhook ? Blank(integration.Signature) ?? AutomationSignatures.Standard : kind == AutomationTriggerKind.IncidentIo ? AutomationSignatures.Standard : null,
+                SignatureHeader = Blank(integration.SignatureHeader),
+                Fields = [.. integration.Fields.Select(static field => field?.Trim() ?? string.Empty).Where(static field => field.Length > 0).Distinct(StringComparer.Ordinal)],
+                Reply = integration.Reply,
+            };
+            return true;
+        }
+
         trigger = new AutomationTrigger(kind)
         {
             Minute = item.Minute,
@@ -420,7 +457,34 @@ internal sealed record AutomationsRequest(string? ExpectedEpoch);
 /// <param name="Command">Command: the command line the automation keeps running.</param>
 /// <param name="Folder">Command: the folder it runs in, from the folder of the project; null for that folder.</param>
 internal sealed record AutomationTriggerItem(string Type, int Minute, int Every, IReadOnlyList<string> At, IReadOnlyList<string> Days, string? Expression, string Event, string Authors,
-    string? Command, string? Folder);
+    string? Command, string? Folder)
+{
+    /// <summary>The settings of a trigger of another tool (Jira versions and queries, Slack, incident.io, webhooks); null for the others.</summary>
+    public AutomationIntegrationItem? Integration { get; init; }
+}
+
+/// <summary>
+/// The settings of a trigger of another tool, as the page shows and edits them: credentials are <c>${secret:NAME}</c>
+/// references, never values.
+/// </summary>
+/// <param name="Site">Jira: the https address of the site, or a <c>${var:NAME}</c> reference.</param>
+/// <param name="Email">Jira: the email of the account of the token.</param>
+/// <param name="Token">Jira: the API token, a secret reference.</param>
+/// <param name="JiraProject">Jira version: the key of the project.</param>
+/// <param name="Query">Jira query: the JQL.</param>
+/// <param name="AppToken">Slack: the app-level token of Socket Mode, a secret reference.</param>
+/// <param name="BotToken">Slack: the bot token, a secret reference.</param>
+/// <param name="Channel">Slack: the id of the channel.</param>
+/// <param name="Match">Slack: a text the message contains; null for any.</param>
+/// <param name="ApiKey">incident.io: the API key, a secret reference.</param>
+/// <param name="Hook">incident.io and webhooks: the hook of the server.</param>
+/// <param name="Secret">incident.io and webhooks: the signing secret, a secret reference.</param>
+/// <param name="Signature">Webhooks: <c>standard</c>, <c>github</c> or <c>hmac_sha256</c>.</param>
+/// <param name="SignatureHeader">Webhooks with <c>hmac_sha256</c>: the header of the signature.</param>
+/// <param name="Fields">Webhooks: the JSON pointers of the fields that reach the prompt.</param>
+/// <param name="Reply">Whether the answer of the run is written back to the source.</param>
+internal sealed record AutomationIntegrationItem(string? Site, string? Email, string? Token, string? JiraProject, string? Query, string? AppToken, string? BotToken,
+    string? Channel, string? Match, string? ApiKey, string? Hook, string? Secret, string? Signature, string? SignatureHeader, IReadOnlyList<string> Fields, bool Reply);
 
 /// <summary>An automation as the page shows it.</summary>
 /// <param name="ProjectId">The project it runs in; null for a chat.</param>

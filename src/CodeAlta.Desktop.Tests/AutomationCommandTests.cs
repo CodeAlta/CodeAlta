@@ -485,6 +485,23 @@ public sealed class AutomationCommandTests
     }
 
     [TestMethod]
+    public void ATriggerOfAnotherTool_IsWrittenAndReadAsATable()
+    {
+        const string text = """{ type = "slack", event = "mention", channel = "C0123ABCDEF", app_token = "${secret:SLACK_APP}", bot_token = "${secret:SLACK_BOT}", reply = true }""";
+        Assert.IsTrue(AutomationTriggerText.TryParse(text, out var trigger, out var problem), problem);
+        Assert.AreEqual((AutomationTriggerKind.Slack, "mention", "C0123ABCDEF", true), (trigger!.Kind, trigger.Event, trigger.Channel, trigger.Reply));
+        Assert.AreEqual(text, AutomationTriggerText.Format(trigger));
+
+        // Its settings are not written after a @, and a token is never written in clear.
+        Assert.IsFalse(AutomationTriggerText.TryParse("slack@mention", out _, out problem));
+        StringAssert.Contains(problem, "table");
+        Assert.IsFalse(AutomationTriggerText.TryParse("""{ type = "slack", channel = "C0123ABCDEF", app_token = "xapp-1-A0", bot_token = "${secret:SLACK_BOT}" }""", out _, out problem));
+        StringAssert.Contains(problem, "${secret:NAME}");
+        Assert.IsFalse(AutomationTriggerText.TryParse("{ type = ", out _, out problem));
+        StringAssert.Contains(problem, "not a table");
+    }
+
+    [TestMethod]
     public async Task TheShell_RunsACommand_GivesItsExitCodeAndWhatItPrinted_AndEndsOneThatWaits()
     {
         string? asked = null;
