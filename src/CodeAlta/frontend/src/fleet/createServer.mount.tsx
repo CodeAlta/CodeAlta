@@ -53,6 +53,15 @@ const joinApi: JoinOrganizationApi = {
       recoveryKey: null } };
   },
   status: async () => ({ status: "ok", servers: [], deviceId: "me", words: "cabin onion leopard pigeon peach needle" }),
+  // A server whose address names SSO offers its company sign-in and a passkey; the others offer none, and take an enrollment code.
+  signInMethods: async request => request.url.includes("sso")
+    ? { status: "ok", organization: "Contoso", ssoRequired: false, message: null, methods: [{ id: "passkey", name: "Passkey", breakGlass: false }, { id: "company", name: "Contoso", breakGlass: false }] }
+    : { status: "ok", organization: null, ssoRequired: false, message: null, methods: [] },
+  joinWithSignIn: async request => {
+    calls.push(JSON.stringify({ joinSignIn: request.url, method: request.method }));
+    return { status: "ok", person: "Sam", hasDevices: false, message: null, server: { id: "corp", url: request.url, organization: "Contoso", link: "pending", connection: "pending", problem: null,
+      controller: false, spaces: [], recoveryKey: null } };
+  },
   linkSpace: async request => { calls.push(JSON.stringify({ link: request.spaceId, server: request.linkId })); return { status: "ok", message: null, space: null } as never; },
 };
 const spacesApi: JoinOrganizationSpacesApi = {

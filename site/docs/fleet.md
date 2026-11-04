@@ -304,18 +304,27 @@ It takes the options of `altaserver run` (`--port`, `--urls`, `--data-root`, `--
 
 - **A machine**: in **Settings** > **Fleet** > **Machines**, **Add a machine…** > **Through my server** shows the command to run on it, `altanode join <address> --token <code>`, which prints the six words of the machine's key. The machines that join list under the command with their words: click **It shows the same words** beside the one whose words the machine printed. Another one is never approved by itself. The **Add a machine…** of the server's card shows the same command for a machine that waits for you to approve it: it appears under the server as a **New device**; click **Approve…**, check that the machine shows the same six words, and click **It shows the same words**.
 - **What waits for you**: when a machine or a computer asks to join, a message comes wherever you are in CodeAlta, with its six words, **Approve** and **Refuse**, and the **Fleet** button of the title bar counts what waits. Approve when the words are the same as on the device.
-- **Another of your computers**: **Join an organization…** with the address of the server and an enrollment code; it shows six words while it waits, and you approve it the same way from a computer already approved. Once approved, it can add and approve machines too. A node never approves anything.
+- **Another of your computers**: **Join an organization…** with the address of the server, then sign in with a method you linked (a passkey, Microsoft, Google, GitHub) or an enrollment code; it shows six words while it waits, and you approve it the same way from a computer already approved. Once approved, it can add and approve machines too. A node never approves anything.
 
 ### Join an organization
 
 To join the server of your company, open **Settings** > **Fleet** > **Server** and click **Join an organization…**:
 
 1. **Server**: its address, which your administrator gives.
-2. **Sign in**: the one-time enrollment code your administrator made for you.
+2. **Sign in**: click **Continue with** a method the server offers: your company's sign-in, a passkey, or a Microsoft, Google or GitHub account you linked. Your browser opens; once you are signed in there, it sends you back to CodeAlta. **Use an enrollment code instead** takes the one-time code your administrator made for you.
 3. **Space**: the space that works with the organization, **A new Work space** by default. Its sessions are published to the server: their states and counts, never their content.
-4. **Approval**: an administrator approves this computer; they see the six words shown here beside it.
+4. **Approval**: another of your computers approves this one, or, for your first computer, an administrator; they see the six words shown here beside it.
 
-A device gets the keys that open your titles only once one of your computers approved it: the server alone cannot add one.
+Signing in proves who you are; it does not let this computer in by itself. A device gets the keys that open your titles only once one of your computers approved it: the server alone cannot add one.
+
+### Sign-in methods
+
+The card of the server shows **Sign-in**: the ways people sign in on a new computer, and the ones linked to you.
+
+- **Link…** adds a way to sign in to you, from a computer already approved: **Add a passkey** (the server's page opens in your browser) or **Link Microsoft**, **Google**, **GitHub**. An account signs nobody in until someone linked it.
+- On the owner's computer, **Change…** turns each method on or off and sets the company's sign-in: its **Issuer** (the OpenID Connect address of Entra ID, Okta, Google Workspace, Keycloak...), the **Client id** and **Client secret** you registered there, with the redirect `http://127.0.0.1` (any port), and the **Groups claim**. The secret is never shown again. People sign in with it the first time without an invitation; their first computer waits for your approval.
+- **Require company sign-in** leaves only the company's sign-in for a new computer, and your passkey as the owner's way in.
+- Microsoft, Google and GitHub show **Not registered yet** until CodeAlta's own sign-in applications for them exist.
 
 ### Keep your recovery key
 

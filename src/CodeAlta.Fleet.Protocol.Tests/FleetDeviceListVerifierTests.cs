@@ -97,11 +97,31 @@ public sealed class FleetDeviceListVerifierTests
         using var node = new Key();
         using var laptop = new Key();
 
+        using var second = new Key();
+        using var third = new Key();
+
+        // The owner (the person of the first entry) signs in the first controller device of another person, and nothing more of theirs.
         var otherPerson = new Chain();
         otherPerson.Add(desktop.First());
         otherPerson.Add(desktop, FleetDeviceListOperations.Add, node, FleetDeviceKinds.Node, Owner);
         otherPerson.Add(desktop, FleetDeviceListOperations.Add, laptop, FleetDeviceKinds.Controller, "person-2");
-        AssertBroken(otherPerson, 3, "a controller device adds devices of its own person only");
+        otherPerson.Add(desktop, FleetDeviceListOperations.Add, second, FleetDeviceKinds.Controller, "person-2");
+        AssertBroken(otherPerson, 4, "a controller device adds devices of its own person only");
+
+        var machineOfAnother = new Chain();
+        machineOfAnother.Add(desktop.First());
+        machineOfAnother.Add(desktop, FleetDeviceListOperations.Add, node, FleetDeviceKinds.Node, Owner);
+        machineOfAnother.Add(desktop, FleetDeviceListOperations.Add, laptop, FleetDeviceKinds.Node, "person-2");
+        AssertBroken(machineOfAnother, 3, "a controller device adds devices of its own person only");
+
+        // That person's device signs their next ones, never the first device of a third person: only the owner does.
+        var notTheOwner = new Chain();
+        notTheOwner.Add(desktop.First());
+        notTheOwner.Add(desktop, FleetDeviceListOperations.Add, node, FleetDeviceKinds.Node, Owner);
+        notTheOwner.Add(desktop, FleetDeviceListOperations.Add, laptop, FleetDeviceKinds.Controller, "person-2");
+        notTheOwner.Add(laptop, FleetDeviceListOperations.Add, second, FleetDeviceKinds.Controller, "person-2");
+        notTheOwner.Add(laptop, FleetDeviceListOperations.Add, third, FleetDeviceKinds.Controller, "person-3");
+        AssertBroken(notTheOwner, 5, "a controller device adds devices of its own person only");
 
         var lastController = new Chain();
         lastController.Add(desktop.First());

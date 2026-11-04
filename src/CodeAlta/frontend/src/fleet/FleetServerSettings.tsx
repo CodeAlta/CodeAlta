@@ -8,13 +8,15 @@ import { useShellLanguage } from "../shellLanguage";
 import type { MessageKey } from "../localization";
 import { CreateServerDialog } from "./CreateServerDialog";
 import { JoinOrganizationDialog } from "./JoinOrganizationDialog";
+import { ServerSignIn } from "./FleetSignInSettings";
 import { campaignProgress, campaignStateIntent, campaignStateLabel, canCancelCampaign, emptyUpdateDraft, joinCommand, keyWords, localTimeZone, machineStateIntent,
   machineStateLabel, orderedDevices, policyDraft, policyDraftProblem, policySummary, recoveryCheckPasses, recoveryCheckPositions, recoveryWordCount, serverAddressOf, serverConnection,
   serverConnectionIntent, serverConnectionLabel, serverProblem, telemetryDraft, telemetryHeaderEdits, telemetryProblem, telemetrySignals, telemetrySummary, updateDraftProblem,
   updateProblem, updateStart, type PolicyDraft, type TelemetryDraft, type TelemetrySignal, type UpdateDraft } from "./fleetServer";
 
 export type FleetServerApi = Pick<typeof fleetServer, "status" | "create" | "join" | "leave" | "createToken" | "devices" | "approve" | "revoke" | "watch" | "telemetry"
-  | "setTelemetry" | "updates" | "startUpdate" | "cancelUpdate" | "setUpdatePolicy" | "createRecoveryKey" | "recover">;
+  | "setTelemetry" | "updates" | "startUpdate" | "cancelUpdate" | "setUpdatePolicy" | "createRecoveryKey" | "recover" | "signInMethods" | "joinWithSignIn" | "signInSettings"
+  | "setSignInSettings" | "linkSignIn">;
 
 /** The address a server the person runs on this computer listens on, as `altaserver run` says it. */
 export const localServerAddress = "http://127.0.0.1:2586";
@@ -111,6 +113,7 @@ function ServerCard({ server, epoch, api, busy, revision, words, onRecoveryKey, 
     </div>
     {server.controller && connection !== "revoked" && server.recoveryKey !== null && <ServerRecovery server={server} epoch={epoch} api={api} onMade={onRecoveryKey} />}
     {server.controller && connection !== "revoked" && <ServerDevices server={server} epoch={epoch} api={api} revision={revision} />}
+    {server.controller && server.link === "approved" && connection !== "revoked" && <ServerSignIn server={server} epoch={epoch} api={api} revision={revision} />}
     {server.controller && connection !== "revoked" && <ServerTelemetry server={server} epoch={epoch} api={api} revision={revision} />}
     {server.controller && connection !== "revoked" && <ServerUpdates server={server} epoch={epoch} api={api} revision={revision} />}
     {token && <TokenDialog server={server} epoch={epoch} api={api} onClose={() => setToken(false)} />}

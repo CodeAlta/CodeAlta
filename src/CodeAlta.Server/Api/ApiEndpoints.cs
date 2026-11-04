@@ -223,6 +223,7 @@ internal static class ApiEndpoints
 
         AutomationEndpoints.Map(api);
         SecretEndpoints.Map(api);
+        SignInEndpoints.Map(api, app);
 
         app.MapPost(FleetTelemetryPaths.Forward + "/{signal}", (string signal, HttpContext context, OtlpForwarder forwarder) => forwarder.HandleAsync(context, signal))
             .ExcludeFromDescription();

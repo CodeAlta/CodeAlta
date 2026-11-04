@@ -118,7 +118,7 @@ internal sealed record ApiAnswer(HttpStatusCode Status, JsonElement Body)
     public static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
     {
         TypeInfoResolverChain = { ServerApiJsonContext.Default, FleetServerJsonContext.Default, FleetDeviceListJsonContext.Default, FleetTelemetryJsonContext.Default,
-            FleetAutomationApiJsonContext.Default, FleetSecretsApiJsonContext.Default, FleetEnvironmentJsonContext.Default },
+            FleetAutomationApiJsonContext.Default, FleetSecretsApiJsonContext.Default, FleetEnvironmentJsonContext.Default, FleetSignInJsonContext.Default },
     };
 }
 
@@ -149,7 +149,7 @@ internal sealed class ServerFixture : IAsyncDisposable
     /// <summary>Starts a server; a data root given stays the caller's, one made here is deleted with the fixture.</summary>
     public static async Task<ServerFixture> StartAsync(TempDirectory? root = null, TestClock? clock = null, Control.RelayOptions? relay = null,
         Func<FleetUpdateStatus?>? updateStatus = null, Func<string, string?>? environment = null, TimeSpan? telemetryInterval = null,
-        Func<CoordinatorServerOptions, CoordinatorServerOptions>? configure = null)
+        Func<CoordinatorServerOptions, CoordinatorServerOptions>? configure = null, Identity.SignIn.SignInOptions? signIn = null)
     {
         var owned = root is null ? new TempDirectory() : null;
         root ??= owned!;
@@ -165,6 +165,7 @@ internal sealed class ServerFixture : IAsyncDisposable
             // The OTEL_* variables of the machine that runs the tests never reach a test's server.
             EnvironmentVariable = environment ?? (static _ => null),
             TelemetryExportInterval = telemetryInterval,
+            SignIn = signIn,
         };
         var server = await CoordinatorServer.StartAsync(configure?.Invoke(options) ?? options);
         return new ServerFixture(owned, server, clock);

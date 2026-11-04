@@ -49,6 +49,8 @@
     </PackageReference>
     <PackageReference Include="Microsoft.AspNetCore.OpenApi" />
     <PackageReference Include="Microsoft.Data.Sqlite" />
+    <!-- Sign-in (doc/fleet/identity.md): the discovery documents, keys and ID tokens of the providers people sign in with (MIT). -->
+    <PackageReference Include="Microsoft.IdentityModel.Protocols.OpenIdConnect" />
     <!-- Its own traces, metrics and logs, and ASP.NET Core's, over OTLP when a collector is named (doc/fleet/observability.md). -->
     <PackageReference Include="OpenTelemetry" />
     <PackageReference Include="OpenTelemetry.Exporter.OpenTelemetryProtocol" />

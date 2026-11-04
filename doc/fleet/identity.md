@@ -74,7 +74,7 @@ to it.
 | --- | --- |
 | From another device | The new device shows a code or QR with its key fingerprint; an existing device compares the short words, signs it into the list and wraps the keys to it. |
 | Device code (headless) | `altanode join https://<server>` shows a code; the person approves it in the desktop (which signs the node in) or on the server's web page. |
-| Linked sign-in or passkey | Proves the person on a new device; that device gets the keys of Private spaces only once another device of the person approves it (the device list never grows by the server alone). |
+| Linked sign-in or passkey | Proves the person on a new device, which then enrolls as a pending controller device of theirs with a single-use grant of a few minutes; another device of the person approves it, or their recovery key, or the owner for a person's first device (a person company sign-in created). The device list never grows by the server alone. |
 | Recovery key | When every device of the person is lost: the words of the recovery key sign the new device in and give it the person's keys, on the device; it then removes the lost ones. |
 
 ### Linked sign-in methods
@@ -83,9 +83,15 @@ to it.
   id), **Google** (keyed on `sub`; `hd` names a Workspace domain), **GitHub** (OAuth only, no ID token: the server
   reads the numeric user id through the API with the token it is given), Apple later.
 - A self-hosted server has its own host name, so it cannot use a redirect address registered once for everyone. The
-  **desktop signs in natively** with public client ids that the CodeAlta project registers and maintains (system browser, PKCE,
-  loopback redirect, with a nonce from the server) and gives the server the ID token, which the server checks
-  (issuer, audience, nonce, signature). No registration per server.
+  **desktop signs in through the system browser** with public client ids that the CodeAlta project registers and
+  maintains, and a loopback redirect to itself. The server makes the state, the nonce and the PKCE verifier, and
+  redeems the code the desktop brings back: the client secrets that Google and GitHub require even for installed
+  applications stay on the server, and no token of a provider reaches the desktop. The server checks the ID token
+  (issuer, audience, nonce, signature, lifetime), or reads GitHub's account with its access token. No registration
+  per server; the ids are configuration of the server (`CODEALTA_SIGNIN_<PROVIDER>_CLIENT_ID`) until a release carries
+  them, and a method whose id is missing is not offered.
+- A linked method signs in only once a person linked it from one of their devices; an account nobody linked signs
+  nobody in.
 - Sign-in on the server's own web pages (a browser, the phone) needs an application the admin registers with the
   provider, or a passkey.
 
@@ -93,10 +99,13 @@ to it.
 
 - An organization configures its OpenID Connect provider (Entra ID, Okta, Google Workspace, Keycloak...); SAML is not
   planned.
-- **Enforcement** for the company's domains: no other way to sign in for those people, except one **break-glass
-  Owner** kept offline.
-- People are created at their first sign-in; groups map to roles by **group id** (Entra app roles rather than group
-  claims, which overflow past 200 groups).
+- The owner sets its issuer, client id and secret; the server reads its discovery document before keeping them, and
+  never gives the secret back. The redirect registered at the provider is the loopback of the desktop
+  (`http://127.0.0.1`, any port).
+- **Enforcement**: the organization requires its company sign-in, and no other way signs a new device in, except
+  the passkey of one **break-glass Owner**.
+- People are created at their first sign-in, as members; the groups of each sign-in are kept with its login, and map
+  to roles by **group id** in milestone 4 (Entra app roles rather than group claims, which overflow past 200 groups).
 - **SCIM 2.0** (users, groups) deprovisions without waiting for a sign-in: the person is suspended, their devices and
   delegations revoked, their sessions on team machines stopped, the audit trail kept (milestone 5).
 
@@ -108,9 +117,11 @@ authenticates only: what they may do is still CodeAlta's. Tailscale's free plan 
 
 ### The server as identity provider
 
-- **ASP.NET Core Identity** keeps people, passkeys and recovery codes; **OpenIddict** (Apache 2.0, on .NET 10) is the
-  OAuth and OpenID Connect server: authorization code with PKCE, device authorization (RFC 8628), refresh, token
-  exchange (RFC 8693). Duende is excluded (licence cost and redistribution terms); Keycloak, Zitadel, Authentik or
+- **ASP.NET Core Identity**'s passkey handler runs the WebAuthn ceremonies of the server's sign-in page, for
+  discoverable credentials; the passkeys are kept with the people. **OpenIddict** (Apache 2.0, on .NET 10) is the OAuth
+  and OpenID Connect server once the server issues tokens of its own: authorization code with PKCE, device
+  authorization (RFC 8628), refresh, token exchange (RFC 8693). A sign-in issues none: its result is the single-use
+  grant above, held in memory for minutes. Duende is excluded (licence cost and redistribution terms); Keycloak, Zitadel, Authentik or
   Pocket ID can be the *external* provider of a company, never a dependency of a home install.
 - Access tokens live 5 to 15 minutes; refresh tokens are bound to the device key; every request carries a proof of
   possession of the device key (DPoP-style, RFC 9449). Mutual TLS is an option for organizations that control their

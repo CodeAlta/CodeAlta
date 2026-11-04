@@ -106,7 +106,9 @@ analysis of Matrix showed a malicious server exploiting exactly that).
   A compromised execution node therefore acts only as itself, and the server, which signs nothing, cannot widen anyone's
   power (Tailnet Lock's signing nodes are the precedent).
 - A person's devices form a **signed list**: each new device is signed in by an existing controller device of the
-  same person, after both screens show the same short words. Team machines are signed in by a signer. An enrollment
+  same person, after both screens show the same short words. A person's first controller device, when they hold no
+  device of the list (a person company sign-in created), is signed in by a controller device of the owner who set the
+  server up. Team machines are signed in by a signer. An enrollment
   token only lets a machine register its public key; it becomes a member when a signer signs that key.
 - Devices accept a new member only with a valid signature chain, so the server cannot add a device to receive keys
   (Tailscale's Tailnet Lock is the precedent).

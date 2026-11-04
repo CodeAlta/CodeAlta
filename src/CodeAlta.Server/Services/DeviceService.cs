@@ -69,6 +69,12 @@ public sealed class DeviceService
     /// <summary>Gets the instruments of enrollments and approvals; null for none.</summary>
     public Telemetry.ServerMetrics? Metrics { get; init; }
 
+    /// <summary>Gets the grants of sign-ins, which let a device enroll as a controller device of the person who signed in; null for none.</summary>
+    public Identity.SignIn.SignInAttempts? SignInGrants { get; init; }
+
+    /// <summary>Gets the store of the devices that sign-ins register; null for none.</summary>
+    public ISignInStore? SignInStore { get; init; }
+
     /// <summary>Makes an enrollment token; only a controller device may.</summary>
     /// <param name="actor">The calling device.</param>
     /// <param name="request">The request.</param>
@@ -112,6 +118,7 @@ public sealed class DeviceService
     {
         ArgumentNullException.ThrowIfNull(signed);
         ArgumentNullException.ThrowIfNull(origin);
+        if (request is not null && !string.IsNullOrEmpty(request.SignInGrant)) return await EnrollSignedInAsync(request, signed, origin, cancellationToken).ConfigureAwait(false);
         if (request is null || string.IsNullOrEmpty(request.Token) || request.Token.Length > 128)
         {
             throw CoordinatorException.BadRequest(CoordinatorErrorCodes.InvalidBody, "The request needs an enrollment token, a public key and a device name.");
@@ -153,6 +160,40 @@ public sealed class DeviceService
         return new EnrollResponse(enrolled!.ToDto(false));
     }
 
+    // A person who signed in on this device enrolls it as a pending controller device of theirs: the grant names the
+    // person and the device, and works once. It is a member only once a device of theirs, their recovery key or, for a
+    // person without a device, the owner signs it into the device list.
+    private async Task<EnrollResponse> EnrollSignedInAsync(EnrollRequest request, SignedRequestData signed, RequestOrigin origin, CancellationToken cancellationToken)
+    {
+        if (SignInGrants is null || SignInStore is null) throw CoordinatorException.BadRequest(CoordinatorErrorCodes.InvalidBody, "This server takes no sign-in grant.");
+        var name = SetupService.RequireName(request.DeviceName, "deviceName");
+        if ((request.Kind ?? FleetDeviceKinds.Controller) != FleetDeviceKinds.Controller)
+            throw CoordinatorException.BadRequest(CoordinatorErrorCodes.InvalidBody, "A sign-in enrolls a person's controller device; a machine enrolls with a token.");
+        if (!FleetDevicePublicKey.TryParse(request.PublicKey, out var key))
+            throw CoordinatorException.BadRequest(CoordinatorErrorCodes.InvalidBody, "publicKey must be the base64 of the SubjectPublicKeyInfo of a P-256 key.");
+        _authenticator.VerifyWithKey(signed, key);
+        var audit = new AuditEntry("device.enroll", AuditEntry.Success, null, key.DeviceId, key.DeviceId, origin.SourceAddress, origin.RequestId, "{\"kind\":\"controller\",\"by\":\"sign_in\"}");
+        var grant = SignInGrants.TakeGrant(request.SignInGrant, key.DeviceId);
+        if (grant is null)
+        {
+            await _store.AppendAuditAsync(audit with { Result = Identity.SignIn.SignInErrorCodes.GrantInvalid }, cancellationToken).ConfigureAwait(false);
+            Metrics?.Enrollment(Identity.SignIn.SignInErrorCodes.GrantInvalid);
+            throw CoordinatorException.Unauthenticated(Identity.SignIn.SignInErrorCodes.GrantInvalid, "The sign-in is used or expired: sign in again.");
+        }
+
+        var device = new DeviceRecord(key.DeviceId, grant.OrganizationId, name, FleetDeviceKinds.Controller, key.Text, key.Fingerprint, grant.PersonId, DeviceStatuses.Pending,
+            null, null, _time.GetUtcNow(), null, null, 1);
+        if (!await SignInStore.RegisterSignedInDeviceAsync(device, audit with { ActorPersonId = grant.PersonId, Details = $"{{\"kind\":\"controller\",\"by\":\"{grant.Method}\"}}" },
+                cancellationToken).ConfigureAwait(false))
+        {
+            await _store.AppendAuditAsync(audit with { Result = CoordinatorErrorCodes.DeviceExists }, cancellationToken).ConfigureAwait(false);
+            throw CoordinatorException.Conflict(CoordinatorErrorCodes.DeviceExists, "A device with this key is already registered.");
+        }
+
+        Metrics?.Enrollment("enrolled");
+        return new EnrollResponse(device.ToDto(false));
+    }
+
     /// <summary>
     /// Approves a pending device: the calling controller device signed the entry that adds it to the device list, which
     /// must follow the last entry and say exactly what the server holds of the device.
@@ -173,10 +214,14 @@ public sealed class DeviceService
         RequireController(actor);
         var device = await RequireDeviceAsync(actor, deviceId, cancellationToken).ConfigureAwait(false);
         if (device.Status != DeviceStatuses.Pending) throw CoordinatorException.Conflict(CoordinatorErrorCodes.DeviceState, $"The device is {device.Status}, not pending.");
-        // A controller device signs others in: only a controller device of its own person lets it in (the owner's, in this step).
+        // A controller device signs others in: a controller device of its own person lets it in, or the owner's for the
+        // first device of a person who has none (a person company sign-in created).
+        var firstOfPerson = false;
         if (device.Kind == FleetDeviceKinds.Controller && (device.OwnerPersonId is null || device.OwnerPersonId != actor.OwnerPersonId))
         {
-            throw CoordinatorException.Forbidden(FleetErrorCodes.Forbidden, "A controller device is approved by a controller device of its own person.");
+            firstOfPerson = device.OwnerPersonId is not null && await IsOwnerApprovingFirstDeviceAsync(actor, device, cancellationToken).ConfigureAwait(false);
+            if (!firstOfPerson)
+                throw CoordinatorException.Forbidden(FleetErrorCodes.Forbidden, "A controller device is approved by a controller device of its own person, or by the owner for a person's first device.");
         }
 
         var (payload, record) = await ReadEntryAsync(actor, request?.DeviceListEntry, cancellationToken).ConfigureAwait(false);
@@ -184,7 +229,9 @@ public sealed class DeviceService
         DeviceListChain.Require(payload.DeviceId == device.Id && payload.PublicKey == device.PublicKey, "name the device and its key as the server holds them");
         DeviceListChain.Require(payload.Kind == device.Kind, $"add the device as a {device.Kind}");
         // A controller signs the devices of its own person: a personal machine is its owner's (team machines and their signers come later).
-        DeviceListChain.Require(payload.OwnerId is not null && payload.OwnerId == actor.OwnerPersonId, "give the device to the person of the signing device");
+        var expectedOwner = firstOfPerson ? device.OwnerPersonId : actor.OwnerPersonId;
+        DeviceListChain.Require(payload.OwnerId is not null && payload.OwnerId == expectedOwner,
+            firstOfPerson ? "give the device to the person who signed in on it" : "give the device to the person of the signing device");
 
         var audit = origin.Audit("device.approve", actor, device.Id, details: $"{{\"seq\":{payload.Sequence}}}");
         var (outcome, approved) = await _store.AppendDeviceListEntryAsync(record, DeviceStatuses.Pending, DeviceStatuses.Approved, payload.OwnerId, audit, cancellationToken)
@@ -318,9 +365,19 @@ public sealed class DeviceService
         DeviceListChain.Require(payload.Operation == FleetDeviceListOperations.Add && payload.DeviceId == key.DeviceId && payload.PublicKey == key.Text
             && payload.Kind == FleetDeviceKinds.Controller && payload.OwnerId == signer.OwnerPersonId, "add the device that sends it as a controller device of the person of the recovery key");
         var now = _time.GetUtcNow();
+        var audit = origin.Audit("device.recover", signer, key.DeviceId, details: $"{{\"seq\":{payload.Sequence}}}");
+        // A device the person signed in on waits as pending: the recovery key confirms it rather than adding it again.
+        if (await _store.GetDeviceAsync(key.DeviceId, cancellationToken).ConfigureAwait(false) is { Status: DeviceStatuses.Pending, Kind: FleetDeviceKinds.Controller } pending
+            && pending.OwnerPersonId == signer.OwnerPersonId && pending.OrganizationId == signer.OrganizationId)
+        {
+            var (appended, confirmed) = await _store.AppendDeviceListEntryAsync(record, DeviceStatuses.Pending, DeviceStatuses.Approved, signer.OwnerPersonId, audit, cancellationToken)
+                .ConfigureAwait(false);
+            ThrowIfNotAppended(appended, confirmed);
+            return confirmed!.ToDto(false);
+        }
+
         var device = new DeviceRecord(key.DeviceId, signer.OrganizationId, name, FleetDeviceKinds.Controller, key.Text, key.Fingerprint, signer.OwnerPersonId,
             DeviceStatuses.Approved, signer.Id, null, now, now, null, 1);
-        var audit = origin.Audit("device.recover", signer, device.Id, details: $"{{\"seq\":{payload.Sequence}}}");
         var (outcome, added) = await _store.AddDeviceWithEntryAsync(device, record, null, audit, cancellationToken).ConfigureAwait(false);
         ThrowIfNotAdded(outcome);
         return added!.ToDto(false);
@@ -369,6 +426,21 @@ public sealed class DeviceService
         var recovery = actor.Kind == FleetDeviceKinds.Recovery ? await _store.GetRecoveryKeyAsync(actor.Id, cancellationToken).ConfigureAwait(false) : null;
         if (recovery is null) throw CoordinatorException.NotFound(CoordinatorErrorCodes.RecoveryKeyNotFound, "The calling device is not a recovery key of this server.");
         return new RecoveryAnchorDto(actor.Id, recovery.SealedAnchor);
+    }
+
+    // The owner who set the server up signs people in: their controller device, already bound to their person in the
+    // list (so that this entry cannot bind it to another), adds the first device of a person who holds none.
+    private async Task<bool> IsOwnerApprovingFirstDeviceAsync(DeviceRecord actor, DeviceRecord device, CancellationToken cancellationToken)
+    {
+        var person = actor.OwnerPersonId is null ? null : await _store.GetPersonAsync(actor.OwnerPersonId, cancellationToken).ConfigureAwait(false);
+        if (person is null || person.Role != PersonRoles.Owner) return false;
+        var entries = await _store.ListDeviceListAsync(actor.OrganizationId, cancellationToken).ConfigureAwait(false);
+        var list = FleetDeviceListVerifier.Verify(entries.Select(static entry => new FleetSignedDeviceListEntry(entry.Payload, entry.Signature)), actor.OrganizationId);
+        if (!list.IsValid) return false;
+        var state = list.State;
+        if (!state.Members.TryGetValue(actor.Id, out var signer) || signer.OwnerId != actor.OwnerPersonId) return false;
+        var first = state.FirstDeviceId is { } id ? state.Tenures.GetValueOrDefault(id)?.Member.OwnerId : null;
+        return first == actor.OwnerPersonId && !state.Members.Values.Any(member => member.OwnerId == device.OwnerPersonId);
     }
 
     private static void ThrowIfNotAdded(DeviceListAppendOutcome outcome)

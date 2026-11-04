@@ -61,6 +61,33 @@ test("Join an organization goes from the server to signing in, the space and the
   }, options);
 });
 
+test("Join an organization signs in through the browser with the server's methods, and an enrollment code stays at hand", { skip: !edge, timeout: 90_000 }, async () => {
+  await withCanvas(async page => {
+    await page.evaluate(`window.serverFixture.show('join')`);
+    await page.until(`document.querySelector('.join-organization-dialog input')`, "the address");
+    await page.evaluate(type(".join-organization-dialog input", "sso.contoso.com"));
+    await page.clickText(".join-organization-dialog .bp6-button", "Next");
+    await page.until(`document.querySelectorAll('.join-organization-methods .bp6-button').length === 2`, "the methods of the server");
+    assert.deepEqual(await page.evaluate(`[...document.querySelectorAll('.join-organization-methods .bp6-button')].map(button => button.textContent)`),
+      ["Continue with Contoso", "Continue with Passkey"], "the company's sign-in first");
+    await page.shot("join-organization-sign-in");
+
+    // The code stays one click away, and back.
+    await page.clickText(".join-organization-dialog .bp6-button", "Use an enrollment code instead");
+    await page.until(`document.querySelector('.join-organization-dialog input[aria-label="Enrollment code"]')`, "the code");
+    await page.clickText(".join-organization-dialog .bp6-button", "Sign in with an account instead");
+    await page.until(`document.querySelector('.join-organization-methods [data-method=company]')`, "the methods again");
+
+    await page.clickText(".join-organization-methods .bp6-button", "Continue with Contoso");
+    await page.until(`document.querySelector('.join-organization-spaces')`, "the space");
+    await page.clickText(".join-organization-dialog .bp6-button", "Link the space");
+    await page.until(`document.querySelector('.join-organization-dialog [role=status]')?.textContent.includes('An administrator of Contoso approves this computer.')`,
+      "a person's first computer waits for the owner");
+    assert.deepEqual((await calls(page)).filter(call => call.joinSignIn || call.joinOrg), [{ joinSignIn: "https://sso.contoso.com", method: "company" }]);
+    assert.deepEqual(page.problems, []);
+  }, options);
+});
+
 test("A device that waits comes as a toast with its words, and the Fleet button counts it until it is approved", { skip: !edge, timeout: 90_000 }, async () => {
   await withCanvas(async page => {
     await page.until(`document.querySelector('.fleet-approvals-button')?.getAttribute('aria-label') === 'Fleet: 1 device waits for your approval'`, "the mark");

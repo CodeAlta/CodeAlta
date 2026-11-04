@@ -7,6 +7,7 @@ using CodeAlta.Fleet.Protocol.Api;
 using CodeAlta.Server.Api;
 using CodeAlta.Server.Control;
 using CodeAlta.Server.Identity;
+using CodeAlta.Server.Identity.SignIn;
 using CodeAlta.Server.Services;
 using CodeAlta.Server.Storage;
 using CodeAlta.Server.Storage.Sqlite;
@@ -106,6 +107,12 @@ public sealed class CoordinatorServerOptions
 
     /// <summary>Gets what reads the latest stable version of a feed for an automatic policy, for tests; null to read the feed.</summary>
     public Func<string, CancellationToken, Task<string?>>? ReadLatestUpdate { get; init; }
+
+    /// <summary>
+    /// Gets the sign-in of the server: the public clients of Microsoft, Google and GitHub and where their providers are;
+    /// null for the built-in clients, overridden by the <c>CODEALTA_SIGNIN_*</c> variables of the environment.
+    /// </summary>
+    public SignInOptions? SignIn { get; init; }
 }
 
 /// <summary>What a running server writes in its data root, for <c>altaserver status</c>.</summary>
@@ -378,6 +385,7 @@ public sealed class CoordinatorServer : IAsyncDisposable
             json.SerializerOptions.TypeInfoResolverChain.Insert(3, FleetStatisticsJsonContext.Default);
             json.SerializerOptions.TypeInfoResolverChain.Insert(4, FleetAutomationApiJsonContext.Default);
             json.SerializerOptions.TypeInfoResolverChain.Insert(5, FleetSecretsApiJsonContext.Default);
+            json.SerializerOptions.TypeInfoResolverChain.Add(FleetSignInJsonContext.Default);
             json.SerializerOptions.DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull;
         });
         services.AddProblemDetails();
@@ -407,8 +415,12 @@ public sealed class CoordinatorServer : IAsyncDisposable
             Metrics = metrics,
             Stopping = provider.GetRequiredService<IHostApplicationLifetime>().ApplicationStopping,
         });
+        var signIn = options.SignIn ?? SignInOptions.FromEnvironment(options.EnvironmentVariable);
+        services.AddSingleton(new SignInAttempts(time, signIn.MaxPendingAttempts));
+        services.AddSingleton(provider => new SignInService(store, store, provider.GetRequiredService<RequestAuthenticator>(), provider.GetRequiredService<SignInAttempts>(),
+            signIn, time));
         services.AddSingleton(provider => new DeviceService(store, provider.GetRequiredService<RequestAuthenticator>(), provider.GetRequiredService<PresenceRegistry>(), time,
-            provider.GetRequiredService<RelayHub>()) { Metrics = metrics });
+            provider.GetRequiredService<RelayHub>()) { Metrics = metrics, SignInGrants = provider.GetRequiredService<SignInAttempts>(), SignInStore = store });
         services.AddSingleton(provider => new PublicationService(store, provider.GetRequiredService<DirectoryHub>(), time) { Metrics = metrics });
         services.AddSingleton(_ => new MetadataKeyService(store, time));
         services.AddSingleton(provider => new FleetSecretService(store, store, time) { Presence = provider.GetRequiredService<PresenceRegistry>() });
