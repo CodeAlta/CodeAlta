@@ -196,4 +196,21 @@ public sealed partial class FleetServerClient
     /// <exception cref="HttpRequestException">The server does not answer.</exception>
     public async Task<IReadOnlyList<SignInLoginDto>> ListSignInLoginsAsync(CancellationToken cancellationToken = default)
         => (await SendAsync(HttpMethod.Get, "api/v1/sign-in/logins", null, FleetSignInJsonContext.Default.ListResponseSignInLoginDto, cancellationToken).ConfigureAwait(false)).Items;
+
+    /// <summary>
+    /// Removes a way this device's person signs in, a linked account or a passkey: it signs nobody in afterwards. Not a
+    /// company account (the organization's), nor the last way in of an owner without a recovery key.
+    /// </summary>
+    /// <param name="loginId">The id of the way in (<see cref="SignInLoginDto.Id"/>).</param>
+    /// <param name="cancellationToken">Cancels the call.</param>
+    /// <returns>The ways the person signs in now.</returns>
+    /// <exception cref="ArgumentException"><paramref name="loginId"/> is empty.</exception>
+    /// <exception cref="FleetServerException">The server refused (<c>sign_in.last_way_in</c>, <c>sign_in.managed_by_organization</c>, <c>sign_in.login_not_found</c>).</exception>
+    /// <exception cref="HttpRequestException">The server does not answer.</exception>
+    public async Task<IReadOnlyList<SignInLoginDto>> RemoveSignInLoginAsync(string loginId, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(loginId);
+        return (await SendAsync(HttpMethod.Delete, "api/v1/sign-in/logins/" + Uri.EscapeDataString(loginId), null, FleetSignInJsonContext.Default.ListResponseSignInLoginDto,
+            cancellationToken).ConfigureAwait(false)).Items;
+    }
 }

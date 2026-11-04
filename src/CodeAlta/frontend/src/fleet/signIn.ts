@@ -1,4 +1,4 @@
-import type { FleetSignInCodeView, FleetSignInMethodView, FleetSignInSettingsView } from "#neoastra";
+import type { FleetSignInCodeView, FleetSignInLoginView, FleetSignInMethodView, FleetSignInSettingsView } from "#neoastra";
 import type { MessageKey } from "../localization";
 
 /** The sign-in methods a server may offer, in the order the page shows them. */
@@ -29,11 +29,22 @@ export function signInProblem(status: string): MessageKey | null {
     case "sign_in.invalid_settings": return "These sign-in settings do not hold.";
     case "sign_in.approval_mismatch": return "The change shown is not the one the server would apply: nothing was approved.";
     case "sign_in.identity_not_allowed": return "This account is not of the domains or tenants your organization lets in.";
+    case "sign_in.last_way_in": return "This is your last way to sign in, and you have no recovery key: make your recovery key first, or link another way.";
+    case "sign_in.managed_by_organization": return "Managed by your organization: an admin removes a person in People and access";
+    case "sign_in.login_not_found": return "This way to sign in was removed already.";
     case "sign_in.code_refused": case "sign_in.invalid_token": case "sign_in.wrong_audience": case "sign_in.wrong_issuer": case "sign_in.wrong_nonce":
     case "sign_in.token_expired": case "sign_in.invalid_passkey": case "sign_in.state_mismatch": case "sign_in.invalid_grant":
       return "The sign-in did not verify: start it again.";
     default: return null;
   }
+}
+
+/**
+ * Whether the row offers to remove a way in: a linked account or a passkey the server gave an id. A company account is
+ * the organization's (an admin removes the person in People and access), and a server before ids removes nothing.
+ */
+export function removableLogin(login: Pick<FleetSignInLoginView, "method" | "id">): boolean {
+  return login.method !== "company" && typeof login.id === "string" && login.id.length > 0;
 }
 
 /** The code of a GitHub sign-in, as the page shows it, with the handle the host continues it with. */

@@ -385,6 +385,20 @@ internal sealed partial class DesktopFleetServers
         return await client.ListSignInLoginsAsync(cancellationToken).ConfigureAwait(false);
     }
 
+    /// <summary>Removes a way the person of this computer signs in at a server: a linked account or a passkey.</summary>
+    /// <param name="linkId">The link.</param>
+    /// <param name="loginId">The id of the way in.</param>
+    /// <param name="cancellationToken">Cancels the call.</param>
+    /// <returns>A task that completes once it is removed.</returns>
+    /// <exception cref="KeyNotFoundException">No such link.</exception>
+    /// <exception cref="FleetServerException">The server refused.</exception>
+    /// <exception cref="HttpRequestException">The server does not answer.</exception>
+    public async Task RemoveSignInLoginAsync(string linkId, string loginId, CancellationToken cancellationToken)
+    {
+        using var client = Client(linkId);
+        await client.RemoveSignInLoginAsync(loginId, cancellationToken).ConfigureAwait(false);
+    }
+
     private async Task<CompleteSignInResponse> SignInThroughBrowserAsync(FleetServerClient client, string method, string purpose, CancellationToken cancellationToken)
     {
         using var redirect = FleetLoopbackRedirect.Start();

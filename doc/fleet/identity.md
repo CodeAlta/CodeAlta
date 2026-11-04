@@ -83,6 +83,11 @@ to it.
   id), **Google** (keyed on `sub`; `hd` names a Workspace domain), **GitHub** (the device flow of the CodeAlta GitHub
   App, no ID token: the server reads the numeric user id and the name through the API with the user token, once, and
   keeps neither the token nor the login, which its person can change and give away), Apple later.
+- **Removing** a linked account or a passkey (`DELETE /api/v1/sign-in/logins/{id}`, the person's own, or anyone's for
+  `access.manage`) makes it sign nobody in; the ids are opaque hashes, never the issuer, subject or credential id. Two
+  are kept: the last way in of an owner without a recovery key (`sign_in.last_way_in`, checked in the same write), and a
+  company account (`sign_in.managed_by_organization`), which would only come back as a new person at its next sign-in:
+  a person leaves through deprovisioning. There is no sign-out: the server keeps no session, a device key acts.
 - A self-hosted server has its own host name, so it cannot use a redirect address registered once for everyone. The
   **desktop signs in through the system browser** with public client ids that the CodeAlta project registers and
   maintains, and a loopback redirect to itself. The server makes the state, the nonce and the PKCE verifier, and

@@ -137,6 +137,8 @@
 .fleet-sign-in-main .bp6-callout { flex-basis: 100%; }
 .fleet-sign-in-summary { font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
 .fleet-sign-in-logins { display: flex; flex-wrap: wrap; gap: 4px; flex-basis: 100%; font-size: 12px; }
+.fleet-sign-in-login { position: relative; display: inline-flex; }
+.fleet-sign-in-login-remove:disabled { cursor: default; opacity: 0.3; }
 .fleet-sign-in-dialog { width: min(560px, calc(100vw - 32px)); }
 .fleet-sign-in-groups { display: grid; gap: 6px; justify-items: start; }
 .fleet-sign-in-group { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 6px; align-items: center; width: 100%; }

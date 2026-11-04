@@ -139,11 +139,32 @@ internal sealed partial class FleetServerService
             }
 
             return new("ok", settings, [.. logins.Select(static login => new FleetSignInLoginView(login.Method, login.Name, Time(login.CreatedAt),
-                login.LastUsedAt is { } used ? Time(used) : null))], null, approvals);
+                login.LastUsedAt is { } used ? Time(used) : null, login.Id))], null, approvals);
         }
         catch (Exception exception) when (Failure(exception) is { } failure)
         {
             return new(failure.Status, null, [], failure.Message);
+        }
+    }
+
+    /// <summary>
+    /// Removes a way the person of this computer signs in at a server, a linked account or a passkey: it signs them in no
+    /// more. The server keeps a company account and the last way in of an owner without a recovery key, and says why.
+    /// </summary>
+    [NeoRpcMethod("removeSignInLogin")]
+    public async Task<FleetServerActionResult> RemoveSignInLoginAsync(FleetSignInLoginRemoveRequest request, CancellationToken cancellationToken)
+    {
+        if (Refuse(request?.ExpectedEpoch) is { } refused) return new(refused, null);
+        if (!FleetServerLinkStore.IsValidId(request!.LinkId) || request.LoginId is not { Length: > 0 and <= 128 } loginId) return new("invalid_request", null);
+        try
+        {
+            await _servers!.RemoveSignInLoginAsync(request.LinkId, loginId, cancellationToken).ConfigureAwait(false);
+            ChangedLocally?.Invoke();
+            return new("ok", null);
+        }
+        catch (Exception exception) when (Failure(exception) is { } failure)
+        {
+            return new(failure.Status, failure.Message);
         }
     }
 
@@ -326,7 +347,14 @@ internal sealed record FleetSignInGroupRoleView(string Group, string Role);
 /// <param name="Name">What it shows: an email, a login, a passkey.</param>
 /// <param name="CreatedAt">When it was linked.</param>
 /// <param name="LastUsedAt">When it last signed in, or null.</param>
-internal sealed record FleetSignInLoginView(string Method, string Name, string CreatedAt, string? LastUsedAt);
+/// <param name="Id">What removes it (<c>removeSignInLogin</c>); null from a server that removes none.</param>
+internal sealed record FleetSignInLoginView(string Method, string Name, string CreatedAt, string? LastUsedAt, string? Id = null);
+
+/// <summary>A way the person of this computer signs in at a server, to remove.</summary>
+/// <param name="ExpectedEpoch">The host epoch the page knows.</param>
+/// <param name="LinkId">The link of the server.</param>
+/// <param name="LoginId">The id of the way in.</param>
+internal sealed record FleetSignInLoginRemoveRequest(string ExpectedEpoch, string LinkId, string LoginId);
 
 /// <summary>How people sign in to an organization.</summary>
 /// <param name="Status"><c>ok</c>, the code of the server's refusal, <c>unreachable</c>, <c>not_found</c>, <c>invalid_request</c>, <c>stale_epoch</c> or <c>unavailable</c>.</param>

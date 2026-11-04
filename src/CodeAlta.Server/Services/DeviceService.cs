@@ -234,7 +234,7 @@ public sealed class DeviceService
         var firstOfPerson = false;
         if (device.Kind == FleetDeviceKinds.Controller && (device.OwnerPersonId is null || device.OwnerPersonId != actor.OwnerPersonId))
         {
-            firstOfPerson = device.OwnerPersonId is not null && await IsOwnerApprovingFirstDeviceAsync(actor, device, cancellationToken).ConfigureAwait(false);
+            firstOfPerson = device.OwnerPersonId is not null && await IsOwnerApprovingFirstDeviceAsync(actor, device, request?.DeviceListEntry, cancellationToken).ConfigureAwait(false);
             if (!firstOfPerson)
                 throw CoordinatorException.Forbidden(FleetErrorCodes.Forbidden, "A controller device is approved by a controller device of its own person, or by the owner for a person's first device.");
         }
@@ -449,7 +449,7 @@ public sealed class DeviceService
 
     // The owner who set the server up signs people in: their controller device, already bound to their person in the
     // list (so that this entry cannot bind it to another), adds the first device of a person who holds none.
-    private async Task<bool> IsOwnerApprovingFirstDeviceAsync(DeviceRecord actor, DeviceRecord device, CancellationToken cancellationToken)
+    private async Task<bool> IsOwnerApprovingFirstDeviceAsync(DeviceRecord actor, DeviceRecord device, FleetSignedDeviceListEntry? entry, CancellationToken cancellationToken)
     {
         var person = actor.OwnerPersonId is null ? null : await _store.GetPersonAsync(actor.OwnerPersonId, cancellationToken).ConfigureAwait(false);
         if (person is null || person.Role != PersonRoles.Owner) return false;
@@ -458,8 +458,14 @@ public sealed class DeviceService
             FleetDeviceListMode.Tolerant);
         if (!list.IsValid) return false;
         var state = list.State;
-        if (!state.Members.TryGetValue(actor.Id, out var signer) || signer.OwnerId != actor.OwnerPersonId) return false;
-        var first = state.FirstDeviceId is { } id ? state.Tenures.GetValueOrDefault(id)?.Member.OwnerId : null;
+        if (!state.Members.TryGetValue(actor.Id, out var signer)) return false;
+        // The owner's first device, whose person the list does not know yet (its first entry named none), names it in the
+        // entry ("sowner"), so that every device's replay gives it to the owner rather than to the person it adds.
+        var named = signer.OwnerId is null && actor.Id == state.FirstDeviceId && FleetDeviceListEntries.TryParsePayload(entry?.Payload, out var payload)
+            ? payload!.SignerOwnerId
+            : null;
+        if ((signer.OwnerId ?? named) != actor.OwnerPersonId) return false;
+        var first = state.FirstDeviceId is { } id ? state.Tenures.GetValueOrDefault(id)?.Member.OwnerId ?? (id == actor.Id ? named : null) : null;
         return first == actor.OwnerPersonId && !state.Members.Values.Any(member => member.OwnerId == device.OwnerPersonId);
     }
 

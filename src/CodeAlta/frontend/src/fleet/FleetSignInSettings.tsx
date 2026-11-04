@@ -6,12 +6,14 @@ import { ActivitySpinner } from "../ActivitySpinner";
 import { useShellLanguage } from "../shellLanguage";
 import type { MessageKey } from "../localization";
 import { serverProblem } from "./fleetServer";
-import { allowedValues, groupRoleChoices, hasCompany, linkableMethods, signInCode, signInDraft, signInDraftProblem, signInProblem, signInSummary, type SignInCode as Code, type SignInDraft } from "./signIn";
+import { allowedValues, groupRoleChoices, hasCompany, linkableMethods, removableLogin, signInCode, signInDraft, signInDraftProblem, signInProblem, signInSummary, type SignInCode as Code, type SignInDraft } from "./signIn";
+import { ConfirmPopover } from "../ConfirmPopover";
 import { SignInCode } from "./SignInCode";
 import { SignInMethodIcon } from "./SignInMethodIcon";
 
 /** The calls of the sign-in of a server. */
-export type FleetSignInApi = Pick<typeof fleetServer, "signInSettings" | "setSignInSettings" | "linkSignIn" | "startSignInCode" | "openSignInPage" | "approveSignInChange">;
+export type FleetSignInApi = Pick<typeof fleetServer, "signInSettings" | "setSignInSettings" | "linkSignIn" | "startSignInCode" | "openSignInPage" | "approveSignInChange"
+  | "removeSignInLogin">;
 
 // How often an owner's computer reads again whether another computer of theirs asks it to approve a change.
 const approvalsPollMilliseconds = 15_000;
@@ -32,6 +34,8 @@ export function ServerSignIn({ server, epoch, api = fleetServer, revision }: { s
   const [approving, setApproving] = useState<string | null>(null);
   const [editing, setEditing] = useState(false);
   const [linking, setLinking] = useState<string | null>(null);
+  // The way in whose removal is asked beside its row, and what removing it met.
+  const [removing, setRemoving] = useState<{ id: string; busy: boolean; error: string | null } | null>(null);
   const [deviceCode, setDeviceCode] = useState<Code | null>(null);
   const work = useRef<AbortController | null>(null);
   useEffect(() => () => work.current?.abort(), []);
@@ -64,6 +68,17 @@ export function ServerSignIn({ server, epoch, api = fleetServer, revision }: { s
     } catch {
       setProblem({ key: "The server does not answer." });
     } finally { setApproving(null); setGeneration(value => value + 1); }
+  }
+
+  async function remove(id: string) {
+    setRemoving({ id, busy: true, error: null });
+    try {
+      const result = await api.removeSignInLogin({ expectedEpoch: epoch, linkId: server.id, loginId: id }, { timeoutMilliseconds: 30_000 });
+      if (result.status === "ok") { setRemoving(null); setGeneration(value => value + 1); return; }
+      setRemoving({ id, busy: false, error: t(signInProblem(result.status) ?? serverProblem(result.status) ?? "The operation did not complete.") });
+    } catch {
+      setRemoving({ id, busy: false, error: t("The server does not answer.") });
+    }
   }
 
   async function link(method: string) {
@@ -112,8 +127,24 @@ export function ServerSignIn({ server, epoch, api = fleetServer, revision }: { s
       {summary && <span className="muted-text fleet-sign-in-summary">{t(summary.key, { methods: summary.methods })}</span>}
       <span className="fleet-sign-in-logins" aria-label={t("Your sign-in methods")}>
         {logins.length === 0 ? <span className="muted-text">{t("Your sign-in methods")}: {t("None yet.")}</span>
-          : logins.map((login, index) => <Tag key={`${login.method}:${index}`} minimal round title={login.name} icon={<SignInMethodIcon method={login.method} size={12} />}>
-            {login.method === "passkey" ? t("Passkey") : methodNames[login.method] ?? login.method} · {login.name}</Tag>)}
+          : logins.map((login, index) => {
+            const label = login.method === "passkey" ? t("Passkey")
+              : login.method === "company" ? settings?.methods.find(method => method.id === "company")?.name ?? t("Company sign-in") : methodNames[login.method] ?? login.method;
+            // A company account is the organization's: it has no remove button, and says who removes a person.
+            return <span key={`${login.method}:${login.id ?? index}`} className="fleet-sign-in-login">
+              <Tag minimal round icon={<SignInMethodIcon method={login.method} size={12} />}
+                title={login.method === "company" ? t("Managed by your organization: an admin removes a person in People and access") : login.name}
+                endIcon={removableLogin(login) ? <button type="button" className="bp6-tag-remove fleet-sign-in-login-remove" disabled={!!removing}
+                  aria-label={t("Remove {method} · {name}", { method: label, name: login.name })} onClick={() => setRemoving({ id: login.id!, busy: false, error: null })}>
+                  <AppIcon name="close" size={10} /></button> : undefined}>
+                {label} · {login.name}
+              </Tag>
+              {removing && removing.id === login.id && <ConfirmPopover always intent="danger" placement="bottom-start" busy={removing.busy} error={removing.error}
+                title={t("Remove {method} from your ways to sign in?", { method: label })} subject={login.name}
+                detail={t("It no longer signs you in to this server. Link… adds it again.")} confirmLabel={t("Remove")}
+                onConfirm={() => void remove(login.id!)} onCancel={() => setRemoving(null)} />}
+            </span>;
+          })}
       </span>
       {linking && (deviceCode ? <SignInCode epoch={epoch} code={deviceCode} api={api} onCancel={cancelLink} />
         : <span className="muted-text">{t("Finish signing in in your browser…")}</span>)}

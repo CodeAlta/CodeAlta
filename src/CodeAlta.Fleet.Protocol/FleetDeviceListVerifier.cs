@@ -308,14 +308,19 @@ public static class FleetDeviceListVerifier
                 if (string.IsNullOrEmpty(payload.OwnerId)) return Skip("it adds a device without its person", ref next);
                 // A recovery key signs in a new controller device of its person, when every device is lost, and nothing else.
                 if (signer.Kind == FleetDeviceKinds.Recovery && payload.Kind != FleetDeviceKinds.Controller) return "a recovery key adds controller devices only";
-                // The person of the first device is the one its first entry names.
+                // The person of the first device is the one its first entry names as its own ("sowner"), else the one of the
+                // device that entry adds; once known, an entry does not name another.
                 if (signer.OwnerId is null)
                 {
-                    members = members.SetItem(signer.DeviceId, signer = signer with { OwnerId = payload.OwnerId });
+                    members = members.SetItem(signer.DeviceId, signer = signer with { OwnerId = payload.SignerOwnerId ?? payload.OwnerId });
                     tenures = tenures.SetItem(signer.DeviceId, tenures.TryGetValue(signer.DeviceId, out var tenure) ? tenure with { Member = signer } : new(signer, 1, null));
                 }
+                else if (payload.SignerOwnerId is not null && !string.Equals(payload.SignerOwnerId, signer.OwnerId, StringComparison.Ordinal))
+                {
+                    return "it names another person for its signer";
+                }
 
-                if (!string.Equals(signer.OwnerId, payload.OwnerId, StringComparison.Ordinal) && !AddsFirstDeviceOfPerson(state, members, signer, payload))
+                if (!string.Equals(signer.OwnerId, payload.OwnerId, StringComparison.Ordinal) && !AddsFirstDeviceOfPerson(state, tenures, members, signer, payload))
                     return Skip("a controller device adds devices of its own person only", ref next);
                 if (payload.Kind == FleetDeviceKinds.Recovery && members.Values.Any(member => member.Kind == FleetDeviceKinds.Recovery && member.OwnerId == payload.OwnerId))
                     return "the person has a recovery key already: the old one leaves the list first";
@@ -364,11 +369,12 @@ public static class FleetDeviceListVerifier
     // The owner signs people in (doc/fleet/identity.md, a new device): a controller device of the person of the first
     // entry (the owner who set the server up) adds the first controller device of another person, one who holds no
     // member of the list, such as a person whom company sign-in created. That device then signs the person's next ones.
-    private static bool AddsFirstDeviceOfPerson(FleetDeviceListState state, ImmutableDictionary<string, FleetDeviceListMember> members, FleetDeviceListMember signer,
-        FleetDeviceListEntryPayload payload)
+    private static bool AddsFirstDeviceOfPerson(FleetDeviceListState state, ImmutableDictionary<string, FleetDeviceListTenure> tenures,
+        ImmutableDictionary<string, FleetDeviceListMember> members, FleetDeviceListMember signer, FleetDeviceListEntryPayload payload)
     {
         if (signer.Kind != FleetDeviceKinds.Controller || payload.Kind != FleetDeviceKinds.Controller || string.IsNullOrEmpty(payload.OwnerId)) return false;
-        var owner = state.FirstDeviceId is { } first && state.Tenures.TryGetValue(first, out var tenure) ? tenure.Member.OwnerId
+        // The tenures as this entry left them: the first device's person may be the one this entry named.
+        var owner = state.FirstDeviceId is { } first && tenures.TryGetValue(first, out var tenure) ? tenure.Member.OwnerId
             : state.FirstDeviceId is { } id && members.TryGetValue(id, out var member) ? member.OwnerId : null;
         return owner is not null && string.Equals(signer.OwnerId, owner, StringComparison.Ordinal)
             && !members.Values.Any(other => string.Equals(other.OwnerId, payload.OwnerId, StringComparison.Ordinal));

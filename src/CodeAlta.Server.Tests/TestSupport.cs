@@ -264,13 +264,13 @@ internal sealed class ServerFixture : IAsyncDisposable
 
     /// <summary>Makes the entry that follows the last one of the device list, signed by a controller.</summary>
     public async Task<FleetSignedDeviceListEntry> NextEntryAsync(TestDevice signer, string operation, string deviceId, string? publicKey, string? kind, string? ownerId,
-        string organizationId)
+        string organizationId, string? signerOwnerId = null)
     {
         var list = await SendAsync(signer, HttpMethod.Get, "/api/v1/device-list");
         Assert.AreEqual(HttpStatusCode.OK, list.Status, list.Body.ToString());
         var last = list.Read<ListResponse<DeviceListEntryDto>>().Items[^1];
         return signer.SignEntry(new FleetDeviceListEntryPayload(1, organizationId, last.Sequence + 1, last.Hash, operation, deviceId, publicKey, kind, ownerId, signer.DeviceId,
-            Clock.Now));
+            Clock.Now, signerOwnerId));
     }
 
     /// <summary>Sets up an owner and approves a node; returns the setup and the node.</summary>

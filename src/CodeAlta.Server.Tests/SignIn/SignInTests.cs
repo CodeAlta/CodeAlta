@@ -1,7 +1,9 @@
 using System.Net;
 using System.Text.Json;
+using CodeAlta.Fleet.Identity;
 using CodeAlta.Fleet.Protocol;
 using CodeAlta.Fleet.Protocol.Api;
+using CodeAlta.Fleet.Server;
 using CodeAlta.Server.Identity;
 using CodeAlta.Server.Identity.SignIn;
 using CodeAlta.Server.Storage;
@@ -181,6 +183,61 @@ public sealed class SignInTests
         Assert.AreEqual(SignInErrorCodes.RedirectInvalid, elsewhere.Code);
         var unsigned = await server.SendAsync(thief, HttpMethod.Post, "/api/v1/sign-in/start", new StartSignInRequest(FleetSignInMethods.Company, laptop.PublicKey, Redirect));
         Assert.AreEqual(CoordinatorErrorCodes.SignatureInvalid, unsigned.Code, "the start is signed by the key it names");
+    }
+
+    [TestMethod]
+    public async Task TheOwnerApprovesAPersonsFirstDevice_EvenWhenTheirDesktopIsTheOnlyDeviceOfTheList_AndOnlyTheFirst()
+    {
+        await using var provider = await FakeOidcProvider.StartAsync(clientSecret: "company-secret");
+        await using var server = await ServerFixture.StartAsync(signIn: Options(provider));
+        using var root = new TempDirectory();
+        using var desktopKey = DeviceIdentity.LoadOrCreate(Path.Combine(root.Path, "desktop"));
+        using var owner = TestDevice.From(desktopKey);
+        using var desktop = new FleetServerClient(server.BaseAddress, desktopKey);
+        using var laptop = new TestDevice("Laptop");
+        using var phone = new TestDevice("Second laptop");
+        using var stranger = new TestDevice("Other laptop");
+        // The owner's desktop alone in the device list: no node joined yet, and its first entry names no person.
+        var setup = await server.SetUpAsync(owner);
+        await ConfigureCompanyAsync(server, owner, provider, requireSso: false);
+
+        async Task<CompleteSignInResponse> EnrollAsync(TestDevice device)
+        {
+            var (start, back) = await StartAsync(server, device, FleetSignInMethods.Company);
+            var signedIn = (await CompleteAsync(server, device, start, back)).Read<CompleteSignInResponse>();
+            Assert.AreEqual(HttpStatusCode.Created, (await server.SendAsync(device, HttpMethod.Post, "/api/v1/enroll",
+                new EnrollRequest(string.Empty, device.PublicKey, device.Name, null, signedIn.Grant))).Status);
+            return signedIn;
+        }
+
+        Task<ApiAnswer> ApproveAsync(TestDevice signer, TestDevice device, string person) => server.NextEntryAsync(signer, FleetDeviceListOperations.Add, device.DeviceId,
+            device.PublicKey, FleetDeviceKinds.Controller, person, setup.Organization.Id).ContinueWith(entry => server.SendAsync(signer, HttpMethod.Post,
+                $"/api/v1/devices/{device.DeviceId}/approve", new DeviceListChangeRequest(entry.Result))).Unwrap();
+
+        // An entry that does not name its signer's person would give the owner's desktop to the person it adds: refused.
+        var pat = await EnrollAsync(laptop);
+        Assert.AreEqual(HttpStatusCode.Forbidden, (await ApproveAsync(owner, laptop, pat.Person.Id)).Status);
+
+        // The owner's desktop signs the first device of a person the company sign-in created, naming its own person.
+        Assert.AreEqual(DeviceStatuses.Approved, (await desktop.ApproveAsync(laptop.DeviceId, FleetDeviceKinds.Controller, CancellationToken.None)).Status);
+
+        // Their next device is theirs to approve, not the owner's.
+        Assert.AreEqual(pat.Person.Id, (await EnrollAsync(phone)).Person.Id);
+        Assert.AreEqual(HttpStatusCode.Forbidden, (await ApproveAsync(owner, phone, pat.Person.Id)).Status, "the owner signs only a person's first device");
+        Assert.AreEqual(HttpStatusCode.OK, (await ApproveAsync(laptop, phone, pat.Person.Id)).Status);
+
+        // Another person's first device: the owner again, never another person's device.
+        provider.Account = new FakeAccount("user-9", "kim@contoso.example", "Kim Park", []);
+        var kim = await EnrollAsync(stranger);
+        Assert.AreEqual(HttpStatusCode.Forbidden, (await ApproveAsync(laptop, stranger, kim.Person.Id)).Status, "a member does not sign another person's first device");
+        Assert.AreEqual(DeviceStatuses.Approved, (await desktop.ApproveAsync(stranger.DeviceId, FleetDeviceKinds.Controller, CancellationToken.None)).Status);
+
+        // Every device replays the list with the same rules: the desktop is the owner's, each laptop its person's.
+        var list = (await server.SendAsync(owner, HttpMethod.Get, "/api/v1/device-list")).Read<ListResponse<DeviceListEntryDto>>();
+        var verified = FleetDeviceListVerifier.Verify(list.Items.Select(static item => item.Entry), setup.Organization.Id);
+        Assert.IsTrue(verified.IsValid, verified.Reason);
+        Assert.AreEqual((setup.Owner.Id, pat.Person.Id, pat.Person.Id, kim.Person.Id), (verified.State.Members[owner.DeviceId].OwnerId,
+            verified.State.Members[laptop.DeviceId].OwnerId, verified.State.Members[phone.DeviceId].OwnerId, verified.State.Members[stranger.DeviceId].OwnerId));
     }
 
     [TestMethod]
@@ -729,6 +786,92 @@ public sealed class SignInTests
         (start, back) = await StartAsync(server, laptop, FleetSignInMethods.Company);
         await CompleteAsync(server, laptop, start, back);
         Assert.AreEqual(PersonRoles.Owner, (await server.Server.Store.GetPersonAsync(signedIn.Person.Id))!.Role);
+    }
+
+    [TestMethod]
+    public async Task APersonRemovesALinkedAccount_WhichThenSignsNobodyIn_ButNeverTheLastWayInOfAnOwnerWithoutARecoveryKey()
+    {
+        await using var provider = await FakeOidcProvider.StartAsync(clientSecret: "company-secret");
+        await using var server = await ServerFixture.StartAsync(signIn: Options(provider));
+        using var owner = new TestDevice("Desktop");
+        using var laptop = new TestDevice("Laptop");
+        using var recovery = new TestDevice("Recovery key");
+        using var passkey = new SoftwareAuthenticator();
+        var setup = await server.SetUpAsync(owner);
+        var (link, linkBack) = await StartAsync(server, owner, FleetSignInMethods.Microsoft, FleetSignInPurposes.Link);
+        Assert.AreEqual(HttpStatusCode.OK, (await CompleteAsync(server, owner, link, linkBack)).Status);
+        async Task<IReadOnlyList<SignInLoginDto>> LoginsAsync() => (await server.SendAsync(owner, HttpMethod.Get, "/api/v1/sign-in/logins")).Read<ListResponse<SignInLoginDto>>().Items;
+        var microsoft = (await LoginsAsync()).Single();
+        Assert.IsFalse(string.IsNullOrEmpty(microsoft.Id), "each way to sign in has an id to remove it by");
+        Assert.IsFalse(microsoft.Id!.Contains(provider.Issuer.Host, StringComparison.Ordinal), "the id does not show the issuer or the subject of the account");
+
+        // The only way in of an owner without a recovery key stays: removing it could lock the server out.
+        var last = await server.SendAsync(owner, HttpMethod.Delete, $"/api/v1/sign-in/logins/{microsoft.Id}");
+        Assert.AreEqual((HttpStatusCode.Conflict, SignInErrorCodes.LastWayIn), Answer(last), last.Body.ToString());
+
+        // With a passkey beside it, the account goes: it signs nobody in any more.
+        await RegisterPasskeyAsync(server, owner, passkey, server.BaseAddress.GetLeftPart(UriPartial.Authority));
+        var removed = await server.SendAsync(owner, HttpMethod.Delete, $"/api/v1/sign-in/logins/{microsoft.Id}");
+        Assert.AreEqual(HttpStatusCode.OK, removed.Status, removed.Body.ToString());
+        CollectionAssert.AreEqual(new[] { FleetSignInMethods.Passkey }, removed.Read<ListResponse<SignInLoginDto>>().Items.Select(static login => login.Method).ToArray());
+        var (start, back) = await StartAsync(server, laptop, FleetSignInMethods.Microsoft);
+        Assert.AreEqual((HttpStatusCode.Forbidden, SignInErrorCodes.NotLinked), Answer(await CompleteAsync(server, laptop, start, back)));
+        Assert.AreEqual((HttpStatusCode.NotFound, SignInErrorCodes.LoginNotFound),
+            Answer(await server.SendAsync(owner, HttpMethod.Delete, $"/api/v1/sign-in/logins/{microsoft.Id}")), "removed once");
+
+        // The passkey is now the last way in; with a recovery key, it may go too.
+        var key = (await LoginsAsync()).Single();
+        Assert.AreEqual(SignInErrorCodes.LastWayIn, (await server.SendAsync(owner, HttpMethod.Delete, $"/api/v1/sign-in/logins/{key.Id}")).Code);
+        var entry = await server.NextEntryAsync(owner, FleetDeviceListOperations.Add, recovery.DeviceId, recovery.PublicKey, FleetDeviceKinds.Recovery, setup.Owner.Id, setup.Organization.Id);
+        Assert.AreEqual(HttpStatusCode.Created, (await server.SendAsync(owner, HttpMethod.Post, "/api/v1/recovery-keys", new CreateRecoveryKeyRequest(recovery.PublicKey, entry, "sealed-anchor"))).Status);
+        Assert.AreEqual(HttpStatusCode.OK, (await server.SendAsync(owner, HttpMethod.Delete, $"/api/v1/sign-in/logins/{key.Id}")).Status);
+        Assert.AreEqual(0, (await LoginsAsync()).Count);
+
+        var audit = (await server.SendAsync(owner, HttpMethod.Get, "/api/v1/audit?limit=500")).Read<ListResponse<AuditRecordDto>>().Items;
+        Assert.AreEqual(2, audit.Count(static record => record.Action == "sign_in.login.remove" && record.Result == "success"));
+        Assert.AreEqual(2, audit.Count(static record => record.Action == "sign_in.login.remove" && record.Result == SignInErrorCodes.LastWayIn));
+    }
+
+    [TestMethod]
+    public async Task AnAdminRemovesAnotherPersonsWayIn_AMemberDoesNot_AndACompanyAccountIsManagedByTheOrganization()
+    {
+        await using var provider = await FakeOidcProvider.StartAsync(clientSecret: "company-secret");
+        await using var server = await ServerFixture.StartAsync(signIn: Options(provider));
+        using var owner = new TestDevice("Desktop");
+        using var node = new TestDevice("Mac mini");
+        using var laptop = new TestDevice("Laptop");
+        using var passkey = new SoftwareAuthenticator();
+        var (setup, _) = await server.SetUpWithNodeAsync(owner, node);
+        await ConfigureCompanyAsync(server, owner, provider, requireSso: false);
+
+        // Pat joins through the company's sign-in on their laptop, which the owner approves; Pat adds a passkey.
+        provider.Account = new FakeAccount("user-2", "pat@contoso.example", "Pat Lee", []);
+        var (start, back) = await StartAsync(server, laptop, FleetSignInMethods.Company);
+        var signedIn = (await CompleteAsync(server, laptop, start, back)).Read<CompleteSignInResponse>();
+        var pat = signedIn.Person.Id;
+        Assert.AreEqual(HttpStatusCode.Created, (await server.SendAsync(laptop, HttpMethod.Post, "/api/v1/enroll",
+            new EnrollRequest(string.Empty, laptop.PublicKey, laptop.Name, null, signedIn.Grant))).Status);
+        var entry = await server.NextEntryAsync(owner, FleetDeviceListOperations.Add, laptop.DeviceId, laptop.PublicKey, FleetDeviceKinds.Controller, pat, setup.Organization.Id);
+        var approved = await server.SendAsync(owner, HttpMethod.Post, $"/api/v1/devices/{laptop.DeviceId}/approve", new DeviceListChangeRequest(entry));
+        Assert.AreEqual(HttpStatusCode.OK, approved.Status, approved.Body.ToString());
+        await RegisterPasskeyAsync(server, laptop, passkey, server.BaseAddress.GetLeftPart(UriPartial.Authority));
+
+        // The company's account is the organization's: neither Pat nor an admin removes it here (that is deprovisioning the person).
+        var mine = (await server.SendAsync(laptop, HttpMethod.Get, "/api/v1/sign-in/logins")).Read<ListResponse<SignInLoginDto>>().Items;
+        var company = mine.Single(static login => login.Method == FleetSignInMethods.Company);
+        Assert.AreEqual((HttpStatusCode.Forbidden, SignInErrorCodes.ManagedByOrganization),
+            Answer(await server.SendAsync(laptop, HttpMethod.Delete, $"/api/v1/sign-in/logins/{company.Id}")));
+        Assert.AreEqual(SignInErrorCodes.ManagedByOrganization, (await server.SendAsync(owner, HttpMethod.Delete, $"/api/v1/sign-in/logins/{company.Id}?person={pat}")).Code);
+
+        // A member neither reads nor removes another person's ways in; an owner does.
+        var owners = (await server.SendAsync(owner, HttpMethod.Get, "/api/v1/sign-in/logins")).Read<ListResponse<SignInLoginDto>>().Items;
+        Assert.AreEqual(HttpStatusCode.Forbidden, (await server.SendAsync(laptop, HttpMethod.Get, $"/api/v1/sign-in/logins?person={setup.Owner.Id}")).Status);
+        Assert.AreEqual(HttpStatusCode.Forbidden, (await server.SendAsync(laptop, HttpMethod.Delete, $"/api/v1/sign-in/logins/{owners[0].Id}?person={setup.Owner.Id}")).Status);
+        var patsKeys = (await server.SendAsync(owner, HttpMethod.Get, $"/api/v1/sign-in/logins?person={pat}")).Read<ListResponse<SignInLoginDto>>().Items;
+        CollectionAssert.AreEquivalent(new[] { FleetSignInMethods.Company, FleetSignInMethods.Passkey }, patsKeys.Select(static login => login.Method).ToArray());
+        var removed = await server.SendAsync(owner, HttpMethod.Delete, $"/api/v1/sign-in/logins/{patsKeys.Single(static login => login.Method == FleetSignInMethods.Passkey).Id}?person={pat}");
+        Assert.AreEqual(HttpStatusCode.OK, removed.Status, removed.Body.ToString());
+        Assert.AreEqual(FleetSignInMethods.Company, (await server.SendAsync(laptop, HttpMethod.Get, "/api/v1/sign-in/logins")).Read<ListResponse<SignInLoginDto>>().Items.Single().Method);
     }
 
     internal static SignInOptions Options(FakeOidcProvider provider) => new()
