@@ -26,6 +26,31 @@ public sealed class MachineNewSessionTests
     public TestContext TestContext { get; set; } = null!;
 
     [TestMethod]
+    public async Task TheProvidersOfAMachine_AreListedForAnAutomation_ThoughThisComputerMayNotStartSessionsThere()
+    {
+        var token = TestContext.CancellationToken;
+        await using var fixture = await FleetNodeFixture.StartAsync(token);
+        var registry = new SessionHostRegistry(new SessionHostRegistryTests.RecordingSessionHost(null));
+        await using var fleet = new DesktopFleet(Path.Combine(fixture.Root, "desktop-fleet"), registry.TakeMembership(), "desktop",
+            static (machine, identity) => new RemoteSessionHost(machine, cancellation => FleetNodeClient.ConnectAsync(machine, identity, cancellation), Quick,
+                localDeviceId: identity.DeviceId));
+        var machine = await fleet.PairAsync(fixture.CreatePairingLink(), token);
+        var host = fleet.Find(machine.DeviceId)!;
+        await WaitForAsync(() => host.State == RemoteMachineState.Online, "the machine to be online", token);
+        // As a machine reached through a server grants: this computer may give it automations, not start sessions there.
+        fixture.Service.TrustedDevices.SetPermissions(fleet.DeviceId, CodeAlta.Fleet.Identity.DevicePermissions.View | CodeAlta.Fleet.Identity.DevicePermissions.Automate);
+        var epoch = Guid.NewGuid().ToString("D");
+        var service = new MachinesService(fleet, epoch);
+
+        Assert.AreEqual("not_allowed", (await service.NewSessionChoicesAsync(new MachineNewSessionChoicesRequest(epoch, machine.DeviceId, null), token)).Status,
+            "A session is not started there.");
+        var providers = await service.NewSessionChoicesAsync(new MachineNewSessionChoicesRequest(epoch, machine.DeviceId, null) { ProvidersOnly = true }, token);
+        Assert.AreEqual("ok", providers.Status, providers.Message);
+        Assert.AreEqual(("scripted", "Scripted"), (providers.Providers.Single().Key, providers.Providers.Single().Name), "What an automation placed there runs with.");
+        Assert.AreEqual(0, providers.Projects.Length, "Its projects are not what an automation is placed with.");
+    }
+
+    [TestMethod]
     public async Task NewSession_OnAMachine_ChoosesItsProjectProviderAndModel_AndIsListedUnderTheSameRepositoryHere()
     {
         var token = TestContext.CancellationToken;

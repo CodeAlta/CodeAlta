@@ -193,7 +193,7 @@ function AutomationDetail({ hub, item, paused, busy, now, sessions, epoch, provi
   const next = item.nextRunAt ? timelineTime(item.nextRunAt, locale) : null;
   const waits = !item.problem && waitsToBeAllowed(item);
   // Its provider as the machine that runs it names it, else as this computer does.
-  const machine = useRemoteChoices(epoch, item.runsOn ?? null, null).choices;
+  const machine = useRemoteChoices(epoch, item.runsOn ?? null, null, undefined, true).choices;
   const providerName = (item.runsOn ? machineRunProviders(machine) : providers)?.find(provider => provider.id === item.provider)?.name ?? null;
   const runsWith = runsWithFacts(item, t, providerName);
   const placed = placementLabel(item, t);

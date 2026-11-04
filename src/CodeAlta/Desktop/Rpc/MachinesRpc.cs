@@ -147,6 +147,8 @@ internal sealed partial class MachinesService
         catch (FleetException exception) { return MachineNewSessionChoices.Refused(exception.Error.Code) with { Message = exception.Error.Message }; }
         catch (Exception exception) when (exception is IOException or TimeoutException) { return MachineNewSessionChoices.Refused(RemoteSessionHost.MachineOfflineCode) with { Message = exception.Message }; }
 
+        // What an automation placed there runs with: its providers, which any device the machine lists may read.
+        if (request.ProvidersOnly == true) return Choices(info, null) with { Projects = [] };
         // What this device may do there now: the owner of the machine may have changed it since the pairing.
         if (!info.Permissions.Contains("start", StringComparer.Ordinal)) return MachineNewSessionChoices.Refused("not_allowed");
         var local = request.LocalProjectId is { Length: > 0 } localId && !localId.StartsWith(WorkspaceService.MachineScopePrefix, StringComparison.Ordinal) && LocalLocation is { } read
@@ -411,7 +413,13 @@ internal sealed record MachineNewSessionRequest(string ExpectedEpoch, string Mac
 /// <param name="ExpectedEpoch">The host epoch the page knows.</param>
 /// <param name="MachineId">The device id of the machine.</param>
 /// <param name="LocalProjectId">The project of this computer the person is in, whose repository the machine may have too; null for none.</param>
-internal sealed record MachineNewSessionChoicesRequest(string ExpectedEpoch, string MachineId, string? LocalProjectId);
+internal sealed record MachineNewSessionChoicesRequest(string ExpectedEpoch, string MachineId, string? LocalProjectId)
+{
+    // True to read only the providers of the machine, for an automation placed there: no session is started, so this
+    // device needs no permission to start one; absent for a new session.
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public bool? ProvidersOnly { get; init; }
+}
 
 /// <summary>A project of a machine a new session can work in.</summary>
 /// <param name="Id">Its id on the machine.</param>
