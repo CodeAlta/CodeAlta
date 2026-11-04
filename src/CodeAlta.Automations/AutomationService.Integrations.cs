@@ -141,9 +141,36 @@ internal sealed partial class AutomationService
             var seen = mark?.Seen.ToList() ?? [];
             seen.Add(eventId);
             if (seen.Count > RememberedEvents) seen.RemoveRange(0, seen.Count - RememberedEvents);
-            _state.SetWatermark(entry.Id, trigger.Key, new AutomationWatermark { Since = _time.GetUtcNow(), Seen = seen, Heads = new(StringComparer.Ordinal) }, RememberedEvents, 0);
+            // The threads it answered stay beside the events it saw.
+            var heads = new Dictionary<string, string>(mark?.Heads ?? [], StringComparer.Ordinal);
+            _state.SetWatermark(entry.Id, trigger.Key, new AutomationWatermark { Since = _time.GetUtcNow(), Seen = seen, Heads = heads }, RememberedEvents, RememberedThreads);
             return true;
         }
+    }
+
+    /// <summary>The most threads of Slack a trigger remembers it answered.</summary>
+    internal const int RememberedThreads = 512;
+
+    private static string ThreadKey(string channel, string thread) => "thread:" + channel + ":" + thread;
+
+    // Records that the automation answered in a thread of Slack: the replies of people there are theirs.
+    private void Answered(string automationId, AutomationTrigger trigger, string channel, string thread)
+    {
+        lock (_gate)
+        {
+            var mark = _state.Watermark(automationId, trigger.Key);
+            var heads = new Dictionary<string, string>(mark?.Heads ?? [], StringComparer.Ordinal)
+            {
+                [ThreadKey(channel, thread)] = _time.GetUtcNow().ToUnixTimeSeconds().ToString(CultureInfo.InvariantCulture),
+            };
+            _state.SetWatermark(automationId, trigger.Key, new AutomationWatermark { Since = mark?.Since ?? _time.GetUtcNow(), Floor = mark?.Floor ?? 0, Seen = [.. mark?.Seen ?? []], Heads = heads },
+                RememberedEvents, RememberedThreads);
+        }
+    }
+
+    private bool AnsweredIn(string automationId, AutomationTrigger trigger, string channel, string thread)
+    {
+        lock (_gate) return _state.Watermark(automationId, trigger.Key)?.Heads.ContainsKey(ThreadKey(channel, thread)) == true;
     }
 
     // One look at a Jira trigger: what it sees that it has not seen starts the automation. True when an event waits.
@@ -343,6 +370,8 @@ internal sealed partial class AutomationService
         AutomationEntry? entry;
         lock (_gate) entry = _snapshot.Find(automationId);
         if (entry is null || !Armed(entry) || !entry.Definition.Triggers.Any(candidate => candidate.FingerprintKey == trigger.FingerprintKey)) return Task.CompletedTask;
+        // A person's reply in a thread this automation answered is theirs, unless the trigger follows its threads too.
+        if (!trigger.Threads && !message.Mention && message.ThreadTs is { } thread && AnsweredIn(entry.Id, trigger, message.Channel, thread)) return Task.CompletedTask;
         if (!FirstSeen(entry, trigger, message.EventId)) return Task.CompletedTask;
         var reply = trigger.Reply ? new AutomationReplyTarget(trigger, "the Slack thread") { Channel = message.Channel, Thread = message.ReplyThread } : null;
         Trigger(entry, trigger.KindName, AutomationText.Line(message.Text, 120), SlackPrompt(entry.Definition.Prompt, message, reply), occurrence: EventOccurrence(trigger, message.EventId),
@@ -604,6 +633,7 @@ internal sealed partial class AutomationService
                     var (bot, botMissing) = Resolve(entry.ProjectId, trigger.BotToken!);
                     if (bot is null) return ($"Nothing was written to {target.Where}: {botMissing}", null);
                     written = await new SlackClient(integrations.Http, integrations.SlackApi).ReplyAsync(bot, channel, thread, text, _stop.Token).ConfigureAwait(false);
+                    if (written.Problem is null) Answered(entry.Id, trigger, channel, thread);
                     break;
                 case AutomationTriggerKind.IncidentIo when target.IncidentId is { } incident:
                     var (key2, keyMissing) = Resolve(entry.ProjectId, trigger.ApiKey!);

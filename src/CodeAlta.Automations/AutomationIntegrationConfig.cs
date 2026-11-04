@@ -25,6 +25,7 @@ internal static class AutomationIntegrationConfig
             apiKey = null, hook = null, secret = null, signature = null, header = null, @event = null;
         IReadOnlyList<string> fields = [];
         var reply = false;
+        var threads = false;
         if (!AutomationConfig.TryText(table, "event", out @event, out problem) || !AutomationConfig.TryText(table, "site", out site, out problem)
             || !AutomationConfig.TryText(table, "email", out email, out problem) || !AutomationConfig.TryText(table, "token", out token, out problem)
             || !AutomationConfig.TryText(table, "jira_project", out project, out problem) || !AutomationConfig.TryText(table, "jql", out query, out problem)
@@ -33,7 +34,7 @@ internal static class AutomationIntegrationConfig
             || !AutomationConfig.TryText(table, "api_key", out apiKey, out problem) || !AutomationConfig.TryText(table, "hook", out hook, out problem)
             || !AutomationConfig.TryText(table, "secret", out secret, out problem) || !AutomationConfig.TryText(table, "signature", out signature, out problem)
             || !AutomationConfig.TryText(table, "signature_header", out header, out problem) || !AutomationConfig.TryTexts(table, "fields", out fields, out problem)
-            || !AutomationConfig.TryFlag(table, "reply", false, out reply, out problem)) return false;
+            || !AutomationConfig.TryFlag(table, "reply", false, out reply, out problem) || !AutomationConfig.TryFlag(table, "threads", false, out threads, out problem)) return false;
         var events = AutomationTrigger.Events(kind);
         trigger = new AutomationTrigger(kind)
         {
@@ -55,6 +56,7 @@ internal static class AutomationIntegrationConfig
             SignatureHeader = AutomationConfig.Blank(header),
             Fields = [.. fields.Select(static field => field.Trim()).Where(static field => field.Length > 0).Distinct(StringComparer.Ordinal)],
             Reply = reply,
+            Threads = threads,
         };
         return true;
     }
@@ -68,6 +70,7 @@ internal static class AutomationIntegrationConfig
         if (!AutomationTrigger.Events(trigger.Kind).Contains(trigger.Event))
             return $"A {name} trigger starts on {string.Join(" or ", AutomationTrigger.Events(trigger.Kind))}.";
         if (trigger.Reply && !trigger.CanReply) return $"A {name} trigger has nowhere to reply.";
+        if (trigger.Threads && trigger is not { Kind: AutomationTriggerKind.Slack, Event: "message" }) return "threads is for a Slack trigger on every message.";
         foreach (var text in new[] { trigger.Site, trigger.Email, trigger.JiraProject, trigger.Query, trigger.Channel, trigger.Match, trigger.Hook, trigger.SignatureHeader })
         {
             if (text is not null && (text.Any(char.IsControl) || !AutomationConfig.IsWellFormed(text) || text.Length > AutomationTrigger.MaximumQueryLength))
@@ -143,6 +146,7 @@ internal static class AutomationIntegrationConfig
         Add("signature_header", trigger.SignatureHeader);
         if (trigger.Fields.Count > 0) builder.Append(", fields = [").Append(string.Join(", ", trigger.Fields.Select(AutomationConfig.Quote))).Append(']');
         if (trigger.Reply) builder.Append(", reply = true");
+        if (trigger.Threads) builder.Append(", threads = true");
         return builder.Append(" }").ToString();
 
         void Add(string key, string? value)

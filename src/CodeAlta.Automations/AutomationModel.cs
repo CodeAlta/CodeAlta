@@ -201,6 +201,12 @@ internal sealed record AutomationTrigger(AutomationTriggerKind Kind)
     /// <summary>Whether the answer of the run is written back where the event came from (a comment, a thread reply, a timeline item).</summary>
     public bool Reply { get; init; }
 
+    /// <summary>
+    /// Slack, on every message: whether a person's replies in a thread this automation answered start runs too. Off, they do
+    /// not: the automation answered there, and the conversation is the people's.
+    /// </summary>
+    public bool Threads { get; init; }
+
     /// <summary>The longest JQL query kept.</summary>
     internal const int MaximumQueryLength = 2000;
 
@@ -282,7 +288,7 @@ internal sealed record AutomationTrigger(AutomationTriggerKind Kind)
     /// </summary>
     public string FingerprintKey => !IsIntegration ? Key
         : string.Join('\t', Key, Email ?? string.Empty, string.Join(',', Credentials), Signature ?? string.Empty, SignatureHeader ?? string.Empty,
-            string.Join(',', Fields), Reply ? "reply" : string.Empty);
+            string.Join(',', Fields), Reply ? "reply" : string.Empty) + (Threads ? "\tthreads" : string.Empty);
 }
 
 /// <summary>The provider, model and effort an automation asks for: each part is optional.</summary>

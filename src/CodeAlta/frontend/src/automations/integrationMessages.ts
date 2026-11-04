@@ -40,6 +40,8 @@ export const automationIntegrationMessages = {
   "mentions the app": ["menciona la app", "mentionne l’app", "erwähnt die App", "アプリをメンション", "提及应用"],
   "is posted": ["se publica", "est publié", "wird gepostet", "投稿される", "被发布"],
   "is declared": ["se declara", "est déclaré", "wird gemeldet", "宣言される", "被宣布"],
+  "Also start on people's replies in the threads it answered": ["Iniciar también con las respuestas en los hilos que respondió", "Démarrer aussi sur les réponses dans les fils auxquels il a répondu",
+    "Auch bei Antworten in Threads starten, die es beantwortet hat", "回答したスレッドへの返信でも開始する", "在它回答过的线程中有人回复时也启动"],
   "Write the answer back where the event came from": ["Escribir la respuesta donde vino el evento", "Écrire la réponse là d’où vient l’événement", "Die Antwort dorthin schreiben, woher das Ereignis kam",
     "イベントの発生元に回答を書き戻す", "将回答写回事件来源"],
   "The name of a secret of Settings > Secrets": ["El nombre de un secreto de Ajustes > Secretos", "Le nom d’un secret de Paramètres > Secrets", "Der Name eines Geheimnisses unter Einstellungen > Geheimnisse",

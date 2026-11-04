@@ -54,6 +54,8 @@ test("a trigger of another tool shows its settings, its secrets by name, and how
   const slack = integrated(newTrigger("slack"));
   assert.match(slack, /aria-label="Channel id"[\s\S]*aria-label="App-level token"[\s\S]*aria-label="Bot token"/);
   assert.match(slack, /Socket Mode/);
+  assert.doesNotMatch(slack, /replies in the threads it answered/, "a trigger on mentions answers each mention");
+  assert.match(integrated({ ...newTrigger("slack"), event: "message" }), /Also start on people&#x27;s replies in the threads it answered/);
   const webhook = integrated(newTrigger("webhook"));
   assert.match(webhook, /aria-label="Hook"[\s\S]*Make a hook[\s\S]*aria-label="Signing secret"/);
   assert.match(webhook, /aria-label="Fields that reach the prompt"/);

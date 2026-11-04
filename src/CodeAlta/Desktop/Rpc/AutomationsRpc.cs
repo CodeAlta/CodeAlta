@@ -380,6 +380,9 @@ internal sealed class AutomationsService
             Integration = trigger.IsIntegration
                 ? new AutomationIntegrationItem(trigger.Site, trigger.Email, trigger.Token, trigger.JiraProject, trigger.Query, trigger.AppToken, trigger.BotToken,
                     trigger.Channel, trigger.Match, trigger.ApiKey, trigger.Hook, trigger.Secret, trigger.Signature, trigger.SignatureHeader, trigger.Fields, trigger.Reply)
+                {
+                    Threads = trigger.Threads,
+                }
                 : null,
         };
 
@@ -484,6 +487,7 @@ internal sealed class AutomationsService
                 SignatureHeader = Blank(integration.SignatureHeader),
                 Fields = [.. integration.Fields.Select(static field => field?.Trim() ?? string.Empty).Where(static field => field.Length > 0).Distinct(StringComparer.Ordinal)],
                 Reply = integration.Reply,
+                Threads = integration.Threads,
             };
             return true;
         }
@@ -547,7 +551,11 @@ internal sealed record AutomationTriggerItem(string Type, int Minute, int Every,
 /// <param name="Fields">Webhooks: the JSON pointers of the fields that reach the prompt.</param>
 /// <param name="Reply">Whether the answer of the run is written back to the source.</param>
 internal sealed record AutomationIntegrationItem(string? Site, string? Email, string? Token, string? JiraProject, string? Query, string? AppToken, string? BotToken,
-    string? Channel, string? Match, string? ApiKey, string? Hook, string? Secret, string? Signature, string? SignatureHeader, IReadOnlyList<string> Fields, bool Reply);
+    string? Channel, string? Match, string? ApiKey, string? Hook, string? Secret, string? Signature, string? SignatureHeader, IReadOnlyList<string> Fields, bool Reply)
+{
+    /// <summary>Slack, on every message: whether a person's replies in a thread the automation answered start runs too.</summary>
+    public bool Threads { get; init; }
+}
 
 /// <summary>An automation as the page shows it.</summary>
 /// <param name="ProjectId">The project it runs in; null for a chat.</param>

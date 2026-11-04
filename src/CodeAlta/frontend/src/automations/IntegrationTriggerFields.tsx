@@ -92,7 +92,7 @@ export function IntegrationTriggerFields({ hub, trigger, context, disabled, onCh
   return <div className="automation-integration">
     <div className="automation-integration-fields">
       {events.length > 1 && <HTMLSelect value={events.includes(trigger.event) ? trigger.event : events[0]} disabled={off} aria-label={t("Event")}
-        onChange={event => onChange({ ...trigger, event: event.target.value })}>
+        onChange={event => onChange({ ...trigger, event: event.target.value, integration: { ...settings, threads: event.target.value === "message" && settings.threads } })}>
         {events.map(name => <option key={name} value={name}>{t(eventLabels[name] ?? "Event")}</option>)}
       </HTMLSelect>}
       {(type === "jira_version" || type === "jira_query") && <>
@@ -126,6 +126,8 @@ export function IntegrationTriggerFields({ hub, trigger, context, disabled, onCh
       </>}
       {canReply(type) && <Switch className="automation-integration-reply" checked={settings.reply} disabled={off} label={t("Write the answer back where the event came from")}
         onChange={event => set({ reply: event.currentTarget.checked })} />}
+      {type === "slack" && trigger.event === "message" && <Switch className="automation-integration-reply" checked={settings.threads} disabled={off}
+        label={t("Also start on people's replies in the threads it answered")} onChange={event => set({ threads: event.currentTarget.checked })} />}
     </div>
     {address && <p className="automation-integration-address"><span>{t("Give this address to the tool:")}</span><code>{address}</code>
       <Button variant="minimal" size="small" icon={<AppIcon name="copy" size={13} />} aria-label={t("Copy the address")} title={t("Copy the address")}
