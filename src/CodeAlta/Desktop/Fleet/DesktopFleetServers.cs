@@ -116,6 +116,8 @@ internal sealed partial class DesktopFleetServers : IAsyncDisposable
             return new DesktopServerAutomationRoute(connection.Link.Id, organization, machine.Inventory.Name, connector.Devices, identity, Client(connection.Link.Id))
             {
                 TeamId = MaintainedTeamOf(connector.Access.Current, connector.Devices.Current, identity.DeviceId, machineId),
+                OfOrganization = connector.Access.Current?.IsOrganizationMachine(machineId) == true && connector.Devices.Current?.Members.GetValueOrDefault(identity.DeviceId) is { } self
+                    && connector.Access.Current.IsSigner(self.OwnerId),
                 Access = connector.Access,
             };
         }

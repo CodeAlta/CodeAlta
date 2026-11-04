@@ -168,7 +168,38 @@ public static class FleetAutomationSigning
         var recipients = list.Members.Values.Where(member => member.DeviceId == machine.DeviceId
                 || member.Kind == FleetDeviceKinds.Controller && member.OwnerId is { } owner && team.Maintainers.Contains(owner, StringComparer.Ordinal))
             .Where(member => !list.Removed.Contains(member.DeviceId)).Take(MaxRecipients).ToArray();
-        return SealScoped(content, automationId, number, machineId, "team", teamId, recipients, list, signer);
+        return SealScoped(content, automationId, number, machineId, "team", teamId, recipients, list, signer, TeamKeys);
+    }
+
+    /// <summary>
+    /// Seals what a version of an automation of the organization does: for its machine and the controller devices of the
+    /// owners and the admins who sign, as the access document and the device list this device verified say.
+    /// </summary>
+    /// <param name="content">The definition and the repository.</param>
+    /// <param name="automationId">The automation.</param>
+    /// <param name="number">The number of the version.</param>
+    /// <param name="machineId">The machine of the organization that runs it.</param>
+    /// <param name="list">The device list as the signer verified it.</param>
+    /// <param name="access">The access document as the signer verified it.</param>
+    /// <param name="signer">The controller device of an owner or an admin who signs.</param>
+    /// <returns>The sealed text: <c>{ "alg", "kid", "org", "iv", "ct", "keys": { device: wrapped } }</c>.</returns>
+    /// <exception cref="ArgumentNullException">An argument is null.</exception>
+    /// <exception cref="ArgumentException">The machine is not the organization's, or the signer is not an owner or an admin who signs.</exception>
+    public static string SealForOrganization(FleetAutomationContent content, string automationId, long number, string machineId, FleetDeviceListState list,
+        FleetAccessState access, DeviceIdentity signer)
+    {
+        ArgumentNullException.ThrowIfNull(content);
+        ArgumentException.ThrowIfNullOrEmpty(automationId);
+        ArgumentException.ThrowIfNullOrEmpty(machineId);
+        ArgumentNullException.ThrowIfNull(list);
+        ArgumentNullException.ThrowIfNull(access);
+        ArgumentNullException.ThrowIfNull(signer);
+        if (!access.IsOrganizationMachine(machineId)) throw new ArgumentException("The machine is not a machine of the organization.", nameof(machineId));
+        if (!list.Members.TryGetValue(signer.DeviceId, out var self) || self.Kind != FleetDeviceKinds.Controller || !access.IsSigner(self.OwnerId))
+            throw new ArgumentException("Only a controller device of an owner or an admin who signs seals the automations of the organization.", nameof(signer));
+        var recipients = list.Members.Values.Where(member => member.DeviceId == machineId || member.Kind == FleetDeviceKinds.Controller && access.IsSigner(member.OwnerId))
+            .Where(member => !list.Removed.Contains(member.DeviceId)).Take(MaxRecipients).ToArray();
+        return SealScoped(content, automationId, number, machineId, "organization", list.OrganizationId ?? string.Empty, recipients, list, signer, OrganizationKeys);
     }
 
     /// <summary>
@@ -232,6 +263,19 @@ public static class FleetAutomationSigning
                     signer => FleetAccessState.RoleIn(team, signer.OwnerId) == FleetTeamRoles.Maintainer, TeamKeys);
                 if (key.Id != keyId) throw new InvalidDataException("The copy is the one of another key.");
             }
+            else if (FleetSealedJson.Text(root, "organization") is { } organization)
+            {
+                // A copy of the key of a version of the organization is given by an owner or an admin who signs.
+                if (access is null || organization != list.OrganizationId)
+                {
+                    reason = "an automation of the organization opens with the access document of the organization";
+                    return false;
+                }
+
+                key = FleetGrantKeys.Unwrap(wrapped, organization, automationId, ScopedSubject("organization", organization, number, machineId), identity, list,
+                    signer => access.IsSigner(signer.OwnerId), OrganizationKeys);
+                if (key.Id != keyId) throw new InvalidDataException("The copy is the one of another key.");
+            }
             else
             {
                 key = FleetKeyWrap.Unwrap(wrapped, keyId, 1, identity, list);
@@ -278,13 +322,14 @@ public static class FleetAutomationSigning
     }
 
     private static readonly FleetGrantKeys.Purpose TeamKeys = new("codealta-team-automation-key/1", "codealta-team-automation-key-sign/1");
+    private static readonly FleetGrantKeys.Purpose OrganizationKeys = new("codealta-organization-automation-key/1", "codealta-organization-automation-key-sign/1");
 
     private static string ScopedSubject(string kind, string id, long number, string machineId)
         => string.Create(CultureInfo.InvariantCulture, $"{kind}:{id}#{number}#{machineId}");
 
     // Seals a version of a scope for the devices given, each copy of its key wrapped and signed by the signer under the domain of the scope.
     private static string SealScoped(FleetAutomationContent content, string automationId, long number, string machineId, string kind, string scopeId,
-        IReadOnlyList<FleetDeviceListMember> recipients, FleetDeviceListState list, DeviceIdentity signer)
+        IReadOnlyList<FleetDeviceListMember> recipients, FleetDeviceListState list, DeviceIdentity signer, FleetGrantKeys.Purpose purpose)
     {
         if (list.OrganizationId is not { } organization) throw new ArgumentException("The list names no organization yet.", nameof(list));
         var key = FleetMetadataKey.Generate();
@@ -308,7 +353,7 @@ public static class FleetAutomationSigning
             writer.WriteString("ct", Base64Url.EncodeToString(sealedBytes));
             writer.WriteStartObject("keys");
             foreach (var recipient in recipients)
-                writer.WriteString(recipient.DeviceId, FleetGrantKeys.Wrap(key, recipient.Key, organization, automationId, subject, Math.Max(1, list.Sequence), signer, TeamKeys));
+                writer.WriteString(recipient.DeviceId, FleetGrantKeys.Wrap(key, recipient.Key, organization, automationId, subject, Math.Max(1, list.Sequence), signer, purpose));
             writer.WriteEndObject();
         }));
     }

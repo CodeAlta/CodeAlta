@@ -113,7 +113,10 @@ internal sealed partial class NodeAutomations
     // for an automation of the team, and the person who gave it for a personal one; on a personal machine, its owner.
     private Func<string?, bool>? MayAsk(string linkId, FleetSignedAutomationRunRequest signed, FleetDeviceListState devices, string self)
     {
-        if (ServerAccess?.Invoke(linkId)?.TeamOf(self) is not { } team || !FleetAutomationRunRequestDocuments.TryRead(signed.Payload, out var asked, out _)) return null;
+        var access = ServerAccess?.Invoke(linkId);
+        // A machine of the organization runs by hand what its owners and the admins who sign ask.
+        if (access?.IsOrganizationMachine(self) == true) return person => access.IsSigner(person);
+        if (access?.TeamOf(self) is not { } team || !FleetAutomationRunRequestDocuments.TryRead(signed.Payload, out var asked, out _)) return null;
         if (AssignmentOf(asked.AutomationId) is not { Signed: { } held } || !FleetAutomationVersionDocuments.TryParse(held.Payload, out var version)) return static _ => false;
         if (version.TeamId == team.Id) return person => FleetAccessState.RoleIn(team, person) == FleetTeamRoles.Maintainer;
         var giver = devices.Members.TryGetValue(version.SignerDeviceId, out var signer) ? signer.OwnerId : null;

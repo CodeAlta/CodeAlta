@@ -138,6 +138,38 @@ public sealed class FleetAccessDocumentsTests
         Assert.IsFalse(FleetAutomationVersionDocuments.Serialize(personal).Contains("scope", StringComparison.Ordinal), "a personal version writes the format as before");
     }
 
+    [TestMethod]
+    public void TheMachinesOfTheOrganizationRunItsAutomations_FromItsOwnersAndSigners_AndNoOther()
+    {
+        using var world = new World();
+        Assert.IsFalse(FleetAccessDocuments.Serialize(Document(1, null, 4, owners: ["alex"])).Contains("orgMachines", StringComparison.Ordinal), "nothing of the organization: the format as before");
+        var chain = new List<FleetSignedAccessDocument> { world.Founder.Sign(Document(1, null, 4, owners: ["alex"], signers: ["ada"])) };
+        var before = FleetAccessDocuments.Verify(chain, world.Devices, Organization).State;
+        var after = Document(2, Hash(chain), 4, owners: ["alex"], signers: ["ada"]) with { OrganizationMachines = [world.Node.Id], OrganizationServices = ["svc-org"] };
+        CollectionAssert.AreEqual(new[] { "Build box becomes a machine of the organization", "The organization runs its automations as org-bot" },
+            FleetAccessDocuments.Describe(before, after, id => id == world.Node.Id ? "Build box" : id == "svc-org" ? "org-bot" : null).ToArray());
+        Assert.IsFalse(FleetAccessDocuments.SaySame(before, after));
+        chain.Add(world.Ada.Sign(after));
+        var state = FleetAccessDocuments.Verify(chain, world.Devices, Organization).State;
+        Assert.IsTrue(state.IsOrganizationMachine(world.Node.Id));
+        CollectionAssert.AreEqual(new[] { "svc-org" }, state.OrganizationServices.ToArray());
+
+        FleetSignedAutomationVersion Version(Key signer, string? scope)
+        {
+            var text = FleetAutomationVersionDocuments.Serialize(new FleetAutomationVersion(FleetAutomationVersion.CurrentVersion, Organization, "report", 1, world.Node.Id, false,
+                true, [], null, null, "{\"sealed\":1}", signer.Id, signer.PublicKey, Time) { Scope = scope });
+            return new FleetSignedAutomationVersion(text, signer.SignVersion(text));
+        }
+
+        Assert.IsTrue(FleetAutomationVersionDocuments.TryVerify(Version(world.Ada, "organization"), world.Devices, state, Organization, world.Node.Id, out _, out var reason), reason);
+        Assert.IsFalse(FleetAutomationVersionDocuments.TryVerify(Version(world.Bea, "organization"), world.Devices, state, Organization, world.Node.Id, out _, out _),
+            "a member gives the organization no automation");
+        Assert.IsFalse(FleetAutomationVersionDocuments.TryVerify(Version(world.Ada, null), world.Devices, state, Organization, world.Node.Id, out _, out _),
+            "a machine of the organization runs no personal automation");
+        Assert.IsFalse(FleetAutomationVersionDocuments.TryVerify(Version(world.Ada, "organization"), world.Devices, before, Organization, world.Node.Id, out _, out _),
+            "an automation of the organization runs on a machine of the organization only");
+    }
+
     private static void AssertBroken(IReadOnlyList<FleetSignedAccessDocument> chain, World world, long at, string reason, string organization = Organization,
         FleetDeviceListState? devices = null)
     {

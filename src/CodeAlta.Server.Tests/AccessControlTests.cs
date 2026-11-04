@@ -248,6 +248,44 @@ public sealed class AccessControlTests
     }
 
     [TestMethod]
+    public async Task AnAdminGivesAMachineOfTheOrganizationAnAutomationOfTheOrganization_AndNobodyElseGivesItAnything()
+    {
+        await using var server = await ServerFixture.StartAsync();
+        using var owner = new TestDevice("Alex desktop");
+        using var node = new TestDevice("Build box");
+        var (setup, machine) = await server.SetUpWithNodeAsync(owner, node);
+        var (ada, _) = await AddPersonAsync(server, owner, setup, "Ada", FleetOrganizationRoles.Admin);
+        var (max, _) = await AddPersonAsync(server, owner, setup, "Max");
+        var offer = (await server.SendAsync(owner, HttpMethod.Post, "/api/v1/transfers", new OfferTransferRequest(FleetResourceKinds.Machine, machine.Id,
+            FleetPrincipalKinds.Organization, setup.Organization.Id))).Read<TransferDto>();
+        Assert.AreEqual(HttpStatusCode.OK, (await server.SendAsync(ada, HttpMethod.Post, $"/api/v1/transfers/{offer.Id}/accept")).Status);
+        PutAutomationRequest Version(TestDevice signer, string id, string? scope)
+        {
+            var text = FleetAutomationVersionDocuments.Serialize(new FleetAutomationVersion(FleetAutomationVersion.CurrentVersion, setup.Organization.Id, id, 1, machine.Id, false,
+                true, ["hourly"], null, null, "{\"sealed\":\"for the machine\"}", signer.DeviceId, signer.PublicKey, server.Clock.Now) { Scope = scope });
+            return new PutAutomationRequest(new FleetSignedAutomationVersion(text, signer.Sign(FleetAutomationVersionDocuments.GetSignedBytes(text))));
+        }
+
+        var put = await server.SendAsync(ada, HttpMethod.Put, "/api/v1/automations/report", Version(ada, "report", FleetAutomationVersion.OrganizationScope));
+        Assert.AreEqual(HttpStatusCode.OK, put.Status, put.Body.ToString());
+        var owned = (await server.SendAsync(owner, HttpMethod.Get, "/api/v1/owners")).Read<AccessListDto<ResourceOwnerDto>>().Items.Single(resource => resource.ResourceId == "report");
+        Assert.AreEqual(FleetPrincipalKinds.Organization, owned.OwnerKind);
+        Assert.IsTrue((await server.SendAsync(owner, HttpMethod.Get, "/api/v1/automations")).Read<AutomationListDto>().Automations.Any(static item => item.Id == "report"),
+            "the owner lists what an admin gave the organization");
+        Assert.AreEqual(HttpStatusCode.Forbidden, (await server.SendAsync(max, HttpMethod.Put, "/api/v1/automations/mine",
+            Version(max, "mine", FleetAutomationVersion.OrganizationScope))).Status, "a member gives the organization nothing");
+        Assert.AreEqual(HttpStatusCode.Forbidden, (await server.SendAsync(owner, HttpMethod.Put, "/api/v1/automations/mine", Version(owner, "mine", null))).Status,
+            "a machine of the organization runs no personal automation");
+
+        var identity = (await server.SendAsync(ada, HttpMethod.Post, "/api/v1/service-identities",
+            new CreateServiceIdentityRequest("org-bot", FleetPrincipalKinds.Organization, setup.Organization.Id))).Read<ServiceIdentityDto>();
+        Assert.AreEqual(HttpStatusCode.OK, (await server.SendAsync(ada, HttpMethod.Post, $"/api/v1/service-identities/{identity.Id}/enable")).Status);
+        var draft = (await server.SendAsync(owner, HttpMethod.Get, "/api/v1/access/draft")).Read<AccessDocumentDraftDto>();
+        CollectionAssert.AreEqual(new[] { machine.Id }, draft.Document.OrganizationMachines!.ToArray());
+        CollectionAssert.AreEqual(new[] { identity.Id }, draft.Document.OrganizationServices!.ToArray());
+    }
+
+    [TestMethod]
     public async Task AMachineGoesToATeamOnceAMaintainerAcceptsIt_AndAnAutomationTakenWaitsPaused()
     {
         await using var server = await ServerFixture.StartAsync();

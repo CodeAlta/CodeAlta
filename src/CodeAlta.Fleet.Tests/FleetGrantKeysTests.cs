@@ -123,6 +123,26 @@ public sealed class FleetGrantKeysTests
             "only a maintainer seals for the team");
     }
 
+    [TestMethod]
+    public void AnAutomationOfTheOrganizationOpensOnItsMachineAndOnTheDevicesOfItsOwnersAndSigners()
+    {
+        using var devices = new Devices();
+        var list = devices.List();
+        // p1 owns the organization, Bea (p2) signs as an admin, Cy (p3) is a member; the node is the organization's.
+        var access = FleetAccessState.Empty with
+        {
+            OrganizationId = "org", Owners = ["p1"], Signers = ["p2"], OrganizationMachines = [devices.Node.DeviceId], OrganizationServices = ["svc"],
+        };
+        var content = new FleetAutomationContent("[automations.report]\n", null);
+        var sealedText = FleetAutomationSigning.SealForOrganization(content, "report", 1, devices.Node.DeviceId, list, access, devices.Bea);
+        foreach (var reader in new[] { devices.Node, devices.Desk, devices.Bea })
+            Assert.IsTrue(FleetAutomationSigning.TryOpen(sealedText, "report", 1, devices.Node.DeviceId, reader, list, access, out _, out var reason), reason);
+        Assert.IsFalse(FleetAutomationSigning.TryOpen(sealedText, "report", 1, devices.Node.DeviceId, devices.Cy, list, access, out _, out _), "a member reads nothing of it");
+        Assert.IsFalse(FleetAutomationSigning.TryOpen(sealedText, "report", 1, devices.Node.DeviceId, devices.Node, list, access with { Signers = [] }, out _, out _),
+            "a copy given by someone who no longer signs");
+        Assert.ThrowsExactly<ArgumentException>(() => FleetAutomationSigning.SealForOrganization(content, "report", 1, devices.Node.DeviceId, list, access, devices.Cy));
+    }
+
     // The founder's laptop, the desk of the owner of the session (p1), their node, Bea (p2) and Cy (p3).
     private sealed class Devices : IDisposable
     {

@@ -54,6 +54,13 @@ public sealed record FleetAutomationVersion(
     /// <summary>The prefix of the scope of an automation of a team.</summary>
     public const string TeamScopePrefix = "team:";
 
+    /// <summary>The scope of an automation of the organization.</summary>
+    public const string OrganizationScope = "organization";
+
+    /// <summary>Gets whether the automation is the organization's.</summary>
+    [JsonIgnore]
+    public bool IsOrganizationScope => Scope == OrganizationScope;
+
     /// <summary>
     /// Gets the scope of the automation (<c>doc/fleet/orchestration.md</c>, scopes): <c>team:&lt;id&gt;</c> for an automation of a
     /// team, which its maintainers sign for its machines and which runs as the team's service identity; null for a personal one,
@@ -159,7 +166,8 @@ public static class FleetAutomationVersionDocuments
         if (version.OrganizationId is { } organization && !IsName(organization, MaxIdLength)) return "the organization is 1 to 128 characters";
         if (version.Triggers.Count > MaxTriggers || version.Triggers.Any(static trigger => !IsWord(trigger)))
             return $"a version names at most {MaxTriggers} kinds of triggers, each a short word";
-        if (version.Scope is not null && (version.TeamId is not { } team || !IsName(team, MaxIdLength))) return "the scope of a version is a team (team:<id>), or none for a personal one";
+        if (version.Scope is not null && !version.IsOrganizationScope && (version.TeamId is not { } team || !IsName(team, MaxIdLength)))
+            return "the scope of a version is a team (team:<id>), the organization, or none for a personal one";
         if (version.Removed)
         {
             return version.Definition is null && version.Repository is null && version.Sealed is null ? null : "a version that removes the automation holds nothing else";
@@ -263,6 +271,15 @@ public static class FleetAutomationVersionDocuments
             return false;
         }
 
+        // An automation of the organization: signed by an owner or an admin who signs, for a machine of the organization; such a
+        // machine runs no other.
+        if ((parsed.IsOrganizationScope || access?.IsOrganizationMachine(machineId!) == true)
+            && (!parsed.IsOrganizationScope || access?.IsOrganizationMachine(machineId!) != true || !access.IsSigner(signer.OwnerId)))
+        {
+            reason = "an automation of the organization is signed by an owner or an admin for a machine of the organization, which runs no other";
+            return false;
+        }
+
         // An automation of a team: signed by one of its maintainers, for a machine of that team, as the access document says.
         if (parsed.TeamId is { } teamId && (access?.TeamOf(machineId!) is not { } owning || owning.Id != teamId
             || FleetAccessState.RoleIn(owning, signer.OwnerId) != FleetTeamRoles.Maintainer))
@@ -295,6 +312,9 @@ public static class FleetAutomationVersionDocuments
     {
         ArgumentNullException.ThrowIfNull(devices);
         if (access is not null && access.IsSuspended(signerPersonId)) return "the version is signed by a device of a person the organization suspended";
+        // A machine of the organization runs what its owners and the admins who sign give it.
+        if (access?.IsOrganizationMachine(machineId) == true)
+            return access.IsSigner(signerPersonId) ? null : "a machine of the organization runs the automations its owners and admins give it";
         if (access?.TeamOf(machineId) is { } team)
         {
             var role = FleetAccessState.RoleIn(team, signerPersonId);

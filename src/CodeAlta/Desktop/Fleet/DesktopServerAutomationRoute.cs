@@ -43,8 +43,11 @@ internal sealed class DesktopServerAutomationRoute : IDisposable
     /// </summary>
     internal string? TeamId { get; init; }
 
-    /// <summary>Gets the scope the versions given through this route name: the team of the machine, or none for a personal automation.</summary>
-    internal string? Scope => TeamId is { } team ? FleetAutomationVersion.TeamScopePrefix + team : null;
+    /// <summary>Gets whether the machine is the organization's and this computer's person an owner or an admin who signs: what is given to it is the organization's.</summary>
+    internal bool OfOrganization { get; init; }
+
+    /// <summary>Gets the scope the versions given through this route name: the organization, the team of the machine, or none for a personal automation.</summary>
+    internal string? Scope => OfOrganization ? FleetAutomationVersion.OrganizationScope : TeamId is { } team ? FleetAutomationVersion.TeamScopePrefix + team : null;
 
     /// <summary>Seals what a version does for its machine and the controllers of this computer's person, as the device list of the server verifies them now.</summary>
     /// <exception cref="FleetDeviceListException">The device list does not verify.</exception>
@@ -53,6 +56,9 @@ internal sealed class DesktopServerAutomationRoute : IDisposable
     {
         var list = await _devices.RefreshAsync(cancellationToken).ConfigureAwait(false);
         // An automation of a team is sealed for its machine and every maintainer of the team, as the access document says.
+        if (OfOrganization && Access is { } organization)
+            return FleetAutomationSigning.SealForOrganization(content, automationId, number, machineId, list, await organization.RefreshAsync(cancellationToken).ConfigureAwait(false),
+                _identity);
         if (TeamId is { } team && Access is { } access)
             return FleetAutomationSigning.SealForTeam(content, automationId, number, machineId, team, list, await access.RefreshAsync(cancellationToken).ConfigureAwait(false), _identity);
         return FleetAutomationSigning.Seal(content, automationId, number, machineId, list, _identity);

@@ -116,7 +116,7 @@ internal sealed class FleetAutomationService
         if (machine is null || machine.OrganizationId != actor.OrganizationId || machine.Kind != FleetDeviceKinds.Node)
             throw CoordinatorException.NotFound(CoordinatorErrorCodes.DeviceNotFound, "No machine of the organization has this id.");
         if (machine.Status != DeviceStatuses.Approved) throw CoordinatorException.Conflict(CoordinatorErrorCodes.DeviceState, "The machine is not a member of the device list.");
-        var team = await TeamGivenAsync(actor.OrganizationId, version, machine, person, cancellationToken).ConfigureAwait(false);
+        var scope = await ScopeGivenAsync(actor.OrganizationId, version, machine, person, cancellationToken).ConfigureAwait(false);
         if (!version.Removed) await RequireOwnedAsync(actor.OrganizationId, version.AutomationId, person, cancellationToken).ConfigureAwait(false);
 
         var record = new AutomationRecord(actor.OrganizationId, version.AutomationId, version.MachineId, person, version.Number, version.Removed, version.Enabled,
@@ -131,11 +131,12 @@ internal sealed class FleetAutomationService
         }
 
         // An automation of a team is the team's from its first version: its maintainers change it, and its runs act as the team.
-        if (team is not null && !version.Removed && Access is { } access
+        if (scope is { } owner && !version.Removed && Access is { } access
             && (await access.ReadAccessAsync(actor.OrganizationId, cancellationToken).ConfigureAwait(false)).Owner(FleetResourceKinds.Automation, version.AutomationId) is null)
         {
-            await access.PutResourceOwnerAsync(new ResourceOwnerRecord(actor.OrganizationId, FleetResourceKinds.Automation, version.AutomationId, FleetPrincipalKinds.Team, team, person,
-                null, false, _time.GetUtcNow()), origin.Audit("owner.set", actor, version.AutomationId, details: $"{{\"team\":\"{team}\"}}"), CancellationToken.None).ConfigureAwait(false);
+            await access.PutResourceOwnerAsync(new ResourceOwnerRecord(actor.OrganizationId, FleetResourceKinds.Automation, version.AutomationId, owner.Kind, owner.Id, person,
+                null, false, _time.GetUtcNow()), origin.Audit("owner.set", actor, version.AutomationId, details: $"{{\"{owner.Kind}\":\"{owner.Id}\"}}"),
+                CancellationToken.None).ConfigureAwait(false);
         }
 
         _logger.LogInformation("Automation {Automation} version {Number} for {Machine} was {Action} by {Device}", version.AutomationId, version.Number, version.MachineId,
@@ -259,18 +260,27 @@ internal sealed class FleetAutomationService
         return new AutomationRunDto(runId, id, run.MachineId, held.Number, "manual", FleetAutomationRunRequest.TakeOverAction, run.Time, null, null, null, null, null);
     }
 
-    // Whether the person maintains the team that owns an automation.
+    // Whether the person answers for an automation of a scope: a maintainer of its team, an owner or admin for the organization.
     private async Task<bool> MaintainsAsync(string organizationId, string automationId, string person, CancellationToken cancellationToken)
         => Access is { } access && (await access.ReadAccessAsync(organizationId, cancellationToken).ConfigureAwait(false)) is var snapshot
-            && snapshot.Owner(FleetResourceKinds.Automation, automationId) is { OwnerKind: FleetPrincipalKinds.Team } owner && snapshot.TeamRole(owner.OwnerId, person) == FleetTeamRoles.Maintainer;
+            && snapshot.Owner(FleetResourceKinds.Automation, automationId) is { } owner && Answers(snapshot, owner, person);
+
+    private static bool Administers(AccessSnapshot snapshot, string person) => snapshot.Person(person) is { IsActive: true } held && FleetOrganizationRoles.Administers(held.Role);
+
+    private static bool Answers(AccessSnapshot snapshot, ResourceOwnerRecord owner, string person) => owner.OwnerKind switch
+    {
+        FleetPrincipalKinds.Team => snapshot.TeamRole(owner.OwnerId, person) == FleetTeamRoles.Maintainer,
+        FleetPrincipalKinds.Organization => Administers(snapshot, person),
+        _ => false,
+    };
 
     // The versions of the automations owned by the teams a person maintains.
     private async Task<IReadOnlyList<AutomationRecord>> TeamAutomationsAsync(string organizationId, string person, CancellationToken cancellationToken)
     {
         if (Access is not { } access) return [];
         var snapshot = await access.ReadAccessAsync(organizationId, cancellationToken).ConfigureAwait(false);
-        var ids = snapshot.Owners.Where(owner => owner.ResourceKind == FleetResourceKinds.Automation && owner.OwnerKind == FleetPrincipalKinds.Team
-                && snapshot.TeamRole(owner.OwnerId, person) == FleetTeamRoles.Maintainer).Select(static owner => owner.ResourceId).ToHashSet(StringComparer.Ordinal);
+        var ids = snapshot.Owners.Where(owner => owner.ResourceKind == FleetResourceKinds.Automation && Answers(snapshot, owner, person))
+            .Select(static owner => owner.ResourceId).ToHashSet(StringComparer.Ordinal);
         if (ids.Count == 0) return [];
         var found = new List<AutomationRecord>();
         foreach (var giver in (await _automations.ListAutomationHoldersAsync(organizationId, cancellationToken).ConfigureAwait(false)).Where(holder => ids.Contains(holder.AutomationId))
@@ -289,23 +299,34 @@ internal sealed class FleetAutomationService
         if (Access is not { } access) return;
         var snapshot = await access.ReadAccessAsync(organizationId, cancellationToken).ConfigureAwait(false);
         if (snapshot.Owner(FleetResourceKinds.Automation, automationId) is { } owner && !(owner.OwnerKind == FleetPrincipalKinds.Person && owner.OwnerId == person)
-            && !(owner.OwnerKind == FleetPrincipalKinds.Team && snapshot.TeamRole(owner.OwnerId, person) == FleetTeamRoles.Maintainer))
+            && !(owner.OwnerKind == FleetPrincipalKinds.Team && snapshot.TeamRole(owner.OwnerId, person) == FleetTeamRoles.Maintainer)
+            && !(owner.OwnerKind == FleetPrincipalKinds.Organization && Administers(snapshot, person)))
             throw CoordinatorException.Forbidden(FleetErrorCodes.Forbidden, "This automation was given to another owner: its former owner only takes it off their machines.");
     }
 
     // Who may give a machine a version (doc/fleet/orchestration.md, scopes): its owner, for a personal machine; for a machine of a
     // team, a maintainer of that team, and a member when the team runs the automations of its members. An automation of a team
     // (scope team:<id>) is signed by a maintainer of that team for one of its machines. Gives the team of a version of a team.
-    private async Task<string?> TeamGivenAsync(string organizationId, FleetAutomationVersion version, DeviceRecord machine, string person, CancellationToken cancellationToken)
+    private async Task<(string Kind, string Id)?> ScopeGivenAsync(string organizationId, FleetAutomationVersion version, DeviceRecord machine, string person,
+        CancellationToken cancellationToken)
     {
         var snapshot = Access is { } access ? await access.ReadAccessAsync(organizationId, cancellationToken).ConfigureAwait(false) : null;
+        // A machine of the organization takes the automations of the organization, from its owners and admins only.
+        var ofOrganization = snapshot?.Owner(FleetResourceKinds.Machine, machine.Id) is { OwnerKind: FleetPrincipalKinds.Organization };
+        if (version.IsOrganizationScope || ofOrganization)
+        {
+            if (!version.IsOrganizationScope || !ofOrganization || snapshot!.Person(person) is not { IsActive: true } giver || !FleetOrganizationRoles.Administers(giver.Role))
+                throw CoordinatorException.Forbidden(FleetErrorCodes.Forbidden, "An automation of the organization is given by an owner or an admin to a machine of the organization, which runs no other.");
+            return (FleetPrincipalKinds.Organization, organizationId);
+        }
+
         var held = snapshot?.Owner(FleetResourceKinds.Machine, machine.Id) is { OwnerKind: FleetPrincipalKinds.Team } owner ? owner.OwnerId : null;
         var role = held is null ? null : snapshot!.TeamRole(held, person);
         if (version.TeamId is { } team)
         {
             if (held != team || role != FleetTeamRoles.Maintainer)
                 throw CoordinatorException.Forbidden(FleetErrorCodes.Forbidden, "An automation of a team is given by one of its maintainers to a machine of that team.");
-            return team;
+            return (FleetPrincipalKinds.Team, team);
         }
 
         if (held is null)

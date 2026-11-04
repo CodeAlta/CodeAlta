@@ -325,6 +325,43 @@ public sealed class NodeServerAutomationTests
     }
 
     [TestMethod]
+    public async Task AMachineOfTheOrganization_RunsItsAutomationsAsItsServiceIdentity_WithAccountCredentialsOnly()
+    {
+        var token = TestContext.CancellationToken;
+        using var root = new NodeTestRoot();
+        await using var node = await NodeHost.StartAsync(root.Options() with
+        {
+            Automations = new NodeAutomationOptions
+            {
+                TimeProvider = new NodeClock { Now = Noon }, TimeZone = TimeZoneInfo.Utc, WatchRepositories = false,
+                CredentialKind = static provider => provider.ProviderId.Value == "plan" ? AutomationCredentialKind.Personal : AutomationCredentialKind.Account,
+            },
+        }, token);
+        using var laptop = DeviceIdentity.LoadOrCreate(Path.Combine(root.Root, "laptop"));
+        using var tablet = DeviceIdentity.LoadOrCreate(Path.Combine(root.Root, "tablet"));
+        using var self = DeviceIdentity.LoadOrCreate(Path.Combine(root.Root, "self"));
+        var automations = node.Automations!;
+        automations.DeviceId = self.DeviceId;
+        var list = DeviceList(laptop, tablet, self, removeTablet: false);
+        automations.ServerDevices = _ => list;
+        var access = FleetAccessState.Empty with { OrganizationId = "org", Number = 1, Owners = ["p1"], OrganizationMachines = [self.DeviceId] };
+        automations.ServerAccess = _ => access;
+        var sealedText = FleetAutomationSigning.SealForOrganization(new FleetAutomationContent(Definition, null), Id, 1, self.DeviceId, list, access, tablet);
+        var signed = FleetAutomationSigning.Sign(tablet, new FleetAutomationVersion(FleetAutomationVersion.CurrentVersion, "org", Id, 1, self.DeviceId, false, true, ["hourly"],
+            null, null, sealedText, string.Empty, string.Empty, DateTimeOffset.UtcNow) { Scope = FleetAutomationVersion.OrganizationScope });
+        var outcome = await automations.AcceptFromServerAsync("link-1", list, "org", signed,
+            version => FleetAutomationSigning.TryOpen(version.Sealed, version.AutomationId, version.Number, version.MachineId, self, list, access, out var content, out var reason)
+                ? (content, null) : (null, reason), token);
+        Assert.IsTrue(outcome.Applied, outcome.Message);
+        var entry = automations.Engine.Snapshot.Find(Id)!;
+        var account = new CodeAlta.Agent.ModelProviderDescriptor(new("gateway"), "Gateway");
+        StringAssert.Contains(automations.Check(entry, account), "service identit");
+        access = access with { OrganizationServices = ["svc-org"] };
+        Assert.IsNull(automations.Check(entry, account));
+        StringAssert.Contains(automations.Check(entry, new CodeAlta.Agent.ModelProviderDescriptor(new("plan"), "Plan")), "account credentials only");
+    }
+
+    [TestMethod]
     public async Task TheAutomationsAServerGaveStopOnceTheNodeLeftItAndAReplayedVersionIsRefused()
     {
         var token = TestContext.CancellationToken;
