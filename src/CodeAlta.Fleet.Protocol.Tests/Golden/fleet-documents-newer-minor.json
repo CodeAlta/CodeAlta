@@ -1,0 +1,53 @@
+{
+  "organization": "org-golden",
+  "ids": {
+    "founder": "q5s4rgfehoaylvbhx5wnjdkdeq",
+    "node": "2vd77i3r2mzo6rkkn7metbbqjm",
+    "teamMachine": "ccayfnknta35tiaswc7vqcjv7u",
+    "ada": "d2hnalr6bab35gccgcvnlsi6iu",
+    "adaNode": "j63ti6ei3arjvi5oahnl33o33u"
+  },
+  "keys": {
+    "node": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAERQcAd97YAvD1hVIpAZ0i8jJUdmXSAXMeMJyK/LH5GWzZDb2FZYIpodvbOtJPlVxbPuVeL/OEilfxKavueECeCA=="
+  },
+  "deviceList": [
+    {
+      "payload": "{\u0022v\u0022:1,\u0022org\u0022:null,\u0022seq\u0022:1,\u0022prev\u0022:null,\u0022op\u0022:\u0022add\u0022,\u0022device\u0022:\u0022q5s4rgfehoaylvbhx5wnjdkdeq\u0022,\u0022key\u0022:\u0022MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAENLYGighYDqIDFlWq3m9AvQ6HxqaUwkJbfhy5jhGdxbiJukgDUCTr4/hGN2hps2GZvE\\u002BGaKhxT5UBMuODgkLeuA==\u0022,\u0022kind\u0022:\u0022controller\u0022,\u0022owner\u0022:null,\u0022signer\u0022:\u0022q5s4rgfehoaylvbhx5wnjdkdeq\u0022,\u0022time\u0022:\u00222026-11-04T09:00:00\u002B00:00\u0022}",
+      "sig": "ZzORO9e_azdcYWpMIr2bN3UsSZPI_5Y6UlV_pF2yCeOLGxH45pUA80_2ws9vgCzeQMUmlH-q_9_EvFhd9vn9kg"
+    },
+    {
+      "payload": "{\u0022v\u0022:1,\u0022org\u0022:\u0022org-golden\u0022,\u0022seq\u0022:2,\u0022prev\u0022:\u0022jurIbhVtMm8XFYusQonldRwf8RrGR-Qu1afzLXwSAQQ\u0022,\u0022op\u0022:\u0022add\u0022,\u0022device\u0022:\u00222vd77i3r2mzo6rkkn7metbbqjm\u0022,\u0022key\u0022:\u0022MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAERQcAd97YAvD1hVIpAZ0i8jJUdmXSAXMeMJyK/LH5GWzZDb2FZYIpodvbOtJPlVxbPuVeL/OEilfxKavueECeCA==\u0022,\u0022kind\u0022:\u0022node\u0022,\u0022owner\u0022:\u0022alex\u0022,\u0022signer\u0022:\u0022q5s4rgfehoaylvbhx5wnjdkdeq\u0022,\u0022time\u0022:\u00222026-11-04T09:00:00\\u002B00:00\u0022,\u0022labels\u0022:[\u0022gpu\u0022],\u0022sandboxRequired\u0022:true}",
+      "sig": "Rm4zVvvmLJVN_slQ5LYHexDVGNZkAr0_yWx6NSr--fydLConw7EIfkqS4vMkpqISJ4P9rMqdfJbfQyMajvhP9A"
+    },
+    {
+      "payload": "{\u0022v\u0022:1,\u0022org\u0022:\u0022org-golden\u0022,\u0022seq\u0022:3,\u0022prev\u0022:\u00221dPUsK827KA3Br3iN0JfGG_f-CyUX0SIH0Kq5pi-16E\u0022,\u0022op\u0022:\u0022add\u0022,\u0022device\u0022:\u0022ccayfnknta35tiaswc7vqcjv7u\u0022,\u0022key\u0022:\u0022MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEzbJyKeultxkiK/EpEdJlsg91qGQSKLqdu2cH2PcbBmCK5RbS1aRqirnQbcNt0HSBSFjRxiOh0CZ9L7UMzmdJtQ==\u0022,\u0022kind\u0022:\u0022team-machine\u0022,\u0022owner\u0022:null,\u0022signer\u0022:\u0022q5s4rgfehoaylvbhx5wnjdkdeq\u0022,\u0022time\u0022:\u00222026-11-04T09:00:00\\u002B00:00\u0022,\u0022team\u0022:\u0022team-build\u0022}",
+      "sig": "_xNIvjyWp51PTBCOcTkrluQ66AtzIrtnNB7wGnp4WWg-8r5fSYXK11L_dYbhJLhNcjou-LQ87UxlaWoeBrqdeA"
+    },
+    {
+      "payload": "{\u0022v\u0022:1,\u0022org\u0022:\u0022org-golden\u0022,\u0022seq\u0022:4,\u0022prev\u0022:\u0022Dpi2iu6ioXHAqvJjsGb_SDvcFXCd0MClHYW6IB0rlHg\u0022,\u0022op\u0022:\u0022rotate\u0022,\u0022device\u0022:\u00222vd77i3r2mzo6rkkn7metbbqjm\u0022,\u0022key\u0022:null,\u0022kind\u0022:null,\u0022owner\u0022:\u0022alex\u0022,\u0022signer\u0022:\u0022q5s4rgfehoaylvbhx5wnjdkdeq\u0022,\u0022time\u0022:\u00222026-11-04T09:00:00\\u002B00:00\u0022,\u0022newKey\u0022:\u0022MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEu3l3CRiWYK0aJuUpL9wiplU9jbt2XA\\u002BI0LE0sFgoyA0NeIZdUmtgIfBlPojJOHR0LizEzDkYruDu8QJl8jqpRA==\u0022}",
+      "sig": "rHxJ01Ik_8L4eAAYxMp-I9LAz9uU9VT8A1MrA1tHx6OXM6CPHgGPay-ijSHwbkjhkvIo_jNDUYJGEA6aXa2u0A"
+    },
+    {
+      "payload": "{\u0022v\u0022:1,\u0022org\u0022:\u0022org-golden\u0022,\u0022seq\u0022:5,\u0022prev\u0022:\u00224SL-AmrA1lgACh3w9GCT_1yflrl9daASA0mDv9dMx-g\u0022,\u0022op\u0022:\u0022add\u0022,\u0022device\u0022:\u0022d2hnalr6bab35gccgcvnlsi6iu\u0022,\u0022key\u0022:\u0022MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEWqiZm2YsCvTLefx7krlXzRO1zEIBPCv/9YNyPZa6CNSISrmr6NvuP5xvEas9Y3kV72yu\\u002BcpjRaT8El90foppvg==\u0022,\u0022kind\u0022:\u0022controller\u0022,\u0022owner\u0022:\u0022ada\u0022,\u0022signer\u0022:\u0022q5s4rgfehoaylvbhx5wnjdkdeq\u0022,\u0022time\u0022:\u00222026-11-04T09:00:00\\u002B00:00\u0022,\u0022invitedBy\u0022:\u0022alex\u0022}",
+      "sig": "wq7pXuGeI_nvvPi0d6Yq6Ol2twDFRztEFhvxy2P7ynD9c9ScIb4qh7LUYUFlT9L81fqGBHRw0EkKO7z0HAUwSg"
+    },
+    {
+      "payload": "{\u0022v\u0022:1,\u0022org\u0022:\u0022org-golden\u0022,\u0022seq\u0022:6,\u0022prev\u0022:\u0022Au-_zSOIDCWZSBSUjA4HUF7a2_uj64mVerx0R6sKFKM\u0022,\u0022op\u0022:\u0022remove\u0022,\u0022device\u0022:\u0022ccayfnknta35tiaswc7vqcjv7u\u0022,\u0022key\u0022:null,\u0022kind\u0022:null,\u0022owner\u0022:null,\u0022signer\u0022:\u0022q5s4rgfehoaylvbhx5wnjdkdeq\u0022,\u0022time\u0022:\u00222026-11-04T09:00:00\\u002B00:00\u0022,\u0022why\u0022:\u0022retired\u0022}",
+      "sig": "wYlT8DLE90o8G4rsyXBUhGNS4gvtMOwNuvP2excCa_JBLlpgpR_UCgaw7EtdxUNQuE7nNPDVhRxm1BCxMqTkjA"
+    },
+    {
+      "payload": "{\u0022v\u0022:1,\u0022org\u0022:\u0022org-golden\u0022,\u0022seq\u0022:7,\u0022prev\u0022:\u0022Qm-G7dKG7ST_1na-oKNYtM4HLTcicUCSKlo4Av_J6tw\u0022,\u0022op\u0022:\u0022add\u0022,\u0022device\u0022:\u0022j63ti6ei3arjvi5oahnl33o33u\u0022,\u0022key\u0022:\u0022MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEw2lguOwIL4YZaCycfRXaBHbD7y1ajFGiMwaEF6XcPezL5owYHVcHzLUoBAdO7Ormf5xDZ6VYfq3Ae1wwhVRNvA==\u0022,\u0022kind\u0022:\u0022node\u0022,\u0022owner\u0022:\u0022ada\u0022,\u0022signer\u0022:\u0022d2hnalr6bab35gccgcvnlsi6iu\u0022,\u0022time\u0022:\u00222026-11-04T09:00:00\\u002B00:00\u0022}",
+      "sig": "Ij932OPZL-2OpaV6IN5jqsZOcyHvhsGtLFzAvllgynXj8mh-ZvPygbn4OWs8v8JqarZUqA9pYE--2VweGkM7bQ"
+    }
+  ],
+  "accessDocuments": [
+    {
+      "payload": "{\u0022v\u0022:1,\u0022org\u0022:\u0022org-golden\u0022,\u0022number\u0022:1,\u0022prev\u0022:null,\u0022list\u0022:7,\u0022owners\u0022:[\u0022alex\u0022],\u0022signers\u0022:[\u0022ada\u0022],\u0022teams\u0022:[{\u0022id\u0022:\u0022team-build\u0022,\u0022maintainers\u0022:[\u0022ada\u0022],\u0022members\u0022:[],\u0022runsMemberAutomations\u0022:false,\u0022labels\u0022:[\u0022ci\u0022]}],\u0022machines\u0022:[],\u0022suspended\u0022:[],\u0022signer\u0022:\u0022q5s4rgfehoaylvbhx5wnjdkdeq\u0022,\u0022time\u0022:\u00222026-11-04T09:00:00\\u002B00:00\u0022,\u0022roles\u0022:{\u0022ada\u0022:\u0022admin\u0022},\u0022retention\u0022:{\u0022days\u0022:30}}",
+      "sig": "XidQKMV3H89qsmF0BJlf3q9QBpGTviEEM8g3vansMedwVzaotc6EqadH8S3oHaEwr3FMuq6obX6yFP3W8P58Pw"
+    },
+    {
+      "payload": "{\u0022v\u0022:1,\u0022org\u0022:\u0022org-golden\u0022,\u0022number\u0022:2,\u0022prev\u0022:\u0022O_Za4hXRU5jlsrNkvUkLIvsgaywxYLQQG5Gvcf0DcMs\u0022,\u0022list\u0022:7,\u0022owners\u0022:[\u0022alex\u0022],\u0022signers\u0022:[\u0022ada\u0022],\u0022teams\u0022:[{\u0022id\u0022:\u0022team-build\u0022,\u0022maintainers\u0022:[\u0022ada\u0022],\u0022members\u0022:[],\u0022runsMemberAutomations\u0022:false,\u0022labels\u0022:[\u0022ci\u0022]}],\u0022machines\u0022:[],\u0022suspended\u0022:[\u0022eve\u0022],\u0022signer\u0022:\u0022d2hnalr6bab35gccgcvnlsi6iu\u0022,\u0022time\u0022:\u00222026-11-04T09:00:00\\u002B00:00\u0022,\u0022note\u0022:\u0022Eve left\u0022}",
+      "sig": "SWQed3j8Se4rzQXXTAFEC_X196bG-eHR4vRykvGnd9Gjh20gpk7349ORN57iiQHGHYRLsRDF9p8nM1ZQUYQCOQ"
+    }
+  ]
+}

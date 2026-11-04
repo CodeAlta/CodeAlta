@@ -448,7 +448,8 @@ public sealed class DeviceService
         var person = actor.OwnerPersonId is null ? null : await _store.GetPersonAsync(actor.OwnerPersonId, cancellationToken).ConfigureAwait(false);
         if (person is null || person.Role != PersonRoles.Owner) return false;
         var entries = await _store.ListDeviceListAsync(actor.OrganizationId, cancellationToken).ConfigureAwait(false);
-        var list = FleetDeviceListVerifier.Verify(entries.Select(static entry => new FleetSignedDeviceListEntry(entry.Payload, entry.Signature)), actor.OrganizationId);
+        var list = FleetDeviceListVerifier.Verify(entries.Select(static entry => new FleetSignedDeviceListEntry(entry.Payload, entry.Signature)), actor.OrganizationId,
+            FleetDeviceListMode.Tolerant);
         if (!list.IsValid) return false;
         var state = list.State;
         if (!state.Members.TryGetValue(actor.Id, out var signer) || signer.OwnerId != actor.OwnerPersonId) return false;

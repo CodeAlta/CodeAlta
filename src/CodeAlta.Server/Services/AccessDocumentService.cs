@@ -94,7 +94,8 @@ internal sealed class AccessDocumentService
         if (!FleetAccessDocuments.TryReadSigned(request?.Document, key, out var document, out var reason)) throw Invalid(reason);
         if (document.OrganizationId != actor.OrganizationId) throw Invalid("it names another organization");
         var entries = await _store.ListDeviceListAsync(actor.OrganizationId, cancellationToken).ConfigureAwait(false);
-        var devices = FleetDeviceListVerifier.VerifyOrThrow(entries.Select(static entry => new FleetSignedDeviceListEntry(entry.Payload, entry.Signature)), actor.OrganizationId);
+        var devices = FleetDeviceListVerifier.VerifyOrThrow(entries.Select(static entry => new FleetSignedDeviceListEntry(entry.Payload, entry.Signature)), actor.OrganizationId,
+            FleetDeviceListMode.Tolerant);
         var held = await _access.ListAccessDocumentsAsync(actor.OrganizationId, 0, cancellationToken).ConfigureAwait(false);
         var chain = FleetAccessDocuments.Verify([.. held.Select(static item => new FleetSignedAccessDocument(item.Payload, item.Signature)), request!.Document], devices,
             actor.OrganizationId);
@@ -123,7 +124,8 @@ internal sealed class AccessDocumentService
             return FleetAccessDocuments.TryParse(documents[^1].Payload, out var last) && !last.Suspended.Contains(personId, StringComparer.Ordinal)
                 && (last.Owners.Contains(personId, StringComparer.Ordinal) || last.Signers.Contains(personId, StringComparer.Ordinal));
         var entries = await _store.ListDeviceListAsync(organizationId, cancellationToken).ConfigureAwait(false);
-        var list = FleetDeviceListVerifier.Verify(entries.Select(static entry => new FleetSignedDeviceListEntry(entry.Payload, entry.Signature)), organizationId).State;
+        var list = FleetDeviceListVerifier.Verify(entries.Select(static entry => new FleetSignedDeviceListEntry(entry.Payload, entry.Signature)), organizationId,
+            FleetDeviceListMode.Tolerant).State;
         return list.FirstDeviceId is { } first && list.Tenures.TryGetValue(first, out var tenure) && tenure.Member.OwnerId == personId;
     }
 

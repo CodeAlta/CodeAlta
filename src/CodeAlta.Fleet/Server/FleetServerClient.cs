@@ -293,7 +293,8 @@ public sealed partial class FleetServerClient : IDisposable
                 throw new FleetDeviceListException(index + 1, "the server's sequence or hash of the entry does not match the entry");
         }
 
-        return FleetDeviceListVerifier.VerifyOrThrow(list.Select(static item => item.Entry), organizationId);
+        // A list a newer version extended stays readable: what these rules do not understand adds no member (doc/fleet/protocol.md, versions).
+        return FleetDeviceListVerifier.VerifyOrThrow(list.Select(static item => item.Entry), organizationId, FleetDeviceListMode.Tolerant);
     }
 
     // The list as the anchor of this server verifies it: the one every entry signed here follows.

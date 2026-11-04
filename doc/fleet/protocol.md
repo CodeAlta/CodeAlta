@@ -128,6 +128,15 @@ follows carries the state.
 - Within 4.x, fields are only added, never repurposed or removed; unknown fields and events are ignored; an unknown
   method answers `method_not_found`. Features are announced (`features` in the welcome), never inferred from a version.
 - `protocol {min, max}` in the handshake; a breaking change is a new major version, announced in the release notes.
+- **Signed documents** (device-list entries, the access document, settings and policies) keep their format version
+  within 4.x and grow by fields only; a verifier reads past the fields it does not know. A device *replays* the device
+  list tolerantly: an authentic entry (chain, organization, a controller signer and its signature hold) whose operation,
+  device class or addition its rules do not understand stays in the chain without effect, adds no member, and is shown
+  as skipped; the removal of such a device still counts as a removal. What a device *signs* and what a server *keeps*
+  must be understood (strict), so a newer feature waits for the server that knows it. A revocation is always a
+  `remove` of the device, never a new operation, so that no older verifier misses one. A golden file of documents a
+  newer minor signed (`CodeAlta.Fleet.Protocol.Tests/Golden`) is verified by every build; once released it does not
+  change.
 
 ## Services
 
