@@ -43,8 +43,8 @@ public sealed class NodeHealthTests
         var servers = NodeServers.Start(node, null, "test-node", "1.0.0", Fast);
         try
         {
-            // Any disk is low for this node: the problem is in every heartbeat.
-            servers.Health.MinimumFreeBytes = long.MaxValue;
+            // The disk of this node is low (1 MiB left of 100 GiB): the problem is in every heartbeat.
+            servers.Health.DiskSpace = () => (1024 * 1024, 100 * 1024L * 1024 * 1024);
             Assert.AreEqual(FleetHealthKinds.DiskLow, servers.Health.Read().Single().Kind);
             var manager = new FleetBudgetsManager(new FleetOrganizationDevices(address, desktopKey, Path.Combine(root.Root, "desktop-link", FleetOrganizationDevices.PinFileName)));
             var told = await WaitForAsync(async () => (await manager.ListNotificationsAsync(token)).Notifications
@@ -56,7 +56,7 @@ public sealed class NodeHealthTests
             Assert.AreEqual(1, (await manager.ListNotificationsAsync(token)).Notifications.Count(static notification => notification.Problem == FleetHealthKinds.DiskLow));
 
             // Room again: the next heartbeats end it.
-            servers.Health.MinimumFreeBytes = 0;
+            servers.Health.DiskSpace = () => (50 * 1024L * 1024 * 1024, 100 * 1024L * 1024 * 1024);
             await WaitForAsync(async () => (await manager.ListNotificationsAsync(token)).Notifications
                 .FirstOrDefault(static notification => notification.Problem == FleetHealthKinds.DiskLow && notification.ResolvedAt is not null), token);
         }

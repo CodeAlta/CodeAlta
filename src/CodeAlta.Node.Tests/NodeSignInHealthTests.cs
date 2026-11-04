@@ -30,7 +30,7 @@ public sealed class NodeSignInHealthTests
         };
         var health = new NodeHealth(node)
         {
-            MinimumFreeBytes = 0,
+            DiskSpace = () => (500 * 1024L * 1024 * 1024, 1000 * 1024L * 1024 * 1024),
             SignInDefinitions = () => [.. statuses.Keys.Select(static key => new CodeAltaProviderDocument { ProviderKey = key, ProviderType = "xai" })],
             SignInStatus = (definition, _) => Task.FromResult(statuses[definition.ProviderKey]),
         };
@@ -45,5 +45,25 @@ public sealed class NodeSignInHealthTests
         statuses["grok"] = new(true, null, null, now.AddDays(30));
         await health.RefreshSignInsAsync(token);
         Assert.AreEqual(0, health.Read().Count);
+    }
+
+    [TestMethod]
+    public async Task ALargeDiskWithTensOfGigabytesLeft_IsNotLow_ButOneUnderTheMinimumIs()
+    {
+        var token = TestContext.CancellationToken;
+        using var root = new NodeTestRoot();
+        await using var node = await NodeHost.StartAsync(root.Options(), token);
+        const long GiB = 1024L * 1024 * 1024;
+        var space = (Free: 80 * GiB, Total: 1862 * GiB);
+        var health = new NodeHealth(node) { SignInDefinitions = static () => [], DiskSpace = () => space };
+
+        // 80 GiB left of 1.8 TiB is under a twentieth of the disk, but far above what a twentieth may ask (10 GiB).
+        Assert.AreEqual(0, health.Read().Count);
+
+        // A small disk under its twentieth, and any disk under the minimum, are low.
+        space = (3 * GiB, 100 * GiB);
+        Assert.AreEqual(FleetHealthKinds.DiskLow, health.Read().Single().Kind);
+        space = (1 * GiB, 1862 * GiB);
+        Assert.AreEqual(FleetHealthKinds.DiskLow, health.Read().Single().Kind);
     }
 }
