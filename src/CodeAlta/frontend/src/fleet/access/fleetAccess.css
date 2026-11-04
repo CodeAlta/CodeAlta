@@ -16,5 +16,8 @@
 .fleet-access-members li { display: inline-flex; align-items: center; gap: 4px; }
 .fleet-access-team-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; }
 .fleet-access-team-actions .bp6-control { margin: 0; }
+.fleet-access-oncall { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 16px; font-size: 12px; }
+.fleet-access-oncall-actions { display: inline-flex; align-items: center; gap: 12px; }
+.fleet-access-oncall .bp6-control { margin: 0; }
 .fleet-access-footer { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; }
 .fleet-access-footer .bp6-control { margin: 0; }

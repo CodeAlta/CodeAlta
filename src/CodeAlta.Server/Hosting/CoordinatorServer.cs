@@ -502,7 +502,7 @@ public sealed class CoordinatorServer : IAsyncDisposable
         {
             var access = new AccessService(store, store, store, provider.GetRequiredService<NotificationService>(), time)
             {
-                Visibility = provider.GetRequiredService<DirectoryVisibility>(),
+                Visibility = provider.GetRequiredService<DirectoryVisibility>(), OnCall = store, Logins = store,
             };
             var devices = provider.GetRequiredService<DeviceService>();
             var presence = provider.GetRequiredService<PresenceRegistry>();
@@ -525,8 +525,10 @@ public sealed class CoordinatorServer : IAsyncDisposable
             Access = store,
             // The approvals of an automation go to its owner, the members of the team that owns it, and who is granted them.
             Notifications = provider.GetRequiredService<NotificationService>(),
-            ApprovalRecipients = (automation, token) => provider.GetRequiredService<AccessService>().ApproversOfAsync(automation.OrganizationId, automation.AutomationId,
-                automation.OwnerPersonId, token),
+            ApprovalRecipients = (automation, run, token) => provider.GetRequiredService<AccessService>().ApproversOfAsync(automation.OrganizationId, automation.AutomationId,
+                automation.OwnerPersonId, run?.Approvers, run?.OnCall, token),
+            MayTakeOver = (automation, person, token) => provider.GetRequiredService<AccessService>().ApprovesAsync(automation.OrganizationId, automation.AutomationId,
+                automation.OwnerPersonId, person, token),
         });
         services.AddSingleton(provider => new HookService(store, store, provider.GetRequiredService<PresenceRegistry>(), time,
             provider.GetRequiredService<ILoggerFactory>().CreateLogger("CodeAlta.Server.Hooks")));

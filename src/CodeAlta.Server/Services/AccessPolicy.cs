@@ -170,6 +170,45 @@ internal static class AccessPolicy
             && (byRole || !decision.Source.StartsWith("role:", StringComparison.Ordinal))).Select(static person => person.Id)];
     }
 
+    /// <summary>
+    /// Lists the people who answer the approvals of an automation now (<see cref="Approvers"/>), each with when that ends: null
+    /// for one who holds it with no end, the latest end of their grants for one who holds it by grants with an end date only.
+    /// </summary>
+    /// <param name="snapshot">The access of the organization.</param>
+    /// <param name="automation">The automation and its owner.</param>
+    /// <param name="now">The time.</param>
+    /// <returns>The people and their ends, in the order of the snapshot.</returns>
+    /// <exception cref="ArgumentNullException">An argument is null.</exception>
+    public static IReadOnlyList<(string PersonId, DateTimeOffset? Until)> ApproversWithEnds(AccessSnapshot snapshot, AccessTarget automation, DateTimeOffset now)
+    {
+        ArgumentNullException.ThrowIfNull(snapshot);
+        ArgumentNullException.ThrowIfNull(automation);
+        var forever = new HashSet<string>(Approvers(snapshot, automation, DateTimeOffset.MaxValue), StringComparer.Ordinal);
+        var ending = snapshot.Grants.Where(grant => grant.Status == FleetGrantStatuses.Active && grant.Capability == "automation.approve" && grant.ExpiresAt > now).ToList();
+        var list = new List<(string, DateTimeOffset?)>();
+        foreach (var person in Approvers(snapshot, automation, now))
+        {
+            if (forever.Contains(person))
+            {
+                list.Add((person, null));
+                continue;
+            }
+
+            // Only grants that end make them an approver: their latest end is theirs.
+            DateTimeOffset? end = null;
+            foreach (var grant in ending)
+            {
+                if (Decide(snapshot with { Grants = [grant] }, person, "automation.approve", automation, now) is { Allowed: true } decision
+                    && decision.Source.StartsWith("grant:", StringComparison.Ordinal) && (end is null || grant.ExpiresAt > end))
+                    end = grant.ExpiresAt;
+            }
+
+            if (end is not null) list.Add((person, end));
+        }
+
+        return list;
+    }
+
     /// <summary>Gets whether a person's devices sign the access document: an active owner or admin.</summary>
     /// <param name="snapshot">The access of the organization.</param>
     /// <param name="personId">The person.</param>

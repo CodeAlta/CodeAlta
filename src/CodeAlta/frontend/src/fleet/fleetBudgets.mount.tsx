@@ -23,7 +23,7 @@ let overview: FleetBudgetsOverview = {
   holds: [{ id: "h1", budgetId: "b1", budgetName: "Home tokens", machine: "Mac mini", runId: "run-1", title: "Nightly report", status: "waiting",
     requestedAt: "2026-11-04T09:00:00Z" }],
   notifications: [{ id: "n1", kind: "health", severity: "error", budget: null, machine: "Build box", problem: "disk_low", subject: null, detail: "900",
-    createdAt: "2026-11-04T08:00:00Z", resolved: false, read: false }],
+    createdAt: "2026-11-04T08:00:00Z", resolved: false, read: false, machineId: "box" }],
   machines: [{ id: "mac", name: "Mac mini" }, { id: "box", name: "Build box" }], spaces: [{ id: "work", name: "Work" }], projects: [{ id: "api", name: "API" }],
 };
 const ok = async () => ({ status: "ok", message: null });

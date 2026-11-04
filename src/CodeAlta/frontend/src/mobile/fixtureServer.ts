@@ -1,7 +1,8 @@
 import { readFile } from "node:fs/promises";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
-import type { ApprovalRequest, ApprovalResult, Ask, AskResult, BackgroundJob, Live, Options, PromptSelection, Session, SessionChoices, Space, TimelineEvent } from "./contract";
+import type { WaitingRun } from "./contract";
+import type { ApprovalAutomation, ApprovalRequest, ApprovalResult, Ask, AskResult, BackgroundJob, Live, Options, PromptSelection, Session, SessionChoices, Space, TimelineEvent } from "./contract";
 
 /** The policy the plugin's server sets on the page (the contract of the phone page). */
 export const mobilePolicy = "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; manifest-src 'self'; worker-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
@@ -45,6 +46,12 @@ export async function startFixtureServer(files: Readonly<Record<string, Readonly
     approvals: new Map<string, ApprovalRequest[]>(),
     /** What the next answer to a permission request becomes; null: it goes. */
     approvalResult: null as ApprovalResult | null,
+    /** The run of the automation that started each session, as the page of its requests says it. */
+    automations: new Map<string, ApprovalAutomation>(),
+    /** The runs that wait for the person, which the home page lists. */
+    waiting: [] as WaitingRun[],
+    /** What the next take-over answers; null: it is taken over. */
+    takeOverResult: null as Readonly<{ ok: boolean; error: string | null }> | null,
     /** The messages a page of the latest events holds, as the plugin pages them; null: a page holds them all. */
     messagesPerPage: null as number | null,
     /** The reads of older events fail. */
@@ -147,6 +154,13 @@ export async function startFixtureServer(files: Readonly<Record<string, Readonly
       return response.end(found.body);
     }
     if (path === "/api/projects") return send(response, 200, { projects: state.projects, default: "p1", error: null });
+    if (path === "/api/automations/waiting") return send(response, 200, { runs: state.waiting, error: null });
+    if (path === "/api/automations/takeover") {
+      const result = state.takeOverResult ?? { ok: true, error: null };
+      state.takeOverResult = null;
+      if (result.ok) state.waiting = state.waiting.filter(run => run.runId !== (body as { runId: string }).runId);
+      return send(response, 200, result);
+    }
     if (path === "/api/options") return send(response, 200, state.options);
     const jobPath = /^\/api\/sessions\/([^/]+)\/jobs(?:\/([^/]+)(\/stop)?)?$/.exec(path);
     if (jobPath) {
@@ -162,7 +176,7 @@ export async function startFixtureServer(files: Readonly<Record<string, Readonly
       }
       return send(response, 200, { job, text: state.jobOutput.get(jobId) ?? "", truncated: false, error: null });
     }
-    const found = /^\/api\/sessions\/([^/]+)(?:\/(events\/latest|events|prompt|abort|archive|restore|choices|ask|ask\/answer|ask\/cancel|permissions|permissions\/resolve))?$/.exec(path);
+    const found = /^\/api\/sessions\/([^/]+)(?:\/(events\/latest|events|prompt|abort|archive|restore|choices|ask|ask\/answer|ask\/cancel|permissions|permissions\/resolve|takeover))?$/.exec(path);
     if (found) {
       const id = decodeURIComponent(found[1]), action = found[2];
       // An archived session is out of the list, and can still be restored.
@@ -199,7 +213,14 @@ export async function startFixtureServer(files: Readonly<Record<string, Readonly
         return send(response, 200, { since: page.at(-1)?.seq ?? 0, before: page[0]?.seq ?? null, hasMore: start > 0, events: page, error: null });
       }
       if (action === "choices") return send(response, 200, choicesOf(target));
-      if (action === "permissions") return send(response, 200, { requests: state.approvals.get(id) ?? [], hasMore: false, error: null });
+      if (action === "permissions") return send(response, 200, { requests: state.approvals.get(id) ?? [], hasMore: false, error: null, automation: state.automations.get(id) ?? null });
+      if (action === "takeover") {
+        const result = state.takeOverResult ?? { ok: true, error: null };
+        state.takeOverResult = null;
+        const run = state.automations.get(id);
+        if (result.ok && run) state.automations.set(id, { ...run, waiting: false });
+        return send(response, 200, result);
+      }
       if (action === "permissions/resolve") {
         const result = state.approvalResult ?? { ok: true, status: "resolved", error: null };
         state.approvalResult = null;

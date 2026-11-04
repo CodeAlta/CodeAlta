@@ -59,15 +59,20 @@ public sealed class SessionToolGuards
 
     private sealed class Guarded(SessionToolGuards guards, string sessionId, AgentToolInterceptor? plugins) : AgentToolInterceptor
     {
+        // The tools of the session, intercepted: a guard calls one first (a precondition), and that call is guarded too.
+        private readonly ConcurrentDictionary<string, AgentToolDefinition> _tools = new(StringComparer.Ordinal);
+
+        protected override void OnIntercepted(AgentToolDefinition tool) => _tools[tool.Spec.Name] = tool;
+
         public override async ValueTask<AgentToolCallDecision> BeforeToolCallAsync(AgentToolHookCall call, CancellationToken cancellationToken)
         {
             ArgumentNullException.ThrowIfNull(call);
             var decision = plugins is null ? AgentToolCallDecision.Allow : await plugins.BeforeToolCallAsync(call, cancellationToken).ConfigureAwait(false);
             if (decision.BlockMessage is not null || guards.Find(sessionId) is not { } guard) return decision;
             // The guard checks the call as it would run: with the arguments the plugins gave it.
-            var checkedCall = decision.Arguments is { } arguments
+            var checkedCall = (decision.Arguments is { } arguments
                 ? AgentToolHookCall.Create(call.Invocation with { Arguments = arguments }, call.Spec, call.WorkingDirectory, call.Capabilities, call.RunByAgent)
-                : call;
+                : call) with { FindTool = name => _tools.TryGetValue(name, out var tool) ? tool : null };
             var guarded = await guard.BeforeToolCallAsync(checkedCall, cancellationToken).ConfigureAwait(false);
             return guarded.BlockMessage is not null ? guarded : guarded.Arguments is not null ? guarded : decision;
         }

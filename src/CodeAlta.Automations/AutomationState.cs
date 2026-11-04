@@ -84,6 +84,12 @@ internal sealed record AutomationRun(string Id, string AutomationId, DateTimeOff
 
     /// <summary>The calls of allowed tools a try recorded instead of making them, as the tool and its arguments; null for none.</summary>
     public IReadOnlyList<string>? Calls { get; init; }
+
+    /// <summary>
+    /// Gets who its on-call tool said was on call when it started, by email and name: what the server asks when the run waits,
+    /// if they answer the approvals of its automation; null when the automation reads none.
+    /// </summary>
+    public IReadOnlyList<string>? OnCall { get; init; }
 }
 
 /// <summary>What an event trigger has already seen of a repository.</summary>

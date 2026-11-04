@@ -169,7 +169,7 @@ internal static class AutomationIntegrationConfig
     internal static bool IsHookId(string? text)
         => text is { Length: >= 16 and <= MaximumHookLength } && text.All(static ch => ch is >= 'a' and <= 'z' or >= '0' and <= '9');
 
-    private static string? CredentialProblem(string? reference, string what)
+    internal static string? CredentialProblem(string? reference, string what)
     {
         if (reference is null) return $"The {what} is missing: name a secret of this machine, such as ${{secret:NAME}}.";
         // A value written in the file would travel with it, be read by whoever reads the file, and end in backups.
