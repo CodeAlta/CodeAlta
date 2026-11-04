@@ -56,6 +56,11 @@ never by the server.
   project the blind index of its repository, so the server does not learn them.
 - **The server nudges** the machines concerned when a value, an environment or an approval of theirs changes; a machine
   also reads its copies before each run, and drops those of a server that revoked it.
+- **No rollback**: a machine keeps, per organization and across restarts, the newest version it took of each environment
+  (with whether it was taken away) and of each value, and refuses an older one or another definition of the same
+  version, so that a server replaying what it held before loosens no rule and brings back no superseded value.
+- **Rotation reaches only the machines a controller gave the value to**: a controller device seals the next version for
+  the holders whose copy carries a grant a controller device signed, never for a holder the server lists by itself.
 
 ## How a run gets them
 

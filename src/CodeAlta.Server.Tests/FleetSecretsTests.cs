@@ -336,6 +336,69 @@ public sealed class FleetSecretsTests
             new CodeAlta.Catalog.Secrets.SecretReference(CodeAlta.Catalog.Secrets.SecretReferenceKind.Secret, "TOKEN"), out _));
     }
 
+    [TestMethod]
+    public async Task AMachine_RefusesARollBackOfItsEnvironmentsAndValues_AlsoAfterARestart()
+    {
+        await using var fleet = await SecretsFixture.StartAsync();
+        var person = (await fleet.NodeListAsync()).Members[fleet.DesktopKey.DeviceId].OwnerId!;
+        await fleet.Manager.PutEnvironmentAsync("production", [], [], [], false, CancellationToken.None);
+        await fleet.Manager.PutEnvironmentAsync("staging", [], [], [], false, CancellationToken.None);
+        var secret = await fleet.Manager.SetAsync(FleetSecretKinds.Secret, "TOKEN", new FleetSecretScopeDto(FleetSecretScopeKinds.Person), "v1-value", false,
+            [fleet.NodeKey.DeviceId], CancellationToken.None);
+
+        using var replay = new ReplayHandler { InnerHandler = new HttpClientHandler() };
+        using var nodeRoot = new TempDirectory();
+        var store = new CodeAlta.Catalog.Secrets.LocalSecretStore(nodeRoot.Path, new CodeAlta.Catalog.Secrets.MasterKeySecretProtector(
+            new CodeAlta.Catalog.Secrets.FileSecretKeyStore(Path.Combine(nodeRoot.Path, "secrets", "key"))));
+        FleetSecretSync NewSync() => new("link-1", new FleetOrganizationDevices(fleet.Server.BaseAddress, fleet.NodeKey,
+            Path.Combine(fleet.Root.Path, "node-link", FleetOrganizationDevices.PinFileName), replay), null, store, null);
+        var sync = NewSync();
+        replay.Recording = true;
+        await sync.SyncAsync(CancellationToken.None);
+        replay.Recording = false;
+        Assert.AreEqual(1L, sync.Environments["production"].Number);
+
+        // The rules get stricter, staging is taken away, the value is rotated: the machine takes it all.
+        await fleet.Manager.PutEnvironmentAsync("production", [person], [], [], false, CancellationToken.None);
+        await fleet.Manager.PutEnvironmentAsync("staging", [], [], [], true, CancellationToken.None);
+        await fleet.Manager.RotateAsync(secret.Id, "v2-value", CancellationToken.None);
+        await sync.SyncAsync(CancellationToken.None);
+        Assert.AreEqual(2L, sync.Environments["production"].Number);
+        Assert.IsFalse(sync.Environments.ContainsKey("staging"));
+
+        // The server answers what it held before, correctly signed: the machine keeps none of it, also once restarted.
+        replay.Replaying = true;
+        foreach (var refreshed in new[] { sync, NewSync() })
+        {
+            var result = await refreshed.SyncAsync(CancellationToken.None);
+            Assert.IsFalse(refreshed.Environments.TryGetValue("production", out var production) && production.Approvers.Count == 0, "the rule of approval is not dropped");
+            Assert.IsFalse(refreshed.Environments.ContainsKey("staging"), "an environment taken away does not come back");
+            Assert.IsFalse(store.GetSecretValues().Contains("v1-value"), "a superseded value does not come back");
+            Assert.IsTrue(result.Refused.Count >= 3, string.Join("; ", result.Refused));
+        }
+    }
+
+    // Answers the environments and the values of a machine as the server answered them while it recorded.
+    private sealed class ReplayHandler : DelegatingHandler
+    {
+        private readonly System.Collections.Concurrent.ConcurrentDictionary<string, string> _recorded = new(StringComparer.Ordinal);
+
+        public bool Recording { get; set; }
+
+        public bool Replaying { get; set; }
+
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            var path = request.RequestUri!.AbsolutePath;
+            var replayed = request.Method == HttpMethod.Get && (path.EndsWith("/api/v1/environments", StringComparison.Ordinal) || path.EndsWith("/api/v1/secrets/held", StringComparison.Ordinal));
+            if (replayed && Replaying && _recorded.TryGetValue(path, out var body))
+                return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(body, Encoding.UTF8, "application/json") };
+            var response = await base.SendAsync(request, cancellationToken);
+            if (replayed && Recording) _recorded[path] = await response.Content.ReadAsStringAsync(cancellationToken);
+            return response;
+        }
+    }
+
     // The files of the data root, the database and its log included, read while the server holds them open.
     private static bool DataRootHolds(ServerFixture server, string text)
     {
