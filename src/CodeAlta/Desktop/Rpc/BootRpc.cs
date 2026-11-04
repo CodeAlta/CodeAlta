@@ -533,6 +533,8 @@ internal sealed record BootClosing(string? Step, int Seconds, bool CanForceExit)
 [JsonSerializable(typeof(MachineSecretWriteRequest))]
 [JsonSerializable(typeof(MachineSecretNameRequest))]
 [JsonSerializable(typeof(MachineAgentsView))]
+[JsonSerializable(typeof(MachinePeopleView))]
+[JsonSerializable(typeof(MachinePersonRequest))]
 [JsonSerializable(typeof(MachineAgentSpaceRequest))]
 [JsonSerializable(typeof(MachineAgentSandboxRequest))]
 [JsonSerializable(typeof(MachineAgentBypassRequest))]

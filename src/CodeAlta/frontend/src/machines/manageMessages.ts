@@ -130,4 +130,14 @@ export const machineManageMessages = {
   "Up to date.": ["Actualizada.", "À jour.", "Aktuell.", "最新です。", "已是最新。"],
   "This machine does not update itself: update it with dotnet tool update.": ["Esta máquina no se actualiza sola: actualízala con dotnet tool update.", "Cette machine ne se met pas à jour seule : mettez-la à jour avec dotnet tool update.", "Diese Maschine aktualisiert sich nicht selbst: Mit dotnet tool update aktualisieren.", "このマシンは自動更新しません。dotnet tool update で更新してください。", "此机器不会自行更新：请使用 dotnet tool update 更新。"],
   "The update did not go through.": ["La actualización no se completó.", "La mise à jour n’a pas abouti.", "Das Update ist nicht durchgelaufen.", "更新を完了できませんでした。", "更新未能完成。"],
+  "People of your organization who may use {name}, each on their own sessions only.": [
+    "Personas de tu organización que pueden usar {name}, cada una solo en sus propias sesiones.",
+    "Personnes de votre organisation qui peuvent utiliser {name}, chacune sur ses propres sessions seulement.",
+    "Personen deiner Organisation, die {name} nutzen dürfen, jeweils nur in ihren eigenen Sitzungen.",
+    "{name} を使用できる組織のメンバー (各自のセッションのみ)。",
+    "可以使用 {name} 的组织成员，每人仅限自己的会话。"],
+  "{name} asked to use this machine on {date}.": ["{name} pidió usar esta máquina el {date}.", "{name} a demandé à utiliser cette machine le {date}.",
+    "{name} hat am {date} gebeten, diese Maschine zu nutzen.", "{name} が {date} にこのマシンの使用を求めました。", "{name} 于 {date} 请求使用此机器。"],
+  "Let in": ["Dejar entrar", "Laisser entrer", "Zulassen", "許可", "允许"],
+  "Add a person…": ["Añadir una persona…", "Ajouter une personne…", "Person hinzufügen…", "ユーザーを追加…", "添加人员…"],
 } as const satisfies Record<string, Row>;

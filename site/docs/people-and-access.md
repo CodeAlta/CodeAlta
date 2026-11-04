@@ -37,6 +37,10 @@ Click **New team…** and add its members. A team has **maintainers**, who run i
 - **Its machines run the automations of its members**: off by default. Its maintainers' automations run there either way.
 - **Dissolve** gives what the team owned to the organization.
 
+## People on your own machines
+
+Your machines are yours: the people of your organization see and use them only when you let them. When someone tries, their first try becomes a request: the Fleet button tells you, and the page of the machine (**Settings** > **Fleet** > **Machines**, then the machine) shows it under **People**, with **Let in** and **Refuse**. **Add a person…** lets someone in before they ask, and the switches beside each name set what they may do: view, drive and start sessions. A person you let in sees and drives only the sessions they started there, never yours. The machine keeps this list itself: the server cannot add anyone to it.
+
 ## Owners and transfers
 
 Every machine and automation has one owner: a person, a team or the organization. **Machines and automations** lists them; **Give to…** offers one to another owner, who accepts or declines it under **Waiting for you**. An automation that changes owner is **Paused** until its new owner clicks **Resume**.

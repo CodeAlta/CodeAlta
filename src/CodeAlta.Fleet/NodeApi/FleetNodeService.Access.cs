@@ -10,6 +10,31 @@ namespace CodeAlta.Fleet.NodeApi;
 public sealed partial class FleetNodeService
 {
     private FleetSessionPrincipals? _principals;
+    private FleetNodePeople? _people;
+
+    /// <summary>Gets the people of the organization this machine names, and who asks to be let in.</summary>
+    public FleetNodePeople People => LazyInitializer.EnsureInitialized(ref _people, () => new FleetNodePeople(_host.CatalogOptions.FleetRoot, _options.TimeProvider));
+
+    // Who the machine lets in: read and changed by its owner, on the machine or from a device paired to manage it.
+    private void RegisterPeople(FleetNodeCaller caller, Access access)
+    {
+        On(caller, FleetNodeMethods.ControlPeopleGet, access, FleetNodeJsonContext.Default.FleetEmpty, FleetNodeJsonContext.Default.FleetNodePeopleInfo,
+            (_, _, _) => Task.FromResult(People.Read()), optionalParams: true);
+        On(caller, FleetNodeMethods.ControlPeopleSet, access, FleetNodeJsonContext.Default.FleetNodePeopleChange, FleetNodeJsonContext.Default.FleetNodePeopleInfo,
+            (_, change, _) =>
+            {
+                try
+                {
+                    var info = People.Set(change);
+                    LogInfo($"The people of the machine changed: {change.PersonId} {(change.Permissions is { Count: > 0 } names ? string.Join(",", names) : change.Refuse ? "refused" : "removed")}.");
+                    return Task.FromResult(info);
+                }
+                catch (ArgumentException exception)
+                {
+                    throw new FleetException(FleetErrorCodes.InvalidParams, null, exception.Message);
+                }
+            });
+    }
 
     /// <summary>Gets who started each session here through a team membership, kept in the fleet folder of the node.</summary>
     internal FleetSessionPrincipals Principals => LazyInitializer.EnsureInitialized(ref _principals, () => new FleetSessionPrincipals(_host.CatalogOptions.FleetRoot));

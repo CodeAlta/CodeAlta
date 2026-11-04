@@ -148,6 +148,8 @@ internal sealed class DirectoryScope
     {
         if (machineId == _viewer.Id || Broad) return true;
         if (_person is null) return false;
+        // A session a person started (on a team machine, or one whose owner named them) is listed to them.
+        if (personId == _person.Id) return true;
         var (kind, owner) = OwnerOf(machineId);
         if (kind == FleetPrincipalKinds.Person && owner == _person.Id) return true;
         // On a team machine, its maintainers see every session's facts, a member the sessions they started there.

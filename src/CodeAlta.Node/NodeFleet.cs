@@ -381,7 +381,10 @@ internal sealed class NodeServers : IAsyncDisposable
         var statistics = Fleet.Server.FleetHostStatisticsSource.ForHost(node.Host);
         NodeFleetSecrets? secrets = null;
         NodeBudgets? budgets = null;
-        var health = new NodeHealth(node);
+        var health = new NodeHealth(node)
+        {
+            AccessRequests = service is null ? null : () => [.. service.People.Read().Asks.Select(static ask => ask.PersonId)],
+        };
         var connections = new Fleet.Server.FleetServerConnections(new Fleet.Server.FleetServerConnectionsOptions
         {
             FleetRoot = catalog.FleetRoot,

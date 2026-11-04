@@ -171,6 +171,12 @@ export const fleetAccessMessages = {
   "Show teams, grants and service identities": ["Mostrar equipos, permisos e identidades de servicio", "Afficher les équipes, autorisations et identités de service",
     "Teams, Berechtigungen und Dienstidentitäten anzeigen", "チーム、付与、サービス ID を表示", "显示团队、授权和服务身份"],
   "Copy who can do what (CSV)": ["Copiar quién puede hacer qué (CSV)", "Copier qui peut faire quoi (CSV)", "Kopieren, wer was darf (CSV)", "誰が何をできるかをコピー (CSV)", "复制谁能做什么 (CSV)"],
+  "Someone of your organization asks to use {machine}: let them in or refuse on its page.": [
+    "Alguien de tu organización pide usar {machine}: déjalo entrar o recházalo en su página.",
+    "Quelqu’un de votre organisation demande à utiliser {machine} : laissez-le entrer ou refusez sur sa page.",
+    "Jemand aus deiner Organisation möchte {machine} nutzen: auf ihrer Seite zulassen oder ablehnen.",
+    "組織のメンバーが {machine} の使用を求めています。マシンのページで許可または拒否してください。",
+    "组织中有人请求使用 {machine}：请在其页面上允许或拒绝。"],
   "Who can do what was copied as CSV.": ["Se copió quién puede hacer qué en CSV.", "Qui peut faire quoi a été copié en CSV.", "Wer was darf, wurde als CSV kopiert.",
     "誰が何をできるかを CSV でコピーしました。", "已以 CSV 复制谁能做什么。"],
 } satisfies Record<string, Row>;

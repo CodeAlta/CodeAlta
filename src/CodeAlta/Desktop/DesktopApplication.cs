@@ -1051,6 +1051,19 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                     {
                         // A machine this computer manages joins a server this computer owns, and is approved here.
                         machinesService.ServerAddress = linkId => fleetServers.Connections.FirstOrDefault(connection => connection.Link.Id == linkId)?.Link.Url;
+                        // The names of the people a machine lets in, from the servers this computer is linked to.
+                        machinesService.PersonNames = async token =>
+                        {
+                            var names = new Dictionary<string, string>(StringComparer.Ordinal);
+                            foreach (var connection in fleetServers.Connections)
+                            {
+                                var people = await fleetServers.AccessCallAsync(connection.Link.Id, static (client, inner) => client.ListPeopleAsync(inner), token).ConfigureAwait(false);
+                                foreach (var person in people.Items.Where(static person => person.Status == CodeAlta.Fleet.Protocol.FleetPersonStatuses.Active))
+                                    names[person.Id] = person.DisplayName;
+                            }
+
+                            return names;
+                        };
                         machinesService.CreateJoinCode = async (linkId, token) => (await fleetServers.CreateEnrollmentTokenAsync(linkId, TimeSpan.FromMinutes(10),
                             "Added from CodeAlta Desktop", token).ConfigureAwait(false)).Token;
                         machinesService.ApproveDevice = async (linkId, machine, token) => await fleetServers.ApproveMachineAsync(linkId, machine, token).ConfigureAwait(false);
