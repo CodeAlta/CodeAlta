@@ -50,6 +50,29 @@ public sealed class AutomationIntegrationTests
     }
 
     [TestMethod]
+    public async Task AJiraQuery_ReadsAllItsPagesUpToTheCap_AndSaysOnceWhenTheCapIsReached()
+    {
+        await using var fixture = await Fixture.CreateAsync($$"""{ type = "jira_query", {{JiraSettings}}, jql = "project = PLAT" }""");
+        var total = AutomationService.MaximumQueryIssues + 1;
+        fixture.Tools.On(HttpMethod.Post, "/rest/api/3/search/jql", request =>
+        {
+            using var body = JsonDocument.Parse(request.Body);
+            var from = body.RootElement.TryGetProperty("nextPageToken", out var token) ? int.Parse(token.GetString()!, System.Globalization.CultureInfo.InvariantCulture) : 0;
+            var count = Math.Min(body.RootElement.GetProperty("maxResults").GetInt32(), total - from);
+            var issues = string.Join(",", Enumerable.Range(from, count).Select(static n => Issue("PLAT-" + n, "S" + n)));
+            var next = from + count < total ? ",\"nextPageToken\":\"" + (from + count) + "\"" : ",\"isLast\":true";
+            return (HttpStatusCode.OK, "{\"issues\":[" + issues + "]" + next + "}");
+        });
+
+        await fixture.Service.LookAsync(default);
+        await fixture.Service.LookAsync(default);
+
+        Assert.AreEqual(1, fixture.Logged.Count(static line => line.Contains("matches more than 1000 issues", StringComparison.Ordinal)), string.Join("\n", fixture.Logged));
+        Assert.AreEqual(2 * 10, fixture.Tools.To("/rest/api/3/search/jql").Length, "ten pages of 100 a look, and no more");
+        Assert.AreEqual(0, fixture.Runner.Starts.Count, "what matches already is not an event");
+    }
+
+    [TestMethod]
     public async Task AJiraVersion_StartsWhenAVersionIsReleased()
     {
         await using var fixture = await Fixture.CreateAsync($$"""{ type = "jira_version", {{JiraSettings}}, jira_project = "PLAT" }""");
@@ -112,6 +135,35 @@ public sealed class AutomationIntegrationTests
         Assert.AreEqual("Bearer xoxb-bot", reply.Authorization);
         Assert.AreEqual(1, fixture.Runner.Starts.Count);
         Assert.IsTrue(fixture.Tools.To("/api/apps.connections.open").All(static request => request.Authorization == "Bearer xapp-app"));
+    }
+
+    [TestMethod]
+    [DataRow(false)]
+    [DataRow(true)]
+    public async Task ASlackMessageTrigger_DoesNotStartOnTheRepliesInAThreadItAnswered_UnlessAsked(bool threads)
+    {
+        await using var fixture = await Fixture.CreateAsync($$"""{ type = "slack", event = "message", channel = "C0123ABCDEF", app_token = "${secret:SLACK_APP}", bot_token = "${secret:SLACK_BOT}", reply = true{{(threads ? ", threads = true" : string.Empty)}} }""");
+        fixture.Tools.On(HttpMethod.Post, "/api/apps.connections.open", """{"ok":true,"url":"wss://wss.slack.test/link"}""")
+            .On(HttpMethod.Post, "/api/chat.postMessage", """{"ok":true,"ts":"6.0"}""");
+        fixture.Service.Tick(fixture.Clock.Now);
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        var socket = await fixture.Sockets.Accepted.Reader.ReadAsync(timeout.Token);
+
+        await FakeSlackSockets.SendAsync(socket, Envelope("e1", "Ev1", "message", "C0123ABCDEF", "the build is red"));
+        (await fixture.Runner.NextAsync()).Complete(new(AutomationRun.Completed) { Answer = "A flaky test." });
+        await fixture.UntilAsync(() => fixture.Service.Runs(First, 5).FirstOrDefault()?.Reply is not null);
+
+        // A person answers in the thread the automation answered; another one writes in an unrelated thread.
+        await FakeSlackSockets.SendAsync(socket, Threaded("e2", "Ev2", "thanks, rerunning", "5.0", "7.0"));
+        await FakeSlackSockets.SendAsync(socket, Threaded("e3", "Ev3", "unrelated", "4.0", "8.0"));
+        var next = await fixture.Runner.NextAsync();
+        StringAssert.Contains(next.Prompt, threads ? "thanks, rerunning" : "unrelated");
+        // With threads, the unrelated message comes while that run works: it is skipped, not started.
+        await fixture.UntilAsync(() => fixture.Service.Runs(First, 10).Count == (threads ? 3 : 2));
+        next.Complete(new(AutomationRun.Completed));
+        await fixture.UntilAsync(() => !fixture.Service.IsRunning(First));
+        Assert.AreEqual(2, fixture.Runner.Starts.Count);
+        if (threads) Assert.AreEqual(AutomationRun.Skipped, fixture.Service.Runs(First, 10).Single(static run => run.Detail == "unrelated").Status);
     }
 
     [TestMethod]
@@ -196,6 +248,10 @@ public sealed class AutomationIntegrationTests
     private static string Envelope(string envelope, string eventId, string type, string channel, string text)
         => $$$"""{"envelope_id":"{{{envelope}}}","type":"events_api","payload":{"team_id":"T1","event_id":"{{{eventId}}}","event":{"type":"{{{type}}}","channel":"{{{channel}}}","user":"U1","text":"{{{text}}}","ts":"5.0""" + "\"}}}";
 
+    private static string Threaded(string envelope, string eventId, string text, string thread, string ts)
+        => "{\"envelope_id\":\"" + envelope + "\",\"type\":\"events_api\",\"payload\":{\"team_id\":\"T1\",\"event_id\":\"" + eventId
+            + "\",\"event\":{\"type\":\"message\",\"channel\":\"C0123ABCDEF\",\"user\":\"U2\",\"text\":\"" + text + "\",\"ts\":\"" + ts + "\",\"thread_ts\":\"" + thread + "\"}}}";
+
     private static WebhookRequest Signed(string body, string id, byte[]? key = null)
     {
         var stamp = Noon.ToUnixTimeSeconds().ToString(System.Globalization.CultureInfo.InvariantCulture);
@@ -236,11 +292,14 @@ public sealed class AutomationIntegrationTests
                     SlackApi = new Uri("https://slack.test/api/"),
                     IncidentApi = new Uri("https://incident.test/"),
                     SlackConnect = Sockets.ConnectAsync,
+                    Log = Logged.Enqueue,
                 },
             };
         }
 
         internal FakeToolServer Tools { get; } = new();
+
+        internal System.Collections.Concurrent.ConcurrentQueue<string> Logged { get; } = new();
 
         internal FakeSlackSockets Sockets { get; } = new();
 

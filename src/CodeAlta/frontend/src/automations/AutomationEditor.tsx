@@ -15,6 +15,7 @@ import { dayName, formProblem, formSettings, inputOf, isIntegration, isSchedule 
   newTrigger, scriptArgumentsTemplate, sessionSettingsOf, triggerLabel, triggerTone, triggerTypes, weekDays, type AutomationForm, type TriggerType } from "./automations";
 import type { AutomationsHub } from "./automationsHub";
 import { IntegrationTriggerFields, type IntegrationContext } from "./IntegrationTriggerFields";
+import { AutonomyFields } from "./AutonomyFields";
 
 const hours = [1, 2, 3, 4, 6, 8, 12];
 
@@ -260,6 +261,7 @@ export function AutomationEditor({ hub, initial, projects, providers, epoch, onC
         <FormGroup label={t("Runs with")} className="automation-runs-with">
           <SessionSettingsChip id="automation" providers={runProviders} choices={choices} value={settings} disabled={busy} onChange={next => edit(formSettings(next))} />
         </FormGroup>
+        <AutonomyFields autonomy={form.autonomy} permissionMode={form.permissionMode || null} disabled={busy} onChange={autonomy => edit({ autonomy })} />
         <div className="automation-editor-switches">
           <Switch checked={form.enabled} disabled={busy} label={t("Enabled")} onChange={event => edit({ enabled: event.currentTarget.checked })} />
           {form.triggers.length > 0 && <Switch checked={form.catchUp} disabled={busy} label={t("Catch up on what was missed while CodeAlta was closed")}

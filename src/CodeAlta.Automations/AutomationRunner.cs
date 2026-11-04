@@ -66,7 +66,11 @@ internal sealed record AutomationUsage(long? InputTokens, long? OutputTokens, do
 /// <param name="SessionId">The session that was created; null when none was.</param>
 /// <param name="Problem">Why the run did not start; null when it did.</param>
 /// <param name="Completion">Completes when the session has answered, failed or been stopped; null when the run did not start.</param>
-internal sealed record AutomationStart(string? SessionId, string? Problem, Task<AutomationOutcome>? Completion);
+internal sealed record AutomationStart(string? SessionId, string? Problem, Task<AutomationOutcome>? Completion)
+{
+    /// <summary>The guard of the session of a run of an automation with autonomy; null for one without.</summary>
+    public AutomationRunGuard? Guard { get; init; }
+}
 
 /// <summary>
 /// What a host checks before a run starts, once the provider it would run with is known: a node checks its own local
@@ -118,6 +122,17 @@ internal interface IAutomationRunner
     /// <param name="cancellationToken">Cancels the preparation of the run; a session that was already sent its prompt keeps going.</param>
     /// <returns>The session and its completion, or why the run did not start. Failures are results, not exceptions.</returns>
     Task<AutomationStart> StartAsync(AutomationEntry entry, string runId, string prompt, string? detail, CancellationToken cancellationToken);
+
+    /// <summary>Creates a session where the automation runs, as <see cref="StartAsync(AutomationEntry, string, string, string?, CancellationToken)"/>, for a try or not.</summary>
+    /// <param name="entry">The automation.</param>
+    /// <param name="runId">The identifier of the run.</param>
+    /// <param name="prompt">The text to send.</param>
+    /// <param name="detail">What the trigger was about.</param>
+    /// <param name="dryRun">Whether the run is a try: the tools its autonomy allows are fakes.</param>
+    /// <param name="cancellationToken">Cancels the preparation of the run.</param>
+    /// <returns>The session and its completion, or why the run did not start.</returns>
+    Task<AutomationStart> StartAsync(AutomationEntry entry, string runId, string prompt, string? detail, bool dryRun, CancellationToken cancellationToken)
+        => StartAsync(entry, runId, prompt, detail, cancellationToken);
 }
 
 /// <summary>
@@ -134,6 +149,10 @@ internal sealed class AutomationRunner : IAutomationRunner
 
     private readonly CodeAltaHost _host;
     private readonly IAutomationRunGate? _gate;
+    private readonly AutomationCallBreaker _breaker = new();
+
+    /// <summary>How often the approvals of the commands and edits of a run with autonomy are looked at for their timeout.</summary>
+    internal static readonly TimeSpan ApprovalWatch = TimeSpan.FromSeconds(15);
 
     /// <summary>Creates the runner of a host.</summary>
     /// <param name="host">The host the sessions of the runs start in.</param>
@@ -145,7 +164,11 @@ internal sealed class AutomationRunner : IAutomationRunner
     }
 
     /// <inheritdoc />
-    public async Task<AutomationStart> StartAsync(AutomationEntry entry, string runId, string prompt, string? detail, CancellationToken cancellationToken)
+    public Task<AutomationStart> StartAsync(AutomationEntry entry, string runId, string prompt, string? detail, CancellationToken cancellationToken)
+        => StartAsync(entry, runId, prompt, detail, false, cancellationToken);
+
+    /// <inheritdoc />
+    public async Task<AutomationStart> StartAsync(AutomationEntry entry, string runId, string prompt, string? detail, bool dryRun, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(entry);
         ArgumentException.ThrowIfNullOrWhiteSpace(runId);
@@ -258,18 +281,32 @@ internal sealed class AutomationRunner : IAutomationRunner
 
             // A script runs through exec, which its session has whatever the setting of Code Mode says.
             if (definition.Script is not null) _host.CodeModeRuns.RequireCodeMode(sessionId);
+            // What a run with autonomy does without a person is enforced on this machine, at every tool call, from its first one.
+            AutomationRunGuard? guard = null;
+            if (definition.Autonomy is not null)
+            {
+                if (_host.RuntimeService.GetPermissionPolicy(sessionId) == SessionPermissionPolicy.Approve)
+                    return new(sessionId, "This automation decides what its runs do without a person: it runs in a permission mode that asks for commands and edits, not one that allows everything.", null);
+                var guarded = sessionId;
+                guard = new AutomationRunGuard(entry, _breaker, (request, token) => _host.RuntimeService.Permissions.RequestForSessionAsync(guarded, request, token), TimeProvider.System, dryRun);
+                _host.ToolGuards.Set(sessionId, guard);
+            }
+
             // The effort of a model that reports its efforts is completed by the host when the automation names none.
             var selection = new OwnedSessionSelection(provider.ProviderId.Value, agent, model.Id, definition.Model.Effort);
             var admission = _host.Commands.AdmitSend(new OwnedTextSendRequest("automation:" + runId, sessionId, prompt)
                 { Selection = selection, Provenance = AgentPromptProvenance.Automation }, CancellationToken.None);
             if (admission.Kind is not (OwnedSessionCommandAdmissionKind.Accepted or OwnedSessionCommandAdmissionKind.Replay) || admission.Receipt is null)
             {
+                if (guard is not null) _host.ToolGuards.Remove(sessionId, guard);
                 return new(sessionId, admission.Kind == OwnedSessionCommandAdmissionKind.Capacity ? NoCapacity
                     : $"The prompt was not accepted ({admission.Kind.ToString().ToLowerInvariant()}).", null);
             }
 
             // Its answer is read only when a trigger of it writes the answer back to the source of its event.
-            return new(sessionId, null, ObserveAsync(admission.Receipt, sessionId, definition.Triggers.Any(static trigger => trigger.Reply)));
+            var observed = ObserveAsync(admission.Receipt, sessionId, definition.Triggers.Any(static trigger => trigger.Reply));
+            if (guard is not null) observed = GuardAsync(observed, admission.Receipt, sessionId, runId, guard, definition.Autonomy!);
+            return new(sessionId, null, observed) { Guard = guard };
         }
         catch (OperationCanceledException)
         {
@@ -290,6 +327,52 @@ internal sealed class AutomationRunner : IAutomationRunner
     /// </summary>
     internal static string SessionTitle(string name, string? detail)
         => AutomationText.Line(detail, MaximumDetailInTitle) is { Length: > 0 } about ? name + " · " + about : name;
+
+    // While a run with autonomy works: the approvals of its commands and edits count as waiting too, an approval that waits
+    // longer than the automation says stops the run (unless a person took it over), and the guard leaves with the run.
+    private async Task<AutomationOutcome> GuardAsync(Task<AutomationOutcome> observed, OwnedSessionCommandReceipt receipt, string sessionId, string runId,
+        AutomationRunGuard guard, AutomationAutonomy autonomy)
+    {
+        guard.Stopped += _ => _host.Commands.AdmitAbort(new OwnedAbortRequest("automation-stop:" + runId, receipt.OperationId), CancellationToken.None);
+        using var stop = new CancellationTokenSource();
+        var watch = Task.Run(async () =>
+        {
+            DateTimeOffset? since = null;
+            while (!stop.IsCancellationRequested)
+            {
+                try { await Task.Delay(ApprovalWatch, stop.Token).ConfigureAwait(false); }
+                catch (OperationCanceledException) { return; }
+                SessionOwnedPermissionPage page;
+                try { page = await _host.RuntimeService.Permissions.ListOwnedCommandsAsync(sessionId, stop.Token).ConfigureAwait(false); }
+                catch (Exception exception) when (exception is OperationCanceledException or ObjectDisposedException or ArgumentException) { return; }
+                var waiting = page.Entries.Count > 0;
+                guard.NoteWaiting(waiting);
+                since = waiting ? since ?? DateTimeOffset.UtcNow : null;
+                if (since is not { } start || guard.TakenOver || autonomy.ApprovalTimeout is not { } minutes || autonomy.OnTimeout != AutomationAutonomy.StopOnTimeout
+                    || DateTimeOffset.UtcNow - start < TimeSpan.FromMinutes(minutes)) continue;
+                foreach (var entry in page.Entries)
+                {
+                    try { await _host.RuntimeService.Permissions.ResolveOwnedCommandAsync(entry.Handle, AgentPermissionDecisionKind.Deny, CancellationToken.None).ConfigureAwait(false); }
+                    catch (Exception exception) when (exception is OperationCanceledException or ObjectDisposedException) { }
+                }
+
+                guard.Stop($"No one answered an approval of the run within {minutes} minutes: the run stopped.");
+                return;
+            }
+        });
+        try
+        {
+            return await observed.ConfigureAwait(false);
+        }
+        finally
+        {
+            await stop.CancelAsync().ConfigureAwait(false);
+            try { await watch.ConfigureAwait(false); }
+            catch (Exception exception) when (exception is not OutOfMemoryException) { }
+            guard.NoteWaiting(false);
+            _host.ToolGuards.Remove(sessionId, guard);
+        }
+    }
 
     private async Task<AutomationOutcome> ObserveAsync(OwnedSessionCommandReceipt receipt, string sessionId, bool answer)
     {

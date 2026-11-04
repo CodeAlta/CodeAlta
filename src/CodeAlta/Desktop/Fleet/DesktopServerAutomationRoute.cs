@@ -65,6 +65,9 @@ internal sealed class DesktopServerAutomationRoute : IDisposable
     /// <summary>Asks the machine, through the server, to run an automation now.</summary>
     internal Task<AutomationRunDto> RunAsync(FleetSignedAutomationRunRequest signed, CancellationToken cancellationToken) => _client.RunAutomationAsync(signed, cancellationToken);
 
+    /// <summary>Passes a take-over of a run in progress, signed by this computer, to the machine through the server.</summary>
+    internal Task<AutomationRunDto> TakeOverAsync(FleetSignedAutomationRunRequest signed, CancellationToken cancellationToken) => _client.TakeOverAutomationRunAsync(signed, cancellationToken);
+
     /// <summary>Forgets an automation for the machine once it took away what it held.</summary>
     internal Task<AutomationListDto> DeleteAsync(string automationId, string machineId, CancellationToken cancellationToken)
         => _client.DeleteAutomationAsync(automationId, machineId, cancellationToken);
@@ -83,6 +86,14 @@ internal sealed class DesktopServerAutomationRoute : IDisposable
     {
         var hook = await _client.CreateHookAsync(machineId, source, label, cancellationToken).ConfigureAwait(false);
         return (hook, new Uri(_client.ServerAddress, hook.Path));
+    }
+
+    /// <summary>Reads the address of a hook of this computer's person on the server, for its machine.</summary>
+    /// <returns>The address; null when no hook of the person has this id for this machine.</returns>
+    internal async Task<Uri?> HookAddressAsync(string machineId, string hookId, CancellationToken cancellationToken)
+    {
+        var hooks = await _client.ListHooksAsync(cancellationToken).ConfigureAwait(false);
+        return hooks.Hooks.FirstOrDefault(hook => hook.Id == hookId && hook.MachineId == machineId) is { } found ? new Uri(_client.ServerAddress, found.Path) : null;
     }
 
     public void Dispose() => _client.Dispose();

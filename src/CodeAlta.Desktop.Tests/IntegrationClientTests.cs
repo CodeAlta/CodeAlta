@@ -28,7 +28,7 @@ public sealed class IntegrationClientTests
         var versions = (await jira.VersionsAsync("PLAT", CancellationToken.None)).Value!;
         Assert.AreEqual(("10", "3.9", true, "2026-10-01"), (versions[0].Id, versions[0].Name, versions[0].Released, versions[0].ReleaseDate));
         Assert.IsFalse(versions[1].Released);
-        var issue = (await jira.SearchAsync("project = PLAT", 20, CancellationToken.None)).Value!.Single();
+        var issue = (await jira.SearchAsync("project = PLAT", 20, CancellationToken.None)).Value!.Issues.Single();
         Assert.AreEqual(("PLAT-7", "Crash on start", "To Do", "Bug", "Ana"), (issue.Key, issue.Summary, issue.Status, issue.Type, issue.Reporter));
         Assert.AreEqual("https://acme.atlassian.net/browse/PLAT-7", jira.Browse("PLAT-7"));
 
@@ -36,6 +36,31 @@ public sealed class IntegrationClientTests
         Assert.IsTrue(fake.Requests.All(request => request.Authorization == basic && request.Uri.Host == "acme.atlassian.net"));
         using var search = JsonDocument.Parse(fake.To("/rest/api/3/search/jql").Single().Body);
         Assert.AreEqual("project = PLAT", search.RootElement.GetProperty("jql").GetString());
+    }
+
+    [TestMethod]
+    public async Task Jira_ReadsEveryPageOfAQuery_UpToItsCap()
+    {
+        var pages = 0;
+        var fake = new FakeToolServer().On(HttpMethod.Post, "/rest/api/3/search/jql", request =>
+        {
+            using var body = JsonDocument.Parse(request.Body);
+            var token = body.RootElement.TryGetProperty("nextPageToken", out var given) ? given.GetString() : null;
+            var page = token is null ? 0 : int.Parse(token[1..], System.Globalization.CultureInfo.InvariantCulture);
+            Interlocked.Increment(ref pages);
+            var issues = string.Join(",", Enumerable.Range(page * 100, 100).Select(static n => "{\"id\":\"" + n + "\",\"key\":\"PLAT-" + n + "\",\"fields\":{\"summary\":\"S" + n + "\"}}"));
+            var next = page < 4 ? ",\"nextPageToken\":\"p" + (page + 1) + "\",\"isLast\":false" : ",\"isLast\":true";
+            return (HttpStatusCode.OK, "{\"issues\":[" + issues + "]" + next + "}");
+        });
+        using var http = new HttpClient(fake);
+        var jira = new JiraRestClient(http, Site, "bot@acme.test", Token);
+
+        var all = (await jira.SearchAsync("project = PLAT", 1000, CancellationToken.None)).Value!;
+        Assert.AreEqual((500, false, 5), (all.Issues.Count, all.More, Volatile.Read(ref pages)));
+        Assert.AreEqual("PLAT-499", all.Issues[^1].Key);
+
+        var capped = (await jira.SearchAsync("project = PLAT", 250, CancellationToken.None)).Value!;
+        Assert.AreEqual((250, true), (capped.Issues.Count, capped.More), "the cap is reached: what is left is said, not read");
     }
 
     [TestMethod]

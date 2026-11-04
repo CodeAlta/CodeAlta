@@ -753,7 +753,8 @@ internal sealed partial class AutomationService : IAsyncDisposable
         AutomationStart start;
         try
         {
-            start = await _runner.StartAsync(entry, run.Id, prompt, detail, cancellationToken).ConfigureAwait(false);
+            // A try is a dry run: the tools its autonomy allows are fakes.
+            start = await _runner.StartAsync(entry, run.Id, prompt, detail, trigger == TryTrigger, cancellationToken).ConfigureAwait(false);
         }
         catch (Exception exception) when (exception is not OutOfMemoryException)
         {
@@ -766,6 +767,7 @@ internal sealed partial class AutomationService : IAsyncDisposable
         var started = _state.Update(run.Id, current => current.Status == AutomationRun.Held
                 ? current with { SessionId = start.SessionId, Status = AutomationRun.Running, Message = null }
                 : current with { SessionId = start.SessionId }) ?? run with { SessionId = start.SessionId };
+        if (start.Guard is { } guard) Follow(run.Id, guard);
         Changed?.Invoke();
         var observer = ObserveAsync(run.Id, entry, start.Completion, reply);
         lock (_gate)
@@ -820,6 +822,15 @@ internal sealed partial class AutomationService : IAsyncDisposable
             waiting |= HoldsCommand(automationId);
         }
 
+        string? stoppedWhy;
+        lock (_gate)
+        {
+            _guards.Remove(runId);
+            _stoppedWhy.Remove(runId, out stoppedWhy);
+        }
+
+        // A run its guard stopped says why, rather than that it was cancelled.
+        if (stoppedWhy is not null && outcome.Status != AutomationRun.Completed) outcome = outcome with { Status = AutomationRun.Failed, Message = stoppedWhy };
         var ended = _state.Update(runId, run => run with
         {
             Status = outcome.Status, Message = outcome.Message, EndedAt = _time.GetUtcNow(), SessionId = sessionId ?? run.SessionId,

@@ -207,6 +207,7 @@ The machine fires its schedules and starts its sessions; **Run now** runs it the
 - Its project is found on the machine by its git repository: the machine needs a checkout of it (`altanode projects clone <url>`). An automation of no project runs as a chat there.
 - **Runs with** lists the providers and models of the machine once you choose it in **Runs on**, paired or reached through your server, named as the machine names them (a machine that does not answer leaves the providers of this computer); leave it to the defaults for the machine's default provider. **Runs in** lists the projects of this computer: the machine finds its own checkout of the project.
 - A command trigger runs on this computer only, and an automation kept in the configuration of a project runs on the machines that have the project.
+- An automation with [autonomy](automations.md#decide-what-it-does-without-you) waits for you on the machine. Through your server, a run that waits comes as a message to the owner of the automation (for a team's, its members) and to the people granted to approve it; **Take over** on the run is signed by your computer and checked by the machine, and you answer in its session.
 
 A machine of your server that is not paired with this computer gets the automation through the server, with no permission to give on the machine: it must be one of your machines. The server keeps it sealed, so it cannot read nor change it, and the machine gets it when it connects. Its details say whether the machine took it or refused it, and why. **Run now** asks the machine through the server while it is online; its triggers run it either way, also while the server is away.
 
@@ -445,7 +446,7 @@ Your nodes tell the server how they are: little disk space left, a provider whos
 
 incident.io and other tools that push signed webhooks send their events to a hook of your server, for one of your machines.
 
-1. In an automation that runs on that machine, add an **incident.io** or **Webhook** trigger and click **Make a hook**. Give the address it shows to the tool (in incident.io: Settings > Webhooks).
+1. In an automation that runs on that machine, add an **incident.io** or **Webhook** trigger and click **Make a hook**. Give the address it shows to the tool (in incident.io: Settings > Webhooks). The address stays hidden in the trigger: **Show the address** reads it again from the server.
 2. Keep the signing secret of the tool, and for incident.io an API key, in the secrets of that machine.
 3. **Test the connection**, then enable the automation.
 

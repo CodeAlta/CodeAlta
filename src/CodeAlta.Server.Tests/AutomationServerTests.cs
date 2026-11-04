@@ -203,6 +203,62 @@ public sealed class AutomationServerTests
     }
 
     [TestMethod]
+    public async Task ARunThatWaits_IsToldToItsOwnerOnce_AndATakeOverIsPassedSignedToTheMachine()
+    {
+        await using var fixture = await ServerFixture.StartAsync();
+        using var owner = new TestDevice("laptop");
+        using var node = new TestDevice("node");
+        var (setup, _) = await fixture.SetUpWithNodeAsync(owner, node);
+        var organization = setup.Organization.Id;
+        Assert.AreEqual(HttpStatusCode.OK, (await fixture.SendAsync(owner, HttpMethod.Put, $"/api/v1/automations/{Id}",
+            new PutAutomationRequest(Sign(owner, Version(organization, node.DeviceId, 1))))).Status);
+        var asked = Channel.CreateUnbounded<FleetSignedAutomationRunRequest>();
+        var (connection, _) = await fixture.ConnectAsync(node, connection => connection.SetEventHandler((fleetEvent, _) =>
+        {
+            if (fleetEvent.Event == FleetAutomationMethods.TakeOver)
+                asked.Writer.TryWrite(fleetEvent.Payload!.Value.Deserialize(FleetAutomationRunRequestJsonContext.Default.FleetSignedAutomationRunRequest)!);
+            return ValueTask.CompletedTask;
+        }));
+        await using var _1 = connection;
+
+        // The run waits for an approval, reported twice: its owner is told once, with no content of the run.
+        var now = fixture.Clock.Now;
+        for (var report = 0; report < 2; report++)
+        {
+            await connection.SendRequestAsync(FleetAutomationMethods.Runs, JsonSerializer.SerializeToElement(new FleetAutomationRunFacts([
+                new FleetAutomationRunFact("run-9", Id, 1, "incident_io", "waiting", now, null) { SessionId = "s9" },
+            ]), FleetAutomationServerJsonContext.Default.FleetAutomationRunFacts));
+        }
+
+        var notifications = await fixture.SendAsync(owner, HttpMethod.Get, "/api/v1/notifications");
+        Assert.AreEqual(HttpStatusCode.OK, notifications.Status, notifications.Body.ToString());
+        var approval = notifications.Body.GetProperty("notifications").EnumerateArray().Where(static item => item.GetProperty("kind").GetString() == FleetNotificationKinds.Approval).ToArray();
+        Assert.AreEqual(1, approval.Length, notifications.Body.ToString());
+        Assert.AreEqual((Id, node.DeviceId), (approval[0].GetProperty("subject").GetString(), approval[0].GetProperty("machineId").GetString()));
+
+        FleetSignedAutomationRunRequest TakeOver(string? action, string run = "run-9")
+        {
+            var text = FleetAutomationRunRequestDocuments.Serialize(new FleetAutomationRunRequest(FleetAutomationRunRequest.CurrentVersion, organization, Id, node.DeviceId, run,
+                owner.DeviceId, owner.PublicKey, fixture.Clock.Now) { Action = action });
+            return new FleetSignedAutomationRunRequest(text, owner.Sign(FleetAutomationRunRequestDocuments.GetSignedBytes(text)));
+        }
+
+        var request = TakeOver(FleetAutomationRunRequest.TakeOverAction);
+        var taken = await fixture.SendAsync(owner, HttpMethod.Post, $"/api/v1/automations/{Id}/runs/run-9/takeover", new RunAutomationRequest(request));
+        Assert.AreEqual(HttpStatusCode.Accepted, taken.Status, taken.Body.ToString());
+        Assert.AreEqual(request, await NextAsync(asked), "the machine gets the take-over as signed");
+        // A request to run is not a take-over, nor the other way round, nor one for another run than the path.
+        StringAssert.Contains((await fixture.SendAsync(owner, HttpMethod.Post, $"/api/v1/automations/{Id}/runs/run-9/takeover", new RunAutomationRequest(TakeOver(null)))).Body.ToString(),
+            "does not take a run over");
+        StringAssert.Contains((await fixture.SendAsync(owner, HttpMethod.Post, $"/api/v1/automations/{Id}/run", new RunAutomationRequest(request))).Body.ToString(),
+            "sent to its run");
+        StringAssert.Contains((await fixture.SendAsync(owner, HttpMethod.Post, $"/api/v1/automations/{Id}/runs/run-8/takeover", new RunAutomationRequest(request))).Body.ToString(),
+            "another automation or run");
+        // A request to run reads as before: no action is written.
+        Assert.IsFalse(TakeOver(null).Payload.Contains("action", StringComparison.Ordinal));
+    }
+
+    [TestMethod]
     public async Task ARemovalIsAVersionToo_AndTheServerForgetsItOnceTheMachineTookItAway()
     {
         await using var fixture = await ServerFixture.StartAsync();

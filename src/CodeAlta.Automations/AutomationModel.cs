@@ -201,6 +201,12 @@ internal sealed record AutomationTrigger(AutomationTriggerKind Kind)
     /// <summary>Whether the answer of the run is written back where the event came from (a comment, a thread reply, a timeline item).</summary>
     public bool Reply { get; init; }
 
+    /// <summary>
+    /// Slack, on every message: whether a person's replies in a thread this automation answered start runs too. Off, they do
+    /// not: the automation answered there, and the conversation is the people's.
+    /// </summary>
+    public bool Threads { get; init; }
+
     /// <summary>The longest JQL query kept.</summary>
     internal const int MaximumQueryLength = 2000;
 
@@ -282,7 +288,91 @@ internal sealed record AutomationTrigger(AutomationTriggerKind Kind)
     /// </summary>
     public string FingerprintKey => !IsIntegration ? Key
         : string.Join('\t', Key, Email ?? string.Empty, string.Join(',', Credentials), Signature ?? string.Empty, SignatureHeader ?? string.Empty,
-            string.Join(',', Fields), Reply ? "reply" : string.Empty);
+            string.Join(',', Fields), Reply ? "reply" : string.Empty) + (Threads ? "\tthreads" : string.Empty);
+}
+
+/// <summary>
+/// What the runs of an automation may do without a person (<c>doc/fleet/orchestration.md</c>, "Autonomy and approvals"):
+/// the tools of other sources (MCP servers, plugins) they call by themselves, how often, and what happens to the rest,
+/// which waits for an approval. The machine enforces it on every tool call; the host's own tools keep their guards.
+/// </summary>
+internal sealed record AutomationAutonomy
+{
+    /// <summary>Approvals go to the owner of the automation.</summary>
+    internal const string OwnerApprovers = "owner";
+
+    /// <summary>A run whose approval waits too long stops.</summary>
+    internal const string StopOnTimeout = "stop";
+
+    /// <summary>A run whose approval waits too long keeps waiting.</summary>
+    internal const string WaitOnTimeout = "wait";
+
+    /// <summary>The most allowed tools.</summary>
+    internal const int MaximumTools = 32;
+
+    /// <summary>The longest approval timeout, in minutes: a week.</summary>
+    internal const int MaximumTimeout = 7 * 24 * 60;
+
+    /// <summary>The most calls of the allowed tools in an hour, the circuit breaker.</summary>
+    internal const int MaximumCallsPerHour = 1000;
+
+    /// <summary>
+    /// The tools of the host: their calls keep the guards of the host (commands and edits follow the permission mode,
+    /// reads run), so an automation neither lists nor holds them.
+    /// </summary>
+    internal static readonly string[] HostTools =
+    [
+        "read_file", "view_image", "list_dir", "grep", "webget", "shell_command", "write_file", "replace_in_file", "delete_file_or_dir", "rename_file_or_dir",
+        "apply_patch", "request_user_input", "alta", "exec", "wait", "web_search", "web_fetch", "tool_search",
+    ];
+
+    /// <summary>Gets the tools of other sources the runs call without a person, by their exact names.</summary>
+    public IReadOnlyList<string> AllowedTools { get; init; } = [];
+
+    /// <summary>Gets the circuit breaker: the most calls of the allowed tools in an hour, all runs together; null for no limit.</summary>
+    public int? MaxCallsPerHour { get; init; }
+
+    /// <summary>Gets how many minutes an approval waits before <see cref="OnTimeout"/>; null to wait as long as it takes.</summary>
+    public int? ApprovalTimeout { get; init; }
+
+    /// <summary>Gets what a run does when an approval waits too long: <see cref="StopOnTimeout"/> or <see cref="WaitOnTimeout"/>.</summary>
+    public string OnTimeout { get; init; } = StopOnTimeout;
+
+    /// <summary>Gets who answers the approvals: <see cref="OwnerApprovers"/> now; teams and on-call resolvers come with access control.</summary>
+    public string Approvers { get; init; } = OwnerApprovers;
+
+    /// <summary>A text that changes with every part, for the fingerprint of the automation.</summary>
+    internal string Key => string.Join('\t', string.Join(',', AllowedTools), MaxCallsPerHour?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? string.Empty,
+        ApprovalTimeout?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? string.Empty, OnTimeout, Approvers);
+
+    /// <summary>Whether two read the same: the same tools in the same order and the same limits.</summary>
+    public bool Equals(AutomationAutonomy? other) => other is not null && Key == other.Key;
+
+    /// <inheritdoc />
+    public override int GetHashCode() => StringComparer.Ordinal.GetHashCode(Key);
+
+    /// <summary>Whether a tool is one the runs call without a person.</summary>
+    internal bool Allows(string tool) => AllowedTools.Contains(tool, StringComparer.Ordinal);
+
+    /// <summary>What is wrong with it, or null.</summary>
+    internal string? Validate()
+    {
+        if (AllowedTools.Count > MaximumTools) return $"An automation allows at most {MaximumTools} tools.";
+        foreach (var tool in AllowedTools)
+        {
+            if (tool.Length is 0 or > 128 || !tool.All(static ch => char.IsAsciiLetterOrDigit(ch) || ch is '_' or '-' or '.' or ':' or '/'))
+                return $"'{AutomationText.Line(tool, 60)}' is not the name of a tool: letters, digits, _ - . : / only, without wildcards.";
+            if (HostTools.Contains(tool, StringComparer.Ordinal))
+                return $"{tool} is a tool of CodeAlta: its commands and edits follow the permission mode of the run, and it is not allowed by name.";
+        }
+
+        if (AllowedTools.Distinct(StringComparer.Ordinal).Count() != AllowedTools.Count) return "A tool is allowed twice.";
+        if (MaxCallsPerHour is < 1 or > MaximumCallsPerHour) return $"max_calls_per_hour is 1 to {MaximumCallsPerHour}.";
+        if (ApprovalTimeout is < 1 or > MaximumTimeout) return $"approval_timeout is 1 to {MaximumTimeout} minutes.";
+        if (OnTimeout is not (StopOnTimeout or WaitOnTimeout)) return "on_timeout is stop or wait.";
+        if (Approvers != OwnerApprovers) return "approvers is owner: the approvals of a run go to the owner of the automation (teams and on-call people come with access control).";
+        return null;
+    }
 }
 
 /// <summary>The provider, model and effort an automation asks for: each part is optional.</summary>
@@ -402,6 +492,9 @@ internal sealed record AutomationDefinition(string Id, string Name)
     /// <summary>The options of its sessions, such as whether they can start sessions of their own; null for the defaults.</summary>
     public AgentSessionOptions? SessionOptions { get; init; }
 
+    /// <summary>What its runs may do without a person, enforced on the machine; null for an automation that runs as before.</summary>
+    public AutomationAutonomy? Autonomy { get; init; }
+
     /// <summary>
     /// Whether what was missed while the application was not running is run when it starts: once for the times
     /// of a schedule, and for each issue or pull request an event trigger would have seen.
@@ -430,6 +523,8 @@ internal sealed record AutomationDefinition(string Id, string Name)
         if (RunsOn is not null) text += "\nruns_on\n" + RunsOn;
         // Nor without an environment.
         if (Environment is not null) text += "\nenvironment\n" + Environment;
+        // Nor without autonomy.
+        if (Autonomy is not null) text += "\nautonomy\n" + Autonomy.Key;
         return Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(text)));
     }
 

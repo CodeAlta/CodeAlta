@@ -93,7 +93,12 @@ internal sealed class DesktopAltaAutomations(AutomationService automations, Proj
     private AltaAutomation Automation(AutomationEntry entry)
         => new(entry.Id, entry.Definition.Name, entry.Definition.Enabled, entry.Definition.Prompt, entry.ProjectId, entry.ProjectPath, entry.Source.FilePath,
             entry.Definition.Model.Format(), entry.Definition.Agent, [.. entry.Definition.Triggers.Select(AutomationTriggerText.Format)], entry.Problem,
-            automations.NextDue(entry.Id), automations.IsRunning(entry.Id), automations.IsAllowed(entry)) { Script = entry.Definition.Script };
+            automations.NextDue(entry.Id), automations.IsRunning(entry.Id), automations.IsAllowed(entry))
+            {
+                Script = entry.Definition.Script,
+                Autonomy = entry.Definition.Autonomy is { } autonomy
+                    ? new(autonomy.AllowedTools, autonomy.MaxCallsPerHour, autonomy.ApprovalTimeout, autonomy.OnTimeout, autonomy.Approvers) : null,
+            };
 
     private static AltaAutomationRun Run(AutomationRun run)
         => new(run.Id, run.AutomationId, run.Name, run.SessionId, run.ProjectId, run.StartedAt, run.EndedAt, run.Trigger, run.Detail, run.Status, run.Message);

@@ -30,6 +30,19 @@ public sealed record FleetAutomationRunRequest(
     [property: JsonPropertyName("key")] string SignerKey,
     [property: JsonPropertyName("time")] DateTimeOffset Time)
 {
+    /// <summary>The action of a request that takes a run in progress over (<see cref="Action"/>).</summary>
+    public const string TakeOverAction = "takeover";
+
+    /// <summary>
+    /// Gets what the request asks of the run: null to run the automation now (the run takes <see cref="RunId"/>), or
+    /// <see cref="TakeOverAction"/> to take the run in progress with <see cref="RunId"/> over: what it waits for waits for
+    /// that person, and no approval stops it any more. The signature covers it: one request is never the other. Not
+    /// written when null, so that a request to run reads as before.
+    /// </summary>
+    [JsonPropertyName("action")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Action { get; init; }
+
     /// <summary>The version of the format this library writes.</summary>
     public const int CurrentVersion = 1;
 }
@@ -95,6 +108,12 @@ public static class FleetAutomationRunRequestDocuments
             || string.IsNullOrEmpty(read.SignerKey))
         {
             reason = "a run request names its organization, automation, machine, run and signer";
+            return false;
+        }
+
+        if (read.Action is not (null or FleetAutomationRunRequest.TakeOverAction))
+        {
+            reason = "the action of the run request is not known";
             return false;
         }
 

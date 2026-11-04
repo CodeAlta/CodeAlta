@@ -46,6 +46,13 @@ internal static class AutomationEndpoints
             .Produces<AutomationRunDto>(StatusCodes.Status202Accepted)
             .WithSummary("Passes a run the calling controller device asked by hand, and signed, to the machine of the automation, when it is online; the machine verifies it and reports the run.");
 
+        api.MapPost("/automations/{id}/runs/{runId}/takeover", (string id, string runId, RunAutomationRequest? request, HttpContext context, FleetAutomationService automations) =>
+                AuditedAsync(context, "automation.takeover", id, async actor => Results.Json(
+                    await automations.TakeOverAsync(actor, id, runId, request, ApiEndpoints.Origin(context), context.RequestAborted).ConfigureAwait(false),
+                    FleetAutomationApiJsonContext.Default.AutomationRunDto, statusCode: StatusCodes.Status202Accepted)))
+            .Produces<AutomationRunDto>(StatusCodes.Status202Accepted)
+            .WithSummary("Passes the take-over of a run in progress, signed by the calling controller device, to the machine of the automation: the run then waits for that person.");
+
         api.MapGet("/automations/{id}/runs", async (string id, int? limit, HttpContext context, FleetAutomationService automations) =>
                 Results.Json(await automations.ListRunsAsync(DeviceAuthenticationMiddleware.GetDevice(context), id, limit, context.RequestAborted).ConfigureAwait(false),
                     FleetAutomationApiJsonContext.Default.AutomationRunListDto))
