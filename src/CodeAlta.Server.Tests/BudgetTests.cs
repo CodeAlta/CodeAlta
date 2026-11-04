@@ -351,6 +351,24 @@ public sealed class BudgetTests
         StringAssert.Contains(admission.Problem, "nobody continued the run in time");
     }
 
+    // What the server gives of an enforced budget is not signed: the machine never holds more than its signed limit, and what it
+    // spent itself reaching the limit holds the run, whatever allowance the server gives.
+    [TestMethod]
+    public async Task AnAllowance_IsBoundedByTheSignedLimit_WhateverTheServerGives()
+    {
+        await using var fleet = await BudgetFixture.StartAsync();
+        await fleet.Manager.PutAsync(null, Settings(100), CancellationToken.None);
+        var spend = new FakeSpend { Spent = 100 };
+        var tamper = new Tamper { Allowance = 1_000_000 };
+        var gate = fleet.Gate(spend, null, tamper);
+        gate.HoldWait = TimeSpan.FromSeconds(1);
+        var reached = await gate.AdmitAsync(new FleetBudgetRun("run-1", null, null, null), TestContext.CancellationToken).WaitAsync(Patience, TestContext.CancellationToken);
+        StringAssert.Contains(reached.Problem, "nobody continued the run in time", "its own spending reached the signed limit");
+        // Below the limit, the run starts on what is left of it, not on the allowance the server made up.
+        spend.Spent = 60;
+        Assert.IsNull((await gate.AdmitAsync(new FleetBudgetRun("run-2", null, null, null), TestContext.CancellationToken)).Problem);
+    }
+
     /// <summary>A server in the path of a machine that changes what it answers, as a compromised one would.</summary>
     private sealed class Tamper() : DelegatingHandler(new SocketsHttpHandler())
     {

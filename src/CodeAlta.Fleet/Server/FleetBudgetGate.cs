@@ -149,8 +149,11 @@ public sealed class FleetBudgetGate
             return serverReached || spent >= budget.Limit ? period : null;
         }
 
+        // What the server gives is not signed: this machine never holds more than the signed limit, and its own spending that
+        // reached the limit holds the run whatever the server says.
+        if (spent >= budget.Limit) return period;
         var reserve = FleetBudgetDocuments.RunReserve(budget);
-        var held = kept.PeriodStart == period.StartQuarter ? kept.Allowance : 0;
+        var held = Math.Min(kept.PeriodStart == period.StartQuarter ? kept.Allowance : 0, budget.Limit);
         if (held - spent >= reserve) return null;
         try
         {
@@ -158,9 +161,10 @@ public sealed class FleetBudgetGate
             timeout.CancelAfter(ReadTimeout);
             using var client = Client(link);
             var given = await client.AskAllowanceAsync(budget.BudgetId, new FleetAllowanceRequest(budget.Number, spent, reserve), timeout.Token).ConfigureAwait(false);
-            state.SetAllowance(budget.BudgetId, given.PeriodStart, given.Granted);
-            Log($"The server gave this machine {given.Granted} of the budget '{budget.Name}' for its period{(given.Exhausted ? "; the budget is reached" : string.Empty)}.");
-            return given.Granted - spent >= reserve ? null : period;
+            var granted = Math.Clamp(given.Granted, 0, budget.Limit);
+            state.SetAllowance(budget.BudgetId, given.PeriodStart, granted);
+            Log($"The server gave this machine {granted} of the budget '{budget.Name}' for its period{(given.Exhausted ? "; the budget is reached" : string.Empty)}.");
+            return granted - spent >= reserve ? null : period;
         }
         catch (Exception exception) when (!cancellationToken.IsCancellationRequested && exception is FleetServerException or HttpRequestException or OperationCanceledException)
         {
