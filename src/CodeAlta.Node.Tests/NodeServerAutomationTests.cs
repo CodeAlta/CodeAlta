@@ -123,6 +123,21 @@ public sealed class NodeServerAutomationTests
             Assert.AreEqual("no run of this automation with autonomy is in progress with this id", automations.TakeOverFromServer(link, list, setup.Organization.Id, takeOver));
             StringAssert.Contains(automations.TakeOverFromServer(link, list, setup.Organization.Id, takeOver with { Signature = request.Signature }), "signature");
 
+            // Run now while a budget of the machine holds new runs: the machine answers at once that the run waits for Continue
+            // anyway, and reports it so to the server, which the desktop reads; continued, the run goes on.
+            var decision = new TaskCompletionSource<CodeAlta.Fleet.Server.FleetBudgetAdmission>(TaskCreationOptions.RunContinuationsAsynchronously);
+            automations.AdmitBudget = (_, waits, cancellation) => { waits?.Invoke(); return decision.Task.WaitAsync(cancellation); };
+            var heldRunId = Guid.CreateVersion7().ToString("N");
+            var heldRequest = FleetAutomationSigning.SignRun(desktopKey, new FleetAutomationRunRequest(FleetAutomationRunRequest.CurrentVersion, setup.Organization.Id, Id, nodeId,
+                heldRunId, string.Empty, string.Empty, clock.Now));
+            var heldRun = await automations.RunFromServerAsync(link, list, setup.Organization.Id, heldRequest, token).WaitAsync(TimeSpan.FromSeconds(20), token);
+            Assert.AreEqual((heldRunId, "held"), (heldRun.Run?.Id, heldRun.Run?.Status));
+            await WaitForAsync(async () => (await desktop.ListAutomationRunsAsync(Id, null, token)).Runs.FirstOrDefault(run => run.RunId == heldRunId && run.Status == "held"), token);
+            decision.SetResult(CodeAlta.Fleet.Server.FleetBudgetAdmission.Admitted);
+            await WaitForAsync(async () => (await desktop.ListAutomationRunsAsync(Id, null, token)).Runs
+                .FirstOrDefault(run => run.RunId == heldRunId && run.Status == AutomationRun.Completed), token);
+            automations.AdmitBudget = null;
+
             // A long run: while it works, the node renews the lease of its due time with the server.
             var gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
             var working = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);

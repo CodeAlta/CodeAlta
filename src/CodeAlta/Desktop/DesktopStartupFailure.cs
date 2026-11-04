@@ -27,7 +27,7 @@ internal static class DesktopStartupFailure
     internal const string DisableSandboxVariable = "WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS";
 
     /// <summary>The page of the documentation that explains a start that fails.</summary>
-    internal const string TroubleshootingUrl = "https://codealta.github.io/docs/troubleshooting/#the-desktop-app-does-not-start";
+    internal const string TroubleshootingUrl = "https://codealta.io/docs/troubleshooting/#the-desktop-app-does-not-start";
 
     /// <summary>Where the WebView2 Runtime is installed from.</summary>
     internal const string WebView2Url = "https://developer.microsoft.com/microsoft-edge/webview2/";

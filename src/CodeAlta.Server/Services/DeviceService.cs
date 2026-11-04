@@ -75,6 +75,12 @@ public sealed class DeviceService
     /// <summary>Gets the store of the devices that sign-ins register; null for none.</summary>
     public ISignInStore? SignInStore { get; init; }
 
+    /// <summary>
+    /// Gets what tells whether a controller device may revoke a device of another person (<c>doc/fleet/access-control.md</c>):
+    /// an owner or admin, or a maintainer for a team machine. Null lets a controller revoke only the devices of its own person.
+    /// </summary>
+    public Func<DeviceRecord, DeviceRecord, CancellationToken, Task<bool>>? MayRevokeOther { get; set; }
+
     /// <summary>Makes an enrollment token; only a controller device may.</summary>
     /// <param name="actor">The calling device.</param>
     /// <param name="request">The request.</param>
@@ -259,6 +265,8 @@ public sealed class DeviceService
         ArgumentNullException.ThrowIfNull(actor);
         RequireController(actor);
         var device = await RequireDeviceAsync(actor, deviceId, cancellationToken).ConfigureAwait(false);
+        if (device.OwnerPersonId != actor.OwnerPersonId && (MayRevokeOther is not { } mayRevoke || !await mayRevoke(actor, device, cancellationToken).ConfigureAwait(false)))
+            throw CoordinatorException.Forbidden(FleetErrorCodes.Forbidden, "A device of another person is revoked by an owner or an admin, or by a maintainer of its team.");
         DeviceRecord revoked;
         switch (device.Status)
         {

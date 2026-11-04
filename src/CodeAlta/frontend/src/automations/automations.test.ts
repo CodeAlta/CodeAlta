@@ -59,6 +59,8 @@ test("each kind of trigger has its label, icon and color; a run by hand has its 
   assert.deepEqual([runTone("running"), runTone("completed"), runTone("failed"), runTone("skipped"), runTone("interrupted")], ["running", "ok", "failed", "muted", "muted"]);
   assert.deepEqual(["running", "completed", "failed", "cancelled", "interrupted", "skipped", "later"].map(status => english(runStatusLabel(status))),
     ["Running", "Completed", "Failed", "Cancelled", "Interrupted", "Skipped", "Unknown"]);
+  // A run a budget of its machine holds says what it waits for.
+  assert.deepEqual([runTone("held"), english(runStatusLabel("held"))], ["held", "Waits for Continue anyway"]);
   assert.deepEqual(["manual", "daily", "issue", "pull_request", "command", "try", "slack"].map(name => english(runTriggerLabel(name))),
     ["Manual", "Daily", "Issue", "Pull request", "Command", "Try", "Slack"]);
 });

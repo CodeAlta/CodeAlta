@@ -6,14 +6,17 @@ namespace CodeAlta.Server.Storage;
 /// <param name="CreatedAt">When it was set up.</param>
 public sealed record OrganizationRecord(string Id, string Name, DateTimeOffset CreatedAt);
 
-/// <summary>The roles of a person in this step: the owner, and the members to come.</summary>
+/// <summary>The roles of a person (<see cref="CodeAlta.Fleet.Protocol.FleetOrganizationRoles"/>), as the store keeps them.</summary>
 public static class PersonRoles
 {
-    /// <summary>The person who set the server up.</summary>
-    public const string Owner = "owner";
+    /// <summary>An owner of the organization: the person who set the server up, and those an owner makes owners.</summary>
+    public const string Owner = CodeAlta.Fleet.Protocol.FleetOrganizationRoles.Owner;
+
+    /// <summary>An admin of the organization.</summary>
+    public const string Admin = CodeAlta.Fleet.Protocol.FleetOrganizationRoles.Admin;
 
     /// <summary>A member of the organization.</summary>
-    public const string Member = "member";
+    public const string Member = CodeAlta.Fleet.Protocol.FleetOrganizationRoles.Member;
 }
 
 /// <summary>A person of the organization.</summary>
@@ -22,7 +25,14 @@ public static class PersonRoles
 /// <param name="DisplayName">The name shown for them.</param>
 /// <param name="Role">Their role (<see cref="PersonRoles"/>).</param>
 /// <param name="CreatedAt">When they were added.</param>
-public sealed record PersonRecord(string Id, string OrganizationId, string DisplayName, string Role, DateTimeOffset CreatedAt);
+/// <param name="Status">Whether they act (<see cref="CodeAlta.Fleet.Protocol.FleetPersonStatuses"/>).</param>
+/// <param name="SuspendedAt">When they were suspended; null while they act.</param>
+public sealed record PersonRecord(string Id, string OrganizationId, string DisplayName, string Role, DateTimeOffset CreatedAt,
+    string Status = CodeAlta.Fleet.Protocol.FleetPersonStatuses.Active, DateTimeOffset? SuspendedAt = null)
+{
+    /// <summary>Gets whether the person acts: not suspended.</summary>
+    public bool IsActive => Status == CodeAlta.Fleet.Protocol.FleetPersonStatuses.Active;
+}
 
 /// <summary>The states of the enrollment of a device; its connection (online or not) is presence, kept in memory.</summary>
 public static class DeviceStatuses

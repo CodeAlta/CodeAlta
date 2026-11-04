@@ -3,7 +3,7 @@ using Microsoft.Data.Sqlite;
 
 namespace CodeAlta.Server.Storage.Sqlite;
 
-// The hooks of the server and the events they received (migration 0014).
+// The hooks of the server and the events they received (migration 0015).
 public sealed partial class SqliteCoordinatorStore : IHookStore
 {
     private const string HookColumns = "SELECT organization_id, hook_id, owner_person_id, machine_id, source, label, created_by_device_id, created_at, last_received_at FROM hooks";

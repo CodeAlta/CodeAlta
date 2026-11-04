@@ -49,6 +49,7 @@ internal sealed partial class WorkspaceService
             var machineId = host.MachineId!;
             var machineName = Bounded(listing.Info?.Name ?? host.Machine.Name);
             var remoteProjects = (listing.Info?.Projects ?? []).ToDictionary(static project => project.Id, StringComparer.Ordinal);
+            var providers = listing.Info?.Providers ?? [];
             var scope = MachineScopePrefix + machineId;
             var channel = host.ChannelPath switch
             {
@@ -78,6 +79,8 @@ internal sealed partial class WorkspaceService
                     MachineChannel = channel,
                     RemoteState = session.State,
                     RemoteProject = remoteProject is null ? null : Bounded(remoteProject.Name),
+                    MachineProviderName = (session.ProviderKey is { } key ? providers.FirstOrDefault(provider => string.Equals(provider.Key, key, StringComparison.Ordinal))
+                        : providers.FirstOrDefault(static provider => provider.IsDefault)) is { } named ? Bounded(named.Name) : null,
                 });
             }
 

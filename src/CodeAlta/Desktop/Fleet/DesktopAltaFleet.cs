@@ -17,7 +17,7 @@ namespace CodeAlta.Desktop.Fleet;
 /// <param name="fleet">The machines of this computer.</param>
 /// <param name="machineName">The name of this computer.</param>
 /// <param name="version">The version of CodeAlta this computer runs.</param>
-internal sealed class DesktopAltaFleet(DesktopFleet fleet, string machineName, string? version) : IAltaFleet
+internal sealed partial class DesktopAltaFleet(DesktopFleet fleet, string machineName, string? version) : IAltaFleet
 {
     /// <summary>Gets the servers this computer is linked to; null for none.</summary>
     internal DesktopFleetServers? Servers { get; init; }

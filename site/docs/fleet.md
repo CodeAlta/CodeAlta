@@ -199,13 +199,13 @@ An automation of yours can run on a paired machine, or on a machine of your serv
 2. In the **Automations** tab, edit the automation and choose the machine in **Runs on**. It is offered for an automation kept in your configuration, once a machine is paired or your server lists one.
 3. Save. CodeAlta copies the automation to the machine: its card says **On** and the name of the machine, and its details say **Copied to** that machine. A machine that is offline gets it when it answers.
 
-The machine fires its schedules and starts its sessions; **Run now** runs it there too. Its runs are listed with the automation, as the machine reports them, and their sessions are those of the machine. Choose **This computer** to bring it back: the machine no longer has it.
+The machine fires its schedules and starts its sessions; **Run now** runs it there too. When a [budget](#set-budgets-for-your-machines) of the machine holds new runs, **Run now** says at once that the run waits, with **Continue anyway**, and the run is listed as **Waits for Continue anyway** until you decide. Its runs are listed with the automation, as the machine reports them, and their sessions are those of the machine. Choose **This computer** to bring it back: the machine no longer has it.
 
 - The automation keeps its definition here; edit it here, and the machine gets the change.
 - Moved to another machine, or brought back to this computer, while the machine it ran on is offline, an enabled automation waits: its card says **Waits for the machine it left** until that machine takes its copy away, so that both never run it. A machine that refuses to take it away (its copy could not be deleted there) keeps it waiting, and the card says why. **Start anyway…** starts it at once where it is now; both machines may then run it until the old one answers, and it still takes its copy away then.
 - Turning off **Running** in the **Automations** tab pauses the automations on machines too: they get them disabled until you turn it on again.
 - Its project is found on the machine by its git repository: the machine needs a checkout of it (`altanode projects clone <url>`). An automation of no project runs as a chat there.
-- **Runs with** lists the providers and models of a paired machine once you choose it in **Runs on**, named as the machine names them; leave it to the defaults for the machine's default provider. **Runs in** lists the projects of this computer: the machine finds its own checkout of the project.
+- **Runs with** lists the providers and models of the machine once you choose it in **Runs on**, paired or reached through your server, named as the machine names them (a machine that does not answer leaves the providers of this computer); leave it to the defaults for the machine's default provider. **Runs in** lists the projects of this computer: the machine finds its own checkout of the project.
 - A command trigger runs on this computer only, and an automation kept in the configuration of a project runs on the machines that have the project.
 - An automation with [autonomy](automations.md#decide-what-it-does-without-you) waits for you on the machine. Through your server, a run that waits comes as a message; **Take over** on the run is signed by your computer and checked by the machine, and you answer in its session.
 
@@ -319,6 +319,8 @@ To join the server of your company, open **Settings** > **Fleet** > **Server** a
 2. **Sign in**: click **Continue with** a method the server offers: your company's sign-in, a passkey, or a Microsoft, Google or GitHub account you linked. Your browser opens; once you are signed in there, it sends you back to CodeAlta. With GitHub, CodeAlta shows a code instead: click **Copy the code and open GitHub**, paste the code on GitHub's page and approve, and CodeAlta goes on by itself; **Cancel** stops the wait. **Use an enrollment code instead** takes the one-time code your administrator made for you.
 3. **Space**: the space that works with the organization, **A new Work space** by default. Its sessions are published to the server: their states and counts, never their content.
 4. **Approval**: another of your computers approves this one, or, for your first computer, an administrator; they see the six words shown here beside it.
+
+To bring someone into your server, the owner or an admin invites them in **Settings** > **Fleet** > **People and access** ([People and Access](people-and-access.md#invite-a-person)), which also sets their role, teams and the owners of machines.
 
 Signing in proves who you are; it does not let this computer in by itself. A device gets the keys that open your titles only once one of your computers approved it: the server alone cannot add one.
 
@@ -470,10 +472,11 @@ Ask an agent of CodeAlta Desktop to work with your machines: "run the iOS tests 
 | Reads the statistics, the updates and the health of the fleet | `alta fleet statistics`, `alta fleet update status`, `alta fleet health` |
 | Reads the devices of a machine you manage | `alta fleet machine devices <machine>` |
 | Checks which secrets a machine has, by name only | `alta fleet secret list <machine>` |
+| Reads people, roles, teams, grants and owners, and proposes a change for you to apply | `alta fleet access show`, `people`, `owners`, `propose` |
 
 An agent works with your access and never more:
 
-- It reads devices, permissions and grants, and does not change them: you do, on the page of the machine.
+- It reads devices, permissions, roles, teams and grants, and does not change them: you do, on the page of the machine or in [People and Access](people-and-access.md), where its proposals wait for you.
 - It creates automations disabled, enables none, and places a disabled one only: you enable them in the **Automations** tab. You start an update campaign.
 - Its sandbox and permission mode go with what it starts or drives on another machine. A sandboxed session reads the fleet, and starts, moves or places nothing elsewhere; one whose sandbox does not allow the fleet does not read it either.
 

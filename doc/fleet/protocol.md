@@ -203,6 +203,12 @@ The management plane, and the whole surface of the console ([console](console.md
   delivery stands, the version as signed), `PUT /api/v1/automations/{id}` (a version or a removal a controller device of
   the machine's owner signed, sealed, never in clear; never replaced by one that is not newer), `DELETE
   .../{id}?machine=` (forgets a removal the machine acknowledged), `POST .../{id}/run` (a signed run by hand, passed to the machine online), `POST .../{id}/runs/{runId}/takeover` (a signed take-over of a run that waits), `GET .../{id}/runs`. A run reported `waiting` is told to the recipients of its approvals (the owner of the automation) once, as a notification of kind `approval`.
+- **Access**: `GET /api/v1/access/self`, `people` (`POST` invites, `PUT .../{id}/role`, `POST .../{id}/deprovision`),
+  `teams` (and `.../{id}/members/{personId}`), `service-identities`, `grants` (`POST .../{id}/keys` once a device of the
+  owner of sealed content wrapped its keys), `owners` (`POST .../{kind}/{id}/resume`), `transfers` (`.../accept`,
+  `decline`, `cancel`), `access/review`, `access/proposals` (changes agents propose), and the signed access document:
+  `GET /api/v1/access/documents?after=`, `GET /api/v1/access/draft`, `POST /api/v1/access/documents`. The event
+  `access.changed` tells devices to read again ([access control](access-control.md#the-signed-access-document)).
 - **Hooks**: `GET /api/v1/hooks` (the caller's person's, with their paths and the events that wait), `POST /api/v1/hooks` (a hook for
   one of the person's machines, for `incident_io` or `webhook`), `DELETE .../{id}`, `GET .../{id}/events` (facts: when, state,
   what the machine said), and the ingress `POST /api/v1/hooks/{id}`, which takes no device: a tool pushes there, 256 KB and 60

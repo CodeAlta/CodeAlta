@@ -224,6 +224,28 @@ public sealed class SpacesRpcTests
     }
 
     [TestMethod]
+    public async Task ASessionAPersonStartedOnAnotherMachine_ThatWaits_IsListedAsWaiting()
+    {
+        using var fixture = new Fixture();
+        var now = DateTimeOffset.UtcNow;
+        CodeAlta.Fleet.NodeApi.FleetSessionSummary Remote(string id, string state, string? project = null)
+            => new(id, "Run git status", project, "default", null, "claude-code", null, now, now, state);
+        IReadOnlyList<(string, CodeAlta.Fleet.NodeApi.FleetSessionSummary)> remote =
+            [("mac", Remote("asks", "waiting", "node-project")), ("mac", Remote("works", "working")), ("mac", Remote("idle", "idle"))];
+        var service = new SpacesService(new SpaceCatalog(fixture.Projects), fixture.View, () => fixture.Runs, () => ValueTask.FromResult(fixture.Waiting), Epoch)
+        {
+            RemoteSessions = () => remote,
+        };
+
+        var reply = await service.ActivityAsync(new(Epoch), default);
+
+        // A command or a question there waits for the person here: its row and its machine say so, as for a session of this computer.
+        var asks = reply.Sessions.Single();
+        Assert.AreEqual(("asks", true, false, "machine:mac"), (asks.SessionId, asks.Waiting, asks.Running, asks.ProjectId));
+        Assert.AreEqual(0, asks.Ancestors.Count);
+    }
+
+    [TestMethod]
     public async Task ARecentRestoreForARun_IsGivenWithTheActivityOfItsSession()
     {
         using var fixture = new Fixture();

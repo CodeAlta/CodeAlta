@@ -233,6 +233,7 @@ public sealed partial class FleetConnector : IAsyncDisposable
         }
 
         Devices = options.Devices ?? options.MetadataKeys?.Devices ?? new FleetOrganizationDevices(options.ServerAddress, options.Identity, options.DeviceListPinPath);
+        InitializeAccess();
     }
 
     /// <summary>Gets the devices of the organization of the server, as this device verified its signed device list.</summary>
@@ -515,6 +516,9 @@ public sealed partial class FleetConnector : IAsyncDisposable
                 case Protocol.Api.FleetBudgetMethods.NotificationsChanged:
                     _options.BudgetsChanged?.Invoke();
                     break;
+                case Protocol.Api.FleetAccessMethods.Changed:
+                    RefreshAccess(stop);
+                    break;
             }
 
             return ValueTask.CompletedTask;
@@ -529,6 +533,8 @@ public sealed partial class FleetConnector : IAsyncDisposable
             if (_options.UpdateReport?.Invoke() is { } report) await SendUpdateReportAsync(connection, report, stop).ConfigureAwait(false);
             // The runs of the automations this server gave, again on each connection: the server may have missed some.
             OnAutomationsOnline(stop);
+            // The access document, again on each connection: a version signed while this device was away applies now.
+            RefreshAccess(stop);
 
             var lastPresence = DateTimeOffset.MinValue;
             var lastRead = DateTimeOffset.MinValue;

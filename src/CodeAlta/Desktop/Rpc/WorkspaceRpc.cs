@@ -385,6 +385,10 @@ internal sealed record WorkspaceSession(string Id, string Title, string? Workspa
     // The name of its project on that machine.
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? RemoteProject { get; init; }
+
+    // The name of its provider as that machine names it: a provider of the same key here may be another one.
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? MachineProviderName { get; init; }
 }
 
 /// <summary>What the Explorer shows of the cloud session a session runs as, or ran as.</summary>

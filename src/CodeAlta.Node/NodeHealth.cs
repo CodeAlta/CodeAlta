@@ -18,6 +18,12 @@ internal sealed class NodeHealth
     /// <summary>The space left under which the disk is low by default: 2 GiB.</summary>
     public const long DefaultMinimumFreeBytes = 2L * 1024 * 1024 * 1024;
 
+    /// <summary>
+    /// The most that the twentieth of a disk asks to stay free: 10 GiB, so that a large disk with tens of gigabytes left is
+    /// not low.
+    /// </summary>
+    public const long MaximumShareFreeBytes = 10L * 1024 * 1024 * 1024;
+
     /// <summary>How many runs of an automation in a row must fail before it is failing.</summary>
     public const int FailedRunsInARow = 2;
 
@@ -45,10 +51,16 @@ internal sealed class NodeHealth
         _node = node;
         SignInDefinitions = () => new CodeAltaConfigStore(node.Host.CatalogOptions).LoadGlobalProviderDefinitions();
         SignInStatus = (definition, token) => ConfiguredProviderLogin.GetStatusAsync(definition, node.Host.CatalogOptions.GlobalRoot, token);
+        DiskSpace = () => ReadDiskSpace(node.Host.CatalogOptions.StateRoot);
     }
 
     /// <summary>Gets or sets the space left under which the disk is low.</summary>
     public long MinimumFreeBytes { get; set; } = DefaultMinimumFreeBytes;
+
+    /// <summary>
+    /// Gets or sets what reads the space left and the size of the disk of the state root, in bytes; null when it cannot be read.
+    /// </summary>
+    public Func<(long Free, long Total)?> DiskSpace { get; set; }
 
     /// <summary>Gets or sets what lists the enabled providers whose sign-in is checked.</summary>
     public Func<IReadOnlyList<CodeAltaProviderDocument>> SignInDefinitions { get; set; }
@@ -133,18 +145,22 @@ internal sealed class NodeHealth
         return [.. problems.Take(MaxProblems)];
     }
 
-    // The disk of the state root: low under the minimum, or under a twentieth of its size.
+    // The disk of the state root: low under the minimum, or under a twentieth of its size (at most MaximumShareFreeBytes).
     private FleetHealthProblem? Disk()
+    {
+        if (DiskSpace() is not var (free, total)) return null;
+        if (free >= MinimumFreeBytes && free >= Math.Min(total / 20, MaximumShareFreeBytes)) return null;
+        return new FleetHealthProblem(FleetHealthKinds.DiskLow, null, (free / (1024 * 1024)).ToString(CultureInfo.InvariantCulture));
+    }
+
+    private static (long Free, long Total)? ReadDiskSpace(string stateRoot)
     {
         try
         {
-            var root = Path.GetPathRoot(Path.GetFullPath(_node.Host.CatalogOptions.StateRoot));
+            var root = Path.GetPathRoot(Path.GetFullPath(stateRoot));
             if (string.IsNullOrEmpty(root)) return null;
             var drive = new DriveInfo(root);
-            if (!drive.IsReady) return null;
-            var free = drive.AvailableFreeSpace;
-            if (free >= MinimumFreeBytes && free >= drive.TotalSize / 20) return null;
-            return new FleetHealthProblem(FleetHealthKinds.DiskLow, null, (free / (1024 * 1024)).ToString(CultureInfo.InvariantCulture));
+            return drive.IsReady ? (drive.AvailableFreeSpace, drive.TotalSize) : null;
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException)
         {

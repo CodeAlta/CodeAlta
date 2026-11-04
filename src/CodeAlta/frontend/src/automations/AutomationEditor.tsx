@@ -161,7 +161,8 @@ export function AutomationEditor({ hub, initial, projects, providers, epoch, onC
   // The machines this computer reaches: paired ones, and those of a linked server, which gets the automation sealed for them.
   const reachable = useMachines(epoch);
   // Placed on a machine, it runs with a provider of that machine: the chip lists the machine's providers and models, named as it names them.
-  const machine = useRemoteChoices(epoch, form.runsOn, null).choices;
+  // A machine reached through a server answers too, through the relay: an automation needs no permission to start sessions there.
+  const machine = useRemoteChoices(epoch, form.runsOn, null, undefined, true).choices;
   const machineProviders = form.runsOn ? machineRunProviders(machine) : null;
   const runProviders = machineProviders ?? providers;
   // An automation runs in the space of its project when it is in one, else in the default space: the host reads its catalogs there.

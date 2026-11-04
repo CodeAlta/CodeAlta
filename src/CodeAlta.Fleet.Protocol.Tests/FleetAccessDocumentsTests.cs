@@ -1,0 +1,191 @@
+using System.Buffers.Text;
+using System.Security.Cryptography;
+
+namespace CodeAlta.Fleet.Protocol.Tests;
+
+/// <summary>
+/// The chain of the signed access document (<c>doc/fleet/access-control.md</c>, what the node decides), as every machine replays
+/// it against the device list it anchored: the first version by the owner who set the server up, the next ones by the devices
+/// of signers; only an owner changes who signs or takes a suspension back; a version follows the one before; a device that
+/// left the list signs nothing after it left.
+/// </summary>
+[TestClass]
+public sealed class FleetAccessDocumentsTests
+{
+    private const string Organization = "org1";
+    private static readonly DateTimeOffset Time = new(2026, 11, 4, 9, 0, 0, TimeSpan.Zero);
+
+    [TestMethod]
+    public void TheOwnerSignsTheFirstVersion_ASignerTheNext_AndMachinesReadTeamsAndSuspensions()
+    {
+        using var world = new World();
+        var chain = new List<FleetSignedAccessDocument>();
+        chain.Add(world.Founder.Sign(Document(1, null, 4, owners: ["alex"], signers: ["ada"])));
+        chain.Add(world.Ada.Sign(Document(2, Hash(chain), 4, owners: ["alex"], signers: ["ada"], teams: [Team("infra", ["ada"], ["bea"])],
+            machines: [new FleetAccessMachine(world.Node.Id, "infra")])));
+        chain.Add(world.Ada.Sign(Document(3, Hash(chain), 4, owners: ["alex"], signers: ["ada"], teams: [Team("infra", ["ada"], [])], machines: [new FleetAccessMachine(world.Node.Id, "infra")],
+            suspended: ["bea"])));
+
+        var verification = FleetAccessDocuments.Verify(chain, world.Devices, Organization);
+        Assert.IsTrue(verification.IsValid, verification.Reason);
+        var state = verification.State;
+        Assert.AreEqual(3, state.Number);
+        Assert.AreEqual("infra", state.TeamOf(world.Node.Id)?.Id);
+        Assert.AreEqual(FleetTeamRoles.Maintainer, FleetAccessState.RoleIn(state.TeamOf(world.Node.Id)!, "ada"));
+        Assert.IsNull(FleetAccessState.RoleIn(state.TeamOf(world.Node.Id)!, "bea"), "Bea left the team");
+        Assert.IsTrue(state.IsSuspended("bea"));
+        Assert.IsTrue(state.IsSigner("ada"));
+        Assert.IsNull(state.TeamOf(world.Founder.Id), "a machine the document does not name is personal");
+        Assert.AreEqual(FleetAccessDocuments.Hash(chain[0]), state.FirstHash);
+    }
+
+    [TestMethod]
+    public void AVersionNotSignedByASigner_OrOutOfTheChain_IsRefused()
+    {
+        using var world = new World();
+        var first = world.Founder.Sign(Document(1, null, 4, owners: ["alex"]));
+
+        AssertBroken([world.Ada.Sign(Document(1, null, 4, owners: ["alex"]))], world, 1, "the first version is signed by a device of the person who set the server up");
+        AssertBroken([world.Founder.Sign(Document(1, null, 4, owners: ["ada"]))], world, 1, "the first version names the person who set the server up as an owner");
+        AssertBroken([first, world.Bea.Sign(Document(2, Hash([first]), 4, owners: ["alex"]))], world, 2, "its signer is not an owner or an admin who signs, or is suspended");
+        AssertBroken([first, world.Founder.Sign(Document(3, Hash([first]), 4, owners: ["alex"]))], world, 2, "its number is 3, not 2");
+        AssertBroken([first, world.Founder.Sign(Document(2, "elsewhere", 4, owners: ["alex"]))], world, 2, "it does not name the hash of the version before it");
+        AssertBroken([first, world.Founder.Sign(Document(2, Hash([first]), 3, owners: ["alex"]))], world, 2,
+            "it names an entry of the device list before the one of the version before, or one this device does not hold");
+        AssertBroken([world.Node.Sign(Document(1, null, 4, owners: ["alex"]))], world, 1, "its signer was not a controller device of the device list at the entry it names");
+        AssertBroken([world.Founder.Sign(Document(1, null, 4, owners: ["alex"], teams: [Team("t", ["bea"], [])], suspended: ["bea"]))], world, 1, "a suspended person is in a team");
+        AssertBroken([world.Founder.Sign(Document(1, null, 4, owners: ["alex"], machines: [new FleetAccessMachine(world.Node.Id, "ghost")]))], world, 1,
+            "a team machine does not name a team of the version, or is named twice");
+
+        var tampered = first with { Payload = first.Payload.Replace("\"suspended\":[]", "\"suspended\":[\"bea\"]", StringComparison.Ordinal) };
+        AssertBroken([tampered], world, 1, "its signature does not verify with the key of its signer");
+        AssertBroken([first], world, 1, "it names another organization", organization: "org2");
+    }
+
+    [TestMethod]
+    public void OnlyAnOwnerChangesWhoSigns_OrTakesASuspensionBack_AndADeviceThatLeftSignsNothingAfter()
+    {
+        using var world = new World();
+        var chain = new List<FleetSignedAccessDocument> { world.Founder.Sign(Document(1, null, 4, owners: ["alex"], signers: ["ada"], suspended: ["bea"])) };
+
+        AssertBroken([.. chain, world.Ada.Sign(Document(2, Hash(chain), 4, owners: ["alex"], signers: ["ada", "cy"], suspended: ["bea"]))], world, 2,
+            "only an owner changes who owns and signs, or takes a suspension back");
+        AssertBroken([.. chain, world.Ada.Sign(Document(2, Hash(chain), 4, owners: ["alex"], signers: ["ada"]))], world, 2,
+            "only an owner changes who owns and signs, or takes a suspension back");
+        var byOwner = world.Founder.Sign(Document(2, Hash(chain), 4, owners: ["alex"], signers: [], suspended: []));
+        Assert.IsTrue(FleetAccessDocuments.Verify([.. chain, byOwner], world.Devices, Organization).IsValid, "the owner takes the suspension back and Ada's signature");
+
+        // Ada's device left the list at entry 5: it signed at entry 4 before, never at 5 or later.
+        AssertBroken([.. chain, world.Ada.Sign(Document(2, Hash(chain), 5, owners: ["alex"], signers: ["ada"], suspended: ["bea"]))], world, 2,
+            "its signer was not a controller device of the device list at the entry it names", devices: world.WithAdaRemoved);
+        Assert.IsTrue(FleetAccessDocuments.Verify([.. chain, world.Ada.Sign(Document(2, Hash(chain), 4, owners: ["alex"], signers: ["ada"], suspended: ["bea"]))],
+            world.WithAdaRemoved, Organization).IsValid, "what it signed before it left still holds");
+    }
+
+    [TestMethod]
+    public void DescribeSaysWhatChanges_AndSaySameIgnoresTheOrder()
+    {
+        using var world = new World();
+        var before = FleetAccessDocuments.Verify([world.Founder.Sign(Document(1, null, 4, owners: ["alex"], teams: [Team("infra", ["ada"], ["bea"])]))], world.Devices, Organization).State;
+        var after = Document(2, null, 4, owners: ["alex"], signers: ["ada"], teams: [Team("infra", ["ada"], [])], machines: [new FleetAccessMachine("m1", "infra")], suspended: ["bea"]);
+        var names = new Dictionary<string, string> { ["ada"] = "Ada", ["bea"] = "Bea", ["infra"] = "Infra", ["m1"] = "Build box" };
+
+        CollectionAssert.AreEqual(new[]
+        {
+            "Ada becomes an admin who signs", "Bea leaves Infra", "Build box becomes a machine of Infra", "Bea is suspended: their work stops on team machines",
+        }, FleetAccessDocuments.Describe(before, after, id => names.GetValueOrDefault(id)).ToArray());
+        Assert.IsTrue(FleetAccessDocuments.SaySame(after, after with { Owners = ["alex"], Teams = [Team("infra", ["ada"], [])], Suspended = ["bea"], Number = 9 }));
+        Assert.IsFalse(FleetAccessDocuments.SaySame(after, after with { Suspended = [] }));
+    }
+
+    private static void AssertBroken(IReadOnlyList<FleetSignedAccessDocument> chain, World world, long at, string reason, string organization = Organization,
+        FleetDeviceListState? devices = null)
+    {
+        var verification = FleetAccessDocuments.Verify(chain, devices ?? world.Devices, organization);
+        Assert.IsFalse(verification.IsValid);
+        Assert.AreEqual((at, reason), (verification.BrokenAt, verification.Reason));
+        Assert.AreEqual(at - 1, verification.State.Number, "the state is the document up to the last version that holds");
+    }
+
+    private static string Hash(IReadOnlyList<FleetSignedAccessDocument> chain) => FleetAccessDocuments.Hash(chain[^1]);
+
+    private static FleetAccessTeam Team(string id, IReadOnlyList<string> maintainers, IReadOnlyList<string> members) => new(id, maintainers, members, false);
+
+    private static FleetAccessDocument Document(long number, string? previous, long list, IReadOnlyList<string> owners, IReadOnlyList<string>? signers = null,
+        IReadOnlyList<FleetAccessTeam>? teams = null, IReadOnlyList<FleetAccessMachine>? machines = null, IReadOnlyList<string>? suspended = null)
+        => new(1, Organization, number, previous, list, owners, signers ?? [], teams ?? [], machines ?? [], suspended ?? [], string.Empty, Time);
+
+    // A device list: Alex's first device, his node, then Ada's and Bea's first devices signed by Alex; Ada's later removed.
+    private sealed class World : IDisposable
+    {
+        public World()
+        {
+            var entries = new List<FleetSignedDeviceListEntry>
+            {
+                Founder.Entry(new FleetDeviceListEntryPayload(1, null, 1, null, FleetDeviceListOperations.Add, Founder.Id, Founder.PublicKey, FleetDeviceKinds.Controller, null, Founder.Id, Time)),
+            };
+            void Add(Key device, string kind, string owner)
+                => entries.Add(Founder.Entry(new FleetDeviceListEntryPayload(1, Organization, entries.Count + 1, FleetDeviceListEntries.Hash(entries[^1]), FleetDeviceListOperations.Add,
+                    device.Id, device.PublicKey, kind, owner, Founder.Id, Time)));
+            Add(Node, FleetDeviceKinds.Node, "alex");
+            Add(Ada, FleetDeviceKinds.Controller, "ada");
+            Add(Bea, FleetDeviceKinds.Controller, "bea");
+            Devices = FleetDeviceListVerifier.VerifyOrThrow(entries, Organization);
+            entries.Add(Founder.Entry(new FleetDeviceListEntryPayload(1, Organization, 5, FleetDeviceListEntries.Hash(entries[^1]), FleetDeviceListOperations.Remove, Ada.Id, null,
+                null, null, Founder.Id, Time)));
+            WithAdaRemoved = FleetDeviceListVerifier.VerifyOrThrow(entries, Organization);
+        }
+
+        public Key Founder { get; } = new();
+
+        public Key Node { get; } = new();
+
+        public Key Ada { get; } = new();
+
+        public Key Bea { get; } = new();
+
+        public FleetDeviceListState Devices { get; }
+
+        public FleetDeviceListState WithAdaRemoved { get; }
+
+        public void Dispose()
+        {
+            Founder.Dispose();
+            Node.Dispose();
+            Ada.Dispose();
+            Bea.Dispose();
+        }
+    }
+
+    private sealed class Key : IDisposable
+    {
+        private readonly ECDsa _key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+
+        public Key()
+        {
+            PublicKey = Convert.ToBase64String(_key.ExportSubjectPublicKeyInfo());
+            FleetDevicePublicKey.TryParse(PublicKey, out var parsed);
+            Id = parsed!.DeviceId;
+        }
+
+        public string PublicKey { get; }
+
+        public string Id { get; }
+
+        public FleetSignedDeviceListEntry Entry(FleetDeviceListEntryPayload payload)
+        {
+            var text = FleetDeviceListEntries.SerializePayload(payload);
+            return new FleetSignedDeviceListEntry(text, Base64Url.EncodeToString(_key.SignData(FleetDeviceListEntries.GetSignedBytes(text), HashAlgorithmName.SHA256,
+                DSASignatureFormat.IeeeP1363FixedFieldConcatenation)));
+        }
+
+        public FleetSignedAccessDocument Sign(FleetAccessDocument document)
+        {
+            var text = FleetAccessDocuments.Serialize(document with { SignerDeviceId = Id });
+            return new FleetSignedAccessDocument(text, Base64Url.EncodeToString(_key.SignData(FleetAccessDocuments.GetSignedBytes(text), HashAlgorithmName.SHA256,
+                DSASignatureFormat.IeeeP1363FixedFieldConcatenation)));
+        }
+
+        public void Dispose() => _key.Dispose();
+    }
+}

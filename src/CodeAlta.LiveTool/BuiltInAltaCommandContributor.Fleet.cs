@@ -70,6 +70,7 @@ internal sealed partial class BuiltInAltaCommandContributor
         var secret = Group("secret", "List the secrets and variables of this computer or of a machine it manages, by name: never a value.");
         secret.Add(CreateFleetSecretListCommand(context));
         group.Add(secret);
+        group.Add(CreateFleetAccessCommand(context));
         var hook = Group("hook", "List the hooks of a server: the addresses tools such as incident.io push their signed events to, for one machine each, and what the machine did with them.");
         hook.Add(CreateFleetHookListCommand(context));
         group.Add(hook);

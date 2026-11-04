@@ -286,6 +286,7 @@ import { readMachinePageLink } from "./machines/machines";
 import { FleetServerSettings } from "./fleet/FleetServerSettings";
 import { FleetSecretsSettings } from "./fleet/FleetSecretsSettings";
 import { FleetBudgetsSettings } from "./fleet/FleetBudgetsSettings";
+import { FleetAccessSettings } from "./fleet/access/FleetAccessSettings";
 import { FleetApprovals, showHeldStartToast } from "./fleet/FleetApprovals";
 import { fleetCanvasOf } from "./fleet/approvals";
 import { RemoteSessionChoice, RunOnChip, useMachines, useRemoteChoices } from "./machines/RunOnChip";
@@ -380,6 +381,7 @@ import "./secrets/secrets.css";
 import "./fleet/fleet.css";
 import "./fleet/fleetSecrets.css";
 import "./fleet/fleetBudgets.css";
+import "./fleet/access/fleetAccess.css";
 import "./spaces/spaces.css";
 import "./canvases/canvases.css";
 import "./landing/landing.css";
@@ -6198,6 +6200,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
       : settingsSection === "fleetServer" ? <FleetServerSettings epoch={owned ? status!.hostEpoch : null} />
       : settingsSection === "fleetSecrets" ? <FleetSecretsSettings epoch={owned ? status!.hostEpoch : null} />
       : settingsSection === "fleetBudgets" ? <FleetBudgetsSettings epoch={owned ? status!.hostEpoch : null} />
+      : settingsSection === "fleetAccess" ? <FleetAccessSettings epoch={owned ? status!.hostEpoch : null} />
       : settingsSection === "search" ? <SearchSettings projects={catalog.current?.projects ?? snapshot?.projects ?? []} spaces={spacesState.spaces}
           onMeaningTurnedOn={() => setFollowMeaning(true)}
           onOpenCanvas={(() => { const item = canvasCatalog.find(value => value.pluginKey === "builtin:search" && value.id === "search");

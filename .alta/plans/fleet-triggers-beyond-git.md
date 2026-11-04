@@ -38,7 +38,7 @@ enabling"), `doc/fleet/secrets.md`, `doc/fleet/protocol.md` (REST `hooks`), `doc
 - [x] 3. Engine: polling of the Jira triggers, Slack Socket Mode listeners, inbound hook events, dedupe and claims,
   prompts with bound fields, replies to the source after the run (kept, not posted, in a try), run records with the reply.
 - [x] 4. Protocol + server: `hooks` REST (`GET/POST /api/v1/hooks`, `DELETE /api/v1/hooks/{id}`, `GET .../{id}/events`,
-  anonymous `POST /api/v1/hooks/{id}` ingress), migration `0014_hooks.sql`, control `hooks.event` / `hooks.ack`,
+  anonymous `POST /api/v1/hooks/{id}` ingress), migration `0015_hooks.sql` (renumbered at the merge after `0014_access.sql`), control `hooks.event` / `hooks.ack`,
   pending events sent on connect, expiry; tests.
 - [x] 5. Node: hook events from the connector to the engine, acknowledgements, claims of events with the server; tests.
 - [x] 6. Desktop: RPC `testTrigger`, `sampleEvent`, `tryRun`, hook creation through the server for the machine; the

@@ -281,7 +281,7 @@ public static partial class ServiceDefinition
         unit.Append("# Written by ").Append(command).Append(" install; ").Append(command).Append(" uninstall removes it.\n");
         unit.Append("[Unit]\n");
         unit.Append("Description=").Append(DisplayName(spec.Product)).Append(" (").Append(command).Append(")\n");
-        unit.Append("Documentation=https://codealta.github.io/\n");
+        unit.Append("Documentation=https://codealta.io/\n");
         if (system)
         {
             unit.Append("Wants=network-online.target\n");

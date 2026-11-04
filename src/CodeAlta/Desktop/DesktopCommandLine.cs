@@ -144,7 +144,7 @@ internal static class DesktopCommandLine
           ... --enable-owned-user-input
               Answer provider input forms. Do not enter secrets in them.
 
-        Documentation: https://codealta.github.io
+        Documentation: https://codealta.io
         """;
 
     internal static string Version => typeof(DesktopCommandLine).Assembly

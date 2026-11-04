@@ -408,6 +408,8 @@ public sealed class ControlService
                     return FleetProofVerification.Reject(new FleetError(FleetErrorCodes.Revoked, null, "The device was revoked."));
             }
 
+            if (device.OwnerPersonId is { } owner && await store.GetPersonAsync(owner, cancellationToken).ConfigureAwait(false) is { IsActive: false })
+                return FleetProofVerification.Reject(new FleetError(FleetErrorCodes.Revoked, null, "The person of this device is suspended."));
             Device = device;
             return FleetProofVerification.Accept();
         }

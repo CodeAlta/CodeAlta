@@ -14,7 +14,7 @@ template_theme_override_styles = ["/css/codealta.scss"]
 # -----------------------------------------------------------------------------
 
 # Canonical base URL used for `lunet build` (links, og:meta, sitemap...).
-site_project_baseurl = "https://codealta.github.io"
+site_project_baseurl = "https://codealta.io"
 site_project_name = "CodeAlta"
 site_project_description = "An agentic AI coding assistant for your desktop and your terminal: local projects, model providers, plugins, and multi-session workflows."
 site_project_logo_path = "/img/CodeAlta.svg"

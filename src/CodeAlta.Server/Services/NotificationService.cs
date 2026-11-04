@@ -110,6 +110,15 @@ internal sealed class NotificationService
         }
     }
 
+    /// <summary>Tells every device of the organization online that something they all read changed, such as access.</summary>
+    /// <param name="organizationId">The organization.</param>
+    /// <param name="method">The event.</param>
+    public void TellOrganization(string organizationId, string method)
+    {
+        if (Presence is not { } presence) return;
+        foreach (var session in presence.List(organizationId)) _ = SendAsync(session, method);
+    }
+
     /// <summary>Tells one device online that something of its own changed.</summary>
     /// <param name="deviceId">The device.</param>
     /// <param name="method">The event.</param>

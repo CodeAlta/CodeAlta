@@ -33,7 +33,7 @@ public sealed record HookRecord(string OrganizationId, string HookId, string Own
 public sealed record HookEventRecord(string OrganizationId, string DeliveryId, string HookId, string MachineId, string EventKey, DateTimeOffset ReceivedAt, DateTimeOffset ExpiresAt,
     string State, string? Message, DateTimeOffset? AnsweredAt, string? Headers, byte[]? Body);
 
-/// <summary>The hooks of the server and the events they received (migration 0014).</summary>
+/// <summary>The hooks of the server and the events they received (migration 0015).</summary>
 public interface IHookStore
 {
     /// <summary>Stores a new hook, with its audit record.</summary>

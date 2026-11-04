@@ -31,11 +31,17 @@ internal sealed record AutomationRun(string Id, string AutomationId, DateTimeOff
     /// <summary>The run is in progress and waits for a person: an approval of a call it may not make by itself.</summary>
     internal const string Waiting = "waiting";
 
+    /// <summary>
+    /// The run waits for its owner to continue it anyway: a budget of the machine is reached and holds new runs. It goes
+    /// on as <see cref="Running"/> once continued, or fails once stopped.
+    /// </summary>
+    internal const string Held = "held";
+
     /// <summary>The most calls a try records.</summary>
     internal const int MaximumCalls = 50;
 
-    /// <summary>Whether the run is in progress, working or waiting for a person.</summary>
-    internal bool InProgress => Status is Running or Waiting;
+    /// <summary>Whether the run is in progress: working, waiting for a person, or held by a budget.</summary>
+    internal bool InProgress => Status is Running or Waiting or Held;
 
     /// <summary>The name of the automation when it ran: a run outlives a rename, and its automation.</summary>
     public string? Name { get; init; }

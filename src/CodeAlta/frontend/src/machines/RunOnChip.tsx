@@ -32,14 +32,14 @@ export function useMachines(epoch: string | null | undefined, api: MachinesApi =
  * names it, with the project of this computer the person is in; null while it is read or no machine is named.
  */
 export function useRemoteChoices(epoch: string | null | undefined, machineId: string | null, localProjectId: string | null,
-  api: MachinesApi = machines): Readonly<{ choices: MachineNewSessionChoices | null; reload: () => void }> {
+  api: MachinesApi = machines, providersOnly = false): Readonly<{ choices: MachineNewSessionChoices | null; reload: () => void }> {
   const [state, setState] = useState<{ key: string; choices: MachineNewSessionChoices } | null>(null);
   const [generation, setGeneration] = useState(0);
-  const key = epoch && machineId ? JSON.stringify([epoch, machineId, localProjectId, generation]) : null;
+  const key = epoch && machineId ? JSON.stringify([epoch, machineId, localProjectId, generation, providersOnly]) : null;
   useEffect(() => {
     if (!epoch || !machineId || !key) return;
     const abort = new AbortController();
-    void api.newSessionChoices({ expectedEpoch: epoch, machineId, localProjectId }, { signal: abort.signal, timeoutMilliseconds: 30_000 })
+    void api.newSessionChoices({ expectedEpoch: epoch, machineId, localProjectId, ...(providersOnly ? { providersOnly: true } : {}) }, { signal: abort.signal, timeoutMilliseconds: 30_000 })
       .then(choices => { if (!abort.signal.aborted) setState({ key, choices }); })
       .catch(() => { if (!abort.signal.aborted) setState({ key, choices: { status: "machine_offline", machineName: null, projects: [], suggestedProjectId: null, providers: [], message: null } }); });
     return () => abort.abort();

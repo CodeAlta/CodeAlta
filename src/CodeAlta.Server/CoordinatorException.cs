@@ -221,4 +221,19 @@ public static class CoordinatorErrorCodes
 
     /// <summary>The caller's person has no notification with this id.</summary>
     public const string NotificationNotFound = "notification.not_found";
+
+    /// <summary>A change of access does not hold: a role, a team, a grant, a transfer, a proposal.</summary>
+    public const string AccessInvalid = "access.invalid";
+
+    /// <summary>No person, team, grant, transfer, resource or proposal of the organization has this id.</summary>
+    public const string AccessNotFound = "access.not_found";
+
+    /// <summary>The change of access was overtaken: read again.</summary>
+    public const string AccessConflict = "access.conflict";
+
+    /// <summary>The change would leave the organization without an active owner.</summary>
+    public const string LastOwner = "access.last_owner";
+
+    /// <summary>A version of the signed access document does not hold, or does not follow the last one.</summary>
+    public const string AccessDocumentInvalid = "access_document.invalid";
 }

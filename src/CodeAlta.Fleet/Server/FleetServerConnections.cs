@@ -78,6 +78,12 @@ public sealed class FleetServerConnectionsOptions
     /// <summary>Gets what is told, by the id of its link, that a server says the budgets, holds or notifications of this device's person changed; null ignores it.</summary>
     public Action<string>? BudgetsChanged { get; init; }
 
+    /// <summary>
+    /// Gets what is told, with the link, once a newer version of the access document of its server verified: a node stops
+    /// the work of suspended people on it. Null tells nobody.
+    /// </summary>
+    public Action<string, Protocol.FleetAccessState>? AccessChanged { get; init; }
+
     /// <summary>Gets what reads the problems of the machine its heartbeats report; null reports nothing.</summary>
     public Func<IReadOnlyList<Protocol.Api.FleetHealthProblem>>? Health { get; init; }
 }
@@ -335,6 +341,8 @@ public sealed class FleetServerConnections : IAsyncDisposable
             Devices = devices,
             MetadataKeys = new FleetMetadataKeyring(devices),
             DeviceListPinPath = Path.Combine(_store.LinkFolder(link.Id), FleetOrganizationDevices.PinFileName),
+            AccessPinPath = Path.Combine(_store.LinkFolder(link.Id), FleetOrganizationAccess.PinFileName),
+            AccessChanged = _options.AccessChanged is { } accessChanged ? state => accessChanged(link.Id, state) : null,
             AcceptRelay = _options.AcceptRelay is { } accept ? (incoming, stream, token) => accept(created!, incoming, stream, token) : null,
             TelemetrySettings = _options.TelemetrySettings is { } receive ? (settings, token) => receive(created!, link, settings, token) : null,
             Metrics = _options.Metrics,

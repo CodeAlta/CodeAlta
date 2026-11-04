@@ -228,6 +228,8 @@ public sealed class CoordinatorServer : IAsyncDisposable
                 telemetry.Apply(organization is null ? null : await store.GetTelemetrySettingsAsync(organization.Id, cancellationToken).ConfigureAwait(false),
                     organization?.Id);
                 await LogIntegrityAsync(app, store, organization, cancellationToken).ConfigureAwait(false);
+                // Access control joins the devices and the document before the first request: who may revoke whose devices, where the document stands.
+                _ = app.Services.GetRequiredService<AccessDocumentService>();
                 await app.StartAsync(cancellationToken).ConfigureAwait(false);
                 // The campaigns a stop interrupted go on, the server's own step included (a new version confirms it).
                 app.Services.GetRequiredService<UpdateCampaignService>().Start();
@@ -393,6 +395,8 @@ public sealed class CoordinatorServer : IAsyncDisposable
             json.SerializerOptions.TypeInfoResolverChain.Insert(5, FleetSecretsApiJsonContext.Default);
             json.SerializerOptions.TypeInfoResolverChain.Add(FleetSignInJsonContext.Default);
             json.SerializerOptions.TypeInfoResolverChain.Add(FleetBudgetsApiJsonContext.Default);
+            json.SerializerOptions.TypeInfoResolverChain.Add(FleetAccessApiJsonContext.Default);
+            json.SerializerOptions.TypeInfoResolverChain.Add(FleetAccessDocumentJsonContext.Default);
             json.SerializerOptions.TypeInfoResolverChain.Add(FleetHookApiJsonContext.Default);
             json.SerializerOptions.DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull;
         });
@@ -450,6 +454,24 @@ public sealed class CoordinatorServer : IAsyncDisposable
                 ReadLatest = options.ReadLatestUpdate,
                 Limits = new UpdateCampaignLimits { MaxConcurrent = Math.Max(1, options.UpdateConcurrency), OfflineGrace = options.UpdateOfflineGrace },
             }));
+        services.AddSingleton(provider =>
+        {
+            var access = new AccessService(store, store, store, provider.GetRequiredService<NotificationService>(), time);
+            var devices = provider.GetRequiredService<DeviceService>();
+            var presence = provider.GetRequiredService<PresenceRegistry>();
+            var relays = provider.GetRequiredService<RelayHub>();
+            // A suspended person's devices: pending ones refused, connections and relays closed; approved ones leave the list by the console's entries.
+            access.EndDevice = async (device, origin, token) =>
+            {
+                if (device.Status == DeviceStatuses.Pending)
+                    await store.RefusePendingDeviceAsync(device.Id, time.GetUtcNow(), origin.Audit("device.refuse", null, device.Id), token).ConfigureAwait(false);
+                await presence.DisconnectAsync(device.Id, new FleetError(FleetErrorCodes.Revoked, null, "The person of this device is suspended.")).ConfigureAwait(false);
+                await relays.CloseDeviceAsync(device.Id).ConfigureAwait(false);
+            };
+            devices.MayRevokeOther = (actor, device, token) => access.MayRevokeAsync(actor, device, token);
+            return access;
+        });
+        services.AddSingleton(provider => new AccessDocumentService(store, store, provider.GetRequiredService<AccessService>(), time));
         services.AddSingleton(provider => new FleetAutomationService(store, store, provider.GetRequiredService<PresenceRegistry>(), time,
             provider.GetRequiredService<ILoggerFactory>().CreateLogger("CodeAlta.Server.Automations"))
         {
