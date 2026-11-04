@@ -199,7 +199,7 @@ internal sealed class NodeTelemetry : IDisposable
             }
         }
 
-        var accepted = new Accepted(link.Id, link.Address, organizationId, signed, settings);
+        var accepted = new Accepted(link.Id, link.Address, organizationId, signed, settings, link.CertificatePin);
         _accepted[link.Id] = accepted;
         try
         {
@@ -274,7 +274,7 @@ internal sealed class NodeTelemetry : IDisposable
                 // Verified when the server pushed it, and kept in the node's own state root since.
                 var signed = JsonSerializer.Deserialize(File.ReadAllBytes(SettingsPath(link.Id)), FleetTelemetryJsonContext.Default.FleetSignedTelemetrySettings);
                 if (signed is not null && FleetTelemetrySettingsDocuments.TryParse(signed.Payload, out var settings))
-                    _accepted[link.Id] = new Accepted(link.Id, link.Address, link.OrganizationId ?? settings.OrganizationId, signed, settings);
+                    _accepted[link.Id] = new Accepted(link.Id, link.Address, link.OrganizationId ?? settings.OrganizationId, signed, settings, link.CertificatePin);
             }
             catch (Exception exception) when (exception is FileNotFoundException or DirectoryNotFoundException or JsonException or IOException or InvalidDataException)
             {
@@ -303,7 +303,8 @@ internal sealed class NodeTelemetry : IDisposable
             ExportInterval = _options.ExportInterval,
             // The server route: OTLP/HTTP to the server, each request signed with the key of the node, as its REST API takes them.
             RouteAddress = server is null ? null : signal => new Uri(server, FleetTelemetryPaths.Forward.TrimStart('/') + "/" + signal),
-            HttpClientFactory = server is null ? null : () => new HttpClient(new FleetSignedRequestHandler(_identity, new SocketsHttpHandler())),
+            HttpClientFactory = server is null ? null : () => new HttpClient(new FleetSignedRequestHandler(_identity,
+                fleet?.CertificatePin is { } pin ? FleetServerCertificates.CreateHandler(pin) : new SocketsHttpHandler())),
         };
     }
 
@@ -344,7 +345,7 @@ internal sealed class NodeTelemetry : IDisposable
         }
     }
 
-    private sealed record Accepted(string LinkId, Uri Server, string? OrganizationId, FleetSignedTelemetrySettings Signed, FleetTelemetrySettings Settings);
+    private sealed record Accepted(string LinkId, Uri Server, string? OrganizationId, FleetSignedTelemetrySettings Signed, FleetTelemetrySettings Settings, string? CertificatePin);
 }
 
 /// <summary>

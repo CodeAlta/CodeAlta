@@ -43,6 +43,12 @@ public sealed class CoordinatorServerOptions
     /// </summary>
     public bool AllowInsecureHttp { get; init; }
 
+    /// <summary>
+    /// Gets whether the <c>https://</c> addresses use a certificate the server makes once and keeps (<c>--own-certificate</c>),
+    /// when <see cref="CertificatePath"/> names none: no system trusts it, its clients pin its key (<see cref="CoordinatorServer.CertificatePin"/>).
+    /// </summary>
+    public bool OwnCertificate { get; init; }
+
     /// <summary>Gets how long a setup code works.</summary>
     public TimeSpan SetupCodeLifetime { get; init; } = TimeSpan.FromMinutes(30);
 
@@ -138,7 +144,8 @@ public sealed class CoordinatorServerOptions
 /// <param name="Urls">The addresses it listens on.</param>
 /// <param name="StartedAt">When it started.</param>
 /// <param name="Version">Its version.</param>
-public sealed record ServerState(int ProcessId, IReadOnlyList<string> Urls, DateTimeOffset StartedAt, string Version);
+/// <param name="CertificatePin">The pin of the certificate of its <c>https://</c> addresses (<see cref="CodeAlta.Fleet.Protocol.FleetServerCertificates"/>), or null.</param>
+public sealed record ServerState(int ProcessId, IReadOnlyList<string> Urls, DateTimeOffset StartedAt, string Version, string? CertificatePin = null);
 
 /// <summary>
 /// CodeAlta Server: one process with Kestrel, the REST API, the control connection, the store and the in-memory
@@ -159,8 +166,9 @@ public sealed class CoordinatorServer : IAsyncDisposable
     private int _disposed;
 
     private CoordinatorServer(WebApplication app, ICoordinatorStore store, FileStream dataRootLock, ServerPaths paths, IReadOnlyList<Uri> addresses, SetupCode? setupCode,
-        ServerTelemetry telemetry)
+        ServerTelemetry telemetry, string? certificatePin)
     {
+        CertificatePin = certificatePin;
         _app = app;
         _store = store;
         _lock = dataRootLock;
@@ -175,6 +183,12 @@ public sealed class CoordinatorServer : IAsyncDisposable
 
     /// <summary>Gets the setup code made at the start of a server without an owner, or <see langword="null"/>.</summary>
     public SetupCode? SetupCode { get; }
+
+    /// <summary>
+    /// Gets the pin of the certificate of the <c>https://</c> addresses (<see cref="CodeAlta.Fleet.Protocol.FleetServerCertificates"/>):
+    /// what a client of a server with its own certificate is given beside the address; null without <c>https://</c>.
+    /// </summary>
+    public string? CertificatePin { get; }
 
     /// <summary>Gets the files of the server.</summary>
     public ServerPaths Paths => _paths;
@@ -216,13 +230,15 @@ public sealed class CoordinatorServer : IAsyncDisposable
         SqliteCoordinatorStore? store = null;
         ServerMetrics? metrics = null;
         ServerTelemetry? telemetry = null;
+        X509Certificate2? certificate = null;
         try
         {
+            var sealer = ServerSecretSealer.Create(paths.KeysRoot);
             store = new SqliteCoordinatorStore(new SqliteCoordinatorStoreOptions
             {
                 DatabasePath = paths.DatabasePath,
                 TimeProvider = options.TimeProvider,
-                Sealer = ServerSecretSealer.Create(paths.KeysRoot),
+                Sealer = sealer,
                 ObserveOperation = (operation, duration, failed) => metrics?.StoreOperation(operation, duration, failed),
             });
             var created = store;
@@ -236,7 +252,10 @@ public sealed class CoordinatorServer : IAsyncDisposable
             if (organization is null) setupCode = codes.GetOrCreate(options.SetupCodeLifetime);
             else codes.Consume();
 
-            var app = Build(options, store, codes, telemetry);
+            var urls = options.Urls.Count == 0 ? [CoordinatorServerOptions.DefaultUrl] : options.Urls;
+            ServerBindings.Require(urls, options.AllowInsecureHttp);
+            certificate = Certificate(options, urls, paths, sealer, time);
+            var app = Build(options, urls, store, codes, telemetry, certificate);
             try
             {
                 telemetry.SetLog(app.Services.GetRequiredService<ILoggerFactory>().CreateLogger("CodeAlta.Server.Telemetry"));
@@ -259,12 +278,14 @@ public sealed class CoordinatorServer : IAsyncDisposable
             }
 
             var addresses = app.Services.GetRequiredService<IServer>().Features.Get<IServerAddressesFeature>()!.Addresses.Select(static address => new Uri(address)).ToArray();
-            var server = new CoordinatorServer(app, store, dataRootLock, paths, addresses, setupCode, telemetry);
+            var server = new CoordinatorServer(app, store, dataRootLock, paths, addresses, setupCode, telemetry,
+                certificate is null ? null : CodeAlta.Fleet.Protocol.FleetServerCertificates.Pin(certificate));
             server.WriteState(time.GetUtcNow());
             return server;
         }
         catch
         {
+            certificate?.Dispose();
             telemetry?.Dispose();
             metrics?.Dispose();
             if (store is not null) await store.DisposeAsync().ConfigureAwait(false);
@@ -358,7 +379,19 @@ public sealed class CoordinatorServer : IAsyncDisposable
         }
     }
 
-    private static WebApplication Build(CoordinatorServerOptions options, SqliteCoordinatorStore store, SetupCodeStore codes, ServerTelemetry telemetry)
+    // The certificate of the https:// addresses: the file the owner gave, or the one the server keeps of its own; none
+    // without https://.
+    private static X509Certificate2? Certificate(CoordinatorServerOptions options, IReadOnlyList<string> urls, ServerPaths paths, ServerSecretSealer sealer, TimeProvider time)
+    {
+        if (!urls.Any(static url => url.StartsWith("https://", StringComparison.OrdinalIgnoreCase))) return null;
+        if (!string.IsNullOrEmpty(options.CertificatePath)) return X509CertificateLoader.LoadPkcs12FromFile(options.CertificatePath, options.CertificatePassword);
+        if (options.OwnCertificate) return ServerOwnCertificate.LoadOrCreate(paths, sealer, time);
+        throw new ArgumentException("An https:// address needs a certificate: --certificate with a file, or --own-certificate for one the server makes and its devices pin.",
+            nameof(options));
+    }
+
+    private static WebApplication Build(CoordinatorServerOptions options, IReadOnlyList<string> urls, SqliteCoordinatorStore store, SetupCodeStore codes, ServerTelemetry telemetry,
+        X509Certificate2? certificate)
     {
         var builder = WebApplication.CreateSlimBuilder(new WebApplicationOptions { ContentRootPath = AppContext.BaseDirectory, Args = [] });
         if (options.ConfigureLogging is not null)
@@ -375,13 +408,8 @@ public sealed class CoordinatorServer : IAsyncDisposable
         // The records of the log also go to the collector, when the telemetry sends logs.
         builder.Logging.AddProvider(telemetry.Runtime);
 
-        var urls = options.Urls.Count == 0 ? [CoordinatorServerOptions.DefaultUrl] : options.Urls;
-        ServerBindings.Require(urls, options.AllowInsecureHttp);
-
-        if (urls.Any(static url => url.StartsWith("https://", StringComparison.OrdinalIgnoreCase)))
+        if (certificate is not null)
         {
-            if (string.IsNullOrEmpty(options.CertificatePath)) throw new ArgumentException("An https:// address needs a certificate (--certificate).", nameof(options));
-            var certificate = X509CertificateLoader.LoadPkcs12FromFile(options.CertificatePath, options.CertificatePassword);
             builder.WebHost.UseKestrelHttpsConfiguration();
             builder.WebHost.ConfigureKestrel(kestrel => kestrel.ConfigureHttpsDefaults(https => https.ServerCertificate = certificate));
         }
@@ -555,7 +583,8 @@ public sealed class CoordinatorServer : IAsyncDisposable
 
     private void WriteState(DateTimeOffset startedAt)
     {
-        var state = new ServerState(Environment.ProcessId, Addresses.Select(static address => address.ToString().TrimEnd('/')).ToArray(), startedAt, ServerVersion.Current);
+        var state = new ServerState(Environment.ProcessId, Addresses.Select(static address => address.ToString().TrimEnd('/')).ToArray(), startedAt, ServerVersion.Current,
+            CertificatePin);
         var temporary = _paths.StatePath + ".tmp";
         File.WriteAllText(temporary, JsonSerializer.Serialize(state, ServerStateJsonContext.Default.ServerState));
         File.Move(temporary, _paths.StatePath, overwrite: true);

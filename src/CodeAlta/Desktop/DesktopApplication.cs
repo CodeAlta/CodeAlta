@@ -1055,7 +1055,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                     if (fleet is not null && fleetServers is not null)
                     {
                         // A machine this computer manages joins a server this computer owns, and is approved here.
-                        machinesService.ServerAddress = linkId => fleetServers.Connections.FirstOrDefault(connection => connection.Link.Id == linkId)?.Link.Url;
+                        machinesService.ServerAddress = linkId => fleetServers.Connections.FirstOrDefault(connection => connection.Link.Id == linkId)?.Link.ShareableUrl;
                         // The names of the people a machine lets in, from the servers this computer is linked to.
                         machinesService.PersonNames = async token =>
                         {

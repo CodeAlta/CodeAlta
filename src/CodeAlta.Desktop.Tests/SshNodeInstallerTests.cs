@@ -173,8 +173,8 @@ public sealed class SshNodeInstallerTests
         // The same for a server set up over SSH.
         ssh.Answers.Enqueue(new SshResult(SshResult.ConnectionFailed, "", "Host key verification failed.\n"));
         var server = await Assert.ThrowsExactlyAsync<SshSetupException>(() => new SshServerInstaller(ssh, "4.0.0").RunAsync(
-            new SshServerSetupRequest { Target = new SshTarget("me", "box", null) }, (_, _) => Task.FromResult<ReachProblem?>(null),
-            (_, _, _, _) => Task.FromResult("link"), static _ => { }, TestContext.CancellationToken));
+            new SshServerSetupRequest { Target = new SshTarget("me", "box", null) }, (_, _, _) => Task.FromResult<ReachProblem?>(null),
+            (_, _, _, _, _) => Task.FromResult("link"), static _ => { }, TestContext.CancellationToken));
         Assert.AreEqual("SHA256:Qm9vLWtleS1maW5nZXJwcmludA (ED25519)", server.Message);
     }
 

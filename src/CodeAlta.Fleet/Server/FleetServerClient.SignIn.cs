@@ -18,10 +18,24 @@ public sealed partial class FleetServerClient
     /// <exception cref="ArgumentNullException"><paramref name="serverAddress"/> is null.</exception>
     /// <exception cref="FleetServerException">The server refused the call.</exception>
     /// <exception cref="HttpRequestException">The server does not answer.</exception>
-    public static async Task<SignInMethodsResponse> GetSignInMethodsAsync(Uri serverAddress, HttpMessageHandler? handler = null, CancellationToken cancellationToken = default)
+    public static Task<SignInMethodsResponse> GetSignInMethodsAsync(Uri serverAddress, HttpMessageHandler? handler = null, CancellationToken cancellationToken = default)
+        => GetSignInMethodsAsync(serverAddress, handler, null, cancellationToken);
+
+    /// <summary>Reads the ways a person may sign in to a server that may pin its own certificate; the call needs no device.</summary>
+    /// <param name="serverAddress">The address of the server.</param>
+    /// <param name="handler">The HTTP handler; null for the usual one, or the pinned one.</param>
+    /// <param name="certificatePin">The pin of the server's own certificate (<see cref="FleetServerCertificates"/>); null to validate it as usual.</param>
+    /// <param name="cancellationToken">Cancels the call.</param>
+    /// <returns>The methods.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="serverAddress"/> is null.</exception>
+    /// <exception cref="FleetServerException">The server refused the call.</exception>
+    /// <exception cref="HttpRequestException">The server does not answer, or presents another certificate than the pinned one.</exception>
+    public static async Task<SignInMethodsResponse> GetSignInMethodsAsync(Uri serverAddress, HttpMessageHandler? handler, string? certificatePin, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(serverAddress);
-        using var http = handler is null ? new HttpClient() : new HttpClient(handler, disposeHandler: false);
+        using var http = handler is not null ? new HttpClient(handler, disposeHandler: false)
+            : certificatePin is not null ? new HttpClient(FleetServerCertificates.CreateHandler(certificatePin), disposeHandler: true)
+            : new HttpClient();
         http.Timeout = TimeSpan.FromSeconds(30);
         using var response = await http.GetAsync(new Uri(serverAddress, "api/v1/sign-in/methods"), cancellationToken).ConfigureAwait(false);
         if (!response.IsSuccessStatusCode)

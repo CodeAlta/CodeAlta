@@ -47,7 +47,17 @@ internal sealed partial class DesktopFleetServers
     /// <exception cref="FleetServerException">The server refused.</exception>
     /// <exception cref="HttpRequestException">The server does not answer.</exception>
     public Task<SignInMethodsResponse> GetSignInMethodsAsync(Uri address, CancellationToken cancellationToken)
-        => FleetServerClient.GetSignInMethodsAsync(address, Handler, cancellationToken);
+        => GetSignInMethodsAsync(address, null, cancellationToken);
+
+    /// <summary>Reads the ways a person may sign in to a server that may pin its own certificate.</summary>
+    /// <param name="address">The address of the server.</param>
+    /// <param name="certificatePin">The pin of the server's own certificate; null for one that validates as usual.</param>
+    /// <param name="cancellationToken">Cancels the call.</param>
+    /// <returns>The methods.</returns>
+    /// <exception cref="FleetServerException">The server refused.</exception>
+    /// <exception cref="HttpRequestException">The server does not answer, or presents another certificate than the pinned one.</exception>
+    public Task<SignInMethodsResponse> GetSignInMethodsAsync(Uri address, string? certificatePin, CancellationToken cancellationToken)
+        => FleetServerClient.GetSignInMethodsAsync(address, Handler, certificatePin, cancellationToken);
 
     /// <summary>
     /// Starts a sign-in with a code (GitHub) to join a server: the server asks the provider for the code the person enters;
@@ -62,12 +72,26 @@ internal sealed partial class DesktopFleetServers
     /// <exception cref="DesktopSignInException">Too many sign-ins wait.</exception>
     /// <exception cref="FleetServerException">The server refused, or gave no usable code.</exception>
     /// <exception cref="HttpRequestException">The server does not answer.</exception>
-    public Task<FleetSignInCode> StartJoinCodeAsync(Uri address, string method, CancellationToken cancellationToken)
+    public Task<FleetSignInCode> StartJoinCodeAsync(Uri address, string method, CancellationToken cancellationToken) => StartJoinCodeAsync(address, method, null, cancellationToken);
+
+    /// <summary>Starts a sign-in with a code (GitHub) to join a server that may pin its own certificate.</summary>
+    /// <param name="address">The address of the server.</param>
+    /// <param name="method">The method; one that uses a device code.</param>
+    /// <param name="certificatePin">The pin of the server's own certificate; null for one that validates as usual.</param>
+    /// <param name="cancellationToken">Cancels the call.</param>
+    /// <returns>The code, and its handle.</returns>
+    /// <exception cref="ArgumentException">The method does not use a device code.</exception>
+    /// <exception cref="InvalidOperationException">This computer is linked to that server already.</exception>
+    /// <exception cref="DesktopSignInException">Too many sign-ins wait.</exception>
+    /// <exception cref="FleetServerException">The server refused, or gave no usable code.</exception>
+    /// <exception cref="HttpRequestException">The server does not answer.</exception>
+    public Task<FleetSignInCode> StartJoinCodeAsync(Uri address, string method, string? certificatePin, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(address);
         ObjectDisposedException.ThrowIf(_disposed, this);
         RequireNoLink(address);
-        return StartCodeAsync(new FleetServerClient(address, Identity(), Handler), FleetServerAddress.Format(address), method, FleetSignInPurposes.Enroll, cancellationToken);
+        return StartCodeAsync(new FleetServerClient(address, Identity(), Handler, null, certificatePin), FleetServerAddress.Format(address), method, FleetSignInPurposes.Enroll,
+            cancellationToken);
     }
 
     /// <summary>
@@ -167,14 +191,29 @@ internal sealed partial class DesktopFleetServers
     /// <exception cref="DesktopSignInException">The browser did not open, the person cancelled, the code is not one that waits, or the sign-in expired.</exception>
     /// <exception cref="FleetServerException">The server refused the sign-in or the enrollment.</exception>
     /// <exception cref="HttpRequestException">The server does not answer.</exception>
-    public async Task<(FleetServerLink Link, SignInPersonDto Person)> JoinWithSignInAsync(Uri address, string method, string? handle, CancellationToken cancellationToken)
+    public Task<(FleetServerLink Link, SignInPersonDto Person)> JoinWithSignInAsync(Uri address, string method, string? handle, CancellationToken cancellationToken)
+        => JoinWithSignInAsync(address, method, handle, null, cancellationToken);
+
+    /// <summary>Joins a server that may pin its own certificate by signing in (<see cref="JoinWithSignInAsync(Uri, string, string?, CancellationToken)"/>).</summary>
+    /// <param name="address">The address of the server.</param>
+    /// <param name="method">The method (<see cref="FleetSignInMethods"/>).</param>
+    /// <param name="handle">The handle <see cref="StartJoinCodeAsync(Uri, string, string?, CancellationToken)"/> gave, for a method that uses a code; null otherwise.</param>
+    /// <param name="certificatePin">The pin of the server's own certificate, which the link keeps; null for one that validates as usual.</param>
+    /// <param name="cancellationToken">Cancels the sign-in (the person gave up).</param>
+    /// <returns>The link, pending, and the person who signed in.</returns>
+    /// <exception cref="InvalidOperationException">This computer is linked to that server already.</exception>
+    /// <exception cref="DesktopSignInException">The browser did not open, the person cancelled, the code is not one that waits, or the sign-in expired.</exception>
+    /// <exception cref="FleetServerException">The server refused the sign-in or the enrollment.</exception>
+    /// <exception cref="HttpRequestException">The server does not answer.</exception>
+    public async Task<(FleetServerLink Link, SignInPersonDto Person)> JoinWithSignInAsync(Uri address, string method, string? handle, string? certificatePin,
+        CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(address);
         ObjectDisposedException.ThrowIf(_disposed, this);
         RequireNoLink(address);
         var identity = Identity();
         var pending = FleetSignInMethods.UsesDeviceCode(method) ? TakeCode(handle, FleetServerAddress.Format(address), method, FleetSignInPurposes.Enroll) : null;
-        using var owned = pending is null ? new FleetServerClient(address, identity, Handler) : null;
+        using var owned = pending is null ? new FleetServerClient(address, identity, Handler, null, certificatePin) : null;
         var client = pending?.Client ?? owned!;
         try
         {
@@ -191,7 +230,7 @@ internal sealed partial class DesktopFleetServers
                 var device = await client.EnrollWithSignInAsync(signedIn.Grant, _deviceName, cancellationToken).ConfigureAwait(false);
                 var now = DateTimeOffset.UtcNow;
                 var link = new FleetServerLink(FleetServerLinkStore.NewId(), FleetServerAddress.Format(address), null, null, identity.DeviceId, device.Kind,
-                    FleetServerLinkStates.Pending, now, now);
+                    FleetServerLinkStates.Pending, now, now, certificatePin ?? pending?.Client.CertificatePin);
                 _store.Save(link);
                 await EnsureConnectionsAsync(cancellationToken).ConfigureAwait(false);
                 return (link, signedIn.Person);

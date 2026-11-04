@@ -16,10 +16,10 @@ internal sealed partial class FleetServerService
     public async Task<FleetSignInMethodsResult> SignInMethodsAsync(FleetSignInMethodsRequest request, CancellationToken cancellationToken)
     {
         if (Refuse(request?.ExpectedEpoch) is { } refused) return new(refused, null, [], false, null);
-        if (!FleetServerAddress.TryParse(request!.Url, out var address)) return new("invalid_url", null, [], false, null);
+        if (!FleetServerAddress.TryParse(request!.Url, out var address, out var pin)) return new("invalid_url", null, [], false, null);
         try
         {
-            var methods = await _servers!.GetSignInMethodsAsync(address, cancellationToken).ConfigureAwait(false);
+            var methods = await _servers!.GetSignInMethodsAsync(address, pin, cancellationToken).ConfigureAwait(false);
             return new("ok", methods.Organization, [.. methods.Methods.Select(static method => new FleetSignInMethodView(method.Id, method.DisplayName, method.BreakGlass))],
                 methods.SsoRequired, null);
         }
@@ -52,8 +52,8 @@ internal sealed partial class FleetServerService
             }
             else
             {
-                if (!FleetServerAddress.TryParse(request.Url, out var address)) return new("invalid_url", null, null);
-                code = await _servers!.StartJoinCodeAsync(address, request.Method, cancellationToken).ConfigureAwait(false);
+                if (!FleetServerAddress.TryParse(request.Url, out var address, out var pin)) return new("invalid_url", null, null);
+                code = await _servers!.StartJoinCodeAsync(address, request.Method, pin, cancellationToken).ConfigureAwait(false);
             }
 
             return new("ok", new FleetSignInCodeView(code.Handle, code.UserCode, code.Page.AbsoluteUri, Time(code.ExpiresAt)), null);
@@ -80,11 +80,11 @@ internal sealed partial class FleetServerService
     public async Task<FleetSignInJoinResult> JoinWithSignInAsync(FleetSignInJoinRequest request, CancellationToken cancellationToken)
     {
         if (Refuse(request?.ExpectedEpoch) is { } refused) return new(refused, null, null, false, null);
-        if (!FleetServerAddress.TryParse(request!.Url, out var address)) return new("invalid_url", null, null, false, null);
+        if (!FleetServerAddress.TryParse(request!.Url, out var address, out var pin)) return new("invalid_url", null, null, false, null);
         if (!FleetSignInMethods.IsKnown(request.Method)) return new("invalid_request", null, null, false, null);
         try
         {
-            var (link, person) = await _servers!.JoinWithSignInAsync(address, request.Method, request.Handle, cancellationToken).ConfigureAwait(false);
+            var (link, person) = await _servers!.JoinWithSignInAsync(address, request.Method, request.Handle, pin, cancellationToken).ConfigureAwait(false);
             ChangedLocally?.Invoke();
             return new("ok", Result(link).Server, person.DisplayName, person.HasDevices, null);
         }

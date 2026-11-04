@@ -586,7 +586,7 @@ function TokenDialog({ server, epoch, api, kind, onClose }: { server: FleetServe
     }, () => { if (!abort.signal.aborted) setProblem({ key: "The server does not answer." }); });
     return () => abort.abort();
   }, [api, epoch, server.id]);
-  const command = made ? joinCommand(server.url, made.token) : "";
+  const command = made ? joinCommand(server.shareUrl ?? server.url, made.token) : "";
   // A field to copy from: the text, selected on focus, and Copy beside it.
   const copyable = (label: MessageKey, value: string, className?: string) => <label className={className ? `fleet-token-field ${className}` : "fleet-token-field"}>
     <span>{t(label)}</span>

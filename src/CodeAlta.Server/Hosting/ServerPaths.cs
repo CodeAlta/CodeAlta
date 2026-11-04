@@ -63,6 +63,12 @@ public sealed class ServerPaths
     /// </summary>
     public string KeysRoot => Path.Combine(DataRoot, "keys");
 
+    /// <summary>
+    /// Gets the certificate the server made for itself (<c>--own-certificate</c>), sealed with the key ring of
+    /// <see cref="KeysRoot"/>: its clients pin its key, so it is kept, never replaced by itself.
+    /// </summary>
+    public string OwnCertificatePath => Path.Combine(DataRoot, "tls", "own-certificate.sealed");
+
     /// <summary>Gets the file of the id of this server in its telemetry (<c>service.instance.id</c>), made at its first start.</summary>
     public string InstanceIdPath => Path.Combine(DataRoot, "instance-id");
 }

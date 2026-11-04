@@ -150,8 +150,17 @@ analysis of Matrix showed a malicious server exploiting exactly that).
 - **To the server**: TLS, and a proof of possession of the device key on every request. The server serves plain HTTP
   on its loopback only, behind what terminates TLS in front of it (Tailscale Serve, Caddy, a platform), or `https://`
   with a certificate; an `http://` address beyond the loopback is refused at the start unless its owner forces it
-  (`--allow-insecure-http`), which the desktop's **Create my server** does only for the local network chosen
-  explicitly.
+  (`--allow-insecure-http`), which the desktop's **Create my server** does only for the unencrypted local network
+  chosen explicitly.
+- **A server's own certificate** (`--own-certificate`): without a certificate authority, the server makes a
+  self-signed key once, kept sealed with its key ring in the data root and never replaced by itself. Its clients pin
+  the SHA-256 of that public key (`sha256:…`, given beside the address as `https://host:port#pin=…`), as devices pin
+  each other's keys: a pinned client accepts that key only, whatever the names, dates or chain of the certificate, and
+  rejects any other, and the link keeps the pin for every later connection (REST, control connection, relays,
+  telemetry). The pin must come over a trusted channel: **Create my server** reads it over SSH from `altaserver status`
+  on the machine, and `altanode join` or an invitation gets it with the address from a controller device. A server
+  that lost its key ring cannot open its certificate and refuses to start rather than make a new key its devices would
+  refuse.
 - **Between devices** (a viewer and a node, a move, a live share): TLS 1.3 inside the direct connection or the relay,
   the node's key pinned from pairing or from the signed device list, and the viewer's device proof bound to the
   channel. The relay sees ciphertext.

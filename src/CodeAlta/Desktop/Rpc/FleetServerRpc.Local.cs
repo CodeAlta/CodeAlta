@@ -92,7 +92,7 @@ internal sealed partial class FleetServerService
     internal ISshRunner? Ssh { get; init; }
 
     /// <summary>Gets whether a server answers at an address from this computer; its health request unless a test says otherwise.</summary>
-    internal Func<Uri, CancellationToken, Task<ReachProblem?>>? Reachable { get; init; }
+    internal Func<Uri, string?, CancellationToken, Task<ReachProblem?>>? Reachable { get; init; }
 
     /// <summary>
     /// Sets up CodeAlta Server on a computer reached over SSH and makes this computer its owner, saying where each step
@@ -124,12 +124,12 @@ internal sealed partial class FleetServerService
                 var linkId = await installer.RunAsync(new SshServerSetupRequest
                 {
                     Target = target, Port = request.Port ?? 2586, Address = address, DataRoot = Blank(request.DataRoot), ToolPath = Blank(request.ToolPath),
-                    PackageFolder = Blank(request.PackageFolder), AcceptNewHostKey = request.AcceptNewHostKey,
-                }, Reachable ?? AnswersAsync, async (linkAddress, setupAddress, code, token) =>
+                    PackageFolder = Blank(request.PackageFolder), AcceptNewHostKey = request.AcceptNewHostKey, OwnCertificate = request.OwnCertificate,
+                }, Reachable ?? AnswersAsync, async (linkAddress, setupAddress, code, pin, token) =>
                 {
                     try
                     {
-                        return (await _servers!.CreateServerAsync(linkAddress, setupAddress, code, owner.Trim(), Blank(request.OrganizationName), token).ConfigureAwait(false)).Id;
+                        return (await _servers!.CreateServerAsync(linkAddress, setupAddress, code, owner.Trim(), Blank(request.OrganizationName), pin, token).ConfigureAwait(false)).Id;
                     }
                     catch (Exception exception) when (exception is FleetServerException or HttpRequestException or InvalidOperationException)
                     {
@@ -163,9 +163,11 @@ internal sealed partial class FleetServerService
 
     // The health request of the server, from this computer, as the machines will reach it: null when it answers, otherwise
     // what the last attempt met.
-    private static async Task<ReachProblem?> AnswersAsync(Uri address, CancellationToken cancellationToken)
+    private static async Task<ReachProblem?> AnswersAsync(Uri address, string? certificatePin, CancellationToken cancellationToken)
     {
-        using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(10) };
+        // A server with its own certificate answers through the pin only: the check is the one every device makes.
+        using var http = certificatePin is null ? new HttpClient() : new HttpClient(CodeAlta.Fleet.Protocol.FleetServerCertificates.CreateHandler(certificatePin), disposeHandler: true);
+        http.Timeout = TimeSpan.FromSeconds(10);
         ReachProblem? problem = null;
         for (var attempt = 0; attempt < 3; attempt++)
         {
@@ -223,5 +225,6 @@ internal sealed record FleetServerLocalRequest(string ExpectedEpoch, string Owne
 /// <param name="ToolPath">The folder of the tool there; null for <c>~/.dotnet/tools</c>.</param>
 /// <param name="PackageFolder">A folder of this computer with its packages; null for nuget.org.</param>
 /// <param name="AcceptNewHostKey">Whether a host key ssh does not know yet is accepted.</param>
+/// <param name="OwnCertificate">On the local network (no <paramref name="Address"/>), whether the server is reached over HTTPS with a certificate of its own, which every device pins; otherwise plain HTTP.</param>
 internal sealed record FleetServerSetupRequest(string ExpectedEpoch, string? Target, string OwnerName, string? OrganizationName, string? Address, int? Port, string? DataRoot,
-    string? ToolPath, string? PackageFolder, bool AcceptNewHostKey);
+    string? ToolPath, string? PackageFolder, bool AcceptNewHostKey, bool OwnCertificate = false);

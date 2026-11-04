@@ -67,13 +67,13 @@ internal sealed partial class FleetServerService
     public async Task<FleetServerResult> CreateAsync(FleetServerCreateRequest request, CancellationToken cancellationToken)
     {
         if (Refuse(request?.ExpectedEpoch) is { } refused) return new(refused, null, null);
-        if (!FleetServerAddress.TryParse(request!.Url, out var address)) return new("invalid_url", null, null);
+        if (!FleetServerAddress.TryParse(request!.Url, out var address, out var pin)) return new("invalid_url", null, null);
         if (request.Code is not { Length: > 0 and <= 128 } code || request.OwnerName is not { Length: > 0 and <= 128 } owner || request.OrganizationName is { Length: > 128 })
             return new("invalid_request", null, null);
         return await ActAsync(async () =>
         {
             var link = await _servers!.CreateServerAsync(address, code, owner, string.IsNullOrWhiteSpace(request.OrganizationName) ? null : request.OrganizationName,
-                cancellationToken).ConfigureAwait(false);
+                pin, cancellationToken).ConfigureAwait(false);
             return Result(link) with { RecoveryWords = await TryCreateRecoveryKeyAsync(link.Id, cancellationToken).ConfigureAwait(false) };
         }).ConfigureAwait(false);
     }
@@ -90,12 +90,12 @@ internal sealed partial class FleetServerService
     public async Task<FleetServerResult> RecoverAsync(FleetServerRecoverRequest request, CancellationToken cancellationToken)
     {
         if (Refuse(request?.ExpectedEpoch) is { } refused) return new(refused, null, null);
-        if (!FleetServerAddress.TryParse(request!.Url, out var address)) return new("invalid_url", null, null);
+        if (!FleetServerAddress.TryParse(request!.Url, out var address, out var pin)) return new("invalid_url", null, null);
         if (request.Words is not { Length: > 0 and <= 1024 } words) return new("invalid_request", null, null);
         // A word that is no word of a recovery key is said by its position: the person checks that one, and no word is repeated.
         if (FleetRecoveryKey.UnknownWordPosition(words) is > 0 and var position)
             return new("recovery.unknown_word", null, position.ToString(System.Globalization.CultureInfo.InvariantCulture));
-        return await ActAsync(async () => Result(await _servers!.RecoverAsync(address, words, cancellationToken).ConfigureAwait(false))).ConfigureAwait(false);
+        return await ActAsync(async () => Result(await _servers!.RecoverAsync(address, words, pin, cancellationToken).ConfigureAwait(false))).ConfigureAwait(false);
     }
 
     /// <summary>Makes the recovery key of this computer's person at a server: its words, shown once; one made before stops working.</summary>
@@ -121,9 +121,9 @@ internal sealed partial class FleetServerService
     public async Task<FleetServerResult> JoinAsync(FleetServerJoinRequest request, CancellationToken cancellationToken)
     {
         if (Refuse(request?.ExpectedEpoch) is { } refused) return new(refused, null, null);
-        if (!FleetServerAddress.TryParse(request!.Url, out var address)) return new("invalid_url", null, null);
+        if (!FleetServerAddress.TryParse(request!.Url, out var address, out var pin)) return new("invalid_url", null, null);
         if (request.Token is not { Length: > 0 and <= 256 } token) return new("invalid_request", null, null);
-        return await ActAsync(async () => Result(await _servers!.JoinAsync(address, token.Trim(), cancellationToken).ConfigureAwait(false))).ConfigureAwait(false);
+        return await ActAsync(async () => Result(await _servers!.JoinAsync(address, token.Trim(), pin, cancellationToken).ConfigureAwait(false))).ConfigureAwait(false);
     }
 
     /// <summary>Leaves a server: the link goes, and the spaces linked to it are unlinked.</summary>
@@ -558,7 +558,7 @@ internal sealed partial class FleetServerService
         var link = connection.Link;
         return new FleetServerView(link.Id, link.Url, link.OrganizationName, link.State, State(connection), connection.Connector?.LastError?.Message,
             link.IsController, [.. spaces.Where(space => link.IsServer(space.Settings.Fleet?.Server)).Select(static space => space.Id)],
-            link.IsController ? DesktopFleetServers.HasRecoveryKey(connection) : null);
+            link.IsController ? DesktopFleetServers.HasRecoveryKey(connection) : null, link.CertificatePin is null ? null : link.ShareableUrl);
     }
 
     // The state of a link's connection, as the page names it.
@@ -707,8 +707,10 @@ internal sealed record FleetServerRequest(string ExpectedEpoch);
 /// <param name="Controller">Whether this device may make tokens and approve devices there.</param>
 /// <param name="Spaces">The spaces that publish to it.</param>
 /// <param name="RecoveryKey">Whether the person of this computer has a recovery key there, for an owner's computer; null when unknown or not asked.</param>
+/// <param name="ShareUrl">The address to give a machine or a person (<c>altanode join</c>, an invitation): <paramref name="Url"/>, with the
+/// <c>#pin=</c> of a server's own certificate when it has one; null when it is <paramref name="Url"/>.</param>
 internal sealed record FleetServerView(string Id, string Url, string? Organization, string Link, string Connection, string? Problem, bool Controller, string[] Spaces,
-    bool? RecoveryKey = null);
+    bool? RecoveryKey = null, string? ShareUrl = null);
 
 /// <summary>The servers of this instance.</summary>
 /// <param name="Status"><c>ok</c>, <c>stale_epoch</c> or <c>unavailable</c>.</param>

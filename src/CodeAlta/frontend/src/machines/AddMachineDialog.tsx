@@ -257,7 +257,7 @@ function ServerJoin({ epoch, server, api, onBusy, onBack, onClose }: {
     } catch { setProblem({ key: "The server does not answer." }); }
     finally { setApproving(null); }
   }
-  const command = token ? joinCommand(server.url, token) : "";
+  const command = token ? joinCommand(server.shareUrl ?? server.url, token) : "";
   return <>
     <DialogBody>
       {!token && !problem && <ActivitySpinner size={16} />}

@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Text;
+using CodeAlta.Fleet.Protocol;
 
 namespace CodeAlta.Desktop.Fleet.MachineSetup;
 
@@ -19,6 +20,13 @@ internal sealed record SshServerSetupRequest
     /// loopback, behind what the person put in front of it: the default of the dialog.
     /// </summary>
     public Uri? Address { get; init; }
+
+    /// <summary>
+    /// Gets whether the server on the local network (no <see cref="Address"/>) is reached over HTTPS with a certificate of
+    /// its own (<c>altaserver run --own-certificate</c>), whose pin the setup reads over SSH and every device then checks;
+    /// otherwise over plain HTTP.
+    /// </summary>
+    public bool OwnCertificate { get; init; }
 
     /// <summary>Gets the data folder of the server there; null for <c>~/.altaserver</c>.</summary>
     public string? DataRoot { get; init; }
@@ -57,19 +65,21 @@ internal sealed class SshServerInstaller(ISshRunner ssh, string desktopVersion)
 
     /// <summary>Runs the setup.</summary>
     /// <param name="request">The computer and the options.</param>
-    /// <param name="reachable">Checks that the server answers at an address from this computer: null when it does, otherwise what blocked it.</param>
-    /// <param name="claim">Makes this computer the owner: the address of the link, the address of the setup (the forward), the code; returns the id of the link.</param>
+    /// <param name="reachable">Checks that the server answers at an address from this computer, with the pin of its own certificate if it has one: null when it does, otherwise what blocked it.</param>
+    /// <param name="claim">Makes this computer the owner: the address of the link, the address of the setup (the forward), the code, the pin of its own certificate or null; returns the id of the link.</param>
     /// <param name="progress">Told where each step stands.</param>
     /// <param name="cancellationToken">Stops the setup.</param>
     /// <returns>The id of the link of this computer to the new server.</returns>
     /// <exception cref="SshSetupException">A step failed; its code says why.</exception>
-    public async Task<string> RunAsync(SshServerSetupRequest request, Func<Uri, CancellationToken, Task<ReachProblem?>> reachable,
-        Func<Uri, Uri, string, CancellationToken, Task<string>> claim, Action<SshSetupProgress> progress, CancellationToken cancellationToken)
+    public async Task<string> RunAsync(SshServerSetupRequest request, Func<Uri, string?, CancellationToken, Task<ReachProblem?>> reachable,
+        Func<Uri, Uri, string, string?, CancellationToken, Task<string>> claim, Action<SshSetupProgress> progress, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
         var target = request.Target;
-        var address = request.Address ?? new Uri($"http://{(target.Host.Contains(':', StringComparison.Ordinal) ? $"[{target.Host}]" : target.Host)}:{request.Port.ToString(CultureInfo.InvariantCulture)}");
         var onNetwork = request.Address is null;
+        var encrypted = onNetwork && request.OwnCertificate;
+        var address = request.Address ?? new Uri($"{(encrypted ? "https" : "http")}://{(target.Host.Contains(':', StringComparison.Ordinal) ? $"[{target.Host}]" : target.Host)}:"
+            + request.Port.ToString(CultureInfo.InvariantCulture));
 
         progress(new(SshSetupSteps.Connect, "running", target.Destination));
         SshResult probe;
@@ -110,14 +120,18 @@ internal sealed class SshServerInstaller(ISshRunner ssh, string desktopVersion)
         progress(new(SshSetupSteps.Install, "done", $"CodeAlta Server {version} · {toolPath}"));
 
         progress(new(SshSetupSteps.Service, "running"));
-        var service = await ssh.RunAsync(target, ServiceScript(facts, toolPath, request.DataRoot, request.Port, onNetwork), request.AcceptNewHostKey, null, cancellationToken)
+        var service = await ssh.RunAsync(target, ServiceScript(facts, toolPath, request.DataRoot, request.Port, onNetwork, encrypted), request.AcceptNewHostKey, null, cancellationToken)
             .ConfigureAwait(false);
         if (!service.Succeeded) throw new SshSetupException(SshSetupSteps.Service, "service_failed", Lines(service.Error + service.Output));
+        // The pin of the certificate the server made, as its status printed it over SSH: the channel this computer trusts
+        // already, so that no one on the network can put a certificate of their own in its place.
+        var pin = encrypted ? service.Output.Split('\n', StringSplitOptions.TrimEntries).LastOrDefault(FleetServerCertificates.IsPin) : null;
+        if (encrypted && pin is null) throw new SshSetupException(SshSetupSteps.Service, "service_failed", "The server did not print the pin of its certificate. " + Lines(service.Output));
         progress(new(SshSetupSteps.Service, "done", (facts.Os == "Linux" ? "systemd --user unit" : "LaunchAgent") + $", port {request.Port}"
-            + (onNetwork ? ", every network of the machine" : ", its loopback")));
+            + (onNetwork ? ", every network of the machine" : ", its loopback") + (encrypted ? ", HTTPS with its own certificate" : "")));
 
         progress(new(SshServerSteps.Reach, "running", address.ToString().TrimEnd('/')));
-        if (await reachable(address, cancellationToken).ConfigureAwait(false) is { } blocked)
+        if (await reachable(address, pin, cancellationToken).ConfigureAwait(false) is { } blocked)
             throw new SshSetupException(SshServerSteps.Reach, blocked.BlockedHere ? "local_network_blocked"
                 : onNetwork ? facts.Firewall == "ufw" ? "server_blocked_ufw" : "server_blocked" : "server_proxy_unreachable",
                 $"{address.ToString().TrimEnd('/')} · {blocked.Reason}");
@@ -133,7 +147,8 @@ internal sealed class SshServerInstaller(ISshRunner ssh, string desktopVersion)
         catch (IOException exception) { throw new SshSetupException(SshServerSteps.Claim, "forward_failed", exception.Message); }
         using (forward)
         {
-            var linkId = await claim(address, new Uri($"http://127.0.0.1:{forward.LocalPort.ToString(CultureInfo.InvariantCulture)}"), setupCode, cancellationToken).ConfigureAwait(false);
+            var linkId = await claim(address, new Uri($"{(encrypted ? "https" : "http")}://127.0.0.1:{forward.LocalPort.ToString(CultureInfo.InvariantCulture)}"), setupCode, pin,
+                cancellationToken).ConfigureAwait(false);
             progress(new(SshServerSteps.Claim, "done"));
             return linkId;
         }
@@ -153,7 +168,7 @@ internal sealed class SshServerInstaller(ISshRunner ssh, string desktopVersion)
     // systemd --user unit with lingering, a LaunchAgent), with the PATH and the DOTNET_ROOT of the prelude; then waits until
     // the server answers its own status. The default data root has the service of ~/.altaserver; another one a service
     // named after it, so that two never collide.
-    private static string ServiceScript(SshMachineFacts facts, string toolPath, string? dataRoot, int port, bool onNetwork)
+    private static string ServiceScript(SshMachineFacts facts, string toolPath, string? dataRoot, int port, bool onNetwork, bool encrypted)
     {
         var script = new StringBuilder(SshNodeInstaller.DotnetPrelude(facts));
         script.Append("TOOLS=").Append(SshNodeInstaller.Quote(toolPath)).Append("\nTOOLS=$(cd \"$TOOLS\" && pwd)\n");
@@ -173,12 +188,16 @@ internal sealed class SshServerInstaller(ISshRunner ssh, string desktopVersion)
 
         script.Append("\"$TOOLS/altaserver\" install");
         if (dataRoot is not null) script.Append(" --data-root \"$ROOT\"");
-        // The local network is plain HTTP that the person chose: the server refuses it unless it is forced.
-        script.Append(" --urls ").Append(onNetwork ? $"http://0.0.0.0:{port} --allow-insecure-http" : $"http://127.0.0.1:{port}").Append(" 1>&2\n");
+        // The local network is HTTPS with the server's own certificate, or plain HTTP that the person chose: the server
+        // refuses that one unless it is forced.
+        script.Append(" --urls ").Append(!onNetwork ? $"http://127.0.0.1:{port}" : encrypted ? $"https://0.0.0.0:{port} --own-certificate" : $"http://0.0.0.0:{port} --allow-insecure-http")
+            .Append(" 1>&2\n");
 
         script.Append("i=0\nwhile [ $i -lt ").Append((int)StartTimeout.TotalSeconds).Append(" ]; do\n");
         // "Health: ok" once it serves: status also prints "Health: no answer ..." while it starts.
-        script.Append("  if \"$TOOLS/altaserver\" status --data-root \"$ROOT\" 2>/dev/null | grep -q '^Health: ok'; then exit 0; fi\n  i=$((i+1)); sleep 1\ndone\n");
+        // Once it serves, the pin of its own certificate, on a line of its own (status prints "Certificate: sha256:...").
+        script.Append("  if \"$TOOLS/altaserver\" status --data-root \"$ROOT\" 2>/dev/null | grep -q '^Health: ok'; then ")
+            .Append(encrypted ? "\"$TOOLS/altaserver\" status --data-root \"$ROOT\" | sed -n 's/^Certificate: //p'; " : "").Append("exit 0; fi\n  i=$((i+1)); sleep 1\ndone\n");
         script.Append("\"$TOOLS/altaserver\" status --data-root \"$ROOT\" >&2\nexit 1\n");
         return script.ToString();
     }

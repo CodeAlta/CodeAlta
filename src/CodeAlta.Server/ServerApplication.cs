@@ -108,8 +108,11 @@ public sealed class ServerApplication
             "and the control connection of devices (/fleet/v1) on http://127.0.0.1:2586.",
             "Plain HTTP is for the loopback. To reach it from other machines, keep it on",
             "the loopback behind Tailscale Serve, Caddy or the TLS of your platform (the",
-            "usual way), or give it a certificate and an https:// address. An http://",
-            "address beyond the loopback is refused unless --allow-insecure-http forces it.",
+            "usual way), or give it an https:// address with a certificate: a file of",
+            "yours (--certificate), or one it makes and keeps (--own-certificate), which",
+            "no browser trusts and its devices pin: the address to give them, with the",
+            "pin, is printed at the start and by altaserver status. An http:// address",
+            "beyond the loopback is refused unless --allow-insecure-http forces it.",
             _,
             "Until it has an owner, the server prints a one-time setup code and accepts",
             "its setup from this machine only (altaserver setup-code prints it again).",
@@ -120,6 +123,7 @@ public sealed class ServerApplication
             { "urls=", "The {ADDRESSES} to listen on, separated by ';' (http:// or https://)", v => run.Urls = v },
             { "certificate=", "A PKCS #12 {FILE} for the https:// addresses", v => run.Certificate = v },
             { "certificate-password-env=", "The environment {VARIABLE} that holds the certificate's password", v => run.CertificatePasswordVariable = v },
+            { "own-certificate", "Without --certificate, make (once) and keep a certificate of the server's own for the https:// addresses, which its devices pin", v => run.OwnCertificate = v is not null },
             { "allow-insecure-http", "Allow http:// addresses beyond the loopback, on a network you trust", v => run.AllowInsecureHttp = v is not null },
             { "trusted-proxy=", "The {ADDRESSES} of the reverse proxies in front of the server, separated by ';' (127.0.0.1;::1 for Tailscale Serve or Caddy here): their X-Forwarded-For names the caller the limits count", v => run.TrustedProxies = v },
         };
@@ -160,6 +164,7 @@ public sealed class ServerApplication
             { "urls=", "The {ADDRESSES} to listen on, separated by ';' (http:// or https://)", v => install.Urls = v },
             { "certificate=", "A PKCS #12 {FILE} for the https:// addresses", v => install.Certificate = v },
             { "certificate-password-env=", "The environment {VARIABLE} that holds the certificate's password", v => install.CertificatePasswordVariable = v },
+            { "own-certificate", "Without --certificate, a certificate of the server's own, which its devices pin", v => install.OwnCertificate = v is not null },
             { "allow-insecure-http", "Allow http:// addresses beyond the loopback, on a network you trust", v => install.AllowInsecureHttp = v is not null },
             { "trusted-proxy=", "The {ADDRESSES} of the reverse proxies in front of the server, separated by ';'", v => install.TrustedProxies = v },
             { "user", "A service of the current user (the default)", v => install.User = v is not null },
@@ -362,6 +367,7 @@ public sealed class ServerApplication
                 CertificatePath = options.Certificate,
                 CertificatePassword = password,
                 AllowInsecureHttp = options.AllowInsecureHttp,
+                OwnCertificate = options.OwnCertificate,
                 TrustedProxies = Proxies(options.TrustedProxies),
                 UpdateStatus = () => updates?.Status(),
                 // The last step of a campaign of the fleet: the same self-update as altaserver update, with the signed hash.
@@ -389,6 +395,8 @@ public sealed class ServerApplication
         await using (server.ConfigureAwait(false))
         {
             await _output.WriteLineAsync($"CodeAlta Server {ServerVersion.Current} listens on {string.Join(", ", server.Addresses.Select(static address => address.ToString().TrimEnd('/')))} (data root {paths.DataRoot}).").ConfigureAwait(false);
+            if (server.CertificatePin is { } pin)
+                await _output.WriteLineAsync($"Certificate: {pin} (devices reach the server at its https:// address followed by #pin={pin}).").ConfigureAwait(false);
             // Copies an older version took before the server sealed its secrets keep them in clear: said once, with what to do.
             if (ServerBackups.FindUnsealed(paths) is { Count: > 0 } unsealed)
             {
@@ -654,12 +662,16 @@ public sealed class ServerApplication
 
         await _output.WriteLineAsync($"CodeAlta Server {state.Version}, process {state.ProcessId}, since {state.StartedAt.ToLocalTime():g}").ConfigureAwait(false);
         await _output.WriteLineAsync($"Listens on {string.Join(", ", state.Urls)}").ConfigureAwait(false);
+        // The pin a device is given beside the https:// address: the key of the certificate it then trusts, alone.
+        if (state.CertificatePin is { } pin) await _output.WriteLineAsync($"Certificate: {pin}").ConfigureAwait(false);
         var address = state.Urls.FirstOrDefault(static url => url.StartsWith("http://", StringComparison.OrdinalIgnoreCase)) ?? state.Urls.FirstOrDefault();
         if (address is not null)
         {
             try
             {
-                using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(3) };
+                using var client = state.CertificatePin is { } pinned && address.StartsWith("https://", StringComparison.OrdinalIgnoreCase)
+                    ? new HttpClient(CodeAlta.Fleet.Protocol.FleetServerCertificates.CreateHandler(pinned), disposeHandler: true) { Timeout = TimeSpan.FromSeconds(3) }
+                    : new HttpClient { Timeout = TimeSpan.FromSeconds(3) };
                 var health = await client.GetFromJsonAsync(new Uri(Reachable(new Uri(address)), "api/v1/server/health"), ServerApiJsonContext.Default.ServerHealthDto)
                     .ConfigureAwait(false);
                 await _output.WriteLineAsync(health is null ? "Health: no answer" : $"Health: {health.Status}, {(health.SetUp ? "set up" : "no owner yet (altaserver setup-code)")}, schema {health.SchemaVersion}")
@@ -809,6 +821,7 @@ public sealed class ServerApplication
         if (options.Certificate is { } certificate) arguments.AddRange(["--certificate", Path.GetFullPath(certificate)]);
         if (options.CertificatePasswordVariable is { } variable) arguments.AddRange(["--certificate-password-env", variable]);
         if (options.AllowInsecureHttp) arguments.Add(ServerBindings.AllowInsecureHttpOption);
+        if (options.OwnCertificate) arguments.Add("--own-certificate");
         if (options.TrustedProxies is { } proxies) arguments.AddRange(["--trusted-proxy", proxies]);
         var system = scope == ServiceScope.System;
         return new ServiceRequest
@@ -901,6 +914,8 @@ public sealed class ServerApplication
         public string? CertificatePasswordVariable { get; set; }
 
         public bool AllowInsecureHttp { get; set; }
+
+        public bool OwnCertificate { get; set; }
 
         public string? TrustedProxies { get; set; }
     }

@@ -20,6 +20,7 @@ export type CreateServerMachinesApi = Pick<typeof machines, "list" | "joinServer
 
 type StepState = { state: "waiting" | "running" | "done" | "failed"; detail?: string | null };
 type Where = "ssh" | "local";
+type Reach = "address" | "encrypted" | "network";
 // A server just created has no space linked yet.
 const noSpaces: readonly string[] = [];
 
@@ -37,8 +38,9 @@ export function CreateServerDialog({ epoch, api = fleetServer, machinesApi = mac
   const { t } = useShellLanguage();
   const [where, setWhere] = useState<Where | null>(null);
   const [target, setTarget] = useState("");
-  // An address put in front of the server (TLS) is the default: the local network is plain HTTP, chosen knowingly.
-  const [reach, setReach] = useState<"network" | "address">("address");
+  // An address put in front of the server (TLS) stays the default; on the local network, the server's own certificate
+  // (pinned by every device) comes first, and plain HTTP is chosen knowingly.
+  const [reach, setReach] = useState<Reach>("address");
   const [address, setAddress] = useState("");
   const [owner, setOwner] = useState("");
   const [organization, setOrganization] = useState("");
@@ -65,7 +67,7 @@ export function CreateServerDialog({ epoch, api = fleetServer, machinesApi = mac
   const order = where === "local" ? localServerSteps : sshServerSteps;
   const computer = sshTargetOf(target);
   const url = organizationUrlOf(address);
-  const ready = !!owner.trim() && (where === "local" || !!computer && (reach === "network" || !!url));
+  const ready = !!owner.trim() && (where === "local" || !!computer && (reach !== "address" || !!url));
 
   async function create(acceptNewHostKey: boolean) {
     abort.current?.abort();
@@ -77,8 +79,8 @@ export function CreateServerDialog({ epoch, api = fleetServer, machinesApi = mac
     const common = { expectedEpoch: epoch, ownerName: owner.trim(), organizationName: organization.trim() || null, port, dataRoot: dataRoot.trim() || null,
       toolPath: toolPath.trim() || null, packageFolder: packages.trim() || null };
     try {
-      const events = await api.createServer(where === "local" ? { ...common, target: null, address: null, acceptNewHostKey: false }
-        : { ...common, target: computer, address: reach === "address" ? url : null, acceptNewHostKey }, { signal: controller.signal });
+      const events = await api.createServer(where === "local" ? { ...common, target: null, address: null, acceptNewHostKey: false, ownCertificate: false }
+        : { ...common, target: computer, address: reach === "address" ? url : null, acceptNewHostKey, ownCertificate: reach === "encrypted" }, { signal: controller.signal });
       for await (const event of events) {
         if (controller.signal.aborted) return;
         apply(event);
@@ -120,12 +122,15 @@ export function CreateServerDialog({ epoch, api = fleetServer, machinesApi = mac
             <small className="muted-text">{t("As you would type it after ssh: user@host, user@host:port, or a host of your SSH configuration. Your SSH keys and agent sign in.")}</small>
           </label>
           <div className="add-machine-field"><span>{t("How your machines reach it")}</span>
-            <RadioGroup selectedValue={reach} onChange={event => setReach(event.currentTarget.value as "network" | "address")} className="create-server-reach">
+            <RadioGroup selectedValue={reach} onChange={event => setReach(event.currentTarget.value as Reach)} className="create-server-reach">
               <Radio value="address" label={t("An address I put in front of it (a domain, Tailscale Serve)")} />
+              <Radio value="encrypted" labelElement={<span>{t("The local network, encrypted with the server's own certificate")} <code className="muted-text">{`https://${shownHost || "host"}:${port}`}</code></span>} />
               <Radio value="network" labelElement={<span>{t("The local network, not encrypted")} <code className="muted-text">{`http://${shownHost || "host"}:${port}`}</code></span>} />
             </RadioGroup>
             {reach === "address" && <InputGroup fill value={address} placeholder="https://fleet.example.com" aria-label={t("Address of the server")}
               onChange={event => setAddress(event.currentTarget.value)} />}
+            {reach === "encrypted" && <small className="muted-text create-server-reach-note">{t("The server makes a certificate of its own. No browser trusts it, but CodeAlta reads its fingerprint over SSH and every device checks it at each connection: nothing travels in clear, and no other machine of the network can pass for your server.")}</small>}
+            {reach === "network" && <small className="muted-text create-server-reach-note">{t("Anyone on the network can read what your devices send the server. Only on a network you trust.")}</small>}
           </div>
         </>}
         <label className="add-machine-field"><span>{t("Your name")}</span>

@@ -24,8 +24,8 @@ public sealed class SshServerInstallerTests
         var steps = new List<SshSetupProgress>();
 
         var link = await new SshServerInstaller(ssh, "4.0.0+abc").RunAsync(new SshServerSetupRequest { Target = new SshTarget("me", "box.home.arpa", null), Port = 2693,
-            DataRoot = "~/srv/data", ToolPath = "~/srv/tools" }, (address, _) => { checkedAddress = address; return Task.FromResult<ReachProblem?>(null); },
-            (address, setup, code, _) => { claimed = (address, setup, code); return Task.FromResult("link-1"); }, steps.Add, TestContext.CancellationToken);
+            DataRoot = "~/srv/data", ToolPath = "~/srv/tools" }, (address, _, _) => { checkedAddress = address; return Task.FromResult<ReachProblem?>(null); },
+            (address, setup, code, _, _) => { claimed = (address, setup, code); return Task.FromResult("link-1"); }, steps.Add, TestContext.CancellationToken);
 
         Assert.AreEqual("link-1", link);
         Assert.AreEqual(new Uri("http://box.home.arpa:2693"), checkedAddress, "the address the machines use is checked from this computer before the claim");
@@ -44,6 +44,43 @@ public sealed class SshServerInstallerTests
     }
 
     [TestMethod]
+    public async Task OnTheLocalNetworkEncrypted_TheServerMakesItsOwnCertificate_WhosePinTheSetupReadsOverSsh_AndEveryStepChecks()
+    {
+        const string Pin = "sha256:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+        var ssh = new SshNodeInstallerTests.ScriptedSsh();
+        ssh.Answers.Enqueue(new SshResult(0, Ubuntu, ""));
+        ssh.Answers.Enqueue(new SshResult(0, "4.0.0\n", ""));
+        ssh.Answers.Enqueue(new SshResult(0, Pin + "\n", ""));
+        ssh.Answers.Enqueue(new SshResult(0, "WXYZ-1234\n", ""));
+        (Uri Address, string? Pin)? checkedAt = null;
+        (Uri Link, Uri Setup, string? Pin)? claimed = null;
+
+        await new SshServerInstaller(ssh, "4.0.0").RunAsync(new SshServerSetupRequest { Target = new SshTarget("me", "box", null), Port = 2693, OwnCertificate = true },
+            (address, pin, _) => { checkedAt = (address, pin); return Task.FromResult<ReachProblem?>(null); },
+            (address, setup, _, pin, _) => { claimed = (address, setup, pin); return Task.FromResult("link-1"); }, static _ => { }, TestContext.CancellationToken);
+
+        StringAssert.Contains(ssh.Scripts[2], "\"$TOOLS/altaserver\" install --urls https://0.0.0.0:2693 --own-certificate 1>&2\n");
+        Assert.IsFalse(ssh.Scripts[2].Contains("--allow-insecure-http", StringComparison.Ordinal), "nothing goes in clear on the network");
+        StringAssert.Contains(ssh.Scripts[2], "sed -n 's/^Certificate: //p'", "the pin comes over SSH, the channel this computer trusts already");
+        Assert.AreEqual((new Uri("https://box:2693"), (string?)Pin), checkedAt, "the address of the machines is checked with the pin, as each device will");
+        Assert.AreEqual((new Uri("https://box:2693"), new Uri("https://127.0.0.1:42693"), (string?)Pin), claimed, "the claim through the forward checks it too, and the link keeps it");
+    }
+
+    [TestMethod]
+    public async Task AServerWithItsOwnCertificateThatPrintsNoPin_IsNotClaimed()
+    {
+        var ssh = new SshNodeInstallerTests.ScriptedSsh();
+        ssh.Answers.Enqueue(new SshResult(0, Ubuntu, ""));
+        ssh.Answers.Enqueue(new SshResult(0, "4.0.0\n", ""));
+        ssh.Answers.Enqueue(new SshResult(0, "", ""));
+        var failure = await Assert.ThrowsExactlyAsync<SshSetupException>(() => new SshServerInstaller(ssh, "4.0.0").RunAsync(
+            new SshServerSetupRequest { Target = new SshTarget("me", "box", null), OwnCertificate = true }, (_, _, _) => Task.FromResult<ReachProblem?>(null),
+            (_, _, _, _, _) => Task.FromResult("x"), static _ => { }, TestContext.CancellationToken));
+        Assert.AreEqual(("service", "service_failed"), (failure.Step, failure.Code));
+        Assert.AreEqual(0, ssh.Forwards);
+    }
+
+    [TestMethod]
     public async Task AServerThatDoesNotAnswerFromHere_IsNotClaimed_AndTheFirewallIsNamed()
     {
         var ssh = new SshNodeInstallerTests.ScriptedSsh();
@@ -52,8 +89,8 @@ public sealed class SshServerInstallerTests
         ssh.Answers.Enqueue(new SshResult(0, "", ""));
         var claims = 0;
         var failure = await Assert.ThrowsExactlyAsync<SshSetupException>(() => new SshServerInstaller(ssh, "4.0.0").RunAsync(
-            new SshServerSetupRequest { Target = new SshTarget("me", "box", null) }, (_, _) => Task.FromResult<ReachProblem?>(new("No route to host")),
-            (_, _, _, _) => { claims++; return Task.FromResult("x"); }, static _ => { }, TestContext.CancellationToken));
+            new SshServerSetupRequest { Target = new SshTarget("me", "box", null) }, (_, _, _) => Task.FromResult<ReachProblem?>(new("No route to host")),
+            (_, _, _, _, _) => { claims++; return Task.FromResult("x"); }, static _ => { }, TestContext.CancellationToken));
         Assert.AreEqual(("reach", "server_blocked_ufw"), (failure.Step, failure.Code));
         StringAssert.Contains(failure.Message, "No route to host", "the person sees what this computer met, not only the port");
         Assert.AreEqual(0, claims);
@@ -68,8 +105,8 @@ public sealed class SshServerInstallerTests
         ssh.Answers.Enqueue(new SshResult(0, "", ""));
         ssh.Answers.Enqueue(new SshResult(0, "", ""));
         var failure = await Assert.ThrowsExactlyAsync<SshSetupException>(() => new SshServerInstaller(ssh, "4.0.0").RunAsync(
-            new SshServerSetupRequest { Target = new SshTarget("me", "box", null), Address = new Uri("https://fleet.example.com") }, (_, _) => Task.FromResult<ReachProblem?>(new("No route to host")),
-            (_, _, _, _) => Task.FromResult("x"), static _ => { }, TestContext.CancellationToken));
+            new SshServerSetupRequest { Target = new SshTarget("me", "box", null), Address = new Uri("https://fleet.example.com") }, (_, _, _) => Task.FromResult<ReachProblem?>(new("No route to host")),
+            (_, _, _, _, _) => Task.FromResult("x"), static _ => { }, TestContext.CancellationToken));
         StringAssert.Contains(ssh.Scripts[2], "\"$TOOLS/altaserver\" install --urls http://127.0.0.1:2586 1>&2\n", "the default data root: the service of ~/.altaserver");
         Assert.AreEqual("server_proxy_unreachable", failure.Code, "what stands in front of the server does not answer");
     }
@@ -81,8 +118,8 @@ public sealed class SshServerInstallerTests
         ssh.Answers.Enqueue(new SshResult(SshResult.ConnectionFailed, "",
             "Warning: Permanently added 'box' (ED25519) to the list of known hosts.\r\nme@box: Permission denied (publickey).\r\n"));
         var failure = await Assert.ThrowsExactlyAsync<SshSetupException>(() => new SshServerInstaller(ssh, "4.0.0").RunAsync(
-            new SshServerSetupRequest { Target = new SshTarget("me", "box", null), AcceptNewHostKey = true }, (_, _) => Task.FromResult<ReachProblem?>(null),
-            (_, _, _, _) => Task.FromResult("x"), static _ => { }, TestContext.CancellationToken));
+            new SshServerSetupRequest { Target = new SshTarget("me", "box", null), AcceptNewHostKey = true }, (_, _, _) => Task.FromResult<ReachProblem?>(null),
+            (_, _, _, _, _) => Task.FromResult("x"), static _ => { }, TestContext.CancellationToken));
         Assert.AreEqual(("connect", "auth_failed"), (failure.Step, failure.Code));
         Assert.AreEqual("me@box: Permission denied (publickey).", failure.Message);
     }
@@ -95,8 +132,8 @@ public sealed class SshServerInstallerTests
         ssh.Answers.Enqueue(new SshResult(0, "", ""));
         ssh.Answers.Enqueue(new SshResult(0, "", ""));
         var failure = await Assert.ThrowsExactlyAsync<SshSetupException>(() => new SshServerInstaller(ssh, "4.0.0").RunAsync(
-            new SshServerSetupRequest { Target = new SshTarget("me", "box", null) }, (_, _) => Task.FromResult<ReachProblem?>(new("No route to host", BlockedHere: true)),
-            (_, _, _, _) => Task.FromResult("x"), static _ => { }, TestContext.CancellationToken));
+            new SshServerSetupRequest { Target = new SshTarget("me", "box", null) }, (_, _, _) => Task.FromResult<ReachProblem?>(new("No route to host", BlockedHere: true)),
+            (_, _, _, _, _) => Task.FromResult("x"), static _ => { }, TestContext.CancellationToken));
         Assert.AreEqual(("reach", "local_network_blocked"), (failure.Step, failure.Code), "macOS keeps the application from the local network, not ufw on the machine");
         Assert.AreEqual("http://box:2586 · No route to host", failure.Message);
     }
