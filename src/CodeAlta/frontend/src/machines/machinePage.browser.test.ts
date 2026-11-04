@@ -7,6 +7,9 @@ const options = { entry: "../machines/machinePage.mount.tsx", fixture: "machineF
 const type = (selector: string, value: string) => `(() => { const input = document.querySelector(${JSON.stringify(selector)});
   Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(input, ${JSON.stringify(value)});
   input.dispatchEvent(new Event('input', { bubbles: true })); return true; })()`;
+const choose = (selector: string, value: string) => `(() => { const select = document.querySelector(${JSON.stringify(selector)});
+  Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set.call(select, ${JSON.stringify(value)});
+  select.dispatchEvent(new Event('change', { bubbles: true })); return true; })()`;
 const calls = async (page: { evaluate: (script: string) => Promise<unknown> }) => (await page.evaluate(`[...window.machineFixture.calls]`) as string[]).map(call => JSON.parse(call));
 
 test("the computer that manages a machine changes what its devices may do, its projects and its version from its page", { skip: !edge, timeout: 90_000 }, async () => {
@@ -49,6 +52,48 @@ test("the computer that manages a machine changes what its devices may do, its p
 
     assert.deepEqual(await calls(page), [{ permission: ["phone", "move", true] }, { revoke: "phone" }, { clone: "https://github.com/owner/repo" },
       { update: "check" }, { update: "install" }]);
+    assert.deepEqual(page.problems, []);
+  }, options);
+});
+
+test("the computer that manages a machine sees why each provider is not ready, gives one its key and signs another in with a code", { skip: !edge, timeout: 90_000 }, async () => {
+  await withCanvas(async page => {
+    const section = ".machine-providers-section";
+    await page.until(`document.querySelectorAll('${section} .machine-providers li').length === 3`, "the providers of the machine");
+    assert.deepEqual(await page.evaluate(`[...document.querySelectorAll('${section} li')].map(row => row.dataset.state + ': ' + (row.querySelector('.machine-provider-problem')?.textContent ?? ''))`),
+      ["ready: ", "not_ready: It has no key: the variable OPENAI_API_KEY is not set on the machine.", "not_ready: It is not signed in on the machine."],
+      "the provider skipped for missing credentials says it on the page");
+    await page.evaluate(`document.querySelector('${section}').scrollIntoView({ block: "nearest" })`);
+    await page.shot("machine-providers");
+
+    // Its key, typed here: the machine keeps it in its secrets, and the provider is ready.
+    await page.clickText(`${section} .bp6-button`, "Add its key…");
+    await page.until(`document.querySelector('.machine-provider-dialog input[type=password]')`, "the key field");
+    await page.evaluate(type(".machine-provider-dialog input[type=password]", "sk-test-123"));
+    await page.shot("machine-provider-key");
+    await page.clickText(".machine-provider-dialog .bp6-button", "Save");
+    await page.until(`document.querySelector('${section} li:nth-child(2)')?.dataset.state === 'ready'`, "OpenAI ready");
+    assert.match(await page.evaluate(`document.querySelector('${section} li:nth-child(2) small').textContent`) as string, /key in the secret PROVIDER_OPENAI_API_KEY/u);
+
+    // Copilot signs in with a code: the machine gives it, the page shows it with Copy, and follows the machine until it is signed in.
+    await page.clickText(`${section} .bp6-button`, "Sign in…");
+    await page.until(`document.querySelector('.machine-provider-signin-dialog .provider-account-code code')?.textContent === 'WDJB-MJHT'`, "the code");
+    await page.until(`document.querySelector('.machine-provider-signin-dialog [role=status]')?.textContent.includes('signed in on build-box as octocat')`, "signed in");
+    await page.clickText(".machine-provider-signin-dialog .bp6-button", "Done");
+    await page.until(`document.querySelector('${section} li:nth-child(3)')?.dataset.state === 'ready'`, "Copilot ready");
+
+    // A new provider: its type, its key.
+    await page.clickText(`${section} .bp6-button`, "Add a provider…");
+    await page.until(`document.querySelector('.machine-provider-dialog select')`, "the type");
+    await page.evaluate(choose(".machine-provider-dialog select", "anthropic"));
+    await page.evaluate(type(".machine-provider-dialog input[type=password]", "sk-ant-1"));
+    await page.clickText(".machine-provider-dialog .bp6-button", "Add");
+    await page.until(`document.querySelectorAll('${section} li').length === 4`, "the new provider");
+
+    const asked = (await calls(page)).filter(call => call.setProvider || call.signIn);
+    assert.deepEqual(asked, [{ setProvider: "openai", type: null, keyGiven: true, makeDefault: false }, { signIn: "copilot" },
+      { setProvider: "anthropic", type: "anthropic", keyGiven: true, makeDefault: false }]);
+    assert.ok(!JSON.stringify(await calls(page)).includes("sk-"), "the key is never recorded by the page");
     assert.deepEqual(page.problems, []);
   }, options);
 });

@@ -202,6 +202,36 @@ public sealed class MachineManagementTests
         CollectionAssert.AreEqual(new[] { "gpu", "prod" }, (await firstService.LabelsAsync(new MachineRequest(firstEpoch, firstMachine), token)).Labels);
     }
 
+    // The providers of a machine, from its page: the calls reach the machine, which answers for itself; this node has none to change.
+    [TestMethod]
+    public async Task TheProvidersOfAMachine_AreAskedOfTheMachine_AndRefusedToAComputerThatDoesNotManageIt()
+    {
+        var token = TestContext.CancellationToken;
+        await using var fixture = await FleetNodeFixture.StartAsync(token);
+        await using var firstComputer = await PairAsync(fixture, "first", token);
+        await using var secondComputer = await PairAsync(fixture, "second", token);
+        var (first, firstService, firstEpoch) = firstComputer;
+        var (second, secondService, secondEpoch) = secondComputer;
+        var firstMachine = first.Hosts.Single().MachineId!;
+        var secondMachine = second.Hosts.Single().MachineId!;
+
+        var listed = await firstService.ProvidersAsync(new MachineRequest(firstEpoch, firstMachine), token);
+        Assert.AreEqual("provider.unavailable", listed.Status, "a node whose host has no providers to change says so");
+        Assert.AreEqual("provider.unavailable", (await firstService.SetProviderAsync(new MachineProviderRequest(firstEpoch, firstMachine, "openai", "openai-responses", null, null, null,
+            "sk-1", true, false), token)).Status);
+        Assert.AreEqual("invalid_request", (await firstService.SetProviderAsync(new MachineProviderRequest(firstEpoch, firstMachine, "two words", null, null, null, null, null, true, false),
+            token)).Status, "checked here before it goes to the machine");
+        Assert.AreEqual("invalid_request", (await firstService.ProviderSignInAsync(new MachineProviderKeyRequest(firstEpoch, firstMachine, "../x"), token)).Status);
+        Assert.AreEqual("not_found", (await firstService.ProvidersAsync(new MachineRequest(firstEpoch, "nothing"), token)).Status);
+        Assert.AreEqual("stale_epoch", (await firstService.ProvidersAsync(new MachineRequest("other", firstMachine), token)).Status);
+
+        // A computer that does not manage the machine reads and changes none of its providers.
+        Assert.AreEqual("not_manager", (await secondService.ProvidersAsync(new MachineRequest(secondEpoch, secondMachine), token)).Status);
+        Assert.AreEqual("not_manager", (await secondService.SetProviderAsync(new MachineProviderRequest(secondEpoch, secondMachine, "openai", null, null, null, null, "stolen", true, false),
+            token)).Status);
+        Assert.AreEqual("not_manager", (await secondService.ProviderSignInAsync(new MachineProviderKeyRequest(secondEpoch, secondMachine, "copilot"), token)).Status);
+    }
+
     private static DeviceFingerprint DeviceFingerprintOf(FleetNodeFixture fixture, string deviceId)
         => fixture.Service.TrustedDevices.List(includeRevoked: true).Single(device => device.DeviceId == deviceId).Fingerprint;
 

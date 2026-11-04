@@ -9,13 +9,14 @@ import { useShellLanguage } from "../shellLanguage";
 import type { MessageKey } from "../localization";
 import { machineIntent, machineState, machineStateLabel } from "./machines";
 import { parseLabels } from "../fleet/fleetSecrets";
+import { MachineProviders } from "./MachineProviders";
 import { agentSandboxChoices, agentsAllowed, confirmsBypass, confirmsLoss, devicePermissions, hasPermission, isMachineLabel, managementProblem, orderedDevices, permissionLabel, permissionsEditable, projectSource,
   updateSummary, type DevicePermission } from "./machineManagement";
 
 /** The calls of the page of a machine. */
 export type MachinePageApi = Pick<typeof machines, "management" | "setDevicePermission" | "revokeDevice" | "addProject" | "cloneProject" | "removeProject"
   | "readLog" | "updateMachine" | "secrets" | "setSecret" | "rotateSecret" | "deleteSecret" | "setVariable" | "deleteVariable"
-  | "agents" | "setAgentSpace" | "setAgentSandbox" | "setAgentBypass" | "labels" | "setLabels">;
+  | "agents" | "setAgentSpace" | "setAgentSandbox" | "setAgentBypass" | "labels" | "setLabels" | "providers" | "setProvider" | "providerSignIn" | "providerSignInWait">;
 
 type Problem = { key: MessageKey; detail?: string | null } | null;
 
@@ -92,7 +93,9 @@ export function MachinePage({ epoch, machine, api = machines, onBack }: { epoch:
           : api.addProject({ expectedEpoch: epoch, machineId: machine.id, value }), done)}
         onRemove={project => void change(() => api.removeProject({ expectedEpoch: epoch, machineId: machine.id, value: project }))} />
     </>}
-    {view && (view.status === "ok" || view.status === "not_manager") && <ProvidersSection view={view} machine={machine} />}
+    {/* A computer that manages the machine sees each provider, why it is not ready, and gives it a key or signs it in; the others see the ready ones. */}
+    {view?.status === "ok" && <MachineProviders epoch={epoch} machine={machine} api={api} />}
+    {view?.status === "not_manager" && <ProvidersSection view={view} machine={machine} />}
     {view?.status === "ok" && <>
       <SecretsSection epoch={epoch} machine={machine} api={api} />
       <UpdatesSection epoch={epoch} machine={machine} view={view} api={api} onChanged={reload} />

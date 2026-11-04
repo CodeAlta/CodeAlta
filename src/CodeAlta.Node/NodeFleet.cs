@@ -133,6 +133,8 @@ internal sealed class NodeFleet : IAsyncDisposable
                 AcceptsWork = () => node.AcceptsWork, PairingAddresses = () => addresses, RequestStop = requestStop, CloneRoot = node.Options.CloneRoot,
                 Updating = () => node.AdmissionPaused, UpdateStatus = updateStatus, Metrics = metrics, Automations = node.Automations,
                 Management = management,
+                // Its providers, their readiness, a key typed on the desktop kept in the secrets of the machine, and their device-code sign-in.
+                Providers = new NodeProviders(node.Host, node.ModelCatalog),
                 // A session that names an environment is admitted as a run of an automation is, once the node joined a server.
                 AdmitEnvironment = (environment, runId, title, token) => node.Automations?.Environments is { } gate
                     ? gate.AdmitAsync(environment, runId, null, title, token)
