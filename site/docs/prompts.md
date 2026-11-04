@@ -149,7 +149,15 @@ The id of a prompt is its file name: `reviewer.prompt.md` is the agent prompt `r
 - **Replace**: a file with the same id replaces the one before it. A global `reviewer` prompt can have a stricter `reviewer.prompt.md` in one repository.
 - **Append**: with `mode: append` in its frontmatter, the file's body is added after the prompt it would replace. Several appended files stack in order.
 
-The custom agents of GitHub Copilot (`.github/agents`, `~/.copilot/agents`) are agent prompts too; a CodeAlta prompt with the same id comes first. See [GitHub Copilot layout](copilot-layout.md#custom-agents).
+The custom agents of GitHub Copilot (`.github/agents`, `~/.copilot/agents`) and the subagents of Claude Code (`.claude/agents`, `~/.claude/agents`) are agent prompts too; a CodeAlta prompt with the same id comes first. See [GitHub Copilot layout](copilot-layout.md#custom-agents) and [Claude Code subagents](#claude-code-subagents).
+
+### Claude Code subagents
+
+A subagent of Claude Code is an agent prompt in CodeAlta: those of `.claude/agents` in a project, and yours in `~/.claude/agents`, subfolders included. The id is the name of the file: `.claude/agents/reviewer.md` is the agent prompt `reviewer`. The text of the file is the prompt, and its `name` and `description` are what the list shows, marked **Claude** in **Settings > Agent prompts** and in the prompt selector of CodeAlta TUI.
+
+Select one with the **Agent** chip below the prompt of a session, or give it to a [sub-agent](sessions/delegation.md#sub-agents), with any model provider. The session keeps its model and the tools of CodeAlta: the `tools`, `model` and other fields of the file are for Claude Code and are not used.
+
+CodeAlta does not change these files. To change one for CodeAlta only, open it in **Settings > Agent prompts** and select **Customize a copy**: your copy, with the same id, is used instead. The agents of a project come before yours and, with the same id, an agent of GitHub Copilot before one of Claude Code. Only `.claude/agents` of your home folder is read, not the one of the folder a Claude Code provider sets with `config_dir`.
 
 ## Create a prompt
 

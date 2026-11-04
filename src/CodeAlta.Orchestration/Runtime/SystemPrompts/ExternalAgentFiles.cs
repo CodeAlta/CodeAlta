@@ -3,47 +3,85 @@ using CodeAlta.Catalog;
 namespace CodeAlta.Orchestration.Runtime.SystemPrompts;
 
 /// <summary>
-/// Reads the custom agents of GitHub Copilot as agent prompts: <c>.github/agents/&lt;id&gt;.agent.md</c> of a project and
-/// <c>~/.copilot/agents/&lt;id&gt;.agent.md</c> of the user. The text of the file is the prompt, and its <c>name</c> and
-/// <c>description</c> present it. What the file says about tools, model and handoffs is for Copilot and is not read.
+/// Reads the agents other coding tools keep as agent prompts: the custom agents of GitHub Copilot
+/// (<c>.github/agents/&lt;id&gt;.agent.md</c> of a project, <c>~/.copilot/agents/&lt;id&gt;.agent.md</c> of the user) and the
+/// subagents of Claude Code (<c>.claude/agents/&lt;id&gt;.md</c> of a project, <c>~/.claude/agents/&lt;id&gt;.md</c> of the user,
+/// subfolders included). The text of the file is the prompt, and its <c>name</c> and <c>description</c> present it.
+/// What the file says about tools, model and handoffs is for the other tool and is not read. The files are never written.
 /// </summary>
-internal static class CopilotAgentFiles
+internal static class ExternalAgentFiles
 {
-    /// <summary>The precedence of the agents of the user: below every prompt of CodeAlta, which wins on the same id.</summary>
-    internal const int UserPrecedence = -2;
+    // Below every prompt of CodeAlta, which wins on the same id. The agents of a project come after the ones of the
+    // user, and, in each, the ones of GitHub Copilot after the ones of Claude Code.
 
-    /// <summary>The precedence of the agents of a project: above the ones of the user, below every prompt of CodeAlta.</summary>
-    internal const int ProjectPrecedence = -1;
+    /// <summary>The precedence of the subagents of Claude Code of the user.</summary>
+    internal const int ClaudeUserPrecedence = -4;
+
+    /// <summary>The precedence of the custom agents of GitHub Copilot of the user.</summary>
+    internal const int CopilotUserPrecedence = -3;
+
+    /// <summary>The precedence of the subagents of Claude Code of a project.</summary>
+    internal const int ClaudeProjectPrecedence = -2;
+
+    /// <summary>The precedence of the custom agents of GitHub Copilot of a project.</summary>
+    internal const int CopilotProjectPrecedence = -1;
 
     private const string AgentSuffix = ".agent.md";
     private const string MarkdownSuffix = ".md";
     private const int MaximumLength = 256 * 1024;
     private const int MaximumIdLength = 128;
 
-    /// <summary>One custom agent: the id is the name of its file.</summary>
+    // Claude Code reads its folders of agents with their subfolders (`agents/review/security.md`).
+    private static readonly EnumerationOptions ClaudeEnumeration = new()
+    {
+        RecurseSubdirectories = true,
+        MaxRecursionDepth = 8,
+        IgnoreInaccessible = true,
+        AttributesToSkip = FileAttributes.ReparsePoint | FileAttributes.Hidden | FileAttributes.System,
+    };
+
+    /// <summary>One agent: the id is the name of its file.</summary>
     internal sealed record Agent(string Id, string Name, string? Description, string Body, string Path);
 
-    /// <summary>Gets the folders that exist, the one of the user first.</summary>
+    /// <summary>Gets the folders that exist, in the order of their precedence.</summary>
     internal static IEnumerable<(AgentPromptSourceKind Kind, int Precedence, string Folder)> Folders(SystemPromptContentRoots roots)
     {
-        if (roots.CopilotUserAgentsRoot is { } user && Directory.Exists(user))
+        if (roots.ClaudeUserAgentsRoot is { } claudeUser && Directory.Exists(claudeUser))
         {
-            yield return (AgentPromptSourceKind.CopilotUser, UserPrecedence, user);
+            yield return (AgentPromptSourceKind.ClaudeUser, ClaudeUserPrecedence, claudeUser);
         }
 
-        if (roots.ProjectPromptResourcesTrusted && roots.CopilotProjectAgentsRoot is { } project && Directory.Exists(project))
+        if (roots.CopilotUserAgentsRoot is { } copilotUser && Directory.Exists(copilotUser))
         {
-            yield return (AgentPromptSourceKind.CopilotProject, ProjectPrecedence, project);
+            yield return (AgentPromptSourceKind.CopilotUser, CopilotUserPrecedence, copilotUser);
+        }
+
+        if (!roots.ProjectPromptResourcesTrusted)
+        {
+            yield break;
+        }
+
+        if (roots.ClaudeProjectAgentsRoot is { } claudeProject && Directory.Exists(claudeProject))
+        {
+            yield return (AgentPromptSourceKind.ClaudeProject, ClaudeProjectPrecedence, claudeProject);
+        }
+
+        if (roots.CopilotProjectAgentsRoot is { } copilotProject && Directory.Exists(copilotProject))
+        {
+            yield return (AgentPromptSourceKind.CopilotProject, CopilotProjectPrecedence, copilotProject);
         }
     }
 
     /// <summary>Reads every agent of a folder, by id. A file that cannot be read or has no text is left out.</summary>
-    internal static IReadOnlyList<Agent> ReadAll(string folder)
+    internal static IReadOnlyList<Agent> ReadAll(AgentPromptSourceKind kind, string folder)
     {
+        var claude = kind.IsClaude();
         string[] files;
         try
         {
-            files = Directory.GetFiles(folder, "*" + MarkdownSuffix, SearchOption.TopDirectoryOnly);
+            files = claude
+                ? Directory.GetFiles(folder, "*" + MarkdownSuffix, ClaudeEnumeration)
+                : Directory.GetFiles(folder, "*" + MarkdownSuffix, SearchOption.TopDirectoryOnly);
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
@@ -51,10 +89,14 @@ internal static class CopilotAgentFiles
         }
 
         var agents = new Dictionary<string, Agent>(StringComparer.OrdinalIgnoreCase);
-        // `<id>.agent.md` comes before `<id>.md`, the older name of the same file.
-        foreach (var file in files.OrderByDescending(static file => file.EndsWith(AgentSuffix, StringComparison.OrdinalIgnoreCase)).ThenBy(static file => file, StringComparer.OrdinalIgnoreCase))
+        var ordered = claude
+            // The file nearest to the folder comes first when two of its subfolders have the same name of file.
+            ? files.OrderBy(static file => file.Count(static c => c == Path.DirectorySeparatorChar || c == Path.AltDirectorySeparatorChar)).ThenBy(static file => file, StringComparer.OrdinalIgnoreCase)
+            // `<id>.agent.md` comes before `<id>.md`, the older name of the same file of GitHub Copilot.
+            : files.OrderByDescending(static file => file.EndsWith(AgentSuffix, StringComparison.OrdinalIgnoreCase)).ThenBy(static file => file, StringComparer.OrdinalIgnoreCase);
+        foreach (var file in ordered)
         {
-            if (IdOf(file) is { } id && !agents.ContainsKey(id) && ReadFile(id, file) is { } agent)
+            if (IdOf(file, claude) is { } id && !agents.ContainsKey(id) && ReadFile(id, file) is { } agent)
             {
                 agents.Add(id, agent);
             }
@@ -64,17 +106,23 @@ internal static class CopilotAgentFiles
     }
 
     /// <summary>Reads the agent of an id in a folder, or null.</summary>
-    internal static Agent? Read(string folder, string id)
+    internal static Agent? Read(AgentPromptSourceKind kind, string folder, string id)
     {
         if (!IsId(id))
         {
             return null;
         }
 
+        if (kind.IsClaude())
+        {
+            // An agent may be in a subfolder: the one of the listing is the one that is used.
+            return ReadAll(kind, folder).FirstOrDefault(agent => string.Equals(agent.Id, id, StringComparison.OrdinalIgnoreCase));
+        }
+
         foreach (var suffix in (string[])[AgentSuffix, MarkdownSuffix])
         {
             var path = Path.Combine(folder, id + suffix);
-            if (File.Exists(path) && IdOf(path) is not null && ReadFile(id, path) is { } agent)
+            if (File.Exists(path) && IdOf(path, claude: false) is not null && ReadFile(id, path) is { } agent)
             {
                 return agent;
             }
@@ -83,10 +131,11 @@ internal static class CopilotAgentFiles
         return null;
     }
 
-    private static string? IdOf(string path)
+    private static string? IdOf(string path, bool claude)
     {
         var name = Path.GetFileName(path);
-        var id = name.EndsWith(AgentSuffix, StringComparison.OrdinalIgnoreCase) ? name[..^AgentSuffix.Length]
+        // Claude Code names its agents `<id>.md`: a `.agent.md` there is part of the id.
+        var id = !claude && name.EndsWith(AgentSuffix, StringComparison.OrdinalIgnoreCase) ? name[..^AgentSuffix.Length]
             : name.EndsWith(MarkdownSuffix, StringComparison.OrdinalIgnoreCase) ? name[..^MarkdownSuffix.Length]
             : null;
         // A folder of agents often has a README beside them.
@@ -139,7 +188,7 @@ internal static class CopilotAgentFiles
         return new Agent(id, Text(header.GetValueOrDefault("name")) ?? id, Text(header.GetValueOrDefault("description")), body, Path.GetFullPath(path));
     }
 
-    // The header of an agent file is YAML with lists and maps (tools, handoffs, MCP servers). Only its top-level
+    // The header of an agent file is YAML with lists and maps (tools, handoffs, MCP servers, hooks). Only its top-level
     // scalars are read: a `name` nested in one of the maps is not the name of the agent.
     private static (Dictionary<string, string> Header, string Body) SplitHeader(string text)
     {

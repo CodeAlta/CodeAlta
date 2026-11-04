@@ -2716,6 +2716,7 @@ export const messages = dictionary({
   "No language matches.": ["Ningún lenguaje coincide.", "Aucun langage ne correspond.", "Keine Sprache passt.", "一致する言語がありません。", "没有匹配的语言。"],
   "Start a new file": ["Empezar un archivo nuevo", "Commencer un nouveau fichier", "Eine neue Datei beginnen", "新しいファイルを始める", "开始一个新文件"],
   "From the GitHub Copilot layout": ["Del diseño de GitHub Copilot", "De la disposition GitHub Copilot", "Aus dem GitHub-Copilot-Layout", "GitHub Copilot のレイアウトから", "来自 GitHub Copilot 布局"],
+  "From the Claude Code layout": ["Del diseño de Claude Code", "De la disposition Claude Code", "Aus dem Claude-Code-Layout", "Claude Code のレイアウトから", "来自 Claude Code 布局"],
   "Usage": ["Uso", "Utilisation", "Nutzung", "使用量", "用量"],
   "Subscription usage": ["Uso de la suscripción", "Utilisation de l'abonnement", "Nutzung des Abonnements", "サブスクリプションの使用量", "订阅用量"],
   "5-hour limit": ["Límite de 5 horas", "Limite de 5 heures", "5-Stunden-Limit", "5 時間の上限", "5 小时限额"],

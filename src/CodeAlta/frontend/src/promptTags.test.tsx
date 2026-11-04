@@ -14,14 +14,25 @@ test("a prompt says where it is kept, and a custom agent of GitHub Copilot carri
   for (const locale of locales) {
     for (const [scope, label] of [["BuiltIn", "Built-in"], ["Global", "Global"], ["Project", "Project"]] as const) {
       const html = render(scope, false, locale);
-      assert.ok(html.includes(`>${translate(locale, label)}<`) && !html.includes("copilot-tag"), html);
+      assert.ok(html.includes(`>${translate(locale, label)}<`) && !html.includes("copilot-tag") && !html.includes("claude-tag"), html);
     }
     for (const [scope, label] of [["CopilotGlobal", "Global"], ["CopilotProject", "Project"]] as const) {
       const html = render(scope, false, locale);
       assert.ok(html.includes(`>${translate(locale, label)}<`) && html.includes("copilot-tag") && html.includes(">Copilot<"), html);
-      assert.ok(html.includes(`title="${translate(locale, "From the GitHub Copilot layout")}"`), html);
+      assert.ok(html.includes(`title="${translate(locale, "From the GitHub Copilot layout")}"`) && !html.includes("claude-tag"), html);
     }
   }
+});
+
+test("a subagent of Claude Code says where it is kept and carries the mark of Claude", () => {
+  for (const locale of locales) {
+    for (const [scope, label] of [["ClaudeGlobal", "Global"], ["ClaudeProject", "Project"]] as const) {
+      const html = render(scope, false, locale);
+      assert.ok(html.includes(`>${translate(locale, label)}<`) && html.includes("claude-tag") && html.includes(">Claude<") && !html.includes("copilot-tag"), html);
+      assert.ok(html.includes(`title="${translate(locale, "From the Claude Code layout")}"`), html);
+    }
+  }
+  assert.ok(render("ClaudeProject", true).includes(`>${translate("en", "Overridden")}<`));
 });
 
 test("a prompt that another one replaces says so, a custom agent of GitHub Copilot too", () => {

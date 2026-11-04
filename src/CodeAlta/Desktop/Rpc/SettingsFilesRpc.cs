@@ -208,6 +208,8 @@ internal sealed class SettingsFilesService
                 if (roots.ProjectPromptRoot is { } projectPrompts) yield return new("prompts", Project, "CodeAlta", projectPrompts, Folder: true, Owned: true);
                 if (roots.CopilotUserAgentsRoot is { } userAgents && Directory.Exists(userAgents)) yield return new("prompts", Global, "Copilot", userAgents, Folder: true);
                 if (roots.CopilotProjectAgentsRoot is { } projectAgents && Directory.Exists(projectAgents)) yield return new("prompts", Project, "Copilot", projectAgents, Folder: true);
+                if (roots.ClaudeUserAgentsRoot is { } claudeUserAgents && Directory.Exists(claudeUserAgents)) yield return new("prompts", Global, "Claude", claudeUserAgents, Folder: true);
+                if (roots.ClaudeProjectAgentsRoot is { } claudeProjectAgents && Directory.Exists(claudeProjectAgents)) yield return new("prompts", Project, "Claude", claudeProjectAgents, Folder: true);
                 yield return new("prompts", BuiltIn, "CodeAlta", roots.ShippedPromptRoot, Folder: true, ReadOnly: true);
                 break;
             case "skills":

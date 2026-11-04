@@ -328,6 +328,33 @@ public sealed class PromptManagementDialogTests
         Assert.IsFalse(options[1].IsBuiltIn);
     }
 
+    [TestMethod]
+    public void SubagentsOfClaudeCode_AreInThePromptSelector_AfterThePromptsOfCodeAlta()
+    {
+        using var tempDirectory = TempDirectory.Create();
+        var appBase = Path.Combine(tempDirectory.Path, "app");
+        var builtIn = Directory.CreateDirectory(Path.Combine(appBase, "content", "prompts", "agents")).FullName;
+        File.WriteAllText(Path.Combine(builtIn, "default.prompt.md"), "---\nname: Default\n---\nbuilt-in body\n");
+        var projectRoot = Path.Combine(tempDirectory.Path, "project");
+        var agents = Directory.CreateDirectory(Path.Combine(projectRoot, ".claude", "agents")).FullName;
+        File.WriteAllText(Path.Combine(agents, "reviewer.md"), "---\nname: code-reviewer\nmodel: sonnet\n---\nReview the change.\n");
+        var catalog = new AgentPromptCatalog(new FileSystemPromptContentLocator(appBase));
+
+        var options = CodeAlta.Tui.Presentation.Chat.AgentPromptPresentation.BuildPromptOptions(catalog.ListEffectivePrompts(new AgentPromptCatalogQuery
+        {
+            AppBaseDirectory = appBase,
+            UserProfileRoot = Path.Combine(tempDirectory.Path, "profile"),
+            UserCodeAltaRoot = Path.Combine(tempDirectory.Path, "global"),
+            ProjectRoot = projectRoot,
+            ProjectPromptResourcesTrusted = true,
+        }));
+
+        CollectionAssert.AreEqual(new[] { "default", "reviewer" }, options.Select(static option => option.PromptName).ToArray());
+        Assert.AreEqual("code-reviewer (reviewer)", options[1].Label);
+        Assert.AreEqual("Claude", options[1].SourceLabel);
+        Assert.IsFalse(options[1].IsBuiltIn);
+    }
+
     private static PromptManagementDialog CreatePromptDialog(string root, Action? onPromptsChanged = null)
     {
         var globalRoot = Path.Combine(root, "global");

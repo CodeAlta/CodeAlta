@@ -447,7 +447,7 @@ public sealed class SystemPromptBuilder
     {
         var candidates = EnumerateExistingRoots(roots)
             .Select(root => LoadResource(root, folder, suffix, name, diagnostics, resourceKind))
-            .Concat(resourceKind == SystemPromptResourceKind.AgentPrompt ? CopilotAgents(roots, name) : [])
+            .Concat(resourceKind == SystemPromptResourceKind.AgentPrompt ? ExternalAgents(roots, name) : [])
             .Where(static resource => resource is not null)
             .Cast<PromptResource>()
             .OrderBy(static resource => resource.Precedence)
@@ -478,13 +478,13 @@ public sealed class SystemPromptBuilder
         return new ResourceResolution(selected, body, applied, skipped);
     }
 
-    // The custom agents of GitHub Copilot with this id (`.github/agents`, `~/.copilot/agents`), below every prompt of
-    // CodeAlta: the text of the file is the agent prompt.
-    private static IEnumerable<PromptResource?> CopilotAgents(SystemPromptContentRoots roots, string name)
+    // The agents of GitHub Copilot (`.github/agents`, `~/.copilot/agents`) and Claude Code (`.claude/agents`,
+    // `~/.claude/agents`) with this id, below every prompt of CodeAlta: the text of the file is the agent prompt.
+    private static IEnumerable<PromptResource?> ExternalAgents(SystemPromptContentRoots roots, string name)
     {
-        foreach (var (kind, precedence, folder) in CopilotAgentFiles.Folders(roots))
+        foreach (var (kind, precedence, folder) in ExternalAgentFiles.Folders(roots))
         {
-            if (CopilotAgentFiles.Read(folder, name) is { } agent)
+            if (ExternalAgentFiles.Read(kind, folder, name) is { } agent)
             {
                 yield return new PromptResource(ToPromptSourceLabel(kind), precedence, agent.Path, agent.Body, agent.Description, agent.Name, null,
                     PartialSystemPromptPartOptions.Empty, HashText(agent.Body), PromptCompositionMode.Replace);
@@ -1361,6 +1361,8 @@ public sealed class SystemPromptBuilder
             AgentPromptSourceKind.Project => "project",
             AgentPromptSourceKind.CopilotUser => "copilot-user",
             AgentPromptSourceKind.CopilotProject => "copilot-project",
+            AgentPromptSourceKind.ClaudeUser => "claude-user",
+            AgentPromptSourceKind.ClaudeProject => "claude-project",
             _ => sourceKind.ToString(),
         };
 

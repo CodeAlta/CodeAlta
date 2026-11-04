@@ -241,6 +241,47 @@ public sealed class AgentPromptsRpcTests
     }
 
     [TestMethod]
+    public async Task SubagentsOfClaudeCode_AreListedAndRead_AndNeverWritten()
+    {
+        using var fixture = await Fixture.CreateAsync();
+        var projectAgents = Directory.CreateDirectory(Path.Combine(fixture.ProjectPath, ".claude", "agents")).FullName;
+        var userAgents = Directory.CreateDirectory(Path.Combine(fixture.Profile, ".claude", "agents")).FullName;
+        var reviewer = Path.Combine(projectAgents, "reviewer.md");
+        File.WriteAllText(reviewer, "---\nname: reviewer\ndescription: Reviews a change\ntools: Read, Grep\nmodel: sonnet\n---\nReview the change and report.\n");
+        File.WriteAllText(Path.Combine(userAgents, "writer.md"), "---\nname: writer\ndescription: Writes the documentation\n---\nWrite the documentation.\n");
+
+        var global = await fixture.Service.ListAsync(new(Epoch, null), default);
+        Assert.AreEqual("ok", global.Status);
+        Assert.IsFalse(global.Prompts.Any(prompt => prompt.Scope == "ClaudeProject"), "A project agent belongs to its project.");
+        var writer = global.Prompts.Single(prompt => prompt is { Scope: "ClaudeGlobal", Id: "writer" });
+        Assert.AreEqual("Writes the documentation", writer.Description);
+        Assert.IsTrue(writer.ReadOnly);
+
+        var scoped = await fixture.Service.ListAsync(new(Epoch, fixture.Project.Id), default);
+        var listed = scoped.Prompts.Single(prompt => prompt.Scope == "ClaudeProject");
+        Assert.AreEqual("reviewer", listed.Id);
+        Assert.IsTrue(listed.ReadOnly);
+        var agents = scoped.Prompts.Where(prompt => prompt.Kind == "Agent").Select(prompt => prompt.Scope).ToArray();
+        CollectionAssert.AreEqual(new[] { "BuiltIn", "ClaudeGlobal", "ClaudeProject" }, agents);
+
+        var read = await fixture.Service.ReadAsync(new(Epoch, fixture.Project.Id, "Agent", "ClaudeProject", "reviewer"), default);
+        Assert.AreEqual("ok", read.Status, read.Message);
+        Assert.IsTrue(read.Prompt!.ReadOnly);
+        Assert.AreEqual("ClaudeProject", read.Prompt.Scope);
+        Assert.AreEqual("Review the change and report.", read.Prompt.Body);
+        Assert.AreEqual(Path.GetFullPath(reviewer), read.Prompt.File);
+        Assert.AreEqual("Write the documentation.", (await fixture.Service.ReadAsync(new(Epoch, null, "Agent", "ClaudeGlobal", "writer"), default)).Prompt!.Body);
+        Assert.AreEqual("not_found", (await fixture.Service.ReadAsync(new(Epoch, null, "Agent", "ClaudeProject", "reviewer"), default)).Status);
+        Assert.AreEqual("invalid", (await fixture.Service.ReadAsync(new(Epoch, fixture.Project.Id, "Agent", "ClaudeProject", "../reviewer"), default)).Status);
+        Assert.AreEqual(Path.GetFullPath(reviewer), fixture.Service.Locate("Agent", "ClaudeProject", "reviewer", fixture.ProjectPath)?.File);
+
+        var before = File.ReadAllText(reviewer);
+        Assert.AreEqual("read_only", (await fixture.Service.SaveAsync(Save("Agent", "ClaudeProject", "reviewer", read.Prompt.Revision) with { ProjectId = fixture.Project.Id }, default)).Status);
+        Assert.AreEqual("read_only", (await fixture.Service.DeleteAsync(new(Epoch, fixture.Project.Id, "Agent", "ClaudeProject", "reviewer", read.Prompt.Revision), default)).Status);
+        Assert.AreEqual(before, File.ReadAllText(reviewer));
+    }
+
+    [TestMethod]
     public async Task InheritedPrompts_AreSavedListedReadAndComposedBeforeTheTextOfThePrompt()
     {
         using var fixture = await Fixture.CreateAsync();
