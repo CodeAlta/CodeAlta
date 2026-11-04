@@ -94,8 +94,8 @@ const api: FleetServerApi = {
     return { status: "ok", message: null };
   },
   signInSettings: async () => ({ status: "ok", settings: signIn, logins, message: null, approvals }),
-  approveSignInChange: async (request: { approvalId: string }) => {
-    calls.push(JSON.stringify({ approved: request.approvalId }));
+  approveSignInChange: async (request: { approvalId: string; digest: string }) => {
+    calls.push(JSON.stringify({ approved: request.approvalId, digest: request.digest }));
     approvals = approvals.filter(approval => approval.id !== request.approvalId);
     return { status: "ok", message: null };
   },
@@ -141,7 +141,9 @@ Object.assign(window, { fleetFixture: { calls, skip: (count: number) => { skippe
     { method: "company", name: "alex@contoso.example", createdAt: "2026-11-01T08:00:00Z", lastUsedAt: null, id: "a_company" },
     { method: "microsoft", name: "alex@outlook.com", createdAt: "2026-11-02T08:00:00Z", lastUsedAt: null, id: "a_microsoft" }]; },
   ask: () => { approvals = [{ id: "approval-1", requestedBy: "Office desktop", issuer: "https://login.contoso.example", clientId: "contoso-client", secretChanges: true,
-    allowedDomains: ["contoso.example"], allowedTenants: [], requireSso: true, enabled: ["company", "passkey"], expiresAt: "2026-11-04T12:10:00Z" }]; } } });
+    allowedDomains: ["contoso.example"], allowedTenants: [], requireSso: true, enabled: ["company", "passkey"], expiresAt: "2026-11-04T12:10:00Z",
+    digest: "digest-of-the-change-shown", displayName: "Contoso", groupsClaim: "roles", groupRoles: [{ group: "g-admins", role: "admin" }], secretRemoved: false,
+    breakGlassPersonId: null, companyOff: false }]; } } });
 
 createRoot(document.getElementById("root")!).render(<StrictMode>
   <ShellLanguageContext.Provider value={{ locale: "en", choice: "en", setLanguage: () => {} }}>

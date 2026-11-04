@@ -6,7 +6,7 @@ import { ActivitySpinner } from "../ActivitySpinner";
 import { useShellLanguage } from "../shellLanguage";
 import type { MessageKey } from "../localization";
 import { serverProblem } from "./fleetServer";
-import { allowedValues, groupRoleChoices, hasCompany, linkableMethods, removableLogin, signInCode, signInDraft, signInDraftProblem, signInProblem, signInSummary, type SignInCode as Code, type SignInDraft } from "./signIn";
+import { allowedValues, approvalLines, groupRoleChoices, hasCompany, linkableMethods, removableLogin, signInCode, signInDraft, signInDraftProblem, signInProblem, signInSummary, type SignInCode as Code, type SignInDraft } from "./signIn";
 import { ConfirmPopover } from "../ConfirmPopover";
 import { SignInCode } from "./SignInCode";
 import { SignInMethodIcon } from "./SignInMethodIcon";
@@ -63,7 +63,8 @@ export function ServerSignIn({ server, epoch, api = fleetServer, revision }: { s
     setApproving(approval.id);
     setProblem(null);
     try {
-      const result = await api.approveSignInChange({ expectedEpoch: epoch, linkId: server.id, approvalId: approval.id }, { timeoutMilliseconds: 30_000 });
+      // The digest of the change shown: the host signs that change, or nothing.
+      const result = await api.approveSignInChange({ expectedEpoch: epoch, linkId: server.id, approvalId: approval.id, digest: approval.digest }, { timeoutMilliseconds: 30_000 });
       if (result.status !== "ok") setProblem({ key: signInProblem(result.status) ?? serverProblem(result.status) ?? "The operation did not complete.", detail: result.message });
     } catch {
       setProblem({ key: "The server does not answer." });
@@ -151,11 +152,7 @@ export function ServerSignIn({ server, epoch, api = fleetServer, revision }: { s
       {approvals.map(approval => <Callout key={approval.id} compact intent="primary" className="fleet-sign-in-approval">
         <div>{t("{device} asks to change the company sign-in.", { device: approval.requestedBy })}</div>
         <ul className="muted-text">
-          <li>{approval.issuer ? `${approval.issuer} · ${approval.clientId ?? ""}` : t("Company sign-in removed")}</li>
-          {approval.allowedDomains.length > 0 && <li>{t("Email domains let in")}: {approval.allowedDomains.join(", ")}</li>}
-          {approval.allowedTenants.length > 0 && <li>{t("Tenant ids let in")}: {approval.allowedTenants.join(", ")}</li>}
-          {approval.requireSso && <li>{t("Require company sign-in")}</li>}
-          {approval.secretChanges && <li>{t("A new client secret")}</li>}
+          {approvalLines(approval, settings).map(line => <li key={line.key + (line.value ?? "")}>{t(line.key)}{line.value !== undefined && <>: {line.value}</>}</li>)}
         </ul>
         <Button size="small" intent="primary" disabled={!!approving} icon={approving === approval.id ? <ActivitySpinner size={12} /> : undefined}
           text={t("Approve")} onClick={() => void approve(approval)} />

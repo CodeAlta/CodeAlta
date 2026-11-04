@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import type { FleetSignInSettingsView } from "#neoastra";
-import { allowedValues, orderedSignInMethods, removableLogin, signInCode, signInDraft, signInDraftProblem, signInProblem, signInSummary } from "./signIn";
+import type { FleetSignInApprovalView, FleetSignInSettingsView } from "#neoastra";
+import { allowedValues, approvalLines, orderedSignInMethods, removableLogin, signInCode, signInDraft, signInDraftProblem, signInProblem, signInSummary } from "./signIn";
 
 const settings = (look: Partial<FleetSignInSettingsView> = {}): FleetSignInSettingsView => ({ methods: [
   { id: "company", name: "Contoso", enabled: true, available: true }, { id: "passkey", name: "Passkey", enabled: true, available: true },
@@ -83,4 +83,21 @@ test("a GitHub code is shown only when it is a short printable code with an http
   assert.equal(code("two words", "https://github.com/login/device"), null);
   assert.equal(code("", "https://github.com/login/device"), null);
   assert.equal(signInCode(null), null);
+});
+
+test("a change to approve shows every field that decides who signs in, and what it turns off", () => {
+  const approval = (look: Partial<FleetSignInApprovalView> = {}): FleetSignInApprovalView => ({ id: "a", requestedBy: "Office", issuer: "https://login.contoso.example",
+    clientId: "client", secretChanges: false, allowedDomains: ["contoso.example"], allowedTenants: [], requireSso: false, enabled: ["company", "passkey"],
+    expiresAt: "2026-11-04T12:10:00Z", digest: "d", displayName: null, groupsClaim: null, groupRoles: null, secretRemoved: false, breakGlassPersonId: null, companyOff: false,
+    ...look });
+  const text = (lines: ReturnType<typeof approvalLines>) => lines.map(line => line.value === undefined ? line.key : `${line.key}: ${line.value}`);
+  assert.deepEqual(text(approvalLines(approval({ groupRoles: [{ group: "g-admins", role: "admin" }], groupsClaim: "roles", requireSso: true, breakGlassPersonId: "p-2",
+    secretChanges: true }), null)), ["Issuer: https://login.contoso.example · client", "Groups claim: roles", "Email domains let in: contoso.example",
+    "Roles from groups: g-admins → admin", "Sign in with: company, passkey", "Require company sign-in", "Break-glass owner: p-2", "A new client secret"]);
+  // Required company sign-in turned off, the roles of the groups removed, the secret removed: each is said.
+  assert.deepEqual(text(approvalLines(approval({ groupRoles: [], secretChanges: true, secretRemoved: true }), settings({ requireSso: true }))).slice(-4),
+    ["Roles from groups removed", "Sign in with: company, passkey", "Company sign-in no longer required", "Client secret removed"]);
+  assert.deepEqual(text(approvalLines(approval({ companyOff: true, enabled: ["passkey"] }), null)).slice(0, 3),
+    ["Issuer: https://login.contoso.example · client", "Groups claim: groups", "Company sign-in turned off"]);
+  assert.equal(text(approvalLines(approval({ issuer: null, clientId: null, allowedDomains: [], companyOff: true, enabled: ["passkey"] }), null))[0], "Company sign-in removed");
 });

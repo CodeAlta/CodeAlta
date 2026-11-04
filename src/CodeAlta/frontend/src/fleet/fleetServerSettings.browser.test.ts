@@ -59,11 +59,13 @@ test("another computer of the owner asks to change the company sign-in: this one
     await page.clickText(".bp6-menu-item", "Add a passkey");
     await page.until(`document.querySelector('.fleet-sign-in-approval')`, "the change to approve");
     assert.deepEqual(await page.evaluate(`[...document.querySelectorAll('.fleet-sign-in-approval li')].map(item => item.textContent)`),
-      ["https://login.contoso.example · contoso-client", "Email domains let in: contoso.example", "Require company sign-in", "A new client secret"]);
+      ["Issuer: https://login.contoso.example · contoso-client", "Name shown: Contoso", "Groups claim: roles", "Email domains let in: contoso.example",
+        "Roles from groups: g-admins → admin", "Sign in with: company, passkey", "Require company sign-in", "Break-glass owner: you", "A new client secret"]);
     assert.match(await page.evaluate(`document.querySelector('.fleet-sign-in-approval').textContent`) as string, /^Office desktop asks to change the company sign-in\./u);
     await page.clickText(".fleet-sign-in-approval .bp6-button", "Approve");
     await page.until(`!document.querySelector('.fleet-sign-in-approval')`, "approved");
-    assert.ok((await page.evaluate(`[...window.fleetFixture.calls]`) as string[]).some(call => call.includes('"approved":"approval-1"')));
+    // The approval names the digest of the change shown: the host signs that change or nothing.
+    assert.ok((await page.evaluate(`[...window.fleetFixture.calls]`) as string[]).some(call => call.includes('"approved":"approval-1","digest":"digest-of-the-change-shown"')));
     assert.deepEqual(page.problems, []);
   }, options);
 });

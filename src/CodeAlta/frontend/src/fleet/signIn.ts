@@ -1,4 +1,4 @@
-import type { FleetSignInCodeView, FleetSignInLoginView, FleetSignInMethodView, FleetSignInSettingsView } from "#neoastra";
+import type { FleetSignInApprovalView, FleetSignInCodeView, FleetSignInLoginView, FleetSignInMethodView, FleetSignInSettingsView } from "#neoastra";
 import type { MessageKey } from "../localization";
 
 /** The sign-in methods a server may offer, in the order the page shows them. */
@@ -11,6 +11,37 @@ export const linkableMethods = ["passkey", "microsoft", "google", "github"] as c
 export function orderedSignInMethods(methods: readonly FleetSignInMethodView[]): FleetSignInMethodView[] {
   const rank = (id: string) => { const at = signInMethodOrder.indexOf(id as typeof signInMethodOrder[number]); return at < 0 ? signInMethodOrder.length : at; };
   return [...methods].sort((left, right) => rank(left.id) - rank(right.id));
+}
+
+/** A line of a change to approve: what it names, and its value when it has one. */
+export type ApprovalLine = Readonly<{ key: MessageKey; value?: string }>;
+
+/**
+ * Every field of a change of the company sign-in that decides who signs in, as the computer that approves it shows it:
+ * the provider, its name and secret, who it lets in, the roles its groups give and their claim, the methods, whether it
+ * is required and its break-glass owner, and what it turns off compared with the settings held (when this computer read them).
+ */
+export function approvalLines(approval: FleetSignInApprovalView, held: FleetSignInSettingsView | null): ApprovalLine[] {
+  const lines: ApprovalLine[] = [];
+  if (!approval.issuer) lines.push({ key: "Company sign-in removed" });
+  else {
+    lines.push({ key: "Issuer", value: `${approval.issuer} · ${approval.clientId ?? ""}` });
+    if (approval.displayName) lines.push({ key: "Name shown", value: approval.displayName });
+    lines.push({ key: "Groups claim", value: approval.groupsClaim ?? "groups" });
+  }
+  if (approval.companyOff && approval.issuer) lines.push({ key: "Company sign-in turned off" });
+  if (approval.allowedDomains.length > 0) lines.push({ key: "Email domains let in", value: approval.allowedDomains.join(", ") });
+  if (approval.allowedTenants.length > 0) lines.push({ key: "Tenant ids let in", value: approval.allowedTenants.join(", ") });
+  if (approval.groupRoles) lines.push(approval.groupRoles.length === 0 ? { key: "Roles from groups removed" }
+    : { key: "Roles from groups", value: approval.groupRoles.map(role => `${role.group} → ${role.role}`).join(", ") });
+  lines.push({ key: "Sign in with", value: approval.enabled.join(", ") });
+  if (approval.requireSso) {
+    lines.push({ key: "Require company sign-in" });
+    lines.push(approval.breakGlassPersonId ? { key: "Break-glass owner", value: approval.breakGlassPersonId } : { key: "Break-glass owner: you" });
+  } else if (held?.requireSso) lines.push({ key: "Company sign-in no longer required" });
+  if (approval.secretRemoved) lines.push({ key: "Client secret removed" });
+  else if (approval.secretChanges) lines.push({ key: "A new client secret" });
+  return lines;
 }
 
 /** What a failed sign-in says, for the statuses of sign-in; null for the others. */

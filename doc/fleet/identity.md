@@ -191,8 +191,9 @@ or required, the break-glass owner) needs it today, one way or the other, each w
   passkey, a linked account or the company's own sign-in), which gives a single-use confirmation bound to that device
   for 10 minutes.
 - **Approve on another device**: the device asks for an approval of exactly this change; another approved controller
-  device of the same person is shown the change (the client secret by its SHA-256 only), recomputes its digest itself,
-  refuses one that does not match, and signs that digest. The approval binds to the change and to the device that asks,
+  device of the same person is shown every field of the change (the client secret by its SHA-256 only), recomputes its
+  digest itself, refuses one that does not match, and signs that digest only if the server still holds the change it
+  showed. The approval binds to the change and to the device that asks,
   lasts 10 minutes and is audited with its signature; the server cannot have it sign another change than the one shown.
 
 A signed request alone is not enough, and a refused change does not use the confirmation up.

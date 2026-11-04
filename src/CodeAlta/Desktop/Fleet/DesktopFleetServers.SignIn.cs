@@ -355,20 +355,29 @@ internal sealed partial class DesktopFleetServers
         return [.. (await client.ListSignInApprovalsAsync(cancellationToken).ConfigureAwait(false)).Where(approval => approval.RequesterDeviceId != client.DeviceId && approval.Status == "pending")];
     }
 
-    /// <summary>Approves from this computer a change of the company sign-in another computer of its person asks for.</summary>
+    /// <summary>
+    /// Approves from this computer a change of the company sign-in another computer of its person asks for: exactly the
+    /// change its page showed, named by the digest this computer computed of it. The server is read again to sign, and a
+    /// server that answers another change then (whatever digest it gives) gets nothing signed.
+    /// </summary>
     /// <param name="linkId">The link.</param>
     /// <param name="approvalId">The approval.</param>
+    /// <param name="shownDigest">The digest of the change the page showed (<see cref="FleetSignInApprovals.Digest"/>).</param>
     /// <param name="cancellationToken">Cancels the call.</param>
     /// <returns>A task that completes once approved.</returns>
+    /// <exception cref="ArgumentException"><paramref name="shownDigest"/> is null or empty.</exception>
     /// <exception cref="KeyNotFoundException">No such link, or no such approval.</exception>
-    /// <exception cref="InvalidOperationException">The change shown is not the one the server would apply: nothing was signed.</exception>
+    /// <exception cref="InvalidOperationException">The change the server holds now is not the one shown: nothing was signed.</exception>
     /// <exception cref="FleetServerException">The server refused.</exception>
     /// <exception cref="HttpRequestException">The server does not answer.</exception>
-    public async Task ApproveSignInChangeAsync(string linkId, string approvalId, CancellationToken cancellationToken)
+    public async Task ApproveSignInChangeAsync(string linkId, string approvalId, string shownDigest, CancellationToken cancellationToken)
     {
+        ArgumentException.ThrowIfNullOrEmpty(shownDigest);
         using var client = Client(linkId);
         var approval = (await client.ListSignInApprovalsAsync(cancellationToken).ConfigureAwait(false)).FirstOrDefault(approval => approval.Id == approvalId)
             ?? throw new KeyNotFoundException("No change waits for this approval.");
+        if (!string.Equals(FleetSignInApprovals.Digest(approval.Change), shownDigest, StringComparison.Ordinal))
+            throw new InvalidOperationException("The change the server holds now is not the one shown: nothing was signed.");
         await client.ApproveSignInChangeAsync(approval, cancellationToken).ConfigureAwait(false);
     }
 
