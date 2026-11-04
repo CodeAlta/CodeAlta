@@ -12,13 +12,8 @@ internal static class HistoryToolProjection
     internal static HistoryToolSummary? Project(AgentActivityEvent activity, int budget, out int cost)
     {
         var details = activity.Details;
-        var command = Text(details, "command") ?? Text(details, "arguments", "command") ?? Text(details, "input", "command");
-        command ??= activity.Kind == AgentActivityKind.CommandExecution ? activity.Name : null;
-        // The `alta` tool takes its command line as an array: it is shown as the command it is.
-        command ??= AltaCommand(activity.Name, details);
-        var primary = command ?? Text(details, "arguments", "path") ?? Text(details, "path")
-            ?? Text(details, "arguments", "query") ?? Text(details, "arguments", "pattern") ?? Text(details, "query")
-            ?? Text(details, "arguments", "url") ?? Text(details, "arguments") ?? Files(details) ?? Arguments(Value(details, "arguments"));
+        var command = AgentToolCallProjection.CommandLine(activity);
+        var primary = AgentToolCallProjection.Subject(activity);
         var output = Text(details, "aggregatedOutput") ?? Text(details, "result", "content")
             ?? Text(details, "error", "message") ?? Text(details, "output", "body") ?? Text(details, "result", "detailedContent")
             ?? Text(details, "output") ?? Text(details, "result");
@@ -110,74 +105,9 @@ internal static class HistoryToolProjection
         return null;
     }
 
-    // `alta session list --json` for the arguments {"args": ["session", "list", "--json"]}.
-    private static string? AltaCommand(string? name, JsonElement? details)
-    {
-        if (!string.Equals(name, "alta", StringComparison.Ordinal) || Value(details, "arguments", "args") is not { ValueKind: JsonValueKind.Array } args) return null;
-        var line = new StringBuilder("alta");
-        foreach (var argument in args.EnumerateArray())
-        {
-            if (argument.ValueKind != JsonValueKind.String || line.Length > 512) return null;
-            var text = argument.GetString()!;
-            line.Append(' ').Append(text.Length > 0 && !text.Any(static character => char.IsWhiteSpace(character) || character is '"' or '\'')
-                ? text : string.Concat("\"", text.Replace("\"", "\\\"", StringComparison.Ordinal), "\""));
-        }
-        return line.ToString();
-    }
+    internal static string? Text(JsonElement? value, params string[] path) => AgentToolCallProjection.Text(value, path);
 
-    // The files a call changed or read, when it names them: the path of a single one, else the name of the
-    // first one and how many follow.
-    private static string? Files(JsonElement? details)
-    {
-        foreach (var property in new[] { "modifiedFiles", "readFiles" })
-        {
-            if (Value(details, property) is not { ValueKind: JsonValueKind.Array } files || files.GetArrayLength() == 0) continue;
-            if (files[0].ValueKind != JsonValueKind.String || files[0].GetString() is not { Length: > 0 } first) continue;
-            if (files.GetArrayLength() == 1) return first;
-            var name = first[(first.LastIndexOfAny(['/', '\\']) + 1)..];
-            return $"{(name.Length == 0 ? first : name)} (+{files.GetArrayLength() - 1})";
-        }
-        return null;
-    }
-
-    // The arguments of a call that names no command, path or query, on one line: `uid: 1_25, dblClick: false`.
-    private static string? Arguments(JsonElement? arguments)
-    {
-        if (arguments is not { ValueKind: JsonValueKind.Object } value) return null;
-        var line = new StringBuilder();
-        foreach (var property in value.EnumerateObject())
-        {
-            var text = property.Value.ValueKind switch
-            {
-                JsonValueKind.String => property.Value.GetString(),
-                JsonValueKind.Number or JsonValueKind.True or JsonValueKind.False => property.Value.GetRawText(),
-                _ => null,
-            };
-            if (string.IsNullOrWhiteSpace(text)) continue;
-            if (line.Length > 0) line.Append(", ");
-            line.Append(property.Name).Append(": ").Append(text.Length > 96 ? string.Concat(text.AsSpan(0, char.IsHighSurrogate(text[95]) ? 95 : 96), "…") : text);
-            if (line.Length > 256) break;
-        }
-        return line.Length == 0 ? null : line.ToString();
-    }
-
-    internal static string? Text(JsonElement? value, params string[] path)
-        => Value(value, path) is { ValueKind: JsonValueKind.String } text ? text.GetString() : null;
-
-    internal static JsonElement? Value(JsonElement? value, params string[] path)
-    {
-        if (value is not { } current) return null;
-        foreach (var part in path)
-        {
-            if (current.ValueKind == JsonValueKind.String && current.GetString() is { Length: <= 32768 } json)
-            {
-                try { using var parsed = JsonDocument.Parse(json); current = parsed.RootElement.Clone(); }
-                catch (JsonException) { return null; }
-            }
-            if (current.ValueKind != JsonValueKind.Object || !current.TryGetProperty(part, out current)) return null;
-        }
-        return current;
-    }
+    internal static JsonElement? Value(JsonElement? value, params string[] path) => AgentToolCallProjection.Value(value, path);
 }
 
 /// <param name="Added">Lines the call added to files, when its record has a diff.</param>

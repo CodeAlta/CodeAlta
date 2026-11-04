@@ -5533,6 +5533,91 @@ public sealed partial class AltaLiveToolTests
     }
 
     [TestMethod]
+    public async Task SessionQueued_ListsWhatWaits_AndUnqueue_KeepsAPromptFromBeingSent()
+    {
+        using var root = TempDirectory.Create();
+        var options = new CatalogOptions { GlobalRoot = root.Path };
+        var providerId = new ModelProviderId("queued-prompts");
+        var providerRuntime = new StatefulProviderRuntime(providerId);
+        await using var runtime = CreateRuntime(options, providerRuntime);
+        var dispatcher = CreateDispatcher(new AltaServiceCollection()
+            .Add(options).Add(new ProjectCatalog(options)).Add(new SessionViewCatalog(options)).Add(runtime));
+        var created = await dispatcher.InvokeAsync(["session", "create", "--global", "--provider", providerId.Value], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+        var sessionId = ReadJsonLines(created.Stdout).Single(static line => line.GetProperty("type").GetString() == "alta.session.created").GetProperty("sessionId").GetString()!;
+        Assert.AreEqual(AltaExitCodes.Success, (await dispatcher.InvokeAsync(["session", "send", sessionId, "--message", "first prompt"], caller: AltaCallerIdentity.Cli).ConfigureAwait(false)).ExitCode);
+
+        async Task<string> QueueAsync(string text)
+        {
+            var queued = await dispatcher.InvokeAsync(["session", "queue", sessionId, "--message", text], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+            Assert.AreEqual(AltaExitCodes.Success, queued.ExitCode, queued.Stderr);
+            return ReadJsonLines(queued.Stdout).Single(static line => line.GetProperty("type").GetString() == "alta.session.queued").GetProperty("queueItemId").GetString()!;
+        }
+
+        async Task<string?> UnqueueAsync(string item)
+        {
+            var removed = await dispatcher.InvokeAsync(["session", "unqueue", sessionId, item], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+            Assert.AreEqual(AltaExitCodes.Success, removed.ExitCode, removed.Stderr);
+            return ReadJsonLines(removed.Stdout).Single(static line => line.GetProperty("type").GetString() == "alta.session.unqueued").GetProperty("status").GetString();
+        }
+
+        async Task<string?[]> ListAsync()
+        {
+            var list = await dispatcher.InvokeAsync(["session", "queued", sessionId], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+            Assert.AreEqual(AltaExitCodes.Success, list.ExitCode, list.Stderr);
+            return [.. ReadJsonLines(list.Stdout).Where(static line => line.GetProperty("type").GetString() == "alta.session.queued.item").Select(static line => line.GetProperty("prompt").GetString())];
+        }
+
+        var dropped = await QueueAsync("do not send this");
+        await QueueAsync("send this");
+        CollectionAssert.AreEqual(new[] { "do not send this", "send this" }, await ListAsync());
+
+        Assert.AreEqual("removed", await UnqueueAsync(dropped));
+        CollectionAssert.AreEqual(new[] { "send this" }, await ListAsync());
+        Assert.AreEqual("not_found", await UnqueueAsync(dropped), "It was removed already.");
+        Assert.AreEqual("not_found", await UnqueueAsync("queue-unknown"));
+
+        // When the turn ends, the session sends what the queue still holds, and only that.
+        providerRuntime.PublishIdle(sessionId, new AgentRunId("run-1"));
+        await WaitUntilAsync(() => providerRuntime.SentOptions.Count >= 2).ConfigureAwait(false);
+        CollectionAssert.AreEqual(new[] { "first prompt", "send this" }, providerRuntime.SentOptions.Select(static send => ExtractText(send.Input)).ToArray());
+    }
+
+    [TestMethod]
+    public async Task SessionUnsteer_TakesBackAPromptTheRunHolds_AndSaysWhenItIsTooLate()
+    {
+        using var root = TempDirectory.Create();
+        var options = new CatalogOptions { GlobalRoot = root.Path };
+        var providerId = new ModelProviderId("unsteer");
+        var providerRuntime = new StatefulProviderRuntime(providerId);
+        await using var runtime = CreateRuntime(options, providerRuntime);
+        var dispatcher = CreateDispatcher(new AltaServiceCollection()
+            .Add(options).Add(new ProjectCatalog(options)).Add(new SessionViewCatalog(options)).Add(runtime));
+        var created = await dispatcher.InvokeAsync(["session", "create", "--global", "--provider", providerId.Value], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+        var sessionId = ReadJsonLines(created.Stdout).Single(static line => line.GetProperty("type").GetString() == "alta.session.created").GetProperty("sessionId").GetString()!;
+        Assert.AreEqual(AltaExitCodes.Success, (await dispatcher.InvokeAsync(["session", "send", sessionId, "--message", "first prompt"], caller: AltaCallerIdentity.Cli).ConfigureAwait(false)).ExitCode);
+
+        var steered = await dispatcher.InvokeAsync(["session", "steer", sessionId, "--message", "never mind"], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+        Assert.AreEqual(AltaExitCodes.Success, steered.ExitCode, steered.Stderr);
+        var withdrawalId = ReadJsonLines(steered.Stdout).Single(static line => line.GetProperty("type").GetString() == "alta.session.steered").GetProperty("withdrawalId").GetString()!;
+        Assert.AreEqual(withdrawalId, providerRuntime.SteeredOptions.Single().WithdrawalId);
+
+        async Task<bool> UnsteerAsync()
+        {
+            var answer = await dispatcher.InvokeAsync(["session", "unsteer", sessionId, withdrawalId], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+            Assert.AreEqual(AltaExitCodes.Success, answer.ExitCode, answer.Stderr);
+            return ReadJsonLines(answer.Stdout).Single(static line => line.GetProperty("type").GetString() == "alta.session.unsteered").GetProperty("withdrawn").GetBoolean();
+        }
+
+        Assert.IsTrue(await UnsteerAsync());
+        Assert.AreEqual(0, providerRuntime.SteeredOptions.Count);
+        Assert.IsFalse(await UnsteerAsync(), "It was taken back already.");
+
+        providerRuntime.PublishIdle(sessionId, new AgentRunId("run-1"));
+        await WaitUntilAsync(async () => !await runtime.HasActiveRunAsync((await runtime.TryGetRecoverableSessionAsync(sessionId).ConfigureAwait(false))!).ConfigureAwait(false)).ConfigureAwait(false);
+        Assert.IsFalse(await UnsteerAsync(), "No run holds it.");
+    }
+
+    [TestMethod]
     [DataRow(true)]
     [DataRow(false)]
     public async Task HostPrompts_SteeredOrQueuedIntoABusySession_KeepTheirProvenance(bool supportsSteering)
@@ -7367,6 +7452,9 @@ public sealed partial class AltaLiveToolTests
             owner.SteeredOptions.Add(options);
             return Task.FromResult(new AgentRunId("steer-" + Interlocked.Increment(ref _nextRun).ToString(System.Globalization.CultureInfo.InvariantCulture)));
         }
+
+        public Task<bool> TryWithdrawSteerAsync(string withdrawalId, CancellationToken cancellationToken = default)
+            => Task.FromResult(owner.SteeredOptions.RemoveAll(steer => steer.WithdrawalId == withdrawalId) > 0);
 
         public Task AbortAsync(CancellationToken cancellationToken = default)
         {

@@ -80,7 +80,11 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         Mutating("session create"),
         Mutating("session send"),
         Mutating("session steer"),
+        Mutating("session unsteer"),
         Mutating("session queue"),
+        Read("session queued"),
+        Mutating("session unqueue"),
+        Read("session tool"),
         Mutating("session set_agent"),
         Mutating("session set_worktree"),
         Mutating("session title"),
@@ -792,7 +796,11 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         group.Add(CreateSessionCreateCommand(context));
         group.Add(CreateSessionSendCommand(context));
         group.Add(CreateSessionSteerCommand(context));
+        group.Add(CreateSessionUnsteerCommand(context));
         group.Add(CreateSessionQueueCommand(context));
+        group.Add(CreateSessionQueuedCommand(context));
+        group.Add(CreateSessionUnqueueCommand(context));
+        group.Add(CreateSessionToolCommand(context));
         group.Add(CreateSessionSetAgentCommand(context));
         group.Add(CreateSessionSetWorktreeCommand(context));
         group.Add(CreateSessionTitleCommand(context));
@@ -3770,6 +3778,8 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
             if (kind == PromptDispatchKind.Steer || steerPeer)
             {
                 AgentRunId? steeredRunId = null;
+                // What the sender names to take the prompt back (`session unsteer`) while the run has not given it to the model.
+                var withdrawalId = kind == PromptDispatchKind.Steer ? "steer-" + Guid.NewGuid().ToString("N") : null;
                 try
                 {
                     steeredRunId = await context.ObserveOriginalAsync(runtime.SteerAsync(
@@ -3778,7 +3788,7 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
                         new AgentSteerOptions
                         {
                             Input = agentInput, SourceSessionId = IsAgentCaller(context) ? context.Caller.SourceSessionId : null,
-                            Provenance = PromptProvenanceOf(context),
+                            Provenance = PromptProvenanceOf(context), WithdrawalId = withdrawalId,
                         },
                         context.CancellationToken)).ConfigureAwait(false);
                 }
@@ -3802,7 +3812,7 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
                 if (steeredRunId is { } acceptedRunId)
                 {
                     await PersistPromptProvenanceAsync(context, info.Session, acceptedRunId.Value, queued: false, kind, inputText).ConfigureAwait(false);
-                    WritePromptResult(context, "alta.session.steered", info.Session, acceptedRunId.Value, null, queued: false, kind, inputText);
+                    WritePromptResult(context, "alta.session.steered", info.Session, acceptedRunId.Value, null, queued: false, kind, inputText, withdrawalId);
                     return AltaExitCodes.Success;
                 }
             }
@@ -7122,7 +7132,7 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         {
             AgentContentDeltaEvent content => new MappedEvent(ContentKindToEventKind(content.Kind), ContentKindToRole(content.Kind), content.Delta, null),
             AgentContentCompletedEvent content => MapCompletedContent(content),
-            AgentActivityEvent activity => new MappedEvent($"activity.{activity.Kind.ToString().ToLowerInvariant()}.{activity.Phase.ToString().ToLowerInvariant()}", "host", activity.Message ?? activity.Name, new { activity.ActivityId, activity.ParentActivityId }),
+            AgentActivityEvent activity => new MappedEvent($"activity.{activity.Kind.ToString().ToLowerInvariant()}.{activity.Phase.ToString().ToLowerInvariant()}", "host", activity.Message ?? activity.Name, new { activity.ActivityId, activity.ParentActivityId, subject = ToolSubject(activity) }),
             AgentSessionUpdateEvent update => new MappedEvent($"host.{update.Kind.ToString().ToLowerInvariant()}", "host", update.Message, update.Kind is AgentSessionUpdateKind.Reconnecting or AgentSessionUpdateKind.Warning ? update.Details : null),
             AgentPlanSnapshotEvent plan => new MappedEvent("assistant.plan", "assistant", plan.Snapshot.Explanation, new { plan.Snapshot.ChangeKind, steps = plan.Snapshot.Steps }),
             AgentInteractionEvent interaction => new MappedEvent($"interaction.{interaction.Kind.ToString().ToLowerInvariant()}", "host", interaction.Message, new { interaction.InteractionId }),
@@ -7202,7 +7212,7 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
         return set;
     }
 
-    private static void WritePromptResult(AltaCommandContext context, string type, SessionViewDescriptor session, string? runId, string? queueItemId, bool queued, PromptDispatchKind kind, string prompt)
+    private static void WritePromptResult(AltaCommandContext context, string type, SessionViewDescriptor session, string? runId, string? queueItemId, bool queued, PromptDispatchKind kind, string prompt, string? withdrawalId = null)
     {
         var parentNotificationExpected = IsAgentCaller(context) && !string.IsNullOrWhiteSpace(session.ParentSessionId);
         AltaJsonlWriter.WriteRecord(context.Stdout, new
@@ -7213,6 +7223,7 @@ internal sealed partial class BuiltInAltaCommandContributor : IAltaCommandContri
             sessionId = session.SessionId,
             runId,
             queueItemId,
+            withdrawalId,
             queued,
             detached = runId is null && queueItemId is null && !queued,
             dispatchKind = kind.ToString().ToLowerInvariant(),

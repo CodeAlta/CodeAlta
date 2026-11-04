@@ -55,6 +55,18 @@ public interface IAgentSession : IAsyncDisposable
     Task<AgentRunId> SteerAsync(AgentSteerOptions options, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Takes back a steering input that the active run has not given to the model yet.
+    /// </summary>
+    /// <param name="withdrawalId">The <see cref="AgentSteerOptions.WithdrawalId"/> of the input.</param>
+    /// <param name="cancellationToken">A token to cancel the operation.</param>
+    /// <returns>
+    /// <see langword="true"/> when the input was taken back and will never reach the model; <see langword="false"/> when the
+    /// run already took it, or when the session cannot take an input back.
+    /// </returns>
+    /// <exception cref="ArgumentException"><paramref name="withdrawalId"/> is empty.</exception>
+    Task<bool> TryWithdrawSteerAsync(string withdrawalId, CancellationToken cancellationToken = default) => Task.FromResult(false);
+
+    /// <summary>
     /// Aborts/cancels the currently running work in this session (best effort).
     /// </summary>
     /// <param name="cancellationToken">A token to cancel the operation.</param>

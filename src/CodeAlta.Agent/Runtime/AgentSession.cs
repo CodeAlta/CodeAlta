@@ -1621,6 +1621,29 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
     }
 
     /// <inheritdoc />
+    public async Task<bool> TryWithdrawSteerAsync(string withdrawalId, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(withdrawalId);
+        using var operation = EnterOperation();
+        ObjectDisposedException.ThrowIf(_disposed, this);
+
+        // Under the gate the run takes the inputs with: an input is taken back here or given to the model there, never both.
+        await _stateGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            var kept = _pendingSteerInputs.Where(steer => !string.Equals(steer.WithdrawalId, withdrawalId, StringComparison.Ordinal)).ToArray();
+            if (kept.Length == _pendingSteerInputs.Count) return false;
+            _pendingSteerInputs.Clear();
+            foreach (var steer in kept) _pendingSteerInputs.Enqueue(steer);
+            return true;
+        }
+        finally
+        {
+            _stateGate.Release();
+        }
+    }
+
+    /// <inheritdoc />
     public async Task AbortAsync(CancellationToken cancellationToken = default)
     {
         using var operation = EnterOperation(allowRetained: true);

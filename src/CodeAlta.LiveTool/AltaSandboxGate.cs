@@ -25,8 +25,8 @@ internal static class AltaSandboxGate
         // The browser of a sandboxed session keeps to its sandbox: the isolated profile, the network of its profile through
         // a proxy, its folders.
         "browser list", "browser activate", "browser status", "browser close", "browser deactivate",
-        "session current", "session create", "session fork", "session send", "session queue", "session steer", "session request",
-        "session message", "session tail", "session events", "session result", "session info", "session status", "session choices",
+        "session current", "session create", "session fork", "session send", "session queue", "session queued", "session unqueue", "session steer", "session unsteer", "session request",
+        "session message", "session tail", "session events", "session tool", "session result", "session info", "session status", "session choices",
         "session abort", "session compact", "session title", "session metrics",
         // To a new worktree, or the folder of its project: an existing checkout elsewhere is refused by the command itself.
         "session set_worktree",

@@ -413,6 +413,56 @@ public sealed partial class AltaLiveToolTests
     }
 
     [TestMethod]
+    public async Task SessionTool_ReadsOneCallWhole_AndSessionEventsNameWhatEachCallWorksOn()
+    {
+        using var root = TempDirectory.Create();
+        var options = new CatalogOptions { GlobalRoot = root.Path };
+        var providerId = new ModelProviderId("tool-calls");
+        var runtime = CreateRuntime(options, providerId);
+        await using var _ = runtime.ConfigureAwait(false);
+        var catalog = new SessionViewCatalog(options);
+        var sessionId = await WriteTurnScenarioAsync(catalog, providerId, root.Path, "completed").ConfigureAwait(false);
+        var store = catalog.JournalStore.CreateSessionStore();
+        var at = new DateTimeOffset(2026, 10, 3, 9, 0, 0, TimeSpan.Zero);
+        var run = new AgentRunId("tool-run");
+        var longOutput = "start of the output " + new string('x', 200) + " end of the output";
+        AgentActivityEvent Call(AgentActivityPhase phase, string details) => new(providerId, sessionId, at = at.AddSeconds(1), run, AgentActivityKind.ToolCall, phase, "call-1", null, "Bash", null,
+            System.Text.Json.JsonDocument.Parse(details).RootElement.Clone());
+        await store.AppendEventsAsync("openai", providerId.Value, sessionId,
+        [
+            Call(AgentActivityPhase.Requested, """{"arguments":{"command":"git status\nmore","cwd":"C:/work/tree"}}"""),
+            new AgentContentCompletedEvent(providerId, sessionId, at, run, AgentContentKind.ToolOutput, "output-1", "call-1", longOutput),
+            Call(AgentActivityPhase.Failed, """{"exitCode":3,"error":{"message":"it broke"},"modifiedFiles":["a.txt"]}"""),
+            new AgentActivityEvent(providerId, sessionId, at, run, AgentActivityKind.ToolCall, AgentActivityPhase.Completed, "call-2", null, "Bash", null,
+                System.Text.Json.JsonDocument.Parse("""{"arguments":{"command":"another"}}""").RootElement.Clone()),
+        ]).ConfigureAwait(false);
+        var dispatcher = CreateDispatcher(new AltaServiceCollection().Add(options).Add(new ProjectCatalog(options)).Add(catalog).Add(runtime));
+
+        var read = await dispatcher.InvokeAsync(["session", "tool", sessionId, "call-1", "--max-text", "20"], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+        Assert.AreEqual(AltaExitCodes.Success, read.ExitCode, read.Stderr);
+        var call = ReadJsonLines(read.Stdout).Single(static line => line.GetProperty("type").GetString() == "alta.session.tool");
+        Assert.AreEqual("Bash", call.GetProperty("name").GetString());
+        Assert.AreEqual("failed", call.GetProperty("phase").GetString(), "The newest record says how it ended.");
+        Assert.AreEqual("git status\nmore", call.GetProperty("command").GetString(), "An earlier record says what it runs.");
+        Assert.AreEqual("C:/work/tree", call.GetProperty("workingDirectory").GetString());
+        Assert.AreEqual(root.Path, call.GetProperty("sessionFolder").GetString());
+        Assert.AreEqual(3, call.GetProperty("exitCode").GetInt32());
+        Assert.AreEqual("it broke", call.GetProperty("error").GetString());
+        Assert.AreEqual(" end of the output".PadLeft(20, 'x'), call.GetProperty("output").GetString(), "The end of an output says the most.");
+        Assert.AreEqual(longOutput.Length, call.GetProperty("outputLength").GetInt32());
+        Assert.AreEqual("a.txt", call.GetProperty("modifiedFiles")[0].GetString());
+
+        var missing = await dispatcher.InvokeAsync(["session", "tool", sessionId, "call-unknown"], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+        Assert.AreEqual(AltaExitCodes.NotFound, missing.ExitCode, missing.Stdout);
+
+        var events = await dispatcher.InvokeAsync(["session", "tail", sessionId, "--last", "4", "--no-tool-output"], caller: AltaCallerIdentity.Cli).ConfigureAwait(false);
+        var subjects = ReadJsonLines(events.Stdout).Where(static line => line.GetProperty("type").GetString() == "alta.session.event")
+            .Select(static line => line.TryGetProperty("metadata", out var metadata) && metadata.ValueKind == System.Text.Json.JsonValueKind.Object && metadata.TryGetProperty("subject", out var subject) ? subject.GetString() : null).ToArray();
+        CollectionAssert.Contains(subjects, "git status", "One line of what the call runs.");
+        CollectionAssert.Contains(subjects, "another");
+    }
+
+    [TestMethod]
     [System.Runtime.Versioning.SupportedOSPlatform("windows")]
     public async Task SessionEventsAndTail_ReadOnlyTheTurnsTheyShow_NumberedAsInTheWholeHistory()
     {
