@@ -60,6 +60,25 @@ test("the log reads by day, filters by kind, person and result, pages older reco
   }, options);
 });
 
+test("older records asked before the filters changed never join the records of the new filters", { skip: !edge, timeout: 90_000 }, async () => {
+  await withCanvas(async page => {
+    await page.until(`document.querySelectorAll('.fleet-audit-row').length === 6`, "the newest records");
+    await page.evaluate(`window.fleetAuditFixture.holdOlder()`);
+    await page.clickText(".fleet-audit-older", "Show older records");
+    await page.until(`window.fleetAuditFixture.calls.some(call => JSON.parse(call).audit?.before === 235)`, "the older records asked");
+
+    // The filters change while the server still reads the older page of the whole log.
+    await page.evaluate(choose(`select[aria-label="What"]`, "access"));
+    await page.evaluate(choose(`select[aria-label="Result"]`, "failure"));
+    await page.until(`document.querySelectorAll('.fleet-audit-row').length === 1`, "the refused change of access");
+    await page.evaluate(`window.fleetAuditFixture.releaseOlder()`);
+    await new Promise(resolve => setTimeout(resolve, 500));
+    assert.deepEqual(await page.evaluate(rows), ["person.invite"], "the late page of the old filters is dropped");
+    assert.equal(await page.evaluate(`document.querySelector('.fleet-audit-older')`), null, "and its cursor with it");
+    assert.deepEqual(page.problems, []);
+  }, options);
+});
+
 test("a broken chain is said plainly, and a person who may not read the log is told who may", { skip: !edge, timeout: 90_000 }, async () => {
   await withCanvas(async page => {
     await page.until(`document.querySelectorAll('.fleet-audit-row').length === 6`, "the log");

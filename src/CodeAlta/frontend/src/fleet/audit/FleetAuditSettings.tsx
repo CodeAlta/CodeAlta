@@ -106,17 +106,22 @@ function AuditLog({ server, epoch, api, access, now }: { server: FleetServerView
     return () => abort.abort();
   }, [api, epoch, linkId, filters]);
 
+  // An older page belongs to the filters it was asked with: a change of filters aborts it, and a late answer is dropped.
   const older = useCallback(async () => {
     if (before === null || !filters) return;
+    loadAbort.current?.abort();
+    const abort = new AbortController();
+    loadAbort.current = abort;
     setLoading(true);
     try {
-      const page = await api.audit({ expectedEpoch: epoch, linkId, filters, before, limit: pageSize }, call);
+      const page = await api.audit({ expectedEpoch: epoch, linkId, filters, before, limit: pageSize }, { signal: abort.signal, ...call });
+      if (abort.signal.aborted) return;
       if (page.status === "ok") { setItems(value => [...value, ...page.items]); setBefore(page.before); }
       else setProblem({ key: serverProblem(page.status) ?? "The operation did not complete.", detail: page.message });
     } catch {
-      setProblem({ key: "The server does not answer." });
+      if (!abort.signal.aborted) setProblem({ key: "The server does not answer." });
     } finally {
-      setLoading(false);
+      if (!abort.signal.aborted) setLoading(false);
     }
   }, [api, epoch, linkId, filters, before]);
 
