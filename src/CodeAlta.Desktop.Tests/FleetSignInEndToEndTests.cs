@@ -56,7 +56,7 @@ public sealed class FleetSignInEndToEndTests
             var linkId = created.Server!.Id;
             var held = await owner.SignInSettingsAsync(new FleetServerLinkRequest(ownerEpoch, linkId), token);
             Assert.AreEqual("ok", held.Status, held.Message);
-            Assert.IsFalse(held.Settings!.Methods.Single(static method => method.Id == "microsoft").Available, "the public client of the project is a placeholder");
+            Assert.IsTrue(held.Settings!.Methods.Single(static method => method.Id == "microsoft").Available, "the public client of CodeAlta for Microsoft is registered");
             var change = new FleetSignInSettingsRequest(ownerEpoch, linkId, held.Settings.Version, ["company", "passkey"],
                 provider.Issuer.AbsoluteUri, provider.ClientId, provider.ClientSecret, "Contoso", null, false, [new FleetSignInGroupRoleView("0b1e-engineering", "auditor")],
                 AllowedDomains: ["contoso.example"]);
