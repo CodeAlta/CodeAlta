@@ -53,6 +53,9 @@ internal sealed class DesktopRemoteChildren : IRemoteChildSessions, IAsyncDispos
     // was lost, or this computer stopped before it) is acknowledged again, never delivered twice.
     private readonly List<string> _received;
     private readonly HashSet<string> _receivedSet;
+    // The creations in progress, by machine: a delivery of a child this computer does not know, from a machine a child is
+    // being created on, may be that child's, whose creation has not returned yet. It stays in the outbox of the machine.
+    private readonly Dictionary<string, int> _creating = new(StringComparer.Ordinal);
     private Task _loop = Task.CompletedTask;
 
     /// <summary>Creates the service of an instance; <see cref="Start"/> starts the loop of its deliveries.</summary>
@@ -84,6 +87,12 @@ internal sealed class DesktopRemoteChildren : IRemoteChildSessions, IAsyncDispos
 
     /// <summary>Gets the remote children this computer started, the oldest first.</summary>
     public IReadOnlyList<DesktopRemoteChild> Children { get { lock (_gate) return [.. _children]; } }
+
+    /// <summary>
+    /// Gets or sets what is called once a machine created a child, before its lineage is recorded here, with the id of the
+    /// child; tests hold a creation there. Null calls nothing.
+    /// </summary>
+    internal Func<string, CancellationToken, Task>? Created { get; set; }
 
     /// <summary>Starts the loop that takes the deliveries of the machines.</summary>
     public void Start() => _loop = Task.Run(RunAsync);
@@ -124,11 +133,23 @@ internal sealed class DesktopRemoteChildren : IRemoteChildSessions, IAsyncDispos
                     request.Confinement is { } confinement ? FleetSandboxFloors.ToWire(confinement) : null)));
             var selection = request.ProviderKey is null && request.ModelId is null && request.ReasoningEffort is null && request.AgentPromptId is null
                 ? null : new FleetModelSelection(request.ProviderKey, request.ModelId, request.AgentPromptId, request.ReasoningEffort);
-            // The answer of a child a script waits for is kept from the start: it may come before the script waits.
-            var created = await host.CreateRemoteSessionAsync(new FleetCreateSessionParams(projectId, request.SpaceId, request.Title, request.Prompt, selection)
-                { Agent = signed }, Guid.NewGuid().ToString("N"), cancellationToken).ConfigureAwait(false);
-            if (request.ForScript) _answers.TryAdd(created.SessionId, NewAnswer());
-            Remember(new DesktopRemoteChild(created.SessionId, host.MachineId!, name, request.ParentSessionId, request.ForScript, _time.GetUtcNow()));
+            // The answer of a child a script waits for is kept from the start: it may come before the script waits. Until its
+            // lineage is recorded, a delivery of a child unknown here from that machine waits in its outbox (DeliverAsync).
+            FleetCreateSessionResult created;
+            Creating(host.MachineId!, 1);
+            try
+            {
+                created = await host.CreateRemoteSessionAsync(new FleetCreateSessionParams(projectId, request.SpaceId, request.Title, request.Prompt, selection)
+                    { Agent = signed }, Guid.NewGuid().ToString("N"), cancellationToken).ConfigureAwait(false);
+                if (Created is { } hold) await hold(created.SessionId, cancellationToken).ConfigureAwait(false);
+                if (request.ForScript) _answers.TryAdd(created.SessionId, NewAnswer());
+                Remember(new DesktopRemoteChild(created.SessionId, host.MachineId!, name, request.ParentSessionId, request.ForScript, _time.GetUtcNow()));
+            }
+            finally
+            {
+                Creating(host.MachineId!, -1);
+            }
+
             Log($"Started session {created.SessionId} on {name} for the agent session {request.ParentSessionId} (mode {created.PermissionMode ?? "provider"}, sandbox {created.Sandbox ?? "none"}).");
             return new RemoteChildResult("created", null, null)
             {
@@ -321,7 +342,22 @@ internal sealed class DesktopRemoteChildren : IRemoteChildSessions, IAsyncDispos
     // outbox of the machine for the next round.
     private async Task<bool?> DeliverAsync(FleetAgentDelivery delivery, string machineId, string machineName, string key)
     {
-        if (FindLineage(Children, machineId, delivery) is not { } child)
+        DesktopRemoteChild? child;
+        bool creating;
+        // Read together: a creation records its lineage before it ends, so one of the two is always seen.
+        lock (_gate)
+        {
+            child = FindLineage(_children, machineId, delivery);
+            creating = _creating.GetValueOrDefault(machineId) > 0;
+        }
+
+        if (child is null && creating)
+        {
+            Log($"{machineName} gave a {delivery.Kind} of {delivery.ChildSessionId}, unknown here while a session is being created there: it is taken again at the next round.");
+            return null;
+        }
+
+        if (child is null)
         {
             Log($"{machineName} gave a {delivery.Kind} of {delivery.ChildSessionId} for {delivery.ParentSessionId}, which this computer did not start there for that session: it is dropped.");
             return false;
@@ -345,6 +381,17 @@ internal sealed class DesktopRemoteChildren : IRemoteChildSessions, IAsyncDispos
         {
             Log($"The {delivery.Kind} of {child.ChildSessionId} on {machineName} could not be delivered to {child.ParentSessionId}: {exception.Message}");
             return null;
+        }
+    }
+
+    // Counts a creation of a child on a machine that starts (1) or ends (-1).
+    private void Creating(string machineId, int change)
+    {
+        lock (_gate)
+        {
+            var count = _creating.GetValueOrDefault(machineId) + change;
+            if (count > 0) _creating[machineId] = count;
+            else _creating.Remove(machineId);
         }
     }
 

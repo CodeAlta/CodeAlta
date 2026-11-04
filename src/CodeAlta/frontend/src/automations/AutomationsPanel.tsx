@@ -129,7 +129,7 @@ function AutomationCard({ item, paused, selected, busy, now, onSelect, onRun, on
         {handoff !== null && <span className="automation-start-anchor">
           <Button size="small" intent="warning" disabled={busy} onClick={() => setStarting(true)}>{t("Start anyway…")}</Button>
           {starting && <ConfirmPopover always placement="bottom-end" intent="warning" busy={busy} subject={item.name} confirmLabel={t("Start anyway")}
-            title={t("Start it on {machine} now?", { machine: item.placement?.machineName ?? t("Unavailable machine") })}
+            title={item.runsOn ? t("Start it on {machine} now?", { machine: item.placement?.machineName ?? t("Unavailable machine") }) : t("Start it on this computer now?")}
             detail={t("The machine it left may still run its copy until it answers: both machines may run it meanwhile.")}
             onConfirm={() => { setStarting(false); onStartPlaced(); }} onCancel={() => setStarting(false)} />}
         </span>}

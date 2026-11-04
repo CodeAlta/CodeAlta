@@ -50,6 +50,14 @@
   .machine-device > span:last-child { grid-column: 1 / -1; justify-content: flex-end; }
 }
 .machine-confirm { max-width: 300px; padding: 10px 12px; display: grid; gap: 6px; }
+/* Agents of other machines: one row per setting, its name then its control. */
+.machine-agents-settings { display: grid; gap: 4px; }
+.machine-agent-row { display: grid; grid-template-columns: 150px minmax(0, 1fr); align-items: center; gap: 10px; min-height: 30px; }
+.machine-agent-row > .bp6-switch, .machine-agent-row > .bp6-popover-target { justify-self: start; }
+.machine-agent-label { color: var(--muted); font-size: 12.5px; }
+.machine-agent-spaces { display: flex; flex-wrap: wrap; gap: 4px 18px; }
+.machine-agent-spaces .bp6-switch { margin: 0; }
+.machine-agent-row .bp6-html-select { max-width: 240px; }
 .machine-confirm p { margin: 0; }
 .machine-projects, .machine-providers { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
 .machine-projects li { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 8px; padding: 4px 2px; }

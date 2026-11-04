@@ -1,4 +1,4 @@
-import type { MachineDeviceView, MachineManagement, MachineUpdateView, MachineView } from "#neoastra";
+import type { MachineAgentsView, MachineDeviceView, MachineManagement, MachineUpdateView, MachineView } from "#neoastra";
 import type { MessageKey } from "../localization";
 
 /** A permission a device has on a machine, in the order the page shows them. */
@@ -70,6 +70,24 @@ export function orderedDevices(devices: readonly MachineDeviceView[]): MachineDe
   const rank = (device: MachineDeviceView) => device.revokedAt ? 2 : device.isThisComputer ? 0 : 1;
   return [...devices].sort((left, right) => rank(left) - rank(right) || left.pairedAt.localeCompare(right.pairedAt) || left.id.localeCompare(right.id));
 }
+
+/** Whether agents of other machines may work on a machine: off until a space lets them in. */
+export const agentsAllowed = (view: Pick<MachineAgentsView, "spaces">): boolean => view.spaces.some(space => space.allowed);
+
+/**
+ * The sandboxes the sessions agents of other machines start may be held to: their parent's (`""`) first, then the
+ * profiles the machine offers, and the one its policy names when it is none of them.
+ */
+export function agentSandboxChoices(view: Pick<MachineAgentsView, "sandboxes" | "sandbox">): string[] {
+  const choices = [""];
+  for (const name of [...view.sandboxes, view.sandbox ?? ""]) {
+    if (name && !choices.some(value => value.toLowerCase() === name.toLowerCase())) choices.push(name);
+  }
+  return choices;
+}
+
+/** Whether a change of the bypass of agents' sessions asks first: turning it on does, turning it off does not. */
+export const confirmsBypass = (allowed: boolean): boolean => allowed;
 
 /** What a text typed to add a project is: a repository to clone (a URL, or `host:owner/repo`), a folder of the machine, or nothing. */
 export function projectSource(text: string): { kind: "clone" | "folder"; value: string } | null {

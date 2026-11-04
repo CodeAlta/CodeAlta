@@ -52,8 +52,8 @@ internal sealed class NodeServerAutomations(NodeAutomations automations, DeviceI
         {
             // A version that does not read names nothing to answer: the server keeps it pending, and nothing runs.
             if (signed is null || !FleetAutomationVersionDocuments.TryParse(signed.Payload, out var named)) continue;
-            var outcome = await automations.AcceptFromServerAsync(link.Id, devices, organization, signed, version => Open(version, devices), cancellationToken)
-                .ConfigureAwait(false);
+            var outcome = await automations.AcceptFromServerAsync(link.Id, devices, organization, signed, version => Open(version, devices), cancellationToken,
+                connector.Devices.ReadNameAsync).ConfigureAwait(false);
             acks.Add(new FleetAutomationAck(named.AutomationId, named.Number, outcome.Applied, outcome.Message));
         }
 

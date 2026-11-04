@@ -43,7 +43,8 @@ public sealed class SandboxConfinementTests
 
         var floorWithDeny = workspace with { Deny = ["~/.aws"], Read = ["~/code"], Write = [@"C:\work\"] };
         StringAssert.Contains(workspace.WeakerThan(floorWithDeny), "~/.aws", "a folder the floor denies stays denied");
-        Assert.IsNull((floorWithDeny with { Read = ["C:/work"] }).WeakerThan(floorWithDeny), "a folder written by the floor can be read, whatever its separators");
+        // Only a Windows path (a drive or a share) reads `\` as `/`: see BackslashesSeparateFolders_OnlyInWindowsPaths.
+        Assert.IsNull((floorWithDeny with { Read = ["C:/work"] }).WeakerThan(floorWithDeny), "a Windows folder written by the floor can be read, whatever its separators");
         Assert.IsNull((workspace with { Hosts = ["api.nuget.org", "*.cdn.nuget.org"] }).WeakerThan(workspace), "a host under a domain of the floor is as strict");
         StringAssert.Contains((workspace with { Hosts = ["nuget.org.evil.com"] }).WeakerThan(workspace), "nuget.org.evil.com");
         Assert.IsNull((workspace with { Network = SandboxNetwork.Hosts, Hosts = ["github.com"] }).WeakerThan(workspace with { Network = SandboxNetwork.On }),
@@ -63,5 +64,28 @@ public sealed class SandboxConfinementTests
         StringAssert.Contains((floor with { Write = ["/srv/Out"] }).WeakerThan(floor), "/srv/Out", "a folder the floor does not write");
         Assert.IsNull((floor with { Deny = ["/srv/data/secret", "/srv/data/Secret"] }).WeakerThan(floor), "denying both is as strict");
         Assert.IsNull(floor.WeakerThan(floor), "the same folders, as written, are as strict");
+    }
+
+    // On Linux and macOS `\` is an ordinary character of a file name: `/srv/a\b` is a folder of `/srv`, not `/srv/a/b`.
+    // Only a path that is a Windows one (a drive or a share) reads it as a separator, and `~\` is the home folder on every
+    // system; any other path compares as written, which refuses rather than gives what the floor does not.
+    [TestMethod]
+    public void BackslashesSeparateFolders_OnlyInWindowsPaths()
+    {
+        var workspace = SandboxConfinement.Of(SandboxProfiles.Resolve(SandboxProfiles.Workspace, []));
+        var floor = workspace with { Read = [@"/srv/a\b"], Write = [@"/srv/out\"], Deny = [@"/srv/a\b"] };
+
+        StringAssert.Contains((floor with { Deny = ["/srv/a/b"] }).WeakerThan(floor), @"/srv/a\b", "denying /srv/a/b does not deny the folder /srv/a\\b");
+        StringAssert.Contains((floor with { Read = ["/srv/a/b"], Deny = [@"/srv/a\b"] }).WeakerThan(floor), "/srv/a/b", "reading /srv/a\\b does not read /srv/a/b");
+        StringAssert.Contains((floor with { Write = ["/srv/out"] }).WeakerThan(floor), "/srv/out", "a trailing `\\` is part of a Linux name");
+        Assert.IsNull(floor.WeakerThan(floor), "the same folders, as written, are as strict");
+
+        var windows = workspace with { Read = [@"C:\data\in"], Write = [@"\\server\share\out\"], Deny = [@"D:\secret"] };
+        Assert.IsNull((windows with { Read = ["C:/data/in"], Write = ["//server/share/out"], Deny = ["D:/secret/"] }).WeakerThan(windows),
+            "a Windows path reads `\\` and `/` alike");
+        var home = workspace with { Deny = [@"~\.aws"] };
+        Assert.IsNull((workspace with { Deny = ["~/.aws"] }).WeakerThan(home), "`~\\` is the home folder on every system");
+        StringAssert.Contains((workspace with { Deny = ["~/.config/gh"] }).WeakerThan(workspace with { Deny = [@"~\.config\gh"] }), @"~\.config\gh",
+            "past the home folder, a path that is not a Windows one compares as written");
     }
 }

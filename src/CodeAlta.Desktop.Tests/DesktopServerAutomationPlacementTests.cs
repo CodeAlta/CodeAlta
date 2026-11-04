@@ -168,16 +168,120 @@ public sealed class DesktopServerAutomationPlacementTests
                 Assert.IsTrue(given.TryDequeue(out var removal));
                 Assert.IsTrue(removal.Version.Removed);
                 Assert.IsTrue(removal.Version.Number > second.Version.Number);
-                Assert.IsNull(placement.Status(automations.Snapshot.Find(Id)!));
-                Assert.IsNotNull(automations.NextDue(Id));
 
-                // Once the machine took it away, the server is asked to forget it.
+                // Once the machine took it away, its triggers start it here, and the server is asked to forget it.
                 await WaitForAsync(async () =>
                 {
                     await placement.SyncAsync(token);
                     return (await desktop.ListAutomationsAsync(token)).Automations.Count == 0;
                 }, "the server to forget the removal", token);
+                Assert.IsNull(placement.Status(automations.Snapshot.Find(Id)!));
+                Assert.IsNotNull(automations.NextDue(Id));
             }
+        }
+        finally
+        {
+            try { Directory.Delete(root, recursive: true); }
+            catch (IOException) { }
+            catch (UnauthorizedAccessException) { }
+        }
+    }
+
+    // A machine that refuses a removal may not have taken its copy away (its file could not be deleted): the automation,
+    // back on this computer, still waits for it, says why, and starts here only when a person starts it anyway.
+    [TestMethod]
+    public async Task BackHere_ARemovalTheMachineRefuses_KeepsItsTriggersWaiting_AndSaysWhy()
+    {
+        var token = TestContext.CancellationToken;
+        var root = Path.Combine(Path.GetTempPath(), "CodeAlta-desktop-server-refusal-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            await using var server = await CoordinatorServer.StartAsync(new CoordinatorServerOptions
+            {
+                DataRoot = Path.Combine(root, "server"), Urls = ["http://127.0.0.1:0"], ConfigureLogging = static _ => { }, EnvironmentVariable = static _ => null,
+            }, token);
+            var address = server.Addresses.First(static uri => uri.Scheme == "http");
+            var desktopFleetRoot = Path.Combine(root, "desktop-fleet");
+            using var desktopKey = DeviceIdentity.LoadOrCreate(desktopFleetRoot);
+            using var desktop = new FleetServerClient(address, desktopKey);
+            var setup = await desktop.SetUpAsync(server.SetupCode!.Code, "Alex", "Desktop", "Home", token);
+            using var nodeKey = DeviceIdentity.LoadOrCreate(Path.Combine(root, "node-fleet"));
+            using (var enrolling = new FleetServerClient(address, nodeKey))
+                await enrolling.EnrollAsync((await desktop.CreateEnrollmentTokenAsync(null, "mini", token)).Token, "mini", FleetDeviceKinds.Node, token);
+            await desktop.ApproveAsync(nodeKey.DeviceId, FleetDeviceKinds.Node, token);
+
+            // The machine takes what it is given, and refuses every removal: its copy could not be deleted there.
+            var refusals = 0;
+            FleetConnector? nodeConnector = null;
+            await using var connector = nodeConnector = new FleetConnector(new FleetConnectorOptions
+            {
+                ServerAddress = address, Identity = nodeKey, OutboxPath = Path.Combine(root, "node-outbox.json"), Client = new FleetClientInfo("node", "4.0.0", "windows"),
+                MinimumBackoff = TimeSpan.FromMilliseconds(100), MaximumBackoff = TimeSpan.FromSeconds(1), PollInterval = TimeSpan.FromMilliseconds(500),
+                AutomationsAssigned = async (delivery, cancellationToken) =>
+                {
+                    var list = await nodeConnector!.Devices.RefreshAsync(cancellationToken);
+                    var acks = new List<FleetAutomationAck>();
+                    foreach (var signed in delivery.Versions)
+                    {
+                        Assert.IsTrue(FleetAutomationVersionDocuments.TryVerify(signed, list, setup.Organization.Id, nodeKey.DeviceId, out var version, out var reason), reason);
+                        if (version.Removed) Interlocked.Increment(ref refusals);
+                        acks.Add(version.Removed ? new FleetAutomationAck(version.AutomationId, version.Number, false, "The file of the automation is locked")
+                            : new FleetAutomationAck(version.AutomationId, version.Number, true, null));
+                    }
+
+                    await nodeConnector.AcknowledgeAutomationsAsync(new FleetAutomationAcks(acks), cancellationToken);
+                },
+            });
+            connector.Start();
+            await WaitForAsync(() => connector.State == FleetConnectorState.Online, "the machine to connect", token);
+
+            var registry = new SessionHostRegistry(new SessionHostRegistryTests.RecordingSessionHost(null));
+            await using var fleet = new DesktopFleet(desktopFleetRoot, registry.TakeMembership(), "desktop");
+            var global = Path.Combine(root, "desktop-config.toml");
+            File.WriteAllText(global, $$"""
+                [automations.{{Id}}]
+                name = "Nightly on the mini"
+                runs_on = "{{nodeKey.DeviceId}}"
+                prompt = "Summarize the day."
+                triggers = [{ type = "daily", at = ["23:00"] }]
+                """);
+            await using var automations = new AutomationService(global, _ => Task.FromResult<IReadOnlyList<ProjectDescriptor>>([]),
+                new AutomationStateStore(Path.Combine(root, "desktop-state", "automations.json"), false), new FakeAutomationRunner(), TimeProvider.System, TimeZoneInfo.Utc);
+            await automations.RefreshAsync();
+            await using var placement = new DesktopAutomationPlacement(automations, fleet.Find, desktopFleetRoot, () => fleet.DeviceId, fleet.SignAutomation)
+            {
+                ServerRoute = machineId => machineId == nodeKey.DeviceId
+                    ? new DesktopServerAutomationRoute("link-1", setup.Organization.Id, "mini", new FleetOrganizationDevices(address, desktopKey), desktopKey,
+                        new FleetServerClient(address, desktopKey))
+                    : null,
+                RunsReadInterval = TimeSpan.Zero,
+            };
+            automations.Placement = placement;
+            var rpc = new CodeAlta.Desktop.Rpc.AutomationsService(automations, new ProjectCatalog(new CatalogOptions { GlobalRoot = Directory.CreateDirectory(Path.Combine(root, "global")).FullName }), "epoch", placement: placement);
+            await WaitForAsync(async () =>
+            {
+                await placement.SyncAsync(token);
+                return placement.Status(automations.Snapshot.Find(Id)!)!.State == "copied";
+            }, "the machine to take it", token);
+
+            // Back here: the machine refuses the removal, and the automation keeps waiting for it, with the reason.
+            Assert.IsNull(await automations.SaveAsync(automations.Snapshot.Find(Id)!.Definition with { RunsOn = null }, null, token));
+            await WaitForAsync(async () =>
+            {
+                await placement.SyncAsync(token);
+                return Volatile.Read(ref refusals) > 0 && (await desktop.ListAutomationsAsync(token)).Automations.Any(static item => item is { Removed: true, State: "refused" });
+            }, "the machine to refuse the removal", token);
+            await placement.SyncAsync(token);
+            await placement.SyncAsync(token);
+            Assert.IsNull(automations.NextDue(Id), "not armed here while the machine may still run its copy");
+            var waiting = (await rpc.ListAsync(new("epoch"), token)).Items.Single().Placement!;
+            Assert.AreEqual("waiting", waiting.State);
+            StringAssert.Contains(waiting.Message, "The file of the automation is locked");
+
+            // The person starts it here anyway.
+            Assert.AreEqual("ok", rpc.StartPlaced(new("epoch", Id)).Status);
+            Assert.IsNotNull(automations.NextDue(Id));
         }
         finally
         {

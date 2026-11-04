@@ -184,9 +184,10 @@ internal sealed partial class AutomationService : IAsyncDisposable
         return true;
     }
 
-    // Whether the triggers of an automation start it here: it is enabled, can run as defined, is allowed, and is not
-    // placed on another machine, which fires its triggers in place of this one.
-    private bool Armed(AutomationEntry entry) => entry is { Definition.Enabled: true, Definition.RunsOn: null, Problem: null } && IsAllowed(entry);
+    // Whether the triggers of an automation start it here: it is enabled, can run as defined, is allowed, is not placed
+    // on another machine, which fires its triggers in place of this one, and no machine it left may still run its copy.
+    private bool Armed(AutomationEntry entry)
+        => entry is { Definition.Enabled: true, Definition.RunsOn: null, Problem: null } && IsAllowed(entry) && Placement?.WaitsHere(entry.Id) is null;
 
     // What is allowed is what the automation does and the file it is in: the same table in another folder is another one.
     private string Allowance(AutomationEntry entry)

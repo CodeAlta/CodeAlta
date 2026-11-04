@@ -274,6 +274,9 @@ internal sealed class AutomationsService
             {
                 var runs = _automations.Runs(entry.Id, 1);
                 lastRun = runs.Count > 0 ? Run(runs[0]) : null;
+                // Back here, it may wait for a machine it left to take its copy away.
+                if (_placement?.Status(entry) is { } waiting)
+                    placed = new AutomationPlacementItem(waiting.MachineId, waiting.MachineName, waiting.State, waiting.Message, waiting.CopiedAt);
             }
 
             return new AutomationItem(entry.Id, definition.Name, definition.Enabled, definition.Prompt, entry.ProjectId, project?.DisplayName,

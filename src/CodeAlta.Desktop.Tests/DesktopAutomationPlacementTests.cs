@@ -201,6 +201,125 @@ public sealed class DesktopAutomationPlacementTests
     }
 
     [TestMethod]
+    public async Task BackHere_WhileItsMachineIsAway_ItsTriggersWaitForItsRemovalThere_OrAPersonStartsItAnyway()
+    {
+        var token = TestContext.CancellationToken;
+        await using var handoff = await HandoffFixture.StartAsync(enabled: true, token);
+        var (automations, a) = (handoff.Automations, handoff.A);
+        await using var placement = handoff.Placement();
+        var rpc = new AutomationsService(automations, handoff.First.Host.ProjectCatalog, Epoch, placement: placement);
+        await placement.SyncAsync(token);
+        Assert.AreEqual(1, a.Node.Puts.Count);
+
+        // Its machine is away when it comes back here: its triggers here wait, from the moment it is saved, so that both never run it.
+        handoff.Reach(a, false);
+        Assert.IsNull(await automations.SaveAsync(automations.Snapshot.Find(Id)!.Definition with { RunsOn = null }, null, token));
+        Assert.IsNull(automations.NextDue(Id), "not armed here while its machine may still run its copy");
+        await placement.SyncAsync(token);
+        Assert.IsNull(automations.NextDue(Id));
+        var waiting = (await rpc.ListAsync(new(Epoch), token)).Items.Single().Placement!;
+        Assert.AreEqual("waiting", waiting.State);
+        StringAssert.Contains(waiting.Message, "takes away its copy");
+
+        // The machine answers: it takes its copy away, and the triggers start it here.
+        handoff.Reach(a, true);
+        await placement.SyncAsync(token);
+        CollectionAssert.AreEqual(new[] { Id }, a.Node.Removed.ToArray());
+        Assert.IsNotNull(automations.NextDue(Id));
+        Assert.IsNull((await rpc.ListAsync(new(Epoch), token)).Items.Single().Placement);
+
+        // Again, and the person starts it here anyway: its removal there is still made once the machine answers.
+        Assert.IsNull(await automations.SaveAsync(automations.Snapshot.Find(Id)!.Definition with { RunsOn = a.DeviceId }, null, token));
+        await placement.SyncAsync(token);
+        handoff.Reach(a, false);
+        Assert.IsNull(await automations.SaveAsync(automations.Snapshot.Find(Id)!.Definition with { RunsOn = null }, null, token));
+        await placement.SyncAsync(token);
+        Assert.IsNull(automations.NextDue(Id));
+        Assert.AreEqual("ok", rpc.StartPlaced(new(Epoch, Id)).Status);
+        Assert.IsNotNull(automations.NextDue(Id), "started here anyway, as the person asked");
+        handoff.Reach(a, true);
+        await placement.SyncAsync(token);
+        Assert.AreEqual(2, a.Node.Removed.Count);
+    }
+
+    [TestMethod]
+    public async Task PlacedElsewhere_WhenTheRecordOfItsRemovalCannotBeWritten_KeepsThePlacement_AndStillWaitsAfterARestart()
+    {
+        var token = TestContext.CancellationToken;
+        await using var handoff = await HandoffFixture.StartAsync(enabled: true, token);
+        var (automations, a, b) = (handoff.Automations, handoff.A, handoff.B);
+        var removals = Path.Combine(handoff.FleetRoot, DesktopAutomationPlacement.RemovalsFileName);
+        await using (var placement = handoff.Placement())
+        {
+            await placement.SyncAsync(token);
+            Assert.AreEqual(1, a.Node.Puts.Count);
+
+            // The record of the removals is held open by another process: it cannot be replaced.
+            handoff.Reach(a, false);
+            File.WriteAllText(removals, "[]");
+            using (new FileStream(removals, FileMode.Open, FileAccess.Read, FileShare.Read))
+            {
+                Assert.IsNull(await automations.SaveAsync(automations.Snapshot.Find(Id)!.Definition with { RunsOn = b.DeviceId }, null, token));
+                await placement.SyncAsync(token);
+                Assert.AreEqual(0, b.Node.Puts.Count, "not copied while its removal is not recorded");
+                var waiting = placement.Status(automations.Snapshot.Find(Id)!)!;
+                Assert.AreEqual("waiting", waiting.State);
+                StringAssert.Contains(waiting.Message, "could not be written");
+            }
+        }
+
+        // Started again once the file can be written: the removal is recorded, and the second machine still waits for the first.
+        await using (var restarted = handoff.Placement())
+        {
+            await restarted.SyncAsync(token);
+            Assert.AreEqual(0, b.Node.Puts.Count);
+            Assert.AreEqual("waiting", restarted.Status(automations.Snapshot.Find(Id)!)!.State);
+            handoff.Reach(a, true);
+            await restarted.SyncAsync(token);
+            CollectionAssert.AreEqual(new[] { Id }, a.Node.Removed.ToArray());
+            Assert.AreEqual(1, b.Node.Puts.Count);
+        }
+    }
+
+    [TestMethod]
+    public async Task PlacedElsewhere_WhenTheRecordOfItsRemovalCannotBeRead_GivesNothingEnabled_UntilItReads()
+    {
+        var token = TestContext.CancellationToken;
+        await using var handoff = await HandoffFixture.StartAsync(enabled: true, token);
+        var (automations, a, b) = (handoff.Automations, handoff.A, handoff.B);
+        var removals = Path.Combine(handoff.FleetRoot, DesktopAutomationPlacement.RemovalsFileName);
+        await using (var placement = handoff.Placement())
+        {
+            await placement.SyncAsync(token);
+            handoff.Reach(a, false);
+            Assert.IsNull(await automations.SaveAsync(automations.Snapshot.Find(Id)!.Definition with { RunsOn = b.DeviceId }, null, token));
+            await placement.SyncAsync(token);
+            Assert.AreEqual("waiting", placement.Status(automations.Snapshot.Find(Id)!)!.State);
+        }
+
+        // The record is broken while this computer is closed: what it waited for cannot be told, so nothing enabled is given.
+        var recorded = File.ReadAllText(removals);
+        File.WriteAllText(removals, "{ broken");
+        await using (var restarted = handoff.Placement())
+        {
+            await restarted.SyncAsync(token);
+            Assert.AreEqual(0, b.Node.Puts.Count, "not copied while the record of the removals cannot be read");
+            var waiting = restarted.Status(automations.Snapshot.Find(Id)!)!;
+            Assert.AreEqual("waiting", waiting.State);
+            StringAssert.Contains(waiting.Message, "cannot be read");
+
+            // It reads again: the removal it held still comes first.
+            File.WriteAllText(removals, recorded);
+            await restarted.SyncAsync(token);
+            Assert.AreEqual(0, b.Node.Puts.Count);
+            handoff.Reach(a, true);
+            await restarted.SyncAsync(token);
+            CollectionAssert.AreEqual(new[] { Id }, a.Node.Removed.ToArray());
+            Assert.AreEqual(1, b.Node.Puts.Count);
+        }
+    }
+
+    [TestMethod]
     public async Task VersionNumbers_NeverGoBelowTheLastSigned_EvenWhenTheClockGoesBack_OrAfterARestart()
     {
         var root = Path.Combine(Path.GetTempPath(), "CodeAlta-placement-numbers-" + Guid.NewGuid().ToString("N"));

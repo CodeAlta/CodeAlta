@@ -66,6 +66,9 @@ public sealed class ServiceEnvironment
     /// <summary>Gets what runs a command of the service manager and waits for it.</summary>
     public required Func<string, IReadOnlyList<string>, ServiceCommandResult> Run { get; init; }
 
+    /// <summary>Gets what waits between two commands, such as two reads of a service that stops.</summary>
+    public Action<TimeSpan> Sleep { get; init; } = static delay => Thread.Sleep(delay);
+
     /// <summary>Gets what reads the user the machine signs in automatically at startup, or null.</summary>
     public Func<string?> AutoLoginUser { get; init; } = static () => null;
 

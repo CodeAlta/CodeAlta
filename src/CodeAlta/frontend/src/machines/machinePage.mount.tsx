@@ -17,6 +17,8 @@ let devices: MachineDeviceView[] = [
     channels: 1, isThisComputer: true },
   { id: "phone", name: "phone", fingerprint: "PH0N EEEE AAAA", permissions: ["view"], pairedAt: "2026-11-02T00:00:00Z", revokedAt: null, channels: 0, isThisComputer: false },
 ];
+// The policy of the machine for agents of other machines: off in every space, as a machine starts.
+const agentPolicy = { spaces: [] as string[], sandbox: null as string | null, allowBypass: false };
 let projects = [{ id: "p1", name: "app", path: "/home/me/code/app", repository: "github.com/me/app" }];
 const view = (id: string): MachineManagement => id === "managed"
   ? { status: "ok", message: null, version: "4.0.0", sessionsAtWork: 0, updating: false, update: { running: "4.0.0", installed: "4.0.0", pendingVersion: null, pendingPhase: null,
@@ -69,6 +71,15 @@ const api: MachinePageApi = {
     return { status: "ok", message: null };
   },
   deleteVariable: async request => { calls.push(JSON.stringify({ deleteVariable: request.name })); variables.delete(request.name); return { status: "ok", message: null }; },
+  agents: async () => ({ status: "ok", message: null, sandbox: agentPolicy.sandbox, allowBypass: agentPolicy.allowBypass, sandboxes: ["workspace", "strict"],
+    spaces: [{ id: "default", name: "Default" }, { id: "work", name: "Work" }].map(space => ({ ...space, allowed: agentPolicy.spaces.includes(space.id) })) }),
+  setAgentSpace: async request => {
+    calls.push(JSON.stringify({ agentSpace: [request.space, request.allowed] }));
+    agentPolicy.spaces = request.allowed ? [...agentPolicy.spaces, request.space] : agentPolicy.spaces.filter(space => space !== request.space);
+    return { status: "ok", message: null };
+  },
+  setAgentSandbox: async request => { calls.push(JSON.stringify({ agentSandbox: request.sandbox })); agentPolicy.sandbox = request.sandbox ?? null; return { status: "ok", message: null }; },
+  setAgentBypass: async request => { calls.push(JSON.stringify({ agentBypass: request.allowed })); agentPolicy.allowBypass = request.allowed; return { status: "ok", message: null }; },
 };
 const secrets = new Map<string, SecretView & { value: string }>();
 const variables = new Map<string, VariableView>([["GRAFANA_URL", { name: "GRAFANA_URL", value: "https://grafana.example", version: 1, setBy: "build-box owner", setAt: "2026-11-02T09:00:00Z" }]]);

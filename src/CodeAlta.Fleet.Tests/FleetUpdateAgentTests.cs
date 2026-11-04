@@ -591,6 +591,47 @@ public sealed class FleetUpdateAgentTests
         Assert.AreEqual(FleetUpdateMachineStates.Failed, agent.Current?.State);
         StringAssert.Contains(agent.Current?.Message, "replaced");
     }
+
+    [TestMethod]
+    public async Task ReportsReachTheServerOneAtATimeAndTheLastSaysWhereTheNodeStands()
+    {
+        // The server handles the requests of a connection concurrently and records the last report it handles: two reports
+        // in flight at once could leave it on the older one (downloading, while the node switches).
+        using var harness = new AgentHarness();
+        var sent = new List<string>();
+        var (inFlight, most) = (0, 0);
+        var firstAnswer = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var agent = harness.Start(options => options with
+        {
+            Send = async (_, report, _) =>
+            {
+                lock (sent)
+                {
+                    sent.Add(report.State);
+                    most = Math.Max(most, ++inFlight);
+                }
+
+                if (sent.Count == 1) await firstAnswer.Task;
+                else await Task.Yield();
+                lock (sent) inFlight--;
+            },
+        });
+
+        await harness.AcceptAsync(agent, LinkA, harness.Instruction(harness.Manifest(1, "c1", "4.0.2")));
+        await (agent.Tick() ?? Task.CompletedTask);
+        Assert.AreEqual(FleetUpdateMachineStates.Switching, agent.Current?.State);
+        // The reports leave on a queue of their own: wait for the first to be sent, then leave the others time to come, as
+        // they would at once if they did not wait for its answer.
+        for (var waited = 0; waited < 5000 && Volatile.Read(ref inFlight) == 0; waited += 10) await Task.Delay(10);
+        await Task.Delay(200);
+        lock (sent) CollectionAssert.AreEqual(new[] { FleetUpdateMachineStates.Waiting }, sent, "the next report waits for the server's answer to the first");
+
+        firstAnswer.SetResult();
+        await agent.DisposeAsync();
+        Assert.AreEqual(1, most, "never two reports in flight");
+        Assert.AreEqual(FleetUpdateMachineStates.Switching, sent[^1]);
+        Assert.IsFalse(sent.SkipWhile(static state => state != FleetUpdateMachineStates.Switching).Contains(FleetUpdateMachineStates.Downloading), string.Join(", ", sent));
+    }
 }
 
 /// <summary>An update agent on a folder of its own, with a controller that signs, a clock and a faked self-update.</summary>

@@ -20,6 +20,7 @@ export const automationPlacementMessages = {
   "Start anyway…": ["Iniciar de todos modos…", "Démarrer quand même…", "Trotzdem starten…", "このまま開始…", "仍然启动…"],
   "Start anyway": ["Iniciar de todos modos", "Démarrer quand même", "Trotzdem starten", "このまま開始", "仍然启动"],
   "Start it on {machine} now?": ["¿Iniciarla ahora en {machine}?", "La démarrer maintenant sur {machine} ?", "Jetzt auf {machine} starten?", "今すぐ {machine} で開始しますか？", "现在在 {machine} 上启动？"],
+  "Start it on this computer now?": ["¿Iniciarla ahora en este ordenador?", "La démarrer maintenant sur cet ordinateur ?", "Jetzt auf diesem Computer starten?", "今すぐこのコンピューターで開始しますか？", "现在在本机上启动？"],
   "The machine it left may still run its copy until it answers: both machines may run it meanwhile.": [
     "La máquina que dejó puede seguir ejecutando su copia hasta que responda: mientras tanto, ambas máquinas pueden ejecutarla.",
     "La machine qu’elle a quittée peut encore exécuter sa copie jusqu’à ce qu’elle réponde : les deux machines peuvent l’exécuter d’ici là.",
