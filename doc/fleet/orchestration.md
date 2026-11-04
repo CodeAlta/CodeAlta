@@ -155,8 +155,10 @@ editor says why another one is refused:
   (read-only by default), and everything else held as an approval.
 - **Allowed actions are tools, not command patterns.** "Restart a pod in namespace `shop`" is an MCP or plugin tool with
   typed parameters and a fixed scope; a shell pattern such as `kubectl rollout *` is too easy to bend. Typed parameters
-  are not enough on their own, so an allowed tool also has: a **pinned implementation** (its version and hash are part
-  of the signed automation), **preconditions** it checks on the target before acting, **bounds** on what it may change
+  are not enough on their own, so an allowed tool also has: a **pinned definition** (the hash of its name, description
+  and parameters, and the version its server reports, are part of the signed automation: a tool whose definition
+  changed waits for a person; the pin does not identify its code, which is a host-side tool of the machine, installed and
+  updated by its owner), **preconditions** it checks on the target before acting, **bounds** on what it may change
   (one deployment, a replica count within limits), **idempotency** (a repeat does nothing more) and a **circuit
   breaker** (after N uses in a period it stops and asks). Commands and edits outside the allowed tools follow the
   run's permission mode, which an unattended run keeps strict.

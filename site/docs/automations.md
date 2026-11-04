@@ -139,7 +139,7 @@ autonomy = { allowed_tools = ["k8s_restart_pod"], max_calls_per_hour = 3, approv
 
 In the configuration file, a tool it calls by itself can say more than its name:
 
-- **A pin**: `hash` is the hash of the definition of the tool, and `version` the version of its MCP server. A try says both for each tool it calls. A call of a tool that changed since you pinned it waits for you.
+- **A pin**: `hash` is the hash of the definition of the tool (its name, description and parameters), and `version` the version its MCP server reports. A try says both for each tool it calls. A call of a tool whose definition or version changed since you pinned it waits for you. A pin is of what the tool says it is, not of its code: keep the MCP servers of a machine that runs automations installed and updated by you only.
 - **Bounds**: the values an argument may take, or its `min` and `max`. A call outside them waits for you.
 - **Preconditions**: another tool it allows, which reads the target first, called with the arguments it names; its answer must contain what it `expect`s. When it does not, the call is not made, also after you approved it.
 
