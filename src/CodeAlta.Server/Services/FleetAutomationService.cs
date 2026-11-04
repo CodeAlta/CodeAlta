@@ -42,6 +42,8 @@ internal sealed class FleetAutomationService
     internal const string WaitingStatus = "waiting";
 
     private const int MaxRunsPerReport = 100;
+    // The latest runs of an automation a take-over is looked for in: a run that waits for a person is among its latest.
+    private const int MaxRunsChecked = 1000;
     private const int MaxMessageLength = 500;
     private const int MaxRunIdLength = 128;
     private const int MaxOccurrenceLength = 256;
@@ -253,6 +255,11 @@ internal sealed class FleetAutomationService
         if (held is null || held.Removed
             || held.OwnerPersonId != person && (MayTakeOver is not { } may || !await may(held, person, cancellationToken).ConfigureAwait(false)))
             throw CoordinatorException.NotFound(CoordinatorErrorCodes.AutomationNotFound, "No automation whose approvals you answer has this id on this machine.");
+        // The run must be one the machine reported for this automation: a take-over authorized for one automation is never
+        // forwarded for the run of another (the machine checks it too).
+        if (!(await _automations.ListAutomationRunsAsync(actor.OrganizationId, id, MaxRunsChecked, cancellationToken).ConfigureAwait(false))
+                .Any(reported => reported.RunId == runId && reported.MachineId == run.MachineId))
+            throw CoordinatorException.NotFound(CoordinatorErrorCodes.AutomationNotFound, "No run of this automation has this id on this machine.");
         if (_presence.Get(run.MachineId) is not { } session)
             throw CoordinatorException.Conflict(CoordinatorErrorCodes.AutomationConflict, "The machine is offline: its run goes on as its automation says until it is online.");
         try

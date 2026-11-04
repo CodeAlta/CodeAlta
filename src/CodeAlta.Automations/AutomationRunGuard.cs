@@ -75,6 +75,9 @@ internal sealed class AutomationRunGuard : AgentToolInterceptor
     /// <summary>Gets whether the run is a try, whose allowed tools are fakes.</summary>
     internal bool DryRun { get; }
 
+    /// <summary>Gets the automation the run is of.</summary>
+    internal string AutomationId => _entry.Id;
+
     /// <summary>Gets whether a call waits for a person now.</summary>
     internal bool Waiting
     {

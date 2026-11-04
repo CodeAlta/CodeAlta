@@ -19,11 +19,20 @@ internal sealed partial class AutomationService
     /// </summary>
     /// <param name="runId">The run.</param>
     /// <returns>The session of the run; null when no run of an automation with autonomy is in progress with this id.</returns>
-    internal string? TakeOver(string runId)
+    internal string? TakeOver(string runId) => TakeOver(runId, null);
+
+    /// <summary>A person takes a run of a given automation over, as <see cref="TakeOver(string)"/> does.</summary>
+    /// <param name="runId">The run.</param>
+    /// <param name="automationId">
+    /// The automation the run must be of: the one whose approvers or owner were checked for the request; null for a person at
+    /// this machine, who may take any run over.
+    /// </param>
+    /// <returns>The session of the run; null when no run of that automation with autonomy is in progress with this id.</returns>
+    internal string? TakeOver(string runId, string? automationId)
     {
         AutomationRunGuard? guard;
         lock (_gate) _guards.TryGetValue(runId, out guard);
-        if (guard is null) return null;
+        if (guard is null || automationId is not null && !string.Equals(guard.AutomationId, automationId, StringComparison.Ordinal)) return null;
         guard.TakeOver();
         var run = _state.Update(runId, current => current with { Message = "Taken over by a person." });
         Changed?.Invoke();

@@ -203,7 +203,8 @@ internal sealed partial class NodeAutomations
 
         if (request.Action != FleetAutomationRunRequest.TakeOverAction) return "the request does not take a run over";
         if (AssignmentOf(request.AutomationId) is not { Via: { } via } || via != linkId) return "this machine holds no such automation from that server";
-        if (Engine.TakeOver(request.RunId) is null) return "no run of this automation with autonomy is in progress with this id";
+        // The run must be of the automation the request was authorized for: who answers for one never takes another's run over.
+        if (Engine.TakeOver(request.RunId, request.AutomationId) is null) return "no run of this automation with autonomy is in progress with this id";
         Log($"{request.SignerDeviceId} took the run {request.RunId} of the automation {request.AutomationId} over through the server.");
         return null;
     }
