@@ -28,11 +28,13 @@ function Download() {
   return <PaintedProgressBar intent="primary" stripes={false} animate={false} value={value} />;
 }
 
-// A plugin whose button of the rail is busy: its ring turns there, in the drag region of the title bar.
+// A plugin whose button of the rail is busy: its ring turns there, in the drag region of the title bar. Its buttons come
+// late, as from a host under load: the rail grows once they come, which a measure that starts before is not to blame on
+// what it measures.
 const memory = new Map<string, string>();
 const plugins: PluginButtonsHost = {
   epoch: "epoch-1", spaceId: "work", hidden: createHiddenButtons({ getItem: key => memory.get(key) ?? null, setItem: (key, value) => { memory.set(key, value); } }),
-  api: { buttons: async request => ({ status: "ok", place: request.place, buttons: request.place === "Rail" ? [{ id: "builtin:fixture/sync", pluginKey: "builtin:fixture", pluginId: "fixture",
+  api: { buttons: async request => (await new Promise(resolve => setTimeout(resolve, 400)), { status: "ok", place: request.place, buttons: request.place === "Rail" ? [{ id: "builtin:fixture/sync", pluginKey: "builtin:fixture", pluginId: "fixture",
     plugin: "Fixture", buttonId: "sync", place: "Rail", icon: "refresh-cw", iconData: null, label: "Sync", commandId: "command-1", canvas: null, canvasScope: null, badge: "busy", count: 0,
     tone: "Info", hidden: false, disabled: false, tooltip: null }] : [] }) as never },
   activate: () => { }, isActive: () => false,

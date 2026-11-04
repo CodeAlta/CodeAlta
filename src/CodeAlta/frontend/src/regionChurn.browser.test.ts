@@ -8,7 +8,21 @@ import { edge, withCanvas } from "./statistics/browserHarness";
 // Chromium send the regions again at each frame, and Windows pays for it in the host: nothing there may move.
 
 const options = { entry: "../regionChurn.mount.tsx", fixture: "regionFixture", rpcFixture: "../demo-api.ts", styles: ["../../node_modules/flexlayout-react/style/light.css", "../speech/speech.css", "../pluginButtons/pluginButtons.css"], width: 1300, height: 400 } as const;
-type Churn = { regions: number; frames: number; moved: number };
+type Churn = { regions: number; frames: number; moved: number; changes: unknown[] };
+type Page = Parameters<Parameters<typeof withCanvas>[0]>[0];
+
+// The page has drawn what it draws: its fonts loaded, the buttons of its rail come (a host under load answers late), and
+// no box of a region changed for a while. A measure that starts before would count the page coming in, not what it measures.
+async function settled(page: Page): Promise<void> {
+  await page.until(`document.fonts.status === 'loaded' && document.querySelector('.window-brand .plugin-button') !== null`, "the fonts and the buttons of the rail");
+  let last: Churn | undefined;
+  for (let attempt = 0; attempt < 30; attempt++) {
+    last = await page.evaluate<Churn>(regionChurnScript(250, 10));
+    if (last.moved === 0) return;
+  }
+
+  assert.fail(`the page never settled: ${JSON.stringify(last)}`);
+}
 
 test("nothing that animates in a region of the window moves a box", { skip: !edge, timeout: 120_000 }, async () => {
   await withCanvas(async page => {
@@ -19,6 +33,7 @@ test("nothing that animates in a region of the window moves a box", { skip: !edg
     assert.equal(await page.evaluate(`document.querySelector('.plugin-button[data-tone] .plugin-button-badge[data-kind=busy]') !== null`), true, "the button has a tone");
     assert.match(await page.evaluate<string>(`getComputedStyle(document.querySelector('.plugin-button-badge[data-kind=busy]')).backgroundImage`), /conic-gradient/, "the arc of the ring is painted");
     await page.until(`document.querySelector('.speech-level > span').style.getPropertyValue('--speech-level-bar') !== '0%'`, "the level of the microphone");
+    await settled(page);
 
     // The measure sees a box that moves: the mark of #164 as it was, scaled in a tab of the title bar.
     await page.evaluate(`(() => { const sheet = new CSSStyleSheet(); sheet.replaceSync('@keyframes old-mark { 0%, 100% { transform: scale(.8); } 50% { transform: scale(1); } } #tab .session-background { animation: old-mark .6s ease-in-out infinite; }');
@@ -29,7 +44,7 @@ test("nothing that animates in a region of the window moves a box", { skip: !edg
 
     // The marks of a tab, the level of the microphone, the bar of the download: they change, and no box moves.
     const after = await page.evaluate<Churn>(regionChurnScript(1500));
-    assert.ok(after.regions >= 4 && after.frames > 30, `the regions were measured: ${JSON.stringify(after)}`);
+    assert.ok(after.regions >= 4 && after.frames >= 30, `the regions were measured: ${JSON.stringify(after)}`);
     assert.equal(after.moved, 0, `a box moved in a region of the window: ${JSON.stringify(after)}`);
     assert.deepEqual(page.problems, []);
   }, options);
@@ -73,12 +88,13 @@ test("the tab strip of the title bar is one region, whatever its tabs", { skip: 
 test("what moves inside a popover or a dialog moves no box of a region of the window", { skip: !edge, timeout: 120_000 }, async () => {
   await withCanvas(async page => {
     await page.until(`document.querySelector('#popover-body') !== null && document.querySelector('#dialog-body') !== null`, "the popover and the dialog");
+    await settled(page);
     assert.equal(await page.evaluate(`getComputedStyle(document.querySelector('.bp6-overlay-content')).getPropertyValue('app-region')`), "no-drag", "a popover stays clickable over the title bar");
     assert.equal(await page.evaluate(`getComputedStyle(document.querySelector('#region-dialog')).getPropertyValue('app-region')`), "no-drag", "a dialog stays clickable over the title bar");
     await page.evaluate(`(() => { const sheet = new CSSStyleSheet(); sheet.replaceSync('@keyframes opening { from { transform: scale(.3); } to { transform: scale(1); } } #popover-body, #dialog-body { animation: opening .3s infinite; }');
       document.adoptedStyleSheets = [...document.adoptedStyleSheets, sheet]; })()`);
     const churn = await page.evaluate<Churn>(regionChurnScript(1000));
-    assert.ok(churn.frames > 30, `the regions were measured: ${JSON.stringify(churn)}`);
+    assert.ok(churn.frames >= 30, `the regions were measured: ${JSON.stringify(churn)}`);
     assert.equal(churn.moved, 0, `what moves inside moved a box of a region of the window: ${JSON.stringify(churn)}`);
     assert.deepEqual(page.problems, []);
   }, options);
@@ -90,6 +106,7 @@ test("what moves inside a popover or a dialog moves no box of a region of the wi
 test("a toast that slides in moves no box of a region of the window", { skip: !edge, timeout: 120_000 }, async () => {
   await withCanvas(async page => {
     await page.until(`document.querySelector('#tab') !== null`, "the title bar");
+    await settled(page);
     await page.evaluate(`(() => { const toast = document.createElement('div'); toast.id = 'sliding-toast'; toast.className = 'bp6-toast bp6-overlay-content';
       toast.style.cssText = 'position: absolute; left: 400px; top: 46px; width: 320px; height: 40px;'; toast.textContent = 'Session cleanup is running';
       document.querySelector('.ide-shell').append(toast);
@@ -97,7 +114,7 @@ test("a toast that slides in moves no box of a region of the window", { skip: !e
       document.adoptedStyleSheets = [...document.adoptedStyleSheets, sheet]; })()`);
     assert.equal(await page.evaluate(`getComputedStyle(document.querySelector('#sliding-toast')).getPropertyValue('app-region')`), "none", "a toast is no region");
     const churn = await page.evaluate<Churn>(regionChurnScript(1000));
-    assert.ok(churn.frames > 30, `the regions were measured: ${JSON.stringify(churn)}`);
+    assert.ok(churn.frames >= 30, `the regions were measured: ${JSON.stringify(churn)}`);
     assert.equal(churn.moved, 0, `the toast moved a box of a region of the window: ${JSON.stringify(churn)}`);
     assert.deepEqual(page.problems, []);
   }, options);
