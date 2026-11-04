@@ -69,6 +69,8 @@ internal static class DesktopSettingBindings
         Bool("general.reconnect_remote_control", () => shell!.ReconnectRemoteControl, value => shell!.SetReconnectRemoteControl(value), HasShell);
         Add("general.on_close", () => SettingValues.Of(CloseName(shell!.OnClose)), value => { shell!.SetOnClose(CloseOf(value.GetString())); return null; }, HasShell);
         Bool("general.keep_awake", () => shell!.KeepAwake, value => shell!.SetKeepAwake(value), HasShell);
+        Add("general.turn_alerts", () => SettingValues.Of(DesktopPreferences.Name(shell!.TurnAlerts)),
+            value => DesktopPreferences.TryParseTurnAlerts(value.GetString(), out var mode) ? Do(() => shell!.SetTurnAlerts(mode)) : "The alerts are all, mark or off.", HasShell);
         Add("general.external_editor", () => SettingValues.Write(writer =>
         {
             var editor = shell!.ExternalEditor;

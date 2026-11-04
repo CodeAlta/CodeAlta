@@ -24,7 +24,7 @@ import { RunningExitDialog } from "./RunningExitDialog";
 import { NewSessionPopover } from "./NewSessionPopover";
 import { SessionStartProgress, type SessionStartStep } from "./SessionStartProgress";
 import { CloseWindowDialog } from "./CloseWindowDialog";
-import { closeBehavior, entryAddedGuide, entryAddedNotice, type CloseBehavior } from "./desktopShell";
+import { closeBehavior, entryAddedGuide, entryAddedNotice, turnAlertMode, type CloseBehavior, type TurnAlertMode } from "./desktopShell";
 import { EntryAddedDialog } from "./EntryAddedDialog";
 import { showToast } from "./appToaster";
 import { availableUpdate, installedNotice, runtimeNotification, updateCheckInterval, updateToAnnounce, updateNotification, UpdateToaster, type AvailableUpdate } from "./UpdateNotice";
@@ -2138,6 +2138,8 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
   const requestImmediateExit = useRef(() => quitApplication(true));
   // A project that a start of alta added (`alta .`): the window reads the catalog again and selects it.
   const showHostProject = useRef(async (_projectId: string, _spaceId: string | null) => {});
+  // The session whose notification the user opened (a session that is done or waits for them).
+  const showHostSession = useRef((_sessionId: string) => {});
   const nativeCloseTab = useRef<() => void>(() => {});
   requestExit.current = exitApplication;
   async function saveAllAndExit(unsaved: FileTab[]) {
@@ -2298,6 +2300,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
           // An application that drives CodeAlta through its MCP server creates sessions without the window asking.
           else if (notice.kind === "sessions-changed") readSessionList.current();
           else if (notice.kind === "show-project" && notice.projectId) void showHostProject.current(notice.projectId, notice.spaceId ?? null);
+          else if (notice.kind === "show-session" && notice.sessionId) showHostSession.current(notice.sessionId);
           // The user chose another external editor, in this window or another one.
           else if (notice.kind === "external-editor") void externalOpener.reload();
           // The width changed: the user's setting, or the width of one session (an alta command, or a drag that released it).
@@ -2324,6 +2327,11 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
   function setReconnectRemoteControl(reconnect: boolean) {
     setShellPreferences(current => current && { ...current, reconnectRemoteControl: reconnect });
     void desktopShell.setReconnectRemoteControl({ reconnect }, { timeoutMilliseconds: 8_000 })
+      .then(value => { if (value.status === "ok") setShellPreferences(value); }, () => { /* The setting shows what was asked. */ });
+  }
+  function setTurnAlerts(turnAlerts: TurnAlertMode) {
+    setShellPreferences(current => current && { ...current, turnAlerts });
+    void desktopShell.setTurnAlerts({ turnAlerts }, { timeoutMilliseconds: 8_000 })
       .then(value => { if (value.status === "ok") setShellPreferences(value); }, () => { /* The setting shows what was asked. */ });
   }
   function setKeepAwake(keepAwake: boolean) {
@@ -2707,6 +2715,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
     const session = shown.sessions.find(candidate => candidate.id === id) ?? catalog.current?.sessions.find(candidate => candidate.id === id);
     if (session) revealSession(session);
   }
+  showHostSession.current = id => void openAutomationSession(id);
   // The bookmarks: the sessions and the messages the user marked to find them again. This window lists them and is told
   // when they change. It does not follow them itself: the tab, the rail of a timeline and the mark of a row do.
   const bookmarkActions = useRef<Pick<SessionBookmarkHost, "toggleMessage" | "go" | "unshown">>({ toggleMessage: () => { }, go: () => { }, unshown: () => { } });
@@ -6006,6 +6015,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
         remoteControl={owned && shellPreferences ? { reconnect: shellPreferences.reconnectRemoteControl === true, set: setReconnectRemoteControl } : null}
         closing={shellPreferences?.canKeepRunning ? { behavior: closeBehavior(shellPreferences.onClose), platform: shellPreferences.platform, trayIcon: shellPreferences.trayIcon, set: setOnClose } : null}
         keepAwake={owned && typeof shellPreferences?.keepAwake === "boolean" ? { on: shellPreferences.keepAwake, set: setKeepAwake } : null}
+        turnAlerts={owned && typeof shellPreferences?.turnAlerts === "string" ? { mode: turnAlertMode(shellPreferences.turnAlerts), platform: shellPreferences.platform, set: setTurnAlerts } : null}
         externalEditor={owned ? { api: externalEditorSettings, onChanged: externalOpener.accept } : null} />
       : settingsSection === "permissions" ? <PermissionSettings confirms={{ ...confirms, set: setConfirm }} tools={owned && status?.hostEpoch ? { epoch: status.hostEpoch, api: globalConfig } : null}
         permissions={owned && shellPreferences ? { review: shellPreferences.reviewPermissions, set: setReviewPermissions,

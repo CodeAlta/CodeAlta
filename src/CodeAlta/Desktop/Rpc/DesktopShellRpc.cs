@@ -97,6 +97,19 @@ internal sealed class DesktopShellService
     }
 
     /// <summary>
+    /// Changes the user's setting for the alerts: what tells the user that a session is done or waits for them while
+    /// CodeAlta is in the background (<c>all</c>, <c>mark</c> or <c>off</c>). It applies at once; a name that is not one
+    /// changes nothing.
+    /// </summary>
+    [NeoRpcMethod("setTurnAlerts")]
+    public DesktopShellPreferences SetTurnAlerts(DesktopShellTurnAlertsRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        if (DesktopPreferences.TryParseTurnAlerts(request.TurnAlerts, out var mode)) _shell?.SetTurnAlerts(mode);
+        return Current();
+    }
+
+    /// <summary>
     /// Changes the user's setting for the width of the conversations, in percent of the space of a session (40 to
     /// 100). A width out of range changes nothing. The session the user resized follows the setting again. Every
     /// page is told with <c>session-width</c> notices of <see cref="Watch"/>.
@@ -227,7 +240,7 @@ internal sealed class DesktopShellService
         : new("ok", DesktopPreferences.Name(_shell.OnClose), _shell.CanHide, Platform, _shell.EntryAdded, _shell.SessionWidth,
             [.. _shell.SessionWidths().Select(static pair => new DesktopShellSessionWidth(pair.Key, pair.Value))], _shell.TrayAvailable, _shell.Zoom,
             _shell.ReviewPermissions, _shell.InheritPermissions)
-        { ReconnectRemoteControl = _shell.ReconnectRemoteControl ? true : null, KeepAwake = _shell.KeepAwake };
+        { ReconnectRemoteControl = _shell.ReconnectRemoteControl ? true : null, KeepAwake = _shell.KeepAwake, TurnAlerts = DesktopPreferences.Name(_shell.TurnAlerts) };
 
     private static string Platform => OperatingSystem.IsWindows() ? "windows" : OperatingSystem.IsMacOS() ? "macos" : "linux";
 }
@@ -297,6 +310,13 @@ internal sealed record DesktopShellPreferences(string Status, string OnClose, bo
     /// </summary>
     [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
     public bool? KeepAwake { get; init; }
+
+    /// <summary>
+    /// The user's setting: what tells the user that a session is done or waits for them while CodeAlta is in the
+    /// background, <c>all</c>, <c>mark</c> or <c>off</c>; absent without a shell.
+    /// </summary>
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public string? TurnAlerts { get; init; }
 }
 
 /// <summary>Asks to review the commands and the file changes of the sessions, or to approve them automatically.</summary>
@@ -314,6 +334,10 @@ internal sealed record DesktopShellReconnectRemoteControlRequest(bool Reconnect)
 /// <summary>Asks to keep the computer from going to idle sleep while CodeAlta runs, or to let it sleep.</summary>
 /// <param name="KeepAwake">Whether the computer is kept awake.</param>
 internal sealed record DesktopShellKeepAwakeRequest(bool KeepAwake);
+
+/// <summary>Asks to change what tells the user that a session is done or waits for them while CodeAlta is in the background.</summary>
+/// <param name="TurnAlerts"><c>all</c> (a notification and the mark of the application), <c>mark</c> (the mark alone) or <c>off</c>.</param>
+internal sealed record DesktopShellTurnAlertsRequest(string? TurnAlerts);
 
 /// <summary>The width one session is shown with instead of the user's setting.</summary>
 internal sealed record DesktopShellSessionWidth(string SessionId, int Percent);

@@ -25,6 +25,35 @@ export function closeBehaviorLabel(behavior: CloseBehavior): MessageKey {
 }
 
 /**
+ * What tells the user that a session is done or waits for them while CodeAlta is in the background, as the host names
+ * it: a notification and the mark of the application, the mark alone, or nothing.
+ */
+export const turnAlertModes = ["all", "mark", "off"] as const;
+export type TurnAlertMode = typeof turnAlertModes[number];
+
+/** The mode the host names; a name this page does not know is the default, a notification and the mark. */
+export const turnAlertMode = (value: string | null | undefined): TurnAlertMode => turnAlertModes.find(mode => mode === value) ?? "all";
+
+/** The modes a platform offers: Linux has no mark of the application, only its notifications. */
+export const turnAlertChoices = (platform: string): readonly TurnAlertMode[] => platform === "linux" ? ["all", "off"] : turnAlertModes;
+
+/** The name of each mode where it is chosen, with the mark as each platform shows it. */
+export function turnAlertLabel(mode: TurnAlertMode, platform: string): MessageKey {
+  if (mode === "off") return "Off";
+  if (platform === "macos") return mode === "all" ? "Notification and Dock badge" : "Dock badge only";
+  if (platform === "windows") return mode === "all" ? "Notification and flashing taskbar button" : "Flashing taskbar button only";
+  return mode === "all" ? "Notification" : "App icon mark only";
+}
+
+/** What a mode does, under its choice. */
+export function turnAlertHelp(mode: TurnAlertMode, platform: string): MessageKey {
+  if (mode === "off") return "CodeAlta does not tell you when a session is done or waits for you while it is in the background.";
+  if (mode === "mark") return "While CodeAlta is in the background. The mark goes once you are back in CodeAlta.";
+  return platform === "linux" ? "While CodeAlta is in the background. The notification opens the session."
+    : "While CodeAlta is in the background. The notification opens the session; the mark goes once you are back in CodeAlta.";
+}
+
+/**
  * The button an arrow key moves to in a row of `count` buttons, from the one at `index`: the next or the
  * previous one, around the ends, as in a dialog of the system. -1 for any other key.
  */

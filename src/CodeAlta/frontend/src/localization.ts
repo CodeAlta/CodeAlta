@@ -29,6 +29,7 @@ import { skillFolderMessages } from "./skillFolderMessages";
 import { promptSurfaceMessages } from "./promptSurface/messages";
 import { externalEditorMessages } from "./externalEditors/messages";
 import { windowMessages } from "./windows/messages";
+import { turnAlertMessages } from "./turnAlertMessages";
 import { fontMessages } from "./fonts/messages";
 import { timelineActivityMessages } from "./timelineActivity/messages";
 import { localSearchMessages } from "./search/localSearchMessages";
@@ -2880,6 +2881,7 @@ export const messages = dictionary({
   ...promptSurfaceMessages,
   ...externalEditorMessages,
   ...windowMessages,
+  ...turnAlertMessages,
   ...fontMessages,
   ...timelineActivityMessages,
   ...skillSearchMessages,

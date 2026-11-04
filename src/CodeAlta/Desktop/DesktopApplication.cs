@@ -346,6 +346,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
         IAsyncDisposable? environmentLifetime = null, rpcLifetime = null, viewLifetime = null, bindingLifetime = null, chromeLifetime = null, instanceLifetime = null;
         IAsyncDisposable? uiLifetime = null;
         IAsyncDisposable? sessionTaskbarProgress = null;
+        IAsyncDisposable? sessionTurnAlerts = null;
         var bodyFailed = false;
         try
         {
@@ -753,6 +754,22 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
             // A session whose background job runs is at work too: exiting ends the command.
             shell.RunningSessions = host.RuntimeService.CountSessionsAtWork;
             sessionTaskbarProgress = DesktopWindowsTaskbarProgress.StartIfAvailable(window, chrome.Services.WindowPolish, host.RuntimeService);
+            // A question a session asked, a command to review, a form to fill, a conversation open elsewhere.
+            async ValueTask<IReadOnlyList<string>> SessionsWaitingAsync()
+            {
+                var reviews = await host.RuntimeService.Permissions.ListWaitingSessionsAsync();
+                var held = await host.RuntimeService.ConversationHolds.ListWaitingSessionsAsync();
+                return [.. host.Commands.Asks.ListWaitingSessions(), .. reviews, .. held];
+            }
+            // A session that is done or waits for the user while the application is in the background: a notification,
+            // which opens the session, and the mark of the application, until a window has the focus again.
+            sessionTurnAlerts = new DesktopTurnAlerts(new DesktopTurnAlertSurface(window, chrome.Services, host.RuntimeService,
+                async _ => await SessionsWaitingAsync(), () => shell.TurnAlerts, () => windows.AnyFocused,
+                DesktopTurnAlertSurface.CanNotify(OperatingSystem.IsMacOS() ? DesktopIntegration.MacRunningBundleIdentifier() : null)), DesktopTurnAlerts.Period);
+            chrome.Services.Notifications.Activated += (_, activation) =>
+            {
+                if (DesktopTurnAlerts.SessionOf(activation) is { } notifiedSession) shell.ShowSession(notifiedSession);
+            };
             shell.HasWorkspace = true;
             if (!closeRequested.Task.IsCompleted)
             {
@@ -1057,13 +1074,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                     builder.AddPullRequestPromptsService(new PullRequestPromptsService(pullRequestPrompts, host.ProjectCatalog, epoch));
                     var startPrompts = new CodeAlta.Catalog.StartPrompts.StartPromptCatalog(host.CatalogOptions);
                     builder.AddStartPromptsService(new StartPromptsService(startPrompts, host.ProjectCatalog, epoch));
-                    builder.AddSpacesService(new SpacesService(host.SpaceCatalog, spaceView, host.RuntimeService.ListOverview, async () =>
-                    {
-                        // A question a session asked, a command to review, a form to fill, a conversation open elsewhere.
-                        var reviews = await host.RuntimeService.Permissions.ListWaitingSessionsAsync();
-                        var held = await host.RuntimeService.ConversationHolds.ListWaitingSessionsAsync();
-                        return [.. host.Commands.Asks.ListWaitingSessions(), .. reviews, .. held];
-                    }, epoch, id => host.Commands.MoveSpaceChatsAsync(id, CodeAlta.Catalog.SpaceDescriptor.DefaultId)) {
+                    builder.AddSpacesService(new SpacesService(host.SpaceCatalog, spaceView, host.RuntimeService.ListOverview, SessionsWaitingAsync, epoch, id => host.Commands.MoveSpaceChatsAsync(id, CodeAlta.Catalog.SpaceDescriptor.DefaultId)) {
                         Fallbacks = () => host.Commands.LastFallbacks,
                         HeldElsewhere = () => host.ExternalSessions?.Held ?? [],
                         ConfigStore = new CodeAltaConfigStore(host.CatalogOptions),
@@ -1299,6 +1310,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
             GC.KeepAlive(chromeLifetime);
             GC.KeepAlive(environmentLifetime);
             GC.KeepAlive(sessionTaskbarProgress);
+            GC.KeepAlive(sessionTurnAlerts);
             GC.KeepAlive(window);
             GC.KeepAlive(desktopWindows);
             return; // No native-resource disposal, lease release or ForceShutdown on this path.
@@ -1313,7 +1325,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
         // The placement of the window for the next start, written while the window is still there.
         if (windowState is not null) await windowState.DisposeAsync();
         var nativeFailed = false;
-        foreach (var resource in new[] { uiLifetime, bindingLifetime, viewLifetime, rpcLifetime, instanceLifetime, sessionTaskbarProgress, chromeLifetime, environmentLifetime })
+        foreach (var resource in new[] { uiLifetime, bindingLifetime, viewLifetime, rpcLifetime, instanceLifetime, sessionTaskbarProgress, sessionTurnAlerts, chromeLifetime, environmentLifetime })
         {
             if (resource is null) continue;
             try
@@ -1335,6 +1347,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
             GC.KeepAlive(chromeLifetime);
             GC.KeepAlive(environmentLifetime);
             GC.KeepAlive(sessionTaskbarProgress);
+            GC.KeepAlive(sessionTurnAlerts);
             GC.KeepAlive(window);
             GC.KeepAlive(desktopWindows);
             return;

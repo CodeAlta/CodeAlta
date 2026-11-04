@@ -165,6 +165,7 @@ internal sealed record BootClosing(string? Step, int Seconds, bool CanForceExit)
 [JsonSerializable(typeof(DesktopShellInheritPermissionsRequest))]
 [JsonSerializable(typeof(DesktopShellReconnectRemoteControlRequest))]
 [JsonSerializable(typeof(DesktopShellKeepAwakeRequest))]
+[JsonSerializable(typeof(DesktopShellTurnAlertsRequest))]
 [JsonSerializable(typeof(DesktopShellZoomRequest))]
 [JsonSerializable(typeof(DesktopShellHideResponse))]
 [JsonSerializable(typeof(DesktopShellExitRequest))]

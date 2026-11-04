@@ -39,8 +39,9 @@ internal enum DesktopCloseAction
 /// <c>close-tab</c> (the native menu asks the page to close its focused tab, not the window),
 /// <c>entry-added</c> (the application was just added to the desktop's applications),
 /// <c>sessions-changed</c> (something outside the window may have created or changed sessions),
-/// <c>external-editor</c> (the user chose another external editor) and <c>show-project</c> (a start of <c>alta</c> added
-/// the project <c>ProjectId</c>, with <c>SpaceId</c> a space it joined: the page selects it).
+/// <c>external-editor</c> (the user chose another external editor), <c>show-project</c> (a start of <c>alta</c> added
+/// the project <c>ProjectId</c>, with <c>SpaceId</c> a space it joined: the page selects it) and <c>show-session</c> (the
+/// user opened the notification of the session <c>SessionId</c>: the page opens it).
 /// </summary>
 internal sealed record DesktopShellEvent(string Kind, int RunningSessions, int BusyTerminals = 0, int SessionWidth = 0, string? SessionId = null,
     [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)] string? ProjectId = null,
@@ -75,8 +76,8 @@ internal sealed class DesktopShell
     private bool _exiting;
     private bool _exitPending;
     private bool _entryAdded;
-    // The project a start of alta added before any page watched (see ShowProject).
-    private DesktopShellEvent? _pendingProject;
+    // The project or the session to show that came before any page watched (see ShowProject and ShowSession).
+    private DesktopShellEvent? _pendingShow;
     private int _pickingFolder;
 
     /// <param name="window">The main window.</param>
@@ -180,12 +181,26 @@ internal sealed class DesktopShell
     internal void ShowProject(string projectId, string? spaceId)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(projectId);
-        var notice = new DesktopShellEvent("show-project", 0, ProjectId: projectId, SpaceId: spaceId);
+        ShowInMainPage(new DesktopShellEvent("show-project", 0, ProjectId: projectId, SpaceId: spaceId));
+    }
+
+    /// <summary>
+    /// Shows the window and tells the page to open a session (<c>show-session</c>): the user opened its notification. While
+    /// no page watches (the application starts), the notice waits for the first one.
+    /// </summary>
+    internal void ShowSession(string sessionId)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
+        ShowInMainPage(new DesktopShellEvent("show-session", 0, SessionId: sessionId));
+    }
+
+    private void ShowInMainPage(DesktopShellEvent notice)
+    {
         bool watched;
         lock (_gate)
         {
             watched = _watchers.Any(static entry => entry.Label == Windows.DesktopWindows.MainLabel);
-            _pendingProject = watched ? null : notice;
+            _pendingShow = watched ? null : notice;
         }
 
         if (watched) PublishTo(Windows.DesktopWindows.MainLabel, notice);
@@ -460,6 +475,27 @@ internal sealed class DesktopShell
         _writer.Write();
     }
 
+    /// <summary>
+    /// The user's setting: what tells the user that a session is done or waits for them while CodeAlta is in the
+    /// background. A notification and the mark of the application unless the user chose otherwise; it applies at once.
+    /// </summary>
+    internal DesktopTurnAlertMode TurnAlerts { get { lock (_gate) return _preferences.TurnAlerts; } }
+
+    /// <summary>Changes that setting and keeps it.</summary>
+    /// <param name="value">What tells the user.</param>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="value"/> is not a mode.</exception>
+    internal void SetTurnAlerts(DesktopTurnAlertMode value)
+    {
+        if (!Enum.IsDefined(value)) throw new ArgumentOutOfRangeException(nameof(value));
+        DesktopPreferences? preferences = null;
+        lock (_gate)
+        {
+            if (_preferences.TurnAlerts != value) preferences = _preferences = _preferences with { TurnAlerts = value };
+        }
+
+        if (preferences is not null) _writer.Write();
+    }
+
     /// <summary>The user's setting: the editor folders and files are opened in beside the code editor of CodeAlta.</summary>
     internal ExternalEditorChoice ExternalEditor { get { lock (_gate) return _preferences.ExternalEditor; } }
 
@@ -664,7 +700,7 @@ internal sealed class DesktopShell
         lock (_gate)
         {
             _watchers.Add(entry);
-            if (label == Windows.DesktopWindows.MainLabel) (pending, _pendingProject) = (_pendingProject, null);
+            if (label == Windows.DesktopWindows.MainLabel) (pending, _pendingShow) = (_pendingShow, null);
         }
 
         if (pending is not null) watcher(pending);

@@ -146,6 +146,9 @@ internal sealed class DesktopWindows : IAsyncDisposable
     /// <summary>The label of the view of the window that was focused last: <c>main</c> before any other was.</summary>
     internal string FocusedLabel { get { lock (_gate) return LabelOf(_focused); } }
 
+    /// <summary>Whether a window of the application has the focus now: the user is in CodeAlta.</summary>
+    internal bool AnyFocused { get { lock (_gate) return _entries.Any(static entry => entry.Window is { IsClosed: false, IsFocused: true }); } }
+
     /// <summary>The window that was focused last, the main one when none is open any more.</summary>
     internal NeoWindow? FocusedWindow { get { lock (_gate) return (Find(_focused) ?? Find(MainId))?.Window; } }
 

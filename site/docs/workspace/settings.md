@@ -135,6 +135,7 @@ Your schemes are files in `~/.alta/color-schemes/`, which you can copy, share or
 - **Language**: **Auto**, English, Spanish, French, German, Japanese or Simplified Chinese.
 - **Welcome page**: whether the [welcome page](readme.md#welcome-page) opens at startup and is animated.
 - **Startup and closing**: turn [Remote Control](prompt.md#remote-control) back on at startup, what closing the main window does (see [Close or keep running](readme.md#close-or-keep-running)), and **Keep computer awake when CodeAlta is running**.
+- **Notifications**: what tells you that a session is done or waits for you while CodeAlta is in the background (see [Done or waiting](readme.md#done-or-waiting)).
 - **External editor**: see [External editor](code.md#external-editor).
 
 **Sessions** has **Session titles** (see [Session titles](../sessions/readme.md#session-titles)), **Suggest the next prompt** (see [Prompt suggestions](../sessions/readme.md#prompt-suggestions)), **Review changes before commit** (see [Review before commit](../reviews.md#review-before-commit)), **Add CodeAlta as co-author** (see [CodeAlta as co-author](../sessions/readme.md#codealta-as-co-author)) and [Single tab for sessions](readme.md#single-tab-for-sessions).
