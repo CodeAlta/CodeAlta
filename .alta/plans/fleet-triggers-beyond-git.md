@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: done
 ---
 
 # Triggers beyond Git (fleet 4.0, M4)
@@ -41,10 +41,10 @@ enabling"), `doc/fleet/secrets.md`, `doc/fleet/protocol.md` (REST `hooks`), `doc
   anonymous `POST /api/v1/hooks/{id}` ingress), migration `0014_hooks.sql`, control `hooks.event` / `hooks.ack`,
   pending events sent on connect, expiry; tests.
 - [x] 5. Node: hook events from the connector to the engine, acknowledgements, claims of events with the server; tests.
-- [ ] 6. Desktop: RPC `testTrigger`, `sampleEvent`, `tryRun`, hook creation through the server for the machine; the
+- [x] 6. Desktop: RPC `testTrigger`, `sampleEvent`, `tryRun`, hook creation through the server for the machine; the
   editor's rows and setup guide for each trigger (fields, secrets, test connection, sample event, Try); frontend tests.
-- [ ] 7. `alta fleet hooks` commands, the `codealta-fleet` skill, `site/docs` (automations, fleet).
-- [ ] 8. Verification: build, .NET suites touched, `npm test`, `lunet build`; plan done.
+- [x] 7. `alta fleet hook list` (read only; a person makes a hook in the editor), the `codealta-fleet` skill, `site/docs` (automations, fleet).
+- [x] 8. Verification: build, .NET suites touched, `npm test`, `lunet build`; plan done.
 
 ## Not in this work
 
