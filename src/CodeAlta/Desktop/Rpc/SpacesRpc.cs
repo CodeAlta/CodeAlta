@@ -389,13 +389,18 @@ internal sealed class SpacesService
         // their parent here, so that a question or a permission request there reaches the person where they are.
         var local = runs.GroupBy(static session => session.SessionId, StringComparer.OrdinalIgnoreCase)
             .ToDictionary(static group => group.Key, static group => group.First(), StringComparer.OrdinalIgnoreCase);
+        // A session a person started there, which no session here is the parent of, is listed when it waits for the person:
+        // a question or a command to allow there is answered from here too.
         var remote = (RemoteSessions?.Invoke() ?? [])
-            .Where(value => value.Session.ParentSessionId is { } parent && local.ContainsKey(parent) && value.Session.State is "working" or "waiting")
+            .Where(value => value.Session.ParentSessionId is { } parent
+                ? local.ContainsKey(parent) && value.Session.State is "working" or "waiting"
+                : value.Session.State == "waiting")
             .Select(value => new SpaceSessionActivity(value.Session.Id,
-                // Listed under the project of its parent's repository, or under its machine when its parent is a chat.
-                value.Session.ProjectId is null ? WorkspaceService.MachineScopePrefix + value.MachineId : local[value.Session.ParentSessionId!].ProjectId ?? WorkspaceService.MachineScopePrefix + value.MachineId,
+                // Listed under the project of its parent's repository, or under its machine when its parent is a chat or it has none.
+                value.Session.ProjectId is null || value.Session.ParentSessionId is null ? WorkspaceService.MachineScopePrefix + value.MachineId
+                    : local[value.Session.ParentSessionId].ProjectId ?? WorkspaceService.MachineScopePrefix + value.MachineId,
                 Cut(value.Session.Title, 256), value.Session.State == "working", 0, false, value.Session.State == "waiting",
-                [value.Session.ParentSessionId!, .. Ancestors(value.Session.ParentSessionId!, parents)],
+                value.Session.ParentSessionId is { } above ? [above, .. Ancestors(above, parents)] : [],
                 SpaceDescriptor.IsValidId(value.Session.SpaceId) ? value.Session.SpaceId : null))
             .OrderByDescending(static activity => activity.Waiting).ToArray();
         own = [.. remote.Where(static activity => activity.Waiting), .. own, .. remote.Where(static activity => !activity.Waiting)];

@@ -153,6 +153,12 @@ internal sealed partial class NodeAutomations : IFleetNodeAutomations, IAutomati
     private readonly SemaphoreSlim _applies = new(1, 1);
     private readonly Dictionary<string, NodeAutomationAssignment> _assignments;
     private readonly Logger _logger = LogManager.GetLogger("CodeAlta.Node.Automations");
+
+    // The runs by hand whose caller waits to hear that a budget holds them, by run.
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, TaskCompletionSource> _holdWaiters = new(StringComparer.Ordinal);
+
+    /// <summary>What a run that a budget holds says it waits for.</summary>
+    internal const string HeldMessage = "A budget of the machine is reached: the run waits for Continue anyway.";
     private int _disposed;
 
     /// <summary>Creates the automations of a node; nothing fires before <see cref="Start"/>.</summary>
@@ -252,12 +258,27 @@ internal sealed partial class NodeAutomations : IFleetNodeAutomations, IAutomati
     /// <summary>Gets or sets what admits a run to the budgets of the machine; null until the node joined a server, and then no budget limits it.</summary>
     internal NodeBudgets? Budgets { get; set; }
 
+    /// <summary>
+    /// Gets or sets what admits a run to budgets in place of <see cref="Budgets"/>: a test holds runs with it; null for the
+    /// budgets of the machine.
+    /// </summary>
+    internal Func<Fleet.NodeApi.FleetNodeBudgetRun, Action?, CancellationToken, Task<Fleet.Server.FleetBudgetAdmission>>? AdmitBudget { get; set; }
+
     /// <inheritdoc />
     public async Task<string?> AdmitBudgetAsync(AutomationEntry entry, string runId, ProjectDescriptor? project, string spaceId, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(entry);
-        if (Budgets is not { } budgets) return null;
-        return (await budgets.AdmitAsync(new Fleet.NodeApi.FleetNodeBudgetRun(runId, entry.Definition.Name, spaceId, project), null, cancellationToken).ConfigureAwait(false)).Problem;
+        var admit = AdmitBudget ?? (Budgets is { } budgets ? budgets.AdmitAsync : null);
+        if (admit is null) return null;
+        // A run that waits for its owner says so: in its runs, and to a caller of Run now that waits for its answer.
+        var run = new Fleet.NodeApi.FleetNodeBudgetRun(runId, entry.Definition.Name, spaceId, project);
+        return (await admit(run, () => Held(runId), cancellationToken).ConfigureAwait(false)).Problem;
+    }
+
+    private void Held(string runId)
+    {
+        Engine.MarkHeld(runId, HeldMessage);
+        if (_holdWaiters.TryGetValue(runId, out var waiter)) waiter.TrySetResult();
     }
 
     /// <inheritdoc />
@@ -525,10 +546,31 @@ internal sealed partial class NodeAutomations : IFleetNodeAutomations, IAutomati
         ArgumentException.ThrowIfNullOrWhiteSpace(id);
         if (Engine.Snapshot.Find(id) is not { Source.IsAssigned: true })
             throw new FleetException(FleetNodeErrorCodes.AutomationNotFound, null, "No automation of yours on this machine has that id.");
-        var run = await Engine.RunAsync(id, cancellationToken).ConfigureAwait(false)
-            ?? throw new FleetException(FleetNodeErrorCodes.AutomationNotFound, null, "No automation of yours on this machine has that id.");
-        Log($"{caller.Name} ({caller.DeviceId}) ran the automation {id}: {run.Status}.");
-        return Describe(run);
+        // A run a budget holds waits for its owner, as long as it takes: the caller hears at once that it waits (held), and
+        // the run goes on in the work of the engine, which it outlives the call in.
+        var runId = Guid.CreateVersion7().ToString("N");
+        var held = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        _holdWaiters[runId] = held;
+        try
+        {
+            var running = Engine.RunAsync(id, runId, Engine.Stopping);
+            if (await Task.WhenAny(running, held.Task).WaitAsync(cancellationToken).ConfigureAwait(false) != running
+                && Engine.Runs(id, MaximumRuns).FirstOrDefault(candidate => candidate.Id == runId) is { Status: AutomationRun.Held } waiting)
+            {
+                Log($"{caller.Name} ({caller.DeviceId}) ran the automation {id}: it waits for Continue anyway.");
+                _ = running.ContinueWith(static task => _ = task.Exception, CancellationToken.None, TaskContinuationOptions.OnlyOnFaulted, TaskScheduler.Default);
+                return Describe(waiting);
+            }
+
+            var run = await running.WaitAsync(cancellationToken).ConfigureAwait(false)
+                ?? throw new FleetException(FleetNodeErrorCodes.AutomationNotFound, null, "No automation of yours on this machine has that id.");
+            Log($"{caller.Name} ({caller.DeviceId}) ran the automation {id}: {run.Status}.");
+            return Describe(run);
+        }
+        finally
+        {
+            _holdWaiters.TryRemove(runId, out _);
+        }
     }
 
     /// <inheritdoc />

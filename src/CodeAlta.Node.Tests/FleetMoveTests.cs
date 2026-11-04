@@ -261,6 +261,43 @@ public sealed class FleetMoveTests
     }
 
     [TestMethod]
+    public async Task ASessionWaitingForAPermission_IsRefused_AsWaitingForAPerson()
+    {
+        await using var fixture = await MoveFixture.StartAsync(TestContext.CancellationToken);
+        var token = TestContext.CancellationToken;
+        await using var client = await fixture.ConnectAsync(DevicePermissions.View | DevicePermissions.Drive | DevicePermissions.Start | DevicePermissions.Move, token,
+            serve: connection => FleetMoveRoutes.Register(connection, (_, _) => fixture.ViewerReceiver.For(fixture.Fleet.DeviceId)));
+        var gate = new TaskCompletionSource();
+        var started = new TaskCompletionSource();
+        fixture.NodeProvider.Turns.Enqueue(ScriptedNodeProvider.WaitThenReply(gate.Task, "Finally.", started));
+        var created = await client.CreateSessionAsync(new FleetCreateSessionParams(fixture.NodeProjectId, Prompt: "Run git status."), cancellationToken: token);
+        await started.Task.WaitAsync(Patience, token);
+
+        // Its turn asks to run a command: the session waits for a person, not for its turn to end.
+        using var asking = CancellationTokenSource.CreateLinkedTokenSource(token);
+        var command = new CodeAlta.Agent.AgentCommandPermissionRequest(new CodeAlta.Agent.ModelProviderId("scripted"), created.SessionId, DateTimeOffset.UtcNow, null, "i-1", null,
+            "git status", fixture.NodeProject, null, null, null, null, null);
+        var answer = fixture.Node.Host.RuntimeService.Permissions.RequestForSessionAsync(created.SessionId, command, asking.Token);
+        var deadline = DateTime.UtcNow + Patience;
+        while (!(await fixture.Node.Host.RuntimeService.Permissions.ListWaitingSessionsAsync()).Contains(created.SessionId))
+        {
+            Assert.IsFalse(answer.IsCompleted, "The request waits for a person.");
+            if (DateTime.UtcNow > deadline) Assert.Fail("The request did not wait.");
+            await Task.Delay(25, token);
+        }
+
+        var preview = await fixture.Fleet.Service.MoveSender.PreviewAsync(created.SessionId, token);
+        Assert.AreEqual("waiting", preview.Busy, "A command to allow keeps it as a question does.");
+        var refused = await client.StartMoveAsync(new FleetMoveStartParams(created.SessionId, "move-waiting", "viewer"), cancellationToken: token);
+        Assert.AreEqual(("refused", "waiting"), (refused.Status, refused.Code), refused.Message);
+
+        await asking.CancelAsync();
+        await answer;
+        gate.SetResult();
+        await fixture.WaitIdleOnNodeAsync(client, created.SessionId, token);
+    }
+
+    [TestMethod]
     public async Task Cli_RemoteMove_BringsASessionToTheNodeOfItsProfile_AndMovesListsIt()
     {
         await using var fixture = await MoveFixture.StartAsync(TestContext.CancellationToken);

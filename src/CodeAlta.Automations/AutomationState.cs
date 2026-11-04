@@ -28,6 +28,12 @@ internal sealed record AutomationRun(string Id, string AutomationId, DateTimeOff
     /// <summary>A trigger was due while the previous run was still in progress.</summary>
     internal const string Skipped = "skipped";
 
+    /// <summary>
+    /// The run waits for its owner to continue it anyway: a budget of the machine is reached and holds new runs. It goes
+    /// on as <see cref="Running"/> once continued, or fails once stopped.
+    /// </summary>
+    internal const string Held = "held";
+
     /// <summary>The name of the automation when it ran: a run outlives a rename, and its automation.</summary>
     public string? Name { get; init; }
 
@@ -122,7 +128,7 @@ internal sealed class AutomationStateStore
         // What was in progress when the application stopped did not finish.
         for (var index = 0; index < _state.Runs.Count; index++)
         {
-            if (_state.Runs[index].Status == AutomationRun.Running)
+            if (_state.Runs[index].Status is AutomationRun.Running or AutomationRun.Held)
                 _state.Runs[index] = _state.Runs[index] with { Status = AutomationRun.Interrupted, EndedAt = _state.Runs[index].EndedAt ?? _state.AliveAt };
         }
     }

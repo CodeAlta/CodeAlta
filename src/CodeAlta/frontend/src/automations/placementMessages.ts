@@ -3,6 +3,13 @@ export const automationPlacementMessages = {
   "Runs on": ["Se ejecuta en", "S’exécute sur", "Läuft auf", "実行場所", "运行于"],
   "{machine} (offline)": ["{machine} (sin conexión)", "{machine} (hors ligne)", "{machine} (offline)", "{machine}（オフライン）", "{machine}（离线）"],
   "Unavailable machine": ["Máquina no disponible", "Machine indisponible", "Nicht verfügbare Maschine", "利用できないマシン", "不可用的机器"],
+  "Waits for Continue anyway": ["Espera a continuar de todos modos", "Attend Continuer quand même", "Wartet auf Trotzdem fortsetzen", "それでも続行を待っています", "等待仍然继续"],
+  "{name} waits for Continue anyway on {machine}: a budget of the machine is reached.": [
+    "{name} espera a continuar de todos modos en {machine}: se alcanzó un presupuesto de la máquina.",
+    "{name} attend Continuer quand même sur {machine} : un budget de la machine est atteint.",
+    "{name} wartet auf {machine} auf Trotzdem fortsetzen: Ein Budget der Maschine ist erreicht.",
+    "{name} は {machine} で「それでも続行」を待っています。マシンの予算が上限に達しました。",
+    "{name} 在 {machine} 上等待仍然继续：该机器的预算已达上限。"],
   "On {machine}": ["En {machine}", "Sur {machine}", "Auf {machine}", "{machine} 上", "在 {machine} 上"],
   "Copied to {machine}": ["Copiada en {machine}", "Copiée sur {machine}", "Auf {machine} kopiert", "{machine} にコピー済み", "已复制到 {machine}"],
   "The machine of this run does not list its session now.": [

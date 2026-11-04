@@ -486,6 +486,24 @@ internal sealed partial class AutomationService : IAsyncDisposable
         return null;
     }
 
+    /// <summary>Gets the token of the work of the service: canceled once it is disposed.</summary>
+    internal CancellationToken Stopping => _stop.Token;
+
+    /// <summary>
+    /// Says that a run in progress waits for its owner to continue it anyway (<see cref="AutomationRun.Held"/>): it goes on
+    /// as running once its session starts.
+    /// </summary>
+    /// <param name="runId">The run.</param>
+    /// <param name="message">What it waits for, in words.</param>
+    /// <returns>The run as it is now; null for a run that is not known.</returns>
+    internal AutomationRun? MarkHeld(string runId, string message)
+    {
+        var held = _state.Update(runId, current => current.Status == AutomationRun.Running && current.SessionId is null
+            ? current with { Status = AutomationRun.Held, Message = message } : current);
+        Changed?.Invoke();
+        return held;
+    }
+
     /// <summary>Runs an automation now, whatever its triggers, and whether or not it is enabled.</summary>
     /// <returns>The run once its session exists or it failed to start; null when there is no such automation.</returns>
     internal Task<AutomationRun?> RunAsync(string id, CancellationToken cancellationToken) => RunAsync(id, null, cancellationToken);
@@ -740,7 +758,10 @@ internal sealed partial class AutomationService : IAsyncDisposable
 
         if (start.Completion is null)
             return End(run.Id, entry.Id, new(AutomationRun.Failed, start.Problem ?? "The run did not start."), start.SessionId);
-        var started = _state.Update(run.Id, current => current with { SessionId = start.SessionId }) ?? run with { SessionId = start.SessionId };
+        // A run that waited for its owner goes on as running.
+        var started = _state.Update(run.Id, current => current.Status == AutomationRun.Held
+                ? current with { SessionId = start.SessionId, Status = AutomationRun.Running, Message = null }
+                : current with { SessionId = start.SessionId }) ?? run with { SessionId = start.SessionId };
         Changed?.Invoke();
         var observer = ObserveAsync(run.Id, entry.Id, start.Completion);
         lock (_gate)

@@ -77,6 +77,7 @@
 .automation-run-mark[data-tone="ok"] { color: #3fb950; }
 .automation-run-mark[data-tone="failed"] { color: #e76a6e; }
 .automation-run-mark[data-tone="running"] { color: var(--accent); }
+.automation-run-mark[data-tone="held"] { color: #d9822b; }
 .automation-run-mark[data-tone="muted"] { color: var(--muted); }
 
 /* The detail of one automation, or the latest runs of all. */

@@ -60,7 +60,8 @@ public sealed class FleetMoveSender
 
         var jobs = runtime.Jobs.List(sessionId).Where(static job => job.State == SessionJobState.Running).Select(static job => job.Label).ToArray();
         string? busy = null;
-        if (_host.Commands.Asks.ListWaitingSessions().Contains(sessionId, StringComparer.OrdinalIgnoreCase)) busy = "waiting";
+        // A question, a command or a file change to allow, a conversation held elsewhere: the session waits for a person.
+        if ((await _host.ListSessionsWaitingForPersonAsync().ConfigureAwait(false)).Contains(sessionId, StringComparer.OrdinalIgnoreCase)) busy = "waiting";
         else if ((await _host.Commands.ReadSessionsAtWorkAsync([sessionId]).ConfigureAwait(false)).Contains(sessionId)) busy = "working";
         else if (jobs.Length > 0) busy = "background_running";
 

@@ -245,7 +245,7 @@ internal sealed class DesktopMoves
                     }
                 }
                 while ((await _host.Commands.ReadSessionsAtWorkAsync([sessionId]).ConfigureAwait(false)).Contains(sessionId)
-                    || _host.Commands.Asks.ListWaitingSessions().Contains(sessionId, StringComparer.OrdinalIgnoreCase));
+                    || (await _host.ListSessionsWaitingForPersonAsync().ConfigureAwait(false)).Contains(sessionId, StringComparer.OrdinalIgnoreCase));
 
                 var result = await MoveAsync(sessionId, null, targetMachineId, clone, CancellationToken.None).ConfigureAwait(false);
                 Log($"Move {result.MoveId} of session {sessionId} to {targetName}, when its turn ended: {result.Status}{(result.Code is { } code ? $" ({code})" : "")}.");

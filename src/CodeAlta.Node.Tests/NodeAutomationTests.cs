@@ -78,6 +78,40 @@ public sealed class NodeAutomationTests
     }
 
     [TestMethod]
+    public async Task RunByHand_WhileABudgetHoldsIt_IsAnsweredAtOnce_AsWaitingForContinueAnyway()
+    {
+        var token = TestContext.CancellationToken;
+        using var root = new NodeTestRoot();
+        var provider = new ScriptedNodeProvider();
+        await using var fixture = await AutomationFixture.StartAsync(root, provider, new NodeClock { Now = Noon }, token);
+        // A budget of the machine is reached and holds new runs: the run waits until its owner continues it anyway.
+        var decision = new TaskCompletionSource<CodeAlta.Fleet.Server.FleetBudgetAdmission>(TaskCreationOptions.RunContinuationsAsynchronously);
+        string? held = null;
+        fixture.Node.Automations!.AdmitBudget = (run, waits, cancellation) =>
+        {
+            held = run.RunId;
+            waits?.Invoke();
+            return decision.Task.WaitAsync(cancellation);
+        };
+        var machine = await fixture.PairAsync(DevicePermissions.View | DevicePermissions.Start | DevicePermissions.Automate, token);
+        await using var client = await FleetNodeClient.ConnectAsync(machine, fixture.ViewerIdentity, token);
+        await client.PutAutomationAsync(fixture.Signed(Definition("Held", "Say hello."), 1), cancellationToken: token);
+
+        // Run now answers at once, not when the person decides: the run waits, bound to the hold that Continue anyway names.
+        var run = await client.RunAutomationAsync(Id, cancellationToken: token).WaitAsync(TimeSpan.FromSeconds(20), token);
+        Assert.AreEqual(("held", held), (run.Status, run.Id), run.Message);
+        StringAssert.Contains(run.Message, "Continue anyway");
+        Assert.AreEqual("held", (await client.ListAutomationRunsAsync(Id, cancellationToken: token)).Runs.Single(candidate => candidate.Id == run.Id).Status);
+
+        // Continued anyway: the run starts its session, as any run by hand.
+        decision.SetResult(CodeAlta.Fleet.Server.FleetBudgetAdmission.Admitted);
+        var completed = await WaitForAsync(async () => (await client.ListAutomationRunsAsync(Id, cancellationToken: token)).Runs
+            .FirstOrDefault(candidate => candidate.Id == run.Id && candidate.Status == AutomationRun.Completed), token);
+        Assert.IsNotNull(completed.SessionId);
+        StringAssert.Contains(provider.LastUserText, "Say hello.");
+    }
+
+    [TestMethod]
     public async Task Node_RefusesARun_ItsPolicy_TheCredentialKind_OrTheAssigningDevice_DoNotAllow()
     {
         var token = TestContext.CancellationToken;
