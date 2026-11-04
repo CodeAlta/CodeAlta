@@ -56,6 +56,13 @@ public sealed class ServerPaths
     /// </summary>
     public string TelemetryPath => Path.Combine(DataRoot, CodeAlta.Fleet.Protocol.FleetLocalTelemetrySettings.FileName);
 
+    /// <summary>
+    /// Gets the folder of the key ring that seals the secrets the server uses itself (the company's client secret, the
+    /// collector's headers); readable by the account of the server only, protected by DPAPI on Windows. A backup of the
+    /// database keeps it beside: without it, those values are set again.
+    /// </summary>
+    public string KeysRoot => Path.Combine(DataRoot, "keys");
+
     /// <summary>Gets the file of the id of this server in its telemetry (<c>service.instance.id</c>), made at its first start.</summary>
     public string InstanceIdPath => Path.Combine(DataRoot, "instance-id");
 }

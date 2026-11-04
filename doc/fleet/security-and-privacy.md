@@ -82,6 +82,12 @@ snapshot never grants a whole space.
   person linked a space of the same id. A space that is unlinked seals nothing more with its key.
 - Revoking someone's access rotates the keys they held (a new epoch); what they already read cannot be taken back,
   and deleting ciphertext at the server does not revoke copies a recipient made.
+- **The server's own secrets** are the few it must use itself: the client secret of the company's sign-in and the
+  headers it sends to the telemetry collector. The database keeps them sealed (ASP.NET Core Data Protection, a key
+  ring in `keys/` of the data root, protected by DPAPI on Windows and readable by the server's account only
+  elsewhere), each for one use and one organization; no API gives them back, not even to the owner (the names of the
+  headers only), and no log or audit record holds them. A value an older version kept in clear is sealed at the next
+  start and overwritten in the file. A database without its key ring reads them as unset: the owner sets them again.
 - **Account recovery is not encryption recovery.** Regaining the Owner role on a server (`altaserver recover-owner`, on
   the server's own terminal) never needs the recovery key of encrypted data, which never goes to the server; that key
   restores keys on a device, locally.

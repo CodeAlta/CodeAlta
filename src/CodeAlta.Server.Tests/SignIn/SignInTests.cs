@@ -618,6 +618,7 @@ public sealed class SignInTests
 
         var settings = await ConfigureCompanyAsync(server, owner, provider, requireSso: false);
         Assert.IsTrue(settings.Company!.HasClientSecret);
+        Assert.IsFalse(server.DatabaseHolds("company-secret"), "the client secret is sealed in the database");
         StringAssert.DoesNotMatch((await server.SendAsync(owner, HttpMethod.Get, "/api/v1/sign-in/settings")).Body.ToString(), new System.Text.RegularExpressions.Regex("company-secret"));
         var stale = await server.SendAsync(owner, HttpMethod.Put, "/api/v1/sign-in/settings", new SetSignInSettingsRequest(held.Version, [], null, false));
         Assert.AreEqual((HttpStatusCode.Conflict, SignInErrorCodes.SettingsInvalid), (stale.Status, stale.Code), "a change names the version it read");

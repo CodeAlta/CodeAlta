@@ -520,8 +520,26 @@ public sealed partial class FleetServerClient : IDisposable
     /// <exception cref="FleetDeviceListException">This device is not a controller device of the device list it verified: nothing was signed.</exception>
     /// <exception cref="FleetServerException">The server refused the setting.</exception>
     /// <exception cref="HttpRequestException">The server does not answer.</exception>
-    public async Task<TelemetrySettingsDto> SetTelemetryAsync(FleetTelemetryChange change, IReadOnlyDictionary<string, string>? serverHeaders,
+    public Task<TelemetrySettingsDto> SetTelemetryAsync(FleetTelemetryChange change, IReadOnlyDictionary<string, string>? serverHeaders,
         CancellationToken cancellationToken = default)
+        => SetTelemetryAsync(change, serverHeaders, null, cancellationToken);
+
+    /// <summary>
+    /// Sets the telemetry of the fleet, keeping by their names headers of the server route the server holds: their values
+    /// never come back to a device.
+    /// </summary>
+    /// <param name="change">What the setting says.</param>
+    /// <param name="serverHeaders">The headers of the collector only the server holds, for the server route; null for none.</param>
+    /// <param name="keepServerHeaders">The names of the headers of the server route whose held values are kept; null for none.</param>
+    /// <param name="cancellationToken">Cancels the call.</param>
+    /// <returns>The setting as the server holds it now.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="change"/> is null.</exception>
+    /// <exception cref="ArgumentException">The setting does not hold.</exception>
+    /// <exception cref="FleetDeviceListException">This device is not a controller device of the device list it verified: nothing was signed.</exception>
+    /// <exception cref="FleetServerException">The server refused the setting.</exception>
+    /// <exception cref="HttpRequestException">The server does not answer.</exception>
+    public async Task<TelemetrySettingsDto> SetTelemetryAsync(FleetTelemetryChange change, IReadOnlyDictionary<string, string>? serverHeaders,
+        IReadOnlyList<string>? keepServerHeaders, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(change);
         var organization = await GetOrganizationAsync(cancellationToken).ConfigureAwait(false);
@@ -536,7 +554,7 @@ public sealed partial class FleetServerClient : IDisposable
             if (!FleetTelemetrySettingsDocuments.TryValidate(settings, out var reason)) throw new ArgumentException($"The telemetry setting does not hold: {reason}.", nameof(change));
             var text = FleetTelemetrySettingsDocuments.Serialize(settings);
             var request = new SetTelemetrySettingsRequest(new FleetSignedTelemetrySettings(text, Base64Url.EncodeToString(_identity.SignData(FleetTelemetrySettingsDocuments.GetSignedBytes(text)))),
-                serverHeaders is { Count: > 0 } ? serverHeaders : null);
+                serverHeaders is { Count: > 0 } ? serverHeaders : null, keepServerHeaders is { Count: > 0 } ? keepServerHeaders : null);
             try
             {
                 return await SendAsync(HttpMethod.Put, "api/v1/telemetry", Body(request, ServerApiJsonContext.Default.SetTelemetrySettingsRequest),

@@ -10,12 +10,13 @@ public sealed class SqliteCoordinatorStoreTests
 {
     private static readonly DateTimeOffset Start = new(2026, 11, 3, 12, 0, 0, TimeSpan.Zero);
 
-    private static async Task<SqliteCoordinatorStore> OpenAsync(TempDirectory root, TestClock? clock = null)
+    private static async Task<SqliteCoordinatorStore> OpenAsync(TempDirectory root, TestClock? clock = null, ServerSecretSealer? sealer = null)
     {
         var store = new SqliteCoordinatorStore(new SqliteCoordinatorStoreOptions
         {
             DatabasePath = Path.Combine(root.Path, "test.sqlite3"),
             TimeProvider = clock ?? new TestClock(Start),
+            Sealer = sealer,
         });
         await store.InitializeAsync();
         return store;
@@ -93,6 +94,56 @@ public sealed class SqliteCoordinatorStoreTests
         var newer = new SqliteCoordinatorStore(new SqliteCoordinatorStoreOptions { DatabasePath = Path.Combine(root.Path, "test.sqlite3") });
         await Assert.ThrowsExactlyAsync<InvalidOperationException>(async () => await newer.InitializeAsync());
         await newer.DisposeAsync();
+    }
+
+    [TestMethod]
+    public async Task SecretsAnOlderVersionKeptInClearAreSealedAtTheNextStart_AndNoSealerWritesNone()
+    {
+        using var root = new TempDirectory();
+        var databasePath = Path.Combine(root.Path, "test.sqlite3");
+        var keys = Path.Combine(root.Path, "keys");
+        await using (var store = await OpenAsync(root, sealer: ServerSecretSealer.Create(keys)))
+        {
+            await SetUpAsync(store);
+        }
+
+        // What a server before the migration "sealed_secrets" wrote: the client secret and the collector headers in clear.
+        await using (var connection = new SqliteConnection($"Data Source={databasePath};Pooling=False"))
+        {
+            await connection.OpenAsync();
+            await using var command = connection.CreateCommand();
+            command.CommandText = "INSERT INTO sign_in_settings (organization_id, settings, company_client_secret, version, updated_at) VALUES ('org', '{}', 'legacy-client-secret', 1, 0);" +
+                "INSERT INTO telemetry_settings (organization_id, seq, payload, signature, signer_device_id, server_headers, updated_at) " +
+                "VALUES ('org', 1, '{}', 'sig', 'desktop', '{\"x-api-key\":\"legacy-header-value\"}', 0)";
+            await command.ExecuteNonQueryAsync();
+        }
+
+        Assert.IsTrue(ServerFixture.DatabaseFilesHold(databasePath, "legacy-client-secret"));
+        await using (var store = await OpenAsync(root, sealer: ServerSecretSealer.Create(keys)))
+        {
+            Assert.AreEqual("legacy-client-secret", (await store.GetSignInSettingsAsync("org"))!.CompanyClientSecret);
+            StringAssert.Contains((await store.GetTelemetrySettingsAsync("org"))!.ServerHeaders, "legacy-header-value");
+            Assert.IsFalse(ServerFixture.DatabaseFilesHold(databasePath, "legacy-client-secret"), "sealed, and the clear text overwritten");
+            Assert.IsFalse(ServerFixture.DatabaseFilesHold(databasePath, "legacy-header-value"));
+
+            // Written again, still sealed.
+            Assert.IsTrue(await store.SetSignInSettingsAsync(new SignInSettingsRecord("org", "{}", "next-client-secret", 2, Start), Audit("sign_in.settings.set")));
+            Assert.AreEqual("next-client-secret", (await store.GetSignInSettingsAsync("org"))!.CompanyClientSecret);
+            Assert.IsFalse(ServerFixture.DatabaseFilesHold(databasePath, "next-client-secret"));
+        }
+
+        // Another key ring (a database restored elsewhere) reads no value: it is set again, never shown wrong.
+        await using (var store = await OpenAsync(root, sealer: ServerSecretSealer.Create(Path.Combine(root.Path, "other-keys"))))
+        {
+            Assert.IsNull((await store.GetSignInSettingsAsync("org"))!.CompanyClientSecret);
+        }
+
+        // A store without a sealer (a tool beside the server) writes no secret at all.
+        await using (var store = await OpenAsync(root))
+        {
+            await Assert.ThrowsExactlyAsync<InvalidOperationException>(async () =>
+                await store.SetSignInSettingsAsync(new SignInSettingsRecord("org", "{}", "clear", 3, Start), Audit("sign_in.settings.set")));
+        }
     }
 
     [TestMethod]

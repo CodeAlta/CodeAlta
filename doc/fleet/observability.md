@@ -101,7 +101,8 @@ which the hosts name at three levels; the first that names one wins:
 - **Two routes.** *Direct*: each machine sends to the collector, with the headers (API keys) of the setting. *Through
   the server*: each machine sends OTLP/HTTP to the server's `/otlp/v1/{traces,metrics,logs}`, each request signed with
   its device key as the REST API's are; the server forwards the bytes to the collector with headers only it holds,
-  which never reach a machine. Machines behind NAT need no collector credential and no way out but the server. The
+  which never reach a machine, are kept sealed, and come back to no one, the owner included: a change keeps them by
+  their names. Machines behind NAT need no collector credential and no way out but the server. The
   server forwards; it never stores what it forwards.
 - **Resource**: `service.name` (`altanode`, `altaserver`), `service.version`, `service.instance.id` (the device id of a
   node, a stable id of a server), `host.name`, `os.type`, `codealta.fleet.organization.id` once linked, and

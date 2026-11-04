@@ -48,7 +48,7 @@ internal sealed class TelemetrySettingsService
         _logger = logger;
     }
 
-    /// <summary>Gets the setting, with the headers only the server holds; for an owner's controller device only.</summary>
+    /// <summary>Gets the setting, with the names of the headers only the server holds, never their values; for an owner's controller device only.</summary>
     /// <param name="actor">The calling device.</param>
     /// <param name="cancellationToken">Cancels the operation.</param>
     /// <returns>The setting.</returns>
@@ -114,20 +114,33 @@ internal sealed class TelemetrySettingsService
         if (!string.Equals(settings.SignerDeviceId, actor.Id, StringComparison.Ordinal)) throw Invalid("The setting must name the device that signs it.");
         if (!string.Equals(settings.OrganizationId, actor.OrganizationId, StringComparison.Ordinal)) throw Invalid("The setting must name the organization of the server.");
         if (!FleetTelemetrySettingsDocuments.TryValidate(settings, out var reason)) throw Invalid($"The setting does not hold: {reason}.");
-        var serverHeaders = request.ServerHeaders is { Count: > 0 } headers ? headers : null;
-        if (serverHeaders is not null)
-        {
-            if (settings.Route != FleetTelemetryRoutes.Server) throw Invalid("The headers of a direct route are part of the signed setting.");
-            if (!FleetTelemetrySettingsDocuments.TryValidateHeaders(serverHeaders, out var headerReason)) throw Invalid($"The headers do not hold: {headerReason}.");
-        }
+        var given = request.ServerHeaders ?? new Dictionary<string, string>();
+        var keep = request.KeepServerHeaders ?? [];
+        if ((given.Count > 0 || keep.Count > 0) && settings.Route != FleetTelemetryRoutes.Server) throw Invalid("The headers of a direct route are part of the signed setting.");
+        if (keep.Count > FleetTelemetrySettingsDocuments.MaxHeaders) throw Invalid("Too many headers to keep.");
 
         TelemetrySettingsRecord record;
+        IReadOnlyDictionary<string, string>? serverHeaders;
         await _setGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
             var held = await _store.GetTelemetrySettingsAsync(actor.OrganizationId, cancellationToken).ConfigureAwait(false);
             if (held is not null && settings.Sequence <= held.Sequence)
                 throw CoordinatorException.Conflict(CoordinatorErrorCodes.TelemetryConflict, $"The setting must be numbered after the one held ({held.Sequence}): read it again.");
+
+            // The owner never reads the values of the headers again: a header kept by its name keeps the value held.
+            var merged = new Dictionary<string, string>(given, StringComparer.OrdinalIgnoreCase);
+            var heldHeaders = new Dictionary<string, string>(ServerTelemetry.ReadHeaders(held?.ServerHeaders) ?? new Dictionary<string, string>(), StringComparer.OrdinalIgnoreCase);
+            foreach (var name in keep)
+            {
+                if (merged.ContainsKey(name ?? string.Empty)) continue;
+                if (name is null || !heldHeaders.TryGetValue(name, out var value)) throw Invalid($"No header '{name}' is held to keep.");
+                merged[name] = value;
+            }
+
+            serverHeaders = merged.Count > 0 ? merged : null;
+            if (serverHeaders is not null && !FleetTelemetrySettingsDocuments.TryValidateHeaders(serverHeaders, out var headerReason))
+                throw Invalid($"The headers do not hold: {headerReason}.");
 
             record = new TelemetrySettingsRecord(actor.OrganizationId, settings.Sequence, signed.Payload, signed.Signature, actor.Id,
                 serverHeaders is null ? null : JsonSerializer.Serialize(serverHeaders.ToDictionary(), Fleet.Protocol.FleetTelemetryJsonContext.Default.DictionaryStringString),
@@ -176,9 +189,11 @@ internal sealed class TelemetrySettingsService
             throw CoordinatorException.Forbidden(FleetErrorCodes.Forbidden, "Only an owner may read or set the telemetry of the fleet.");
     }
 
+    // The names of the headers of the server route, never their values: they leave the server toward the collector only.
     private static TelemetrySettingsDto ToDto(TelemetrySettingsRecord? record)
         => record is null ? new TelemetrySettingsDto(null, null, null)
-            : new TelemetrySettingsDto(new FleetSignedTelemetrySettings(record.Payload, record.Signature), ServerTelemetry.ReadHeaders(record.ServerHeaders), record.UpdatedAt);
+            : new TelemetrySettingsDto(new FleetSignedTelemetrySettings(record.Payload, record.Signature),
+                ServerTelemetry.ReadHeaders(record.ServerHeaders)?.ToDictionary(static pair => pair.Key, static _ => string.Empty, StringComparer.OrdinalIgnoreCase), record.UpdatedAt);
 
     private static string Details(FleetTelemetrySettings settings, int serverHeaders)
     {

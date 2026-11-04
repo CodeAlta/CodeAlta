@@ -273,14 +273,14 @@ public sealed class FleetServerRpcTests
             var view = set.Telemetry!;
             Assert.AreEqual((true, "https://otlp.example:4318", "server", "production"), (view.Enabled, view.Endpoint, view.Route, view.Environment));
             CollectionAssert.AreEqual(new[] { "traces", "logs" }, view.Signals);
-            Assert.AreEqual(("x-api-key", "\u2022\u2022\u2022\u20226789"), (view.Headers.Single().Name, view.Headers.Single().Masked), "the page never sees a secret");
+            Assert.AreEqual(("x-api-key", "\u2022\u2022\u2022\u2022"), (view.Headers.Single().Name, view.Headers.Single().Masked), "the page never sees a secret, nor its end");
 
             // A header sent without a value keeps the one the server holds.
             var again = await service.SetTelemetryAsync(new FleetTelemetryRequest(epoch, linkId, true, "https://otlp.example:4318", FleetTelemetryProtocols.HttpProtobuf,
                 FleetTelemetryRoutes.Server, [FleetTelemetrySignals.Traces], [new FleetTelemetryHeaderEdit("x-api-key", null)], null), token);
             Assert.AreEqual("ok", again.Status, again.Message);
             var held = await servers.GetTelemetryAsync(linkId, token);
-            Assert.AreEqual(Secret, held.ServerHeaders!["x-api-key"]);
+            Assert.AreEqual(string.Empty, held.ServerHeaders!["x-api-key"], "the server gives the names of its headers, never their values; it keeps the value");
             Assert.IsTrue(FleetTelemetrySettingsDocuments.TryParse(held.Settings!.Payload, out var signed));
             Assert.AreEqual((2L, (string?)null), (signed.Sequence, signed.Environment));
             Assert.IsFalse(held.Settings.Payload.Contains(Secret, StringComparison.Ordinal), "the headers of the server route are not in what the machines get");

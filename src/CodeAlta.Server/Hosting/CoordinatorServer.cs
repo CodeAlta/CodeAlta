@@ -210,6 +210,7 @@ public sealed class CoordinatorServer : IAsyncDisposable
             {
                 DatabasePath = paths.DatabasePath,
                 TimeProvider = options.TimeProvider,
+                Sealer = ServerSecretSealer.Create(paths.KeysRoot),
                 ObserveOperation = (operation, duration, failed) => metrics?.StoreOperation(operation, duration, failed),
             });
             var created = store;

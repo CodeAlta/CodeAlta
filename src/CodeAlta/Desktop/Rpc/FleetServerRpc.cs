@@ -228,21 +228,31 @@ internal sealed partial class FleetServerService
         {
             var held = await _servers!.GetTelemetryAsync(request.LinkId, cancellationToken).ConfigureAwait(false);
             var current = HeldHeaders(held);
+            var server = request.Route == FleetTelemetryRoutes.Server;
+            var heldOnServer = HeldServerRoute(held);
             var headers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            var keep = new List<string>();
             foreach (var edit in request.Headers)
             {
                 var name = edit?.Name?.Trim();
-                if (string.IsNullOrEmpty(name) || headers.ContainsKey(name)) return new("invalid_request", null, $"'{name}' is not a header, or is there twice.");
-                var value = edit!.Value ?? current.GetValueOrDefault(name);
+                if (string.IsNullOrEmpty(name) || headers.ContainsKey(name) || keep.Contains(name, StringComparer.OrdinalIgnoreCase))
+                    return new("invalid_request", null, $"'{name}' is not a header, or is there twice.");
+                // The server never gives back the values of the headers of its route: one kept on that route is kept by its name.
+                if (edit!.Value is null && server && heldOnServer && current.ContainsKey(name))
+                {
+                    keep.Add(name);
+                    continue;
+                }
+
+                var value = edit.Value ?? (heldOnServer ? null : current.GetValueOrDefault(name));
                 if (value is null) return new("invalid_request", null, $"The header '{name}' has no value.");
                 headers[name] = value.Trim();
             }
 
-            var server = request.Route == FleetTelemetryRoutes.Server;
             var change = new FleetTelemetryChange(request.Enabled, string.IsNullOrWhiteSpace(request.Endpoint) ? null : request.Endpoint.Trim().TrimEnd('/'), request.Protocol,
                 request.Route, [.. request.Signals.Distinct(StringComparer.Ordinal)], server ? null : headers,
                 string.IsNullOrWhiteSpace(request.Environment) ? null : request.Environment.Trim());
-            var set = await _servers.SetTelemetryAsync(request.LinkId, change, server ? headers : null, cancellationToken).ConfigureAwait(false);
+            var set = await _servers.SetTelemetryAsync(request.LinkId, change, server ? headers : null, server ? keep : null, cancellationToken).ConfigureAwait(false);
             ChangedLocally?.Invoke();
             return new("ok", TelemetryView(set), null);
         }
@@ -599,7 +609,12 @@ internal sealed partial class FleetServerService
             parsed.Environment, settings.UpdatedAt is { } updated ? Time(updated) : null);
     }
 
-    // The headers the setting uses: those of a direct route are signed in it, those of the server route only the server holds.
+    // Whether the setting held sends through the server: its headers are then names only, the server keeps their values.
+    private static bool HeldServerRoute(TelemetrySettingsDto settings)
+        => settings.Settings is { } signed && FleetTelemetrySettingsDocuments.TryParse(signed.Payload, out var parsed) && parsed.Route == FleetTelemetryRoutes.Server;
+
+    // The headers the setting uses: those of a direct route are signed in it, those of the server route only the server
+    // holds, and it gives their names only.
     private static Dictionary<string, string> HeldHeaders(TelemetrySettingsDto settings)
     {
         var headers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);

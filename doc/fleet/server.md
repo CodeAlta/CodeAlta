@@ -129,7 +129,7 @@ Nodes are autonomous: a server that is down stops visibility, relay and sharing,
   service is a task at logon that no signal reaches, `altaserver uninstall` asks the server to stop through a file of
   its data root (`altaserver.stop`), and the server stops as on Ctrl+C.
 - **A backup is a consistent set**: the database, the blobs it references and the server's own keys (TLS, token
-  signing), the keys encrypted. The server holds no key that decrypts Private data, so a backup holds none either.
+  signing, the key ring of `keys/` that seals the secrets it uses itself), the keys encrypted. The server holds no key that decrypts Private data, so a backup holds none either.
 - **Restore epochs**: a restored server starts a new epoch. Nodes notice that it is behind them and publish again what
   it lacks (facts, inventories); revocations are signed device-list entries that devices also keep, so a restored
   server cannot bring a revoked device back; nodes refuse a run they already recorded, so a restored queue does not

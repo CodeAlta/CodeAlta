@@ -343,6 +343,7 @@ internal sealed partial class DesktopFleetServers : IAsyncDisposable
     /// <param name="linkId">The link.</param>
     /// <param name="change">What the setting says.</param>
     /// <param name="serverHeaders">The headers only the server holds, for the server route; null for none.</param>
+    /// <param name="keepServerHeaders">The names of the headers of the server route whose held values the server keeps; null for none.</param>
     /// <param name="cancellationToken">Cancels the call.</param>
     /// <returns>The setting as the server holds it now.</returns>
     /// <exception cref="KeyNotFoundException">No such link.</exception>
@@ -351,10 +352,10 @@ internal sealed partial class DesktopFleetServers : IAsyncDisposable
     /// <exception cref="FleetServerException">The server refused.</exception>
     /// <exception cref="HttpRequestException">The server does not answer.</exception>
     public async Task<TelemetrySettingsDto> SetTelemetryAsync(string linkId, FleetTelemetryChange change, IReadOnlyDictionary<string, string>? serverHeaders,
-        CancellationToken cancellationToken)
+        IReadOnlyList<string>? keepServerHeaders, CancellationToken cancellationToken)
     {
         using var client = Client(linkId);
-        return await client.SetTelemetryAsync(change, serverHeaders, cancellationToken).ConfigureAwait(false);
+        return await client.SetTelemetryAsync(change, serverHeaders, keepServerHeaders, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>Reads the updates of the fleet of a server: its versions, its policy, its recent campaigns; a controller device only.</summary>
