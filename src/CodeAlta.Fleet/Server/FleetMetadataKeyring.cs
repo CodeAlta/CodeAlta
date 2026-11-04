@@ -108,7 +108,7 @@ public sealed class FleetMetadataKeyring
         // A removal it accepted stops the older keys sealing now, before the calls that follow can fail (or a server delay them).
         var accepted = Volatile.Read(ref _snapshot);
         if (Sealing(accepted.Current, list) is var sealing && !ReferenceEquals(sealing, accepted.Current)) Volatile.Write(ref _snapshot, accepted with { Current = sealing });
-        using var client = new FleetServerClient(_devices.ServerAddress, _identity, _devices.Handler, null, _devices.CertificatePin) { DeviceList = _devices };
+        using var client = _devices.CreateClient();
         var rows = await client.ListMetadataKeysAsync(cancellationToken).ConfigureAwait(false);
         var opened = Open(rows, list);
         var known = ReadSpaces(rows, opened);

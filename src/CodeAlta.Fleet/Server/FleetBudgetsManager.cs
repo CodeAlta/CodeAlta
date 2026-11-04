@@ -210,7 +210,7 @@ public sealed class FleetBudgetsManager
         return await client.PutBudgetAsync(SignBudget(_devices.Identity, definition), cancellationToken).ConfigureAwait(false);
     }
 
-    private FleetServerClient Client() => new(_devices.ServerAddress, _devices.Identity, _devices.Handler) { DeviceList = _devices };
+    private FleetServerClient Client() => _devices.CreateClient();
 
     // To the second, as the signed documents of the fleet are.
     private DateTimeOffset Now() => DateTimeOffset.FromUnixTimeSeconds(_time.GetUtcNow().ToUnixTimeSeconds());

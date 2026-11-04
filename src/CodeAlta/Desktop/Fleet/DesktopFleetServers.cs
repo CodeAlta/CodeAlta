@@ -828,7 +828,7 @@ internal sealed partial class DesktopFleetServers : IAsyncDisposable
             {
                 CertificatePin = link.CertificatePin,
             };
-        return new FleetServerClient(link.Address, identity, Handler, null, link.CertificatePin) { DeviceList = devices };
+        return devices.CreateClient();
     }
 
     // The key of this device: the one of pairing, made on first use.

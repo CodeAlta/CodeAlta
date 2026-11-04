@@ -64,9 +64,12 @@ public sealed class FleetOrganizationDevices
     /// <summary>Gets the pin of the server's own certificate (<see cref="FleetServerCertificates"/>), or null for one that validates as usual.</summary>
     public string? CertificatePin { get; init; }
 
-    /// <summary>Creates a client of the server, signed by this device, that checks the pin of its certificate when it has one.</summary>
+    /// <summary>
+    /// Creates a client of the server, signed by this device, that checks the pin of its certificate when it has one and reads
+    /// the device list through this anchor: the one way a node or a desktop makes a client of a link it holds.
+    /// </summary>
     /// <returns>The client; the caller disposes it.</returns>
-    internal FleetServerClient CreateClient() => new(ServerAddress, Identity, Handler, null, CertificatePin);
+    public FleetServerClient CreateClient() => new(ServerAddress, Identity, Handler, null, CertificatePin) { DeviceList = this };
 
     /// <summary>
     /// Reads the device list from the server again, verifies it, and checks it against the anchor: the same first entry,

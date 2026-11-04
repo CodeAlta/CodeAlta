@@ -74,7 +74,7 @@ public sealed class FleetOrganizationPolicy
         {
             var access = await Access.RefreshAsync(cancellationToken).ConfigureAwait(false);
             var devices = Devices.Current ?? await Devices.RefreshAsync(cancellationToken).ConfigureAwait(false);
-            using var client = new FleetServerClient(Devices.ServerAddress, Devices.Identity, Devices.Handler);
+            using var client = Devices.CreateClient();
             var held = Volatile.Read(ref _current);
             var organization = devices.OrganizationId ?? access.OrganizationId ?? string.Empty;
             // Verified before in this process: only the versions after it are read, each checked to follow the one before it.
@@ -160,7 +160,7 @@ public sealed class FleetOrganizationPolicy
         ArgumentNullException.ThrowIfNull(draft);
         var text = FleetPolicyDocuments.Serialize(draft.Document with { SignerDeviceId = Devices.Identity.DeviceId });
         var signed = new FleetSignedPolicyDocument(text, Base64Url.EncodeToString(Devices.Identity.SignData(FleetPolicyDocuments.GetSignedBytes(text))));
-        using (var client = new FleetServerClient(Devices.ServerAddress, Devices.Identity, Devices.Handler))
+        using (var client = Devices.CreateClient())
             await client.AppendPolicyDocumentAsync(signed, cancellationToken).ConfigureAwait(false);
         return await RefreshAsync(cancellationToken).ConfigureAwait(false);
     }

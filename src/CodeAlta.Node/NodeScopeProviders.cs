@@ -55,7 +55,7 @@ internal sealed class NodeScopeProviders
         ArgumentException.ThrowIfNullOrEmpty(linkId);
         ArgumentNullException.ThrowIfNull(connector);
         if (connector.Access.Current is not { } access) return [];
-        using var client = new FleetServerClient(connector.Devices.ServerAddress, _identity);
+        using var client = connector.Devices.CreateClient();
         var keys = await client.ListProviderKeysAsync(cancellationToken).ConfigureAwait(false);
         var list = connector.Devices.Current ?? await connector.Devices.RefreshAsync(cancellationToken).ConfigureAwait(false);
         var opened = new List<(ScopeProviderDto Provider, string Key)>();
