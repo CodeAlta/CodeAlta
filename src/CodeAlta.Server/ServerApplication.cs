@@ -975,7 +975,7 @@ public sealed class ServerApplication
                 await _output.WriteLineAsync($"Kept {Path.GetFileName(backup.Path)}: {backup.KeptForTrial} rolls back to it while on trial; run this again once it confirmed.").ConfigureAwait(false);
             return ServerExitCodes.Success;
         }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or CodeAlta.Fleet.Update.UpdateException)
         {
             await _error.WriteLineAsync($"altaserver backups: {exception.Message}").ConfigureAwait(false);
             return ServerExitCodes.Failure;
