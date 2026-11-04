@@ -44,6 +44,12 @@ public sealed record ServiceRequest
 /// <param name="MayFail">Whether its failure is expected (stopping a service that does not run).</param>
 public sealed record ServiceCommand(string FileName, IReadOnlyList<string> Arguments, bool MayFail = false)
 {
+    /// <summary>
+    /// Gets a command run again after this one, while it succeeds, before the next command: the job launchd still holds
+    /// after a <c>bootout</c>, while its process stops; null for none.
+    /// </summary>
+    public ServiceCommand? ThenWaitWhile { get; init; }
+
     /// <summary>Gets the command as a person would type it.</summary>
     /// <returns>The command line.</returns>
     public override string ToString() => string.Join(' ', new[] { FileName }.Concat(Arguments).Select(static word => word.Contains(' ', StringComparison.Ordinal) ? $"\"{word}\"" : word));
@@ -233,18 +239,22 @@ public sealed class ServiceManager(ServiceEnvironment environment)
         var label = ServiceDefinition.LaunchdLabel(system ? ServiceDefinition.SystemServiceName(spec.Name, spec.Account!) : spec.Name);
         var domain = system ? "system" : $"gui/{env.UserId ?? throw new ServiceException("The uid of the user cannot be read (id -u).")}";
         var file = system ? Path.Combine(env.LaunchDaemonDirectory, label + ".plist") : Path.Combine(env.Home, "Library", "LaunchAgents", label + ".plist");
+        // launchd answers a bootout before the process of the job ends, and keeps the job until it did (a node drains its
+        // turns): a bootstrap meanwhile fails with "5: Input/output error". The job is read again until it is gone.
+        var print = new ServiceCommand("launchctl", ["print", $"{domain}/{label}"]);
+        var bootout = new ServiceCommand("launchctl", ["bootout", $"{domain}/{label}"], MayFail: true) { ThenWaitWhile = print };
         return new ServicePlan
         {
             Platform = ServicePlatform.MacOS, Spec = spec, Kind = system ? $"a LaunchDaemon run as {spec.Account}" : $"a LaunchAgent of {env.UserName}",
             Location = file, DefinitionPath = file, Definition = ServiceDefinition.LaunchdPlist(spec),
             Install =
             [
-                new("launchctl", ["bootout", $"{domain}/{label}"], MayFail: true),
+                bootout,
                 new("launchctl", ["enable", $"{domain}/{label}"]),
                 new("launchctl", ["bootstrap", domain, file]),
             ],
-            Uninstall = [new("launchctl", ["bootout", $"{domain}/{label}"], MayFail: true)],
-            Query = new("launchctl", ["print", $"{domain}/{label}"]),
+            Uninstall = [bootout],
+            Query = print,
             Notes = notes,
         };
     }
@@ -502,12 +512,24 @@ public sealed class ServiceManager(ServiceEnvironment environment)
         foreach (var command in commands)
         {
             var result = Environment.Run(command.FileName, command.Arguments);
-            if (result.Succeeded || command.MayFail) continue;
-            error.WriteLine($"{product} {verb}: {command} failed ({result.ExitCode}): {FirstLine(result.Output)}");
-            return false;
+            if (!result.Succeeded && !command.MayFail)
+            {
+                error.WriteLine($"{product} {verb}: {command} failed ({result.ExitCode}): {FirstLine(result.Output)}");
+                return false;
+            }
+
+            if (command.ThenWaitWhile is { } probe) WaitWhile(probe);
         }
 
         return true;
+    }
+
+    // Reads again while the probe succeeds, at most as long as the service manager gives a process to stop (then it kills it).
+    private void WaitWhile(ServiceCommand probe)
+    {
+        var interval = TimeSpan.FromMilliseconds(250);
+        var attempts = (int)(TimeSpan.FromSeconds(ServiceDefinition.StopTimeoutSeconds + 10) / interval);
+        for (var attempt = 0; attempt < attempts && Environment.Run(probe.FileName, probe.Arguments).Succeeded; attempt++) Environment.Sleep(interval);
     }
 
     private static DateTime TruncateToMinute(DateTime time) => new(time.Year, time.Month, time.Day, time.Hour, time.Minute, 0, time.Kind);
