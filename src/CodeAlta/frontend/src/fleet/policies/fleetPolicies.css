@@ -24,6 +24,10 @@
 .fleet-policy-version { padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); }
 .fleet-policy-version-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 4px; }
 .fleet-stop-indicator { white-space: nowrap; font-weight: 600; }
+/* In the title bar, where buttons are bare icons: a red label that reads at a glance, never over its neighbours. */
+.window-actions > .bp6-button.fleet-stop-indicator { flex: 0 0 auto; padding: 0 8px; margin-right: 4px; color: #fff; background: var(--red, #cd4246); }
+.window-actions > .bp6-button.fleet-stop-indicator:hover { color: #fff; background: color-mix(in srgb, var(--red, #cd4246) 85%, #000); }
+.window-actions > .bp6-button.fleet-stop-indicator .bp6-icon, .window-actions > .bp6-button.fleet-stop-indicator svg { color: #fff; }
 @container (max-width: 560px) {
   .fleet-policy-form { grid-template-columns: minmax(0, 1fr); }
 }
