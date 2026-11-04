@@ -454,11 +454,11 @@ function GrantForm({ context, onClose }: { context: Context; onClose: () => void
       <HTMLSelect value={subject} aria-label={t("Who")} disabled={busy} onChange={event => setSubject(event.target.value)} options={subjects} />
       <HTMLSelect value={capability} aria-label={t("What")} disabled={busy} onChange={event => setCapability(event.target.value)}
         options={grantCapabilities.map(item => ({ value: item.value, label: t(item.label) }))} />
-      <HTMLSelect value={chosenScope} aria-label={t("Where")} disabled={busy || scopes.length === 0} onChange={event => setScope(event.target.value)} options={scopes} />
+      {scopes.length > 0 && <HTMLSelect value={chosenScope} aria-label={t("Where")} disabled={busy} onChange={event => setScope(event.target.value)} options={scopes} />}
     </div>
     {capability === "session.view-content" && scopes.length > 0 && <Checkbox checked={sealed} disabled={busy} label={t("The content is sealed from the server (a Private space): a device of its owner gives the keys")}
       onChange={event => setSealed(event.currentTarget.checked)} />}
-    {content && scopes.length === 0 && <p className="muted-text">{t("Content is granted on one machine or session, never on a whole scope.")}</p>}
+    {content && !ofSession && scopes.length === 0 && <p className="muted-text">{t("Content is granted on one machine or session, never on a whole scope.")}</p>}
     {ofSession && scopes.length === 0 && <p className="muted-text">{t("Only your own sessions whose title this computer opens are shared from here.")}</p>}
     <div className="fleet-secret-new-row fleet-secret-new-actions">
       <Button variant="minimal" size="small" text={t("Cancel")} disabled={busy} onClick={onClose} />

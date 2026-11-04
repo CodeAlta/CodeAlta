@@ -185,7 +185,7 @@ function PeopleSection({ epoch, machine, api }: { epoch: string; machine: Machin
     const abort = new AbortController();
     api.people({ expectedEpoch: epoch, machineId: machine.id }, { signal: abort.signal, timeoutMilliseconds: 30_000 }).then(value => {
       if (abort.signal.aborted) return;
-      const failed = managementProblem(value.status);
+      const failed = value.status === "team" ? null : managementProblem(value.status);
       if (failed) setProblem({ key: failed, detail: value.message }); else setView(value);
     }, () => { if (!abort.signal.aborted) setProblem({ key: "The machine does not answer: it is offline." }); });
     return () => abort.abort();
@@ -208,9 +208,11 @@ function PeopleSection({ epoch, machine, api }: { epoch: string; machine: Machin
   if (!view && !problem) return null;
   return <section className="machine-section machine-people" aria-label={t("People")}>
     <h2>{t("People")}</h2>
-    <p className="muted-text">{t("People of your organization who may use {name}, each on their own sessions only.", { name: machine.name })}</p>
+    {view?.status === "team"
+      ? <p className="muted-text">{t("{name} belongs to {owner}: the members its access document names use it, each on their own sessions only.", { name: machine.name, owner: view.owner ?? "" })}</p>
+      : <p className="muted-text">{t("People of your organization who may use {name}, each on their own sessions only.", { name: machine.name })}</p>}
     {problem && <Callout compact intent="warning" role="alert">{t(problem.key)}{problem.detail && <div className="muted-text">{problem.detail}</div>}</Callout>}
-    {view && <>
+    {view && view.status !== "team" && <>
       {view.asks.map(ask => <div key={ask.personId} className="machine-person machine-person-ask" data-ask={ask.name}>
         <span>{t("{name} asked to use this machine on {date}.", { name: ask.name, date: new Date(ask.askedAt).toLocaleString(locale, { dateStyle: "medium", timeStyle: "short" }) })}</span>
         <Button size="small" intent="primary" disabled={busy} text={t("Let in")} onClick={() => void set(ask.personId, all)} />

@@ -130,6 +130,12 @@ export const machineManageMessages = {
   "Up to date.": ["Actualizada.", "À jour.", "Aktuell.", "最新です。", "已是最新。"],
   "This machine does not update itself: update it with dotnet tool update.": ["Esta máquina no se actualiza sola: actualízala con dotnet tool update.", "Cette machine ne se met pas à jour seule : mettez-la à jour avec dotnet tool update.", "Diese Maschine aktualisiert sich nicht selbst: Mit dotnet tool update aktualisieren.", "このマシンは自動更新しません。dotnet tool update で更新してください。", "此机器不会自行更新：请使用 dotnet tool update 更新。"],
   "The update did not go through.": ["La actualización no se completó.", "La mise à jour n’a pas abouti.", "Das Update ist nicht durchgelaufen.", "更新を完了できませんでした。", "更新未能完成。"],
+  "{name} belongs to {owner}: the members its access document names use it, each on their own sessions only.": [
+    "{name} pertenece a {owner}: lo usan los miembros que nombra su documento de acceso, cada uno solo en sus propias sesiones.",
+    "{name} appartient à {owner} : les membres que nomme son document d’accès l’utilisent, chacun sur ses propres sessions.",
+    "{name} gehört {owner}: Die Mitglieder, die sein Zugriffsdokument nennt, nutzen es, jeweils nur für ihre eigenen Sitzungen.",
+    "{name} は {owner} のものです。アクセス文書に記載されたメンバーが、それぞれ自分のセッションだけで使います。",
+    "{name} 属于 {owner}：其访问文档列出的成员使用它，各自只用于自己的会话。"],
   "People of your organization who may use {name}, each on their own sessions only.": [
     "Personas de tu organización que pueden usar {name}, cada una solo en sus propias sesiones.",
     "Personnes de votre organisation qui peuvent utiliser {name}, chacune sur ses propres sessions seulement.",

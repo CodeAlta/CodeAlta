@@ -158,6 +158,9 @@ test("an automation that runs on a machine is published to a team or the organiz
   assert.equal(formOf(item("a", { runsOn: "box", publishTo: "organization" })).publishTo, "organization");
   assert.equal(inputOf({ ...form, runsOn: null }).publishTo, null);
   assert.equal(inputOf({ ...form, storeInProject: true }).publishTo, null);
+  assert.equal(formProblem(form), "An automation of a team or of the organization names the provider it runs with.");
+  assert.equal(formProblem({ ...form, provider: "gateway" }), null);
+  assert.equal(formProblem({ ...form, publishTo: null }), null, "the person's own runs with the default of the machine");
 });
 
 test("an automation that runs a script sends its script and arguments, and no prompt", () => {

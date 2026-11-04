@@ -181,4 +181,32 @@ internal sealed partial class DesktopFleetServers
         var teams = await AccessCallAsync(route.LinkId, static (client, token) => client.ListTeamsAsync(token), cancellationToken).ConfigureAwait(false);
         return [new(FleetAutomationVersion.TeamScopePrefix + team, teams.Items.FirstOrDefault(item => item.Id == team)?.Name ?? team)];
     }
+
+    /// <summary>
+    /// Names the team, or the organization, that owns a machine as the signed access document this computer verified says;
+    /// null for a personal machine or one of no server. The name of a team comes from the server.
+    /// </summary>
+    /// <param name="machineId">The machine.</param>
+    /// <param name="cancellationToken">Cancels the read.</param>
+    /// <returns>The name, or null.</returns>
+    internal async Task<string?> OwnerOfMachineAsync(string machineId, CancellationToken cancellationToken)
+    {
+        foreach (var connection in Connections)
+        {
+            if (connection.Connector?.Access.Current is not { } access) continue;
+            if (access.IsOrganizationMachine(machineId)) return connection.Link.OrganizationName ?? "the organization";
+            if (access.TeamOf(machineId) is not { } team) continue;
+            try
+            {
+                var teams = await AccessCallAsync(connection.Link.Id, static (client, token) => client.ListTeamsAsync(token), cancellationToken).ConfigureAwait(false);
+                return teams.Items.FirstOrDefault(item => item.Id == team.Id)?.Name ?? team.Id;
+            }
+            catch (Exception exception) when (exception is FleetServerException or HttpRequestException)
+            {
+                return team.Id;
+            }
+        }
+
+        return null;
+    }
 }

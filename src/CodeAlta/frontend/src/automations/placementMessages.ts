@@ -40,6 +40,12 @@ export const automationPlacementMessages = {
     "Die Maschine, die sie verlassen hat, kann ihre Kopie noch ausführen, bis sie antwortet: Bis dahin können beide Maschinen sie ausführen.",
     "移動元のマシンは応答するまでコピーを実行し続ける可能性があります。その間、両方のマシンで実行されることがあります。",
     "原来的机器在响应之前可能仍会运行其副本：在此期间两台机器都可能运行它。"],
+  "An automation of a team or of the organization names the provider it runs with.": [
+    "Una automatización de un equipo o de la organización indica el proveedor con el que se ejecuta.",
+    "Une automatisation d’une équipe ou de l’organisation nomme le fournisseur avec lequel elle s’exécute.",
+    "Eine Automation eines Teams oder der Organisation nennt den Anbieter, mit dem sie läuft.",
+    "チームまたは組織の自動化には、実行に使うプロバイダーを指定します。",
+    "团队或组织的自动化需指明其运行所用的提供方。"],
   "A command trigger runs on this computer only.": [
     "Un disparador de comando solo se ejecuta en este ordenador.",
     "Un déclencheur de commande ne s’exécute que sur cet ordinateur.",

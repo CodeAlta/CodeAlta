@@ -1056,6 +1056,8 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                     {
                         // A machine this computer manages joins a server this computer owns, and is approved here.
                         machinesService.ServerAddress = linkId => fleetServers.Connections.FirstOrDefault(connection => connection.Link.Id == linkId)?.Link.Url;
+                        // A machine of a team or of the organization lets in who its signed access document names.
+                        machinesService.OwnerOfMachine = fleetServers.OwnerOfMachineAsync;
                         // The names of the people a machine lets in, from the servers this computer is linked to.
                         machinesService.PersonNames = async token =>
                         {

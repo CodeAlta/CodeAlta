@@ -268,6 +268,8 @@ export function formProblem(form: AutomationForm): MessageKey | null {
     if (trigger.type === "command" && !(trigger.command ?? "").trim()) return "Write the command of the trigger.";
     if (trigger.type === "command" && form.runsOn && !form.storeInProject) return "A command trigger runs on this computer only.";
   }
+  // A team or the organization runs it with the key of an account: the machine and the server check the provider it names.
+  if (form.publishTo && form.runsOn && !form.storeInProject && !form.provider.trim()) return "An automation of a team or of the organization names the provider it runs with.";
   return null;
 }
 

@@ -85,7 +85,7 @@ const api: MachinePageApi = {
     return { status: "ok", message: null };
   },
   setAgentSandbox: async request => { calls.push(JSON.stringify({ agentSandbox: request.sandbox })); agentPolicy.sandbox = request.sandbox ?? null; return { status: "ok", message: null }; },
-  people: async () => ({ status: "ok", message: null, people: machinePeople.people, asks: machinePeople.asks, others: machinePeople.others }),
+  people: async () => ({ status: "ok", message: null, people: machinePeople.people, asks: machinePeople.asks, others: machinePeople.others, owner: null }),
   setMachinePerson: async request => {
     calls.push(JSON.stringify({ person: { personId: request.personId, permissions: request.permissions, refuse: request.refuse } }));
     return { status: "ok", message: null };
