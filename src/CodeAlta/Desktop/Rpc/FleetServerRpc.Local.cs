@@ -124,7 +124,7 @@ internal sealed partial class FleetServerService
                 var linkId = await installer.RunAsync(new SshServerSetupRequest
                 {
                     Target = target, Port = request.Port ?? 2586, Address = address, DataRoot = Blank(request.DataRoot), ToolPath = Blank(request.ToolPath),
-                    PackageFolder = Blank(request.PackageFolder), AcceptNewHostKey = request.AcceptNewHostKey, OwnCertificate = request.OwnCertificate,
+                    PackageFolder = Blank(request.PackageFolder), TrustedHostKey = TrustedHostKey(request.TrustedHostKey), OwnCertificate = request.OwnCertificate,
                 }, Reachable ?? AnswersAsync, async (linkAddress, setupAddress, code, pin, token) =>
                 {
                     try
@@ -200,6 +200,10 @@ internal sealed partial class FleetServerService
 
     private static string? Blank(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 
+    // The fingerprint of a host key the person trusted, as it was shown (SHA256:… with its type): anything else trusts nothing.
+    internal static string? TrustedHostKey(string? value)
+        => value?.Trim() is { Length: > 7 and <= 128 } text && text.StartsWith("SHA256:", StringComparison.Ordinal) && !text.Any(char.IsControl) ? text : null;
+
     private static bool LocalFolder(string? path) => string.IsNullOrWhiteSpace(path) || path.Length <= 1024 && Path.IsPathFullyQualified(path.Trim());
 }
 
@@ -224,7 +228,7 @@ internal sealed record FleetServerLocalRequest(string ExpectedEpoch, string Owne
 /// <param name="DataRoot">Its data folder there; null for <c>~/.altaserver</c>.</param>
 /// <param name="ToolPath">The folder of the tool there; null for <c>~/.dotnet/tools</c>.</param>
 /// <param name="PackageFolder">A folder of this computer with its packages; null for nuget.org.</param>
-/// <param name="AcceptNewHostKey">Whether a host key ssh does not know yet is accepted.</param>
+/// <param name="TrustedHostKey">The fingerprint of the host key the person trusted, as it was shown to them; null for the keys ssh knows.</param>
 /// <param name="OwnCertificate">On the local network (no <paramref name="Address"/>), whether the server is reached over HTTPS with a certificate of its own, which every device pins; otherwise plain HTTP.</param>
 internal sealed record FleetServerSetupRequest(string ExpectedEpoch, string? Target, string OwnerName, string? OrganizationName, string? Address, int? Port, string? DataRoot,
-    string? ToolPath, string? PackageFolder, bool AcceptNewHostKey, bool OwnCertificate = false);
+    string? ToolPath, string? PackageFolder, string? TrustedHostKey, bool OwnCertificate = false);

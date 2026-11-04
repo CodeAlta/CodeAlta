@@ -26,7 +26,7 @@ public sealed class FleetSecretCopiesTests
             store.ListFleetCopies().Select(static copy => (copy.Name, copy.Version, copy.Source)).ToArray());
         Assert.AreEqual("glsa_rotated", SecretReferenceResolver.ForMachine(root.Path).Get(new SecretReference(SecretReferenceKind.Secret, "GRAFANA_TOKEN")));
         Assert.IsTrue(store.GetSecretValues().Contains("glsa_rotated"), "a value of the fleet is masked as the machine's own are");
-        Assert.IsFalse(store.GetSecretValues().Contains("glsa_person"), "an old version is no longer masked once it is gone");
+        Assert.IsTrue(store.GetSecretValues().Contains("glsa_person"), "an old version stays masked: a run may still hold it");
 
         Assert.IsTrue(store.RemoveFleetCopies("link-a"));
         Assert.IsFalse(SecretReferenceResolver.ForMachine(root.Path).TryGet(new SecretReference(SecretReferenceKind.Secret, "GRAFANA_TOKEN"), out _));
@@ -61,6 +61,9 @@ public sealed class FleetSecretCopiesTests
         Assert.AreEqual("machine", Resolve(new SecretScope("work", "p1", "production")));
         Assert.AreEqual("environment", SecretReferenceResolver.ForScope(root.Path, new SecretScope("work", "p1", "production") { OwnerWork = false }, shell: true)
             .Resolve("${secret:TOKEN}"));
+        // The work of another person gets none of the owner's values: not those of the owner's person, spaces or projects.
+        Assert.IsFalse(SecretReferenceResolver.ForScope(root.Path, new SecretScope("work", "p1", null) { OwnerWork = false }, shell: true)
+            .TryGet(new SecretReference(SecretReferenceKind.Secret, "TOKEN"), out _));
     }
 
     [TestMethod]
@@ -99,6 +102,31 @@ public sealed class FleetSecretCopiesTests
         Assert.AreEqual(2, log.Read().Count);
         Assert.AreEqual(2, log.PublishAsync("link", 10, static _ => Task.FromResult(true)).GetAwaiter().GetResult().Count);
         Assert.AreEqual(0, log.Read().Count);
+    }
+
+    [TestMethod]
+    public void AValueTakenAway_IsStillMasked_ButNeverGivenAgain_AlsoAfterARestart()
+    {
+        using var root = new TempRoot();
+        var store = FileStore(root.Path);
+        store.ReplaceFleetCopies("link", [Value("link", "TOKEN", "fleet-old-value", FleetSecretScopes.Person, null)]);
+        store.ReplaceFleetCopies("link", [Value("link", "TOKEN", "fleet-new-value", FleetSecretScopes.Person, null, version: 2)]);
+        store.SetSecret("OWN_TOKEN", "own-old-value", "alex (tests)");
+        store.SetSecret("OWN_TOKEN", "own-new-value", "alex (tests)");
+        store.SetSecret("GONE_TOKEN", "own-deleted-value", "alex (tests)");
+        store.DeleteSecret("GONE_TOKEN");
+
+        // A run that took the old value may still print it: it stays masked; a reference resolves the current one only.
+        Assert.AreEqual("fleet-new-value", SecretReferenceResolver.ForScope(root.Path, SecretScope.None, shell: true).Resolve("${secret:TOKEN}"));
+        Assert.AreEqual("own-new-value", SecretReferenceResolver.ForScope(root.Path, SecretScope.None, shell: true).Resolve("${secret:OWN_TOKEN}"));
+        Assert.IsFalse(SecretReferenceResolver.ForScope(root.Path, SecretScope.None, shell: true).TryGet(new SecretReference(SecretReferenceKind.Secret, "GONE_TOKEN"), out _));
+        store.RemoveFleetCopies("link");
+        foreach (var reading in new[] { store, FileStore(root.Path) })
+        {
+            var masked = reading.GetSecretValues();
+            foreach (var value in new[] { "fleet-old-value", "fleet-new-value", "own-old-value", "own-new-value", "own-deleted-value" })
+                Assert.IsTrue(masked.Contains(value), $"{value} is still masked");
+        }
     }
 
     private static FleetSecretValue Value(string source, string name, string value, string scope, string? scopeId, int version = 1, bool hostOnly = false,

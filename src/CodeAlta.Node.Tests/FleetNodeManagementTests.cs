@@ -218,6 +218,89 @@ public sealed class FleetNodeManagementTests
     }
 
     [TestMethod]
+    public async Task AProviderThatFails_NeverGivesItsKeyBackInWhyItFailed()
+    {
+        await using var fixture = await ManagedNodeFixture.StartAsync(TestContext.CancellationToken);
+        var token = TestContext.CancellationToken;
+        var store = new CodeAlta.Catalog.Secrets.LocalSecretStore(fixture.Node.Host.CatalogOptions.GlobalRoot);
+        // A gateway that refuses the key and says it back, as some do.
+        using var gateway = new System.Net.Sockets.TcpListener(System.Net.IPAddress.Loopback, 0);
+        gateway.Start();
+        using var stop = CancellationTokenSource.CreateLinkedTokenSource(token);
+        var answering = Task.Run(async () =>
+        {
+            while (!stop.IsCancellationRequested)
+            {
+                using var client = await gateway.AcceptTcpClientAsync(stop.Token);
+                using var stream = client.GetStream();
+                var buffer = new byte[16 * 1024];
+                var read = await stream.ReadAsync(buffer, stop.Token);
+                var request = System.Text.Encoding.UTF8.GetString(buffer, 0, read);
+                var key = request.Split('\n').Select(static line => line.Trim()).FirstOrDefault(static line => line.StartsWith("x-api-key:", StringComparison.OrdinalIgnoreCase)
+                    || line.StartsWith("authorization:", StringComparison.OrdinalIgnoreCase))?.Split(':', 2)[1].Trim() ?? "";
+                var body = $"{{\"type\":\"error\",\"error\":{{\"type\":\"authentication_error\",\"message\":\"invalid x-api-key: {key}\"}}}}";
+                await stream.WriteAsync(System.Text.Encoding.UTF8.GetBytes($"HTTP/1.1 401 Unauthorized\r\nContent-Type: application/json\r\nContent-Length: {body.Length}\r\nConnection: close\r\n\r\n{body}"),
+                    stop.Token);
+            }
+        }, stop.Token);
+        try
+        {
+            var ownerMachine = await fixture.PairAsync(fixture.Owner, "laptop", manages: true, token);
+            await using var manager = await FleetNodeClient.ConnectAsync(ownerMachine, fixture.Owner, token);
+            await manager.SetProviderAsync(new FleetProviderSetParams("anthropic", "anthropic", "Claude API", null,
+                $"http://127.0.0.1:{((System.Net.IPEndPoint)gateway.LocalEndpoint).Port}", "sk-ant-leaked-key-123456"), token);
+            FleetProviderStatus? failed = null;
+            var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(60);
+            while (DateTime.UtcNow < deadline)
+            {
+                failed = (await manager.ListProvidersAsync(token)).Providers.Single(static provider => provider.Key == "anthropic");
+                if (failed.State == FleetProviderStates.Failed) break;
+                await Task.Delay(200, token);
+            }
+
+            Assert.AreEqual(FleetProviderStates.Failed, failed?.State, failed?.Detail);
+            Assert.IsFalse(failed!.Detail?.Contains("sk-ant-leaked-key-123456", StringComparison.Ordinal) == true, $"the key never comes back: {failed.Detail}");
+        }
+        finally
+        {
+            await stop.CancelAsync();
+            try { await answering; }
+            catch (Exception exception) when (exception is OperationCanceledException or System.Net.Sockets.SocketException or IOException) { }
+            store.Delete();
+        }
+    }
+
+    [TestMethod]
+    public async Task TwoProvidersWhoseIdsReadAlike_KeepTheirOwnKeys()
+    {
+        await using var fixture = await ManagedNodeFixture.StartAsync(TestContext.CancellationToken);
+        var token = TestContext.CancellationToken;
+        var store = new CodeAlta.Catalog.Secrets.LocalSecretStore(fixture.Node.Host.CatalogOptions.GlobalRoot);
+        try
+        {
+            var ownerMachine = await fixture.PairAsync(fixture.Owner, "laptop", manages: true, token);
+            await using var manager = await FleetNodeClient.ConnectAsync(ownerMachine, fixture.Owner, token);
+            var first = await manager.SetProviderAsync(new FleetProviderSetParams("my-gateway", "anthropic", null, null, "http://127.0.0.1:9/v1", "sk-first-account-1111"), token);
+            var second = await manager.SetProviderAsync(new FleetProviderSetParams("my_gateway", "anthropic", null, null, "http://127.0.0.1:9/v1", "sk-second-account-2222"), token);
+            Assert.AreNotEqual(first.KeySecret, second.KeySecret, "each provider has a secret of its own");
+            Assert.IsTrue(store.TryGetSecret(first.KeySecret!, out var firstKey));
+            Assert.AreEqual("sk-first-account-1111", firstKey, "setting the key of one never changes the key of the other");
+            Assert.IsTrue(store.TryGetSecret(second.KeySecret!, out var secondKey));
+            Assert.AreEqual("sk-second-account-2222", secondKey);
+
+            // Its key given again, a provider keeps its secret.
+            var again = await manager.SetProviderAsync(new FleetProviderSetParams("my_gateway", null, null, null, null, "sk-second-rotated-3333"), token);
+            Assert.AreEqual(second.KeySecret, again.KeySecret);
+            Assert.IsTrue(store.TryGetSecret(first.KeySecret!, out firstKey));
+            Assert.AreEqual("sk-first-account-1111", firstKey);
+        }
+        finally
+        {
+            store.Delete();
+        }
+    }
+
+    [TestMethod]
     public void NodeProviders_NameTheSecretOfAKey_AndTellHowEachTypeGetsItsCredential()
     {
         Assert.AreEqual("PROVIDER_OPENAI_API_KEY", NodeProviders.SecretNameOf("openai"));

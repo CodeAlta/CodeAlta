@@ -73,7 +73,7 @@ public sealed class NodeBudgetTests
 
             // The node holds the run: the budget has nothing left for it.
             var hold = await WaitForAsync(async () => (await manager.ListHoldsAsync(token)).Holds.FirstOrDefault(), token);
-            Assert.AreEqual((FleetBudgetHoldStates.Waiting, nodeId, "Report"), (hold.Status, hold.MachineId, hold.Title));
+            Assert.AreEqual((FleetBudgetHoldStates.Waiting, nodeId, (string?)null), (hold.Status, hold.MachineId, hold.Title), "the server never reads what the run is about");
             Assert.IsNull((await desktop.ListAutomationRunsAsync(Id, null, token)).Runs.FirstOrDefault(run => run.RunId == runId && run.SessionId is not null),
                 "no session starts while the run waits");
             Assert.AreEqual(string.Empty, provider.LastUserText, "no model is called");

@@ -70,6 +70,13 @@ public sealed class SessionIdentityResolver
     /// <summary>Gets the environments sessions were admitted to, whose values their processes get.</summary>
     public SessionSecretEnvironments Environments { get; }
 
+    /// <summary>
+    /// Gets or sets what tells whether a session is the work of the owner of the machine: a session another person started
+    /// (a member of a team on a team machine) resolves none of the owner's values, only those of the environment it was
+    /// admitted to (<see cref="SecretScope.OwnerWork"/>). Null makes every session the owner's work, as on a desktop.
+    /// </summary>
+    public Func<string, bool>? IsOwnerWork { get; set; }
+
     /// <summary>Gets a new resolver that gives every session the usual settings (its <see cref="Environments"/> its own).</summary>
     public static SessionIdentityResolver None => new(null);
 
@@ -122,6 +129,7 @@ public sealed class SessionIdentityResolver
         return Of(space, profiles, new SecretScope(space.Id, string.IsNullOrWhiteSpace(projectId) ? null : projectId, sessionId is null ? null : Environments.Get(sessionId))
         {
             RunId = sessionId,
+            OwnerWork = sessionId is null || IsOwnerWork?.Invoke(sessionId) != false,
         });
     }
 

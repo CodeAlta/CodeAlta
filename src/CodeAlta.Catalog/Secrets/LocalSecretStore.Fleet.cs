@@ -108,6 +108,8 @@ public sealed partial class LocalSecretStore
                 });
             }
 
+            // A secret this set no longer holds may still be held by a run: it stays masked.
+            Retire(document, held.Where(entry => !current.Contains(entry.Key) && entry.Value.Kind != FleetSecretValue.VariableKind).Select(static entry => entry.Value.Value));
             document.Fleet = copies;
             return true;
         });
@@ -119,7 +121,15 @@ public sealed partial class LocalSecretStore
     public bool RemoveFleetCopies(string source)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(source);
-        return Change(document => document.Fleet.RemoveAll(copy => copy.Source == source) > 0);
+        return Change(document =>
+        {
+            var removed = document.Fleet.Where(copy => copy.Source == source).ToList();
+            if (removed.Count == 0) return false;
+            // A run may still hold them: they stay masked.
+            Retire(document, removed.Where(static copy => copy.Kind != FleetSecretValue.VariableKind).Select(static copy => copy.Value));
+            document.Fleet.RemoveAll(copy => copy.Source == source);
+            return true;
+        });
     }
 
     /// <summary>Lists what is known of the values the fleet gave this machine, never their values.</summary>

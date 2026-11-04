@@ -18,6 +18,69 @@ public sealed class FleetNodeBudgetQueueTests
     public TestContext TestContext { get; set; } = null!;
 
     [TestMethod]
+    public async Task ASendHeldAtABudget_MakesItsSessionWait_AndIsSentOnceAdmittedAfterARestart()
+    {
+        var token = TestContext.CancellationToken;
+        var never = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        await using var fixture = await FleetNodeFixture.StartAsync(token, null, async (run, held, cancellation) =>
+        {
+            held();
+            await never.Task.WaitAsync(cancellation).ConfigureAwait(false);
+            return FleetBudgetAdmission.Admitted;
+        });
+        await using var client = await FleetNodeClient.ConnectAsync(await fixture.PairViewerAsync(token), fixture.ViewerIdentity, token);
+        var project = await fixture.Host.ProjectCatalog.UpsertFromPathAsync(Directory.CreateDirectory(Path.Combine(fixture.Root, "held-project")).FullName);
+        var created = await client.CreateSessionAsync(new FleetCreateSessionParams(Title: "Report", ProjectId: project.Id), "create-held", token);
+        Assert.AreEqual(FleetBudgetCommandStatuses.Held, (await client.SendAsync(created.SessionId, "The held work.", retryKey: "send-held", cancellationToken: token)).Status);
+
+        // The send waits for a person: its session says so, and does not move meanwhile.
+        CollectionAssert.Contains((await fixture.Host.ListSessionsWaitingForPersonAsync()).ToList(), created.SessionId);
+        Assert.AreEqual("waiting", (await fixture.Service.MoveSender.PreviewAsync(created.SessionId, token)).Busy, "a session whose send waits does not move");
+
+        // The node restarts while it waits: the send is not lost, and goes once the budgets admit it.
+        var restarted = new FleetNodeService(new FleetNodeServiceOptions
+        {
+            Host = fixture.Host, Identity = fixture.NodeIdentity, TrustedDevices = new CodeAlta.Fleet.Identity.TrustedDeviceStore(Path.Combine(fixture.Root, "restarted"),
+                TimeProvider.System), Name = "test-node", Version = "1.0.0",
+            AdmitBudget = (_, _, _) => Task.FromResult(FleetBudgetAdmission.Admitted),
+        });
+        try
+        {
+            var deadline = DateTime.UtcNow + Patience;
+            while (!fixture.Provider.Prompts.Any(static prompt => prompt.Contains("The held work.", StringComparison.Ordinal)) && DateTime.UtcNow < deadline)
+                await Task.Delay(50, token);
+            Assert.IsTrue(fixture.Provider.Prompts.Any(static prompt => prompt.Contains("The held work.", StringComparison.Ordinal)), "the held send survives a restart");
+            Assert.IsFalse((await fixture.Host.ListSessionsWaitingForPersonAsync()).Contains(created.SessionId), "sent, the session waits no more");
+        }
+        finally
+        {
+            await restarted.DisposeAsync();
+        }
+    }
+
+    [TestMethod]
+    public async Task TheFirstPromptOfASessionInAnEnvironment_IsAdmittedToTheBudgetsToo()
+    {
+        var token = TestContext.CancellationToken;
+        var admitted = new ConcurrentQueue<FleetNodeBudgetRun>();
+        await using var fixture = await FleetNodeFixture.StartAsync(token, null, (run, _, _) =>
+        {
+            admitted.Enqueue(run);
+            return Task.FromResult(new FleetBudgetAdmission("The budget 'Home' is reached: the run does not start.", []));
+        }, null, false, (environment, _, _, _) => Task.FromResult(new CodeAlta.Orchestration.Runtime.EnvironmentAdmissionResult(null,
+            new CodeAlta.Orchestration.Runtime.EnvironmentAdmission(environment, "env-1", 1, null))));
+        await using var client = await FleetNodeClient.ConnectAsync(await fixture.PairViewerAsync(token), fixture.ViewerIdentity, token);
+        var created = await client.CreateSessionAsync(new FleetCreateSessionParams(Title: "Deploy", Prompt: "Deploy the release.") { Environment = "production" }, "create-env", token);
+
+        // Admitted to its environment, the session's first prompt still goes through the budgets: one that stops it is never sent.
+        var deadline = DateTime.UtcNow + Patience;
+        while (admitted.IsEmpty && DateTime.UtcNow < deadline) await Task.Delay(50, token);
+        Assert.AreEqual(created.SessionId, admitted.SingleOrDefault()?.RunId, "the budgets admit the first run of a session in an environment");
+        await Task.Delay(TimeSpan.FromMilliseconds(300), token);
+        Assert.IsFalse(fixture.Provider.Prompts.Any(static prompt => prompt.Contains("Deploy the release.", StringComparison.Ordinal)), "a prompt a budget stops never reaches the model");
+    }
+
+    [TestMethod]
     public async Task AQueuedPrompt_IsAdmittedToTheBudgetsWhenItsTurnStarts_AndASteerIsPartOfTheRunningTurn()
     {
         var token = TestContext.CancellationToken;

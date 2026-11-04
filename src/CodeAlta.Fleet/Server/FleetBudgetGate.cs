@@ -19,10 +19,14 @@ public sealed record FleetBudgetLink(string LinkId, FleetOrganizationDevices Dev
 
 /// <summary>A run that a budget may limit: a session of the machine, in a space, of a project.</summary>
 /// <param name="RunId">The run, which a Continue anyway is bound to.</param>
-/// <param name="Title">What the run is, for the owner.</param>
+/// <param name="Title">What the run is, for the owner on this machine: a hold the server records names the run only, never its title.</param>
 /// <param name="SpaceId">The space of the session on this machine; null for the default one.</param>
 /// <param name="ProjectIdentity">What recognizes its project on the person's machines (<see cref="FleetProjectKeys.IdentityAsync"/>); null for none.</param>
-public sealed record FleetBudgetRun(string RunId, string? Title, string? SpaceId, string? ProjectIdentity);
+public sealed record FleetBudgetRun(string RunId, string? Title, string? SpaceId, string? ProjectIdentity)
+{
+    /// <summary>Gets the nonce of the hold the run asks when a budget holds it; null for a new one. A run taken again after a restart asks the same hold.</summary>
+    public string? Nonce { get; init; }
+}
 
 /// <summary>What this machine spent of a budget: the statistics facts it counted itself, which it holds offline too.</summary>
 public interface IFleetBudgetSpend
@@ -174,7 +178,7 @@ public sealed class FleetBudgetGate
     private async Task<string?> HoldAsync(FleetBudgetLink link, LinkState state, FleetBudgetDefinition budget, FleetBudgetPeriod period, FleetBudgetRun run, Action? held,
         CancellationToken cancellationToken)
     {
-        var nonce = Base64Url.EncodeToString(RandomNumberGenerator.GetBytes(16));
+        var nonce = run.Nonce is { Length: > 0 and <= 128 } given && !given.Any(char.IsControl) ? given : Base64Url.EncodeToString(RandomNumberGenerator.GetBytes(16));
         var deadline = _time.GetUtcNow() + HoldWait;
         FleetBudgetHoldDto? hold = null;
         var announced = false;
@@ -187,7 +191,7 @@ public sealed class FleetBudgetGate
             {
                 using var client = Client(link);
                 hold = hold is null
-                    ? await client.RequestBudgetHoldAsync(budget.BudgetId, new RequestFleetBudgetHoldRequest(run.RunId, nonce, budget.Number, period.StartQuarter, Title(run.Title)),
+                    ? await client.RequestBudgetHoldAsync(budget.BudgetId, new RequestFleetBudgetHoldRequest(run.RunId, nonce, budget.Number, period.StartQuarter, Title: null),
                         cancellationToken).ConfigureAwait(false)
                     : await client.GetBudgetHoldAsync(hold.Id, cancellationToken).ConfigureAwait(false);
             }
@@ -282,13 +286,6 @@ public sealed class FleetBudgetGate
 
     private static FleetServerClient Client(FleetBudgetLink link)
         => new(link.Devices.ServerAddress, link.Devices.Identity, link.Devices.Handler) { DeviceList = link.Devices };
-
-    private static string? Title(string? title)
-    {
-        if (string.IsNullOrWhiteSpace(title)) return null;
-        var kept = new string([.. title.Where(static c => !char.IsControl(c))]).Trim();
-        return kept.Length > 200 ? kept[..200] : kept;
-    }
 
     private static void Log(string message)
     {

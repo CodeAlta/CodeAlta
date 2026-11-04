@@ -36,7 +36,7 @@ test("over SSH, the assistant shows each step, says what to do when ssh does not
     await page.until(`document.querySelector('.add-machine-dialog [role=status]')?.textContent.includes('pc-ai is paired with this computer and managed from here.')`, "the outcome");
     await page.shot("add-machine-ssh-done");
     await page.clickText(".add-machine-dialog .bp6-button", "Open its page");
-    assert.deepEqual(await calls(page), [{ ssh: "me@pc-ai", trust: false, port: 2585 }, { ssh: "me@pc-ai", trust: true, port: 2585 }, { open: "pc-ai-id" }]);
+    assert.deepEqual(await calls(page), [{ ssh: "me@pc-ai", trust: null, port: 2585 }, { ssh: "me@pc-ai", trust: "SHA256:Qm9vLWtleS1maW5nZXJwcmludA (ED25519)", port: 2585 }, { open: "pc-ai-id" }]);
     assert.deepEqual(page.problems, []);
   }, options);
 });

@@ -84,7 +84,7 @@ function ServerSecrets({ server, epoch, api, titled }: { server: FleetServerView
       <h2 id={`approvals-${linkId}`}>{t("Runs that wait for you")}</h2>
       <ul className="secret-list" aria-label={t("Runs that wait for you")}>
         {waiting.map(approval => <ApprovalRow key={approval.id} approval={approval} busy={busy}
-          onApprove={() => void run(() => api.approveRun({ expectedEpoch: epoch, linkId, approvalId: approval.id }, { timeoutMilliseconds: 30_000 }))} />)}
+          onApprove={() => void run(() => api.approveRun({ expectedEpoch: epoch, linkId, approvalId: approval.id, review: approval.review }, { timeoutMilliseconds: 30_000 }))} />)}
       </ul>
     </Card>}
     <Card className="appearance-settings" aria-labelledby={`values-${linkId}`}>
