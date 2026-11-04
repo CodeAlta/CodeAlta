@@ -44,7 +44,8 @@ its tests. The protocol only gains: optional query parameters of `GET /api/v1/au
 ## Slices
 
 - [x] 1. Audit on the server: filters, orders, cursors, exports (CSV, JSON Lines), verification head; tests.
-- [ ] 2. Audit in the client, the desktop RPC and `alta fleet audit` (list, verify, export); tests.
+- [x] 2. Audit in the client, the desktop RPC (pages, check, export to a file the person chooses) and `alta fleet audit`
+      (list, verify; no export: the host writes no file for a session); tests.
 - [ ] 3. The audit viewer in CodeAlta Desktop (Settings > Fleet > Audit): timeline, filters, paging, verification, exports.
 - [ ] 4. The policy document: format, rules, stop, chain verifier, describe; tests.
 - [ ] 5. Policies on the server: migration 0017, endpoints, `policy.changed`, audit; tests.

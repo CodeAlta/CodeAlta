@@ -1083,6 +1083,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                         Spaces = host.SpaceCatalog, IsPaired = machineId => fleet?.Find(machineId) is { IsPaired: true },
                         IsReachable = machineId => fleet?.Find(machineId) is not null, Fleet = fleet,
                         PersonName = CodeAlta.Desktop.Fleet.PersonName.ReadOnce(),
+                        ChooseSavePath = shell.ChooseSavePathAsync,
                     });
                     builder.AddConfigurationService(new ConfigurationService(host.ModelProviderRegistry, host.PluginRuntime, new DesktopDefaultProvider(host.CatalogOptions), host.CatalogOptions)
                     {

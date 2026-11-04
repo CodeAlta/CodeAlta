@@ -722,7 +722,25 @@ public sealed partial class FleetServerClient : IDisposable
 
     private async Task<TResult> SendAsync<TResult>(HttpMethod method, string relative, byte[]? body, JsonTypeInfo<TResult> resultType, CancellationToken cancellationToken)
     {
-        using var request = new HttpRequestMessage(method, new Uri(ServerAddress, relative));
+        using var request = CreateSigned(method, relative, body);
+        using var response = await _http.SendAsync(request, cancellationToken).ConfigureAwait(false);
+        var text = await response.Content.ReadAsByteArrayAsync(cancellationToken).ConfigureAwait(false);
+        if (!response.IsSuccessStatusCode) throw Refusal(response.StatusCode, text);
+        try
+        {
+            return JsonSerializer.Deserialize(text, resultType)
+                ?? throw new FleetServerException(response.StatusCode, FleetServerException.HttpErrorCode, null, "The server answered nothing.");
+        }
+        catch (JsonException exception)
+        {
+            throw new FleetServerException(response.StatusCode, FleetServerException.HttpErrorCode, null, $"The answer of the server does not read: {exception.Message}");
+        }
+    }
+
+    // A request signed by the key of this device, as every call of the REST API is.
+    private HttpRequestMessage CreateSigned(HttpMethod method, string relative, byte[]? body)
+    {
+        var request = new HttpRequestMessage(method, new Uri(ServerAddress, relative));
         var bytes = body ?? [];
         if (body is not null)
         {
@@ -737,18 +755,7 @@ public sealed partial class FleetServerClient : IDisposable
         request.Headers.Add(FleetSignedRequest.TimestampHeader, time.ToString(CultureInfo.InvariantCulture));
         request.Headers.Add(FleetSignedRequest.NonceHeader, nonce);
         request.Headers.Add(FleetSignedRequest.SignatureHeader, Base64Url.EncodeToString(_identity.SignData(signed)));
-        using var response = await _http.SendAsync(request, cancellationToken).ConfigureAwait(false);
-        var text = await response.Content.ReadAsByteArrayAsync(cancellationToken).ConfigureAwait(false);
-        if (!response.IsSuccessStatusCode) throw Refusal(response.StatusCode, text);
-        try
-        {
-            return JsonSerializer.Deserialize(text, resultType)
-                ?? throw new FleetServerException(response.StatusCode, FleetServerException.HttpErrorCode, null, "The server answered nothing.");
-        }
-        catch (JsonException exception)
-        {
-            throw new FleetServerException(response.StatusCode, FleetServerException.HttpErrorCode, null, $"The answer of the server does not read: {exception.Message}");
-        }
+        return request;
     }
 
     private static FleetServerException Refusal(HttpStatusCode status, byte[] body)
