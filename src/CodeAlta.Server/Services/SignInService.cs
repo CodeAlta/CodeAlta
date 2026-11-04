@@ -780,9 +780,11 @@ public sealed class SignInService : IDisposable
         string? deviceId, CancellationToken cancellationToken)
     {
         // Every company sign-in, of a new person or of one already linked, is of a domain or a tenant the owner named.
-        if (attempt.Method == FleetSignInMethods.Company && !IsAllowed(settings.Document.Company, identity))
+        if (attempt.Method == FleetSignInMethods.Company && Admit(settings.Document.Company, identity) is var admission and not Admission.Allowed)
             throw await RefuseAsync(origin, deviceId, attempt.Method, SignInErrorCodes.IdentityNotAllowed,
-                "This account is not of the domains or tenants your organization lets in.", cancellationToken).ConfigureAwait(false);
+                admission == Admission.EmailNotConfirmed
+                    ? "The provider did not confirm this account's email, so its domain cannot be checked: let in its tenant instead."
+                    : "This account is not of the domains or tenants your organization lets in.", cancellationToken).ConfigureAwait(false);
         var now = _time.GetUtcNow();
         var groups = identity.Groups.Count == 0 ? null : JsonSerializer.Serialize(identity.Groups.ToArray(), SignInSettingsJsonContext.Default.StringArray);
         var name = Truncate(identity.Email ?? identity.Name ?? identity.Subject);
@@ -1054,18 +1056,24 @@ public sealed class SignInService : IDisposable
 
     // A tenant named must be the account's; a domain named must be the one of its verified email. Both, when both are named.
     // Settings kept before the owner had to name them let nobody in.
-    internal static bool IsAllowed(CompanyDocument? company, ExternalIdentity identity)
+    internal static bool IsAllowed(CompanyDocument? company, ExternalIdentity identity) => Admit(company, identity) == Admission.Allowed;
+
+    // Why an identity is let in or not: a domain counts only from a verified email, so an account of the right tenant whose
+    // provider did not confirm its email (Entra ID never does) is refused for that reason, which the refusal then says.
+    private static Admission Admit(CompanyDocument? company, ExternalIdentity identity)
     {
-        if (company is null) return false;
+        if (company is null) return Admission.NotAllowed;
         var domains = company.AllowedDomains ?? [];
         var tenants = company.AllowedTenants ?? [];
-        if (domains.Length == 0 && tenants.Length == 0) return false;
-        if (tenants.Length > 0 && (identity.TenantId is not { Length: > 0 } tenant || !tenants.Contains(tenant, StringComparer.OrdinalIgnoreCase))) return false;
-        if (domains.Length == 0) return true;
-        if (!identity.EmailVerified || identity.Email is not { } email) return false;
+        if (domains.Length == 0 && tenants.Length == 0) return Admission.NotAllowed;
+        if (tenants.Length > 0 && (identity.TenantId is not { Length: > 0 } tenant || !tenants.Contains(tenant, StringComparer.OrdinalIgnoreCase))) return Admission.NotAllowed;
+        if (domains.Length == 0) return Admission.Allowed;
+        if (!identity.EmailVerified || identity.Email is not { } email) return Admission.EmailNotConfirmed;
         var at = email.LastIndexOf('@');
-        return at > 0 && at < email.Length - 1 && domains.Contains(email[(at + 1)..], StringComparer.OrdinalIgnoreCase);
+        return at > 0 && at < email.Length - 1 && domains.Contains(email[(at + 1)..], StringComparer.OrdinalIgnoreCase) ? Admission.Allowed : Admission.NotAllowed;
     }
+
+    private enum Admission { Allowed, NotAllowed, EmailNotConfirmed }
 
     private static string[] ReadAllowed(IReadOnlyList<string>? values, Func<string, bool> valid, string message)
     {

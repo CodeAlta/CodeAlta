@@ -83,16 +83,18 @@ public sealed class IndexedPromptReferencesTests
         finally { Directory.Delete(root, recursive: true); }
     }
 
-    // The first answers arrive while the folder is still being read; ask again until the index settles.
+    // The first answers arrive while the folder is still being read; ask again until the index settles. The deadline is on the
+    // clock, wide enough for a loaded CI runner: a settled index answers at once.
     private static async Task<OwnedReferenceSearchResult> Settled(IndexedPromptReferences references, string root, string query)
     {
-        for (var attempt = 0; attempt < 200; attempt++)
+        var waited = System.Diagnostics.Stopwatch.StartNew();
+        while (waited.Elapsed < TimeSpan.FromSeconds(30))
         {
             var result = await references.SearchAsync(root, query, CancellationToken.None);
             if (result.Status != "indexing") return result;
             await Task.Delay(25);
         }
-        Assert.Fail("The index did not settle.");
+        Assert.Fail($"The index did not settle within {waited.Elapsed.TotalSeconds:0} s.");
         throw new InvalidOperationException();
     }
 

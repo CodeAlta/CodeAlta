@@ -6,7 +6,7 @@ import { ActivitySpinner } from "../ActivitySpinner";
 import { useShellLanguage } from "../shellLanguage";
 import type { MessageKey } from "../localization";
 import { serverProblem } from "./fleetServer";
-import { allowedValues, approvalLines, groupRoleChoices, hasCompany, linkableMethods, removableLogin, signInCode, signInDraft, signInDraftProblem, signInProblem, signInSummary, type SignInCode as Code, type SignInDraft } from "./signIn";
+import { allowedValues, approvalLines, confirmWays, groupRoleChoices, hasCompany, isEntraIssuer, linkableMethods, removableLogin, signInCode, signInDraft, signInDraftProblem, signInProblem, signInSummary, type SignInCode as Code, type SignInDraft } from "./signIn";
 import { ConfirmPopover } from "../ConfirmPopover";
 import { SignInCode } from "./SignInCode";
 import { SignInMethodIcon } from "./SignInMethodIcon";
@@ -19,6 +19,11 @@ export type FleetSignInApi = Pick<typeof fleetServer, "signInSettings" | "setSig
 const approvalsPollMilliseconds = 15_000;
 
 const methodNames: Record<string, string> = { microsoft: "Microsoft", google: "Google", github: "GitHub" };
+
+// Names read as a sentence in the language of the page: "a, b or c".
+function listOf(locale: string, names: readonly string[]): string {
+  try { return new Intl.ListFormat(locale, { style: "long", type: "disjunction" }).format(names); } catch { return names.join(", "); }
+}
 
 /**
  * The sign-in of a server, in its card of Settings > Fleet > Server: the methods linked to the person of this computer (a
@@ -233,16 +238,18 @@ function SignInDialog({ server, epoch, api, view, logins, onClose }: {
   server: FleetServerView; epoch: string; api: Pick<FleetSignInApi, "setSignInSettings" | "startSignInCode" | "openSignInPage">; view: FleetSignInSettingsView;
   logins: readonly FleetSignInLoginView[]; onClose: (changed: boolean) => void;
 }) {
-  const { t } = useShellLanguage();
+  const { t, locale } = useShellLanguage();
   const [draft, setDraft] = useState<SignInDraft>(() => signInDraft(view));
   const [working, setWorking] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const [confirmCode, setConfirmCode] = useState<Code | null>(null);
   // The way the change waits to be confirmed: a method to sign in again with, or "device" for another computer's approval.
   const [waitingOn, setWaitingOn] = useState<string | null>(null);
-  const [problem, setProblem] = useState<{ key: MessageKey; detail?: string | null } | null>(null);
+  // What the dialog says went wrong: a message, with the server's words under it; or, when the dialog composed the words itself, those.
+  const [problem, setProblem] = useState<{ key: MessageKey; detail?: string | null; text?: string } | null>(null);
   // The methods the owner may confirm with: the ones linked to them, once each.
   const confirmWith = [...new Set(logins.map(login => login.method))];
+  const wayName = (way: string) => way === "passkey" ? t("Passkey") : methodNames[way] ?? way;
   const invalid = signInDraftProblem(draft);
   const update = (change: Partial<SignInDraft>) => setDraft(value => ({ ...value, ...change }));
   const toggle = (method: string, on: boolean) => update({ enabled: on ? [...draft.enabled.filter(item => item !== method), method] : draft.enabled.filter(item => item !== method) });
@@ -271,6 +278,13 @@ function SignInDialog({ server, epoch, api, view, logins, onClose }: {
         { timeoutMilliseconds: method ? 11 * 60_000 : 60_000 });
       if (result.status === "ok") { onClose(true); return; }
       if (result.status === "sign_in.confirmation_required") { setConfirming(true); return; }
+      // An account that is not one of theirs cannot confirm: say which of their linked ways in can, not that no one linked it.
+      const ways = method && method !== "device" && result.status === "sign_in.not_linked" ? confirmWays(method, logins, wayName) : [];
+      if (ways.length > 0) {
+        setProblem({ key: "This {method} account is not one of yours here: use {ways}.",
+          text: t("This {method} account is not one of yours here: use {ways}.", { method: wayName(method!), ways: listOf(locale, ways) }) });
+        return;
+      }
       setProblem({ key: signInProblem(result.status) ?? serverProblem(result.status) ?? "The operation did not complete.", detail: result.message });
     } catch {
       setProblem({ key: "The server does not answer." });
@@ -310,7 +324,9 @@ function SignInDialog({ server, epoch, api, view, logins, onClose }: {
             <InputGroup value={draft.allowedTenants} disabled={working} placeholder={t("Required for Entra ID")} spellCheck={false}
               onChange={event => update({ allowedTenants: event.target.value })} /></label>
         </div>
-        <small className="muted-text">{t("Redirect to register at the provider: http://127.0.0.1 (any port).")}</small>
+        {isEntraIssuer(draft.issuer) && <Callout compact intent="warning" className="fleet-sign-in-entra">
+          {t("Entra ID does not confirm emails, so an email domain would refuse all its accounts: they are let in by tenant id.")}</Callout>}
+        <small className="muted-text">{t("Redirect to register at the provider: http://localhost/callback (any port; on Entra ID, a Web platform redirect).")}</small>
         {hasCompany(draft) && <GroupRoles draft={draft} working={working} update={update} />}
         <Switch checked={draft.requireSso} disabled={working} label={t("Require company sign-in")} onChange={event => update({ requireSso: event.currentTarget.checked })} />
         {draft.requireSso && <small className="muted-text">{t("Only company sign-in lets a new computer in; your passkey stays as the owner's way in.")}</small>}
@@ -325,7 +341,7 @@ function SignInDialog({ server, epoch, api, view, logins, onClose }: {
         {working && waitingOn === "device" && <div className="muted-text">{t("On another of your computers, approve the change in Settings > Fleet > Server.")}</div>}
         {working && !confirmCode && waitingOn && waitingOn !== "device" && <div className="muted-text">{t("Finish signing in in your browser…")}</div>}
       </Callout>}
-      {(problem ?? (invalid ? { key: invalid } : null)) && <Callout compact intent="warning" role="alert">{t((problem ?? { key: invalid! }).key)}
+      {(problem ?? (invalid ? { key: invalid } : null)) && <Callout compact intent="warning" role="alert">{problem?.text ?? t((problem ?? { key: invalid! }).key)}
         {problem?.detail && <div className="muted-text">{problem.detail}</div>}</Callout>}
     </DialogBody>
     <DialogFooter actions={<>

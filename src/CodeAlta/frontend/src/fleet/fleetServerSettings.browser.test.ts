@@ -312,11 +312,21 @@ test("the owner links a passkey, turns company sign-in on and requires it, and t
     await page.until(`document.querySelector('.fleet-sign-in-dialog .fleet-sign-in-methods')`, "the form");
     assert.deepEqual(await page.evaluate(`[...document.querySelectorAll('.fleet-sign-in-methods label')].map(label => [label.textContent, label.querySelector('input').checked])`),
       [["Passkey", true], ["Microsoft", true], ["Google · Not registered yet", true], ["GitHub", true]]);
+    // The redirect to register is the one company sign-in comes back to: localhost, since Entra ID's Web platform takes no 127.0.0.1.
+    assert.equal(await page.evaluate(`[...document.querySelectorAll('.fleet-sign-in-dialog small')].map(small => small.textContent).find(text => text.startsWith('Redirect'))`),
+      "Redirect to register at the provider: http://localhost/callback (any port; on Entra ID, a Web platform redirect).");
     await page.evaluate(`[...document.querySelectorAll('.fleet-sign-in-dialog .bp6-switch')].find(label => label.textContent === 'Company sign-in').querySelector('input').click()`);
     await page.until(`document.querySelector('.fleet-sign-in-dialog [role=alert]')?.textContent === 'Company sign-in needs its issuer and client id.'`, "the provider is needed");
+    // Entra ID never confirms an email: with its issuer the dialog says its accounts are let in by tenant id; another issuer needs no such word.
+    assert.equal(await page.evaluate(`document.querySelector('.fleet-sign-in-entra')`), null);
+    await page.evaluate(type(".fleet-sign-in-dialog .fleet-server-form .bp6-input", "https://login.microsoftonline.com/organizations/v2.0"));
+    await page.until(`document.querySelector('.fleet-sign-in-entra')`, "the warning about Entra ID");
+    assert.equal(await page.evaluate(`document.querySelector('.fleet-sign-in-entra').textContent`),
+      "Entra ID does not confirm emails, so an email domain would refuse all its accounts: they are let in by tenant id.");
     await page.evaluate(`(() => { const inputs = [...document.querySelectorAll('.fleet-sign-in-dialog .fleet-server-form .bp6-input')];
       const set = (input, value) => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(input, value); input.dispatchEvent(new Event('input', { bubbles: true })); };
       set(inputs[0], 'https://login.contoso.example/v2.0'); set(inputs[1], 'contoso-client'); set(inputs[2], 'the-secret'); set(inputs[3], 'Contoso'); return true; })()`);
+    assert.equal(await page.evaluate(`document.querySelector('.fleet-sign-in-entra')`), null, "no word about Entra ID for another issuer");
     await page.evaluate(`[...document.querySelectorAll('.fleet-sign-in-dialog .bp6-switch')].find(label => label.textContent === 'Require company sign-in').querySelector('input').click()`);
     // Whose accounts it lets in is named: nothing named is refused.
     await page.until(`document.querySelector('.fleet-sign-in-dialog [role=alert]')?.textContent === 'Company sign-in needs the email domains or the tenant ids it lets in.'`, "the domains are needed");
@@ -342,7 +352,34 @@ test("the owner links a passkey, turns company sign-in on and requires it, and t
   }, options);
 });
 
-test("the owner's computer sees the telemetry of the fleet and changes it without the page holding a secret", { skip: !edge, timeout: 90_000 }, async () => {
+test("confirming a change with an account that is not theirs names the ways in that are, not that no one linked the account", { skip: !edge, timeout: 90_000 }, async () => {
+  await withCanvas(async page => {
+    await page.until(`document.querySelector('.fleet-sign-in-summary')`, "the sign-in of the server");
+    for (const item of ["Add a passkey", "Link Microsoft"]) {
+      await page.clickText(".fleet-server-sign-in .bp6-button", "Link…");
+      await page.until(`[...document.querySelectorAll('.bp6-menu-item')].some(entry => entry.textContent === ${JSON.stringify(item)})`, item);
+      await page.clickText(".bp6-menu-item", item);
+      await page.until(`!document.querySelector('.bp6-popover-open') && !document.querySelector('.fleet-server-sign-in .bp6-button:disabled')`, `${item} done`);
+    }
+    await page.until(`document.querySelectorAll('.fleet-sign-in-logins .bp6-tag').length === 2`, "the two ways in listed");
+    await page.clickText(".fleet-server-sign-in .bp6-button", "Change…");
+    await page.until(`document.querySelector('.fleet-sign-in-dialog .fleet-sign-in-methods')`, "the form");
+    await page.evaluate(`[...document.querySelectorAll('.fleet-sign-in-dialog .bp6-switch')].find(label => label.textContent === 'Company sign-in').querySelector('input').click()`);
+    await page.evaluate(`(() => { const inputs = [...document.querySelectorAll('.fleet-sign-in-dialog .fleet-server-form .bp6-input')];
+      const set = (input, value) => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(input, value); input.dispatchEvent(new Event('input', { bubbles: true })); };
+      set(inputs[0], 'https://login.contoso.example/v2.0'); set(inputs[1], 'contoso-client'); set(inputs[5], 'contoso.example'); return true; })()`);
+    await page.until(`!document.querySelector('.fleet-sign-in-dialog [role=alert]')`, "the form holds");
+    await page.clickText(".fleet-sign-in-dialog .bp6-button", "Save");
+    await page.until(`[...document.querySelectorAll('.fleet-sign-in-confirm-methods .bp6-button')].some(button => button.textContent === 'Continue with Microsoft')`, "the confirmation asked");
+    await page.clickText(".fleet-sign-in-confirm-methods .bp6-button", "Continue with Microsoft");
+    await page.until(`document.querySelector('.fleet-sign-in-dialog [role=alert]')`, "the refusal");
+    assert.equal(await page.evaluate(`document.querySelector('.fleet-sign-in-dialog [role=alert]').textContent`),
+      "This Microsoft account is not one of yours here: use alex@example.com or Passkey.");
+    assert.deepEqual(page.problems, []);
+  }, options);
+});
+
+test("the owner's computer sees the telemetry of the fleet and changes it without the page holding a secret",{ skip: !edge, timeout: 90_000 }, async () => {
   await withCanvas(async page => {
     // The card of the server says where the machines send, in one line.
     await page.until(`document.querySelector('.fleet-telemetry-summary')`, "the telemetry of the server");

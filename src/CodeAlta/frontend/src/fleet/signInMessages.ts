@@ -37,6 +37,10 @@ export const signInMessages = {
     "Niemand auf diesem Server hat dieses Konto verknüpft: melde dich an einem deiner Computer an und verknüpfe es zuerst.",
     "このサーバーではこのアカウントをリンクした人がいません。まず自分のコンピューターでサインインしてリンクしてください。",
     "此服务器上没有人关联过此账户：请先在你的一台计算机上登录并关联它。"],
+  "This {method} account is not one of yours here: use {ways}.": [
+    "Esta cuenta de {method} no es una de las tuyas aquí: usa {ways}.", "Ce compte {method} n’est pas l’un des vôtres ici : utilisez {ways}.",
+    "Dieses {method}-Konto gehört hier nicht dir: Verwende {ways}.", "この {method} アカウントは、ここではあなたのものではありません。{ways} を使ってください。",
+    "此 {method} 账户在这里不属于你：请使用 {ways}。"],
   "This account is linked to another person of the organization.": ["Esta cuenta está vinculada a otra persona de la organización.",
     "Ce compte est lié à une autre personne de l’organisation.", "Dieses Konto ist mit einer anderen Person der Organisation verknüpft.",
     "このアカウントは組織の別のユーザーにリンクされています。", "此账户已关联到组织中的另一个人。"],
@@ -107,10 +111,12 @@ export const signInMessages = {
     "每次公司登录时，此人获得其所属组中最广的角色，不属于任何组则为成员。所有者保留其角色。"],
   "Each group needs its id.": ["Cada grupo necesita su id.", "Chaque groupe a besoin de son id.", "Jede Gruppe braucht ihre ID.", "各グループには ID が必要です。", "每个组都需要其 ID。"],
   "A group gives one role.": ["Un grupo da un solo rol.", "Un groupe donne un seul rôle.", "Eine Gruppe gibt eine Rolle.", "1 つのグループが与えるロールは 1 つです。", "一个组只给一个角色。"],
-  "Redirect to register at the provider: http://127.0.0.1 (any port).": [
-    "Redirección que registrar en el proveedor: http://127.0.0.1 (cualquier puerto).", "Redirection à enregistrer chez le fournisseur : http://127.0.0.1 (tout port).",
-    "Beim Anbieter zu registrierende Weiterleitung: http://127.0.0.1 (beliebiger Port).", "プロバイダーに登録するリダイレクト: http://127.0.0.1 (任意のポート)。",
-    "在提供方注册的重定向：http://127.0.0.1（任意端口）。"],
+  "Redirect to register at the provider: http://localhost/callback (any port; on Entra ID, a Web platform redirect).": [
+    "Redirección que registrar en el proveedor: http://localhost/callback (cualquier puerto; en Entra ID, una redirección de la plataforma Web).",
+    "Redirection à enregistrer chez le fournisseur : http://localhost/callback (tout port ; sur Entra ID, une redirection de la plateforme Web).",
+    "Beim Anbieter zu registrierende Weiterleitung: http://localhost/callback (beliebiger Port; bei Entra ID eine Weiterleitung der Plattform „Web“).",
+    "プロバイダーに登録するリダイレクト: http://localhost/callback (任意のポート。Entra ID では「Web」プラットフォームのリダイレクト)。",
+    "在提供方注册的重定向：http://localhost/callback（任意端口；在 Entra ID 中为 Web 平台重定向）。"],
   "Require company sign-in": ["Exigir el inicio de sesión de empresa", "Exiger la connexion d’entreprise", "Unternehmensanmeldung verlangen", "会社のサインインを必須にする", "要求公司登录"],
   "Only company sign-in lets a new computer in; your passkey stays as the owner's way in.": [
     "Solo el inicio de sesión de empresa deja entrar un equipo nuevo; tu llave de acceso sigue siendo la entrada del propietario.",
@@ -172,6 +178,12 @@ export const signInMessages = {
     "La modification affichée n’est pas celle que le serveur appliquerait : rien n’a été approuvé.", "Die angezeigte Änderung ist nicht die, die der Server anwenden würde: nichts wurde genehmigt.",
     "表示された変更はサーバーが適用する変更ではありません。何も承認されていません。", "显示的更改并非服务器将应用的更改：未批准任何内容。"],
   "Email domains let in": ["Dominios de correo admitidos", "Domaines d’e-mail admis", "Zugelassene E-Mail-Domänen", "受け入れるメールのドメイン", "允许的邮箱域名"],
+  "Entra ID does not confirm emails, so an email domain would refuse all its accounts: they are let in by tenant id.": [
+    "Entra ID no confirma los correos, así que un dominio de correo rechazaría todas sus cuentas: se admiten por id. de inquilino.",
+    "Entra ID ne confirme pas les e-mails : un domaine d’e-mail refuserait tous ses comptes, qui sont admis par id. de locataire.",
+    "Entra ID bestätigt keine E-Mail-Adressen, deshalb würde eine E-Mail-Domäne alle seine Konten abweisen: Sie werden über die Mandanten-ID hereingelassen.",
+    "Entra ID はメールを確認しないため、メールのドメインを指定するとそのアカウントはすべて拒否されます。アカウントはテナント ID で受け入れます。",
+    "Entra ID 不会确认邮箱，因此邮箱域名会拒绝其所有账户：请改用租户 ID 允许它们。"],
   "Tenant ids let in": ["Id. de inquilino admitidos", "Id. de locataire admis", "Zugelassene Mandanten-IDs", "受け入れるテナント ID", "允许的租户 ID"],
   "Required for Entra ID": ["Obligatorio para Entra ID", "Obligatoire pour Entra ID", "Für Entra ID erforderlich", "Entra ID では必須", "Entra ID 必填"],
   "Requiring company sign-in needs company sign-in on.": ["Exigir el inicio de sesión de empresa requiere activarlo.", "Exiger la connexion d’entreprise demande de l’activer.",

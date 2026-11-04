@@ -104,6 +104,8 @@ const api: FleetServerApi = {
       name: request.displayName, requireSso: request.requireSso, domains: request.allowedDomains, confirmWith: request.confirmWith } }));
     // As the server: a change of the company sign-in waits for the owner to sign in again.
     if (request.issuer !== signIn.issuer && !request.confirmWith) return { status: "sign_in.confirmation_required", settings: null, logins: [], message: null, approvals: null };
+    // As the server: the Microsoft account the person picks to confirm is not one linked to them.
+    if (request.confirmWith === "microsoft") return { status: "sign_in.not_linked", settings: null, logins: [], message: "This account is not linked to you: confirm with a method linked to you.", approvals: null };
     signIn = { ...signIn, version: signIn.version + 1, issuer: request.issuer, clientId: request.clientId, hasClientSecret: !!request.clientSecret, displayName: request.displayName,
       requireSso: request.requireSso, allowedDomains: request.allowedDomains ?? [], methods: signIn.methods.map(method => ({ ...method, enabled: request.enabled.includes(method.id),
         name: method.id === "company" ? request.displayName ?? method.name : method.name, available: method.id === "company" ? !!request.issuer : method.available })) };

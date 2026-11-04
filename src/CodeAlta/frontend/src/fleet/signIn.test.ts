@@ -1,8 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import type { FleetSignInApprovalView, FleetSignInSettingsView } from "#neoastra";
-import { allowedValues, approvalLines, orderedSignInMethods, removableLogin, signInCode, signInDraft, signInDraftProblem, signInProblem, signInSummary } from "./signIn";
-
+import { allowedValues, approvalLines, confirmWays, isEntraIssuer, orderedSignInMethods, removableLogin, signInCode, signInDraft, signInDraftProblem, signInProblem, signInSummary } from "./signIn";
 const settings = (look: Partial<FleetSignInSettingsView> = {}): FleetSignInSettingsView => ({ methods: [
   { id: "company", name: "Contoso", enabled: true, available: true }, { id: "passkey", name: "Passkey", enabled: true, available: true },
   { id: "microsoft", name: "Microsoft", enabled: true, available: false }, { id: "google", name: "Google", enabled: false, available: true },
@@ -45,6 +44,22 @@ test("company sign-in names the domains or the tenants it lets in", () => {
   assert.equal(signInDraftProblem({ ...draft, allowedDomains: " , " }), "Company sign-in needs the email domains or the tenant ids it lets in.");
   assert.equal(signInDraftProblem({ ...draft, allowedDomains: "", allowedTenants: "tenant-a" }), null);
   assert.deepEqual(allowedValues(" Contoso.com, fabrikam.com;contoso.com\nexample.org "), ["contoso.com", "fabrikam.com", "example.org"]);
+});
+
+test("Entra ID is told by its issuer's host, whatever the tenant or the path", () => {
+  for (const issuer of ["https://login.microsoftonline.com/organizations/v2.0", " https://LOGIN.microsoftonline.com/0a1b/v2.0 ", "https://sts.windows.net/0a1b/",
+    "https://login.microsoft.com/0a1b/v2.0"]) assert.equal(isEntraIssuer(issuer), true, issuer);
+  for (const issuer of ["", "not a url", "https://login.contoso.example/v2.0", "https://accounts.google.com", "https://evil.example/login.microsoftonline.com"]) assert.equal(isEntraIssuer(issuer), false, issuer);
+});
+
+test("a confirmation with an account that is not theirs names the ways that are: the accounts of that method first, then each other method once", () => {
+  const login = (method: string, name: string) => ({ method, name });
+  const name = (method: string) => ({ passkey: "Passkey", microsoft: "Microsoft", google: "Google", github: "GitHub" })[method] ?? method;
+  assert.deepEqual(confirmWays("microsoft", [login("google", "a@gmail.com"), login("passkey", "Passkey on Windows"), login("microsoft", "alex@contoso.example"), login("github", "alex"),
+    login("microsoft", "alex@live.com"), login("passkey", "Passkey on Mac")], name), ["alex@contoso.example", "alex@live.com", "Google", "Passkey", "GitHub"]);
+  assert.deepEqual(confirmWays("github", [login("microsoft", "alex@contoso.example")], name), ["Microsoft"], "none of that method linked: only the others");
+  assert.deepEqual(confirmWays("passkey", [login("passkey", "Passkey on Windows"), login("google", "a@gmail.com")], name), ["Passkey", "Google"], "a passkey is named, not its device");
+  assert.deepEqual(confirmWays("microsoft", [], name), []);
 });
 
 test("the row says the methods people may use now, or that company sign-in is required", () => {
