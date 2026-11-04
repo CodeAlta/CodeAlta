@@ -137,6 +137,10 @@ internal sealed class NodeFleet : IAsyncDisposable
                 AdmitEnvironment = (environment, runId, title, token) => node.Automations?.Environments is { } gate
                     ? gate.AdmitAsync(environment, runId, null, title, token)
                     : Task.FromResult(CodeAlta.Orchestration.Runtime.EnvironmentAdmissionResult.Refused($"This machine runs no session in the environment '{environment}': it joined no server.")),
+                // A prompt sent through the node API starts a run the budgets of the machine admit first, once it joined a server.
+                AdmitBudget = (run, held, token) => node.Budgets is { } budgets
+                    ? budgets.AdmitAsync(run, held, token)
+                    : Task.FromResult(Fleet.Server.FleetBudgetAdmission.Admitted),
             });
             // An assigned automation runs while the device that assigned it is still paired, with the automate permission.
             if (node.Automations is { } automations)
@@ -374,6 +378,8 @@ internal sealed class NodeServers : IAsyncDisposable
         // The statistics the node counts (its Statistics plugin), published with the facts of its sessions.
         var statistics = Fleet.Server.FleetHostStatisticsSource.ForHost(node.Host);
         NodeFleetSecrets? secrets = null;
+        NodeBudgets? budgets = null;
+        var health = new NodeHealth(node);
         var connections = new Fleet.Server.FleetServerConnections(new Fleet.Server.FleetServerConnectionsOptions
         {
             FleetRoot = catalog.FleetRoot,
@@ -391,8 +397,15 @@ internal sealed class NodeServers : IAsyncDisposable
             Automations = node.Automations is { } given ? new NodeServerAutomations(given, identity) : null,
             // The values the servers seal for this node: read again as soon as a server says they changed.
             SecretsChanged = linkId => secrets?.Changed(linkId),
+            // The budgets and holds of the owner: the runs that wait read them again at once.
+            BudgetsChanged = _ => budgets?.Changed(),
+            // The problems of the machine travel with its heartbeat; the server tells its owner of those that last.
+            Health = health.Read,
         });
         secrets = new NodeFleetSecrets(node.Host, connections);
+        budgets = new NodeBudgets(connections, source, statistics);
+        node.Budgets = budgets;
+        if (node.Automations is { } limited) limited.Budgets = budgets;
         // A run that names an environment is admitted by its rules and its approval, as the servers verified them.
         if (node.Automations is { } admitted) admitted.Environments = new NodeEnvironmentGate(secrets, catalog);
         // An admission kept across a restart holds while the rules this node verified are the version that admitted it.
@@ -410,8 +423,11 @@ internal sealed class NodeServers : IAsyncDisposable
 
         connections.Start();
         secrets.Start();
-        return new NodeServers(identity, source, connections, statistics, secrets);
+        return new NodeServers(identity, source, connections, statistics, secrets) { Health = health };
     }
+
+    /// <summary>Gets the problems of the machine its heartbeats report.</summary>
+    public NodeHealth Health { get; private init; } = null!;
 
     // The device list is read again for each relay, so that a device removed from it is refused at once; when the server
     // does not answer, the list last verified is kept.

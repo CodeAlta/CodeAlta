@@ -284,6 +284,7 @@ import { SecretsSettings } from "./secrets/SecretsSettings";
 import { readMachinePageLink } from "./machines/machines";
 import { FleetServerSettings } from "./fleet/FleetServerSettings";
 import { FleetSecretsSettings } from "./fleet/FleetSecretsSettings";
+import { FleetBudgetsSettings } from "./fleet/FleetBudgetsSettings";
 import { FleetApprovals } from "./fleet/FleetApprovals";
 import { RemoteSessionChoice, RunOnChip, useMachines, useRemoteChoices } from "./machines/RunOnChip";
 import { newSessionProblem, noRemoteSelection, remoteSelection, remoteStartBlocker, runOnMachine, runOnTargets, type RemoteSelection } from "./machines/runOn";
@@ -376,6 +377,7 @@ import "./machines/machines.css";
 import "./secrets/secrets.css";
 import "./fleet/fleet.css";
 import "./fleet/fleetSecrets.css";
+import "./fleet/fleetBudgets.css";
 import "./spaces/spaces.css";
 import "./canvases/canvases.css";
 import "./landing/landing.css";
@@ -6183,6 +6185,7 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
         initialMachine={machineFocus?.id ?? null} />
       : settingsSection === "fleetServer" ? <FleetServerSettings epoch={owned ? status!.hostEpoch : null} />
       : settingsSection === "fleetSecrets" ? <FleetSecretsSettings epoch={owned ? status!.hostEpoch : null} />
+      : settingsSection === "fleetBudgets" ? <FleetBudgetsSettings epoch={owned ? status!.hostEpoch : null} />
       : settingsSection === "search" ? <SearchSettings projects={catalog.current?.projects ?? snapshot?.projects ?? []} spaces={spacesState.spaces}
           onMeaningTurnedOn={() => setFollowMeaning(true)}
           onOpenCanvas={(() => { const item = canvasCatalog.find(value => value.pluginKey === "builtin:search" && value.id === "search");

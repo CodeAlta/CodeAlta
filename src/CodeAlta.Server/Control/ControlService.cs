@@ -100,6 +100,9 @@ public sealed class ControlService
     /// <summary>Gets what keeps the statistics sets machines publish; null keeps none, and the welcome does not announce them.</summary>
     internal StatisticsService? Statistics { get; init; }
 
+    /// <summary>Gets what keeps the problems machines report in their heartbeat; null keeps none.</summary>
+    internal HealthService? Health { get; init; }
+
     /// <summary>Serves a WebSocket request on <see cref="FleetServerMethods.ControlPath"/>.</summary>
     /// <param name="context">The request.</param>
     /// <returns>A task that completes when the connection ends.</returns>
@@ -210,7 +213,7 @@ public sealed class ControlService
     {
         var connection = session.Connection;
         void On(string method, FleetRequestHandler handler) => connection.RegisterRequestHandler(method, Traced(session, handler));
-        On(FleetServerMethods.PresenceUpdate, Handler(FleetServerJsonContext.Default.FleetPresenceUpdate, (update, _) =>
+        On(FleetServerMethods.PresenceUpdate, Handler(FleetServerJsonContext.Default.FleetPresenceUpdate, async (update, token) =>
         {
             if (update is null || string.IsNullOrEmpty(update.State) || update.State.Length > MaxStateLength || update.ActiveSessions < 0)
             {
@@ -218,7 +221,9 @@ public sealed class ControlService
             }
 
             if (session.Update(update)) _directory.Publish(session.Device.OrganizationId, PresenceChange(session.GetPresence()));
-            return Task.FromResult<JsonElement?>(null);
+            // The problems of the machine: those that last are told to its owner, once.
+            if (update.Health is { } health && Health is { } service) await service.ReportAsync(session.Device, health, token).ConfigureAwait(false);
+            return null;
         }));
 
         On(FleetServerMethods.UpdateReport, Handler(FleetServerJsonContext.Default.FleetUpdateReport, async (report, token) =>

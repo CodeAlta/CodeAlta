@@ -505,6 +505,10 @@ public sealed partial class FleetConnector : IAsyncDisposable
                 case Protocol.Api.FleetSecretMethods.Changed:
                     _options.SecretsChanged?.Invoke();
                     break;
+                case Protocol.Api.FleetBudgetMethods.Changed:
+                case Protocol.Api.FleetBudgetMethods.NotificationsChanged:
+                    _options.BudgetsChanged?.Invoke();
+                    break;
             }
 
             return ValueTask.CompletedTask;
@@ -804,7 +808,9 @@ public sealed partial class FleetConnector : IAsyncDisposable
             if (!revisions.TryGetValue(session.SessionId, out var revision)) continue;
             // The project travels as a blind index of the key of the session's space: without a key yet, it waits with the titles.
             var projectKey = KeyOf(session) is { } key && session.ProjectIdentity is { Length: > 0 } identity ? FleetProjectKeys.Of(key, identity) : null;
-            if (!outbox.NeedsRows(session.SessionId, revision, session.Epoch, projectKey)) continue;
+            // The space travels as the opaque id the server knows it by, which the budgets of a space count by.
+            var spaceKey = KeyOf(session)?.Grant?.SpaceId;
+            if (!outbox.NeedsRows(session.SessionId, revision, session.Epoch, projectKey, spaceKey)) continue;
             var read = await source.ReadRowsAsync(session.SessionId, _options.StatisticsFromQuarter, stop).ConfigureAwait(false);
             if (read.Count > MaxStatisticsRowsPerSet)
             {
@@ -813,7 +819,7 @@ public sealed partial class FleetConnector : IAsyncDisposable
                 continue;
             }
 
-            if (outbox.Record(session.SessionId, revision, session.Epoch, projectKey, read) is not { } set) continue;
+            if (outbox.Record(session.SessionId, revision, session.Epoch, projectKey, read, spaceKey) is not { } set) continue;
             if (sets.Count > 0 && (sets.Count >= MaxStatisticsSetsPerBatch || rows + set.Rows.Count > MaxStatisticsRowsPerBatch))
             {
                 await SendStatisticsAsync(connection, outbox, sets, stop).ConfigureAwait(false);
@@ -871,8 +877,24 @@ public sealed partial class FleetConnector : IAsyncDisposable
     {
         _activeSessions = active;
         await connection.SendRequestAsync(FleetServerMethods.PresenceUpdate,
-            JsonSerializer.SerializeToElement(new FleetPresenceUpdate(active > 0 ? "busy" : "active", active, _options.UpdateReport?.Invoke()), FleetServerJsonContext.Default.FleetPresenceUpdate),
+            JsonSerializer.SerializeToElement(new FleetPresenceUpdate(active > 0 ? "busy" : "active", active, _options.UpdateReport?.Invoke(), ReadHealth()),
+                FleetServerJsonContext.Default.FleetPresenceUpdate),
             null, stop).ConfigureAwait(false);
+    }
+
+    // The problems of the machine for its heartbeat; a probe that fails says nothing rather than that all is well.
+    private IReadOnlyList<Protocol.Api.FleetHealthProblem>? ReadHealth()
+    {
+        if (_options.Health is not { } health) return null;
+        try
+        {
+            return health();
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException)
+        {
+            if (LogManager.IsInitialized) _logger.Warn($"The health of the machine could not be read: {exception.Message}");
+            return null;
+        }
     }
 
     // Waits for a wake, the time given or the end of the connection; true when woken.

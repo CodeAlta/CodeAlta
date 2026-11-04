@@ -57,6 +57,9 @@ public sealed class NodeHost : IAsyncDisposable
     /// </summary>
     internal NodeAutomations? Automations { get; }
 
+    /// <summary>Gets or sets what admits the runs of the node to the budgets of its owner; null until the node joined a server.</summary>
+    internal NodeBudgets? Budgets { get; set; }
+
     /// <summary>
     /// Gets the dispatcher of the <c>alta</c> commands, the one of the <c>alta</c> tool of the sessions of the node
     /// (<see cref="AltaCommandRegistryOptions.Node"/>).

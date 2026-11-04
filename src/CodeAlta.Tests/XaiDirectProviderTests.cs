@@ -360,6 +360,19 @@ public sealed class XaiDirectProviderTests
         var status = await manager.GetCredentialStatusAsync(new XaiDirectLoginOptions("xai", temp.Path)).ConfigureAwait(false);
         Assert.IsNotNull(status);
         Assert.IsTrue(status!.ExpiresAt > DateTimeOffset.UtcNow);
+        Assert.IsTrue(result.Renews && status.Renews, "a sign-in with a refresh token renews its access token");
+    }
+
+    [TestMethod]
+    public async Task XaiDirectLoginManager_GetCredentialStatus_SaysASignInWithoutRefreshTokenDoesNotRenew()
+    {
+        using var temp = TestTempDirectory.Create();
+        WriteCachedCredential(temp.Path, "xai", refreshToken: null);
+        var manager = new XaiDirectLoginManager(new HttpClient(new StubHandler(_ => new HttpResponseMessage(HttpStatusCode.NotFound))));
+
+        var status = await manager.GetCredentialStatusAsync(new XaiDirectLoginOptions("xai", temp.Path)).ConfigureAwait(false);
+        Assert.IsNotNull(status);
+        Assert.IsFalse(status!.Renews, "without a refresh token, the sign-in ends when its access token expires");
     }
 
     [TestMethod]
@@ -454,7 +467,7 @@ public sealed class XaiDirectProviderTests
         Assert.IsNull(await manager.GetCredentialStatusAsync(new XaiDirectLoginOptions("xai", temp.Path)).ConfigureAwait(false));
     }
 
-    private static void WriteCachedCredential(string stateRoot, string providerKey, string accessToken = "test-token")
+    private static void WriteCachedCredential(string stateRoot, string providerKey, string accessToken = "test-token", string? refreshToken = "refresh-token")
     {
         var dir = Path.Combine(stateRoot, "auth", "xai");
         Directory.CreateDirectory(dir);
@@ -462,7 +475,7 @@ public sealed class XaiDirectProviderTests
         var json = $$"""
             {
               "access_token": "{{accessToken}}",
-              "refresh_token": "refresh-token",
+              "refresh_token": {{(refreshToken is null ? "null" : "\"" + refreshToken + "\"")}},
               "expires_at": {{expires}},
               "scope": "openid offline_access api:access"
             }

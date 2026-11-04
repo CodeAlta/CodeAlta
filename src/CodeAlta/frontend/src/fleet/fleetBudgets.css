@@ -1,0 +1,18 @@
+/* Settings > Fleet > Budgets: the rows of Settings > Fleet > Secrets, with the consumption bar of each budget. */
+.fleet-budget-row { grid-template-columns: minmax(9rem, max-content) minmax(0, max-content) minmax(8rem, 1fr) max-content; }
+.fleet-budget-usage { display: grid; gap: 4px; min-width: 0; }
+.fleet-budget-usage .bp6-progress-bar { height: 6px; }
+.fleet-budget-usage .secret-meta { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fleet-budget-form { margin: 0; min-width: min(30rem, calc(100vw - 32px)); max-width: calc(100vw - 32px); box-sizing: border-box; }
+.secret-list .fleet-budget-form, .fleet-secrets-head + .fleet-budget-form { margin: 8px 0 12px; }
+.fleet-notification-row { grid-template-columns: max-content minmax(0, 1fr) max-content max-content; }
+.fleet-notification-text { min-width: 0; overflow-wrap: anywhere; }
+@container (max-width: 600px) {
+  .fleet-budget-row { grid-template-columns: minmax(0, 1fr) max-content; }
+  .fleet-budget-row .secret-name { grid-column: 1; grid-row: 1; }
+  .fleet-budget-row .secret-actions { grid-column: 2; grid-row: 1; }
+  .fleet-budget-row .fleet-secret-tags { grid-column: 1 / -1; grid-row: 2; justify-self: start; }
+  .fleet-budget-row .fleet-budget-usage { grid-column: 1 / -1; grid-row: 3; }
+  .fleet-notification-row { grid-template-columns: max-content minmax(0, 1fr) max-content; }
+  .fleet-notification-row .secret-meta { grid-column: 2; grid-row: 2; }
+}

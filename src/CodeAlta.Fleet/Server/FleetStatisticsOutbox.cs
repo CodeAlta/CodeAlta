@@ -88,10 +88,11 @@ internal sealed class FleetStatisticsOutbox
     /// <param name="revision">The revision of its facts.</param>
     /// <param name="epoch">Its epoch.</param>
     /// <param name="projectKey">The key of its project.</param>
+    /// <param name="spaceKey">The opaque id of its space at the server.</param>
     /// <returns>Whether to read its rows.</returns>
-    public bool NeedsRows(string sessionId, string revision, long epoch, string? projectKey)
+    public bool NeedsRows(string sessionId, string revision, long epoch, string? projectKey, string? spaceKey = null)
         => !_state.Sessions.TryGetValue(sessionId, out var kept) || kept.Withdraw || kept.Version > kept.Acked || kept.Revision != revision || kept.Epoch != epoch
-            || kept.ProjectKey != projectKey;
+            || kept.ProjectKey != projectKey || kept.SpaceKey != spaceKey;
 
     /// <summary>
     /// Records the rows of a session as they are now: a new version when they changed. Gives the set to send when the server
@@ -103,8 +104,9 @@ internal sealed class FleetStatisticsOutbox
     /// <param name="epoch">Its epoch.</param>
     /// <param name="projectKey">The key of its project.</param>
     /// <param name="rows">Its rows.</param>
+    /// <param name="spaceKey">The opaque id of its space at the server.</param>
     /// <returns>The set to send, or null.</returns>
-    public FleetStatisticsSet? Record(string sessionId, string revision, long epoch, string? projectKey, IReadOnlyList<FleetStatisticsRow> rows)
+    public FleetStatisticsSet? Record(string sessionId, string revision, long epoch, string? projectKey, IReadOnlyList<FleetStatisticsRow> rows, string? spaceKey = null)
     {
         if (!_state.Sessions.TryGetValue(sessionId, out var kept))
         {
@@ -118,7 +120,7 @@ internal sealed class FleetStatisticsOutbox
             kept.Acked = 0;
         }
 
-        var set = new FleetStatisticsSet(sessionId, epoch, 0, projectKey, rows);
+        var set = new FleetStatisticsSet(sessionId, epoch, 0, projectKey, rows, spaceKey);
         var hash = Hash(set);
         if (kept.Hash != hash)
         {
@@ -129,6 +131,7 @@ internal sealed class FleetStatisticsOutbox
         kept.Revision = revision;
         kept.Epoch = epoch;
         kept.ProjectKey = projectKey;
+        kept.SpaceKey = spaceKey;
         _dirty = true;
         return kept.Version > kept.Acked ? set with { Version = kept.Version } : null;
     }
@@ -255,6 +258,8 @@ internal sealed class FleetStatisticsOutboxSession
     public long Epoch { get; set; }
 
     public string? ProjectKey { get; set; }
+
+    public string? SpaceKey { get; set; }
 
     public long Version { get; set; }
 

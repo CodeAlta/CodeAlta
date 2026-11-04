@@ -60,7 +60,11 @@ internal sealed class FleetNodeFixture : IAsyncDisposable
     public static Task<FleetNodeFixture> StartAsync(CancellationToken cancellationToken) => StartAsync(cancellationToken, null);
 
     /// <summary>Starts the node, with the automations it runs for its devices; null for none.</summary>
-    public static async Task<FleetNodeFixture> StartAsync(CancellationToken cancellationToken, IFleetNodeAutomations? automations)
+    public static Task<FleetNodeFixture> StartAsync(CancellationToken cancellationToken, IFleetNodeAutomations? automations) => StartAsync(cancellationToken, automations, null);
+
+    /// <summary>Starts the node, with the automations it runs for its devices and what admits its runs to budgets; null for none.</summary>
+    public static async Task<FleetNodeFixture> StartAsync(CancellationToken cancellationToken, IFleetNodeAutomations? automations,
+        Func<FleetNodeBudgetRun, Action, CancellationToken, Task<CodeAlta.Fleet.Server.FleetBudgetAdmission>>? admitBudget)
     {
         var root = Path.Combine(Path.GetTempPath(), "codealta-desktop-fleet-tests", Guid.NewGuid().ToString("N"));
         var global = Path.Combine(root, "global");
@@ -81,7 +85,7 @@ internal sealed class FleetNodeFixture : IAsyncDisposable
         var service = new FleetNodeService(new FleetNodeServiceOptions
         {
             Host = host, Identity = identity, TrustedDevices = new TrustedDeviceStore(nodeFleet, TimeProvider.System), Name = "test-node", Version = "1.0.0",
-            PairingAddresses = () => addresses, Automations = automations,
+            PairingAddresses = () => addresses, Automations = automations, AdmitBudget = admitBudget,
         });
         var listener = FleetDirectListener.Start(new IPEndPoint(IPAddress.Loopback, 0), service.ServeAsync);
         addresses = [FleetDirectConnector.Format(IPAddress.Loopback, listener.LocalEndPoint.Port)];
@@ -120,6 +124,9 @@ internal sealed class ScriptedFleetProvider
     internal ModelProviderDescriptor Descriptor { get; set; } = new(new ModelProviderId("scripted"), "Scripted") { DefaultModelId = Model, IsDefault = true };
 
     internal ConcurrentQueue<Func<AgentTurnRequest, CancellationToken, Task<AgentTurnResponse>>> Turns { get; } = new();
+
+    /// <summary>Gets the text of the last prompt of each turn, in order.</summary>
+    internal ConcurrentQueue<string> Prompts { get; } = new();
 
     internal void Register(ModelProviderRegistry registry) => registry.RegisterOrReplace(Descriptor, () => new Runtime(this));
 
@@ -172,6 +179,10 @@ internal sealed class ScriptedFleetProvider
     {
         public Task<AgentTurnResponse> ExecuteTurnAsync(AgentTurnRequest request, Func<AgentTurnDelta, CancellationToken, ValueTask> onUpdate,
             CancellationToken cancellationToken = default)
-            => owner.Turns.TryDequeue(out var step) ? step(request, cancellationToken) : Task.FromResult(Answer("Done."));
+        {
+            if (request.Conversation.LastOrDefault(static message => message.Role == AgentConversationRole.User) is { } user)
+                owner.Prompts.Enqueue(string.Join("\n", user.Parts.OfType<AgentMessagePart.Text>().Select(static part => part.Value)));
+            return owner.Turns.TryDequeue(out var step) ? step(request, cancellationToken) : Task.FromResult(Answer("Done."));
+        }
     }
 }

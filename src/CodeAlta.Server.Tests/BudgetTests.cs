@@ -1,0 +1,395 @@
+using System.Net;
+using CodeAlta.Fleet.Identity;
+using CodeAlta.Fleet.Protocol;
+using CodeAlta.Fleet.Protocol.Api;
+using CodeAlta.Fleet.Server;
+using CodeAlta.Server.Services;
+using CodeAlta.Server.Storage;
+
+namespace CodeAlta.Server.Tests;
+
+/// <summary>
+/// The budgets of a person at the server (<c>doc/fleet/observability.md</c>, budgets and alerts): signed by a controller device of
+/// their owner; consumption from the published facts, with 80% and 100% told once per period; allowances that never pass the
+/// limit; a reached budget that holds a run until a Continue anyway its owner signed, which the machine verifies; offline
+/// spending within what a machine holds.
+/// </summary>
+[TestClass]
+public sealed class BudgetTests
+{
+    private static readonly TimeSpan Patience = TimeSpan.FromSeconds(20);
+
+    public TestContext TestContext { get; set; } = null!;
+
+    [TestMethod]
+    public void Allowances_NeverPassTheLimit_WhateverTheMachinesAskOrSpend()
+    {
+        var random = new Random(4242);
+        for (var round = 0; round < 50; round++)
+        {
+            var limit = random.NextInt64(1, 10_000);
+            var granted = new Dictionary<string, long>(StringComparer.Ordinal);
+            var used = new Dictionary<string, long>(StringComparer.Ordinal);
+            string[] machines = ["a", "b", "c", "d"];
+            for (var step = 0; step < 400; step++)
+            {
+                var machine = machines[random.Next(machines.Length)];
+                if (random.Next(3) == 0)
+                {
+                    // A machine spends offline what it holds, a run sometimes a little more (a run admitted with the reserve may pass it).
+                    var holds = granted.GetValueOrDefault(machine) - used.GetValueOrDefault(machine);
+                    used[machine] = used.GetValueOrDefault(machine) + Math.Max(0, random.NextInt64(0, Math.Max(1, holds + 3)));
+                    continue;
+                }
+
+                var needed = random.NextInt64(0, limit / 10 + 2);
+                var spent = used.GetValueOrDefault(machine) + (random.Next(4) == 0 ? random.NextInt64(0, 5) : 0);
+                var (holdsNow, exhausted) = BudgetAllowances.Grant(limit, granted, used, machine, spent, needed, BudgetAllowances.Share(limit));
+                var given = holdsNow - granted.GetValueOrDefault(machine);
+                Assert.IsGreaterThanOrEqualTo(0, given, "an allowance is never taken back by a grant");
+                granted[machine] = holdsNow;
+                Assert.IsLessThanOrEqualTo(limit, granted.Values.Sum(), $"the allowances never pass the limit (round {round}, step {step})");
+                if (given > 0) Assert.IsLessThanOrEqualTo(limit, BudgetAllowances.Committed(granted, used), "a grant gives only what no machine held or used");
+                if (!exhausted) Assert.IsGreaterThanOrEqualTo(needed, holdsNow - Math.Max(spent, used.GetValueOrDefault(machine)), "what is not exhausted holds what is needed");
+            }
+        }
+    }
+
+    [TestMethod]
+    public void AMachine_GetsAShare_SpendsIt_AndTopsUpUntilTheBudgetIsReached()
+    {
+        var granted = new Dictionary<string, long>(StringComparer.Ordinal);
+        var used = new Dictionary<string, long>(StringComparer.Ordinal);
+        var share = BudgetAllowances.Share(1000);
+        Assert.AreEqual(250, share);
+
+        // The first ask gets a share, more than a run needs: the machine spends it without asking, also offline.
+        Assert.AreEqual((250L, false), BudgetAllowances.Grant(1000, granted, used, "node", 0, 10, share));
+        granted["node"] = 250;
+        Assert.AreEqual((250L, false), BudgetAllowances.Grant(1000, granted, used, "node", 200, 10, share), "it holds enough: nothing changes");
+
+        // Spent nearly all of it: it tops up by another share, and keeps what it did not spend.
+        Assert.AreEqual((500L, false), BudgetAllowances.Grant(1000, granted, used, "node", 245, 10, share));
+        granted["node"] = 500;
+
+        // A desktop that spends without allowances still counts: its facts take their part of the limit.
+        used["desktop"] = 400;
+        Assert.AreEqual((600L, false), BudgetAllowances.Grant(1000, granted, used, "node", 495, 10, share), "only what nobody committed is given");
+        granted["node"] = 600;
+        Assert.AreEqual((600L, true), BudgetAllowances.Grant(1000, granted, used, "node", 595, 10, share), "the budget is reached");
+        Assert.AreEqual((0L, true), BudgetAllowances.Grant(1000, granted, used, "laptop", 0, 10, share), "another machine gets nothing either");
+
+        // A machine that spent more than it held (a run passed it) commits what it spent, never less.
+        used["desktop"] = 0;
+        Assert.AreEqual((900L, false), BudgetAllowances.Grant(1000, granted, used, "node", 650, 10, share), "its overspend (650 of 600) is covered first, then a share");
+    }
+
+    [TestMethod]
+    public async Task ABudget_IsSignedByItsOwner_AndTheServerTakesNoOtherSignature()
+    {
+        await using var fleet = await BudgetFixture.StartAsync();
+        var budget = await fleet.Manager.PutAsync(null, Settings(1000), CancellationToken.None);
+        Assert.AreEqual((1L, FleetBudgetStates.Ok, 1000L), (budget.Number, budget.Usage!.State, budget.Usage.Limit));
+        var changed = await fleet.Manager.PutAsync(budget.Id, Settings(2000), CancellationToken.None);
+        Assert.AreEqual((2L, 2000L), (changed.Number, changed.Usage!.Limit));
+
+        // A machine reads the budgets of its owner, never sets one.
+        FleetBudgetDocuments.TryRead(changed.Signed.Payload, out var definition, out _);
+        var bySelf = FleetBudgetsManager.SignBudget(fleet.NodeKey, definition! with { Number = 3 });
+        var refused = await fleet.Server.SendAsync(TestDevice.From(fleet.NodeKey), HttpMethod.Put, $"/api/v1/budgets/{budget.Id}", new PutFleetBudgetRequest(bySelf));
+        Assert.AreEqual(HttpStatusCode.Forbidden, refused.Status);
+
+        // Another signature, an older version, a team: refused.
+        var forged = new FleetSignedBudget(FleetBudgetDocuments.Serialize(definition with { Number = 3, Limit = 10_000_000 }), changed.Signed.Signature);
+        var tampered = await fleet.Server.SendAsync(TestDevice.From(fleet.DesktopKey), HttpMethod.Put, $"/api/v1/budgets/{budget.Id}", new PutFleetBudgetRequest(forged));
+        Assert.AreEqual((HttpStatusCode.BadRequest, CoordinatorErrorCodes.BudgetInvalid), (tampered.Status, tampered.Code));
+        var stale = FleetBudgetsManager.SignBudget(fleet.DesktopKey, definition with { Number = 2 });
+        var older = await fleet.Server.SendAsync(TestDevice.From(fleet.DesktopKey), HttpMethod.Put, $"/api/v1/budgets/{budget.Id}", new PutFleetBudgetRequest(stale));
+        Assert.AreEqual((HttpStatusCode.Conflict, CoordinatorErrorCodes.BudgetConflict), (older.Status, older.Code));
+        await Assert.ThrowsExactlyAsync<FleetServerException>(() => fleet.Manager.PutAsync(null, Settings(1000) with { ScopeKind = FleetBudgetScopeKinds.Team, ScopeId = "t" },
+            CancellationToken.None));
+
+        // The machine verifies what it reads against the device list it anchored.
+        using var node = new FleetServerClient(fleet.Server.BaseAddress, fleet.NodeKey);
+        var listed = (await node.ListMachineBudgetsAsync()).Budgets.Single();
+        var list = await new FleetOrganizationDevices(fleet.Server.BaseAddress, fleet.NodeKey).RefreshAsync(CancellationToken.None);
+        Assert.IsTrue(FleetBudgetDocuments.TryVerify(listed.Signed, list, fleet.NodeKey.DeviceId, out var verified, out var reason), reason);
+        Assert.AreEqual(2000, verified.Limit);
+        Assert.IsFalse(FleetBudgetDocuments.TryVerify(forged, list, fleet.NodeKey.DeviceId, out _, out _), "a budget the server made up does not verify");
+
+        // Removed, it limits nothing and is no longer listed.
+        await fleet.Manager.RemoveAsync(budget.Id, CancellationToken.None);
+        Assert.AreEqual(0, (await fleet.Manager.ListAsync(CancellationToken.None)).Budgets.Count);
+        Assert.AreEqual(0, (await node.ListMachineBudgetsAsync()).Budgets.Count);
+        CollectionAssert.IsSubsetOf(new[] { "budget.set", "budget.remove" }, (await fleet.AuditAsync("budget.")).Select(static record => record.Action).ToArray());
+    }
+
+    [TestMethod]
+    public async Task TheFactsOfAPeriod_Warn_At80And100_OncePerPeriod()
+    {
+        await using var fleet = await BudgetFixture.StartAsync();
+        var budget = await fleet.Manager.PutAsync(null, Settings(1000) with { Mode = FleetBudgetModes.Advisory }, CancellationToken.None);
+        await fleet.PublishAsync(fleet.NodeKey, 1, 700, 150);
+        var usage = (await fleet.Manager.ListAsync(CancellationToken.None)).Budgets.Single().Usage!;
+        Assert.AreEqual((850L, FleetBudgetStates.Warning), (usage.Used, usage.State));
+        var notifications = (await fleet.Manager.ListNotificationsAsync(CancellationToken.None)).Notifications;
+        Assert.AreEqual(FleetNotificationKinds.BudgetWarning, notifications.Single().Kind);
+        Assert.AreEqual((budget.Id, "Tokens of the person", "850/1000"), (notifications[0].BudgetId, notifications[0].Subject, notifications[0].Detail));
+
+        // The same facts again, then more of them on another machine: one warning, one reached.
+        await fleet.PublishAsync(fleet.NodeKey, 2, 700, 150);
+        await fleet.PublishAsync(fleet.OtherKey, 1, 300, 0);
+        await fleet.PublishAsync(fleet.OtherKey, 2, 400, 0);
+        notifications = (await fleet.Manager.ListNotificationsAsync(CancellationToken.None)).Notifications;
+        CollectionAssert.AreEquivalent(new[] { FleetNotificationKinds.BudgetWarning, FleetNotificationKinds.BudgetReached }, notifications.Select(static n => n.Kind).ToArray());
+        Assert.AreEqual(FleetBudgetStates.Reached, (await fleet.Manager.ListAsync(CancellationToken.None)).Budgets.Single().Usage!.State);
+
+        // Dismissed on one device, it is read on all; it is not made again.
+        var read = await fleet.Manager.ReadNotificationAsync(notifications[0].Id, CancellationToken.None);
+        Assert.IsNotNull(read.Notifications.Single(n => n.Id == notifications[0].Id).ReadAt);
+        await fleet.PublishAsync(fleet.OtherKey, 3, 500, 0);
+        Assert.AreEqual(2, (await fleet.Manager.ListNotificationsAsync(CancellationToken.None)).Notifications.Count);
+
+        // A machine sees no notification, and dismisses none.
+        using var node = new FleetServerClient(fleet.Server.BaseAddress, fleet.NodeKey);
+        Assert.AreEqual(0, (await node.ListNotificationsAsync()).Notifications.Count);
+        var other = await Assert.ThrowsExactlyAsync<FleetServerException>(() => node.ReadNotificationAsync(notifications[0].Id));
+        Assert.AreEqual(CoordinatorErrorCodes.NotificationNotFound, other.Code);
+    }
+
+    [TestMethod]
+    public async Task AnEnforcedBudget_GivesAllowances_NeverMoreThanItsLimit()
+    {
+        await using var fleet = await BudgetFixture.StartAsync();
+        var budget = await fleet.Manager.PutAsync(null, Settings(1000), CancellationToken.None);
+        using var node = new FleetServerClient(fleet.Server.BaseAddress, fleet.NodeKey);
+        using var other = new FleetServerClient(fleet.Server.BaseAddress, fleet.OtherKey);
+        var first = await node.AskAllowanceAsync(budget.Id, new FleetAllowanceRequest(1, 0, 10));
+        Assert.AreEqual((250L, false), (first.Granted, first.Exhausted));
+        var big = await other.AskAllowanceAsync(budget.Id, new FleetAllowanceRequest(1, 0, 700));
+        Assert.AreEqual((700L, false), (big.Granted, big.Exhausted));
+        var last = await node.AskAllowanceAsync(budget.Id, new FleetAllowanceRequest(1, 245, 100));
+        Assert.AreEqual((300L, true), (last.Granted, last.Exhausted), "the rest of the limit, then reached");
+        var listed = (await fleet.Manager.ListAsync(CancellationToken.None)).Budgets.Single().Usage!;
+        Assert.AreEqual((1000L, 0L), (listed.Granted, listed.Used), "what the machines hold is the limit, nothing spent yet");
+        Assert.AreEqual(FleetNotificationKinds.BudgetReached, (await fleet.Manager.ListNotificationsAsync(CancellationToken.None)).Notifications
+            .Single(static n => n.Kind == FleetNotificationKinds.BudgetReached).Kind, "an exhausted budget tells its owner once");
+
+        // An old version of the budget, a budget that is advisory: refused.
+        var stale = await Assert.ThrowsExactlyAsync<FleetServerException>(() => node.AskAllowanceAsync(budget.Id, new FleetAllowanceRequest(7, 0, 10)));
+        Assert.AreEqual(CoordinatorErrorCodes.BudgetConflict, stale.Code);
+        var advisory = await fleet.Manager.PutAsync(null, Settings(1000) with { Name = "Advisory", Mode = FleetBudgetModes.Advisory }, CancellationToken.None);
+        Assert.AreEqual(CoordinatorErrorCodes.BudgetInvalid,
+            (await Assert.ThrowsExactlyAsync<FleetServerException>(() => node.AskAllowanceAsync(advisory.Id, new FleetAllowanceRequest(1, 0, 10)))).Code);
+    }
+
+    [TestMethod]
+    public async Task AReachedBudget_HoldsARun_UntilItsOwnerSignsContinueAnyway()
+    {
+        await using var fleet = await BudgetFixture.StartAsync();
+        var budget = await fleet.Manager.PutAsync(null, Settings(100), CancellationToken.None);
+        // Another machine holds all of it.
+        using (var other = new FleetServerClient(fleet.Server.BaseAddress, fleet.OtherKey))
+            Assert.IsTrue((await other.AskAllowanceAsync(budget.Id, new FleetAllowanceRequest(1, 0, 100))).Granted == 100);
+
+        var gate = fleet.Gate(new FakeSpend());
+        var held = new TaskCompletionSource();
+        var admission = gate.AdmitAsync(new FleetBudgetRun("run-1", "Deploy", null, null), () => held.TrySetResult(), TestContext.CancellationToken);
+        await held.Task.WaitAsync(Patience, TestContext.CancellationToken);
+        var hold = await WaitForAsync(async () => (await fleet.Manager.ListHoldsAsync(CancellationToken.None)).Holds.FirstOrDefault(), TestContext.CancellationToken);
+        Assert.AreEqual((FleetBudgetHoldStates.Waiting, "run-1", "Deploy", fleet.NodeKey.DeviceId), (hold.Status, hold.RunId, hold.Title, hold.MachineId));
+        Assert.IsFalse(admission.IsCompleted, "the run waits");
+
+        // A Continue anyway the server makes up, or one the machine signs, is refused: only the owner's controller device signs it.
+        FleetBudgetDocuments.TryRead(budget.Signed.Payload, out var definition, out _);
+        var time = DateTimeOffset.FromUnixTimeSeconds(DateTimeOffset.UtcNow.ToUnixTimeSeconds());
+        var bySelf = FleetBudgetsManager.SignContinue(fleet.NodeKey, new FleetBudgetContinue(1, definition!.OrganizationId, hold.Id, budget.Id, 1, hold.PeriodStart,
+            hold.MachineId, hold.RunId, hold.Nonce, definition.PersonId, fleet.NodeKey.DeviceId, time, time.AddHours(1)));
+        var forged = await fleet.Server.SendAsync(TestDevice.From(fleet.NodeKey), HttpMethod.Post, $"/api/v1/budget-holds/{hold.Id}/continue", new ContinueFleetBudgetHoldRequest(bySelf));
+        Assert.AreEqual(HttpStatusCode.Forbidden, forged.Status);
+
+        var continued = await fleet.Manager.ContinueAsync(hold.Id, CancellationToken.None);
+        Assert.AreEqual(FleetBudgetHoldStates.Continued, continued.Status);
+        gate.Changed();
+        var result = await admission.WaitAsync(Patience, TestContext.CancellationToken);
+        Assert.IsNull(result.Problem, result.Problem);
+        CollectionAssert.AreEqual(new[] { budget.Id }, result.Continued.ToArray());
+        await Assert.ThrowsExactlyAsync<FleetServerException>(() => fleet.Manager.ContinueAsync(hold.Id, CancellationToken.None), "a hold is decided once");
+
+        // The next run waits again: Continue anyway is for one run.
+        var stopped = gate.AdmitAsync(new FleetBudgetRun("run-2", null, null, null), TestContext.CancellationToken);
+        var second = await WaitForAsync(async () => (await fleet.Manager.ListHoldsAsync(CancellationToken.None)).Holds.FirstOrDefault(h => h.RunId == "run-2"), TestContext.CancellationToken);
+        await fleet.Manager.StopAsync(second.Id, CancellationToken.None);
+        gate.Changed();
+        StringAssert.Contains((await stopped.WaitAsync(Patience, TestContext.CancellationToken)).Problem, "stopped");
+        CollectionAssert.IsSubsetOf(new[] { "budget.hold", "budget.continue", "budget.stop" }, (await fleet.AuditAsync("budget.")).Select(static record => record.Action).ToArray());
+    }
+
+    [TestMethod]
+    public async Task AStopBudget_RefusesAtOnce_AndAnAdvisoryOne_HoldsOnceTheFactsReachIt()
+    {
+        await using var fleet = await BudgetFixture.StartAsync();
+        var spend = new FakeSpend();
+        var gate = fleet.Gate(spend);
+        var advisory = await fleet.Manager.PutAsync(null, Settings(1000) with { Mode = FleetBudgetModes.Advisory }, CancellationToken.None);
+        Assert.IsNull((await gate.AdmitAsync(new FleetBudgetRun("run-1", null, null, null), TestContext.CancellationToken)).Problem, "under its limit, a run starts");
+
+        // The facts of another machine reach the limit: the next run of this machine waits.
+        await fleet.PublishAsync(fleet.OtherKey, 1, 900, 200);
+        var waiting = gate.AdmitAsync(new FleetBudgetRun("run-2", null, null, null), TestContext.CancellationToken);
+        var hold = await WaitForAsync(async () => (await fleet.Manager.ListHoldsAsync(CancellationToken.None)).Holds.FirstOrDefault(), TestContext.CancellationToken);
+        Assert.AreEqual(advisory.Id, hold.BudgetId);
+
+        // A higher limit releases it: the budget is no longer reached.
+        await fleet.Manager.PutAsync(advisory.Id, Settings(5000) with { Mode = FleetBudgetModes.Advisory }, CancellationToken.None);
+        gate.Changed();
+        Assert.IsNull((await waiting.WaitAsync(Patience, TestContext.CancellationToken)).Problem);
+
+        // A budget that stops: this machine's own count reaches it, without the server.
+        await fleet.Manager.PutAsync(null, Settings(100) with { Name = "Machine", ScopeKind = FleetBudgetScopeKinds.Machine, ScopeId = fleet.NodeKey.DeviceId,
+            Mode = FleetBudgetModes.Advisory, Reached = FleetBudgetReachedActions.Stop }, CancellationToken.None);
+        spend.Spent = 100;
+        var refused = await gate.AdmitAsync(new FleetBudgetRun("run-3", null, null, null), TestContext.CancellationToken);
+        StringAssert.Contains(refused.Problem, "'Machine' is reached");
+    }
+
+    [TestMethod]
+    public async Task OfflineAMachine_SpendsWhatItHolds_AndNoMore()
+    {
+        var root = new TempDirectory();
+        var fleet = await BudgetFixture.StartAsync(root);
+        try
+        {
+            var spend = new FakeSpend();
+            var gate = fleet.Gate(spend, Path.Combine(root.Path, "node-budgets.json"));
+            gate.HoldWait = TimeSpan.FromSeconds(1);
+            gate.HoldPoll = TimeSpan.FromMilliseconds(100);
+            gate.ReadTimeout = TimeSpan.FromSeconds(2);
+            await fleet.Manager.PutAsync(null, Settings(1000), CancellationToken.None);
+            Assert.IsNull((await gate.AdmitAsync(new FleetBudgetRun("run-1", null, null, null), TestContext.CancellationToken)).Problem);
+
+            // The server goes away: the machine runs on what it holds (a share, 250), counted by itself.
+            await fleet.DisposeServerAsync();
+            spend.Spent = 200;
+            Assert.IsNull((await gate.AdmitAsync(new FleetBudgetRun("run-2", null, null, null), TestContext.CancellationToken)).Problem, "within its allowance");
+            spend.Spent = 245;
+            var over = await gate.AdmitAsync(new FleetBudgetRun("run-3", null, null, null), TestContext.CancellationToken);
+            StringAssert.Contains(over.Problem, "nobody continued the run in time", "it holds less than a run needs, and cannot ask: the run waits, then gives up");
+        }
+        finally
+        {
+            await fleet.DisposeAsync();
+            root.Dispose();
+        }
+    }
+
+    private static FleetBudgetSettings Settings(long limit) => new("Tokens of the person", FleetBudgetScopeKinds.Person, null, FleetBudgetMeasures.Tokens, limit,
+        FleetBudgetPeriods.Month, "UTC", FleetBudgetModes.Enforced, FleetBudgetReachedActions.Hold);
+
+    private static async Task<T> WaitForAsync<T>(Func<Task<T?>> read, CancellationToken cancellationToken) where T : class
+    {
+        var deadline = DateTime.UtcNow + Patience;
+        while (true)
+        {
+            if (await read() is { } value) return value;
+            if (DateTime.UtcNow > deadline) Assert.Fail("It did not get there in time.");
+            await Task.Delay(50, cancellationToken);
+        }
+    }
+
+    /// <summary>What a machine spent, as a test says it.</summary>
+    private sealed class FakeSpend : IFleetBudgetSpend
+    {
+        public long Spent { get; set; }
+
+        public ValueTask<long> SpentAsync(FleetBudgetLink link, FleetBudgetDefinition budget, FleetBudgetPeriod period, CancellationToken cancellationToken) => ValueTask.FromResult(Spent);
+    }
+
+    private sealed class BudgetFixture : IAsyncDisposable
+    {
+        private bool _serverDisposed;
+
+        private BudgetFixture(ServerFixture server, TempDirectory root, bool ownsRoot, DeviceIdentity desktopKey, DeviceIdentity nodeKey, DeviceIdentity otherKey)
+        {
+            Server = server;
+            Root = root;
+            OwnsRoot = ownsRoot;
+            DesktopKey = desktopKey;
+            NodeKey = nodeKey;
+            OtherKey = otherKey;
+            Manager = new FleetBudgetsManager(new FleetOrganizationDevices(server.BaseAddress, desktopKey, Path.Combine(root.Path, "desktop-link", FleetOrganizationDevices.PinFileName)));
+        }
+
+        public ServerFixture Server { get; }
+
+        public TempDirectory Root { get; }
+
+        private bool OwnsRoot { get; }
+
+        public DeviceIdentity DesktopKey { get; }
+
+        public DeviceIdentity NodeKey { get; }
+
+        public DeviceIdentity OtherKey { get; }
+
+        public FleetBudgetsManager Manager { get; }
+
+        public static async Task<BudgetFixture> StartAsync(TempDirectory? root = null)
+        {
+            var server = await ServerFixture.StartAsync();
+            var owns = root is null;
+            root ??= new TempDirectory();
+            var desktopKey = DeviceIdentity.LoadOrCreate(Path.Combine(root.Path, "desktop"));
+            var nodeKey = DeviceIdentity.LoadOrCreate(Path.Combine(root.Path, "node"));
+            var otherKey = DeviceIdentity.LoadOrCreate(Path.Combine(root.Path, "other"));
+            using var desktop = new FleetServerClient(server.BaseAddress, desktopKey);
+            await desktop.SetUpAsync(server.SetupCode, "Alex", "Desktop");
+            foreach (var (key, name) in new[] { (nodeKey, "Mac mini"), (otherKey, "Build box") })
+            {
+                using var machine = new FleetServerClient(server.BaseAddress, key);
+                await machine.EnrollAsync((await desktop.CreateEnrollmentTokenAsync()).Token, name);
+                await desktop.ApproveAsync(key.DeviceId, FleetDeviceKinds.Node);
+            }
+
+            return new BudgetFixture(server, root, owns, desktopKey, nodeKey, otherKey);
+        }
+
+        /// <summary>The gate of the node machine, with what it spent as the test says it.</summary>
+        public FleetBudgetGate Gate(IFleetBudgetSpend spend, string? statePath = null)
+        {
+            var devices = new FleetOrganizationDevices(Server.BaseAddress, NodeKey);
+            var link = new FleetBudgetLink("link", devices, null, statePath);
+            return new FleetBudgetGate(() => [link], spend) { HoldPoll = TimeSpan.FromMilliseconds(100) };
+        }
+
+        /// <summary>Publishes the statistics of one session of a machine, as its control connection does: tokens in and out this quarter hour.</summary>
+        public async Task PublishAsync(DeviceIdentity machine, long version, long input, long output)
+        {
+            var device = await Server.GetService<ICoordinatorStore>().GetDeviceAsync(machine.DeviceId, CancellationToken.None) ?? throw new InvalidOperationException();
+            var row = new FleetStatisticsRow(FleetStatisticsFamilies.Usage, FleetStatisticsFamilies.QuarterOf(DateTimeOffset.UtcNow), "anthropic", "claude", [""],
+                new Dictionary<string, long> { ["input_tokens"] = input, ["output_tokens"] = output, ["requests"] = 1 });
+            await Server.GetService<StatisticsService>().PublishAsync(device, new FleetStatisticsPublish(version, "generation-" + machine.DeviceId,
+                [new FleetStatisticsSet("session-of-" + machine.DeviceId, 0, version, null, [row])]), CancellationToken.None);
+        }
+
+        public async Task<IReadOnlyList<AuditRecordDto>> AuditAsync(string prefix)
+            => [.. (await Server.SendAsync(TestDevice.From(DesktopKey), HttpMethod.Get, "/api/v1/audit?limit=500")).Read<ListResponse<AuditRecordDto>>().Items
+                .Where(record => record.Action.StartsWith(prefix, StringComparison.Ordinal))];
+
+        public async Task DisposeServerAsync()
+        {
+            if (_serverDisposed) return;
+            _serverDisposed = true;
+            await Server.DisposeAsync();
+        }
+
+        public async ValueTask DisposeAsync()
+        {
+            await DisposeServerAsync();
+            DesktopKey.Dispose();
+            NodeKey.Dispose();
+            OtherKey.Dispose();
+            if (OwnsRoot) Root.Dispose();
+        }
+    }
+}

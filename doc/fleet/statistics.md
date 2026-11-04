@@ -61,7 +61,8 @@ console queries them by scope.
   nobody is asked, counts from its first day.
 - **Projects** travel as a blind index (an HMAC of the person's metadata key) of what recognizes the project on every
   machine: its repository and its folder in it, or its id without a repository. The server groups by it and cannot
-  name it; the person's devices name the projects they have by computing the same index.
+  name it; the person's devices name the projects they have by computing the same index. **Spaces** travel by the
+  opaque id the server knows them by, which budgets of a space count by.
 - **Deleted sessions** keep their published facts (as the local archive keeps them), until the organization's
   retention removes them.
 - **Private sessions** publish nothing ([security](security-and-privacy.md#what-the-server-sees)): their numbers stay
