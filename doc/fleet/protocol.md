@@ -198,7 +198,8 @@ The management plane, and the whole surface of the console ([console](console.md
   `Alta-Timestamp` (Unix milliseconds) and `Alta-Nonce` go with `Alta-Signature`. The signature is ECDSA P-256 over
   the method, the path and query, the timestamp, the nonce, the SHA-256 of the body and the device id. The server
   refuses a time more than 5 minutes from its own and a nonce it has seen in that window. The host is not signed,
-  because proxies change it. Setup and enrollment are signed by the key in their body.
+  because proxies change it. The headers, the time and the device are checked before the body is read (the REST API,
+  the OTLP ingress), so that who is not a device of the server never makes it buffer a body. Setup and enrollment are signed by the key in their body.
 - **Conventions**: JSON in camelCase with source-generated contracts; cursor pagination; `ETag` and `If-Match` for
   updates; an `Idempotency-Key` on creations; errors as problem details (RFC 9457) with a stable code and a hint; rate
   limits; `traceparent` on every call.

@@ -81,6 +81,31 @@ public sealed class RequestAuthenticator
         }
     }
 
+    /// <summary>
+    /// Checks what a signed request carries before its body is read: its headers, its time, and that its device is one of
+    /// the table. Who is not a device of the server never makes it buffer a body; the signature is checked once the body
+    /// is read (<see cref="AuthenticateAsync"/>).
+    /// </summary>
+    /// <param name="request">The request.</param>
+    /// <param name="cancellationToken">Cancels the operation.</param>
+    /// <returns>A task that completes when the request may be read.</returns>
+    /// <exception cref="CoordinatorException">The headers are missing, the time is wrong, or the device is unknown (answered as a wrong signature).</exception>
+    public async ValueTask PrecheckAsync(HttpRequest request, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        try
+        {
+            var data = SignedRequestData.From(request, string.Empty);
+            CheckForm(data);
+            if (await _store.GetDeviceAsync(data.DeviceId!, cancellationToken).ConfigureAwait(false) is null) throw SignatureInvalid();
+        }
+        catch (CoordinatorException exception)
+        {
+            Metrics?.SignedRequestRefused(exception.Code);
+            throw;
+        }
+    }
+
     private async ValueTask<DeviceRecord> AuthenticateCoreAsync(SignedRequestData request, CancellationToken cancellationToken)
     {
         var timestamp = CheckForm(request);

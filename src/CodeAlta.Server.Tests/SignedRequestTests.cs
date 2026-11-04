@@ -22,6 +22,53 @@ public sealed class SignedRequestTests
     }
 
     [TestMethod]
+    public async Task WhoIsNoDeviceIsRefusedBeforeTheServerReadsItsBody()
+    {
+        await using var server = await ServerFixture.StartAsync();
+        using var owner = new TestDevice("Desktop");
+        using var stranger = new TestDevice("Stranger");
+        await server.SetUpAsync(owner);
+
+        // A body that never ends: the server answers from the headers, without waiting for it (or buffering it).
+        foreach (var (path, device) in new[] { ("/api/v1/metadata-keys", (TestDevice?)null), ("/api/v1/metadata-keys", stranger), ("/otlp/v1/traces", null), ("/otlp/v1/traces", stranger) })
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Post, path) { Content = new EndlessContent() };
+            // Kestrel asks for the body (100 Continue) only when the server reads it: an answer before it is one from the headers.
+            request.Headers.ExpectContinue = true;
+            if (device is not null)
+            {
+                request.Headers.Add(FleetSignedRequest.DeviceHeader, device.DeviceId);
+                request.Headers.Add(FleetSignedRequest.TimestampHeader, server.Clock.Now.ToUnixTimeMilliseconds().ToString(System.Globalization.CultureInfo.InvariantCulture));
+                request.Headers.Add(FleetSignedRequest.NonceHeader, FleetSignedRequest.CreateNonce());
+                request.Headers.Add(FleetSignedRequest.SignatureHeader, "AAAA");
+            }
+
+            using var answer = await server.Http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead).WaitAsync(TimeSpan.FromSeconds(10));
+            Assert.AreEqual(HttpStatusCode.Unauthorized, answer.StatusCode, path);
+        }
+    }
+
+    // Sends 1 KiB, then waits until the request is given up: a client that never finishes its body.
+    private sealed class EndlessContent : HttpContent
+    {
+        protected override async Task SerializeToStreamAsync(Stream stream, TransportContext? context, CancellationToken cancellationToken)
+        {
+            await stream.WriteAsync(new byte[1024], cancellationToken);
+            await stream.FlushAsync(cancellationToken);
+            await Task.Delay(Timeout.Infinite, cancellationToken);
+        }
+
+        protected override Task SerializeToStreamAsync(Stream stream, TransportContext? context) => SerializeToStreamAsync(stream, context, CancellationToken.None);
+
+        protected override bool TryComputeLength(out long length)
+        {
+            // Under the limits of the REST API (1 MiB) and of the OTLP ingress (8 MiB): a body each would read.
+            length = 512 * 1024;
+            return true;
+        }
+    }
+
+    [TestMethod]
     public async Task ARequestWithoutSignatureIsRefusedAndSaysHowToSign()
     {
         await using var server = await ServerFixture.StartAsync();
