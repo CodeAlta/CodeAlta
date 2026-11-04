@@ -466,7 +466,10 @@ public sealed partial class FleetServerClient : IDisposable
             // The class signed is the one approved, never the one the server says: a machine is never signed in as a controller.
             if (!string.Equals(device.Kind, kind, StringComparison.Ordinal))
                 throw new FleetDeviceListException(0, $"the server lists the device as a {device.Kind}, not as the {kind} approved");
-            return (FleetDeviceListOperations.Add, device.PublicKey, kind, self.OwnerId);
+            // A person's first controller device, which the owner signs in (a person company sign-in created), is theirs; the
+            // device list this device verifies refuses it for anyone but the owner, and for a person who holds a device.
+            var owner = kind == FleetDeviceKinds.Controller && device.OwnerId is { } person && person != self.OwnerId ? person : self.OwnerId;
+            return (FleetDeviceListOperations.Add, device.PublicKey, kind, owner);
         }, cancellationToken);
     }
 
@@ -685,6 +688,10 @@ public sealed partial class FleetServerClient : IDisposable
                 throw new FleetDeviceListException(state.Sequence, "the server names another organization than its device list");
             if (!state.IsController(DeviceId))
                 throw new FleetDeviceListException(state.Sequence, "this device is not a controller device of the list, so it signs no entry");
+            // A device of another person is signed only by a device the list already gives to its own person: an entry of
+            // a device not yet bound would bind it to that other person.
+            if (owner is not null && owner != self.OwnerId && state.Members[DeviceId].OwnerId != self.OwnerId)
+                throw new FleetDeviceListException(state.Sequence, "this device signs a device of another person only once the list gives it to its own person");
             var entry = Sign(new FleetDeviceListEntryPayload(FleetDeviceListEntryPayload.CurrentVersion, organization.Id, state.Sequence + 1, state.LastHash, operation, deviceId,
                 key, kind, owner, DeviceId, Now()));
             if (!FleetDeviceListVerifier.TryAppend(state, entry, organization.Id, out _, out var reason))

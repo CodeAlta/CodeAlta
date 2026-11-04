@@ -232,7 +232,8 @@ public static class FleetDeviceListVerifier
                     tenures = tenures.SetItem(signer.DeviceId, tenures.TryGetValue(signer.DeviceId, out var tenure) ? tenure with { Member = signer } : new(signer, 1, null));
                 }
 
-                if (!string.Equals(signer.OwnerId, payload.OwnerId, StringComparison.Ordinal)) return "a controller device adds devices of its own person only";
+                if (!string.Equals(signer.OwnerId, payload.OwnerId, StringComparison.Ordinal) && !AddsFirstDeviceOfPerson(state, members, signer, payload))
+                    return "a controller device adds devices of its own person only";
                 if (payload.Kind == FleetDeviceKinds.Recovery && members.Values.Any(member => member.Kind == FleetDeviceKinds.Recovery && member.OwnerId == payload.OwnerId))
                     return "the person has a recovery key already: the old one leaves the list first";
                 var joined = new FleetDeviceListMember(payload.DeviceId, payload.Kind!, added, payload.OwnerId);
@@ -262,5 +263,18 @@ public static class FleetDeviceListVerifier
             Tenures = tenures,
         };
         return null;
+    }
+
+    // The owner signs people in (doc/fleet/identity.md, a new device): a controller device of the person of the first
+    // entry (the owner who set the server up) adds the first controller device of another person, one who holds no
+    // member of the list, such as a person whom company sign-in created. That device then signs the person's next ones.
+    private static bool AddsFirstDeviceOfPerson(FleetDeviceListState state, ImmutableDictionary<string, FleetDeviceListMember> members, FleetDeviceListMember signer,
+        FleetDeviceListEntryPayload payload)
+    {
+        if (signer.Kind != FleetDeviceKinds.Controller || payload.Kind != FleetDeviceKinds.Controller || string.IsNullOrEmpty(payload.OwnerId)) return false;
+        var owner = state.FirstDeviceId is { } first && state.Tenures.TryGetValue(first, out var tenure) ? tenure.Member.OwnerId
+            : state.FirstDeviceId is { } id && members.TryGetValue(id, out var member) ? member.OwnerId : null;
+        return owner is not null && string.Equals(signer.OwnerId, owner, StringComparison.Ordinal)
+            && !members.Values.Any(other => string.Equals(other.OwnerId, payload.OwnerId, StringComparison.Ordinal));
     }
 }

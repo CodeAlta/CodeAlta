@@ -110,14 +110,19 @@ public sealed record EnrollmentTokenRequest(int? TtlSeconds = null, string? Labe
 public sealed record EnrollmentTokenResponse(string Id, string Token, DateTimeOffset ExpiresAt);
 
 /// <summary>The body of <c>POST /api/v1/enroll</c>, signed with the key it names.</summary>
-/// <param name="Token">The enrollment token.</param>
+/// <param name="Token">The enrollment token; empty when <paramref name="SignInGrant"/> is given.</param>
 /// <param name="PublicKey">The public key of the machine.</param>
 /// <param name="DeviceName">Its name.</param>
 /// <param name="Kind">
 /// Its class (<see cref="FleetDeviceKinds"/>): <c>controller</c> for a person's desktop, which a controller device of the
 /// same person approves and which then approves others; <c>node</c> (the default) for an execution device.
 /// </param>
-public sealed record EnrollRequest(string Token, string PublicKey, string DeviceName, string? Kind = null);
+/// <param name="SignInGrant">
+/// The grant of a sign-in this device completed (<see cref="CompleteSignInResponse.Grant"/>), instead of a token: the
+/// device enrolls as a controller device of the person who signed in, pending until one of their devices, their
+/// recovery key or, for a person without a device, the owner approves it.
+/// </param>
+public sealed record EnrollRequest(string Token, string PublicKey, string DeviceName, string? Kind = null, string? SignInGrant = null);
 
 /// <summary>The answer of an enrollment.</summary>
 /// <param name="Device">The device, pending until a controller device signs it into the device list.</param>
