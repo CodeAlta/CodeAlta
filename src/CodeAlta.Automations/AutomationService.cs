@@ -116,6 +116,10 @@ internal sealed partial class AutomationService : IAsyncDisposable
         ArgumentNullException.ThrowIfNull(zone);
         (_globalConfigPath, _projects, _state, _runner, _time, _zone, _feed) = (globalConfigPath, projects, state, runner, time, zone, feed);
         _aliveBefore = state.AliveAt;
+        // The sessions of the runs keep the guard of their automation as it is now, a try staying a try, after their run too.
+        if (runner is AutomationRunner concrete)
+            concrete.Origin = (automationId, runId) => (Snapshot.Entries.FirstOrDefault(entry => entry.Id == automationId),
+                _state.Run(runId) is { } run ? run.Trigger == TryTrigger : null);
     }
 
     /// <summary>Raised, on any thread, when the automations, their runs or their state changed.</summary>

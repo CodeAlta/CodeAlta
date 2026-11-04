@@ -1077,6 +1077,85 @@ public sealed class AutomationHostTests
     }
 
     [TestMethod]
+    public async Task Runner_TheGuardOfARunWithAutonomy_StaysWithItsSession_FollowsItsChildren_AndOutlivesARestart()
+    {
+        var root = Directory.CreateTempSubdirectory("codealta-automation-guard-").FullName;
+        try
+        {
+            var global = Path.Combine(root, "global");
+            var projectPath = Path.Combine(root, "project");
+            var home = Path.Combine(root, "home");
+            var builtin = Path.Combine(root, "builtin");
+            foreach (var path in new[] { global, projectPath, home, builtin }) Directory.CreateDirectory(path);
+            var provider = new RunnerProvider();
+            CodeAltaHostOptions Options() => new()
+            {
+                GlobalRoot = global, CurrentProjectPath = projectPath, DiscoveryScope = new(home, root), BuiltInSkillRoot = builtin,
+                PluginEnvironment = FrozenDictionary<string, string?>.Empty, StartPlugins = false, IsHeadless = true, OwnsLogging = false,
+                ConfigureModelProviders = registry => registry.RegisterOrReplace(provider.Descriptor, () => new RunnerRuntime(provider)),
+            };
+            var entry = new AutomationEntry(new("0199f4c2-6d1e-7c3a-b5f0-2f9c8e4a1d79", "Diagnosis")
+            {
+                Prompt = "Diagnose the incident.", Autonomy = new AutomationAutonomy { AllowedTools = ["k8s_restart_pod"] },
+            }, new AutomationSource(Path.Combine(global, "config.toml"), null, null), null, null, null);
+            string sessionId, childId, plainId;
+            await using (var host = await CodeAltaHost.CreateAsync(Options()))
+            {
+                var project = await host.ProjectCatalog.UpsertFromPathAsync(projectPath);
+                entry = entry with { ProjectId = project.Id, ProjectPath = project.ProjectPath };
+                var runner = new AutomationRunner(host);
+                var start = await runner.StartAsync(entry, "run-1", entry.Definition.Prompt, null, dryRun: false, default);
+                Assert.IsNull(start.Problem);
+                sessionId = start.SessionId!;
+                await provider.Sends.Reader.ReadAsync().AsTask().WaitAsync(Patience);
+                // A child the run starts while it works is checked by the guard of the run itself.
+                childId = (await host.Commands.CreateDraftSessionAsync(project, provider.Descriptor, "Child", new AltaActorProvenance
+                {
+                    Kind = AltaActorProvenance.WorkflowKind, SourceSessionId = sessionId, CreatedAt = DateTimeOffset.UtcNow,
+                }, null, null, null, null, null, null)).SessionId;
+                plainId = (await host.Commands.CreateDraftSessionAsync(project, provider.Descriptor, "Plain", null, null, null, null, null, null, null)).SessionId;
+                Assert.AreSame(start.Guard, await host.ToolGuards.FindAsync(childId, default), "a child of the run is checked by the guard of the run");
+                Assert.IsNull(await host.ToolGuards.FindAsync(plainId, default));
+                provider.Release.SetResult();
+                Assert.AreEqual(AutomationRun.Completed, (await start.Completion!.WaitAsync(Patience)).Status);
+
+                // Once its prompt is answered, a later turn of the session (a reminder, a job, a queued prompt) is checked still.
+                var later = await host.ToolGuards.FindAsync(sessionId, default);
+                Assert.IsInstanceOfType<AutomationRunGuard>(later, "the session keeps a guard after its first turn");
+                Assert.IsNotNull(await host.ToolGuards.FindAsync(childId, default));
+                // Nobody can be asked in this host: the call that would wait for a person is not made.
+                Assert.IsNotNull(await host.ToolGuards.CheckAsync(sessionId, new AgentToolSpec("deploy_everything", "Deploys.", default), default, null,
+                    new CancellationTokenSource(TimeSpan.FromSeconds(2)).Token).AsTask().ContinueWith(static task => task.IsCanceled ? "waits for a person" : task.Result),
+                    "a tool the automation does not allow is not called without a person");
+                var workspace = new WorkspaceService(host, Epoch);
+                await workspace.CloseSessionsAsync();
+                await workspace.CloseImportsAsync();
+            }
+
+            // After a restart, the session and its child are resumed with the guard of the automation that started them.
+            await using (var host = await CodeAltaHost.CreateAsync(Options()))
+            {
+                var runner = new AutomationRunner(host);
+                Assert.IsInstanceOfType<AutomationRunGuard>(await host.ToolGuards.FindAsync(sessionId, default));
+                Assert.IsInstanceOfType<AutomationRunGuard>(await host.ToolGuards.FindAsync(childId, default));
+                Assert.IsNull(await host.ToolGuards.FindAsync(plainId, default));
+                // What the automation is now decides: a try stays a try, from the run it records.
+                runner.Origin = (_, _) => (entry, true);
+                Assert.IsTrue(((AutomationRunGuard)(await host.ToolGuards.FindAsync(childId, default))!).DryRun);
+                var workspace = new WorkspaceService(host, Epoch);
+                await workspace.CloseSessionsAsync();
+                await workspace.CloseImportsAsync();
+            }
+        }
+        finally
+        {
+            try { Directory.Delete(root, recursive: true); }
+            catch (IOException) { }
+            catch (UnauthorizedAccessException) { }
+        }
+    }
+
+    [TestMethod]
     public async Task Workflows_ListTheLibrary_RunAScriptInANewSession_ListTheRuns_AndAskARunToBeSaved()
     {
         var root = Directory.CreateTempSubdirectory("codealta-workflows-").FullName;

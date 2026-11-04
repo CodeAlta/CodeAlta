@@ -221,6 +221,12 @@ internal sealed class AutomationStateStore
         }
     }
 
+    /// <summary>A run by its identifier, or null when it is not kept.</summary>
+    internal AutomationRun? Run(string runId)
+    {
+        lock (_gate) return _state.Runs.LastOrDefault(run => run.Id == runId);
+    }
+
     /// <summary>The run that started a session, or null.</summary>
     internal AutomationRun? RunOfSession(string sessionId)
     {

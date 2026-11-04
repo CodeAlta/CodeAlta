@@ -47,7 +47,7 @@ internal sealed class AutomationRunGuard : AgentToolInterceptor
     private readonly AutomationEntry _entry;
     private readonly AutomationAutonomy _autonomy;
     private readonly AutomationCallBreaker _breaker;
-    private readonly Func<AgentPermissionRequest, CancellationToken, Task<AgentPermissionDecision>> _ask;
+    private readonly Func<string, AgentPermissionRequest, CancellationToken, Task<AgentPermissionDecision>> _ask;
     private readonly TimeProvider _time;
     private readonly System.Collections.Concurrent.ConcurrentDictionary<CancellationTokenSource, byte> _timeouts = new();
     private readonly Lock _gate = new();
@@ -64,6 +64,18 @@ internal sealed class AutomationRunGuard : AgentToolInterceptor
     /// <param name="time">The clock of the timeouts.</param>
     /// <param name="dryRun">Whether the run is a try: the allowed tools are fakes.</param>
     internal AutomationRunGuard(AutomationEntry entry, AutomationCallBreaker breaker, Func<AgentPermissionRequest, CancellationToken, Task<AgentPermissionDecision>> ask,
+        TimeProvider time, bool dryRun)
+        : this(entry, breaker, (_, request, token) => ask(request, token), time, dryRun)
+    {
+    }
+
+    /// <summary>Creates the guard of a run, whose sessions (its own, and those it starts) are asked on their own cards.</summary>
+    /// <param name="entry">The automation.</param>
+    /// <param name="breaker">The circuit breaker of the host.</param>
+    /// <param name="ask">Asks a person a permission request of a session: the one that makes the call.</param>
+    /// <param name="time">The clock of the timeouts.</param>
+    /// <param name="dryRun">Whether the run is a try: the allowed tools are fakes.</param>
+    internal AutomationRunGuard(AutomationEntry entry, AutomationCallBreaker breaker, Func<string, AgentPermissionRequest, CancellationToken, Task<AgentPermissionDecision>> ask,
         TimeProvider time, bool dryRun)
     {
         ArgumentNullException.ThrowIfNull(entry);
@@ -142,7 +154,7 @@ internal sealed class AutomationRunGuard : AgentToolInterceptor
         var shown = Shown(tool, call.Invocation.Arguments);
         if (!_autonomy.Allows(tool))
         {
-            return await AskAsync(tool, shown, $"The automation '{_entry.Definition.Name}' may not call {tool} by itself: allow this call once, or deny it.",
+            return await AskAsync(call.Invocation.SessionId, tool, shown, $"The automation '{_entry.Definition.Name}' may not call {tool} by itself: allow this call once, or deny it.",
                 call.WorkingDirectory, cancellationToken).ConfigureAwait(false);
         }
 
@@ -165,7 +177,7 @@ internal sealed class AutomationRunGuard : AgentToolInterceptor
             held = $"it called its allowed tools {_autonomy.MaxCallsPerHour} times in the last hour, and its circuit breaker asks a person";
         }
 
-        var decision = await AskAsync(tool, shown, $"The automation '{_entry.Definition.Name}' may not make this call of {tool} by itself: {held}. Allow it once, or deny it.",
+        var decision = await AskAsync(call.Invocation.SessionId, tool, shown, $"The automation '{_entry.Definition.Name}' may not make this call of {tool} by itself: {held}. Allow it once, or deny it.",
             call.WorkingDirectory, cancellationToken).ConfigureAwait(false);
         if (decision.BlockMessage is not null) return decision;
         return await PreconditionsAsync(rules, call, cancellationToken).ConfigureAwait(false) is { } stale ? NotMade(tool, stale) : decision;
@@ -202,7 +214,7 @@ internal sealed class AutomationRunGuard : AgentToolInterceptor
     private static AgentToolCallDecision NotMade(string tool, string why)
         => AgentToolCallDecision.Block($"The call of {tool} was not made: {why}. Its target is not as it must be to act; say what you found instead.");
 
-    private async Task<AgentToolCallDecision> AskAsync(string tool, string shown, string reason, string? folder, CancellationToken cancellationToken)
+    private async Task<AgentToolCallDecision> AskAsync(string sessionId, string tool, string shown, string reason, string? folder, CancellationToken cancellationToken)
     {
         var request = new AgentCommandPermissionRequest(new ModelProviderId("automation"), string.Empty, _time.GetUtcNow(), null, "automation-" + Guid.NewGuid().ToString("N"),
             null, shown, string.IsNullOrWhiteSpace(folder) ? Environment.CurrentDirectory : folder, null, reason, null, null, null);
@@ -216,7 +228,7 @@ internal sealed class AutomationRunGuard : AgentToolInterceptor
         AgentPermissionDecision decision;
         try
         {
-            decision = await _ask(request, linked.Token).ConfigureAwait(false);
+            decision = await _ask(sessionId, request, linked.Token).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {

@@ -12,12 +12,76 @@ namespace CodeAlta.Orchestration.Runtime;
 /// run may do without a person is enforced on the machine, never by its prompt).
 /// </summary>
 /// <remarks>
+/// <para>
 /// The guard of a session is looked up at each call, not when the session is attached: one given after the session was
-/// attached applies at its next call, and one taken away stops applying.
+/// attached applies at its next call.
+/// </para>
+/// <para>
+/// A guard is a durable constraint of a session and of what comes from it, not of one turn: a session without a guard of
+/// its own takes the one its origin gives it (<see cref="AddOrigin"/>: the automation that created it, as the session
+/// records it), else the one of the session it comes from (its parent, the session that created it), up its lineage. So
+/// its later turns (a queued prompt, a reminder, the result of a job), its children (<c>agent()</c>, <c>alta session
+/// create</c>) and the session resumed after a restart are checked as its first turn was.
+/// </para>
 /// </remarks>
 public sealed class SessionToolGuards
 {
+    // The most sessions up a lineage that are looked at: a cycle of links, or a deeper one, ends there.
+    private const int MaximumDepth = 32;
     private readonly ConcurrentDictionary<string, AgentToolInterceptor> _guards = new(StringComparer.Ordinal);
+    private readonly List<Func<string, CodeAlta.Catalog.AltaActorProvenance, AgentToolInterceptor?>> _origins = [];
+    private readonly Lock _gate = new();
+
+    /// <summary>
+    /// Gets or sets what reads a stored session, for the lineage of the sessions whose guard comes from where they come from;
+    /// null reads none: a session then takes only a guard given to it, or the one its own origin gives.
+    /// </summary>
+    public Func<string, CancellationToken, Task<CodeAlta.Catalog.SessionViewDescriptor?>>? ReadSession { get; set; }
+
+    /// <summary>
+    /// Adds what gives a session the guard of its origin: it is given the session and who created it, as the session records
+    /// it, and answers its guard, or null when that origin gives none (an automation gives the sessions of its runs the
+    /// guard of its autonomy, also once the run ended and after a restart).
+    /// </summary>
+    /// <param name="origin">The origin.</param>
+    /// <exception cref="ArgumentNullException"><paramref name="origin"/> is null.</exception>
+    public void AddOrigin(Func<string, CodeAlta.Catalog.AltaActorProvenance, AgentToolInterceptor?> origin)
+    {
+        ArgumentNullException.ThrowIfNull(origin);
+        lock (_gate) _origins.Add(origin);
+    }
+
+    // The guard the origin of a session gives it, or null.
+    private AgentToolInterceptor? OriginOf(string sessionId, CodeAlta.Catalog.AltaActorProvenance? createdBy)
+    {
+        if (createdBy is null) return null;
+        Func<string, CodeAlta.Catalog.AltaActorProvenance, AgentToolInterceptor?>[] origins;
+        lock (_gate) origins = [.. _origins];
+        foreach (var origin in origins)
+        {
+            if (origin(sessionId, createdBy) is { } guard) return guard;
+        }
+
+        return null;
+    }
+
+    // The guard of a session that has none of its own: the one of its origin, else the one of the session it comes from, up
+    // its lineage, each read from the store.
+    private async ValueTask<AgentToolInterceptor?> InheritedAsync(string sessionId, CodeAlta.Catalog.AltaActorProvenance? createdBy, string? parentSessionId,
+        CancellationToken cancellationToken)
+    {
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { sessionId };
+        for (var depth = 0; depth < MaximumDepth; depth++)
+        {
+            if (OriginOf(sessionId, createdBy) is { } origin) return origin;
+            if (string.IsNullOrWhiteSpace(parentSessionId) || !seen.Add(parentSessionId)) return null;
+            if (Find(parentSessionId) is { } given) return given;
+            if (ReadSession is not { } read || await read(parentSessionId, cancellationToken).ConfigureAwait(false) is not { } parent) return null;
+            (sessionId, createdBy, parentSessionId) = (parent.SessionId, parent.CreatedBy, parent.ParentSessionId ?? parent.CreatedBy?.SourceSessionId);
+        }
+
+        return null;
+    }
 
     /// <summary>Gives a session a guard, in place of the one it had.</summary>
     /// <param name="sessionId">The session.</param>
@@ -50,7 +114,14 @@ public sealed class SessionToolGuards
     /// <param name="sessionId">The session.</param>
     /// <param name="cancellationToken">Cancels the lookup.</param>
     /// <returns>The guard; null when the session has none.</returns>
-    public ValueTask<AgentToolInterceptor?> FindAsync(string sessionId, CancellationToken cancellationToken) => ValueTask.FromResult(Find(sessionId));
+    public async ValueTask<AgentToolInterceptor?> FindAsync(string sessionId, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(sessionId)) return null;
+        if (Find(sessionId) is { } given) return given;
+        if (ReadSession is not { } read || await read(sessionId, cancellationToken).ConfigureAwait(false) is not { } session) return null;
+        return await InheritedAsync(session.SessionId, session.CreatedBy, session.ParentSessionId ?? session.CreatedBy?.SourceSessionId, cancellationToken)
+            .ConfigureAwait(false);
+    }
 
     /// <summary>
     /// Checks a call of a tool that a session makes otherwise than as a tool call of its own (through a command of <c>alta</c>),
@@ -84,21 +155,37 @@ public sealed class SessionToolGuards
     public AgentToolInterceptor Compose(SessionToolHookScope scope, AgentToolInterceptor? plugins)
     {
         ArgumentNullException.ThrowIfNull(scope);
-        return new Guarded(this, scope.SessionId, plugins);
+        return new Guarded(this, scope, plugins);
     }
 
-    private sealed class Guarded(SessionToolGuards guards, string sessionId, AgentToolInterceptor? plugins) : AgentToolInterceptor
+    private sealed class Guarded(SessionToolGuards guards, SessionToolHookScope scope, AgentToolInterceptor? plugins) : AgentToolInterceptor
     {
         // The tools of the session, intercepted: a guard calls one first (a precondition), and that call is guarded too.
         private readonly ConcurrentDictionary<string, AgentToolDefinition> _tools = new(StringComparer.Ordinal);
+        // The guard the session takes from where it comes from, found at its first call of this attachment: its lineage does not change.
+        private Task<AgentToolInterceptor?>? _inherited;
 
         protected override void OnIntercepted(AgentToolDefinition tool) => _tools[tool.Spec.Name] = tool;
+
+        // The guard given to the session, else the one it inherits; a lookup that failed is made again at the next call.
+        private async ValueTask<AgentToolInterceptor?> GuardAsync(CancellationToken cancellationToken)
+        {
+            if (guards.Find(scope.SessionId) is { } given) return given;
+            var inherited = Volatile.Read(ref _inherited);
+            if (inherited is null || inherited.IsFaulted || inherited.IsCanceled)
+            {
+                var started = guards.InheritedAsync(scope.SessionId, scope.CreatedBy, scope.ParentSessionId, CancellationToken.None).AsTask();
+                inherited = Interlocked.CompareExchange(ref _inherited, started, inherited) == inherited ? started : Volatile.Read(ref _inherited)!;
+            }
+
+            return await inherited.WaitAsync(cancellationToken).ConfigureAwait(false);
+        }
 
         public override async ValueTask<AgentToolCallDecision> BeforeToolCallAsync(AgentToolHookCall call, CancellationToken cancellationToken)
         {
             ArgumentNullException.ThrowIfNull(call);
             var decision = plugins is null ? AgentToolCallDecision.Allow : await plugins.BeforeToolCallAsync(call, cancellationToken).ConfigureAwait(false);
-            if (decision.BlockMessage is not null || guards.Find(sessionId) is not { } guard) return decision;
+            if (decision.BlockMessage is not null || await GuardAsync(cancellationToken).ConfigureAwait(false) is not { } guard) return decision;
             // The guard checks the call as it would run: with the arguments the plugins gave it.
             var checkedCall = (decision.Arguments is { } arguments
                 ? AgentToolHookCall.Create(call.Invocation with { Arguments = arguments }, call.Spec, call.WorkingDirectory, call.Capabilities, call.RunByAgent)
@@ -110,7 +197,7 @@ public sealed class SessionToolGuards
         public override async ValueTask<AgentToolResult> AfterToolCallAsync(AgentToolHookCall call, AgentToolResult result, CancellationToken cancellationToken)
         {
             var changed = plugins is null ? result : await plugins.AfterToolCallAsync(call, result, cancellationToken).ConfigureAwait(false);
-            return guards.Find(sessionId) is { } guard ? await guard.AfterToolCallAsync(call, changed, cancellationToken).ConfigureAwait(false) : changed;
+            return await GuardAsync(cancellationToken).ConfigureAwait(false) is { } guard ? await guard.AfterToolCallAsync(call, changed, cancellationToken).ConfigureAwait(false) : changed;
         }
     }
 }

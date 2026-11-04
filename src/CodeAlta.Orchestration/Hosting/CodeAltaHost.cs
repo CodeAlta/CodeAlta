@@ -100,6 +100,8 @@ public sealed class CodeAltaHost : IAsyncDisposable
         var toolHooks = Commands.Plugins;
         runtimeService.ToolInterceptorOf = scope => ToolGuards.Compose(scope, toolHooks?.CreateToolInterceptor(scope));
         runtimeService.ToolGuards = ToolGuards;
+        // A session without a guard of its own takes the one of where it comes from: its lineage is read from the store.
+        ToolGuards.ReadSession = runtimeService.TryGetRecoverableSessionAsync;
         // A plugin can continue a session whose run ended, with a prompt of its own.
         if (runtimeService.PluginEventObserver is { } pluginEvents)
             pluginEvents.RunEndHooks = new PluginRunEndHooks(pluginRuntime.Adapter, () => pluginRuntime.ActivePlugins,

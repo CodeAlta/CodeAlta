@@ -34,6 +34,10 @@ public sealed partial class SessionRuntimeService
             spaceId = null;
         }
 
-        return create(new SessionToolHookScope(session.SessionId, project?.Id, workingDirectory, spaceId));
+        return create(new SessionToolHookScope(session.SessionId, project?.Id, workingDirectory, spaceId)
+        {
+            ParentSessionId = NormalizeOptionalText(session.ParentSessionId) ?? NormalizeOptionalText(session.CreatedBy?.SourceSessionId),
+            CreatedBy = session.CreatedBy,
+        });
     }
 }
