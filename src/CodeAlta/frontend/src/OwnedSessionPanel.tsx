@@ -45,6 +45,7 @@ import { createPromptHistory, noPromptRecall, recallPrompt } from "./promptHisto
 import { changeSelection, validSelection } from "./sessionSelection";
 import { ProviderChooser } from "./ProviderChooser";
 import { useProviderName } from "./ProviderIcon";
+import { sessionProviderName } from "./machines/machineProviders";
 import type { createNextSendSelectionStore } from "./nextSendSelection";
 import { ComposerModelPicker } from "./ComposerModelPicker";
 import { adaptiveChoice, adaptiveTier, composerAdaptiveEntry, composerTierEntries, tierLabels, tierStore, useTiers, type TierName } from "./modelTiers";
@@ -1025,11 +1026,10 @@ export function OwnedSessionPanel({ canAdmit = () => true, onRunActivity, toolOu
   const selected = pending?.request.selection ?? (activeChoices ? selection ?? activeChoices.current : null);
   const selectionDisabled = loadingChoices || !activeChoices?.current || invalidEpoch || !!pending;
   // The provider as Settings names it ("Claude Business"): the configuration's name, else the one the host gives the
-  // provider of the session, else its key.
+  // provider of the session, else its key. A session of another machine runs with a provider of that machine: the
+  // name that machine gives it, never the one of a provider of this computer that has the same key.
   const configuredProviderName = useProviderName(selected?.providerKey);
-  const selectedProviderName = configuredProviderName
-    ?? (selected?.providerKey && selected.providerKey === activeChoices?.current?.providerKey ? activeChoices.providerName : null)
-    ?? selected?.providerKey ?? t("session provider");
+  const selectedProviderName = sessionProviderName(selected?.providerKey, activeChoices, configuredProviderName) ?? t("session provider");
   const spaceProblem = activeChoices?.providerOutsideSpace
     ? t("{provider} is not available in the space of this session: choose another provider to send.", { provider: activeChoices.providerName ?? activeChoices.current?.providerKey ?? t("session provider") })
     : activeChoices?.providerUnavailable

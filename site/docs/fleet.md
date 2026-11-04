@@ -155,7 +155,9 @@ The sessions of a paired machine are listed in the Explorer with your own, with 
 - A session in a project you also have here, a checkout of the same git repository, is listed under that project, whatever its folder and its name on each computer.
 - The other sessions of the machine are listed under a row named after the machine. That row is there as soon as the machine is paired, sessions or none, and is dimmed while the machine is offline; its tooltip says its state.
 
-Open one: its tab is the tab of any session. You read its timeline as it works, answer its questions and permission requests, send it prompts, steer it and stop it. The provider and the model are the ones the machine gives it.
+Open one: its tab is the tab of any session. You read its timeline as it works, answer its questions and permission requests, send it prompts, steer it and stop it. The provider and the model are the ones the machine gives it, named as the machine names them.
+
+A session of a machine that asks a question, or waits for you to allow a command or a change, is marked as waiting within a few seconds: its row in the Explorer, **wait for you** on the Fleet canvas, and the mark of the **Fleet** button of the title bar.
 
 What works on the files of a project (the code editor, Changes, terminals, worktrees) is not offered for a session of another machine: its folder is on that machine. Renaming, forking, archiving and deleting it are not offered either. Pictures and files attached to a prompt are not sent to another machine.
 
@@ -203,7 +205,7 @@ The machine fires its schedules and starts its sessions; **Run now** runs it the
 - Moved to another machine, or brought back to this computer, while the machine it ran on is offline, an enabled automation waits: its card says **Waits for the machine it left** until that machine takes its copy away, so that both never run it. A machine that refuses to take it away (its copy could not be deleted there) keeps it waiting, and the card says why. **Start anyway…** starts it at once where it is now; both machines may then run it until the old one answers, and it still takes its copy away then.
 - Turning off **Running** in the **Automations** tab pauses the automations on machines too: they get them disabled until you turn it on again.
 - Its project is found on the machine by its git repository: the machine needs a checkout of it (`altanode projects clone <url>`). An automation of no project runs as a chat there.
-- Name a provider the machine has, or none for the machine's default one.
+- **Runs with** lists the providers and models of a paired machine once you choose it in **Runs on**, named as the machine names them; leave it to the defaults for the machine's default provider. **Runs in** lists the projects of this computer: the machine finds its own checkout of the project.
 - A command trigger runs on this computer only, and an automation kept in the configuration of a project runs on the machines that have the project.
 
 A machine of your server that is not paired with this computer gets the automation through the server, with no permission to give on the machine: it must be one of your machines. The server keeps it sealed, so it cannot read nor change it, and the machine gets it when it connects. Its details say whether the machine took it or refused it, and why. **Run now** asks the machine through the server while it is online; its triggers run it either way, also while the server is away.
@@ -303,7 +305,7 @@ It takes the options of `altaserver run` (`--port`, `--urls`, `--data-root`, `--
 ### Add machines and computers
 
 - **A machine**: in **Settings** > **Fleet** > **Machines**, **Add a machine…** > **Through my server** shows the command to run on it, `altanode join <address> --token <code>`, which prints the six words of the machine's key. The machines that join list under the command with their words: click **It shows the same words** beside the one whose words the machine printed. Another one is never approved by itself. The **Add a machine…** of the server's card shows the same command for a machine that waits for you to approve it: it appears under the server as a **New device**; click **Approve…**, check that the machine shows the same six words, and click **It shows the same words**.
-- **What waits for you**: when a machine or a computer asks to join, a message comes wherever you are in CodeAlta, with its six words, **Approve** and **Refuse**, and the **Fleet** button of the title bar counts what waits, with the runs held by a [budget](#set-budgets-for-your-machines) and the [problems of your machines](#hear-of-problems-of-your-machines). Approve when the words are the same as on the device.
+- **What waits for you**: when a machine or a computer asks to join, a message comes wherever you are in CodeAlta, with its six words, **Approve** and **Refuse**, and the **Fleet** button of the title bar counts what waits, with the runs held by a [budget](#set-budgets-for-your-machines), the [problems of your machines](#hear-of-problems-of-your-machines) and the sessions of your machines that wait for you. Approve when the words are the same as on the device.
 - **Another of your computers**: **Join an organization…** with the address of the server, then sign in with a method you linked (a passkey, Microsoft, Google, GitHub) or an enrollment code; it shows six words while it waits, and you approve it the same way from a computer already approved. Once approved, it can add and approve machines too. A node never approves anything.
 
 ### Join an organization
@@ -427,13 +429,13 @@ A budget limits the tokens or the estimated cost (in US dollars) your machines s
 | **Hold new runs for me** | A new run in its scope waits; **Continue anyway** starts it, **Stop** drops it |
 | **Stop new runs** | A new run in its scope does not start |
 
-Each budget shows a bar of what its scope used in its period, red once it is reached. **Edit** and the trash button change or remove it, beside its row. You hear of a budget once at 80% and once at 100% of each period.
+Each budget shows a bar of what its scope used in its period, red once it is reached. **Edit** and the trash button change or remove it, beside its row. You hear of a budget once at 80% and once at 100% of each period: a message you dismiss, or close, is gone from all your computers.
 
-A run that waits comes as a message wherever you are in CodeAlta, with **Continue anyway** and **Stop**, and in **Runs that wait for a budget** at the top of the page. Your computer signs each **Continue anyway** for that one run: the machine checks it, so the server alone cannot start a run past your budget. Estimated costs come from the prices of the model catalog, as in the Statistics tab.
+A run that waits comes as a message wherever you are in CodeAlta, with **Continue anyway** and **Stop**, and in **Runs that wait for a budget** at the top of the page. A session you start on a machine whose budget holds new runs starts, and its prompt waits on the machine: the message says so, with **Continue anyway**. Your computer signs each **Continue anyway** for that one run: the machine checks it, so the server alone cannot start a run past your budget. Estimated costs come from the prices of the model catalog, as in the Statistics tab.
 
 ### Hear of problems of your machines
 
-Your nodes tell the server how they are: little disk space left, a provider whose sign-in failed or ends within three days without renewing itself, an automation whose last runs failed, their policy refusing runs. The server also sees a node offline for more than six hours and one that runs an older version than the server. A problem that lasts more than ten minutes comes to you once, as a message with **Dismiss**, and stays listed under **Notifications** in **Settings** > **Fleet** > **Budgets** until you dismiss it or it ends. One that comes back later comes again.
+Your nodes tell the server how they are: little disk space left, a provider whose sign-in failed or ends within three days without renewing itself, an automation whose last runs failed, their policy refusing runs. The server also sees a node offline for more than six hours and one that runs an older version than the server. A problem that lasts more than ten minutes comes to you once, as a message with **Dismiss**, and stays listed under **Notifications** in **Settings** > **Fleet** > **Budgets** until you dismiss it or it ends. Dismissing it, or closing its message, dismisses it on all your computers. One that comes back later comes again.
 
 ### Give secrets to your machines
 

@@ -91,7 +91,8 @@ public sealed class FleetHostPublicationSource : IFleetPublicationSource, IAsync
         var epochs = Epochs();
         var sessions = snapshot.Sessions.Where(session => !movedAway.Contains(session.SessionId)).ToArray();
         var atWork = await _host.Commands.ReadSessionsAtWorkAsync([.. sessions.Select(static session => session.SessionId)]).ConfigureAwait(false);
-        var waiting = new HashSet<string>(_host.Commands.Asks.ListWaitingSessions(), StringComparer.OrdinalIgnoreCase);
+        // A question, a command or a file change to allow, a conversation held elsewhere: the session waits for a person.
+        var waiting = new HashSet<string>(await _host.ListSessionsWaitingForPersonAsync().ConfigureAwait(false), StringComparer.OrdinalIgnoreCase);
         var providerTypes = _host.ModelProviderInitializationService.CurrentStates
             .GroupBy(static state => state.ProviderId.Value, StringComparer.Ordinal)
             .ToDictionary(static group => group.Key, static group => group.First().Descriptor.ProviderType, StringComparer.Ordinal);

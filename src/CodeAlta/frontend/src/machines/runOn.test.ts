@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { MachineNewSessionChoices, MachineView } from "#neoastra";
-import { canStartOn, newSessionProblem, noRemoteSelection, remoteSelection, remoteStartBlocker, runOnMachine, runOnTargets } from "./runOn";
+import { canStartOn, newSessionProblem, noRemoteSelection, remoteSelection, remoteStartBlocker, remoteStartPrompt, runOnMachine, runOnTargets } from "./runOn";
 
 const machine = (change: Partial<MachineView> = {}): MachineView => ({ id: "m1", name: "mac-mini", state: "online", os: "macos", version: "4.0.0",
   address: "mac-mini:2585", fingerprint: "ABCD EFGH", words: "apple river stone cloud amber tiger", sessions: 2, lastSeen: null, problem: null,
@@ -75,4 +75,11 @@ test("Why a start on a machine failed, in words", () => {
   assert.equal(newSessionProblem("unavailable"), "The machine no longer has that project or provider.");
   assert.equal(newSessionProblem("node.stopping"), "The machine is stopping.");
   assert.equal(newSessionProblem(null), "The session could not be started on the machine.");
+});
+
+test("A first prompt that a budget of the machine holds is not one that was not sent: it waits for Continue anyway", () => {
+  assert.equal(remoteStartPrompt("ok"), "sent");
+  assert.equal(remoteStartPrompt("held"), "held");
+  assert.equal(remoteStartPrompt("budget_reached"), "not_sent");
+  assert.equal(remoteStartPrompt(null), "not_sent");
 });

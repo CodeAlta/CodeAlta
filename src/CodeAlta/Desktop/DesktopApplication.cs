@@ -1139,13 +1139,8 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                     builder.AddPullRequestPromptsService(new PullRequestPromptsService(pullRequestPrompts, host.ProjectCatalog, epoch));
                     var startPrompts = new CodeAlta.Catalog.StartPrompts.StartPromptCatalog(host.CatalogOptions);
                     builder.AddStartPromptsService(new StartPromptsService(startPrompts, host.ProjectCatalog, epoch));
-                    builder.AddSpacesService(new SpacesService(host.SpaceCatalog, spaceView, host.RuntimeService.ListOverview, async () =>
-                    {
-                        // A question a session asked, a command to review, a form to fill, a conversation open elsewhere.
-                        var reviews = await host.RuntimeService.Permissions.ListWaitingSessionsAsync();
-                        var held = await host.RuntimeService.ConversationHolds.ListWaitingSessionsAsync();
-                        return [.. host.Commands.Asks.ListWaitingSessions(), .. reviews, .. held];
-                    }, epoch, id => host.Commands.MoveSpaceChatsAsync(id, CodeAlta.Catalog.SpaceDescriptor.DefaultId)) {
+                    // A question a session asked, a command to review, a form to fill, a conversation open elsewhere.
+                    builder.AddSpacesService(new SpacesService(host.SpaceCatalog, spaceView, host.RuntimeService.ListOverview, async () => await host.ListSessionsWaitingForPersonAsync(), epoch, id => host.Commands.MoveSpaceChatsAsync(id, CodeAlta.Catalog.SpaceDescriptor.DefaultId)) {
                         Fallbacks = () => host.Commands.LastFallbacks,
                         HeldElsewhere = () => host.ExternalSessions?.Held ?? [],
                         RemoteSessions = () => fleet is { } machines ? [.. machines.Hosts.SelectMany(static machine => machine.Listing.Sessions.Select(session => (machine.MachineId!, session)))] : [],

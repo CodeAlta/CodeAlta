@@ -150,7 +150,8 @@ public sealed partial class FleetNodeService
 
         var page = listed.Take(limit).ToArray();
         var atWork = await _host.Commands.ReadSessionsAtWorkAsync([.. page.Select(static item => item.Session.SessionId)]).ConfigureAwait(false);
-        var waiting = new HashSet<string>(_host.Commands.Asks.ListWaitingSessions(), StringComparer.OrdinalIgnoreCase);
+        // A question, a command or a file change to allow, a conversation held elsewhere: the session waits for a person.
+        var waiting = new HashSet<string>(await _host.ListSessionsWaitingForPersonAsync().ConfigureAwait(false), StringComparer.OrdinalIgnoreCase);
         return new FleetSessionListResult([.. page.Select(item => new FleetSessionSummary(item.Session.SessionId, item.Title, item.ProjectId, item.SpaceId,
             item.Session.ParentSessionId ?? item.Session.ViewState?.ParentSessionId, item.Session.ViewState?.ProviderKey ?? item.Session.ProviderKey,
             item.Session.ViewState?.ModelId ?? item.Session.ModelId, item.Session.CreatedAt, item.Session.UpdatedAt,

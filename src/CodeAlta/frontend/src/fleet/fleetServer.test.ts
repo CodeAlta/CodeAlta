@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import type { FleetDeviceView, FleetMachineView, FleetServerView, FleetSessionView, FleetTelemetryView, FleetUpdateCampaignView, FleetUpdatePolicyView } from "#neoastra";
-import { campaignProgress, campaignStateIntent, campaignStateLabel, canCancelCampaign, emptyUpdateDraft, fleetGroups, fleetSummary, isVersion, joinCommand, keyWords,
+import { campaignProgress, campaignStateIntent, campaignStateLabel, canCancelCampaign, emptyUpdateDraft, fleetGroups, fleetSummary, isVersion, joinCommand, keyWords, waitingRuns,
   machineStateIntent, machineStateLabel, orderedDevices, policyDraft, policyDraftProblem, policySummary, recoveryCheckPasses, recoveryCheckPositions, serverAddressOf,
   serverConnection, serverConnectionIntent,
   serverConnectionLabel, serverOfSpace, serverProblem, sessionModel, sessionState, sessionStateLabel, telemetryDraft, telemetryHeaderEdits, telemetryProblem, telemetrySummary,
@@ -78,6 +78,9 @@ test("the canvas groups the sessions by machine: this computer first, then those
   assert.deepEqual(groups.find(group => group.machine.id === "mac")!.sessions.map(item => item.id), ["s-waits", "s-runs", "s-idle"], "archived sessions are left out");
   assert.deepEqual(fleetGroups(machines, sessions, true).find(group => group.machine.id === "mac")!.sessions.map(item => item.id), ["s-waits", "s-runs", "s-idle", "s-old"]);
   assert.deepEqual(fleetSummary(machines, sessions), { online: 3, machines: 4, working: 1, waiting: 1 });
+  // The Fleet button counts the sessions of the other machines that wait: this computer marks its own in its window.
+  assert.equal(waitingRuns([{ id: "me", isThisComputer: true }, { id: "mac", isThisComputer: false }],
+    [{ machineId: "me", state: "requires_action" }, { machineId: "mac", state: "requires_action" }, { machineId: "mac", state: "running" }, { machineId: "box", state: "requires_action" }]), 2);
 });
 
 test("a session reads its state and model in words; an unknown state is idle", () => {

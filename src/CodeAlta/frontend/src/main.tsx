@@ -286,9 +286,9 @@ import { readMachinePageLink } from "./machines/machines";
 import { FleetServerSettings } from "./fleet/FleetServerSettings";
 import { FleetSecretsSettings } from "./fleet/FleetSecretsSettings";
 import { FleetBudgetsSettings } from "./fleet/FleetBudgetsSettings";
-import { FleetApprovals } from "./fleet/FleetApprovals";
+import { FleetApprovals, showHeldStartToast } from "./fleet/FleetApprovals";
 import { RemoteSessionChoice, RunOnChip, useMachines, useRemoteChoices } from "./machines/RunOnChip";
-import { newSessionProblem, noRemoteSelection, remoteSelection, remoteStartBlocker, runOnMachine, runOnTargets, type RemoteSelection } from "./machines/runOn";
+import { newSessionProblem, noRemoteSelection, remoteSelection, remoteStartBlocker, remoteStartPrompt, runOnMachine, runOnTargets, type RemoteSelection } from "./machines/runOn";
 import { MoveToMachineDialog } from "./machines/MoveToMachineDialog";
 import { createSpacesHub, type SpacesRequestKind } from "./spaces/spacesHub";
 import { ElsewhereBadge } from "./sessionLeases/ElsewhereBadge";
@@ -4816,13 +4816,17 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
       showToast({ message: `${say(newSessionProblem(result?.status))}${result?.message ? ` ${result.message}` : ""}`, intent: "warning", icon: "warning-sign", timeout: 8000 });
       return;
     }
-    const sent = result.status === "ok";
+    // A prompt a budget of the machine holds is there already: it is sent once its owner continues it anyway.
+    const promptState = remoteStartPrompt(result.status);
+    const sent = promptState !== "not_sent";
     if (sent && localDrafts.peek(scope)?.text.trim() === prompt) {
       localDrafts.edit(scope, "");
       persistDraft((_key, value) => localStorage.setItem(`codealta.desktop.localPrompt.${JSON.stringify(id)}`, value),
         () => localStorage.removeItem(`codealta.desktop.localPrompt.${JSON.stringify(id)}`), scope, "");
     }
     if (!sent) showToast({ message: say("The session was started on {name}, but its prompt was not sent. The prompt keeps its text.", { name: machineName }), intent: "warning", icon: "warning-sign", timeout: 8000 });
+    if (promptState === "held") showHeldStartToast({ epoch, runId: result.sessionId, say,
+      message: say("The session was started on {name}. Its prompt waits for a reached budget of the machine: it is sent once you continue it anyway.", { name: machineName }) });
     const fresh = await refreshProjects(creationRefresh.current.signal);
     const row = fresh?.sessions.find(session => session.id === result.sessionId);
     if (!creationAlive.current) return;

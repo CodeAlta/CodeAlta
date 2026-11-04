@@ -100,6 +100,7 @@ const approvalsApi: FleetApprovalsApi = {
   continueRun: async () => ({ status: "ok", message: null }),
   stopRun: async () => ({ status: "ok", message: null }),
   readNotification: async () => ({ status: "ok", message: null }),
+  directory: async () => ({ status: "ok", machines: [], sessions: [] }) as never,
 };
 
 function Fixture() {

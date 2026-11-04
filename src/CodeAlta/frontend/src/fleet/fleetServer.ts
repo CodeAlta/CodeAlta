@@ -153,6 +153,12 @@ export function fleetSummary(machines: readonly FleetMachineView[], sessions: re
   };
 }
 
+/** How many sessions of other machines than this computer wait for the person: what the Fleet button counts with what it shows. */
+export function waitingRuns(machines: readonly Pick<FleetMachineView, "id" | "isThisComputer">[], sessions: readonly Pick<FleetSessionView, "machineId" | "state">[]): number {
+  const self = new Set(machines.filter(machine => machine.isThisComputer).map(machine => machine.id));
+  return sessions.filter(session => !self.has(session.machineId) && sessionState(session) === "requires_action").length;
+}
+
 /** The model of a session in a few words: its model, else its provider type, else nothing. */
 export function sessionModel(session: Pick<FleetSessionView, "model" | "providerType">): string {
   return session.model && session.providerType ? `${session.model} · ${session.providerType}` : session.model ?? session.providerType ?? "";

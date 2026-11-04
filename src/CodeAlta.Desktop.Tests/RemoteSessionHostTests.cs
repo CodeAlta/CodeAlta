@@ -42,6 +42,9 @@ public sealed class RemoteSessionHostTests
         Assert.IsTrue(await host.WaitListedAsync(created.SessionId, Patience, token), "The new session is listed once the list is read again.");
         Assert.AreSame(host, registry.Resolve(created.SessionId), "The registry gives a session to the machine that lists it.");
         Assert.AreSame(registry.Local, registry.Resolve(Guid.NewGuid().ToString()), "A session no machine lists is one of this process.");
+        // Its composer names the provider as the machine does: a provider of the same key here may be another one.
+        var choices = host.SelectionChoices(created.SessionId)!;
+        Assert.AreEqual(("scripted", "Scripted"), (choices.Current.ProviderKey, choices.HostProviderName));
 
         // The display of the node, watched before the send, shows the answer of the turn.
         using var watching = CancellationTokenSource.CreateLinkedTokenSource(token);
