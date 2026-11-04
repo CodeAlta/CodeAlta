@@ -144,11 +144,12 @@ internal sealed class AccessDocumentService
                 [.. held.Suspended])
             {
                 OrganizationMachines = [.. held.OrganizationMachines ?? []], OrganizationServices = [.. held.OrganizationServices ?? []],
+                Automations = (held.Automations ?? []).ToImmutableDictionary(static automation => automation.Id, StringComparer.Ordinal),
             };
         }
 
         // A home server with no team and nobody suspended has nothing for machines to verify: its first version waits for a need.
-        var needed = last is not null || model.Teams.Count > 0 || model.Suspended.Count > 0 || model.OrganizationMachines is not null;
+        var needed = last is not null || model.Teams.Count > 0 || model.Suspended.Count > 0 || model.OrganizationMachines is not null || model.Automations is not null;
         var names = (await _store.ListDevicesAsync(organizationId, cancellationToken).ConfigureAwait(false)).ToDictionary(static device => device.Id, static device => device.Name,
             StringComparer.Ordinal);
         foreach (var person in snapshot.People) names[person.Id] = person.DisplayName;
@@ -183,6 +184,10 @@ internal sealed class AccessDocumentService
         // The machines of the organization and the service identities it turned on: its automations run there, as one of them.
         var organizationMachines = snapshot.Owners.Where(owner => owner.ResourceKind == FleetResourceKinds.Machine && owner.OwnerKind == FleetPrincipalKinds.Organization
                 && approved.Contains(owner.ResourceId)).Select(static owner => owner.ResourceId).Order(StringComparer.Ordinal).ToArray();
+        // The automations whose owner machines follow: given to another owner, or of a team or of the organization; a person who
+        // gives versions to their own machines needs none.
+        var automations = snapshot.Owners.Where(static owner => owner.ResourceKind == FleetResourceKinds.Automation).OrderBy(static owner => owner.ResourceId, StringComparer.Ordinal)
+            .Select(static owner => new FleetAccessAutomation(owner.ResourceId, owner.OwnerKind, owner.OwnerId, owner.Paused)).ToArray();
         var organizationServices = snapshot.ServiceIdentities.Where(static identity => identity.Enabled && identity.OwnerKind == FleetPrincipalKinds.Organization)
             .Select(static identity => identity.Id).Order(StringComparer.Ordinal).ToArray();
         var machines = snapshot.Owners.Where(owner => owner.ResourceKind == FleetResourceKinds.Machine && owner.OwnerKind == FleetPrincipalKinds.Team && living.Contains(owner.OwnerId)
@@ -193,7 +198,8 @@ internal sealed class AccessDocumentService
             [.. active.Where(static person => person.Role == FleetOrganizationRoles.Admin).Select(static person => person.Id).Order(StringComparer.Ordinal)],
             teams, machines,
             [.. snapshot.People.Where(static person => !person.IsActive).Select(static person => person.Id).Order(StringComparer.Ordinal)],
-            string.Empty, default, organizationMachines.Length == 0 ? null : organizationMachines, organizationServices.Length == 0 ? null : organizationServices);
+            string.Empty, default, organizationMachines.Length == 0 ? null : organizationMachines, organizationServices.Length == 0 ? null : organizationServices,
+            automations.Length == 0 ? null : automations);
     }
 
     private static AccessDocumentDto ToDto(AccessDocumentRecord record)

@@ -170,6 +170,25 @@ public sealed class FleetAccessDocumentsTests
             "an automation of the organization runs on a machine of the organization only");
     }
 
+    [TestMethod]
+    public void TheDocumentSaysWhoOwnsAnAutomationGivenAway_AndItsFormerOwnerGivesItNothingButItsRemoval()
+    {
+        using var world = new World();
+        var chain = new List<FleetSignedAccessDocument> { world.Founder.Sign(Document(1, null, 4, owners: ["alex"], signers: ["ada"])) };
+        var before = FleetAccessDocuments.Verify(chain, world.Devices, Organization).State;
+        var after = Document(2, Hash(chain), 4, owners: ["alex"], signers: ["ada"]) with { Automations = [new FleetAccessAutomation("nightly", FleetPrincipalKinds.Person, "bea", true)] };
+        CollectionAssert.AreEqual(new[] { "The automation nightly is Bea's", "The automation nightly waits for its owner to resume it" },
+            FleetAccessDocuments.Describe(before, after, id => id == "bea" ? "Bea" : null).ToArray());
+        chain.Add(world.Ada.Sign(after));
+        var state = FleetAccessDocuments.Verify(chain, world.Devices, Organization).State;
+        Assert.AreEqual("bea", state.Automations["nightly"].OwnerId);
+
+        // The node of Alex: his own version of it no longer runs; Bea's does not either while it waits.
+        StringAssert.Contains(FleetAutomationVersionDocuments.CheckAccess("alex", world.Node.Id, world.Devices, state, "nightly"), "another owner");
+        Assert.AreEqual(FleetAutomationVersionDocuments.WaitsForOwner, FleetAutomationVersionDocuments.CheckAccess("bea", world.Node.Id, world.Devices, state, "nightly"));
+        Assert.IsNull(FleetAutomationVersionDocuments.CheckAccess("alex", world.Node.Id, world.Devices, state, "other"), "an automation the document does not name stays his");
+    }
+
     private static void AssertBroken(IReadOnlyList<FleetSignedAccessDocument> chain, World world, long at, string reason, string organization = Organization,
         FleetDeviceListState? devices = null)
     {

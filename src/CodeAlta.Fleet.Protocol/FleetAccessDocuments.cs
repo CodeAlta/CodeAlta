@@ -24,6 +24,21 @@ public sealed record FleetAccessTeam(
     [property: JsonPropertyName("runsMemberAutomations")] bool RunsMemberAutomations,
     [property: JsonPropertyName("services"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<string>? Services = null);
 
+/// <summary>
+/// An automation whose owner is not simply the person who gives it versions (<c>doc/fleet/access-control.md</c>, ownership over
+/// time): one given to another owner, or one of a team or of the organization. Machines take its versions from who answers for
+/// that owner only, and run none while it waits for its owner to resume it.
+/// </summary>
+/// <param name="Id">The automation.</param>
+/// <param name="OwnerKind">A person, a team or the organization.</param>
+/// <param name="OwnerId">Their id.</param>
+/// <param name="Paused">Whether it waits for its owner to resume it.</param>
+public sealed record FleetAccessAutomation(
+    [property: JsonPropertyName("id")] string Id,
+    [property: JsonPropertyName("ownerKind")] string OwnerKind,
+    [property: JsonPropertyName("owner")] string OwnerId,
+    [property: JsonPropertyName("paused")] bool Paused);
+
 /// <summary>A team machine: the device of the machine and the team that owns it.</summary>
 /// <param name="DeviceId">The device of the machine.</param>
 /// <param name="TeamId">The team.</param>
@@ -59,6 +74,7 @@ public sealed record FleetAccessMachine(
 /// <param name="Time">When the signer made it; for display, never for ordering.</param>
 /// <param name="OrganizationMachines">The machines the organization owns, which run its automations; null for none, which writes the format as before.</param>
 /// <param name="OrganizationServices">The service identities of the organization that are on, which its automations run as; null for none.</param>
+/// <param name="Automations">The automations whose owner machines follow; null for none, which writes the format as before.</param>
 public sealed record FleetAccessDocument(
     [property: JsonPropertyName("v")] int Version,
     [property: JsonPropertyName("org")] string OrganizationId,
@@ -73,7 +89,8 @@ public sealed record FleetAccessDocument(
     [property: JsonPropertyName("signer")] string SignerDeviceId,
     [property: JsonPropertyName("time")] DateTimeOffset Time,
     [property: JsonPropertyName("orgMachines"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<string>? OrganizationMachines = null,
-    [property: JsonPropertyName("orgServices"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<string>? OrganizationServices = null)
+    [property: JsonPropertyName("orgServices"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<string>? OrganizationServices = null,
+    [property: JsonPropertyName("automations"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<FleetAccessAutomation>? Automations = null)
 {
     /// <summary>The version of the format this library writes.</summary>
     public const int CurrentVersion = 1;
@@ -150,6 +167,22 @@ public sealed record FleetAccessState(
 
     /// <summary>Gets the service identities of the organization that are on.</summary>
     public IReadOnlyList<string> OrganizationServices { get; init; } = [];
+
+    /// <summary>Gets the automations whose owner machines follow, by id.</summary>
+    public ImmutableDictionary<string, FleetAccessAutomation> Automations { get; init; } = ImmutableDictionary.Create<string, FleetAccessAutomation>(StringComparer.Ordinal);
+
+    /// <summary>Gets whether a person answers for an owner: the person themselves, a maintainer of the team, an owner or signer for the organization.</summary>
+    /// <param name="ownerKind">The kind of the owner.</param>
+    /// <param name="ownerId">The owner.</param>
+    /// <param name="personId">The person.</param>
+    /// <returns>Whether they answer for it, and are not suspended.</returns>
+    public bool Answers(string ownerKind, string ownerId, string? personId) => personId is not null && !IsSuspended(personId) && ownerKind switch
+    {
+        FleetPrincipalKinds.Person => ownerId == personId,
+        FleetPrincipalKinds.Team => Teams.TryGetValue(ownerId, out var team) && RoleIn(team, personId) == FleetTeamRoles.Maintainer,
+        FleetPrincipalKinds.Organization => IsSigner(personId),
+        _ => false,
+    };
 
     /// <summary>Gets whether a machine is the organization's.</summary>
     /// <param name="deviceId">The device of the machine.</param>
@@ -301,6 +334,7 @@ public static class FleetAccessDocuments
             FirstHash = state.FirstHash ?? hash,
             OrganizationMachines = [.. document.OrganizationMachines ?? []],
             OrganizationServices = [.. document.OrganizationServices ?? []],
+            Automations = (document.Automations ?? []).ToImmutableDictionary(static automation => automation.Id, StringComparer.Ordinal),
         };
         return true;
     }
@@ -396,6 +430,15 @@ public static class FleetAccessDocuments
             lines.Add($"The organization runs its automations as {Name(id)}");
         foreach (var id in before.OrganizationServices.Where(id => after.OrganizationServices?.Contains(id, StringComparer.Ordinal) != true))
             lines.Add($"The organization no longer runs its automations as {Name(id)}");
+        foreach (var automation in after.Automations ?? [])
+        {
+            before.Automations.TryGetValue(automation.Id, out var held);
+            if (held is null || held.OwnerKind != automation.OwnerKind || held.OwnerId != automation.OwnerId)
+                lines.Add(automation.OwnerKind == FleetPrincipalKinds.Organization ? $"The automation {Name(automation.Id)} is the organization's"
+                    : $"The automation {Name(automation.Id)} is {Name(automation.OwnerId)}'s");
+            if (automation.Paused && held?.Paused != true) lines.Add($"The automation {Name(automation.Id)} waits for its owner to resume it");
+            if (!automation.Paused && held?.Paused == true) lines.Add($"The automation {Name(automation.Id)} is resumed");
+        }
         return lines;
     }
 
@@ -411,7 +454,10 @@ public static class FleetAccessDocuments
         return SameSet(left.Owners, right.Owners) && SameSet(left.Signers, right.Signers) && SameSet(left.Suspended, right.Suspended)
             && SameSet(left.Machines.Select(static machine => machine.DeviceId + "\n" + machine.TeamId), right.Machines.Select(static machine => machine.DeviceId + "\n" + machine.TeamId))
             && SameSet(left.Teams.Select(TeamKey), right.Teams.Select(TeamKey))
-            && SameSet(left.OrganizationMachines ?? [], right.OrganizationMachines ?? []) && SameSet(left.OrganizationServices ?? [], right.OrganizationServices ?? []);
+            && SameSet(left.OrganizationMachines ?? [], right.OrganizationMachines ?? []) && SameSet(left.OrganizationServices ?? [], right.OrganizationServices ?? [])
+            && SameSet((left.Automations ?? []).Select(AutomationKey), (right.Automations ?? []).Select(AutomationKey));
+
+        static string AutomationKey(FleetAccessAutomation automation) => $"{automation.Id}\n{automation.OwnerKind}\n{automation.OwnerId}\n{automation.Paused}";
 
         static string TeamKey(FleetAccessTeam team)
             => $"{team.Id}\n{team.RunsMemberAutomations}\n{string.Join(',', team.Maintainers.Order(StringComparer.Ordinal))}\n{string.Join(',', team.Members.Order(StringComparer.Ordinal))}"
@@ -428,7 +474,7 @@ public static class FleetAccessDocuments
         ArgumentNullException.ThrowIfNull(document);
         return SaySame(new FleetAccessDocument(1, document.OrganizationId, 0, null, 0, [.. state.Owners], [.. state.Signers], [.. state.Teams.Values],
             [.. state.Machines.Select(static pair => new FleetAccessMachine(pair.Key, pair.Value))], [.. state.Suspended], document.SignerDeviceId, document.Time,
-            [.. state.OrganizationMachines], [.. state.OrganizationServices]), document);
+            [.. state.OrganizationMachines], [.. state.OrganizationServices], [.. state.Automations.Values]), document);
     }
 
     private static bool SameSet(IEnumerable<string> left, IEnumerable<string> right)
@@ -490,6 +536,10 @@ public static class FleetAccessDocuments
         }
 
         if (document.OrganizationMachines?.Any(id => document.Machines.Any(machine => machine.DeviceId == id)) == true) return "a machine is both a team's and the organization's";
+        if (document.Automations is { } automations && (automations.Count > MaxItems * 4 || automations.Any(static automation => automation is null || !IsId(automation.Id)
+                || automation.OwnerKind is not (FleetPrincipalKinds.Person or FleetPrincipalKinds.Team or FleetPrincipalKinds.Organization) || !IsId(automation.OwnerId))
+            || automations.Select(static automation => automation.Id).Distinct(StringComparer.Ordinal).Count() != automations.Count))
+            return "a list of automations does not hold";
         var suspended = new HashSet<string>(document.Suspended, StringComparer.Ordinal);
         if (document.Owners.Concat(document.Signers).Any(suspended.Contains)) return "a suspended person owns or signs";
         var teams = new HashSet<string>(StringComparer.Ordinal);

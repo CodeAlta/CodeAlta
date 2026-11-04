@@ -178,6 +178,9 @@ public sealed class AccessControlTests
         Assert.AreEqual(HttpStatusCode.OK, (await server.SendAsync(owner, HttpMethod.Put, "/api/v1/automations/nightly", new PutAutomationRequest(Version(4, removed: true)))).Status,
             "its former owner takes it off his machines");
         Assert.AreEqual(HttpStatusCode.OK, (await server.SendAsync(bea, HttpMethod.Get, $"/api/v1/transfers/{transfer.Id}/handover")).Status, "the hand-over stays for her devices");
+        var listed = (await server.SendAsync(owner, HttpMethod.Get, "/api/v1/access/draft")).Read<AccessDocumentDraftDto>().Document.Automations!.Single();
+        Assert.AreEqual(("nightly", FleetPrincipalKinds.Person, beaId, true), (listed.Id, listed.OwnerKind, listed.OwnerId, listed.Paused),
+            "machines learn from the signed document that it is hers, and waits for her");
 
         // A declined offer takes its hand-over with it.
         var back = await server.SendAsync(bea, HttpMethod.Post, "/api/v1/transfers", new OfferTransferRequest(FleetResourceKinds.Automation, "nightly", FleetPrincipalKinds.Person,

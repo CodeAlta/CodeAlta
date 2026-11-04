@@ -276,7 +276,8 @@ public static class FleetAutomationVersionDocuments
             return false;
         }
 
-        if (CheckAccess(signer.OwnerId, machineId!, devices, access) is { } refused)
+        // A removal takes away what a machine holds, whoever owns the automation now: its former owner cleans up after a transfer.
+        if (CheckAccess(signer.OwnerId, machineId!, devices, access, parsed.Removed ? null : parsed.AutomationId) is { } refused)
         {
             reason = refused;
             return false;
@@ -320,6 +321,37 @@ public static class FleetAutomationVersionDocuments
     /// <returns>Why not, or null when they may.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="devices"/> is null.</exception>
     public static string? CheckAccess(string? signerPersonId, string machineId, FleetDeviceListState devices, FleetAccessState? access)
+        => CheckAccess(signerPersonId, machineId, devices, access, null);
+
+    /// <summary>
+    /// Says whether the person of a signing device may give a machine a version of an automation, as
+    /// <see cref="CheckAccess(string?, string, FleetDeviceListState, FleetAccessState?)"/> does, and, when the access document names
+    /// the owner of that automation, whether they answer for it: once it was given to another owner, its former owner gives it
+    /// nothing more; while it waits for its owner to resume it, nothing of it runs.
+    /// </summary>
+    /// <param name="signerPersonId">The person of the device that signed.</param>
+    /// <param name="machineId">The device of the machine.</param>
+    /// <param name="devices">The device list of the server, as the machine verified it.</param>
+    /// <param name="access">The access document of the server, as the machine verified it; null reads the machine as personal.</param>
+    /// <param name="automationId">The automation; null checks the machine only.</param>
+    /// <returns>Why not, or null when they may.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="devices"/> is null.</exception>
+    public static string? CheckAccess(string? signerPersonId, string machineId, FleetDeviceListState devices, FleetAccessState? access, string? automationId)
+    {
+        ArgumentNullException.ThrowIfNull(devices);
+        if (automationId is not null && access?.Automations.GetValueOrDefault(automationId) is { } owned)
+        {
+            if (!access.Answers(owned.OwnerKind, owned.OwnerId, signerPersonId)) return "this automation belongs to another owner now: the version of its former owner does not run";
+            if (owned.Paused) return WaitsForOwner;
+        }
+
+        return CheckMachine(signerPersonId, machineId, devices, access);
+    }
+
+    /// <summary>Why an automation does not run while it waits for its owner to resume it.</summary>
+    public const string WaitsForOwner = "this automation waits for its owner to resume it";
+
+    private static string? CheckMachine(string? signerPersonId, string machineId, FleetDeviceListState devices, FleetAccessState? access)
     {
         ArgumentNullException.ThrowIfNull(devices);
         if (access is not null && access.IsSuspended(signerPersonId)) return "the version is signed by a device of a person the organization suspended";

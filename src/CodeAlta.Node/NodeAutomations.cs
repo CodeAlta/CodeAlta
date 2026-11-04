@@ -491,7 +491,7 @@ internal sealed partial class NodeAutomations : IFleetNodeAutomations, IAutomati
             // The signed access document as this node verified it: a suspended signer, a team machine that no longer runs it.
             if (ServerDevices?.Invoke(link) is { } listed && ServerAccess?.Invoke(link) is { } access && DeviceId is { } machine
                 && listed.Members.TryGetValue(key.DeviceId, out var signer)
-                && FleetAutomationVersionDocuments.CheckAccess(signer.OwnerId, machine, listed, access) is { } refused)
+                && FleetAutomationVersionDocuments.CheckAccess(signer.OwnerId, machine, listed, access, entry.Id) is { } refused)
                 return $"This automation waits for its owner: {refused}.";
             return null;
         }

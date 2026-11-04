@@ -364,6 +364,44 @@ public sealed class NodeServerAutomationTests
     }
 
     [TestMethod]
+    public async Task AnAutomationTheDocumentGivesToAnotherOwner_StopsOnTheMachineOfItsFormerOwner_WhoStillTakesItAway()
+    {
+        var token = TestContext.CancellationToken;
+        using var root = new NodeTestRoot();
+        await using var node = await NodeHost.StartAsync(root.Options() with
+        {
+            Automations = new NodeAutomationOptions
+            {
+                TimeProvider = new NodeClock { Now = Noon }, TimeZone = TimeZoneInfo.Utc, WatchRepositories = false, CredentialKind = static _ => AutomationCredentialKind.Account,
+            },
+        }, token);
+        using var laptop = DeviceIdentity.LoadOrCreate(Path.Combine(root.Root, "laptop"));
+        using var tablet = DeviceIdentity.LoadOrCreate(Path.Combine(root.Root, "tablet"));
+        using var self = DeviceIdentity.LoadOrCreate(Path.Combine(root.Root, "self"));
+        var automations = node.Automations!;
+        automations.DeviceId = self.DeviceId;
+        var list = DeviceList(laptop, tablet, self, removeTablet: false);
+        automations.ServerDevices = _ => list;
+        var access = FleetAccessState.Empty with { OrganizationId = "org", Number = 1, Owners = ["p1"] };
+        automations.ServerAccess = _ => access;
+        (FleetAutomationContent?, string?) Open(FleetAutomationVersion version)
+            => FleetAutomationSigning.TryOpen(version.Sealed, version.AutomationId, version.Number, version.MachineId, self, list, out var content, out var reason) ? (content, null) : (null, reason);
+        Assert.IsTrue((await automations.AcceptFromServerAsync("link-1", list, "org", Sign(tablet, list, "org", self.DeviceId, 1), Open, token)).Applied);
+        var entry = automations.Engine.Snapshot.Find(Id)!;
+        var provider = new CodeAlta.Agent.ModelProviderDescriptor(new("gateway"), "Gateway");
+        Assert.IsNull(automations.Check(entry, provider));
+
+        // The signed document says p1 gave it to p2: it stops here, and p1 gives it no new version, only its removal.
+        access = access with { Automations = access.Automations.Add(Id, new FleetAccessAutomation(Id, FleetPrincipalKinds.Person, "p2", true)) };
+        StringAssert.Contains(automations.Check(entry, provider), "another owner");
+        var again = await automations.AcceptFromServerAsync("link-1", list, "org", Sign(tablet, list, "org", self.DeviceId, 2), Open, token);
+        Assert.IsFalse(again.Applied);
+        StringAssert.Contains(again.Message, "another owner");
+        Assert.IsTrue((await automations.AcceptFromServerAsync("link-1", list, "org", SignRemoval(tablet, "org", self.DeviceId, 3, Id), _ => (null, "unused"), token)).Applied);
+        Assert.IsNull(automations.Engine.Snapshot.Find(Id));
+    }
+
+    [TestMethod]
     public async Task TheAutomationsAServerGaveStopOnceTheNodeLeftItAndAReplayedVersionIsRefused()
     {
         var token = TestContext.CancellationToken;
