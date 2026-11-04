@@ -54,6 +54,36 @@ public static class CoordinatorErrorCodes
     /// <summary>The server has no organization yet: set it up first.</summary>
     public const string NotSetUp = "setup.required";
 
+    /// <summary>A named value, or its copies, does not hold.</summary>
+    public const string SecretInvalid = "secret.invalid";
+
+    /// <summary>Another value has this name in this scope: rotate it instead.</summary>
+    public const string SecretExists = "secret.exists";
+
+    /// <summary>The value is not at the version before the one written: read it again.</summary>
+    public const string SecretConflict = "secret.conflict";
+
+    /// <summary>No value of this person has this id.</summary>
+    public const string SecretNotFound = "secret.not_found";
+
+    /// <summary>An environment does not hold.</summary>
+    public const string EnvironmentInvalid = "environment.invalid";
+
+    /// <summary>The environment is not newer than the one held, or another environment has its name.</summary>
+    public const string EnvironmentConflict = "environment.conflict";
+
+    /// <summary>No environment of this person has this id.</summary>
+    public const string EnvironmentNotFound = "environment.not_found";
+
+    /// <summary>An approval does not hold.</summary>
+    public const string ApprovalInvalid = "approval.invalid";
+
+    /// <summary>The approval was given already.</summary>
+    public const string ApprovalConflict = "approval.conflict";
+
+    /// <summary>No approval the caller may see has this id.</summary>
+    public const string ApprovalNotFound = "approval.not_found";
+
     /// <summary>The server already has an owner.</summary>
     public const string AlreadySetUp = "setup.done";
 
