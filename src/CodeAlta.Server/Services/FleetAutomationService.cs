@@ -202,6 +202,7 @@ internal sealed class FleetAutomationService
         if (run.SignerDeviceId != actor.Id || run.SignerKey != actor.PublicKey) throw Invalid("The run request must name the device that signs it, with its key.");
         if (run.OrganizationId != actor.OrganizationId) throw Invalid("The run request must name the organization of the server.");
         var held = await _automations.GetAutomationAsync(actor.OrganizationId, id, run.MachineId, cancellationToken).ConfigureAwait(false);
+        // Run by hand by who the machine lets run it (it checks the signed request): the person who gave it, who answers for its scope.
         if (held is null || held.Removed || held.OwnerPersonId != person && !await MaintainsAsync(actor.OrganizationId, id, person, cancellationToken).ConfigureAwait(false))
             throw CoordinatorException.NotFound(CoordinatorErrorCodes.AutomationNotFound, "No automation of yours has this id on this machine.");
         await RequireOwnedAsync(actor.OrganizationId, id, person, cancellationToken).ConfigureAwait(false);
@@ -301,6 +302,19 @@ internal sealed class FleetAutomationService
             ? identity : null;
     }
 
+    // Whether a person holds a capability on an automation (doc/fleet/access-control.md, team roles and grants): the person who
+    // gave the version held, else by access control on its owner (its team's roles, a grant, the roles of the organization).
+    private async Task<bool> MayAsync(string organizationId, string automationId, string? giver, string person, string capability, CancellationToken cancellationToken)
+    {
+        if (giver == person) return true;
+        if (Access is not { } access) return false;
+        var snapshot = await access.ReadAccessAsync(organizationId, cancellationToken).ConfigureAwait(false);
+        var owner = snapshot.Owner(FleetResourceKinds.Automation, automationId);
+        var (ownerKind, ownerId) = owner is not null ? (owner.OwnerKind, owner.OwnerId) : giver is not null ? (FleetPrincipalKinds.Person, giver) : (null, null);
+        return ownerKind is not null && ownerId is not null
+            && AccessPolicy.Allows(snapshot, person, capability, AccessTarget.Resource(FleetResourceKinds.Automation, automationId, ownerKind, ownerId), _time.GetUtcNow());
+    }
+
     // Whether the person answers for an automation of a scope: a maintainer of its team, an owner or admin for the organization.
     private async Task<bool> MaintainsAsync(string organizationId, string automationId, string person, CancellationToken cancellationToken)
         => Access is { } access && (await access.ReadAccessAsync(organizationId, cancellationToken).ConfigureAwait(false)) is var snapshot
@@ -393,8 +407,8 @@ internal sealed class FleetAutomationService
     {
         var person = RequirePersonController(actor);
         var records = await _automations.ListAutomationsAsync(actor.OrganizationId, person, cancellationToken).ConfigureAwait(false);
-        // Its runs are read by the person who gave it, and by those who answer for its team or for the organization.
-        if (!records.Any(record => record.AutomationId == id) && !await MaintainsAsync(actor.OrganizationId, id, person, cancellationToken).ConfigureAwait(false))
+        // Its runs are read by the person who gave it, and by who holds automation.view on it: its team, a grant, the organization's roles.
+        if (!records.Any(record => record.AutomationId == id) && !await MayAsync(actor.OrganizationId, id, null, person, "automation.view", cancellationToken).ConfigureAwait(false))
             throw CoordinatorException.NotFound(CoordinatorErrorCodes.AutomationNotFound, "No automation of yours has this id.");
         var runs = await _automations.ListAutomationRunsAsync(actor.OrganizationId, id, Math.Clamp(limit ?? 50, 1, RunsKept), cancellationToken).ConfigureAwait(false);
         return new AutomationRunListDto([.. runs.Select(static run => new AutomationRunDto(run.RunId, run.AutomationId, run.MachineId, run.Number, run.Trigger, run.Status,

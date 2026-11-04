@@ -253,7 +253,12 @@ public sealed class AccessControlTests
 
         Assert.AreEqual(HttpStatusCode.Conflict, (await server.SendAsync(ada, HttpMethod.Post, "/api/v1/automations/deploy/run", Run(ada))).Status,
             "a maintainer may run it: the machine is offline here");
+        // A member of the team sees its runs, which their team role gives at the endpoints too; running it by hand stays its maintainers'.
         Assert.AreEqual(HttpStatusCode.NotFound, (await server.SendAsync(max, HttpMethod.Post, "/api/v1/automations/deploy/run", Run(max))).Status);
+        Assert.AreEqual(HttpStatusCode.OK, (await server.SendAsync(max, HttpMethod.Get, "/api/v1/automations/deploy/runs")).Status, "a member sees the runs of the team");
+        var (cy, _) = await AddPersonAsync(server, owner, setup, "Cy");
+        Assert.AreEqual(HttpStatusCode.NotFound, (await server.SendAsync(cy, HttpMethod.Get, "/api/v1/automations/deploy/runs")).Status, "not someone of no team");
+        Assert.AreEqual(HttpStatusCode.NotFound, (await server.SendAsync(cy, HttpMethod.Post, "/api/v1/automations/deploy/run", Run(cy))).Status);
         Assert.AreEqual(HttpStatusCode.Forbidden, (await server.SendAsync(max, HttpMethod.Put, "/api/v1/automations/other", Version(max, "other", "team:" + team.Id))).Status,
             "a member gives the team none of its automations");
         Assert.AreEqual(HttpStatusCode.Forbidden, (await server.SendAsync(max, HttpMethod.Put, "/api/v1/automations/mine", Version(max, "mine", null))).Status,
@@ -477,6 +482,10 @@ public sealed class AccessControlTests
         Assert.AreEqual(HttpStatusCode.OK, (await server.SendAsync(mia, HttpMethod.Delete, $"/api/v1/teams/{team.Id}/oncall")).Status);
         CollectionAssert.AreEqual(new[] { miaId, maxId }, (await access.ApproversOfAsync(setup.Organization.Id, "nightly", maxId, "oncall", default)).ToArray(), "without a rotation, its team");
 
+        // The machine reported the run that waits: a take-over is passed on for a run of this automation only.
+        var box = (await server.GetService<ICoordinatorStore>().GetDeviceAsync(machine.Id))!;
+        await server.GetService<CodeAlta.Server.Services.FleetAutomationService>().RecordRunsAsync(box, new FleetAutomationRunFacts([
+            new FleetAutomationRunFact("run-1", "nightly", 1, "schedule", "waiting", server.Clock.Now, null)]), CancellationToken.None);
         var byMia = await TakeOverAsync(mia);
         Assert.AreEqual(HttpStatusCode.Conflict, byMia.Status, byMia.Body.ToString());
         StringAssert.Contains(byMia.Body.ToString(), "offline", "Mia may: the machine is offline, so it is not passed on");
