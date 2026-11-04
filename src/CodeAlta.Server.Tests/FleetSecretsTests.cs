@@ -231,7 +231,8 @@ public sealed class FleetSecretsTests
         var asked = await node.RequestApprovalAsync(environment.Id, new RequestFleetApprovalRequest("run-1", "nonce-1", definition.Number, null, "Deploy"));
         Assert.AreEqual(FleetApprovalStates.Pending, asked.Status);
         Assert.AreEqual(asked.Id, (await fleet.Manager.ListApprovalsAsync(CancellationToken.None)).Approvals.Single().Id, "it waits for the approver");
-        var approved = await fleet.Manager.ApproveAsync(asked.Id, CancellationToken.None);
+        var listed = (await fleet.Manager.ListApprovalsAsync(CancellationToken.None)).Approvals.Single();
+        var approved = await fleet.Manager.ApproveAsync(asked.Id, FleetSecretsManager.ReviewOf(listed), CancellationToken.None);
         Assert.AreEqual(FleetApprovalStates.Approved, approved.Status);
         var given = (await node.GetApprovalAsync(asked.Id)).Approval;
         var now = DateTimeOffset.UtcNow;
@@ -375,6 +376,55 @@ public sealed class FleetSecretsTests
             Assert.IsFalse(refreshed.Environments.ContainsKey("staging"), "an environment taken away does not come back");
             Assert.IsFalse(store.GetSecretValues().Contains("v1-value"), "a superseded value does not come back");
             Assert.IsTrue(result.Refused.Count >= 3, string.Join("; ", result.Refused));
+        }
+    }
+
+    [TestMethod]
+    public async Task AnApproval_SignsTheRunThePersonReviewed_NeverOneTheServerSubstitutesAtTheClick()
+    {
+        await using var fleet = await SecretsFixture.StartAsync();
+        var person = (await fleet.NodeListAsync()).Members[fleet.DesktopKey.DeviceId].OwnerId!;
+        var environment = await fleet.Manager.PutEnvironmentAsync("production", [person], [], [], false, CancellationToken.None);
+        using var node = new FleetServerClient(fleet.Server.BaseAddress, fleet.NodeKey);
+        var asked = await node.RequestApprovalAsync(environment.Id, new RequestFleetApprovalRequest("run-reviewed", "nonce-reviewed", 1, null, null));
+        var reviewed = (await fleet.Manager.ListApprovalsAsync(CancellationToken.None)).Approvals.Single();
+
+        // Between the listing and the click, the server answers another run, machine and nonce for the same approval.
+        using var swap = new ApprovalSwapHandler { InnerHandler = new HttpClientHandler(), Swap = approval => approval with { RunId = "run-other", Nonce = "nonce-other",
+            MachineId = fleet.OtherKey.DeviceId } };
+        var manager = new FleetSecretsManager(new FleetOrganizationDevices(fleet.Server.BaseAddress, fleet.DesktopKey,
+            Path.Combine(fleet.Root.Path, "desktop-link", FleetOrganizationDevices.PinFileName), swap));
+        await Assert.ThrowsExactlyAsync<InvalidDataException>(() => manager.ApproveAsync(asked.Id, FleetSecretsManager.ReviewOf(reviewed), CancellationToken.None));
+        Assert.AreEqual(0, swap.Sent, "nothing was signed for a run the person did not review");
+        Assert.AreEqual(FleetApprovalStates.Pending, (await node.GetApprovalAsync(asked.Id)).Status);
+
+        // Unchanged, the run reviewed is the one signed.
+        swap.Swap = null;
+        await manager.ApproveAsync(asked.Id, FleetSecretsManager.ReviewOf(reviewed), CancellationToken.None);
+        FleetEnvironmentDocuments.TryReadApproval((await node.GetApprovalAsync(asked.Id)).Approval!.Payload, out var signed, out _);
+        Assert.AreEqual(("run-reviewed", "nonce-reviewed", fleet.NodeKey.DeviceId), (signed!.RunId, signed.Nonce, signed.MachineId));
+    }
+
+    // Answers an approval changed by the server.
+    private sealed class ApprovalSwapHandler : DelegatingHandler
+    {
+        private int _sent;
+
+        public Func<FleetApprovalDto, FleetApprovalDto>? Swap { get; set; }
+
+        // The signed approvals sent.
+        public int Sent => Volatile.Read(ref _sent);
+
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            if (request.Method == HttpMethod.Post && request.RequestUri!.AbsolutePath.EndsWith("/approve", StringComparison.Ordinal)) Interlocked.Increment(ref _sent);
+            var response = await base.SendAsync(request, cancellationToken);
+            if (Swap is not { } swap || request.Method != HttpMethod.Get || !request.RequestUri!.AbsolutePath.Contains("/api/v1/approvals/", StringComparison.Ordinal)) return response;
+            var approval = System.Text.Json.JsonSerializer.Deserialize(await response.Content.ReadAsStringAsync(cancellationToken), FleetSecretsApiJsonContext.Default.FleetApprovalDto)!;
+            return new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(System.Text.Json.JsonSerializer.Serialize(swap(approval), FleetSecretsApiJsonContext.Default.FleetApprovalDto), Encoding.UTF8, "application/json"),
+            };
         }
     }
 
