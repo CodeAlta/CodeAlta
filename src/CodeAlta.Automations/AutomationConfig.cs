@@ -102,6 +102,9 @@ internal static class AutomationConfig
             return "The permission mode of an automation is a name.";
         if (definition.Sandbox is { } sandbox && (sandbox.Length is 0 or > 256 || sandbox.Any(char.IsControl) || sandbox.Trim() != sandbox))
             return "The sandbox of an automation is the name of a profile, or off.";
+        if (definition.Environment is { } environment
+            && (environment.Length is 0 or > 64 || !environment.All(static ch => char.IsAsciiLetterOrDigit(ch) || ch is '-' or '_')))
+            return "The environment of an automation is the name of an environment of the fleet: letters, digits, - and _, at most 64.";
         if (definition.Triggers.Count > AutomationDefinition.MaximumTriggers) return $"An automation has at most {AutomationDefinition.MaximumTriggers} triggers.";
         foreach (var trigger in definition.Triggers)
         {
@@ -243,7 +246,7 @@ internal static class AutomationConfig
             || !TryFlag(table, "catch_up", false, out var catchUp, out problem) || !TryText(table, "permission_mode", out var permissionMode, out problem)
             || !TryText(table, "sandbox", out var sandbox, out problem) || !TryText(table, "script", out var script, out problem)
             || !TryText(table, "script_args", out var scriptArguments, out problem) || !TryFlag(table, "sub_sessions", true, out var subSessions, out problem)
-            || !TryText(table, "runs_on", out var runsOn, out problem)) return false;
+            || !TryText(table, "runs_on", out var runsOn, out problem) || !TryText(table, "environment", out var environment, out problem)) return false;
         bool? review = null;
         if (table.ContainsKey("review_before_commit"))
         {
@@ -295,6 +298,7 @@ internal static class AutomationConfig
             PermissionMode = Blank(permissionMode),
             ReviewBeforeCommit = review,
             Sandbox = Blank(sandbox),
+            Environment = Blank(environment),
             SessionOptions = AgentSessionOptions.Stored(new AgentSessionOptions { SubSessions = subSessions }),
             CatchUp = catchUp,
             Triggers = triggers,
@@ -434,6 +438,7 @@ internal static class AutomationConfig
         if (definition.PermissionMode is { } mode) builder.Append("permission_mode = ").Append(Quote(mode)).Append(newline);
         if (definition.ReviewBeforeCommit is { } review) builder.Append("review_before_commit = ").Append(review ? "true" : "false").Append(newline);
         if (definition.Sandbox is { } sandbox) builder.Append("sandbox = ").Append(Quote(sandbox)).Append(newline);
+        if (definition.Environment is { } environment) builder.Append("environment = ").Append(Quote(environment)).Append(newline);
         // An option is written only when it is not its default.
         if (AgentSessionOptions.Stored(definition.SessionOptions) is { SubSessions: false }) builder.Append("sub_sessions = false").Append(newline);
         if (definition.CatchUp) builder.Append("catch_up = true").Append(newline);

@@ -1,0 +1,172 @@
+using System.Buffers.Text;
+using System.Security.Cryptography;
+using System.Text.Json;
+using CodeAlta.Catalog;
+using CodeAlta.Fleet.Protocol;
+using CodeAlta.Fleet.Protocol.Api;
+using CodeAlta.Fleet.Server;
+using XenoAtom.Logging;
+
+namespace CodeAlta.Node;
+
+/// <summary>
+/// What a node checks before a run that names an environment starts (<c>doc/fleet/secrets.md</c>, environments protect
+/// themselves): the environment is one of the owner of the machine, as a controller device of that person signed it; the
+/// machine has one of its labels; the run is of an automation it allows; and, when it requires one, an approver approved
+/// this run, with a signature of a controller device of that approver bound to this environment and version, this machine,
+/// this run and the nonce this node chose, and valid now. An approval is taken once. The node decides: the server only
+/// relays the request and the signed approval.
+/// </summary>
+internal sealed class NodeEnvironmentGate
+{
+    /// <summary>How long a run waits for its approval by default.</summary>
+    public static readonly TimeSpan DefaultApprovalWait = TimeSpan.FromHours(1);
+
+    private const int MaximumUsed = 2048;
+
+    private readonly NodeFleetSecrets _secrets;
+    private readonly string _usedPath;
+    private readonly string _labelsPath;
+    private readonly Lock _gate = new();
+
+    /// <summary>Initializes a new instance of the <see cref="NodeEnvironmentGate"/> class.</summary>
+    /// <param name="secrets">The values the servers give the node, with the environments they verified.</param>
+    /// <param name="catalog">The catalog of the profile: the labels of the machine and the approvals it took are in its fleet folder.</param>
+    public NodeEnvironmentGate(NodeFleetSecrets secrets, CatalogOptions catalog)
+    {
+        ArgumentNullException.ThrowIfNull(secrets);
+        ArgumentNullException.ThrowIfNull(catalog);
+        _secrets = secrets;
+        _usedPath = Path.Combine(catalog.FleetRoot, "approvals-used.json");
+        _labelsPath = Path.Combine(catalog.FleetRoot, LabelsFileName);
+    }
+
+    /// <summary>The file of the labels of the machine, in the fleet folder of its profile: a JSON array of names.</summary>
+    public const string LabelsFileName = "labels.json";
+
+    /// <summary>Gets or sets how long a run waits for its approval.</summary>
+    public TimeSpan ApprovalWait { get; set; } = DefaultApprovalWait;
+
+    /// <summary>Gets or sets how often a run that waits reads its approval again when the server says nothing.</summary>
+    public TimeSpan ApprovalPoll { get; set; } = TimeSpan.FromSeconds(5);
+
+    /// <summary>Admits a run to an environment, or tells why not.</summary>
+    /// <param name="environment">The name of the environment.</param>
+    /// <param name="runId">The run.</param>
+    /// <param name="automationId">The automation of the run; null for a session.</param>
+    /// <param name="title">What the run is, for the approver.</param>
+    /// <param name="cancellationToken">Cancels the wait.</param>
+    /// <returns>Null when the run may start with the values of the environment; else why not.</returns>
+    public async Task<string?> AdmitAsync(string environment, string runId, string? automationId, string? title, CancellationToken cancellationToken)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(environment);
+        ArgumentException.ThrowIfNullOrWhiteSpace(runId);
+        // The newest rules and values before the run.
+        await _secrets.SyncAsync(cancellationToken).ConfigureAwait(false);
+        if (!_secrets.Environments().TryGetValue(environment, out var found))
+            return $"The environment '{environment}' is not an environment of the owner of this machine that a controller device signed.";
+        var (definition, sync) = found;
+        if (definition.Automations.Count > 0 && (automationId is null || !definition.Automations.Contains(automationId, StringComparer.Ordinal)))
+            return $"The environment '{environment}' is open to some automations only, not to this run.";
+        if (definition.MachineLabels.Count > 0 && !definition.MachineLabels.Intersect(ReadLabels(), StringComparer.OrdinalIgnoreCase).Any())
+            return $"The environment '{environment}' runs on machines labeled {string.Join(", ", definition.MachineLabels)}: this machine is not.";
+        if (definition.Approvers.Count == 0) return null;
+
+        var nonce = Base64Url.EncodeToString(RandomNumberGenerator.GetBytes(16));
+        FleetApprovalDto asked;
+        try
+        {
+            asked = await sync.RequestApprovalAsync(definition.EnvironmentId, new RequestFleetApprovalRequest(runId, nonce, definition.Number, automationId, title), cancellationToken)
+                .ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is FleetServerException or HttpRequestException)
+        {
+            return $"The approval of the run could not be asked: {exception.Message}";
+        }
+
+        Log($"The run {runId} waits for the approval of the environment '{environment}'.");
+        var deadline = DateTimeOffset.UtcNow + ApprovalWait;
+        while (true)
+        {
+            var signal = _secrets.ApprovalSignal;
+            FleetApprovalDto read;
+            try
+            {
+                read = await sync.GetApprovalAsync(asked.Id, cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception exception) when (exception is FleetServerException or HttpRequestException or TaskCanceledException && !cancellationToken.IsCancellationRequested)
+            {
+                read = asked;
+            }
+
+            if (read.Approval is { } signed)
+            {
+                FleetDeviceListState list;
+                try
+                {
+                    list = await sync.Devices.RefreshAsync(cancellationToken).ConfigureAwait(false);
+                }
+                catch (Exception exception) when (exception is FleetServerException or HttpRequestException or FleetDeviceListException)
+                {
+                    return $"The approval could not be checked against the device list: {exception.Message}";
+                }
+
+                if (!FleetEnvironmentDocuments.TryVerifyApproval(signed, definition, list, sync.MachineId, runId, nonce, DateTimeOffset.UtcNow, out var approval, out var reason))
+                    return $"The approval of the run was refused: {reason}.";
+                if (!TakeOnce(approval.ApprovalId)) return "The approval of the run was used already.";
+                Log($"The run {runId} was approved for the environment '{environment}' by {approval.ApproverPersonId}.");
+                return null;
+            }
+
+            var left = deadline - DateTimeOffset.UtcNow;
+            if (left <= TimeSpan.Zero) return $"No approver of the environment '{environment}' approved the run in time.";
+            using var wait = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            wait.CancelAfter(left < ApprovalPoll ? left : ApprovalPoll);
+            try { await signal.WaitAsync(wait.Token).ConfigureAwait(false); }
+            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested) { }
+        }
+    }
+
+    /// <summary>Reads the labels the owner gave this machine.</summary>
+    /// <returns>The labels; none when the file is missing or does not read.</returns>
+    public IReadOnlyList<string> ReadLabels()
+    {
+        try
+        {
+            return JsonSerializer.Deserialize(File.ReadAllBytes(_labelsPath), NodeEnvironmentJsonContext.Default.ListString) is { } labels
+                ? [.. labels.Where(static label => !string.IsNullOrWhiteSpace(label)).Select(static label => label.Trim())]
+                : [];
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or JsonException)
+        {
+            return [];
+        }
+    }
+
+    // An approval is taken once, also across restarts of the node.
+    private bool TakeOnce(string approvalId)
+    {
+        lock (_gate)
+        {
+            List<string> used;
+            try { used = JsonSerializer.Deserialize(File.ReadAllBytes(_usedPath), NodeEnvironmentJsonContext.Default.ListString) ?? []; }
+            catch (Exception exception) when (exception is FileNotFoundException or DirectoryNotFoundException or JsonException) { used = []; }
+            if (used.Contains(approvalId, StringComparer.Ordinal)) return false;
+            used.Add(approvalId);
+            if (used.Count > MaximumUsed) used.RemoveRange(0, used.Count - MaximumUsed);
+            Directory.CreateDirectory(Path.GetDirectoryName(_usedPath)!);
+            var staging = _usedPath + "." + Guid.NewGuid().ToString("N") + ".tmp";
+            File.WriteAllBytes(staging, JsonSerializer.SerializeToUtf8Bytes(used, NodeEnvironmentJsonContext.Default.ListString));
+            File.Move(staging, _usedPath, overwrite: true);
+            return true;
+        }
+    }
+
+    private static void Log(string message)
+    {
+        if (LogManager.IsInitialized) LogManager.GetLogger("CodeAlta.Node.Secrets").Info(message);
+    }
+}
+
+[System.Text.Json.Serialization.JsonSerializable(typeof(List<string>))]
+internal sealed partial class NodeEnvironmentJsonContext : System.Text.Json.Serialization.JsonSerializerContext;

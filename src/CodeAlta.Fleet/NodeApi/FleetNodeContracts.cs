@@ -501,6 +501,13 @@ public sealed record FleetCreateSessionParams(string? ProjectId = null, string? 
     FleetModelSelection? Selection = null)
 {
     /// <summary>
+    /// Gets the environment of the fleet the session uses; null for none. The node admits the session first (its rules,
+    /// and its approval when it requires one): its first prompt is sent once it was admitted, and its processes get the
+    /// values of the environment.
+    /// </summary>
+    public string? Environment { get; init; }
+
+    /// <summary>
     /// Gets the signed request of the agent that starts the session as the child of its own, on behalf of the person of
     /// the calling device (<see cref="Protocol.FleetAgentRequestKinds.Start"/>); null for a session a person starts.
     /// </summary>

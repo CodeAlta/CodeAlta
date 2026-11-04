@@ -70,6 +70,18 @@ internal interface IAutomationRunGate
     /// <param name="provider">The provider the run would start with.</param>
     /// <returns>Why the run may not start; null when it may.</returns>
     string? Check(AutomationEntry entry, ModelProviderDescriptor provider);
+
+    /// <summary>
+    /// Admits a run to the environment its automation names (<c>doc/fleet/secrets.md</c>, environments): its rules hold
+    /// on this machine and, when it requires one, an approver approved this run. It may wait for the approval.
+    /// </summary>
+    /// <param name="entry">The automation.</param>
+    /// <param name="runId">The run, which the approval is bound to.</param>
+    /// <param name="environment">The name of the environment.</param>
+    /// <param name="cancellationToken">Cancels the wait.</param>
+    /// <returns>Why the run may not start; null when it may.</returns>
+    Task<string?> AdmitEnvironmentAsync(AutomationEntry entry, string runId, string environment, CancellationToken cancellationToken)
+        => Task.FromResult<string?>($"This machine runs no automation in the environment '{environment}': environments are given by a server.");
 }
 
 /// <summary>Starts the session of a run and sends it the prompt.</summary>
@@ -162,6 +174,12 @@ internal sealed class AutomationRunner : IAutomationRunner
 
             // What the host itself requires of a run (a node: its policy, the credential kind), before anything is created.
             if (_gate?.Check(entry, provider) is { } refused) return Refuse(refused);
+            // An environment admits the run before anything is created: its rules, then its approval, which may wait.
+            if (definition.Environment is { } environment)
+            {
+                if (_gate is null) return Refuse($"This machine runs no automation in the environment '{environment}': environments are given by a server.");
+                if (await _gate.AdmitEnvironmentAsync(entry, runId, environment, cancellationToken).ConfigureAwait(false) is { } closed) return Refuse(closed);
+            }
 
             var models = await _host.ModelProviderInitializationService.GetModelsAsync(provider.ProviderId, cancellationToken).ConfigureAwait(false);
             var modelId = definition.Model.Model ?? AgentModelDefaults.ResolveModelId(models, provider.DefaultModelId);
@@ -198,6 +216,8 @@ internal sealed class AutomationRunner : IAutomationRunner
                 CreatedAt = DateTimeOffset.UtcNow,
             }, null, spaceId, definition.PermissionMode, null, null, definition.SessionOptions).ConfigureAwait(false);
             sessionId = session.SessionId;
+            // The processes of the session get the values of the environment it was admitted to, from its first attachment.
+            if (definition.Environment is { } admitted) _host.Identities.Environments.Admit(sessionId, admitted);
             // The review and the sandbox the automation chose, before anything is sent to the session.
             if (definition.ReviewBeforeCommit is { } review
                 && (await _host.Commands.SetReviewBeforeCommitAsync(sessionId, review, cancellationToken).ConfigureAwait(false)).Status is var reviewed and not "ok")

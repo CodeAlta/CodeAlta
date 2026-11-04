@@ -37,6 +37,8 @@ public sealed partial class FleetNodeService
 
         if (parameters.SpaceId is { } spaceId && (!SpaceDescriptor.IsValidId(spaceId) || await _host.SpaceCatalog.GetAsync(spaceId).ConfigureAwait(false) is null))
             throw new FleetException(FleetNodeErrorCodes.Unavailable, null, $"The node has no space '{spaceId}'.");
+        if (parameters.Environment is { } named && (_options.AdmitEnvironment is null || named.Length is 0 or > 64 || named.Any(char.IsControl)))
+            throw new FleetException(FleetErrorCodes.InvalidParams, null, _options.AdmitEnvironment is null ? "This node runs no session in an environment." : "The name of an environment has 1 to 64 characters.");
 
         var provider = ResolveProvider(parameters.Selection?.ProviderKey, project?.ProjectPath);
         SessionViewDescriptor session;
@@ -50,6 +52,13 @@ public sealed partial class FleetNodeService
             throw new FleetException(FleetNodeErrorCodes.NodeStopping, FleetErrorHints.Retry, "The node is stopping.");
         }
 
+        // The session is admitted to its environment before its first prompt: an approval may wait, the creation does not.
+        if (parameters.Environment is { } environment)
+        {
+            _ = AdmitThenSendAsync(environment, session, provider, parameters, retryKey);
+            return new FleetCreateSessionResult(session.SessionId, provider.ProviderId.Value, null);
+        }
+
         FleetCommandResult? send = null;
         if (parameters.Prompt is { } prompt)
         {
@@ -58,6 +67,30 @@ public sealed partial class FleetNodeService
         }
 
         return new FleetCreateSessionResult(session.SessionId, provider.ProviderId.Value, send);
+    }
+
+    private async Task AdmitThenSendAsync(string environment, SessionViewDescriptor session, ModelProviderDescriptor provider, FleetCreateSessionParams parameters, string retryKey)
+    {
+        try
+        {
+            var problem = await _options.AdmitEnvironment!(environment, session.SessionId, parameters.Title ?? "A session", CancellationToken.None).ConfigureAwait(false);
+            if (problem is not null)
+            {
+                LogInfo($"The session {session.SessionId} was not admitted to the environment '{environment}': {problem}");
+                return;
+            }
+
+            _host.Identities.Environments.Admit(session.SessionId, environment);
+            if (parameters.Prompt is { } prompt)
+            {
+                var selection = Selection(parameters.Selection, provider.ProviderId.Value, session.AgentPromptId);
+                _host.Commands.AdmitSend(new OwnedTextSendRequest(retryKey, session.SessionId, prompt) { Selection = selection });
+            }
+        }
+        catch (Exception exception) when (exception is IOException or InvalidOperationException or ObjectDisposedException or UnauthorizedAccessException)
+        {
+            LogInfo($"The session {session.SessionId} was not admitted to the environment '{environment}': {exception.Message}");
+        }
     }
 
     // The provider a request names, or the default of the node for the project, as the desktop chooses it: the one the

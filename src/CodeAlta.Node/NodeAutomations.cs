@@ -230,6 +230,18 @@ internal sealed partial class NodeAutomations : IFleetNodeAutomations, IAutomati
         return null;
     }
 
+    /// <summary>Gets or sets what admits a run to an environment of the fleet; null until the node joined a server, and then no run uses one.</summary>
+    internal NodeEnvironmentGate? Environments { get; set; }
+
+    /// <inheritdoc />
+    public Task<string?> AdmitEnvironmentAsync(AutomationEntry entry, string runId, string environment, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(entry);
+        return Environments is { } environments
+            ? environments.AdmitAsync(environment, runId, entry.Definition.Id, entry.Definition.Name, cancellationToken)
+            : Task.FromResult<string?>($"This machine runs no automation in the environment '{environment}': it joined no server.");
+    }
+
     /// <inheritdoc />
     public async Task<FleetAutomationInfo> PutAsync(FleetAutomationCaller caller, FleetAutomationPutParams parameters, CancellationToken cancellationToken)
     {

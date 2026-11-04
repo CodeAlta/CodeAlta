@@ -68,6 +68,13 @@ public sealed class FleetNodeServiceOptions
     public IFleetNodeAutomations? Automations { get; init; }
 
     /// <summary>
+    /// Gets what admits a run to an environment of the fleet (<c>doc/fleet/secrets.md</c>, environments), by the name of the
+    /// environment, the run, and what the run is for its approver: null when it may start, else why not. It may wait for
+    /// an approval. Null runs no session in an environment.
+    /// </summary>
+    public Func<string, string, string?, CancellationToken, Task<string?>>? AdmitEnvironment { get; init; }
+
+    /// <summary>
     /// Gets the log and the self-update the node gives its owner and the devices that manage it (<c>control.log</c>,
     /// <c>control.update</c>); null for a host without them, whose methods then answer <see cref="FleetNodeErrorCodes.Unavailable"/>.
     /// </summary>
