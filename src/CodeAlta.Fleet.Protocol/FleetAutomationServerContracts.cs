@@ -130,6 +130,12 @@ public sealed record FleetAutomationRunFact(string RunId, string AutomationId, l
     /// rotation of its team. Null for none.
     /// </summary>
     public IReadOnlyList<string>? OnCall { get; init; }
+
+    /// <summary>
+    /// Gets the id of the approval a run that waits waits for, a new one each time it starts to wait: the server tells a person of
+    /// each approval once, not of the run once. Null for a run that waits for none, or a machine that does not say it.
+    /// </summary>
+    public string? Approval { get; init; }
 }
 
 /// <summary>The source-generated contracts of the automation methods of the control connection.</summary>

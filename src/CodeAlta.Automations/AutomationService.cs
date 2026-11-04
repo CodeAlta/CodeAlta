@@ -790,7 +790,7 @@ internal sealed partial class AutomationService : IAsyncDisposable
         var started = _state.Update(run.Id, current => current.Status == AutomationRun.Held
                 ? current with { SessionId = start.SessionId, Status = AutomationRun.Running, Message = null }
                 : current with { SessionId = start.SessionId }) ?? run with { SessionId = start.SessionId };
-        if (start.Guard is { } guard) Follow(run.Id, guard);
+        if (start.Guard is { } guard) Follow(entry, run.Id, guard);
         Changed?.Invoke();
         var observer = ObserveAsync(run.Id, entry, start.Completion, reply);
         lock (_gate)

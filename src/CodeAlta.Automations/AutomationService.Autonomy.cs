@@ -63,6 +63,20 @@ internal sealed partial class AutomationService
         if (people is { Count: > 0 }) _state.Update(runId, run => run with { OnCall = people });
     }
 
+    // Reads again who is on call for a run that starts to wait, and tells it: what its server routes the approval with.
+    private async Task OnCallNowAsync(AutomationEntry entry, string runId)
+    {
+        if (entry.Definition.Autonomy is not { Approvers: AutomationAutonomy.OnCallApprovers }) return;
+        try
+        {
+            await ReadOnCallAsync(entry, runId, _stop.Token).ConfigureAwait(false);
+            Changed?.Invoke();
+        }
+        catch (Exception exception) when (exception is OperationCanceledException or ObjectDisposedException)
+        {
+        }
+    }
+
     /// <summary>Whether a person took a run in progress over.</summary>
     internal bool IsTakenOver(string runId)
     {
@@ -71,13 +85,18 @@ internal sealed partial class AutomationService
 
     // Follows the guard of a run while it works: its status says when it waits for a person, a try keeps the calls it
     // recorded, and a stop keeps why.
-    private void Follow(string runId, AutomationRunGuard guard)
+    private void Follow(AutomationEntry entry, string runId, AutomationRunGuard guard)
     {
         lock (_gate) _guards[runId] = guard;
         guard.WaitingChanged += waiting =>
         {
-            _state.Update(runId, run => run.InProgress ? run with { Status = waiting ? AutomationRun.Waiting : AutomationRun.Running } : run);
+            // Each time the run starts to wait, an approval of its own (its server tells a person of each one), and who is on
+            // call is read again: the person of the rotation now, not the one when the run started.
+            _state.Update(runId, run => run.InProgress
+                ? run with { Status = waiting ? AutomationRun.Waiting : AutomationRun.Running, Approval = waiting ? Guid.CreateVersion7().ToString("N") : null }
+                : run);
             Changed?.Invoke();
+            if (waiting) _ = OnCallNowAsync(entry, runId);
         };
         guard.Recorded += call =>
         {

@@ -531,9 +531,12 @@ internal sealed class FleetAutomationService
                     OnCall = fact.OnCall is { } named ? [.. named.Where(static identity => identity is { Length: > 0 and <= 256 }).Take(20)] : null,
                 };
                 var recipients = ApprovalRecipients is { } resolve ? await resolve(automation, fact, cancellationToken).ConfigureAwait(false) : [automation.OwnerPersonId];
+                // Once per approval the run waits for, when the machine names it (each one is told, also after the first was read),
+                // to who answers it when it waits: the person on call then.
+                var key = "approval:" + run.RunId + (fact?.Approval is { Length: > 0 and <= 64 } approval ? ":" + approval : string.Empty);
                 foreach (var person in recipients.Distinct(StringComparer.Ordinal))
                 {
-                    await notifications.NotifyAsync(device.OrganizationId, person, "approval:" + run.RunId, FleetNotificationKinds.Approval, "warning", null, device.Id, null,
+                    await notifications.NotifyAsync(device.OrganizationId, person, key, FleetNotificationKinds.Approval, "warning", null, device.Id, null,
                         run.AutomationId, run.RunId, cancellationToken).ConfigureAwait(false);
                 }
             }

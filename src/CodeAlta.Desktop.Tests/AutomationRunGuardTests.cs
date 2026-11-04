@@ -269,6 +269,45 @@ public sealed class AutomationRunGuardTests
         }
     }
 
+    // Each approval a run waits for is one of its own: its server tells a person of each one (a notification per approval, not
+    // per run), and who is on call is read again when it starts to wait.
+    [TestMethod]
+    public async Task EachApprovalARunWaitsFor_HasAnIdOfItsOwn()
+    {
+        using var root = new AutomationTempRoot();
+        File.WriteAllText(Path.Combine(root.Path, "config.toml"), """
+            [automations.0199f4c2-6d1e-7c3a-b5f0-2f9c8e4a1d77]
+            name = "Diagnosis"
+            prompt = "Diagnose."
+            autonomy = { allowed_tools = ["k8s_restart_pod"] }
+            """);
+        var asker = new Asker { Held = new(TaskCreationOptions.RunContinuationsAsynchronously) };
+        var runner = new GuardedRunner(asker);
+        await using var service = new AutomationService(Path.Combine(root.Path, "config.toml"), _ => Task.FromResult<IReadOnlyList<CodeAlta.Catalog.ProjectDescriptor>>([]),
+            new AutomationStateStore(Path.Combine(root.Path, "state.json"), false), runner, new AutomationClock { Now = Noon }, TimeZoneInfo.Utc);
+        await service.RefreshAsync();
+        const string Id = "0199f4c2-6d1e-7c3a-b5f0-2f9c8e4a1d77";
+
+        await service.RunAsync(Id, default);
+        Assert.IsNull(service.Runs(Id, 1)[0].Approval, "a run that waits for nobody has no approval");
+        var first = runner.Guard!.BeforeToolCallAsync(Call("k8s_delete_namespace"), default).AsTask();
+        var approval = service.Runs(Id, 1)[0].Approval;
+        Assert.IsNotNull(approval);
+        asker.Held.SetResult(new(AgentPermissionDecisionKind.AllowOnce));
+        await first;
+        Assert.IsNull(service.Runs(Id, 1)[0].Approval, "answered, it waits for nothing");
+
+        asker.Held = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        var second = runner.Guard.BeforeToolCallAsync(Call("k8s_delete_namespace"), default).AsTask();
+        var next = service.Runs(Id, 1)[0].Approval;
+        Assert.IsNotNull(next);
+        Assert.AreNotEqual(approval, next, "the next approval is another one");
+        asker.Held.SetResult(new(AgentPermissionDecisionKind.Deny));
+        await second;
+        runner.Completion.SetResult(new(AutomationRun.Completed));
+        for (var i = 0; i < 200 && service.IsRunning(Id); i++) await Task.Delay(10);
+    }
+
     [TestMethod]
     public async Task ARunWaitsWhileACallWaitsForAPerson_ATryKeepsItsCalls_AndATakeOverIsSaid()
     {

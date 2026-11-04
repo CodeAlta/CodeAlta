@@ -86,10 +86,16 @@ internal sealed record AutomationRun(string Id, string AutomationId, DateTimeOff
     public IReadOnlyList<string>? Calls { get; init; }
 
     /// <summary>
-    /// Gets who its on-call tool said was on call when it started, by email and name: what the server asks when the run waits,
-    /// if they answer the approvals of its automation; null when the automation reads none.
+    /// Gets who its on-call tool said was on call when it started, and again each time it starts to wait, by email and name: what
+    /// the server asks when the run waits, if they answer the approvals of its automation; null when the automation reads none.
     /// </summary>
     public IReadOnlyList<string>? OnCall { get; init; }
+
+    /// <summary>
+    /// Gets the id of the approval the run waits for now, a new one each time it starts to wait: its server tells a person of each
+    /// approval once; null while it waits for none.
+    /// </summary>
+    public string? Approval { get; init; }
 }
 
 /// <summary>What an event trigger has already seen of a repository.</summary>
