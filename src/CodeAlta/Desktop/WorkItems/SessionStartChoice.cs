@@ -15,6 +15,12 @@ internal sealed record SessionStartModel(WorkItemSelection? Asked = null, WorkIt
     public string? Worktree { get; init; }
 
     /// <summary>
+    /// Gets the new branch the work is done on, such as <c>feature/123-export</c>: the one of a new worktree, or the one the folder
+    /// of the project moves to; null for an <c>alta/</c> branch named by CodeAlta, or the branch the folder of the project is on.
+    /// </summary>
+    public string? Branch { get; init; }
+
+    /// <summary>
     /// Gets the provenance the first prompt of the session is recorded with (see <see cref="AgentPromptProvenance"/>),
     /// such as the review of the user; null for a prompt of the user.
     /// </summary>
