@@ -162,6 +162,32 @@ public sealed class NodeAutomationTests
         StringAssert.Contains(forbidden.Message, "automate");
     }
 
+    // A machine of a team or of the organization runs automations with account credentials only, whatever gave them: one a
+    // device paired directly gave it too, not only one a server assigned.
+    [TestMethod]
+    public async Task OnAMachineOfATeam_AnAutomationNoServerGaveRunsWithAccountCredentialsOnly()
+    {
+        var token = TestContext.CancellationToken;
+        using var root = new NodeTestRoot();
+        await using var fixture = await AutomationFixture.StartAsync(root, new ScriptedNodeProvider(), new NodeClock { Now = Noon }, token, _ => AutomationCredentialKind.Personal);
+        var machine = await fixture.PairAsync(DevicePermissions.View | DevicePermissions.Start | DevicePermissions.Automate, token);
+        await using var client = await FleetNodeClient.ConnectAsync(machine, fixture.ViewerIdentity, token);
+        await client.PutAutomationAsync(fixture.Signed(Definition("Local", "Hello."), 1), cancellationToken: token);
+        var automations = fixture.Node.Automations!;
+        automations.DeviceId ??= fixture.Fleet.DeviceId;
+        Assert.AreNotEqual(AutomationRun.Failed, (await client.RunAutomationAsync(Id, cancellationToken: token)).Status, "a personal machine may use a personal plan");
+
+        var team = new FleetAccessTeam("infra", ["p2"], [], false);
+        var access = FleetAccessState.Empty with
+        {
+            OrganizationId = "org", Teams = FleetAccessState.Empty.Teams.Add("infra", team), Machines = FleetAccessState.Empty.Machines.Add(automations.DeviceId!, "infra"),
+        };
+        automations.ServerAccesses = () => [access];
+        var refused = await client.RunAutomationAsync(Id, cancellationToken: token);
+        Assert.AreEqual(AutomationRun.Failed, refused.Status);
+        StringAssert.Contains(refused.Message, "account credentials only");
+    }
+
     // The signed policy of the organization of the space a run goes to (doc/fleet/security-and-privacy.md, policies and the kill
     // switch) applies to the node's own automations too, not only to those a server delivered: its providers, its models, its
     // account credentials.

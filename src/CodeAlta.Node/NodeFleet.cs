@@ -438,6 +438,7 @@ internal sealed class NodeServers : IAsyncDisposable
             Fleet.Server.FleetConnector? ConnectorOf(string linkId) => connections.Find(linkId)?.Connector;
             automations.ServerDevices = linkId => ConnectorOf(linkId)?.Devices.Current;
             automations.ServerAccess = linkId => ConnectorOf(linkId)?.Access.Current;
+            automations.ServerAccesses = () => connections.Connections.Select(static connection => connection.Connector?.Access.Current);
             automations.ServerClaim = (linkId, claim, token) => ConnectorOf(linkId) is { } connector
                 ? connector.ClaimAutomationAsync(claim, token)
                 : Task.FromResult<CodeAlta.Fleet.Protocol.FleetAutomationClaimResult?>(null);

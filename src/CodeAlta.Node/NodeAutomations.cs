@@ -218,6 +218,12 @@ internal sealed partial class NodeAutomations : IFleetNodeAutomations, IAutomati
     /// </summary>
     internal Func<string, FleetAccessState?>? ServerAccess { get; set; }
 
+    /// <summary>
+    /// Gets or sets what gives the signed access documents of all the server links of the node as it last verified them: what
+    /// says whether this machine is a team's or the organization's, whatever gave an automation; null names none.
+    /// </summary>
+    internal Func<IEnumerable<FleetAccessState?>>? ServerAccesses { get; set; }
+
     /// <summary>Starts reading the automations and firing their triggers.</summary>
     internal void Start()
     {
@@ -275,7 +281,7 @@ internal sealed partial class NodeAutomations : IFleetNodeAutomations, IAutomati
         var kind = _options.CredentialKind?.Invoke(provider) ?? Classify(provider);
         if (kind == AutomationCredentialKind.Unknown)
             return $"The credential the provider '{provider.ProviderId.Value}' runs with cannot be told: an unattended run uses a provider whose credential is known.";
-        if (kind == AutomationCredentialKind.Personal && (team is not null || organizationMachine))
+        if (kind == AutomationCredentialKind.Personal && (team is not null || organizationMachine || IsSharedMachine()))
             return $"The provider '{provider.ProviderId.Value}' runs with a personal plan, and a machine of a team or of the organization runs automations with account credentials only.";
         if (kind == AutomationCredentialKind.Personal && policy.Credentials != NodeAutomationPolicy.AnyCredentials)
             return $"The provider '{provider.ProviderId.Value}' runs with a personal plan, and this machine runs automations with account credentials only.";
@@ -421,6 +427,12 @@ internal sealed partial class NodeAutomations : IFleetNodeAutomations, IAutomati
 
         return stopped;
     }
+
+    // Whether a signed access document of a server of this machine says it is a team's or the organization's: a shared machine,
+    // which runs every automation with account credentials, whatever gave it (a server, a device paired directly, its owner).
+    private bool IsSharedMachine()
+        => DeviceId is { } self && ServerAccesses?.Invoke() is { } documents
+            && documents.Any(access => access is not null && (access.TeamOf(self) is not null || access.IsOrganizationMachine(self)));
 
     // Whether this machine is the organization's, whether the automation is the organization's, and the service identities the
     // organization turned on, as the access document of the server it came through says.
