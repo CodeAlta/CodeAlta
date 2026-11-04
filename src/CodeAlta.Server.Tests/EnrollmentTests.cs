@@ -45,6 +45,23 @@ public sealed class EnrollmentTests
     }
 
     [TestMethod]
+    public async Task ACodeTypedAtAServerWithoutAnOwnerIsToldItIsASetupCode()
+    {
+        await using var server = await ServerFixture.StartAsync();
+        using var owner = new TestDevice("Desktop");
+        using var mac = new TestDevice("Mac mini");
+
+        // No owner yet: the server holds no enrollment token, so what is typed can only be its setup code.
+        var typed = await server.SendAsync(mac, HttpMethod.Post, "/api/v1/enroll", new EnrollRequest("ABCD-EFGH-IJKL", mac.PublicKey, mac.Name));
+        Assert.AreEqual((HttpStatusCode.Unauthorized, CoordinatorErrorCodes.EnrollmentServerNotSetUp), (typed.Status, typed.Code), typed.Body.ToString());
+
+        // Once it has an owner, an unknown code is an unknown enrollment token again.
+        await server.SetUpAsync(owner);
+        var unknown = await server.SendAsync(mac, HttpMethod.Post, "/api/v1/enroll", new EnrollRequest("ABCD-EFGH-IJKL", mac.PublicKey, mac.Name));
+        Assert.AreEqual(CoordinatorErrorCodes.EnrollmentTokenInvalid, unknown.Code);
+    }
+
+    [TestMethod]
     public async Task AnEnrollmentTokenExpires()
     {
         await using var server = await ServerFixture.StartAsync();

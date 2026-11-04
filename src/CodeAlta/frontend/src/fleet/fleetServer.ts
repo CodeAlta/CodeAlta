@@ -43,6 +43,9 @@ export function serverAddressOf(text: string): string {
   } catch { return ""; }
 }
 
+/** What a server without an owner answers to an enrollment code: what was typed is, if anything, its setup code. */
+export const notSetUpProblem: MessageKey = "This server has no owner yet: its code is a setup code. Use Create my server… → It runs already.";
+
 /** Why a setup, a join or another call to a server failed, in words; null when it did not. */
 export function serverProblem(status: string): MessageKey | null {
   switch (status) {
@@ -55,6 +58,7 @@ export function serverProblem(status: string): MessageKey | null {
     case "setup.loopback_only": return "Set the server up from the computer it runs on.";
     case "setup.done": return "The server has an owner already: join it with an enrollment code.";
     case "enrollment.invalid_token": return "The server does not know this enrollment code.";
+    case "enrollment.server_not_set_up": return notSetUpProblem;
     case "enrollment.token_used": return "This enrollment code was used already.";
     case "enrollment.token_expired": return "This enrollment code expired.";
     case "device.exists": return "This computer is registered with the server already.";

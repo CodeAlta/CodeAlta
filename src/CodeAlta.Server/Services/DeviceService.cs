@@ -157,6 +157,12 @@ public sealed class DeviceService
                 EnrollmentOutcome.DeviceExists => (CoordinatorErrorCodes.DeviceExists, "A device with this key is already registered."),
                 _ => (CoordinatorErrorCodes.EnrollmentTokenInvalid, "The enrollment token is not known to this server."),
             };
+            // A server that has no owner has no token: what was typed is its setup code, and the person is told so.
+            if (code == CoordinatorErrorCodes.EnrollmentTokenInvalid && await _store.GetOrganizationAsync(cancellationToken).ConfigureAwait(false) is null)
+            {
+                (code, message) = (CoordinatorErrorCodes.EnrollmentServerNotSetUp, "This server has no owner yet: set it up with its setup code (altaserver setup-code prints it).");
+            }
+
             await _store.AppendAuditAsync(audit with { Result = code }, cancellationToken).ConfigureAwait(false);
             Metrics?.Enrollment(code);
             throw outcome == EnrollmentOutcome.DeviceExists ? CoordinatorException.Conflict(code, message) : CoordinatorException.Unauthenticated(code, message);

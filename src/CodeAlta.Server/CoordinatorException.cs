@@ -126,6 +126,9 @@ public static class CoordinatorErrorCodes
     /// <summary>The enrollment token is unknown.</summary>
     public const string EnrollmentTokenInvalid = "enrollment.invalid_token";
 
+    /// <summary>The server has no owner yet: what was typed as an enrollment token is, if anything, its setup code.</summary>
+    public const string EnrollmentServerNotSetUp = "enrollment.server_not_set_up";
+
     /// <summary>The enrollment token was already used.</summary>
     public const string EnrollmentTokenUsed = "enrollment.token_used";
 
