@@ -138,7 +138,7 @@ internal sealed class NodeFleet : IAsyncDisposable
                     ? gate.AdmitAsync(environment, runId, null, title, token)
                     : Task.FromResult(CodeAlta.Orchestration.Runtime.EnvironmentAdmissionResult.Refused($"This machine runs no session in the environment '{environment}': it joined no server.")),
                 // A prompt sent through the node API starts a run the budgets of the machine admit first, once it joined a server.
-                AdmitBudget = (run, held, token) => node.Automations?.Budgets is { } budgets
+                AdmitBudget = (run, held, token) => node.Budgets is { } budgets
                     ? budgets.AdmitAsync(run, held, token)
                     : Task.FromResult(Fleet.Server.FleetBudgetAdmission.Admitted),
             });
@@ -404,6 +404,7 @@ internal sealed class NodeServers : IAsyncDisposable
         });
         secrets = new NodeFleetSecrets(node.Host, connections);
         budgets = new NodeBudgets(connections, source, statistics);
+        node.Budgets = budgets;
         if (node.Automations is { } limited) limited.Budgets = budgets;
         // A run that names an environment is admitted by its rules and its approval, as the servers verified them.
         if (node.Automations is { } admitted) admitted.Environments = new NodeEnvironmentGate(secrets, catalog);
