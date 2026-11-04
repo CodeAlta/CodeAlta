@@ -904,7 +904,8 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                     PausesPlaced = !options.Developer,
                 };
                 automations.Placement = placement;
-                if (placedServers is not null) placedServers.Handover = new Fleet.DesktopAutomationHandover(automations, token => host.ProjectCatalog.LoadAsync(token));
+                // An automation of a team another maintainer gave is opened here in the editor, recorded as given at its version.
+                if (placedServers is not null) placedServers.Handover = new Fleet.DesktopAutomationHandover(automations, token => host.ProjectCatalog.LoadAsync(token)) { Placement = placement };
                 fleet.Changed += placement.Poke;
                 if (placedServers is not null) placedServers.Changed += placement.Poke;
                 // A host that has the user review the commands of its sessions lets no session type in a terminal, nor
@@ -1059,6 +1060,8 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                     {
                         // A machine this computer manages joins a server this computer owns, and is approved here.
                         machinesService.ServerAddress = linkId => fleetServers.Connections.FirstOrDefault(connection => connection.Link.Id == linkId)?.Link.ShareableUrl;
+                        // A machine of a team or of the organization lets in who its signed access document names.
+                        machinesService.OwnerOfMachine = fleetServers.OwnerOfMachineAsync;
                         // The names of the people a machine lets in, from the servers this computer is linked to.
                         machinesService.PersonNames = async token =>
                         {
@@ -1157,7 +1160,12 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                     builder.AddModelCatalogService(providers);
                     builder.AddReminderService(reminders);
                     builder.AddSessionRetentionProtectionService(retention.ProtectionRpc);
-                    builder.AddAutomationsService(new AutomationsService(automations, host.ProjectCatalog, epoch, host.CodeModeScripts, placement));
+                    builder.AddAutomationsService(new AutomationsService(automations, host.ProjectCatalog, epoch, host.CodeModeScripts, placement)
+                    {
+                        PublishTargets = fleetServers is { } publishing ? publishing.PublishTargetsAsync : null,
+                        TeamAutomations = fleetServers is { } teams ? teams.TeamAutomationsAsync : null,
+                        OpenTeamAutomation = fleetServers is { } opening ? opening.OpenTeamAutomationAsync : null,
+                    });
                     var pullRequestPrompts = new CodeAlta.Catalog.PullRequests.PullRequestPromptCatalog(host.CatalogOptions);
                     builder.AddPullRequestPromptsService(new PullRequestPromptsService(pullRequestPrompts, host.ProjectCatalog, epoch));
                     var startPrompts = new CodeAlta.Catalog.StartPrompts.StartPromptCatalog(host.CatalogOptions);

@@ -64,6 +64,9 @@ public sealed class FleetHostPublicationSource : IFleetPublicationSource, IAsync
     /// </summary>
     public Func<string, string?>? PersonOf { get; set; }
 
+    /// <summary>Gets or sets what tells whether a provider runs with the credentials of an account; null says nothing of it.</summary>
+    public Func<ModelProviderDescriptor, bool>? IsAccountProvider { get; set; }
+
     /// <inheritdoc />
     public ValueTask<FleetMachineInventory> ReadInventoryAsync(CancellationToken cancellationToken)
     {
@@ -72,10 +75,17 @@ public sealed class FleetHostPublicationSource : IFleetPublicationSource, IAsync
             .Select(static state => state.Descriptor.ProviderType)
             .Where(static type => !string.IsNullOrWhiteSpace(type) && type.Length <= 128)
             .Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).Take(64).ToArray();
+        // The providers that run with the key of an account: the server lets automations of a team or the organization use those only.
+        string[]? accounts = IsAccountProvider is { } isAccount
+            ? [.. _host.ModelProviderInitializationService.CurrentStates
+                .Where(state => state.Descriptor.IsEnabled && state.Availability == ModelProviderAvailability.Ready && isAccount(state.Descriptor))
+                .Select(static state => state.Descriptor.ProviderId.Value).Where(static id => id.Length is > 0 and <= 128)
+                .Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).Take(64)]
+            : null;
         return ValueTask.FromResult(new FleetMachineInventory(_name, FleetChannelProtocol.OperatingSystemName,
             RuntimeInformation.OSArchitecture.ToString().ToLowerInvariant(), _version, _capabilities,
             // The labels its owner gave it, read at each publication: a change is published at the next one.
-            FleetMachineLabels.Read(_host.CatalogOptions.FleetRoot) is { Count: > 0 } labels ? labels : null, providers));
+            FleetMachineLabels.Read(_host.CatalogOptions.FleetRoot) is { Count: > 0 } labels ? labels : null, providers, accounts));
     }
 
     /// <inheritdoc />

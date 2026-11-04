@@ -112,6 +112,17 @@ public sealed class AutomationPlacementTests
         Assert.IsNull(AutomationConfig.Read(written, new AutomationSource("a", null, null) { IsAssigned = true }).Definitions.Single().RunsOn,
             "One assigned to this machine runs here.");
         StringAssert.Contains(AutomationConfig.Validate(entry.Definition with { RunsOn = "two words" }), "paired machine");
+
+        // Whom it is published to is part of it too, kept with its machine only, and a team or the organization only.
+        var published = entry.Definition with { PublishTo = "team:infra" };
+        Assert.AreNotEqual(entry.Definition.Fingerprint(), published.Fingerprint());
+        var withScope = AutomationConfig.Write(string.Empty, published);
+        StringAssert.Contains(withScope, "publish_to = \"team:infra\"");
+        Assert.AreEqual("team:infra", AutomationConfig.Read(withScope, new AutomationSource(global, null, null)).Definitions.Single().PublishTo);
+        Assert.IsNull(AutomationConfig.Read(withScope, new AutomationSource("a", null, null) { IsAssigned = true }).Definitions.Single().PublishTo);
+        Assert.IsNull(AutomationConfig.Validate(entry.Definition with { PublishTo = "organization" }));
+        Assert.IsNotNull(AutomationConfig.Validate(entry.Definition with { PublishTo = "everyone" }));
+        Assert.IsNotNull(AutomationConfig.Validate(entry.Definition with { RunsOn = null, PublishTo = "organization" }), "published from the machine it runs on");
     }
 
     [TestMethod]

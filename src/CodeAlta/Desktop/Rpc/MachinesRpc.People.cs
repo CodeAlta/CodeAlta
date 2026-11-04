@@ -16,6 +16,12 @@ internal sealed partial class MachinesService
     /// <summary>Gets the names of the people of the organizations this computer is linked to, by id; null names nobody.</summary>
     internal Func<CancellationToken, Task<IReadOnlyDictionary<string, string>>>? PersonNames { get; set; }
 
+    /// <summary>
+    /// Gets or sets what names the team, or the organization, that owns a machine as the signed access document this computer
+    /// verified says: such a machine lets in the members of its team, not people named one by one; null when none says so.
+    /// </summary>
+    internal Func<string, CancellationToken, Task<string?>>? OwnerOfMachine { get; set; }
+
     /// <summary>Reads the people a machine names, who asks to use it, and the people of the organization it could name.</summary>
     [NeoRpcMethod("people")]
     public async Task<MachinePeopleView> PeopleAsync(MachineRequest request, CancellationToken cancellationToken)
@@ -23,6 +29,9 @@ internal sealed partial class MachinesService
         if (Refuse(request?.ExpectedEpoch) is { } refused) return MachinePeopleView.Refused(refused);
         if (request!.MachineId is not { Length: > 0 and <= 64 } id) return MachinePeopleView.Refused("invalid_request");
         if (_fleet!.Find(id) is not { } host) return MachinePeopleView.Refused("not_found");
+        // A machine of a team or of the organization: who uses it is what the signed access document says, not a list of its own.
+        if (OwnerOfMachine is { } ownerOf && await ownerOf(id, cancellationToken).ConfigureAwait(false) is { } owner)
+            return MachinePeopleView.Refused("team") with { Owner = owner };
         try
         {
             var info = await host.ManageAsync(static (client, token) => client.GetPeopleAsync(token), changes: false, cancellationToken).ConfigureAwait(false);
@@ -68,6 +77,9 @@ internal sealed partial class MachinesService
 /// <param name="Others">The people of the organization it does not name, which the page offers to add.</param>
 internal sealed record MachinePeopleView(string Status, string? Message, MachinePersonView[] People, MachineAskView[] Asks, MachinePersonView[] Others)
 {
+    /// <summary>Gets the team, or the organization, that owns the machine when <see cref="Status"/> is <c>team</c>.</summary>
+    public string? Owner { get; init; }
+
     internal static MachinePeopleView Refused(string status) => new(status, null, [], [], []);
 }
 

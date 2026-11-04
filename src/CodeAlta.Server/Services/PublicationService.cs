@@ -60,7 +60,7 @@ public sealed class PublicationService
         // Written again from the contract: what the device sent beyond it is not kept.
         var kept = new FleetMachineInventory(Text(inventory.Name, "name", required: true)!, Text(inventory.Os, "os", required: true)!,
             Text(inventory.Architecture, "architecture"), Text(inventory.AppVersion, "appVersion"), List(inventory.Capabilities, "capabilities"),
-            List(inventory.Labels, "labels"), List(inventory.Providers, "providers"));
+            List(inventory.Labels, "labels"), List(inventory.Providers, "providers"), List(inventory.AccountProviders, "accountProviders"));
         var now = _time.GetUtcNow();
         var machine = new MachineRecord(device.Id, device.OrganizationId, JsonSerializer.Serialize(kept, FleetServerJsonContext.Default.FleetMachineInventory),
             publication.Sequence, now);

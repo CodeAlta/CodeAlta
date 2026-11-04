@@ -36,7 +36,7 @@ const owner: FleetAccessOverview = {
   status: "ok", message: null, me: person("alex", "Alex", "owner"), capabilities: ["access.view", "audit.read", "audit.export"], signer: true, advanced: true,
   document: { number: 2, signedBy: "Alex", signedAt: now.toISOString(), pending: [] },
   people: [person("alex", "Alex", "owner"), person("ada", "Ada", "admin"), person("bea", "Bea", "member"), person("ines", "Ines", "auditor"), person("max", "Max", "member")],
-  teams: [], identities: [], grants: [], transfers: [], proposals: [], sessions: [], owners: [], serverUrl: "https://fleet.example",
+  teams: [], identities: [], grants: [], transfers: [], proposals: [], sessions: [], owners: [], serverUrl: "https://fleet.example", providers: [],
 };
 let access = owner;
 let brokenAt: number | null = null;

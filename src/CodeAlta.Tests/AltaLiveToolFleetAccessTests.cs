@@ -26,6 +26,18 @@ public sealed partial class AltaLiveToolTests
         var first = Records(owners, "alta.fleet.access.owner").First();
         Assert.AreEqual(("nightly", true), (first.GetProperty("id").GetString(), first.GetProperty("ownerSuspended").GetBoolean()), "what waits for someone comes first");
 
+        // What machines decide by: the identities automations run as, and the signed document with the owners of automations.
+        var identities = await dispatcher.InvokeAsync(["fleet", "access", "identities"], caller: FleetAgent);
+        Assert.AreEqual(("infra-bot", "team:Infra", true), (Records(identities, "alta.fleet.access.identity").Single().GetProperty("name").GetString(),
+            Records(identities, "alta.fleet.access.identity").Single().GetProperty("owner").GetString(), Records(identities, "alta.fleet.access.identity").Single().GetProperty("enabled").GetBoolean()));
+        var document = await dispatcher.InvokeAsync(["fleet", "access", "document"], caller: FleetAgent);
+        Assert.AreEqual(AltaExitCodes.Success, document.ExitCode, document.Transcript);
+        Assert.AreEqual(3, Records(document, "alta.fleet.access.document").Single().GetProperty("number").GetInt64());
+        var signedAutomation = Records(document, "alta.fleet.access.automation").Single();
+        Assert.AreEqual(("nightly", "person:p3", true), (signedAutomation.GetProperty("id").GetString(), signedAutomation.GetProperty("owner").GetString(), signedAutomation.GetProperty("paused").GetBoolean()));
+        var grants = await dispatcher.InvokeAsync(["fleet", "access", "grants"], caller: FleetAgent);
+        Assert.IsTrue(Records(grants, "alta.fleet.access.grant").Single().GetProperty("missingKeys").GetBoolean());
+
         var review = await dispatcher.InvokeAsync(["fleet", "access", "review"], caller: FleetAgent);
         Assert.AreEqual(AltaExitCodes.PolicyDenied, review.ExitCode, "a member reviews no access");
 
@@ -59,6 +71,10 @@ public sealed partial class AltaLiveToolTests
                 Pending = ["Max is a member of Infra"],
                 People = [new AltaFleetPerson("p1", "Alex", "owner", "active", [], 2), mia],
                 Owners = [new AltaFleetOwner("machine", "m1", "Build box", "team:Infra", false, false), new AltaFleetOwner("automation", "nightly", null, "person:Sam", true, true)],
+                Identities = [new AltaFleetIdentity("svc1", "infra-bot", "team:Infra", true)],
+                Grants = [new AltaFleetGrant("g1", "team:Infra", "session.view-content", "resource:session:s1", "active", null) { MissingKeys = true }],
+                Signed = new AltaFleetSignedAccess(3, new Dictionary<string, IReadOnlyList<string>> { ["t1"] = ["svc1"] }, new Dictionary<string, string> { ["m1"] = "t1" }, [], [],
+                    [new AltaFleetSignedAutomation("nightly", "person:p3", true)]),
             });
         }
 

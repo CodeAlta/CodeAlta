@@ -5,7 +5,7 @@ import { createAutomationsHub, reconnectMilliseconds, refreshMilliseconds, type 
 
 const item = (id: string): AutomationItem => ({
   id, name: `Automation ${id}`, enabled: true, prompt: "Do the thing.", projectId: null, projectName: null, projectFolder: null, storeProjectId: null, file: "/home/config.toml",
-  provider: null, model: null, effort: null, agent: null, permissionMode: null, reviewBeforeCommit: null, sandbox: null, catchUp: false, triggers: [], problem: null, nextRunAt: null, running: false, lastRun: null, repository: null, watchProblem: null, allowed: true, script: null, scriptArguments: null, options: null, runsOn: null, placement: null, autonomy: null,
+  provider: null, model: null, effort: null, agent: null, permissionMode: null, reviewBeforeCommit: null, sandbox: null, catchUp: false, triggers: [], problem: null, nextRunAt: null, running: false, lastRun: null, repository: null, watchProblem: null, allowed: true, script: null, scriptArguments: null, options: null, runsOn: null, publishTo: null, placement: null, autonomy: null,
 });
 const run = (status: string, sessionId: string | null = "s1"): AutomationRunItem =>
   ({ id: "r1", automationId: "a", name: "A", sessionId, projectId: "p", startedAt: "2026-10-06T12:00:00Z", endedAt: null, trigger: "manual", detail: null, status, message: status === "failed" ? "No model." : null, machineId: null, reply: null, output: null, calls: null });
@@ -13,6 +13,7 @@ const listed = (items: AutomationItem[], change: Partial<AutomationsListResponse
   ({ status: "ok", paused: false, scanned: true, items, faults: [], runs: [], upcoming: [], ...change });
 const trigger: AutomationTriggerItem = { type: "daily", minute: 0, every: 1, at: ["09:00"], days: [], expression: null, event: "opened", authors: "trusted", command: null, folder: null, integration: null };
 const settle = () => new Promise<void>(resolve => setTimeout(resolve, 0));
+const teamItem = { linkId: "link-1", id: "nightly", machineId: "box", machineName: "Build box", name: "Nightly", scope: "team:infra", scopeName: "Infra" };
 
 // A host that answers what the test says and records what it is asked. Its notices are sent by the test.
 function fixture() {
@@ -49,6 +50,8 @@ function fixture() {
     hookAddress: (request: object) => answer("hookAddress", request, { status: "ok", message: null, hookId: "abcdefghijklmnopqrstuvwxyz", url: "https://fleet.test/api/v1/hooks/abcdefghijklmnopqrstuvwxyz" }),
     takeOver: (request: object) => answer("takeOver", request, (request as { runId: string }).runId === "r1" ? { status: "ok", message: null, sessionId: "s1" }
       : { status: "refused", message: "This run is not in progress.", sessionId: null }),
+    teamAutomations: (request: object) => answer("teamAutomations", request, { status: "ok", items: [teamItem] }),
+    openTeamAutomation: (request: object) => answer("openTeamAutomation", request, state.mutation),
     createHook: (request: object) => answer("createHook", request, { status: "ok", message: null, hookId: "abcdefghijklmnopqrstuvwxyz", url: "https://fleet.test/api/v1/hooks/abcdefghijklmnopqrstuvwxyz" }),
     watch: async (request: object, options?: { signal?: AbortSignal }) => {
       calls.push(`watch:${JSON.stringify(request)}`);
@@ -130,7 +133,7 @@ test("a host without automations, or of another epoch, shows none; a host that s
   state.fail = true;
   await hub.refresh();
   assert.equal(hub.getSnapshot().items.length, 1);
-  assert.deepEqual(await hub.save({ id: null, name: "n", enabled: true, prompt: "p", projectId: null, provider: null, model: null, effort: null, agent: null, permissionMode: null, reviewBeforeCommit: null, sandbox: null, catchUp: false, triggers: [], script: null, scriptArguments: null, options: null, runsOn: null, autonomy: null }, null), { ok: false, message: null });
+  assert.deepEqual(await hub.save({ id: null, name: "n", enabled: true, prompt: "p", projectId: null, provider: null, model: null, effort: null, agent: null, permissionMode: null, reviewBeforeCommit: null, sandbox: null, catchUp: false, triggers: [], script: null, scriptArguments: null, options: null, runsOn: null, publishTo: null, autonomy: null }, null), { ok: false, message: null });
   assert.deepEqual(await hub.runs("a"), []);
   assert.deepEqual(await hub.run("a"), { ok: false });
   assert.equal(await hub.preview(trigger, new AbortController().signal), null);
@@ -141,7 +144,7 @@ test("a change is sent to the host and the list is read again before it answers"
   hub.connect("epoch-1");
   await settle();
   calls.length = 0;
-  const input = { id: null, name: "Nightly", enabled: true, prompt: "Review.", projectId: "p", provider: null, model: null, effort: null, agent: null, permissionMode: null, reviewBeforeCommit: null, sandbox: null, catchUp: false, triggers: [trigger], script: null, scriptArguments: null, options: null, runsOn: null, autonomy: null };
+  const input = { id: null, name: "Nightly", enabled: true, prompt: "Review.", projectId: "p", provider: null, model: null, effort: null, agent: null, permissionMode: null, reviewBeforeCommit: null, sandbox: null, catchUp: false, triggers: [trigger], script: null, scriptArguments: null, options: null, runsOn: null, publishTo: null, autonomy: null };
 
   state.list = listed([item("a"), item("new")]);
   state.mutation = { status: "ok", id: "new", message: null };
@@ -165,11 +168,27 @@ test("a change is sent to the host and the list is read again before it answers"
     'delete:{"expectedEpoch":"epoch-1","id":"a"}', 'refresh:{"expectedEpoch":"epoch-1"}']);
 });
 
+test("an automation of a team another maintainer gave is listed, then taken here to be edited, and the list is read again", async () => {
+  const { hub, calls, state } = fixture();
+  hub.connect("epoch-1");
+  await settle();
+  calls.length = 0;
+  assert.deepEqual(await hub.teamAutomations(), [teamItem]);
+  state.list = listed([item("a"), item("nightly")]);
+  state.mutation = { status: "ok", id: "nightly", message: null };
+  assert.deepEqual(await hub.openTeamAutomation(teamItem), { ok: true, id: "nightly", message: null });
+  assert.deepEqual(calls, ['teamAutomations:{"expectedEpoch":"epoch-1"}', 'openTeamAutomation:{"expectedEpoch":"epoch-1","linkId":"link-1","id":"nightly","machineId":"box"}',
+    'list:{"expectedEpoch":"epoch-1"}']);
+  assert.ok(hub.getSnapshot().items.some(value => value.id === "nightly"), "it is in the list, to open in the editor");
+  state.mutation = { status: "failed", id: null as unknown as string, message: "Add the project of github.com/codealta/codealta to CodeAlta first." };
+  assert.deepEqual(await hub.openTeamAutomation(teamItem), { ok: false, id: null, message: "Add the project of github.com/codealta/codealta to CodeAlta first." });
+});
+
 test("a change that the host also announces returns once the newest list is shown", async () => {
   const { hub, state } = fixture();
   hub.connect("epoch-1");
   await settle();
-  const input = { id: null, name: "Nightly", enabled: true, prompt: "Review.", projectId: null, provider: null, model: null, effort: null, agent: null, permissionMode: null, reviewBeforeCommit: null, sandbox: null, catchUp: false, triggers: [], script: null, scriptArguments: null, options: null, runsOn: null, autonomy: null };
+  const input = { id: null, name: "Nightly", enabled: true, prompt: "Review.", projectId: null, provider: null, model: null, effort: null, agent: null, permissionMode: null, reviewBeforeCommit: null, sandbox: null, catchUp: false, triggers: [], script: null, scriptArguments: null, options: null, runsOn: null, publishTo: null, autonomy: null };
   state.mutation = { status: "ok", id: "new", message: null };
   state.held = [];
   let done = false;

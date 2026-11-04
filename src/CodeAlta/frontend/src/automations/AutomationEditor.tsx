@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { TriggerIcon } from "./TriggerIcon";
 import { Button, ButtonGroup, Callout, FormGroup, HTMLSelect, InputGroup, Menu, MenuItem, NumericInput, PopoverNext, SegmentedControl, Switch, TextArea } from "@blueprintjs/core";
-import type { AutomationScriptItem, AutomationTriggerItem, WorkspaceProject } from "#neoastra";
+import type { AutomationPublishTarget, AutomationScriptItem, AutomationTriggerItem, WorkspaceProject } from "#neoastra";
 import { AppIcon } from "../AppIcon";
 import { AppWindow } from "../AppWindow";
 import { machineState } from "../machines/machines";
@@ -173,6 +173,14 @@ export function AutomationEditor({ hub, initial, projects, providers, epoch, onC
   const settings = sessionSettingsOf(form);
   const choices = useSessionSettingsChoices(api, runProviders, null, settings);
   const [kind, setKind] = useState<"prompt" | "script">(initial.script ? "script" : "prompt");
+  // Whom it may be published to on the server of its machine: the team of the machine, the organization, beside the person.
+  const [targets, setTargets] = useState<readonly AutomationPublishTarget[]>([]);
+  useEffect(() => {
+    if (!form.runsOn) { setTargets([]); return; }
+    const abort = new AbortController();
+    void hub.publishTargets(form.runsOn, abort.signal).then(value => { if (!abort.signal.aborted) setTargets(value); });
+    return () => abort.abort();
+  }, [hub, form.runsOn]);
   const [scripts, setScripts] = useState<readonly AutomationScriptItem[]>([]);
   // The scripts of the project it runs in come first, then yours.
   useEffect(() => {
@@ -228,11 +236,21 @@ export function AutomationEditor({ hub, initial, projects, providers, epoch, onC
           </FormGroup>}
           {/* Another machine runs it while this computer is closed: offered once one is paired or listed by a server, for an automation of yours. */}
           {!form.storeInProject && (reachable.length > 0 || form.runsOn) && <FormGroup label={t("Runs on")} labelFor="automation-machine">
-            <HTMLSelect id="automation-machine" fill value={form.runsOn ?? ""} disabled={busy} onChange={event => edit({ runsOn: event.target.value || null })}>
+            <HTMLSelect id="automation-machine" fill value={form.runsOn ?? ""} disabled={busy} onChange={event => edit({ runsOn: event.target.value || null, publishTo: null })}>
               <option value="">{t("This computer")}</option>
               {form.runsOn && !reachable.some(machine => machine.id === form.runsOn) && <option value={form.runsOn}>{t("Unavailable machine")}</option>}
               {reachable.map(machine => <option key={machine.id} value={machine.id}>
                 {machineState(machine) === "online" ? machine.name : t("{machine} (offline)", { machine: machine.name })}</option>)}
+            </HTMLSelect>
+          </FormGroup>}
+          {/* On a machine of a team the person maintains, or of the organization: whose automation it is, which then runs as their service identity. */}
+          {!form.storeInProject && form.runsOn && (targets.length > 0 || form.publishTo) && <FormGroup label={t("Publish to")} labelFor="automation-publish"
+            helperText={form.publishTo ? t("It runs as a service identity, with account credentials only.") : undefined}>
+            <HTMLSelect id="automation-publish" fill value={form.publishTo ?? ""} disabled={busy} onChange={event => edit({ publishTo: event.target.value || null })}>
+              <option value="">{t("Me")}</option>
+              {form.publishTo && !targets.some(target => target.scope === form.publishTo) && <option value={form.publishTo}>{t("Unavailable team or organization")}</option>}
+              {targets.map(target => <option key={target.scope} value={target.scope}>
+                {target.scope === "organization" ? target.name : t("Team {name}", { name: target.name })}</option>)}
             </HTMLSelect>
           </FormGroup>}
         </div>

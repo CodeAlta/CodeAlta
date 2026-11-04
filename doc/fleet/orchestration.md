@@ -124,11 +124,13 @@ their own use, under their vendor's terms. So:
   is checked by the scheduler before dispatch and by the node before the run starts, and it holds for the whole run:
   its children, a change of provider, model tiers and fallbacks resolve only to account providers. An organization's
   policy can require account credentials for every automation, personal ones included.
-- **Organization providers**: an admin or a team maintainer defines a provider once (type, endpoint, models, budget).
-  Its key is a secret of the organization ([secrets](secrets.md)): the admin's console seals it to the keys of the machines
-  allowed to use it (taken from the signed device list); the server stores and relays only these sealed copies, and
-  the machines keep them in their protected store. Rotation is a console action. With a gateway, each scope or
-  automation gets its own virtual key, so costs and limits follow ownership.
+- **Organization providers**: an admin or a team maintainer defines a provider once (type, endpoint, models). Its key
+  is sealed by their computer to the keys of the machines of that scope, as the signed device list and the signed access
+  document say; the server stores and relays only these sealed copies. A machine opens its copy only when it was given
+  by someone who answers for the scope in the access document it verified, keeps the key in its protected store, and
+  adds the provider to its configuration with that key; a provider taken away is removed with its key. A provider of the
+  machine's own with the same id is never replaced. Rotation is a new version of the provider, sealed again. With a
+  gateway, each scope or automation gets its own virtual key, so costs and limits follow ownership.
 - **Other credentials of a run** (Jira, Grafana, Kubernetes, Slack, Git) are the machine's own, scoped to what its runs
   may do: a machine inside the infrastructure holds read-only monitoring access and the narrow write role of its
   allowed remediations, used by host-side tools outside the agent's sandbox, never by the agent's shell

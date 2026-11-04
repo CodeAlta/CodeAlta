@@ -116,6 +116,9 @@ internal sealed partial class DesktopFleetServers : IAsyncDisposable
             return new DesktopServerAutomationRoute(connection.Link.Id, organization, machine.Inventory.Name, connector.Devices, identity, Client(connection.Link.Id))
             {
                 TeamId = MaintainedTeamOf(connector.Access.Current, connector.Devices.Current, identity.DeviceId, machineId),
+                OfOrganization = connector.Access.Current?.IsOrganizationMachine(machineId) == true && connector.Devices.Current?.Members.GetValueOrDefault(identity.DeviceId) is { } self
+                    && connector.Access.Current.IsSigner(self.OwnerId),
+                Access = connector.Access,
             };
         }
 
@@ -794,7 +797,12 @@ internal sealed partial class DesktopFleetServers : IAsyncDisposable
             // A newer policy, a stop of the kill switch or its lift: the banner and the pages read it again.
             PolicyChanged = (_, _) => OnChanged(),
             // An automation this person gave away and that its new owner took: off this computer, and so off its machines.
-            AccessRead = linkId => _ = FollowTransfersAsync(linkId),
+            AccessRead = linkId =>
+            {
+                _ = FollowTransfersAsync(linkId);
+                // A grantee with a device or a member its grant has no copy for: this computer, which holds the key, seals for them again.
+                _ = RekeyGrantsAsync(linkId);
+            },
         });
         connections.Changed += OnChanged;
         Volatile.Write(ref _connections, connections);

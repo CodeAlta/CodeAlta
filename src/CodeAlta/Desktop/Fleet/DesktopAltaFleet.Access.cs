@@ -45,7 +45,14 @@ internal sealed partial class DesktopAltaFleet : IAltaFleetAccess
                     [.. team.Members.Where(static member => member.Role != FleetTeamRoles.Maintainer).Select(static member => member.DisplayName)],
                     [.. team.Machines.Select(DeviceName)], team.RunsMemberAutomations))],
                 Grants = [.. read.Grants.Select(grant => new AltaFleetGrant(grant.Id, Named(grant.SubjectKind, grant.SubjectId), grant.Capability,
-                    grant.ScopeKind + (grant.ScopeId is null ? string.Empty : ":" + grant.ScopeId), grant.Status, grant.ExpiresAt))],
+                    grant.ScopeKind + (grant.ScopeId is null ? string.Empty : ":" + grant.ScopeId), grant.Status, grant.ExpiresAt) { MissingKeys = grant.MissingKeys })],
+                Identities = [.. read.Identities.Select(identity => new AltaFleetIdentity(identity.Id, identity.Name, Named(identity.OwnerKind, identity.OwnerId), identity.Enabled))],
+                Signed = connection.Connector?.Access.Current is { } signed
+                    ? new AltaFleetSignedAccess(signed.Number, signed.Teams.Values.ToDictionary(static team => team.Id, static team => (IReadOnlyList<string>)[.. team.Services ?? []]),
+                        signed.Machines.ToDictionary(static pair => pair.Key, static pair => pair.Value), [.. signed.OrganizationMachines.Order(StringComparer.Ordinal)],
+                        signed.OrganizationServices, [.. signed.Automations.Values.Select(static automation => new AltaFleetSignedAutomation(automation.Id,
+                            automation.OwnerKind + ":" + automation.OwnerId, automation.Paused))])
+                    : null,
                 Owners = [.. read.Owners.Select(owner => new AltaFleetOwner(owner.ResourceKind, owner.ResourceId, owner.Name, owner.OwnerKind + ":" + owner.OwnerName, owner.Paused,
                     owner.OwnerSuspended))],
                 Transfers = [.. read.Transfers.Select(transfer => new AltaFleetTransfer(transfer.Id, transfer.ResourceKind + ":" + (transfer.ResourceName ?? transfer.ResourceId),

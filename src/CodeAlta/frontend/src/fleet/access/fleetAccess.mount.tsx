@@ -20,7 +20,7 @@ const household: FleetAccessOverview = {
   people: [me, person("bea", "Bea", "member"), person("cy", "Cy", "member", { joined: false, devices: 0 })],
   teams: [], identities: [], grants: [], transfers: [], proposals: [], sessions: [{ id: "s1", title: "Fix the parser", machineName: "Mac mini" }],
   owners: [{ kind: "machine", id: "mini", name: "Mac mini", ownerKind: "person", ownerId: "alex", ownerName: "Alex", author: null, paused: false, ownerSuspended: false, canAct: true }],
-  serverUrl: "https://home.example",
+  serverUrl: "https://home.example", providers: [],
 };
 const company: FleetAccessOverview = {
   ...household, advanced: true,
@@ -31,6 +31,8 @@ const company: FleetAccessOverview = {
   teams: [{ id: "infra", name: "Infra", runsMemberAutomations: false, canManage: true, machines: [{ id: "box", name: "Build box" }], onCall: null,
     members: [{ personId: "alex", name: "Alex", role: "maintainer" }, { personId: "max", name: "Max", role: "member" }] }],
   identities: [{ id: "svc", name: "infra-bot", ownerKind: "team", ownerName: "Infra", enabled: false }],
+  providers: [{ id: "infra-anthropic", ownerKind: "team", ownerName: "Infra", name: "Infra Anthropic", type: "anthropic", endpoint: null, models: ["claude-sonnet-5-5"],
+    machines: 1, canManage: true }],
   grants: [{ id: "g1", subjectKind: "person", subjectId: "ada", subjectName: "Ada", capability: "session.view-content", scopeKind: "resource", scopeId: "session:s1", scopeName: "Fix the parser",
     status: "pending_keys", expiresAt: null }],
   owners: [
@@ -64,6 +66,7 @@ const api: FleetAccessApi = {
   enableServiceIdentity: record("enable") as never, decideProposal: record("proposal") as never,
   prepareAccessDocument: async () => ({ status: "ok", message: null, changes: overview.document?.pending ?? [], number: (overview.document?.number ?? 0) + 1 }),
   signAccessDocument: record("sign") as never,
+  setScopeProvider: record("provider") as never, deleteScopeProvider: record("deleteProvider") as never,
   accessReview: async () => ({ status: "ok", message: null, csv: "principal_kind,principal_id\r\n", lines: 1 }),
 };
 

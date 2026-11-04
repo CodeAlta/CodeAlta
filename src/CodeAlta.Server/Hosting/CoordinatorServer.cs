@@ -476,6 +476,8 @@ public sealed class CoordinatorServer : IAsyncDisposable
             provider.GetRequiredService<RelayHub>())
         {
             Metrics = metrics, SignInGrants = provider.GetRequiredService<SignInAttempts>(), SignInStore = store, RateLimiter = provider.GetRequiredService<AuthenticationRateLimiter>(),
+            // A device approved or revoked: the computers of owners key their grants of sealed content again for the devices of the grantees.
+            DevicesChanged = organization => provider.GetRequiredService<AccessService>().Changed(organization),
         });
         services.AddSingleton(provider => new PublicationService(store, provider.GetRequiredService<DirectoryHub>(), time) { Metrics = metrics });
         services.AddSingleton(_ => new MetadataKeyService(store, time));

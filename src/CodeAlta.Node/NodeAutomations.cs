@@ -266,12 +266,16 @@ internal sealed partial class NodeAutomations : IFleetNodeAutomations, IAutomati
         if (scope is not null && team?.Id != scope) return "This automation of a team runs on a machine of that team only.";
         if (scope is not null && team!.Services is not { Count: > 0 })
             return "The automations of a team run as one of its service identities: a maintainer turns one on in People and access, and a signer signs it for machines.";
+        var (organizationMachine, organizationScope, organizationServices) = OrganizationOf(entry);
+        if (organizationScope && !organizationMachine) return "This automation of the organization runs on a machine of the organization only.";
+        if (organizationScope && organizationServices.Count == 0)
+            return "The automations of the organization run as one of its service identities: an admin turns one on in People and access, and a signer signs it for machines.";
 
         var kind = _options.CredentialKind?.Invoke(provider) ?? Classify(provider);
         if (kind == AutomationCredentialKind.Unknown)
             return $"The credential the provider '{provider.ProviderId.Value}' runs with cannot be told: an unattended run uses a provider whose credential is known.";
-        if (kind == AutomationCredentialKind.Personal && team is not null)
-            return $"The provider '{provider.ProviderId.Value}' runs with a personal plan, and a machine of a team runs automations with account credentials only.";
+        if (kind == AutomationCredentialKind.Personal && (team is not null || organizationMachine))
+            return $"The provider '{provider.ProviderId.Value}' runs with a personal plan, and a machine of a team or of the organization runs automations with account credentials only.";
         if (kind == AutomationCredentialKind.Personal && policy.Credentials != NodeAutomationPolicy.AnyCredentials)
             return $"The provider '{provider.ProviderId.Value}' runs with a personal plan, and this machine runs automations with account credentials only.";
 
@@ -315,6 +319,16 @@ internal sealed partial class NodeAutomations : IFleetNodeAutomations, IAutomati
         }
 
         return stopped;
+    }
+
+    // Whether this machine is the organization's, whether the automation is the organization's, and the service identities the
+    // organization turned on, as the access document of the server it came through says.
+    private (bool Machine, bool Automation, IReadOnlyList<string> Services) OrganizationOf(AutomationEntry entry)
+    {
+        if (!entry.Source.IsAssigned || AssignmentOf(entry.Id) is not { Via: { } link } assignment || DeviceId is not { } self) return (false, false, []);
+        var access = ServerAccess?.Invoke(link);
+        var scoped = assignment.Signed is { } signed && FleetAutomationVersionDocuments.TryParse(signed.Payload, out var version) && version.IsOrganizationScope;
+        return (access?.IsOrganizationMachine(self) == true, scoped, access?.OrganizationServices ?? []);
     }
 
     // The team of this machine, as the access document of the server an automation came through says, and the team the
@@ -519,7 +533,7 @@ internal sealed partial class NodeAutomations : IFleetNodeAutomations, IAutomati
             // The signed access document as this node verified it: a suspended signer, a team machine that no longer runs it.
             if (ServerDevices?.Invoke(link) is { } listed && ServerAccess?.Invoke(link) is { } access && DeviceId is { } machine
                 && listed.Members.TryGetValue(key.DeviceId, out var signer)
-                && FleetAutomationVersionDocuments.CheckAccess(signer.OwnerId, machine, listed, access) is { } refused)
+                && FleetAutomationVersionDocuments.CheckAccess(signer.OwnerId, machine, listed, access, entry.Id) is { } refused)
                 return $"This automation waits for its owner: {refused}.";
             return null;
         }
@@ -703,6 +717,11 @@ internal sealed partial class NodeAutomations : IFleetNodeAutomations, IAutomati
             AssignedBy = assignment?.DeviceId, AssignedByName = assignment?.DeviceName, AssignedAt = assignment?.AssignedAt,
             Project = entry.ProjectPath, NextDue = Engine.NextDue(entry.Id), Running = Engine.IsRunning(entry.Id), Problem = entry.Problem,
         };
+
+    /// <summary>Tells the credential kind a provider runs with on this machine, as the check before a run does.</summary>
+    /// <param name="provider">The provider.</param>
+    /// <returns>Its kind.</returns>
+    internal AutomationCredentialKind CredentialKindOf(ModelProviderDescriptor provider) => _options.CredentialKind?.Invoke(provider) ?? Classify(provider);
 
     private AutomationCredentialKind Classify(ModelProviderDescriptor provider)
     {

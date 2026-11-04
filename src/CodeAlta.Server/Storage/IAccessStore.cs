@@ -60,6 +60,22 @@ public sealed record GrantRecord(string Id, string OrganizationId, string Subjec
 public sealed record ResourceOwnerRecord(string OrganizationId, string ResourceKind, string ResourceId, string OwnerKind, string OwnerId, string? AuthorPersonId,
     string? AuthorSessionId, bool Paused, DateTimeOffset UpdatedAt);
 
+/// <summary>A provider of a team or of the organization, as stored: its definition and its key, sealed.</summary>
+/// <param name="Id">Its id.</param>
+/// <param name="OrganizationId">The organization.</param>
+/// <param name="OwnerKind">A team or the organization.</param>
+/// <param name="OwnerId">Its owner.</param>
+/// <param name="Name">The name people see.</param>
+/// <param name="Type">The type of provider.</param>
+/// <param name="Endpoint">Its endpoint, or null.</param>
+/// <param name="Models">The models, as a JSON array.</param>
+/// <param name="Version">Its version.</param>
+/// <param name="Sealed">Its key, sealed for the machines of the scope.</param>
+/// <param name="UpdatedByPersonId">Who set it last.</param>
+/// <param name="UpdatedAt">When.</param>
+public sealed record ScopeProviderRecord(string Id, string OrganizationId, string OwnerKind, string OwnerId, string Name, string Type, string? Endpoint, string Models, long Version,
+    string Sealed, string UpdatedByPersonId, DateTimeOffset UpdatedAt);
+
 /// <summary>A transfer of a resource to another owner.</summary>
 /// <param name="Id">The transfer.</param>
 /// <param name="OrganizationId">Its organization.</param>
@@ -245,14 +261,49 @@ public interface IAccessStore
     /// <returns>The grant as written, or null when it was not in the status expected.</returns>
     ValueTask<GrantRecord?> SetGrantStatusAsync(string grantId, string expected, string status, DateTimeOffset at, AuditEntry audit, CancellationToken cancellationToken = default);
 
-    /// <summary>Makes a grant of sealed content active with its keys: the sealed metadata and the copy of its key for each device.</summary>
-    /// <param name="grantId">The grant, waiting for its keys.</param>
+    /// <summary>Lists which devices hold a copy of the key of each grant of the organization.</summary>
+    /// <param name="organizationId">The organization.</param>
+    /// <param name="cancellationToken">Cancels the read.</param>
+    /// <returns>The grants and the devices of their copies.</returns>
+    ValueTask<IReadOnlyList<(string GrantId, string DeviceId)>> ListGrantKeyDevicesAsync(string organizationId, CancellationToken cancellationToken = default);
+
+    /// <summary>Lists the providers of the teams and of the organization, with the machines that hold their keys.</summary>
+    /// <param name="organizationId">The organization.</param>
+    /// <param name="cancellationToken">Cancels the read.</param>
+    /// <returns>The providers.</returns>
+    ValueTask<IReadOnlyList<(ScopeProviderRecord Provider, IReadOnlyList<string> Machines)>> ListScopeProvidersAsync(string organizationId, CancellationToken cancellationToken = default);
+
+    /// <summary>Writes a provider of a scope with its sealed key, replacing the copies held, when its version is above the one held.</summary>
+    /// <param name="provider">The provider.</param>
+    /// <param name="wraps">The copy of its sealing key for each machine.</param>
+    /// <param name="audit">The audit record.</param>
+    /// <param name="cancellationToken">Cancels the write.</param>
+    /// <returns>Whether it was written: false when the version held is not below.</returns>
+    ValueTask<bool> PutScopeProviderAsync(ScopeProviderRecord provider, IReadOnlyList<(string DeviceId, string Wrapped)> wraps, AuditEntry audit,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>Deletes a provider of a scope and the copies of its key.</summary>
+    /// <param name="organizationId">The organization.</param>
+    /// <param name="providerId">The provider.</param>
+    /// <param name="audit">The audit record.</param>
+    /// <param name="cancellationToken">Cancels the write.</param>
+    /// <returns>Whether it existed.</returns>
+    ValueTask<bool> DeleteScopeProviderAsync(string organizationId, string providerId, AuditEntry audit, CancellationToken cancellationToken = default);
+
+    /// <summary>Lists the providers whose key a machine holds a copy of, with that copy.</summary>
+    /// <param name="deviceId">The machine.</param>
+    /// <param name="cancellationToken">Cancels the read.</param>
+    /// <returns>The providers and the copies.</returns>
+    ValueTask<IReadOnlyList<(ScopeProviderRecord Provider, string Wrapped)>> ListScopeProviderKeysAsync(string deviceId, CancellationToken cancellationToken = default);
+
+    /// <summary>Activates a grant of sealed content, or keys it again: its sealed metadata and the copies of its key replace those held.</summary>
+    /// <param name="grantId">The grant.</param>
     /// <param name="sealedText">The sealed metadata.</param>
-    /// <param name="wraps">The device and its copy of the key.</param>
+    /// <param name="wraps">The copy of the key for each device.</param>
     /// <param name="at">The time.</param>
     /// <param name="audit">The audit record.</param>
     /// <param name="cancellationToken">Cancels the write.</param>
-    /// <returns>The grant, active; null when it did not wait for its keys.</returns>
+    /// <returns>The grant, active; null when it waits for nothing and is not active.</returns>
     ValueTask<GrantRecord?> ActivateGrantKeysAsync(string grantId, string sealedText, IReadOnlyList<(string DeviceId, string Wrapped)> wraps, DateTimeOffset at, AuditEntry audit,
         CancellationToken cancellationToken = default);
 

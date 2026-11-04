@@ -19,6 +19,8 @@ internal sealed partial class BuiltInAltaCommandContributor
         Read("fleet access transfers"),
         Read("fleet access review"),
         Read("fleet access proposals"),
+        Read("fleet access identities"),
+        Read("fleet access document"),
         // A proposal changes nothing until a person applies it; a sandboxed session makes none.
         Mutating("fleet access propose"),
     ];
@@ -34,6 +36,8 @@ internal sealed partial class BuiltInAltaCommandContributor
         group.Add(AccessLeaf(context, "transfers", "List the transfers that concern the person of this computer.", WriteAccessTransfers));
         group.Add(AccessLeaf(context, "review", "List who can do what, for an access review: for owners, admins and auditors.", WriteAccessReview));
         group.Add(AccessLeaf(context, "proposals", "List the changes of access agents proposed, and whether a person applied them.", WriteAccessProposals));
+        group.Add(AccessLeaf(context, "identities", "List the service identities automations of a team or of the organization run as, and whether each is on.", WriteAccessIdentities));
+        group.Add(AccessLeaf(context, "document", "Say what the signed access document this computer verified gives machines: team and organization machines, the identities their automations run as, and the owners of automations.", WriteAccessDocument));
         group.Add(CreateFleetAccessProposeCommand(context));
         AddHelpText(
             group,
@@ -161,6 +165,42 @@ internal sealed partial class BuiltInAltaCommandContributor
         return AltaExitCodes.Success;
     }
 
+    private static int WriteAccessIdentities(AltaCommandContext context, AltaFleetAccess access)
+    {
+        foreach (var identity in access.Identities)
+        {
+            AltaJsonlWriter.WriteRecord(context.Stdout, new
+            {
+                type = "alta.fleet.access.identity", version = 1, correlationId = context.CorrelationId, id = identity.Id, name = identity.Name, owner = identity.Owner,
+                enabled = identity.Enabled,
+            });
+        }
+
+        WriteSummary(context, "alta.fleet.access.identity.summary", access.Identities.Count, truncated: false);
+        return AltaExitCodes.Success;
+    }
+
+    private static int WriteAccessDocument(AltaCommandContext context, AltaFleetAccess access)
+    {
+        var signed = access.Signed;
+        AltaJsonlWriter.WriteRecord(context.Stdout, new
+        {
+            type = "alta.fleet.access.document", version = 1, correlationId = context.CorrelationId, number = signed?.Number ?? 0,
+            teamServices = signed?.TeamServices, teamMachines = signed?.TeamMachines, organizationMachines = signed?.OrganizationMachines ?? [],
+            organizationServices = signed?.OrganizationServices ?? [], pending = access.Pending,
+        });
+        foreach (var automation in signed?.Automations ?? [])
+        {
+            AltaJsonlWriter.WriteRecord(context.Stdout, new
+            {
+                type = "alta.fleet.access.automation", version = 1, correlationId = context.CorrelationId, id = automation.Id, owner = automation.Owner, paused = automation.Paused,
+            });
+        }
+
+        WriteSummary(context, "alta.fleet.access.automation.summary", signed?.Automations.Count ?? 0, truncated: false);
+        return AltaExitCodes.Success;
+    }
+
     private static int WriteAccessGrants(AltaCommandContext context, AltaFleetAccess access)
     {
         foreach (var grant in access.Grants)
@@ -168,7 +208,7 @@ internal sealed partial class BuiltInAltaCommandContributor
             AltaJsonlWriter.WriteRecord(context.Stdout, new
             {
                 type = "alta.fleet.access.grant", version = 1, correlationId = context.CorrelationId, id = grant.Id, subject = grant.Subject, capability = grant.Capability,
-                scope = grant.Scope, status = grant.Status, expiresAt = grant.ExpiresAt,
+                scope = grant.Scope, status = grant.Status, expiresAt = grant.ExpiresAt, missingKeys = grant.MissingKeys,
             });
         }
 

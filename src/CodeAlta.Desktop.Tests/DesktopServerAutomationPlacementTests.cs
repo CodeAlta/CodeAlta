@@ -41,6 +41,27 @@ public sealed class DesktopServerAutomationPlacementTests
         Assert.IsNull(DesktopFleetServers.MaintainedTeamOf(access, devices, "max-desk", "box"), "a member gives the machine personal automations");
         Assert.IsNull(DesktopFleetServers.MaintainedTeamOf(access, devices, "desk", "mini"), "a personal machine");
         Assert.IsNull(DesktopFleetServers.MaintainedTeamOf(null, devices, "desk", "box"), "no document verified yet");
+
+        // Published to a scope, it goes only to a machine of that scope this person answers for.
+        var folder = Directory.CreateTempSubdirectory("codealta-route-").FullName;
+        try
+        {
+            using var key = DeviceIdentity.LoadOrCreate(folder);
+            using var team = new DesktopServerAutomationRoute("link", "org", "Build box", new FleetOrganizationDevices(new Uri("http://127.0.0.1:9/"), key), key,
+                new FleetServerClient(new Uri("http://127.0.0.1:9/"), key)) { TeamId = "infra" };
+            Assert.IsNull(team.CheckScope(null), "the person's own");
+            Assert.IsNull(team.CheckScope("team:infra"));
+            Assert.IsNotNull(team.CheckScope("team:web"));
+            Assert.IsNotNull(team.CheckScope("organization"));
+            using var organization = new DesktopServerAutomationRoute("link", "org", "Pool", new FleetOrganizationDevices(new Uri("http://127.0.0.1:9/"), key), key,
+                new FleetServerClient(new Uri("http://127.0.0.1:9/"), key)) { OfOrganization = true };
+            Assert.IsNull(organization.CheckScope("organization"));
+            Assert.IsNotNull(organization.CheckScope("team:infra"));
+        }
+        finally
+        {
+            Directory.Delete(folder, recursive: true);
+        }
     }
 
     [TestMethod]
