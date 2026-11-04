@@ -346,7 +346,9 @@ internal sealed class NodeProviders(CodeAltaHost host, ModelsDevCatalogService? 
             (status, reason, detail) = state.Availability switch
             {
                 ModelProviderAvailability.Ready => (FleetProviderStates.Ready, (string?)null, (string?)null),
-                ModelProviderAvailability.Failed => (FleetProviderStates.Failed, FleetProviderReasons.StartFailed, Bounded(state.StatusMessage) ?? state.ErrorCategory?.ToString()),
+                // What a provider says of its failure may hold its key (a gateway that says it back): masked before it is cut.
+                ModelProviderAvailability.Failed => (FleetProviderStates.Failed, FleetProviderReasons.StartFailed,
+                    Bounded(Masked(definition, state.StatusMessage)) ?? state.ErrorCategory?.ToString()),
                 _ => (FleetProviderStates.Preparing, null, null),
             };
         }
@@ -362,7 +364,7 @@ internal sealed class NodeProviders(CodeAltaHost host, ModelsDevCatalogService? 
         }
 
         return new FleetProviderStatus(key, Bounded(name)!, type, definition.Enabled != false, status, reason, detail, credential, keySecret, SignsInWithCode(type), isDefault,
-            Bounded(definition.Model), Bounded(definition.ApiUrl));
+            Bounded(definition.Model), Bounded(Masked(definition, definition.ApiUrl)));
     }
 
     // Why a provider that takes a key has none: a secret named and not set (its name), else no key at all (the variable it waits for).
@@ -417,6 +419,31 @@ internal sealed class NodeProviders(CodeAltaHost host, ModelsDevCatalogService? 
     private static string? Optional(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 
     private static string? Bounded(string? value) => value is null ? null : value.Length <= 512 ? value : value[..512];
+
+    // A text of a provider as the desktop may see it: the secrets of the machine masked, and the key of this provider wherever it
+    // comes from (the configuration, a secret, a variable of the environment), never sent back.
+    private string? Masked(CodeAltaProviderDocument definition, string? text)
+    {
+        if (string.IsNullOrEmpty(text)) return text;
+        var masked = host.AgentHub.SecretMasker?.MaskText(text) ?? text;
+        foreach (var key in KeysOf(definition).Where(static key => key.Length >= CodeAlta.Agent.Runtime.AgentSecretMasker.MinimumLength).OrderByDescending(static key => key.Length))
+            masked = masked.Replace(key, CodeAlta.Agent.Runtime.AgentSecretMasker.Mask, StringComparison.Ordinal);
+        return masked;
+    }
+
+    private IEnumerable<string> KeysOf(CodeAltaProviderDocument definition)
+    {
+        if (Optional(definition.ApiKey) is { } literal && !SecretReferences.TryParseLone(literal, out _)) yield return literal;
+        if (KeySecretOf(definition) is { } secret)
+        {
+            string? value = null;
+            try { new LocalSecretStore(Root).TryGetSecret(secret, out value); }
+            catch (Exception exception) when (exception is SecretStoreUnavailableException or InvalidDataException or IOException or UnauthorizedAccessException) { }
+            if (value is not null) yield return value;
+        }
+
+        if (Optional(definition.ApiKeyEnv) is { } variable && Environment.GetEnvironmentVariable(variable) is { Length: > 0 } fromEnvironment) yield return fromEnvironment;
+    }
 
     private static T? TryRead<T>(Func<T> read)
     {
