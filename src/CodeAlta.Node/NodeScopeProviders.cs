@@ -63,8 +63,9 @@ internal sealed class NodeScopeProviders
         {
             try
             {
+                // The copy is signed over the definition: what is installed below is what the maintainer sealed, not what the server says.
                 opened.Add((key.Provider, FleetProviderKeys.Open(key.Sealed, key.Wrapped, list.OrganizationId ?? string.Empty, key.Provider.Id, key.Provider.Version,
-                    key.Provider.OwnerKind, key.Provider.OwnerId, _identity, list, access)));
+                    FleetProviderDefinition.Of(key.Provider), _identity, list, access)));
             }
             catch (InvalidDataException exception)
             {
@@ -84,17 +85,34 @@ internal sealed class NodeScopeProviders
     }
 
     // Writes the providers of a link: the keys in the protected store, the definitions in the configuration; those of the
-    // link no longer given go away. A provider of the user's own with the same key stays as it is.
+    // link no longer given go away. A provider of the user's own with the same key stays as it is. Versions only move forward:
+    // a copy older than the version installed is refused and the installed one kept, and a provider taken away comes back
+    // only at a newer version than the one removed, also after a restart.
     internal IReadOnlyList<string> Apply(string linkId, IReadOnlyList<(ScopeProviderDto Provider, string Key)> opened)
     {
         var applied = ReadApplied();
-        var before = applied.GetValueOrDefault(linkId) ?? [];
+        var link = applied.GetValueOrDefault(linkId) ?? new ScopeProvidersOfLink();
+        var before = new Dictionary<string, long>(link.Applied, StringComparer.Ordinal);
         var store = new CodeAltaConfigStore(_catalog);
         var definitions = store.LoadGlobalProviderDefinitions(includeDisabled: true).ToList();
-        var ours = applied.Values.SelectMany(static ids => ids).ToHashSet(StringComparer.Ordinal);
-        var kept = new List<string>();
+        var ours = applied.Values.SelectMany(static other => other.Applied.Keys).ToHashSet(StringComparer.Ordinal);
+        var kept = new Dictionary<string, long>(StringComparer.Ordinal);
         foreach (var (provider, key) in opened)
         {
+            if (kept.ContainsKey(provider.Id)) continue;
+            if (before.TryGetValue(provider.Id, out var held) && provider.Version < held)
+            {
+                if (LogManager.IsInitialized) _logger.Warn($"The provider {provider.Id} of {linkId} was given at version {provider.Version}, older than {held}: the installed one stays.");
+                kept[provider.Id] = held;
+                continue;
+            }
+
+            if (link.Removed.TryGetValue(provider.Id, out var removed) && provider.Version <= removed)
+            {
+                if (LogManager.IsInitialized) _logger.Warn($"The provider {provider.Id} of {linkId} was removed at version {removed}: version {provider.Version} does not bring it back.");
+                continue;
+            }
+
             var existing = definitions.FirstOrDefault(definition => string.Equals(definition.ProviderKey, provider.Id, StringComparison.OrdinalIgnoreCase));
             if (existing is not null && !ours.Contains(provider.Id)) continue;
             if (existing is not null) definitions.Remove(existing);
@@ -104,41 +122,73 @@ internal sealed class NodeScopeProviders
                 ProviderKey = provider.Id, DisplayName = provider.Name, ProviderType = provider.Type, ApiUrl = provider.Endpoint, Model = provider.Models.FirstOrDefault(),
                 ApiKeySecret = SecretName(provider.Id), Enabled = true,
             });
-            kept.Add(provider.Id);
+            kept[provider.Id] = provider.Version;
+            link.Removed.Remove(provider.Id);
         }
 
-        foreach (var gone in before.Where(id => !kept.Contains(id, StringComparer.Ordinal)))
+        foreach (var (gone, version) in before.Where(pair => !kept.ContainsKey(pair.Key)))
         {
             definitions.RemoveAll(definition => string.Equals(definition.ProviderKey, gone, StringComparison.OrdinalIgnoreCase));
             _secrets.DeleteSecret(SecretName(gone));
+            link.Removed[gone] = Math.Max(version, link.Removed.GetValueOrDefault(gone));
         }
 
         if (kept.Count > 0 || before.Count > 0) store.SaveGlobalProviderDefinitions(definitions);
-        applied[linkId] = kept;
+        link.Applied = kept;
+        applied[linkId] = link;
         WriteApplied(applied);
-        if (LogManager.IsInitialized && (kept.Count > 0 || before.Count > 0)) _logger.Info($"The providers of {linkId} on this machine: {string.Join(", ", kept)}.");
-        return kept;
+        if (LogManager.IsInitialized && (kept.Count > 0 || before.Count > 0)) _logger.Info($"The providers of {linkId} on this machine: {string.Join(", ", kept.Keys)}.");
+        return [.. kept.Keys];
     }
 
-    private Dictionary<string, List<string>> ReadApplied()
+    private Dictionary<string, ScopeProvidersOfLink> ReadApplied()
     {
         var path = Path.Combine(_catalog.FleetRoot, FileName);
+        string text;
         try
         {
-            return JsonSerializer.Deserialize(File.ReadAllText(path), NodeScopeProvidersJson.Default.DictionaryStringListString) ?? new(StringComparer.Ordinal);
+            text = File.ReadAllText(path);
         }
-        catch (Exception exception) when (exception is FileNotFoundException or DirectoryNotFoundException or JsonException)
+        catch (Exception exception) when (exception is FileNotFoundException or DirectoryNotFoundException)
         {
             return new(StringComparer.Ordinal);
         }
+
+        try
+        {
+            return new(JsonSerializer.Deserialize(text, NodeScopeProvidersJson.Default.DictionaryStringScopeProvidersOfLink) ?? [], StringComparer.Ordinal);
+        }
+        catch (JsonException)
+        {
+            // The first form of the file named the providers of each link, without versions: each is held at version 0.
+            var ids = JsonSerializer.Deserialize(text, NodeScopeProvidersJson.Default.DictionaryStringListString) ?? [];
+            return ids.ToDictionary(static pair => pair.Key,
+                static pair => new ScopeProvidersOfLink { Applied = pair.Value.ToDictionary(static id => id, static _ => 0L, StringComparer.Ordinal) }, StringComparer.Ordinal);
+        }
     }
 
-    private void WriteApplied(Dictionary<string, List<string>> applied)
+    private void WriteApplied(Dictionary<string, ScopeProvidersOfLink> applied)
     {
         Directory.CreateDirectory(_catalog.FleetRoot);
-        File.WriteAllText(Path.Combine(_catalog.FleetRoot, FileName), JsonSerializer.Serialize(applied, NodeScopeProvidersJson.Default.DictionaryStringListString));
+        // Written whole, then moved over the file: a machine stopped halfway keeps the checkpoints it had.
+        var path = Path.Combine(_catalog.FleetRoot, FileName);
+        var temporary = path + ".tmp";
+        File.WriteAllBytes(temporary, JsonSerializer.SerializeToUtf8Bytes(applied, NodeScopeProvidersJson.Default.DictionaryStringScopeProvidersOfLink));
+        File.Move(temporary, path, overwrite: true);
     }
 }
 
+/// <summary>The providers of one link on a machine: the version installed of each, and the last version of each one taken away.</summary>
+internal sealed class ScopeProvidersOfLink
+{
+    /// <summary>Gets or sets the version installed of each provider.</summary>
+    public Dictionary<string, long> Applied { get; set; } = new(StringComparer.Ordinal);
+
+    /// <summary>Gets or sets the version each provider taken away had: it comes back only above it.</summary>
+    public Dictionary<string, long> Removed { get; set; } = new(StringComparer.Ordinal);
+}
+
+[System.Text.Json.Serialization.JsonSourceGenerationOptions(PropertyNamingPolicy = System.Text.Json.Serialization.JsonKnownNamingPolicy.CamelCase)]
 [System.Text.Json.Serialization.JsonSerializable(typeof(Dictionary<string, List<string>>))]
+[System.Text.Json.Serialization.JsonSerializable(typeof(Dictionary<string, ScopeProvidersOfLink>))]
 internal sealed partial class NodeScopeProvidersJson : System.Text.Json.Serialization.JsonSerializerContext;

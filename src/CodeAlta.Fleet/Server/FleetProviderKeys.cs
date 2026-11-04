@@ -9,10 +9,61 @@ using CodeAlta.Fleet.Protocol;
 namespace CodeAlta.Fleet.Server;
 
 /// <summary>
+/// What a machine installs with the key of a provider of a scope: its owner, its name, its type, its endpoint and its models.
+/// The copy of the key is signed over it, so that a server that keeps a genuine copy cannot send the key, or the sessions of
+/// the machine, to another endpoint.
+/// </summary>
+/// <param name="OwnerKind">A team or the organization.</param>
+/// <param name="OwnerId">Its owner.</param>
+/// <param name="Name">The name people see.</param>
+/// <param name="Type">The type of provider.</param>
+/// <param name="Endpoint">Its endpoint; null for the vendor's own.</param>
+/// <param name="Models">The models it offers, in order: the first is its default.</param>
+public sealed record FleetProviderDefinition(string OwnerKind, string OwnerId, string Name, string Type, string? Endpoint, IReadOnlyList<string> Models)
+{
+    private const string Domain = "codealta-provider-definition/1";
+
+    /// <summary>Gets the definition of a provider as a server describes it.</summary>
+    /// <param name="provider">The provider.</param>
+    /// <returns>Its definition.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="provider"/> is null.</exception>
+    public static FleetProviderDefinition Of(Protocol.Api.ScopeProviderDto provider)
+    {
+        ArgumentNullException.ThrowIfNull(provider);
+        return new(provider.OwnerKind, provider.OwnerId, provider.Name, provider.Type, provider.Endpoint, provider.Models ?? []);
+    }
+
+    /// <summary>Gets the hash of the definition: a JSON array of its fields in a fixed order, under a domain of its own.</summary>
+    /// <returns>The hash, base64url.</returns>
+    public string Digest()
+    {
+        var buffer = new System.Buffers.ArrayBufferWriter<byte>();
+        using (var writer = new Utf8JsonWriter(buffer))
+        {
+            writer.WriteStartArray();
+            writer.WriteStringValue(Domain);
+            writer.WriteStringValue(OwnerKind);
+            writer.WriteStringValue(OwnerId);
+            writer.WriteStringValue(Name);
+            writer.WriteStringValue(Type);
+            if (Endpoint is null) writer.WriteNullValue();
+            else writer.WriteStringValue(Endpoint);
+            writer.WriteStartArray();
+            foreach (var model in Models ?? []) writer.WriteStringValue(model);
+            writer.WriteEndArray();
+            writer.WriteEndArray();
+        }
+
+        return Base64Url.EncodeToString(SHA256.HashData(buffer.WrittenSpan));
+    }
+}
+
+/// <summary>
 /// The key of a provider of a team or of the organization (<c>doc/fleet/orchestration.md</c>, credentials of unattended
 /// runs): a device of someone who answers for that scope seals it with a key made for this version of the provider, and wraps
-/// that key to each machine of the scope, signed by itself. A machine opens its copy only when the signer answers for the
-/// owner of the provider, as the signed access document it verified says; the server never reads the key.
+/// that key to each machine of the scope, signing each copy over the version and the whole definition of the provider. A
+/// machine opens its copy only when the signer answers for the owner of the provider, as the signed access document it verified
+/// says, and only for the definition it installs; the server never reads the key.
 /// </summary>
 public static class FleetProviderKeys
 {
@@ -21,10 +72,11 @@ public static class FleetProviderKeys
     private const int TagLength = 16;
     private static readonly FleetGrantKeys.Purpose Providers = new("codealta-provider-key/1", "codealta-provider-key-sign/1");
 
-    /// <summary>Seals the key of a provider for the machines of its scope.</summary>
+    /// <summary>Seals the key of a provider for the machines of its scope, bound to its definition.</summary>
     /// <param name="organizationId">The organization.</param>
     /// <param name="providerId">The provider.</param>
     /// <param name="version">Its version, which a new key or definition makes.</param>
+    /// <param name="definition">What the machines install with the key, as the server will describe it.</param>
     /// <param name="apiKey">The key of the account.</param>
     /// <param name="recipients">The machines of the scope, from the device list this device verified.</param>
     /// <param name="listSequence">The entry of the device list this device read.</param>
@@ -32,11 +84,12 @@ public static class FleetProviderKeys
     /// <returns>The sealed key, and the copy of its sealing key for each machine.</returns>
     /// <exception cref="ArgumentNullException">An argument is null.</exception>
     /// <exception cref="ArgumentException">An id or the key is empty, or no machine receives it.</exception>
-    public static (string Sealed, IReadOnlyList<(string DeviceId, string Wrapped)> Wraps) Seal(string organizationId, string providerId, long version, string apiKey,
-        IReadOnlyList<FleetDevicePublicKey> recipients, long listSequence, DeviceIdentity signer)
+    public static (string Sealed, IReadOnlyList<(string DeviceId, string Wrapped)> Wraps) Seal(string organizationId, string providerId, long version,
+        FleetProviderDefinition definition, string apiKey, IReadOnlyList<FleetDevicePublicKey> recipients, long listSequence, DeviceIdentity signer)
     {
         ArgumentException.ThrowIfNullOrEmpty(organizationId);
         ArgumentException.ThrowIfNullOrEmpty(providerId);
+        ArgumentNullException.ThrowIfNull(definition);
         ArgumentException.ThrowIfNullOrEmpty(apiKey);
         ArgumentNullException.ThrowIfNull(recipients);
         ArgumentNullException.ThrowIfNull(signer);
@@ -55,36 +108,39 @@ public static class FleetProviderKeys
             writer.WriteString("iv", Base64Url.EncodeToString(nonce));
             writer.WriteString("ct", Base64Url.EncodeToString(cipher));
         }));
-        var subject = Subject(version);
+        var subject = Subject(version, definition);
         var wraps = new List<(string, string)>(recipients.Count);
         foreach (var recipient in recipients)
             wraps.Add((recipient.DeviceId, FleetGrantKeys.Wrap(key, recipient, organizationId, providerId, subject, Math.Max(1, listSequence), signer, Providers)));
         return (sealedText, wraps);
     }
 
-    /// <summary>Opens the key of a provider on a machine it was sealed for, once its copy holds.</summary>
+    /// <summary>Opens the key of a provider on a machine it was sealed for, once its copy holds for the definition the machine installs.</summary>
     /// <param name="sealedText">The sealed key.</param>
     /// <param name="wrapped">This machine's copy of its sealing key.</param>
     /// <param name="organizationId">The organization.</param>
     /// <param name="providerId">The provider.</param>
     /// <param name="version">Its version.</param>
-    /// <param name="ownerKind">The kind of its owner: a team or the organization.</param>
-    /// <param name="ownerId">Its owner.</param>
+    /// <param name="definition">What the machine installs with the key: its owner, name, type, endpoint and models.</param>
     /// <param name="identity">The key of this machine.</param>
     /// <param name="list">The device list as this machine verified it.</param>
     /// <param name="access">The access document as this machine verified it.</param>
     /// <returns>The key of the account.</returns>
     /// <exception cref="ArgumentNullException">An argument is null.</exception>
-    /// <exception cref="InvalidDataException">The copy is not for this machine, provider and version, is not signed by someone who answers for its owner, or does not open.</exception>
-    public static string Open(string sealedText, string wrapped, string organizationId, string providerId, long version, string ownerKind, string ownerId, DeviceIdentity identity,
-        FleetDeviceListState list, FleetAccessState access)
+    /// <exception cref="InvalidDataException">
+    /// The copy is not for this machine, provider, version and definition, is not signed by someone who answers for its owner, or does not open.
+    /// </exception>
+    public static string Open(string sealedText, string wrapped, string organizationId, string providerId, long version, FleetProviderDefinition definition,
+        DeviceIdentity identity, FleetDeviceListState list, FleetAccessState access)
     {
         ArgumentNullException.ThrowIfNull(sealedText);
         ArgumentNullException.ThrowIfNull(wrapped);
+        ArgumentNullException.ThrowIfNull(definition);
         ArgumentNullException.ThrowIfNull(identity);
         ArgumentNullException.ThrowIfNull(list);
         ArgumentNullException.ThrowIfNull(access);
-        var key = FleetGrantKeys.Unwrap(wrapped, organizationId, providerId, Subject(version), identity, list, signer => access.Answers(ownerKind, ownerId, signer.OwnerId), Providers);
+        var key = FleetGrantKeys.Unwrap(wrapped, organizationId, providerId, Subject(version, definition), identity, list,
+            signer => access.Answers(definition.OwnerKind, definition.OwnerId, signer.OwnerId), Providers);
         try
         {
             using var document = JsonDocument.Parse(sealedText);
@@ -112,7 +168,9 @@ public static class FleetProviderKeys
         }
     }
 
-    private static string Subject(long version) => "version:" + version.ToString(CultureInfo.InvariantCulture);
+    // What the signature of a copy binds besides the provider: its version and the hash of its definition.
+    private static string Subject(long version, FleetProviderDefinition definition)
+        => "version:" + version.ToString(CultureInfo.InvariantCulture) + ";definition:" + definition.Digest();
 
     private static byte[] Associated(string keyId, string organizationId, string providerId, long version)
         => Encoding.UTF8.GetBytes(string.Create(CultureInfo.InvariantCulture, $"{ContentDomain}\n{FleetMetadataKey.SealAlgorithm}\n{keyId}\n{organizationId}\n{providerId}\n{version}"));

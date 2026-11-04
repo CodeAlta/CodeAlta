@@ -51,6 +51,47 @@ public sealed class NodeScopeProvidersTests
         Assert.IsTrue(config.LoadGlobalProviderDefinitions(includeDisabled: true).Any(definition => definition.ProviderKey == "mine"));
     }
 
+    [TestMethod]
+    public async Task AnOlderVersion_OrAProviderTakenAway_IsNotInstalledAgain_AlsoAfterARestart()
+    {
+        var token = TestContext.CancellationToken;
+        using var root = new NodeTestRoot();
+        await using var node = await NodeHost.StartAsync(root.Options(), token);
+        var catalog = node.Host.CatalogOptions;
+        using var identity = DeviceIdentity.LoadOrCreate(Path.Combine(root.Root, "self"));
+        var store = new LocalSecretStore(Path.Combine(root.Root, "secrets"), new PlainProtector());
+        var config = new CodeAltaConfigStore(catalog);
+        var providers = new NodeScopeProviders(catalog, store, identity);
+        ScopeProviderDto Provider(long version) => new("infra-gateway", FleetPrincipalKinds.Team, "infra", "Infra gateway", "openai-responses",
+            $"https://gateway.example/v{version}", ["gpt-6.1"], version, "p2", DateTimeOffset.UtcNow, ["self"]);
+        (string? Endpoint, string? Key) Installed()
+        {
+            var definition = config.LoadGlobalProviderDefinitions(includeDisabled: true).SingleOrDefault(static definition => definition.ProviderKey == "infra-gateway");
+            return (definition?.ApiUrl, store.TryGetSecret(NodeScopeProviders.SecretName("infra-gateway"), out var key) ? key : null);
+        }
+
+        providers.Apply("link-1", [(Provider(2), "sk-2")]);
+        Assert.AreEqual(("https://gateway.example/v2", "sk-2"), Installed());
+
+        // A genuine copy of version 1 replayed by the server: the machine keeps version 2.
+        CollectionAssert.AreEqual(new[] { "infra-gateway" }, providers.Apply("link-1", [(Provider(1), "sk-1")]).ToArray());
+        Assert.AreEqual(("https://gateway.example/v2", "sk-2"), Installed(), "a rotation is not rolled back");
+
+        // Taken away, then version 2 given again: it does not come back.
+        Assert.AreEqual(0, providers.Apply("link-1", []).Count);
+        Assert.AreEqual(0, providers.Apply("link-1", [(Provider(2), "sk-2")]).Count, "a removed provider is not resurrected");
+        Assert.AreEqual(((string?)null, (string?)null), Installed());
+
+        // After a restart of the machine, the checkpoints hold; a newer version comes in.
+        providers = new NodeScopeProviders(catalog, store, identity);
+        Assert.AreEqual(0, providers.Apply("link-1", [(Provider(2), "sk-2")]).Count);
+        CollectionAssert.AreEqual(new[] { "infra-gateway" }, providers.Apply("link-1", [(Provider(3), "sk-3")]).ToArray());
+        Assert.AreEqual(("https://gateway.example/v3", "sk-3"), Installed());
+        providers = new NodeScopeProviders(catalog, store, identity);
+        providers.Apply("link-1", [(Provider(1), "sk-1")]);
+        Assert.AreEqual(("https://gateway.example/v3", "sk-3"), Installed());
+    }
+
     // Keeps values as they are: the protection of the machine is not what this test is about.
     private sealed class PlainProtector : ISecretProtector
     {

@@ -113,10 +113,14 @@ internal sealed partial class DesktopFleetServers
         if (ownerKind == FleetPrincipalKinds.Organization) ownerId = list.OrganizationId ?? string.Empty;
         using var client = Client(linkId);
         var held = (await client.ListScopeProvidersAsync(cancellationToken).ConfigureAwait(false)).Items.FirstOrDefault(provider => provider.Id == providerId);
-        var version = (held?.Version ?? 0) + 1;
-        var (sealedText, wraps) = FleetProviderKeys.Seal(list.OrganizationId ?? string.Empty, providerId, version, apiKey, recipients, list.Sequence, Identity());
-        return await client.PutScopeProviderAsync(providerId, new PutScopeProviderRequest(ownerKind, ownerId, name, type, endpoint, models, version, sealedText,
-            [.. wraps.Select(static wrap => new GrantKeyWrapDto(wrap.DeviceId, wrap.Wrapped))]), cancellationToken).ConfigureAwait(false);
+        // Machines refuse a version at or below one they removed, and the server forgets a provider it deletes: a version
+        // also above the time keeps one made again after a deletion above the one removed.
+        var version = Math.Max((held?.Version ?? 0) + 1, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
+        // The definition as the server keeps it (trimmed), which is what the copies are signed over and the machines install.
+        var definition = new FleetProviderDefinition(ownerKind, ownerId, name.Trim(), type, endpoint, [.. models.Select(static model => model.Trim())]);
+        var (sealedText, wraps) = FleetProviderKeys.Seal(list.OrganizationId ?? string.Empty, providerId, version, definition, apiKey, recipients, list.Sequence, Identity());
+        return await client.PutScopeProviderAsync(providerId, new PutScopeProviderRequest(ownerKind, ownerId, definition.Name, type, endpoint, definition.Models, version,
+            sealedText, [.. wraps.Select(static wrap => new GrantKeyWrapDto(wrap.DeviceId, wrap.Wrapped))]), cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>
