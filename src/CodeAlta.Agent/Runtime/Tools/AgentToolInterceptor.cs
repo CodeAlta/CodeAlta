@@ -47,7 +47,7 @@ public abstract class AgentToolInterceptor
     {
         ArgumentNullException.ThrowIfNull(tool);
         var inner = tool.Handler;
-        return tool with
+        var intercepted = tool with
         {
             Handler = async (invocation, cancellationToken) =>
             {
@@ -68,6 +68,17 @@ public abstract class AgentToolInterceptor
                 return await AfterToolCallAsync(call, result, cancellationToken).ConfigureAwait(false);
             },
         };
+        OnIntercepted(intercepted);
+        return intercepted;
+    }
+
+    /// <summary>
+    /// Called with each tool this interceptor intercepts, as its calls run through it: an interceptor that calls a tool of
+    /// the session itself (a check before another call) keeps them, and its calls then go through the hooks too.
+    /// </summary>
+    /// <param name="tool">The tool, with its calls intercepted.</param>
+    protected virtual void OnIntercepted(AgentToolDefinition tool)
+    {
     }
 }
 
@@ -114,6 +125,12 @@ public sealed record AgentToolHookCall
 
     /// <summary>Gets what the hooks can do with the call.</summary>
     public AgentToolHookCapabilities Capabilities { get; init; }
+
+    /// <summary>
+    /// Gets the tools of the session by name, with their calls intercepted, for a hook that calls one first (a check of the
+    /// target before the call); null when the session gives none.
+    /// </summary>
+    public Func<string, AgentToolDefinition?>? FindTool { get; init; }
 
     /// <summary>Gets the folder the session works in, when known.</summary>
     public string? WorkingDirectory { get; init; }

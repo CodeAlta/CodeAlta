@@ -14,6 +14,16 @@ export const automationAutonomyMessages = {
   "Minutes an approval waits": ["Minutos que espera una aprobación", "Minutes d’attente d’une approbation", "Minuten, die eine Freigabe wartet", "承認を待つ分数", "批准等待的分钟数"],
   "then stop the run": ["luego detener la ejecución", "puis arrêter l’exécution", "dann den Lauf beenden", "その後実行を停止", "然后停止运行"],
   "then keep waiting": ["luego seguir esperando", "puis continuer d’attendre", "dann weiter warten", "その後も待ち続ける", "然后继续等待"],
+  "pinned to {version}": ["fijada a {version}", "épinglé à {version}", "festgelegt auf {version}", "{version} に固定", "固定到 {version}"],
+  "pinned": ["fijada", "épinglé", "festgelegt", "固定", "已固定"],
+  "bounds on {arguments}": ["límites en {arguments}", "bornes sur {arguments}", "Grenzen für {arguments}", "{arguments} に制限", "限定 {arguments}"],
+  "checks {tools} first": ["comprueba {tools} antes", "vérifie {tools} d’abord", "prüft zuerst {tools}", "先に {tools} を確認", "先检查 {tools}"],
+  "Pins, bounds and preconditions are written in its configuration file; a try says the pin of each tool it calls.": [
+    "Las fijaciones, los límites y las condiciones previas se escriben en su archivo de configuración; una prueba indica la fijación de cada herramienta que llama.",
+    "Les épinglages, bornes et préconditions s’écrivent dans son fichier de configuration ; un essai donne l’épinglage de chaque outil qu’il appelle.",
+    "Festlegungen, Grenzen und Vorbedingungen stehen in seiner Konfigurationsdatei; ein Test nennt die Festlegung jedes aufgerufenen Tools.",
+    "固定、制限、前提条件は設定ファイルに書きます。試行では呼び出す各ツールの固定値が示されます。",
+    "固定、限制和前提条件写在其配置文件中；试运行会给出它调用的每个工具的固定值。"],
   "Approvals go to": ["Las aprobaciones van a", "Les approbations vont à", "Freigaben gehen an", "承認の送り先", "批准发送给"],
   "Its owner: you, or on your server the team that owns it and those granted to approve it.": [
     "Su propietario: tú, o en tu servidor el equipo al que pertenece y quienes tienen permiso para aprobarla.",

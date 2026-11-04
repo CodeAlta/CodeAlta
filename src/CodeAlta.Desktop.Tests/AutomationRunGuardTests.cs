@@ -83,6 +83,73 @@ public sealed class AutomationRunGuardTests
     }
 
     [TestMethod]
+    public async Task APinnedBoundedTool_RunsAsItWasPinned_WithinItsBounds_OnceItsPreconditionHolds()
+    {
+        var spec = new AgentToolSpec("k8s_restart_pod", "Restarts a pod.", JsonDocument.Parse("""{ "type": "object" }""").RootElement.Clone()) { Version = "1.4.2" };
+        var hash = AutomationAllowedTool.HashOf(spec);
+        StringAssert.StartsWith(hash, "sha256:");
+        Assert.AreEqual(hash, AutomationAllowedTool.HashOf(spec with { InputSchema = JsonDocument.Parse("""{"type":"object"}""").RootElement.Clone() }), "the spaces of the schema do not count");
+        var state = "available";
+        var reads = new List<string>();
+        var read = new AgentToolDefinition(new AgentToolSpec("k8s_get_deployment", "Reads a deployment.", JsonDocument.Parse("{}").RootElement.Clone()), (invocation, _) =>
+        {
+            reads.Add(invocation.Arguments.GetRawText());
+            return Task.FromResult(new AgentToolResult(true, [new AgentToolResultItem.Text($"deployment api: {state}")]));
+        });
+        var autonomy = new AutomationAutonomy
+        {
+            AllowedTools = ["k8s_restart_pod", "k8s_get_deployment"],
+            Tools =
+            [
+                new AutomationAllowedTool("k8s_restart_pod")
+                {
+                    Hash = hash, Version = "1.4.2",
+                    Bounds = [new AutomationToolBound("namespace") { Values = ["shop"] }, new AutomationToolBound("replicas") { Min = 1, Max = 5 }],
+                    Preconditions = [new AutomationToolPrecondition("k8s_get_deployment") { Arguments = ["namespace"], Expect = "Available" }],
+                },
+            ],
+        };
+        Assert.IsNull(autonomy.Validate());
+        var asker = new Asker { Answer = AgentPermissionDecisionKind.AllowOnce };
+        var guard = new AutomationRunGuard(Entry(autonomy), new AutomationCallBreaker(), asker.AskAsync, new AutomationClock { Now = Noon }, dryRun: false);
+        AgentToolHookCall Restart(string arguments, AgentToolSpec? as_ = null) => AgentToolHookCall.Create(
+            new AgentToolInvocation(new ModelProviderId("scripted"), "s1", "call-1", "k8s_restart_pod", JsonDocument.Parse(arguments).RootElement.Clone()), as_ ?? spec, "/work",
+            AgentToolHookCapabilities.All) with { FindTool = name => name == read.Spec.Name ? read : null };
+
+        Assert.IsNull((await guard.BeforeToolCallAsync(Restart("""{"namespace":"shop","replicas":3,"pod":"api-7"}"""), default)).BlockMessage, "as pinned, within its bounds");
+        CollectionAssert.AreEqual(new[] { """{"namespace":"shop"}""" }, reads, "its precondition read the target first, with the arguments it names");
+        Assert.AreEqual(0, asker.Asked.Count);
+
+        // Out of its bounds, or not as it was pinned: a person decides, then its precondition is read again before it acts.
+        foreach (var (arguments, changed, why) in new[]
+        {
+            ("""{"namespace":"payments","replicas":3}""", (AgentToolSpec?)null, "namespace is payments, not one of shop"),
+            ("""{"namespace":"shop","replicas":9}""", null, "replicas is 9, more than 5"),
+            ("""{"namespace":"shop"}""", null, "replicas is not given"),
+            ("""{"namespace":"shop","replicas":3}""", spec with { Description = "Restarts every pod." }, "definition of k8s_restart_pod changed since it was pinned"),
+            ("""{"namespace":"shop","replicas":3}""", spec with { Version = "2.0.0" }, "version 2.0.0, not 1.4.2"),
+        })
+        {
+            asker.Asked.Clear();
+            Assert.IsNull((await guard.BeforeToolCallAsync(Restart(arguments, changed), default)).BlockMessage, why);
+            StringAssert.Contains(asker.Asked.Single().Reason, why);
+        }
+
+        // A target that is not as it must be: the call is not made, and a person's approval does not make it either.
+        state = "degraded";
+        StringAssert.Contains((await guard.BeforeToolCallAsync(Restart("""{"namespace":"shop","replicas":3}"""), default)).BlockMessage, "was not made: k8s_get_deployment did not say");
+        asker.Asked.Clear();
+        StringAssert.Contains((await guard.BeforeToolCallAsync(Restart("""{"namespace":"shop","replicas":9}"""), default)).BlockMessage, "was not made");
+        Assert.AreEqual(1, asker.Asked.Count, "asked, then read again after the approval");
+
+        // A try makes no call, preconditions included, and says what its pin would be.
+        var trying = new AutomationRunGuard(Entry(autonomy), new AutomationCallBreaker(), asker.AskAsync, new AutomationClock { Now = Noon }, dryRun: true);
+        reads.Clear();
+        StringAssert.Contains((await trying.BeforeToolCallAsync(Restart("""{"namespace":"payments"}"""), default)).BlockMessage, $"hash = \"{hash}\", version = \"1.4.2\"");
+        Assert.AreEqual(0, reads.Count);
+    }
+
+    [TestMethod]
     public async Task ATry_RecordsTheCallsOfItsAllowedTools_AndMakesNone()
     {
         var asker = new Asker();

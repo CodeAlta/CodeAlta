@@ -137,6 +137,16 @@ An automation runs unattended. Turn on **Autonomy** in the editor to decide what
 autonomy = { allowed_tools = ["k8s_restart_pod"], max_calls_per_hour = 3, approval_timeout = 30, on_timeout = "stop", approvers = "owner" }
 ```
 
+In the configuration file, a tool it calls by itself can say more than its name:
+
+- **A pin**: `hash` is the hash of the definition of the tool, and `version` the version of its MCP server. A try says both for each tool it calls. A call of a tool that changed since you pinned it waits for you.
+- **Bounds**: the values an argument may take, or its `min` and `max`. A call outside them waits for you.
+- **Preconditions**: another tool it allows, which reads the target first, called with the arguments it names; its answer must contain what it `expect`s. When it does not, the call is not made, also after you approved it.
+
+```toml
+autonomy = { allowed_tools = ["k8s_get_deployment", { name = "k8s_restart_pod", hash = "sha256:…", version = "1.4.2", bounds = { namespace = ["shop"], replicas = { min = 1, max = 5 } }, preconditions = [{ tool = "k8s_get_deployment", arguments = ["namespace", "name"], expect = "available" }] }] }
+```
+
 The approvals go to the owner of the automation: you, or on a [server](fleet.md#run-your-automations-on-it) the team that owns it and the people granted to approve it. There, a run that waits comes to them as a message too.
 
 ## Follow the runs

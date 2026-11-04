@@ -62,6 +62,14 @@ public sealed class McpSessionViewTests
         Assert.AreEqual(2, described.Single(static server => server.Server.Key == "docs").Tools.Count);
     }
 
+    [TestMethod]
+    public void AToolOfAServer_CarriesTheVersionTheServerGivesOfItself_ForAPinOfAnAutomation()
+    {
+        var home = new McpHome(Path.GetTempPath(), null);
+        Assert.AreEqual("1.4.2", McpPlugin.CreateAgentTool(Tool("k8s", "restart_pod", "Restarts a pod.") with { ServerVersion = "1.4.2" }, null, home, null).Spec.Version);
+        Assert.IsNull(McpPlugin.CreateAgentTool(Tool("k8s", "restart_pod", "Restarts a pod."), null, home, null).Spec.Version, "a server that gives none");
+    }
+
     private static McpRuntimeTool Tool(string server, string name, string? description, IReadOnlyList<string>? visibility = null)
         => new()
         {

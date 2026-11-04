@@ -341,9 +341,19 @@ internal sealed record AutomationAutonomy
     /// <summary>Gets who answers the approvals: <see cref="OwnerApprovers"/> now; teams and on-call resolvers come with access control.</summary>
     public string Approvers { get; init; } = OwnerApprovers;
 
+    /// <summary>
+    /// Gets what the allowed tools that say more than their name must be and stay within: their pins, bounds and
+    /// preconditions. A tool of <see cref="AllowedTools"/> missing here runs as allowed, under the circuit breaker only.
+    /// </summary>
+    public IReadOnlyList<AutomationAllowedTool> Tools { get; init; } = [];
+
     /// <summary>A text that changes with every part, for the fingerprint of the automation.</summary>
     internal string Key => string.Join('\t', string.Join(',', AllowedTools), MaxCallsPerHour?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? string.Empty,
-        ApprovalTimeout?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? string.Empty, OnTimeout, Approvers);
+        ApprovalTimeout?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? string.Empty, OnTimeout, Approvers)
+        + (Tools.Count == 0 ? string.Empty : "\t" + string.Join('\u001b', Tools.Select(static tool => tool.Key)));
+
+    /// <summary>What an allowed tool must be and stay within; null for a tool allowed by its name alone.</summary>
+    internal AutomationAllowedTool? Tool(string name) => Tools.FirstOrDefault(tool => tool.Name == name);
 
     /// <summary>Whether two read the same: the same tools in the same order and the same limits.</summary>
     public bool Equals(AutomationAutonomy? other) => other is not null && Key == other.Key;
@@ -367,6 +377,16 @@ internal sealed record AutomationAutonomy
         }
 
         if (AllowedTools.Distinct(StringComparer.Ordinal).Count() != AllowedTools.Count) return "A tool is allowed twice.";
+        foreach (var tool in Tools)
+        {
+            if (!Allows(tool.Name)) return $"{tool.Name} has a pin, bounds or preconditions but is not allowed.";
+            if (tool.Validate(AllowedTools) is { } problem) return problem;
+            // A precondition reads the target: it has none of its own, so that checks never call each other in a loop.
+            if (tool.Preconditions.FirstOrDefault(precondition => Tool(precondition.Tool) is { Preconditions.Count: > 0 }) is { } loop)
+                return $"{loop.Tool}, a precondition of {tool.Name}, has preconditions of its own.";
+        }
+
+        if (Tools.Select(static tool => tool.Name).Distinct(StringComparer.Ordinal).Count() != Tools.Count) return "A tool is described twice.";
         if (MaxCallsPerHour is < 1 or > MaximumCallsPerHour) return $"max_calls_per_hour is 1 to {MaximumCallsPerHour}.";
         if (ApprovalTimeout is < 1 or > MaximumTimeout) return $"approval_timeout is 1 to {MaximumTimeout} minutes.";
         if (OnTimeout is not (StopOnTimeout or WaitOnTimeout)) return "on_timeout is stop or wait.";

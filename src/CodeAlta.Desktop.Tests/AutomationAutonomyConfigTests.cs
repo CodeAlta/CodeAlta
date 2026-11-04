@@ -56,6 +56,44 @@ public sealed class AutomationAutonomyConfigTests
     }
 
     [TestMethod]
+    public void AnAllowedTool_IsPinnedBoundedAndChecked_ReadAndWrittenAsATable()
+    {
+        const string Hash = "sha256:00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff";
+        var (definitions, faults) = Read($$"""{ allowed_tools = ["k8s_get_deployment", { name = "k8s_restart_pod", hash = "{{Hash}}", version = "1.4.2", bounds = { namespace = ["shop"], replicas = { min = 1, max = 5 } }, preconditions = [{ tool = "k8s_get_deployment", arguments = ["namespace", "name"], expect = "available" }] }] }""");
+
+        Assert.AreEqual(0, faults.Count, string.Join("; ", faults.Select(static fault => fault.Message)));
+        var autonomy = definitions.Single().Autonomy!;
+        CollectionAssert.AreEqual(new[] { "k8s_get_deployment", "k8s_restart_pod" }, autonomy.AllowedTools.ToArray(), "a table allows its tool too");
+        var tool = autonomy.Tool("k8s_restart_pod")!;
+        Assert.AreEqual((Hash, "1.4.2"), (tool.Hash, tool.Version));
+        Assert.AreEqual(("namespace", "shop"), (tool.Bounds[0].Argument, tool.Bounds[0].Values!.Single()));
+        Assert.AreEqual(("replicas", 1d, 5d), (tool.Bounds[1].Argument, tool.Bounds[1].Min, tool.Bounds[1].Max));
+        Assert.AreEqual(("k8s_get_deployment", "available"), (tool.Preconditions.Single().Tool, tool.Preconditions.Single().Expect));
+        Assert.IsNull(autonomy.Tool("k8s_get_deployment"), "allowed by its name alone");
+
+        var written = AutomationConfig.Write(string.Empty, definitions.Single());
+        StringAssert.Contains(written, $$"""{ name = "k8s_restart_pod", hash = "{{Hash}}", version = "1.4.2", bounds = { namespace = ["shop"], replicas = { min = 1, max = 5 } }""");
+        Assert.AreEqual(definitions.Single().Fingerprint(), AutomationConfig.Read(written, Global).Definitions.Single().Fingerprint());
+        var looser = definitions.Single() with { Autonomy = autonomy with { Tools = [tool with { Bounds = [] }] } };
+        Assert.AreNotEqual(definitions.Single().Fingerprint(), looser.Fingerprint(), "loosening a bound is another automation to allow");
+
+        foreach (var (text, problem) in new[]
+        {
+            ("""{ allowed_tools = [{ name = "k8s_restart_pod", hash = "md5:abc" }] }""", "sha256: and 64 hexadecimal digits"),
+            ("""{ allowed_tools = [{ name = "k8s_restart_pod", preconditions = [{ tool = "k8s_get", expect = "ok" }] }] }""", "a tool the automation also allows"),
+            ("""{ allowed_tools = [{ name = "k8s_restart_pod", bounds = { replicas = { min = 5, max = 1 } } }] }""", "a min above its max"),
+            ("""{ allowed_tools = [{ name = "k8s_restart_pod", bounds = { replicas = { least = 1 } } }] }""", "a list of values, or { min"),
+            ("""{ allowed_tools = [{ name = "k8s_restart_pod", colour = "red" }] }""", "has no colour"),
+            ("""{ allowed_tools = [{ hash = "x" }] }""", "has a name"),
+            ("""{ allowed_tools = [{ name = "a", preconditions = [{ tool = "b", expect = "ok" }] }, { name = "b", preconditions = [{ tool = "a", expect = "ok" }] }] }""", "preconditions of its own"),
+        })
+        {
+            var refused = Read(text).Faults.Single().Message;
+            StringAssert.Contains(refused, problem, text);
+        }
+    }
+
+    [TestMethod]
     public void Autonomy_WithoutAllowedTools_IsReadOnly()
     {
         var autonomy = Read("{ }").Definitions.Single().Autonomy!;

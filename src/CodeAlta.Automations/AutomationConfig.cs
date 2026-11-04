@@ -336,7 +336,7 @@ internal static class AutomationConfig
             }
         }
 
-        if (!TryTexts(table, "allowed_tools", out var tools, out problem) || !TryText(table, "on_timeout", out var onTimeout, out problem)
+        if (!AutomationToolConfig.TryRead(table, out var tools, out var described, out problem) || !TryText(table, "on_timeout", out var onTimeout, out problem)
             || !TryText(table, "approvers", out var approvers, out problem)) return false;
         int? calls = null, timeout = null;
         foreach (var (key, assign) in new (string, Action<int>)[] { ("max_calls_per_hour", value => calls = value), ("approval_timeout", value => timeout = value) })
@@ -358,13 +358,14 @@ internal static class AutomationConfig
             ApprovalTimeout = timeout,
             OnTimeout = Blank(onTimeout)?.ToLowerInvariant() ?? AutomationAutonomy.StopOnTimeout,
             Approvers = Blank(approvers)?.ToLowerInvariant() ?? AutomationAutonomy.OwnerApprovers,
+            Tools = described,
         };
         return true;
     }
 
     private static string Format(AutomationAutonomy autonomy)
     {
-        var builder = new StringBuilder("{ allowed_tools = [").Append(string.Join(", ", autonomy.AllowedTools.Select(Quote))).Append(']');
+        var builder = new StringBuilder("{ allowed_tools = ").Append(AutomationToolConfig.Format(autonomy));
         if (autonomy.MaxCallsPerHour is { } calls) builder.Append(", max_calls_per_hour = ").Append(calls.ToString(CultureInfo.InvariantCulture));
         if (autonomy.ApprovalTimeout is { } timeout) builder.Append(", approval_timeout = ").Append(timeout.ToString(CultureInfo.InvariantCulture));
         if (autonomy.OnTimeout != AutomationAutonomy.StopOnTimeout) builder.Append(", on_timeout = ").Append(Quote(autonomy.OnTimeout));

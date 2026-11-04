@@ -183,6 +183,9 @@ button.automation-run:hover, button.automation-run:focus-visible { background: v
 .automation-autonomy-help, .automation-autonomy-summary { margin: 0; color: var(--muted); font-size: 12px; }
 .automation-autonomy-grid { display: grid; grid-template-columns: max-content minmax(0, 1fr); align-items: center; gap: 6px 12px; }
 .automation-autonomy-grid > label, .automation-autonomy-label { font-size: 12px; }
+.automation-autonomy-tools { display: grid; gap: 2px; margin-top: -2px; }
+.automation-autonomy-tools > p { margin: 0; color: var(--muted); font-size: 11px; }
+.automation-autonomy-tools code { font-family: var(--code-font); color: var(--text); }
 .automation-autonomy-approvers { color: var(--muted); font-size: 12px; }
 #automation-allowed-tools { font-family: var(--code-font); font-size: 12px; }
 .automation-autonomy-grid .bp6-numeric-input { width: 96px; }

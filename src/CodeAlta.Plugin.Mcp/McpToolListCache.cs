@@ -42,6 +42,9 @@ public sealed record McpCachedToolList(string Server, string Fingerprint, DateTi
     /// the session), which says whether the list answers for a start with the same values. Only a hash is kept, never a value.
     /// </summary>
     public string? Variant { get; init; }
+
+    /// <summary>Gets the version the server gave of itself when it listed them; null when it gave none.</summary>
+    public string? ServerVersion { get; init; }
 }
 
 [JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase, WriteIndented = false)]
@@ -141,10 +144,11 @@ public sealed class McpToolListCache
                 Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(tool.InputSchema.GetRawText())))[..32], tool.Enabled)
                 {
                     InputSchema = tool.InputSchema.Clone(), UiResourceUri = tool.UiResourceUri, Visibility = tool.Visibility,
-                })]) { Variant = variant };
+                })]) { Variant = variant, ServerVersion = tools.FirstOrDefault()?.ServerVersion };
         var path = PathOf(definition.Key);
         // A list with the same tools is not written again: its time would only wake the readers for nothing.
-        if (Read(definition.Key, list.Fingerprint) is { } previous && previous.Variant == variant && previous.Tools.SequenceEqual(list.Tools, ToolComparer.Instance)) return;
+        if (Read(definition.Key, list.Fingerprint) is { } previous && previous.Variant == variant && previous.ServerVersion == list.ServerVersion
+            && previous.Tools.SequenceEqual(list.Tools, ToolComparer.Instance)) return;
         Directory.CreateDirectory(Folder);
         var temporary = path + "." + Environment.ProcessId.ToString(System.Globalization.CultureInfo.InvariantCulture) + ".tmp";
         File.WriteAllBytes(temporary, JsonSerializer.SerializeToUtf8Bytes(list, McpToolListCacheJsonContext.Default.McpCachedToolList));
