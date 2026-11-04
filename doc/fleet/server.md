@@ -59,7 +59,7 @@ which mints tokens and never clones).
 | `organizations`, `people`, `logins`, `passkeys` | Accounts and their sign-in methods (logins keyed on issuer and subject) |
 | `devices`, `device_list` | Devices, their public keys, status, and the signed list entries |
 | `teams`, `memberships`, `grants`, `service_identities` | Teams, grants `(subject, capability, scope)`, the identities of unattended work |
-| `automations`, `automation_versions`, `runs`, `trigger_events` | Automations, their signed versions, runs and the events that started them |
+| `automations`, `automation_runs`, `hooks`, `hook_events` | Automations as their signed versions, runs and claims, the hooks of the ingress and the events they received (held until their machine takes them, then facts only) |
 | `providers` | Organization providers and their keys sealed to machines |
 | `machines`, `machine_inventory` | Node records (owner, labels, capabilities) and their last inventory |
 | `projects` | Repository keys or blind indexes, per space |
