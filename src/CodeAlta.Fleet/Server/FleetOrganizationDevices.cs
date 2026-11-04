@@ -93,6 +93,36 @@ public sealed class FleetOrganizationDevices
     }
 
     /// <summary>
+    /// Reads the name the server gives a member of the verified list, to show it beside the id that list verifies: the
+    /// server's word, which no signature covers, for display only.
+    /// </summary>
+    /// <param name="deviceId">The device, a member of <see cref="Current"/>.</param>
+    /// <param name="cancellationToken">Cancels the read.</param>
+    /// <returns>The name, on one line of at most 64 characters; null when the device is not a member, the server does not
+    /// answer, or it answers for another key.</returns>
+    /// <exception cref="ArgumentException"><paramref name="deviceId"/> is empty.</exception>
+    public async Task<string?> ReadNameAsync(string deviceId, CancellationToken cancellationToken)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(deviceId);
+        if (Current is not { } list || !list.Members.ContainsKey(deviceId)) return null;
+        DeviceDto device;
+        try
+        {
+            using var client = new FleetServerClient(ServerAddress, Identity, Handler);
+            device = await client.GetDeviceAsync(deviceId, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is FleetServerException or HttpRequestException or IOException or TaskCanceledException
+            && !cancellationToken.IsCancellationRequested)
+        {
+            return null;
+        }
+
+        if (device.Id != deviceId || !FleetDevicePublicKey.TryParse(device.PublicKey, out var key) || key.DeviceId != deviceId) return null;
+        var name = new string([.. (device.Name ?? string.Empty).Trim().Select(static c => char.IsControl(c) ? ' ' : c)]);
+        return name.Length == 0 ? null : name.Length > 64 ? name[..64] : name;
+    }
+
+    /// <summary>
     /// Pins the device list of a link to a first entry this device learned elsewhere than from the server (the anchor a
     /// recovery key sealed), before its first read: the server then cannot answer a list of its own making.
     /// </summary>
