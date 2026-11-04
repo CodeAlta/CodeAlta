@@ -80,7 +80,8 @@ export const integrationEvents: Readonly<Record<IntegrationType, readonly string
 export function newTrigger(type: TriggerType): AutomationTriggerItem {
   const integration = isIntegration(type) ? {
     site: null, email: null, token: null, jiraProject: null, query: null, appToken: null, botToken: null, channel: null, match: null, apiKey: null, hook: null, secret: null,
-    signature: type === "webhook" ? "standard" : null, signatureHeader: null, fields: [], reply: canReply(type),
+    // Writing in another tool is something the person turns on: a new trigger only reads.
+    signature: type === "webhook" ? "standard" : null, signatureHeader: null, fields: [], reply: false,
   } : null;
   return { type, minute: 0, every: 1, at: type === "daily" || type === "weekly" ? ["09:00"] : [], days: type === "weekly" ? ["mon"] : [],
     expression: type === "cron" ? "0 9 * * 1-5" : null, event: isIntegration(type) ? integrationEvents[type][0]! : type === "jira" ? "created" : "opened", authors: "trusted",

@@ -74,8 +74,8 @@ test("a trigger of another tool reads as a sentence, starts with its default eve
   assert.equal(read(newTrigger("incident_io")), "When incident.io declares an incident");
   assert.equal(read(newTrigger("webhook")), "When a signed webhook arrives");
   assert.deepEqual(integrationTypes.map(type => newTrigger(type).event), ["released", "matches", "mention", "declared", "received"]);
-  // What can answer where its event came from does so unless told not to; a webhook has nowhere to answer.
-  assert.deepEqual(integrationTypes.map(type => newTrigger(type).integration!.reply), [false, true, true, true, false]);
+  // A new trigger only reads: writing back where the event came from is turned on by the person.
+  assert.ok(integrationTypes.every(type => newTrigger(type).integration!.reply === false));
   assert.equal(newTrigger("webhook").integration!.signature, "standard");
   assert.deepEqual([needsProject(newTrigger("jira_query")), canReply("webhook"), isHooked("incident_io"), isHooked("slack")], [false, false, true, false]);
   assert.equal(secretReference(" JIRA_TOKEN "), "${secret:JIRA_TOKEN}");
