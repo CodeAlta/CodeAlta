@@ -271,6 +271,36 @@ public sealed class FleetNodeManagementTests
     }
 
     [TestMethod]
+    public async Task TwoProvidersWhoseIdsReadAlike_KeepTheirOwnKeys()
+    {
+        await using var fixture = await ManagedNodeFixture.StartAsync(TestContext.CancellationToken);
+        var token = TestContext.CancellationToken;
+        var store = new CodeAlta.Catalog.Secrets.LocalSecretStore(fixture.Node.Host.CatalogOptions.GlobalRoot);
+        try
+        {
+            var ownerMachine = await fixture.PairAsync(fixture.Owner, "laptop", manages: true, token);
+            await using var manager = await FleetNodeClient.ConnectAsync(ownerMachine, fixture.Owner, token);
+            var first = await manager.SetProviderAsync(new FleetProviderSetParams("my-gateway", "anthropic", null, null, "http://127.0.0.1:9/v1", "sk-first-account-1111"), token);
+            var second = await manager.SetProviderAsync(new FleetProviderSetParams("my_gateway", "anthropic", null, null, "http://127.0.0.1:9/v1", "sk-second-account-2222"), token);
+            Assert.AreNotEqual(first.KeySecret, second.KeySecret, "each provider has a secret of its own");
+            Assert.IsTrue(store.TryGetSecret(first.KeySecret!, out var firstKey));
+            Assert.AreEqual("sk-first-account-1111", firstKey, "setting the key of one never changes the key of the other");
+            Assert.IsTrue(store.TryGetSecret(second.KeySecret!, out var secondKey));
+            Assert.AreEqual("sk-second-account-2222", secondKey);
+
+            // Its key given again, a provider keeps its secret.
+            var again = await manager.SetProviderAsync(new FleetProviderSetParams("my_gateway", null, null, null, null, "sk-second-rotated-3333"), token);
+            Assert.AreEqual(second.KeySecret, again.KeySecret);
+            Assert.IsTrue(store.TryGetSecret(first.KeySecret!, out firstKey));
+            Assert.AreEqual("sk-first-account-1111", firstKey);
+        }
+        finally
+        {
+            store.Delete();
+        }
+    }
+
+    [TestMethod]
     public void NodeProviders_NameTheSecretOfAKey_AndTellHowEachTypeGetsItsCredential()
     {
         Assert.AreEqual("PROVIDER_OPENAI_API_KEY", NodeProviders.SecretNameOf("openai"));

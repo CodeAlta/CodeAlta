@@ -118,7 +118,7 @@ internal sealed class NodeProviders(CodeAltaHost host, ModelsDevCatalogService? 
             if (Optional(parameters.ApiKey) is { } apiKey)
             {
                 // The key goes to the secrets store of the machine; the configuration names the secret, never the key.
-                var name = SecretNameOf(definition.ProviderKey);
+                var name = KeySecretFor(definitions, definition);
                 new LocalSecretStore(Root).SetSecret(name, apiKey, setBy);
                 definition.ApiKeySecret = name;
                 definition.ApiKey = null;
@@ -126,7 +126,7 @@ internal sealed class NodeProviders(CodeAltaHost host, ModelsDevCatalogService? 
             else if (Credential(definition.ProviderType) == "key" && Optional(definition.ApiKey) is null && Optional(definition.ApiKeySecret) is null && Optional(definition.ApiKeyEnv) is null)
             {
                 // A provider given no key yet names the secret its key will be: it says which one it waits for until the key is given.
-                definition.ApiKeySecret = SecretNameOf(definition.ProviderKey);
+                definition.ApiKeySecret = KeySecretFor(definitions, definition);
             }
 
             store.SaveGlobalProviderDefinitions(definitions);
@@ -384,6 +384,26 @@ internal sealed class NodeProviders(CodeAltaHost host, ModelsDevCatalogService? 
         if (Optional(definition.ApiKey) is { } literal)
             return SecretReferences.TryParseLone(literal, out var reference) && reference.Kind == SecretReferenceKind.Secret ? reference.Name : null;
         return Optional(definition.ApiKeySecret);
+    }
+
+    // The secret a provider keeps its key in: the one it names already, else PROVIDER_<KEY>_API_KEY, never one another provider
+    // of the configuration names (ids such as my-gateway and my_gateway read alike): then a name with a digest of its own id.
+    private static string KeySecretFor(IReadOnlyList<CodeAltaProviderDocument> definitions, CodeAltaProviderDocument definition)
+    {
+        bool TakenByOther(string name) => definitions.Any(other => !ReferenceEquals(other, definition)
+            && !string.Equals(other.ProviderKey, definition.ProviderKey, StringComparison.OrdinalIgnoreCase)
+            && string.Equals(KeySecretOf(other), name, StringComparison.OrdinalIgnoreCase));
+        if (Optional(definition.ApiKeySecret) is { } current && !TakenByOther(current)) return current;
+        var readable = SecretNameOf(definition.ProviderKey);
+        if (!TakenByOther(readable)) return readable;
+        var digest = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(definition.ProviderKey.ToUpperInvariant())));
+        for (var length = 8; length <= digest.Length; length += 8)
+        {
+            var name = readable[..^"_API_KEY".Length] + "_" + digest[..length] + "_API_KEY";
+            if (LocalSecretStore.IsName(name) && !TakenByOther(name)) return name;
+        }
+
+        throw new InvalidOperationException($"No secret name is free for the key of the provider {definition.ProviderKey}.");
     }
 
     /// <summary>The name of the secret of the machine that holds the key of a provider: <c>PROVIDER_&lt;KEY&gt;_API_KEY</c>.</summary>
