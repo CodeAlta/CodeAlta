@@ -1,7 +1,7 @@
 // The blocks of the timeline of a session on the phone, drawn as compact cards for a touch screen: a message, a message
 // the host sent (a background job, a message of another agent, a reminder...), the folded activity of a turn with the
-// images its tools gave the model and the runs of its scripts, and the images of a message. A card is one line that opens
-// on a tap; what is open stays open while the page shows the session.
+// images its tools gave the model and the runs of its scripts that have a card of their own, and the images of a message.
+// A card is one line that opens on a tap; what is open stays open while the page shows the session.
 import { activityDuration } from "../timelineActivity/activityText";
 import { plainResult } from "../workflows/scriptResult";
 import { activityLine, el, icon } from "./dom";
@@ -10,7 +10,7 @@ import { linkedImageUrl, matchLinkedImages, savedImageUrl, splitFiles, type Imag
 import type { ImageViewer } from "./imageViewer";
 import { activityFacts, clockTime, type ActivityBlock, type MessageBlock, type PendingPrompt, type ToolRow, type WorkflowBlock } from "./timeline";
 import { timelineIcon, type TimelineIconName } from "./timelineIcons";
-import type { WorkflowCall, WorkflowRun, WorkflowState } from "./workflowRun";
+import { hasRunBlock, runsUnderLine, type WorkflowCall, type WorkflowRun, type WorkflowState } from "./workflowRun";
 
 /** A block as the page holds it: its element, the version it was drawn at, and whether it has a diagram (drawn again with the theme). */
 export type DrawnBlock = { element: HTMLLIElement; version: string; diagram: boolean };
@@ -241,7 +241,7 @@ export function createTimelineView(options: TimelineViewOptions) {
     files(item, block);
   }
 
-  // ---- The activity of a turn: its line, the images of its tools and the runs of its scripts, then its rows when open ----
+  // ---- The activity of a turn: its line, the images of its tools and the runs of its scripts with a card, then its rows when open ----
 
   function toolRow(tool: ToolRow): HTMLDivElement {
     const element = make("div", "tool-row");
@@ -263,12 +263,26 @@ export function createTimelineView(options: TimelineViewOptions) {
   }
 
   function activityBody(block: ActivityBlock, body: HTMLElement) {
-    // Rows are kept by key: a thought never changes, a tool changes its phase; new rows are added after.
+    // A run of a script that only made calls is in the place of its call, and folds with the activity.
+    const cards = new Map((block.workflows ?? []).filter(run => run.callId && !hasRunBlock(run)).map(run => [run.callId!, run]));
+    // Rows are kept by key: a thought never changes, a tool changes its phase; new rows are added after. The card of a run is
+    // drawn again, as the version of the activity changes with its runs.
     const existing = new Map(Array.from(body.children as HTMLCollectionOf<HTMLElement>).map(child => [child.dataset.key!, child]));
     let previous: Element | null = null;
     for (const entry of block.rows) {
       let element = existing.get(entry.key);
-      if (!element) {
+      const run = entry.type === "tool" && entry.activityId ? cards.get(entry.activityId) : undefined;
+      if (run) {
+        const card = workflowCard(run);
+        card.dataset.key = entry.key;
+        element?.replaceWith(card);
+        element = card;
+      } else if (entry.type === "tool" && element?.classList.contains("wf-card")) {
+        // The run got a card of its own under the line: its call is a row again.
+        const row = toolRow(entry);
+        element.replaceWith(row);
+        element = row;
+      } else if (!element) {
         if (entry.type === "thought") {
           element = make("div", "msg msg-reasoning");
           element.dataset.key = entry.key;
@@ -298,9 +312,10 @@ export function createTimelineView(options: TimelineViewOptions) {
     toggle.setAttribute("aria-expanded", String(isOpen));
     toggle.querySelector(".act-line")?.remove();
     toggle.append(activityLine(document, facts, live, Date.now()));
-    // What shows folded: the runs of its scripts, then the images its tools gave the model.
+    // What shows folded or not: the runs of its scripts with a card of their own (folded, also those that go on), then the
+    // images its tools gave the model. The other runs fold with the activity, in the place of their call (#323).
     let extras = item.querySelector<HTMLElement>(":scope > .act-extras");
-    const runs = block.workflows ?? [];
+    const runs = runsUnderLine(block.workflows ?? [], isOpen);
     if (runs.length || block.images?.length) {
       if (!extras) { extras = make("div", "act-extras"); toggle.after(extras); }
       const cards = runs.map(run => workflowCard(run));

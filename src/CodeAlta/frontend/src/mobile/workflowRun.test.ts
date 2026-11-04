@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { TimelineEvent, WorkflowFacts } from "./contract";
-import { foldWorkflows } from "./workflowRun";
+import { foldWorkflows, runsUnderLine } from "./workflowRun";
 
 let seq = 0;
 const at = (second: number) => new Date(Date.UTC(2026, 9, 27, 10, 0, second)).toISOString();
@@ -71,4 +71,16 @@ test("what a run presented, in its order, and whether the host started it for th
   assert.equal(run.forUser, true);
   const [ofAgent] = foldWorkflows([record("runStarted", 0, { title: "Read" })]);
   assert.deepEqual([ofAgent.presented, ofAgent.forUser], [[], false], "a run of an agent presented nothing yet");
+});
+
+test("under the folded line of an activity: the runs with a card of their own and those that go on; open, only the first (#323)", () => {
+  const plain = (runId: string, end: boolean) => foldWorkflows([{ ...record("runStarted", 0, {}), workflow: { runId, callId: `call-${runId}` } },
+    ...(end ? [{ ...record("runEnded", 1, { status: "completed" }), workflow: { runId, callId: `call-${runId}`, status: "completed" } }] : [])])[0];
+  const [steps] = foldWorkflows(running);
+  const [presented] = foldWorkflows([record("runStarted", 0, {}), record("presented", 1, {}, "## Report"), record("runEnded", 2, { status: "completed" })]
+    .map(event => ({ ...event, workflow: { ...event.workflow!, runId: "shown" } })));
+  const done = plain("done", true), going = plain("going", false);
+  assert.deepEqual(runsUnderLine([steps, done, going, presented], false).map(run => run.runId), ["run-1", "going", "shown"],
+    "a script that only made calls and ended folds with its step");
+  assert.deepEqual(runsUnderLine([steps, done, going], true).map(run => run.runId), ["run-1"], "open, a plain run is in the place of its call");
 });
