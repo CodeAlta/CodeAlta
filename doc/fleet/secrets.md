@@ -79,6 +79,9 @@ never by the server.
   controller device of its person, so that a server cannot drop one. The approval is a person's device signature, as
   for every remote action, bound to the environment and the version of its rules, the machine, the run and a nonce the
   machine chose, valid for a while; the machine verifies it against its anchored device list and takes it once. The
+  nonce carries the machine's signature of what it asks (environment, version, run, automation), and the approver's
+  device signs only a request that verifies and is the one the person reviewed, so a server can neither make up nor
+  change the run approved. The approval and a budget hold name the run, never its title. The
   machine keeps the admission of the session it started, bound to the environment, the version of its rules and the
   approval taken: a restart keeps it, and new rules end it.
 
