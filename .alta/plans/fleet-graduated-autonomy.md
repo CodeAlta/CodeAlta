@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: done
 ---
 
 # Graduated autonomy (fleet 4.0, M4)
@@ -20,8 +20,9 @@ rule 9, roadmap M4. Personal scope now; teams and on-call resolvers plug into th
     breaker (`max_calls_per_hour`, per automation); otherwise the call is held as an approval;
   - an approval is a permission request of the session (the same review card, remote `answerPermission`, the
     phone's permissions), bound to that exact call (tool, arguments digest), never answerable by an agent.
-- **Routing**: the run is `waiting` while an approval waits; the node reports it, and the server notifies who the
-  router names (the owner now; `IApprovalRecipients` is the seam for teams and on-call resolvers). The desktop shows
+- **Routing**: the run is `waiting` while an approval waits; the node reports it, and the server notifies who holds
+  `automation.approve` on it by access control (its owner, the team that owns it, grants); `ApprovalRecipients` is the
+  seam where on-call resolvers come too. The desktop shows
   waiting sessions as it does today.
 - **Timeout**: after `approval_timeout` minutes, `stop` cancels the waiting requests and stops the run; `wait` keeps it.
 - **Take over**: from the run, the person opens its session and takes it over: the guard stops timing it out and
@@ -39,4 +40,4 @@ rule 9, roadmap M4. Personal scope now; teams and on-call resolvers plug into th
 - [x] 4. Fleet: `waiting` reported, server notification to the router's recipients (owner), `automations.takeOver`
   on the node API; tests.
 - [x] 5. Desktop: editor Autonomy section, run detail (waiting, Take over, recorded calls), RPC; frontend tests.
-- [ ] 6. Docs (`site/docs`), `codealta-fleet` skill, `alta automation show`; verification.
+- [x] 6. Docs (`site/docs`), `codealta-fleet` skill, `alta automation show`; verification.
