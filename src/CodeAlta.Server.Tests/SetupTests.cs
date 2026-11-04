@@ -65,20 +65,20 @@ public sealed class SetupTests
     public async Task KestrelSettingsOfTheEnvironmentDoNotOpenPlainHttpToOtherMachines()
     {
         // Kestrel__Endpoints__Http__Url in the environment, or Kestrel:Endpoints in an appsettings.json: Kestrel would take them over --urls.
+        // The endpoint of the test is of TEST-NET-1 (RFC 5737), an address no machine has: a server that took it would fail
+        // to bind, never open a port beyond the loopback, whatever the code under test does. A test never binds every
+        // interface (0.0.0.0, [::], *, +).
+        const string NotOfThisMachine = "192.0.2.1";
+        if (System.Net.NetworkInformation.NetworkInterface.GetAllNetworkInterfaces()
+            .SelectMany(static network => network.GetIPProperties().UnicastAddresses).Any(static unicast => unicast.Address.ToString() == NotOfThisMachine))
+            Assert.Inconclusive($"{NotOfThisMachine} is an address of this machine: the test would bind beyond the loopback.");
         using var root = new TempDirectory();
-        try
+        await using var server = await CoordinatorServer.StartAsync(new CoordinatorServerOptions
         {
-            await using var server = await CoordinatorServer.StartAsync(new CoordinatorServerOptions
-            {
-                DataRoot = root.Path, Urls = ["http://127.0.0.1:0"], ConfigureLogging = static _ => { }, EnvironmentVariable = static _ => null,
-                HostConfiguration = new Dictionary<string, string?> { ["Kestrel:Endpoints:Http:Url"] = "http://0.0.0.0:0" },
-            });
-            CollectionAssert.AreEqual(new[] { "127.0.0.1" }, server.Addresses.Select(static address => address.Host).ToArray(), "the server listens where --urls says only");
-        }
-        catch (ArgumentException refused)
-        {
-            StringAssert.Contains(refused.Message, ServerBindings.AllowInsecureHttpOption);
-        }
+            DataRoot = root.Path, Urls = ["http://127.0.0.1:0"], ConfigureLogging = static _ => { }, EnvironmentVariable = static _ => null,
+            HostConfiguration = new Dictionary<string, string?> { ["Kestrel:Endpoints:Http:Url"] = $"http://{NotOfThisMachine}:0" },
+        });
+        CollectionAssert.AreEqual(new[] { "127.0.0.1" }, server.Addresses.Select(static address => address.Host).ToArray(), "the server listens where --urls says only");
     }
 
     [TestMethod]
