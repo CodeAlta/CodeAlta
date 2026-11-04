@@ -37,7 +37,7 @@ public sealed class MachineManagementTests
         CollectionAssert.AreEquivalent(new[] { "first", "second" }, managed.Devices.Select(static device => device.Name).ToArray());
         var me = managed.Devices.Single(static device => device.IsThisComputer);
         Assert.AreEqual("first", me.Name);
-        CollectionAssert.Contains(me.Permissions, "manage", "The first computer paired with a node manages it.");
+        CollectionAssert.Contains(me.Permissions, "manage", "A link made to manage the node gives it.");
         Assert.AreEqual("scripted", managed.Providers.Single().Key, "The page says which providers are ready there.");
 
         var other = await secondService.ManagementAsync(new MachineRequest(secondEpoch, secondMachine), token);
@@ -242,7 +242,8 @@ public sealed class MachineManagementTests
         var fleet = new DesktopFleet(Path.Combine(fixture.Root, name + "-fleet"), registry.TakeMembership(), name,
             static (machine, identity) => new RemoteSessionHost(machine, cancellation => FleetNodeClient.ConnectAsync(machine, identity, cancellation), Quick,
                 localDeviceId: identity.DeviceId));
-        var machine = await fleet.PairAsync(fixture.CreatePairingLink(), cancellationToken);
+        // The first computer is paired with a link made to manage the node (altanode pair --manage); the next ones with a plain one.
+        var machine = await fleet.PairAsync(fixture.CreatePairingLink(manages: name == "first"), cancellationToken);
         var host = fleet.Find(machine.DeviceId)!;
         var deadline = DateTime.UtcNow + Patience;
         while (host.State != RemoteMachineState.Online)

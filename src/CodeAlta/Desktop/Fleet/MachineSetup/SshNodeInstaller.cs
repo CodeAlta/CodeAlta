@@ -31,6 +31,12 @@ internal sealed record SshNodeSetupRequest
     /// <summary>Gets whether a host key ssh does not know yet is accepted (the person said they trust the computer).</summary>
     public bool AcceptNewHostKey { get; init; }
 
+    /// <summary>
+    /// Gets whether this desktop manages the node (its devices, projects, secrets, updates: <c>altanode pair --manage</c>),
+    /// which the person ticks; off by default, as for every pairing.
+    /// </summary>
+    public bool Manage { get; init; }
+
     /// <summary>Gets whether the runtime package is installed even where a .NET SDK is (the path of machines without one).</summary>
     internal bool PreferRuntimePackage { get; init; }
 }
@@ -76,9 +82,9 @@ internal sealed class SshSetupException(string step, string code, string message
 
 /// <summary>
 /// Installs CodeAlta Node on a computer reached over SSH, as its owner would in a terminal there, and pairs it with this
-/// desktop as the device that manages it: connect and probe (system, architecture, .NET), install the tool
+/// desktop, as the device that manages it when the person asked: connect and probe (system, architecture, .NET), install the tool
 /// (<c>dotnet tool update</c>, or the runtime package where only the .NET runtime is), install its service
-/// (<c>altanode install --listen-all</c>), then <c>altanode pair --manage</c>, whose link this desktop redeems at once over
+/// (<c>altanode install --listen-all</c>), then <c>altanode pair</c> (<c>--manage</c> when asked), whose link this desktop redeems at once over
 /// the channel it pins to the node's key. Each step can run again: a retry starts over and changes only what is missing.
 /// </summary>
 internal sealed partial class SshNodeInstaller(ISshRunner ssh, string desktopVersion)
@@ -169,7 +175,7 @@ internal sealed partial class SshNodeInstaller(ISshRunner ssh, string desktopVer
         using var pairing = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         pairing.CancelAfter(PairTimeout);
         var link = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
-        var waiting = ssh.RunAsync(target, PairScript(facts, toolPath, dataRoot), request.AcceptNewHostKey, line =>
+        var waiting = ssh.RunAsync(target, PairScript(facts, toolPath, dataRoot, request.Manage), request.AcceptNewHostKey, line =>
         {
             if (PairLinkPattern().Match(line) is { Success: true } match) link.TrySetResult(match.Value);
         }, pairing.Token);
@@ -391,8 +397,8 @@ internal sealed partial class SshNodeInstaller(ISshRunner ssh, string desktopVer
         return script.ToString();
     }
 
-    // Waits for the node the service started to listen, then makes a link for a device that manages it, and waits for it.
-    private static string PairScript(SshMachineFacts facts, string toolPath, string? dataRoot)
+    // Waits for the node the service started to listen, then makes a link (for a device that manages it, when asked), and waits for it.
+    private static string PairScript(SshMachineFacts facts, string toolPath, string? dataRoot, bool manage)
     {
         var script = new StringBuilder(DotnetPrelude(facts));
         script.Append("TOOLS=").Append(Quote(toolPath)).Append('\n');
@@ -406,7 +412,7 @@ internal sealed partial class SshNodeInstaller(ISshRunner ssh, string desktopVer
         script.Append("i=0\nwhile [ $i -lt 60 ]; do\n");
         script.Append("  if \"$TOOLS/altanode\" status").Append(root).Append(" 2>/dev/null | grep -q '^Listening on'; then break; fi\n");
         script.Append("  i=$((i+1)); sleep 1\ndone\n");
-        script.Append("exec \"$TOOLS/altanode\" pair --manage --minutes 5").Append(root).Append('\n');
+        script.Append("exec \"$TOOLS/altanode\" pair").Append(manage ? " --manage" : "").Append(" --minutes 5").Append(root).Append('\n');
         return script.ToString();
     }
 

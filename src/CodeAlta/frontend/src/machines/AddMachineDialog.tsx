@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Button, Callout, Collapse, Dialog, DialogBody, DialogFooter, InputGroup, NumericInput, Tag } from "@blueprintjs/core";
+import { Button, Callout, Checkbox, Collapse, Dialog, DialogBody, DialogFooter, InputGroup, NumericInput, Tag } from "@blueprintjs/core";
 import { fleetServer, machines, type FleetDeviceView, type FleetServerView, type MachineSetupEvent } from "#neoastra";
 import { AppIcon, type IconName } from "../AppIcon";
 import { ActivitySpinner } from "../ActivitySpinner";
@@ -93,6 +93,8 @@ function SshSetup({ epoch, api, onBusy, onBack, onClose, onOpen }: {
   const [dataRoot, setDataRoot] = useState("");
   const [toolPath, setToolPath] = useState("");
   const [packages, setPackages] = useState("");
+  // Managing the machine from here (its devices, secrets, updates) is asked, never implied by being the first.
+  const [manage, setManage] = useState(false);
   const [steps, setSteps] = useState<Record<SetupStep, StepState> | null>(null);
   const [outcome, setOutcome] = useState<Outcome>(null);
   const [running, setRunning] = useState(false);
@@ -111,7 +113,7 @@ function SshSetup({ epoch, api, onBusy, onBack, onClose, onOpen }: {
     setSteps(Object.fromEntries(setupSteps.map(step => [step, { state: "waiting" }])) as Record<SetupStep, StepState>);
     try {
       const events = await api.addOverSsh({ expectedEpoch: epoch, target: parsed, name: name.trim() || null, port, dataRoot: dataRoot.trim() || null,
-        toolPath: toolPath.trim() || null, packageFolder: packages.trim() || null, acceptNewHostKey }, { signal: controller.signal });
+        toolPath: toolPath.trim() || null, packageFolder: packages.trim() || null, acceptNewHostKey, manage }, { signal: controller.signal });
       for await (const event of events) {
         if (controller.signal.aborted) return;
         apply(event);
@@ -144,6 +146,8 @@ function SshSetup({ epoch, api, onBusy, onBack, onClose, onOpen }: {
       <label className="add-machine-field"><span>{t("Name")}</span>
         <InputGroup fill value={name} placeholder={t("The name of the computer")} aria-label={t("Name")} onChange={event => setName(event.currentTarget.value)} />
       </label>
+      <Checkbox className="add-machine-manage" checked={manage} onChange={event => setManage(event.currentTarget.checked)}
+        labelElement={<span>{t("Manage it from this computer")} <span className="muted-text">{t("its devices, projects, secrets and updates")}</span></span>} />
       <Button variant="minimal" size="small" icon={<AppIcon name={advanced ? "chevronDown" : "chevronRight"} size={14} />} text={t("Advanced")} onClick={() => setAdvanced(value => !value)} />
       <Collapse isOpen={advanced}>
         <div className="add-machine-advanced">
@@ -177,7 +181,7 @@ function SshSetup({ epoch, api, onBusy, onBack, onClose, onOpen }: {
       {failure && problem && <Callout compact intent="warning" role="alert" className="add-machine-failure">{t(problem, { host: parsed ?? target })}
         <SetupFailureDetail code={failure.code} detail={failure.detail} /></Callout>}
       {outcome?.machineId && <Callout compact intent="success" role="status">
-        {t("{name} is paired with this computer and managed from here.", { name: outcome.name ?? parsed ?? target })}
+        {t(manage ? "{name} is paired with this computer and managed from here." : "{name} is paired with this computer.", { name: outcome.name ?? parsed ?? target })}
         {outcome.words && <div className="pair-machine-words add-machine-words">{keyWords(outcome.words).map((word, index) => <Tag key={`${index}:${word}`} minimal>{word}</Tag>)}</div>}
       </Callout>}
     </DialogBody>

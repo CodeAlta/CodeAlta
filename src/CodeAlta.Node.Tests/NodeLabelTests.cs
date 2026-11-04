@@ -24,7 +24,7 @@ public sealed class NodeLabelTests
     {
         var token = TestContext.CancellationToken;
         await using var fixture = await ManagedNodeFixture.StartAsync(token);
-        var managerMachine = await fixture.PairAsync(fixture.Owner, "laptop", manages: false, token);
+        var managerMachine = await fixture.PairAsync(fixture.Owner, "laptop", manages: true, token);
         var otherMachine = await fixture.PairAsync(fixture.Other, "phone", manages: false, token);
         await using var manager = await FleetNodeClient.ConnectAsync(managerMachine, fixture.Owner, token);
         await using var other = await FleetNodeClient.ConnectAsync(otherMachine, fixture.Other, token);
