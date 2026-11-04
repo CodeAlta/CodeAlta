@@ -365,6 +365,25 @@ internal sealed partial class DesktopFleetServers : IAsyncDisposable
     /// <exception cref="FleetServerException">The server refused.</exception>
     /// <exception cref="HttpRequestException">The server does not answer.</exception>
     public async Task<(UpdatesDto Updates, IReadOnlyList<MachineDto> Machines)> GetUpdatesAsync(string linkId, CancellationToken cancellationToken)
+        => await GetUpdatesCoreAsync(linkId, cancellationToken).ConfigureAwait(false);
+
+    /// <summary>Lists the hooks of this computer's person on a server, with the full address of each, and the events of one when asked.</summary>
+    /// <param name="linkId">The link.</param>
+    /// <param name="hookId">The hook whose latest events are read; null for none.</param>
+    /// <param name="cancellationToken">Cancels the call.</param>
+    /// <returns>The address of the server, the hooks, and the events of the hook asked.</returns>
+    /// <exception cref="KeyNotFoundException">No such link.</exception>
+    /// <exception cref="FleetServerException">The server refused.</exception>
+    /// <exception cref="HttpRequestException">The server does not answer.</exception>
+    public async Task<(Uri Server, HookListDto Hooks, HookEventListDto? Events)> ListHooksAsync(string linkId, string? hookId, CancellationToken cancellationToken)
+    {
+        using var client = Client(linkId);
+        var hooks = await client.ListHooksAsync(cancellationToken).ConfigureAwait(false);
+        var events = hookId is null ? null : await client.ListHookEventsAsync(hookId, null, cancellationToken).ConfigureAwait(false);
+        return (client.ServerAddress, hooks, events);
+    }
+
+    private async Task<(UpdatesDto Updates, IReadOnlyList<MachineDto> Machines)> GetUpdatesCoreAsync(string linkId, CancellationToken cancellationToken)
     {
         using var client = Client(linkId);
         var updates = await client.GetUpdatesAsync(cancellationToken).ConfigureAwait(false);

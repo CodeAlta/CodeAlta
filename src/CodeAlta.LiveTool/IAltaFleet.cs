@@ -76,7 +76,42 @@ public interface IAltaFleet
     /// <param name="cancellationToken">Stops waiting for the machine.</param>
     /// <returns>The names, or why they could not be read (<c>not_manager</c>, <c>not_found</c>, <c>offline</c>...).</returns>
     Task<AltaFleetSecrets> ListSecretsAsync(string? machine, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Lists the hooks of the person of this computer on a server: the addresses tools push their signed events to, for one
+    /// machine each, and, for one hook, what its machine did with its latest events. Never an event's content.
+    /// </summary>
+    /// <param name="server">The server, by its link id or its address; null for the one online.</param>
+    /// <param name="hookId">The hook whose latest events are listed; null for none.</param>
+    /// <param name="cancellationToken">Stops waiting for the server.</param>
+    /// <returns>The hooks, or why they could not be read.</returns>
+    Task<AltaFleetHooks> ListHooksAsync(string? server, string? hookId, CancellationToken cancellationToken)
+        => Task.FromResult(new AltaFleetHooks("unavailable", "This host lists no hooks.", [], []));
 }
+
+/// <summary>The hooks of a person on a server.</summary>
+/// <param name="Status"><c>ok</c>, <c>no_server</c>, <c>unreachable</c>, or the code the server answered.</param>
+/// <param name="Message">What was said of a failure.</param>
+/// <param name="Items">The hooks.</param>
+/// <param name="Events">The latest events of the hook asked, the newest first; empty otherwise.</param>
+public sealed record AltaFleetHooks(string Status, string? Message, IReadOnlyList<AltaFleetHook> Items, IReadOnlyList<AltaFleetHookEvent> Events);
+
+/// <summary>A hook of a server: the address a tool pushes its signed events to, for one machine.</summary>
+/// <param name="Id">Its id, which a trigger names with <c>hook = "&lt;id&gt;"</c>.</param>
+/// <param name="Address">Its full address, given to the tool.</param>
+/// <param name="Machine">The name of the machine its events go to, or its id.</param>
+/// <param name="Source"><c>incident_io</c> or <c>webhook</c>.</param>
+/// <param name="Label">Its name.</param>
+/// <param name="LastReceivedAt">When it last received an event.</param>
+/// <param name="Pending">How many events wait for the machine.</param>
+public sealed record AltaFleetHook(string Id, string Address, string Machine, string Source, string Label, DateTimeOffset? LastReceivedAt, int Pending);
+
+/// <summary>What a machine did with one event of a hook, as facts.</summary>
+/// <param name="DeliveryId">The delivery.</param>
+/// <param name="ReceivedAt">When it came.</param>
+/// <param name="State"><c>pending</c>, <c>accepted</c>, <c>refused</c> or <c>expired</c>.</param>
+/// <param name="Message">What the machine said of it, such as why its signature did not verify.</param>
+public sealed record AltaFleetHookEvent(string DeliveryId, DateTimeOffset ReceivedAt, string State, string? Message);
 
 /// <summary>The secrets and variables of a machine, by name.</summary>
 /// <param name="Status"><c>ok</c>, <c>not_manager</c>, <c>not_found</c>, the state of a machine that is not online, or the code the machine answered.</param>

@@ -39,6 +39,7 @@ internal sealed partial class BuiltInAltaCommandContributor
         Mutating("fleet update start"),
         Read("fleet health"),
         Read("fleet secret list"),
+        Read("fleet hook list"),
     ];
 
     private static Command CreateFleetCommand(AltaCommandContext context)
@@ -69,6 +70,9 @@ internal sealed partial class BuiltInAltaCommandContributor
         var secret = Group("secret", "List the secrets and variables of this computer or of a machine it manages, by name: never a value.");
         secret.Add(CreateFleetSecretListCommand(context));
         group.Add(secret);
+        var hook = Group("hook", "List the hooks of a server: the addresses tools such as incident.io push their signed events to, for one machine each, and what the machine did with them.");
+        hook.Add(CreateFleetHookListCommand(context));
+        group.Add(hook);
         AddHelpText(
             group,
             "The fleet is this computer and the machines it is paired with or reaches through a CodeAlta Server. Every command works with the access of the person of this computer, never more.",
@@ -288,6 +292,64 @@ internal sealed partial class BuiltInAltaCommandContributor
             "An agent never reads nor sets a value: the user sets it in Settings > Secrets, in the page of the machine, or with `altanode secrets set <name>` there.",
             "Examples: `alta fleet secret list`; `alta fleet secret list mac-mini`.");
         return command;
+    }
+
+    private static Command CreateFleetHookListCommand(AltaCommandContext context)
+    {
+        string? server = null;
+        string? events = null;
+        var command = Leaf("list", "List the hooks of the person on a server, with their addresses; with --events <hook-id>, what the machine did with the latest events of one.");
+        command.Add("server=", "The server: the id of its link or its address. Defaults to the one online.", value => server = value);
+        command.Add("events=", "The id of a hook whose latest events to list.", value => events = value);
+        command.Add(async (_, _) => await WithFleetFloorAsync(context, async () => await HandleFleetHookListAsync(context, server, events).ConfigureAwait(false)).ConfigureAwait(false));
+        AddHelpText(
+            command,
+            "An automation of a machine starts on the events of a hook when one of its triggers names it: a trigger of type `incident_io` or `webhook` with `hook = \"<hook-id>\"` and its signing secret as `secret = \"${secret:NAME}\"` (and `api_key` for incident.io, `fields` for a webhook). The machine checks the signature of each event with that secret: the server holds none. An event refused for its signature says so here.",
+            "A person makes a hook in the automation editor (Make a hook), where the address to give the tool is shown.",
+            "Examples: `alta fleet hook list`; `alta fleet hook list --events <hook-id>`.");
+        return command;
+    }
+
+    private static async ValueTask<int> HandleFleetHookListAsync(AltaCommandContext context, string? server, string? events)
+    {
+        if (!context.TryGetRequired<IAltaFleet>(nameof(IAltaFleet), out var fleet)) return AltaExitCodes.ServiceUnavailable;
+        var hookId = NormalizeOptionalText(events);
+        var hooks = await fleet.ListHooksAsync(NormalizeOptionalText(server), hookId, context.CancellationToken).ConfigureAwait(false);
+        if (hooks.Status != "ok") return FleetFailure(context, hooks.Status, hooks.Message, null);
+        foreach (var hook in hooks.Items)
+        {
+            AltaJsonlWriter.WriteRecord(context.Stdout, new
+            {
+                type = "alta.fleet.hook",
+                version = 1,
+                correlationId = context.CorrelationId,
+                id = hook.Id,
+                address = hook.Address,
+                machine = hook.Machine,
+                source = hook.Source,
+                label = hook.Label,
+                lastReceivedAt = hook.LastReceivedAt,
+                pending = hook.Pending,
+            });
+        }
+
+        foreach (var item in hooks.Events)
+        {
+            AltaJsonlWriter.WriteRecord(context.Stdout, new
+            {
+                type = "alta.fleet.hook.event",
+                version = 1,
+                correlationId = context.CorrelationId,
+                hook = hookId,
+                deliveryId = item.DeliveryId,
+                receivedAt = item.ReceivedAt,
+                state = item.State,
+                message = item.Message,
+            });
+        }
+
+        WriteSummary(context, "alta.fleet.hook.summary", hooks.Items.Count, truncated: false);
+        return AltaExitCodes.Success;
     }
 
     private static async ValueTask<int> HandleFleetSecretListAsync(AltaCommandContext context, string? machine)

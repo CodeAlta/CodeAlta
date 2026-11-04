@@ -439,6 +439,18 @@ A run that waits comes as a message wherever you are in CodeAlta, with **Continu
 
 Your nodes tell the server how they are: little disk space left, a provider whose sign-in failed or ends within three days without renewing itself, an automation whose last runs failed, their policy refusing runs. The server also sees a node offline for more than six hours and one that runs an older version than the server. A problem that lasts more than ten minutes comes to you once, as a message with **Dismiss**, and stays listed under **Notifications** in **Settings** > **Fleet** > **Budgets** until you dismiss it or it ends. Dismissing it, or closing its message, dismisses it on all your computers. One that comes back later comes again.
 
+### Receive events of other tools
+
+incident.io and other tools that push signed webhooks send their events to a hook of your server, for one of your machines.
+
+1. In an automation that runs on that machine, add an **incident.io** or **Webhook** trigger and click **Make a hook**. Give the address it shows to the tool (in incident.io: Settings > Webhooks).
+2. Keep the signing secret of the tool, and for incident.io an API key, in the secrets of that machine.
+3. **Test the connection**, then enable the automation.
+
+- The server keeps each event until the machine takes it, for a day at most, and then only when it came and what the machine did with it. The same event pushed twice runs once.
+- The server has no signing secret: the machine checks the signature of each event, and an event that does not verify starts nothing. An incident is read again from incident.io before it reaches the session.
+- `alta fleet hook list` lists your hooks with their addresses; `--events <hook>` says what the machine did with the latest events.
+
 ### Give secrets to your machines
 
 **Settings > Fleet > Secrets and environments** sets the secrets and variables of your machines from the computer that made the server: for all your work, a space, a project or an environment, for the machines you choose, rotated from there. Environments such as `production` run only on the machines they name and can wait for your approval before a run starts. See [Secrets of your machines with a server](secrets.md#secrets-of-your-machines-with-a-server).

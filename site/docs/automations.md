@@ -75,6 +75,11 @@ sub_sessions = false
 | Pull request | When a pull request is opened, or when it receives commits. |
 | Jira issue | When an issue of the Jira project is created, or when it is updated. A project with [several Jira projects](plugins/jira.md#several-jira-projects) watches all of them. |
 | Command | When a command that CodeAlta keeps running ends with success. |
+| Jira version | When a version of a Jira project is released. |
+| Jira query | When an issue starts to match a JQL query, or changes while it matches. |
+| Slack | When the app is mentioned in a channel, or when a message is posted there. |
+| incident.io | When incident.io declares or updates an incident ([a hook of a server](fleet.md#receive-events-of-other-tools)). |
+| Webhook | When another tool pushes a signed event ([a hook of a server](fleet.md#receive-events-of-other-tools)). |
 
 An automation can have several triggers. Times are read on the clock of your computer.
 
@@ -101,6 +106,23 @@ triggers = [
 ]
 ```
 
+### Jira, Slack and incident.io
+
+These triggers read another tool with an account of yours: no project is needed.
+
+- Keep their tokens in [Settings > Secrets](secrets.md) and type the name of the secret in the trigger: the configuration holds `${secret:NAME}`, never the token. A token written in the file is refused.
+- **Set up** under the trigger says what to create in the tool. **Test the connection** checks the tokens; **Show a sample event** reads the latest event and shows the prompt the session would get; **Try it on this event** runs the saved automation once on it.
+- Turn on **Write the answer back where the event came from** to post the last answer of the session as a comment on the Jira issue, a reply in the Slack thread or an item on the incident's timeline. A try keeps the answer on its run instead.
+- Jira is looked at every five minutes, with the API token of an account (`id.atlassian.com`). Slack is reached over Socket Mode: the app needs an app-level token and a bot token, and nothing connects to your computer. incident.io and webhooks push their events to a [hook of a server](fleet.md#receive-events-of-other-tools), for a machine of that server.
+- What the event says reaches the session as someone else's text: the title, the message or the incident, read again from its tool, and for a webhook only the fields you list.
+
+```toml
+triggers = [
+  { type = "jira_query", site = "https://acme.atlassian.net", email = "bot@acme.com", token = "${secret:JIRA_TOKEN}", jql = "project = PLAT AND labels = triage", reply = true },
+  { type = "slack", event = "mention", channel = "C0123ABCDEF", app_token = "${secret:SLACK_APP}", bot_token = "${secret:SLACK_BOT}", reply = true },
+]
+```
+
 ## Follow the runs
 
 <figure class="alta-figure my-4">
@@ -109,7 +131,7 @@ triggers = [
 </figure>
 
 - A session started by an automation has a bolt in the sidebar. Its first card, **Automation**, is the prompt the automation sent: it names the automation, which you open with a click, and what started the run.
-- In the **Automations** tab, select an automation to see its runs. Click a run to open its session.
+- In the **Automations** tab, select an automation to see its runs. Click a run to open its session. A run started by another tool says what was done with its answer.
 - The switch of an automation turns its triggers off. The **Running** switch at the top turns off the triggers of all of them. **Run now** always works.
 
 ## Good to know
