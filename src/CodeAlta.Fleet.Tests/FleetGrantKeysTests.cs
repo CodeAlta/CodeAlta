@@ -143,6 +143,30 @@ public sealed class FleetGrantKeysTests
         Assert.ThrowsExactly<ArgumentException>(() => FleetAutomationSigning.SealForOrganization(content, "report", 1, devices.Node.DeviceId, list, access, devices.Cy));
     }
 
+    [TestMethod]
+    public void TheKeyOfAProviderOfATeamOpensOnItsMachines_WhenAMaintainerSealedIt()
+    {
+        using var devices = new Devices();
+        var list = devices.List();
+        var team = new FleetAccessTeam("infra", ["p2"], ["p3"], false, ["svc"]);
+        var access = FleetAccessState.Empty with
+        {
+            OrganizationId = "org", Teams = FleetAccessState.Empty.Teams.Add("infra", team), Machines = FleetAccessState.Empty.Machines.Add(devices.Node.DeviceId, "infra"),
+        };
+        var (sealedText, wraps) = FleetProviderKeys.Seal("org", "gateway", 2, "sk-account-key", [PublicKey(devices.Node)], list.Sequence, devices.Bea);
+        Assert.IsFalse(sealedText.Contains("sk-account", StringComparison.Ordinal), "the server holds ciphertext only");
+        var copy = wraps.Single().Wrapped;
+        Assert.AreEqual("sk-account-key", FleetProviderKeys.Open(sealedText, copy, "org", "gateway", 2, FleetPrincipalKinds.Team, "infra", devices.Node, list, access));
+        // Another version, provider or owner, or a signer who does not answer for the team: refused.
+        Assert.ThrowsExactly<InvalidDataException>(() => FleetProviderKeys.Open(sealedText, copy, "org", "gateway", 3, FleetPrincipalKinds.Team, "infra", devices.Node, list, access));
+        Assert.ThrowsExactly<InvalidDataException>(() => FleetProviderKeys.Open(sealedText, copy, "org", "other", 2, FleetPrincipalKinds.Team, "infra", devices.Node, list, access));
+        Assert.ThrowsExactly<InvalidDataException>(() => FleetProviderKeys.Open(sealedText, copy, "org", "gateway", 2, FleetPrincipalKinds.Organization, "org", devices.Node, list,
+            access), "Bea does not sign for the organization");
+        var (byMember, memberWraps) = FleetProviderKeys.Seal("org", "gateway", 2, "sk-x", [PublicKey(devices.Node)], list.Sequence, devices.Cy);
+        Assert.ThrowsExactly<InvalidDataException>(() => FleetProviderKeys.Open(byMember, memberWraps.Single().Wrapped, "org", "gateway", 2, FleetPrincipalKinds.Team, "infra",
+            devices.Node, list, access), "a member of the team gives it no key");
+    }
+
     // The founder's laptop, the desk of the owner of the session (p1), their node, Bea (p2) and Cy (p3).
     private sealed class Devices : IDisposable
     {

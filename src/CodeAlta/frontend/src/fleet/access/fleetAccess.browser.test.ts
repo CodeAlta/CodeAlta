@@ -88,6 +88,21 @@ test("in an organization what waits is reviewed and signed, a transfer taken, a 
     assert.equal(await page.evaluate(`document.querySelector('[data-person=Sam] .bp6-intent-danger')?.textContent`), "Suspended");
     assert.equal(await page.evaluate(`document.querySelector('[data-grant="session.view-content"] .bp6-tag')?.textContent`), "Waiting for keys");
 
+    // A provider of the team: its key typed once, sealed for the team's machines by the host.
+    assert.equal(await page.evaluate(`document.querySelector('[data-provider="infra-anthropic"] .fleet-secret-tags .bp6-tag')?.textContent`), "Machines: 1");
+    await page.clickText(".fleet-secrets-head .bp6-button", "New provider…");
+    await page.until(`document.querySelector('.fleet-access-provider')`, "the provider form");
+    await page.evaluate(type(".fleet-access-provider input[aria-label=Name]", "Infra OpenAI"));
+    await page.evaluate(choose(".fleet-access-provider select[aria-label='Belongs to']", "team:infra"));
+    await page.evaluate(choose(".fleet-access-provider select[aria-label=Type]", "openai-responses"));
+    await page.evaluate(type(".fleet-access-provider input[aria-label=Models]", "gpt-6.1, gpt-6.1-mini"));
+    await page.evaluate(type(".fleet-access-provider input[aria-label='API key']", "sk-test"));
+    await page.shot("fleet-access-provider");
+    await page.clickText(".fleet-access-provider .bp6-button", "Save");
+    await page.until(`window.fleetAccessFixture.calls.length === 6`, "the provider set");
+    assert.deepEqual((await page.evaluate(calls) as unknown[])[5], { provider: { id: "infra-openai", ownerKind: "team", ownerId: "infra", name: "Infra OpenAI",
+      type: "openai-responses", endpoint: null, models: ["gpt-6.1", "gpt-6.1-mini"], key: "sk-test" } });
+
     // A window of 900 by 650: rows wrap, none overflows.
     await page.evaluate(`window.fleetAccessFixture.setWidth(430)`);
     await page.until(`document.querySelector('.fleet-access-settings').getBoundingClientRect().width < 450`, "the narrow page");

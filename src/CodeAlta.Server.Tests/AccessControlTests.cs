@@ -312,6 +312,45 @@ public sealed class AccessControlTests
     }
 
     [TestMethod]
+    public async Task AMaintainerSetsAProviderOfTheTeam_ItsKeySealedForTheMachinesOfTheTeamOnly_WhichReadTheirCopies()
+    {
+        await using var server = await ServerFixture.StartAsync();
+        using var owner = new TestDevice("Alex desktop");
+        using var node = new TestDevice("Build box");
+        var (setup, machine) = await server.SetUpWithNodeAsync(owner, node);
+        var (mia, miaId) = await AddPersonAsync(server, owner, setup, "Mia");
+        var (max, maxId) = await AddPersonAsync(server, owner, setup, "Max");
+        var team = (await server.SendAsync(owner, HttpMethod.Post, "/api/v1/teams", new CreateTeamRequest("Infra"))).Read<TeamDto>();
+        await server.SendAsync(owner, HttpMethod.Put, $"/api/v1/teams/{team.Id}/members/{miaId}", new SetTeamMemberRequest(FleetTeamRoles.Maintainer));
+        await server.SendAsync(owner, HttpMethod.Put, $"/api/v1/teams/{team.Id}/members/{maxId}", new SetTeamMemberRequest(FleetTeamRoles.Member));
+        var offer = (await server.SendAsync(owner, HttpMethod.Post, "/api/v1/transfers", new OfferTransferRequest(FleetResourceKinds.Machine, machine.Id, FleetPrincipalKinds.Team,
+            team.Id))).Read<TransferDto>();
+        Assert.AreEqual(HttpStatusCode.OK, (await server.SendAsync(mia, HttpMethod.Post, $"/api/v1/transfers/{offer.Id}/accept")).Status);
+        PutScopeProviderRequest Provider(long version, string device, string type = "anthropic") => new(FleetPrincipalKinds.Team, team.Id, "Infra gateway", type,
+            "https://gateway.example/v1", ["claude-opus-5-5"], version, "sealed-key", [new GrantKeyWrapDto(device, "wrapped")]);
+
+        Assert.AreEqual(HttpStatusCode.Forbidden, (await server.SendAsync(max, HttpMethod.Put, "/api/v1/providers/infra-gateway", Provider(1, machine.Id))).Status,
+            "a member of the team sets no provider of it");
+        Assert.AreEqual(HttpStatusCode.BadRequest, (await server.SendAsync(mia, HttpMethod.Put, "/api/v1/providers/infra-gateway", Provider(1, mia.DeviceId))).Status,
+            "its key goes to the machines of the team only");
+        Assert.AreEqual(HttpStatusCode.BadRequest, (await server.SendAsync(mia, HttpMethod.Put, "/api/v1/providers/infra-gateway", Provider(1, machine.Id, "codex"))).Status,
+            "a personal plan is no provider of a scope");
+        var put = await server.SendAsync(mia, HttpMethod.Put, "/api/v1/providers/infra-gateway", Provider(1, machine.Id));
+        Assert.AreEqual(HttpStatusCode.OK, put.Status, put.Body.ToString());
+        Assert.AreEqual(HttpStatusCode.Conflict, (await server.SendAsync(mia, HttpMethod.Put, "/api/v1/providers/infra-gateway", Provider(1, machine.Id))).Status,
+            "a version is never replaced by one that is not newer");
+        var listed = (await server.SendAsync(max, HttpMethod.Get, "/api/v1/providers")).Read<AccessListDto<ScopeProviderDto>>().Items.Single();
+        Assert.AreEqual(("Infra gateway", machine.Id), (listed.Name, listed.Machines.Single()), "the members see what the team runs with, never its key");
+        Assert.IsFalse((await server.SendAsync(max, HttpMethod.Get, "/api/v1/providers")).Body.ToString().Contains("sealed-key", StringComparison.Ordinal));
+
+        var copies = (await server.SendAsync(node, HttpMethod.Get, "/api/v1/provider-keys")).Read<AccessListDto<ScopeProviderKeyDto>>().Items.Single();
+        Assert.AreEqual(("infra-gateway", "sealed-key", "wrapped"), (copies.Provider.Id, copies.Sealed, copies.Wrapped));
+        Assert.AreEqual(HttpStatusCode.Forbidden, (await server.SendAsync(mia, HttpMethod.Get, "/api/v1/provider-keys")).Status, "the keys go to machines");
+        Assert.AreEqual(HttpStatusCode.OK, (await server.SendAsync(mia, HttpMethod.Delete, "/api/v1/providers/infra-gateway")).Status);
+        Assert.AreEqual(0, (await server.SendAsync(node, HttpMethod.Get, "/api/v1/provider-keys")).Read<AccessListDto<ScopeProviderKeyDto>>().Items.Count);
+    }
+
+    [TestMethod]
     public async Task AMachineGoesToATeamOnceAMaintainerAcceptsIt_AndAnAutomationTakenWaitsPaused()
     {
         await using var server = await ServerFixture.StartAsync();

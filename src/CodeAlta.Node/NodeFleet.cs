@@ -387,7 +387,9 @@ internal sealed class NodeServers : IAsyncDisposable
         {
             AccessRequests = service is null ? null : () => [.. service.People.Read().Asks.Select(static ask => ask.PersonId)],
         };
-        var connections = new Fleet.Server.FleetServerConnections(new Fleet.Server.FleetServerConnectionsOptions
+        var providers = new NodeScopeProviders(node.Host.CatalogOptions, new CodeAlta.Catalog.Secrets.LocalSecretStore(node.Host.CatalogOptions.GlobalRoot), identity);
+        Fleet.Server.FleetServerConnections? connections = null;
+        connections = new Fleet.Server.FleetServerConnections(new Fleet.Server.FleetServerConnectionsOptions
         {
             FleetRoot = catalog.FleetRoot,
             Identity = identity,
@@ -408,6 +410,8 @@ internal sealed class NodeServers : IAsyncDisposable
             BudgetsChanged = _ => budgets?.Changed(),
             // A newer access document: the sessions people it suspends started on this machine stop, their channels close.
             AccessChanged = service is null ? null : (linkId, access) => { _ = ApplyAccessAsync(service, access); },
+            // Access read again: the providers of the teams and of the organization this machine runs with, their keys opened here.
+            AccessRead = linkId => _ = RefreshProvidersAsync(providers, connections, linkId),
             // The problems of the machine travel with its heartbeat; the server tells its owner of those that last.
             Health = health.Read,
         });
@@ -438,6 +442,21 @@ internal sealed class NodeServers : IAsyncDisposable
 
     /// <summary>Gets the problems of the machine its heartbeats report.</summary>
     public NodeHealth Health { get; private init; } = null!;
+
+    // The providers of a link, read beside the connection that read access again; a failure is logged, the next read applies them.
+    private static async Task RefreshProvidersAsync(NodeScopeProviders providers, Fleet.Server.FleetServerConnections? connections, string linkId)
+    {
+        if (connections?.Find(linkId)?.Connector is not { } connector) return;
+        try
+        {
+            await providers.RefreshAsync(linkId, connector, CancellationToken.None).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is Fleet.Server.FleetServerException or HttpRequestException or IOException or UnauthorizedAccessException
+            or CodeAlta.Fleet.Protocol.FleetDeviceListException or CodeAlta.Catalog.Secrets.SecretStoreUnavailableException or InvalidOperationException)
+        {
+            if (LogManager.IsInitialized) LogManager.GetLogger("CodeAlta.Node.Providers").Warn($"The providers of {linkId} could not be read: {exception.Message}");
+        }
+    }
 
     // Applied beside the connection that verified the document; a failure is logged, the next version applies again.
     private static async Task ApplyAccessAsync(FleetNodeService service, CodeAlta.Fleet.Protocol.FleetAccessState access)

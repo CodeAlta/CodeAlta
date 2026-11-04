@@ -9,11 +9,11 @@ import { useShellLanguage } from "../../shellLanguage";
 import type { MessageKey } from "../../localization";
 import { serverProblem } from "../fleetServer";
 import { assignableRoles, attention, attentionCount, canManagePerson, grantCapabilities, isAdvanced, isContentCapability, managesAccess, nameOf, ownerTargets, parseTarget,
-  proposalDetail, roleHints, roleLabels } from "./access";
+  proposalDetail, providerId, providerTypes, roleHints, roleLabels } from "./access";
 
 export type FleetAccessApi = Pick<typeof fleetServer, "status" | "access" | "invitePerson" | "setPersonRole" | "deprovisionPerson" | "createTeam" | "updateTeam" | "dissolveTeam"
   | "setTeamMember" | "createGrant" | "revokeGrant" | "confirmGrantKeys" | "offerTransfer" | "decideTransfer" | "resumeResource" | "createServiceIdentity" | "enableServiceIdentity"
-  | "decideProposal" | "prepareAccessDocument" | "signAccessDocument" | "accessReview">;
+  | "decideProposal" | "prepareAccessDocument" | "signAccessDocument" | "accessReview" | "setScopeProvider" | "deleteScopeProvider">;
 type Result = Promise<{ status: string; message?: string | null }>;
 type Run = (call: () => Result, done?: MessageKey) => Promise<boolean>;
 type Context = { overview: FleetAccessOverview; api: FleetAccessApi; epoch: string; linkId: string; busy: boolean; run: Run };
@@ -96,6 +96,7 @@ function ServerAccess({ server, epoch, api, titled }: { server: FleetServerView;
     {overview.owners.length > 0 && <Owners context={context} />}
     {showAdvanced && <Grants context={context} />}
     {showAdvanced && <Identities context={context} />}
+    {showAdvanced && <Providers context={context} />}
     <div className="fleet-access-footer">
       {!isAdvanced(overview) && managesAccess(overview) && <Switch checked={advanced} label={t("Show teams, grants and service identities")}
         onChange={event => setAdvanced(event.currentTarget.checked)} />}
@@ -505,6 +506,91 @@ function Identities({ context }: { context: Context }) {
         </li>)}
       </ul>}
   </Card>;
+}
+
+/**
+ * The providers of the teams and of the organization, which their automations run with: the key of the account is typed
+ * here once, sealed on this computer for the machines of that team or of the organization, and kept nowhere else.
+ */
+function Providers({ context }: { context: Context }) {
+  const { t } = useShellLanguage();
+  const { overview, api, epoch, linkId, busy, run } = context;
+  const [adding, setAdding] = useState(false);
+  const [removing, setRemoving] = useState<string | null>(null);
+  const owners = providerOwners(overview, t);
+  return <Card className="appearance-settings" aria-labelledby={`providers-${linkId}`}>
+    <div className="fleet-secrets-head">
+      <h2 id={`providers-${linkId}`}>{t("Team and organization providers")}</h2>
+      {owners.length > 0 && <Button size="small" icon={<AppIcon name="plus" size={14} />} disabled={busy || adding} text={t("New provider…")} onClick={() => setAdding(true)} />}
+    </div>
+    {adding && <ProviderForm context={context} owners={owners} onClose={() => setAdding(false)} />}
+    {overview.providers.length === 0 && !adding
+      ? <NonIdealState className="secrets-empty" icon={<AppIcon name="automation" size={28} />} title={t("No team or organization provider yet.")}
+        description={t("Their automations run with one: its key is sealed for their machines only.")} />
+      : <ul className="secret-list" aria-label={t("Team and organization providers")}>
+        {overview.providers.map(provider => <li key={provider.id} className="secret-row fleet-access-row" data-provider={provider.id}>
+          <span className="secret-name"><code>{provider.id}</code>
+            <span className="secret-reference">{provider.name} · {provider.ownerKind === "organization" ? t("The organization") : t("Team {name}", { name: provider.ownerName })}
+              {" · "}{provider.models.join(", ")}</span></span>
+          <span className="fleet-secret-tags">{provider.machines === 0
+            ? <Tag minimal intent="warning">{t("No machine holds its key")}</Tag>
+            : <Tag minimal>{t("Machines: {count}", { count: provider.machines })}</Tag>}</span>
+          {provider.canManage && <span className="secret-delete">
+            <Button size="small" variant="minimal" intent="danger" icon={<AppIcon name="trash" size={14} />} aria-label={t("Remove the provider {name}", { name: provider.name })}
+              disabled={busy} onClick={() => setRemoving(provider.id)} />
+            {removing === provider.id && <ConfirmPopover always intent="danger" busy={busy} placement="bottom-end" title={t("Remove this provider?")} subject={provider.name}
+              detail={t("Its machines delete its key, and the automations that run with it stop.")} confirmLabel={t("Remove")}
+              onConfirm={() => { setRemoving(null); void run(() => api.deleteScopeProvider({ expectedEpoch: epoch, linkId, id: provider.id }, call)); }}
+              onCancel={() => setRemoving(null)} />}
+          </span>}
+        </li>)}
+      </ul>}
+  </Card>;
+}
+
+function ProviderForm({ context, owners, onClose }: { context: Context; owners: { value: string; label: string }[]; onClose: () => void }) {
+  const { t } = useShellLanguage();
+  const { api, epoch, linkId, busy, run } = context;
+  const [name, setName] = useState("");
+  const [owner, setOwner] = useState(owners[0]?.value ?? "");
+  const [type, setType] = useState(providerTypes[0].value);
+  const [endpoint, setEndpoint] = useState("");
+  const [models, setModels] = useState("");
+  const [key, setKey] = useState("");
+  const id = providerId(name);
+  const modelList = models.split(",").map(model => model.trim()).filter(model => model.length > 0);
+  const ready = id.length > 0 && owner.length > 0 && modelList.length > 0 && key.length > 0;
+  const submit = () => {
+    const chosen = parseTarget(owner);
+    void run(() => api.setScopeProvider({ expectedEpoch: epoch, linkId, id, ownerKind: chosen.kind, ownerId: chosen.id ?? "", name: name.trim(), type,
+      endpoint: endpoint.trim() || null, models: modelList, key }, call), "The provider was set: its machines receive its key.").then(ok => { if (ok) onClose(); });
+  };
+  return <form className="fleet-secret-new fleet-access-provider" aria-label={t("New provider…")} onSubmit={event => { event.preventDefault(); if (ready) submit(); }}>
+    <div className="fleet-secret-new-row">
+      <InputGroup small autoFocus value={name} placeholder={t("Name")} aria-label={t("Name")} disabled={busy} onChange={event => setName(event.target.value)} />
+      <HTMLSelect value={owner} aria-label={t("Belongs to")} disabled={busy} onChange={event => setOwner(event.target.value)} options={owners} />
+      <HTMLSelect value={type} aria-label={t("Type")} disabled={busy} onChange={event => setType(event.target.value)} options={providerTypes} />
+    </div>
+    <div className="fleet-secret-new-row">
+      <InputGroup small value={models} placeholder={t("Models, separated by commas")} aria-label={t("Models")} disabled={busy} onChange={event => setModels(event.target.value)} />
+      <InputGroup small value={endpoint} placeholder={t("Endpoint (optional)")} aria-label={t("Endpoint")} disabled={busy} onChange={event => setEndpoint(event.target.value)} />
+    </div>
+    <div className="fleet-secret-new-row">
+      <InputGroup small type="password" value={key} placeholder={t("API key")} aria-label={t("API key")} disabled={busy} autoComplete="off"
+        onChange={event => setKey(event.target.value)} />
+    </div>
+    {id && <p className="muted-text">{t("Automations name it {id}.", { id })}</p>}
+    <div className="fleet-secret-new-row fleet-secret-new-actions">
+      <Button variant="minimal" size="small" text={t("Cancel")} disabled={busy} onClick={onClose} />
+      <Button type="submit" size="small" intent="primary" text={t("Save")} disabled={busy || !ready} />
+    </div>
+  </form>;
+}
+
+/** Who answers for a provider this person may set: the organization for an admin, and the teams they maintain. */
+function providerOwners(overview: FleetAccessOverview, t: ReturnType<typeof useShellLanguage>["t"]): { value: string; label: string }[] {
+  return [...(managesAccess(overview) ? [{ value: "organization:", label: t("The organization") }] : []),
+    ...overview.teams.filter(team => team.canManage).map(team => ({ value: `team:${team.id}`, label: t("Team {name}", { name: team.name }) }))];
 }
 
 /** Who can do what, copied as CSV for an access review. */

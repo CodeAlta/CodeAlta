@@ -101,6 +101,22 @@ export function ownerTargets(overview: FleetAccessOverview, owner?: { ownerKind:
   return targets.filter(target => !owner || !(target.kind === owner.ownerKind && (target.id === owner.ownerId || target.kind === "organization")));
 }
 
+/** The types of provider a team or the organization runs with: those that take the key of an account. */
+export const providerTypes: readonly { value: string; label: string }[] = [
+  { value: "anthropic", label: "Anthropic" },
+  { value: "openai-responses", label: "OpenAI (Responses)" },
+  { value: "openai-chat", label: "OpenAI (Chat Completions)" },
+  { value: "azure-openai", label: "Azure OpenAI" },
+  { value: "google-genai", label: "Google Gemini" },
+  { value: "mistral", label: "Mistral" },
+  { value: "xai", label: "xAI" },
+];
+
+/** The id of a provider from its name: lowercase letters, digits and dashes, which automations and machines name it by. */
+export function providerId(name: string): string {
+  return name.normalize("NFKD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 64).replace(/-+$/, "");
+}
+
 /** Splits a value of a target select: <kind>:<id>. */
 export function parseTarget(value: string): { kind: string; id: string | null } {
   const colon = value.indexOf(":");

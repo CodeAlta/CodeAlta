@@ -16,7 +16,11 @@ namespace CodeAlta.Desktop.Fleet;
 /// <param name="Devices">The devices of the organization, by id, for their names.</param>
 internal sealed record DesktopFleetAccess(AccessSelfDto Self, IReadOnlyList<PersonAccessDto> People, IReadOnlyList<TeamDto> Teams, IReadOnlyList<ServiceIdentityDto> Identities,
     IReadOnlyList<GrantDto> Grants, IReadOnlyList<ResourceOwnerDto> Owners, IReadOnlyList<TransferDto> Transfers, IReadOnlyList<AccessProposalDto> Proposals,
-    IReadOnlyDictionary<string, DeviceDto> Devices);
+    IReadOnlyDictionary<string, DeviceDto> Devices)
+{
+    /// <summary>Gets the providers of the teams and of the organization.</summary>
+    public IReadOnlyList<ScopeProviderDto> Providers { get; init; } = [];
+}
 
 // People and access of a server (doc/fleet/access-control.md): reads, changes made by this computer's person, and the signed
 // access document, which this computer signs with its key when its person is a signer and says so.
@@ -52,7 +56,11 @@ internal sealed partial class DesktopFleetServers
         var transfers = await client.ListTransfersAsync(cancellationToken).ConfigureAwait(false);
         var proposals = await client.ListAccessProposalsAsync(cancellationToken).ConfigureAwait(false);
         var devices = (await client.ListDevicesAsync(cancellationToken).ConfigureAwait(false)).ToDictionary(static device => device.Id, StringComparer.Ordinal);
-        return new DesktopFleetAccess(self, people.Items, teams.Items, identities.Items, grants.Items, owners.Items, transfers.Items, proposals.Items, devices);
+        var providers = await client.ListScopeProvidersAsync(cancellationToken).ConfigureAwait(false);
+        return new DesktopFleetAccess(self, people.Items, teams.Items, identities.Items, grants.Items, owners.Items, transfers.Items, proposals.Items, devices)
+        {
+            Providers = providers.Items,
+        };
     }
 
     /// <summary>Calls the access endpoints of a server as this computer's person.</summary>
@@ -69,6 +77,46 @@ internal sealed partial class DesktopFleetServers
         ArgumentNullException.ThrowIfNull(call);
         using var client = Client(linkId);
         return await call(client, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Sets a provider of a team or of the organization: its key sealed here for the machines of that scope, as the device list
+    /// and the access document this computer verified say, at a version above the one the server holds. The key is not kept here.
+    /// </summary>
+    /// <param name="linkId">The link.</param>
+    /// <param name="providerId">The provider.</param>
+    /// <param name="ownerKind">A team or the organization.</param>
+    /// <param name="ownerId">The team; ignored for the organization, the one of the link.</param>
+    /// <param name="name">The name people see.</param>
+    /// <param name="type">The type of provider.</param>
+    /// <param name="endpoint">Its endpoint, or null.</param>
+    /// <param name="models">The models it offers.</param>
+    /// <param name="apiKey">The key of the account.</param>
+    /// <param name="cancellationToken">Cancels the call.</param>
+    /// <returns>The provider.</returns>
+    /// <exception cref="KeyNotFoundException">No such link.</exception>
+    /// <exception cref="InvalidOperationException">The scope has no machine this computer verified, or no access document was verified yet.</exception>
+    /// <exception cref="FleetServerException">The server refused it.</exception>
+    /// <exception cref="HttpRequestException">The server does not answer.</exception>
+    public async Task<ScopeProviderDto> SetScopeProviderAsync(string linkId, string providerId, string ownerKind, string ownerId, string name, string type, string? endpoint,
+        IReadOnlyList<string> models, string apiKey, CancellationToken cancellationToken)
+    {
+        var connector = Volatile.Read(ref _connections)?.Find(linkId)?.Connector ?? throw new InvalidOperationException("This computer is not connected to the server.");
+        var access = await connector.Access.RefreshAsync(cancellationToken).ConfigureAwait(false);
+        var list = await connector.Devices.RefreshAsync(cancellationToken).ConfigureAwait(false);
+        var machines = ownerKind == FleetPrincipalKinds.Organization
+            ? access.OrganizationMachines.ToHashSet(StringComparer.Ordinal)
+            : access.Machines.Where(pair => pair.Value == ownerId).Select(static pair => pair.Key).ToHashSet(StringComparer.Ordinal);
+        var recipients = list.Members.Values.Where(member => machines.Contains(member.DeviceId) && !list.Removed.Contains(member.DeviceId)).Select(static member => member.Key).ToArray();
+        if (recipients.Length == 0)
+            throw new InvalidOperationException("The scope has no machine in the signed access document yet: give it a machine, and sign the change, first.");
+        if (ownerKind == FleetPrincipalKinds.Organization) ownerId = list.OrganizationId ?? string.Empty;
+        using var client = Client(linkId);
+        var held = (await client.ListScopeProvidersAsync(cancellationToken).ConfigureAwait(false)).Items.FirstOrDefault(provider => provider.Id == providerId);
+        var version = (held?.Version ?? 0) + 1;
+        var (sealedText, wraps) = FleetProviderKeys.Seal(list.OrganizationId ?? string.Empty, providerId, version, apiKey, recipients, list.Sequence, Identity());
+        return await client.PutScopeProviderAsync(providerId, new PutScopeProviderRequest(ownerKind, ownerId, name, type, endpoint, models, version, sealedText,
+            [.. wraps.Select(static wrap => new GrantKeyWrapDto(wrap.DeviceId, wrap.Wrapped))]), cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>

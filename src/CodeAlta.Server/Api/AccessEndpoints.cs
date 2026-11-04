@@ -144,6 +144,27 @@ internal static class AccessEndpoints
             .Produces<GrantDto>()
             .WithSummary("Confirms, from a device of the owner of sealed content, that its keys were wrapped to the subject's devices: the grant then applies.");
 
+        api.MapGet("/providers", (HttpContext context, AccessService access) =>
+                Read(context, json.AccessListDtoScopeProviderDto, actor => access.ListProvidersAsync(actor, context.RequestAborted)))
+            .Produces<AccessListDto<ScopeProviderDto>>()
+            .WithSummary("The providers of the teams and of the organization: their definitions and which machines hold their keys, never the keys.");
+
+        api.MapPut("/providers/{id}", (string id, PutScopeProviderRequest? request, HttpContext context, AccessService access) =>
+                Audited(context, "provider.put", id, json.ScopeProviderDto, actor => access.PutProviderAsync(actor, id, request, ApiEndpoints.Origin(context), context.RequestAborted)))
+            .Produces<ScopeProviderDto>()
+            .WithSummary("Sets a provider of a team or of the organization, its key sealed for the machines of that scope: for who answers for it.");
+
+        api.MapDelete("/providers/{id}", (string id, HttpContext context, AccessService access) =>
+                Audited(context, "provider.delete", id, json.AccessListDtoScopeProviderDto, actor => access.DeleteProviderAsync(actor, id, ApiEndpoints.Origin(context),
+                    context.RequestAborted)))
+            .Produces<AccessListDto<ScopeProviderDto>>()
+            .WithSummary("Deletes a provider of a team or of the organization; its machines drop its key at their next read.");
+
+        api.MapGet("/provider-keys", (HttpContext context, AccessService access) =>
+                Read(context, json.AccessListDtoScopeProviderKeyDto, actor => access.ListProviderKeysAsync(actor, context.RequestAborted)))
+            .Produces<AccessListDto<ScopeProviderKeyDto>>()
+            .WithSummary("The providers whose key the calling machine holds a copy of: their definitions and its copies, which it verifies and opens.");
+
         api.MapGet("/grant-keys", (HttpContext context, AccessService access) =>
                 Read(context, json.AccessListDtoGrantKeyDto, actor => access.ListGrantKeysAsync(actor, context.RequestAborted)))
             .Produces<AccessListDto<GrantKeyDto>>()

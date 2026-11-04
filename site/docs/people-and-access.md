@@ -57,9 +57,11 @@ A grant gives a person or a team one capability somewhere: on the organization, 
 
 **Service identities** are what team and organization automations run as. A new one stays off until a person turns it on.
 
+**Team and organization providers** are the providers their automations run with. Click **New provider…**, give it a name, choose the team or the organization it belongs to, its type, its models and the API key of the account, then **Save**: your computer seals the key for the machines of that team or of the organization, and keeps no copy. Those machines add the provider with that key, so the editor of an automation placed on one of them offers it. The trash icon removes it, and its machines delete the key. To change the key, set the provider again under the same name.
+
 ### Automations of a team
 
-When an automation runs on a machine of a team you maintain, **Publish to** in its editor makes it an automation of that team: the team owns it, every maintainer reads, changes and runs it. On a machine of the organization, owners and admins publish it to the organization the same way. **Me** keeps it yours.
+When an automation runs on a machine of a team you maintain, **Publish to** in its editor makes it an automation of that team: the team owns it, and every maintainer can run it. On a machine of the organization, owners and admins publish it to the organization the same way. **Me** keeps it yours.
 
 - It runs only while the team has a service identity turned on, once that change is signed (see [Sign what machines follow](#sign-what-machines-follow)).
 - A machine of a team runs automations with account credentials only: an API key or a gateway, never a personal plan such as a Claude, Codex or Copilot subscription.

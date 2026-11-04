@@ -259,6 +259,52 @@ public sealed partial class FleetServerClient
         return SendAsync(HttpMethod.Get, $"api/v1/transfers/{Uri.EscapeDataString(transferId)}/handover", null, AccessJson.TransferHandoverCopyDto, cancellationToken);
     }
 
+    /// <summary>Lists the providers of the teams and of the organization: their definitions and the machines that hold their keys.</summary>
+    /// <param name="cancellationToken">Cancels the call.</param>
+    /// <returns>The providers.</returns>
+    /// <exception cref="FleetServerException">The server refused the call.</exception>
+    /// <exception cref="HttpRequestException">The server does not answer.</exception>
+    public Task<AccessListDto<ScopeProviderDto>> ListScopeProvidersAsync(CancellationToken cancellationToken = default)
+        => SendAsync(HttpMethod.Get, "api/v1/providers", null, AccessJson.AccessListDtoScopeProviderDto, cancellationToken);
+
+    /// <summary>Sets a provider of a team or of the organization, its key sealed for the machines of its scope.</summary>
+    /// <param name="providerId">The provider.</param>
+    /// <param name="request">Its definition and its sealed key.</param>
+    /// <param name="cancellationToken">Cancels the call.</param>
+    /// <returns>The provider.</returns>
+    /// <exception cref="ArgumentException"><paramref name="providerId"/> is empty.</exception>
+    /// <exception cref="ArgumentNullException"><paramref name="request"/> is null.</exception>
+    /// <exception cref="FleetServerException">The server refused it.</exception>
+    /// <exception cref="HttpRequestException">The server does not answer.</exception>
+    public Task<ScopeProviderDto> PutScopeProviderAsync(string providerId, PutScopeProviderRequest request, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(providerId);
+        ArgumentNullException.ThrowIfNull(request);
+        return SendAsync(HttpMethod.Put, $"api/v1/providers/{Uri.EscapeDataString(providerId)}", Body(request, AccessJson.PutScopeProviderRequest), AccessJson.ScopeProviderDto,
+            cancellationToken);
+    }
+
+    /// <summary>Deletes a provider of a team or of the organization.</summary>
+    /// <param name="providerId">The provider.</param>
+    /// <param name="cancellationToken">Cancels the call.</param>
+    /// <returns>The providers left.</returns>
+    /// <exception cref="ArgumentException"><paramref name="providerId"/> is empty.</exception>
+    /// <exception cref="FleetServerException">The server refused it.</exception>
+    /// <exception cref="HttpRequestException">The server does not answer.</exception>
+    public Task<AccessListDto<ScopeProviderDto>> DeleteScopeProviderAsync(string providerId, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(providerId);
+        return SendAsync(HttpMethod.Delete, $"api/v1/providers/{Uri.EscapeDataString(providerId)}", null, AccessJson.AccessListDtoScopeProviderDto, cancellationToken);
+    }
+
+    /// <summary>Lists the providers whose key this machine holds a copy of: their definitions and its copies.</summary>
+    /// <param name="cancellationToken">Cancels the call.</param>
+    /// <returns>The providers and the copies, which this machine verifies and opens.</returns>
+    /// <exception cref="FleetServerException">The server refused the call.</exception>
+    /// <exception cref="HttpRequestException">The server does not answer.</exception>
+    public Task<AccessListDto<ScopeProviderKeyDto>> ListProviderKeysAsync(CancellationToken cancellationToken = default)
+        => SendAsync(HttpMethod.Get, "api/v1/provider-keys", null, AccessJson.AccessListDtoScopeProviderKeyDto, cancellationToken);
+
     /// <summary>Lists the resources this person may see and their owners.</summary>
     /// <param name="cancellationToken">Cancels the call.</param>
     /// <returns>The resources.</returns>

@@ -116,6 +116,43 @@ public sealed record TransferDto(string Id, string ResourceKind, string Resource
 /// <param name="Wraps">The copy of the key for each device of who takes it.</param>
 public sealed record TransferHandoverDto(string Sealed, IReadOnlyList<GrantKeyWrapDto> Wraps);
 
+/// <summary>
+/// A provider of a team or of the organization (<c>doc/fleet/orchestration.md</c>, credentials of unattended runs): defined
+/// once by who answers for its scope, with the key of an account sealed for the machines of that scope only.
+/// </summary>
+/// <param name="Id">Its id, which is its provider key on the machines.</param>
+/// <param name="OwnerKind">A team or the organization.</param>
+/// <param name="OwnerId">Its owner.</param>
+/// <param name="Name">The name people see.</param>
+/// <param name="Type">The type of provider, one that runs with an API key (<c>anthropic</c>, <c>openai-responses</c>...).</param>
+/// <param name="Endpoint">Its endpoint, such as a gateway; null for the vendor's own.</param>
+/// <param name="Models">The models it offers, the first one by default.</param>
+/// <param name="Version">Its version, which a new key or definition makes.</param>
+/// <param name="UpdatedBy">The person who set it last.</param>
+/// <param name="UpdatedAt">When.</param>
+/// <param name="Machines">The machines that hold its key.</param>
+public sealed record ScopeProviderDto(string Id, string OwnerKind, string OwnerId, string Name, string Type, string? Endpoint, IReadOnlyList<string> Models, long Version,
+    string UpdatedBy, DateTimeOffset UpdatedAt, IReadOnlyList<string> Machines);
+
+/// <summary>The body of <c>PUT /api/v1/providers/{id}</c>: a provider of a scope, with its key sealed for the machines of the scope.</summary>
+/// <param name="OwnerKind">A team or the organization.</param>
+/// <param name="OwnerId">Its owner.</param>
+/// <param name="Name">The name people see.</param>
+/// <param name="Type">The type of provider.</param>
+/// <param name="Endpoint">Its endpoint; null for the vendor's own.</param>
+/// <param name="Models">The models it offers.</param>
+/// <param name="Version">Its new version, above the one held.</param>
+/// <param name="Sealed">The key of the account, sealed.</param>
+/// <param name="Wraps">The copy of its sealing key for each machine of the scope.</param>
+public sealed record PutScopeProviderRequest(string OwnerKind, string OwnerId, string Name, string Type, string? Endpoint, IReadOnlyList<string> Models, long Version,
+    string Sealed, IReadOnlyList<GrantKeyWrapDto> Wraps);
+
+/// <summary>What a provider of a scope gives the calling machine (<c>GET /api/v1/provider-keys</c>): its definition and this machine's copy of its key.</summary>
+/// <param name="Provider">The provider.</param>
+/// <param name="Sealed">Its key, sealed.</param>
+/// <param name="Wrapped">This machine's copy of the sealing key.</param>
+public sealed record ScopeProviderKeyDto(ScopeProviderDto Provider, string Sealed, string Wrapped);
+
 /// <summary>What a hand-over gives the calling device (<c>GET /api/v1/transfers/{id}/handover</c>).</summary>
 /// <param name="TransferId">The transfer.</param>
 /// <param name="ResourceId">The automation.</param>
@@ -341,6 +378,10 @@ public sealed record AccessListDto<T>(IReadOnlyList<T> Items);
 [JsonSerializable(typeof(DecideAccessProposalRequest))]
 [JsonSerializable(typeof(ConfirmGrantKeysRequest))]
 [JsonSerializable(typeof(TransferHandoverCopyDto))]
+[JsonSerializable(typeof(PutScopeProviderRequest))]
+[JsonSerializable(typeof(ScopeProviderDto))]
+[JsonSerializable(typeof(AccessListDto<ScopeProviderDto>))]
+[JsonSerializable(typeof(AccessListDto<ScopeProviderKeyDto>))]
 [JsonSerializable(typeof(AccessListDto<GrantKeyDto>))]
 [JsonSerializable(typeof(ApiProblemDto))]
 public sealed partial class FleetAccessApiJsonContext : JsonSerializerContext;
