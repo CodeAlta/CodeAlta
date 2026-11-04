@@ -310,8 +310,11 @@ internal sealed partial class RemoteSessionHost : ISessionHost, IAsyncDisposable
         if (!SameList(previous, listing)) Changed?.Invoke(this);
     }
 
+    // What this computer may do on the machine is part of it: a permission given on its page lets its automations be copied at once.
     private static bool SameList(RemoteListing previous, RemoteListing next)
-        => previous.Info?.Name == next.Info?.Name && previous.Sessions.Count == next.Sessions.Count
+        => previous.Info?.Name == next.Info?.Name
+            && (previous.Info?.Permissions ?? []).SequenceEqual(next.Info?.Permissions ?? [], StringComparer.Ordinal)
+            && previous.Sessions.Count == next.Sessions.Count
             && previous.Sessions.Zip(next.Sessions).All(static pair => pair.First == pair.Second);
 
     private void Publish(RemoteMachineState state, string? problem, FleetNodeClient? client)

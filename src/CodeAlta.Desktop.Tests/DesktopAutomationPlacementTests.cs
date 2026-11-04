@@ -470,9 +470,56 @@ public sealed class DesktopAutomationPlacementTests
         public override DateTimeOffset GetUtcNow() => Now;
     }
 
-    private static async Task WaitForAsync(Func<bool> condition, string what, CancellationToken cancellationToken)
+    [TestMethod]
+    public async Task RunsOn_IsCopiedAtOnce_WhenThisComputerTurnsOnAutomate_OnThePageOfTheMachine()
     {
-        var deadline = DateTime.UtcNow + Patience;
+        var token = TestContext.CancellationToken;
+        var node = new RecordingNodeAutomations();
+        await using var fixture = await FleetNodeFixture.StartAsync(token, node);
+        var registry = new SessionHostRegistry(new SessionHostRegistryTests.RecordingSessionHost(null));
+        var desktopFleetRoot = Path.Combine(fixture.Root, "desktop-fleet");
+        await using var fleet = new DesktopFleet(desktopFleetRoot, registry.TakeMembership(), "desktop",
+            static (machine, identity) => new RemoteSessionHost(machine, cancellation => FleetNodeClient.ConnectAsync(machine, identity, cancellation), Quick,
+                localDeviceId: identity.DeviceId));
+        var machine = await fleet.PairAsync(fixture.CreatePairingLink(), token);
+        var host = fleet.Find(machine.DeviceId)!;
+        await WaitForAsync(() => host.State == RemoteMachineState.Online, "the machine to be online", token);
+
+        var global = Path.Combine(fixture.Root, "desktop-config.toml");
+        File.WriteAllText(global, $$"""
+            [automations.{{Id}}]
+            name = "Nightly on the mini"
+            runs_on = "{{machine.DeviceId}}"
+            prompt = "Summarize the day."
+            triggers = [{ type = "daily", at = ["23:00"] }]
+            """);
+        await using var automations = new AutomationService(global, _ => Task.FromResult<IReadOnlyList<ProjectDescriptor>>([]),
+            new AutomationStateStore(Path.Combine(fixture.Root, "desktop-state", "automations.json"), false), new FakeAutomationRunner(), TimeProvider.System, TimeZoneInfo.Utc);
+        await automations.RefreshAsync();
+        var placement = new DesktopAutomationPlacement(automations, fleet.Find, desktopFleetRoot, () => fleet.DeviceId, fleet.SignAutomation);
+        automations.Placement = placement;
+        // As the application wires it: a change of a machine wakes the placement.
+        fleet.Changed += placement.Poke;
+        await using (placement)
+        {
+            placement.Start();
+            await WaitForAsync(() => placement.Status(automations.Snapshot.Find(Id)!)!.State == "failed", "the machine to refuse it", token);
+
+            // Automate turned on for this computer, on the page of the machine: the card is not left with the refusal until the
+            // next look of the loop, half a minute later, or until Run now.
+            await host.ManageAsync((client, cancellation) => client.SetDevicePermissionsAsync(new FleetDevicePermissionsParams(fleet.DeviceId, ["automate"], []), cancellation),
+                changes: true, token);
+            await WaitForAsync(() => placement.Status(automations.Snapshot.Find(Id)!)!.State == "copied", "the copy once allowed", token, TimeSpan.FromSeconds(10));
+            Assert.AreEqual(1, node.Puts.Count);
+            CollectionAssert.Contains(host.Listing.Info!.Permissions.ToArray(), "automate", "The listing says what this computer may do now.");
+        }
+    }
+
+    private static Task WaitForAsync(Func<bool> condition, string what, CancellationToken cancellationToken) => WaitForAsync(condition, what, cancellationToken, Patience);
+
+    private static async Task WaitForAsync(Func<bool> condition, string what, CancellationToken cancellationToken, TimeSpan patience)
+    {
+        var deadline = DateTime.UtcNow + patience;
         while (!condition())
         {
             if (DateTime.UtcNow > deadline) Assert.Fail($"Timed out waiting for {what}.");
