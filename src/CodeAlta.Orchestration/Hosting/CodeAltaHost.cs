@@ -113,6 +113,7 @@ public sealed class CodeAltaHost : IAsyncDisposable
         // A long result is kept whole with the attachments of its session (~/.alta/sessions), where a long output of a command is,
         // and goes with it; the sandbox of the session reads it there.
         CodeModeRuns.ResultFolder = runtimeService.GetToolOutputDirectoryAsync;
+        CodeModeRuns.SecretMasker = agentHub.SecretMasker;
         // The sessions scripts start go through a headless driver of the host, made when a script first asks for one.
         _codeModeAgents = new Lazy<CodeModeAgents>(() => new CodeModeAgents(this), LazyThreadSafetyMode.ExecutionAndPublication);
         // The sessions a run kept open close with it.

@@ -78,6 +78,12 @@ public sealed class CodeModeRunRegistry : IAsyncDisposable, ISessionScriptRuns
     public Func<string, CancellationToken, ValueTask<string?>>? ResultFolder { get; set; }
 
     /// <summary>
+    /// Gets or sets what masks the secrets of the machine in a result kept whole in a file, which goes with its session as
+    /// the text of the result does; null masks nothing.
+    /// </summary>
+    public CodeAlta.Agent.Runtime.AgentSecretMasker? SecretMasker { get; set; }
+
+    /// <summary>
     /// Formats the result of a run as its session reads it (<see cref="CodeModeResultFormatter"/>), keeping the whole result in
     /// a file the text names when it is longer than the text gives. The file is written once per run.
     /// </summary>
@@ -135,11 +141,13 @@ public sealed class CodeModeRunRegistry : IAsyncDisposable, ISessionScriptRuns
         {
             Directory.CreateDirectory(folder);
             var path = Path.Combine(folder, $"script-{run.Id}-result{whole.FileExtension}");
-            await File.WriteAllTextAsync(path, whole.Text).ConfigureAwait(false);
+            var masker = SecretMasker;
+            await File.WriteAllTextAsync(path, masker is null ? whole.Text : whole.FileExtension == ".json" ? masker.MaskJson(whole.Text) : masker.MaskText(whole.Text))
+                .ConfigureAwait(false);
             // A long text of lines in a JSON result is on one line of its file: it is also kept alone, to read by line.
             foreach (var part in CodeModeResultFormatter.TextParts(whole))
             {
-                await File.WriteAllTextAsync(CodeModeResultFormatter.TextPartPath(path, part), part.Text).ConfigureAwait(false);
+                await File.WriteAllTextAsync(CodeModeResultFormatter.TextPartPath(path, part), masker?.MaskText(part.Text) ?? part.Text).ConfigureAwait(false);
             }
 
             return path;

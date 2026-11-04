@@ -193,9 +193,12 @@ public sealed partial class SessionRuntimeService
         if (git.Status != GitWorktreeService.Ok || git.Repository is not { } repository)
             return SessionBundleExportResult.Refused(git.Status, git.Message);
 
-        var journal = await SessionBundle.CopyIntoAsync(journalPath, bundle, SessionMoveManifest.JournalFile, CancellationToken.None).ConfigureAwait(false);
+        // The bundle goes to another machine: no secret of this one goes with it, also one set after the session wrote it
+        // (the journal, the whole output of a command beside it, what its provider keeps).
+        var masker = _agentHub.SecretMasker;
+        var journal = await SessionBundle.CopyIntoAsync(journalPath, bundle, SessionMoveManifest.JournalFile, masker, CancellationToken.None).ConfigureAwait(false);
         if (await store.GetAttachmentDirectoryAsync(sessionId, CancellationToken.None).ConfigureAwait(false) is { } attachments)
-            await SessionBundle.CopyFolderAsync(attachments, Path.Combine(bundle, SessionMoveManifest.AttachmentsFolder), CancellationToken.None).ConfigureAwait(false);
+            await SessionBundle.CopyFolderAsync(attachments, Path.Combine(bundle, SessionMoveManifest.AttachmentsFolder), masker, CancellationToken.None).ConfigureAwait(false);
 
         SessionMoveProviderSession? providerSession = null;
         if (await store.GetStateAsync(sessionId, CancellationToken.None).ConfigureAwait(false) is { } state)
@@ -203,7 +206,11 @@ public sealed partial class SessionRuntimeService
             var (copied, warning) = await _agentHub.ExportProviderSessionAsync(state, workFolder, Path.Combine(bundle, SessionMoveManifest.ProviderFolder), CancellationToken.None)
                 .ConfigureAwait(false);
             if (warning is not null) warnings.Add(warning);
-            if (copied) providerSession = new SessionMoveProviderSession(state.ProviderKey, SessionMoveManifest.ProviderFolder);
+            if (copied)
+            {
+                await SessionBundle.MaskFolderAsync(Path.Combine(bundle, SessionMoveManifest.ProviderFolder), masker, CancellationToken.None).ConfigureAwait(false);
+                providerSession = new SessionMoveProviderSession(state.ProviderKey, SessionMoveManifest.ProviderFolder);
+            }
         }
 
         var manifest = await SessionBundle.WriteManifestAsync(bundle, new SessionMoveManifest
@@ -211,7 +218,7 @@ public sealed partial class SessionRuntimeService
             MoveId = request.MoveId,
             SessionId = sessionId,
             SessionCreatedAt = session.CreatedAt,
-            Title = session.Title,
+            Title = masker?.MaskText(session.Title) ?? session.Title,
             SpaceId = session.SpaceId,
             FromMachine = request.FromMachine,
             FromDeviceId = request.FromDeviceId,

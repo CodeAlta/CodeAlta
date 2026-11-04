@@ -63,6 +63,36 @@ public sealed class NodeTelemetryTests
     }
 
     [TestMethod]
+    public async Task TheLogRecordsExported_HaveTheSecretsOfTheMachineMasked_InTheirTextAndTheirException()
+    {
+        const string secret = "sk-node-7c1e9a44d2";
+        await using var receiver = await OtlpReceiver.StartAsync();
+        using var root = new NodeTestRoot();
+        var fleetRoot = FleetRoot(root);
+        Directory.CreateDirectory(fleetRoot);
+        File.WriteAllText(Path.Combine(fleetRoot, FleetLocalTelemetrySettings.FileName), $$"""{ "endpoint": "{{receiver.Endpoint}}", "signals": ["logs"] }""");
+        Exception failure;
+        try
+        {
+            throw new InvalidOperationException($"failed with {secret}", new IOException($"inner {secret}"));
+        }
+        catch (InvalidOperationException exception)
+        {
+            failure = exception;
+        }
+
+        using (var telemetry = new NodeTelemetry(Options(fleetRoot) with { SecretMasker = new CodeAlta.Agent.Runtime.AgentSecretMasker(() => [secret]) }))
+        {
+            telemetry.LogWriter.Write("CodeAlta.Node", LogLevel.Warning, $"A record that names {secret}", failure);
+            var logs = await receiver.WaitAsync(static request => request.Signal == "logs" && request.Contains("A record that names"));
+
+            Assert.IsFalse(logs.Contains(secret), "No secret of the machine goes to the collector.");
+            Assert.IsTrue(logs.Contains("A record that names ***") && logs.Contains("failed with ***") && logs.Contains("inner ***"));
+            Assert.IsTrue(logs.Contains("InvalidOperationException"), "The type of the exception is still told.");
+        }
+    }
+
+    [TestMethod]
     public async Task ANodeAppliesOnlyASettingAControllerOfItsOrganizationSigned()
     {
         await using var receiver = await OtlpReceiver.StartAsync();
