@@ -204,6 +204,22 @@ internal sealed class ServerFixture : IAsyncDisposable
         return new ApiAnswer(response.StatusCode, json);
     }
 
+    /// <summary>Gets a path, signed by a device, and gives the answer as text with its content type and file name: what an export answers.</summary>
+    public async Task<(HttpStatusCode Status, string Text, string? ContentType, string? FileName)> GetTextAsync(TestDevice device, string path)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Get, path);
+        var time = Clock.Now.ToUnixTimeMilliseconds();
+        var nonce = FleetSignedRequest.CreateNonce();
+        var signed = FleetSignedRequest.GetSignedBytes("GET", path, time, nonce, FleetSignedRequest.HashBody([]), device.DeviceId);
+        request.Headers.Add(FleetSignedRequest.DeviceHeader, device.DeviceId);
+        request.Headers.Add(FleetSignedRequest.TimestampHeader, time.ToString(System.Globalization.CultureInfo.InvariantCulture));
+        request.Headers.Add(FleetSignedRequest.NonceHeader, nonce);
+        request.Headers.Add(FleetSignedRequest.SignatureHeader, device.Sign(signed));
+        using var response = await Http.SendAsync(request);
+        return (response.StatusCode, await response.Content.ReadAsStringAsync(), response.Content.Headers.ContentType?.MediaType,
+            response.Content.Headers.ContentDisposition?.FileName?.Trim('"'));
+    }
+
     /// <summary>Posts bytes, signed by a device unless none is given, and gives the status of the answer.</summary>
     public async Task<HttpStatusCode> PostBytesAsync(TestDevice? device, string path, byte[] body, string contentType = "application/x-protobuf")
     {

@@ -58,14 +58,14 @@ public static class AuditChain
                 || !string.Equals(record.PreviousHash, previous, StringComparison.Ordinal)
                 || !string.Equals(record.Hash, ComputeHash(record.PreviousHash, record.Sequence, record.RecordedAt, record.Entry), StringComparison.Ordinal))
             {
-                return new AuditVerification(false, count, record.Sequence);
+                return new AuditVerification(false, count, record.Sequence, previous.Length == 0 ? null : previous);
             }
 
             previous = record.Hash;
             expected++;
         }
 
-        return new AuditVerification(true, count, null);
+        return new AuditVerification(true, count, null, previous.Length == 0 ? null : previous);
     }
 
     // "<length>:<value>\n", or "-\n" for a missing field: a field can never be read as part of another.

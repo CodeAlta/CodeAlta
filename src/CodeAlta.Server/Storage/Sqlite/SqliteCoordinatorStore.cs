@@ -885,6 +885,94 @@ public sealed partial class SqliteCoordinatorStore : ICoordinatorStore, IAutomat
     }
 
     /// <inheritdoc />
+    public ValueTask<IReadOnlyList<AuditRecord>> QueryAuditAsync(FleetAuditQuery query, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(query);
+        var (where, parameters) = AuditFilter(query);
+        var limit = Math.Clamp(query.Limit ?? 100, 1, FleetAuditQuery.MaxPage);
+        parameters.Add(("$limit", limit));
+        var sql = $"{AuditColumns} FROM audit{(where.Count == 0 ? string.Empty : " WHERE " + string.Join(" AND ", where))} ORDER BY seq{(query.Newest ? " DESC" : string.Empty)} LIMIT $limit";
+        var values = parameters.ToArray();
+        return ReadAsync(connection => QueryList(connection, null, sql, ReadAudit, values), cancellationToken);
+    }
+
+    // Plain SQL both stores read the same way: a prefix is a LIKE with its wildcards escaped, never a function of one engine.
+    private static (List<string> Where, List<(string Name, object? Value)> Parameters) AuditFilter(FleetAuditQuery query)
+    {
+        var where = new List<string>();
+        var parameters = new List<(string Name, object? Value)>();
+        // '!' escapes the wildcards of LIKE (and itself), in SQLite and PostgreSQL alike.
+        static string Like(string text) => text.Replace("!", "!!", StringComparison.Ordinal).Replace("%", "!%", StringComparison.Ordinal).Replace("_", "!_", StringComparison.Ordinal);
+        if (query.Actions is { Count: > 0 } actions)
+        {
+            var any = new List<string>();
+            for (var index = 0; index < actions.Count; index++)
+            {
+                var pattern = actions[index];
+                var name = "$action" + index.ToString(CultureInfo.InvariantCulture);
+                if (pattern.EndsWith('*') || pattern.EndsWith('.'))
+                {
+                    any.Add($"action LIKE {name} ESCAPE '!'");
+                    parameters.Add((name, Like(pattern.TrimEnd('*')) + "%"));
+                }
+                else
+                {
+                    any.Add($"action = {name}");
+                    parameters.Add((name, pattern));
+                }
+            }
+
+            where.Add("(" + string.Join(" OR ", any) + ")");
+        }
+
+        void Equal(string column, string name, string? value)
+        {
+            if (value is null) return;
+            where.Add($"{column} = {name}");
+            parameters.Add((name, value));
+        }
+
+        Equal("actor_person_id", "$person", query.PersonId);
+        Equal("actor_device_id", "$device", query.DeviceId);
+        Equal("target", "$target", query.Target);
+        Equal("source_address", "$address", query.SourceAddress);
+        if (query.Result == FleetAuditResults.Failure) where.Add($"result <> '{AuditEntry.Success}'");
+        else Equal("result", "$result", query.Result);
+        if (query.From is { } from)
+        {
+            where.Add("recorded_at >= $from");
+            parameters.Add(("$from", ToTime(from)));
+        }
+
+        if (query.To is { } to)
+        {
+            where.Add("recorded_at < $to");
+            parameters.Add(("$to", ToTime(to)));
+        }
+
+        if (query.Text is { } text)
+        {
+            where.Add("(action LIKE $text ESCAPE '!' OR target LIKE $text ESCAPE '!' OR details LIKE $text ESCAPE '!' OR source_address LIKE $text ESCAPE '!' "
+                + "OR request_id LIKE $text ESCAPE '!' OR result LIKE $text ESCAPE '!')");
+            parameters.Add(("$text", "%" + Like(text) + "%"));
+        }
+
+        if (!query.Newest && query.After is { } after)
+        {
+            where.Add("seq > $after");
+            parameters.Add(("$after", after));
+        }
+
+        if (query.Newest && query.Before is { } before)
+        {
+            where.Add("seq < $before");
+            parameters.Add(("$before", before));
+        }
+
+        return (where, parameters);
+    }
+
+    /// <inheritdoc />
     public ValueTask<AuditVerification> VerifyAuditAsync(CancellationToken cancellationToken = default)
         => ReadAsync(static connection =>
         {

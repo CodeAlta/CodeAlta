@@ -153,6 +153,8 @@ public sealed record DeviceListEntryDto(long Sequence, string Hash, FleetSignedD
 /// <param name="Details">More facts, as JSON text.</param>
 /// <param name="PreviousHash">The hash of the record before.</param>
 /// <param name="Hash">Its hash.</param>
+/// <param name="ActorName">The name of the person behind it, as the server knows it now; not part of the chain. Null when unknown.</param>
+/// <param name="DeviceName">The name of the device that asked, as the server knows it now; not part of the chain. Null when unknown.</param>
 public sealed record AuditRecordDto(
     long Sequence,
     DateTimeOffset RecordedAt,
@@ -165,13 +167,20 @@ public sealed record AuditRecordDto(
     string? RequestId,
     string? Details,
     string PreviousHash,
-    string Hash);
+    string Hash,
+    string? ActorName = null,
+    string? DeviceName = null);
 
 /// <summary>The check of the chain of the audit log.</summary>
 /// <param name="Valid">Whether it holds.</param>
 /// <param name="Count">How many records were checked.</param>
 /// <param name="BrokenAt">The first record that does not hold.</param>
-public sealed record AuditVerificationDto(bool Valid, long Count, long? BrokenAt);
+/// <param name="HeadHash">
+/// The hash of the last record that holds, which an auditor keeps to check later that nothing before it changed; null for
+/// an empty log.
+/// </param>
+/// <param name="CheckedAt">When the server checked it; null from a server that does not say.</param>
+public sealed record AuditVerificationDto(bool Valid, long Count, long? BrokenAt, string? HeadHash = null, DateTimeOffset? CheckedAt = null);
 
 /// <summary>The health of the server, for <c>altaserver status</c> and probes.</summary>
 /// <param name="Status">Always <c>ok</c> when it answers.</param>
