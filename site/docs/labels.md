@@ -10,6 +10,7 @@ A label groups projects inside a [space](spaces.md): **Infra**, **Helm charts**,
 - A label can be under another label: **Infra › Helm charts**.
 - A project can have several labels. It is listed under each of them.
 - A label is in one space, or in every space. A label under another one is in the space of the label above it.
+- Labels side by side have different names. Two spaces can each have a top-level label of the same name, such as **Infra**: they never show together. A label of every space shows in each space, so no top-level label there may share its name.
 
 CodeAlta TUI lists the projects without their labels, and keeps them.
 

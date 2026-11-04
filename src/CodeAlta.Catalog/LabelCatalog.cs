@@ -523,7 +523,10 @@ public sealed class LabelCatalog
         if (label.Description is { Length: > LabelDescriptor.MaximumDescriptionLength }) return "A label description is at most 2000 characters.";
         if (label.Icon is not null && !SpaceDescriptor.IsValidIcon(label.Icon)) return $"'{label.Icon}' is not the name of an icon.";
         if (label.Color is not null && !SpaceDescriptor.IsValidColor(label.Color)) return $"'{label.Color}' is not a color written #rgb or #rrggbb.";
+        // Beside it: under the same parent, so in the same space, or at the top of a space it shows in. Top-level labels
+        // of two spaces never show together, so they can share a name; a label of every space shows with all of them.
         return labels.Any(other => !ReferenceEquals(other, label) && other.Id != label.Id && other.Parent == label.Parent
+                && (other.Space is null || label.Space is null || other.Space == label.Space)
                 && string.Equals(other.Name, label.Name, StringComparison.OrdinalIgnoreCase))
             ? $"A label beside it is already named '{label.Name}'."
             : null;
