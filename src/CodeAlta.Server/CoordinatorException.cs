@@ -188,4 +188,25 @@ public static class CoordinatorErrorCodes
 
     /// <summary>A statistics query that does not read: its days, its time zone, its groups or its scope.</summary>
     public const string StatisticsInvalid = "statistics.invalid";
+
+    /// <summary>A budget that does not hold, is not signed by the caller, or limits a scope that cannot be limited yet.</summary>
+    public const string BudgetInvalid = "budget.invalid";
+
+    /// <summary>A budget not newer than the one held, or changed since the machine read it.</summary>
+    public const string BudgetConflict = "budget.conflict";
+
+    /// <summary>No budget of the caller's person has this id.</summary>
+    public const string BudgetNotFound = "budget.not_found";
+
+    /// <summary>A hold, or its Continue anyway, that does not hold.</summary>
+    public const string BudgetHoldInvalid = "budget_hold.invalid";
+
+    /// <summary>The run was continued or stopped already, or asked another hold.</summary>
+    public const string BudgetHoldConflict = "budget_hold.conflict";
+
+    /// <summary>No hold the caller may see has this id.</summary>
+    public const string BudgetHoldNotFound = "budget_hold.not_found";
+
+    /// <summary>The caller's person has no notification with this id.</summary>
+    public const string NotificationNotFound = "notification.not_found";
 }

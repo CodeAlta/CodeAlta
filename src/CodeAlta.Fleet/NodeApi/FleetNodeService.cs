@@ -75,6 +75,12 @@ public sealed class FleetNodeServiceOptions
     public Func<string, string, string?, CancellationToken, Task<EnvironmentAdmissionResult>>? AdmitEnvironment { get; init; }
 
     /// <summary>
+    /// Gets what admits a run to the budgets of the machine (<c>doc/fleet/observability.md</c>, budgets and alerts) before its
+    /// prompt is sent: the run, what is told once it waits for a person, and the wait. Null sends without a budget.
+    /// </summary>
+    public Func<FleetNodeBudgetRun, Action, CancellationToken, Task<Server.FleetBudgetAdmission>>? AdmitBudget { get; init; }
+
+    /// <summary>
     /// Gets the log and the self-update the node gives its owner and the devices that manage it (<c>control.log</c>,
     /// <c>control.update</c>); null for a host without them, whose methods then answer <see cref="FleetNodeErrorCodes.Unavailable"/>.
     /// </summary>

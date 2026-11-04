@@ -118,7 +118,8 @@ internal sealed record ApiAnswer(HttpStatusCode Status, JsonElement Body)
     public static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
     {
         TypeInfoResolverChain = { ServerApiJsonContext.Default, FleetServerJsonContext.Default, FleetDeviceListJsonContext.Default, FleetTelemetryJsonContext.Default,
-            FleetAutomationApiJsonContext.Default, FleetSecretsApiJsonContext.Default, FleetEnvironmentJsonContext.Default, FleetSignInJsonContext.Default },
+            FleetAutomationApiJsonContext.Default, FleetSecretsApiJsonContext.Default, FleetEnvironmentJsonContext.Default, FleetSignInJsonContext.Default,
+            FleetBudgetsApiJsonContext.Default },
     };
 }
 

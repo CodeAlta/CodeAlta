@@ -77,7 +77,8 @@ public sealed record FleetStatisticsRow(string Family, long Quarter, string? Pro
 /// <param name="Version">The version of the set, from 1.</param>
 /// <param name="ProjectKey">The blind index of its project, which only the person's devices can name; null for none.</param>
 /// <param name="Rows">The rows.</param>
-public sealed record FleetStatisticsSet(string SessionId, long Epoch, long Version, string? ProjectKey, IReadOnlyList<FleetStatisticsRow> Rows);
+/// <param name="SpaceKey">The opaque id of its space at the server, which budgets of a space count by; null when the machine has none yet.</param>
+public sealed record FleetStatisticsSet(string SessionId, long Epoch, long Version, string? ProjectKey, IReadOnlyList<FleetStatisticsRow> Rows, string? SpaceKey = null);
 
 /// <summary>The parameters of <c>statistics.publish</c>.</summary>
 /// <param name="Sequence">The sequence of the batch, from 1.</param>

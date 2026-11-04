@@ -8,7 +8,8 @@ namespace CodeAlta.Server.Storage;
 /// <param name="Version">The version of the set.</param>
 /// <param name="ProjectKey">The blind index of its project; null for none.</param>
 /// <param name="Rows">The rows.</param>
-public sealed record StatisticsSetRecord(string SessionId, long Epoch, long Version, string? ProjectKey, IReadOnlyList<FleetStatisticsRow> Rows);
+/// <param name="SpaceKey">The opaque id of its space at the server; null when unknown.</param>
+public sealed record StatisticsSetRecord(string SessionId, long Epoch, long Version, string? ProjectKey, IReadOnlyList<FleetStatisticsRow> Rows, string? SpaceKey = null);
 
 /// <summary>What happened to a set of statistics rows.</summary>
 public enum StatisticsSetOutcome

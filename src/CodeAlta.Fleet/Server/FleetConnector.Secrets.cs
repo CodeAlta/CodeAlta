@@ -9,4 +9,11 @@ public sealed partial class FleetConnectorOptions
     /// its copies again (<see cref="FleetSecretSync"/>), off the reader of the connection. Null ignores it.
     /// </summary>
     public Action? SecretsChanged { get; init; }
+
+    /// <summary>
+    /// Gets what is told that the budgets, allowances or holds of this device's person changed at the server, or that the
+    /// person has a new notification (<see cref="Protocol.Api.FleetBudgetMethods"/>): a machine reads its budgets again and a
+    /// held run its hold; a desktop reads its notifications. Null ignores it.
+    /// </summary>
+    public Action? BudgetsChanged { get; init; }
 }

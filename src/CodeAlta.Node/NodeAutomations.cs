@@ -238,6 +238,17 @@ internal sealed partial class NodeAutomations : IFleetNodeAutomations, IAutomati
     /// <summary>Gets or sets what admits a run to an environment of the fleet; null until the node joined a server, and then no run uses one.</summary>
     internal NodeEnvironmentGate? Environments { get; set; }
 
+    /// <summary>Gets or sets what admits a run to the budgets of the machine; null until the node joined a server, and then no budget limits it.</summary>
+    internal NodeBudgets? Budgets { get; set; }
+
+    /// <inheritdoc />
+    public async Task<string?> AdmitBudgetAsync(AutomationEntry entry, string runId, ProjectDescriptor? project, string spaceId, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(entry);
+        if (Budgets is not { } budgets) return null;
+        return (await budgets.AdmitAsync(new Fleet.NodeApi.FleetNodeBudgetRun(runId, entry.Definition.Name, spaceId, project), null, cancellationToken).ConfigureAwait(false)).Problem;
+    }
+
     /// <inheritdoc />
     public Task<CodeAlta.Orchestration.Runtime.EnvironmentAdmissionResult> AdmitEnvironmentAsync(AutomationEntry entry, string runId, string environment, CancellationToken cancellationToken)
     {

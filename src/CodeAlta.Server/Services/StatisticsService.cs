@@ -56,6 +56,9 @@ public sealed class StatisticsService
     /// <summary>Gets the instruments of the publications; null for none.</summary>
     public Telemetry.ServerMetrics? Metrics { get; init; }
 
+    /// <summary>Gets what runs once the sets of a machine changed what the server holds (the budgets); null for nothing.</summary>
+    internal Func<DeviceRecord, CancellationToken, Task>? Published { get; init; }
+
     /// <summary>Keeps the statistics sets a machine publishes.</summary>
     /// <param name="device">The device of the machine.</param>
     /// <param name="publication">The publication.</param>
@@ -83,12 +86,15 @@ public sealed class StatisticsService
                 }
 
                 records.Add(new StatisticsSetRecord(Text(set.SessionId, "sessionId", required: true, MaxIdLength)!, set.Epoch, set.Version,
-                    Text(set.ProjectKey, "projectKey", maxLength: 64), rows));
+                    Text(set.ProjectKey, "projectKey", maxLength: 64), rows, Text(set.SpaceKey, "spaceKey", maxLength: MaxIdLength)));
             }
 
             var result = await _store.PublishStatisticsAsync(device.Id, device.OrganizationId, publication.Sequence, generation, records, _time.GetUtcNow(), cancellationToken)
                 .ConfigureAwait(false);
             Metrics?.Publication("statistics", null);
+            // The budgets of the organization see the facts as they arrive: 80% and 100% are told once per period.
+            if (Published is { } published && result.Outcomes.Any(static outcome => outcome.Outcome == StatisticsSetOutcome.Applied))
+                await published(device, cancellationToken).ConfigureAwait(false);
             return new FleetStatisticsPublishResult(result.Ack, result.Outcomes.Count(static outcome => outcome.Outcome == StatisticsSetOutcome.Applied),
                 result.Outcomes.Count(static outcome => outcome.Outcome == StatisticsSetOutcome.Unchanged),
                 [.. result.Outcomes.Where(static outcome => outcome.Outcome == StatisticsSetOutcome.Stale).Select(static outcome => outcome.SessionId)]);

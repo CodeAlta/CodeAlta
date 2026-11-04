@@ -386,6 +386,7 @@ public sealed class CoordinatorServer : IAsyncDisposable
             json.SerializerOptions.TypeInfoResolverChain.Insert(4, FleetAutomationApiJsonContext.Default);
             json.SerializerOptions.TypeInfoResolverChain.Insert(5, FleetSecretsApiJsonContext.Default);
             json.SerializerOptions.TypeInfoResolverChain.Add(FleetSignInJsonContext.Default);
+            json.SerializerOptions.TypeInfoResolverChain.Add(FleetBudgetsApiJsonContext.Default);
             json.SerializerOptions.DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull;
         });
         services.AddProblemDetails();
@@ -424,7 +425,10 @@ public sealed class CoordinatorServer : IAsyncDisposable
         services.AddSingleton(provider => new PublicationService(store, provider.GetRequiredService<DirectoryHub>(), time) { Metrics = metrics });
         services.AddSingleton(_ => new MetadataKeyService(store, time));
         services.AddSingleton(provider => new FleetSecretService(store, store, time) { Presence = provider.GetRequiredService<PresenceRegistry>() });
-        services.AddSingleton(_ => new StatisticsService(store, time) { Metrics = metrics });
+        services.AddSingleton(provider => new NotificationService(store, store, time) { Presence = provider.GetRequiredService<PresenceRegistry>() });
+        services.AddSingleton(provider => new BudgetService(store, store, provider.GetRequiredService<NotificationService>(), time,
+            provider.GetRequiredService<ILoggerFactory>().CreateLogger("CodeAlta.Server.Budgets")));
+        services.AddSingleton(provider => new StatisticsService(store, time) { Metrics = metrics, Published = provider.GetRequiredService<BudgetService>().EvaluateAsync });
         services.AddSingleton(provider => new TelemetrySettingsService(store, provider.GetRequiredService<PresenceRegistry>(), telemetry, time,
             provider.GetRequiredService<ILoggerFactory>().CreateLogger("CodeAlta.Server.Telemetry")));
         services.AddSingleton(provider => new OtlpForwarder(telemetry, provider.GetRequiredService<RequestAuthenticator>(),
