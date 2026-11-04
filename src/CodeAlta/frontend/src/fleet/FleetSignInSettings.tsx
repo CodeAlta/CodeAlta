@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Button, Callout, Dialog, DialogBody, DialogFooter, HTMLSelect, InputGroup, Menu, MenuItem, PopoverNext, Switch, Tag } from "@blueprintjs/core";
-import { fleetServer, type FleetServerView, type FleetSignInApprovalView, type FleetSignInLoginView, type FleetSignInSettingsView } from "#neoastra";
+import { fleetServer, type FleetServerView, type FleetSignInApprovalView, type FleetSignInLinkApprovalView, type FleetSignInLoginView, type FleetSignInSettingsView } from "#neoastra";
 import { AppIcon } from "../AppIcon";
 import { ActivitySpinner } from "../ActivitySpinner";
 import { useShellLanguage } from "../shellLanguage";
@@ -13,7 +13,7 @@ import { SignInMethodIcon } from "./SignInMethodIcon";
 
 /** The calls of the sign-in of a server. */
 export type FleetSignInApi = Pick<typeof fleetServer, "signInSettings" | "setSignInSettings" | "linkSignIn" | "startSignInCode" | "openSignInPage" | "approveSignInChange"
-  | "removeSignInLogin">;
+  | "removeSignInLogin" | "approveSignInLink">;
 
 // How often an owner's computer reads again whether another computer of theirs asks it to approve a change.
 const approvalsPollMilliseconds = 15_000;
@@ -44,6 +44,10 @@ export function ServerSignIn({ server, epoch, api = fleetServer, revision }: { s
   const [deviceCode, setDeviceCode] = useState<Code | null>(null);
   // The method to link once the person signed in again with a way in they have, which the server asks for any but the first.
   const [linkConfirm, setLinkConfirm] = useState<string | null>(null);
+  // Whether the link under way waits for another computer of the person to approve it.
+  const [linkOnDevice, setLinkOnDevice] = useState(false);
+  // Links of ways to sign in another computer of this person asks this one to approve.
+  const [linkApprovals, setLinkApprovals] = useState<readonly FleetSignInLinkApprovalView[]>([]);
   const work = useRef<AbortController | null>(null);
   useEffect(() => () => work.current?.abort(), []);
   const [problem, setProblem] = useState<{ key: MessageKey; detail?: string | null } | null>(null);
@@ -55,16 +59,28 @@ export function ServerSignIn({ server, epoch, api = fleetServer, revision }: { s
       setSettings(value.status === "ok" ? value.settings : null);
       setLogins(value.status === "ok" ? value.logins : null);
       setApprovals(value.status === "ok" ? value.approvals ?? [] : []);
+      setLinkApprovals(value.status === "ok" ? value.linkApprovals ?? [] : []);
     }, () => { if (!abort.signal.aborted) { setSettings(null); setLogins(null); } });
     return () => abort.abort();
   }, [api, epoch, server.id, revision, generation]);
-  // An owner's computer reads again now and then: another of their computers may ask it to approve a change.
-  const owner = !!settings;
+  // The row reads again now and then: another computer of the person may ask this one to approve a link, or, for an
+  // owner, a change of the company sign-in.
   useEffect(() => {
-    if (!owner) return;
     const timer = setInterval(() => setGeneration(value => value + 1), approvalsPollMilliseconds);
     return () => clearInterval(timer);
-  }, [owner]);
+  }, []);
+
+  async function approveLink(approval: FleetSignInLinkApprovalView) {
+    setApproving(approval.id);
+    setProblem(null);
+    try {
+      // The digest of the link shown: the host signs that link, or nothing.
+      const result = await api.approveSignInLink({ expectedEpoch: epoch, linkId: server.id, approvalId: approval.id, digest: approval.digest }, { timeoutMilliseconds: 30_000 });
+      if (result.status !== "ok") setProblem({ key: signInProblem(result.status) ?? serverProblem(result.status) ?? "The operation did not complete.", detail: result.message });
+    } catch {
+      setProblem({ key: "The server does not answer." });
+    } finally { setApproving(null); setGeneration(value => value + 1); }
+  }
 
   async function approve(approval: FleetSignInApprovalView) {
     setApproving(approval.id);
@@ -89,15 +105,17 @@ export function ServerSignIn({ server, epoch, api = fleetServer, revision }: { s
     }
   }
 
-  // Links a method: the person's first way in at once, any other once they signed in again with `confirmWith`, one they have.
+  // Links a method: the person's first way in at once, any other once they signed in again with `confirmWith`, one they
+  // have, or once another computer of theirs approved it (`confirmWith` "device").
   async function link(method: string, confirmWith: string | null = null) {
     const abort = new AbortController();
     work.current = abort;
     setLinking(method);
+    setLinkOnDevice(confirmWith === "device");
     setLinkConfirm(null);
     setProblem(null);
     const failed = (status: string, message: string | null) => {
-      if (status === "sign_in.confirmation_required") { setLinkConfirm(method); return; }
+      if (status === "sign_in.confirmation_required" || status === "sign_in.first_way_in_expired") { setLinkConfirm(method); return; }
       setProblem({ key: signInProblem(status) ?? serverProblem(status) ?? "The operation did not complete.", detail: message });
     };
     try {
@@ -133,7 +151,7 @@ export function ServerSignIn({ server, epoch, api = fleetServer, revision }: { s
     } catch {
       if (!abort.signal.aborted) setProblem({ key: "The server does not answer." });
     } finally {
-      if (work.current === abort) { work.current = null; setLinking(null); setDeviceCode(null); }
+      if (work.current === abort) { work.current = null; setLinking(null); setDeviceCode(null); setLinkOnDevice(false); }
     }
   }
 
@@ -176,15 +194,24 @@ export function ServerSignIn({ server, epoch, api = fleetServer, revision }: { s
           })}
       </span>
       {linking && (deviceCode ? <SignInCode epoch={epoch} code={deviceCode} api={api} onCancel={cancelLink} />
+        : linkOnDevice ? <span className="muted-text">{t("On another of your computers, approve it in Settings > Fleet > Server.")}</span>
         : <span className="muted-text">{t("Finish signing in in your browser…")}</span>)}
       {linkConfirm && !linking && <Callout compact intent="primary" role="status" className="fleet-sign-in-confirm">
-        {t("Adding a way to sign in needs you to sign in again with one you have.")}
+        {logins.length > 0 ? t("Adding a way to sign in needs you to sign in again with one you have, or to approve it on another of your computers.")
+          : t("Your first way to sign in is added within an hour of a computer joining: approve this one on another of your computers.")}
         <div className="fleet-sign-in-confirm-methods">{[...new Set(logins.map(login => login.method))].map(method => <Button key={method} size="small"
           text={t("Continue with {method}", { method: method === "passkey" ? t("Passkey")
             : method === "company" ? settings?.methods.find(item => item.id === "company")?.name ?? t("Company sign-in") : methodNames[method] ?? method })}
           onClick={() => void link(linkConfirm, method)} />)}
+          <Button size="small" text={t("Approve on another of my computers")} onClick={() => void link(linkConfirm, "device")} />
           <Button size="small" variant="minimal" text={t("Cancel")} onClick={() => setLinkConfirm(null)} /></div>
       </Callout>}
+      {linkApprovals.map(approval => <Callout key={approval.id} compact intent="primary" className="fleet-sign-in-link-approval">
+        <div>{t("{device} asks to add a way to sign in: {method}.", { device: approval.requestedBy,
+          method: approval.method === "passkey" ? t("Passkey") : methodNames[approval.method] ?? approval.method })}</div>
+        <Button size="small" intent="primary" disabled={!!approving} icon={approving === approval.id ? <ActivitySpinner size={12} /> : undefined}
+          text={t("Approve")} onClick={() => void approveLink(approval)} />
+      </Callout>)}
       {approvals.map(approval => <Callout key={approval.id} compact intent="primary" className="fleet-sign-in-approval">
         <div>{t("{device} asks to change the company sign-in.", { device: approval.requestedBy })}</div>
         <ul className="muted-text">

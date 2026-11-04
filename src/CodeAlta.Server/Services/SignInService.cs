@@ -289,7 +289,8 @@ public sealed class SignInService : IDisposable
             if (actor.Id != key.DeviceId || actor.Kind != FleetDeviceKinds.Controller || actor.OwnerPersonId is null)
                 throw CoordinatorException.Forbidden(FleetErrorCodes.Forbidden, "A sign-in method is linked from an approved controller device of its person.");
             linking = actor.OwnerPersonId;
-            if (purpose == FleetSignInPurposes.Link) firstWayIn = await RequireLinkAuthorityAsync(actor, request.Confirmation, origin, cancellationToken).ConfigureAwait(false);
+            if (purpose == FleetSignInPurposes.Link)
+                firstWayIn = await RequireLinkAuthorityAsync(actor, request.Method, request.Confirmation, request.ApprovalId, origin, cancellationToken).ConfigureAwait(false);
         }
         else
         {
@@ -478,12 +479,24 @@ public sealed class SignInService : IDisposable
     }
 
     // A new way to sign in becomes a factor of its own (a later confirmation, a new device): the device key alone, which a
-    // thief may hold, does not add one. A person who has a way in proves it again first, from this device; a person who has
-    // none links their first one soon after the device joined, when its key was just proved by the setup code or by another
-    // device. Returns whether the link is of the first way in, which its completion checks again.
-    private async Task<bool> RequireLinkAuthorityAsync(DeviceRecord actor, string? confirmation, RequestOrigin origin, CancellationToken cancellationToken)
+    // thief may hold, does not add one. Another approved controller device of the person approves this very link; or a
+    // person who has a way in proves it again first, from this device; or a person who has none links their first one soon
+    // after the device joined, when its key was just proved by the setup code or by another device. Returns whether the
+    // link is of the first way in, which its completion checks again.
+    private async Task<bool> RequireLinkAuthorityAsync(DeviceRecord actor, string method, string? confirmation, string? approvalId, RequestOrigin origin,
+        CancellationToken cancellationToken)
     {
         var person = actor.OwnerPersonId!;
+        if (approvalId is not null)
+        {
+            // An approval of another link (another method, person or device) is left as it is.
+            if (_attempts.FindLinkApproval(approvalId) is { } linkApproval && linkApproval.PersonId == person && linkApproval.OrganizationId == actor.OrganizationId
+                && linkApproval.Method == method && _attempts.TakeLinkApproval(approvalId, actor.Id) is not null)
+                return false;
+            throw await RefuseStartAsync(origin, actor, SignInErrorCodes.ConfirmationRequired,
+                "This link is not approved on another of your devices: ask for its approval again.", cancellationToken).ConfigureAwait(false);
+        }
+
         if (await HasWayInAsync(person, cancellationToken).ConfigureAwait(false))
         {
             if (_attempts.TakeConfirmation(confirmation, actor.Id) is { } confirmed && confirmed.PersonId == person && confirmed.OrganizationId == actor.OrganizationId)
@@ -1031,6 +1044,109 @@ public sealed class SignInService : IDisposable
             details: $"{{\"digest\":\"{approval.Digest}\",\"signature\":\"{signed.Signature}\"}}"), cancellationToken).ConfigureAwait(false);
         return ToDto(approval);
     }
+
+    /// <summary>
+    /// Asks another approved controller device of the caller's person to approve a link of a way to sign in from this
+    /// device: the approval waits 10 minutes for <see cref="ApproveLinkAsync"/>, and then works once, for this method.
+    /// </summary>
+    /// <param name="actor">The calling device, which alone links with the approval.</param>
+    /// <param name="request">The method to link.</param>
+    /// <param name="origin">Where it comes from.</param>
+    /// <param name="cancellationToken">Cancels the operation.</param>
+    /// <returns>The approval that waits.</returns>
+    /// <exception cref="CoordinatorException">The caller is not a controller device of a person, the method is not offered, or too many wait.</exception>
+    public async Task<SignInLinkApprovalDto> RequestLinkApprovalAsync(DeviceRecord actor, RequestLinkApprovalRequest? request, RequestOrigin origin,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(origin);
+        var person = await RequirePersonDeviceAsync(actor, cancellationToken).ConfigureAwait(false);
+        if (request?.Method is not { } method || !FleetSignInMethods.IsKnown(method)) throw Invalid("The request needs the method to link.");
+        RequireMethod(await ReadSettingsAsync(actor.OrganizationId, cancellationToken).ConfigureAwait(false), method, FleetSignInPurposes.Link);
+        var approval = new SignInLinkApproval
+        {
+            Id = SignInAttempts.NewSecret(), OrganizationId = actor.OrganizationId, PersonId = person.Id, RequesterDeviceId = actor.Id, RequesterName = actor.Name, Method = method,
+            Digest = FleetSignInApprovals.LinkDigest(actor.OrganizationId, actor.Id, method), ExpiresAt = _time.GetUtcNow() + ConfirmationLifetime,
+        };
+        if (!_attempts.AddLinkApproval(approval)) throw new CoordinatorException(StatusCodes.Status503ServiceUnavailable, SignInErrorCodes.Busy, "Too many links wait for an approval.");
+        await _store.AppendAuditAsync(origin.Audit("sign_in.link_approval.request", actor, person.Id, details: $"{{\"method\":\"{method}\"}}"), cancellationToken)
+            .ConfigureAwait(false);
+        return ToDto(approval);
+    }
+
+    /// <summary>Lists the links that wait for an approval of the caller's person.</summary>
+    /// <param name="actor">The calling device.</param>
+    /// <param name="cancellationToken">Cancels the operation.</param>
+    /// <returns>The approvals.</returns>
+    /// <exception cref="CoordinatorException">The caller is not a controller device of a person.</exception>
+    public async Task<ListResponse<SignInLinkApprovalDto>> ListLinkApprovalsAsync(DeviceRecord actor, CancellationToken cancellationToken)
+    {
+        var person = await RequirePersonDeviceAsync(actor, cancellationToken).ConfigureAwait(false);
+        return new ListResponse<SignInLinkApprovalDto>([.. _attempts.ListLinkApprovals(person.Id).Where(approval => approval.OrganizationId == actor.OrganizationId).Select(ToDto)]);
+    }
+
+    /// <summary>Reads a link approval of the caller's person.</summary>
+    /// <param name="actor">The calling device.</param>
+    /// <param name="id">The approval.</param>
+    /// <param name="cancellationToken">Cancels the operation.</param>
+    /// <returns>The approval.</returns>
+    /// <exception cref="CoordinatorException">The caller is not a controller device of a person, or no link of their person waits with that id.</exception>
+    public async Task<SignInLinkApprovalDto> GetLinkApprovalAsync(DeviceRecord actor, string id, CancellationToken cancellationToken)
+    {
+        var person = await RequirePersonDeviceAsync(actor, cancellationToken).ConfigureAwait(false);
+        return ToDto(RequireLinkApproval(id, person, actor));
+    }
+
+    /// <summary>
+    /// Approves a link with the approval this device signed: another approved controller device of the person who links,
+    /// which computed the digest of the link from what it was shown (the method, the device that links).
+    /// </summary>
+    /// <param name="actor">The approving device.</param>
+    /// <param name="id">The approval.</param>
+    /// <param name="signed">The signed approval.</param>
+    /// <param name="origin">Where it comes from.</param>
+    /// <param name="cancellationToken">Cancels the operation.</param>
+    /// <returns>The approval, approved.</returns>
+    /// <exception cref="CoordinatorException">The caller is not a controller device of the person, is the device that links, the approval is unknown, or the signed approval does not hold.</exception>
+    public async Task<SignInLinkApprovalDto> ApproveLinkAsync(DeviceRecord actor, string id, FleetSignedSignInApproval? signed, RequestOrigin origin,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(origin);
+        var person = await RequirePersonDeviceAsync(actor, cancellationToken).ConfigureAwait(false);
+        var approval = RequireLinkApproval(id, person, actor);
+        if (approval.RequesterDeviceId == actor.Id)
+            throw CoordinatorException.Forbidden(FleetErrorCodes.Forbidden, "Another of your devices approves the link: the one that links does not.");
+        if (signed is null || string.IsNullOrEmpty(signed.Signature) || !FleetSignInApprovals.TryParse(signed.Payload, out var parsed)
+            || !FleetDevicePublicKey.TryParse(actor.PublicKey, out var key) || !key.Verify(FleetSignInApprovals.GetSignedBytes(signed.Payload), signed.Signature))
+            throw Invalid("The approval is not signed by the calling device.");
+        if (parsed.Version != 1 || parsed.OrganizationId != actor.OrganizationId || parsed.ApprovalId != approval.Id || parsed.RequesterDeviceId != approval.RequesterDeviceId
+            || parsed.SignerDeviceId != actor.Id || !CryptographicEquals(parsed.Digest, approval.Digest) || (parsed.Time - _time.GetUtcNow()).Duration() > TimeSpan.FromMinutes(5))
+            throw Invalid("The approval is not of this link, or not of now.");
+        approval.ApprovedBy = actor.Id;
+        await _store.AppendAuditAsync(origin.Audit("sign_in.link_approval.approve", actor, approval.RequesterDeviceId,
+            details: $"{{\"method\":\"{approval.Method}\",\"signature\":\"{signed.Signature}\"}}"), cancellationToken).ConfigureAwait(false);
+        return ToDto(approval);
+    }
+
+    // A link is asked for and approved by approved controller devices of an acting person.
+    private async Task<PersonRecord> RequirePersonDeviceAsync(DeviceRecord actor, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(actor);
+        var person = actor.Kind == FleetDeviceKinds.Controller && actor.Status == DeviceStatuses.Approved && actor.OwnerPersonId is not null
+            ? await _store.GetPersonAsync(actor.OwnerPersonId, cancellationToken).ConfigureAwait(false)
+            : null;
+        if (person is null || !person.IsActive || person.OrganizationId != actor.OrganizationId)
+            throw CoordinatorException.Forbidden(FleetErrorCodes.Forbidden, "A link is asked for and approved by approved controller devices of its person.");
+        return person;
+    }
+
+    private SignInLinkApproval RequireLinkApproval(string id, PersonRecord person, DeviceRecord actor)
+        => _attempts.FindLinkApproval(id) is { } approval && approval.PersonId == person.Id && approval.OrganizationId == actor.OrganizationId
+            ? approval
+            : throw CoordinatorException.NotFound(SignInErrorCodes.AttemptInvalid, "No link waits for an approval with this id: it was used, or it expired.");
+
+    private static SignInLinkApprovalDto ToDto(SignInLinkApproval approval)
+        => new(approval.Id, approval.ApprovedBy is null ? "pending" : "approved", approval.RequesterDeviceId, approval.RequesterName, approval.Method, approval.Digest,
+            approval.ExpiresAt, approval.ApprovedBy);
 
     private SignInApprovalRequest RequireApproval(string id, PersonRecord owner, DeviceRecord actor)
         => _attempts.FindApproval(id) is { } approval && approval.PersonId == owner.Id && approval.OrganizationId == actor.OrganizationId

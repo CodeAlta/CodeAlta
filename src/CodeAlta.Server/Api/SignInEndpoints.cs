@@ -90,6 +90,30 @@ internal static class SignInEndpoints
             .Produces<SignInApprovalDto>()
             .WithSummary("A change that waits for an approval, or was approved.");
 
+        signIn.MapPost("/link-approvals", (RequestLinkApprovalRequest? request, HttpContext context, SignInService service) =>
+                AuditedAsync(context, "sign_in.link_approval.request", actor => service.RequestLinkApprovalAsync(actor, request, ApiEndpoints.Origin(context), context.RequestAborted),
+                    FleetSignInJsonContext.Default.SignInLinkApprovalDto))
+            .Produces<SignInLinkApprovalDto>()
+            .WithSummary("Asks another approved controller device of the caller's person to approve a link of a way to sign in from the calling device.");
+
+        signIn.MapGet("/link-approvals", async (HttpContext context, SignInService service)
+                => Results.Json(await service.ListLinkApprovalsAsync(DeviceAuthenticationMiddleware.GetDevice(context), context.RequestAborted).ConfigureAwait(false),
+                    FleetSignInJsonContext.Default.ListResponseSignInLinkApprovalDto))
+            .Produces<ListResponse<SignInLinkApprovalDto>>()
+            .WithSummary("The links of ways to sign in that wait for an approval of the caller's person.");
+
+        signIn.MapGet("/link-approvals/{id}", async (string id, HttpContext context, SignInService service)
+                => Results.Json(await service.GetLinkApprovalAsync(DeviceAuthenticationMiddleware.GetDevice(context), id, context.RequestAborted).ConfigureAwait(false),
+                    FleetSignInJsonContext.Default.SignInLinkApprovalDto))
+            .Produces<SignInLinkApprovalDto>()
+            .WithSummary("A link that waits for an approval, or was approved.");
+
+        signIn.MapPost("/link-approvals/{id}/approve", (string id, FleetSignedSignInApproval? request, HttpContext context, SignInService service) =>
+                AuditedAsync(context, "sign_in.link_approval.approve", actor => service.ApproveLinkAsync(actor, id, request, ApiEndpoints.Origin(context), context.RequestAborted),
+                    FleetSignInJsonContext.Default.SignInLinkApprovalDto))
+            .Produces<SignInLinkApprovalDto>()
+            .WithSummary("Approves a link of a way to sign in that another device of the caller's person asks for, with the approval the caller signed.");
+
         signIn.MapPost("/settings/approvals/{id}/approve", (string id, FleetSignedSignInApproval? request, HttpContext context, SignInService service) =>
                 AuditedAsync(context, "sign_in.approval.approve", actor => service.ApproveAsync(actor, id, request, ApiEndpoints.Origin(context), context.RequestAborted),
                     FleetSignInJsonContext.Default.SignInApprovalDto))
