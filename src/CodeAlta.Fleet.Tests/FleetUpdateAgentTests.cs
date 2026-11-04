@@ -620,6 +620,10 @@ public sealed class FleetUpdateAgentTests
         await harness.AcceptAsync(agent, LinkA, harness.Instruction(harness.Manifest(1, "c1", "4.0.2")));
         await (agent.Tick() ?? Task.CompletedTask);
         Assert.AreEqual(FleetUpdateMachineStates.Switching, agent.Current?.State);
+        // The reports leave on a queue of their own: wait for the first to be sent, then leave the others time to come, as
+        // they would at once if they did not wait for its answer.
+        for (var waited = 0; waited < 5000 && Volatile.Read(ref inFlight) == 0; waited += 10) await Task.Delay(10);
+        await Task.Delay(200);
         lock (sent) CollectionAssert.AreEqual(new[] { FleetUpdateMachineStates.Waiting }, sent, "the next report waits for the server's answer to the first");
 
         firstAnswer.SetResult();
