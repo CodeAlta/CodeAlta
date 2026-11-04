@@ -275,25 +275,28 @@ internal sealed class AutomationStateStore
     /// Records what an event trigger has seen. Only the latest items are kept by their number: the older ones
     /// are remembered as everything up to the highest of them.
     /// </summary>
-    internal void SetWatermark(string automationId, string triggerKey, AutomationWatermark watermark)
+    internal void SetWatermark(string automationId, string triggerKey, AutomationWatermark watermark) => SetWatermark(automationId, triggerKey, watermark, MaximumSeen, MaximumHeads);
+
+    /// <summary>Records what a trigger has seen, keeping at most so many items and heads: a trigger of another tool keeps more.</summary>
+    internal void SetWatermark(string automationId, string triggerKey, AutomationWatermark watermark, int maximumSeen, int maximumHeads)
     {
         ArgumentNullException.ThrowIfNull(watermark);
         lock (_gate)
         {
-            if (watermark.Seen.Count > MaximumSeen)
+            if (watermark.Seen.Count > maximumSeen)
             {
-                var dropped = watermark.Seen.Count - MaximumSeen;
+                var dropped = watermark.Seen.Count - maximumSeen;
                 var floor = watermark.Floor;
                 foreach (var number in watermark.Seen.Take(dropped))
                 {
                     if (long.TryParse(number, System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out var value) && value > floor) floor = value;
                 }
 
-                watermark = watermark with { Floor = floor, Seen = watermark.Seen.GetRange(dropped, MaximumSeen) };
+                watermark = watermark with { Floor = floor, Seen = watermark.Seen.GetRange(dropped, maximumSeen) };
             }
 
             // The pull requests with the lowest numbers are the oldest ones.
-            foreach (var old in watermark.Heads.Keys.OrderByDescending(static key => key.Length).ThenByDescending(static key => key, StringComparer.Ordinal).Skip(MaximumHeads).ToArray())
+            foreach (var old in watermark.Heads.Keys.OrderByDescending(static key => key.Length).ThenByDescending(static key => key, StringComparer.Ordinal).Skip(maximumHeads).ToArray())
                 watermark.Heads.Remove(old);
             _state.Watermarks[automationId + "|" + triggerKey] = watermark;
             Save();

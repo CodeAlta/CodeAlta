@@ -50,6 +50,29 @@ public sealed class AutomationIntegrationTests
     }
 
     [TestMethod]
+    public async Task AJiraQuery_ReadsAllItsPagesUpToTheCap_AndSaysOnceWhenTheCapIsReached()
+    {
+        await using var fixture = await Fixture.CreateAsync($$"""{ type = "jira_query", {{JiraSettings}}, jql = "project = PLAT" }""");
+        var total = AutomationService.MaximumQueryIssues + 1;
+        fixture.Tools.On(HttpMethod.Post, "/rest/api/3/search/jql", request =>
+        {
+            using var body = JsonDocument.Parse(request.Body);
+            var from = body.RootElement.TryGetProperty("nextPageToken", out var token) ? int.Parse(token.GetString()!, System.Globalization.CultureInfo.InvariantCulture) : 0;
+            var count = Math.Min(body.RootElement.GetProperty("maxResults").GetInt32(), total - from);
+            var issues = string.Join(",", Enumerable.Range(from, count).Select(static n => Issue("PLAT-" + n, "S" + n)));
+            var next = from + count < total ? ",\"nextPageToken\":\"" + (from + count) + "\"" : ",\"isLast\":true";
+            return (HttpStatusCode.OK, "{\"issues\":[" + issues + "]" + next + "}");
+        });
+
+        await fixture.Service.LookAsync(default);
+        await fixture.Service.LookAsync(default);
+
+        Assert.AreEqual(1, fixture.Logged.Count(static line => line.Contains("matches more than 1000 issues", StringComparison.Ordinal)), string.Join("\n", fixture.Logged));
+        Assert.AreEqual(2 * 10, fixture.Tools.To("/rest/api/3/search/jql").Length, "ten pages of 100 a look, and no more");
+        Assert.AreEqual(0, fixture.Runner.Starts.Count, "what matches already is not an event");
+    }
+
+    [TestMethod]
     public async Task AJiraVersion_StartsWhenAVersionIsReleased()
     {
         await using var fixture = await Fixture.CreateAsync($$"""{ type = "jira_version", {{JiraSettings}}, jira_project = "PLAT" }""");
@@ -236,11 +259,14 @@ public sealed class AutomationIntegrationTests
                     SlackApi = new Uri("https://slack.test/api/"),
                     IncidentApi = new Uri("https://incident.test/"),
                     SlackConnect = Sockets.ConnectAsync,
+                    Log = Logged.Enqueue,
                 },
             };
         }
 
         internal FakeToolServer Tools { get; } = new();
+
+        internal System.Collections.Concurrent.ConcurrentQueue<string> Logged { get; } = new();
 
         internal FakeSlackSockets Sockets { get; } = new();
 

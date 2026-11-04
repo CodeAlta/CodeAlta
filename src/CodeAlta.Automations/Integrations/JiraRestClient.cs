@@ -23,6 +23,11 @@ internal sealed record JiraVersion(string Id, string Name, bool Released, string
 /// <param name="Updated">When it last changed, as Jira writes it.</param>
 internal sealed record JiraIssue(string Id, string Key, string? Summary, string? Status, string? Type, string? Reporter, string? Updated);
 
+/// <summary>What a JQL search read.</summary>
+/// <param name="Issues">The issues, in the order of the query.</param>
+/// <param name="More">Whether the query matches more issues than the cap let read.</param>
+internal sealed record JiraSearch(IReadOnlyList<JiraIssue> Issues, bool More);
+
 /// <summary>
 /// The REST API v3 of a Jira Cloud site, with the API token of an account (basic authentication with its email): what the
 /// triggers of Jira read (versions of a project, a JQL search) and write (a comment on an issue). The token is the one a
@@ -77,38 +82,58 @@ internal sealed class JiraRestClient
         }, cancellationToken);
     }
 
-    /// <summary>Searches issues with JQL, the most recently updated first as the query orders them.</summary>
-    internal Task<IntegrationResult<IReadOnlyList<JiraIssue>>> SearchAsync(string jql, int maximum, CancellationToken cancellationToken)
+    /// <summary>
+    /// Searches issues with JQL, in the order of the query, page after page until the query has no more or the cap is
+    /// reached: the answer says whether issues were left unread.
+    /// </summary>
+    /// <param name="jql">The query.</param>
+    /// <param name="maximum">The most issues read, all pages together.</param>
+    /// <param name="cancellationToken">Cancels the search.</param>
+    internal async Task<IntegrationResult<JiraSearch>> SearchAsync(string jql, int maximum, CancellationToken cancellationToken)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(jql);
-        using var buffer = new MemoryStream();
-        using (var writer = new Utf8JsonWriter(buffer))
+        maximum = Math.Max(1, maximum);
+        var found = new List<JiraIssue>();
+        string? next = null;
+        while (true)
         {
-            writer.WriteStartObject();
-            writer.WriteString("jql", jql);
-            writer.WriteNumber("maxResults", Math.Clamp(maximum, 1, 100));
-            writer.WriteStartArray("fields");
-            foreach (var field in new[] { "summary", "status", "issuetype", "reporter", "updated" }) writer.WriteStringValue(field);
-            writer.WriteEndArray();
-            writer.WriteEndObject();
-        }
-
-        var request = IntegrationHttp.Json(HttpMethod.Post, new Uri(_site, "rest/api/3/search/jql"), Encoding.UTF8.GetString(buffer.ToArray()));
-        request.Headers.Authorization = _authorization;
-        return IntegrationHttp.SendAsync(_http, request, Service, static (root, _) =>
-        {
-            if (root.Member("issues") is not { ValueKind: JsonValueKind.Array } issues) return IntegrationResult<IReadOnlyList<JiraIssue>>.Fail("Jira did not answer a list of issues.");
-            var found = new List<JiraIssue>();
-            foreach (var issue in issues.EnumerateArray())
+            using var buffer = new MemoryStream();
+            using (var writer = new Utf8JsonWriter(buffer))
             {
-                if (issue.Text("key") is not { Length: > 0 } key) continue;
-                var fields = issue.Member("fields");
-                found.Add(new JiraIssue(issue.Text("id") ?? key, key, fields.Text("summary"), fields.Member("status").Text("name"), fields.Member("issuetype").Text("name"),
-                    fields.Member("reporter").Text("displayName"), fields.Text("updated")));
+                writer.WriteStartObject();
+                writer.WriteString("jql", jql);
+                writer.WriteNumber("maxResults", Math.Clamp(maximum - found.Count, 1, 100));
+                writer.WriteStartArray("fields");
+                foreach (var field in new[] { "summary", "status", "issuetype", "reporter", "updated" }) writer.WriteStringValue(field);
+                writer.WriteEndArray();
+                if (next is not null) writer.WriteString("nextPageToken", next);
+                writer.WriteEndObject();
             }
 
-            return IntegrationResult<IReadOnlyList<JiraIssue>>.Of(found);
-        }, cancellationToken);
+            var request = IntegrationHttp.Json(HttpMethod.Post, new Uri(_site, "rest/api/3/search/jql"), Encoding.UTF8.GetString(buffer.ToArray()));
+            request.Headers.Authorization = _authorization;
+            var page = await IntegrationHttp.SendAsync(_http, request, Service, static (root, _) =>
+            {
+                if (root.Member("issues") is not { ValueKind: JsonValueKind.Array } issues) return IntegrationResult<(List<JiraIssue>, string?)>.Fail("Jira did not answer a list of issues.");
+                var read = new List<JiraIssue>();
+                foreach (var issue in issues.EnumerateArray())
+                {
+                    if (issue.Text("key") is not { Length: > 0 } key) continue;
+                    var fields = issue.Member("fields");
+                    read.Add(new JiraIssue(issue.Text("id") ?? key, key, fields.Text("summary"), fields.Member("status").Text("name"), fields.Member("issuetype").Text("name"),
+                        fields.Member("reporter").Text("displayName"), fields.Text("updated")));
+                }
+
+                // The last page says so; a page without a token for the next one is the last too.
+                return IntegrationResult<(List<JiraIssue>, string?)>.Of((read, root.Flag("isLast") ? null : root.Text("nextPageToken")));
+            }, cancellationToken).ConfigureAwait(false);
+            if (page.Problem is { } problem) return IntegrationResult<JiraSearch>.Fail(problem);
+            var (issues, token) = page.Value;
+            found.AddRange(issues.Take(maximum - found.Count));
+            if (token is null || issues.Count == 0) return IntegrationResult<JiraSearch>.Of(new JiraSearch(found, false));
+            if (found.Count >= maximum) return IntegrationResult<JiraSearch>.Of(new JiraSearch(found, true));
+            next = token;
+        }
     }
 
     /// <summary>Writes a comment on an issue, as plain paragraphs.</summary>

@@ -4,6 +4,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using CodeAlta.Automations.Integrations;
+using XenoAtom.Logging;
 
 namespace CodeAlta.Automations;
 
@@ -32,6 +33,9 @@ internal sealed class AutomationIntegrationOptions
     /// <summary>Gets what connects a Socket Mode WebSocket; null for a <see cref="ClientWebSocket"/>.</summary>
     public Func<Uri, CancellationToken, Task<WebSocket>>? SlackConnect { get; init; }
 
+    /// <summary>Gets what writes a line to the log of the host; null for none. Never given a credential.</summary>
+    public Action<string>? Log { get; init; }
+
     /// <summary>Gets whether the service disposes <see cref="Http"/> with itself.</summary>
     public bool DisposesHttp { get; init; }
 
@@ -49,6 +53,10 @@ internal sealed class AutomationIntegrationOptions
         {
             Http = new HttpClient { Timeout = Timeout.InfiniteTimeSpan },
             DisposesHttp = true,
+            Log = static message =>
+            {
+                if (LogManager.IsInitialized) LogManager.GetLogger("CodeAlta.Automations").Warn(message);
+            },
             Resolve = (projectId, text) => CodeAlta.Catalog.Secrets.SecretReferenceResolver.ForScope(globalRoot, new CodeAlta.Catalog.Secrets.SecretScope(null, projectId, null), shell: false)
                 .TryResolve(text, out var value, out var problem) ? (value, null) : (null, problem),
         };
@@ -89,8 +97,8 @@ internal sealed record AutomationSample(string Detail, string Prompt, Automation
 // an id, claimed before its run starts, so that it runs once.
 internal sealed partial class AutomationService
 {
-    /// <summary>The most issues one look at a JQL query reads.</summary>
-    internal const int MaximumQueryIssues = 50;
+    /// <summary>The most issues one look at a JQL query reads, all its pages together.</summary>
+    internal const int MaximumQueryIssues = 1000;
 
     /// <summary>The longest answer written back to a source.</summary>
     internal const int MaximumReplyLength = 8000;
@@ -100,6 +108,7 @@ internal sealed partial class AutomationService
 
     private static readonly TimeSpan ListenAgainAfter = TimeSpan.FromMinutes(1);
     private readonly Dictionary<string, SlackListening> _listeners = new(StringComparer.Ordinal);
+    private readonly HashSet<string> _capped = new(StringComparer.Ordinal);
     private readonly Dictionary<string, (string Problem, DateTimeOffset At)> _listenerProblems = new(StringComparer.Ordinal);
 
     /// <summary>
@@ -132,7 +141,7 @@ internal sealed partial class AutomationService
             var seen = mark?.Seen.ToList() ?? [];
             seen.Add(eventId);
             if (seen.Count > RememberedEvents) seen.RemoveRange(0, seen.Count - RememberedEvents);
-            _state.SetWatermark(entry.Id, trigger.Key, new AutomationWatermark { Since = _time.GetUtcNow(), Seen = seen, Heads = new(StringComparer.Ordinal) });
+            _state.SetWatermark(entry.Id, trigger.Key, new AutomationWatermark { Since = _time.GetUtcNow(), Seen = seen, Heads = new(StringComparer.Ordinal) }, RememberedEvents, 0);
             return true;
         }
     }
@@ -191,14 +200,15 @@ internal sealed partial class AutomationService
         if (query is null) { problems.TryAdd(entry.Id, unset!); return false; }
         repositories[entry.Id] = AutomationText.Line(site, 200);
         var found = await jira.SearchAsync(query, MaximumQueryIssues, cancellationToken).ConfigureAwait(false);
-        if (found.Value is not { } issues) { problems.TryAdd(entry.Id, found.Problem!); return false; }
+        if (found.Value is not { Issues: var issues } search) { problems.TryAdd(entry.Id, found.Problem!); return false; }
+        NoteCapped(entry, trigger, search.More);
         var updated = trigger.Event == "updated";
         if (fresh)
         {
             _state.SetWatermark(entry.Id, trigger.Key, new AutomationWatermark
             {
                 Since = now, Seen = [.. issues.Select(static issue => issue.Key)], Heads = issues.ToDictionary(static issue => issue.Key, JiraRestClient.Stamp, StringComparer.Ordinal),
-            });
+            }, MaximumQueryIssues, MaximumQueryIssues);
             return false;
         }
 
@@ -238,8 +248,23 @@ internal sealed partial class AutomationService
             Heads = issues.Where(issue => handled.Contains(issue.Key)).ToDictionary(static issue => issue.Key, JiraRestClient.Stamp, StringComparer.Ordinal)
                 .Concat(heads.Where(pair => !handled.Contains(pair.Key) && issues.Any(issue => issue.Key == pair.Key)))
                 .ToDictionary(static pair => pair.Key, static pair => pair.Value, StringComparer.Ordinal),
-        });
+        }, MaximumQueryIssues, MaximumQueryIssues);
         return waiting;
+    }
+
+    // A query that matches more than the cap is read in part: said once in the log, and again once it went below and over.
+    private void NoteCapped(AutomationEntry entry, AutomationTrigger trigger, bool capped)
+    {
+        var key = entry.Id + "|" + trigger.Key;
+        bool first;
+        lock (_gate)
+        {
+            first = capped && _capped.Add(key);
+            if (!capped) _capped.Remove(key);
+        }
+
+        if (first)
+            Integrations?.Log?.Invoke($"The Jira query of the automation '{entry.Definition.Name}' ({entry.Id}) matches more than {MaximumQueryIssues} issues: it reads the first {MaximumQueryIssues}, in the order of the query.");
     }
 
     // Starts and stops the Socket Mode listeners of the Slack triggers as the automations are now; under no lock.
@@ -417,8 +442,8 @@ internal sealed partial class AutomationService
                 var (query, unset) = Resolve(projectId, trigger.Query!);
                 if (query is null) return (null, unset);
                 var found = await jira.SearchAsync(query, MaximumQueryIssues, cancellationToken).ConfigureAwait(false);
-                return found.Value is { } issues
-                    ? ($"Signed in to {site} as {who.Value}: the query matches {(issues.Count >= MaximumQueryIssues ? $"{MaximumQueryIssues} issues or more" : $"{issues.Count} issues")} now.", null)
+                return found.Value is { } search
+                    ? ($"Signed in to {site} as {who.Value}: the query matches {(search.More ? $"more than {MaximumQueryIssues} issues: the trigger reads the first {MaximumQueryIssues}" : $"{search.Issues.Count} issues")} now.", null)
                     : (null, found.Problem);
             }
 
@@ -491,7 +516,7 @@ internal sealed partial class AutomationService
                 var (query, unset) = Resolve(projectId, trigger.Query!);
                 if (query is null) return (null, unset);
                 var found = await jira.SearchAsync(query, 1, cancellationToken).ConfigureAwait(false);
-                if (found.Value is not { } issues) return (null, found.Problem);
+                if (found.Value is not { Issues: var issues }) return (null, found.Problem);
                 if (issues.Count == 0) return (null, "No issue matches the query now.");
                 var issue = issues[0];
                 var reply = trigger.Reply ? new AutomationReplyTarget(trigger, $"the Jira issue {issue.Key}") { IssueKey = issue.Key } : null;
