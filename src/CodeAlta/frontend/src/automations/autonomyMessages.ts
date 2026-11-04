@@ -32,6 +32,8 @@ export const automationAutonomyMessages = {
     "Auf Ihrem Server wechselt sich das Team, dem es gehört, in der Bereitschaft ab; ohne Rotation antwortet das ganze Team.",
     "サーバー上では所有チームが交代で当番をします。ローテーションがなければチーム全員が回答します。",
     "在你的服务器上，拥有它的团队轮流值班；没有轮值时，整个团队都会作答。"],
+  "Its approvals go to the person on call of its team.": ["Sus aprobaciones van a la persona de guardia de su equipo.", "Ses approbations vont à la personne d’astreinte de son équipe.",
+    "Seine Freigaben gehen an die Bereitschaft seines Teams.", "承認はチームの当番に送られます。", "其批准发送给其团队的值班人员。"],
   "Approvals go to": ["Las aprobaciones van a", "Les approbations vont à", "Freigaben gehen an", "承認の送り先", "批准发送给"],
   "Its owner: you, or on your server the team that owns it and those granted to approve it.": [
     "Su propietario: tú, o en tu servidor el equipo al que pertenece y quienes tienen permiso para aprobarla.",

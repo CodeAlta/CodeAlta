@@ -51,7 +51,7 @@ export function AutonomyFields({ autonomy, permissionMode, disabled, onChange }:
         </div>
         {/* The approvals follow the owner of the automation: on a server, a team that owns it and who is granted to approve it. */}
         <label htmlFor="automation-approvers">{t("Approvals go to")}</label>
-        <div className="automation-autonomy-timeout">
+        <div className="automation-autonomy-approvers-field">
           <HTMLSelect id="automation-approvers" value={autonomy.approvers} disabled={disabled} onChange={event => set({ approvers: event.target.value })}>
             <option value="owner">{t("Its owner")}</option><option value="oncall">{t("The person on call of its team")}</option>
           </HTMLSelect>

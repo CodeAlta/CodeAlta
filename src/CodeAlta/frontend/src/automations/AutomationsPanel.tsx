@@ -9,7 +9,7 @@ import { TriggerIcon } from "./TriggerIcon";
 import { sessionTime, timelineTime } from "../sessionTime";
 import { useShellLanguage } from "../shellLanguage";
 import { AutomationEditor } from "./AutomationEditor";
-import { automationTemplates, describeAutonomy, describeTrigger, describeTriggers, emptyForm, filterAutomations, formOf, placementLabel, placementProblem, placementWait, runStatusLabel, runTone, runTriggerLabel, runsWithFacts,
+import { automationTemplates, describeAllowedTool, describeAutonomy, describeTrigger, describeTriggers, emptyForm, filterAutomations, formOf, placementLabel, placementProblem, placementWait, runStatusLabel, runTone, runTriggerLabel, runsWithFacts,
   timelinePosition, timelineRows, triggerTone, waitsToBeAllowed,
   type AutomationForm, type AutomationScope, type AutomationTemplate } from "./automations";
 import type { AutomationsHub } from "./automationsHub";
@@ -215,10 +215,6 @@ function AutomationDetail({ hub, item, paused, busy, taking, now, sessions, epoc
       <div><h3>{item.name}</h3><ScopeTag item={item} /></div>
       <Button intent="primary" disabled={busy || !!item.problem} loading={busy} icon={<AppIcon name="play" size={14} />} onClick={onRun}>{t("Run now")}</Button>
       {/* A try of an automation with autonomy makes none of the calls it would make by itself: it records them on its run. */}
-      {/* On another machine, the calls a try records stay in the session of the run there: the server carries no content. */}
-      {item.autonomy && <Button disabled={busy || !!item.problem} onClick={onTry}
-        title={t(item.runsOn ? "A try on its machine replaces the tools it calls by itself with fakes: their calls are in the session of the run there, not made."
-          : "A try replaces the tools it calls by itself with fakes: their calls are recorded on the run, not made.")}>{t("Try it (dry run)")}</Button>}
       <Button icon={<AppIcon name="edit" size={14} />} onClick={onEdit}>{t("Edit")}</Button>
     </header>
     {item.problem && <Callout intent="warning" compact role="alert">{item.problem}</Callout>}
@@ -242,7 +238,16 @@ function AutomationDetail({ hub, item, paused, busy, taking, now, sessions, epoc
       {item.repository && <><dt>{t("Repository")}</dt><dd>{item.repository}</dd></>}
       {/* What its sessions run with besides the defaults, which an automation that came with a project shows before it is allowed. */}
       {runsWith.length > 0 && <><dt>{t("Runs with")}</dt><dd>{runsWith.join(" · ")}</dd></>}
-      {item.autonomy && <><dt>{t("Autonomy")}</dt><dd>{describeAutonomy(item.autonomy, t)}</dd></>}
+      {/* What its runs do without a person, what its tools are held to, who approves; and its try, which makes none of the calls.
+          On another machine, the calls a try records stay in the session of the run there: the server carries no content. */}
+      {item.autonomy && <><dt>{t("Autonomy")}</dt><dd className="automation-autonomy-fact">
+        <span className="automation-autonomy-said">{describeAutonomy(item.autonomy, t)}</span>
+        {(item.autonomy.tools ?? []).map(tool => { const said = describeAllowedTool(tool, t); return said && <span key={tool.name}><code>{tool.name}</code> {said}</span>; })}
+        {item.autonomy.approvers === "oncall" && <span>{t("Its approvals go to the person on call of its team.")}</span>}
+        <Button size="small" icon={<AppIcon name="play" size={12} />} disabled={busy || !!item.problem} onClick={onTry}
+          title={t(item.runsOn ? "A try on its machine replaces the tools it calls by itself with fakes: their calls are in the session of the run there, not made."
+            : "A try replaces the tools it calls by itself with fakes: their calls are recorded on the run, not made.")}>{t("Try it (dry run)")}</Button>
+      </dd></>}
       <dt>{t("Stored in")}</dt><dd className="automation-file" title={item.file}>{item.file}</dd>
     </dl>
     {item.script ? <><h4>{t("Script")}</h4>

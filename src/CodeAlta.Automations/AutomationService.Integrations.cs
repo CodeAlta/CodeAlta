@@ -607,7 +607,7 @@ internal sealed partial class AutomationService
         var trigger = entry.Definition.Triggers[triggerIndex];
         var (sample, missing) = await SampleAsync(entry.ProjectId, entry.Definition.Prompt, trigger, body, cancellationToken).ConfigureAwait(false);
         if (sample is null) return (null, missing);
-        var run = await BeginAsync(entry, TryTrigger, "Try · " + sample.Detail, sample.Prompt, cancellationToken, reply: sample.Reply is { } target ? target with { Kept = true } : null)
+        var run = await BeginAsync(entry, TryTrigger, sample.Detail, sample.Prompt, cancellationToken, reply: sample.Reply is { } target ? target with { Kept = true } : null)
             .ConfigureAwait(false);
         return (run, null);
     }

@@ -547,7 +547,8 @@ internal sealed partial class AutomationService : IAsyncDisposable
             return refused;
         }
 
-        return dryRun ? await BeginAsync(entry, TryTrigger, "Try", entry.Definition.Prompt, cancellationToken, runId).ConfigureAwait(false)
+        // The trigger of a try says it is one: its own prompt has no detail.
+        return dryRun ? await BeginAsync(entry, TryTrigger, null, entry.Definition.Prompt, cancellationToken, runId).ConfigureAwait(false)
             : await BeginAsync(entry, "manual", null, entry.Definition.Prompt, cancellationToken, runId).ConfigureAwait(false);
     }
 
