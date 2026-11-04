@@ -1,6 +1,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { setupProblem, setupSteps, sshTargetOf, stepTitle } from "./addMachine";
+import { hostKeyOf, setupProblem, setupSteps, sshTargetOf, stepTitle } from "./addMachine";
+
+test("The SSH key of an unknown computer is shown before the person trusts it", () => {
+  assert.equal(hostKeyOf("host_key_unknown", "SHA256:Qm9vLWtleS1maW5nZXJwcmludA (ED25519)"), "SHA256:Qm9vLWtleS1maW5nZXJwcmludA (ED25519)");
+  assert.equal(hostKeyOf("host_key_unknown", "Host key verification failed."), null, "an ssh that gave no key: the words of ssh stay");
+  assert.equal(hostKeyOf("auth_failed", "SHA256:Qm9vLWtleS1maW5nZXJwcmludA (ED25519)"), null);
+  assert.equal(hostKeyOf("host_key_unknown", null), null);
+});
 
 test("A computer is typed as ssh takes it", () => {
   assert.equal(sshTargetOf(" xoofx@pc-ai.home.arpa "), "xoofx@pc-ai.home.arpa");

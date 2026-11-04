@@ -25,6 +25,16 @@ export function sshTargetOf(text: string): string {
   return /^([A-Za-z0-9._-]+@)?(\[[0-9A-Fa-f:.]+\]|[A-Za-z0-9._-]+)(:\d{1,5})?$/u.test(value) && !value.startsWith("-") && value.length <= 255 ? value : "";
 }
 
+/**
+ * The fingerprint of the SSH key of a computer that ssh does not know yet, as the failure of its first connection gives it
+ * (`SHA256:… (ED25519)`): shown before the person trusts it. Null when the failure does not give one.
+ */
+export function hostKeyOf(code: string, detail: string | null | undefined): string | null {
+  if (code !== "host_key_unknown" || !detail) return null;
+  const match = /SHA256:[A-Za-z0-9+/=]{8,}(?: \([A-Z0-9-]{2,16}\))?/u.exec(detail);
+  return match ? match[0] : null;
+}
+
 /** What a failure of a setup asks the person to do; `{host}` names the computer. */
 export function setupProblem(code: string): MessageKey {
   switch (code) {

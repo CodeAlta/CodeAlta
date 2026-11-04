@@ -123,7 +123,7 @@ internal sealed partial class SshNodeInstaller(ISshRunner ssh, string desktopVer
             }
         }
 
-        if (probe.ExitCode == SshResult.ConnectionFailed) throw Fail(SshSetupSteps.Connect, ConnectionCode(probe.Error), FirstLines(probe.Error));
+        if (probe.ExitCode == SshResult.ConnectionFailed) throw await ConnectionFailureAsync(ssh, target, probe.Error, cancellationToken).ConfigureAwait(false);
         var facts = ReadFacts(probe.Output);
         progress(new(SshSetupSteps.Connect, "done", $"{facts.User}@{facts.Hostname ?? target.Host}"));
 
@@ -195,6 +195,17 @@ internal sealed partial class SshNodeInstaller(ISshRunner ssh, string desktopVer
         try { await waiting.WaitAsync(TimeSpan.FromSeconds(15), cancellationToken).ConfigureAwait(false); }
         catch (TimeoutException) { await pairing.CancelAsync().ConfigureAwait(false); }
         return machineId;
+    }
+
+    /// <summary>
+    /// The failure of a first connection: its code, and what ssh said; for a host key ssh does not know yet, the fingerprint
+    /// of that key instead, which the person compares before trusting it.
+    /// </summary>
+    internal static async Task<SshSetupException> ConnectionFailureAsync(ISshRunner ssh, SshTarget target, string error, CancellationToken cancellationToken)
+    {
+        var code = ConnectionCode(error);
+        var detail = code == "host_key_unknown" ? await ssh.ReadHostKeyAsync(target, cancellationToken).ConfigureAwait(false) : null;
+        return new SshSetupException(SshSetupSteps.Connect, code, detail ?? FirstLines(error));
     }
 
     /// <summary>The words of a failure: what ssh said when it could not connect.</summary>

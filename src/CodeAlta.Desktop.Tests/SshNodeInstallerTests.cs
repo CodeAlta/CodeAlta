@@ -159,6 +159,34 @@ public sealed class SshNodeInstallerTests
         }
     }
 
+    [TestMethod]
+    public async Task UnknownHostKey_SaysTheFingerprintOfTheKey_BeforeThePersonTrustsIt()
+    {
+        var ssh = new ScriptedSsh { HostKey = "SHA256:Qm9vLWtleS1maW5nZXJwcmludA (ED25519)" };
+        ssh.Answers.Enqueue(new SshResult(SshResult.ConnectionFailed, "", "Host key verification failed.\n"));
+        var failure = await Assert.ThrowsExactlyAsync<SshSetupException>(() => new SshNodeInstaller(ssh, "4.0.0").RunAsync(
+            new SshNodeSetupRequest { Target = new SshTarget("me", "box", null) }, (_, _) => Task.FromResult("m"), static _ => { }, TestContext.CancellationToken));
+        Assert.AreEqual("host_key_unknown", failure.Code);
+        Assert.AreEqual("SHA256:Qm9vLWtleS1maW5nZXJwcmludA (ED25519)", failure.Message, "the key the person compares before Trust it");
+        Assert.AreEqual(1, ssh.HostKeyReads);
+
+        // The same for a server set up over SSH.
+        ssh.Answers.Enqueue(new SshResult(SshResult.ConnectionFailed, "", "Host key verification failed.\n"));
+        var server = await Assert.ThrowsExactlyAsync<SshSetupException>(() => new SshServerInstaller(ssh, "4.0.0").RunAsync(
+            new SshServerSetupRequest { Target = new SshTarget("me", "box", null) }, (_, _) => Task.FromResult<ReachProblem?>(null),
+            (_, _, _, _) => Task.FromResult("link"), static _ => { }, TestContext.CancellationToken));
+        Assert.AreEqual("SHA256:Qm9vLWtleS1maW5nZXJwcmludA (ED25519)", server.Message);
+    }
+
+    [TestMethod]
+    public void HostKeyFingerprint_IsReadFromTheLinesOfSshKeygen()
+    {
+        Assert.AreEqual("SHA256:abc+/def= (ED25519)", OpenSshRunner.ReadFingerprint("256 SHA256:abc+/def= box (ED25519)\n"));
+        Assert.AreEqual("SHA256:xyz (RSA)", OpenSshRunner.ReadFingerprint("3072 SHA256:xyz |1|hashed= (RSA)\n256 SHA256:other x (ED25519)\n"), "the first key ssh recorded");
+        Assert.IsNull(OpenSshRunner.ReadFingerprint(""));
+        Assert.IsNull(OpenSshRunner.ReadFingerprint("not a key\n"));
+    }
+
     private async Task<string> FailureAsync(params SshResult[] answers)
     {
         var ssh = new ScriptedSsh();
@@ -185,6 +213,16 @@ public sealed class SshNodeInstallerTests
 
         public Task<SshResult> CopyAsync(SshTarget target, IReadOnlyList<string> files, string folder, bool acceptNewHostKey, CancellationToken cancellationToken)
             => Task.FromResult(new SshResult(0, "", ""));
+
+        public string? HostKey { get; init; }
+
+        public int HostKeyReads { get; private set; }
+
+        public Task<string?> ReadHostKeyAsync(SshTarget target, CancellationToken cancellationToken)
+        {
+            HostKeyReads++;
+            return Task.FromResult(HostKey);
+        }
 
         public int Forwards { get; private set; }
 
