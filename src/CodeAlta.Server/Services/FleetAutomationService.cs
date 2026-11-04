@@ -258,7 +258,7 @@ internal sealed class FleetAutomationService
         var now = _time.GetUtcNow();
         var lease = request.LeaseUntil < now ? now : request.LeaseUntil > now + MaxLease ? now + MaxLease : request.LeaseUntil;
         var outcome = await _automations.ClaimAutomationOccurrenceAsync(new AutomationRunRecord(device.OrganizationId, request.RunId, request.AutomationId, device.Id,
-            request.Number, "schedule", AutomationRunRecord.Claimed, request.Occurrence, now, null, lease, null, null, now), cancellationToken).ConfigureAwait(false);
+            request.Number, request.Occurrence.StartsWith("event:", StringComparison.Ordinal) ? "event" : "schedule", AutomationRunRecord.Claimed, request.Occurrence, now, null, lease, null, null, now), cancellationToken).ConfigureAwait(false);
         if (outcome.Granted) return new FleetAutomationClaimResult(true, null);
         var holder = outcome.Holder!;
         return new FleetAutomationClaimResult(false, holder.MachineId == device.Id

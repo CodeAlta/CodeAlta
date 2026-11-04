@@ -17,6 +17,7 @@ import { scriptCardMessages } from "./scriptCard/messages";
 import { resumeCardMessages } from "./resumeCard/messages";
 import { scriptAutomationMessages } from "./automations/scriptAutomationMessages";
 import { automationPlacementMessages } from "./automations/placementMessages";
+import { automationIntegrationMessages } from "./automations/integrationMessages";
 import { workflowMessages } from "./workflows/messages";
 import { claudeCliMessages } from "./claudeCli/messages";
 import { pluginProviderMessages } from "./pluginProviders/messages";
@@ -2889,6 +2890,7 @@ export const messages = dictionary({
   ...scriptCardMessages,
   ...resumeCardMessages,
   ...scriptAutomationMessages,
+  ...automationIntegrationMessages,
   ...automationPlacementMessages,
   ...workflowMessages,
   ...claudeCliMessages,

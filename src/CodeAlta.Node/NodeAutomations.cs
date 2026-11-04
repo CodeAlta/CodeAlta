@@ -121,6 +121,9 @@ internal sealed record NodeAutomationOptions
 
     /// <summary>Gets whether the repositories of the projects are watched for the event triggers (issues, pull requests). Default true.</summary>
     public bool WatchRepositories { get; init; } = true;
+
+    /// <summary>Gets what the triggers of other tools use (Jira, Slack, hooks); null for the clients and the secrets of the profile.</summary>
+    public AutomationIntegrationOptions? Integrations { get; init; }
 }
 
 /// <summary>
@@ -181,7 +184,11 @@ internal sealed partial class NodeAutomations : IFleetNodeAutomations, IAutomati
             new ShellAutomationCommands(projectId => host.Identities.ResolveAsync(null, projectId).GetAwaiter().GetResult().Environment),
             entry => entry.Definition.Script is { } script ? host.CodeModeScripts.FindHash(script, entry.ProjectPath) : null,
             new NodeAutomationClaims(new AutomationClaimStore(Path.Combine(_fleetRoot, ClaimsFileName), _options.Holder), this),
-            Path.Combine(_fleetRoot, AssignedFileName));
+            Path.Combine(_fleetRoot, AssignedFileName))
+        {
+            // Jira, Slack and the hooks of its servers, with the secrets of this machine: the node watches them while nobody is at the keyboard.
+            Integrations = _options.Integrations ?? AutomationIntegrationOptions.ForHost(catalog.GlobalRoot),
+        };
     }
 
     /// <summary>Gets the engine.</summary>

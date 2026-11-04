@@ -64,7 +64,7 @@ CodeAlta Desktop brings together:
 - **[Reviews](https://codealta.io/docs/reviews/)**: comment on the lines of a plan, a file or an agent's changes, send them with a verdict, and have agents wait for your approval before they commit.
 - **Bookmarks**: mark a message or a whole session, jump between the bookmarks of a timeline, and find them all in one tab.
 - **Issues & pull requests**: browse issues and PRs on GitHub, GitLab, Azure DevOps or Bitbucket, plus Jira issues, with views of your filters (on Azure DevOps, the PRs that wait for your review, also through nested groups); start sessions and open PRs.
-- **Automations**: start sessions on a schedule, issue/PR events or on demand.
+- **Automations**: start sessions on a schedule, issue/PR events, Jira, Slack, incident.io and signed webhooks, or on demand, and write the answer back where the event came from.
 - **On your phone**: [follow, answer, steer and start sessions from a phone, follow their background jobs, and answer the questions, permission requests and review requests of agents](https://codealta.io/docs/plugins/mobile/), on your own tailnet through Tailscale.
 - **Canvases**: use interactive boards, checklists, graphs and custom tools beside your conversations.
 - **Plugins**: ask agents to build trusted local .NET canvases, dialogs, tools, commands and buttons for one project or the whole workspace, and [hooks](https://codealta.io/docs/plugins/developers/) that check, block or change the tool calls and prompts of sessions, or continue a session when its run ends.

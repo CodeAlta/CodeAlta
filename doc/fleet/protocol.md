@@ -157,6 +157,7 @@ windows, asks, permissions, jobs); the node API is that surface, made remote, pl
 | `relay` | `open`, `incoming`, `accept`, `close` |
 | `telemetry` | `settings`: the fleet's telemetry setting, signed by a controller device, sent when a device connects and when an owner changes it ([observability](observability.md#where-telemetry-goes)) |
 | `automations` | `assigned` (the versions a controller device of the machine's person signed, sealed for the machine and the person's controllers, removals included; sent when one is stored for a machine online, and on each connection until acknowledged), `ack` (taken or refused, with the reason), `claim` (a due time, before its run: one run per automation and due time, whatever the machine; a node whose server does not answer runs the time it claimed itself; the same run claiming again renews its lease while it works), `runs` (run facts: version, trigger, status, times, session, tokens and cost, and when each automation is next due; never the prompt, the answer or what the trigger was about), `run` (a run asked by hand, signed by a controller device of the person for the machine and a run id, sent to the machine online; the machine refuses a request signed more than minutes away from its time, and runs a run id once) ([orchestration](orchestration.md#placement-and-dispatch)) |
+| `hooks` | `event` (an event a hook of the server received for this machine, as it was pushed: headers and body; sent when it arrives for a machine online, and on each connection while it waits, a day at most; at least once), `ack` (taken by an automation, or refused with why, such as a signature that does not verify; the server then keeps only the facts) ([orchestration](orchestration.md#triggers)) |
 | `update` | `instruction` (a campaign's signed manifest, or the signed automatic policy and its version), `cancel`, `policy` (the fleet's signed update policy, any mode, sent on each connection and each change), `report` (where the node stands; `updated` once its trial confirmed) ([deployment](deployment.md#updates)) |
 | `ownership` | `commit` (a move), `takeover`, `changed` |
 | `replica` | `append`, `read`, `status` |
@@ -208,6 +209,10 @@ The management plane, and the whole surface of the console ([console](console.md
   `decline`, `cancel`), `access/review`, `access/proposals` (changes agents propose), and the signed access document:
   `GET /api/v1/access/documents?after=`, `GET /api/v1/access/draft`, `POST /api/v1/access/documents`. The event
   `access.changed` tells devices to read again ([access control](access-control.md#the-signed-access-document)).
+- **Hooks**: `GET /api/v1/hooks` (the caller's person's, with their paths and the events that wait), `POST /api/v1/hooks` (a hook for
+  one of the person's machines, for `incident_io` or `webhook`), `DELETE .../{id}`, `GET .../{id}/events` (facts: when, state,
+  what the machine said), and the ingress `POST /api/v1/hooks/{id}`, which takes no device: a tool pushes there, 256 KB and 60
+  events a minute at most per hook, the same event once. The server holds no signing secret: the machine checks it.
 - **Telemetry**: `GET`/`PUT /api/v1/telemetry` reads and sets the fleet's signed telemetry setting (an owner's controller
   device only); `POST /otlp/v1/{traces,metrics,logs}` takes the OTLP of approved devices, signed as the API's calls are,
   and forwards it to the collector ([observability](observability.md#where-telemetry-goes)).

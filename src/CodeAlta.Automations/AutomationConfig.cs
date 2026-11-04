@@ -116,6 +116,10 @@ internal static class AutomationConfig
                 if (trigger.Folder is { } folder && (string.IsNullOrWhiteSpace(folder) || folder.Length > AutomationTrigger.MaximumFolderLength || folder.Any(char.IsControl) || !IsWellFormed(folder)))
                     return "The folder of a command trigger is a path.";
             }
+            else if (trigger.IsIntegration)
+            {
+                if (AutomationIntegrationConfig.Validate(trigger) is { } integration) return integration;
+            }
             else if (trigger.IsSchedule)
             {
                 if (!AutomationSchedule.TryCreate(trigger, out _, out var error)) return error;
@@ -307,15 +311,17 @@ internal static class AutomationConfig
         return problem is null;
     }
 
-    private static bool TryReadTrigger(TomlTable table, out AutomationTrigger? trigger, out string? problem)
+    internal static bool TryReadTrigger(TomlTable table, out AutomationTrigger? trigger, out string? problem)
     {
         trigger = null;
         if (!TryText(table, "type", out var type, out problem)) return false;
         if (!AutomationTrigger.TryParseKind(type, out var kind))
         {
-            problem = $"'{type}' is not a trigger: hourly, daily, weekly, cron, issue, pull_request, jira or command.";
+            problem = $"'{type}' is not a trigger: hourly, daily, weekly, cron, issue, pull_request, jira, command, jira_version, jira_query, slack, incident_io or webhook.";
             return false;
         }
+
+        if (new AutomationTrigger(kind).IsIntegration) return AutomationIntegrationConfig.TryRead(kind, table, out trigger, out problem);
 
         if (!TryNumber(table, "minute", 0, out var minute, out problem) || !TryNumber(table, "every", 1, out var every, out problem)
             || !TryTexts(table, "at", out var at, out problem) || !TryTexts(table, "days", out var days, out problem)
@@ -372,7 +378,7 @@ internal static class AutomationConfig
         return true;
     }
 
-    private static bool TryText(TomlTable table, string key, out string? text, out string? problem)
+    internal static bool TryText(TomlTable table, string key, out string? text, out string? problem)
     {
         (text, problem) = (null, null);
         if (!table.TryGetValue(key, out var value)) return true;
@@ -386,7 +392,7 @@ internal static class AutomationConfig
         return true;
     }
 
-    private static bool TryTexts(TomlTable table, string key, out IReadOnlyList<string> texts, out string? problem)
+    internal static bool TryTexts(TomlTable table, string key, out IReadOnlyList<string> texts, out string? problem)
     {
         (texts, problem) = ([], null);
         if (!table.TryGetValue(key, out var value)) return true;
@@ -396,7 +402,7 @@ internal static class AutomationConfig
         return problem is null;
     }
 
-    private static bool TryFlag(TomlTable table, string key, bool fallback, out bool flag, out string? problem)
+    internal static bool TryFlag(TomlTable table, string key, bool fallback, out bool flag, out string? problem)
     {
         (flag, problem) = (fallback, null);
         if (!table.TryGetValue(key, out var value)) return true;
@@ -465,8 +471,11 @@ internal static class AutomationConfig
         return builder.ToString();
     }
 
-    private static string Format(AutomationTrigger trigger)
+    /// <summary>Writes a trigger as the inline table a configuration file holds, such as <c>{ type = "daily", at = ["09:00"] }</c>.</summary>
+    internal static string Format(AutomationTrigger trigger)
     {
+        ArgumentNullException.ThrowIfNull(trigger);
+        if (trigger.IsIntegration) return AutomationIntegrationConfig.Format(trigger);
         var builder = new StringBuilder("{ type = ").Append(Quote(trigger.KindName));
         switch (trigger.Kind)
         {
@@ -499,7 +508,7 @@ internal static class AutomationConfig
         static string List(IEnumerable<string> values) => "[" + string.Join(", ", values.Select(Quote)) + "]";
     }
 
-    private static string Quote(string text) => "\"" + Escape(text, multiline: false) + "\"";
+    internal static string Quote(string text) => "\"" + Escape(text, multiline: false) + "\"";
 
     private static string Escape(string text, bool multiline)
     {
@@ -525,7 +534,7 @@ internal static class AutomationConfig
         return builder.ToString();
     }
 
-    private static bool IsWellFormed(string text)
+    internal static bool IsWellFormed(string text)
     {
         for (var index = 0; index < text.Length; index++)
         {
@@ -536,7 +545,7 @@ internal static class AutomationConfig
         return true;
     }
 
-    private static string? Blank(string? text) => string.IsNullOrWhiteSpace(text) ? null : text.Trim();
+    internal static string? Blank(string? text) => string.IsNullOrWhiteSpace(text) ? null : text.Trim();
 
     private static bool IsObject(string json)
     {

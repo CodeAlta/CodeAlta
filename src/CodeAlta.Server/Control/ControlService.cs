@@ -19,7 +19,7 @@ public sealed class ControlService
     public static readonly FleetProtocolRange Protocol = new(1, 1);
 
     /// <summary>The features the server announces in its welcome.</summary>
-    public static readonly IReadOnlyList<string> Features = ["presence", "inventory", "facts", "facts.withdraw", "directory", "relay", "telemetry", "update", FleetAutomationMethods.Feature];
+    public static readonly IReadOnlyList<string> Features = ["presence", "inventory", "facts", "facts.withdraw", "directory", "relay", "telemetry", "update", FleetAutomationMethods.Feature, FleetHookMethods.Feature];
 
     private const int MaxStateLength = 32;
 
@@ -89,6 +89,9 @@ public sealed class ControlService
 
     /// <summary>Gets the automations of the organization, delivered to a machine that connects and claimed and reported by it; null for none.</summary>
     internal FleetAutomationService? Automations { get; init; }
+
+    /// <summary>Gets the hooks of the organization, whose events are handed to a machine that connects and answered by it; null for none.</summary>
+    internal HookService? Hooks { get; init; }
 
     /// <summary>
     /// Gets what ends every control connection when the server stops (the host's <c>ApplicationStopping</c>): each device
@@ -185,6 +188,7 @@ public sealed class ControlService
         if (Updates is { } updates) _ = updates.SendCurrentAsync(session);
         // The automation versions the machine has not taken yet, as their controller devices signed them.
         if (Automations is { } automations) _ = automations.SendPendingAsync(session);
+        if (Hooks is { } hooks) _ = hooks.SendPendingAsync(session);
         try
         {
             using var registration = cancellationToken.Register(static state =>
@@ -278,6 +282,15 @@ public sealed class ControlService
         });
 
         if (Automations is { } automations) RegisterAutomations(session, automations, On);
+        if (Hooks is { } hookService)
+        {
+            // A machine answers the events of its hooks.
+            On(FleetHookMethods.Ack, Handler(FleetHookServerJsonContext.Default.FleetHookAcks, async (acks, token) =>
+            {
+                await hookService.AcknowledgeAsync(session.Device, acks, token).ConfigureAwait(false);
+                return null;
+            }));
+        }
 
         if (_relays is not { } relays) return;
         On(FleetServerMethods.RelayOpen, Handler(FleetServerJsonContext.Default.FleetRelayOpen, async (open, token) =>

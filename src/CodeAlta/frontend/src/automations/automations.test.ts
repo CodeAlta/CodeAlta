@@ -3,19 +3,19 @@ import test from "node:test";
 import type { AutomationItem, AutomationRunItem, AutomationTriggerItem } from "#neoastra";
 import { locales, translate, type Locale, type MessageKey } from "../localization";
 import { defaultSessionSettings } from "../sessionSettings/sessionSettings";
-import { automationTemplates, dayName, denseTimeline, describeTrigger, describeTriggers, emptyForm, filterAutomations, formOf, formProblem, formSettings, inputOf, isSchedule, maximumNameLength,
-  maximumPromptLength, needsProject, newTrigger, openableRun, placementLabel, placementProblem, placementWait, scriptArgumentsTemplate, runStatusLabel, runTone, runTriggerLabel, runsWithFacts, sessionOrigin, sessionSettingsOf, timelinePosition, timelineRows, triggerIcon, triggerLabel,
+import { automationTemplates, canReply, dayName, denseTimeline, describeTrigger, describeTriggers, emptyForm, filterAutomations, formOf, formProblem, formSettings, inputOf, integrationTypes, isHooked, isIntegration, isSchedule, maximumNameLength,
+  maximumPromptLength, needsProject, newTrigger, openableRun, placementLabel, placementProblem, placementWait, scriptArgumentsTemplate, runStatusLabel, runTone, runTriggerLabel, runsWithFacts, secretName, secretReference, sessionOrigin, sessionSettingsOf, timelinePosition, timelineRows, triggerIcon, triggerLabel,
   triggerTone, triggerTypes, type AutomationForm } from "./automations";
 
 const english = (key: MessageKey, parameters?: Readonly<Record<string, string | number>>) => translate("en", key, parameters);
 const trigger = (type: string, change: Partial<AutomationTriggerItem> = {}): AutomationTriggerItem =>
-  ({ type, minute: 0, every: 1, at: [], days: [], expression: null, event: "opened", authors: "trusted", command: null, folder: null, ...change });
+  ({ type, minute: 0, every: 1, at: [], days: [], expression: null, event: "opened", authors: "trusted", command: null, folder: null, integration: null, ...change });
 const item = (id: string, change: Partial<AutomationItem> = {}): AutomationItem => ({
   id, name: `Automation ${id}`, enabled: true, prompt: "Do the thing.", projectId: null, projectName: null, projectFolder: null, storeProjectId: null, file: "/home/config.toml",
   provider: null, model: null, effort: null, agent: null, permissionMode: null, reviewBeforeCommit: null, sandbox: null, catchUp: false, triggers: [], problem: null, nextRunAt: null, running: false, lastRun: null, repository: null, watchProblem: null, allowed: true, script: null, scriptArguments: null, options: null, runsOn: null, placement: null, ...change,
 });
 const run = (id: string, sessionId: string | null): AutomationRunItem =>
-  ({ id, automationId: "a", name: "A", sessionId, projectId: null, startedAt: "2026-10-06T12:00:00Z", endedAt: null, trigger: "manual", detail: null, status: "running", message: null, machineId: null });
+  ({ id, automationId: "a", name: "A", sessionId, projectId: null, startedAt: "2026-10-06T12:00:00Z", endedAt: null, trigger: "manual", detail: null, status: "running", message: null, machineId: null, reply: null, output: null });
 
 test("a trigger reads as a sentence, and several as one line", () => {
   const read = (value: AutomationTriggerItem, locale: Locale = "en") => describeTrigger(value, (key, parameters) => translate(locale, key, parameters), locale);
@@ -46,11 +46,14 @@ test("a trigger reads as a sentence, and several as one line", () => {
 });
 
 test("each kind of trigger has its label, icon and color; a run by hand has its own", () => {
-  assert.deepEqual(triggerTypes.map(type => english(triggerLabel(type))), ["Hourly", "Daily", "Weekly", "Cron", "Issue", "Pull request", "Jira issue", "Command"]);
+  assert.deepEqual(triggerTypes.map(type => english(triggerLabel(type))), ["Hourly", "Daily", "Weekly", "Cron", "Issue", "Pull request", "Jira issue", "Command",
+    "Jira version", "Jira query", "Slack", "incident.io", "Webhook"]);
   assert.equal(new Set(triggerTypes.map(triggerIcon)).size, triggerTypes.length);
-  assert.equal(new Set(triggerTypes.map(triggerTone)).size, triggerTypes.length);
+  // A color per kind of the application's own triggers; those of other tools have a color each too, from fewer tones.
+  assert.equal(new Set(triggerTypes.filter(type => !isIntegration(type)).map(triggerTone)).size, triggerTypes.length - integrationTypes.length);
+  assert.ok(integrationTypes.every(type => triggerTone(type) !== "muted"));
   assert.deepEqual([triggerIcon(undefined), triggerTone(undefined), english(triggerLabel("unknown"))], ["hand", "muted", "Manual"]);
-  assert.deepEqual(triggerTypes.filter(type => !isSchedule({ type })), ["issue", "pull_request", "jira", "command"]);
+  assert.deepEqual(triggerTypes.filter(type => !isSchedule({ type })), ["issue", "pull_request", "jira", "command", ...integrationTypes]);
   // A command watches no repository: it runs in a chat too.
   assert.deepEqual(triggerTypes.filter(type => needsProject({ type })), ["issue", "pull_request", "jira"]);
   assert.deepEqual([runTone("running"), runTone("completed"), runTone("failed"), runTone("skipped"), runTone("interrupted")], ["running", "ok", "failed", "muted", "muted"]);
@@ -58,7 +61,28 @@ test("each kind of trigger has its label, icon and color; a run by hand has its 
     ["Running", "Completed", "Failed", "Cancelled", "Interrupted", "Skipped", "Unknown"]);
   // A run a budget of its machine holds says what it waits for.
   assert.deepEqual([runTone("held"), english(runStatusLabel("held"))], ["held", "Waits for Continue anyway"]);
-  assert.deepEqual(["manual", "daily", "issue", "pull_request", "command"].map(name => english(runTriggerLabel(name))), ["Manual", "Daily", "Issue", "Pull request", "Command"]);
+  assert.deepEqual(["manual", "daily", "issue", "pull_request", "command", "try", "slack"].map(name => english(runTriggerLabel(name))),
+    ["Manual", "Daily", "Issue", "Pull request", "Command", "Try", "Slack"]);
+});
+
+test("a trigger of another tool reads as a sentence, starts with its default event, and names its secrets by reference", () => {
+  const read = (value: AutomationTriggerItem) => describeTrigger(value, english, "en");
+  const version = newTrigger("jira_version");
+  assert.equal(read({ ...version, integration: { ...version.integration!, jiraProject: "PLAT" } }), "When a version of PLAT is released");
+  assert.equal(read(newTrigger("jira_query")), "When an issue matches a Jira query");
+  assert.equal(read({ ...newTrigger("jira_query"), event: "updated" }), "When an issue changes while it matches a Jira query");
+  assert.equal(read(newTrigger("slack")), "When the app is mentioned in Slack");
+  assert.equal(read({ ...newTrigger("slack"), event: "message" }), "When a message is posted in Slack");
+  assert.equal(read(newTrigger("incident_io")), "When incident.io declares an incident");
+  assert.equal(read(newTrigger("webhook")), "When a signed webhook arrives");
+  assert.deepEqual(integrationTypes.map(type => newTrigger(type).event), ["released", "matches", "mention", "declared", "received"]);
+  // A new trigger only reads: writing back where the event came from is turned on by the person.
+  assert.ok(integrationTypes.every(type => newTrigger(type).integration!.reply === false));
+  assert.equal(newTrigger("webhook").integration!.signature, "standard");
+  assert.deepEqual([needsProject(newTrigger("jira_query")), canReply("webhook"), isHooked("incident_io"), isHooked("slack")], [false, false, true, false]);
+  assert.equal(secretReference(" JIRA_TOKEN "), "${secret:JIRA_TOKEN}");
+  assert.equal(secretReference("  "), null);
+  assert.deepEqual([secretName("${secret:JIRA_TOKEN}"), secretName(null), secretName("plain")], ["JIRA_TOKEN", "", "plain"]);
 });
 
 test("a new trigger starts with values that can be saved; a command waits to be written", () => {
@@ -66,7 +90,7 @@ test("a new trigger starts with values that can be saved; a command waits to be 
     const form: AutomationForm = { ...emptyForm("p"), name: "n", prompt: "p", triggers: [newTrigger(type)] };
     assert.equal(formProblem(form), type === "command" ? "Write the command of the trigger." : null, type);
   }
-  assert.deepEqual(newTrigger("weekly"), { type: "weekly", minute: 0, every: 1, at: ["09:00"], days: ["mon"], expression: null, event: "opened", authors: "trusted", command: null, folder: null });
+  assert.deepEqual(newTrigger("weekly"), { type: "weekly", minute: 0, every: 1, at: ["09:00"], days: ["mon"], expression: null, event: "opened", authors: "trusted", command: null, folder: null, integration: null });
   assert.equal(newTrigger("cron").expression, "0 9 * * 1-5");
   assert.deepEqual([newTrigger("command").command, newTrigger("command").folder, newTrigger("daily").command], ["", null, null]);
 });

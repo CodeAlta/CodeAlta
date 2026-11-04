@@ -884,7 +884,11 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                     // A command runs with the identity of the space its runs go to (AutomationRunner): the space of its project.
                     new Automations.ShellAutomationCommands(projectId => host.Identities.ResolveAsync(null, projectId).GetAwaiter().GetResult().Environment),
                     // An automation that runs a script is allowed with the script as the library holds it.
-                    entry => entry.Definition.Script is { } script ? host.CodeModeScripts.FindHash(script, entry.ProjectPath) : null);
+                    entry => entry.Definition.Script is { } script ? host.CodeModeScripts.FindHash(script, entry.ProjectPath) : null)
+                {
+                    // Jira and Slack, with the secrets of this computer, while the desktop runs; the hooks of a server go to its machines.
+                    Integrations = Automations.AutomationIntegrationOptions.ForHost(host.CatalogOptions.GlobalRoot),
+                };
                 // An automation of the user can run on a paired machine: it is copied there, and runs there while this
                 // computer is closed. A profile that placed none makes no call and creates no key.
                 var placedFleet = fleet;

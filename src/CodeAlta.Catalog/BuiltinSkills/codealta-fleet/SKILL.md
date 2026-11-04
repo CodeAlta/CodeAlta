@@ -37,6 +37,12 @@ A machine that is not ready is not chosen. Say why to the user when no machine f
 - `alta fleet automation place <automation-id> --machine <machine>` makes a disabled automation run on that machine; `--here` brings it back. A person enables it.
 - `alta fleet automation run <automation-id>` runs it now where it runs; `alta fleet automation runs <automation-id>` reads its runs, those its machine reported included.
 
+## Events of other tools
+
+- An automation starts on Jira (a version released, an issue of a JQL query), Slack (a message or a mention, over Socket Mode) or a hook of a server (incident.io, a signed webhook) when its triggers say so (`alta automation create --help`). Their credentials are `${secret:NAME}` references to secrets of the machine that runs it: check them with `alta fleet secret list <machine>`.
+- `alta fleet hook list` lists the hooks of the person on a server, with the address each gives a tool and its machine; `--events <hook-id>` says what the machine did with its latest events (`accepted`, `refused` with why, such as a signature that does not verify, `expired`). The server holds no signing secret: the machine checks each event.
+- A person makes a hook, tests the connection, looks at a sample event and tries the automation in the Automations tab.
+
 ## Statistics, updates and health
 
 - `alta fleet statistics --days 30 --group-by machine,provider` reads the sums of what the person's machines did (runs, tokens, tool calls, estimated costs) from the server.

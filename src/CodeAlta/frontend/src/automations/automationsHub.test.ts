@@ -8,10 +8,10 @@ const item = (id: string): AutomationItem => ({
   provider: null, model: null, effort: null, agent: null, permissionMode: null, reviewBeforeCommit: null, sandbox: null, catchUp: false, triggers: [], problem: null, nextRunAt: null, running: false, lastRun: null, repository: null, watchProblem: null, allowed: true, script: null, scriptArguments: null, options: null, runsOn: null, placement: null,
 });
 const run = (status: string, sessionId: string | null = "s1"): AutomationRunItem =>
-  ({ id: "r1", automationId: "a", name: "A", sessionId, projectId: "p", startedAt: "2026-10-06T12:00:00Z", endedAt: null, trigger: "manual", detail: null, status, message: status === "failed" ? "No model." : null, machineId: null });
+  ({ id: "r1", automationId: "a", name: "A", sessionId, projectId: "p", startedAt: "2026-10-06T12:00:00Z", endedAt: null, trigger: "manual", detail: null, status, message: status === "failed" ? "No model." : null, machineId: null, reply: null, output: null });
 const listed = (items: AutomationItem[], change: Partial<AutomationsListResponse> = {}): AutomationsListResponse =>
   ({ status: "ok", paused: false, scanned: true, items, faults: [], runs: [], upcoming: [], ...change });
-const trigger: AutomationTriggerItem = { type: "daily", minute: 0, every: 1, at: ["09:00"], days: [], expression: null, event: "opened", authors: "trusted", command: null, folder: null };
+const trigger: AutomationTriggerItem = { type: "daily", minute: 0, every: 1, at: ["09:00"], days: [], expression: null, event: "opened", authors: "trusted", command: null, folder: null, integration: null };
 const settle = () => new Promise<void>(resolve => setTimeout(resolve, 0));
 
 // A host that answers what the test says and records what it is asked. Its notices are sent by the test.
@@ -43,6 +43,10 @@ function fixture() {
     run: (request: object) => answer("run", request, state.run),
     runs: (request: object) => answer("runs", request, { status: "ok", runs: [run("completed")] }),
     preview: (request: object) => answer("preview", request, { status: "ok", message: null, times: ["2026-10-07T09:00:00Z"] }),
+    testTrigger: (request: object) => answer("testTrigger", request, { status: "refused", message: "The secret JIRA_TOKEN is not set on this machine." }),
+    sampleEvent: (request: object) => answer("sampleEvent", request, { status: "ok", message: null, detail: "PLAT-7 Crash", prompt: "Triage it.\n---\nTitle: Crash", replyTo: "the Jira issue PLAT-7" }),
+    tryRun: (request: object) => answer("tryRun", request, { status: "ok", message: null, run: { ...run("running"), trigger: "try" } }),
+    createHook: (request: object) => answer("createHook", request, { status: "ok", message: null, hookId: "abcdefghijklmnopqrstuvwxyz", url: "https://fleet.test/api/v1/hooks/abcdefghijklmnopqrstuvwxyz" }),
     watch: async (request: object, options?: { signal?: AbortSignal }) => {
       calls.push(`watch:${JSON.stringify(request)}`);
       if (state.fail) throw new Error("gone");
@@ -179,6 +183,20 @@ test("a change that the host also announces returns once the newest list is show
   state.held[1]();
   assert.deepEqual(await saving, { ok: true, id: "new", message: null });
   assert.ok(hub.getSnapshot().items.some(value => value.id === "new"));
+});
+
+test("a trigger of another tool is tested, sampled, tried and given a hook through the host", async () => {
+  const { hub, calls } = fixture();
+  hub.connect("epoch-1");
+  await settle();
+  assert.deepEqual(await hub.testTrigger(trigger, "p"), { ok: false, message: "The secret JIRA_TOKEN is not set on this machine." });
+  assert.deepEqual(await hub.sample(trigger, "p", "Triage it.", null),
+    { ok: true, message: null, detail: "PLAT-7 Crash", prompt: "Triage it.\n---\nTitle: Crash", replyTo: "the Jira issue PLAT-7" });
+  const tried = await hub.tryRun("a", 0, null);
+  assert.deepEqual([tried.ok, tried.run?.trigger], [true, "try"]);
+  assert.ok(calls.includes('tryRun:{"expectedEpoch":"epoch-1","id":"a","triggerIndex":0,"body":null}'));
+  assert.deepEqual(await hub.createHook("node-1", "incident_io", null),
+    { ok: true, message: null, hookId: "abcdefghijklmnopqrstuvwxyz", url: "https://fleet.test/api/v1/hooks/abcdefghijklmnopqrstuvwxyz" });
 });
 
 test("a run answers with its session, or with why it did not start", async () => {

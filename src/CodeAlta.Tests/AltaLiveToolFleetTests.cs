@@ -265,6 +265,22 @@ public sealed partial class AltaLiveToolTests
     }
 
     [TestMethod]
+    public async Task FleetHooks_AreListedWithTheirAddresses_AndWhatTheirMachineDidWithEachEvent()
+    {
+        var dispatcher = CreateDispatcher(new AltaServiceCollection().Add<IAltaFleet>(new FakeFleet()));
+
+        var listed = await dispatcher.InvokeAsync(["fleet", "hook", "list", "--events", "hook1"], caller: FleetAgent);
+        Assert.AreEqual(AltaExitCodes.Success, listed.ExitCode, listed.Transcript);
+        var hook = Records(listed, "alta.fleet.hook").Single();
+        Assert.AreEqual(("hook1", "https://fleet.example/api/v1/hooks/hook1", "mac-mini", "incident_io"),
+            (hook.GetProperty("id").GetString(), hook.GetProperty("address").GetString(), hook.GetProperty("machine").GetString(), hook.GetProperty("source").GetString()));
+        var refused = Records(listed, "alta.fleet.hook.event").Single();
+        Assert.AreEqual(("refused", "The signature of the event does not verify with its signing secret."), (refused.GetProperty("state").GetString(), refused.GetProperty("message").GetString()));
+        // An address takes events from anyone who knows it: not read from a sandbox.
+        Assert.IsFalse(AltaSandboxGate.Allows("alta fleet hook list"));
+    }
+
+    [TestMethod]
     public void FleetCommands_ThatStartOrChangeWorkElsewhere_AreRefusedToASandboxedSession_TheReadsAreNot()
     {
         foreach (var read in new[] { "machine list", "machine show", "machine sessions", "machine devices", "move status", "automation list", "automation runs", "statistics", "update status", "health" })
@@ -282,8 +298,9 @@ public sealed partial class AltaLiveToolTests
         var dispatcher = new AltaCommandDispatcher(registry, new AltaServiceCollection().Add(new CatalogOptions { GlobalRoot = root.Path }).Add(registry)
             .Add<IAltaFleet>(new FakeFleet()).Add<IAltaAutomations>(new FakeAutomations()).Add<IAltaSessionMachineMoves>(new RecordingMachineMoves()));
         var commands = dispatcher.Describe(AltaCallerIdentity.Cli, root.Path).Where(static command => command.Path.StartsWith("fleet ", StringComparison.Ordinal)).ToArray();
-        // Fifteen commands of machines, moves, automations, statistics, updates, health and secrets; nine of access (`fleet access`).
-        Assert.HasCount(24, commands);
+        // Fifteen commands of machines, moves, automations, statistics, updates, health and secrets; nine of access (`fleet access`);
+        // one of hooks.
+        Assert.HasCount(25, commands);
         foreach (var command in commands)
         {
             Assert.IsNotNull(command.Policy, command.Path);
@@ -387,6 +404,10 @@ public sealed partial class AltaLiveToolTests
             });
 
         public IReadOnlyList<AltaFleetServer> ListServers() => [new("link-1", "https://fleet.example", "Contoso", "online", null)];
+
+        public Task<AltaFleetHooks> ListHooksAsync(string? server, string? hookId, CancellationToken cancellationToken)
+            => Task.FromResult(new AltaFleetHooks("ok", null, [new("hook1", "https://fleet.example/api/v1/hooks/hook1", "mac-mini", "incident_io", "incident.io", null, 0)],
+                hookId == "hook1" ? [new("d1", DateTimeOffset.UnixEpoch, "refused", "The signature of the event does not verify with its signing secret.")] : []));
 
         public Task<AltaFleetSecrets> ListSecretsAsync(string? machine, CancellationToken cancellationToken)
             => Task.FromResult(machine switch

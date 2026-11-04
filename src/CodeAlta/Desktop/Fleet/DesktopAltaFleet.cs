@@ -276,6 +276,25 @@ internal sealed partial class DesktopAltaFleet(DesktopFleet fleet, string machin
     }
 
     /// <inheritdoc />
+    public async Task<AltaFleetHooks> ListHooksAsync(string? server, string? hookId, CancellationToken cancellationToken)
+    {
+        if (Servers is not { } servers || Connection(server) is not { } connection) return new("no_server", null, [], []);
+        try
+        {
+            var (address, hooks, events) = await servers.ListHooksAsync(connection.Link.Id, hookId, cancellationToken).ConfigureAwait(false);
+            var machines = connection.Connector?.Directory.Machines;
+            return new("ok", null,
+                [.. hooks.Hooks.Select(hook => new AltaFleetHook(hook.Id, new Uri(address, hook.Path).ToString(),
+                    machines is not null && machines.TryGetValue(hook.MachineId, out var machine) ? machine.Inventory.Name : hook.MachineId, hook.Source, hook.Label, hook.LastReceivedAt, hook.Pending))],
+                [.. (events?.Events ?? []).Select(static item => new AltaFleetHookEvent(item.DeliveryId, item.ReceivedAt, item.State, item.Message))]);
+        }
+        catch (Exception exception) when (Failure(exception) is { } failure)
+        {
+            return new(failure.Status, failure.Message, [], []);
+        }
+    }
+
+    /// <inheritdoc />
     public IReadOnlyList<AltaFleetServer> ListServers()
         => Servers is not { } servers ? [] : [.. servers.Connections.Select(static connection => FleetServerService.View(connection, []))
             .Select(static view => new AltaFleetServer(view.Id, view.Url, view.Organization, view.Connection, view.Problem))];

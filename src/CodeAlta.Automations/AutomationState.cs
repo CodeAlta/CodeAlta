@@ -66,6 +66,12 @@ internal sealed record AutomationRun(string Id, string AutomationId, DateTimeOff
 
     /// <summary>The unit of <see cref="Cost"/>: <c>usd</c>, or the one the provider named.</summary>
     public string? CostUnit { get; init; }
+
+    /// <summary>What was done with the answer of a run started by another tool: written back to its source, failed, or kept by a try.</summary>
+    public string? Reply { get; init; }
+
+    /// <summary>The answer a try kept instead of writing it back; null otherwise.</summary>
+    public string? Output { get; init; }
 }
 
 /// <summary>What an event trigger has already seen of a repository.</summary>

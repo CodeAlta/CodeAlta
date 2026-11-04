@@ -24,6 +24,33 @@ public sealed class AutomationHostTests
     private static readonly TimeSpan Patience = TimeSpan.FromSeconds(30);
 
     [TestMethod]
+    public async Task Rpc_KeepsEverySettingOfATriggerOfAnotherTool_AndTestsItsConnection()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var slack = new AutomationTriggerItem("slack", 0, 1, [], [], null, "message", "trusted", null, null)
+        {
+            Integration = new AutomationIntegrationItem(null, null, null, null, null, "${secret:SLACK_APP}", "${secret:SLACK_BOT}", "C0123ABCDEF", "deploy", null, null, null, null, null, [], true),
+        };
+        var saved = await fixture.Rpc.SaveAsync(new(Epoch, Input("Deploys") with { Triggers = [slack] }, null), default);
+        Assert.AreEqual("ok", saved.Status, saved.Message);
+
+        var listed = (await fixture.Rpc.ListAsync(new(Epoch), default)).Items.Single(item => item.Id == saved.Id).Triggers.Single();
+        Assert.AreEqual(("slack", "message"), (listed.Type, listed.Event));
+        Assert.AreEqual(slack.Integration, listed.Integration! with { Fields = slack.Integration!.Fields });
+        // A token written in clear is refused with the reason, before anything is written.
+        var leaky = slack with { Integration = slack.Integration! with { BotToken = "xoxb-1-real-token" } };
+        var refused = await fixture.Rpc.SaveAsync(new(Epoch, Input("Leaky") with { Triggers = [leaky] }, null), default);
+        Assert.AreEqual("refused", refused.Status);
+        StringAssert.Contains(refused.Message, "${secret:NAME}");
+        // This fixture's engine watches no other tool: the test says so, the sample too.
+        var test = await fixture.Rpc.TestTriggerAsync(new(Epoch, null, slack, null, null), default);
+        Assert.AreEqual(("refused", "This host does not watch other tools."), (test.Status, test.Message));
+        Assert.AreEqual("refused", (await fixture.Rpc.SampleEventAsync(new(Epoch, null, slack, "x", null), default)).Status);
+        Assert.AreEqual("stale_epoch", (await fixture.Rpc.TryRunAsync(new("other", saved.Id!, 0, null), default)).Status);
+        Assert.AreEqual("refused", (await fixture.Rpc.CreateHookAsync(new(Epoch, "node-1", "webhook", null), default)).Status, "no server reaches that machine");
+    }
+
+    [TestMethod]
     public async Task Rpc_Lists_Saves_AndMovesAnAutomationBetweenTheFiles()
     {
         await using var fixture = await Fixture.CreateAsync();

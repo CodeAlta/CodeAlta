@@ -30,6 +30,37 @@ internal enum AutomationTriggerKind
 
     /// <summary>When a command the automation keeps running ends with the exit code 0.</summary>
     Command,
+
+    /// <summary>When a version of a Jira project is released, as the REST API of the site says.</summary>
+    JiraVersion,
+
+    /// <summary>When an issue starts to match a JQL query, or changes while it matches.</summary>
+    JiraQuery,
+
+    /// <summary>When a message is posted in a Slack channel, or mentions the app, as Socket Mode delivers it.</summary>
+    Slack,
+
+    /// <summary>When incident.io pushes an incident event to a hook of the server.</summary>
+    IncidentIo,
+
+    /// <summary>When any tool pushes a signed event to a hook of the server.</summary>
+    Webhook,
+}
+
+/// <summary>How the sender of a webhook signs what it pushes.</summary>
+internal static class AutomationSignatures
+{
+    /// <summary>Standard Webhooks (<c>webhook-id</c>, <c>webhook-timestamp</c>, <c>webhook-signature</c>), as incident.io and Svix send it.</summary>
+    internal const string Standard = "standard";
+
+    /// <summary>GitHub's <c>X-Hub-Signature-256: sha256=&lt;hex&gt;</c>.</summary>
+    internal const string GitHub = "github";
+
+    /// <summary>An HMAC-SHA256 of the body, in hexadecimal or base64, in a header the trigger names.</summary>
+    internal const string HmacSha256 = "hmac_sha256";
+
+    /// <summary>The schemes, in the order the editor offers them.</summary>
+    internal static readonly string[] All = [Standard, GitHub, HmacSha256];
 }
 
 /// <summary>Whose issues and pull requests start an automation.</summary>
@@ -122,8 +153,87 @@ internal sealed record AutomationTrigger(AutomationTriggerKind Kind)
     /// </summary>
     public string? Folder { get; init; }
 
-    /// <summary>Whether the trigger is a schedule, as opposed to an event of the repository or a command.</summary>
-    public bool IsSchedule => !IsEvent && !IsCommand;
+    /// <summary>The integration triggers: the site of Jira (<c>https://acme.atlassian.net</c>), or a <c>${var:NAME}</c> reference.</summary>
+    public string? Site { get; init; }
+
+    /// <summary>Jira: the email of the account of the API token, or a <c>${var:NAME}</c> reference.</summary>
+    public string? Email { get; init; }
+
+    /// <summary>Jira: the API token, a <c>${secret:NAME}</c> reference and never a value.</summary>
+    public string? Token { get; init; }
+
+    /// <summary><see cref="AutomationTriggerKind.JiraVersion"/>: the key of the Jira project whose versions are watched.</summary>
+    public string? JiraProject { get; init; }
+
+    /// <summary><see cref="AutomationTriggerKind.JiraQuery"/>: the JQL query.</summary>
+    public string? Query { get; init; }
+
+    /// <summary>Slack: the app-level token of Socket Mode (<c>xapp-</c>), a <c>${secret:NAME}</c> reference.</summary>
+    public string? AppToken { get; init; }
+
+    /// <summary>Slack: the bot token (<c>xoxb-</c>) that replies and reads, a <c>${secret:NAME}</c> reference.</summary>
+    public string? BotToken { get; init; }
+
+    /// <summary>Slack: the id of the channel watched (<c>C0123ABCD</c>), or a <c>${var:NAME}</c> reference.</summary>
+    public string? Channel { get; init; }
+
+    /// <summary>Slack: a text the message must contain, case ignored; null for any message.</summary>
+    public string? Match { get; init; }
+
+    /// <summary>incident.io: the API key that re-reads the incident and writes on its timeline, a <c>${secret:NAME}</c> reference.</summary>
+    public string? ApiKey { get; init; }
+
+    /// <summary>incident.io and webhooks: the id of the hook of the server the events are pushed to.</summary>
+    public string? Hook { get; init; }
+
+    /// <summary>incident.io and webhooks: the signing secret of the sender, a <c>${secret:NAME}</c> reference the server never holds.</summary>
+    public string? Secret { get; init; }
+
+    /// <summary>Webhooks: how the sender signs (<see cref="AutomationSignatures"/>).</summary>
+    public string? Signature { get; init; }
+
+    /// <summary>Webhooks with <see cref="AutomationSignatures.HmacSha256"/>: the header that holds the signature.</summary>
+    public string? SignatureHeader { get; init; }
+
+    /// <summary>Webhooks: the JSON pointers of the fields of the body that reach the prompt; nothing else of it does.</summary>
+    public IReadOnlyList<string> Fields { get; init; } = [];
+
+    /// <summary>Whether the answer of the run is written back where the event came from (a comment, a thread reply, a timeline item).</summary>
+    public bool Reply { get; init; }
+
+    /// <summary>The longest JQL query kept.</summary>
+    internal const int MaximumQueryLength = 2000;
+
+    /// <summary>The most fields of a webhook that reach the prompt.</summary>
+    internal const int MaximumFields = 16;
+
+    /// <summary>Whether the trigger watches a tool other than Git through its own API or a hook of the server.</summary>
+    public bool IsIntegration => Kind is AutomationTriggerKind.JiraVersion or AutomationTriggerKind.JiraQuery or AutomationTriggerKind.Slack
+        or AutomationTriggerKind.IncidentIo or AutomationTriggerKind.Webhook;
+
+    /// <summary>Whether the events of the trigger are pushed to a hook of the server.</summary>
+    public bool IsHooked => Kind is AutomationTriggerKind.IncidentIo or AutomationTriggerKind.Webhook;
+
+    /// <summary>Whether the trigger can write the answer of a run back to its source.</summary>
+    public bool CanReply => Kind is AutomationTriggerKind.JiraQuery or AutomationTriggerKind.Slack or AutomationTriggerKind.IncidentIo;
+
+    /// <summary>The events each integration trigger starts on, the default first.</summary>
+    internal static IReadOnlyList<string> Events(AutomationTriggerKind kind) => kind switch
+    {
+        AutomationTriggerKind.JiraVersion => ["released"],
+        AutomationTriggerKind.JiraQuery => ["matches", "updated"],
+        AutomationTriggerKind.Slack => ["message", "mention"],
+        AutomationTriggerKind.IncidentIo => ["declared", "updated"],
+        AutomationTriggerKind.Webhook => ["received"],
+        AutomationTriggerKind.Jira => ["created", "updated"],
+        _ => ["opened", "updated"],
+    };
+
+    /// <summary>The secret references the trigger uses: its credentials.</summary>
+    public IEnumerable<string> Credentials => new[] { Token, AppToken, BotToken, ApiKey, Secret }.OfType<string>();
+
+    /// <summary>Whether the trigger is a schedule, as opposed to an event of the repository, of another tool, or a command.</summary>
+    public bool IsSchedule => !IsEvent && !IsCommand && !IsIntegration;
 
     /// <summary>Whether the trigger is an event of the repository of the project, or of its tracker.</summary>
     public bool IsEvent => Kind is AutomationTriggerKind.Issue or AutomationTriggerKind.PullRequest or AutomationTriggerKind.Jira;
@@ -137,7 +247,8 @@ internal sealed record AutomationTrigger(AutomationTriggerKind Kind)
     /// <summary>The name of the kind in a configuration file.</summary>
     public string KindName => KindNames[(int)Kind];
 
-    private static readonly string[] KindNames = ["hourly", "daily", "weekly", "cron", "issue", "pull_request", "jira", CommandKindName];
+    private static readonly string[] KindNames = ["hourly", "daily", "weekly", "cron", "issue", "pull_request", "jira", CommandKindName,
+        "jira_version", "jira_query", "slack", "incident_io", "webhook"];
 
     /// <summary>Reads the name of a kind from a configuration file.</summary>
     internal static bool TryParseKind(string? name, out AutomationTriggerKind kind)
@@ -156,8 +267,22 @@ internal sealed record AutomationTrigger(AutomationTriggerKind Kind)
         AutomationTriggerKind.Cron => "cron:" + Expression,
         // Neither part holds a tabulation: two commands that differ, or that run in two folders, are two triggers.
         AutomationTriggerKind.Command => "command:" + Folder + "\t" + Command,
+        // What it watches, not how it signs in: a new token keeps what the trigger has seen.
+        AutomationTriggerKind.JiraVersion => $"jira_version:{Site}\t{JiraProject}",
+        AutomationTriggerKind.JiraQuery => $"jira_query:{Event}:{Site}\t{Query}",
+        AutomationTriggerKind.Slack => $"slack:{Event}:{Channel}\t{Match}",
+        AutomationTriggerKind.IncidentIo => $"incident_io:{Event}:{Hook}",
+        AutomationTriggerKind.Webhook => $"webhook:{Hook}",
         _ => $"{KindName}:{Event}:{(Authors == AutomationAuthors.Anyone ? "anyone" : "trusted")}",
     };
+
+    /// <summary>
+    /// What the fingerprint of an automation takes of the trigger: its <see cref="Key"/>, and for an integration trigger
+    /// also how it signs in, what it binds and whether it replies, so that a change of any of them asks again.
+    /// </summary>
+    public string FingerprintKey => !IsIntegration ? Key
+        : string.Join('\t', Key, Email ?? string.Empty, string.Join(',', Credentials), Signature ?? string.Empty, SignatureHeader ?? string.Empty,
+            string.Join(',', Fields), Reply ? "reply" : string.Empty);
 }
 
 /// <summary>The provider, model and effort an automation asks for: each part is optional.</summary>
@@ -294,7 +419,7 @@ internal sealed record AutomationDefinition(string Id, string Name)
     internal string Fingerprint()
     {
         var text = string.Join('\n', Name, Model.Format() ?? string.Empty, Agent ?? string.Empty, CatchUp ? "1" : "0", Project ?? string.Empty,
-            string.Join('|', Triggers.Select(static trigger => trigger.Key)), Prompt);
+            string.Join('|', Triggers.Select(static trigger => trigger.FingerprintKey)), Prompt);
         // An automation without them keeps the fingerprint it was allowed with.
         if (PermissionMode is not null || ReviewBeforeCommit is not null || Sandbox is not null)
             text += "\n" + string.Join('\n', PermissionMode ?? string.Empty, ReviewBeforeCommit switch { true => "1", false => "0", null => string.Empty }, Sandbox ?? string.Empty);

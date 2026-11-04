@@ -119,7 +119,7 @@ internal sealed record ApiAnswer(HttpStatusCode Status, JsonElement Body)
     {
         TypeInfoResolverChain = { ServerApiJsonContext.Default, FleetServerJsonContext.Default, FleetDeviceListJsonContext.Default, FleetTelemetryJsonContext.Default,
             FleetAutomationApiJsonContext.Default, FleetSecretsApiJsonContext.Default, FleetEnvironmentJsonContext.Default, FleetSignInJsonContext.Default,
-            FleetBudgetsApiJsonContext.Default, FleetAccessApiJsonContext.Default, FleetAccessDocumentJsonContext.Default },
+            FleetBudgetsApiJsonContext.Default, FleetAccessApiJsonContext.Default, FleetAccessDocumentJsonContext.Default, FleetHookApiJsonContext.Default },
     };
 }
 

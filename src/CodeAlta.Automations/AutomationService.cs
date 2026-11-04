@@ -551,6 +551,7 @@ internal sealed partial class AutomationService : IAsyncDisposable
             if (_closed) return;
             _closed = true;
             commands = EndCommands();
+            StopListeners();
             pending = [.. new[] { _loop, _scan, _look }.OfType<Task>(), .. _observers];
         }
 
@@ -568,6 +569,7 @@ internal sealed partial class AutomationService : IAsyncDisposable
         // The next start tells from this what was missed while the application was closed.
         _state.Flush();
         (_feed as IDisposable)?.Dispose();
+        if (Integrations is { DisposesHttp: true } integrations) integrations.Http.Dispose();
         _stop.Dispose();
     }
 
@@ -648,6 +650,7 @@ internal sealed partial class AutomationService : IAsyncDisposable
         foreach (var (entry, trigger, due) in starts)
             Trigger(entry, trigger.KindName, null, entry.Definition.Prompt, occurrence: Occurrence(trigger, due));
         if (LookAtCommands(now) is { } restart && (next is null || restart < next)) next = restart;
+        ListenToSlack(now);
         var wait = next is { } soonest ? soonest - now : LongestWait;
         return wait < TimeSpan.FromMilliseconds(250) ? TimeSpan.FromMilliseconds(250) : wait > LongestWait ? LongestWait : wait;
     }
@@ -669,8 +672,9 @@ internal sealed partial class AutomationService : IAsyncDisposable
     /// A time that is due does not wait: it is recorded as skipped.
     /// </param>
     /// <param name="occurrence">What is due, claimed before the run starts when the host claims (<see cref="Occurrence"/>); null for nothing to claim.</param>
+    /// <param name="reply">Where the answer of the run is written back, the event's source; null for nowhere.</param>
     /// <returns>Whether a run was started.</returns>
-    internal bool Trigger(AutomationEntry entry, string trigger, string? detail, string prompt, bool waits = false, string? occurrence = null)
+    internal bool Trigger(AutomationEntry entry, string trigger, string? detail, string prompt, bool waits = false, string? occurrence = null, AutomationReplyTarget? reply = null)
     {
         bool busy;
         lock (_gate)
@@ -707,7 +711,7 @@ internal sealed partial class AutomationService : IAsyncDisposable
             return false;
         }
 
-        var start = BeginAsync(entry, trigger, detail, prompt, _stop.Token, runId, occurrence);
+        var start = BeginAsync(entry, trigger, detail, prompt, _stop.Token, runId, occurrence, reply);
         lock (_gate)
         {
             _observers.RemoveAll(static task => task.IsCompleted);
@@ -719,7 +723,7 @@ internal sealed partial class AutomationService : IAsyncDisposable
 
     // Records the run, starts its session and returns once the session exists; what follows is observed apart.
     private async Task<AutomationRun?> BeginAsync(AutomationEntry entry, string trigger, string? detail, string prompt, CancellationToken cancellationToken, string? runId = null,
-        string? occurrence = null)
+        string? occurrence = null, AutomationReplyTarget? reply = null)
     {
         var run = new AutomationRun(runId ?? NewRunId(), entry.Id, _time.GetUtcNow(), trigger) { Name = entry.Definition.Name, ProjectId = entry.ProjectId, Detail = detail };
         lock (_gate)
@@ -763,7 +767,7 @@ internal sealed partial class AutomationService : IAsyncDisposable
                 ? current with { SessionId = start.SessionId, Status = AutomationRun.Running, Message = null }
                 : current with { SessionId = start.SessionId }) ?? run with { SessionId = start.SessionId };
         Changed?.Invoke();
-        var observer = ObserveAsync(run.Id, entry.Id, start.Completion);
+        var observer = ObserveAsync(run.Id, entry, start.Completion, reply);
         lock (_gate)
         {
             _observers.RemoveAll(static task => task.IsCompleted);
@@ -773,8 +777,9 @@ internal sealed partial class AutomationService : IAsyncDisposable
         return started;
     }
 
-    private async Task ObserveAsync(string runId, string automationId, Task<AutomationOutcome> completion)
+    private async Task ObserveAsync(string runId, AutomationEntry entry, Task<AutomationOutcome> completion, AutomationReplyTarget? reply)
     {
+        var automationId = entry.Id;
         AutomationOutcome outcome;
         try
         {
@@ -788,6 +793,13 @@ internal sealed partial class AutomationService : IAsyncDisposable
         catch (Exception exception) when (exception is not OutOfMemoryException)
         {
             outcome = new(AutomationRun.Failed, FirstLine(exception.Message));
+        }
+
+        // The answer goes back where the event came from before the run is recorded as ended, with what was done.
+        if (reply is not null)
+        {
+            var (replied, kept) = await ReplyAsync(entry, reply, outcome, runId).ConfigureAwait(false);
+            outcome = outcome with { Reply = replied, Output = kept };
         }
 
         End(runId, automationId, outcome, null);
@@ -812,6 +824,7 @@ internal sealed partial class AutomationService : IAsyncDisposable
         {
             Status = outcome.Status, Message = outcome.Message, EndedAt = _time.GetUtcNow(), SessionId = sessionId ?? run.SessionId,
             InputTokens = outcome.Usage?.InputTokens, OutputTokens = outcome.Usage?.OutputTokens, Cost = outcome.Usage?.Cost, CostUnit = outcome.Usage?.CostUnit,
+            Reply = outcome.Reply ?? run.Reply, Output = outcome.Output ?? run.Output,
         });
         _claims?.Release(runId, _time.GetUtcNow());
         if (waiting) Wake();

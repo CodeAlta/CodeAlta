@@ -119,6 +119,8 @@ internal static class AutomationTriggerText
             AutomationTriggerKind.Weekly => "weekly@" + string.Join(',', trigger.Days.Select(static day => AutomationTrigger.DayNames[(int)day])) + "@" + string.Join(',', trigger.At),
             AutomationTriggerKind.Cron => "cron@" + trigger.Expression,
             AutomationTriggerKind.Command => "command@" + trigger.Command,
+            // A trigger of another tool has settings of its own: the inline table of a configuration file.
+            _ when trigger.IsIntegration => AutomationConfig.Format(trigger),
             _ => trigger.KindName + "@" + trigger.Event + (trigger.Authors == AutomationAuthors.Anyone ? "+anyone" : string.Empty),
         };
     }
@@ -129,13 +131,20 @@ internal static class AutomationTriggerText
     {
         (trigger, problem) = (null, null);
         var value = text?.Trim() ?? string.Empty;
+        if (value.StartsWith('{')) return TryParseTable(value, out trigger, out problem);
         var at = value.IndexOf('@');
         var name = (at < 0 ? value : value[..at]).Trim().ToLowerInvariant();
         var rest = at < 0 ? string.Empty : value[(at + 1)..].Trim();
         if (name == "pr") name = "pull_request";
         if (!AutomationTrigger.TryParseKind(name, out var kind))
         {
-            problem = $"'{text}' is not a trigger. Write daily@09:00, hourly@15, weekly@mon,thu@08:30, cron@0 9 * * 1-5, issue@opened, pull_request@opened, jira@created or command@<command line>.";
+            problem = $"'{text}' is not a trigger. Write daily@09:00, hourly@15, weekly@mon,thu@08:30, cron@0 9 * * 1-5, issue@opened, pull_request@opened, jira@created, command@<command line>, or a trigger of another tool as a table, such as {{ type = \"slack\", channel = \"C0123ABCDEF\", app_token = \"${{secret:SLACK_APP}}\", bot_token = \"${{secret:SLACK_BOT}}\" }}.";
+            return false;
+        }
+
+        if (new AutomationTrigger(kind).IsIntegration)
+        {
+            problem = $"A {AutomationIntegrationConfig.Name(kind)} trigger has settings of its own: write it as a table, such as {{ type = \"{name}\", ... }}, with its credentials as ${{secret:NAME}}.";
             return false;
         }
 
@@ -197,6 +206,34 @@ internal static class AutomationTriggerText
 
         // What makes the trigger one that can run is said by the same check as for a configuration file.
         problem = AutomationConfig.Validate(new AutomationDefinition(AutomationDefinition.NewId(), "trigger") { Prompt = "trigger", Triggers = [trigger] });
+        if (problem is null) return true;
+        trigger = null;
+        return false;
+    }
+
+    // A trigger written as the inline table of a configuration file: { type = "jira_query", jql = "...", ... }.
+    private static bool TryParseTable(string text, out AutomationTrigger? trigger, out string? problem)
+    {
+        (trigger, problem) = (null, null);
+        Tomlyn.Model.TomlTable? table;
+        try
+        {
+            table = Tomlyn.TomlSerializer.Deserialize<Tomlyn.Model.TomlTable>("trigger = " + text.ReplaceLineEndings(" "))?["trigger"] as Tomlyn.Model.TomlTable;
+        }
+        catch (Tomlyn.TomlException exception)
+        {
+            problem = "The trigger is not a table: " + exception.Message.ReplaceLineEndings(" ");
+            return false;
+        }
+
+        if (table is null || !AutomationConfig.TryReadTrigger(table, out trigger, out problem))
+        {
+            problem ??= "A trigger is a table with a type.";
+            trigger = null;
+            return false;
+        }
+
+        problem = AutomationConfig.Validate(new AutomationDefinition(AutomationDefinition.NewId(), "trigger") { Prompt = "trigger", Triggers = [trigger!] });
         if (problem is null) return true;
         trigger = null;
         return false;

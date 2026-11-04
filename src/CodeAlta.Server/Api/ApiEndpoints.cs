@@ -224,6 +224,7 @@ internal static class ApiEndpoints
             .WithSummary("Sets the update policy of the fleet (manual, pinned, automatic) with a policy the calling owner's controller device signed.");
 
         AutomationEndpoints.Map(api);
+        HookEndpoints.Map(api);
         SecretEndpoints.Map(api);
         SignInEndpoints.Map(api, app);
         BudgetEndpoints.Map(api);

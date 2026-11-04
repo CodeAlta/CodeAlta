@@ -9,8 +9,16 @@ import { sessionOptionsOf, storedSessionOptions } from "../sessionSettings/sessi
 import type { SessionSettings } from "../sessionSettings/sessionSettings";
 
 export type Translate = (key: MessageKey, parameters?: Readonly<Record<string, string | number>>) => string;
-export type TriggerType = "hourly" | "daily" | "weekly" | "cron" | "issue" | "pull_request" | "jira" | "command";
-export const triggerTypes: readonly TriggerType[] = ["hourly", "daily", "weekly", "cron", "issue", "pull_request", "jira", "command"];
+export type IntegrationType = "jira_version" | "jira_query" | "slack" | "incident_io" | "webhook";
+export type TriggerType = "hourly" | "daily" | "weekly" | "cron" | "issue" | "pull_request" | "jira" | "command" | IntegrationType;
+export const triggerTypes: readonly TriggerType[] = ["hourly", "daily", "weekly", "cron", "issue", "pull_request", "jira", "command", "jira_version", "jira_query", "slack", "incident_io", "webhook"];
+/** The triggers of other tools: their settings, secrets included as references, are in `integration`. */
+export const integrationTypes: readonly IntegrationType[] = ["jira_version", "jira_query", "slack", "incident_io", "webhook"];
+export const isIntegration = (type: string): type is IntegrationType => (integrationTypes as readonly string[]).includes(type);
+/** Whether a trigger of another tool can write the answer of its run back to the source of its event. */
+export const canReply = (type: string): boolean => type === "jira_query" || type === "slack" || type === "incident_io";
+/** Whether the events of a trigger are pushed to a hook of a server, for a machine of that server. */
+export const isHooked = (type: string): boolean => type === "incident_io" || type === "webhook";
 /** The days as the host names them, Monday first as a week is shown. */
 export const weekDays = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"] as const;
 export const maximumTriggers = 8;
@@ -21,12 +29,14 @@ export const maximumFolderLength = 1024;
 
 const typeLabels: Readonly<Record<TriggerType, MessageKey>> = {
   hourly: "Hourly", daily: "Daily", weekly: "Weekly", cron: "Cron", issue: "Issue", pull_request: "Pull request", jira: "Jira issue", command: "Command",
+  jira_version: "Jira version", jira_query: "Jira query", slack: "Slack", incident_io: "incident.io", webhook: "Webhook",
 };
 const typeIcons: Readonly<Record<TriggerType, IconName>> = {
   hourly: "repeat", daily: "sun", weekly: "calendar", cron: "terminal", issue: "issueOpen", pull_request: "pullRequest", jira: "list", command: "tool",
+  jira_version: "tag", jira_query: "filter", slack: "chat", incident_io: "warning", webhook: "remote",
 };
 
-export const triggerLabel = (type: string): MessageKey => typeLabels[type as TriggerType] ?? "Manual";
+export const triggerLabel = (type: string): MessageKey => type === "try" ? "Try" : typeLabels[type as TriggerType] ?? "Manual";
 /** The icon of what starts an automation: of its first trigger, or the one of a run by hand. */
 export const triggerIcon = (type: string | undefined): IconName => type && type in typeIcons ? typeIcons[type as TriggerType] : "hand";
 /** The color of a kind of trigger, one of the tones of the application. */
@@ -40,6 +50,12 @@ export function triggerTone(type: string | undefined): string {
     case "pull_request": return "orange";
     case "jira": return "blue";
     case "command": return "cyan";
+    // The two of Jira beside the one of its issues; there are fewer tones than kinds of triggers.
+    case "jira_version": return "cadet";
+    case "jira_query": return "blue";
+    case "slack": return "yellow";
+    case "incident_io": return "pink";
+    case "webhook": return "teal";
     default: return "muted";
   }
 }
@@ -47,7 +63,7 @@ export function triggerTone(type: string | undefined): string {
 /** Whether a trigger is an event of the repository of a project, or of its tracker: it needs a project. */
 export const needsProject = (trigger: Readonly<{ type: string }>): boolean => trigger.type === "issue" || trigger.type === "pull_request" || trigger.type === "jira";
 /** Whether a trigger is a time on the clock, as opposed to an event of the repository of a project or a command. */
-export const isSchedule = (trigger: Readonly<{ type: string }>): boolean => !needsProject(trigger) && trigger.type !== "command";
+export const isSchedule = (trigger: Readonly<{ type: string }>): boolean => !needsProject(trigger) && trigger.type !== "command" && !isIntegration(trigger.type);
 
 /**
  * Whether an automation waits for the user before its triggers start it: it came with the configuration of its
@@ -55,12 +71,27 @@ export const isSchedule = (trigger: Readonly<{ type: string }>): boolean => !nee
  */
 export const waitsToBeAllowed = (item: Readonly<{ allowed: boolean; triggers: readonly unknown[] }>): boolean => !item.allowed && item.triggers.length > 0;
 
+/** The events each trigger of another tool starts on, the default first, as the host names them. */
+export const integrationEvents: Readonly<Record<IntegrationType, readonly string[]>> = {
+  jira_version: ["released"], jira_query: ["matches", "updated"], slack: ["mention", "message"], incident_io: ["declared", "updated"], webhook: ["received"],
+};
+
 /** A trigger with the values a new one of its kind starts with. */
 export function newTrigger(type: TriggerType): AutomationTriggerItem {
+  const integration = isIntegration(type) ? {
+    site: null, email: null, token: null, jiraProject: null, query: null, appToken: null, botToken: null, channel: null, match: null, apiKey: null, hook: null, secret: null,
+    // Writing in another tool is something the person turns on: a new trigger only reads.
+    signature: type === "webhook" ? "standard" : null, signatureHeader: null, fields: [], reply: false,
+  } : null;
   return { type, minute: 0, every: 1, at: type === "daily" || type === "weekly" ? ["09:00"] : [], days: type === "weekly" ? ["mon"] : [],
-    expression: type === "cron" ? "0 9 * * 1-5" : null, event: type === "jira" ? "created" : "opened", authors: "trusted",
-    command: type === "command" ? "" : null, folder: null };
+    expression: type === "cron" ? "0 9 * * 1-5" : null, event: isIntegration(type) ? integrationEvents[type][0]! : type === "jira" ? "created" : "opened", authors: "trusted",
+    command: type === "command" ? "" : null, folder: null, integration };
 }
+
+/** The name of the secret a reference names (`${secret:JIRA_TOKEN}` gives `JIRA_TOKEN`), or the text when it is no reference. */
+export const secretName = (reference: string | null | undefined): string => /^\$\{secret:([^}]*)\}$/.exec(reference ?? "")?.[1] ?? reference ?? "";
+/** The reference of a secret by its name; null for a blank name. */
+export const secretReference = (name: string): string | null => name.trim() ? `${"$"}{secret:${name.trim()}}` : null;
 
 /** The name of a day in the language of the page, short: "Mon". */
 export function dayName(day: string, locale: Locale): string {
@@ -91,6 +122,11 @@ export function describeTrigger(trigger: AutomationTriggerItem, t: Translate, lo
     case "issue": return t("When an issue is opened");
     case "pull_request": return t(trigger.event === "updated" ? "When a pull request is updated" : "When a pull request is opened");
     case "jira": return t(trigger.event === "updated" ? "When a Jira issue is updated" : "When a Jira issue is created");
+    case "jira_version": return t("When a version of {project} is released", { project: trigger.integration?.jiraProject ?? "Jira" });
+    case "jira_query": return t(trigger.event === "updated" ? "When an issue changes while it matches a Jira query" : "When an issue matches a Jira query");
+    case "slack": return t(trigger.event === "message" ? "When a message is posted in Slack" : "When the app is mentioned in Slack");
+    case "incident_io": return t(trigger.event === "updated" ? "When incident.io updates an incident" : "When incident.io declares an incident");
+    case "webhook": return t("When a signed webhook arrives");
     case "command": {
       const command = (trigger.command ?? "").trim();
       const folder = (trigger.folder ?? "").trim();

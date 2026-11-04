@@ -162,7 +162,7 @@ function RunList({ runs, sessions, now, named, onOpen }: {
         <RunMark status={run.status} />
         <span className="automation-run-text">
           <strong>{named ? run.name ?? t("Automation") : status}</strong>
-          <span>{[named ? status : null, t(runTriggerLabel(run.trigger)), run.detail, run.message].filter(Boolean).join(" · ")}</span>
+          <span title={run.output ?? undefined}>{[named ? status : null, t(runTriggerLabel(run.trigger)), run.detail, run.message, run.reply].filter(Boolean).join(" · ")}</span>
         </span>
         <time dateTime={when.dateTime} title={when.title}>{when.label}</time>
         {(session || remote) && <AppIcon name="chevronRight" size={14} />}
