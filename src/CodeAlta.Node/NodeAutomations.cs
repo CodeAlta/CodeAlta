@@ -46,12 +46,17 @@ internal sealed record NodeAutomationPolicy
         var path = Path.Combine(fleetRoot, FileName);
         try
         {
-            if (!File.Exists(path)) return new();
+            // Opened at once: a file that is there but cannot be told apart from none (a folder that cannot be read) is not missing.
             using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
             var policy = JsonSerializer.Deserialize(stream, NodeAutomationJsonContext.Default.NodeAutomationPolicy);
             if (policy is null) return Closed($"{path} holds no policy");
             if (policy.Credentials is not (AnyCredentials or AccountCredentials)) return Closed($"{path} names credentials '{policy.Credentials}', neither '{AnyCredentials}' nor '{AccountCredentials}'");
             return policy;
+        }
+        catch (Exception exception) when (exception is FileNotFoundException or DirectoryNotFoundException)
+        {
+            // Missing: the default policy.
+            return new();
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or JsonException or NotSupportedException)
         {
