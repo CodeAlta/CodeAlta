@@ -36,7 +36,7 @@ const campaign = (request: FleetUpdateStartRequest): FleetUpdateCampaignView => 
 let signIn: FleetSignInSettingsView = { methods: [
   { id: "company", name: "Company sign-in", enabled: false, available: false }, { id: "passkey", name: "Passkey", enabled: true, available: true },
   { id: "microsoft", name: "Microsoft", enabled: true, available: true }, { id: "google", name: "Google", enabled: true, available: false },
-  { id: "github", name: "GitHub", enabled: true, available: true }], issuer: null, clientId: null, hasClientSecret: false, displayName: null, groupsClaim: "groups",
+  { id: "github", name: "GitHub", enabled: true, available: true }], issuer: null, clientId: null, hasClientSecret: false, displayName: null, groupsClaim: "groups", groupRoles: [],
   requireSso: false, version: 0, updatedAt: null };
 let logins: FleetSignInLoginView[] = [];
 const unavailable = async () => { throw new Error("not in this fixture"); };

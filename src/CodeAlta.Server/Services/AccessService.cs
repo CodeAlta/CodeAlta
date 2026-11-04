@@ -671,6 +671,29 @@ internal sealed partial class AccessService
     /// <summary>Gets what lists the directory per caller, which reads access again once it changed; null for none.</summary>
     public DirectoryVisibility? Visibility { get; init; }
 
+    /// <summary>
+    /// Gives a person the role the groups of their company sign-in map them to (<c>doc/fleet/identity.md</c>, company SSO): never
+    /// an owner's role, which the mapper keeps, and never the last owner's. Machines follow it once a signer signs the access document.
+    /// </summary>
+    /// <param name="person">The person who signed in.</param>
+    /// <param name="role">The role their groups give.</param>
+    /// <param name="audit">The audit record of the change, as the sign-in.</param>
+    /// <param name="cancellationToken">Cancels the change.</param>
+    /// <returns>Whether the role changed.</returns>
+    /// <exception cref="ArgumentNullException">An argument is null.</exception>
+    /// <exception cref="ArgumentException"><paramref name="role"/> is the owner role or no role.</exception>
+    public async Task<bool> ApplyGroupRoleAsync(PersonRecord person, string role, AuditEntry audit, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(person);
+        ArgumentNullException.ThrowIfNull(audit);
+        if (!FleetOrganizationRoles.IsKnown(role) || role == FleetOrganizationRoles.Owner) throw new ArgumentException("Groups give a role other than owner.", nameof(role));
+        if (person.Role == FleetOrganizationRoles.Owner || person.Role == role) return false;
+        var outcome = await _access.SetPersonRoleAsync(person.OrganizationId, person.Id, role, audit, cancellationToken).ConfigureAwait(false);
+        if (outcome != RoleChangeOutcome.Changed) return false;
+        Changed(person.OrganizationId);
+        return true;
+    }
+
     /// <summary>Tells the devices of the organization that access changed, and has the directory read access again.</summary>
     /// <param name="organizationId">The organization.</param>
     internal void Changed(string organizationId)

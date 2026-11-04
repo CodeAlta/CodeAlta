@@ -116,7 +116,9 @@ to it.
 - **Enforcement**: the organization requires its company sign-in, and no other way signs a new device in, except
   the passkey of one **break-glass Owner**.
 - People are created at their first sign-in, as members; the groups of each sign-in are kept with its login, and map
-  to roles by **group id** in milestone 4 (Entra app roles rather than group claims, which overflow past 200 groups).
+  to roles by **group id** (Entra app roles rather than group claims, which overflow past 200 groups): at each company
+  sign-in the widest mapped role applies, member for none. No group makes or unmakes an owner, so the break-glass owner
+  never depends on the provider; machines follow the new role once a signer signs the access document.
 - **SCIM 2.0** (users, groups) deprovisions without waiting for a sign-in: the person is suspended, their devices and
   delegations revoked, their sessions on team machines stopped, the audit trail kept (milestone 5).
 

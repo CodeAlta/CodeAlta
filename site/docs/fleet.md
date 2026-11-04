@@ -330,6 +330,7 @@ The card of the server shows **Sign-in**: the ways people sign in on a new compu
 
 - **Link…** adds a way to sign in to you, from a computer already approved: **Add a passkey** (the server's page opens in your browser) or **Link Microsoft**, **Google**, **GitHub** (a code to enter at GitHub, as when you join). An account signs nobody in until someone linked it. The server keeps only the id and the name of a GitHub account, never its login or a token.
 - On the owner's computer, **Change…** turns each method on or off and sets the company's sign-in: its **Issuer** (the OpenID Connect address of Entra ID, Okta, Google Workspace, Keycloak...), the **Client id** and **Client secret** you registered there, with the redirect `http://127.0.0.1` (any port), and the **Groups claim**. The secret is never shown again. People sign in with it the first time without an invitation; their first computer waits for your approval.
+- **Roles from groups** gives a role to the members of a group of your company, by the id of the group in the groups claim: **Add a group**, then choose **Admin**, **Member**, **Auditor** or **Guest**. At each company sign-in a person gets the widest role among their groups, or member when they are in none. No group makes an owner, and owners keep their role.
 - **Require company sign-in** leaves only the company's sign-in for a new computer, and your passkey as the owner's way in.
 - Microsoft, Google and GitHub show **Not registered yet** until CodeAlta's own sign-in applications for them exist.
 

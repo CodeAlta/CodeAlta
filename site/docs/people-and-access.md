@@ -27,7 +27,7 @@ Until then they are listed as **Invited**. People who sign in with your company'
 | **Auditor** | Reads the audit log, statistics and who can do what; changes nothing |
 | **Guest** | Only what is shared with them |
 
-Change a role with the menu on the row of the person. No role reads what others did not share: an owner or an admin sees that a session exists and what it costs, never what it says. The organization always keeps an owner.
+Change a role with the menu on the row of the person. With your company's sign-in, **Roles from groups** can give them instead, by the id of each group (see [Fleet](fleet.md)). No role reads what others did not share: an owner or an admin sees that a session exists and what it costs, never what it says. The organization always keeps an owner.
 
 ## Teams and team machines
 
