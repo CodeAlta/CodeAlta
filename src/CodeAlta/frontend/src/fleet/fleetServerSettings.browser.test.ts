@@ -359,6 +359,12 @@ test("confirming a change with an account that is not theirs names the ways in t
       await page.clickText(".fleet-server-sign-in .bp6-button", "Link…");
       await page.until(`[...document.querySelectorAll('.bp6-menu-item')].some(entry => entry.textContent === ${JSON.stringify(item)})`, item);
       await page.clickText(".bp6-menu-item", item);
+      // A second way in asks first to sign in again with the one the person has.
+      if (item !== "Add a passkey") {
+        await page.until(`[...document.querySelectorAll('.fleet-sign-in-confirm-methods .bp6-button')].some(button => button.textContent === 'Continue with Passkey')`,
+          "the sign-in again asked");
+        await page.clickText(".fleet-sign-in-confirm-methods .bp6-button", "Continue with Passkey");
+      }
       await page.until(`!document.querySelector('.bp6-popover-open') && !document.querySelector('.fleet-server-sign-in .bp6-button:disabled')`, `${item} done`);
     }
     await page.until(`document.querySelectorAll('.fleet-sign-in-logins .bp6-tag').length === 2`, "the two ways in listed");
