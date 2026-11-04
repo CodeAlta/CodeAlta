@@ -40,7 +40,8 @@ internal sealed class NodeHealth
 
     private readonly NodeHost _node;
     private IReadOnlyList<FleetHealthProblem> _signIns = [];
-    private long _signInsReadAt = long.MinValue;
+    // In UTC ticks; 0, the start of time, until the first read: a sentinel the elapsed time never overflows with.
+    private long _signInsReadAt;
     private int _readingSignIns;
 
     /// <summary>Initializes a new instance of the <see cref="NodeHealth"/> class.</summary>
