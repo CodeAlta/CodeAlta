@@ -16,6 +16,7 @@ import type { AutomationsHub } from "./automationsHub";
 import type { RunProvider } from "../workItems/runsWith";
 import { automationProjects, machineRunProviders } from "../machines/machineProviders";
 import { useRemoteChoices } from "../machines/RunOnChip";
+import { showHeldStartToast } from "../fleet/FleetApprovals";
 
 const day = 24 * 60 * 60 * 1000;
 
@@ -35,7 +36,7 @@ function RunMark({ status }: { status: string }) {
   const tone = runTone(status);
   const label = t(runStatusLabel(status));
   return <span className="automation-run-mark" data-tone={tone} role="img" aria-label={label} title={label}>
-    {tone === "running" ? <ActivitySpinner size={12} /> : <AppIcon name={tone === "ok" ? "check" : tone === "failed" ? "error" : "minus"} size={13} />}</span>;
+    {tone === "running" ? <ActivitySpinner size={12} /> : <AppIcon name={tone === "ok" ? "check" : tone === "failed" ? "error" : tone === "held" ? "usage" : "minus"} size={13} />}</span>;
 }
 
 /** The runs of the next day on one line: a mark for each time a schedule is due, the nearest at the left. */
@@ -305,6 +306,13 @@ export function AutomationsPanel({ hub, projects, sessions, projectId, providers
     const outcome = await during(id, () => hub.run(id));
     setSelected(id);
     if (!outcome.ok) { setNotice(outcome.message ?? t("The automation did not start.")); return; }
+    // A budget of its machine holds it: it waits for Continue anyway, offered beside what says so.
+    if (outcome.run?.status === "held") {
+      const item = state.items.find(candidate => candidate.id === id);
+      if (epoch) showHeldStartToast({ epoch, runId: outcome.run.id, say: t, message: t("{name} waits for Continue anyway on {machine}: a budget of the machine is reached.",
+        { name: item?.name ?? outcome.run.name ?? t("Automation"), machine: item?.placement?.machineName ?? t("Unavailable machine") }) });
+      return;
+    }
     if (outcome.run?.sessionId) onOpenSession(outcome.run.sessionId, outcome.run.projectId ?? null);
   }
   async function allow(item: AutomationItem) {
