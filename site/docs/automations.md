@@ -137,7 +137,7 @@ An automation runs unattended. Turn on **Autonomy** in the editor to decide what
 autonomy = { allowed_tools = ["k8s_restart_pod"], max_calls_per_hour = 3, approval_timeout = 30, on_timeout = "stop", approvers = "owner" }
 ```
 
-The approvals go to you, the owner of the automation. On a machine of your [server](fleet.md#run-your-automations-on-it), a run that waits comes to you as a message too.
+The approvals go to the owner of the automation: you, or on a [server](fleet.md#run-your-automations-on-it) the team that owns it and the people granted to approve it. There, a run that waits comes to them as a message too.
 
 ## Follow the runs
 

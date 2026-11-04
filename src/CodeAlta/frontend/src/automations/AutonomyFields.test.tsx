@@ -23,8 +23,8 @@ test("off, the autonomy of an automation is one switch; on, it says what its run
   assert.match(on, /id="automation-allowed-tools"[^>]*value="jira_comment"/);
   assert.match(on, /id="automation-max-calls"[^>]*value="5"/);
   assert.match(on, /<option value="stop" selected="">then stop the run<\/option><option value="wait">then keep waiting<\/option>/);
-  // The approvals go to the owner; teams come with the access control of the fleet.
-  assert.match(on, /<option value="owner" selected="">Me<\/option><option value="team" disabled="">A team \(with access control\)<\/option>/);
+  // The approvals follow the owner of the automation, a team on a server.
+  assert.match(on, /Approvals go to<\/span><span class="automation-autonomy-approvers">Its owner: you, or on your server the team that owns it/);
   assert.match(on, /It calls jira_comment by itself; it asks you for anything else\./);
   assert.doesNotMatch(on, /role="alert"/);
 });

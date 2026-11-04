@@ -475,8 +475,10 @@ public sealed class CoordinatorServer : IAsyncDisposable
         services.AddSingleton(provider => new FleetAutomationService(store, store, provider.GetRequiredService<PresenceRegistry>(), time,
             provider.GetRequiredService<ILoggerFactory>().CreateLogger("CodeAlta.Server.Automations"))
         {
-            // The approvals of a person's automations go to that person; teams and on-call resolvers come with access control.
+            // The approvals of an automation go to its owner, the members of the team that owns it, and who is granted them.
             Notifications = provider.GetRequiredService<NotificationService>(),
+            ApprovalRecipients = (automation, token) => provider.GetRequiredService<AccessService>().ApproversOfAsync(automation.OrganizationId, automation.AutomationId,
+                automation.OwnerPersonId, token),
         });
         services.AddSingleton(provider => new HookService(store, store, provider.GetRequiredService<PresenceRegistry>(), time,
             provider.GetRequiredService<ILoggerFactory>().CreateLogger("CodeAlta.Server.Hooks")));

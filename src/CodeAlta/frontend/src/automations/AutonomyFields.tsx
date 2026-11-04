@@ -40,11 +40,9 @@ export function AutonomyFields({ autonomy, permissionMode, disabled, onChange }:
             <option value="stop">{t("then stop the run")}</option><option value="wait">{t("then keep waiting")}</option>
           </HTMLSelect>
         </div>
-        <label htmlFor="automation-approvers">{t("Approvals go to")}</label>
-        {/* Teams come with the access control of the fleet: until then, the approvals of a run go to the owner of its automation. */}
-        <HTMLSelect id="automation-approvers" value={autonomy.approvers} disabled={disabled} onChange={event => set({ approvers: event.target.value })}>
-          <option value="owner">{t("Me")}</option><option value="team" disabled>{t("A team (with access control)")}</option>
-        </HTMLSelect>
+        {/* The approvals follow the owner of the automation: on a server, a team that owns it and who is granted to approve it. */}
+        <span className="automation-autonomy-label">{t("Approvals go to")}</span>
+        <span className="automation-autonomy-approvers">{t("Its owner: you, or on your server the team that owns it and those granted to approve it.")}</span>
       </div>
       <p className="automation-autonomy-summary">{describeAutonomy(autonomy, t)}</p>
       {permissionMode === bypassPermissionMode && <Callout intent="warning" compact role="alert">

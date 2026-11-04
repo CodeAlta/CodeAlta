@@ -151,6 +151,25 @@ internal static class AccessPolicy
     public static IReadOnlyList<string> OrganizationCapabilities(AccessSnapshot snapshot, string personId, DateTimeOffset now)
         => [.. FleetCapabilities.All.Where(capability => Decide(snapshot, personId, capability, AccessTarget.Organization, now).Allowed)];
 
+    /// <summary>
+    /// Lists the people who answer the approvals of the runs of an automation: those who hold <c>automation.approve</c> on
+    /// it as its owner, through a team that owns it, or by a grant. The roles of the organization give it only on what the
+    /// organization owns: an admin manages every automation, but is not asked for the approvals of a person's or a team's.
+    /// </summary>
+    /// <param name="snapshot">The access of the organization.</param>
+    /// <param name="automation">The automation and its owner.</param>
+    /// <param name="now">The time, for grants that expire.</param>
+    /// <returns>The people, in the order of the snapshot.</returns>
+    /// <exception cref="ArgumentNullException">An argument is null.</exception>
+    public static IReadOnlyList<string> Approvers(AccessSnapshot snapshot, AccessTarget automation, DateTimeOffset now)
+    {
+        ArgumentNullException.ThrowIfNull(snapshot);
+        ArgumentNullException.ThrowIfNull(automation);
+        var byRole = automation.OwnerKind == FleetPrincipalKinds.Organization;
+        return [.. snapshot.People.Where(person => Decide(snapshot, person.Id, "automation.approve", automation, now) is { Allowed: true } decision
+            && (byRole || !decision.Source.StartsWith("role:", StringComparison.Ordinal))).Select(static person => person.Id)];
+    }
+
     /// <summary>Gets whether a person's devices sign the access document: an active owner or admin.</summary>
     /// <param name="snapshot">The access of the organization.</param>
     /// <param name="personId">The person.</param>

@@ -106,6 +106,28 @@ public sealed class AccessPolicyTests
         Assert.ThrowsExactly<ArgumentException>(() => AccessPolicy.Decide(access, "owner", "machine.fly", own, Now));
     }
 
+    [TestMethod]
+    public void TheApprovalsOfAnAutomationGoToItsOwnerItsTeamAndItsGrants_NotToEveryAdmin()
+    {
+        var access = Snapshot(
+            people: [Person("owner", FleetOrganizationRoles.Owner), Person("admin", FleetOrganizationRoles.Admin), Person("mia", FleetOrganizationRoles.Member),
+                Person("max", FleetOrganizationRoles.Member), Person("oncall", FleetOrganizationRoles.Member), Person("bea", FleetOrganizationRoles.Member),
+                Person("old", FleetOrganizationRoles.Member) with { Status = FleetPersonStatuses.Suspended }],
+            teams: [Team("infra")],
+            members: [Member("infra", "mia", FleetTeamRoles.Maintainer), Member("infra", "max", FleetTeamRoles.Member), Member("infra", "old", FleetTeamRoles.Member)],
+            grants: [Grant("g1", FleetPrincipalKinds.Person, "oncall", "automation.approve", FleetScopeKinds.Resource, "automation:a1"),
+                Grant("g2", FleetPrincipalKinds.Person, "bea", "automation.approve", FleetScopeKinds.Resource, "automation:other")]);
+
+        CollectionAssert.AreEqual(new[] { "mia", "max", "oncall" },
+            AccessPolicy.Approvers(access, AccessTarget.Resource(FleetResourceKinds.Automation, "a1", FleetPrincipalKinds.Team, "infra"), Now).ToArray(),
+            "the team that owns it and who is granted it; a suspended member, the admins and a grant on another automation do not");
+        CollectionAssert.AreEqual(new[] { "bea" },
+            AccessPolicy.Approvers(access, AccessTarget.Resource(FleetResourceKinds.Automation, "a2", FleetPrincipalKinds.Person, "bea"), Now).ToArray(), "a person's own");
+        CollectionAssert.AreEqual(new[] { "owner", "admin" },
+            AccessPolicy.Approvers(access, AccessTarget.Resource(FleetResourceKinds.Automation, "a3", FleetPrincipalKinds.Organization, "org"), Now).ToArray(),
+            "the organization's, by the roles that run it");
+    }
+
     private static AccessSnapshot Snapshot(IReadOnlyList<PersonRecord>? people = null, IReadOnlyList<TeamRecord>? teams = null, IReadOnlyList<TeamMemberRecord>? members = null,
         IReadOnlyList<GrantRecord>? grants = null)
         => new(people ?? [], teams ?? [], members ?? [], grants ?? [], [], []);

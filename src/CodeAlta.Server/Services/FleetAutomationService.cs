@@ -19,8 +19,9 @@ namespace CodeAlta.Server.Services;
 internal sealed class FleetAutomationService
 {
     /// <summary>
-    /// Gets or sets what tells the people who answer the approvals of the runs of an automation: its owner today, a team
-    /// or the person on call once access control and on-call resolvers exist. Null: the owner.
+    /// Gets or sets who answers the approvals of the runs of an automation: by access control, its owner, the members of
+    /// the team that owns it and who is granted them; the seam where on-call resolvers come too. Null: the person whose
+    /// version the server holds.
     /// </summary>
     internal Func<AutomationRecord, CancellationToken, Task<IReadOnlyList<string>>>? ApprovalRecipients { get; init; }
 

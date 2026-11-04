@@ -15,7 +15,12 @@ export const automationAutonomyMessages = {
   "then stop the run": ["luego detener la ejecución", "puis arrêter l’exécution", "dann den Lauf beenden", "その後実行を停止", "然后停止运行"],
   "then keep waiting": ["luego seguir esperando", "puis continuer d’attendre", "dann weiter warten", "その後も待ち続ける", "然后继续等待"],
   "Approvals go to": ["Las aprobaciones van a", "Les approbations vont à", "Freigaben gehen an", "承認の送り先", "批准发送给"],
-  "A team (with access control)": ["Un equipo (con el control de acceso)", "Une équipe (avec le contrôle d’accès)", "Ein Team (mit der Zugriffskontrolle)", "チーム (アクセス制御で)", "团队（随访问控制提供）"],
+  "Its owner: you, or on your server the team that owns it and those granted to approve it.": [
+    "Su propietario: tú, o en tu servidor el equipo al que pertenece y quienes tienen permiso para aprobarla.",
+    "Son propriétaire : vous, ou sur votre serveur l’équipe à qui elle appartient et ceux autorisés à l’approuver.",
+    "Sein Eigentümer: Sie, oder auf Ihrem Server das Team, dem es gehört, und wer es freigeben darf.",
+    "所有者: あなた、またはサーバー上でそれを所有するチームと承認を許可された人。",
+    "其所有者：你，或在你的服务器上拥有它的团队以及被授权批准它的人。"],
   "Waits for you": ["Te espera", "Vous attend", "Wartet auf Sie", "あなたを待っています", "等待你"],
   "Take over": ["Tomar el control", "Prendre la main", "Übernehmen", "引き継ぐ", "接管"],
   "Try it (dry run)": ["Probarla (simulación)", "L’essayer (à blanc)", "Testen (Probelauf)", "試す (ドライラン)", "试运行（演练）"],
