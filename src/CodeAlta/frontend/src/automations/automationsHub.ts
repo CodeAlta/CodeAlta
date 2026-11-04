@@ -3,7 +3,9 @@ import type { automations, AutomationInput, AutomationItem, AutomationRunItem, A
 
 /** The calls of the host; `scripts` is missing from a host that has no library of scripts. */
 export type AutomationsApi = Pick<typeof automations, "list" | "refresh" | "save" | "delete" | "setEnabled" | "allow" | "startPlaced" | "setPaused" | "run" | "runs" | "preview" | "watch">
-  & Partial<Pick<typeof automations, "scripts">>;
+  & Partial<Pick<typeof automations, "scripts" | "testTrigger" | "sampleEvent" | "tryRun" | "createHook">>;
+/** What a test or a sample of a trigger of another tool answered: a text, or what is wrong. */
+export type TriggerCheck = Readonly<{ ok: boolean; message: string | null; detail?: string | null; prompt?: string | null; replyTo?: string | null }>;
 type Timers = Readonly<{ set: (run: () => void, milliseconds: number) => unknown; clear: (timer: unknown) => void }>;
 
 /** What the page shows of the automations. `loaded` is false until the host answered once. */
@@ -140,6 +142,43 @@ export function createAutomationsHub(api: AutomationsApi, timers: Timers = { set
         const reply = await api.scripts({ expectedEpoch: host, projectId }, { signal, timeoutMilliseconds: 15_000 });
         return reply.status === "ok" ? reply.scripts : [];
       } catch { return []; }
+    },
+    /** Tests the connection of a trigger of another tool, with the secrets of this computer. */
+    async testTrigger(trigger: AutomationTriggerItem, projectId: string | null): Promise<TriggerCheck> {
+      const host = epoch;
+      if (!host || !api.testTrigger) return { ok: false, message: null };
+      try {
+        const reply = await api.testTrigger({ expectedEpoch: host, projectId, trigger, prompt: null, body: null }, { timeoutMilliseconds: 60_000 });
+        return { ok: reply.status === "ok", message: reply.message ?? null };
+      } catch { return { ok: false, message: null }; }
+    },
+    /** The event a trigger of another tool would start on now, with the prompt it would send; nothing starts. */
+    async sample(trigger: AutomationTriggerItem, projectId: string | null, prompt: string, body: string | null): Promise<TriggerCheck> {
+      const host = epoch;
+      if (!host || !api.sampleEvent) return { ok: false, message: null };
+      try {
+        const reply = await api.sampleEvent({ expectedEpoch: host, projectId, trigger, prompt, body }, { timeoutMilliseconds: 60_000 });
+        return { ok: reply.status === "ok", message: reply.message ?? null, detail: reply.detail ?? null, prompt: reply.prompt ?? null, replyTo: reply.replyTo ?? null };
+      } catch { return { ok: false, message: null }; }
+    },
+    /** Runs a saved automation once on the sample event of one of its triggers; its answer is kept on the run, not written back. */
+    async tryRun(id: string, triggerIndex: number, body: string | null): Promise<AutomationOutcome> {
+      const host = epoch;
+      if (!host || !api.tryRun) return { ok: false };
+      try {
+        const reply = await api.tryRun({ expectedEpoch: host, id, triggerIndex, body }, { timeoutMilliseconds: 120_000 });
+        await list();
+        return { ok: reply.status === "ok" && reply.run !== null && reply.run?.status !== "failed", run: reply.run ?? null, message: reply.message ?? reply.run?.message ?? null };
+      } catch { return { ok: false }; }
+    },
+    /** Makes a hook on the server of a machine: the address a tool pushes its signed events to. */
+    async createHook(machineId: string, source: "incident_io" | "webhook", label: string | null): Promise<Readonly<{ ok: boolean; message: string | null; hookId: string | null; url: string | null }>> {
+      const host = epoch;
+      if (!host || !api.createHook) return { ok: false, message: null, hookId: null, url: null };
+      try {
+        const reply = await api.createHook({ expectedEpoch: host, machineId, source, label }, { timeoutMilliseconds: 30_000 });
+        return { ok: reply.status === "ok", message: reply.message ?? null, hookId: reply.hookId ?? null, url: reply.url ?? null };
+      } catch { return { ok: false, message: null, hookId: null, url: null }; }
     },
     /** The next times a trigger being written is due, or what is wrong with it. */
     async preview(trigger: AutomationTriggerItem, signal: AbortSignal): Promise<Readonly<{ times: readonly string[]; problem: string | null }> | null> {

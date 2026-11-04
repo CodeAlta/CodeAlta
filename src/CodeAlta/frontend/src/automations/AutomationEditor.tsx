@@ -11,9 +11,10 @@ import { SessionSettingsChip, useSessionSettingsChoices } from "../sessionSettin
 import { sessionSettingsApi } from "../sessionSettings/sessionSettingsApi";
 import { useShellLanguage } from "../shellLanguage";
 import type { RunProvider } from "../workItems/runsWith";
-import { dayName, formProblem, formSettings, inputOf, isSchedule as schedule, maximumCommandLength, maximumFolderLength, maximumNameLength, maximumPromptLength, maximumTriggers, needsProject,
+import { dayName, formProblem, formSettings, inputOf, isIntegration, isSchedule as schedule, maximumCommandLength, maximumFolderLength, maximumNameLength, maximumPromptLength, maximumTriggers, needsProject,
   newTrigger, scriptArgumentsTemplate, sessionSettingsOf, triggerLabel, triggerTone, triggerTypes, weekDays, type AutomationForm, type TriggerType } from "./automations";
 import type { AutomationsHub } from "./automationsHub";
+import { IntegrationTriggerFields, type IntegrationContext } from "./IntegrationTriggerFields";
 
 const hours = [1, 2, 3, 4, 6, 8, 12];
 
@@ -50,11 +51,13 @@ function Times({ value, disabled, onChange }: { value: readonly string[]; disabl
   </span>;
 }
 
-export function TriggerRow({ hub, trigger, chat, disabled, onChange, onRemove }: {
+export function TriggerRow({ hub, trigger, chat, disabled, onChange, onRemove, context }: {
   hub: AutomationsHub; trigger: AutomationTriggerItem;
   /** Whether the automation runs in no project: its command then runs in the home folder. */
   chat: boolean;
   disabled: boolean; onChange: (value: AutomationTriggerItem) => void; onRemove: () => void;
+  /** Around a trigger of another tool: where the automation runs and whether it is saved as shown; null outside the editor. */
+  context?: IntegrationContext | null;
 }) {
   const { t, locale } = useShellLanguage();
   const set = (change: Partial<AutomationTriggerItem>) => onChange({ ...trigger, ...change });
@@ -99,6 +102,7 @@ export function TriggerRow({ hub, trigger, chat, disabled, onChange, onRemove }:
         <option value="trusted">{t("by a member")}</option><option value="anyone">{t("by anyone")}</option>
       </HTMLSelect>}
       {schedule(trigger) && <TriggerPreview hub={hub} trigger={trigger} />}
+      {isIntegration(trigger.type) && trigger.integration && context && <IntegrationTriggerFields hub={hub} trigger={trigger} context={context} disabled={disabled} onChange={onChange} />}
     </div>
     <Button variant="minimal" size="small" disabled={disabled} icon={<AppIcon name="trash" size={14} />} aria-label={t("Remove this trigger")} title={t("Remove this trigger")} onClick={onRemove} />
   </li>;
@@ -150,6 +154,8 @@ export function AutomationEditor({ hub, initial, projects, providers, epoch, onC
   const [problem, setProblem] = useState<string | null>(null);
   const name = useRef<HTMLInputElement>(null);
   const edit = (change: Partial<AutomationForm>) => { setForm(current => ({ ...current, ...change })); setProblem(null); };
+  // A try runs the automation as it is saved: the form must still show it so.
+  const unchanged = useMemo(() => JSON.stringify(form) === JSON.stringify(initial), [form, initial]);
   const project = projects.find(candidate => candidate.id === form.projectId);
   // The machines this computer reaches: paired ones, and those of a linked server, which gets the automation sealed for them.
   const reachable = useMachines(epoch);
@@ -234,6 +240,7 @@ export function AutomationEditor({ hub, initial, projects, providers, epoch, onC
               <span className="automation-trigger-icon" data-file-tone="muted"><AppIcon name="hand" size={15} /></span>
               <div className="automation-trigger-fields"><span>{t("When you run it")}</span></div></li>}
             {form.triggers.map((trigger, index) => <TriggerRow key={index} hub={hub} trigger={trigger} chat={!form.projectId} disabled={busy}
+              context={{ projectId: form.projectId, runsOn: form.runsOn, prompt: form.prompt, savedId: form.id, saved: unchanged, index }}
               onChange={value => edit({ triggers: form.triggers.map((other, at) => at === index ? value : other) })}
               onRemove={() => edit({ triggers: form.triggers.filter((_, at) => at !== index) })} />)}
           </ul>

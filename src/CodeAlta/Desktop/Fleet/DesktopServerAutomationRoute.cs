@@ -77,5 +77,13 @@ internal sealed class DesktopServerAutomationRoute : IDisposable
         => _client.ListAutomationRunsAsync(automationId, limit, cancellationToken);
 
     /// <inheritdoc />
+    /// <summary>Makes a hook of the server for the machine: the address a tool pushes its signed events to.</summary>
+    /// <returns>The hook and its full address.</returns>
+    internal async Task<(HookDto Hook, Uri Address)> CreateHookAsync(string machineId, string source, string? label, CancellationToken cancellationToken)
+    {
+        var hook = await _client.CreateHookAsync(machineId, source, label, cancellationToken).ConfigureAwait(false);
+        return (hook, new Uri(_client.ServerAddress, hook.Path));
+    }
+
     public void Dispose() => _client.Dispose();
 }

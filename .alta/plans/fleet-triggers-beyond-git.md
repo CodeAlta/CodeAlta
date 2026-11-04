@@ -23,23 +23,24 @@ enabling"), `doc/fleet/secrets.md`, `doc/fleet/protocol.md` (REST `hooks`), `doc
   each one line, marked as someone else's text.
 - Each event has an id; the run claims `event:<trigger key>#<event id>` (locally and with the server): it runs once.
 - Hook events wait at the server for their machine (24 h), then are dropped; the body is deleted once acknowledged.
+  Delivery is at least once (a resend on connect may cross a push); the machine takes an event once (its id, claims).
 - Agents (`alta automation create`) may write these triggers, but such an automation is saved disabled and only a
   person enables it (the Automations tab).
 
 ## Slices
 
 - [x] 0. Plan (this file).
-- [ ] 1. Model and configuration: the five trigger kinds, their fields (`site`, `email`, `token`, `jira_project`, `jql`,
+- [x] 1. Model and configuration: the five trigger kinds, their fields (`site`, `email`, `token`, `jira_project`, `jql`,
   `channel`, `match`, `app_token`, `bot_token`, `api_key`, `hook`, `secret`, `signature`, `fields`, `reply`), validation
   (secret references only), TOML read/write, keys; desktop RPC items; `alta automation` trigger text; agents' rule.
-- [ ] 2. Integration clients in `CodeAlta.Automations/Integrations`: Jira REST, Slack Web API + Socket Mode,
+- [x] 2. Integration clients in `CodeAlta.Automations/Integrations`: Jira REST, Slack Web API + Socket Mode,
   incident.io API, webhook signature schemes; tests against in-process fakes (HTTP handler fakes, a loopback WebSocket).
-- [ ] 3. Engine: polling of the Jira triggers, Slack Socket Mode listeners, inbound hook events, dedupe and claims,
+- [x] 3. Engine: polling of the Jira triggers, Slack Socket Mode listeners, inbound hook events, dedupe and claims,
   prompts with bound fields, replies to the source after the run (kept, not posted, in a try), run records with the reply.
-- [ ] 4. Protocol + server: `hooks` REST (`GET/POST /api/v1/hooks`, `DELETE /api/v1/hooks/{id}`, `GET .../{id}/events`,
+- [x] 4. Protocol + server: `hooks` REST (`GET/POST /api/v1/hooks`, `DELETE /api/v1/hooks/{id}`, `GET .../{id}/events`,
   anonymous `POST /api/v1/hooks/{id}` ingress), migration `0014_hooks.sql`, control `hooks.event` / `hooks.ack`,
   pending events sent on connect, expiry; tests.
-- [ ] 5. Node: hook events from the connector to the engine, acknowledgements, claims of events with the server; tests.
+- [x] 5. Node: hook events from the connector to the engine, acknowledgements, claims of events with the server; tests.
 - [ ] 6. Desktop: RPC `testTrigger`, `sampleEvent`, `tryRun`, hook creation through the server for the machine; the
   editor's rows and setup guide for each trigger (fields, secrets, test connection, sample event, Try); frontend tests.
 - [ ] 7. `alta fleet hooks` commands, the `codealta-fleet` skill, `site/docs` (automations, fleet).

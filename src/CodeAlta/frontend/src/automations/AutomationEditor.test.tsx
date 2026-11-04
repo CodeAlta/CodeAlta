@@ -37,6 +37,31 @@ test("the folder of a command reads as the one it runs in when it is left empty"
   }
 });
 
+const context = { projectId: null, runsOn: null, prompt: "Triage it.", savedId: null, saved: false, index: 0 };
+const integrated = (trigger: AutomationTriggerItem, locale: typeof locales[number] = "en") => renderToStaticMarkup(createElement(ShellLanguageContext.Provider,
+  { value: { locale, choice: locale, setLanguage: never } }, createElement(TriggerRow, { hub, trigger, chat: true, disabled: false, onChange: never, onRemove: never, context })));
+
+test("a trigger of another tool shows its settings, its secrets by name, and how to set it up", () => {
+  const jira = newTrigger("jira_query");
+  const html = integrated({ ...jira, integration: { ...jira.integration!, site: "https://acme.atlassian.net", token: "${secret:JIRA_TOKEN}", query: "project = PLAT" } });
+  // The token field shows the name of its secret, never a value: the trigger keeps the reference.
+  assert.match(html, /aria-label="API token"[^>]*value="JIRA_TOKEN"/);
+  assert.match(html, /aria-label="JQL query"[^>]*value="project = PLAT"/);
+  assert.match(html, /Write the answer back where the event came from/);
+  assert.match(html, /Test the connection[\s\S]*Show a sample event[\s\S]*Try it on this event/);
+  assert.doesNotMatch(html, /automation-trigger-preview|aria-label="Authors"/, "no next times, no authors");
+
+  const slack = integrated(newTrigger("slack"));
+  assert.match(slack, /aria-label="Channel id"[\s\S]*aria-label="App-level token"[\s\S]*aria-label="Bot token"/);
+  assert.match(slack, /Socket Mode/);
+  const webhook = integrated(newTrigger("webhook"));
+  assert.match(webhook, /aria-label="Hook"[\s\S]*Make a hook[\s\S]*aria-label="Signing secret"/);
+  assert.match(webhook, /aria-label="Fields that reach the prompt"/);
+  assert.doesNotMatch(webhook, /Write the answer back/, "a webhook has nowhere to reply");
+  assert.match(integrated(newTrigger("incident_io")), /aria-label="API key"/);
+  for (const locale of locales) assert.ok(integrated(newTrigger("slack"), locale).includes(translate(locale, "Test the connection")), locale);
+});
+
 test("the other triggers keep their own fields", () => {
   assert.match(row(newTrigger("issue")), /aria-label="Authors"/);
   assert.match(row(newTrigger("pull_request")), /aria-label="Event"[\s\S]*aria-label="Authors"/);

@@ -154,6 +154,23 @@ button.automation-run:hover, button.automation-run:focus-visible { background: v
 .automation-trigger-preview { flex: 1 0 100%; display: flex; flex-wrap: wrap; gap: 4px 10px; margin: 0; font-size: 11px; color: var(--muted); }
 .automation-trigger-preview span { text-transform: uppercase; letter-spacing: .06em; }
 .automation-trigger-preview[data-problem] { color: var(--danger, #e76a6e); }
+/* A trigger of another tool: its settings on the lines of the row, then how to set it up, test it and try it. */
+.automation-integration { flex: 1 0 100%; display: grid; gap: 8px; min-width: 0; }
+.automation-integration-fields { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.automation-integration-fields .bp6-input-group { flex: 1 1 160px; min-width: 120px; }
+.automation-integration-fields .automation-integration-wide { flex: 3 1 100%; }
+.automation-integration-fields input { font-family: var(--code-font); font-size: 12px; }
+.automation-integration-reply.bp6-control { flex: 1 0 100%; margin: 0; }
+.automation-integration-address { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 0; font-size: 12px; color: var(--muted); }
+.automation-integration-address code { overflow-wrap: anywhere; color: var(--text); }
+.automation-integration-setup { font-size: 12px; color: var(--muted); }
+.automation-integration-setup summary { cursor: pointer; width: fit-content; }
+.automation-integration-setup p { margin: 6px 0; line-height: 1.45; }
+.automation-integration-example.bp6-input { min-height: 72px; font-family: var(--code-font); font-size: 12px; }
+.automation-integration-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.automation-integration-check p { margin: 2px 0; }
+.automation-integration-prompt { max-height: 180px; overflow: auto; margin: 6px 0 0; padding: 6px 8px; border-radius: 6px; background: var(--panel); font-family: var(--code-font);
+  font-size: 11px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .automation-editor-switches { display: flex; flex-wrap: wrap; gap: 4px 22px; margin-bottom: 8px; }
 .automation-editor-switches .bp6-control { margin: 0; }
 .automation-editor-footer { flex: none; display: flex; justify-content: flex-end; gap: 8px; padding: 10px 18px 14px; border-top: 1px solid var(--line); }

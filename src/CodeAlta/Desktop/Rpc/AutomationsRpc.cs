@@ -200,6 +200,66 @@ internal sealed class AutomationsService
         return new("ok", [.. _automations!.Runs(request.Id, limit).Select(Run)]);
     }
 
+    /// <summary>Tests the connection of a trigger of another tool as the editor writes it, with the secrets of this computer.</summary>
+    [NeoRpcMethod("testTrigger")]
+    public async Task<AutomationTriggerTestResponse> TestTriggerAsync(AutomationTriggerTestRequest request, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        if (Refuse(request.ExpectedEpoch) is { } refused) return new(refused, null);
+        if (request.Trigger is null || !TryRead(request.Trigger, out var trigger) || request.ProjectId is { } project && !Identifier(project)) return new("invalid_request", null);
+        var (message, problem) = await _automations!.TestTriggerAsync(request.ProjectId, trigger!, cancellationToken).ConfigureAwait(false);
+        return problem is null ? new("ok", message) : new("refused", problem);
+    }
+
+    /// <summary>The event a trigger of another tool would start on now, and the prompt it would send; nothing starts.</summary>
+    [NeoRpcMethod("sampleEvent")]
+    public async Task<AutomationSampleResponse> SampleEventAsync(AutomationSampleRequest request, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        if (Refuse(request.ExpectedEpoch) is { } refused) return new(refused, null, null, null, null);
+        if (request.Trigger is null || !TryRead(request.Trigger, out var trigger) || request.ProjectId is { } project && !Identifier(project)
+            || request.Prompt is { Length: > AutomationDefinition.MaximumPromptLength * 2 } || request.Body is { Length: > 256 * 1024 }) return new("invalid_request", null, null, null, null);
+        var (sample, problem) = await _automations!.SampleAsync(request.ProjectId, request.Prompt ?? string.Empty, trigger!, request.Body, cancellationToken).ConfigureAwait(false);
+        return sample is null ? new("refused", problem, null, null, null) : new("ok", null, sample.Detail, sample.Prompt, sample.Reply?.Where);
+    }
+
+    /// <summary>Runs a saved automation once on the sample event of one of its triggers, its answer kept instead of written back.</summary>
+    [NeoRpcMethod("tryRun")]
+    public async Task<AutomationTryResponse> TryRunAsync(AutomationTryRequest request, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        if (Refuse(request.ExpectedEpoch) is { } refused) return new(refused, null, null);
+        if (!AutomationDefinition.IsId(request.Id) || request.Body is { Length: > 256 * 1024 }) return new("invalid_request", null, null);
+        var (run, problem) = await _automations!.TryAsync(request.Id, request.TriggerIndex, request.Body, cancellationToken).ConfigureAwait(false);
+        return run is null ? new("refused", problem, null) : new("ok", null, Run(run));
+    }
+
+    /// <summary>
+    /// Makes a hook on the server of a machine this computer reaches through one: the address incident.io or another tool
+    /// pushes its signed events to. The machine checks their signature; the server holds no secret of the sender.
+    /// </summary>
+    [NeoRpcMethod("createHook")]
+    public async Task<AutomationHookResponse> CreateHookAsync(AutomationHookRequest request, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        if (Refuse(request.ExpectedEpoch) is { } refused) return new(refused, null, null, null);
+        if (!Identifier(request.MachineId) || request.Source is not ("incident_io" or "webhook") || request.Label is { Length: > 120 }) return new("invalid_request", null, null, null);
+        if (_placement?.ServerRoute?.Invoke(request.MachineId) is not { } route)
+            return new("refused", "This machine is reached through no server online: a hook is an address of a server, for a machine connected to it.", null, null);
+        using (route)
+        {
+            try
+            {
+                var (hook, address) = await route.CreateHookAsync(request.MachineId, request.Source, Blank(request.Label), cancellationToken).ConfigureAwait(false);
+                return new("ok", null, hook.Id, address.ToString());
+            }
+            catch (Exception exception) when (exception is CodeAlta.Fleet.Server.FleetServerException or HttpRequestException or TaskCanceledException)
+            {
+                return new("refused", "The server did not make the hook: " + exception.Message.ReplaceLineEndings(" "), null, null);
+            }
+        }
+    }
+
     /// <summary>The next times a trigger being written would be due, or what is wrong with it.</summary>
     [NeoRpcMethod("preview")]
     public AutomationPreviewResponse Preview(AutomationPreviewRequest request)
@@ -307,7 +367,10 @@ internal sealed class AutomationsService
     private static bool Identifier(string? value) => value is { Length: > 0 and <= 256 } && !value.Any(char.IsControl);
 
     private static AutomationRunItem Run(AutomationRun run)
-        => new(run.Id, run.AutomationId, run.Name, run.SessionId, run.ProjectId, run.StartedAt, run.EndedAt, run.Trigger, run.Detail, run.Status, run.Message);
+        => new(run.Id, run.AutomationId, run.Name, run.SessionId, run.ProjectId, run.StartedAt, run.EndedAt, run.Trigger, run.Detail, run.Status, run.Message)
+        {
+            Reply = run.Reply, Output = run.Output,
+        };
 
     internal static AutomationTriggerItem Trigger(AutomationTrigger trigger)
         => new(trigger.KindName, trigger.Minute, trigger.Every, [.. trigger.At.Select(static time => time.ToString())],
@@ -557,7 +620,45 @@ internal sealed record AutomationRunItem(string Id, string AutomationId, string?
 {
     /// <summary>The paired machine the run ran on, whose session it is; null for this computer.</summary>
     public string? MachineId { get; init; }
+
+    /// <summary>What was done with the answer of a run started by another tool: written back to its source, failed, or kept by a try.</summary>
+    public string? Reply { get; init; }
+
+    /// <summary>The answer a try kept instead of writing it back.</summary>
+    public string? Output { get; init; }
 }
+
+/// <param name="ProjectId">The project the automation runs in, whose secrets come first; null for a chat.</param>
+/// <param name="Prompt">Unused by the test; kept for one shape of request.</param>
+/// <param name="Body">Unused by the test.</param>
+internal sealed record AutomationTriggerTestRequest(string? ExpectedEpoch, string? ProjectId, AutomationTriggerItem Trigger, string? Prompt, string? Body);
+
+/// <param name="Message">What works, or what does not.</param>
+internal sealed record AutomationTriggerTestResponse(string Status, string? Message);
+
+/// <param name="ProjectId">The project the automation runs in; null for a chat.</param>
+/// <param name="Prompt">The prompt of the automation, which the sample prompt starts with.</param>
+/// <param name="Body">A webhook: the JSON body of an example event.</param>
+internal sealed record AutomationSampleRequest(string? ExpectedEpoch, string? ProjectId, AutomationTriggerItem Trigger, string? Prompt, string? Body);
+
+/// <param name="Detail">What the event is about, in a line.</param>
+/// <param name="Prompt">What the session would be sent.</param>
+/// <param name="ReplyTo">Where its answer would be written back; null for nowhere.</param>
+internal sealed record AutomationSampleResponse(string Status, string? Message, string? Detail, string? Prompt, string? ReplyTo);
+
+/// <param name="TriggerIndex">The trigger whose sample event the try runs on.</param>
+/// <param name="Body">A webhook: the JSON body of an example event.</param>
+internal sealed record AutomationTryRequest(string? ExpectedEpoch, string Id, int TriggerIndex, string? Body);
+
+internal sealed record AutomationTryResponse(string Status, string? Message, AutomationRunItem? Run);
+
+/// <param name="MachineId">The machine of a server the hook is for.</param>
+/// <param name="Source"><c>incident_io</c> or <c>webhook</c>.</param>
+internal sealed record AutomationHookRequest(string? ExpectedEpoch, string MachineId, string Source, string? Label);
+
+/// <param name="HookId">The id of the hook, which its trigger names.</param>
+/// <param name="Url">The address to give the tool.</param>
+internal sealed record AutomationHookResponse(string Status, string? Message, string? HookId, string? Url);
 
 internal sealed record AutomationFaultItem(string File, string? ProjectId, string Key, string Message);
 
