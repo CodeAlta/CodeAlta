@@ -6,8 +6,9 @@ using NeoAstra.Rpc;
 
 namespace CodeAlta.Desktop.Rpc;
 
-// Sign-in (doc/fleet/identity.md): the methods of a server, Join an organization through the system browser, the
-// methods linked to this computer's person, and the settings an owner changes. No token reaches the page.
+// Sign-in (doc/fleet/identity.md): the methods of a server, Join an organization through the system browser (or, for
+// GitHub, with a code the person enters at GitHub, which the page shows: two calls, no channel), the methods linked to
+// this computer's person, and the settings an owner changes. No token reaches the page.
 internal sealed partial class FleetServerService
 {
     /// <summary>The ways a person may sign in to a server now.</summary>
@@ -29,8 +30,48 @@ internal sealed partial class FleetServerService
     }
 
     /// <summary>
-    /// Joins a server by signing in through the system browser with one of its methods: this computer then waits, pending,
-    /// for a device of the person, their recovery key or the owner.
+    /// Starts a sign-in that uses a code (GitHub), to join a server (<c>url</c>) or to link the account from this computer
+    /// (<c>linkId</c>): the code the person enters at the provider, and the handle that <c>joinWithSignIn</c> or
+    /// <c>linkSignIn</c> continues with and <c>openSignInPage</c> opens the page of.
+    /// </summary>
+    [NeoRpcMethod("startSignInCode")]
+    public async Task<FleetSignInCodeResult> StartSignInCodeAsync(FleetSignInCodeRequest request, CancellationToken cancellationToken)
+    {
+        if (Refuse(request?.ExpectedEpoch) is { } refused) return new(refused, null, null);
+        if (!FleetSignInMethods.UsesDeviceCode(request!.Method)) return new("invalid_request", null, null);
+        try
+        {
+            FleetSignInCode code;
+            if (request.LinkId is not null)
+            {
+                if (!FleetServerLinkStore.IsValidId(request.LinkId)) return new("invalid_request", null, null);
+                code = await _servers!.StartLinkCodeAsync(request.LinkId, request.Method, cancellationToken).ConfigureAwait(false);
+            }
+            else
+            {
+                if (!FleetServerAddress.TryParse(request.Url, out var address)) return new("invalid_url", null, null);
+                code = await _servers!.StartJoinCodeAsync(address, request.Method, cancellationToken).ConfigureAwait(false);
+            }
+
+            return new("ok", new FleetSignInCodeView(code.Handle, code.UserCode, code.Page.AbsoluteUri, Time(code.ExpiresAt)), null);
+        }
+        catch (DesktopSignInException exception) { return new(exception.Code, null, exception.Message); }
+        catch (InvalidOperationException exception) { return new("already_linked", null, exception.Message); }
+        catch (Exception exception) when (Failure(exception) is { } failure) { return new(failure.Status, null, failure.Message); }
+    }
+
+    /// <summary>Opens, in the browser of the system, the page where the person enters the code of a sign-in that waits; no other address.</summary>
+    [NeoRpcMethod("openSignInPage")]
+    public FleetServerActionResult OpenSignInPage(FleetSignInPageRequest request)
+    {
+        if (Refuse(request?.ExpectedEpoch) is { } refused) return new(refused, null);
+        return _servers!.OpenSignInPage(request!.Handle) ? new("ok", null) : new("sign_in.browser", null);
+    }
+
+    /// <summary>
+    /// Joins a server by signing in through the system browser with one of its methods, or, for GitHub, by waiting until
+    /// the person entered the code of <c>startSignInCode</c>: this computer then waits, pending, for a device of the
+    /// person, their recovery key or the owner.
     /// </summary>
     [NeoRpcMethod("joinWithSignIn")]
     public async Task<FleetSignInJoinResult> JoinWithSignInAsync(FleetSignInJoinRequest request, CancellationToken cancellationToken)
@@ -40,7 +81,7 @@ internal sealed partial class FleetServerService
         if (!FleetSignInMethods.IsKnown(request.Method)) return new("invalid_request", null, null, false, null);
         try
         {
-            var (link, person) = await _servers!.JoinWithSignInAsync(address, request.Method, cancellationToken).ConfigureAwait(false);
+            var (link, person) = await _servers!.JoinWithSignInAsync(address, request.Method, request.Handle, cancellationToken).ConfigureAwait(false);
             ChangedLocally?.Invoke();
             return new("ok", Result(link).Server, person.DisplayName, person.HasDevices, null);
         }
@@ -50,7 +91,10 @@ internal sealed partial class FleetServerService
         catch (Exception exception) when (Failure(exception) is { } failure) { return new(failure.Status, null, null, false, failure.Message); }
     }
 
-    /// <summary>Links a sign-in method to the person of this computer at a server, or registers a passkey, through the system browser.</summary>
+    /// <summary>
+    /// Links a sign-in method to the person of this computer at a server, or registers a passkey, through the system
+    /// browser; or, for GitHub, waits until the person entered the code of <c>startSignInCode</c>.
+    /// </summary>
     [NeoRpcMethod("linkSignIn")]
     public async Task<FleetServerActionResult> LinkSignInAsync(FleetSignInLinkRequest request, CancellationToken cancellationToken)
     {
@@ -58,7 +102,7 @@ internal sealed partial class FleetServerService
         if (!FleetServerLinkStore.IsValidId(request!.LinkId) || !FleetSignInMethods.IsKnown(request.Method)) return new("invalid_request", null);
         try
         {
-            await _servers!.LinkSignInAsync(request.LinkId, request.Method, cancellationToken).ConfigureAwait(false);
+            await _servers!.LinkSignInAsync(request.LinkId, request.Method, request.Handle, cancellationToken).ConfigureAwait(false);
             return new("ok", null);
         }
         catch (DesktopSignInException exception) { return new(exception.Code, exception.Message); }
@@ -154,7 +198,8 @@ internal sealed record FleetSignInMethodsResult(string Status, string? Organizat
 /// <param name="ExpectedEpoch">The host epoch the page knows.</param>
 /// <param name="Url">The address of the server.</param>
 /// <param name="Method">The method.</param>
-internal sealed record FleetSignInJoinRequest(string ExpectedEpoch, string Url, string Method);
+/// <param name="Handle">The handle of <c>startSignInCode</c>, for GitHub; null otherwise.</param>
+internal sealed record FleetSignInJoinRequest(string ExpectedEpoch, string Url, string Method, string? Handle = null);
 
 /// <summary>The outcome of a join by sign-in.</summary>
 /// <param name="Status">
@@ -167,11 +212,37 @@ internal sealed record FleetSignInJoinRequest(string ExpectedEpoch, string Url, 
 /// <param name="Message">What the failure said.</param>
 internal sealed record FleetSignInJoinResult(string Status, FleetServerView? Server, string? Person, bool HasDevices, string? Message);
 
+/// <summary>A sign-in that uses a code (GitHub) to start: to join a server, or to link the account from this computer.</summary>
+/// <param name="ExpectedEpoch">The host epoch the page knows.</param>
+/// <param name="Method">The method: <c>github</c>.</param>
+/// <param name="Url">The address of the server to join; null for a link.</param>
+/// <param name="LinkId">The link whose person links the account; null to join.</param>
+internal sealed record FleetSignInCodeRequest(string ExpectedEpoch, string Method, string? Url, string? LinkId);
+
+/// <summary>The code a person enters at the provider to finish a sign-in (GitHub).</summary>
+/// <param name="Handle">What <c>joinWithSignIn</c>, <c>linkSignIn</c> and <c>openSignInPage</c> name it by.</param>
+/// <param name="UserCode">The code.</param>
+/// <param name="Url">The page where it is entered.</param>
+/// <param name="ExpiresAt">When it stops working.</param>
+internal sealed record FleetSignInCodeView(string Handle, string UserCode, string Url, string ExpiresAt);
+
+/// <summary>The code of a sign-in that started.</summary>
+/// <param name="Status"><c>ok</c>, <c>invalid_url</c>, <c>invalid_request</c>, <c>already_linked</c>, <c>unreachable</c>, <c>sign_in.busy</c>, the code of the server's refusal, <c>stale_epoch</c> or <c>unavailable</c>.</param>
+/// <param name="Code">The code, once started.</param>
+/// <param name="Message">What the failure said.</param>
+internal sealed record FleetSignInCodeResult(string Status, FleetSignInCodeView? Code, string? Message);
+
+/// <summary>The page of a code to open in the browser.</summary>
+/// <param name="ExpectedEpoch">The host epoch the page knows.</param>
+/// <param name="Handle">The handle of the code.</param>
+internal sealed record FleetSignInPageRequest(string ExpectedEpoch, string Handle);
+
 /// <summary>A method to link to this computer's person at a server.</summary>
 /// <param name="ExpectedEpoch">The host epoch the page knows.</param>
 /// <param name="LinkId">The id of the link.</param>
 /// <param name="Method">The method; <c>passkey</c> registers a passkey.</param>
-internal sealed record FleetSignInLinkRequest(string ExpectedEpoch, string LinkId, string Method);
+/// <param name="Handle">The handle of <c>startSignInCode</c>, for GitHub; null otherwise.</param>
+internal sealed record FleetSignInLinkRequest(string ExpectedEpoch, string LinkId, string Method, string? Handle = null);
 
 /// <summary>A method of the organization as an owner sees it.</summary>
 /// <param name="Id">The method.</param>

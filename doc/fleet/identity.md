@@ -80,16 +80,27 @@ to it.
 ### Linked sign-in methods
 
 - **Microsoft** (personal and work accounts through the common endpoint; the account is keyed on tenant and object
-  id), **Google** (keyed on `sub`; `hd` names a Workspace domain), **GitHub** (OAuth only, no ID token: the server
-  reads the numeric user id through the API with the token it is given), Apple later.
+  id), **Google** (keyed on `sub`; `hd` names a Workspace domain), **GitHub** (the device flow of the CodeAlta GitHub
+  App, no ID token: the server reads the numeric user id and the name through the API with the user token, once, and
+  keeps neither the token nor the login, which its person can change and give away), Apple later.
 - A self-hosted server has its own host name, so it cannot use a redirect address registered once for everyone. The
   **desktop signs in through the system browser** with public client ids that the CodeAlta project registers and
   maintains, and a loopback redirect to itself. The server makes the state, the nonce and the PKCE verifier, and
-  redeems the code the desktop brings back: the client secrets that Google and GitHub require even for installed
-  applications stay on the server, and no token of a provider reaches the desktop. The server checks the ID token
-  (issuer, audience, nonce, signature, lifetime), or reads GitHub's account with its access token. No registration
-  per server; the ids are configuration of the server (`CODEALTA_SIGNIN_<PROVIDER>_CLIENT_ID`) until a release carries
-  them, and a method whose id is missing is not offered.
+  redeems the code the desktop brings back: the client secret that Google requires even for installed applications
+  stays on the server, and no token of a provider reaches the desktop. The server checks the ID token (issuer,
+  audience, nonce, signature, lifetime).
+- **GitHub has no redirect and no secret**: the server asks GitHub for a device code with the client id of the GitHub
+  App, the desktop shows the user code and opens `github.com/login/device`, and polls the server, which asks GitHub
+  at most once per interval GitHub sets (`slow_down` lengthens it); the device code never leaves the server. A
+  company's own GitHub Enterprise Server app is the same, at its address (`CODEALTA_SIGNIN_GITHUB_URL`).
+- No registration per server; the ids are configuration of the server (`CODEALTA_SIGNIN_<PROVIDER>_CLIENT_ID`) until a
+  release carries them, and a method whose id is missing is not offered.
+- **Registering the GitHub App** is one confirmation in a browser: `pwsh src/CodeAlta.Server/Identity/SignIn/register-github-app.ps1`
+  posts `github-app-manifest.json` (public, no permission, no webhook) to the CodeAlta organization, converts the code
+  GitHub sends back (`POST /app-manifests/{code}/conversions`) and prints the app id, slug and client id. The owner
+  then turns on **Enable Device Flow** in the app's settings, which a manifest cannot set, and puts the client id in
+  `PublicSignInClients.GitHubClientId`. The client secret, webhook secret and private key of the conversion are not
+  needed, and not kept unless `-SaveCredentialsTo` names a file.
 - A linked method signs in only once a person linked it from one of their devices; an account nobody linked signs
   nobody in.
 - Sign-in on the server's own web pages (a browser, the phone) needs an application the admin registers with the

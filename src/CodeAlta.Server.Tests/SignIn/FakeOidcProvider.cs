@@ -20,15 +20,14 @@ namespace CodeAlta.Server.Tests.SignIn;
 /// <param name="Email">Its email.</param>
 /// <param name="Name">Its name.</param>
 /// <param name="Groups">Its groups.</param>
-/// <param name="GitHubId">Its numeric id in GitHub mode.</param>
+/// <param name="GitHubId">Its numeric id at <see cref="FakeGitHubDeviceFlow"/>.</param>
 internal sealed record FakeAccount(string Subject, string Email, string Name, IReadOnlyList<string> Groups, long GitHubId = 0);
 
 /// <summary>
 /// An OpenID Connect provider in the process of a test, on the loopback: discovery, an authorization endpoint that
 /// signs the current account in at once and redirects with a code, a token endpoint that checks the client, the
-/// redirect, the PKCE verifier and that a code is used once, ID tokens signed with a test RSA key and carrying groups,
-/// and GitHub's OAuth endpoints and <c>/user</c>. Switches make it answer wrong tokens (audience, issuer, nonce, expiry,
-/// key) for the refusals.
+/// redirect, the PKCE verifier and that a code is used once, and ID tokens signed with a test RSA key and carrying
+/// groups. Switches make it answer wrong tokens (audience, issuer, nonce, expiry, key) for the refusals.
 /// </summary>
 internal sealed class FakeOidcProvider : IAsyncDisposable
 {
@@ -36,7 +35,6 @@ internal sealed class FakeOidcProvider : IAsyncDisposable
     private readonly RSA _key = RSA.Create(2048);
     private readonly RSA _otherKey = RSA.Create(2048);
     private readonly ConcurrentDictionary<string, Grant> _codes = new(StringComparer.Ordinal);
-    private readonly ConcurrentDictionary<string, FakeAccount> _accessTokens = new(StringComparer.Ordinal);
 
     private FakeOidcProvider(WebApplication app, string clientId, string? clientSecret, Func<DateTimeOffset> now)
     {
@@ -158,16 +156,7 @@ internal sealed class FakeOidcProvider : IAsyncDisposable
             }), "application/json");
         });
         _app.MapGet("/authorize", (Func<HttpContext, IResult>)Authorize);
-        _app.MapGet("/login/oauth/authorize", (Func<HttpContext, IResult>)Authorize);
         _app.MapPost("/token", (Func<HttpContext, Task<IResult>>)Token);
-        _app.MapPost("/login/oauth/access_token", (Func<HttpContext, Task<IResult>>)Token);
-        _app.MapGet("/user", (HttpContext context) =>
-        {
-            var header = context.Request.Headers.Authorization.ToString();
-            if (!header.StartsWith("Bearer ", StringComparison.Ordinal) || !_accessTokens.TryGetValue(header["Bearer ".Length..], out var account)) return Results.StatusCode(401);
-            return Results.Text(JsonSerializer.Serialize(new Dictionary<string, object> { ["id"] = account.GitHubId, ["login"] = account.Subject, ["name"] = account.Name,
-                ["email"] = account.Email }), "application/json");
-        });
     }
 
     private IResult Authorize(HttpContext context)
@@ -209,10 +198,10 @@ internal sealed class FakeOidcProvider : IAsyncDisposable
         var verifier = form["code_verifier"].ToString();
         if (Base64Url.EncodeToString(SHA256.HashData(Encoding.ASCII.GetBytes(verifier))) != grant.Challenge) return Refuse("invalid_grant");
 
-        var accessToken = "at-" + Guid.NewGuid().ToString("N");
-        _accessTokens[accessToken] = grant.Account;
-        var answer = new Dictionary<string, object> { ["access_token"] = accessToken, ["token_type"] = "Bearer", ["expires_in"] = 300 };
-        if (context.Request.Path.StartsWithSegments("/token")) answer["id_token"] = IdToken(grant);
+        var answer = new Dictionary<string, object>
+        {
+            ["access_token"] = "at-" + Guid.NewGuid().ToString("N"), ["token_type"] = "Bearer", ["expires_in"] = 300, ["id_token"] = IdToken(grant),
+        };
         return Results.Text(JsonSerializer.Serialize(answer), "application/json");
     }
 

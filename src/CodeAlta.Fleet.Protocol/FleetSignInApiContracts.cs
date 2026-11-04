@@ -18,7 +18,10 @@ public static class FleetSignInMethods
     /// <summary>A Google account, through the public client of the CodeAlta project.</summary>
     public const string Google = "google";
 
-    /// <summary>A GitHub account (OAuth only, no ID token), through the public client of the CodeAlta project.</summary>
+    /// <summary>
+    /// A GitHub account, through the device flow of the CodeAlta GitHub App: the person enters a code at GitHub, the
+    /// server asks GitHub until it answers; no redirect and no client secret.
+    /// </summary>
     public const string GitHub = "github";
 
     /// <summary>The OpenID Connect provider of the company, which the owner configures.</summary>
@@ -31,6 +34,11 @@ public static class FleetSignInMethods
     /// <param name="method">The text.</param>
     /// <returns>Whether it is one of <see cref="All"/>.</returns>
     public static bool IsKnown(string? method) => method is Passkey or Microsoft or Google or GitHub or Company;
+
+    /// <summary>Gets whether a method signs in with a code the person enters at the provider (a device flow), rather than through a redirect.</summary>
+    /// <param name="method">The method.</param>
+    /// <returns>Whether the device polls the server (<c>POST /api/v1/sign-in/poll</c>) instead of listening on a loopback address.</returns>
+    public static bool UsesDeviceCode(string? method) => method is GitHub;
 }
 
 /// <summary>Why a sign-in starts.</summary>
@@ -59,20 +67,27 @@ public sealed record SignInMethodsResponse(string? Organization, IReadOnlyList<S
 
 /// <summary>
 /// The body of <c>POST /api/v1/sign-in/start</c>, signed with the key it names: the server makes the state, the nonce
-/// and the PKCE verifier of an authorization request whose answer comes back to the loopback address of the device.
+/// and the PKCE verifier of an authorization request whose answer comes back to the loopback address of the device; or,
+/// for a method that uses a device code (<see cref="FleetSignInMethods.UsesDeviceCode"/>), asks the provider for the
+/// code the person enters, and keeps the provider's device code to itself.
 /// </summary>
 /// <param name="Method">The method (<see cref="FleetSignInMethods"/>).</param>
 /// <param name="PublicKey">The public key of the device that signs in: the new device to enroll, or the approved device that links.</param>
-/// <param name="RedirectUri">The loopback address the browser comes back to: <c>http://127.0.0.1:&lt;port&gt;/&lt;path&gt;</c>.</param>
+/// <param name="RedirectUri">
+/// The loopback address the browser comes back to: <c>http://127.0.0.1:&lt;port&gt;/&lt;path&gt;</c>; null for a method
+/// that uses a device code.
+/// </param>
 /// <param name="Purpose">Why (<see cref="FleetSignInPurposes"/>); <see cref="FleetSignInPurposes.Enroll"/> when absent.</param>
-public sealed record StartSignInRequest(string Method, string PublicKey, string RedirectUri, string? Purpose = null);
+public sealed record StartSignInRequest(string Method, string PublicKey, string? RedirectUri, string? Purpose = null);
 
 /// <summary>A sign-in that started.</summary>
 /// <param name="AttemptId">The attempt, which only its device completes.</param>
-/// <param name="AuthorizationUrl">The address to open in the system browser.</param>
-/// <param name="State">The state the browser brings back with the code, which the device checks.</param>
+/// <param name="AuthorizationUrl">The address to open in the system browser: the provider's sign-in, or the page where the person enters <paramref name="UserCode"/>.</param>
+/// <param name="State">The state the browser brings back with the code, which the device checks; null for a device code.</param>
 /// <param name="ExpiresAt">When the attempt stops working.</param>
-public sealed record StartSignInResponse(string AttemptId, string AuthorizationUrl, string State, DateTimeOffset ExpiresAt);
+/// <param name="UserCode">The code the person enters at <paramref name="AuthorizationUrl"/>, for a method that uses a device code; null otherwise.</param>
+/// <param name="PollInterval">How many seconds the device waits between two polls, for a device code; null otherwise.</param>
+public sealed record StartSignInResponse(string AttemptId, string AuthorizationUrl, string? State, DateTimeOffset ExpiresAt, string? UserCode = null, int? PollInterval = null);
 
 /// <summary>The body of <c>POST /api/v1/sign-in/complete</c>, signed by the key that started the attempt.</summary>
 /// <param name="AttemptId">The attempt.</param>
@@ -97,6 +112,19 @@ public sealed record SignInPersonDto(string Id, string DisplayName, string? Emai
 /// <param name="GrantExpiresAt">When the grant stops working; null for a link.</param>
 /// <param name="Linked">Whether a method was linked to the person (or a passkey registered).</param>
 public sealed record CompleteSignInResponse(string Method, SignInPersonDto Person, string? Grant, DateTimeOffset? GrantExpiresAt, bool Linked);
+
+/// <summary>
+/// The body of <c>POST /api/v1/sign-in/poll</c>, signed by the key that started an attempt with a device code: the server
+/// asks the provider whether the person entered the code, at most once per interval.
+/// </summary>
+/// <param name="AttemptId">The attempt.</param>
+public sealed record PollSignInRequest(string AttemptId);
+
+/// <summary>The answer of a poll: still waiting for the person, or what the sign-in gave, once.</summary>
+/// <param name="Pending">Whether the person has not entered the code yet.</param>
+/// <param name="PollInterval">How many seconds the device waits before the next poll.</param>
+/// <param name="Completed">What the sign-in gave, once it is done; null while it waits.</param>
+public sealed record PollSignInResponse(bool Pending, int PollInterval, CompleteSignInResponse? Completed);
 
 /// <summary>The body of <c>POST /api/v1/sign-in/passkey/options</c>, sent by the server's sign-in page.</summary>
 /// <param name="AttemptId">The attempt the page was opened for.</param>
@@ -165,6 +193,8 @@ public sealed record SignInLoginDto(string Method, string Name, DateTimeOffset C
 [JsonSerializable(typeof(StartSignInResponse))]
 [JsonSerializable(typeof(CompleteSignInRequest))]
 [JsonSerializable(typeof(CompleteSignInResponse))]
+[JsonSerializable(typeof(PollSignInRequest))]
+[JsonSerializable(typeof(PollSignInResponse))]
 [JsonSerializable(typeof(PasskeyOptionsRequest))]
 [JsonSerializable(typeof(PasskeyOptionsResponse))]
 [JsonSerializable(typeof(PasskeyFinishRequest))]

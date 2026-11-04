@@ -32,11 +32,11 @@ const campaign = (request: FleetUpdateStartRequest): FleetUpdateCampaignView => 
   automatic: false, rollback: false, serverState: "pending", serverMessage: null, createdAt: "2026-11-03T08:00:00Z",
   machines: updates.machines.filter(machine => !request.machines || request.machines.includes(machine.id)).map(machine => ({ id: machine.id, name: machine.name,
     state: machine.online ? "switching" : "pending", running: machine.version, message: null, online: machine.online })) });
-// Passkeys and Microsoft on, Google and GitHub not registered by the project yet, no company sign-in; the owner linked nothing.
+// Passkeys, Microsoft and GitHub on, Google not registered by the project yet, no company sign-in; the owner linked nothing.
 let signIn: FleetSignInSettingsView = { methods: [
   { id: "company", name: "Company sign-in", enabled: false, available: false }, { id: "passkey", name: "Passkey", enabled: true, available: true },
   { id: "microsoft", name: "Microsoft", enabled: true, available: true }, { id: "google", name: "Google", enabled: true, available: false },
-  { id: "github", name: "GitHub", enabled: true, available: false }], issuer: null, clientId: null, hasClientSecret: false, displayName: null, groupsClaim: "groups",
+  { id: "github", name: "GitHub", enabled: true, available: true }], issuer: null, clientId: null, hasClientSecret: false, displayName: null, groupsClaim: "groups",
   requireSso: false, version: 0, updatedAt: null };
 let logins: FleetSignInLoginView[] = [];
 const unavailable = async () => { throw new Error("not in this fixture"); };
@@ -95,11 +95,20 @@ const api: FleetServerApi = {
         name: method.id === "company" ? request.displayName ?? method.name : method.name, available: method.id === "company" ? !!request.issuer : method.available })) };
     return { status: "ok", settings: signIn, logins: [], message: null };
   },
-  linkSignIn: async (request: FleetSignInLinkRequest) => {
+  // GitHub gives a code and waits for the person, until Cancel; the others link at once.
+  startSignInCode: async () => ({ status: "ok", message: null, code: { handle: "0123456789abcdef0123456789abcdef", userCode: "WDJB-MJHT",
+    url: "https://github.com/login/device", expiresAt: "2026-11-04T12:15:00Z" } }),
+  linkSignIn: async (request: FleetSignInLinkRequest, options?: { signal?: AbortSignal }) => {
     calls.push(JSON.stringify({ linkSignIn: request.method }));
+    if (request.method === "github") {
+      while (!options?.signal?.aborted) await new Promise(resolve => setTimeout(resolve, 20));
+      calls.push(JSON.stringify({ linkCancelled: request.method }));
+      return { status: "sign_in.cancelled", message: null };
+    }
     logins = [...logins, { method: request.method, name: request.method === "passkey" ? "Passkey on Windows" : "alex@example.com", createdAt: "2026-11-04T08:00:00Z", lastUsedAt: null }];
     return { status: "ok", message: null };
   },
+  openSignInPage: async (request: { handle: string }) => { calls.push(JSON.stringify({ openPage: request.handle })); return { status: "ok", message: null }; },
   watch: async () => (async function* () { })(),
   create: unavailable, join: unavailable, createToken: unavailable, revoke: unavailable, signInMethods: unavailable, joinWithSignIn: unavailable,
 };

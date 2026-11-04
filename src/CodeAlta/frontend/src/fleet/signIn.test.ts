@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import type { FleetSignInSettingsView } from "#neoastra";
-import { orderedSignInMethods, signInDraft, signInDraftProblem, signInProblem, signInSummary } from "./signIn";
+import { orderedSignInMethods, signInCode, signInDraft, signInDraftProblem, signInProblem, signInSummary } from "./signIn";
 
 const settings = (look: Partial<FleetSignInSettingsView> = {}): FleetSignInSettingsView => ({ methods: [
   { id: "company", name: "Contoso", enabled: true, available: true }, { id: "passkey", name: "Passkey", enabled: true, available: true },
@@ -41,5 +41,20 @@ test("the refusals of sign-in say what to do, and the other statuses are left to
   assert.equal(signInProblem("sign_in.sso_required"), "Your organization requires its company sign-in.");
   assert.equal(signInProblem("sign_in.wrong_nonce"), "The sign-in did not verify: start it again.");
   assert.equal(signInProblem("sign_in.cancelled"), "The sign-in was cancelled.");
+  assert.equal(signInProblem("sign_in.denied"), "The sign-in was refused at the provider.");
+  assert.equal(signInProblem("sign_in.expired"), "The code expired before it was entered: start the sign-in again.");
   assert.equal(signInProblem("unreachable"), null);
+});
+
+test("a GitHub code is shown only when it is a short printable code with an https:// page", () => {
+  const handle = "0123456789abcdef0123456789abcdef";
+  const code = (userCode: string, url: string, id = handle) => signInCode({ handle: id, userCode, url, expiresAt: "2026-11-04T12:15:00Z" });
+  assert.deepEqual(code("WDJB-MJHT", "https://github.com/login/device"), { handle, userCode: "WDJB-MJHT", url: "https://github.com/login/device" });
+  assert.deepEqual(code("WDJB-MJHT", "http://127.0.0.1:5000/login/device"), { handle, userCode: "WDJB-MJHT", url: "http://127.0.0.1:5000/login/device" }, "a fake GitHub of a test");
+  assert.equal(code("WDJB-MJHT", "https://github.com/login/device", "not a handle"), null);
+  assert.equal(code("WDJB-MJHT", "http://github.example/login/device"), null);
+  assert.equal(code("WDJB-MJHT", "javascript:alert(1)"), null);
+  assert.equal(code("two words", "https://github.com/login/device"), null);
+  assert.equal(code("", "https://github.com/login/device"), null);
+  assert.equal(signInCode(null), null);
 });

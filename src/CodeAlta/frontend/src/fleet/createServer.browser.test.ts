@@ -86,7 +86,40 @@ test("Join an organization signs in through the browser with the server's method
     await page.clickText(".join-organization-dialog .bp6-button", "Link the space");
     await page.until(`document.querySelector('.join-organization-dialog [role=status]')?.textContent.includes('An administrator of Contoso approves this computer.')`,
       "a person's first computer waits for the owner");
-    assert.deepEqual((await calls(page)).filter(call => call.joinSignIn || call.joinOrg), [{ joinSignIn: "https://sso.contoso.com", method: "company" }]);
+    assert.deepEqual((await calls(page)).filter(call => call.joinSignIn || call.joinOrg), [{ joinSignIn: "https://sso.contoso.com", method: "company", handle: null }]);
+    assert.deepEqual(page.problems, []);
+  }, options);
+});
+
+test("Join an organization with GitHub shows the code to enter at GitHub, opens GitHub's page, and Cancel stops the wait", { skip: !edge, timeout: 90_000 }, async () => {
+  await withCanvas(async page => {
+    await page.evaluate(`window.serverFixture.show('join')`);
+    await page.until(`document.querySelector('.join-organization-dialog input')`, "the address");
+    await page.evaluate(type(".join-organization-dialog input", "github.contoso.com"));
+    await page.clickText(".join-organization-dialog .bp6-button", "Next");
+    await page.until(`document.querySelector('.join-organization-methods [data-method=github]')`, "GitHub offered");
+
+    // The code comes first; Cancel stops the sign-in that waits for it.
+    await page.clickText(".join-organization-methods .bp6-button", "Continue with GitHub");
+    await page.until(`document.querySelector('.fleet-sign-in-code code')?.textContent === 'WDJB-MJHT'`, "the code to enter");
+    await page.clickText(".join-organization-dialog .bp6-dialog-footer .bp6-button", "Cancel");
+    await page.until(`document.querySelector('.join-organization-dialog [role=alert]')?.textContent === 'The sign-in was cancelled.'`, "cancelled");
+    await page.until(`window.serverFixture.calls.some(call => call.includes('joinCancelled'))`, "the wait stopped");
+    assert.equal(await page.evaluate(`!!document.querySelector('.fleet-sign-in-code')`), false);
+
+    // Again: the button opens GitHub's page, the person enters the code there, and the join goes on.
+    await page.clickText(".join-organization-methods .bp6-button", "Continue with GitHub");
+    await page.until(`document.querySelector('.fleet-sign-in-code code')?.textContent === 'WDJB-MJHT'`, "the code again");
+    await page.shot("join-organization-github-code");
+    await page.clickText(".fleet-sign-in-code .bp6-button", "Copy the code and open GitHub");
+    await page.until(`document.querySelector('.join-organization-spaces')`, "the space");
+    await page.clickText(".join-organization-dialog .bp6-button", "Link the space");
+    await page.until(`document.querySelector('.join-organization-dialog [role=status]')?.textContent.includes('Another of your computers approves this one.')`,
+      "a person who linked GitHub has a computer that approves this one");
+    const handle = "0123456789abcdef0123456789abcdef";
+    assert.deepEqual((await calls(page)).filter(call => call.startCode || call.joinSignIn || call.openPage || call.joinCancelled), [
+      { startCode: "https://github.contoso.com", method: "github" }, { joinSignIn: "https://github.contoso.com", method: "github", handle }, { joinCancelled: "github" },
+      { startCode: "https://github.contoso.com", method: "github" }, { joinSignIn: "https://github.contoso.com", method: "github", handle }, { openPage: handle }]);
     assert.deepEqual(page.problems, []);
   }, options);
 });

@@ -4,8 +4,10 @@ namespace CodeAlta.Server.Identity.SignIn;
 /// The public sign-in clients the CodeAlta project registers with Microsoft, Google and GitHub (<c>doc/fleet/readme.md</c>,
 /// decision 26), so that any self-hosted server signs people in without a registration of its own. They do not exist
 /// yet: these values are placeholders, and a method whose client id is still a placeholder is not offered. A server
-/// takes the real values from <c>CODEALTA_SIGNIN_&lt;PROVIDER&gt;_CLIENT_ID</c> and <c>_CLIENT_SECRET</c> until a version
-/// of CodeAlta Server carries them.
+/// takes the real values from <c>CODEALTA_SIGNIN_&lt;PROVIDER&gt;_CLIENT_ID</c> (and <c>_CLIENT_SECRET</c> for Microsoft and
+/// Google) until a version of CodeAlta Server carries them. GitHub has no secret: its sign-in is the device flow of a
+/// GitHub App, registered from <c>src/CodeAlta.Server/Identity/SignIn/github-app-manifest.json</c>
+/// (<c>doc/fleet/identity.md</c>).
 /// </summary>
 public static class PublicSignInClients
 {
@@ -27,11 +29,11 @@ public static class PublicSignInClients
     /// </summary>
     public const string GoogleClientSecret = PlaceholderPrefix + "google-desktop-client-secret";
 
-    /// <summary>The client id of the CodeAlta OAuth App on GitHub, with the callback <c>http://127.0.0.1/callback</c>.</summary>
+    /// <summary>
+    /// The client id of the CodeAlta GitHub App, with "Enable Device Flow" on: the device flow needs no client secret and
+    /// no redirect.
+    /// </summary>
     public const string GitHubClientId = PlaceholderPrefix + "github-client-id";
-
-    /// <summary>The client secret of the CodeAlta OAuth App, which GitHub requires at its token endpoint even with PKCE.</summary>
-    public const string GitHubClientSecret = PlaceholderPrefix + "github-client-secret";
 
     /// <summary>Gets whether a client id is a placeholder (or missing).</summary>
     /// <param name="clientId">The client id.</param>
@@ -41,7 +43,7 @@ public static class PublicSignInClients
 
 /// <summary>The client of one identity provider at the server.</summary>
 /// <param name="ClientId">The client id.</param>
-/// <param name="ClientSecret">The client secret, or null for a public client with PKCE.</param>
+/// <param name="ClientSecret">The client secret, or null for a public client with PKCE or a device flow.</param>
 public sealed record SignInClient(string ClientId, string? ClientSecret = null);
 
 /// <summary>The sign-in of a server: the public clients of the linked methods and where their providers are.</summary>
@@ -53,8 +55,8 @@ public sealed class SignInOptions
     /// <summary>Gets the Google client.</summary>
     public SignInClient Google { get; init; } = new(PublicSignInClients.GoogleClientId, PublicSignInClients.GoogleClientSecret);
 
-    /// <summary>Gets the GitHub client.</summary>
-    public SignInClient GitHub { get; init; } = new(PublicSignInClients.GitHubClientId, PublicSignInClients.GitHubClientSecret);
+    /// <summary>Gets the GitHub client: the client id of a GitHub App with the device flow on, never a secret.</summary>
+    public SignInClient GitHub { get; init; } = new(PublicSignInClients.GitHubClientId);
 
     /// <summary>Gets the authority of Microsoft accounts: the <c>common</c> endpoint, personal and work accounts.</summary>
     public Uri MicrosoftAuthority { get; init; } = new("https://login.microsoftonline.com/common/v2.0");
@@ -62,10 +64,10 @@ public sealed class SignInOptions
     /// <summary>Gets the issuer of Google accounts.</summary>
     public Uri GoogleAuthority { get; init; } = new("https://accounts.google.com");
 
-    /// <summary>Gets the address of GitHub's OAuth pages.</summary>
+    /// <summary>Gets the address of GitHub's sign-in pages: <c>https://github.com</c>, or a GitHub Enterprise Server.</summary>
     public Uri GitHubAddress { get; init; } = new("https://github.com");
 
-    /// <summary>Gets the address of GitHub's API.</summary>
+    /// <summary>Gets the address of GitHub's API: <c>https://api.github.com</c>, or <c>/api/v3</c> of a GitHub Enterprise Server.</summary>
     public Uri GitHubApiAddress { get; init; } = new("https://api.github.com");
 
     /// <summary>
@@ -86,20 +88,41 @@ public sealed class SignInOptions
     /// <summary>Gets the HTTP handler of the calls to the providers, for tests; null for the usual one.</summary>
     public HttpMessageHandler? ProviderHandler { get; init; }
 
-    /// <summary>Reads the clients from the environment (<c>CODEALTA_SIGNIN_MICROSOFT_CLIENT_ID</c>, ...), over the built-in ones.</summary>
+    /// <summary>
+    /// Reads the clients from the environment, over the built-in ones: <c>CODEALTA_SIGNIN_MICROSOFT_CLIENT_ID</c> and
+    /// <c>_CLIENT_SECRET</c>, the same for <c>GOOGLE</c>, <c>CODEALTA_SIGNIN_GITHUB_CLIENT_ID</c> (no secret), and
+    /// <c>CODEALTA_SIGNIN_GITHUB_URL</c>, the address of a GitHub Enterprise Server whose own GitHub App the company registered.
+    /// </summary>
     /// <param name="environment">What gives a variable of the environment.</param>
     /// <returns>The options.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="environment"/> is null.</exception>
+    /// <exception cref="ArgumentException"><c>CODEALTA_SIGNIN_GITHUB_URL</c> is not an <c>https://</c> address.</exception>
     public static SignInOptions FromEnvironment(Func<string, string?> environment)
     {
         ArgumentNullException.ThrowIfNull(environment);
         var defaults = new SignInOptions();
+        var gitHubId = environment("CODEALTA_SIGNIN_GITHUB_CLIENT_ID");
+        var (gitHub, gitHubApi) = GitHubAddresses(environment("CODEALTA_SIGNIN_GITHUB_URL"), defaults);
         return new SignInOptions
         {
             Microsoft = Read(environment, "MICROSOFT", defaults.Microsoft),
             Google = Read(environment, "GOOGLE", defaults.Google),
-            GitHub = Read(environment, "GITHUB", defaults.GitHub),
+            GitHub = string.IsNullOrWhiteSpace(gitHubId) ? defaults.GitHub : new SignInClient(gitHubId.Trim()),
+            GitHubAddress = gitHub,
+            GitHubApiAddress = gitHubApi,
         };
+    }
+
+    // github.com, or a GitHub Enterprise Server, whose API is under /api/v3 of its address.
+    private static (Uri Pages, Uri Api) GitHubAddresses(string? baseUrl, SignInOptions defaults)
+    {
+        if (string.IsNullOrWhiteSpace(baseUrl)) return (defaults.GitHubAddress, defaults.GitHubApiAddress);
+        if (!Uri.TryCreate(baseUrl.Trim(), UriKind.Absolute, out var address) || address.Scheme != Uri.UriSchemeHttps || !string.IsNullOrEmpty(address.Query)
+            || !string.IsNullOrEmpty(address.Fragment) || !string.IsNullOrEmpty(address.UserInfo))
+            throw new ArgumentException("CODEALTA_SIGNIN_GITHUB_URL must be the https:// address of a GitHub Enterprise Server.", nameof(baseUrl));
+        var pages = new Uri(address.GetLeftPart(UriPartial.Path).TrimEnd('/'));
+        if (string.Equals(pages.Host, "github.com", StringComparison.OrdinalIgnoreCase)) return (defaults.GitHubAddress, defaults.GitHubApiAddress);
+        return (pages, new Uri(pages.AbsoluteUri.TrimEnd('/') + "/api/v3"));
     }
 
     private static SignInClient Read(Func<string, string?> environment, string provider, SignInClient fallback)

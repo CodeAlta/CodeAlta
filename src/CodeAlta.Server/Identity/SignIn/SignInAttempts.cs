@@ -29,6 +29,12 @@ public static class SignInErrorCodes
     /// <summary>The provider refused the code (replayed, expired, wrong verifier).</summary>
     public const string CodeRefused = "sign_in.code_refused";
 
+    /// <summary>The person refused the sign-in at the provider (a device code).</summary>
+    public const string Denied = "sign_in.denied";
+
+    /// <summary>The device code expired before the person entered it.</summary>
+    public const string Expired = "sign_in.expired";
+
     /// <summary>The ID token does not verify.</summary>
     public const string TokenInvalid = "sign_in.invalid_token";
 
@@ -87,7 +93,7 @@ public sealed class SignInAttempt
     /// <summary>Gets the person who links, for a link; null for an enrollment.</summary>
     public string? LinkingPersonId { get; init; }
 
-    /// <summary>Gets the loopback address the browser comes back to.</summary>
+    /// <summary>Gets the loopback address the browser comes back to; empty for a device code.</summary>
     public required string RedirectUri { get; init; }
 
     /// <summary>Gets the state.</summary>
@@ -101,6 +107,36 @@ public sealed class SignInAttempt
 
     /// <summary>Gets when it stops working.</summary>
     public required DateTimeOffset ExpiresAt { get; init; }
+
+    /// <summary>Gets the provider's device code, which never leaves the server; null for a redirect.</summary>
+    public string? DeviceCode { get; init; }
+
+    /// <summary>Gets or sets how many seconds pass at least between two polls of the provider.</summary>
+    public int PollInterval { get; set; } = 5;
+
+    /// <summary>Gets or sets when the provider may be polled again.</summary>
+    public DateTimeOffset NextPollAt { get; set; }
+
+    private int _polling;
+
+    /// <summary>Takes the right to poll the provider now: one poll at a time, and none before <see cref="NextPollAt"/>.</summary>
+    /// <param name="now">The time now.</param>
+    /// <returns>Whether this caller polls; false while another poll runs or the interval has not passed.</returns>
+    public bool TryBeginPoll(DateTimeOffset now)
+    {
+        if (Interlocked.CompareExchange(ref _polling, 1, 0) != 0) return false;
+        if (now >= NextPollAt) return true;
+        Volatile.Write(ref _polling, 0);
+        return false;
+    }
+
+    /// <summary>Ends a poll and sets when the next may run.</summary>
+    /// <param name="now">The time now.</param>
+    public void EndPoll(DateTimeOffset now)
+    {
+        NextPollAt = now + TimeSpan.FromSeconds(PollInterval);
+        Volatile.Write(ref _polling, 0);
+    }
 
     /// <summary>Gets or sets the state of the passkey ceremony the page started, or null.</summary>
     public string? PasskeyState { get; set; }

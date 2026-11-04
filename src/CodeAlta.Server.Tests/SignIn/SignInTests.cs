@@ -161,13 +161,13 @@ public sealed class SignInTests
         // The code replayed in another attempt: the provider refuses it.
         var (next, _) = await StartAsync(server, laptop, FleetSignInMethods.Company);
         var replayed = await server.SendAsync(laptop, HttpMethod.Post, "/api/v1/sign-in/complete",
-            new CompleteSignInRequest(next.AttemptId, FakeOidcProvider.Query(back, "code")!, next.State));
+            new CompleteSignInRequest(next.AttemptId, FakeOidcProvider.Query(back, "code")!, next.State!));
         Assert.AreEqual(SignInErrorCodes.CodeRefused, replayed.Code, replayed.Body.ToString());
 
         // A browser that comes back with the state of another sign-in.
         var (third, thirdBack) = await StartAsync(server, laptop, FleetSignInMethods.Company);
         var crossed = await server.SendAsync(laptop, HttpMethod.Post, "/api/v1/sign-in/complete",
-            new CompleteSignInRequest(third.AttemptId, FakeOidcProvider.Query(thirdBack, "code")!, start.State));
+            new CompleteSignInRequest(third.AttemptId, FakeOidcProvider.Query(thirdBack, "code")!, start.State!));
         Assert.AreEqual(SignInErrorCodes.StateMismatch, crossed.Code);
 
         // An attempt expires.
@@ -260,21 +260,130 @@ public sealed class SignInTests
     }
 
     [TestMethod]
-    public async Task GitHubSignsInWithTheNumericIdOfTheAccount()
+    public async Task GitHubSignsInWithTheDeviceFlow_PolledAtItsInterval_AndKeepsOnlyTheIdAndTheName()
     {
-        await using var provider = await FakeOidcProvider.StartAsync(clientSecret: "github-secret");
-        await using var server = await ServerFixture.StartAsync(signIn: Options(provider));
+        await using var github = await FakeGitHubDeviceFlow.StartAsync();
+        await using var server = await ServerFixture.StartAsync(signIn: GitHubOptions(github));
         using var owner = new TestDevice("Desktop");
         using var laptop = new TestDevice("Laptop");
         var setup = await server.SetUpAsync(owner);
-        var (link, linkBack) = await StartAsync(server, owner, FleetSignInMethods.GitHub, FleetSignInPurposes.Link);
-        Assert.AreEqual(HttpStatusCode.OK, (await CompleteAsync(server, owner, link, linkBack)).Status);
-        var login = await ((ISignInStore)server.Server.Store).FindLoginAsync(setup.Organization.Id, provider.Issuer.GetLeftPart(UriPartial.Authority), "4242");
-        Assert.AreEqual(setup.Owner.Id, login?.PersonId);
+        var account = new FakeAccount("octo-alex", "alex@contoso.example", "Alex Martin", [], 4242);
 
-        var (start, back) = await StartAsync(server, laptop, FleetSignInMethods.GitHub);
-        Assert.IsFalse(provider.Authorizations.Last().ContainsKey("nonce"), "GitHub's OAuth has no ID token, so no nonce");
-        Assert.AreEqual(setup.Owner.Id, (await CompleteAsync(server, laptop, start, back)).Read<CompleteSignInResponse>().Person.Id);
+        // The owner links their GitHub account from their desktop: a code to enter at GitHub, no redirect, no state.
+        var link = await StartCodeAsync(server, owner, FleetSignInPurposes.Link);
+        Assert.AreEqual((github.UserCodes.Last(), github.Address.AbsoluteUri.TrimEnd('/') + "/login/device", (string?)null, 5),
+            (link.UserCode, link.AuthorizationUrl, link.State, link.PollInterval));
+
+        // The server asks GitHub no faster than GitHub asked, whatever the device sends.
+        var early = (await PollAsync(server, owner, link)).Read<PollSignInResponse>();
+        Assert.AreEqual((true, 5, 0), (early.Pending, early.PollInterval, github.Polls), "the interval passes before the first request for a token");
+        server.Clock.Advance(TimeSpan.FromSeconds(5));
+        Assert.IsTrue((await PollAsync(server, owner, link)).Read<PollSignInResponse>().Pending);
+        Assert.AreEqual(1, github.Polls, "authorization_pending");
+        github.SlowDown();
+        server.Clock.Advance(TimeSpan.FromSeconds(5));
+        var slowed = (await PollAsync(server, owner, link)).Read<PollSignInResponse>();
+        Assert.AreEqual((true, 10, 2), (slowed.Pending, slowed.PollInterval, github.Polls), "slow_down adds five seconds");
+        server.Clock.Advance(TimeSpan.FromSeconds(5));
+        Assert.IsTrue((await PollAsync(server, owner, link)).Read<PollSignInResponse>().Pending);
+        Assert.AreEqual(2, github.Polls, "the longer interval holds");
+
+        github.Approve(link.UserCode!, account);
+        server.Clock.Advance(TimeSpan.FromSeconds(5));
+        var linkedAnswer = await PollAsync(server, owner, link);
+        var linked = linkedAnswer.Read<PollSignInResponse>();
+        Assert.AreEqual((false, true, setup.Owner.Id), (linked.Pending, linked.Completed!.Linked, linked.Completed.Person.Id), linkedAnswer.Body.ToString());
+        Assert.AreEqual(SignInErrorCodes.AttemptInvalid, (await PollAsync(server, owner, link)).Code, "a sign-in completes once");
+
+        // Kept: the numeric id and the name; never the login, the email or the user token.
+        var login = await ((ISignInStore)server.Server.Store).FindLoginAsync(setup.Organization.Id, github.Address.GetLeftPart(UriPartial.Authority), "4242");
+        Assert.AreEqual((setup.Owner.Id, "Alex Martin", (string?)null), (login?.PersonId, login?.Name, login?.Email));
+        var logins = (await server.SendAsync(owner, HttpMethod.Get, "/api/v1/sign-in/logins")).Body.ToString();
+        Assert.IsFalse(logins.Contains("octo-alex", StringComparison.Ordinal) || logins.Contains("alex@contoso.example", StringComparison.Ordinal), logins);
+        Assert.IsFalse(github.Tokens.Any(token => linkedAnswer.Body.ToString().Contains(token, StringComparison.Ordinal)), "the user token never reaches the device");
+
+        // On a new laptop the same account proves the owner, and the grant enrolls that laptop, pending.
+        var start = await StartCodeAsync(server, laptop);
+        github.Approve(start.UserCode!, account);
+        server.Clock.Advance(TimeSpan.FromSeconds(5));
+        var signedIn = (await PollAsync(server, laptop, start)).Read<PollSignInResponse>().Completed!;
+        Assert.AreEqual((setup.Owner.Id, true, false), (signedIn.Person.Id, signedIn.Person.HasDevices, signedIn.Linked));
+        var enrolled = await server.SendAsync(laptop, HttpMethod.Post, "/api/v1/enroll", new EnrollRequest(string.Empty, laptop.PublicKey, laptop.Name, null, signedIn.Grant));
+        Assert.AreEqual(HttpStatusCode.Created, enrolled.Status, enrolled.Body.ToString());
+        Assert.AreEqual(DeviceStatuses.Pending, enrolled.Read<EnrollResponse>().Device.Status, "a sign-in grants nothing by itself");
+        Assert.AreEqual(0, github.Secrets, "no client secret is ever sent");
+    }
+
+    [TestMethod]
+    public async Task WhatGitHubRefusesEndsTheSignIn_AndAnAttemptWithACodeIsPolledOnlyByItsDevice()
+    {
+        await using var github = await FakeGitHubDeviceFlow.StartAsync();
+        await using var server = await ServerFixture.StartAsync(signIn: GitHubOptions(github));
+        using var owner = new TestDevice("Desktop");
+        using var laptop = new TestDevice("Laptop");
+        using var thief = new TestDevice("Elsewhere");
+        await server.SetUpAsync(owner);
+        github.Interval = 1;
+
+        var cases = new (Action<string> Decide, HttpStatusCode Status, string Code)[]
+        {
+            (github.Deny, HttpStatusCode.Unauthorized, SignInErrorCodes.Denied),
+            (github.Expire, HttpStatusCode.Unauthorized, SignInErrorCodes.Expired),
+            (code => github.Approve(code, new FakeAccount("someone", "s@example.com", "Someone", [], 999)), HttpStatusCode.Forbidden, SignInErrorCodes.NotLinked),
+        };
+        foreach (var (decide, status, code) in cases)
+        {
+            var start = await StartCodeAsync(server, laptop);
+            Assert.AreEqual(SignInErrorCodes.AttemptInvalid, (await PollAsync(server, thief, start)).Code, "another device does not poll the attempt");
+            Assert.AreEqual(SignInErrorCodes.AttemptInvalid, (await server.SendAsync(laptop, HttpMethod.Post, "/api/v1/sign-in/complete",
+                new CompleteSignInRequest(start.AttemptId, "a-code", "a-state"))).Code, "an attempt with a code completes by polling");
+            decide(start.UserCode!);
+            server.Clock.Advance(TimeSpan.FromSeconds(1));
+            Assert.AreEqual((status, code), Answer(await PollAsync(server, laptop, start)), code);
+            Assert.AreEqual(SignInErrorCodes.AttemptInvalid, (await PollAsync(server, laptop, start)).Code, "a refusal ends the attempt");
+        }
+
+        // An attempt with a code expires with the server's attempt.
+        var late = await StartCodeAsync(server, laptop);
+        server.Clock.Advance(TimeSpan.FromMinutes(11));
+        Assert.AreEqual(SignInErrorCodes.AttemptInvalid, (await PollAsync(server, laptop, late)).Code);
+
+        // A sign-in through a redirect is not polled; a link needs an approved device; an app without the device flow is refused at the start.
+        var passkey = (await server.SendAsync(laptop, HttpMethod.Post, "/api/v1/sign-in/start", new StartSignInRequest(FleetSignInMethods.Passkey, laptop.PublicKey, Redirect)))
+            .Read<StartSignInResponse>();
+        Assert.AreEqual(SignInErrorCodes.AttemptInvalid, (await PollAsync(server, laptop, passkey)).Code);
+        Assert.AreEqual(HttpStatusCode.Unauthorized, (await server.SendAsync(laptop, HttpMethod.Post, "/api/v1/sign-in/start",
+            new StartSignInRequest(FleetSignInMethods.GitHub, laptop.PublicKey, null, FleetSignInPurposes.Link))).Status, "a device the server does not know links nothing");
+        github.DeviceFlowDisabled = true;
+        var disabled = await server.SendAsync(laptop, HttpMethod.Post, "/api/v1/sign-in/start", new StartSignInRequest(FleetSignInMethods.GitHub, laptop.PublicKey, null));
+        Assert.AreEqual((HttpStatusCode.BadGateway, SignInErrorCodes.ProviderUnavailable), Answer(disabled), disabled.Body.ToString());
+        StringAssert.Contains(disabled.Body.ToString(), "device flow");
+
+        var audit = (await server.SendAsync(owner, HttpMethod.Get, "/api/v1/audit?limit=500")).Read<ListResponse<AuditRecordDto>>().Items;
+        foreach (var (_, _, code) in cases) Assert.IsTrue(audit.Any(record => record.Action == "sign_in.complete" && record.Result == code), $"{code} is audited");
+        Assert.AreEqual(0, github.Secrets);
+    }
+
+    [TestMethod]
+    public void GitHubTakesItsClientIdAndTheAddressOfAGitHubEnterpriseServerFromTheEnvironment_NeverASecret()
+    {
+        var defaults = SignInOptions.FromEnvironment(static _ => null);
+        Assert.AreEqual(("https://github.com/", "https://api.github.com/", (string?)null), (defaults.GitHubAddress.AbsoluteUri, defaults.GitHubApiAddress.AbsoluteUri,
+            defaults.GitHub.ClientSecret));
+        Assert.IsTrue(PublicSignInClients.IsPlaceholder(defaults.GitHub.ClientId));
+
+        var variables = new Dictionary<string, string>
+        {
+            ["CODEALTA_SIGNIN_GITHUB_CLIENT_ID"] = " Iv23liCodeAlta ", ["CODEALTA_SIGNIN_GITHUB_CLIENT_SECRET"] = "ignored", ["CODEALTA_SIGNIN_GITHUB_URL"] = "https://github.contoso.example/",
+        };
+        var enterprise = SignInOptions.FromEnvironment(name => variables.GetValueOrDefault(name));
+        Assert.AreEqual(("Iv23liCodeAlta", (string?)null), (enterprise.GitHub.ClientId, enterprise.GitHub.ClientSecret));
+        Assert.AreEqual(("https://github.contoso.example/", "https://github.contoso.example/api/v3"), (enterprise.GitHubAddress.AbsoluteUri, enterprise.GitHubApiAddress.AbsoluteUri));
+
+        variables["CODEALTA_SIGNIN_GITHUB_URL"] = "https://github.com";
+        Assert.AreEqual("https://api.github.com/", SignInOptions.FromEnvironment(name => variables.GetValueOrDefault(name)).GitHubApiAddress.AbsoluteUri);
+        variables["CODEALTA_SIGNIN_GITHUB_URL"] = "http://github.contoso.example";
+        Assert.ThrowsExactly<ArgumentException>(() => SignInOptions.FromEnvironment(name => variables.GetValueOrDefault(name)));
     }
 
     [TestMethod]
@@ -315,7 +424,7 @@ public sealed class SignInTests
             .Read<StartSignInResponse>();
         await PasskeyCeremonyAsync(server, guessed, "get", options => authenticator.Get(options, origin));
         Assert.AreEqual(SignInErrorCodes.PasskeyInvalid, (await server.SendAsync(laptop, HttpMethod.Post, "/api/v1/sign-in/complete",
-            new CompleteSignInRequest(guessed.AttemptId, "not-the-code", guessed.State))).Code);
+            new CompleteSignInRequest(guessed.AttemptId, "not-the-code", guessed.State!))).Code);
 
         // An answer to another challenge, or from another origin, does not verify.
         var forged = (await server.SendAsync(laptop, HttpMethod.Post, "/api/v1/sign-in/start", new StartSignInRequest(FleetSignInMethods.Passkey, laptop.PublicKey, Redirect)))
@@ -423,10 +532,26 @@ public sealed class SignInTests
         MicrosoftAuthority = provider.Issuer,
         Google = new SignInClient(provider.ClientId, provider.ClientSecret),
         GoogleAuthority = provider.Issuer,
-        GitHub = new SignInClient(provider.ClientId, provider.ClientSecret),
-        GitHubAddress = provider.Issuer,
-        GitHubApiAddress = provider.Issuer,
+        GitHub = new SignInClient(provider.ClientId),
     };
+
+    internal static SignInOptions GitHubOptions(FakeGitHubDeviceFlow github) => new()
+    {
+        AllowLoopbackHttpProviders = true,
+        GitHub = new SignInClient(github.ClientId),
+        GitHubAddress = github.Address,
+        GitHubApiAddress = github.Address,
+    };
+
+    private static async Task<StartSignInResponse> StartCodeAsync(ServerFixture server, TestDevice device, string? purpose = null)
+    {
+        var started = await server.SendAsync(device, HttpMethod.Post, "/api/v1/sign-in/start", new StartSignInRequest(FleetSignInMethods.GitHub, device.PublicKey, null, purpose));
+        Assert.AreEqual(HttpStatusCode.OK, started.Status, started.Body.ToString());
+        return started.Read<StartSignInResponse>();
+    }
+
+    private static Task<ApiAnswer> PollAsync(ServerFixture server, TestDevice device, StartSignInResponse start)
+        => server.SendAsync(device, HttpMethod.Post, "/api/v1/sign-in/poll", new PollSignInRequest(start.AttemptId));
 
     private static (HttpStatusCode, string?) Answer(ApiAnswer answer) => (answer.Status, answer.Code);
 
