@@ -174,6 +174,8 @@ internal sealed class AutomationStateStore
     private const int MaximumSeen = 256;
     private const int MaximumHeads = 512;
     private const int MaximumAllowed = 1024;
+    // The most calls of an automation its circuit breaker keeps: more than any number of calls an hour it allows.
+    private const int MaximumCalls = 10_000;
     private static readonly TimeSpan AliveSavedEvery = TimeSpan.FromMinutes(1);
 
     private readonly Lock _gate = new();
@@ -378,6 +380,24 @@ internal sealed class AutomationStateStore
         }
     }
 
+    /// <summary>The calls of the allowed tools of an automation its circuit breaker counts, oldest first; empty for none.</summary>
+    internal IReadOnlyList<DateTimeOffset> Calls(string automationId)
+    {
+        lock (_gate) return _state.Calls.TryGetValue(automationId, out var calls) ? [.. calls] : [];
+    }
+
+    /// <summary>Keeps the calls of the allowed tools of an automation its circuit breaker counts: those of the last hour.</summary>
+    internal void SetCalls(string automationId, IReadOnlyList<DateTimeOffset> calls)
+    {
+        ArgumentNullException.ThrowIfNull(calls);
+        lock (_gate)
+        {
+            if (calls.Count == 0) _state.Calls.Remove(automationId);
+            else _state.Calls[automationId] = [.. calls.TakeLast(MaximumCalls)];
+            Save();
+        }
+    }
+
     /// <summary>Forgets what the event triggers of automations that no longer exist have seen.</summary>
     internal void KeepWatermarks(IReadOnlySet<string> keys)
     {
@@ -405,6 +425,7 @@ internal sealed class AutomationStateStore
             state.Runs = [.. (state.Runs ?? []).Where(static run => run is { Id.Length: > 0, AutomationId.Length: > 0, Trigger: not null, Status: not null })];
             state.Watermarks = (state.Watermarks ?? []).Where(static pair => pair.Value is { Seen: not null, Heads: not null }).ToDictionary(static pair => pair.Key, static pair => pair.Value);
             state.Allowed = (state.Allowed ?? []).Where(static pair => !string.IsNullOrEmpty(pair.Value)).ToDictionary(static pair => pair.Key, static pair => pair.Value);
+            state.Calls = (state.Calls ?? []).Where(static pair => pair.Value is not null).ToDictionary(static pair => pair.Key, static pair => pair.Value);
             unreadable = false;
             return state;
         }
@@ -444,6 +465,9 @@ internal sealed class AutomationStateStore
 
         /// <summary>The automations of project files the user allowed, each with the fingerprint of what was allowed.</summary>
         public Dictionary<string, string> Allowed { get; set; } = [];
+
+        /// <summary>The calls of the allowed tools of each automation in the last hour, which its circuit breaker counts.</summary>
+        public Dictionary<string, List<DateTimeOffset>> Calls { get; set; } = [];
     }
 }
 

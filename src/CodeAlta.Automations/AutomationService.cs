@@ -118,8 +118,12 @@ internal sealed partial class AutomationService : IAsyncDisposable
         _aliveBefore = state.AliveAt;
         // The sessions of the runs keep the guard of their automation as it is now, a try staying a try, after their run too.
         if (runner is AutomationRunner concrete)
+        {
+            // The calls of the hour of the allowed tools are kept with the state: a restart does not give them again.
+            concrete.Breaker = new AutomationCallBreaker(state);
             concrete.Origin = (automationId, runId) => (Snapshot.Entries.FirstOrDefault(entry => entry.Id == automationId),
                 _state.Run(runId) is { } run ? run.Trigger == TryTrigger : null);
+        }
     }
 
     /// <summary>Raised, on any thread, when the automations, their runs or their state changed.</summary>

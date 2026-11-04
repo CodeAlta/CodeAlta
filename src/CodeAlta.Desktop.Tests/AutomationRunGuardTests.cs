@@ -106,6 +106,38 @@ public sealed class AutomationRunGuardTests
         Assert.IsNull((await first.BeforeToolCallAsync(Call("k8s_restart_pod"), default)).BlockMessage, "an hour later");
     }
 
+    // The calls of the hour are kept with the state of the automations: a restart does not give an automation its calls again.
+    [TestMethod]
+    public async Task TheCircuitBreaker_KeepsTheCallsOfTheHour_AcrossARestart()
+    {
+        var folder = Directory.CreateTempSubdirectory("codealta-breaker-").FullName;
+        try
+        {
+            var path = Path.Combine(folder, "state.json");
+            var asker = new Asker { Answer = AgentPermissionDecisionKind.Deny };
+            var clock = new AutomationClock { Now = Noon };
+            var autonomy = new AutomationAutonomy { AllowedTools = ["k8s_restart_pod"], MaxCallsPerHour = 2 };
+            var before = new AutomationRunGuard(Entry(autonomy), new AutomationCallBreaker(new AutomationStateStore(path, false)), asker.AskAsync, clock, dryRun: false);
+            Assert.IsNull((await before.BeforeToolCallAsync(Call("k8s_restart_pod"), default)).BlockMessage);
+            Assert.IsNull((await before.BeforeToolCallAsync(Call("k8s_restart_pod"), default)).BlockMessage);
+
+            // Restarted within the hour: the circuit breaker asks a person.
+            clock.Now = Noon.AddMinutes(30);
+            var after = new AutomationRunGuard(Entry(autonomy), new AutomationCallBreaker(new AutomationStateStore(path, false)), asker.AskAsync, clock, dryRun: false);
+            Assert.IsNotNull((await after.BeforeToolCallAsync(Call("k8s_restart_pod"), default)).BlockMessage);
+            StringAssert.Contains(asker.Asked.Single().Reason, "circuit breaker");
+
+            // An hour after the first calls, the tool runs again by itself.
+            clock.Now = Noon.AddMinutes(61);
+            var later = new AutomationRunGuard(Entry(autonomy), new AutomationCallBreaker(new AutomationStateStore(path, false)), asker.AskAsync, clock, dryRun: false);
+            Assert.IsNull((await later.BeforeToolCallAsync(Call("k8s_restart_pod"), default)).BlockMessage);
+        }
+        finally
+        {
+            Directory.Delete(folder, recursive: true);
+        }
+    }
+
     [TestMethod]
     public async Task APinnedBoundedTool_RunsAsItWasPinned_WithinItsBounds_OnceItsPreconditionHolds()
     {

@@ -161,7 +161,8 @@ internal sealed class AutomationRunner : IAutomationRunner
 
     private readonly CodeAltaHost _host;
     private readonly IAutomationRunGate? _gate;
-    private readonly AutomationCallBreaker _breaker = new();
+    /// <summary>Gets or sets the circuit breaker of the allowed tools of the runs; the service gives one that keeps its calls with its state.</summary>
+    internal AutomationCallBreaker Breaker { get; set; } = new();
 
     /// <summary>How often the approvals of the commands and edits of a run with autonomy are looked at for their timeout.</summary>
     internal static readonly TimeSpan ApprovalWatch = TimeSpan.FromSeconds(15);
@@ -197,7 +198,7 @@ internal sealed class AutomationRunner : IAutomationRunner
         if (entry is not null && entry.Definition.Autonomy is null) return null;
         entry ??= new AutomationEntry(new AutomationDefinition(automationId, "an automation that is no longer here"), new AutomationSource(string.Empty, null, null), null, null, null);
         var autonomy = dryRun is null || entry.Definition.Autonomy is null ? new AutomationAutonomy() : entry.Definition.Autonomy;
-        return new AutomationRunGuard(entry with { Definition = entry.Definition with { Autonomy = autonomy } }, _breaker,
+        return new AutomationRunGuard(entry with { Definition = entry.Definition with { Autonomy = autonomy } }, Breaker,
             (session, request, token) => _host.RuntimeService.Permissions.RequestForSessionAsync(session, request, token), TimeProvider.System, dryRun == true);
     }
 
@@ -327,7 +328,7 @@ internal sealed class AutomationRunner : IAutomationRunner
                 if (_host.RuntimeService.GetPermissionPolicy(sessionId) == SessionPermissionPolicy.Approve)
                     return new(sessionId, "This automation decides what its runs do without a person: it runs in a permission mode that asks for commands and edits, not one that allows everything.", null);
                 // A call waits for a person on the card of the session that makes it: the run's own, or a session it started.
-                guard = new AutomationRunGuard(entry, _breaker, (session, request, token) => _host.RuntimeService.Permissions.RequestForSessionAsync(session, request, token),
+                guard = new AutomationRunGuard(entry, Breaker, (session, request, token) => _host.RuntimeService.Permissions.RequestForSessionAsync(session, request, token),
                     TimeProvider.System, dryRun);
                 _live[runId] = guard;
                 _host.ToolGuards.Set(sessionId, guard);

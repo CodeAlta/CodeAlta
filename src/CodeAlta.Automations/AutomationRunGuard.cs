@@ -10,9 +10,24 @@ namespace CodeAlta.Automations;
 /// </summary>
 internal sealed class AutomationCallBreaker
 {
-    private static readonly TimeSpan Window = TimeSpan.FromHours(1);
+    /// <summary>The period of the circuit breaker.</summary>
+    internal static readonly TimeSpan Window = TimeSpan.FromHours(1);
     private readonly Lock _gate = new();
     private readonly Dictionary<string, Queue<DateTimeOffset>> _calls = new(StringComparer.Ordinal);
+    private readonly AutomationStateStore? _store;
+
+    /// <summary>Creates a circuit breaker whose calls are forgotten with the host.</summary>
+    internal AutomationCallBreaker()
+    {
+    }
+
+    /// <summary>Creates a circuit breaker that keeps the calls of the hour with the state of the automations: a restart keeps them.</summary>
+    /// <param name="store">The state of the automations of the host.</param>
+    internal AutomationCallBreaker(AutomationStateStore store)
+    {
+        ArgumentNullException.ThrowIfNull(store);
+        _store = store;
+    }
 
     /// <summary>Takes one call of an automation, when it has calls left in the hour.</summary>
     /// <returns>Whether the call may run without a person.</returns>
@@ -21,10 +36,11 @@ internal sealed class AutomationCallBreaker
         if (maximum is not { } most) return true;
         lock (_gate)
         {
-            if (!_calls.TryGetValue(automationId, out var calls)) _calls[automationId] = calls = new();
+            if (!_calls.TryGetValue(automationId, out var calls)) _calls[automationId] = calls = new(_store?.Calls(automationId) ?? []);
             while (calls.Count > 0 && now - calls.Peek() >= Window) calls.Dequeue();
             if (calls.Count >= most) return false;
             calls.Enqueue(now);
+            _store?.SetCalls(automationId, [.. calls]);
             return true;
         }
     }
