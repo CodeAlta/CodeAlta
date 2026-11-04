@@ -9,6 +9,7 @@ import { keyWords, serverProblem } from "./fleetServer";
 import { defaultJoinSpaces, joinSteps, joinWords, organizationAddressOf, type JoinCase, type JoinStep } from "./joinOrganization";
 import { orderedSignInMethods, signInCode, signInProblem, type SignInCode as Code } from "./signIn";
 import { SignInCode } from "./SignInCode";
+import { hasBrandMark, SignInMethodIcon } from "./SignInMethodIcon";
 
 /** The calls of the dialog. */
 export type JoinOrganizationApi = Pick<typeof fleetServer, "join" | "linkSpace" | "status" | "signInMethods" | "joinWithSignIn" | "startSignInCode" | "openSignInPage">;
@@ -190,8 +191,9 @@ export function JoinOrganizationDialog({ epoch, kind = "organization", api = fle
         {methods === null ? <div className="join-organization-methods muted-text"><ActivitySpinner size={14} /> {t("Checking how this server signs people in…")}</div>
           : <div className="join-organization-methods" role="group" aria-label={t("Sign in with")}>
             {methods.map((method, index) => <Button key={method.id} fill alignText="start" data-method={method.id} disabled={busy}
-              intent={index === 0 && !method.breakGlass ? "primary" : undefined} variant={method.breakGlass ? "minimal" : undefined} size={method.breakGlass ? "small" : undefined}
-              icon={waiting === method.id ? <ActivitySpinner size={14} /> : undefined}
+              intent={index === 0 && !method.breakGlass && !hasBrandMark(method.id) ? "primary" : undefined} variant={method.breakGlass ? "minimal" : undefined}
+              size={method.breakGlass ? "small" : undefined}
+              icon={waiting === method.id ? <ActivitySpinner size={16} /> : <SignInMethodIcon method={method.id} size={method.breakGlass ? 14 : 16} />}
               text={method.breakGlass ? t("Owner's passkey") : t("Continue with {method}", { method: method.id === "passkey" ? t("Passkey") : method.name })}
               onClick={() => void signInWith(method)} />)}
           </div>}

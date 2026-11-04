@@ -8,6 +8,7 @@ import type { MessageKey } from "../localization";
 import { serverProblem } from "./fleetServer";
 import { hasCompany, linkableMethods, signInCode, signInDraft, signInDraftProblem, signInProblem, signInSummary, type SignInCode as Code, type SignInDraft } from "./signIn";
 import { SignInCode } from "./SignInCode";
+import { SignInMethodIcon } from "./SignInMethodIcon";
 
 /** The calls of the sign-in of a server. */
 export type FleetSignInApi = Pick<typeof fleetServer, "signInSettings" | "setSignInSettings" | "linkSignIn" | "startSignInCode" | "openSignInPage">;
@@ -86,7 +87,7 @@ export function ServerSignIn({ server, epoch, api = fleetServer, revision }: { s
       {summary && <span className="muted-text fleet-sign-in-summary">{t(summary.key, { methods: summary.methods })}</span>}
       <span className="fleet-sign-in-logins" aria-label={t("Your sign-in methods")}>
         {logins.length === 0 ? <span className="muted-text">{t("Your sign-in methods")}: {t("None yet.")}</span>
-          : logins.map((login, index) => <Tag key={`${login.method}:${index}`} minimal round title={login.name}>
+          : logins.map((login, index) => <Tag key={`${login.method}:${index}`} minimal round title={login.name} icon={<SignInMethodIcon method={login.method} size={12} />}>
             {login.method === "passkey" ? t("Passkey") : methodNames[login.method] ?? login.method} · {login.name}</Tag>)}
       </span>
       {linking && (deviceCode ? <SignInCode epoch={epoch} code={deviceCode} api={api} onCancel={cancelLink} />
@@ -94,8 +95,8 @@ export function ServerSignIn({ server, epoch, api = fleetServer, revision }: { s
       {problem && <Callout compact intent="warning" role="alert">{t(problem.key)}{problem.detail && <div className="muted-text">{problem.detail}</div>}</Callout>}
     </div>
     <PopoverNext placement="bottom-end" content={<Menu>
-      {offered.map(method => <MenuItem key={method} text={method === "passkey" ? t("Add a passkey") : t("Link {method}", { method: methodNames[method] })}
-        onClick={() => void link(method)} />)}
+      {offered.map(method => <MenuItem key={method} icon={<SignInMethodIcon method={method} />}
+        text={method === "passkey" ? t("Add a passkey") : t("Link {method}", { method: methodNames[method] })} onClick={() => void link(method)} />)}
     </Menu>}>
       <Button size="small" variant="minimal" disabled={!!linking} icon={linking ? <ActivitySpinner size={14} /> : undefined}>{t("Link…")}</Button>
     </PopoverNext>
@@ -139,9 +140,9 @@ function SignInDialog({ server, epoch, api, view, onClose }: {
         <div className="fleet-sign-in-methods" role="group" aria-label={t("Sign in with")}>
           {view.methods.filter(method => method.id !== "company").map(method => <Switch key={method.id} disabled={working || !method.available && !draft.enabled.includes(method.id)}
             checked={draft.enabled.includes(method.id)} onChange={event => toggle(method.id, event.currentTarget.checked)}
-            labelElement={<span>{method.id === "passkey" ? t("Passkey") : method.name}{!method.available && <span className="muted-text"> · {t("Not registered yet")}</span>}</span>} />)}
+            labelElement={<span className="fleet-sign-in-method-label"><SignInMethodIcon method={method.id} />{method.id === "passkey" ? t("Passkey") : method.name}{!method.available && <span className="muted-text"> · {t("Not registered yet")}</span>}</span>} />)}
         </div>
-        <Switch checked={draft.enabled.includes("company")} disabled={working} label={t("Company sign-in")} onChange={event => toggle("company", event.currentTarget.checked)} />
+        <Switch checked={draft.enabled.includes("company")} disabled={working} labelElement={<span className="fleet-sign-in-method-label"><SignInMethodIcon method="company" />{t("Company sign-in")}</span>} onChange={event => toggle("company", event.currentTarget.checked)} />
         <label><span>{t("Issuer")}</span>
           <InputGroup value={draft.issuer} disabled={working} placeholder="https://login.microsoftonline.com/<tenant>/v2.0" spellCheck={false}
             onChange={event => update({ issuer: event.target.value })} /></label>
