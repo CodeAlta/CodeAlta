@@ -261,9 +261,11 @@ internal sealed partial class NodeAutomations : IFleetNodeAutomations, IAutomati
     /// <param name="signed">The signed version.</param>
     /// <param name="open">Opens the sealed content of a version, or says why it does not open.</param>
     /// <param name="cancellationToken">Cancels before the automation is written.</param>
+    /// <param name="nameOf">Reads the name the server gives the device that signed (shown, never trusted); null names it by its id.</param>
     /// <returns>Whether the node holds that version now, or why it refused it.</returns>
     internal async Task<NodeAutomationOutcome> AcceptFromServerAsync(string linkId, FleetDeviceListState devices, string? organizationId, FleetSignedAutomationVersion signed,
-        Func<FleetAutomationVersion, (FleetAutomationContent? Content, string? Reason)> open, CancellationToken cancellationToken)
+        Func<FleetAutomationVersion, (FleetAutomationContent? Content, string? Reason)> open, CancellationToken cancellationToken,
+        Func<string, CancellationToken, Task<string?>>? nameOf = null)
     {
         ArgumentException.ThrowIfNullOrEmpty(linkId);
         ArgumentNullException.ThrowIfNull(devices);
@@ -288,7 +290,8 @@ internal sealed partial class NodeAutomations : IFleetNodeAutomations, IAutomati
         if (content is null) return new(false, $"The definition does not open on this machine: {closed}.");
         try
         {
-            var (outcome, _, _) = await ApplyAsync(signer.DeviceId, signer.DeviceId, signed, version, content, linkId, cancellationToken).ConfigureAwait(false);
+            var name = nameOf is null ? null : await nameOf(signer.DeviceId, cancellationToken).ConfigureAwait(false);
+            var (outcome, _, _) = await ApplyAsync(signer.DeviceId, name ?? signer.DeviceId, signed, version, content, linkId, cancellationToken).ConfigureAwait(false);
             return outcome;
         }
         catch (FleetException exception)
@@ -438,7 +441,7 @@ internal sealed partial class NodeAutomations : IFleetNodeAutomations, IAutomati
                 SaveAssignments();
             }
 
-            Log($"{deviceName} ({deviceId}) assigned the automation '{saved.Definition.Name}' ({saved.Id}), version {version.Number}" + (via is null ? "." : " through a server."));
+            Log($"{(deviceName == deviceId ? deviceId : $"{deviceName} ({deviceId})")} assigned the automation '{saved.Definition.Name}' ({saved.Id}), version {version.Number}" + (via is null ? "." : " through a server."));
             return (new(true, null), saved, assignment);
         }
         finally

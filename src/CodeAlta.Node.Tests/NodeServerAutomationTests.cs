@@ -71,6 +71,8 @@ public sealed class NodeServerAutomationTests
             Assert.AreEqual("pending", (await desktop.PutAutomationAsync(signed, token)).State);
 
             await WaitForAsync(() => Task.FromResult(automations.AssignmentOf(Id) is { Via: not null, Number: 1 } held ? held : null), token);
+            Assert.AreEqual(("Desktop", desktopKey.DeviceId), (automations.AssignmentOf(Id)!.DeviceName, automations.AssignmentOf(Id)!.DeviceId),
+                "the name the server gives the controller that signed it, beside its verified id");
             Assert.AreEqual(Noon.AddMinutes(30), automations.Engine.NextDue(Id), "the node fires its schedule");
             await WaitForAsync(async () => (await desktop.ListAutomationsAsync(token)).Automations.SingleOrDefault(static item => item.State == "applied"), token);
             Assert.AreEqual(Noon.AddMinutes(30), (await WaitForAsync(async () => (await desktop.ListAutomationsAsync(token)).Automations
