@@ -125,6 +125,12 @@ internal sealed class DesktopAutomationPlacement : IAutomationPlacement, IAsyncD
     /// <summary>Gets what signs a run asked by hand of a machine reached through a server; null runs none by hand there.</summary>
     internal Func<FleetAutomationRunRequest, FleetSignedAutomationRunRequest>? SignRun { get; init; }
 
+    /// <summary>
+    /// Gets how long Run now through a server waits for the machine to report the run it asked (started, refused, or held by
+    /// a budget of the machine): the answer then says so; else it says that the run is asked.
+    /// </summary>
+    internal TimeSpan RunReportWait { get; init; } = TimeSpan.FromSeconds(15);
+
     /// <summary>Gets how often the runs of a placed automation, and where it stands, are read again from its machine or server; tests shorten it.</summary>
     internal TimeSpan RunsReadInterval { get; init; } = RunsReadEvery;
 
@@ -520,7 +526,38 @@ internal sealed class DesktopAutomationPlacement : IAutomationPlacement, IAsyncD
 
         lock (_gate) _runsReadAt.Remove(entry.Id);
         Poke();
-        return new AutomationRun(runId, entry.Id, now, "manual") { Name = entry.Definition.Name, Status = AutomationRun.Running };
+        // What the machine reports of the run soon says more: a budget that holds it waits for Continue anyway, offered with it.
+        return await ReportedRunAsync(entry, route, runId, cancellationToken).ConfigureAwait(false)
+            ?? new AutomationRun(runId, entry.Id, now, "manual") { Name = entry.Definition.Name, Status = AutomationRun.Running };
+    }
+
+    // The run asked through a server as its machine reported it, once it did within RunReportWait; null when it did not.
+    private async Task<AutomationRun?> ReportedRunAsync(AutomationEntry entry, DesktopServerAutomationRoute route, string runId, CancellationToken cancellationToken)
+    {
+        var deadline = DateTimeOffset.UtcNow + RunReportWait;
+        while (DateTimeOffset.UtcNow < deadline)
+        {
+            try
+            {
+                var reported = (await route.ListRunsAsync(entry.Id, RunsKept, cancellationToken).ConfigureAwait(false)).Runs
+                    .FirstOrDefault(run => run.RunId == runId && run.Status is not ("requested" or "claimed"));
+                if (reported is not null)
+                {
+                    return new AutomationRun(reported.RunId, entry.Id, reported.StartedAt, reported.Trigger)
+                    {
+                        Name = entry.Definition.Name, SessionId = reported.SessionId, Status = reported.Status, Message = reported.Message, EndedAt = reported.EndedAt,
+                    };
+                }
+            }
+            catch (Exception exception) when (exception is FleetServerException or HttpRequestException or IOException or TaskCanceledException && !cancellationToken.IsCancellationRequested)
+            {
+                return null;
+            }
+
+            await Task.Delay(TimeSpan.FromMilliseconds(250), cancellationToken).ConfigureAwait(false);
+        }
+
+        return null;
     }
 
     // Under _work. Gives an automation to the server of a machine this computer is not paired with, signed and sealed for

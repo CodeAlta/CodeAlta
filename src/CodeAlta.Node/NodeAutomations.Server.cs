@@ -140,7 +140,8 @@ internal sealed partial class NodeAutomations
             return (null, "this machine holds no such automation from that server");
         }
 
-        var run = await Engine.RunAsync(request.AutomationId, request.RunId, cancellationToken).ConfigureAwait(false);
+        // As a run asked directly: answered at once when a budget holds it, which the reports of the runs tell the server.
+        var run = await RunByHandAsync(request.AutomationId, request.RunId, cancellationToken).ConfigureAwait(false);
         if (run is not null) Log($"{request.SignerDeviceId} ran the automation {request.AutomationId} through the server: {run.Status}.");
         return (run, run is null ? "the automation is not on this machine" : null);
     }
