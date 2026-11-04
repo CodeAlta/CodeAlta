@@ -142,6 +142,11 @@ public sealed record FleetPresence(string DeviceId, bool Online, string? State, 
 /// <param name="Capabilities">What it offers, such as <c>sandbox</c> or <c>moves</c>.</param>
 /// <param name="Labels">The labels its owner gave it.</param>
 /// <param name="Providers">The types of the providers ready on it, such as <c>anthropic</c>.</param>
+/// <param name="AccountProviders">
+/// The providers ready on it (their ids) that run with the credentials of an account, as the machine tells from how they
+/// start (<c>doc/fleet/orchestration.md</c>, credentials of unattended runs): what the server lets an automation of a team
+/// or of the organization run with there; null when the machine does not say.
+/// </param>
 public sealed record FleetMachineInventory(
     string Name,
     string Os,
@@ -149,7 +154,8 @@ public sealed record FleetMachineInventory(
     string? AppVersion = null,
     IReadOnlyList<string>? Capabilities = null,
     IReadOnlyList<string>? Labels = null,
-    IReadOnlyList<string>? Providers = null);
+    IReadOnlyList<string>? Providers = null,
+    IReadOnlyList<string>? AccountProviders = null);
 
 /// <summary>The parameters of <c>inventory.publish</c>.</summary>
 /// <param name="Sequence">The sequence of the publication on this device; an older or equal one is a no-op.</param>

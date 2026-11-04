@@ -217,6 +217,93 @@ public sealed partial class SqliteCoordinatorStore : IAccessStore
         }, cancellationToken);
     }
 
+    private const string ScopeProviderColumns = "SELECT p.id, p.organization_id, p.owner_kind, p.owner_id, p.name, p.type, p.endpoint, p.models, p.version, p.sealed, " +
+        "p.updated_by_person_id, p.updated_at FROM scope_providers p";
+
+    /// <inheritdoc />
+    public ValueTask<IReadOnlyList<(ScopeProviderRecord Provider, IReadOnlyList<string> Machines)>> ListScopeProvidersAsync(string organizationId,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(organizationId);
+        return ReadAsync<IReadOnlyList<(ScopeProviderRecord, IReadOnlyList<string>)>>(connection =>
+        {
+            var providers = QueryList(connection, null, ScopeProviderColumns + " WHERE p.organization_id = $org ORDER BY p.name, p.id", ReadScopeProvider, ("$org", organizationId));
+            var keys = QueryList(connection, null, "SELECT k.provider_id, k.device_id FROM scope_provider_keys k JOIN scope_providers p ON p.id = k.provider_id " +
+                "WHERE p.organization_id = $org ORDER BY k.device_id", static reader => (reader.GetString(0), reader.GetString(1)), ("$org", organizationId))
+                .ToLookup(static key => key.Item1, static key => key.Item2);
+            return [.. providers.Select(provider => (provider, (IReadOnlyList<string>)[.. keys[provider.Id]]))];
+        }, cancellationToken);
+    }
+
+    /// <inheritdoc />
+    public ValueTask<bool> PutScopeProviderAsync(ScopeProviderRecord provider, IReadOnlyList<(string DeviceId, string Wrapped)> wraps, AuditEntry audit,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(provider);
+        ArgumentNullException.ThrowIfNull(wraps);
+        ArgumentNullException.ThrowIfNull(audit);
+        return WriteAsync((connection, transaction) =>
+        {
+            var held = QuerySingle(connection, transaction, ScopeProviderColumns + " WHERE p.id = $id", ReadScopeProvider, ("$id", provider.Id));
+            if (held is not null && (held.OrganizationId != provider.OrganizationId || held.Version >= provider.Version)) return false;
+            Execute(connection, transaction, "INSERT INTO scope_providers (id, organization_id, owner_kind, owner_id, name, type, endpoint, models, version, sealed, " +
+                "updated_by_person_id, updated_at) VALUES ($id, $org, $kind, $owner, $name, $type, $endpoint, $models, $version, $sealed, $by, $at) " +
+                "ON CONFLICT (id) DO UPDATE SET owner_kind = excluded.owner_kind, owner_id = excluded.owner_id, name = excluded.name, type = excluded.type, " +
+                "endpoint = excluded.endpoint, models = excluded.models, version = excluded.version, sealed = excluded.sealed, " +
+                "updated_by_person_id = excluded.updated_by_person_id, updated_at = excluded.updated_at",
+                ("$id", provider.Id), ("$org", provider.OrganizationId), ("$kind", provider.OwnerKind), ("$owner", provider.OwnerId), ("$name", provider.Name),
+                ("$type", provider.Type), ("$endpoint", provider.Endpoint), ("$models", provider.Models), ("$version", provider.Version), ("$sealed", provider.Sealed),
+                ("$by", provider.UpdatedByPersonId), ("$at", ToTime(provider.UpdatedAt)));
+            Execute(connection, transaction, "DELETE FROM scope_provider_keys WHERE provider_id = $id", ("$id", provider.Id));
+            foreach (var (deviceId, wrapped) in wraps)
+            {
+                Execute(connection, transaction, "INSERT INTO scope_provider_keys (provider_id, device_id, wrapped) VALUES ($id, $device, $wrapped)",
+                    ("$id", provider.Id), ("$device", deviceId), ("$wrapped", wrapped));
+            }
+
+            AppendAudit(connection, transaction, audit);
+            return true;
+        }, cancellationToken);
+    }
+
+    /// <inheritdoc />
+    public ValueTask<bool> DeleteScopeProviderAsync(string organizationId, string providerId, AuditEntry audit, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(organizationId);
+        ArgumentException.ThrowIfNullOrEmpty(providerId);
+        ArgumentNullException.ThrowIfNull(audit);
+        return WriteAsync((connection, transaction) =>
+        {
+            Execute(connection, transaction, "DELETE FROM scope_provider_keys WHERE provider_id IN (SELECT id FROM scope_providers WHERE id = $id AND organization_id = $org)",
+                ("$id", providerId), ("$org", organizationId));
+            var deleted = Execute(connection, transaction, "DELETE FROM scope_providers WHERE id = $id AND organization_id = $org", ("$id", providerId), ("$org", organizationId));
+            if (deleted > 0) AppendAudit(connection, transaction, audit);
+            return deleted > 0;
+        }, cancellationToken);
+    }
+
+    /// <inheritdoc />
+    public ValueTask<IReadOnlyList<(ScopeProviderRecord Provider, string Wrapped)>> ListScopeProviderKeysAsync(string deviceId, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(deviceId);
+        return ReadAsync(connection => QueryList(connection, null, ScopeProviderColumns.Replace(" FROM scope_providers p", ", k.wrapped FROM scope_providers p", StringComparison.Ordinal) +
+            " JOIN scope_provider_keys k ON k.provider_id = p.id WHERE k.device_id = $device ORDER BY p.id",
+            static reader => (ReadScopeProvider(reader), reader.GetString(12)), ("$device", deviceId)), cancellationToken);
+    }
+
+    private static ScopeProviderRecord ReadScopeProvider(SqliteDataReader reader)
+        => new(reader.GetString(0), reader.GetString(1), reader.GetString(2), reader.GetString(3), reader.GetString(4), reader.GetString(5), GetNullableString(reader, 6),
+            reader.GetString(7), reader.GetInt64(8), reader.GetString(9), reader.GetString(10), FromTime(reader.GetInt64(11)));
+
+    /// <inheritdoc />
+    public ValueTask<IReadOnlyList<(string GrantId, string DeviceId)>> ListGrantKeyDevicesAsync(string organizationId, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(organizationId);
+        return ReadAsync(connection => QueryList(connection, null,
+            "SELECT k.grant_id, k.device_id FROM grant_keys k JOIN grants g ON g.id = k.grant_id WHERE g.organization_id = $org ORDER BY k.grant_id, k.device_id",
+            static reader => (reader.GetString(0), reader.GetString(1)), ("$org", organizationId)), cancellationToken);
+    }
+
     /// <inheritdoc />
     public ValueTask<GrantRecord?> ActivateGrantKeysAsync(string grantId, string sealedText, IReadOnlyList<(string DeviceId, string Wrapped)> wraps, DateTimeOffset at,
         AuditEntry audit, CancellationToken cancellationToken = default)
@@ -227,9 +314,11 @@ public sealed partial class SqliteCoordinatorStore : IAccessStore
         ArgumentNullException.ThrowIfNull(audit);
         return WriteAsync((connection, transaction) =>
         {
-            var changed = Execute(connection, transaction, "UPDATE grants SET status = $active WHERE id = $id AND status = $pending",
+            // Waiting for its keys, or keyed again for the devices of its grantee now: the copies given replace those held.
+            var changed = Execute(connection, transaction, "UPDATE grants SET status = $active WHERE id = $id AND status IN ($pending, $active)",
                 ("$active", FleetGrantStatuses.Active), ("$id", grantId), ("$pending", FleetGrantStatuses.PendingKeys));
             if (changed == 0) return null;
+            Execute(connection, transaction, "DELETE FROM grant_keys WHERE grant_id = $grant", ("$grant", grantId));
             foreach (var (deviceId, wrapped) in wraps)
             {
                 Execute(connection, transaction, "INSERT INTO grant_keys (grant_id, device_id, sealed, wrapped, created_at) VALUES ($grant, $device, $sealed, $wrapped, $at) " +

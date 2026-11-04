@@ -60,9 +60,11 @@ At a CodeAlta Server, `alta fleet access` reads who is who and who may do what, 
 - `alta fleet access people`, `alta fleet access teams`, `alta fleet access grants` list people (role, status, teams), teams (maintainers, members, team machines) and grants.
 - `alta fleet access owners` lists machines and automations with their owners: those `paused` wait for their owner to resume them, those whose `ownerSuspended` is true were owned by someone who left and need a new owner.
 - `alta fleet access transfers` lists the transfers that concern the person; `alta fleet access review` lists who can do what (for owners, admins and auditors).
+- `alta fleet access identities` lists the service identities the automations of a team or of the organization run as, and whether each is `enabled`; `alta fleet access grants` says of a grant of a sealed session whether its grantee has a device that `missingKeys` (a computer of its owner gives it next time it is online).
+- `alta fleet access document` says what the signed access document this computer verified gives machines: `teamMachines`, the identities each team runs as (`teamServices`), `organizationMachines` and `organizationServices`, and the owners of automations (`alta.fleet.access.automation`: `owner`, and `paused` while it waits for its owner to resume it). A machine decides by this, not by the server: a change the server shows in `pending` is not followed before a signer signs it.
 - `alta fleet access propose <kind> --summary "<why>" --stdin` records a change for a person to apply (`role`, `team-member`, `grant`, `transfer`, `team`), the request as a JSON object on stdin (`alta fleet access propose --help` gives each). It changes nothing by itself: tell the user it waits for them in Settings > Fleet > People and access.
 
-A team machine runs the sessions of its team's members, each seeing only their own, and the automations of its maintainers. When a machine refuses work with `not_allowed`, read `alta fleet access show` and `owners` to say who can help.
+A team machine runs the sessions of its team's members, each seeing only their own, and the automations of the team, which its maintainers publish to it (**Publish to** in the editor of an automation): they run as a service identity of the team, with account credentials only, never a personal plan. A machine of the organization runs the automations of the organization the same way. When a machine refuses work with `not_allowed`, read `alta fleet access show` and `owners` to say who can help.
 
 ## Rules
 

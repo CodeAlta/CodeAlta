@@ -155,7 +155,9 @@ event that the signed definition accepts. The first start by a new person asks t
 - **Transfer**: an owner (or a maintainer of the scope) gives a resource to another person or team; the new owner
   accepts; the audit log records both. A personal automation given to a person carries a hand-over: what it does,
   sealed by its owner's device for the new owner's devices, which take it at Resume and sign its next versions; from
-  then on the server takes no version but a removal, and no run, from its former owner.
+  then on the server takes no version but a removal, and no run, from its former owner. The signed access document
+  lists the owners of automations given away or of a team or the organization, and whether each waits for Resume:
+  a machine that reads it takes their versions only from who answers for that owner, and runs none while it waits.
 - **A person leaves** (or is deprovisioned by SCIM): their devices and delegations are revoked; what they owned in team
   or organization scopes (automations, workflow scripts, organization providers) goes to the scope's team or to a named
   successor, paused until that owner resumes it; their personal machines leave the fleet; what they shared stays

@@ -93,6 +93,41 @@ internal sealed partial class DesktopFleetServers
         return null;
     }
 
+    private int _rekeyingGrants;
+
+    // Keys again the grants of sealed sessions whose grantee has devices their copies miss (a new device, a member who joined
+    // the team), when this computer holds the key of the session; one pass at a time.
+    private async Task RekeyGrantsAsync(string linkId)
+    {
+        if (Interlocked.Exchange(ref _rekeyingGrants, 1) != 0) return;
+        try
+        {
+            if (Volatile.Read(ref _connections)?.Find(linkId)?.Connector?.MetadataKeys is not { } keys) return;
+            using var client = Client(linkId);
+            foreach (var grant in (await client.ListGrantsAsync(CancellationToken.None).ConfigureAwait(false)).Items.Where(static grant => grant.MissingKeys))
+            {
+                try
+                {
+                    await FleetGrantKeys.ConfirmAsync(client, keys, grant.Id, CancellationToken.None).ConfigureAwait(false);
+                    if (LogManager.IsInitialized) _handoverLogger.Info($"The grant {grant.Id} was keyed again for the devices of its grantee.");
+                }
+                catch (Exception exception) when (exception is InvalidOperationException or KeyNotFoundException or FleetServerException)
+                {
+                    // A session of another person, or one this computer cannot open: a computer of its owner keys it.
+                }
+            }
+        }
+        catch (Exception exception) when (exception is FleetServerException or HttpRequestException or IOException or KeyNotFoundException or OperationCanceledException
+            or FleetDeviceListException)
+        {
+            if (LogManager.IsInitialized) _handoverLogger.Info($"The grants of {linkId} could not be keyed again: {exception.Message}");
+        }
+        finally
+        {
+            Volatile.Write(ref _rekeyingGrants, 0);
+        }
+    }
+
     // Takes off this computer the automations this person gave away and that their new owner took: the last transfer of each
     // decides, so that one given back later stays. One read at a time; a read asked meanwhile is folded into it.
     private async Task FollowTransfersAsync(string linkId)
@@ -120,5 +155,58 @@ internal sealed partial class DesktopFleetServers
         {
             Volatile.Write(ref _followingTransfers, 0);
         }
+    }
+}
+
+// Whom an automation that runs on a machine of a server may be published to (doc/fleet/orchestration.md, scopes).
+internal sealed partial class DesktopFleetServers
+{
+    /// <summary>
+    /// Reads whom this computer's person may publish an automation to that runs on a machine: the team that owns the machine
+    /// when they maintain it, the organization when it owns the machine and they are an owner or an admin who signs, as the
+    /// access document and the device list this computer verified say; the names come from the server.
+    /// </summary>
+    /// <param name="machineId">The machine.</param>
+    /// <param name="cancellationToken">Cancels the read.</param>
+    /// <returns>The targets beside the person; empty for a personal machine or one of no server.</returns>
+    /// <exception cref="FleetServerException">The server refused the read.</exception>
+    /// <exception cref="HttpRequestException">The server does not answer.</exception>
+    internal async Task<IReadOnlyList<CodeAlta.Desktop.Rpc.AutomationPublishTarget>> PublishTargetsAsync(string machineId, CancellationToken cancellationToken)
+    {
+        using var route = AutomationRoute(machineId);
+        if (route is null) return [];
+        if (route.OfOrganization)
+            return [new(FleetAutomationVersion.OrganizationScope, Connections.FirstOrDefault(connection => connection.Link.Id == route.LinkId)?.Link.OrganizationName ?? "Organization")];
+        if (route.TeamId is not { } team) return [];
+        var teams = await AccessCallAsync(route.LinkId, static (client, token) => client.ListTeamsAsync(token), cancellationToken).ConfigureAwait(false);
+        return [new(FleetAutomationVersion.TeamScopePrefix + team, teams.Items.FirstOrDefault(item => item.Id == team)?.Name ?? team)];
+    }
+
+    /// <summary>
+    /// Names the team, or the organization, that owns a machine as the signed access document this computer verified says;
+    /// null for a personal machine or one of no server. The name of a team comes from the server.
+    /// </summary>
+    /// <param name="machineId">The machine.</param>
+    /// <param name="cancellationToken">Cancels the read.</param>
+    /// <returns>The name, or null.</returns>
+    internal async Task<string?> OwnerOfMachineAsync(string machineId, CancellationToken cancellationToken)
+    {
+        foreach (var connection in Connections)
+        {
+            if (connection.Connector?.Access.Current is not { } access) continue;
+            if (access.IsOrganizationMachine(machineId)) return connection.Link.OrganizationName ?? "the organization";
+            if (access.TeamOf(machineId) is not { } team) continue;
+            try
+            {
+                var teams = await AccessCallAsync(connection.Link.Id, static (client, token) => client.ListTeamsAsync(token), cancellationToken).ConfigureAwait(false);
+                return teams.Items.FirstOrDefault(item => item.Id == team.Id)?.Name ?? team.Id;
+            }
+            catch (Exception exception) when (exception is FleetServerException or HttpRequestException)
+            {
+                return team.Id;
+            }
+        }
+
+        return null;
     }
 }

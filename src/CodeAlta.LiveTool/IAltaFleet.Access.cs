@@ -69,6 +69,12 @@ public sealed record AltaFleetAccess(string Status, string? Message)
 
     /// <summary>Gets the changes agents proposed.</summary>
     public IReadOnlyList<AltaFleetAccessProposal> Proposals { get; init; } = [];
+
+    /// <summary>Gets the service identities of the teams and of the organization.</summary>
+    public IReadOnlyList<AltaFleetIdentity> Identities { get; init; } = [];
+
+    /// <summary>Gets the signed access document as this computer verified it; null before it read one.</summary>
+    public AltaFleetSignedAccess? Signed { get; init; }
 }
 
 /// <summary>A person of the organization.</summary>
@@ -97,7 +103,34 @@ public sealed record AltaFleetTeam(string Id, string Name, IReadOnlyList<string>
 /// <param name="Scope">Where, as <c>kind:id</c>.</param>
 /// <param name="Status"><c>active</c> or <c>pending_keys</c>.</param>
 /// <param name="ExpiresAt">When it stops applying.</param>
-public sealed record AltaFleetGrant(string Id, string Subject, string Capability, string Scope, string Status, DateTimeOffset? ExpiresAt);
+public sealed record AltaFleetGrant(string Id, string Subject, string Capability, string Scope, string Status, DateTimeOffset? ExpiresAt)
+{
+    /// <summary>Gets whether its grantee has a device its copies of the key miss, which a computer of the owner gives next.</summary>
+    public bool MissingKeys { get; init; }
+}
+
+/// <summary>A service identity: what automations of a team or of the organization run as.</summary>
+/// <param name="Id">Its id.</param>
+/// <param name="Name">Its name.</param>
+/// <param name="Owner">Its owner, <c>kind:name</c>.</param>
+/// <param name="Enabled">Whether it is on.</param>
+public sealed record AltaFleetIdentity(string Id, string Name, string Owner, bool Enabled);
+
+/// <summary>An automation whose owner the signed access document gives machines.</summary>
+/// <param name="Id">The automation.</param>
+/// <param name="Owner">Its owner, <c>kind:id</c>.</param>
+/// <param name="Paused">Whether it waits for its owner to resume it.</param>
+public sealed record AltaFleetSignedAutomation(string Id, string Owner, bool Paused);
+
+/// <summary>The signed access document as this computer verified it: what machines decide by.</summary>
+/// <param name="Number">The number of its last version; 0 for none.</param>
+/// <param name="TeamServices">The service identities each team turned on, by team id.</param>
+/// <param name="TeamMachines">The team of each team machine, by machine id.</param>
+/// <param name="OrganizationMachines">The machines of the organization.</param>
+/// <param name="OrganizationServices">The service identities the organization turned on.</param>
+/// <param name="Automations">The automations whose owner machines follow.</param>
+public sealed record AltaFleetSignedAccess(long Number, IReadOnlyDictionary<string, IReadOnlyList<string>> TeamServices, IReadOnlyDictionary<string, string> TeamMachines,
+    IReadOnlyList<string> OrganizationMachines, IReadOnlyList<string> OrganizationServices, IReadOnlyList<AltaFleetSignedAutomation> Automations);
 
 /// <summary>A resource and its owner.</summary>
 /// <param name="Kind"><c>machine</c> or <c>automation</c>.</param>

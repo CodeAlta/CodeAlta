@@ -1,6 +1,12 @@
 // English source keys; translations in es, fr, de, ja, zh-CN order.
 export const automationPlacementMessages = {
   "Runs on": ["Se ejecuta en", "S’exécute sur", "Läuft auf", "実行場所", "运行于"],
+  "Publish to": ["Publicar para", "Publier pour", "Veröffentlichen für", "公開先", "发布给"],
+  "Unavailable team or organization": ["Equipo u organización no disponible", "Équipe ou organisation indisponible", "Team oder Organisation nicht verfügbar",
+    "利用できないチームまたは組織", "不可用的团队或组织"],
+  "It runs as a service identity, with account credentials only.": ["Se ejecuta como una identidad de servicio, solo con credenciales de cuenta.",
+    "Elle s’exécute en tant qu’identité de service, avec des identifiants de compte uniquement.", "Sie läuft als Dienstidentität, nur mit Konto-Anmeldedaten.",
+    "サービス ID として、アカウントの認証情報だけで実行されます。", "它以服务身份运行，仅使用账户凭据。"],
   "{machine} (offline)": ["{machine} (sin conexión)", "{machine} (hors ligne)", "{machine} (offline)", "{machine}（オフライン）", "{machine}（离线）"],
   "Unavailable machine": ["Máquina no disponible", "Machine indisponible", "Nicht verfügbare Maschine", "利用できないマシン", "不可用的机器"],
   "Waits for Continue anyway": ["Espera a continuar de todos modos", "Attend Continuer quand même", "Wartet auf Trotzdem fortsetzen", "それでも続行を待っています", "等待仍然继续"],
@@ -34,10 +40,20 @@ export const automationPlacementMessages = {
     "Die Maschine, die sie verlassen hat, kann ihre Kopie noch ausführen, bis sie antwortet: Bis dahin können beide Maschinen sie ausführen.",
     "移動元のマシンは応答するまでコピーを実行し続ける可能性があります。その間、両方のマシンで実行されることがあります。",
     "原来的机器在响应之前可能仍会运行其副本：在此期间两台机器都可能运行它。"],
+  "An automation of a team or of the organization names the provider it runs with.": [
+    "Una automatización de un equipo o de la organización indica el proveedor con el que se ejecuta.",
+    "Une automatisation d’une équipe ou de l’organisation nomme le fournisseur avec lequel elle s’exécute.",
+    "Eine Automation eines Teams oder der Organisation nennt den Anbieter, mit dem sie läuft.",
+    "チームまたは組織の自動化には、実行に使うプロバイダーを指定します。",
+    "团队或组织的自动化需指明其运行所用的提供方。"],
   "A command trigger runs on this computer only.": [
     "Un disparador de comando solo se ejecuta en este ordenador.",
     "Un déclencheur de commande ne s’exécute que sur cet ordinateur.",
     "Ein Befehlsauslöser läuft nur auf diesem Computer.",
     "コマンドトリガーはこのコンピューターでのみ実行されます。",
     "命令触发器只在本机运行。"],
+  "Automations of your teams": ["Automatizaciones de tus equipos", "Automatisations de vos équipes", "Automationen deiner Teams", "チームの自動化", "你的团队的自动化"],
+  "Open in my editor": ["Abrir en mi editor", "Ouvrir dans mon éditeur", "In meinem Editor öffnen", "自分のエディターで開く", "在我的编辑器中打开"],
+  "The automation could not be opened.": ["No se pudo abrir la automatización.", "L’automatisation n’a pas pu être ouverte.", "Die Automation konnte nicht geöffnet werden.",
+    "自動化を開けませんでした。", "无法打开该自动化。"],
 } as const;

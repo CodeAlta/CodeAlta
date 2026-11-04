@@ -91,6 +91,82 @@ public sealed class FleetGrantKeysTests
             "org", "nightly", "p1", devices.Bea, list));
     }
 
+    [TestMethod]
+    public void AnAutomationOfATeamOpensOnItsMachineAndOnTheDevicesOfItsMaintainers_OfAnotherPersonThanTheMachine()
+    {
+        using var devices = new Devices();
+        var list = devices.List();
+        // The node was enrolled by p1; the team owns it now, and Bea (p2) and Cy (p3) maintain the team.
+        var team = new FleetAccessTeam("infra", ["p2", "p3"], [], false, ["svc"]);
+        var access = FleetAccessState.Empty with
+        {
+            OrganizationId = "org", Teams = FleetAccessState.Empty.Teams.Add("infra", team), Machines = FleetAccessState.Empty.Machines.Add(devices.Node.DeviceId, "infra"),
+        };
+        var content = new FleetAutomationContent("[automations.deploy]\n", "github.com/codealta/codealta");
+        var sealedText = FleetAutomationSigning.SealForTeam(content, "deploy", 1, devices.Node.DeviceId, "infra", list, access, devices.Bea);
+        Assert.IsFalse(sealedText.Contains("automations.deploy", StringComparison.Ordinal));
+        foreach (var reader in new[] { devices.Node, devices.Bea, devices.Cy })
+        {
+            Assert.IsTrue(FleetAutomationSigning.TryOpen(sealedText, "deploy", 1, devices.Node.DeviceId, reader, list, access, out var opened, out var reason), reason);
+            Assert.AreEqual(content, opened);
+        }
+
+        Assert.IsFalse(FleetAutomationSigning.TryOpen(sealedText, "deploy", 1, devices.Node.DeviceId, devices.Desk, list, access, out _, out _),
+            "the person who enrolled the machine does not read what the team runs on it");
+        Assert.IsFalse(FleetAutomationSigning.TryOpen(sealedText, "deploy", 1, devices.Node.DeviceId, devices.Node, list, null, out _, out var without));
+        StringAssert.Contains(without, "access document");
+        var notMaintainer = access with { Teams = access.Teams.SetItem("infra", team with { Maintainers = ["p3"] }) };
+        Assert.IsFalse(FleetAutomationSigning.TryOpen(sealedText, "deploy", 1, devices.Node.DeviceId, devices.Node, list, notMaintainer, out _, out _),
+            "a copy given by someone who no longer maintains the team");
+        Assert.IsFalse(FleetAutomationSigning.TryOpen(sealedText, "deploy", 2, devices.Node.DeviceId, devices.Node, list, access, out _, out _), "another version");
+        Assert.ThrowsExactly<ArgumentException>(() => FleetAutomationSigning.SealForTeam(content, "deploy", 1, devices.Node.DeviceId, "infra", list, access, devices.Desk),
+            "only a maintainer seals for the team");
+    }
+
+    [TestMethod]
+    public void AnAutomationOfTheOrganizationOpensOnItsMachineAndOnTheDevicesOfItsOwnersAndSigners()
+    {
+        using var devices = new Devices();
+        var list = devices.List();
+        // p1 owns the organization, Bea (p2) signs as an admin, Cy (p3) is a member; the node is the organization's.
+        var access = FleetAccessState.Empty with
+        {
+            OrganizationId = "org", Owners = ["p1"], Signers = ["p2"], OrganizationMachines = [devices.Node.DeviceId], OrganizationServices = ["svc"],
+        };
+        var content = new FleetAutomationContent("[automations.report]\n", null);
+        var sealedText = FleetAutomationSigning.SealForOrganization(content, "report", 1, devices.Node.DeviceId, list, access, devices.Bea);
+        foreach (var reader in new[] { devices.Node, devices.Desk, devices.Bea })
+            Assert.IsTrue(FleetAutomationSigning.TryOpen(sealedText, "report", 1, devices.Node.DeviceId, reader, list, access, out _, out var reason), reason);
+        Assert.IsFalse(FleetAutomationSigning.TryOpen(sealedText, "report", 1, devices.Node.DeviceId, devices.Cy, list, access, out _, out _), "a member reads nothing of it");
+        Assert.IsFalse(FleetAutomationSigning.TryOpen(sealedText, "report", 1, devices.Node.DeviceId, devices.Node, list, access with { Signers = [] }, out _, out _),
+            "a copy given by someone who no longer signs");
+        Assert.ThrowsExactly<ArgumentException>(() => FleetAutomationSigning.SealForOrganization(content, "report", 1, devices.Node.DeviceId, list, access, devices.Cy));
+    }
+
+    [TestMethod]
+    public void TheKeyOfAProviderOfATeamOpensOnItsMachines_WhenAMaintainerSealedIt()
+    {
+        using var devices = new Devices();
+        var list = devices.List();
+        var team = new FleetAccessTeam("infra", ["p2"], ["p3"], false, ["svc"]);
+        var access = FleetAccessState.Empty with
+        {
+            OrganizationId = "org", Teams = FleetAccessState.Empty.Teams.Add("infra", team), Machines = FleetAccessState.Empty.Machines.Add(devices.Node.DeviceId, "infra"),
+        };
+        var (sealedText, wraps) = FleetProviderKeys.Seal("org", "gateway", 2, "sk-account-key", [PublicKey(devices.Node)], list.Sequence, devices.Bea);
+        Assert.IsFalse(sealedText.Contains("sk-account", StringComparison.Ordinal), "the server holds ciphertext only");
+        var copy = wraps.Single().Wrapped;
+        Assert.AreEqual("sk-account-key", FleetProviderKeys.Open(sealedText, copy, "org", "gateway", 2, FleetPrincipalKinds.Team, "infra", devices.Node, list, access));
+        // Another version, provider or owner, or a signer who does not answer for the team: refused.
+        Assert.ThrowsExactly<InvalidDataException>(() => FleetProviderKeys.Open(sealedText, copy, "org", "gateway", 3, FleetPrincipalKinds.Team, "infra", devices.Node, list, access));
+        Assert.ThrowsExactly<InvalidDataException>(() => FleetProviderKeys.Open(sealedText, copy, "org", "other", 2, FleetPrincipalKinds.Team, "infra", devices.Node, list, access));
+        Assert.ThrowsExactly<InvalidDataException>(() => FleetProviderKeys.Open(sealedText, copy, "org", "gateway", 2, FleetPrincipalKinds.Organization, "org", devices.Node, list,
+            access), "Bea does not sign for the organization");
+        var (byMember, memberWraps) = FleetProviderKeys.Seal("org", "gateway", 2, "sk-x", [PublicKey(devices.Node)], list.Sequence, devices.Cy);
+        Assert.ThrowsExactly<InvalidDataException>(() => FleetProviderKeys.Open(byMember, memberWraps.Single().Wrapped, "org", "gateway", 2, FleetPrincipalKinds.Team, "infra",
+            devices.Node, list, access), "a member of the team gives it no key");
+    }
+
     // The founder's laptop, the desk of the owner of the session (p1), their node, Bea (p2) and Cy (p3).
     private sealed class Devices : IDisposable
     {

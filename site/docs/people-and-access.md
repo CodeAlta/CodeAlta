@@ -55,16 +55,22 @@ A grant gives a person or a team one capability somewhere: on the organization, 
 
 - Who answers the approvals of an automation and takes its runs over (the people of the team that owns it, a grant to approve it) reaches its machine only once an owner or an admin signs the next version of the access document ([Sign what machines follow](#sign-what-machines-follow)). A grant with an end date is signed with its end, and the machine refuses it from then, by its own clock.
 - Reading content (a session, the log of a machine) is granted on one machine or session, never on a whole team or the organization. **Read a session** lists your own sessions whose title your computer opens.
-- The server cannot read what a session says. Check **The content is sealed from the server** and the grant shows **Waiting for keys**; on a computer of yours, **Confirm keys** seals the session for the grantee's computers only. The session and its title then appear in the grantee's **Fleet** page, until the grant is taken back.
+- The server cannot read what a session says. Check **The content is sealed from the server** and the grant shows **Waiting for keys**; on a computer of yours, **Confirm keys** seals the session for the grantee's computers only. The session and its title then appear in the grantee's **Fleet** page, until the grant is taken back. A computer the grantee adds later, or a person who joins the team of the grant, gets the key the next time a computer of yours is online.
 
 **Service identities** are what team and organization automations run as. A new one stays off until a person turns it on.
 
+**Team and organization providers** are the providers their automations run with. Click **New provider…**, give it a name, choose the team or the organization it belongs to, its type, its models and the API key of the account, then **Save**: your computer seals the key for the machines of that team or of the organization, and keeps no copy. Those machines add the provider with that key, so the editor of an automation placed on one of them offers it. The trash icon removes it, and its machines delete the key. To change the key, set the provider again under the same name.
+
 ### Automations of a team
 
-An automation you send to a machine of a team you maintain (its **Runs on**) becomes an automation of the team: the team owns it, and its maintainers change it.
+When an automation runs on a machine of a team you maintain, **Publish to** in its editor makes it an automation of that team: the team owns it, and every maintainer can run it. On a machine of the organization, owners and admins publish it to the organization the same way. **Me** keeps it yours.
+
+Another maintainer finds it in the **Automations** tab under **Automations of your teams**. **Open in my editor** adds it to their automations as its machine runs it and opens it in the editor; what they save goes to the machine as the next version, and the other maintainers see it.
 
 - It runs only while the team has a service identity turned on, once that change is signed (see [Sign what machines follow](#sign-what-machines-follow)).
 - A machine of a team runs automations with account credentials only: an API key or a gateway, never a personal plan such as a Claude, Codex or Copilot subscription.
+
+A machine given to the organization runs the automations of the organization only. They run as a service identity of the organization, with account credentials only.
 
 ## Sign what machines follow
 

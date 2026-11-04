@@ -115,6 +115,9 @@ public sealed record FleetAutomationRunFact(string RunId, string AutomationId, l
     /// <summary>Gets the unit of <see cref="Cost"/>: <c>usd</c>, or the one the provider named.</summary>
     public string? CostUnit { get; init; }
 
+    /// <summary>Gets the service identity it ran as, for an automation of a team or of the organization; null for a personal one.</summary>
+    public string? ActingAs { get; init; }
+
     /// <summary>
     /// Gets who the automation says answers the approvals of a run that waits: <c>oncall</c> for the person on call of the team
     /// that owns it; null for its owner. Only a waiting run says it.

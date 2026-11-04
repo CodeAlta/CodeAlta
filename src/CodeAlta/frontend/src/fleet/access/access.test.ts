@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import type { FleetAccessOverview } from "#neoastra";
 import { translate, type MessageKey } from "../../localization";
-import { assignableRoles, attention, attentionCount, canManagePerson, isAdvanced, isContentCapability, onCallSummary, ownerTargets, parseTarget, proposalDetail } from "./access";
+import { assignableRoles, attention, attentionCount, canManagePerson, isAdvanced, isContentCapability, onCallSummary, ownerTargets, parseTarget, proposalDetail, providerId } from "./access";
 
 const person = (id: string, name: string, role: string, extra: Partial<FleetAccessOverview["people"][number]> = {}) =>
   ({ id, name, role, status: "active", devices: 1, teams: [], joined: true, isMe: false, ...extra });
@@ -11,7 +11,7 @@ const home: FleetAccessOverview = {
   status: "ok", message: null, me: person("alex", "Alex", "owner", { isMe: true }), capabilities: ["access.manage", "access.sign", "access.view"], signer: true, advanced: false,
   document: { number: 0, signedBy: null, signedAt: null, pending: [] },
   people: [person("alex", "Alex", "owner", { isMe: true }), person("bea", "Bea", "member"), person("cy", "Cy", "member", { joined: false, devices: 0 })],
-  teams: [], identities: [], grants: [], owners: [], transfers: [], proposals: [], serverUrl: "https://home.example", sessions: [],
+  teams: [], identities: [], grants: [], owners: [], transfers: [], proposals: [], serverUrl: "https://home.example", sessions: [], providers: [],
 };
 
 test("a household stays simple; an owner gives every role and an admin all but owner and admin", () => {
@@ -56,4 +56,11 @@ test("a resource goes to the organization, a team or another active person who j
   assert.deepEqual(parseTarget("organization:"), { kind: "organization", id: null });
   assert.equal(isContentCapability("session.view-content"), true);
   assert.equal(isContentCapability("automation.run"), false);
+});
+
+test("a provider of a team is named by an id made of its name, as machines and automations name it", () => {
+  assert.equal(providerId("Infra Anthropic"), "infra-anthropic");
+  assert.equal(providerId("  Équipe — OpenAI (Azure) "), "equipe-openai-azure");
+  assert.equal(providerId("!!!"), "");
+  assert.equal(providerId("a".repeat(70)).length, 64);
 });

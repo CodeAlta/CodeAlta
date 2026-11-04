@@ -12,7 +12,7 @@ const trigger = (type: string, change: Partial<AutomationTriggerItem> = {}): Aut
   ({ type, minute: 0, every: 1, at: [], days: [], expression: null, event: "opened", authors: "trusted", command: null, folder: null, integration: null, ...change });
 const item = (id: string, change: Partial<AutomationItem> = {}): AutomationItem => ({
   id, name: `Automation ${id}`, enabled: true, prompt: "Do the thing.", projectId: null, projectName: null, projectFolder: null, storeProjectId: null, file: "/home/config.toml",
-  provider: null, model: null, effort: null, agent: null, permissionMode: null, reviewBeforeCommit: null, sandbox: null, catchUp: false, triggers: [], problem: null, nextRunAt: null, running: false, lastRun: null, repository: null, watchProblem: null, allowed: true, script: null, scriptArguments: null, options: null, runsOn: null, placement: null, autonomy: null, ...change,
+  provider: null, model: null, effort: null, agent: null, permissionMode: null, reviewBeforeCommit: null, sandbox: null, catchUp: false, triggers: [], problem: null, nextRunAt: null, running: false, lastRun: null, repository: null, watchProblem: null, allowed: true, script: null, scriptArguments: null, options: null, runsOn: null, publishTo: null, placement: null, autonomy: null, ...change,
 });
 const run = (id: string, sessionId: string | null): AutomationRunItem =>
   ({ id, automationId: "a", name: "A", sessionId, projectId: null, startedAt: "2026-10-06T12:00:00Z", endedAt: null, trigger: "manual", detail: null, status: "running", message: null, machineId: null, reply: null, output: null, calls: null });
@@ -120,7 +120,7 @@ test("what is sent for a form is trimmed, and names a model only with its provid
     permissionMode: " acceptEdits ", reviewBeforeCommit: false, sandbox: "off",
     storeInProject: true, triggers: [trigger("daily", { at: ["17:30", "09:00"], expression: "left over" }), trigger("cron", { expression: " 0 9 * * * " })] };
   assert.deepEqual(inputOf(form), { id: "id", name: "Nightly", enabled: true, prompt: "Review.\n", script: null, scriptArguments: null, projectId: "p", provider: "codex", model: "gpt", effort: "High",
-    agent: "reviewer", catchUp: true, permissionMode: "acceptEdits", reviewBeforeCommit: false, sandbox: "off", options: null, runsOn: null, autonomy: null,
+    agent: "reviewer", catchUp: true, permissionMode: "acceptEdits", reviewBeforeCommit: false, sandbox: "off", options: null, runsOn: null, publishTo: null, autonomy: null,
     triggers:[trigger("daily", { at: ["09:00", "17:30"] }), trigger("cron", { expression: "0 9 * * *" })] });
   assert.deepEqual([inputOf(emptyForm(null)).permissionMode, inputOf(emptyForm(null)).reviewBeforeCommit, inputOf(emptyForm(null)).sandbox], [null, null, null], "The defaults are sent as nothing.");
   assert.deepEqual([inputOf({ ...form, provider: "" }).model, inputOf({ ...form, provider: "" }).effort, inputOf({ ...form, model: "" }).effort, inputOf({ ...form, agent: " " }).agent], [null, null, null, null]);
@@ -133,23 +133,34 @@ test("what is sent for a form is trimmed, and names a model only with its provid
 });
 
 test("an automation of yours can run on a paired machine; one of a project, and a command trigger, stay here", () => {
-  const form: AutomationForm = { ...emptyForm("p"), name: "Nightly", prompt: "Review.", runsOn: "mini" };
+  const form: AutomationForm = { ...emptyForm("p"), name: "Nightly", prompt: "Review.", runsOn: "mini", publishTo: null };
   assert.equal(inputOf(form).runsOn, "mini");
   assert.equal(inputOf({ ...form, storeInProject: true }).runsOn, null, "The configuration of a project runs on the machines that have it.");
   assert.equal(formProblem({ ...form, triggers: [trigger("command", { command: "wait-for-it" })] }), "A command trigger runs on this computer only.");
   assert.equal(formProblem({ ...form, storeInProject: true, triggers: [trigger("command", { command: "wait-for-it" })] }), null);
-  assert.equal(formOf(item("a", { runsOn: "mini" })).runsOn, "mini");
+  assert.equal(formOf(item("a", { runsOn: "mini", publishTo: null })).runsOn, "mini");
   assert.equal(placementLabel(item("a"), english), null);
-  assert.equal(placementLabel(item("a", { runsOn: "mini", placement: { machineId: "mini", machineName: "Mac mini", state: "copied", message: null, copiedAt: null } }), english), "On Mac mini");
-  assert.equal(placementLabel(item("a", { runsOn: "gone", placement: { machineId: "gone", machineName: null, state: "failed", message: "x", copiedAt: null } }), english), "On Unavailable machine");
-  assert.equal(placementProblem(item("a", { runsOn: "mini", placement: { machineId: "mini", machineName: "Mac mini", state: "failed", message: "Refused.", copiedAt: null } })), "Refused.");
-  assert.equal(placementProblem(item("a", { runsOn: "mini", placement: { machineId: "mini", machineName: "Mac mini", state: "pending", message: "Offline.", copiedAt: null } })), null,
+  assert.equal(placementLabel(item("a", { runsOn: "mini", publishTo: null, placement: { machineId: "mini", machineName: "Mac mini", state: "copied", message: null, copiedAt: null } }), english), "On Mac mini");
+  assert.equal(placementLabel(item("a", { runsOn: "gone", publishTo: null, placement: { machineId: "gone", machineName: null, state: "failed", message: "x", copiedAt: null } }), english), "On Unavailable machine");
+  assert.equal(placementProblem(item("a", { runsOn: "mini", publishTo: null, placement: { machineId: "mini", machineName: "Mac mini", state: "failed", message: "Refused.", copiedAt: null } })), "Refused.");
+  assert.equal(placementProblem(item("a", { runsOn: "mini", publishTo: null, placement: { machineId: "mini", machineName: "Mac mini", state: "pending", message: "Offline.", copiedAt: null } })), null,
     "A machine that is away is not a problem: it takes the automation when it answers.");
-  const waiting = item("a", { runsOn: "mini", placement: { machineId: "mini", machineName: "Mac mini", state: "waiting", message: "It waits until Laptop takes away its copy.", copiedAt: null } });
+  const waiting = item("a", { runsOn: "mini", publishTo: null, placement: { machineId: "mini", machineName: "Mac mini", state: "waiting", message: "It waits until Laptop takes away its copy.", copiedAt: null } });
   assert.equal(placementWait(waiting), "It waits until Laptop takes away its copy.");
   assert.equal(placementProblem(waiting), null, "A machine that waits for the one it left is no problem of its own.");
-  assert.equal(placementWait(item("a", { runsOn: "mini", placement: { machineId: "mini", machineName: "Mac mini", state: "copied", message: null, copiedAt: null } })), null);
+  assert.equal(placementWait(item("a", { runsOn: "mini", publishTo: null, placement: { machineId: "mini", machineName: "Mac mini", state: "copied", message: null, copiedAt: null } })), null);
   for (const locale of locales) assert.ok(translate(locale, "On {machine}", { machine: "M" }).includes("M"), locale);
+});
+
+test("an automation that runs on a machine is published to a team or the organization; on this computer or in a project it stays the person's", () => {
+  const form: AutomationForm = { ...emptyForm(null), name: "Deploy", prompt: "Deploy.", runsOn: "box", publishTo: "team:infra" };
+  assert.equal(inputOf(form).publishTo, "team:infra");
+  assert.equal(formOf(item("a", { runsOn: "box", publishTo: "organization" })).publishTo, "organization");
+  assert.equal(inputOf({ ...form, runsOn: null }).publishTo, null);
+  assert.equal(inputOf({ ...form, storeInProject: true }).publishTo, null);
+  assert.equal(formProblem(form), "An automation of a team or of the organization names the provider it runs with.");
+  assert.equal(formProblem({ ...form, provider: "gateway" }), null);
+  assert.equal(formProblem({ ...form, publishTo: null }), null, "the person's own runs with the default of the machine");
 });
 
 test("an automation that runs a script sends its script and arguments, and no prompt", () => {
@@ -171,13 +182,13 @@ test("the form of an automation holds what it is, and where it is written", () =
   const stored = item("a", { projectId: "p", storeProjectId: "p", provider: "codex", model: "gpt", effort: "Low", agent: "reviewer", catchUp: true, triggers: [trigger("issue")], enabled: false,
     permissionMode: "plan", reviewBeforeCommit: true, sandbox: "strict", options: { subSessions: false } });
   assert.deepEqual(formOf(stored), { id: "a", name: "Automation a", enabled: false, prompt: "Do the thing.", script: "", scriptArguments: "", projectId: "p", storeInProject: true, provider: "codex", model: "gpt", effort: "Low",
-    agent: "reviewer", catchUp: true, permissionMode: "plan", reviewBeforeCommit: true, sandbox: "strict", options: { subSessions: false }, runsOn: null, triggers: [trigger("issue")], autonomy: null });
+    agent: "reviewer", catchUp: true, permissionMode: "plan", reviewBeforeCommit: true, sandbox: "strict", options: { subSessions: false }, runsOn: null, publishTo: null, triggers: [trigger("issue")], autonomy: null });
   assert.deepEqual(formOf(item("b")), { ...emptyForm(null), id: "b", name: "Automation b", prompt: "Do the thing." });
   // The host says the defaults too: the form holds them as nothing.
   assert.equal(formOf(item("c", { options: { subSessions: true } })).options, null);
   // What a form sends back is what it was read from.
   assert.deepEqual(inputOf(formOf(stored)), { id: "a", name: "Automation a", enabled: false, prompt: "Do the thing.", script: null, scriptArguments: null, projectId: "p", provider: "codex", model: "gpt", effort: "Low", agent: "reviewer",
-    catchUp: true, permissionMode: "plan", reviewBeforeCommit: true, sandbox: "strict", options: { subSessions: false }, runsOn: null, triggers: [trigger("issue")], autonomy: null });
+    catchUp: true, permissionMode: "plan", reviewBeforeCommit: true, sandbox: "strict", options: { subSessions: false }, runsOn: null, publishTo: null, triggers: [trigger("issue")], autonomy: null });
 });
 
 test("the autonomy of an automation goes to the form and back, its tools trimmed", () => {
@@ -223,7 +234,7 @@ test("the details say what the sessions run with besides the defaults, the permi
   assert.deepEqual(runsWithFacts(item("d", { options: { subSessions: true } }), english), []);
   assert.deepEqual(runsWithFacts(item("c"), english), [], "the defaults say nothing");
   // Its provider as the machine it runs on names it, or as this computer does.
-  assert.deepEqual(runsWithFacts(item("e", { provider: "codex", runsOn: "mac" }), english, "Codex (Mac mini)"), ["Codex (Mac mini)"]);
+  assert.deepEqual(runsWithFacts(item("e", { provider: "codex", runsOn: "mac", publishTo: null }), english, "Codex (Mac mini)"), ["Codex (Mac mini)"]);
 });
 
 test("the list is narrowed by words and by where the automations run", () => {

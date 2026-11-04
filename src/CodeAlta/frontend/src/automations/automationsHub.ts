@@ -1,9 +1,11 @@
 // The page's link to the automations of the application: what they are now, and the calls that change them.
-import type { automations, AutomationInput, AutomationItem, AutomationRunItem, AutomationScriptItem, AutomationsListResponse, AutomationTriggerItem } from "#neoastra";
+import type { automations, AutomationInput, AutomationItem, AutomationPublishTarget, AutomationRunItem, AutomationScriptItem, AutomationsListResponse, AutomationTeamItem,
+  AutomationTriggerItem } from "#neoastra";
 
 /** The calls of the host; `scripts` is missing from a host that has no library of scripts. */
 export type AutomationsApi = Pick<typeof automations, "list" | "refresh" | "save" | "delete" | "setEnabled" | "allow" | "startPlaced" | "setPaused" | "run" | "runs" | "preview" | "watch">
-  & Partial<Pick<typeof automations, "scripts" | "testTrigger" | "sampleEvent" | "tryRun" | "createHook" | "hookAddress" | "takeOver">>;
+  & Partial<Pick<typeof automations, "scripts" | "testTrigger" | "sampleEvent" | "tryRun" | "createHook" | "hookAddress" | "takeOver" | "publishTargets"
+  | "teamAutomations" | "openTeamAutomation">>;
 /** What a test or a sample of a trigger of another tool answered: a text, or what is wrong. */
 export type TriggerCheck = Readonly<{ ok: boolean; message: string | null; detail?: string | null; prompt?: string | null; replyTo?: string | null }>;
 type Timers = Readonly<{ set: (run: () => void, milliseconds: number) => unknown; clear: (timer: unknown) => void }>;
@@ -134,6 +136,28 @@ export function createAutomationsHub(api: AutomationsApi, timers: Timers = { set
         return reply.status === "ok" ? reply.runs : [];
       } catch { return []; }
     },
+    /** Whom an automation that runs on a machine may be published to, beside the person: the team of the machine, the organization. */
+    async publishTargets(machineId: string, signal: AbortSignal): Promise<readonly AutomationPublishTarget[]> {
+      const host = epoch;
+      if (!host || !api.publishTargets) return [];
+      try {
+        const reply = await api.publishTargets({ expectedEpoch: host, machineId }, { signal, timeoutMilliseconds: 15_000 });
+        return reply.status === "ok" ? reply.targets : [];
+      } catch { return []; }
+    },
+    /** The automations of the teams this person maintains, and of the organization, that another person gave their machines. */
+    async teamAutomations(signal?: AbortSignal): Promise<readonly AutomationTeamItem[]> {
+      const host = epoch;
+      if (!host || !api.teamAutomations) return [];
+      try {
+        const reply = await api.teamAutomations({ expectedEpoch: host }, { signal, timeoutMilliseconds: 30_000 });
+        return reply.status === "ok" ? reply.items : [];
+      } catch { return []; }
+    },
+    /** Takes one of those into the automations of this computer, to change it in the editor; the list is read again. */
+    openTeamAutomation: (item: AutomationTeamItem) => api.openTeamAutomation
+      ? change(host => api.openTeamAutomation!({ expectedEpoch: host, linkId: item.linkId, id: item.id, machineId: item.machineId }, { timeoutMilliseconds: 30_000 }))
+      : Promise.resolve<AutomationOutcome>({ ok: false, message: null }),
     /** The scripts of the library an automation of a project, or a chat, can run in place of a prompt. */
     async scripts(projectId: string | null, signal: AbortSignal): Promise<readonly AutomationScriptItem[]> {
       const host = epoch;

@@ -16,7 +16,7 @@ const item: AutomationItem = {
   id: "0199f4c2-6d1e-7c3a-b5f0-2f9c8e4a1d77", name: "Incident diagnosis", enabled: true, prompt: "Diagnose the incident of the shop.", projectId: null, projectName: null,
   projectFolder: null, storeProjectId: null, file: "C:/Users/me/.alta/config.toml", provider: null, model: null, effort: null, agent: null, permissionMode: null,
   reviewBeforeCommit: null, sandbox: null, catchUp: false, triggers: [], problem: null, nextRunAt: null, running: true, lastRun: null, repository: null, watchProblem: null,
-  allowed: true, script: null, scriptArguments: null, options: null, runsOn: null, placement: null,
+  allowed: true, script: null, scriptArguments: null, options: null, runsOn: null, placement: null, publishTo: null,
   autonomy: { allowedTools: ["k8s_get_deployment", "k8s_restart_pod"], maxCallsPerHour: 3, approvalTimeout: 30, onTimeout: "stop", approvers: "oncall", onCall: null,
     tools: [{ name: "k8s_restart_pod", version: "1.4.2", hash: "sha256:3f", bounds: [{ argument: "namespace", values: ["shop"], min: null, max: null },
       { argument: "replicas", values: null, min: 1, max: 5 }], preconditions: [{ tool: "k8s_get_deployment", arguments: ["namespace"], expect: "available" }] }] },
@@ -39,6 +39,17 @@ const hub = {
   runs: async () => runs,
   run: async () => ({ ok: true, run: null }),
   tryRun: async (id: string, index: number) => { calls.push(JSON.stringify({ tryRun: id, index })); return { ok: true, run: null }; },
+  // An automation of the team Infra another maintainer gave the build box, until it is taken here to be edited.
+  teamAutomations: async () => state.items.some(other => other.id === "nightly") ? []
+    : [{ linkId: "link-1", id: "nightly", machineId: "box", machineName: "Build box", name: "Nightly builds", scope: "team:infra", scopeName: "Infra" }],
+  openTeamAutomation: async (team: { id: string }) => {
+    calls.push(JSON.stringify({ openTeam: team.id }));
+    state = { ...state, items: [...state.items, { ...item, id: "nightly", name: "Nightly builds", autonomy: null, runsOn: "box", publishTo: "team:infra" }] };
+    for (const listener of listeners) listener();
+    return { ok: true, id: "nightly", message: null };
+  },
+  scripts: async () => [], publishTargets: async () => [{ scope: "team:infra", name: "Infra" }],
+  preview: async () => ({ ok: true, message: null, times: [] }),
   takeOver: async (id: string, runId: string) => {
     calls.push(JSON.stringify({ takeOver: runId }));
     runs = runs.map(other => other.id === runId ? { ...other, status: "running", message: "Taken over by a person." } : other);

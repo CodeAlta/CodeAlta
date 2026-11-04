@@ -179,6 +179,34 @@ internal sealed partial class FleetServerService
             return new FleetSecretActionResult("ok", null);
         });
 
+    /// <summary>Sets a provider of a team or of the organization; its key is sealed on this computer for the machines of that scope.</summary>
+    [NeoRpcMethod("setScopeProvider")]
+    public Task<FleetSecretActionResult> SetScopeProviderAsync(FleetAccessProviderRequest request, CancellationToken cancellationToken)
+        => SecretActionAsync(request?.ExpectedEpoch, request?.LinkId, async () =>
+        {
+            if (string.IsNullOrEmpty(request!.Id) || request.Id.Length > 64 || request.OwnerKind is not (FleetPrincipalKinds.Team or FleetPrincipalKinds.Organization)
+                || request.OwnerKind == FleetPrincipalKinds.Team && string.IsNullOrEmpty(request.OwnerId) || string.IsNullOrWhiteSpace(request.Name) || string.IsNullOrEmpty(request.Type) || string.IsNullOrEmpty(request.Key)
+                || request.Key.Length > 4096 || request.Models is not { Length: > 0 and <= 50 })
+                return new FleetSecretActionResult("invalid_request", null);
+            try
+            {
+                await _servers!.SetScopeProviderAsync(request.LinkId, request.Id, request.OwnerKind, request.OwnerId ?? string.Empty, request.Name.Trim(), request.Type,
+                    string.IsNullOrWhiteSpace(request.Endpoint) ? null : request.Endpoint.Trim(), [.. request.Models.Select(static model => model.Trim()).Where(static model => model.Length > 0)],
+                    request.Key, cancellationToken).ConfigureAwait(false);
+            }
+            catch (InvalidOperationException exception)
+            {
+                return new FleetSecretActionResult("no_machine", exception.Message);
+            }
+
+            return new FleetSecretActionResult("ok", null);
+        });
+
+    /// <summary>Deletes a provider of a team or of the organization.</summary>
+    [NeoRpcMethod("deleteScopeProvider")]
+    public Task<FleetSecretActionResult> DeleteScopeProviderAsync(FleetSecretRefRequest request, CancellationToken cancellationToken)
+        => AccessRefAsync(request, (client, id, token) => client.DeleteScopeProviderAsync(id, token), cancellationToken);
+
     /// <summary>Offers a machine or an automation to another owner.</summary>
     [NeoRpcMethod("offerTransfer")]
     public Task<FleetSecretActionResult> OfferTransferAsync(FleetAccessTransferRequest request, CancellationToken cancellationToken)
@@ -425,7 +453,9 @@ internal sealed partial class FleetServerService
                 transfer.State == FleetTransferStates.Offered && (transfer.OfferedBy == me.Id || administers)))],
             [.. read.Proposals.Select(proposal => new FleetAccessProposalView(proposal.Id, people.GetValueOrDefault(proposal.PersonId, proposal.PersonId), proposal.SessionId,
                 proposal.Kind, proposal.Summary, proposal.Payload, proposal.State, proposal.CreatedAt))],
-            serverUrl, sessions);
+            serverUrl, sessions,
+            [.. read.Providers.Select(provider => new FleetAccessProviderView(provider.Id, provider.OwnerKind, Named(provider.OwnerKind, provider.OwnerId), provider.Name,
+                provider.Type, provider.Endpoint, [.. provider.Models], provider.Machines.Count, Answers(provider.OwnerKind, provider.OwnerId)))]);
     }
 
     // The change a proposal names, made with this person's own request; null once made, else why not.
@@ -495,15 +525,17 @@ internal sealed partial class FleetServerService
 /// <param name="Proposals">The changes agents proposed.</param>
 /// <param name="ServerUrl">The address of the server, which an invited person joins.</param>
 /// <param name="Sessions">The sessions this person may share sealed, their titles opened on this computer.</param>
+/// <param name="Providers">The providers of the teams and of the organization.</param>
 internal sealed record FleetAccessOverview(string Status, string? Message, FleetAccessPersonView? Me, string[] Capabilities, bool Signer, bool Advanced,
     FleetAccessDocumentView? Document, FleetAccessPersonView[] People, FleetAccessTeamView[] Teams, FleetAccessIdentityView[] Identities, FleetAccessGrantView[] Grants,
-    FleetAccessOwnerView[] Owners, FleetAccessTransferView[] Transfers, FleetAccessProposalView[] Proposals, string? ServerUrl, FleetAccessSessionView[] Sessions)
+    FleetAccessOwnerView[] Owners, FleetAccessTransferView[] Transfers, FleetAccessProposalView[] Proposals, string? ServerUrl, FleetAccessSessionView[] Sessions,
+    FleetAccessProviderView[] Providers)
 {
     /// <summary>Gets an overview of a failure.</summary>
     /// <param name="status">The status.</param>
     /// <param name="message">What was said.</param>
     /// <returns>The overview.</returns>
-    public static FleetAccessOverview Failed(string status, string? message) => new(status, message, null, [], false, false, null, [], [], [], [], [], [], [], null, []);
+    public static FleetAccessOverview Failed(string status, string? message) => new(status, message, null, [], false, false, null, [], [], [], [], [], [], [], null, [], []);
 }
 
 /// <summary>A session this person may share with its content sealed.</summary>
@@ -581,6 +613,32 @@ internal sealed record FleetAccessIdentityView(string Id, string Name, string Ow
 /// <param name="ExpiresAt">When it stops applying.</param>
 internal sealed record FleetAccessGrantView(string Id, string SubjectKind, string SubjectId, string SubjectName, string Capability, string ScopeKind, string? ScopeId, string ScopeName,
     string Status, DateTimeOffset? ExpiresAt);
+
+/// <summary>A provider of a team or of the organization, as the page shows it: never its key.</summary>
+/// <param name="Id">Its id, its provider key on the machines.</param>
+/// <param name="OwnerKind">A team or the organization.</param>
+/// <param name="OwnerName">The name of its owner.</param>
+/// <param name="Name">The name people see.</param>
+/// <param name="Type">The type of provider.</param>
+/// <param name="Endpoint">Its endpoint, or null.</param>
+/// <param name="Models">The models it offers.</param>
+/// <param name="Machines">How many machines hold its key.</param>
+/// <param name="CanManage">Whether this person answers for its scope.</param>
+internal sealed record FleetAccessProviderView(string Id, string OwnerKind, string OwnerName, string Name, string Type, string? Endpoint, string[] Models, int Machines, bool CanManage);
+
+/// <summary>A provider of a team or of the organization to set, with the key of its account.</summary>
+/// <param name="ExpectedEpoch">The host epoch the page knows.</param>
+/// <param name="LinkId">The link.</param>
+/// <param name="Id">Its id.</param>
+/// <param name="OwnerKind">A team or the organization.</param>
+/// <param name="OwnerId">Its owner.</param>
+/// <param name="Name">The name people see.</param>
+/// <param name="Type">The type of provider.</param>
+/// <param name="Endpoint">Its endpoint, or null.</param>
+/// <param name="Models">The models it offers.</param>
+/// <param name="Key">The key of the account, sealed on this computer and never kept.</param>
+internal sealed record FleetAccessProviderRequest(string ExpectedEpoch, string LinkId, string Id, string OwnerKind, string OwnerId, string Name, string Type, string? Endpoint,
+    string[] Models, string Key);
 
 /// <summary>A resource and its owner.</summary>
 /// <param name="Kind"><c>machine</c> or <c>automation</c>.</param>

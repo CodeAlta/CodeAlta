@@ -277,7 +277,7 @@ public sealed class NodeServerAutomationTests
         automations.ServerAccess = _ => access;
         var sealedText = FleetAutomationSigning.Seal(new FleetAutomationContent(Definition, null), Id, 1, self.DeviceId, list, tablet);
         var signed = FleetAutomationSigning.Sign(tablet, new FleetAutomationVersion(FleetAutomationVersion.CurrentVersion, "org", Id, 1, self.DeviceId, false, true, ["hourly"],
-            null, null, sealedText, string.Empty, string.Empty, DateTimeOffset.UtcNow) { Scope = "team:infra" });
+            null, null, sealedText, string.Empty, string.Empty, DateTimeOffset.UtcNow) { Scope = "team:infra", Provider = "gateway" });
         var outcome = await automations.AcceptFromServerAsync("link-1", list, "org", signed,
             version => FleetAutomationSigning.TryOpen(version.Sealed, version.AutomationId, version.Number, version.MachineId, self, list, out var content, out var reason)
                 ? (content, null) : (null, reason), token);
@@ -295,6 +295,168 @@ public sealed class NodeServerAutomationTests
         // The machine leaves the team: an automation of the team no longer runs there.
         access = access with { Machines = access.Machines.Remove(self.DeviceId) };
         Assert.IsNotNull(automations.Check(entry, account));
+    }
+
+    [TestMethod]
+    public async Task AMachineOfATeamOpensWhatAMaintainerOfAnotherPersonSealed_AndAnyMaintainerRunsItByHand_NoMember()
+    {
+        var token = TestContext.CancellationToken;
+        using var root = new NodeTestRoot();
+        await using var node = await NodeHost.StartAsync(root.Options() with
+        {
+            Automations = new NodeAutomationOptions
+            {
+                TimeProvider = new NodeClock { Now = Noon }, TimeZone = TimeZoneInfo.Utc, WatchRepositories = false, CredentialKind = static _ => AutomationCredentialKind.Account,
+            },
+        }, token);
+        using var laptop = DeviceIdentity.LoadOrCreate(Path.Combine(root.Root, "laptop"));
+        using var mia = DeviceIdentity.LoadOrCreate(Path.Combine(root.Root, "mia"));
+        using var ada = DeviceIdentity.LoadOrCreate(Path.Combine(root.Root, "ada"));
+        using var max = DeviceIdentity.LoadOrCreate(Path.Combine(root.Root, "max"));
+        using var self = DeviceIdentity.LoadOrCreate(Path.Combine(root.Root, "self"));
+        var time = new DateTimeOffset(2026, 10, 6, 9, 0, 0, TimeSpan.Zero);
+        var entries = new List<FleetSignedDeviceListEntry>();
+        void Add(DeviceIdentity device, string kind, string? owner)
+        {
+            var payload = FleetDeviceListEntries.SerializePayload(new FleetDeviceListEntryPayload(1, entries.Count == 0 ? null : "org", entries.Count + 1,
+                entries.Count == 0 ? null : FleetDeviceListEntries.Hash(entries[^1]), FleetDeviceListOperations.Add, device.DeviceId,
+                Convert.ToBase64String(device.ExportSubjectPublicKeyInfo()), kind, owner, laptop.DeviceId, time));
+            entries.Add(new FleetSignedDeviceListEntry(payload, Base64Url.EncodeToString(laptop.SignData(FleetDeviceListEntries.GetSignedBytes(payload)))));
+        }
+
+        Add(laptop, FleetDeviceKinds.Controller, null);
+        Add(self, FleetDeviceKinds.Node, "p1");
+        Add(mia, FleetDeviceKinds.Controller, "p2");
+        Add(ada, FleetDeviceKinds.Controller, "p4");
+        Add(max, FleetDeviceKinds.Controller, "p3");
+        var list = FleetDeviceListVerifier.VerifyOrThrow(entries, "org");
+        var automations = node.Automations!;
+        automations.DeviceId = self.DeviceId;
+        automations.ServerDevices = _ => list;
+        // The machine p1 enrolled is the team's: Mia and Ada maintain it, Max is a member.
+        var access = FleetAccessState.Empty with
+        {
+            OrganizationId = "org", Number = 1, Teams = FleetAccessState.Empty.Teams.Add("infra", new FleetAccessTeam("infra", ["p2", "p4"], ["p3"], false, ["svc"])),
+            Machines = FleetAccessState.Empty.Machines.Add(self.DeviceId, "infra"),
+        };
+        automations.ServerAccess = _ => access;
+        var sealedText = FleetAutomationSigning.SealForTeam(new FleetAutomationContent(Definition, null), Id, 1, self.DeviceId, "infra", list, access, mia);
+        var signed = FleetAutomationSigning.Sign(mia, new FleetAutomationVersion(FleetAutomationVersion.CurrentVersion, "org", Id, 1, self.DeviceId, false, true, ["hourly"],
+            null, null, sealedText, string.Empty, string.Empty, DateTimeOffset.UtcNow) { Scope = "team:infra", Provider = "gateway" });
+        var outcome = await automations.AcceptFromServerAsync("link-1", list, "org", signed,
+            version => FleetAutomationSigning.TryOpen(version.Sealed, version.AutomationId, version.Number, version.MachineId, self, list, access, out var content, out var reason)
+                ? (content, null) : (null, reason), token);
+        Assert.IsTrue(outcome.Applied, outcome.Message);
+        Assert.IsNull(automations.Check(automations.Engine.Snapshot.Find(Id)!, new CodeAlta.Agent.ModelProviderDescriptor(new("gateway"), "Gateway")));
+
+        FleetSignedAutomationRunRequest Ask(DeviceIdentity device) => FleetAutomationSigning.SignRun(device, new FleetAutomationRunRequest(FleetAutomationRunRequest.CurrentVersion,
+            "org", Id, self.DeviceId, Guid.NewGuid().ToString("N"), string.Empty, string.Empty, Noon));
+        var (_, byAda) = await automations.RunFromServerAsync("link-1", list, "org", Ask(ada), token);
+        Assert.IsFalse(byAda?.Contains("another person", StringComparison.Ordinal) == true, byAda);
+        var (_, byMax) = await automations.RunFromServerAsync("link-1", list, "org", Ask(max), token);
+        StringAssert.Contains(byMax, "another person", "a member does not run what the team runs");
+
+        // Ada opens it in her editor and saves it: her newer version, sealed for the team, is taken; a member's is not.
+        FleetSignedAutomationVersion Edited(DeviceIdentity device, long number, string name) => FleetAutomationSigning.Sign(device, new FleetAutomationVersion(
+            FleetAutomationVersion.CurrentVersion, "org", Id, number, self.DeviceId, false, true, ["hourly"], null, null,
+            FleetAutomationSigning.SealForTeam(new FleetAutomationContent(Definition.Replace("Half past", name, StringComparison.Ordinal), null), Id, number, self.DeviceId,
+                "infra", list, access, device), string.Empty, string.Empty, DateTimeOffset.UtcNow) { Scope = "team:infra", Provider = "gateway" });
+        (FleetAutomationContent?, string?) Open(FleetAutomationVersion version)
+            => FleetAutomationSigning.TryOpen(version.Sealed, version.AutomationId, version.Number, version.MachineId, self, list, access, out var content, out var reason)
+                ? (content, null) : (null, reason);
+        var adaVersion = Edited(ada, 2, "Half past, by Ada");
+        var byAdaEdit = await automations.AcceptFromServerAsync("link-1", list, "org", adaVersion, Open, token);
+        Assert.IsTrue(byAdaEdit.Applied, byAdaEdit.Message);
+        Assert.AreEqual("Half past, by Ada", automations.Engine.Snapshot.Find(Id)!.Definition.Name);
+        Assert.IsTrue(FleetAutomationVersionDocuments.TryParse(adaVersion.Payload, out var adas));
+        Assert.IsTrue(FleetAutomationSigning.TryOpen(adas.Sealed, Id, 2, self.DeviceId, mia, list, access, out var forMia, out var notForMia), notForMia);
+        StringAssert.Contains(forMia.Definition, "by Ada", "the other maintainers open what she saved");
+        Assert.ThrowsExactly<ArgumentException>(() => Edited(max, 3, "Half past, by Max"), "a member does not seal for the team");
+        var byMaxEdit = await automations.AcceptFromServerAsync("link-1", list, "org", FleetAutomationSigning.Sign(max, new FleetAutomationVersion(
+            FleetAutomationVersion.CurrentVersion, "org", Id, 3, self.DeviceId, false, true, ["hourly"], null, null,
+            FleetAutomationSigning.Seal(new FleetAutomationContent(Definition, null), Id, 3, self.DeviceId, list, max), string.Empty, string.Empty, DateTimeOffset.UtcNow)
+        {
+            Scope = "team:infra", Provider = "gateway",
+        }), Open, token);
+        Assert.IsFalse(byMaxEdit.Applied, "a member gives the team's automation no version");
+        Assert.AreEqual("Half past, by Ada", automations.Engine.Snapshot.Find(Id)!.Definition.Name);
+    }
+
+    [TestMethod]
+    public async Task AMachineOfTheOrganization_RunsItsAutomationsAsItsServiceIdentity_WithAccountCredentialsOnly()
+    {
+        var token = TestContext.CancellationToken;
+        using var root = new NodeTestRoot();
+        await using var node = await NodeHost.StartAsync(root.Options() with
+        {
+            Automations = new NodeAutomationOptions
+            {
+                TimeProvider = new NodeClock { Now = Noon }, TimeZone = TimeZoneInfo.Utc, WatchRepositories = false,
+                CredentialKind = static provider => provider.ProviderId.Value == "plan" ? AutomationCredentialKind.Personal : AutomationCredentialKind.Account,
+            },
+        }, token);
+        using var laptop = DeviceIdentity.LoadOrCreate(Path.Combine(root.Root, "laptop"));
+        using var tablet = DeviceIdentity.LoadOrCreate(Path.Combine(root.Root, "tablet"));
+        using var self = DeviceIdentity.LoadOrCreate(Path.Combine(root.Root, "self"));
+        var automations = node.Automations!;
+        automations.DeviceId = self.DeviceId;
+        var list = DeviceList(laptop, tablet, self, removeTablet: false);
+        automations.ServerDevices = _ => list;
+        var access = FleetAccessState.Empty with { OrganizationId = "org", Number = 1, Owners = ["p1"], OrganizationMachines = [self.DeviceId] };
+        automations.ServerAccess = _ => access;
+        var sealedText = FleetAutomationSigning.SealForOrganization(new FleetAutomationContent(Definition, null), Id, 1, self.DeviceId, list, access, tablet);
+        var signed = FleetAutomationSigning.Sign(tablet, new FleetAutomationVersion(FleetAutomationVersion.CurrentVersion, "org", Id, 1, self.DeviceId, false, true, ["hourly"],
+            null, null, sealedText, string.Empty, string.Empty, DateTimeOffset.UtcNow) { Scope = FleetAutomationVersion.OrganizationScope, Provider = "gateway" });
+        var outcome = await automations.AcceptFromServerAsync("link-1", list, "org", signed,
+            version => FleetAutomationSigning.TryOpen(version.Sealed, version.AutomationId, version.Number, version.MachineId, self, list, access, out var content, out var reason)
+                ? (content, null) : (null, reason), token);
+        Assert.IsTrue(outcome.Applied, outcome.Message);
+        var entry = automations.Engine.Snapshot.Find(Id)!;
+        var account = new CodeAlta.Agent.ModelProviderDescriptor(new("gateway"), "Gateway");
+        StringAssert.Contains(automations.Check(entry, account), "service identit");
+        Assert.IsNull(automations.ActingAs("link-1", Id), "without one, it acts as nobody");
+        access = access with { OrganizationServices = ["svc-org"] };
+        Assert.IsNull(automations.Check(entry, account));
+        Assert.AreEqual("svc-org", automations.ActingAs("link-1", Id), "its runs say they acted as the service identity of the organization");
+        StringAssert.Contains(automations.Check(entry, new CodeAlta.Agent.ModelProviderDescriptor(new("plan"), "Plan")), "account credentials only");
+    }
+
+    [TestMethod]
+    public async Task AnAutomationTheDocumentGivesToAnotherOwner_StopsOnTheMachineOfItsFormerOwner_WhoStillTakesItAway()
+    {
+        var token = TestContext.CancellationToken;
+        using var root = new NodeTestRoot();
+        await using var node = await NodeHost.StartAsync(root.Options() with
+        {
+            Automations = new NodeAutomationOptions
+            {
+                TimeProvider = new NodeClock { Now = Noon }, TimeZone = TimeZoneInfo.Utc, WatchRepositories = false, CredentialKind = static _ => AutomationCredentialKind.Account,
+            },
+        }, token);
+        using var laptop = DeviceIdentity.LoadOrCreate(Path.Combine(root.Root, "laptop"));
+        using var tablet = DeviceIdentity.LoadOrCreate(Path.Combine(root.Root, "tablet"));
+        using var self = DeviceIdentity.LoadOrCreate(Path.Combine(root.Root, "self"));
+        var automations = node.Automations!;
+        automations.DeviceId = self.DeviceId;
+        var list = DeviceList(laptop, tablet, self, removeTablet: false);
+        automations.ServerDevices = _ => list;
+        var access = FleetAccessState.Empty with { OrganizationId = "org", Number = 1, Owners = ["p1"] };
+        automations.ServerAccess = _ => access;
+        (FleetAutomationContent?, string?) Open(FleetAutomationVersion version)
+            => FleetAutomationSigning.TryOpen(version.Sealed, version.AutomationId, version.Number, version.MachineId, self, list, out var content, out var reason) ? (content, null) : (null, reason);
+        Assert.IsTrue((await automations.AcceptFromServerAsync("link-1", list, "org", Sign(tablet, list, "org", self.DeviceId, 1), Open, token)).Applied);
+        var entry = automations.Engine.Snapshot.Find(Id)!;
+        var provider = new CodeAlta.Agent.ModelProviderDescriptor(new("gateway"), "Gateway");
+        Assert.IsNull(automations.Check(entry, provider));
+
+        // The signed document says p1 gave it to p2: it stops here, and p1 gives it no new version, only its removal.
+        access = access with { Automations = access.Automations.Add(Id, new FleetAccessAutomation(Id, FleetPrincipalKinds.Person, "p2", true)) };
+        StringAssert.Contains(automations.Check(entry, provider), "another owner");
+        var again = await automations.AcceptFromServerAsync("link-1", list, "org", Sign(tablet, list, "org", self.DeviceId, 2), Open, token);
+        Assert.IsFalse(again.Applied);
+        StringAssert.Contains(again.Message, "another owner");
+        Assert.IsTrue((await automations.AcceptFromServerAsync("link-1", list, "org", SignRemoval(tablet, "org", self.DeviceId, 3, Id), _ => (null, "unused"), token)).Applied);
+        Assert.IsNull(automations.Engine.Snapshot.Find(Id));
     }
 
     [TestMethod]

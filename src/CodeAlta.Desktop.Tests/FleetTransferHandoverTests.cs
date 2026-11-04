@@ -200,6 +200,11 @@ public sealed class FleetTransferHandoverTests
             return Task.FromResult(Refusal);
         }
 
+        public bool Holds(string automationId) => false;
+
+        public Task<string?> EditAsync(FleetAutomationContent content, string machineId, string scope, string linkId, long number, CancellationToken cancellationToken)
+            => Task.FromResult<string?>("Not in this test.");
+
         public Task<bool> GiveUpAsync(string automationId, CancellationToken cancellationToken)
         {
             var had = Content is not null && automationId == "nightly" && !GivenUp.Contains(automationId);

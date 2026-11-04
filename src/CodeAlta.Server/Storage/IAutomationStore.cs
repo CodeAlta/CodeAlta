@@ -67,6 +67,9 @@ public sealed record AutomationRunRecord(string OrganizationId, string RunId, st
 
     /// <summary>Gets the unit of <see cref="Cost"/>: <c>usd</c>, or the one the provider named.</summary>
     public string? CostUnit { get; init; }
+
+    /// <summary>Gets the service identity it ran as; null for a run of a personal automation.</summary>
+    public string? ActingAs { get; init; }
 }
 
 /// <summary>What a claim of a due time found.</summary>

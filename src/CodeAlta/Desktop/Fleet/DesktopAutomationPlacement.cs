@@ -629,7 +629,13 @@ internal sealed class DesktopAutomationPlacement : IAutomationPlacement, IAsyncD
         }
 
         var copy = Copy(entry);
-        var key = Key(copy, repository);
+        // Published to a team or the organization: the machine must be theirs, and this person one who answers for it there.
+        var scope = entry.Definition.PublishTo;
+        if (route.CheckScope(scope) is { } outOfScope) return SetStatus(entry.Id, new(machineId, machineName, "failed", outOfScope, null));
+        if (scope is not null && copy.Model.Provider is null)
+            return SetStatus(entry.Id, new(machineId, machineName, "failed",
+                "An automation of a team or of the organization names the provider it runs with: choose one of the machine that runs with an API key or a gateway.", null));
+        var key = scope is null ? Key(copy, repository) : Key(copy, repository) + "|" + scope;
         lock (_gate)
         {
             // Given already: where it stands is what the server last said (read with the runs).
@@ -645,11 +651,11 @@ internal sealed class DesktopAutomationPlacement : IAutomationPlacement, IAsyncD
         try
         {
             // The server reads only the facts beside it: what it does is sealed for the machine and this person's controllers.
-            var sealedText = await route.SealAsync(new FleetAutomationContent(AutomationConfig.Write(string.Empty, copy), repository), entry.Id, number, machineId,
+            var sealedText = await route.SealAsync(new FleetAutomationContent(AutomationConfig.Write(string.Empty, copy), repository), entry.Id, number, machineId, scope,
                 cancellationToken).ConfigureAwait(false);
             // Given to a machine of a team its person maintains, it is an automation of that team (doc/fleet/orchestration.md, scopes).
             var signed = _sign(new FleetAutomationVersion(FleetAutomationVersion.CurrentVersion, route.OrganizationId, entry.Id, number, machineId, false, copy.Enabled,
-                TriggerKinds(copy), null, null, sealedText, _deviceId(), string.Empty, DateTimeOffset.UtcNow) { Scope = route.Scope });
+                TriggerKinds(copy), null, null, sealedText, _deviceId(), string.Empty, DateTimeOffset.UtcNow) { Scope = scope, Provider = scope is null ? null : copy.Model.Provider });
             await route.PutAsync(signed, cancellationToken).ConfigureAwait(false);
             lock (_gate) _numbers[entry.Id] = number;
         }
@@ -681,6 +687,65 @@ internal sealed class DesktopAutomationPlacement : IAutomationPlacement, IAsyncD
         Log($"The automation '{entry.Definition.Name}' ({entry.Id}) was given to {machineName} through its server.");
         SetStatus(entry.Id, new(machineId, machineName, "pending", $"Given to the server: {machineName} takes it when it connects.", null));
         return true;
+    }
+
+    /// <summary>
+    /// Takes into the automations of this computer one of a team or of the organization that another person who answers for it
+    /// gave its machine through a server, as that machine holds it: it is written here while the placement records it as given
+    /// at that version, so that it is not given again as it is, and the next change made here is a newer version, signed here.
+    /// </summary>
+    /// <param name="definition">What it does, with the machine it runs on and the scope it is published to.</param>
+    /// <param name="repository">The repository of its project; null for none.</param>
+    /// <param name="linkId">The server it was given through.</param>
+    /// <param name="number">The number of the version the server holds.</param>
+    /// <param name="save">Writes it into the automations of this computer; gives why it could not, or null.</param>
+    /// <param name="cancellationToken">Cancels the wait for the placement.</param>
+    /// <returns>Why it could not be taken, or null once it is.</returns>
+    internal async Task<string?> AdoptAsync(AutomationDefinition definition, string? repository, string linkId, long number, Func<Task<string?>> save,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(definition);
+        ArgumentException.ThrowIfNullOrEmpty(linkId);
+        ArgumentNullException.ThrowIfNull(save);
+        if (definition.RunsOn is not { } machineId) throw new ArgumentException("It runs on the machine it was given.", nameof(definition));
+        var copy = definition with { RunsOn = null, PublishTo = null, Project = null, Enabled = definition.Enabled && !(PausesPlaced && _automations.Paused) };
+        var key = definition.PublishTo is { } scope ? Key(copy, repository) + "|" + scope : Key(copy, repository);
+        // Under the work of the placement: it does not see the automation written before it is recorded as given, which would
+        // give its machine the same again, nor recorded and not written, which would take it off its machine.
+        await _work.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            lock (_gate)
+            {
+                if (_placed.ContainsKey(definition.Id)) return "This automation is placed from this computer already.";
+                _placed[definition.Id] = new PlacedAutomation(machineId, key, DateTimeOffset.UtcNow) { Number = number, Via = linkId };
+                _numbers[definition.Id] = Math.Max(_numbers.GetValueOrDefault(definition.Id), number);
+            }
+
+            string? problem;
+            try
+            {
+                problem = await save().ConfigureAwait(false);
+            }
+            catch
+            {
+                lock (_gate) _placed.Remove(definition.Id);
+                throw;
+            }
+
+            lock (_gate)
+            {
+                if (problem is not null) _placed.Remove(definition.Id);
+                Save();
+                SaveNumbers();
+            }
+
+            return problem;
+        }
+        finally
+        {
+            _work.Release();
+        }
     }
 
     // Under _work. Reads where an automation given through a server stands (taken, waiting, refused by the machine) and its runs, at most every so often.
@@ -1074,7 +1139,7 @@ internal sealed class DesktopAutomationPlacement : IAutomationPlacement, IAsyncD
     // What the machine runs: the definition without where it runs here, its project found there by its repository, and
     // disabled while the automations here are paused.
     private AutomationDefinition Copy(AutomationEntry entry)
-        => entry.Definition with { RunsOn = null, Project = null, Enabled = entry.Definition.Enabled && !(PausesPlaced && _automations.Paused) };
+        => entry.Definition with { RunsOn = null, PublishTo = null, Project = null, Enabled = entry.Definition.Enabled && !(PausesPlaced && _automations.Paused) };
 
     /// <summary>The kinds of the triggers of an automation, the facts a version says in clear.</summary>
     internal static IReadOnlyList<string> TriggerKinds(AutomationDefinition definition)

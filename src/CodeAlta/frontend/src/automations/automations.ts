@@ -174,6 +174,8 @@ export type AutomationForm = Readonly<{
   options: SessionOptionsChoice | null;
   /** The paired machine it runs on (its id); null for this computer. Only an automation kept in the configuration of the user runs elsewhere. */
   runsOn: string | null;
+  /** Whom it is published to on the server of its machine: `team:<id>`, `organization`, or null (absent) for the person's own. */
+  publishTo?: string | null;
   triggers: readonly AutomationTriggerItem[];
   /** What its runs may do without a person; null for an automation that runs as before. */
   autonomy: AutomationAutonomyItem | null;
@@ -208,7 +210,7 @@ export const toolNames = (text: string): readonly string[] => [...new Set(text.s
 /** The form of a new automation, in a project or as a chat. */
 export function emptyForm(projectId: string | null): AutomationForm {
   return { id: null, name: "", enabled: true, prompt: "", script: "", scriptArguments: "", projectId, storeInProject: false, provider: "", model: "", effort: "", agent: "", catchUp: false,
-    permissionMode: "", reviewBeforeCommit: null, sandbox: "", options: null, runsOn: null, triggers: [], autonomy: null };
+    permissionMode: "", reviewBeforeCommit: null, sandbox: "", options: null, runsOn: null, publishTo: null, triggers: [], autonomy: null };
 }
 
 /** The form of an automation that exists. */
@@ -216,7 +218,7 @@ export function formOf(item: AutomationItem): AutomationForm {
   return { id: item.id, name: item.name, enabled: item.enabled, prompt: item.prompt, script: item.script ?? "", scriptArguments: item.scriptArguments ?? "", projectId: item.projectId, storeInProject: item.storeProjectId !== null,
     provider: item.provider ?? "", model: item.model ?? "", effort: item.effort ?? "", agent: item.agent ?? "", catchUp: item.catchUp,
     permissionMode: item.permissionMode ?? "", reviewBeforeCommit: item.reviewBeforeCommit, sandbox: item.sandbox ?? "", options: storedSessionOptions(item.options),
-    runsOn: item.runsOn ?? null, triggers: item.triggers, autonomy: item.autonomy ?? null };
+    runsOn: item.runsOn ?? null, publishTo: item.publishTo ?? null, triggers: item.triggers, autonomy: item.autonomy ?? null };
 }
 
 /** The machine an automation runs on, in words: null for this computer. */
@@ -283,6 +285,8 @@ export function formProblem(form: AutomationForm): MessageKey | null {
     if (trigger.type === "command" && !(trigger.command ?? "").trim()) return "Write the command of the trigger.";
     if (trigger.type === "command" && form.runsOn && !form.storeInProject) return "A command trigger runs on this computer only.";
   }
+  // A team or the organization runs it with the key of an account: the machine and the server check the provider it names.
+  if (form.publishTo && form.runsOn && !form.storeInProject && !form.provider.trim()) return "An automation of a team or of the organization names the provider it runs with.";
   return null;
 }
 
@@ -299,6 +303,8 @@ export function inputOf(form: AutomationForm): AutomationInput {
     options: storedSessionOptions(form.options),
     // The configuration of a project runs its automations on the machines that have it.
     runsOn: form.storeInProject ? null : form.runsOn,
+    // Published to a team or the organization of the machine it runs on; on this computer it stays the person's.
+    publishTo: form.storeInProject || !form.runsOn ? null : form.publishTo ?? null,
     autonomy: form.autonomy ? autonomyInput(form.autonomy) : null,
     // An automation that is run by hand misses nothing.
     catchUp: form.catchUp && form.triggers.length > 0,

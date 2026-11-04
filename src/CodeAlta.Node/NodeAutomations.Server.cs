@@ -109,6 +109,20 @@ internal sealed partial class NodeAutomations
         lock (_gate) _serverClaims.Remove(runId);
     }
 
+    // Who may ask a run of an automation this node holds from a server: on a machine of a team, any maintainer of the team
+    // for an automation of the team, and the person who gave it for a personal one; on a personal machine, its owner.
+    private Func<string?, bool>? MayAsk(string linkId, FleetSignedAutomationRunRequest signed, FleetDeviceListState devices, string self)
+    {
+        var access = ServerAccess?.Invoke(linkId);
+        // A machine of the organization runs by hand what its owners and the admins who sign ask.
+        if (access?.IsOrganizationMachine(self) == true) return person => access.IsSigner(person);
+        if (access?.TeamOf(self) is not { } team || !FleetAutomationRunRequestDocuments.TryRead(signed.Payload, out var asked, out _)) return null;
+        if (AssignmentOf(asked.AutomationId) is not { Signed: { } held } || !FleetAutomationVersionDocuments.TryParse(held.Payload, out var version)) return static _ => false;
+        if (version.TeamId == team.Id) return person => FleetAccessState.RoleIn(team, person) == FleetTeamRoles.Maintainer;
+        var giver = devices.Members.TryGetValue(version.SignerDeviceId, out var signer) ? signer.OwnerId : null;
+        return person => person is not null && person == giver;
+    }
+
     /// <summary>
     /// Runs an automation a person asked by hand through the server of a link: the request must verify against the device
     /// list of that server (a controller device of the owner of this machine, for this machine, signed within minutes of
@@ -128,7 +142,9 @@ internal sealed partial class NodeAutomations
         ArgumentNullException.ThrowIfNull(devices);
         ArgumentNullException.ThrowIfNull(signed);
         if (DeviceId is not { } self) return (null, "This machine does not know its own device yet.");
-        if (!FleetAutomationRunRequestDocuments.TryVerify(signed, devices, organizationId, self, _options.TimeProvider.GetUtcNow(), out var request, out var reason))
+        var mayAsk = MayAsk(linkId, signed, devices, self);
+        if (!FleetAutomationRunRequestDocuments.TryVerify(signed, devices, organizationId, self, _options.TimeProvider.GetUtcNow(),
+                mayAsk is null ? null : (_, person) => mayAsk(person), out var request, out var reason))
         {
             Log($"A run asked through the server was refused: {reason}.");
             return (null, reason);
@@ -174,8 +190,12 @@ internal sealed partial class NodeAutomations
         ArgumentNullException.ThrowIfNull(devices);
         ArgumentNullException.ThrowIfNull(signed);
         if (DeviceId is not { } self) return "This machine does not know its own device yet.";
-        if (!FleetAutomationRunRequestDocuments.TryVerify(signed, devices, organizationId, self, _options.TimeProvider.GetUtcNow(),
-                (read, person) => MayTakeOver(access, self, read, person, _options.TimeProvider.GetUtcNow()), out var request, out var reason))
+        var mayAsk = MayAsk(linkId, signed, devices, self);
+        var owner = devices.Members.TryGetValue(self, out var machine) ? machine.OwnerId : null;
+        var now = _options.TimeProvider.GetUtcNow();
+        if (!FleetAutomationRunRequestDocuments.TryVerify(signed, devices, organizationId, self, now,
+                (read, person) => (mayAsk is not null ? mayAsk(person) : person == owner) || MayTakeOver(access ?? ServerAccess?.Invoke(linkId), self, read, person, now),
+                out var request, out var reason))
         {
             Log($"A take-over asked through the server was refused: {reason}.");
             return reason;
@@ -186,6 +206,16 @@ internal sealed partial class NodeAutomations
         if (Engine.TakeOver(request.RunId) is null) return "no run of this automation with autonomy is in progress with this id";
         Log($"{request.SignerDeviceId} took the run {request.RunId} of the automation {request.AutomationId} over through the server.");
         return null;
+    }
+
+    // The service identity the runs of an automation of a team or of the organization act as: the first one the signed access
+    // document says its scope turned on; null for a personal automation.
+    internal string? ActingAs(string linkId, string automationId)
+    {
+        if (AssignmentOf(automationId) is not { Signed: { } signed } || !FleetAutomationVersionDocuments.TryParse(signed.Payload, out var version)) return null;
+        var access = ServerAccess?.Invoke(linkId);
+        if (version.IsOrganizationScope) return access?.OrganizationServices.FirstOrDefault();
+        return version.TeamId is { } team ? access?.Teams.GetValueOrDefault(team)?.Services?.FirstOrDefault() : null;
     }
 
     /// <summary>
@@ -239,12 +269,13 @@ internal sealed partial class NodeAutomations
                         // Why a run failed or was skipped, never what it answered nor what its trigger was about.
                         Message = run.Status is AutomationRun.Failed or AutomationRun.Skipped ? run.Message : null,
                         InputTokens = run.InputTokens, OutputTokens = run.OutputTokens, Cost = run.Cost, CostUnit = run.CostUnit,
+                        ActingAs = ActingAs(linkId, id),
                         // Who answers a run that waits, when the automation does not say its owner: the server routes the approval.
                         Approvers = run.Status == AutomationRun.Waiting && Engine.Snapshot.Find(id)?.Definition.Autonomy is { Approvers: not AutomationAutonomy.OwnerApprovers } autonomy
                             ? autonomy.Approvers : null,
                         OnCall = run.Status == AutomationRun.Waiting ? run.OnCall : null,
                     };
-                    var key = $"{fact.Status}|{fact.EndedAt?.ToUnixTimeMilliseconds()}|{fact.SessionId}|{fact.Number}|{fact.InputTokens}|{fact.OutputTokens}|{fact.Cost}";
+                    var key = $"{fact.Status}|{fact.EndedAt?.ToUnixTimeMilliseconds()}|{fact.SessionId}|{fact.Number}|{fact.InputTokens}|{fact.OutputTokens}|{fact.Cost}|{fact.ActingAs}";
                     if (!reported.TryGetValue(run.Id, out var known) || known != key) changed.Add((fact, key));
                 }
             }
