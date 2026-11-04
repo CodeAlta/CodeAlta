@@ -234,13 +234,21 @@ test("the owner links a passkey, turns company sign-in on and requires it, and t
       const set = (input, value) => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(input, value); input.dispatchEvent(new Event('input', { bubbles: true })); };
       set(inputs[0], 'https://login.contoso.example/v2.0'); set(inputs[1], 'contoso-client'); set(inputs[2], 'the-secret'); set(inputs[3], 'Contoso'); return true; })()`);
     await page.evaluate(`[...document.querySelectorAll('.fleet-sign-in-dialog .bp6-switch')].find(label => label.textContent === 'Require company sign-in').querySelector('input').click()`);
+    // Whose accounts it lets in is named: nothing named is refused.
+    await page.until(`document.querySelector('.fleet-sign-in-dialog [role=alert]')?.textContent === 'Company sign-in needs the email domains or the tenant ids it lets in.'`, "the domains are needed");
+    await page.evaluate(`(() => { const input = [...document.querySelectorAll('.fleet-sign-in-dialog .fleet-server-form .bp6-input')][5];
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(input, 'Contoso.example, fabrikam.example'); input.dispatchEvent(new Event('input', { bubbles: true })); return true; })()`);
     await page.until(`!document.querySelector('.fleet-sign-in-dialog [role=alert]')`, "the form holds");
     await page.shot("fleet-sign-in-dialog");
+    // Changing the company sign-in asks the owner to sign in again, with a method linked to them.
     await page.clickText(".fleet-sign-in-dialog .bp6-button", "Save");
+    await page.until(`[...document.querySelectorAll('.fleet-sign-in-confirm-methods .bp6-button')].some(button => button.textContent === 'Continue with Passkey')`, "the confirmation asked");
+    await page.clickText(".fleet-sign-in-confirm-methods .bp6-button", "Continue with Passkey");
     await page.until(`!document.querySelector('.fleet-sign-in-dialog')`, "the form closes");
     const saved = (await page.evaluate(`[...window.fleetFixture.calls]`) as string[]).map(call => JSON.parse(call)).filter(call => call.signIn || call.linkSignIn);
-    assert.deepEqual(saved, [{ linkSignIn: "passkey" }, { linkSignIn: "github" }, { signIn: { version: 0, enabled: ["passkey", "microsoft", "google", "github", "company"],
-      issuer: "https://login.contoso.example/v2.0", clientId: "contoso-client", secret: "the-secret", name: "Contoso", requireSso: true } }]);
+    const change = { version: 0, enabled: ["passkey", "microsoft", "google", "github", "company"], issuer: "https://login.contoso.example/v2.0", clientId: "contoso-client",
+      secret: "the-secret", name: "Contoso", requireSso: true, domains: ["contoso.example", "fabrikam.example"] };
+    assert.deepEqual(saved, [{ linkSignIn: "passkey" }, { linkSignIn: "github" }, { signIn: { ...change, confirmWith: null } }, { signIn: { ...change, confirmWith: "passkey" } }]);
     await page.until(`document.querySelector('.fleet-sign-in-summary')?.textContent === 'Company sign-in required'`, "the row read again");
     await page.clickText(".fleet-server-sign-in .bp6-button", "Change…");
     await page.until(`document.querySelector('.fleet-sign-in-dialog input[type=password]')`, "the form again");

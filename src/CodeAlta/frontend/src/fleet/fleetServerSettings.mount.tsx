@@ -92,9 +92,11 @@ const api: FleetServerApi = {
   signInSettings: async () => ({ status: "ok", settings: signIn, logins, message: null }),
   setSignInSettings: async (request: FleetSignInSettingsRequest) => {
     calls.push(JSON.stringify({ signIn: { version: request.version, enabled: request.enabled, issuer: request.issuer, clientId: request.clientId, secret: request.clientSecret,
-      name: request.displayName, requireSso: request.requireSso } }));
+      name: request.displayName, requireSso: request.requireSso, domains: request.allowedDomains, confirmWith: request.confirmWith } }));
+    // As the server: a change of the company sign-in waits for the owner to sign in again.
+    if (request.issuer !== signIn.issuer && !request.confirmWith) return { status: "sign_in.confirmation_required", settings: null, logins: [], message: null };
     signIn = { ...signIn, version: signIn.version + 1, issuer: request.issuer, clientId: request.clientId, hasClientSecret: !!request.clientSecret, displayName: request.displayName,
-      requireSso: request.requireSso, methods: signIn.methods.map(method => ({ ...method, enabled: request.enabled.includes(method.id),
+      requireSso: request.requireSso, allowedDomains: request.allowedDomains ?? [], methods: signIn.methods.map(method => ({ ...method, enabled: request.enabled.includes(method.id),
         name: method.id === "company" ? request.displayName ?? method.name : method.name, available: method.id === "company" ? !!request.issuer : method.available })) };
     return { status: "ok", settings: signIn, logins: [], message: null };
   },
