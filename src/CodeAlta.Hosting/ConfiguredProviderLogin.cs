@@ -28,6 +28,12 @@ public sealed record ProviderLoginStatus(bool SignedIn, string? Account, string?
     /// success that enables the provider.
     /// </summary>
     public bool Usable { get; init; } = SignedIn;
+
+    /// <summary>
+    /// Gets whether the stored credential renews itself past <see cref="ExpiresAt"/> (a refresh token, the GitHub credential
+    /// that renews a Copilot token): a sign-in that does not renew needs the person again once it expires.
+    /// </summary>
+    public bool Renews { get; init; }
 }
 
 /// <summary>
@@ -250,6 +256,8 @@ public static class ConfiguredProviderLogin
         => new(true, Text(metadata.AccountLabel), metadata.HasPlanUsagePermission ? null : NoPlanUsageDetail, null)
         {
             Usable = metadata.HasPlanUsagePermission,
+            // A ChatGPT registration renews its access token with its refresh token.
+            Renews = true,
         };
 
     // Sign-out keeps the registration and clears its tokens, like the check before every authenticated request.
@@ -259,10 +267,11 @@ public static class ConfiguredProviderLogin
             : SignedOut;
 
     internal static ProviderLoginStatus FromCopilot(CopilotDirectLoginResult result)
-        => new(true, Text(result.EnterpriseDomain), result.BaseUri.Host, result.ExpiresAt);
+        => new(true, Text(result.EnterpriseDomain), result.BaseUri.Host, result.ExpiresAt) { Renews = true };
 
+    // The expiry of an xAI sign-in is its access token's: one with a refresh token renews it.
     internal static ProviderLoginStatus FromXai(XaiDirectLoginResult result)
-        => new(true, null, result.BaseUri.Host, result.ExpiresAt);
+        => new(true, null, result.BaseUri.Host, result.ExpiresAt) { Renews = result.Renews };
 
     // The key of a Mistral Vibe sign-in does not expire: its workspace revokes it.
     internal static ProviderLoginStatus FromMistralVibe(MistralVibeLoginResult result)

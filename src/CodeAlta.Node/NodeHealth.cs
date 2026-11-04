@@ -1,7 +1,9 @@
 using System.Globalization;
 using CodeAlta.Agent;
 using CodeAlta.Automations;
+using CodeAlta.Catalog;
 using CodeAlta.Fleet.Protocol.Api;
+using CodeAlta.Hosting;
 
 namespace CodeAlta.Node;
 
@@ -22,9 +24,18 @@ internal sealed class NodeHealth
     /// <summary>How long a refusal of the policy of the node stays a problem.</summary>
     public static readonly TimeSpan PolicyRefusalWindow = TimeSpan.FromHours(1);
 
+    /// <summary>How long ahead a sign-in that does not renew itself is reported before it expires.</summary>
+    public static readonly TimeSpan SignInWarning = TimeSpan.FromDays(3);
+
+    /// <summary>How often the stored sign-ins of the providers are read again.</summary>
+    public static readonly TimeSpan SignInReadInterval = TimeSpan.FromMinutes(10);
+
     private const int MaxProblems = 16;
 
     private readonly NodeHost _node;
+    private IReadOnlyList<FleetHealthProblem> _signIns = [];
+    private long _signInsReadAt = long.MinValue;
+    private int _readingSignIns;
 
     /// <summary>Initializes a new instance of the <see cref="NodeHealth"/> class.</summary>
     /// <param name="node">The running node.</param>
@@ -32,10 +43,61 @@ internal sealed class NodeHealth
     {
         ArgumentNullException.ThrowIfNull(node);
         _node = node;
+        SignInDefinitions = () => new CodeAltaConfigStore(node.Host.CatalogOptions).LoadGlobalProviderDefinitions();
+        SignInStatus = (definition, token) => ConfiguredProviderLogin.GetStatusAsync(definition, node.Host.CatalogOptions.GlobalRoot, token);
     }
 
     /// <summary>Gets or sets the space left under which the disk is low.</summary>
     public long MinimumFreeBytes { get; set; } = DefaultMinimumFreeBytes;
+
+    /// <summary>Gets or sets what lists the enabled providers whose sign-in is checked.</summary>
+    public Func<IReadOnlyList<CodeAltaProviderDocument>> SignInDefinitions { get; set; }
+
+    /// <summary>Gets or sets what reads the stored sign-in of a provider, without the network.</summary>
+    public Func<CodeAltaProviderDocument, CancellationToken, Task<ProviderLoginStatus>> SignInStatus { get; set; }
+
+    /// <summary>
+    /// Reads the stored sign-ins of the providers with an account sign-in again: one that tells when it expires and does not
+    /// renew itself is a problem from <see cref="SignInWarning"/> before (or once expired), its subject the provider.
+    /// </summary>
+    /// <param name="cancellationToken">Cancels the reads.</param>
+    /// <returns>A task that completes once they were read.</returns>
+    public async Task RefreshSignInsAsync(CancellationToken cancellationToken)
+    {
+        var problems = new List<FleetHealthProblem>();
+        IReadOnlyList<CodeAltaProviderDocument> definitions;
+        try { definitions = SignInDefinitions(); }
+        catch (Exception exception) when (exception is IOException or InvalidDataException or InvalidOperationException or UnauthorizedAccessException) { return; }
+        var now = DateTimeOffset.UtcNow;
+        foreach (var definition in definitions)
+        {
+            if (!ConfiguredProviderLogin.SupportsLogin(definition.ProviderType)) continue;
+            ProviderLoginStatus status;
+            try { status = await SignInStatus(definition, cancellationToken).ConfigureAwait(false); }
+            catch (Exception exception) when (exception is IOException or InvalidDataException or InvalidOperationException or UnauthorizedAccessException
+                or ArgumentException or System.Text.Json.JsonException) { continue; }
+            if (status is { SignedIn: true, Renews: false, ExpiresAt: { } expires } && expires - now <= SignInWarning)
+                problems.Add(new FleetHealthProblem(FleetHealthKinds.SignIn, definition.ProviderKey, expires.UtcDateTime.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)));
+        }
+
+        Volatile.Write(ref _signIns, problems);
+        Volatile.Write(ref _signInsReadAt, now.UtcTicks);
+    }
+
+    // The heartbeat reads files only off its thread: the sign-ins are read again in the background when due.
+    private IReadOnlyList<FleetHealthProblem> SignIns()
+    {
+        if (DateTimeOffset.UtcNow.UtcTicks - Volatile.Read(ref _signInsReadAt) >= SignInReadInterval.Ticks && Interlocked.Exchange(ref _readingSignIns, 1) == 0)
+        {
+            _ = Task.Run(async () =>
+            {
+                try { await RefreshSignInsAsync(CancellationToken.None).ConfigureAwait(false); }
+                finally { Volatile.Write(ref _readingSignIns, 0); }
+            });
+        }
+
+        return Volatile.Read(ref _signIns);
+    }
 
     /// <summary>Reads the problems of the node now.</summary>
     /// <returns>The problems; empty when it has none.</returns>
@@ -50,6 +112,9 @@ internal sealed class NodeHealth
             if (state.Descriptor.IsEnabled && state.Availability == ModelProviderAvailability.Failed)
                 problems.Add(new FleetHealthProblem(FleetHealthKinds.SignInFailed, state.ProviderId.Value, state.ErrorCategory));
         }
+
+        // A sign-in about to expire that does not renew itself, read in the background.
+        problems.AddRange(SignIns());
 
         if (_node.Automations is { } automations)
         {

@@ -433,7 +433,7 @@ A run that waits comes as a message wherever you are in CodeAlta, with **Continu
 
 ### Hear of problems of your machines
 
-Your nodes tell the server how they are: little disk space left, a provider whose sign-in failed, an automation whose last runs failed, their policy refusing runs. The server also sees a node offline for more than six hours and one that runs an older version than the server. A problem that lasts more than ten minutes comes to you once, as a message with **Dismiss**, and stays listed under **Notifications** in **Settings** > **Fleet** > **Budgets** until you dismiss it or it ends. One that comes back later comes again.
+Your nodes tell the server how they are: little disk space left, a provider whose sign-in failed or ends within three days without renewing itself, an automation whose last runs failed, their policy refusing runs. The server also sees a node offline for more than six hours and one that runs an older version than the server. A problem that lasts more than ten minutes comes to you once, as a message with **Dismiss**, and stays listed under **Notifications** in **Settings** > **Fleet** > **Budgets** until you dismiss it or it ends. One that comes back later comes again.
 
 ### Give secrets to your machines
 

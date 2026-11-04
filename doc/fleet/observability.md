@@ -142,8 +142,9 @@ which the hosts name at three levels; the first that names one wins:
   backlog of its outbox), sessions working and devices connected.
 - Machines report health in their heartbeat; the server turns lasting problems into notifications for the machine's
   owner (or the admins of team machines), at most once per problem.
-  - A node reports what it sees (disk space low where it keeps its state, a provider whose sign-in failed, an
-    automation whose last runs failed, its policy refusing runs); the server sees for itself a node offline longer than
+  - A node reports what it sees (disk space low where it keeps its state, a provider whose sign-in failed, or whose
+    stored sign-in tells its expiry and does not renew itself, three days ahead; an automation whose last runs failed;
+    its policy refusing runs); the server sees for itself a node offline longer than
     a threshold and one behind its own version. Names and numbers, never content.
   - A problem is a kind and a subject (a provider, an automation) since it was first seen: told once it lasts (ten
     minutes by default), resolved when it ends; one that comes back is another one. The store is written when the

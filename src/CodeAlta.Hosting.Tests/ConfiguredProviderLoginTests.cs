@@ -108,18 +108,20 @@ public sealed class ConfiguredProviderLoginTests
     {
         var expiry = new DateTimeOffset(2026, 1, 2, 3, 4, 5, TimeSpan.Zero);
 
-        Assert.AreEqual(new ProviderLoginStatus(true, "Workspace", null, null), ConfiguredProviderLogin.FromCodex(new CodexAccountMetadata("Workspace", "subject", "client", true)));
+        Assert.AreEqual(new ProviderLoginStatus(true, "Workspace", null, null) { Renews = true }, ConfiguredProviderLogin.FromCodex(new CodexAccountMetadata("Workspace", "subject", "client", true)));
         var declined = ConfiguredProviderLogin.FromCodex(new CodexAccountMetadata(" ", "subject", "client", false));
         Assert.IsTrue(declined.SignedIn);
         Assert.IsFalse(declined.Usable, "Like the TUI, a registration without plan usage is not a usable sign-in.");
         Assert.IsNull(declined.Account);
         Assert.AreEqual(ConfiguredProviderLogin.NoPlanUsageDetail, declined.Detail);
-        Assert.AreEqual(new ProviderLoginStatus(true, "octo.example.test", "api.githubcopilot.com", expiry),
+        Assert.AreEqual(new ProviderLoginStatus(true, "octo.example.test", "api.githubcopilot.com", expiry) { Renews = true },
             ConfiguredProviderLogin.FromCopilot(new CopilotDirectLoginResult(new Uri("https://api.githubcopilot.com/"), expiry, " octo.example.test ")));
-        Assert.AreEqual(new ProviderLoginStatus(true, null, "api.githubcopilot.com", null),
+        Assert.AreEqual(new ProviderLoginStatus(true, null, "api.githubcopilot.com", null) { Renews = true },
             ConfiguredProviderLogin.FromCopilot(new CopilotDirectLoginResult(new Uri("https://api.githubcopilot.com/"), null, null)));
         Assert.AreEqual(new ProviderLoginStatus(true, null, "api.x.ai", expiry),
             ConfiguredProviderLogin.FromXai(new XaiDirectLoginResult(new Uri("https://api.x.ai/v1"), expiry, "scope-is-not-reported")));
+        // An xAI sign-in renews its access token only with a refresh token: one without needs the person once it expires.
+        Assert.IsTrue(ConfiguredProviderLogin.FromXai(new XaiDirectLoginResult(new Uri("https://api.x.ai/v1"), expiry, null) { Renews = true }).Renews);
     }
 
     [TestMethod]
@@ -137,7 +139,7 @@ public sealed class ConfiguredProviderLoginTests
             }, cancellation.Token);
 
         Assert.AreEqual(new ProviderLoginPrompt(Authorize, null, null), prompts.Single());
-        Assert.AreEqual(new ProviderLoginStatus(true, "Workspace", null, null), status);
+        Assert.AreEqual(new ProviderLoginStatus(true, "Workspace", null, null) { Renews = true }, status);
     }
 
     [TestMethod]
