@@ -168,10 +168,12 @@ public sealed class UpdateCampaignTests
         Assert.IsNull(mac.Agent.Tick());
         Assert.AreEqual(0, mac.Applied.Count);
 
+        // Once its time came, this tick or the node's own loop (which looks every 50 ms) starts the update: either way once.
         fixture.Clock.Advance(TimeSpan.FromHours(3));
         await (mac.Agent.Tick() ?? Task.CompletedTask);
+        await mac.WaitAppliedAsync();
+        await WaitForAsync(() => Task.FromResult(mac.Agent.Current?.State == FleetUpdateMachineStates.Switching), () => $"the node is {mac.Agent.Current?.State}");
         Assert.AreEqual(1, mac.Applied.Count, "it updates once its time came");
-        Assert.AreEqual(FleetUpdateMachineStates.Switching, mac.Agent.Current?.State);
 
         // The same manifest replayed after it is not taken again, nor an older one.
         await mac.Agent.AcceptAsync(mac.Connector!, LinkId, organization, new FleetUpdateInstruction("c0", fleet.SignManifest(manifest with { CampaignId = "c0", Sequence = 1 })),
