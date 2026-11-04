@@ -82,6 +82,21 @@ public sealed partial class FleetNodeService
         }
     }
 
+    // The gate this service gives the runtime, taken back when it stops.
+    private readonly Func<CodeAlta.Orchestration.Runtime.QueuedRunAdmission, CancellationToken, Task<string?>>? _queuedRunGate;
+
+    // A queued prompt about to start its turn: admitted as a send of its session, the queued item its run; it may wait. A steer
+    // needs no admission: it goes into the turn that runs, which its own send or queued prompt was admitted for.
+    private async Task<string?> AdmitQueuedAsync(CodeAlta.Orchestration.Runtime.QueuedRunAdmission queued, CancellationToken cancellationToken)
+    {
+        if (_options.AdmitBudget is not { } admit) return null;
+        var session = await _host.RuntimeService.TryGetRecoverableSessionAsync(queued.SessionId, cancellationToken).ConfigureAwait(false);
+        var project = session?.ProjectRef is { Length: > 0 } projectId ? await _host.ProjectCatalog.GetByIdAsync(projectId, cancellationToken).ConfigureAwait(false) : null;
+        var decided = await admit(new FleetNodeBudgetRun(queued.QueueItemId, session?.Title, session?.SpaceId, project), static () => { }, cancellationToken).ConfigureAwait(false);
+        if (decided.Problem is { } problem) LogInfo($"The queued prompt {queued.QueueItemId} of the session {queued.SessionId} was not sent: {problem}");
+        return decided.Problem;
+    }
+
     private FleetCommandResult Admitted(string runId, Func<FleetCommandResult> send)
     {
         // Bounded: the runtime keeps its own receipts for retries; this only spares them a second admission.

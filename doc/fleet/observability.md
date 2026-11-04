@@ -55,7 +55,8 @@ Surprise bills are the first complaint of agent users. So budgets ship with the 
   without allowances still takes its part); the server gives only what no machine committed, at least a quarter of the
   limit at once so that a machine asks seldom and spends offline, in one transaction with the facts. A machine admits a
   run while it holds a hundredth of the limit beyond what it spent, counted from its own statistics; the last run of a
-  period can pass the limit by what it spends.
+  period can pass the limit by what it spends. A queued prompt is admitted when its turn starts, not when it is
+  queued; a steer joins the turn that runs and is part of that turn's admission.
 - A budget limits the facts of its owner's machines: the person, one machine, a space (by the opaque id the server knows
   it by, which statistics sets carry), a project (by its blind index). Teams, the organization and automations come with
   their roles (M4).

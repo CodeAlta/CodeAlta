@@ -138,6 +138,13 @@ public sealed partial class FleetNodeService : IAsyncDisposable
         // What the sessions agents of other machines started here say to their parents waits in the outbox of the node.
         _agents = new FleetAgentSessions(options.Host.CatalogOptions.FleetRoot, options.TimeProvider);
         options.Host.RuntimeService.RemoteParents = _agents;
+        // A queued prompt starts its turn later: the budgets of the machine admit it then, as a send.
+        if (options.AdmitBudget is not null)
+        {
+            _queuedRunGate = AdmitQueuedAsync;
+            options.Host.RuntimeService.QueuedRunGate = _queuedRunGate;
+        }
+
         RestoreAgentRestrictions();
     }
 
@@ -273,6 +280,7 @@ public sealed partial class FleetNodeService : IAsyncDisposable
     {
         if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
         if (ReferenceEquals(_host.RuntimeService.RemoteParents, _agents)) _host.RuntimeService.RemoteParents = null;
+        if (_queuedRunGate is not null && ReferenceEquals(_host.RuntimeService.QueuedRunGate, _queuedRunGate)) _host.RuntimeService.QueuedRunGate = null;
         foreach (var caller in _callers.Values)
         {
             try { await caller.Connection.CloseAsync("node_stopping").ConfigureAwait(false); }
