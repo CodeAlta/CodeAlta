@@ -91,6 +91,22 @@ public sealed class SignInTests
     }
 
     [TestMethod]
+    public async Task ACompanyProviderThatTakesItsSecretInTheHeaderOnlyIsServed()
+    {
+        await using var provider = await FakeOidcProvider.StartAsync(clientSecret: "okta-secret");
+        provider.BasicAuthenticationOnly = true;
+        await using var server = await ServerFixture.StartAsync(signIn: Options(provider));
+        using var owner = new TestDevice("Desktop");
+        using var laptop = new TestDevice("Laptop");
+        await server.SetUpAsync(owner);
+        await ConfigureCompanyAsync(server, owner, provider, requireSso: false);
+        var (start, back) = await StartAsync(server, laptop, FleetSignInMethods.Company);
+        var completed = await CompleteAsync(server, laptop, start, back);
+        Assert.AreEqual(HttpStatusCode.OK, completed.Status, completed.Body.ToString());
+        Assert.AreEqual(0, provider.RefusedTokens);
+    }
+
+    [TestMethod]
     public async Task WhatTheProviderAnswersWrongIsRefused()
     {
         await using var provider = await FakeOidcProvider.StartAsync();

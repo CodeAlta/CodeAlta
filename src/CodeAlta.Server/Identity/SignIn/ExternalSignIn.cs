@@ -127,9 +127,8 @@ public sealed class ExternalSignInClient : IDisposable
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(provider);
-        var tokenEndpoint = provider.Kind == ExternalProviderKind.GitHub
-            ? Combine(provider.Authority, "login/oauth/access_token")
-            : (await GetConfigurationAsync(provider, cancellationToken).ConfigureAwait(false)).TokenEndpoint;
+        var configuration = provider.Kind == ExternalProviderKind.GitHub ? null : await GetConfigurationAsync(provider, cancellationToken).ConfigureAwait(false);
+        var tokenEndpoint = configuration is null ? Combine(provider.Authority, "login/oauth/access_token") : configuration.TokenEndpoint;
         if (string.IsNullOrEmpty(tokenEndpoint)) throw new ExternalSignInException(SignInErrorCodes.ProviderUnavailable, "The provider names no token endpoint.");
         RequireTransport(new Uri(tokenEndpoint));
 
@@ -138,9 +137,18 @@ public sealed class ExternalSignInClient : IDisposable
             new("grant_type", "authorization_code"), new("code", code), new("redirect_uri", redirectUri), new("client_id", provider.Client.ClientId),
             new("code_verifier", codeVerifier),
         };
-        if (!string.IsNullOrEmpty(provider.Client.ClientSecret)) form.Add(new("client_secret", provider.Client.ClientSecret));
+        // The secret goes in the form unless the provider takes it in the Authorization header only (Okta's default).
+        var methods = configuration?.TokenEndpointAuthMethodsSupported;
+        var basic = !string.IsNullOrEmpty(provider.Client.ClientSecret) && methods is { Count: > 0 } && !methods.Contains("client_secret_post") && methods.Contains("client_secret_basic");
+        if (!string.IsNullOrEmpty(provider.Client.ClientSecret) && !basic) form.Add(new("client_secret", provider.Client.ClientSecret));
         using var request = new HttpRequestMessage(HttpMethod.Post, tokenEndpoint) { Content = new FormUrlEncodedContent(form) };
         request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+        if (basic)
+        {
+            // RFC 6749, section 2.3.1: each part form-encoded, then joined by a colon.
+            var credentials = Uri.EscapeDataString(provider.Client.ClientId) + ":" + Uri.EscapeDataString(provider.Client.ClientSecret!);
+            request.Headers.Authorization = new AuthenticationHeaderValue("Basic", Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(credentials)));
+        }
         using var token = await ReadJsonAsync(request, "token", cancellationToken).ConfigureAwait(false);
         var root = token.RootElement;
         if (root.TryGetProperty("error", out var error))

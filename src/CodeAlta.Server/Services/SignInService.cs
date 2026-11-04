@@ -270,6 +270,12 @@ public sealed class SignInService : IDisposable
         // Only the key that started the attempt completes it: a new device is not in the table yet, so its key is the attempt's.
         if (!FleetDevicePublicKey.TryParse(pending.PublicKey, out var started)) throw new InvalidOperationException("An attempt without its key.");
         _authenticator.VerifyWithKey(signed, started);
+        // A link completes only from a device that is still an approved controller of its person.
+        if (pending.Purpose == FleetSignInPurposes.Link
+            && await _store.GetDeviceAsync(pending.DeviceId, cancellationToken).ConfigureAwait(false) is not { Status: DeviceStatuses.Approved, Kind: FleetDeviceKinds.Controller })
+        {
+            throw CoordinatorException.Forbidden(FleetErrorCodes.Forbidden, "A sign-in method is linked from an approved controller device of its person.");
+        }
 
         // Taken once: a replayed code finds no attempt, whatever the provider would answer.
         var attempt = _attempts.Take(request.AttemptId);

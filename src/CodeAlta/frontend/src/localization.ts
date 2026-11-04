@@ -59,6 +59,7 @@ import { createServerMessages } from "./fleet/createServerMessages";
 import { secretMessages } from "./secrets/messages";
 import { fleetMessages } from "./fleet/messages";
 import { fleetSecretMessages } from "./fleet/secretsMessages";
+import { signInMessages } from "./fleet/signInMessages";
 // English source keys follow SR's fallback convention. Order: es, fr, de, ja, zh-CN.
 type Row = readonly [string, string, string, string, string];
 function dictionary<T extends Record<string, Row>>(rows: T): Readonly<T> {
@@ -2868,6 +2869,7 @@ export const messages = dictionary({
   ...secretMessages,
   ...fleetMessages,
   ...fleetSecretMessages,
+  ...signInMessages,
   ...documentationMessages,
   ...storageMessages,
   ...sessionBranchMessages,

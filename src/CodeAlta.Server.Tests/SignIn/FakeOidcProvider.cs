@@ -73,6 +73,9 @@ internal sealed class FakeOidcProvider : IAsyncDisposable
     /// <summary>Gets or sets whether the next ID tokens are signed with a key the provider does not publish.</summary>
     public bool SignWithUnknownKey { get; set; }
 
+    /// <summary>Gets or sets whether the token endpoint takes the client secret in the Authorization header only, as Okta does by default.</summary>
+    public bool BasicAuthenticationOnly { get; set; }
+
     /// <summary>Gets the authorization requests it received.</summary>
     public ConcurrentQueue<IReadOnlyDictionary<string, string>> Authorizations { get; } = new();
 
@@ -140,6 +143,7 @@ internal sealed class FakeOidcProvider : IAsyncDisposable
             ["subject_types_supported"] = new[] { "public" },
             ["id_token_signing_alg_values_supported"] = new[] { "RS256" },
             ["code_challenge_methods_supported"] = new[] { "S256" },
+            ["token_endpoint_auth_methods_supported"] = BasicAuthenticationOnly ? new[] { "client_secret_basic" } : new[] { "client_secret_post", "client_secret_basic" },
         }), "application/json"));
         _app.MapGet("/jwks", () =>
         {
@@ -189,7 +193,16 @@ internal sealed class FakeOidcProvider : IAsyncDisposable
         }
 
         if (form["grant_type"] != "authorization_code" || form["client_id"] != ClientId) return Refuse("invalid_client");
-        if (ClientSecret is not null && form["client_secret"] != ClientSecret) return Refuse("invalid_client");
+        if (BasicAuthenticationOnly)
+        {
+            var header = context.Request.Headers.Authorization.ToString();
+            var expected = "Basic " + Convert.ToBase64String(Encoding.UTF8.GetBytes(Uri.EscapeDataString(ClientId) + ":" + Uri.EscapeDataString(ClientSecret ?? string.Empty)));
+            if (header != expected || form.ContainsKey("client_secret")) return Refuse("invalid_client");
+        }
+        else if (ClientSecret is not null && form["client_secret"] != ClientSecret)
+        {
+            return Refuse("invalid_client");
+        }
         // A code works once.
         if (!_codes.TryRemove(form["code"].ToString(), out var grant)) return Refuse("invalid_grant");
         if (form["redirect_uri"] != grant.RedirectUri) return Refuse("invalid_grant");

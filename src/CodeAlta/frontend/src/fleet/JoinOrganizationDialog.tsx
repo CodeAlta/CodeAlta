@@ -1,24 +1,30 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Button, Callout, Dialog, DialogBody, DialogFooter, InputGroup, Radio, RadioGroup, Tag } from "@blueprintjs/core";
-import { fleetServer, spaces as spacesApi, type FleetServerView, type SpaceItem } from "#neoastra";
+import { fleetServer, spaces as spacesApi, type FleetServerView, type FleetSignInMethodView, type SpaceItem } from "#neoastra";
 import { AppIcon } from "../AppIcon";
 import { ActivitySpinner } from "../ActivitySpinner";
 import { useShellLanguage } from "../shellLanguage";
 import type { MessageKey } from "../localization";
 import { keyWords, serverProblem } from "./fleetServer";
 import { joinSteps, organizationAddressOf, type JoinStep } from "./joinOrganization";
+import { orderedSignInMethods, signInProblem } from "./signIn";
 
 /** The calls of the dialog. */
-export type JoinOrganizationApi = Pick<typeof fleetServer, "join" | "linkSpace" | "status">;
+export type JoinOrganizationApi = Pick<typeof fleetServer, "join" | "linkSpace" | "status" | "signInMethods" | "joinWithSignIn">;
+
+/** How long the browser may take before the sign-in is given up: the server's attempt lives ten minutes. */
+const signInTimeoutMilliseconds = 11 * 60_000;
 
 /** The calls of the dialog on the spaces of this computer. */
 export type JoinOrganizationSpacesApi = Pick<typeof spacesApi, "list" | "create">;
 
 /**
- * Join an organization: the address of the company's server, then signing in to it — with the one-time enrollment code
- * an administrator gives, the way the server lets a computer in today — then the space whose sessions it sees (a new
- * Work space by default), and the approval this computer waits for, with the six words of its key. A person whose
- * computers are all lost starts from here too: `onRecover` goes to the recovery key instead.
+ * Join an organization: the address of the company's server, then signing in to it — through the system browser with a
+ * method the server offers (its company sign-in, a passkey, a linked Microsoft, Google or GitHub account), or with the
+ * one-time enrollment code an administrator gives — then the space whose sessions it sees (a new Work space by default),
+ * and the approval this computer waits for, with the six words of its key: from another computer of the person, or from
+ * the owner for a person's first one. A person whose computers are all lost starts from here too: `onRecover` goes to the
+ * recovery key instead.
  */
 export function JoinOrganizationDialog({ epoch, api = fleetServer, spaces = spacesApi, onRecover, onClose }: {
   epoch: string; api?: JoinOrganizationApi; spaces?: JoinOrganizationSpacesApi; onRecover?: () => void; onClose: (joined: boolean) => void;
@@ -33,7 +39,61 @@ export function JoinOrganizationDialog({ epoch, api = fleetServer, spaces = spac
   const [space, setSpace] = useState<string>("new");
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState<{ key: MessageKey; detail?: string | null } | null>(null);
+  const [methods, setMethods] = useState<FleetSignInMethodView[] | null>(null);
+  const [useCode, setUseCode] = useState(false);
+  const [waiting, setWaiting] = useState<string | null>(null);
+  const [byOwnDevice, setByOwnDevice] = useState(false);
+  const browser = useRef<AbortController | null>(null);
   const url = organizationAddressOf(address);
+  useEffect(() => () => browser.current?.abort(), []);
+  useEffect(() => {
+    if (step !== "signin" || !url) return;
+    const abort = new AbortController();
+    setMethods(null);
+    api.signInMethods({ expectedEpoch: epoch, url }, { signal: abort.signal, timeoutMilliseconds: 15_000 }).then(value => {
+      if (abort.signal.aborted) return;
+      const offered = value.status === "ok" ? orderedSignInMethods(value.methods) : [];
+      setMethods(offered);
+      if (offered.length === 0) setUseCode(true);
+    }, () => { if (!abort.signal.aborted) { setMethods([]); setUseCode(true); } });
+    return () => abort.abort();
+  }, [api, epoch, step, url]);
+
+  async function signInWith(method: FleetSignInMethodView) {
+    if (!url) return;
+    const abort = new AbortController();
+    browser.current = abort;
+    setBusy(true);
+    setWaiting(method.id);
+    setProblem(null);
+    try {
+      const result = await api.joinWithSignIn({ expectedEpoch: epoch, url, method: method.id }, { signal: abort.signal, timeoutMilliseconds: signInTimeoutMilliseconds });
+      if (abort.signal.aborted) return;
+      if (result.status !== "ok" || !result.server) {
+        setProblem({ key: signInProblem(result.status) ?? serverProblem(result.status) ?? "The operation did not complete.", detail: result.message });
+        return;
+      }
+      setServer(result.server);
+      setByOwnDevice(result.hasDevices);
+      const status = await api.status({ expectedEpoch: epoch }, { timeoutMilliseconds: 15_000 }).catch(() => null);
+      setWords(status?.words ?? null);
+      setStep("space");
+    } catch {
+      if (!abort.signal.aborted) setProblem({ key: "The server does not answer." });
+    } finally {
+      if (browser.current === abort) browser.current = null;
+      setWaiting(null);
+      setBusy(false);
+    }
+  }
+
+  function cancelSignIn() {
+    browser.current?.abort();
+    browser.current = null;
+    setWaiting(null);
+    setBusy(false);
+    setProblem({ key: "The sign-in was cancelled." });
+  }
   useEffect(() => {
     const abort = new AbortController();
     spaces.list({ expectedEpoch: epoch }, { signal: abort.signal }).then(value => { if (!abort.signal.aborted && value.status === "ok") setList(value.spaces); }, () => { });
@@ -92,7 +152,19 @@ export function JoinOrganizationDialog({ epoch, api = fleetServer, spaces = spac
         <small className="muted-text">{t("Your administrator gives it, or your company's configuration sets it.")}</small>
       </label>}
       {step === "address" && address.trim() && !url && <Callout compact intent="warning">{t("This is not the address of a server.")}</Callout>}
-      {step === "signin" && <>
+      {step === "signin" && !useCode && <>
+        <p className="muted-text">{t("Sign in to {server}. Your browser opens; this computer then waits for its approval.", { server: url })}</p>
+        {methods === null ? <div className="join-organization-methods muted-text"><ActivitySpinner size={14} /> {t("Checking how this server signs people in…")}</div>
+          : <div className="join-organization-methods" role="group" aria-label={t("Sign in with")}>
+            {methods.map((method, index) => <Button key={method.id} fill alignText="start" data-method={method.id} disabled={busy}
+              intent={index === 0 && !method.breakGlass ? "primary" : undefined} variant={method.breakGlass ? "minimal" : undefined} size={method.breakGlass ? "small" : undefined}
+              icon={waiting === method.id ? <ActivitySpinner size={14} /> : undefined}
+              text={method.breakGlass ? t("Owner's passkey") : t("Continue with {method}", { method: method.id === "passkey" ? t("Passkey") : method.name })}
+              onClick={() => void signInWith(method)} />)}
+          </div>}
+        {waiting && <Callout compact intent="primary" role="status" icon={<AppIcon name="shield" size={16} />}>{t("Finish signing in in your browser…")}</Callout>}
+      </>}
+      {step === "signin" && useCode && <>
         <p className="muted-text">{t("Sign in to {server} with the one-time enrollment code your administrator made for you. This computer then waits for their approval.", { server: url })}</p>
         <label className="add-machine-field"><span>{t("Enrollment code")}</span>
           <InputGroup autoFocus fill value={code} disabled={busy} aria-label={t("Enrollment code")} onChange={event => setCode(event.currentTarget.value)}
@@ -107,7 +179,8 @@ export function JoinOrganizationDialog({ epoch, api = fleetServer, spaces = spac
         </RadioGroup>
       </>}
       {step === "approval" && server && <Callout compact intent="primary" role="status" icon={<AppIcon name="shield" size={16} />}>
-        {t("An administrator of {organization} approves this computer. They see these words beside it:", { organization: server.organization ?? server.url })}
+        {byOwnDevice ? t("Another of your computers approves this one. It shows these words beside it:")
+          : t("An administrator of {organization} approves this computer. They see these words beside it:", { organization: server.organization ?? server.url })}
         {words && <div className="pair-machine-words add-machine-words">{keyWords(words).map((word, index) => <Tag key={`${index}:${word}`} minimal>{word}</Tag>)}</div>}
         <div className="muted-text">{t("Settings > Fleet > Server shows when it is done.")}</div>
       </Callout>}
@@ -116,13 +189,16 @@ export function JoinOrganizationDialog({ epoch, api = fleetServer, spaces = spac
     <DialogFooter actions={<>
       {step === "address" && <><Button text={t("Cancel")} onClick={() => onClose(false)} />
         <Button intent="primary" disabled={!url} text={t("Next")} onClick={() => setStep("signin")} /></>}
-      {step === "signin" && <><Button disabled={busy} text={t("Back")} onClick={() => setStep("address")} />
-        <Button intent="primary" disabled={busy || !code.trim()} icon={busy ? <ActivitySpinner size={14} /> : undefined} text={t("Sign in")} onClick={() => void signIn()} /></>}
+      {step === "signin" && <><Button disabled={busy} text={t("Back")} onClick={() => { setStep("address"); setUseCode(false); }} />
+        {waiting && <Button text={t("Cancel")} onClick={cancelSignIn} />}
+        {useCode && <Button intent="primary" disabled={busy || !code.trim()} icon={busy ? <ActivitySpinner size={14} /> : undefined} text={t("Sign in")} onClick={() => void signIn()} />}</>}
       {step === "space" && <Button intent="primary" disabled={busy} icon={busy ? <ActivitySpinner size={14} /> : undefined} text={t("Link the space")} onClick={() => void linkSpace()} />}
       {step === "approval" && <Button intent="primary" text={t("Done")} onClick={() => onClose(true)} />}
     </>}>
       {step === "address" && onRecover && <Button variant="minimal" size="small" icon={<AppIcon name="shield" size={14} />} text={t("Recover with the recovery key…")}
         onClick={onRecover} />}
+      {step === "signin" && !busy && methods && methods.length > 0 && <Button variant="minimal" size="small" className="join-organization-switch"
+        text={t(useCode ? "Sign in with an account instead" : "Use an enrollment code instead")} onClick={() => { setUseCode(value => !value); setProblem(null); }} />}
     </DialogFooter>
   </Dialog>;
 }

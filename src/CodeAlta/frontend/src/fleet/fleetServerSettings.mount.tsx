@@ -2,8 +2,8 @@
 // its telemetry through it. Driven by fleetServerSettings.browser.test.ts through `fleetFixture`: what the page asks is recorded.
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
-import type { FleetDeviceView, FleetServerDeviceRequest, FleetServerRecoverRequest, FleetServerView, FleetTelemetryRequest, FleetTelemetryView, FleetUpdateCampaignView, FleetUpdatePolicyRequest,
-  FleetUpdateStartRequest, FleetUpdatesView } from "#neoastra";
+import type { FleetDeviceView, FleetServerDeviceRequest, FleetServerRecoverRequest, FleetServerView, FleetSignInLinkRequest, FleetSignInLoginView, FleetSignInSettingsRequest,
+  FleetSignInSettingsView, FleetTelemetryRequest, FleetTelemetryView, FleetUpdateCampaignView, FleetUpdatePolicyRequest, FleetUpdateStartRequest, FleetUpdatesView } from "#neoastra";
 import { ShellLanguageContext } from "../shellLanguage";
 import { FleetServerSettings, type FleetServerApi } from "./FleetServerSettings";
 
@@ -32,6 +32,13 @@ const campaign = (request: FleetUpdateStartRequest): FleetUpdateCampaignView => 
   automatic: false, rollback: false, serverState: "pending", serverMessage: null, createdAt: "2026-11-03T08:00:00Z",
   machines: updates.machines.filter(machine => !request.machines || request.machines.includes(machine.id)).map(machine => ({ id: machine.id, name: machine.name,
     state: machine.online ? "switching" : "pending", running: machine.version, message: null, online: machine.online })) });
+// Passkeys and Microsoft on, Google and GitHub not registered by the project yet, no company sign-in; the owner linked nothing.
+let signIn: FleetSignInSettingsView = { methods: [
+  { id: "company", name: "Company sign-in", enabled: false, available: false }, { id: "passkey", name: "Passkey", enabled: true, available: true },
+  { id: "microsoft", name: "Microsoft", enabled: true, available: true }, { id: "google", name: "Google", enabled: true, available: false },
+  { id: "github", name: "GitHub", enabled: true, available: false }], issuer: null, clientId: null, hasClientSecret: false, displayName: null, groupsClaim: "groups",
+  requireSso: false, version: 0, updatedAt: null };
+let logins: FleetSignInLoginView[] = [];
 const unavailable = async () => { throw new Error("not in this fixture"); };
 // Left, the page is empty; the recovery key of the person links it again.
 let linked = true;
@@ -79,8 +86,22 @@ const api: FleetServerApi = {
     updates = { ...updates, policy: { ...updates.policy, mode: request.mode, pinnedVersion: request.pinnedVersion, window: request.window, timeZone: request.timeZone } };
     return { status: "ok", message: null };
   },
+  signInSettings: async () => ({ status: "ok", settings: signIn, logins, message: null }),
+  setSignInSettings: async (request: FleetSignInSettingsRequest) => {
+    calls.push(JSON.stringify({ signIn: { version: request.version, enabled: request.enabled, issuer: request.issuer, clientId: request.clientId, secret: request.clientSecret,
+      name: request.displayName, requireSso: request.requireSso } }));
+    signIn = { ...signIn, version: signIn.version + 1, issuer: request.issuer, clientId: request.clientId, hasClientSecret: !!request.clientSecret, displayName: request.displayName,
+      requireSso: request.requireSso, methods: signIn.methods.map(method => ({ ...method, enabled: request.enabled.includes(method.id),
+        name: method.id === "company" ? request.displayName ?? method.name : method.name, available: method.id === "company" ? !!request.issuer : method.available })) };
+    return { status: "ok", settings: signIn, logins: [], message: null };
+  },
+  linkSignIn: async (request: FleetSignInLinkRequest) => {
+    calls.push(JSON.stringify({ linkSignIn: request.method }));
+    logins = [...logins, { method: request.method, name: request.method === "passkey" ? "Passkey on Windows" : "alex@example.com", createdAt: "2026-11-04T08:00:00Z", lastUsedAt: null }];
+    return { status: "ok", message: null };
+  },
   watch: async () => (async function* () { })(),
-  create: unavailable, join: unavailable, createToken: unavailable, revoke: unavailable,
+  create: unavailable, join: unavailable, createToken: unavailable, revoke: unavailable, signInMethods: unavailable, joinWithSignIn: unavailable,
 };
 Object.assign(window, { fleetFixture: { calls } });
 

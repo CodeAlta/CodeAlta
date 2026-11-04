@@ -172,6 +172,47 @@ test("a computer without a server recovers with the 32 words of the recovery key
   }, options);
 });
 
+test("the owner links a passkey, turns company sign-in on and requires it, and the page never holds the secret", { skip: !edge, timeout: 90_000 }, async () => {
+  await withCanvas(async page => {
+    await page.until(`document.querySelector('.fleet-sign-in-summary')`, "the sign-in of the server");
+    assert.equal(await page.evaluate(`document.querySelector('.fleet-sign-in-summary').textContent`), "Sign in with Passkey, Microsoft",
+      "Google and GitHub are not registered by the project yet");
+    assert.match(await page.evaluate(`document.querySelector('.fleet-sign-in-logins').textContent`) as string, /None yet\./u);
+
+    // Link… adds a passkey through the browser: the host does it, the row lists it.
+    await page.clickText(".fleet-server-sign-in .bp6-button", "Link…");
+    await page.until(`[...document.querySelectorAll('.bp6-menu-item')].some(item => item.textContent === 'Add a passkey')`, "what may be linked");
+    assert.deepEqual(await page.evaluate(`[...document.querySelectorAll('.bp6-menu-item')].map(item => item.textContent)`), ["Add a passkey", "Link Microsoft"]);
+    await page.clickText(".bp6-menu-item", "Add a passkey");
+    await page.until(`document.querySelector('.fleet-sign-in-logins .bp6-tag')?.textContent === 'Passkey · Passkey on Windows'`, "the passkey listed");
+
+    // Change…: company sign-in with its provider, then required; the secret goes to the host once and never comes back.
+    await page.clickText(".fleet-server-sign-in .bp6-button", "Change…");
+    await page.until(`document.querySelector('.fleet-sign-in-dialog .fleet-sign-in-methods')`, "the form");
+    assert.deepEqual(await page.evaluate(`[...document.querySelectorAll('.fleet-sign-in-methods label')].map(label => [label.textContent, label.querySelector('input').checked])`),
+      [["Passkey", true], ["Microsoft", true], ["Google · Not registered yet", true], ["GitHub · Not registered yet", true]]);
+    await page.evaluate(`[...document.querySelectorAll('.fleet-sign-in-dialog .bp6-switch')].find(label => label.textContent === 'Company sign-in').querySelector('input').click()`);
+    await page.until(`document.querySelector('.fleet-sign-in-dialog [role=alert]')?.textContent === 'Company sign-in needs its issuer and client id.'`, "the provider is needed");
+    await page.evaluate(`(() => { const inputs = [...document.querySelectorAll('.fleet-sign-in-dialog .fleet-server-form .bp6-input')];
+      const set = (input, value) => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(input, value); input.dispatchEvent(new Event('input', { bubbles: true })); };
+      set(inputs[0], 'https://login.contoso.example/v2.0'); set(inputs[1], 'contoso-client'); set(inputs[2], 'the-secret'); set(inputs[3], 'Contoso'); return true; })()`);
+    await page.evaluate(`[...document.querySelectorAll('.fleet-sign-in-dialog .bp6-switch')].find(label => label.textContent === 'Require company sign-in').querySelector('input').click()`);
+    await page.until(`!document.querySelector('.fleet-sign-in-dialog [role=alert]')`, "the form holds");
+    await page.shot("fleet-sign-in-dialog");
+    await page.clickText(".fleet-sign-in-dialog .bp6-button", "Save");
+    await page.until(`!document.querySelector('.fleet-sign-in-dialog')`, "the form closes");
+    const saved = (await page.evaluate(`[...window.fleetFixture.calls]`) as string[]).map(call => JSON.parse(call)).filter(call => call.signIn || call.linkSignIn);
+    assert.deepEqual(saved, [{ linkSignIn: "passkey" }, { signIn: { version: 0, enabled: ["passkey", "microsoft", "google", "github", "company"],
+      issuer: "https://login.contoso.example/v2.0", clientId: "contoso-client", secret: "the-secret", name: "Contoso", requireSso: true } }]);
+    await page.until(`document.querySelector('.fleet-sign-in-summary')?.textContent === 'Company sign-in required'`, "the row read again");
+    await page.clickText(".fleet-server-sign-in .bp6-button", "Change…");
+    await page.until(`document.querySelector('.fleet-sign-in-dialog input[type=password]')`, "the form again");
+    assert.deepEqual(await page.evaluate(`[document.querySelector('.fleet-sign-in-dialog input[type=password]').value, document.querySelector('.fleet-sign-in-dialog input[type=password]').placeholder]`),
+      ["", "••••"], "the secret is set, never shown");
+    assert.deepEqual(page.problems, []);
+  }, options);
+});
+
 test("the owner's computer sees the telemetry of the fleet and changes it without the page holding a secret", { skip: !edge, timeout: 90_000 }, async () => {
   await withCanvas(async page => {
     // The card of the server says where the machines send, in one line.
