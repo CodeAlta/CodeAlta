@@ -44,10 +44,8 @@ internal sealed class HookService
     private static readonly TimeSpan ExpireEvery = TimeSpan.FromMinutes(1);
 
     // The headers of the connection, which say nothing of the event and may say something of who relayed it.
-    private static readonly HashSet<string> Dropped = new(StringComparer.OrdinalIgnoreCase)
-    {
-        "cookie", "host", "connection", "content-length", "transfer-encoding", "upgrade", "keep-alive", "te", "trailer", "forwarded", "via",
-    };
+    private static readonly System.Collections.Frozen.FrozenSet<string> Dropped = System.Collections.Frozen.FrozenSet.ToFrozenSet(
+        ["cookie", "host", "connection", "content-length", "transfer-encoding", "upgrade", "keep-alive", "te", "trailer", "forwarded", "via"], StringComparer.OrdinalIgnoreCase);
 
     private readonly ICoordinatorStore _store;
     private readonly IHookStore _hooks;

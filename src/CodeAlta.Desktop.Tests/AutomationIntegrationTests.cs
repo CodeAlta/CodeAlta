@@ -1,3 +1,4 @@
+using System.Collections.Frozen;
 using System.Net;
 using System.Security.Cryptography;
 using System.Text;
@@ -205,7 +206,7 @@ public sealed class AutomationIntegrationTests
 
     private sealed class Fixture : IAsyncDisposable
     {
-        private static readonly Dictionary<string, string> Values = new(StringComparer.Ordinal)
+        private static readonly System.Collections.Frozen.FrozenDictionary<string, string> Values = new Dictionary<string, string>(StringComparer.Ordinal)
         {
             ["${var:JIRA_SITE}"] = "https://acme.atlassian.net",
             ["${secret:JIRA_TOKEN}"] = "jira-token",
@@ -213,7 +214,7 @@ public sealed class AutomationIntegrationTests
             ["${secret:SLACK_BOT}"] = "xoxb-bot",
             ["${secret:INCIDENT_KEY}"] = "inc-key",
             ["${secret:INCIDENT_SIGNING}"] = "whsec_" + Convert.ToBase64String(SigningKey),
-        };
+        }.ToFrozenDictionary(StringComparer.Ordinal);
 
         private readonly AutomationTempRoot _root;
         private readonly HttpClient _http;
