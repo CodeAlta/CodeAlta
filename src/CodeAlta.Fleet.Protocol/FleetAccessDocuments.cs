@@ -133,6 +133,15 @@ public sealed record FleetAccessDocument(
     public IReadOnlyList<FleetAccessApprovers>? Approvers { get; init; }
 
     /// <summary>
+    /// Gets the people who run automations by hand besides who placed each and who answers for its scope: those granted
+    /// <c>automation.run</c> on it, each grant with an end date named with its end. Null for none, which a version without
+    /// them says by leaving the field out.
+    /// </summary>
+    [JsonPropertyName("runners")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyList<FleetAccessApprovers>? Runners { get; init; }
+
+    /// <summary>
     /// Gets the personal machines whose owner is another person than the one the device list names for them: given to that
     /// person, who accepted. Null for none, which a version without them says by leaving the field out.
     /// </summary>
@@ -195,6 +204,22 @@ public sealed record FleetAccessState(
     public bool Approves(string? automationId, string? personId, DateTimeOffset now)
         => automationId is not null && personId is not null && !IsSuspended(personId) && Approvers.TryGetValue(automationId, out var people) && people.Contains(personId)
             && !(ApproversUntil.TryGetValue(automationId, out var ends) && ends.TryGetValue(personId, out var end) && now >= end);
+
+    /// <summary>Gets the people who run each automation by hand besides who placed it and who answers for its scope, by automation.</summary>
+    public ImmutableDictionary<string, ImmutableHashSet<string>> Runners { get; init; } = ImmutableDictionary.Create<string, ImmutableHashSet<string>>(StringComparer.Ordinal);
+
+    /// <summary>Gets when the grant of a person to run an automation ends, by automation then person; a person missing has no end.</summary>
+    public ImmutableDictionary<string, ImmutableDictionary<string, DateTimeOffset>> RunnersUntil { get; init; } =
+        ImmutableDictionary.Create<string, ImmutableDictionary<string, DateTimeOffset>>(StringComparer.Ordinal);
+
+    /// <summary>Gets whether the document names a person among those granted to run an automation by hand, at a time.</summary>
+    /// <param name="automationId">The automation.</param>
+    /// <param name="personId">The person.</param>
+    /// <param name="now">The time of the machine: a grant with an end date holds before it only.</param>
+    /// <returns>Whether it names them, they are not suspended, and their grant has not ended.</returns>
+    public bool Runs(string? automationId, string? personId, DateTimeOffset now)
+        => automationId is not null && personId is not null && !IsSuspended(personId) && Runners.TryGetValue(automationId, out var people) && people.Contains(personId)
+            && !(RunnersUntil.TryGetValue(automationId, out var ends) && ends.TryGetValue(personId, out var end) && now >= end);
 
     /// <summary>Lists when the approvals of a version end, by automation then person.</summary>
     /// <param name="approvers">The approvers of a version; null for none.</param>
@@ -463,6 +488,8 @@ public static class FleetAccessDocuments
             Automations = (document.Automations ?? []).ToImmutableDictionary(static automation => automation.Id, StringComparer.Ordinal),
             Approvers = FleetAccessState.ApproversOf(document.Approvers),
             ApproversUntil = FleetAccessState.UntilOf(document.Approvers),
+            Runners = FleetAccessState.ApproversOf(document.Runners),
+            RunnersUntil = FleetAccessState.UntilOf(document.Runners),
             PersonalMachines = FleetAccessState.PersonalMachinesOf(document.PersonalMachines),
         };
     }
@@ -607,6 +634,26 @@ public static class FleetAccessDocuments
                 lines.Add($"{Name(id)} no longer answers the approvals of {Name(automation)}");
         }
 
+        var runners = FleetAccessState.ApproversOf(after.Runners);
+        var runnersUntil = FleetAccessState.UntilOf(after.Runners);
+        foreach (var (automation, people) in runners.OrderBy(static pair => pair.Key, StringComparer.Ordinal))
+        {
+            var ends = runnersUntil.GetValueOrDefault(automation);
+            DateTimeOffset? RunsUntil(string id) => ends is not null && ends.TryGetValue(id, out var end) ? end : null;
+            DateTimeOffset? RanUntil(string id) => before.RunnersUntil.TryGetValue(automation, out var held) && held.TryGetValue(id, out var end) ? end : null;
+            foreach (var id in people.Where(id => !(before.Runners.TryGetValue(automation, out var held) && held.Contains(id)) || RanUntil(id) != RunsUntil(id))
+                    .Order(StringComparer.Ordinal))
+                lines.Add(RunsUntil(id) is { } end
+                    ? $"{Name(id)} runs {Name(automation)} by hand until {end.ToString("u", System.Globalization.CultureInfo.InvariantCulture)}"
+                    : $"{Name(id)} runs {Name(automation)} by hand");
+        }
+
+        foreach (var (automation, people) in before.Runners.OrderBy(static pair => pair.Key, StringComparer.Ordinal))
+        {
+            foreach (var id in people.Where(id => !(runners.TryGetValue(automation, out var now) && now.Contains(id))).Order(StringComparer.Ordinal))
+                lines.Add($"{Name(id)} no longer runs {Name(automation)} by hand");
+        }
+
         return lines;
     }
 
@@ -624,14 +671,14 @@ public static class FleetAccessDocuments
             && SameSet(left.Teams.Select(TeamKey), right.Teams.Select(TeamKey))
             && SameSet(left.OrganizationMachines ?? [], right.OrganizationMachines ?? []) && SameSet(left.OrganizationServices ?? [], right.OrganizationServices ?? [])
             && SameSet((left.Automations ?? []).Select(AutomationKey), (right.Automations ?? []).Select(AutomationKey))
-            && SameSet(Approvals(left), Approvals(right))
+            && SameSet(Approvals(left.Approvers), Approvals(right.Approvers)) && SameSet(Approvals(left.Runners), Approvals(right.Runners))
             && SameSet((left.PersonalMachines ?? []).Select(static machine => machine.DeviceId + "\n" + machine.PersonId),
                 (right.PersonalMachines ?? []).Select(static machine => machine.DeviceId + "\n" + machine.PersonId));
 
         static string AutomationKey(FleetAccessAutomation automation) => $"{automation.Id}\n{automation.OwnerKind}\n{automation.OwnerId}\n{automation.Paused}";
 
-        static IEnumerable<string> Approvals(FleetAccessDocument document)
-            => (document.Approvers ?? []).SelectMany(static item => item.People.Select(person => item.AutomationId + "\n" + person + "\n"
+        static IEnumerable<string> Approvals(IReadOnlyList<FleetAccessApprovers>? people)
+            => (people ?? []).SelectMany(static item => item.People.Select(person => item.AutomationId + "\n" + person + "\n"
                 + (item.Until?.TryGetValue(person, out var end) == true ? end.ToUnixTimeMilliseconds().ToString(System.Globalization.CultureInfo.InvariantCulture) : string.Empty)));
 
         static string TeamKey(FleetAccessTeam team)
@@ -654,6 +701,10 @@ public static class FleetAccessDocuments
             Approvers = [.. state.Approvers.Select(pair => new FleetAccessApprovers(pair.Key, [.. pair.Value])
             {
                 Until = state.ApproversUntil.TryGetValue(pair.Key, out var ends) && ends.Count > 0 ? ends : null,
+            })],
+            Runners = [.. state.Runners.Select(pair => new FleetAccessApprovers(pair.Key, [.. pair.Value])
+            {
+                Until = state.RunnersUntil.TryGetValue(pair.Key, out var ends) && ends.Count > 0 ? ends : null,
             })],
             PersonalMachines = [.. state.PersonalMachines.Select(static pair => new FleetAccessPersonalMachine(pair.Key, pair.Value))],
         }, document);
@@ -755,21 +806,24 @@ public static class FleetAccessDocuments
             if (given.Any(id => machines.Contains(id) || organization.Contains(id))) return "a machine is both a person's and a team's or the organization's";
         }
 
-        if (document.Approvers is { } approvers)
+        string? People(IReadOnlyList<FleetAccessApprovers>? list, string what, string suspendedReason)
         {
-            if (approvers.Count > MaxItems) return "it holds too many approvers";
-            var approved = new HashSet<string>(StringComparer.Ordinal);
-            foreach (var item in approvers)
+            if (list is null) return null;
+            if (list.Count > MaxItems) return $"it holds too many {what}";
+            var named = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var item in list)
             {
-                if (item is null || !IsId(item.AutomationId) || !approved.Add(item.AutomationId) || item.People is null || item.People.Count == 0 || item.People.Count > MaxItems
+                if (item is null || !IsId(item.AutomationId) || !named.Add(item.AutomationId) || item.People is null || item.People.Count == 0 || item.People.Count > MaxItems
                     || item.People.Any(static id => !IsId(id)) || item.People.Distinct(StringComparer.Ordinal).Count() != item.People.Count)
-                    return "the approvers of an automation do not hold";
-                if (item.People.Any(suspended.Contains)) return "a suspended person answers approvals";
-                if (item.Until is { } until && until.Keys.Any(person => !item.People.Contains(person, StringComparer.Ordinal))) return "the approvers of an automation do not hold";
+                    return $"the {what} of an automation do not hold";
+                if (item.People.Any(suspended.Contains)) return suspendedReason;
+                if (item.Until is { } until && until.Keys.Any(person => !item.People.Contains(person, StringComparer.Ordinal))) return $"the {what} of an automation do not hold";
             }
+
+            return null;
         }
 
-        return null;
+        return People(document.Approvers, "approvers", "a suspended person answers approvals") ?? People(document.Runners, "runners", "a suspended person runs an automation");
     }
 
     private static bool IsId(string? id) => !string.IsNullOrEmpty(id) && id.Length <= MaxIdLength && !id.Any(char.IsControl);

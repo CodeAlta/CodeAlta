@@ -143,8 +143,10 @@ maintainers manage it; a suspended person's devices are refused, their sessions 
 refused. The document also names, per automation, who answers its approvals besides the person who placed it (the
 members of the team that owns it, those granted `automation.approve`, each grant with an end date named with its end):
 a machine takes a run over for them, until that end by its own clock, or for a member of its team when it is a team
-machine, and for nobody else than its owner otherwise. A change of approvers reaches machines only once a signer signs
-the next version.
+machine, and for nobody else than its owner otherwise. It names in the same way who runs an automation by hand besides
+who placed it and the maintainers of its team: those granted `automation.run`; a member of a team runs its
+automations by such a grant only. A change of approvers or runners reaches machines only once a signer signs the next
+version.
 
 A request to run something on a node is valid only when signed by an entitled person's device: a start or a prompt
 directly; an automation's run through the version of the automation an editor signed, the trigger being only the

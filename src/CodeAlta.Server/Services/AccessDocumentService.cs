@@ -142,7 +142,7 @@ internal sealed class AccessDocumentService
 
         // A home server with no team and nobody suspended has nothing for machines to verify: its first version waits for a need.
         var needed = last is not null || model.Teams.Count > 0 || model.Suspended.Count > 0 || model.OrganizationMachines is not null || model.Automations is not null
-            || model.Approvers is { Count: > 0 } || model.PersonalMachines is not null;
+            || model.Approvers is { Count: > 0 } || model.Runners is { Count: > 0 } || model.PersonalMachines is not null;
         var names = (await _store.ListDevicesAsync(organizationId, cancellationToken).ConfigureAwait(false)).ToDictionary(static device => device.Id, static device => device.Name,
             StringComparer.Ordinal);
         foreach (var person in snapshot.People) names[person.Id] = person.DisplayName;
@@ -197,6 +197,7 @@ internal sealed class AccessDocumentService
                 && listed.TryGetValue(owner.ResourceId, out var named) && named != owner.OwnerId)
             .OrderBy(static owner => owner.ResourceId, StringComparer.Ordinal).Select(static owner => new FleetAccessPersonalMachine(owner.ResourceId, owner.OwnerId)).ToArray();
         var approvers = await _service.DocumentApproversAsync(organizationId, snapshot, cancellationToken).ConfigureAwait(false);
+        var runners = await _service.DocumentRunnersAsync(organizationId, snapshot, cancellationToken).ConfigureAwait(false);
         return new FleetAccessDocument(FleetAccessDocument.CurrentVersion, organizationId, (last?.Number ?? 0) + 1, last?.Hash, listSequence,
             [.. active.Where(static person => person.Role == FleetOrganizationRoles.Owner).Select(static person => person.Id).Order(StringComparer.Ordinal)],
             [.. active.Where(static person => person.Role == FleetOrganizationRoles.Admin).Select(static person => person.Id).Order(StringComparer.Ordinal)],
@@ -207,6 +208,8 @@ internal sealed class AccessDocumentService
         {
             // Who else takes the runs of an automation over, for machines to check; a version without any leaves the field out.
             Approvers = approvers.Count > 0 ? approvers : null,
+            // Who else runs an automation by hand, by a grant of automation.run: machines take their requests once a signer signs it.
+            Runners = runners.Count > 0 ? runners : null,
             PersonalMachines = personalMachines.Length > 0 ? personalMachines : null,
         };
     }

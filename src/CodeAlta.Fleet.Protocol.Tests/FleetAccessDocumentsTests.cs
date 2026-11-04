@@ -317,6 +317,33 @@ public sealed class FleetAccessDocumentsTests
         Assert.AreEqual(at - 1, verification.State.Number, "the state is the document up to the last version that holds");
     }
 
+    [TestMethod]
+    public void TheDocumentNamesWhoRunsAnAutomationByHand_UntilTheirGrantEnds_AndTheSignerReadsEachChange()
+    {
+        using var world = new World();
+        var chain = new List<FleetSignedAccessDocument> { world.Founder.Sign(Document(1, null, 4, owners: ["alex"], signers: ["ada"])) };
+        var before = FleetAccessDocuments.Verify(chain, world.Devices, Organization).State;
+        var until = new DateTimeOffset(2026, 12, 1, 0, 0, 0, TimeSpan.Zero);
+        var after = Document(2, Hash(chain), 4, owners: ["alex"], signers: ["ada"]) with
+        {
+            Runners = [new FleetAccessApprovers("nightly", ["bea"]) { Until = new Dictionary<string, DateTimeOffset> { ["bea"] = until } }],
+        };
+        CollectionAssert.AreEqual(new[] { "Bea runs nightly by hand until 2026-12-01 00:00:00Z" },
+            FleetAccessDocuments.Describe(before, after, id => id == "bea" ? "Bea" : null).ToArray());
+        chain.Add(world.Ada.Sign(after));
+        var state = FleetAccessDocuments.Verify(chain, world.Devices, Organization).State;
+        Assert.IsTrue(state.Runs("nightly", "bea", until.AddDays(-1)));
+        Assert.IsFalse(state.Runs("nightly", "bea", until), "not from the end of the grant, by the clock of the machine");
+        Assert.IsFalse(state.Runs("other", "bea", until.AddDays(-1)), "that automation only");
+        Assert.IsFalse(FleetAccessDocuments.SaySame(state, Document(3, Hash(chain), 4, owners: ["alex"], signers: ["ada"])));
+        CollectionAssert.AreEqual(new[] { "Bea no longer runs nightly by hand" },
+            FleetAccessDocuments.Describe(state, Document(3, Hash(chain), 4, owners: ["alex"], signers: ["ada"]), id => id == "bea" ? "Bea" : null).ToArray());
+
+        // A suspended person runs nothing: a version that names one does not hold.
+        var suspended = Document(3, Hash(chain), 4, owners: ["alex"], signers: ["ada"], suspended: ["bea"]) with { Runners = [new FleetAccessApprovers("nightly", ["bea"])] };
+        Assert.IsFalse(FleetAccessDocuments.Verify([.. chain, world.Ada.Sign(suspended)], world.Devices, Organization).IsValid);
+    }
+
     private static string Hash(IReadOnlyList<FleetSignedAccessDocument> chain) => FleetAccessDocuments.Hash(chain[^1]);
 
     private static FleetAccessTeam Team(string id, IReadOnlyList<string> maintainers, IReadOnlyList<string> members) => new(id, maintainers, members, false);

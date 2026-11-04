@@ -203,9 +203,12 @@ internal sealed class FleetAutomationService
         if (run.OrganizationId != actor.OrganizationId) throw Invalid("The run request must name the organization of the server.");
         var held = await _automations.GetAutomationAsync(actor.OrganizationId, id, run.MachineId, cancellationToken).ConfigureAwait(false);
         // Run by hand by who the machine lets run it (it checks the signed request): the person who gave it, who answers for its scope.
-        if (held is null || held.Removed || held.OwnerPersonId != person && !await MaintainsAsync(actor.OrganizationId, id, person, cancellationToken).ConfigureAwait(false))
+        var granted = false;
+        if (held is null || held.Removed || held.OwnerPersonId != person && !await MaintainsAsync(actor.OrganizationId, id, person, cancellationToken).ConfigureAwait(false)
+            && !(granted = await RunsByGrantAsync(actor.OrganizationId, id, held.OwnerPersonId, person, cancellationToken).ConfigureAwait(false)))
             throw CoordinatorException.NotFound(CoordinatorErrorCodes.AutomationNotFound, "No automation of yours has this id on this machine.");
-        await RequireOwnedAsync(actor.OrganizationId, id, person, cancellationToken).ConfigureAwait(false);
+        // Who runs it by a grant gives it no version: whether its former owner may still run it is for who placed or answers for it.
+        if (!granted) await RequireOwnedAsync(actor.OrganizationId, id, person, cancellationToken).ConfigureAwait(false);
         if (FleetAutomationVersionDocuments.TryParse(held.Payload, out var running))
             await RequireAccountProviderAsync(actor.OrganizationId, running, cancellationToken).ConfigureAwait(false);
         if (_presence.Get(run.MachineId) is not { } session)
@@ -313,6 +316,16 @@ internal sealed class FleetAutomationService
         var (ownerKind, ownerId) = owner is not null ? (owner.OwnerKind, owner.OwnerId) : giver is not null ? (FleetPrincipalKinds.Person, giver) : (null, null);
         return ownerKind is not null && ownerId is not null
             && AccessPolicy.Allows(snapshot, person, capability, AccessTarget.Resource(FleetResourceKinds.Automation, automationId, ownerKind, ownerId), _time.GetUtcNow());
+    }
+
+    // Whether a person runs an automation by hand by a grant of automation.run, which the signed access document names for its machine.
+    private async Task<bool> RunsByGrantAsync(string organizationId, string automationId, string giver, string person, CancellationToken cancellationToken)
+    {
+        if (Access is not { } access) return false;
+        var snapshot = await access.ReadAccessAsync(organizationId, cancellationToken).ConfigureAwait(false);
+        var (ownerKind, ownerId) = snapshot.Owner(FleetResourceKinds.Automation, automationId) is { } owner ? (owner.OwnerKind, owner.OwnerId) : (FleetPrincipalKinds.Person, giver);
+        return AccessPolicy.RunnersWithEnds(snapshot, AccessTarget.Resource(FleetResourceKinds.Automation, automationId, ownerKind, ownerId), _time.GetUtcNow())
+            .Any(runner => runner.PersonId == person);
     }
 
     // Whether the person answers for an automation of a scope: a maintainer of its team, an owner or admin for the organization.

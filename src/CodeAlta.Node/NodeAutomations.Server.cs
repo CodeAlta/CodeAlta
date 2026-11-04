@@ -148,9 +148,14 @@ internal sealed partial class NodeAutomations
         ArgumentNullException.ThrowIfNull(devices);
         ArgumentNullException.ThrowIfNull(signed);
         if (DeviceId is not { } self) return (null, "This machine does not know its own device yet.");
-        var mayAsk = MayAsk(ServerAccess?.Invoke(linkId), signed, devices, self);
-        if (!FleetAutomationRunRequestDocuments.TryVerify(signed, devices, organizationId, self, _options.TimeProvider.GetUtcNow(),
-                mayAsk is null ? null : (_, person) => mayAsk(person), out var request, out var reason))
+        var access = ServerAccess?.Invoke(linkId);
+        var mayAsk = MayAsk(access, signed, devices, self);
+        var now = _options.TimeProvider.GetUtcNow();
+        // Besides the machine's own rule, the people the signed access document names as granted to run the automation by hand.
+        if (!FleetAutomationRunRequestDocuments.TryVerify(signed, devices, organizationId, self, now,
+                (read, person) => (mayAsk is not null ? mayAsk(person) : person == FleetAccessState.OwnerOfMachine(access, self, devices))
+                    || (read.Action is null or FleetAutomationRunRequest.TryAction) && access?.Runs(read.AutomationId, person, now) == true,
+                out var request, out var reason))
         {
             Log($"A run asked through the server was refused: {reason}.");
             return (null, reason);

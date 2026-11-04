@@ -100,7 +100,23 @@ internal sealed partial class AccessService
     /// <param name="snapshot">The access of the organization.</param>
     /// <param name="cancellationToken">Cancels the read.</param>
     /// <returns>The approvers by automation, in a stable order; empty for none.</returns>
-    internal async Task<IReadOnlyList<FleetAccessApprovers>> DocumentApproversAsync(string organizationId, AccessSnapshot snapshot, CancellationToken cancellationToken)
+    internal Task<IReadOnlyList<FleetAccessApprovers>> DocumentApproversAsync(string organizationId, AccessSnapshot snapshot, CancellationToken cancellationToken)
+        => DocumentPeopleAsync(organizationId, snapshot, AccessPolicy.ApproversWithEnds, cancellationToken);
+
+    /// <summary>
+    /// Lists, for the signed access document, who runs each automation by hand by a grant of <c>automation.run</c>, besides the
+    /// person who placed it and who answers for its scope: what machines check before they take a run request from them.
+    /// </summary>
+    /// <param name="organizationId">The organization.</param>
+    /// <param name="snapshot">The access of the organization.</param>
+    /// <param name="cancellationToken">Cancels the read.</param>
+    /// <returns>The runners by automation, in a stable order; empty for none.</returns>
+    internal Task<IReadOnlyList<FleetAccessApprovers>> DocumentRunnersAsync(string organizationId, AccessSnapshot snapshot, CancellationToken cancellationToken)
+        => DocumentPeopleAsync(organizationId, snapshot, AccessPolicy.RunnersWithEnds, cancellationToken);
+
+    // The people the access document names for each automation the server holds, besides who placed it, with their ends.
+    private async Task<IReadOnlyList<FleetAccessApprovers>> DocumentPeopleAsync(string organizationId, AccessSnapshot snapshot,
+        Func<AccessSnapshot, AccessTarget, DateTimeOffset, IReadOnlyList<(string PersonId, DateTimeOffset? Until)>> holders, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(snapshot);
         var placedBy = new SortedDictionary<string, string>(StringComparer.Ordinal);
@@ -117,7 +133,7 @@ internal sealed partial class AccessService
         foreach (var (automationId, personId) in placedBy)
         {
             var (ownerKind, ownerId) = snapshot.Owner(FleetResourceKinds.Automation, automationId) is { } own ? (own.OwnerKind, own.OwnerId) : (FleetPrincipalKinds.Person, personId);
-            var people = AccessPolicy.ApproversWithEnds(snapshot, AccessTarget.Resource(FleetResourceKinds.Automation, automationId, ownerKind, ownerId), now)
+            var people = holders(snapshot, AccessTarget.Resource(FleetResourceKinds.Automation, automationId, ownerKind, ownerId), now)
                 .Where(approver => approver.PersonId != personId).OrderBy(static approver => approver.PersonId, StringComparer.Ordinal).ToList();
             if (people.Count == 0) continue;
             var ends = people.Where(static approver => approver.Until is not null).ToDictionary(static approver => approver.PersonId, static approver => approver.Until!.Value, StringComparer.Ordinal);

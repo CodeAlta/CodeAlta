@@ -60,7 +60,9 @@ internal static class AccessPolicy
     // What a member of a team may do with what the team owns; maintainers may do everything.
     private static readonly FrozenSet<string> TeamMemberNames = new[]
     {
-        "view", "view-facts", "view-content", "start", "approve", "use", "read", "post", "view-team", "run",
+        // Running an automation of the team by hand stays its maintainers' and those granted automation.run: what machines check
+        // in the signed access document (doc/fleet/access-control.md, team roles).
+        "view", "view-facts", "view-content", "start", "approve", "use", "read", "post", "view-team",
     }.ToFrozenSet(StringComparer.Ordinal);
 
     // What every person of the organization may do at its scope.
@@ -204,6 +206,42 @@ internal static class AccessPolicy
             }
 
             if (end is not null) list.Add((person, end));
+        }
+
+        return list;
+    }
+
+    /// <summary>
+    /// Lists the people who run an automation by hand by a grant of <c>automation.run</c> (who placed it and who answers for its
+    /// scope run it anyway), each with when that ends: null for one who holds a grant with no end, the latest end of their grants
+    /// otherwise. What machines read in the signed access document to take a run request from them.
+    /// </summary>
+    /// <param name="snapshot">The access of the organization.</param>
+    /// <param name="automation">The automation and its owner.</param>
+    /// <param name="now">The time.</param>
+    /// <returns>The people and their ends, in the order of the snapshot.</returns>
+    /// <exception cref="ArgumentNullException">An argument is null.</exception>
+    public static IReadOnlyList<(string PersonId, DateTimeOffset? Until)> RunnersWithEnds(AccessSnapshot snapshot, AccessTarget automation, DateTimeOffset now)
+    {
+        ArgumentNullException.ThrowIfNull(snapshot);
+        ArgumentNullException.ThrowIfNull(automation);
+        var granted = snapshot.Grants.Where(grant => grant.Status == FleetGrantStatuses.Active && grant.Capability == "automation.run" && !(grant.ExpiresAt <= now)).ToList();
+        var list = new List<(string, DateTimeOffset?)>();
+        if (granted.Count == 0) return list;
+        foreach (var person in snapshot.People.Where(static person => person.IsActive))
+        {
+            var holds = false;
+            DateTimeOffset? end = null;
+            foreach (var grant in granted)
+            {
+                if (Decide(snapshot with { Grants = [grant] }, person.Id, "automation.run", automation, now) is not { Allowed: true } decision
+                    || !decision.Source.StartsWith("grant:", StringComparison.Ordinal))
+                    continue;
+                end = !holds ? grant.ExpiresAt : end is null || grant.ExpiresAt is null ? null : grant.ExpiresAt > end ? grant.ExpiresAt : end;
+                holds = true;
+            }
+
+            if (holds) list.Add((person.Id, end));
         }
 
         return list;
