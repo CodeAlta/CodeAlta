@@ -1,0 +1,20 @@
+/* Settings > Fleet > People and access: rows of people, teams, owners and grants, beside the rows of the secrets of the fleet. */
+.fleet-access-row { grid-template-columns: minmax(9rem, 1fr) max-content max-content; }
+.fleet-access-row .secret-name { min-width: 0; }
+.fleet-access-row .secret-actions { justify-self: end; }
+.fleet-access-summary { overflow-wrap: anywhere; }
+.fleet-access-sign { display: flex; flex-direction: column; gap: 6px; margin-bottom: 8px; }
+.fleet-access-changes { margin: 0; padding-left: 18px; }
+.fleet-access-changes li { overflow-wrap: anywhere; }
+.fleet-access-review { max-width: 420px; }
+.fleet-access-remove, .fleet-access-give { display: flex; flex-direction: column; gap: 8px; max-width: 360px; }
+.fleet-access-invitation p { margin: 4px 0; }
+.fleet-access-team { display: flex; flex-direction: column; align-items: stretch; gap: 6px; }
+.fleet-access-team-head { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.fleet-access-team-head .secret-reference { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fleet-access-members { display: flex; flex-wrap: wrap; gap: 4px 12px; margin: 0; padding: 0; list-style: none; }
+.fleet-access-members li { display: inline-flex; align-items: center; gap: 4px; }
+.fleet-access-team-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; }
+.fleet-access-team-actions .bp6-control { margin: 0; }
+.fleet-access-footer { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; }
+.fleet-access-footer .bp6-control { margin: 0; }
