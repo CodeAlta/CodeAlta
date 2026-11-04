@@ -98,6 +98,33 @@ public sealed class FleetPolicyNodeTests
         Assert.AreEqual("accepted", (await client.SendAsync(created.SessionId, "go on", retryKey: "send-2", cancellationToken: token)).Status, "its own provider goes on");
     }
 
+    [TestMethod]
+    public async Task APromptThatWaitedForItsBudget_IsNotSent_WhenAStopCameMeanwhile()
+    {
+        var token = TestContext.CancellationToken;
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var waiting = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        await using var fixture = await FleetNodeFixture.StartAsync(token, null, async (_, held, _) =>
+        {
+            held();
+            waiting.TrySetResult();
+            await release.Task.ConfigureAwait(false);
+            return FleetBudgetAdmission.Admitted;
+        });
+        FleetPolicyState? policy = null;
+        fixture.Service.Policy = new FleetPolicyGuard(fixture.NodeIdentity.DeviceId, () => [new FleetPolicySource("https://fleet.example", policy, null, static _ => true)]);
+        await using var client = await FleetNodeClient.ConnectAsync(await fixture.PairViewerAsync(token), fixture.ViewerIdentity, token);
+        var created = await client.CreateSessionAsync(new FleetCreateSessionParams(Title: "Work"), "create-1", token);
+        Assert.AreEqual(FleetBudgetCommandStatuses.Held, (await client.SendAsync(created.SessionId, "held work", retryKey: "send-1", cancellationToken: token)).Status);
+        await waiting.Task.WaitAsync(Patience, token);
+
+        // The owner stops the fleet while it waits; then its budget lets it go.
+        policy = FleetPolicyState.Empty with { Number = 1, LastHash = "h1", Stop = new FleetPolicyStop(FleetPolicyStopScopes.Fleet, [], [], "A leaked key") };
+        release.SetResult();
+        await Task.Delay(TimeSpan.FromMilliseconds(500), token);
+        Assert.IsFalse(fixture.Provider.Prompts.Any(static prompt => prompt.Contains("held work", StringComparison.Ordinal)), "a stop reaches the work that waited for its admission");
+    }
+
     // A stop the node holds (kept from before, read at its start) ends work under way at the next check of the node, though no
     // newer version came after the work started.
     [TestMethod]

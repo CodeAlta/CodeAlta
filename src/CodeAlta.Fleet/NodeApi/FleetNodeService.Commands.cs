@@ -107,6 +107,13 @@ public sealed partial class FleetNodeService
                 return;
             }
 
+            // A stop that came while the approval was awaited reaches the session: nothing is sent.
+            if (Policy?.Halt is { } halt)
+            {
+                LogInfo($"The session {session.SessionId} was not sent its prompt once admitted to the environment '{environment}': {halt.Describe(_options.Name)}");
+                return;
+            }
+
             _host.Identities.Environments.Admit(session.SessionId, admission);
             if (parameters.Prompt is { } prompt)
             {

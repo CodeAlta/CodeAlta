@@ -270,6 +270,9 @@ internal sealed class AutomationRunner : IAutomationRunner
                 return Refuse($"The provider '{provider.ProviderId.Value}' does not offer the permission mode '{mode}'.");
 
             cancellationToken.ThrowIfCancellationRequested();
+            // What the host requires is checked again after the admissions that may wait (an approval, a budget): a stop of the
+            // kill switch that came meanwhile reaches the run before anything is created.
+            if (_gate?.Check(entry, provider) is { } stopped) return Refuse(stopped);
             // The host keeps a bounded number of pending commands: a prompt that would be refused starts no session.
             if (!_host.Commands.HasCapacity) return Refuse(NoCapacity);
             var session = await _host.Commands.CreateDraftSessionAsync(project, provider, SessionTitle(definition.Name, detail), new AltaActorProvenance
