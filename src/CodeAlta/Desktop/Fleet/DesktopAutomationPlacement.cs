@@ -401,11 +401,16 @@ internal sealed class DesktopAutomationPlacement : IAutomationPlacement, IAsyncD
         {
             return SetStatus(entry.Id, new(machineId, machineName, "failed", exception.Message, null));
         }
+        catch (FleetException exception) when (exception.Error.Code == FleetErrorCodes.Forbidden)
+        {
+            // A computer that manages the machine gives itself the permission on the page of the machine, without a terminal there.
+            return SetStatus(entry.Id, new(machineId, machineName, "failed", await ManagesAsync(client, cancellationToken).ConfigureAwait(false)
+                ? $"{machineName} does not let this computer give it automations yet: turn on Automate for This computer on its page, in Settings > Fleet > Machines."
+                : $"{machineName} does not let this computer give it automations: on that machine, run altanode permissions {_deviceId()} --allow automate.", null));
+        }
         catch (FleetException exception)
         {
-            return SetStatus(entry.Id, new(machineId, machineName, "failed", exception.Error.Code == FleetErrorCodes.Forbidden
-                ? $"{machineName} does not let this computer give it automations: on that machine, run altanode permissions {_deviceId()} --allow automate."
-                : exception.Message, null));
+            return SetStatus(entry.Id, new(machineId, machineName, "failed", exception.Message, null));
         }
         catch (Exception exception) when (exception is IOException or ObjectDisposedException or FleetConnectionClosedException)
         {
@@ -422,6 +427,20 @@ internal sealed class DesktopAutomationPlacement : IAutomationPlacement, IAsyncD
         Log($"The automation '{entry.Definition.Name}' ({entry.Id}) was copied to {machineName}.");
         SetStatus(entry.Id, new(machineId, machineName, "copied", null, copiedAt));
         return true;
+    }
+
+    // Whether this computer manages the machine, as the machine says; false when it cannot tell.
+    private static async Task<bool> ManagesAsync(FleetNodeClient client, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var info = await client.GetInfoAsync(cancellationToken).ConfigureAwait(false);
+            return info.Permissions.Contains("manage", StringComparer.Ordinal);
+        }
+        catch (Exception exception) when (exception is FleetException or IOException or ObjectDisposedException or FleetConnectionClosedException)
+        {
+            return false;
+        }
     }
 
     private async Task<bool> ReadRunsAsync(string id, FleetNodeClient client, CancellationToken cancellationToken)

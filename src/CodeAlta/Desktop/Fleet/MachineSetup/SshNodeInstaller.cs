@@ -188,7 +188,7 @@ internal sealed partial class SshNodeInstaller(ISshRunner ssh, string desktopVer
         catch (Exception exception) when (exception is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
         {
             await pairing.CancelAsync().ConfigureAwait(false);
-            throw Fail(SshSetupSteps.Pair, "pair_unreachable", exception.Message);
+            throw Fail(SshSetupSteps.Pair, LocalNetworkAccess.IsBlockedHere(exception, OperatingSystem.IsMacOS()) ? "local_network_blocked" : "pair_unreachable", exception.Message);
         }
 
         // altanode pair ends once the link is redeemed.

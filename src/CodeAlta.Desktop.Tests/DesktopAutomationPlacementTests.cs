@@ -60,10 +60,20 @@ public sealed class DesktopAutomationPlacementTests
         automations.Placement = placement;
         await using (placement)
         {
-            // A pairing does not let a computer give automations: the node says so, and the desktop says what to do.
+            // A pairing does not let a computer give automations: the node says so, and the desktop says what to do. The
+            // computer that manages the machine (the first one paired) is sent to the switch of its page, not to a terminal.
+            await placement.SyncAsync(token);
+            var manager = placement.Status(automations.Snapshot.Find(Id)!)!;
+            Assert.AreEqual(("failed", "test-node"), (manager.State, manager.MachineName));
+            StringAssert.Contains(manager.Message, "turn on Automate for This computer on its page");
+            Assert.IsFalse(manager.Message!.Contains("altanode", StringComparison.Ordinal), manager.Message);
+            Assert.AreEqual(0, node.Puts.Count);
+
+            // Another computer is told what the owner runs on the machine.
+            fixture.Service.TrustedDevices.SetPermissions(fleet.DeviceId, DevicePermissions.View | DevicePermissions.Drive | DevicePermissions.Start);
             await placement.SyncAsync(token);
             var refused = placement.Status(automations.Snapshot.Find(Id)!)!;
-            Assert.AreEqual(("failed", "test-node"), (refused.State, refused.MachineName));
+            Assert.AreEqual("failed", refused.State);
             StringAssert.Contains(refused.Message, $"altanode permissions {fleet.DeviceId} --allow automate");
             Assert.AreEqual(0, node.Puts.Count);
 

@@ -61,7 +61,7 @@ export function FleetServerSettings({ epoch, api = fleetServer }: { epoch: strin
     </> : undefined}>
     {!listing ? <SettingsUnavailable loading={loading} icon="server" title="Servers unavailable" />
       : servers.length === 0 ? <NonIdealState className="fleet-server-empty" icon={<AppIcon name="server" size={36} />} title={t("Not linked to a server.")}
-        action={<Button variant="minimal" size="small" icon={<AppIcon name="shield" size={14} />} disabled={!epoch} onClick={() => setDialog("recover")}>
+        description={t("Create a server for your machines, or join the server of your organization.")} action={<Button variant="minimal" size="small" icon={<AppIcon name="shield" size={14} />} disabled={!epoch} onClick={() => setDialog("recover")}>
           {t("Recover with the recovery key…")}</Button>} />
       : <div className="fleet-server-list">
         {servers.map(server => <ServerCard key={server.id} server={server} epoch={epoch ?? ""} api={api} busy={busy} revision={revision} words={listing?.words ?? null}

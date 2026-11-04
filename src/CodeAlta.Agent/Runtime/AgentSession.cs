@@ -619,6 +619,11 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
     // An event told and never recorded is masked as those the journal keeps: it is shown, and watched from other machines.
     private AgentEvent Masked(AgentEvent @event) => SecretMasker is { } masker ? masker.MaskEvents([@event])[0] : @event;
 
+    // A request is read by the person who answers it, in this window or on another computer, as the call is shown in the
+    // timeline: with the secrets masked. The decision goes back by its interaction id, and no decision reads its command.
+    private AgentPermissionRequestHandler MaskedPermissions(AgentPermissionRequestHandler handler)
+        => SecretMasker is null ? handler : (request, token) => handler(Masked(request) as AgentPermissionRequest ?? request, token);
+
     private void Publish(AgentEvent @event)
     {
         lock (_publication)
@@ -786,7 +791,7 @@ public sealed class AgentSession : IAgentSession, IAgentCompactionOutcomeProvide
             };
             await _store.UpsertStateAsync(_state, linkedCts.Token).ConfigureAwait(false);
 
-            var permissionRequestHandler = options.OnPermissionRequest ?? _options.OnPermissionRequest;
+            var permissionRequestHandler = MaskedPermissions(options.OnPermissionRequest ?? _options.OnPermissionRequest);
             var userInputRequestHandler = options.OnUserInputRequest ?? _options.OnUserInputRequest;
             // A provider that runs tools itself answers its own permission prompts and questions through the run.
             var providerToolHost = _turnExecutor as IAgentProviderToolHost;

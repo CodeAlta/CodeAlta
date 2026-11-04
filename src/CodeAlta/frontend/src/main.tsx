@@ -27,6 +27,7 @@ import { CloseWindowDialog } from "./CloseWindowDialog";
 import { closeBehavior, entryAddedGuide, entryAddedNotice, type CloseBehavior } from "./desktopShell";
 import { EntryAddedDialog } from "./EntryAddedDialog";
 import { showToast } from "./appToaster";
+import { findWithPatience } from "./sessionLookup";
 import { availableUpdate, installedNotice, runtimeNotification, updateCheckInterval, updateToAnnounce, updateNotification, UpdateToaster, type AvailableUpdate } from "./UpdateNotice";
 import {
   boot, configuration, applicationLogs, modelCatalog, reminder, workspace as workspaceApi, spaces as spacesApi, labels as labelsApi, sessionDisplay, sessionRuntimeState, sessionPermissions, sessionOperations,
@@ -2731,19 +2732,22 @@ function App({ initialWindow = null }: { initialWindow?: WindowsCurrentResponse 
   }
   // Opens the session of a run. One that was just started is not in the list of sessions yet: the list is read first.
   // Opens a session by its id, reading the sessions again when this window does not list it yet; says whether it opened.
+  // A run that just started on another machine is listed once that machine reports it: it is looked for a few seconds.
   async function openAutomationSession(id: string): Promise<boolean> {
-    let shown = currentSnapshot.current;
-    if (!shown?.sessions.some(session => session.id === id)) {
-      try {
-        const fresh = await workspace.snapshot({}, { timeoutMilliseconds: 30_000 });
-        if (!creationAlive.current || !fresh.configured) return false;
-        publishWorkspaceState({ kind: "ready", snapshot: fresh });
-        shown = fresh;
-      } catch { return false; }
-    }
-    const session = shown.sessions.find(candidate => candidate.id === id) ?? catalog.current?.sessions.find(candidate => candidate.id === id);
-    if (session) revealSession(session);
-    return session !== undefined;
+    return findWithPatience(async () => {
+      let shown = currentSnapshot.current;
+      if (!shown?.sessions.some(session => session.id === id)) {
+        try {
+          const fresh = await workspace.snapshot({}, { timeoutMilliseconds: 30_000 });
+          if (!creationAlive.current || !fresh.configured) return false;
+          publishWorkspaceState({ kind: "ready", snapshot: fresh });
+          shown = fresh;
+        } catch { return false; }
+      }
+      const session = shown?.sessions.find(candidate => candidate.id === id) ?? catalog.current?.sessions.find(candidate => candidate.id === id);
+      if (session) revealSession(session);
+      return session !== undefined;
+    }, () => creationAlive.current);
   }
   // The bookmarks: the sessions and the messages the user marked to find them again. This window lists them and is told
   // when they change. It does not follow them itself: the tab, the rail of a timeline and the mark of a row do.

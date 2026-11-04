@@ -174,16 +174,21 @@ public static class FleetDirectConnector
     /// <param name="cancellationToken">Cancels the attempts.</param>
     /// <returns>The stream of the first connection that opened, and the address it went to.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="addresses"/> is null.</exception>
-    /// <exception cref="IOException">No address answered; the message names the last failure.</exception>
+    /// <exception cref="IOException">
+    /// No address answered; the message names the failure of each address, and the inner exception holds them (an
+    /// <see cref="AggregateException"/> when there are several).
+    /// </exception>
     public static async Task<(Stream Stream, string Address)> ConnectAsync(IReadOnlyList<string> addresses, TimeSpan timeoutPerAddress, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(addresses);
-        Exception? last = null;
+        // Each address fails in its own way (the loopback of this computer refuses, the network of the machine has no
+        // route...): the last one alone can hide the one that tells what to do.
+        var failures = new List<(string Address, Exception Failure)>();
         foreach (var address in addresses)
         {
             if (!TrySplit(address, out var host, out var port))
             {
-                last = new FormatException($"'{address}' is not an address of the form host:port.");
+                failures.Add((address, new FormatException($"'{address}' is not an address of the form host:port.")));
                 continue;
             }
 
@@ -198,7 +203,7 @@ public static class FleetDirectConnector
             catch (Exception exception) when (exception is SocketException or OperationCanceledException && !cancellationToken.IsCancellationRequested)
             {
                 socket.Dispose();
-                last = exception is OperationCanceledException ? new TimeoutException($"{address} did not answer within {timeoutPerAddress.TotalSeconds:0} s.") : exception;
+                failures.Add((address, exception is OperationCanceledException ? new TimeoutException($"No answer within {timeoutPerAddress.TotalSeconds:0} s.") : exception));
             }
             catch
             {
@@ -207,7 +212,9 @@ public static class FleetDirectConnector
             }
         }
 
-        throw new IOException(last is null ? "The machine has no address to connect to." : $"No address of the machine answered: {last.Message}", last);
+        if (failures.Count == 0) throw new IOException("The machine has no address to connect to.");
+        var inner = failures.Count == 1 ? failures[0].Failure : new AggregateException(failures.Select(static failure => failure.Failure));
+        throw new IOException("No address of the machine answered: " + string.Join("; ", failures.Select(static failure => $"{failure.Address} {failure.Failure.Message}")), inner);
     }
 
     /// <summary>Splits an address of the form <c>host:port</c> or <c>[ipv6]:port</c>.</summary>

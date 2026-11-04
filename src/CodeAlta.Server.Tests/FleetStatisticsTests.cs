@@ -40,7 +40,10 @@ public sealed class FleetStatisticsTests
             "the sessions of the linked space, never the Private one nor those of another space");
         Assert.AreEqual(1_500_000L, totals.CostMicro["usd"]);
 
+        // The recovery key of the person is a device of the list: it is not listed among the machines.
+        using (var recovery = FleetRecoveryKey.Generate()) await fleet.Desktop.AddRecoveryKeyAsync(recovery);
         var byModel = await fleet.Desktop.QueryStatisticsAsync(new StatisticsQueryRequest("2026-11-01", "2026-11-04", null, [StatisticsGroupBy.Machine, StatisticsGroupBy.Model]));
+        Assert.IsFalse(byModel.Machines.Any(static machine => machine.Kind == FleetDeviceKinds.Recovery), string.Join(", ", byModel.Machines.Select(static machine => machine.Name)));
         Assert.AreEqual(3, byModel.Groups.Count);
         Assert.AreEqual((fleet.NodeKey.DeviceId, "claude-opus-5-5", 1000L), (byModel.Groups[0].Machine, byModel.Groups[0].Model, byModel.Groups[0].Measures.InputTokens),
             "the largest first");

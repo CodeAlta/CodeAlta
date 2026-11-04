@@ -46,6 +46,8 @@ const machinesApi: CreateServerMachinesApi = {
     paired: true, channel: "direct" }] }),
   joinServer: async request => { calls.push(JSON.stringify({ join: request.machineId, link: request.linkId })); return { status: "ok", name: "mac-mini", words: "maple orbit tiger cloud amber stone", message: null }; },
 };
+// Set by the test once another computer approved the one that joins.
+let joinApproved = false;
 let opened = false;
 const joinApi: JoinOrganizationApi = {
   join: async request => {
@@ -53,7 +55,8 @@ const joinApi: JoinOrganizationApi = {
     return { status: "ok", message: null, recoveryWords: null, server: { id: "corp", url: request.url, organization: "Contoso", link: "pending", connection: "pending", problem: null, controller: false, spaces: [],
       recoveryKey: null } };
   },
-  status: async () => ({ status: "ok", servers: [], deviceId: "me", words: "cabin onion leopard pigeon peach needle" }),
+  status: async () => ({ status: "ok", servers: joinApproved ? [{ id: "corp", url: "https://fleet.contoso.com", organization: "Contoso", link: "approved", connection: "online", problem: null,
+    controller: false, spaces: [], recoveryKey: null } as never] : [], deviceId: "me", words: "cabin onion leopard pigeon peach needle" }),
   // A server whose address names SSO offers its company sign-in and a passkey, one that names GitHub offers GitHub; the others offer none, and take an enrollment code.
   signInMethods: async request => request.url.includes("sso")
     ? { status: "ok", organization: "Contoso", ssoRequired: false, message: null, methods: [{ id: "passkey", name: "Passkey", breakGlass: false }, { id: "company", name: "Contoso", breakGlass: false }] }
@@ -101,7 +104,7 @@ const approvalsApi: FleetApprovalsApi = {
 
 function Fixture() {
   const [shown, setShown] = useState("create");
-  Object.assign(window, { serverFixture: { calls, show: setShown } });
+  Object.assign(window, { serverFixture: { calls, show: setShown, approveJoin: () => { joinApproved = true; } } });
   return <>
     <FleetApprovals epoch={epoch} api={approvalsApi} onOpen={() => calls.push(JSON.stringify({ open: "fleetServer" }))} />
     {shown === "create" && <CreateServerDialog epoch={epoch} api={api} machinesApi={machinesApi} onExisting={() => calls.push(JSON.stringify({ existing: true }))}

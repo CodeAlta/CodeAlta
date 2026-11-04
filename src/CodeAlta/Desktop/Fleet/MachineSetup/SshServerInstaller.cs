@@ -56,13 +56,13 @@ internal sealed class SshServerInstaller(ISshRunner ssh, string desktopVersion)
 
     /// <summary>Runs the setup.</summary>
     /// <param name="request">The computer and the options.</param>
-    /// <param name="reachable">Whether the server answers at an address from this computer.</param>
+    /// <param name="reachable">Checks that the server answers at an address from this computer: null when it does, otherwise what blocked it.</param>
     /// <param name="claim">Makes this computer the owner: the address of the link, the address of the setup (the forward), the code; returns the id of the link.</param>
     /// <param name="progress">Told where each step stands.</param>
     /// <param name="cancellationToken">Stops the setup.</param>
     /// <returns>The id of the link of this computer to the new server.</returns>
     /// <exception cref="SshSetupException">A step failed; its code says why.</exception>
-    public async Task<string> RunAsync(SshServerSetupRequest request, Func<Uri, CancellationToken, Task<bool>> reachable,
+    public async Task<string> RunAsync(SshServerSetupRequest request, Func<Uri, CancellationToken, Task<ReachProblem?>> reachable,
         Func<Uri, Uri, string, CancellationToken, Task<string>> claim, Action<SshSetupProgress> progress, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
@@ -79,7 +79,7 @@ internal sealed class SshServerInstaller(ISshRunner ssh, string desktopVersion)
             catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested) { throw new SshSetupException(SshSetupSteps.Connect, "unreachable", "No answer within 45 s."); }
         }
 
-        if (probe.ExitCode == SshResult.ConnectionFailed) throw new SshSetupException(SshSetupSteps.Connect, SshNodeInstaller.ConnectionCode(probe.Error), probe.Error.Trim());
+        if (probe.ExitCode == SshResult.ConnectionFailed) throw new SshSetupException(SshSetupSteps.Connect, SshNodeInstaller.ConnectionCode(probe.Error), Lines(probe.Error));
         var facts = SshNodeInstaller.ReadFacts(probe.Output);
         progress(new(SshSetupSteps.Connect, "done", $"{facts.User}@{facts.Hostname ?? target.Host}"));
 
@@ -99,9 +99,9 @@ internal sealed class SshServerInstaller(ISshRunner ssh, string desktopVersion)
             var stage = await ssh.RunAsync(target, "set -e\nd=\"$HOME/.cache/codealta-setup\"\nrm -rf \"$d\"\nmkdir -p \"$d\"\nprintf '%s\\n' \"$d\"\n", request.AcceptNewHostKey, null, cancellationToken)
                 .ConfigureAwait(false);
             source = stage.Output.Trim();
-            if (!stage.Succeeded || source.Length == 0) throw new SshSetupException(SshSetupSteps.Install, "copy_failed", stage.Error.Trim());
+            if (!stage.Succeeded || source.Length == 0) throw new SshSetupException(SshSetupSteps.Install, "copy_failed", Lines(stage.Error));
             var copied = await ssh.CopyAsync(target, packages.Files, source, request.AcceptNewHostKey, cancellationToken).ConfigureAwait(false);
-            if (!copied.Succeeded) throw new SshSetupException(SshSetupSteps.Install, "copy_failed", copied.Error.Trim());
+            if (!copied.Succeeded) throw new SshSetupException(SshSetupSteps.Install, "copy_failed", Lines(copied.Error));
         }
 
         var install = await ssh.RunAsync(target, InstallScript(facts, toolPath, version, source), request.AcceptNewHostKey, null, cancellationToken).ConfigureAwait(false);
@@ -116,9 +116,10 @@ internal sealed class SshServerInstaller(ISshRunner ssh, string desktopVersion)
             + (onNetwork ? ", every network of the machine" : ", its loopback")));
 
         progress(new(SshServerSteps.Reach, "running", address.ToString().TrimEnd('/')));
-        if (!await reachable(address, cancellationToken).ConfigureAwait(false))
-            throw new SshSetupException(SshServerSteps.Reach, onNetwork ? facts.Firewall == "ufw" ? "server_blocked_ufw" : "server_blocked" : "server_proxy_unreachable",
-                $"{address.ToString().TrimEnd('/')} · port {request.Port}");
+        if (await reachable(address, cancellationToken).ConfigureAwait(false) is { } blocked)
+            throw new SshSetupException(SshServerSteps.Reach, blocked.BlockedHere ? "local_network_blocked"
+                : onNetwork ? facts.Firewall == "ufw" ? "server_blocked_ufw" : "server_blocked" : "server_proxy_unreachable",
+                $"{address.ToString().TrimEnd('/')} · {blocked.Reason}");
         progress(new(SshServerSteps.Reach, "done", address.ToString().TrimEnd('/')));
 
         progress(new(SshServerSteps.Claim, "running"));
@@ -189,5 +190,7 @@ internal sealed class SshServerInstaller(ISshRunner ssh, string desktopVersion)
         return script.ToString();
     }
 
-    private static string Lines(string text) => string.Join('\n', text.Split('\n', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries).Take(6));
+    // What ssh and the commands said, without the notice of a host key it just recorded, at most six lines.
+    internal static string Lines(string text) => string.Join('\n', text.Split('\n', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries)
+        .Where(static line => !line.StartsWith("Warning: Permanently added", StringComparison.Ordinal)).Take(6));
 }

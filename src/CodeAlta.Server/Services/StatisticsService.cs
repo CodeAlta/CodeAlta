@@ -180,8 +180,10 @@ public sealed class StatisticsService
         var devices = await _store.ListDevicesAsync(actor.OrganizationId, cancellationToken).ConfigureAwait(false);
         var publishers = (await _store.ListStatisticsPublishersAsync(actor.OrganizationId, cancellationToken).ConfigureAwait(false))
             .ToDictionary(static publisher => publisher.DeviceId, StringComparer.Ordinal);
+        // The machines and computers of the person: a recovery key is a device of the list, never a machine that counts.
         var machines = devices
-            .Where(device => device.OwnerPersonId == person && (device.Status != DeviceStatuses.Revoked || publishers.ContainsKey(device.Id)))
+            .Where(device => device.OwnerPersonId == person && device.Kind != FleetDeviceKinds.Recovery
+                && (device.Status != DeviceStatuses.Revoked || publishers.ContainsKey(device.Id)))
             .Select(device => publishers.TryGetValue(device.Id, out var published)
                 ? new StatisticsMachineDto(device.Id, device.Name, device.Kind, published.PublishedAt, published.Sessions)
                 : new StatisticsMachineDto(device.Id, device.Name, device.Kind, null, 0))

@@ -13,6 +13,9 @@ import { SignInCode } from "./SignInCode";
 /** The calls of the dialog. */
 export type JoinOrganizationApi = Pick<typeof fleetServer, "join" | "linkSpace" | "status" | "signInMethods" | "joinWithSignIn" | "startSignInCode" | "openSignInPage">;
 
+/** How often the dialog reads whether this computer is approved, while it waits for that. */
+const approvalPollMilliseconds = 3000;
+
 /** How long the browser may take before the sign-in is given up: the server's attempt lives ten minutes. */
 const signInTimeoutMilliseconds = 11 * 60_000;
 
@@ -46,9 +49,21 @@ export function JoinOrganizationDialog({ epoch, api = fleetServer, spaces = spac
   const [waiting, setWaiting] = useState<string | null>(null);
   const [deviceCode, setDeviceCode] = useState<Code | null>(null);
   const [byOwnDevice, setByOwnDevice] = useState(false);
+  // Whether the computer or the administrator approved this one: the dialog says so instead of waiting on.
+  const [approved, setApproved] = useState(false);
   const browser = useRef<AbortController | null>(null);
   const url = organizationAddressOf(address);
   useEffect(() => () => browser.current?.abort(), []);
+  useEffect(() => {
+    if (step !== "approval" || !server || approved) return;
+    const abort = new AbortController();
+    const read = () => api.status({ expectedEpoch: epoch }, { signal: abort.signal, timeoutMilliseconds: 10_000 }).then(value => {
+      if (!abort.signal.aborted && value.servers.some(item => item.id === server.id && item.link === "approved")) setApproved(true);
+    }, () => { /* Read again at the next tick. */ });
+    void read();
+    const timer = setInterval(() => void read(), approvalPollMilliseconds);
+    return () => { abort.abort(); clearInterval(timer); };
+  }, [api, approved, epoch, server, step]);
   useEffect(() => {
     if (step !== "signin" || !url) return;
     const abort = new AbortController();
@@ -191,7 +206,10 @@ export function JoinOrganizationDialog({ epoch, api = fleetServer, spaces = spac
           {list.map(item => <Radio key={item.id} value={item.id} label={item.name} />)}
         </RadioGroup>
       </>}
-      {step === "approval" && server && <Callout compact intent="primary" role="status" icon={<AppIcon name="shield" size={16} />}>
+      {step === "approval" && server && approved && <Callout compact intent="success" role="status" icon={<AppIcon name="checked" size={16} />}>
+        {t("This computer is approved: it is one of yours on {organization}.", { organization: server.organization ?? server.url })}
+      </Callout>}
+      {step === "approval" && server && !approved && <Callout compact intent="primary" role="status" icon={<AppIcon name="shield" size={16} />}>
         {byOwnDevice ? t("Another of your computers approves this one. It shows these words beside it:")
           : t("An administrator of {organization} approves this computer. They see these words beside it:", { organization: server.organization ?? server.url })}
         {words && <div className="pair-machine-words add-machine-words">{keyWords(words).map((word, index) => <Tag key={`${index}:${word}`} minimal>{word}</Tag>)}</div>}

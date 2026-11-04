@@ -28,7 +28,7 @@ In CodeAlta Desktop, open **Settings** > **Fleet** > **Machines** and click **Ad
    - **Pair it with this computer**: the node makes a pairing link for this computer, which pairs at once and manages the machine. The six words of its key are shown.
 3. Click **Open its page** to give it projects and look at its providers (see [Manage a machine from CodeAlta Desktop](#manage-a-machine-from-codealta-desktop)).
 
-When a step fails, it says why and what to do: add your key to the SSH agent (`ssh-add`) or copy it to the machine (`ssh-copy-id`), install .NET 10 there, open the port of the node in its firewall. **Try again** starts over and changes only what is missing. A computer whose SSH key this one does not know yet asks first: **Trust it and try again**.
+When a step fails, it says why and what to do: add your key to the SSH agent (`ssh-add`) or copy it to the machine (`ssh-copy-id`), install .NET 10 there, open the port of the node in its firewall. On a Mac, macOS keeps CodeAlta from your local network until you turn it on in **System Settings** > **Privacy & Security** > **Local Network**. **Try again** starts over and changes only what is missing. A computer whose SSH key this one does not know yet asks first: **Trust it and try again**.
 
 Where CodeAlta Desktop runs on the machine too, the node gets a profile of its own, `~/.alta-node`. **Advanced** sets the port of the node (2585), its profile, the folder it is installed in, and a folder of this computer to install the packages from.
 
@@ -276,7 +276,7 @@ In CodeAlta Desktop, open **Settings** > **Fleet** > **Server** and click **Crea
 
 Give **Your name** and an **Organization** (**Home** by default). **Advanced** sets the port (2586), the data folder, the install folder and a folder of packages.
 
-When the server runs but does not answer from here, the step says what blocks it: a firewall (on Ubuntu, `sudo ufw allow 2586/tcp` on the machine), a name that does not reach it, or a proxy that does not forward to it. **Try again** goes on from there.
+When the server runs but does not answer from here, the step says what blocks it, with what this computer met: a firewall (on Ubuntu, `sudo ufw allow 2586/tcp` on the machine), a name that does not reach it, a proxy that does not forward to it, or, on a Mac, CodeAlta not allowed in **System Settings** > **Privacy & Security** > **Local Network**. **Try again** starts over and changes only what is missing.
 
 Once you are its owner, **Add your machines** lists the machines this computer manages: **Add** has each join the server from itself, and approves it at once. The six words of each are shown.
 

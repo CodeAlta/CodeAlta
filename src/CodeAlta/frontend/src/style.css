@@ -2228,7 +2228,9 @@ button.project-context-pull:hover, button.project-context-pull:focus-visible, bu
 .bp6-overlay-backdrop { background-color: var(--scrim); }
 
 /* Toasts appear below the title bar, clear of the window controls. */
-.app-toaster.bp6-toast-container { padding-top: 46px; }
+.app-toaster.bp6-toast-container { padding-top: var(--app-toaster-top, 46px); }
+/* The popover of the toasts (appToaster.ts): only a layer, the toast container places them in the window. */
+.app-toaster-layer { position: fixed; inset: 0; width: 100%; height: 100%; max-width: none; max-height: none; margin: 0; padding: 0; border: 0; background: transparent; overflow: visible; pointer-events: none; }
 
 /* Notes window: a title with its icon, icon actions, and text at the reading size of the timeline. */
 .notes-pane > header > .notes-title { display: inline-flex; grid-auto-flow: column; align-items: center; gap: 6px; color: var(--text); }
