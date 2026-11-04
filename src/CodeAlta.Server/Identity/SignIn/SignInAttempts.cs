@@ -82,6 +82,12 @@ public static class SignInErrorCodes
 
     /// <summary>A company account belongs to the organization: an admin removes the person in People and access, not the account.</summary>
     public const string ManagedByOrganization = "sign_in.managed_by_organization";
+
+    /// <summary>
+    /// The person has no way to sign in yet, and the device that links the first one joined too long ago: a stolen device key
+    /// would otherwise make its own. The first way in is linked soon after the device joined.
+    /// </summary>
+    public const string FirstWayInExpired = "sign_in.first_way_in_expired";
 }
 
 /// <summary>A sign-in that waits for the browser.</summary>
@@ -107,6 +113,9 @@ public sealed class SignInAttempt
 
     /// <summary>Gets the person who links, for a link; null for an enrollment.</summary>
     public string? LinkingPersonId { get; init; }
+
+    /// <summary>Gets whether a link is of the first way in of its person, which no sign-in confirmed; it completes only while the person has none.</summary>
+    public bool FirstWayIn { get; init; }
 
     /// <summary>Gets the loopback address the browser comes back to; empty for a device code.</summary>
     public required string RedirectUri { get; init; }

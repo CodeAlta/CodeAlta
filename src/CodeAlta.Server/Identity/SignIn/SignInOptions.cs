@@ -87,6 +87,13 @@ public sealed class SignInOptions
     /// <summary>Gets how long the grant of a sign-in lets its device enroll.</summary>
     public TimeSpan GrantLifetime { get; init; } = TimeSpan.FromMinutes(10);
 
+    /// <summary>
+    /// Gets how long after a device joined the device list its person may link their first way to sign in with the device
+    /// signature alone (the setup of the server, a computer another device or the owner just approved). Any later way in
+    /// needs a sign-in with one the person has.
+    /// </summary>
+    public TimeSpan FirstWayInWindow { get; init; } = TimeSpan.FromHours(1);
+
     /// <summary>Gets how many attempts wait at once, beyond which new ones are refused.</summary>
     public int MaxPendingAttempts { get; init; } = 1024;
 

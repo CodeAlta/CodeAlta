@@ -111,7 +111,14 @@ internal sealed class TestDevice : IFleetHandshakeSigner, IDisposable
         return new FleetSignedTelemetrySettings(text, Sign(FleetTelemetrySettingsDocuments.GetSignedBytes(text)));
     }
 
-    public void Dispose() => _key?.Dispose();
+    /// <summary>Gets or sets the first passkey registered from this device, with which its person signs in again to add another way in.</summary>
+    public SignIn.SoftwareAuthenticator? Passkey { get; set; }
+
+    public void Dispose()
+    {
+        _key?.Dispose();
+        Passkey?.Dispose();
+    }
 }
 
 /// <summary>What the server answered: the status and the JSON body.</summary>

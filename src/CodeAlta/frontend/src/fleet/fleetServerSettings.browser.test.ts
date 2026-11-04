@@ -291,11 +291,16 @@ test("the owner links a passkey, turns company sign-in on and requires it, and t
     await page.clickText(".bp6-menu-item", "Add a passkey");
     await page.until(`document.querySelector('.fleet-sign-in-logins .bp6-tag')?.textContent === 'Passkey · Passkey on Windows'`, "the passkey listed");
 
-    // Link GitHub shows the code to enter at GitHub, opens GitHub's page, and Cancel stops the wait.
+    // Link GitHub: a second way in asks the person to sign in again with the passkey first; then the code to enter at
+    // GitHub shows, Copy opens GitHub's page, and Cancel stops the wait.
     await page.clickText(".fleet-server-sign-in .bp6-button", "Link…");
     await page.until(`[...document.querySelectorAll('.bp6-menu-item')].some(item => item.textContent === 'Link GitHub')`, "GitHub may be linked");
     await page.clickText(".bp6-menu-item", "Link GitHub");
+    await page.until(`document.querySelector('.fleet-sign-in-confirm')?.textContent.startsWith('Adding a way to sign in needs you to sign in again with one you have.')`,
+      "the sign-in again asked");
+    await page.clickText(".fleet-sign-in-confirm-methods .bp6-button", "Continue with Passkey");
     await page.until(`document.querySelector('.fleet-sign-in-code code')?.textContent === 'WDJB-MJHT'`, "the code to enter");
+    assert.ok((await calls(page)).some(call => call.startCode === "github" && call.confirmWith === "passkey"), "the link starts once the person signed in again");
     await page.clickText(".fleet-sign-in-code .bp6-button", "Copy the code and open GitHub");
     await page.until(`window.fleetFixture.calls.some(call => call.includes('openPage'))`, "GitHub's page opened");
     await page.clickText(".fleet-sign-in-code .bp6-button", "Cancel");

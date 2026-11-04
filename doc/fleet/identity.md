@@ -111,7 +111,10 @@ to it.
   `PublicSignInClients.GitHubClientId`. The client secret, webhook secret and private key of the conversion are not
   needed, and not kept unless `-SaveCredentialsTo` names a file.
 - A linked method signs in only once a person linked it from one of their devices; an account nobody linked signs
-  nobody in.
+  nobody in. Linking is not done by the device key alone, which a thief may hold: a person who has a way in signs in
+  with it again first (a single-use confirmation from the same device, as for dangerous actions below), and their first
+  way in is linked within an hour of the device joining (the setup of the server, or a device another one just
+  approved), when its key was just proved.
 - Sign-in on the server's own web pages (a browser, the phone) needs an application the admin registers with the
   provider, or a passkey.
 

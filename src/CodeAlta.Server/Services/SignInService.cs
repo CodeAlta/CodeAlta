@@ -270,6 +270,7 @@ public sealed class SignInService : IDisposable
             ?? throw CoordinatorException.NotFound(CoordinatorErrorCodes.NotSetUp, "The server is not set up.");
 
         string? linking = null;
+        var firstWayIn = false;
         if (purpose is FleetSignInPurposes.Link or FleetSignInPurposes.Confirm)
         {
             // A link or a confirmation is made by a person on one of their approved controller devices, never by a device the server does not know.
@@ -277,6 +278,7 @@ public sealed class SignInService : IDisposable
             if (actor.Id != key.DeviceId || actor.Kind != FleetDeviceKinds.Controller || actor.OwnerPersonId is null)
                 throw CoordinatorException.Forbidden(FleetErrorCodes.Forbidden, "A sign-in method is linked from an approved controller device of its person.");
             linking = actor.OwnerPersonId;
+            if (purpose == FleetSignInPurposes.Link) firstWayIn = await RequireLinkAuthorityAsync(actor, request.Confirmation, origin, cancellationToken).ConfigureAwait(false);
         }
         else
         {
@@ -320,7 +322,7 @@ public sealed class SignInService : IDisposable
         var attempt = new SignInAttempt
         {
             Id = id, OrganizationId = organization.Id, Method = request.Method, Purpose = purpose, DeviceId = key.DeviceId, PublicKey = key.Text,
-            LinkingPersonId = linking,
+            LinkingPersonId = linking, FirstWayIn = firstWayIn,
             RedirectUri = redirect, State = state, Nonce = nonce, CodeVerifier = verifier,
             ExpiresAt = now + lifetime,
             DeviceCode = device?.DeviceCode, PollInterval = device?.Interval ?? 5,
@@ -456,6 +458,37 @@ public sealed class SignInService : IDisposable
                 .ConfigureAwait(false);
         var (person, login) = await ResolvePersonAsync(attempt, settings, result.Identity!, origin, signed.DeviceId, cancellationToken).ConfigureAwait(false);
         return new PollSignInResponse(false, result.Interval, await FinishAsync(attempt, settings, person, login, origin, signed.DeviceId, cancellationToken).ConfigureAwait(false));
+    }
+
+    // A new way to sign in becomes a factor of its own (a later confirmation, a new device): the device key alone, which a
+    // thief may hold, does not add one. A person who has a way in proves it again first, from this device; a person who has
+    // none links their first one soon after the device joined, when its key was just proved by the setup code or by another
+    // device. Returns whether the link is of the first way in, which its completion checks again.
+    private async Task<bool> RequireLinkAuthorityAsync(DeviceRecord actor, string? confirmation, RequestOrigin origin, CancellationToken cancellationToken)
+    {
+        var person = actor.OwnerPersonId!;
+        if (await HasWayInAsync(person, cancellationToken).ConfigureAwait(false))
+        {
+            if (_attempts.TakeConfirmation(confirmation, actor.Id) is { } confirmed && confirmed.PersonId == person && confirmed.OrganizationId == actor.OrganizationId)
+                return false;
+            throw await RefuseStartAsync(origin, actor, SignInErrorCodes.ConfirmationRequired,
+                "Adding a way to sign in needs you to sign in again with one you have, from this device.", cancellationToken).ConfigureAwait(false);
+        }
+
+        if (actor.ApprovedAt is { } approved && _time.GetUtcNow() - approved <= _options.FirstWayInWindow) return true;
+        throw await RefuseStartAsync(origin, actor, SignInErrorCodes.FirstWayInExpired,
+            "A first way to sign in is linked soon after this device joined the server: link it from a device of yours that just joined.", cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task<bool> HasWayInAsync(string personId, CancellationToken cancellationToken)
+        => (await _signIn.ListLoginsAsync(personId, cancellationToken).ConfigureAwait(false)).Count > 0
+            || (await _signIn.ListPasskeysAsync(personId, cancellationToken).ConfigureAwait(false)).Count > 0;
+
+    private async Task<CoordinatorException> RefuseStartAsync(RequestOrigin origin, DeviceRecord actor, string code, string message, CancellationToken _)
+    {
+        await _store.AppendAuditAsync(new AuditEntry("sign_in.start", code, actor.OwnerPersonId, actor.Id, FleetSignInPurposes.Link, origin.SourceAddress, origin.RequestId),
+            CancellationToken.None).ConfigureAwait(false);
+        return CoordinatorException.Forbidden(code, message);
     }
 
     // Only the key that started an attempt completes it: a new device is not in the table yet, so its key is the attempt's;
@@ -698,6 +731,10 @@ public sealed class SignInService : IDisposable
         if (attempt.Purpose == FleetSignInPurposes.Link)
         {
             var person = await _store.GetPersonAsync(attempt.LinkingPersonId!, cancellationToken).ConfigureAwait(false) ?? throw new InvalidOperationException("A link without its person.");
+            // Two first links started at once: only the first one to complete is a first way in.
+            if (attempt.FirstWayIn && await HasWayInAsync(person.Id, cancellationToken).ConfigureAwait(false))
+                throw await RefuseAsync(origin, deviceId, attempt.Method, SignInErrorCodes.ConfirmationRequired,
+                    "Adding a way to sign in needs you to sign in again with one you have, from this device.", cancellationToken, person.Id).ConfigureAwait(false);
             var login = new LoginRecord(attempt.OrganizationId, person.Id, attempt.Method, identity.Issuer, identity.Subject, identity.Email, name, groups, now, now);
             var outcome = await _signIn.LinkLoginAsync(login, new AuditEntry("sign_in.link", AuditEntry.Success, person.Id, deviceId, attempt.Method, origin.SourceAddress,
                 origin.RequestId), cancellationToken).ConfigureAwait(false);
@@ -831,7 +868,7 @@ public sealed class SignInService : IDisposable
         var status = code switch
         {
             SignInErrorCodes.MethodDisabled or SignInErrorCodes.SsoRequired or SignInErrorCodes.NotLinked or SignInErrorCodes.LinkedElsewhere
-                or SignInErrorCodes.IdentityNotAllowed => StatusCodes.Status403Forbidden,
+                or SignInErrorCodes.IdentityNotAllowed or SignInErrorCodes.ConfirmationRequired or SignInErrorCodes.FirstWayInExpired => StatusCodes.Status403Forbidden,
             SignInErrorCodes.ProviderUnavailable => StatusCodes.Status502BadGateway,
             _ => StatusCodes.Status401Unauthorized,
         };

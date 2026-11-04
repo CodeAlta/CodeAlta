@@ -37,6 +37,8 @@ export function ServerSignIn({ server, epoch, api = fleetServer, revision }: { s
   // The way in whose removal is asked beside its row, and what removing it met.
   const [removing, setRemoving] = useState<{ id: string; busy: boolean; error: string | null } | null>(null);
   const [deviceCode, setDeviceCode] = useState<Code | null>(null);
+  // The method to link once the person signed in again with a way in they have, which the server asks for any but the first.
+  const [linkConfirm, setLinkConfirm] = useState<string | null>(null);
   const work = useRef<AbortController | null>(null);
   useEffect(() => () => work.current?.abort(), []);
   const [problem, setProblem] = useState<{ key: MessageKey; detail?: string | null } | null>(null);
@@ -82,26 +84,47 @@ export function ServerSignIn({ server, epoch, api = fleetServer, revision }: { s
     }
   }
 
-  async function link(method: string) {
+  // Links a method: the person's first way in at once, any other once they signed in again with `confirmWith`, one they have.
+  async function link(method: string, confirmWith: string | null = null) {
     const abort = new AbortController();
     work.current = abort;
     setLinking(method);
+    setLinkConfirm(null);
     setProblem(null);
+    const failed = (status: string, message: string | null) => {
+      if (status === "sign_in.confirmation_required") { setLinkConfirm(method); return; }
+      setProblem({ key: signInProblem(status) ?? serverProblem(status) ?? "The operation did not complete.", detail: message });
+    };
     try {
+      // Signing in again with GitHub: a code to enter at GitHub first, which the host waits for before the link starts.
+      let confirmHandle: string | null = null;
+      if (confirmWith === "github") {
+        const started = await api.startSignInCode({ expectedEpoch: epoch, method: confirmWith, url: null, linkId: server.id, purpose: "confirm", confirmWith: null, confirmHandle: null },
+          { signal: abort.signal, timeoutMilliseconds: 30_000 });
+        if (abort.signal.aborted) return;
+        const code = started.status === "ok" ? signInCode(started.code) : null;
+        if (!code) { failed(started.status, started.message); return; }
+        setDeviceCode(code);
+        confirmHandle = code.handle;
+      }
       // GitHub: a code to enter at GitHub first, then the wait for it under its handle.
       let handle: string | null = null;
       if (method === "github") {
-        const started = await api.startSignInCode({ expectedEpoch: epoch, method, url: null, linkId: server.id, purpose: null }, { signal: abort.signal, timeoutMilliseconds: 30_000 });
+        const started = await api.startSignInCode({ expectedEpoch: epoch, method, url: null, linkId: server.id, purpose: null, confirmWith, confirmHandle },
+          { signal: abort.signal, timeoutMilliseconds: confirmWith ? 11 * 60_000 : 30_000 });
         if (abort.signal.aborted) return;
         const code = started.status === "ok" ? signInCode(started.code) : null;
-        if (!code) { setProblem({ key: signInProblem(started.status) ?? serverProblem(started.status) ?? "The operation did not complete.", detail: started.message }); return; }
+        if (!code) { failed(started.status, started.message); return; }
         setDeviceCode(code);
         handle = code.handle;
+        confirmWith = null;
+        confirmHandle = null;
       }
-      const result = await api.linkSignIn({ expectedEpoch: epoch, linkId: server.id, method, handle }, { signal: abort.signal, timeoutMilliseconds: 11 * 60_000 });
+      const result = await api.linkSignIn({ expectedEpoch: epoch, linkId: server.id, method, handle, confirmWith, confirmHandle },
+        { signal: abort.signal, timeoutMilliseconds: 11 * 60_000 });
       if (abort.signal.aborted) return;
       if (result.status === "ok") { setGeneration(value => value + 1); return; }
-      setProblem({ key: signInProblem(result.status) ?? serverProblem(result.status) ?? "The operation did not complete.", detail: result.message });
+      failed(result.status, result.message);
     } catch {
       if (!abort.signal.aborted) setProblem({ key: "The server does not answer." });
     } finally {
@@ -149,6 +172,14 @@ export function ServerSignIn({ server, epoch, api = fleetServer, revision }: { s
       </span>
       {linking && (deviceCode ? <SignInCode epoch={epoch} code={deviceCode} api={api} onCancel={cancelLink} />
         : <span className="muted-text">{t("Finish signing in in your browser…")}</span>)}
+      {linkConfirm && !linking && <Callout compact intent="primary" role="status" className="fleet-sign-in-confirm">
+        {t("Adding a way to sign in needs you to sign in again with one you have.")}
+        <div className="fleet-sign-in-confirm-methods">{[...new Set(logins.map(login => login.method))].map(method => <Button key={method} size="small"
+          text={t("Continue with {method}", { method: method === "passkey" ? t("Passkey")
+            : method === "company" ? settings?.methods.find(item => item.id === "company")?.name ?? t("Company sign-in") : methodNames[method] ?? method })}
+          onClick={() => void link(linkConfirm, method)} />)}
+          <Button size="small" variant="minimal" text={t("Cancel")} onClick={() => setLinkConfirm(null)} /></div>
+      </Callout>}
       {approvals.map(approval => <Callout key={approval.id} compact intent="primary" className="fleet-sign-in-approval">
         <div>{t("{device} asks to change the company sign-in.", { device: approval.requestedBy })}</div>
         <ul className="muted-text">
@@ -161,7 +192,8 @@ export function ServerSignIn({ server, epoch, api = fleetServer, revision }: { s
     </div>
     <PopoverNext placement="bottom-end" content={<Menu>
       {offered.map(method => <MenuItem key={method} icon={<SignInMethodIcon method={method} />}
-        text={method === "passkey" ? t("Add a passkey") : t("Link {method}", { method: methodNames[method] })} onClick={() => void link(method)} />)}
+        text={method === "passkey" ? t("Add a passkey") : t("Link {method}", { method: methodNames[method] })}
+        onClick={() => { if (logins.length > 0) { setProblem(null); setLinkConfirm(method); } else void link(method); }} />)}
     </Menu>}>
       <Button size="small" variant="minimal" disabled={!!linking} icon={linking ? <ActivitySpinner size={14} /> : undefined}>{t("Link…")}</Button>
     </PopoverNext>
@@ -223,7 +255,7 @@ function SignInDialog({ server, epoch, api, view, logins, onClose }: {
       // GitHub confirms with a code to enter at GitHub, shown here while the host waits for it.
       let handle: string | null = null;
       if (method === "github") {
-        const started = await api.startSignInCode({ expectedEpoch: epoch, method, url: null, linkId: server.id, purpose: "confirm" }, { timeoutMilliseconds: 30_000 });
+        const started = await api.startSignInCode({ expectedEpoch: epoch, method, url: null, linkId: server.id, purpose: "confirm", confirmWith: null, confirmHandle: null }, { timeoutMilliseconds: 30_000 });
         const code = started.status === "ok" ? signInCode(started.code) : null;
         if (!code) { setProblem({ key: signInProblem(started.status) ?? serverProblem(started.status) ?? "The operation did not complete.", detail: started.message }); return; }
         setConfirmCode(code);

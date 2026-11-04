@@ -2,7 +2,7 @@
 // its telemetry through it. Driven by fleetServerSettings.browser.test.ts through `fleetFixture`: what the page asks is recorded.
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
-import type { FleetDeviceView, FleetServerDeviceRequest, FleetServerRecoverRequest, FleetServerView, FleetSignInApprovalView, FleetSignInLinkRequest, FleetSignInLoginView, FleetSignInSettingsRequest,
+import type { FleetDeviceView, FleetServerDeviceRequest, FleetServerRecoverRequest, FleetServerView, FleetSignInApprovalView, FleetSignInCodeRequest, FleetSignInLinkRequest, FleetSignInLoginView, FleetSignInSettingsRequest,
   FleetSignInSettingsView, FleetTelemetryRequest, FleetTelemetryView, FleetUpdateCampaignView, FleetUpdatePolicyRequest, FleetUpdateStartRequest, FleetUpdatesView } from "#neoastra";
 import { ShellLanguageContext } from "../shellLanguage";
 import { FleetServerSettings, type FleetServerApi } from "./FleetServerSettings";
@@ -110,8 +110,11 @@ const api: FleetServerApi = {
     return { status: "ok", settings: signIn, logins: [], message: null, approvals: null };
   },
   // GitHub gives a code and waits for the person, until Cancel; the others link at once.
-  startSignInCode: async () => ({ status: "ok", message: null, code: { handle: "0123456789abcdef0123456789abcdef", userCode: "WDJB-MJHT",
-    url: "https://github.com/login/device", expiresAt: "2026-11-04T12:15:00Z" } }),
+  startSignInCode: async (request: FleetSignInCodeRequest) => {
+    if (request.confirmWith) calls.push(JSON.stringify({ startCode: request.method, confirmWith: request.confirmWith }));
+    return { status: "ok", message: null, code: { handle: "0123456789abcdef0123456789abcdef", userCode: "WDJB-MJHT",
+      url: "https://github.com/login/device", expiresAt: "2026-11-04T12:15:00Z" } };
+  },
   linkSignIn: async (request: FleetSignInLinkRequest, options?: { signal?: AbortSignal }) => {
     calls.push(JSON.stringify({ linkSignIn: request.method }));
     if (request.method === "github") {

@@ -63,6 +63,8 @@ export function signInProblem(status: string): MessageKey | null {
     case "sign_in.last_way_in": return "This is your last way to sign in, and you have no recovery key: make your recovery key first, or link another way.";
     case "sign_in.managed_by_organization": return "Managed by your organization: an admin removes a person in People and access";
     case "sign_in.login_not_found": return "This way to sign in was removed already.";
+    case "sign_in.first_way_in_expired": return "Link your first way to sign in soon after a computer of yours joins the server: from one that just joined.";
+    case "sign_in.confirmation_required": return "Adding a way to sign in needs you to sign in again with one you have.";
     case "sign_in.code_refused": case "sign_in.invalid_token": case "sign_in.wrong_audience": case "sign_in.wrong_issuer": case "sign_in.wrong_nonce":
     case "sign_in.token_expired": case "sign_in.invalid_passkey": case "sign_in.state_mismatch": case "sign_in.invalid_grant":
       return "The sign-in did not verify: start it again.";
