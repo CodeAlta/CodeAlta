@@ -131,6 +131,18 @@ public sealed class FleetNodePeople
         }
     }
 
+    /// <summary>Takes out every person the machine names, their requests and the refusals: what its former owner decided ends with a change of owner.</summary>
+    /// <exception cref="IOException">The file cannot be written.</exception>
+    public void Clear()
+    {
+        lock (_gate)
+        {
+            if (_state.People.Count == 0 && _state.Asks.Count == 0 && _state.Refused.Count == 0) return;
+            _state = PeopleState.Empty;
+            Save();
+        }
+    }
+
     private void Save()
     {
         Directory.CreateDirectory(Path.GetDirectoryName(_path)!);

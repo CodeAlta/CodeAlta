@@ -78,8 +78,9 @@ internal sealed class DesktopServerAutomationRoute : IDisposable
     internal FleetOrganizationAccess? Access { get; init; }
 
     /// <summary>
-    /// Says whether the machine is a node of this computer's person, as the device list of the server verifies it now: the
-    /// authority the server and the machine check for each version this computer signs for it.
+    /// Says whether the machine is a node of this computer's person, as the device list of the server verifies it now and the
+    /// access document names its owner once it was given to another person: the authority the server and the machine check
+    /// for each version this computer signs for it.
     /// </summary>
     /// <exception cref="FleetDeviceListException">The device list does not verify.</exception>
     internal async Task<bool> IsOwnMachineAsync(string machineId, CancellationToken cancellationToken)
@@ -87,7 +88,7 @@ internal sealed class DesktopServerAutomationRoute : IDisposable
         var list = await _devices.RefreshAsync(cancellationToken).ConfigureAwait(false);
         return list.Members.TryGetValue(machineId, out var machine) && machine.Kind == FleetDeviceKinds.Node && !list.Removed.Contains(machineId)
             && list.Members.TryGetValue(_identity.DeviceId, out var self) && self.Kind == FleetDeviceKinds.Controller && !list.Removed.Contains(self.DeviceId)
-            && self.OwnerId is { } person && string.Equals(machine.OwnerId, person, StringComparison.Ordinal);
+            && self.OwnerId is { } person && string.Equals(FleetAccessState.OwnerOfMachine(Access?.Current, machineId, list), person, StringComparison.Ordinal);
     }
 
     /// <summary>Gives a signed version to the server.</summary>

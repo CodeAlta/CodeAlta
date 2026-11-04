@@ -266,7 +266,8 @@ public static class FleetDeviceListMembers
 /// <summary>
 /// The trust a node gives, on a relayed channel, to the members of the signed device list of its organization, read with the
 /// signed access document (<c>doc/fleet/access-control.md</c>, what the node decides): on a personal machine, the owner's own
-/// controller devices get the permissions of a paired device; on a team machine, the controller devices of the team's members
+/// controller devices get the permissions of a paired device (the owner the document names once the machine was given to another
+/// person, the device list's otherwise); on a team machine, the controller devices of the team's members
 /// view, drive and start their own sessions, and its maintainers also manage it, whoever the device list names as its owner;
 /// any other member is known but may do nothing; a device the list removed, or of a person the document suspended, is refused.
 /// </summary>
@@ -303,7 +304,8 @@ public sealed class FleetOrganizationTrust(Func<FleetDeviceListState?> list, str
             };
         }
 
-        var owner = current.Members.TryGetValue(selfDeviceId, out var self) ? self.OwnerId : null;
+        // The owner of the machine: the person the signed document names when it was given to another person, else the list's.
+        var owner = FleetAccessState.OwnerOfMachine(document, selfDeviceId, current);
         var own = owner is not null && member.OwnerId == owner && member.Kind == FleetDeviceKinds.Controller;
         // Another person's controller device gets nothing from the organization here; the people the machine names get what
         // its owner gave them, on their own sessions (FleetNamedPeopleTrust), and a first try asks the owner.

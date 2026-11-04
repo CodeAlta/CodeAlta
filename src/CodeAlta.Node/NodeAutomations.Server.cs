@@ -110,13 +110,19 @@ internal sealed partial class NodeAutomations
     }
 
     // Who may ask a run of an automation this node holds from a server: on a machine of a team, any maintainer of the team
-    // for an automation of the team, and the person who gave it for a personal one; on a personal machine, its owner.
-    private Func<string?, bool>? MayAsk(string linkId, FleetSignedAutomationRunRequest signed, FleetDeviceListState devices, string self)
+    // for an automation of the team, and the person who gave it for a personal one; on a personal machine, its owner, as the
+    // signed access document names them once the machine was given to another person.
+    private Func<string?, bool>? MayAsk(FleetAccessState? access, FleetSignedAutomationRunRequest signed, FleetDeviceListState devices, string self)
     {
-        var access = ServerAccess?.Invoke(linkId);
         // A machine of the organization runs by hand what its owners and the admins who sign ask.
         if (access?.IsOrganizationMachine(self) == true) return person => access.IsSigner(person);
-        if (access?.TeamOf(self) is not { } team || !FleetAutomationRunRequestDocuments.TryRead(signed.Payload, out var asked, out _)) return null;
+        if (access?.TeamOf(self) is not { } team)
+        {
+            var owner = FleetAccessState.OwnerOfMachine(access, self, devices);
+            return person => person is not null && person == owner;
+        }
+
+        if (!FleetAutomationRunRequestDocuments.TryRead(signed.Payload, out var asked, out _)) return null;
         if (AssignmentOf(asked.AutomationId) is not { Signed: { } held } || !FleetAutomationVersionDocuments.TryParse(held.Payload, out var version)) return static _ => false;
         if (version.TeamId == team.Id) return person => FleetAccessState.RoleIn(team, person) == FleetTeamRoles.Maintainer;
         var giver = devices.Members.TryGetValue(version.SignerDeviceId, out var signer) ? signer.OwnerId : null;
@@ -142,7 +148,7 @@ internal sealed partial class NodeAutomations
         ArgumentNullException.ThrowIfNull(devices);
         ArgumentNullException.ThrowIfNull(signed);
         if (DeviceId is not { } self) return (null, "This machine does not know its own device yet.");
-        var mayAsk = MayAsk(linkId, signed, devices, self);
+        var mayAsk = MayAsk(ServerAccess?.Invoke(linkId), signed, devices, self);
         if (!FleetAutomationRunRequestDocuments.TryVerify(signed, devices, organizationId, self, _options.TimeProvider.GetUtcNow(),
                 mayAsk is null ? null : (_, person) => mayAsk(person), out var request, out var reason))
         {
@@ -190,11 +196,12 @@ internal sealed partial class NodeAutomations
         ArgumentNullException.ThrowIfNull(devices);
         ArgumentNullException.ThrowIfNull(signed);
         if (DeviceId is not { } self) return "This machine does not know its own device yet.";
-        var mayAsk = MayAsk(linkId, signed, devices, self);
-        var owner = devices.Members.TryGetValue(self, out var machine) ? machine.OwnerId : null;
+        var signedAccess = access ?? ServerAccess?.Invoke(linkId);
+        var mayAsk = MayAsk(signedAccess, signed, devices, self);
+        var owner = FleetAccessState.OwnerOfMachine(signedAccess, self, devices);
         var now = _options.TimeProvider.GetUtcNow();
         if (!FleetAutomationRunRequestDocuments.TryVerify(signed, devices, organizationId, self, now,
-                (read, person) => (mayAsk is not null ? mayAsk(person) : person == owner) || MayTakeOver(access ?? ServerAccess?.Invoke(linkId), self, read, person, now),
+                (read, person) => (mayAsk is not null ? mayAsk(person) : person == owner) || MayTakeOver(signedAccess, self, read, person, now),
                 out var request, out var reason))
         {
             Log($"A take-over asked through the server was refused: {reason}.");

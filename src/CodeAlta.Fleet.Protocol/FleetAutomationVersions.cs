@@ -365,8 +365,9 @@ public static class FleetAutomationVersionDocuments
             return "a team machine runs the automations of its team's maintainers, and of its members when the team allows it";
         }
 
-        // Personal automations: only the person who owns the machine gives it automations.
-        if (!devices.Members.TryGetValue(machineId, out var self) || self.OwnerId is null || !string.Equals(self.OwnerId, signerPersonId, StringComparison.Ordinal))
+        // Personal automations: only the person who owns the machine gives it automations; the one the access document names once
+        // the machine was given to another person.
+        if (FleetAccessState.OwnerOfMachine(access, machineId, devices) is not { } owner || !string.Equals(owner, signerPersonId, StringComparison.Ordinal))
             return "the version is signed by a device of another person than the owner of this machine";
         return null;
     }

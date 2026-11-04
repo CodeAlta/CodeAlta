@@ -412,7 +412,8 @@ internal sealed class NodeServers : IAsyncDisposable
             // The budgets and holds of the owner: the runs that wait read them again at once.
             BudgetsChanged = _ => budgets?.Changed(),
             // A newer access document: the sessions people it suspends started on this machine stop, their channels close.
-            AccessChanged = service is null ? null : (linkId, access) => { _ = ApplyAccessAsync(service, access); },
+            // A machine given to another owner also ends the pairings and the people its former owner gave it.
+            AccessChanged = service is null ? null : (linkId, access) => { _ = ApplyAccessAsync(service, access, connections?.Find(linkId)?.Connector?.Devices.Current); },
             // A newer policy: a stop of the kill switch ends the work of the fleet here and refuses more, until a version lifts it.
             PolicyChanged = (_, _) => { _ = ApplyPolicyAsync(service, node.Automations); },
             // Access read again: the providers of the teams and of the organization this machine runs with, their keys opened here.
@@ -525,11 +526,11 @@ internal sealed class NodeServers : IAsyncDisposable
     }
 
     // Applied beside the connection that verified the document; a failure is logged, the next version applies again.
-    private static async Task ApplyAccessAsync(FleetNodeService service, CodeAlta.Fleet.Protocol.FleetAccessState access)
+    private static async Task ApplyAccessAsync(FleetNodeService service, CodeAlta.Fleet.Protocol.FleetAccessState access, CodeAlta.Fleet.Protocol.FleetDeviceListState? devices)
     {
         try
         {
-            await service.ApplyAccessAsync(access, CancellationToken.None).ConfigureAwait(false);
+            await service.ApplyAccessAsync(access, devices, CancellationToken.None).ConfigureAwait(false);
         }
         catch (Exception exception) when (exception is IOException or InvalidOperationException or ObjectDisposedException)
         {

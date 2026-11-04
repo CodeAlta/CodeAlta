@@ -386,7 +386,9 @@ internal sealed class FleetAutomationService
 
         if (held is null)
         {
-            if (!string.Equals(machine.OwnerPersonId, person, StringComparison.Ordinal))
+            // A personal machine given to another person is theirs, whom the device list does not name.
+            var machineOwner = snapshot?.Owner(FleetResourceKinds.Machine, machine.Id) is { OwnerKind: FleetPrincipalKinds.Person } given ? given.OwnerId : machine.OwnerPersonId;
+            if (!string.Equals(machineOwner, person, StringComparison.Ordinal))
                 throw CoordinatorException.Forbidden(FleetErrorCodes.Forbidden, "A person gives automations to the machines they own only.");
             return null;
         }

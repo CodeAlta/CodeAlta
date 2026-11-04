@@ -158,6 +158,11 @@ event that the signed definition accepts. The first start by a new person asks t
   then on the server takes no version but a removal, and no run, from its former owner. The signed access document
   lists the owners of automations given away or of a team or the organization, and whether each waits for Resume:
   a machine that reads it takes their versions only from who answers for that owner, and runs none while it waits.
+  It also names the new owner of a personal machine given to another person, since the device list still names the person
+  who enrolled it: the machine takes its owner from the signed document (whose devices manage it, whose automations it runs),
+  never from the server's word. Once a signed version gives a machine another owner, the machine revokes the devices paired
+  with it under the former owner, except the new owner's own, and forgets the people it named: its new owner pairs and names
+  again.
 - **A person leaves** (or is deprovisioned by SCIM): their devices and delegations are revoked; what they owned in team
   or organization scopes (automations, workflow scripts, organization providers) goes to the scope's team or to a named
   successor, paused until that owner resumes it; their personal machines leave the fleet; what they shared stays

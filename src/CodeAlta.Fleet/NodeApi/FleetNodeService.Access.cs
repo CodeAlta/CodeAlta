@@ -11,6 +11,8 @@ public sealed partial class FleetNodeService
 {
     private FleetSessionPrincipals? _principals;
     private FleetNodePeople? _people;
+    // One reconciliation of the owner at a time: the links of several servers apply their documents beside each other.
+    private readonly Lock _ownerGate = new();
 
     /// <summary>Gets the people of the organization this machine names, and who asks to be let in.</summary>
     public FleetNodePeople People => LazyInitializer.EnsureInitialized(ref _people, () => new FleetNodePeople(_host.CatalogOptions.FleetRoot, _options.TimeProvider));
@@ -57,9 +59,22 @@ public sealed partial class FleetNodeService
     /// <param name="cancellationToken">Cancels before the next session is stopped.</param>
     /// <returns>The sessions stopped.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="access"/> is null.</exception>
-    public async Task<IReadOnlyList<string>> ApplyAccessAsync(FleetAccessState access, CancellationToken cancellationToken)
+    public Task<IReadOnlyList<string>> ApplyAccessAsync(FleetAccessState access, CancellationToken cancellationToken) => ApplyAccessAsync(access, null, cancellationToken);
+
+    /// <summary>
+    /// Applies a newer access document of an organization as <see cref="ApplyAccessAsync(FleetAccessState, CancellationToken)"/>
+    /// does, and, with the device list it was verified against, ends what the former owner of this machine gave once the document
+    /// says the machine has another owner (<see cref="ReconcileOwner"/>).
+    /// </summary>
+    /// <param name="access">The document, as the link verified it.</param>
+    /// <param name="devices">The device list of that link, as it verified it; null leaves the pairings as they are.</param>
+    /// <param name="cancellationToken">Cancels before the next session is stopped.</param>
+    /// <returns>The sessions stopped.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="access"/> is null.</exception>
+    public async Task<IReadOnlyList<string>> ApplyAccessAsync(FleetAccessState access, FleetDeviceListState? devices, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(access);
+        if (devices is not null) ReconcileOwner(access, devices);
         var stopped = new List<string>();
         foreach (var (sessionId, personId, organizationId) in Principals.List())
         {
@@ -84,6 +99,52 @@ public sealed partial class FleetNodeService
 
         if (stopped.Count > 0) LogInfo($"The sessions of suspended people were stopped: {string.Join(", ", stopped)}.");
         return stopped;
+    }
+
+    /// <summary>
+    /// Ends what the former owner of this machine gave, once a signed access document says it has another owner than the one its
+    /// pairings were made under (<c>doc/fleet/access-control.md</c>, ownership over time): a machine given to another person, to a
+    /// team or to the organization. The devices paired with it are revoked, but the controller devices of a person who owns it now,
+    /// who manage it through the device list anyway, and the people it named are taken out: its new owner pairs and names again.
+    /// The owner they were made under is kept in the fleet folder, the person the device list names until a document says another,
+    /// so that this happens once per change of owner, never for what the new owner pairs afterwards.
+    /// </summary>
+    /// <param name="access">The access document, as a server link verified it.</param>
+    /// <param name="devices">The device list it was verified against.</param>
+    /// <returns>The paired devices revoked.</returns>
+    /// <exception cref="ArgumentNullException">An argument is null.</exception>
+    /// <exception cref="IOException">The pairings or the owner they were made under cannot be written.</exception>
+    public IReadOnlyList<string> ReconcileOwner(FleetAccessState access, FleetDeviceListState devices)
+    {
+        ArgumentNullException.ThrowIfNull(access);
+        ArgumentNullException.ThrowIfNull(devices);
+        var self = _options.Identity.DeviceId;
+        if (access.OrganizationId is not { } organization || !devices.Members.TryGetValue(self, out var listed)) return [];
+        var person = access.TeamOf(self) is null && !access.IsOrganizationMachine(self) ? access.MachineOwner(self, devices) : null;
+        var owner = access.TeamOf(self) is { } team ? "team:" + team.Id : access.IsOrganizationMachine(self) ? "organization" : person is null ? null : "person:" + person;
+        if (owner is null) return [];
+        lock (_ownerGate) return EndWhatTheFormerOwnerGave(organization, listed, person, owner, devices);
+    }
+
+    private List<string> EndWhatTheFormerOwnerGave(string organization, FleetDeviceListMember listed, string? person, string owner, FleetDeviceListState devices)
+    {
+        var pairedUnder = new FleetPairedOwner(_host.CatalogOptions.FleetRoot);
+        var before = pairedUnder.Read(organization) ?? (listed.OwnerId is { } named ? "person:" + named : null);
+        if (string.Equals(before, owner, StringComparison.Ordinal)) return [];
+        var revoked = new List<string>();
+        foreach (var device in _trusted.List())
+        {
+            // The new owner's own controller devices manage the machine through the device list: their pairing stays.
+            if (person is not null && devices.Members.TryGetValue(device.DeviceId, out var member) && member.Kind == FleetDeviceKinds.Controller && member.OwnerId == person
+                && !devices.Removed.Contains(device.DeviceId) && string.Equals(member.Key.Fingerprint, device.Fingerprint.ToString(), StringComparison.Ordinal))
+                continue;
+            if (_trusted.Revoke(device.DeviceId)) revoked.Add(device.DeviceId);
+        }
+
+        People.Clear();
+        pairedUnder.Write(organization, owner);
+        LogInfo($"The machine has another owner ({owner}): the devices paired before were revoked ({(revoked.Count == 0 ? "none" : string.Join(", ", revoked))}), and the people it named taken out.");
+        return revoked;
     }
 
     // A device that sees its own sessions only reaches a session its person started here; others are not shown to exist.
@@ -188,6 +249,46 @@ internal sealed class FleetSessionPrincipals
     }
 }
 
+/// <summary>
+/// The owner the pairings and the people of a node were made under, by organization: a person, a team or the organization, as
+/// <see cref="FleetNodeService.ReconcileOwner"/> last read it. Kept in the fleet folder of the node.
+/// </summary>
+internal sealed class FleetPairedOwner(string fleetRoot)
+{
+    private const string FileName = "paired-owner.json";
+
+    private readonly string _path = Path.Combine(fleetRoot, FileName);
+
+    public string? Read(string organizationId)
+    {
+        try
+        {
+            return JsonSerializer.Deserialize(File.ReadAllBytes(_path), FleetSessionPrincipalJson.Default.DictionaryStringString)?.GetValueOrDefault(organizationId);
+        }
+        catch (Exception exception) when (exception is FileNotFoundException or DirectoryNotFoundException or JsonException)
+        {
+            return null;
+        }
+    }
+
+    public void Write(string organizationId, string owner)
+    {
+        Dictionary<string, string> owners;
+        try
+        {
+            owners = JsonSerializer.Deserialize(File.ReadAllBytes(_path), FleetSessionPrincipalJson.Default.DictionaryStringString) ?? new(StringComparer.Ordinal);
+        }
+        catch (Exception exception) when (exception is FileNotFoundException or DirectoryNotFoundException or JsonException)
+        {
+            owners = new(StringComparer.Ordinal);
+        }
+
+        owners[organizationId] = owner;
+        Directory.CreateDirectory(Path.GetDirectoryName(_path)!);
+        FleetFiles.WriteAtomically(_path, JsonSerializer.SerializeToUtf8Bytes(owners, FleetSessionPrincipalJson.Default.DictionaryStringString));
+    }
+}
+
 /// <summary>A session and the person who started it.</summary>
 /// <param name="SessionId">The session.</param>
 /// <param name="PersonId">The person.</param>
@@ -196,4 +297,5 @@ internal sealed record FleetSessionPrincipal(string SessionId, string PersonId, 
 
 [JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase, WriteIndented = true)]
 [JsonSerializable(typeof(List<FleetSessionPrincipal>))]
+[JsonSerializable(typeof(Dictionary<string, string>))]
 internal sealed partial class FleetSessionPrincipalJson : JsonSerializerContext;

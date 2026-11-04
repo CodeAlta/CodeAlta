@@ -289,6 +289,52 @@ public sealed class AccessControlTests
     }
 
     [TestMethod]
+    public async Task APersonalMachineGivenToAnotherPerson_IsTheirsInTheSignedDocument_WhichMachinesVerify()
+    {
+        await using var server = await ServerFixture.StartAsync();
+        using var owner = new TestDevice("Alex desktop");
+        using var node = new TestDevice("Build box");
+        var (setup, machine) = await server.SetUpWithNodeAsync(owner, node);
+        var (mia, miaId) = await AddPersonAsync(server, owner, setup, "Mia");
+        var offer = (await server.SendAsync(owner, HttpMethod.Post, "/api/v1/transfers", new OfferTransferRequest(FleetResourceKinds.Machine, machine.Id, FleetPrincipalKinds.Person,
+            miaId))).Read<TransferDto>();
+        Assert.AreEqual(HttpStatusCode.OK, (await server.SendAsync(mia, HttpMethod.Post, $"/api/v1/transfers/{offer.Id}/accept")).Status);
+
+        // The draft says it; the owner signs it; a machine that replays the chain against the device list takes Mia as the owner.
+        var draft = (await server.SendAsync(owner, HttpMethod.Get, "/api/v1/access/draft")).Read<AccessDocumentDraftDto>();
+        Assert.AreEqual((machine.Id, miaId), (draft.Document.PersonalMachines!.Single().DeviceId, draft.Document.PersonalMachines!.Single().PersonId));
+        var signed = await SignDraftAsync(server, owner);
+        Assert.AreEqual(HttpStatusCode.Created, signed.Status, signed.Body.ToString());
+        var entries =(await server.SendAsync(node, HttpMethod.Get, "/api/v1/device-list")).Read<ListResponse<DeviceListEntryDto>>().Items;
+        var devices = FleetDeviceListVerifier.VerifyOrThrow(entries.Select(static entry => entry.Entry), setup.Organization.Id);
+        var documents = (await server.SendAsync(node, HttpMethod.Get, "/api/v1/access/documents")).Read<AccessDocumentListDto>().Items;
+        var state = FleetAccessDocuments.Verify(documents.Select(static item => item.Document), devices, setup.Organization.Id);
+        Assert.IsTrue(state.IsValid, state.Reason);
+        Assert.AreEqual((setup.Owner.Id, miaId), (devices.Members[machine.Id].OwnerId, state.State.MachineOwner(machine.Id, devices)),
+            "the device list still names Alex; the signed document names Mia");
+
+        // The server gives the machine the versions of its new owner, and no more those of its former owner.
+        PutAutomationRequest Version(TestDevice signer, string id)
+        {
+            var text = FleetAutomationVersionDocuments.Serialize(new FleetAutomationVersion(FleetAutomationVersion.CurrentVersion, setup.Organization.Id, id, 1, machine.Id, false,
+                true, ["hourly"], null, null, "{\"sealed\":\"for the machine\"}", signer.DeviceId, signer.PublicKey, server.Clock.Now));
+            return new PutAutomationRequest(new FleetSignedAutomationVersion(text, signer.Sign(FleetAutomationVersionDocuments.GetSignedBytes(text))));
+        }
+
+        var byMia = await server.SendAsync(mia, HttpMethod.Put, "/api/v1/automations/mine", Version(mia, "mine"));
+        Assert.AreEqual(HttpStatusCode.OK, byMia.Status, byMia.Body.ToString());
+        Assert.AreEqual(HttpStatusCode.Forbidden, (await server.SendAsync(owner, HttpMethod.Put, "/api/v1/automations/his", Version(owner, "his"))).Status);
+
+        // Given back to Alex: the next draft leaves the machine out, and the signer reads that it goes.
+        var back = (await server.SendAsync(mia, HttpMethod.Post, "/api/v1/transfers", new OfferTransferRequest(FleetResourceKinds.Machine, machine.Id, FleetPrincipalKinds.Person,
+            setup.Owner.Id))).Read<TransferDto>();
+        Assert.AreEqual(HttpStatusCode.OK, (await server.SendAsync(owner, HttpMethod.Post, $"/api/v1/transfers/{back.Id}/accept")).Status);
+        var again = (await server.SendAsync(owner, HttpMethod.Get, "/api/v1/access/draft")).Read<AccessDocumentDraftDto>();
+        Assert.IsTrue(again.Changes);
+        Assert.IsNull(again.Document.PersonalMachines);
+    }
+
+    [TestMethod]
     public async Task AnAdminGivesAMachineOfTheOrganizationAnAutomationOfTheOrganization_AndNobodyElseGivesItAnything()
     {
         await using var server = await ServerFixture.StartAsync();

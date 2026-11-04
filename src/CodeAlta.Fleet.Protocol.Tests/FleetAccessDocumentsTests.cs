@@ -171,6 +171,49 @@ public sealed class FleetAccessDocumentsTests
     }
 
     [TestMethod]
+    public void APersonalMachineGivenToAnotherPerson_IsSignedInTheDocument_AndItsNewOwnerDecidesThere()
+    {
+        using var world = new World();
+        Assert.IsFalse(FleetAccessDocuments.Serialize(Document(1, null, 4, owners: ["alex"])).Contains("personalMachines", StringComparison.Ordinal),
+            "no machine given away: the format as before");
+        var chain = new List<FleetSignedAccessDocument> { world.Founder.Sign(Document(1, null, 4, owners: ["alex"], signers: ["ada"])) };
+        var before = FleetAccessDocuments.Verify(chain, world.Devices, Organization).State;
+        Assert.AreEqual("alex", before.MachineOwner(world.Node.Id, world.Devices), "the device list names the owner until a version says another");
+        Assert.AreEqual("alex", FleetAccessState.OwnerOfMachine(null, world.Node.Id, world.Devices), "and before any version");
+
+        var after = Document(2, Hash(chain), 4, owners: ["alex"], signers: ["ada"]) with { PersonalMachines = [new FleetAccessPersonalMachine(world.Node.Id, "bea")] };
+        CollectionAssert.AreEqual(new[] { "Build box is Bea's: their devices manage it, and it runs their automations" },
+            FleetAccessDocuments.Describe(before, after, id => id == world.Node.Id ? "Build box" : id == "bea" ? "Bea" : null).ToArray());
+        Assert.IsFalse(FleetAccessDocuments.SaySame(before, after), "a signer is never told nothing changes");
+        chain.Add(world.Ada.Sign(after));
+        var state = FleetAccessDocuments.Verify(chain, world.Devices, Organization).State;
+        Assert.AreEqual("bea", state.MachineOwner(world.Node.Id, world.Devices));
+        Assert.IsTrue(FleetAccessDocuments.SaySame(state, after));
+        Assert.IsNull(FleetAutomationVersionDocuments.CheckAccess("bea", world.Node.Id, world.Devices, state), "the machine runs the automations of its new owner");
+        Assert.IsNotNull(FleetAutomationVersionDocuments.CheckAccess("alex", world.Node.Id, world.Devices, state), "and no more those of the person the device list names");
+
+        // Given back: the signer reads that the mapping goes.
+        CollectionAssert.AreEqual(new[] { "Build box is no longer Bea's: the person the device list names for it owns it again" },
+            FleetAccessDocuments.Describe(state, Document(3, Hash(chain), 4, owners: ["alex"], signers: ["ada"]), id => id == world.Node.Id ? "Build box" : id == "bea" ? "Bea" : null)
+                .ToArray());
+
+        // What a version says of personal machines holds: each once, with its person, never also a team's or the organization's.
+        Assert.IsTrue(FleetDevicePublicKey.TryParse(world.Ada.PublicKey, out var adaKey));
+        foreach (var (wrong, why) in new (FleetAccessDocument, string)[]
+        {
+            (after with { PersonalMachines = [new(world.Node.Id, "bea"), new(world.Node.Id, "ada")] }, "a personal machine is named twice, or does not name its person"),
+            (after with { PersonalMachines = [new(world.Node.Id, "")] }, "a personal machine is named twice, or does not name its person"),
+            (after with { PersonalMachines = [new(world.Node.Id, "bea")], OrganizationMachines = [world.Node.Id] }, "a machine is both a person's and a team's or the organization's"),
+            (after with { PersonalMachines = [new(world.Node.Id, "bea")], Teams = [Team("t1", ["ada"], [])], Machines = [new FleetAccessMachine(world.Node.Id, "t1")] },
+                "a machine is both a person's and a team's or the organization's"),
+        })
+        {
+            Assert.IsFalse(FleetAccessDocuments.TryReadSigned(world.Ada.Sign(wrong), adaKey, out _, out var reason));
+            Assert.AreEqual(why, reason);
+        }
+    }
+
+    [TestMethod]
     public void TheDocumentSaysWhoOwnsAnAutomationGivenAway_AndItsFormerOwnerGivesItNothingButItsRemoval()
     {
         using var world = new World();
