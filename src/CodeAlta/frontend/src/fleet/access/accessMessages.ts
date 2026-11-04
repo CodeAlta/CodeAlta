@@ -184,7 +184,7 @@ export const fleetAccessMessages = {
   "See statistics per person": ["Ver estadísticas por persona", "Voir les statistiques par personne", "Statistiken pro Person sehen", "ユーザー別の統計を表示", "查看按人员统计"],
   "Read the audit log": ["Leer el registro de auditoría", "Lire le journal d’audit", "Audit-Protokoll lesen", "監査ログを閲覧", "读取审计日志"],
   "Read the log of a machine": ["Leer el registro de una máquina", "Lire le journal d’une machine", "Protokoll einer Maschine lesen", "マシンのログを閲覧", "读取机器日志"],
-  "See a session and its title": ["Ver una sesión y su título", "Voir une session et son titre", "Eine Sitzung und ihren Titel sehen", "セッションとそのタイトルを表示", "查看会话及其标题"],
+  "Read a session": ["Leer una sesión", "Lire une session", "Eine Sitzung lesen", "セッションを閲覧", "阅读会话"],
   "New identity…": ["Nueva identidad…", "Nouvelle identité…", "Neue Identität…", "新しい ID…", "新建身份…"],
   "Belongs to": ["Pertenece a", "Appartient à", "Gehört zu", "所属", "属于"],
   "No service identity yet.": ["Aún no hay identidades de servicio.", "Aucune identité de service pour l’instant.", "Noch keine Dienstidentität.", "まだサービス ID はありません。", "尚无服务身份。"],

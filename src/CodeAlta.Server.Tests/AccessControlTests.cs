@@ -115,6 +115,9 @@ public sealed class AccessControlTests
         var active = await server.SendAsync(owner, HttpMethod.Post, $"/api/v1/grants/{pending.Id}/keys", keys);
         Assert.AreEqual(HttpStatusCode.OK, active.Status, active.Body.ToString());
         Assert.AreEqual(FleetGrantStatuses.Active, active.Read<GrantDto>().Status);
+        // The machine of the session lets the grantee read its conversation once the access document names them.
+        StringAssert.Contains((await server.SendAsync(owner, HttpMethod.Get, "/api/v1/access/draft")).Body.ToString(),
+            "\"readers\":[{\"session\":\"s1\",\"people\":[\"" + maxId + "\"]}]");
         var given = (await server.SendAsync(max, HttpMethod.Get, "/api/v1/grant-keys")).Read<AccessListDto<GrantKeyDto>>().Items.Single();
         Assert.AreEqual((pending.Id, "s1", machine.Id, "sealed", "wrapped"), (given.GrantId, given.SessionId, given.MachineId, given.Sealed, given.Wrapped));
         Assert.AreEqual(0, (await server.SendAsync(mia, HttpMethod.Get, "/api/v1/grant-keys")).Read<AccessListDto<GrantKeyDto>>().Items.Count, "nothing for another person");

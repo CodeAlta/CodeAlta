@@ -94,6 +94,45 @@ public sealed class NamedPeopleTests
         Assert.AreEqual(0, (await fixture.Service.ApplyAccessAsync(FleetAccessState.Empty with { OrganizationId = "globex", Suspended = ["bea"] }, token)).Count);
     }
 
+    [TestMethod]
+    public async Task APersonGrantedTheContentOfASession_ReadsItsConversationOnItsMachine_AndNothingElse()
+    {
+        var token = TestContext.CancellationToken;
+        await using var fixture = await FleetNodeFixture.StartAsync(token);
+        using var beaKey = DeviceIdentity.LoadOrCreate(Path.Combine(fixture.Root, "bea"));
+        using var otherKey = DeviceIdentity.LoadOrCreate(Path.Combine(fixture.Root, "globex-bea"));
+        var acme = new OtherPeople("acme") { [beaKey.Fingerprint] = ("bea", beaKey.DeviceId) };
+        var globex = new OtherPeople("globex") { [otherKey.Fingerprint] = ("bea", otherKey.DeviceId) };
+        FleetCreateSessionResult shared, other;
+        await using (var owner = await FleetNodeClient.ConnectAsync(await fixture.PairViewerAsync(token), fixture.ViewerIdentity, token))
+        {
+            shared = await owner.CreateSessionAsync(new FleetCreateSessionParams(Title: "Fix the parser", Prompt: "Find the bug."), "create-shared", token);
+            other = await owner.CreateSessionAsync(new FleetCreateSessionParams(Title: "Not shared"), "create-other", token);
+            var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(30);
+            while ((await owner.ReadHistoryAsync(new FleetHistoryParams(shared.SessionId), token)).Entries.Count == 0 && DateTime.UtcNow < deadline) await Task.Delay(100, token);
+        }
+
+        // The signed access document of Acme grants Bea the content of the first session: she reads it, and nothing else.
+        var grants = new HashSet<(string?, string, string)> { ("acme", "bea", shared.SessionId) };
+        fixture.Service.ContentGrants = (organization, person, session) => grants.Contains((organization, person, session));
+        await using (var bea = await ConnectAsync(fixture, acme, beaKey, token))
+        {
+            var history = await bea.ReadHistoryAsync(new FleetHistoryParams(shared.SessionId), token);
+            Assert.IsTrue(history.Entries.Any(static entry => entry.Text?.Contains("Find the bug.", StringComparison.Ordinal) == true), "the grantee reads the conversation");
+            Assert.AreEqual(shared.SessionId, (await bea.GetSessionStateAsync(shared.SessionId, token)).SessionId);
+            var hidden = await Assert.ThrowsExactlyAsync<FleetException>(() => bea.ReadHistoryAsync(new FleetHistoryParams(other.SessionId), token));
+            Assert.AreEqual(FleetErrorCodes.Forbidden, hidden.Error.Code, "another session is not hers to read");
+            await Assert.ThrowsExactlyAsync<FleetException>(() => bea.SendAsync(shared.SessionId, "go on", retryKey: "send-bea", cancellationToken: token), "reading is not driving");
+        }
+
+        // Globex's Bea is another person; and once the grant is gone, Acme's Bea reads nothing.
+        await using (var impostor = await ConnectAsync(fixture, globex, otherKey, token))
+            await Assert.ThrowsExactlyAsync<FleetException>(() => impostor.ReadHistoryAsync(new FleetHistoryParams(shared.SessionId), token));
+        grants.Clear();
+        await using (var bea = await ConnectAsync(fixture, acme, beaKey, token))
+            await Assert.ThrowsExactlyAsync<FleetException>(() => bea.ReadHistoryAsync(new FleetHistoryParams(shared.SessionId), token));
+    }
+
     private static async Task<FleetNodeClient> ConnectAsync(FleetNodeFixture fixture, IDeviceTrustPolicy trust, DeviceIdentity identity, CancellationToken token)
     {
         using var listener = new TcpListener(IPAddress.Loopback, 0);

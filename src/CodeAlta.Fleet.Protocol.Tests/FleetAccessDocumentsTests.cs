@@ -344,6 +344,30 @@ public sealed class FleetAccessDocumentsTests
         Assert.IsFalse(FleetAccessDocuments.Verify([.. chain, world.Ada.Sign(suspended)], world.Devices, Organization).IsValid);
     }
 
+    [TestMethod]
+    public void TheDocumentNamesWhoReadsTheConversationOfASession_UntilTheirGrantEnds()
+    {
+        using var world = new World();
+        var chain = new List<FleetSignedAccessDocument> { world.Founder.Sign(Document(1, null, 4, owners: ["alex"], signers: ["ada"])) };
+        var before = FleetAccessDocuments.Verify(chain, world.Devices, Organization).State;
+        var until = new DateTimeOffset(2026, 12, 1, 0, 0, 0, TimeSpan.Zero);
+        var after = Document(2, Hash(chain), 4, owners: ["alex"], signers: ["ada"]) with
+        {
+            Readers = [new FleetAccessReaders("s1", ["bea", "cy"]) { Until = new Dictionary<string, DateTimeOffset> { ["cy"] = until } }],
+        };
+        CollectionAssert.AreEqual(new[] { "Bea reads the conversation of the session Fix the parser", "cy reads the conversation of the session Fix the parser until 2026-12-01 00:00:00Z" },
+            FleetAccessDocuments.Describe(before, after, id => id switch { "bea" => "Bea", "s1" => "Fix the parser", _ => null }).ToArray());
+        chain.Add(world.Ada.Sign(after));
+        var state = FleetAccessDocuments.Verify(chain, world.Devices, Organization).State;
+        Assert.IsTrue(state.Reads("s1", "bea", until.AddYears(1)), "a grant with no end");
+        Assert.IsTrue(state.Reads("s1", "cy", until.AddDays(-1)));
+        Assert.IsFalse(state.Reads("s1", "cy", until), "not from its end");
+        Assert.IsFalse(state.Reads("s2", "bea", until), "that session only");
+        Assert.IsFalse(FleetAccessDocuments.SaySame(state, Document(3, Hash(chain), 4, owners: ["alex"], signers: ["ada"])));
+        var suspended = Document(3, Hash(chain), 4, owners: ["alex"], signers: ["ada"], suspended: ["bea"]) with { Readers = [new FleetAccessReaders("s1", ["bea"])] };
+        Assert.IsFalse(FleetAccessDocuments.Verify([.. chain, world.Ada.Sign(suspended)], world.Devices, Organization).IsValid, "a suspended person reads nothing");
+    }
+
     private static string Hash(IReadOnlyList<FleetSignedAccessDocument> chain) => FleetAccessDocuments.Hash(chain[^1]);
 
     private static FleetAccessTeam Team(string id, IReadOnlyList<string> maintainers, IReadOnlyList<string> members) => new(id, maintainers, members, false);

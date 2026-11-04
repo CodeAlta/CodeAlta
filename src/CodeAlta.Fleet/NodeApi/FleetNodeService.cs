@@ -484,7 +484,10 @@ public sealed partial class FleetNodeService : IAsyncDisposable
 
         async ValueTask<JsonElement?> HandleAsync(FleetRequestContext context, CancellationToken cancellationToken)
         {
-            var device = Authorize(caller, access);
+            // A person granted the content of a session reads it live here (its state, its history, what it does), and nothing else.
+            var granted = method is FleetNodeMethods.SessionsState or FleetNodeMethods.SessionsHistory or FleetNodeMethods.SessionsWatch
+                ? ContentReader(caller, context.Params) : null;
+            var device = granted?.Device ?? Authorize(caller, access);
             TParams? parameters;
             try
             {
@@ -504,7 +507,9 @@ public sealed partial class FleetNodeService : IAsyncDisposable
             // On a team machine a person reaches only the sessions they started here; the moves of the machine are not theirs to read.
             if (device is { OwnSessionsOnly: true } && method == FleetNodeMethods.MovesList)
                 throw new FleetException(FleetErrorCodes.Forbidden, null, "The moves of a team machine are for its owner's devices.");
-            RequireOwnSession(device, parameters);
+            if (granted is null) RequireOwnSession(device, parameters);
+            else if (SessionIdOf(parameters) != granted.Value.SessionId)
+                throw new FleetException(FleetNodeErrorCodes.SessionNotFound, null, "No session of yours has this id on this machine.");
 
             TResult result;
             try

@@ -114,6 +114,44 @@ internal sealed partial class AccessService
     internal Task<IReadOnlyList<FleetAccessApprovers>> DocumentRunnersAsync(string organizationId, AccessSnapshot snapshot, CancellationToken cancellationToken)
         => DocumentPeopleAsync(organizationId, snapshot, AccessPolicy.RunnersWithEnds, cancellationToken);
 
+    /// <summary>
+    /// Lists, for the signed access document, who reads the conversation of each session on the machine that holds it: the
+    /// people of the active grants of <c>session.view-content</c> on it (a person, or the active people of a team), each with
+    /// the latest end of their grants, or none.
+    /// </summary>
+    /// <param name="snapshot">The access of the organization.</param>
+    /// <returns>The readers by session, in a stable order; empty for none.</returns>
+    internal IReadOnlyList<FleetAccessReaders> DocumentReaders(AccessSnapshot snapshot)
+    {
+        ArgumentNullException.ThrowIfNull(snapshot);
+        const string SessionScope = "session:";
+        var now = _time.GetUtcNow();
+        var bySession = new SortedDictionary<string, SortedDictionary<string, DateTimeOffset?>>(StringComparer.Ordinal);
+        foreach (var grant in snapshot.Grants.Where(grant => grant.Status == FleetGrantStatuses.Active && grant.Capability == "session.view-content"
+                     && grant.ScopeKind == FleetScopeKinds.Resource && grant.ScopeId is { } scope && scope.StartsWith(SessionScope, StringComparison.Ordinal) && !(grant.ExpiresAt <= now)))
+        {
+            var session = grant.ScopeId![SessionScope.Length..];
+            IEnumerable<string> people = grant.SubjectKind switch
+            {
+                FleetPrincipalKinds.Person => [grant.SubjectId],
+                FleetPrincipalKinds.Team => snapshot.Members.Where(member => member.TeamId == grant.SubjectId).Select(static member => member.PersonId),
+                _ => [],
+            };
+            foreach (var person in people.Where(person => snapshot.Person(person) is { IsActive: true }))
+            {
+                if (!bySession.TryGetValue(session, out var readers)) bySession[session] = readers = new(StringComparer.Ordinal);
+                readers[person] = !readers.TryGetValue(person, out var held) ? grant.ExpiresAt
+                    : held is null || grant.ExpiresAt is null ? null : grant.ExpiresAt > held ? grant.ExpiresAt : held;
+            }
+        }
+
+        return [.. bySession.Select(static pair =>
+        {
+            var ends = pair.Value.Where(static reader => reader.Value is not null).ToDictionary(static reader => reader.Key, static reader => reader.Value!.Value, StringComparer.Ordinal);
+            return new FleetAccessReaders(pair.Key, [.. pair.Value.Keys]) { Until = ends.Count > 0 ? ends : null };
+        })];
+    }
+
     // The people the access document names for each automation the server holds, besides who placed it, with their ends.
     private async Task<IReadOnlyList<FleetAccessApprovers>> DocumentPeopleAsync(string organizationId, AccessSnapshot snapshot,
         Func<AccessSnapshot, AccessTarget, DateTimeOffset, IReadOnlyList<(string PersonId, DateTimeOffset? Until)>> holders, CancellationToken cancellationToken)
