@@ -302,6 +302,49 @@ internal sealed partial class NodeAutomations : IFleetNodeAutomations, IAutomati
             ? ServerPolicy?.Invoke(via) is { Number: > 0 } signed ? signed.Rules : null
             : Policy?.RulesFor(spaceId);
 
+    /// <summary>
+    /// Applies the signed policies to the runs under way: a run that ran longer than the policy of its space allows is stopped.
+    /// The node calls it on a timer, so that the policy it holds reaches runs whatever started them and whenever.
+    /// </summary>
+    /// <param name="cancellationToken">Cancels before the next run is stopped.</param>
+    /// <returns>The sessions stopped.</returns>
+    internal async Task<IReadOnlyList<string>> EnforcePolicyAsync(CancellationToken cancellationToken)
+    {
+        if (Policy is null && ServerPolicy is null) return [];
+        var now = _options.TimeProvider.GetUtcNow();
+        var stopped = new List<string>();
+        IReadOnlyList<SpaceDescriptor>? spaces = null;
+        foreach (var run in Engine.Runs(null, 500))
+        {
+            if (run.Status is not (AutomationRun.Running or AutomationRun.Waiting or AutomationRun.Held) || run.SessionId is not { } sessionId) continue;
+            if (Engine.Snapshot.Find(run.AutomationId) is not { } entry) continue;
+            // The space of the run, as its runner chose it: the one of its project, the default one otherwise.
+            spaces ??= await _host.SpaceCatalog.LoadAsync(cancellationToken).ConfigureAwait(false);
+            var project = entry.ProjectId is { } projectId ? await _host.ProjectCatalog.GetByIdAsync(projectId, cancellationToken).ConfigureAwait(false) : null;
+            var spaceId = SpaceCatalog.ResolveSessionSpace(null, project, spaces);
+            if (RulesOf(entry, spaceId)?.MaxSessionMinutes is not { } minutes || now - run.StartedAt <= TimeSpan.FromMinutes(minutes)) continue;
+            if (await StopAsync(sessionId, "The policy of the organization stops a run after the longest time of a session.", cancellationToken).ConfigureAwait(false))
+                stopped.Add(sessionId);
+        }
+
+        if (stopped.Count > 0 && LogManager.IsInitialized) _logger.Info($"Runs past the longest time of their policy were stopped: {string.Join(", ", stopped)}.");
+        return stopped;
+    }
+
+    private async Task<bool> StopAsync(string sessionId, string reason, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await _host.RuntimeService.AbortTreeAsync(sessionId, reason, cancellationToken).ConfigureAwait(false);
+            return true;
+        }
+        catch (Exception exception) when (exception is InvalidOperationException or KeyNotFoundException or IOException)
+        {
+            if (LogManager.IsInitialized) _logger.Warn($"The run of session {sessionId} could not be stopped by the policy: {exception.Message}");
+            return false;
+        }
+    }
+
     /// <summary>Gets or sets the signed policies of the servers of the node: a stop refuses every run; null while it joined none.</summary>
     internal FleetPolicyGuard? Policy { get; set; }
 

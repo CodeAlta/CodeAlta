@@ -451,14 +451,14 @@ internal sealed class NodeServers : IAsyncDisposable
         // The policies kept apply from the start, whether the servers answer or not.
         _ = ApplyPolicyAsync(service, node.Automations);
         var servers = new NodeServers(identity, source, connections, statistics, secrets) { Health = health };
-        if (service is not null) servers.WatchSessionLength(service);
+        servers.WatchPolicy(service, node.Automations);
         return servers;
     }
 
     private readonly CancellationTokenSource _stopping = new();
 
-    // The longest time a policy gives a session of the fleet, checked every half minute.
-    private void WatchSessionLength(FleetNodeService service)
+    // The longest time a policy gives a session of the fleet, and the runs of automations, checked every half minute.
+    private void WatchPolicy(FleetNodeService? service, NodeAutomations? automations)
         => _ = Task.Run(async () =>
         {
             using var timer = new PeriodicTimer(TimeSpan.FromSeconds(30));
@@ -468,7 +468,8 @@ internal sealed class NodeServers : IAsyncDisposable
                 {
                     try
                     {
-                        await service.EnforceSessionLengthAsync(_stopping.Token).ConfigureAwait(false);
+                        if (service is not null) await service.EnforceSessionLengthAsync(_stopping.Token).ConfigureAwait(false);
+                        if (automations is not null) await automations.EnforcePolicyAsync(_stopping.Token).ConfigureAwait(false);
                     }
                     catch (Exception exception) when (exception is IOException or InvalidOperationException or ObjectDisposedException)
                     {

@@ -197,6 +197,38 @@ public sealed class NodeAutomationTests
         Assert.AreNotEqual(AutomationRun.Failed, allowed.Status, allowed.Message);
     }
 
+    // The longest time of a session in the policy reaches the runs of automations.
+    [TestMethod]
+    public async Task TheLongestTime_EndsTheRunsUnderWay()
+    {
+        var token = TestContext.CancellationToken;
+        using var root = new NodeTestRoot();
+        var clock = new NodeClock { Now = Noon };
+        var provider = new ScriptedNodeProvider();
+        await using var fixture = await AutomationFixture.StartAsync(root, provider, clock, token);
+        var machine = await fixture.PairAsync(DevicePermissions.View | DevicePermissions.Start | DevicePermissions.Automate, token);
+        await using var client = await FleetNodeClient.ConnectAsync(machine, fixture.ViewerIdentity, token);
+        await client.PutAutomationAsync(fixture.Signed(Definition("Long", "Work a while."), 1), cancellationToken: token);
+        var policy = FleetPolicyState.Empty with { Number = 1, LastHash = "h1", Rules = new FleetPolicyRules(MaxSessionMinutes: 1) };
+        var automations = fixture.Node.Automations!;
+        automations.Policy = new FleetPolicyGuard(fixture.Fleet.DeviceId, () => [new FleetPolicySource("https://fleet.example", policy, null, static _ => true)]);
+
+        async Task<string> RunUnderWayAsync()
+        {
+            var started = new TaskCompletionSource();
+            provider.Turns.Enqueue(ScriptedNodeProvider.WaitThenReply(new TaskCompletionSource().Task, "Never.", started));
+            var run = await client.RunAutomationAsync(Id, cancellationToken: token);
+            await started.Task.WaitAsync(Patience, token);
+            return (await WaitForAsync(() => Task.FromResult(automations.Engine.Runs(Id, 10).FirstOrDefault(candidate => candidate.Id == run.Id && candidate.SessionId is not null)),
+                token)).SessionId!;
+        }
+
+        var first = await RunUnderWayAsync();
+        Assert.AreEqual(0, (await automations.EnforcePolicyAsync(token)).Count, "within its time it goes on");
+        clock.Now = Noon.AddMinutes(2);
+        CollectionAssert.AreEqual(new[] { first }, (await automations.EnforcePolicyAsync(token)).ToArray(), "past its longest time it is stopped");
+    }
+
     [TestMethod]
     public async Task Put_RefusesCommandTriggers_UnknownRepositories_AndInvalidDefinitions()
     {
