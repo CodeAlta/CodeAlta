@@ -284,6 +284,33 @@ public sealed partial class FleetServerClient
             Body(signed, FleetSignInJsonContext.Default.FleetSignedSignInApproval), FleetSignInJsonContext.Default.SignInApprovalDto, cancellationToken).ConfigureAwait(false);
     }
 
+    /// <summary>
+    /// Approves a link this device asks for with the recovery key of its person: the key of the recovery key in the device
+    /// list, which the words make here, signs the digest of the link; the words never leave this device, as in a recovery.
+    /// </summary>
+    /// <param name="approval">The approval this device asked for (<see cref="RequestLinkApprovalAsync"/>).</param>
+    /// <param name="key">The recovery key, from the words the person kept.</param>
+    /// <param name="cancellationToken">Cancels the call.</param>
+    /// <returns>The approval, approved.</returns>
+    /// <exception cref="ArgumentNullException">An argument is null.</exception>
+    /// <exception cref="InvalidOperationException">The link does not have the digest the server gives: nothing was signed.</exception>
+    /// <exception cref="FleetServerException">The server refused: not the recovery key of the person who links (<c>forbidden</c>), too many attempts, or an approval of another link.</exception>
+    /// <exception cref="HttpRequestException">The server does not answer.</exception>
+    public async Task<SignInLinkApprovalDto> ApproveLinkWithRecoveryKeyAsync(SignInLinkApprovalDto approval, FleetRecoveryKey key, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(approval);
+        ArgumentNullException.ThrowIfNull(key);
+        var organization = await GetOrganizationAsync(cancellationToken).ConfigureAwait(false);
+        var digest = FleetSignInApprovals.LinkDigest(organization.Id, approval.RequesterDeviceId, approval.Method);
+        if (!string.Equals(digest, approval.Digest, StringComparison.Ordinal) || approval.RequesterDeviceId != DeviceId)
+            throw new InvalidOperationException("The link shown is not the one the server would approve: nothing was signed.");
+        using var recovery = key.CreateIdentity();
+        var payload = FleetSignInApprovals.Serialize(new FleetSignInApproval(1, organization.Id, approval.Id, approval.RequesterDeviceId, digest, recovery.DeviceId, Now()));
+        var signed = new FleetSignedSignInApproval(payload, Base64Url.EncodeToString(recovery.SignData(FleetSignInApprovals.GetSignedBytes(payload))));
+        return await SendAsync(HttpMethod.Post, $"api/v1/sign-in/link-approvals/{Uri.EscapeDataString(approval.Id)}/recovery-key",
+            Body(signed, FleetSignInJsonContext.Default.FleetSignedSignInApproval), FleetSignInJsonContext.Default.SignInLinkApprovalDto, cancellationToken).ConfigureAwait(false);
+    }
+
     /// <summary>Lists the sign-in methods and passkeys linked to the person of this device.</summary>
     /// <param name="cancellationToken">Cancels the call.</param>
     /// <returns>The logins.</returns>

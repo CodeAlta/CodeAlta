@@ -125,6 +125,8 @@ const api: FleetServerApi = {
   },
   linkSignIn: async (request: FleetSignInLinkRequest, options?: { signal?: AbortSignal }) => {
     calls.push(JSON.stringify({ linkSignIn: request.method, ...(request.confirmWith ? { confirmWith: request.confirmWith } : {}) }));
+    // As the host: the words of the recovery key are checked here, never sent on.
+    if (request.confirmWith === "recovery" && request.recoveryWords !== recoveryWords) return { status: "recovery.refused", message: null };
     if (request.method === "github") {
       while (!options?.signal?.aborted) await new Promise(resolve => setTimeout(resolve, 20));
       calls.push(JSON.stringify({ linkCancelled: request.method }));

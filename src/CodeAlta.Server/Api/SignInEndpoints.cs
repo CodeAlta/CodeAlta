@@ -114,6 +114,13 @@ internal static class SignInEndpoints
             .Produces<SignInLinkApprovalDto>()
             .WithSummary("Approves a link of a way to sign in that another device of the caller's person asks for, with the approval the caller signed.");
 
+        signIn.MapPost("/link-approvals/{id}/recovery-key", async (string id, FleetSignedSignInApproval? request, HttpContext context, SignInService service) =>
+                Results.Json(await service.ApproveLinkWithRecoveryKeyAsync(id, request, ApiEndpoints.Origin(context), context.RequestAborted).ConfigureAwait(false),
+                    FleetSignInJsonContext.Default.SignInLinkApprovalDto))
+            .WithMetadata(new AllowUnknownDeviceAttribute(), new RateLimitedAttribute(RateLimitedActions.Recover))
+            .Produces<SignInLinkApprovalDto>()
+            .WithSummary("Approves a link of a way to sign in with the recovery key of the person who links, which signed the approval; the request names no device.");
+
         signIn.MapPost("/settings/approvals/{id}/approve", (string id, FleetSignedSignInApproval? request, HttpContext context, SignInService service) =>
                 AuditedAsync(context, "sign_in.approval.approve", actor => service.ApproveAsync(actor, id, request, ApiEndpoints.Origin(context), context.RequestAborted),
                     FleetSignInJsonContext.Default.SignInApprovalDto))

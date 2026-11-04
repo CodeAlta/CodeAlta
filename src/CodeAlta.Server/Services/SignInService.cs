@@ -131,6 +131,9 @@ public sealed class SignInService : IDisposable
     /// <summary>Gets the access control that applies the role the groups give, or null where nothing applies it.</summary>
     internal AccessService? Access { get; init; }
 
+    /// <summary>Gets the limits of the attempts in the name of a person (a recovery key that approves a link); null for none.</summary>
+    internal AuthenticationRateLimiter? RateLimiter { get; init; }
+
     /// <summary>Gets the reverse proxies the server trusts, whose forwarded scheme names the address of its passkey page; null for none.</summary>
     internal Hosting.TrustedProxies? Proxies { get; init; }
 
@@ -1124,6 +1127,54 @@ public sealed class SignInService : IDisposable
         approval.ApprovedBy = actor.Id;
         await _store.AppendAuditAsync(origin.Audit("sign_in.link_approval.approve", actor, approval.RequesterDeviceId,
             details: $"{{\"method\":\"{approval.Method}\",\"signature\":\"{signed.Signature}\"}}"), cancellationToken).ConfigureAwait(false);
+        return ToDto(approval);
+    }
+
+    /// <summary>
+    /// Approves a link with the recovery key of the person who links, on the computer that has its words: the approval is
+    /// signed by the key of the recovery key in the device list, which the words make on that computer and never send (as
+    /// a recovery does). For a person with one computer, who has no other device to approve on. The request names no
+    /// device; its attempts count as recoveries, per address and per person.
+    /// </summary>
+    /// <param name="id">The approval.</param>
+    /// <param name="signed">The approval the recovery key signed.</param>
+    /// <param name="origin">Where it comes from.</param>
+    /// <param name="cancellationToken">Cancels the operation.</param>
+    /// <returns>The approval, approved.</returns>
+    /// <exception cref="CoordinatorException">
+    /// No link waits with that id, too many attempts were made in the name of its person, the signer is not the approved
+    /// recovery key of that person, or the signed approval is not of this link or not of now.
+    /// </exception>
+    public async Task<SignInLinkApprovalDto> ApproveLinkWithRecoveryKeyAsync(string id, FleetSignedSignInApproval? signed, RequestOrigin origin,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(origin);
+        const string Action = "sign_in.link_approval.recovery_key";
+        if (_attempts.FindLinkApproval(id) is not { } approval)
+            throw CoordinatorException.NotFound(SignInErrorCodes.AttemptInvalid, "No link waits for an approval with this id: it was used, or it expired.");
+        if (RateLimiter is { } limiter) await limiter.RequirePersonAsync(RateLimitedActions.Recover, approval.PersonId, origin, _store).ConfigureAwait(false);
+        async Task<CoordinatorException> RefusedAsync(CoordinatorException refusal, string? signer)
+        {
+            await _store.AppendAuditAsync(new AuditEntry(Action, refusal.Code, approval.PersonId, signer, approval.RequesterDeviceId, origin.SourceAddress, origin.RequestId),
+                CancellationToken.None).ConfigureAwait(false);
+            return refusal;
+        }
+
+        if (signed is null || string.IsNullOrEmpty(signed.Signature) || !FleetSignInApprovals.TryParse(signed.Payload, out var parsed))
+            throw await RefusedAsync(Invalid("The approval does not read."), null).ConfigureAwait(false);
+        // Only the recovery key of the person who links, still in the device list: no other person's, and no other device.
+        var signer = await _store.GetDeviceAsync(parsed.SignerDeviceId, cancellationToken).ConfigureAwait(false);
+        if (signer is not { Kind: FleetDeviceKinds.Recovery, Status: DeviceStatuses.Approved } || signer.OwnerPersonId != approval.PersonId
+            || signer.OrganizationId != approval.OrganizationId || !FleetDevicePublicKey.TryParse(signer.PublicKey, out var key)
+            || !key.Verify(FleetSignInApprovals.GetSignedBytes(signed.Payload), signed.Signature))
+            throw await RefusedAsync(CoordinatorException.Forbidden(FleetErrorCodes.Forbidden, "This is not the recovery key of the person who links."), parsed.SignerDeviceId)
+                .ConfigureAwait(false);
+        if (parsed.Version != 1 || parsed.OrganizationId != approval.OrganizationId || parsed.ApprovalId != approval.Id || parsed.RequesterDeviceId != approval.RequesterDeviceId
+            || !CryptographicEquals(parsed.Digest, approval.Digest) || (parsed.Time - _time.GetUtcNow()).Duration() > TimeSpan.FromMinutes(5))
+            throw await RefusedAsync(Invalid("The approval is not of this link, or not of now."), signer.Id).ConfigureAwait(false);
+        approval.ApprovedBy = signer.Id;
+        await _store.AppendAuditAsync(new AuditEntry(Action, AuditEntry.Success, approval.PersonId, signer.Id, approval.RequesterDeviceId, origin.SourceAddress, origin.RequestId,
+            $"{{\"method\":\"{approval.Method}\",\"signature\":\"{signed.Signature}\"}}"), cancellationToken).ConfigureAwait(false);
         return ToDto(approval);
     }
 

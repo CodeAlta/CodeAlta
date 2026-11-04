@@ -1076,6 +1076,77 @@ public sealed class SignInTests
     }
 
     [TestMethod]
+    public async Task TheRecoveryKeyOfTheOwnerApprovesALinkOnTheirOnlyComputer_NoOneElsesDoes_AndFailedAttemptsAreLimited()
+    {
+        await using var server = await ServerFixture.StartAsync(configure: options => new Hosting.CoordinatorServerOptions
+        {
+            DataRoot = options.DataRoot, Urls = options.Urls, TimeProvider = options.TimeProvider, ConfigureLogging = options.ConfigureLogging,
+            EnvironmentVariable = options.EnvironmentVariable,
+            RateLimits = new AuthenticationRateLimits { RecoverPerPerson = new RateLimit(4, TimeSpan.FromMinutes(15)), PersonSlowPath = TimeSpan.FromHours(1) },
+        });
+        using var desktop = new TestDevice("Desktop");
+        using var recovery = new TestDevice("Recovery key");
+        using var stranger = new TestDevice("Not a recovery key");
+        using var key = new SoftwareAuthenticator();
+        var setup = await server.SetUpAsync(desktop);
+        var origin = server.BaseAddress.GetLeftPart(UriPartial.Authority);
+        async Task AddRecoveryKeyAsync(TestDevice device, TestDevice recoveryKey, string personId)
+        {
+            var entry = await server.NextEntryAsync(device, FleetDeviceListOperations.Add, recoveryKey.DeviceId, recoveryKey.PublicKey, FleetDeviceKinds.Recovery, personId,
+                setup.Organization.Id);
+            var added = await server.SendAsync(device, HttpMethod.Post, "/api/v1/recovery-keys", new CreateRecoveryKeyRequest(recoveryKey.PublicKey, entry, "sealed-anchor"));
+            Assert.AreEqual(HttpStatusCode.Created, added.Status, added.Body.ToString());
+        }
+
+        await AddRecoveryKeyAsync(desktop, recovery, setup.Owner.Id);
+        // Sam, another person of the organization, with a recovery key of their own.
+        var (samDevice, samId) = await AccessControlTests.AddPersonAsync(server, desktop, setup, "Sam");
+        using var sam = samDevice;
+        using var samRecovery = new TestDevice("Sam's recovery key");
+        await AddRecoveryKeyAsync(sam, samRecovery, samId);
+
+        // Days later, on the only computer of the owner, who never linked a way in: the device key alone adds none.
+        server.Clock.Advance(TimeSpan.FromDays(3));
+        Assert.AreEqual(SignInErrorCodes.FirstWayInExpired, (await server.SendAsync(desktop, HttpMethod.Post, "/api/v1/sign-in/start",
+            new StartSignInRequest(FleetSignInMethods.Passkey, desktop.PublicKey, Redirect, FleetSignInPurposes.Link))).Code);
+        var approval = (await server.SendAsync(desktop, HttpMethod.Post, "/api/v1/sign-in/link-approvals", new RequestLinkApprovalRequest(FleetSignInMethods.Passkey)))
+            .Read<SignInLinkApprovalDto>();
+        FleetSignedSignInApproval Signed(TestDevice signer, string? digest = null)
+        {
+            var payload = FleetSignInApprovals.Serialize(new FleetSignInApproval(1, setup.Organization.Id, approval.Id, desktop.DeviceId, digest ?? approval.Digest, signer.DeviceId,
+                server.Clock.Now));
+            return new FleetSignedSignInApproval(payload, signer.Sign(FleetSignInApprovals.GetSignedBytes(payload)));
+        }
+
+        // The approval is signed by the recovery key on the computer that has its words: the request names no device of the server.
+        Task<ApiAnswer> ApproveAsync(FleetSignedSignInApproval signed) => server.SendAsync(null, HttpMethod.Post, $"/api/v1/sign-in/link-approvals/{approval.Id}/recovery-key", signed);
+        Assert.AreEqual(HttpStatusCode.Forbidden, (await ApproveAsync(Signed(samRecovery))).Status, "the recovery key of another person");
+        Assert.AreEqual(HttpStatusCode.Forbidden, (await ApproveAsync(Signed(stranger))).Status, "a key that is no recovery key");
+        Assert.AreEqual(HttpStatusCode.BadRequest, (await ApproveAsync(Signed(recovery,
+            FleetSignInApprovals.LinkDigest(setup.Organization.Id, desktop.DeviceId, FleetSignInMethods.Microsoft)))).Status, "the digest of another link");
+        var approved = await ApproveAsync(Signed(recovery));
+        Assert.AreEqual(HttpStatusCode.OK, approved.Status, approved.Body.ToString());
+        Assert.AreEqual(("approved", recovery.DeviceId), (approved.Read<SignInLinkApprovalDto>().Status, approved.Read<SignInLinkApprovalDto>().ApprovedBy));
+
+        // The passkey is linked with it, once.
+        var started = await server.SendAsync(desktop, HttpMethod.Post, "/api/v1/sign-in/start",
+            new StartSignInRequest(FleetSignInMethods.Passkey, desktop.PublicKey, Redirect, FleetSignInPurposes.Link, null, approval.Id));
+        Assert.AreEqual(HttpStatusCode.OK, started.Status, started.Body.ToString());
+        var start = started.Read<StartSignInResponse>();
+        Assert.AreEqual(HttpStatusCode.OK, (await CompleteAsync(server, desktop, start, await PasskeyCeremonyAsync(server, start, "create", options => key.Create(options, origin)))).Status);
+        Assert.AreEqual(1, (await ((ISignInStore)server.Server.Store).ListPasskeysAsync(setup.Owner.Id)).Count);
+
+        // Attempts in the name of the owner are limited, as recoveries are: past the limit, the next one waits.
+        approval = (await server.SendAsync(desktop, HttpMethod.Post, "/api/v1/sign-in/link-approvals", new RequestLinkApprovalRequest(FleetSignInMethods.Microsoft)))
+            .Read<SignInLinkApprovalDto>();
+        Assert.AreEqual(HttpStatusCode.TooManyRequests, (await ApproveAsync(Signed(recovery))).Status);
+
+        var audit = (await server.SendAsync(desktop, HttpMethod.Get, "/api/v1/audit?limit=500")).Read<ListResponse<AuditRecordDto>>().Items;
+        Assert.AreEqual(1, audit.Count(static record => record.Action == "sign_in.link_approval.recovery_key" && record.Result == AuditEntry.Success));
+        Assert.AreEqual(2, audit.Count(static record => record.Action == "sign_in.link_approval.recovery_key" && record.Result == FleetErrorCodes.Forbidden));
+    }
+
+    [TestMethod]
     public async Task AConfirmationIsAFreshSignInAtTheProvider_NotTheSessionItKeeps()
     {
         await using var provider = await FakeOidcProvider.StartAsync();

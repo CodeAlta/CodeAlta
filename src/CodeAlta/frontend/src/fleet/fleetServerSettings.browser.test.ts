@@ -259,6 +259,19 @@ test("another computer of the person asks to add a way to sign in: this one appr
     await page.clickText(".fleet-sign-in-confirm-methods .bp6-button", "Approve on another of my computers");
     await page.until(`window.fleetFixture.calls.some(call => call.includes('"confirmWith":"device"'))`, "the link waits for another computer");
     assert.ok((await calls(page)).some(call => call.linkSignIn === "microsoft" && call.confirmWith === "device"));
+
+    // Or the recovery key: its words, typed here, approve the link on this computer; words that are not the key are said so.
+    await page.clickText(".fleet-server-sign-in .bp6-button", "Link…");
+    await page.until(`[...document.querySelectorAll('.bp6-menu-item')].some(item => item.textContent === 'Link Microsoft')`, "Microsoft offered again");
+    await page.clickText(".bp6-menu-item", "Link Microsoft");
+    await page.until(`[...document.querySelectorAll('.fleet-sign-in-confirm-methods .bp6-button')].some(button => button.textContent === 'Use my recovery key')`, "the recovery key offered");
+    await page.clickText(".fleet-sign-in-confirm-methods .bp6-button", "Use my recovery key");
+    await page.until(`document.querySelector('.fleet-sign-in-recovery-words input')`, "the field of the words");
+    const type = (words: string) => page.evaluate(`(() => { const input = document.querySelector('.fleet-sign-in-recovery-words input');
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(input, ${JSON.stringify(words)}); input.dispatchEvent(new Event('input', { bubbles: true })); return true; })()`);
+    await type("not the words");
+    await page.clickText(".fleet-sign-in-recovery-words .bp6-button", "Approve with my recovery key");
+    await page.until(`document.querySelector('.fleet-server-sign-in [role=alert]')?.textContent === 'These words are not a recovery key of this server.'`, "the words refused");
     assert.deepEqual(page.problems, []);
   }, options);
 });

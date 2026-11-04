@@ -379,6 +379,39 @@ internal sealed partial class DesktopFleetServers
         }
     }
 
+    /// <summary>
+    /// Approves a link from this computer with the recovery key of its person, for a person with no other computer to
+    /// approve on: the words make the key of the recovery key here, which signs the link; they never leave this computer.
+    /// </summary>
+    /// <param name="linkId">The link.</param>
+    /// <param name="method">The method to link.</param>
+    /// <param name="words">The words of the recovery key, as the person typed them.</param>
+    /// <param name="cancellationToken">Cancels the call.</param>
+    /// <returns>The id of the approval, to link with.</returns>
+    /// <exception cref="KeyNotFoundException">No such link.</exception>
+    /// <exception cref="FleetRecoveryException">The words are not a recovery key, or not the recovery key of this person at the server.</exception>
+    /// <exception cref="FleetServerException">The server refused (too many attempts, among others).</exception>
+    /// <exception cref="HttpRequestException">The server does not answer.</exception>
+    public async Task<string> ApproveLinkWithRecoveryKeyAsync(string linkId, string method, string words, CancellationToken cancellationToken)
+    {
+        if (!FleetRecoveryKey.TryParse(words, out var key)) throw new FleetRecoveryException("These words are not a recovery key.");
+        using (key)
+        {
+            using var client = Client(linkId);
+            var asked = await client.RequestLinkApprovalAsync(method, cancellationToken).ConfigureAwait(false);
+            try
+            {
+                await client.ApproveLinkWithRecoveryKeyAsync(asked, key, cancellationToken).ConfigureAwait(false);
+            }
+            catch (FleetServerException exception) when (exception.Status is HttpStatusCode.Forbidden or HttpStatusCode.Unauthorized)
+            {
+                throw new FleetRecoveryException("These words are not your recovery key at this server.", exception);
+            }
+
+            return asked.Id;
+        }
+    }
+
     /// <summary>Lists the links of ways to sign in that other computers of this computer's person ask it to approve.</summary>
     /// <param name="linkId">The link.</param>
     /// <param name="cancellationToken">Cancels the call.</param>

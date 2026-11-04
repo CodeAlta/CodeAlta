@@ -90,6 +90,20 @@ public sealed class FleetSignInLinkApprovalTests
             var linked = await desktop.LinkSignInAsync(new FleetSignInLinkRequest(epoch, linkId, "github", code.Code.Handle), token);
             Assert.AreEqual("ok", linked.Status, linked.Message);
             Assert.AreEqual(FleetSignInMethods.GitHub, (await desktop.SignInSettingsAsync(new FleetServerLinkRequest(epoch, linkId), token)).Logins.Single().Method);
+
+            // The recovery key of the person approves a link on this computer: its words make its key here.
+            var recovery = await desktop.CreateRecoveryKeyAsync(new FleetServerLinkRequest(epoch, linkId), token);
+            Assert.AreEqual("ok", recovery.Status, recovery.Message);
+            var words = recovery.Words!;
+            Assert.AreEqual("recovery.refused", (await desktop.StartSignInCodeAsync(new FleetSignInCodeRequest(epoch, "github", null, linkId, null, "recovery", null,
+                FleetRecoveryKey.Generate().Words), token)).Status, "a recovery key that is not this person's");
+            var typo = string.Join(' ', words.Split(' ').Select(static (word, index) => index == 4 ? "notaword" : word));
+            var mistyped = await desktop.StartSignInCodeAsync(new FleetSignInCodeRequest(epoch, "github", null, linkId, null, "recovery", null, typo), token);
+            Assert.AreEqual(("recovery.unknown_word", "5"), (mistyped.Status, mistyped.Message));
+            var withKey = await desktop.StartSignInCodeAsync(new FleetSignInCodeRequest(epoch, "github", null, linkId, null, "recovery", null, words), token);
+            Assert.AreEqual("ok", withKey.Status, withKey.Message);
+            github.Approve(withKey.Code!.UserCode, new FakeAccount("octo-alex", "alex@example.com", "Alex Martin", [], 4242));
+            Assert.AreEqual("ok", (await desktop.LinkSignInAsync(new FleetSignInLinkRequest(epoch, linkId, "github", withKey.Code.Handle), token)).Status);
         }
         finally
         {
