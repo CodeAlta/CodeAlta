@@ -144,7 +144,11 @@ analysis of Matrix showed a malicious server exploiting exactly that).
 
 ## Channels
 
-- **To the server**: TLS, and a proof of possession of the device key on every request.
+- **To the server**: TLS, and a proof of possession of the device key on every request. The server serves plain HTTP
+  on its loopback only, behind what terminates TLS in front of it (Tailscale Serve, Caddy, a platform), or `https://`
+  with a certificate; an `http://` address beyond the loopback is refused at the start unless its owner forces it
+  (`--allow-insecure-http`), which the desktop's **Create my server** does only for the local network chosen
+  explicitly.
 - **Between devices** (a viewer and a node, a move, a live share): TLS 1.3 inside the direct connection or the relay,
   the node's key pinned from pairing or from the signed device list, and the viewer's device proof bound to the
   channel. The relay sees ciphertext.

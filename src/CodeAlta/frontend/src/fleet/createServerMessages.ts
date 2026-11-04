@@ -125,7 +125,7 @@ export const createServerMessages = {
     "ssh で接続できる常時稼働のマシン: CodeAlta が CodeAlta Server をサービスとしてインストールし、ここから応答することを確認して、あなたを所有者にします。",
     "一台你可以用 ssh 连接的常开机器：CodeAlta 会在其上以服务方式安装 CodeAlta Server，检查它能从本机访问，并让你成为所有者。"],
   "How your machines reach it": ["Cómo llegan tus máquinas a él", "Comment vos machines l’atteignent", "Wie Ihre Maschinen ihn erreichen", "マシンからの接続方法", "你的机器如何访问它"],
-  "The local network": ["La red local", "Le réseau local", "Das lokale Netzwerk", "ローカルネットワーク", "本地网络"],
+  "The local network, not encrypted": ["La red local, sin cifrar", "Le réseau local, non chiffré", "Das lokale Netzwerk, unverschlüsselt", "ローカルネットワーク (暗号化なし)", "本地网络（未加密）"],
   "An address I put in front of it (a domain, Tailscale Serve)": ["Una dirección que pongo delante (un dominio, Tailscale Serve)", "Une adresse que je place devant (un domaine, Tailscale Serve)",
     "Eine Adresse, die ich davorsetze (eine Domain, Tailscale Serve)", "前に置くアドレス (ドメイン、Tailscale Serve)", "我在其前面设置的地址（域名、Tailscale Serve）"],
   "Address of the server": ["Dirección del servidor", "Adresse du serveur", "Adresse des Servers", "サーバーのアドレス", "服务器地址"],

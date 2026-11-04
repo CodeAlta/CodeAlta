@@ -14,8 +14,9 @@ internal sealed record SshServerSetupRequest
 
     /// <summary>
     /// Gets the address the desktop and the machines reach the server at; null for <c>http://&lt;host&gt;:&lt;port&gt;</c> on the local
-    /// network, where the server then listens on every interface. With an address (a domain, a Tailscale name), the
-    /// server stays on its loopback, behind what the person put in front of it.
+    /// network, where the server then listens on every interface in plain HTTP, which the person chose (the server is
+    /// started with <c>--allow-insecure-http</c>). With an address (a domain, a Tailscale name), the server stays on its
+    /// loopback, behind what the person put in front of it: the default of the dialog.
     /// </summary>
     public Uri? Address { get; init; }
 
@@ -172,7 +173,8 @@ internal sealed class SshServerInstaller(ISshRunner ssh, string desktopVersion)
 
         script.Append("\"$TOOLS/altaserver\" install");
         if (dataRoot is not null) script.Append(" --data-root \"$ROOT\"");
-        script.Append(" --urls ").Append(onNetwork ? $"http://0.0.0.0:{port}" : $"http://127.0.0.1:{port}").Append(" 1>&2\n");
+        // The local network is plain HTTP that the person chose: the server refuses it unless it is forced.
+        script.Append(" --urls ").Append(onNetwork ? $"http://0.0.0.0:{port} --allow-insecure-http" : $"http://127.0.0.1:{port}").Append(" 1>&2\n");
 
         script.Append("i=0\nwhile [ $i -lt ").Append((int)StartTimeout.TotalSeconds).Append(" ]; do\n");
         // "Health: ok" once it serves: status also prints "Health: no answer ..." while it starts.

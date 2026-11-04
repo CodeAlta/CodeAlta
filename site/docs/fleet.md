@@ -274,7 +274,7 @@ A CodeAlta Server shows the machines of all your computers, whether they are onl
 
 In CodeAlta Desktop, open **Settings** > **Fleet** > **Server** and click **Create my server…**. Choose where it runs:
 
-- **On a machine over SSH**, the usual place: an always-on Linux or macOS machine you reach with `ssh`. Give it as `user@host`, and how your machines reach it: **The local network** (`http://host:2586`, the server listens on every network of the machine), or **An address I put in front of it**, a domain or Tailscale Serve that forwards to the server, which then stays on the machine's own loopback. CodeAlta checks the system and .NET there, installs CodeAlta Server, starts it as a service with `altaserver install` (a `systemd --user` unit with lingering, or a LaunchAgent), checks that it answers from this computer at that address, then reads its setup code over SSH and makes you its owner. Nothing to copy.
+- **On a machine over SSH**, the usual place: an always-on Linux or macOS machine you reach with `ssh`. Give it as `user@host`, and how your machines reach it: **An address I put in front of it** (the default), a domain or Tailscale Serve that forwards to the server over HTTPS, which then stays on the machine's own loopback; or **The local network, not encrypted** (`http://host:2586`, the server listens on every network of the machine in plain HTTP), only on a network you trust. CodeAlta checks the system and .NET there, installs CodeAlta Server, starts it as a service with `altaserver install` (a `systemd --user` unit with lingering, or a LaunchAgent), checks that it answers from this computer at that address, then reads its setup code over SSH and makes you its owner. Nothing to copy.
 - **On this computer**: CodeAlta installs CodeAlta Server here, runs it as a service with `altaserver install` (see [Run a server as a service](#run-a-server-as-a-service)), so that it starts again after a restart, and makes you its owner.
 - **It runs already**: a server you started with `altaserver run`; give its address, its setup code (`altaserver setup-code` prints it on its machine) and your name.
 
@@ -291,10 +291,10 @@ When you click **Done**, CodeAlta shows your **recovery key**: 32 words, shown o
 A server you installed yourself (`dotnet tool install -g CodeAlta.Server`) starts again after a restart once it runs as a service:
 
 ```sh
-altaserver install --urls http://0.0.0.0:2586
+altaserver install
 ```
 
-It takes the options of `altaserver run` (`--port`, `--urls`, `--data-root`, `--certificate`) and sets up one service per data root:
+It takes the options of `altaserver run` (`--port`, `--urls`, `--data-root`, `--certificate`) and sets up one service per data root. The server listens on `http://127.0.0.1:2586`: put Tailscale Serve, Caddy or the TLS of your platform in front of it, or give it a certificate and an `https://` address. A plain `http://` address beyond the loopback is refused, unless `--allow-insecure-http` forces it on a network you trust.
 
 | System | What `altaserver install` sets up |
 | --- | --- |

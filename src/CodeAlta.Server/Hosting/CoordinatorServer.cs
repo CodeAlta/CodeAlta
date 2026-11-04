@@ -37,6 +37,12 @@ public sealed class CoordinatorServerOptions
     /// <summary>Gets the password of <see cref="CertificatePath"/>, or <see langword="null"/>.</summary>
     public string? CertificatePassword { get; init; }
 
+    /// <summary>
+    /// Gets whether an <c>http://</c> address beyond the loopback is allowed (<c>--allow-insecure-http</c>): off by default,
+    /// so that a server reached from other machines has TLS, its own or that of what is put in front of it.
+    /// </summary>
+    public bool AllowInsecureHttp { get; init; }
+
     /// <summary>Gets how long a setup code works.</summary>
     public TimeSpan SetupCodeLifetime { get; init; } = TimeSpan.FromMinutes(30);
 
@@ -364,13 +370,7 @@ public sealed class CoordinatorServer : IAsyncDisposable
         builder.Logging.AddProvider(telemetry.Runtime);
 
         var urls = options.Urls.Count == 0 ? [CoordinatorServerOptions.DefaultUrl] : options.Urls;
-        foreach (var url in urls)
-        {
-            if (!Uri.TryCreate(url, UriKind.Absolute, out var uri) || uri.Scheme is not ("http" or "https"))
-            {
-                throw new ArgumentException($"'{url}' is not an http:// or https:// address.", nameof(options));
-            }
-        }
+        ServerBindings.Require(urls, options.AllowInsecureHttp);
 
         if (urls.Any(static url => url.StartsWith("https://", StringComparison.OrdinalIgnoreCase)))
         {

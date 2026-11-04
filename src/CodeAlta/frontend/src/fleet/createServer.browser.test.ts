@@ -20,6 +20,9 @@ test("Create my server leads with a machine over SSH, says what blocks it from h
     // The owner's name starts as the full name of the person signed in to this computer.
     assert.equal(await page.evaluate(`document.querySelector(".create-server-dialog input[aria-label='Your name']").value`), "Alex Example");
     await page.evaluate(type(".create-server-dialog input[aria-label='Your name']", "Alex"));
+    // An address in front of the server is the default; the local network, in plain HTTP, is chosen knowingly.
+    assert.equal(await page.evaluate(`document.querySelector('.create-server-reach input:checked').value`), "address");
+    await page.evaluate(`document.querySelector('.create-server-reach input[value=network]').click()`);
     assert.equal(await page.evaluate(`document.querySelector('.create-server-reach code').textContent`), "http://box:2586", "the address the machines will use");
     await page.clickText(".create-server-dialog .bp6-button", "Create my server");
 

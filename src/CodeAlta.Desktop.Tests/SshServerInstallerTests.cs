@@ -34,7 +34,7 @@ public sealed class SshServerInstallerTests
         Assert.AreEqual(1, ssh.Forwards);
         StringAssert.Contains(ssh.Scripts[1], "tool update --tool-path \"$TOOLS\" CodeAlta.Server --version '4.0.0' --allow-downgrade");
         // The service is altaserver install's, as the owner would install it there: the desktop writes no unit of its own.
-        StringAssert.Contains(ssh.Scripts[2], "\"$TOOLS/altaserver\" install --data-root \"$ROOT\" --urls http://0.0.0.0:2693 1>&2\n");
+        StringAssert.Contains(ssh.Scripts[2], "\"$TOOLS/altaserver\" install --data-root \"$ROOT\" --urls http://0.0.0.0:2693 --allow-insecure-http 1>&2\n");
         Assert.IsFalse(ssh.Scripts[2].Contains("[Service]", StringComparison.Ordinal), ssh.Scripts[2]);
         Assert.IsFalse(ssh.Scripts[2].Contains("systemctl --user enable", StringComparison.Ordinal), ssh.Scripts[2]);
         StringAssert.Contains(ssh.Scripts[2], "status --data-root \"$ROOT\" 2>/dev/null | grep -q '^Health: ok'", "it waits until the server answers, not until status prints a health line");

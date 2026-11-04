@@ -108,7 +108,8 @@ public sealed class ServerApplication
             "and the control connection of devices (/fleet/v1) on http://127.0.0.1:2586.",
             "Plain HTTP is for the loopback. To reach it from other machines, keep it on",
             "the loopback behind Tailscale Serve, Caddy or the TLS of your platform (the",
-            "usual way), or give it a certificate and an https:// address.",
+            "usual way), or give it a certificate and an https:// address. An http://",
+            "address beyond the loopback is refused unless --allow-insecure-http forces it.",
             _,
             "Until it has an owner, the server prints a one-time setup code and accepts",
             "its setup from this machine only (altaserver setup-code prints it again).",
@@ -119,6 +120,7 @@ public sealed class ServerApplication
             { "urls=", "The {ADDRESSES} to listen on, separated by ';' (http:// or https://)", v => run.Urls = v },
             { "certificate=", "A PKCS #12 {FILE} for the https:// addresses", v => run.Certificate = v },
             { "certificate-password-env=", "The environment {VARIABLE} that holds the certificate's password", v => run.CertificatePasswordVariable = v },
+            { "allow-insecure-http", "Allow http:// addresses beyond the loopback, on a network you trust", v => run.AllowInsecureHttp = v is not null },
         };
         AddDataRoot(runCommand, run);
         runCommand.Add((_, _) => RunServerAsync(run));
@@ -157,6 +159,7 @@ public sealed class ServerApplication
             { "urls=", "The {ADDRESSES} to listen on, separated by ';' (http:// or https://)", v => install.Urls = v },
             { "certificate=", "A PKCS #12 {FILE} for the https:// addresses", v => install.Certificate = v },
             { "certificate-password-env=", "The environment {VARIABLE} that holds the certificate's password", v => install.CertificatePasswordVariable = v },
+            { "allow-insecure-http", "Allow http:// addresses beyond the loopback, on a network you trust", v => install.AllowInsecureHttp = v is not null },
             { "user", "A service of the current user (the default)", v => install.User = v is not null },
             { "system", "A service of the system, started at boot, that runs as --account", v => install.System = v is not null },
             { "account=", "The {ACCOUNT} a --system service runs as", v => install.Account = v },
@@ -336,6 +339,7 @@ public sealed class ServerApplication
                 Urls = urls,
                 CertificatePath = options.Certificate,
                 CertificatePassword = password,
+                AllowInsecureHttp = options.AllowInsecureHttp,
                 UpdateStatus = () => updates?.Status(),
                 // The last step of a campaign of the fleet: the same self-update as altaserver update, with the signed hash.
                 ApplyUpdate = (request, requestedBy, token) => updates is { } self
@@ -727,6 +731,12 @@ public sealed class ServerApplication
         else if (!options.System && options.Account is not null) usage = "--account goes with --system only.";
         else if (options.Port is not null && (!int.TryParse(options.Port, NumberStyles.None, CultureInfo.InvariantCulture, out var port) || port is < 1 or > 65535))
             usage = $"--port needs a port from 1 to 65535: '{options.Port}'.";
+        else if (options.Urls is { } urls)
+        {
+            // A service that would refuse to start is refused before it is installed.
+            try { ServerBindings.Require(urls.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries), options.AllowInsecureHttp); }
+            catch (ArgumentException exception) { usage = exception.Message; }
+        }
         if (usage is not null)
         {
             await _error.WriteLineAsync("altaserver: " + usage).ConfigureAwait(false);
@@ -766,6 +776,7 @@ public sealed class ServerApplication
         if (options.Urls is { } urls) arguments.AddRange(["--urls", urls]);
         if (options.Certificate is { } certificate) arguments.AddRange(["--certificate", Path.GetFullPath(certificate)]);
         if (options.CertificatePasswordVariable is { } variable) arguments.AddRange(["--certificate-password-env", variable]);
+        if (options.AllowInsecureHttp) arguments.Add(ServerBindings.AllowInsecureHttpOption);
         var system = scope == ServiceScope.System;
         return new ServiceRequest
         {
@@ -855,6 +866,8 @@ public sealed class ServerApplication
         public string? Certificate { get; set; }
 
         public string? CertificatePasswordVariable { get; set; }
+
+        public bool AllowInsecureHttp { get; set; }
     }
 
     /// <summary>The options of <c>install</c> and <c>uninstall</c>: those of the <c>run</c> the service starts, and whom it runs as.</summary>

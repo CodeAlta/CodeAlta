@@ -37,7 +37,8 @@ export function CreateServerDialog({ epoch, api = fleetServer, machinesApi = mac
   const { t } = useShellLanguage();
   const [where, setWhere] = useState<Where | null>(null);
   const [target, setTarget] = useState("");
-  const [reach, setReach] = useState<"network" | "address">("network");
+  // An address put in front of the server (TLS) is the default: the local network is plain HTTP, chosen knowingly.
+  const [reach, setReach] = useState<"network" | "address">("address");
   const [address, setAddress] = useState("");
   const [owner, setOwner] = useState("");
   const [organization, setOrganization] = useState("");
@@ -120,8 +121,8 @@ export function CreateServerDialog({ epoch, api = fleetServer, machinesApi = mac
           </label>
           <div className="add-machine-field"><span>{t("How your machines reach it")}</span>
             <RadioGroup selectedValue={reach} onChange={event => setReach(event.currentTarget.value as "network" | "address")} className="create-server-reach">
-              <Radio value="network" labelElement={<span>{t("The local network")} <code className="muted-text">{`http://${shownHost || "host"}:${port}`}</code></span>} />
               <Radio value="address" label={t("An address I put in front of it (a domain, Tailscale Serve)")} />
+              <Radio value="network" labelElement={<span>{t("The local network, not encrypted")} <code className="muted-text">{`http://${shownHost || "host"}:${port}`}</code></span>} />
             </RadioGroup>
             {reach === "address" && <InputGroup fill value={address} placeholder="https://fleet.example.com" aria-label={t("Address of the server")}
               onChange={event => setAddress(event.currentTarget.value)} />}
