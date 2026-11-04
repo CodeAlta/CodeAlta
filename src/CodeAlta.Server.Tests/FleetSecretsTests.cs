@@ -228,7 +228,9 @@ public sealed class FleetSecretsTests
 
         // The machine asks the approval of a run; the person's controller device approves it.
         using var node = new FleetServerClient(fleet.Server.BaseAddress, fleet.NodeKey);
-        var asked = await node.RequestApprovalAsync(environment.Id, new RequestFleetApprovalRequest("run-1", "nonce-1", definition.Number, null, "Deploy"));
+        // The nonce carries the machine's signature of what it asks.
+        var nonce1 = FleetApprovalRequests.Nonce(fleet.NodeKey, list.OrganizationId!, environment.Id, definition.Number, "run-1", null);
+        var asked = await node.RequestApprovalAsync(environment.Id, new RequestFleetApprovalRequest("run-1", nonce1, definition.Number, null, "Deploy"));
         Assert.AreEqual(FleetApprovalStates.Pending, asked.Status);
         Assert.AreEqual(asked.Id, (await fleet.Manager.ListApprovalsAsync(CancellationToken.None)).Approvals.Single().Id, "it waits for the approver");
         var listed = (await fleet.Manager.ListApprovalsAsync(CancellationToken.None)).Approvals.Single();
@@ -236,23 +238,23 @@ public sealed class FleetSecretsTests
         Assert.AreEqual(FleetApprovalStates.Approved, approved.Status);
         var given = (await node.GetApprovalAsync(asked.Id)).Approval;
         var now = DateTimeOffset.UtcNow;
-        Assert.IsTrue(FleetEnvironmentDocuments.TryVerifyApproval(given, definition, list, fleet.NodeKey.DeviceId, "run-1", "nonce-1", now, out _, out reason), reason);
+        Assert.IsTrue(FleetEnvironmentDocuments.TryVerifyApproval(given, definition, list, fleet.NodeKey.DeviceId, "run-1", nonce1, now, out _, out reason), reason);
 
         // Replayed for another run, or another nonce, or after it expired: refused.
-        Assert.IsFalse(FleetEnvironmentDocuments.TryVerifyApproval(given, definition, list, fleet.NodeKey.DeviceId, "run-2", "nonce-1", now, out _, out _));
+        Assert.IsFalse(FleetEnvironmentDocuments.TryVerifyApproval(given, definition, list, fleet.NodeKey.DeviceId, "run-2", nonce1, now, out _, out _));
         Assert.IsFalse(FleetEnvironmentDocuments.TryVerifyApproval(given, definition, list, fleet.NodeKey.DeviceId, "run-1", "nonce-2", now, out _, out _));
-        Assert.IsFalse(FleetEnvironmentDocuments.TryVerifyApproval(given, definition, list, fleet.OtherKey.DeviceId, "run-1", "nonce-1", now, out _, out _));
-        Assert.IsFalse(FleetEnvironmentDocuments.TryVerifyApproval(given, definition, list, fleet.NodeKey.DeviceId, "run-1", "nonce-1", now.AddHours(2), out _, out _));
-        Assert.IsFalse(FleetEnvironmentDocuments.TryVerifyApproval(given, definition with { Number = 2 }, list, fleet.NodeKey.DeviceId, "run-1", "nonce-1", now, out _, out _),
+        Assert.IsFalse(FleetEnvironmentDocuments.TryVerifyApproval(given, definition, list, fleet.OtherKey.DeviceId, "run-1", nonce1, now, out _, out _));
+        Assert.IsFalse(FleetEnvironmentDocuments.TryVerifyApproval(given, definition, list, fleet.NodeKey.DeviceId, "run-1", nonce1, now.AddHours(2), out _, out _));
+        Assert.IsFalse(FleetEnvironmentDocuments.TryVerifyApproval(given, definition with { Number = 2 }, list, fleet.NodeKey.DeviceId, "run-1", nonce1, now, out _, out _),
             "an approval is of one version of the rules");
 
         // Forged by the machine itself, or by a server (a key not of a controller device of an approver): refused.
         FleetEnvironmentDocuments.TryReadApproval(given!.Payload, out var approval, out _);
         var byNode = FleetServerClient.SignApproval(fleet.NodeKey, approval!);
-        Assert.IsFalse(FleetEnvironmentDocuments.TryVerifyApproval(byNode, definition, list, fleet.NodeKey.DeviceId, "run-1", "nonce-1", now, out _, out reason));
+        Assert.IsFalse(FleetEnvironmentDocuments.TryVerifyApproval(byNode, definition, list, fleet.NodeKey.DeviceId, "run-1", nonce1, now, out _, out reason));
         StringAssert.Contains(reason, "controller device");
         var tampered = new FleetSignedApproval(FleetEnvironmentDocuments.Serialize(approval! with { RunId = "run-2" }), given.Signature);
-        Assert.IsFalse(FleetEnvironmentDocuments.TryVerifyApproval(tampered, definition, list, fleet.NodeKey.DeviceId, "run-2", "nonce-1", now, out _, out _));
+        Assert.IsFalse(FleetEnvironmentDocuments.TryVerifyApproval(tampered, definition, list, fleet.NodeKey.DeviceId, "run-2", nonce1, now, out _, out _));
 
         // The server takes an approval once, from an approver's device, for what the machine asked.
         var twice = await fleet.Server.SendAsync(TestDevice.From(fleet.DesktopKey), HttpMethod.Post, $"/api/v1/approvals/{asked.Id}/approve", new ApproveFleetApprovalRequest(given));
@@ -386,7 +388,8 @@ public sealed class FleetSecretsTests
         var person = (await fleet.NodeListAsync()).Members[fleet.DesktopKey.DeviceId].OwnerId!;
         var environment = await fleet.Manager.PutEnvironmentAsync("production", [person], [], [], false, CancellationToken.None);
         using var node = new FleetServerClient(fleet.Server.BaseAddress, fleet.NodeKey);
-        var asked = await node.RequestApprovalAsync(environment.Id, new RequestFleetApprovalRequest("run-reviewed", "nonce-reviewed", 1, null, null));
+        var nonce = FleetApprovalRequests.Nonce(fleet.NodeKey, (await fleet.NodeListAsync()).OrganizationId!, environment.Id, 1, "run-reviewed", null);
+        var asked = await node.RequestApprovalAsync(environment.Id, new RequestFleetApprovalRequest("run-reviewed", nonce, 1, null, null));
         var reviewed = (await fleet.Manager.ListApprovalsAsync(CancellationToken.None)).Approvals.Single();
 
         // Between the listing and the click, the server answers another run, machine and nonce for the same approval.
@@ -402,7 +405,35 @@ public sealed class FleetSecretsTests
         swap.Swap = null;
         await manager.ApproveAsync(asked.Id, FleetSecretsManager.ReviewOf(reviewed), CancellationToken.None);
         FleetEnvironmentDocuments.TryReadApproval((await node.GetApprovalAsync(asked.Id)).Approval!.Payload, out var signed, out _);
-        Assert.AreEqual(("run-reviewed", "nonce-reviewed", fleet.NodeKey.DeviceId), (signed!.RunId, signed.Nonce, signed.MachineId));
+        Assert.AreEqual(("run-reviewed", nonce, fleet.NodeKey.DeviceId), (signed!.RunId, signed.Nonce, signed.MachineId));
+    }
+
+    [TestMethod]
+    public async Task AnApproval_IsGivenOnlyForARunTheMachineAskedItself()
+    {
+        await using var fleet = await SecretsFixture.StartAsync();
+        var list = await fleet.NodeListAsync();
+        var person = list.Members[fleet.DesktopKey.DeviceId].OwnerId!;
+        var environment = await fleet.Manager.PutEnvironmentAsync("production", [person], [], [], false, CancellationToken.None);
+
+        // The server makes up a request of the machine, for a run and an automation of its choosing.
+        var store = (IFleetSecretStore)fleet.Server.GetService<ICoordinatorStore>();
+        await store.RequestFleetApprovalAsync(new FleetApprovalRecord("made-up", list.OrganizationId!, environment.Id, 1, fleet.NodeKey.DeviceId, "run-made-up", "server-nonce",
+            "harmless-automation", null, FleetApprovalStates.Pending, DateTimeOffset.UtcNow, null, null, null, null), new AuditEntry("test.forge", AuditEntry.Success, null, null, null, null, null));
+        var forged = (await fleet.Manager.ListApprovalsAsync(CancellationToken.None)).Approvals.Single(static approval => approval.Id == "made-up");
+        await Assert.ThrowsExactlyAsync<InvalidDataException>(() => fleet.Manager.ApproveAsync(forged.Id, FleetSecretsManager.ReviewOf(forged), CancellationToken.None));
+        Assert.AreEqual(FleetApprovalStates.Pending, (await store.GetFleetApprovalAsync(list.OrganizationId!, "made-up"))!.Status, "nothing was signed for it");
+
+        // The machine's own request, signed by it, is approved; changed by the server (another automation), it is not.
+        using var node = new FleetServerClient(fleet.Server.BaseAddress, fleet.NodeKey);
+        var nonce = FleetApprovalRequests.Nonce(fleet.NodeKey, list.OrganizationId!, environment.Id, 1, "run-asked", "nightly");
+        var asked = await node.RequestApprovalAsync(environment.Id, new RequestFleetApprovalRequest("run-asked", nonce, 1, "nightly", null));
+        var listed = (await fleet.Manager.ListApprovalsAsync(CancellationToken.None)).Approvals.Single(approval => approval.Id == asked.Id);
+        Assert.IsTrue(FleetApprovalRequests.IsAskedBy(listed with { AutomationId = "nightly" }, list, out var reason), reason);
+        Assert.IsFalse(FleetApprovalRequests.IsAskedBy(listed with { AutomationId = "harmless-automation" }, list, out _));
+        Assert.IsFalse(FleetApprovalRequests.IsAskedBy(listed with { MachineId = fleet.OtherKey.DeviceId }, list, out _));
+        await fleet.Manager.ApproveAsync(asked.Id, FleetSecretsManager.ReviewOf(listed), CancellationToken.None);
+        Assert.AreEqual(FleetApprovalStates.Approved, (await node.GetApprovalAsync(asked.Id)).Status);
     }
 
     // Answers an approval changed by the server.

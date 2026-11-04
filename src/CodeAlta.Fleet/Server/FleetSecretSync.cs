@@ -68,6 +68,18 @@ public sealed class FleetSecretSync
     /// <summary>Gets the device id of this machine.</summary>
     public string MachineId => _devices.Identity.DeviceId;
 
+    /// <summary>Makes the nonce of an approval this machine asks: signed by this machine (<see cref="FleetApprovalRequests"/>).</summary>
+    /// <param name="definition">The environment, as this machine verified it.</param>
+    /// <param name="runId">The run.</param>
+    /// <param name="automationId">Its automation; null for a session.</param>
+    /// <returns>The nonce.</returns>
+    /// <exception cref="ArgumentNullException">An argument but <paramref name="automationId"/> is null.</exception>
+    public string ApprovalNonce(FleetEnvironmentDefinition definition, string runId, string? automationId)
+    {
+        ArgumentNullException.ThrowIfNull(definition);
+        return FleetApprovalRequests.Nonce(_devices.Identity, definition.OrganizationId, definition.EnvironmentId, definition.Number, runId, automationId);
+    }
+
     /// <summary>Asks the server, for a run of this machine, the approval an environment requires.</summary>
     /// <param name="environmentId">The environment.</param>
     /// <param name="request">The run, the nonce this machine chose and the version of the definition it verified.</param>

@@ -1,5 +1,3 @@
-using System.Buffers.Text;
-using System.Security.Cryptography;
 using System.Text.Json;
 using CodeAlta.Catalog;
 using CodeAlta.Fleet.Protocol;
@@ -80,7 +78,8 @@ internal sealed class NodeEnvironmentGate
             return ($"The environment '{environment}' runs on machines labeled {string.Join(", ", definition.MachineLabels)}: this machine is not.", null);
         if (definition.Approvers.Count == 0) return (null, new EnvironmentAdmission(environment, definition.EnvironmentId, definition.Number, null));
 
-        var nonce = Base64Url.EncodeToString(RandomNumberGenerator.GetBytes(16));
+        // The nonce carries this machine's signature of what it asks: an approver signs nothing the server made up or changed.
+        var nonce = sync.ApprovalNonce(definition, runId, automationId);
         FleetApprovalDto asked;
         try
         {

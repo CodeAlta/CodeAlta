@@ -270,7 +270,7 @@ public sealed class FleetSecretsManager
     /// <param name="cancellationToken">Cancels the calls.</param>
     /// <returns>The approval as the server holds it now.</returns>
     /// <exception cref="ArgumentException">An argument is empty, or this device is not a controller device of the list.</exception>
-    /// <exception cref="InvalidDataException">The approval the server answers is not the one reviewed: nothing is signed.</exception>
+    /// <exception cref="InvalidDataException">The approval the server answers is not the one reviewed, or not one its machine asked (<see cref="FleetApprovalRequests"/>): nothing is signed.</exception>
     /// <exception cref="FleetDeviceListException">The device list does not verify.</exception>
     /// <exception cref="FleetServerException">The server refused it: this device's person is not an approver, or it was given already.</exception>
     /// <exception cref="HttpRequestException">The server does not answer.</exception>
@@ -284,6 +284,8 @@ public sealed class FleetSecretsManager
         var asked = await client.GetApprovalAsync(approvalId, cancellationToken).ConfigureAwait(false);
         if (asked.Id != approvalId || !string.Equals(ReviewOf(asked), reviewed, StringComparison.Ordinal))
             throw new InvalidDataException("The approval changed since it was shown: read the approvals again before approving.");
+        // What the machine asked itself, never a request the server made up or changed.
+        if (!FleetApprovalRequests.IsAskedBy(asked, list, out var notAsked)) throw new InvalidDataException($"The run is not one its machine asked: {notAsked}.");
         var now = Now();
         var approval = new FleetEnvironmentApproval(FleetEnvironmentApproval.CurrentVersion, list.OrganizationId!, asked.Id, asked.EnvironmentId, asked.EnvironmentVersion,
             asked.MachineId, asked.RunId, asked.Nonce, person, _devices.Identity.DeviceId, now, now + ApprovalLifetime);

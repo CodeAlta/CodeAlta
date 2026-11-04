@@ -43,7 +43,10 @@ internal sealed partial class FleetServerService
                 .ToDictionary(static pair => pair.Environment.Id, static pair => pair.Definition!.Approvers, StringComparer.Ordinal);
             var approvals = read.Approvals.Select(approval => new FleetApprovalView(approval.Id, approval.EnvironmentName, DeviceName(approval.MachineId), approval.RunId, approval.Title,
                 approval.Status, approval.RequestedAt, approval.Status == FleetApprovalStates.Pending && approvers.TryGetValue(approval.EnvironmentId, out var people)
-                    && people.Contains(read.PersonId, StringComparer.Ordinal), CodeAlta.Fleet.Server.FleetSecretsManager.ReviewOf(approval))).ToArray();
+                    && people.Contains(read.PersonId, StringComparer.Ordinal)
+                    // Only a run its machine asked itself is approved: never one the server made up or changed.
+                    && read.Manager.Devices.Current is { } list && CodeAlta.Fleet.Server.FleetApprovalRequests.IsAskedBy(approval, list, out _),
+                CodeAlta.Fleet.Server.FleetSecretsManager.ReviewOf(approval))).ToArray();
             var spaces = Spaces is null ? [] : await Spaces.LoadAsync(cancellationToken).ConfigureAwait(false);
             var linked = read.ScopeNames;
             return new FleetSecretsOverview("ok", null, secrets, environmentViews, approvals,
