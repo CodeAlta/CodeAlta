@@ -26,6 +26,7 @@ public sealed class FleetOrganizationPolicy
     private readonly string? _path;
     private readonly SemaphoreSlim _refresh = new(1, 1);
     private FleetPolicyState? _current;
+    private bool _unreadable;
     // Whether the state was verified in this process: a state read from the file is extended only after a whole chain verified.
     private bool _verifiedHere;
 
@@ -38,7 +39,7 @@ public sealed class FleetOrganizationPolicy
         ArgumentNullException.ThrowIfNull(access);
         Access = access;
         _path = path;
-        _current = Read();
+        _current = Read(out _unreadable);
     }
 
     /// <summary>Gets the anchored access document of the link.</summary>
@@ -72,6 +73,11 @@ public sealed class FleetOrganizationPolicy
         await _refresh.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
+            // Repaired or deleted meanwhile: read again; still unreadable: refused.
+            if (_unreadable && Read(out _unreadable) is var again && !_unreadable) Volatile.Write(ref _current, again);
+            if (_unreadable)
+                throw new FleetPolicyDocumentException(0, $"the policy this device kept for this server does not read ({_path}), and with it the checkpoint of its chain: "
+                    + "repair or delete that file to read the policy of the server again");
             var access = await Access.RefreshAsync(cancellationToken).ConfigureAwait(false);
             var devices = Devices.Current ?? await Devices.RefreshAsync(cancellationToken).ConfigureAwait(false);
             using var client = Devices.CreateClient();
@@ -174,24 +180,51 @@ public sealed class FleetOrganizationPolicy
         return state;
     }
 
-    // The policy this device verified, read back as it wrote it: the device trusts its own folder as it trusts its pins.
-    private FleetPolicyState? Read()
+    /// <summary>
+    /// Gets whether the policy this device kept for the link does not read: its rules, its stop and the checkpoint of its chain
+    /// are lost, so the work of the fleet stops (<see cref="Current"/> holds a stop that says so) and the chain of the server is
+    /// not trusted again until the file is repaired or deleted.
+    /// </summary>
+    public bool KeptPolicyUnreadable => Volatile.Read(ref _unreadable);
+
+    // The policy this device verified, read back as it wrote it: the device trusts its own folder as it trusts its pins. A
+    // file that exists but does not read fails closed: established restrictions never silently become "no policy".
+    private FleetPolicyState? Read(out bool unreadable)
     {
+        unreadable = false;
         if (_path is null) return null;
-        try
+        for (var attempt = 0; ; attempt++)
         {
-            if (JsonSerializer.Deserialize(File.ReadAllBytes(_path), FleetPolicyKeptJson.Default.PolicyKept) is not { Root.Length: > 0 } kept || kept.Rules is null) return null;
-            return new FleetPolicyState(kept.Organization, kept.Number, kept.Tip, kept.List, kept.Access, kept.Rules, kept.Stop, kept.Signer, kept.Time) { FirstHash = kept.Root };
+            try
+            {
+                if (JsonSerializer.Deserialize(File.ReadAllBytes(_path), FleetPolicyKeptJson.Default.PolicyKept) is not { Root.Length: > 0 } kept || kept.Rules is null)
+                    return Unreadable(out unreadable);
+                return new FleetPolicyState(kept.Organization, kept.Number, kept.Tip, kept.List, kept.Access, kept.Rules, kept.Stop, kept.Signer, kept.Time) { FirstHash = kept.Root };
+            }
+            catch (Exception exception) when (exception is FileNotFoundException or DirectoryNotFoundException)
+            {
+                return null;
+            }
+            catch (JsonException)
+            {
+                return Unreadable(out unreadable);
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+            {
+                // Another instance of the link may be replacing it: read again, then fail closed.
+                if (attempt >= 2) return Unreadable(out unreadable);
+                Thread.Sleep(50);
+            }
         }
-        catch (Exception exception) when (exception is FileNotFoundException or DirectoryNotFoundException)
+    }
+
+    private FleetPolicyState Unreadable(out bool unreadable)
+    {
+        unreadable = true;
+        return FleetPolicyState.Empty with
         {
-            return null;
-        }
-        catch (Exception exception) when (exception is JsonException or IOException or UnauthorizedAccessException)
-        {
-            // A file that does not read is no policy, and no anchor: the next read verifies the chain from its first version.
-            return null;
-        }
+            Stop = new FleetPolicyStop(FleetPolicyStopScopes.Fleet, [], [], $"the policy this machine kept for this server does not read ({_path}): repair or delete that file"),
+        };
     }
 
     // The checkpoint only moves forward, also when another instance of the same link wrote it meanwhile.
@@ -200,7 +233,7 @@ public sealed class FleetOrganizationPolicy
         if (_path is null || state.Number == 0) return;
         try
         {
-            if (Read() is { } stored && stored.Number > state.Number) return;
+            if (Read(out _) is { } stored && stored.Number > state.Number) return;
             Directory.CreateDirectory(Path.GetDirectoryName(_path)!);
             FleetFiles.WriteAtomically(_path, JsonSerializer.SerializeToUtf8Bytes(new PolicyKept(state.FirstHash!, state.Number, state.LastHash!, state.OrganizationId, state.DeviceListSequence,
                 state.AccessNumber, state.Rules, state.Stop, state.SignerDeviceId, state.Time), FleetPolicyKeptJson.Default.PolicyKept));

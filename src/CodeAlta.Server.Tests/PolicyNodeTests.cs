@@ -88,6 +88,27 @@ public sealed class PolicyNodeTests
         Assert.IsTrue(kept.Current!.Stops(nodeKey.DeviceId, null));
     }
 
+    [TestMethod]
+    public async Task AKeptPolicyThatDoesNotRead_StopsTheWorkOfTheFleet_AndIsNotReplacedByWhatTheServerSays()
+    {
+        using var root = new TempDirectory();
+        using var nodeKey = DeviceIdentity.LoadOrCreate(Path.Combine(root.Path, "node"));
+        var path = Path.Combine(root.Path, "node-link", FleetOrganizationPolicy.PinFileName);
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        File.WriteAllText(path, "{ \"root\": \"abc\", \"number\": 3, \"rules\": ");
+
+        // The rules and the stop it held, and the checkpoint of the chain, are lost: the work of the fleet stops, and says how to repair it.
+        var policy = new FleetOrganizationPolicy(new FleetOrganizationAccess(new FleetOrganizationDevices(new Uri("http://127.0.0.1:9"), nodeKey)), path);
+        var halt = new FleetPolicyGuard(nodeKey.DeviceId, () => [new FleetPolicySource("server", policy.Current, null, static _ => true)]).Halt;
+        Assert.IsNotNull(halt, "an established policy that does not read is no reason to run without one");
+        StringAssert.Contains(halt.Stop.Reason, path);
+
+        // The chain of the server would be trusted without the lost checkpoint: it is not read until the file is repaired.
+        var refused = await Assert.ThrowsExactlyAsync<FleetPolicyDocumentException>(() => policy.RefreshAsync(CancellationToken.None));
+        StringAssert.Contains(refused.Message, path);
+        Assert.AreEqual("{ \"root\": \"abc\", \"number\": 3, \"rules\": ", File.ReadAllText(path), "the file stays as it is, for its repair");
+    }
+
     private static FleetOrganizationPolicy Console(Uri server, DeviceIdentity identity, string folder, HttpMessageHandler? handler = null)
     {
         var devices = new FleetOrganizationDevices(server, identity, Path.Combine(folder, FleetOrganizationDevices.PinFileName), handler);
