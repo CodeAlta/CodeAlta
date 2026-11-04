@@ -62,6 +62,26 @@ public sealed class SetupTests
     }
 
     [TestMethod]
+    public async Task KestrelSettingsOfTheEnvironmentDoNotOpenPlainHttpToOtherMachines()
+    {
+        // Kestrel__Endpoints__Http__Url in the environment, or Kestrel:Endpoints in an appsettings.json: Kestrel would take them over --urls.
+        using var root = new TempDirectory();
+        try
+        {
+            await using var server = await CoordinatorServer.StartAsync(new CoordinatorServerOptions
+            {
+                DataRoot = root.Path, Urls = ["http://127.0.0.1:0"], ConfigureLogging = static _ => { }, EnvironmentVariable = static _ => null,
+                HostConfiguration = new Dictionary<string, string?> { ["Kestrel:Endpoints:Http:Url"] = "http://0.0.0.0:0" },
+            });
+            CollectionAssert.AreEqual(new[] { "127.0.0.1" }, server.Addresses.Select(static address => address.Host).ToArray(), "the server listens where --urls says only");
+        }
+        catch (ArgumentException refused)
+        {
+            StringAssert.Contains(refused.Message, ServerBindings.AllowInsecureHttpOption);
+        }
+    }
+
+    [TestMethod]
     public async Task BehindATrustedProxyACallerOfAnotherMachineDoesNotSetTheServerUp()
     {
         await using var server = await ServerFixture.StartAsync(configure: options => new CoordinatorServerOptions

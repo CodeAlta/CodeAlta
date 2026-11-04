@@ -16,6 +16,7 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Hosting.Server;
 using Microsoft.AspNetCore.Hosting.Server.Features;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -137,6 +138,12 @@ public sealed class CoordinatorServerOptions
     /// addresses or networks; empty (the default) to count every request by its peer.
     /// </summary>
     public IReadOnlyList<string> TrustedProxies { get; init; } = [];
+
+    /// <summary>
+    /// Gets settings added to the configuration of ASP.NET Core, as its environment variables (<c>Kestrel__Endpoints__...</c>)
+    /// or an <c>appsettings.json</c> would give them; for tests of what the server does with them.
+    /// </summary>
+    internal IReadOnlyDictionary<string, string?>? HostConfiguration { get; init; }
 }
 
 /// <summary>What a running server writes in its data root, for <c>altaserver status</c>.</summary>
@@ -266,6 +273,17 @@ public sealed class CoordinatorServer : IAsyncDisposable
                 // Access control joins the devices and the document before the first request: who may revoke whose devices, where the document stands.
                 _ = app.Services.GetRequiredService<AccessDocumentService>();
                 await app.StartAsync(cancellationToken).ConfigureAwait(false);
+                // What Kestrel listens on, whatever set it, is held to the same rule as the addresses asked.
+                try
+                {
+                    ServerBindings.Require(app.Services.GetRequiredService<IServer>().Features.Get<IServerAddressesFeature>()!.Addresses, options.AllowInsecureHttp);
+                }
+                catch (ArgumentException)
+                {
+                    await app.StopAsync(CancellationToken.None).ConfigureAwait(false);
+                    throw;
+                }
+
                 // The campaigns a stop interrupted go on, the server's own step included (a new version confirms it).
                 app.Services.GetRequiredService<UpdateCampaignService>().Start();
                 // Machines offline too long, or behind the version of the server, are looked for on a timer.
@@ -394,6 +412,7 @@ public sealed class CoordinatorServer : IAsyncDisposable
         X509Certificate2? certificate)
     {
         var builder = WebApplication.CreateSlimBuilder(new WebApplicationOptions { ContentRootPath = AppContext.BaseDirectory, Args = [] });
+        if (options.HostConfiguration is { } added) builder.Configuration.AddInMemoryCollection(added);
         if (options.ConfigureLogging is not null)
         {
             builder.Logging.ClearProviders();
@@ -417,6 +436,9 @@ public sealed class CoordinatorServer : IAsyncDisposable
         builder.WebHost.UseUrls([.. urls]);
         builder.WebHost.ConfigureKestrel(kestrel =>
         {
+            // The addresses checked above are the only ones: the endpoints of Kestrel's configuration (Kestrel__Endpoints__...
+            // in the environment, an appsettings.json) would replace them unchecked, and be reloaded as they change.
+            kestrel.Configure(new ConfigurationBuilder().Build(), reloadOnChange: false);
             kestrel.AddServerHeader = false;
             kestrel.Limits.MaxRequestBodySize = Math.Max(DeviceAuthenticationMiddleware.MaxBodyBytes, options.ConnectionPolicy.MaxFrameBytes);
         });
