@@ -129,8 +129,8 @@ their own use, under their vendor's terms. So:
   document say; the server stores and relays only these sealed copies. A machine opens its copy only when it was given
   by someone who answers for the scope in the access document it verified, keeps the key in its protected store, and
   adds the provider to its configuration with that key; a provider taken away is removed with its key. A provider of the
-  machine's own with the same id is never replaced. Rotation is a new version of the provider, sealed again. With a gateway, each scope or
-  automation gets its own virtual key, so costs and limits follow ownership.
+  machine's own with the same id is never replaced. Rotation is a new version of the provider, sealed again. With a
+  gateway, each scope or automation gets its own virtual key, so costs and limits follow ownership.
 - **Other credentials of a run** (Jira, Grafana, Kubernetes, Slack, Git) are the machine's own, scoped to what its runs
   may do: a machine inside the infrastructure holds read-only monitoring access and the narrow write role of its
   allowed remediations, used by host-side tools outside the agent's sandbox, never by the agent's shell
