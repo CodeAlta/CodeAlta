@@ -164,9 +164,12 @@ public sealed class AutomationRunGuardTests
         const string Id = "0199f4c2-6d1e-7c3a-b5f0-2f9c8e4a1d77";
 
         var run = (await service.RunAsync(Id, default))!;
+        Task<(string Status, string? Message, string? SessionId)> TakeOver(string runId) => AutomationTakeOvers.TakeOverAsync(service, null, null, runId, default);
         var held = runner.Guard!.BeforeToolCallAsync(Call("k8s_delete_namespace"), default).AsTask();
         Assert.AreEqual(AutomationRun.Waiting, service.Runs(Id, 1)[0].Status, "the run waits for a person");
-        Assert.AreEqual("session-1", service.TakeOver(run.Id));
+        // A person takes it over by the id of the run alone, as the phone does.
+        Assert.AreEqual(("not_found", (string?)null), await TakeOver("run-unknown") is var unknown ? (unknown.Status, unknown.SessionId) : default);
+        Assert.AreEqual(("ok", "session-1"), await TakeOver(run.Id) is var taken ? (taken.Status, taken.SessionId) : default);
         Assert.IsTrue(service.IsTakenOver(run.Id));
         Assert.AreEqual("Taken over by a person.", service.Runs(Id, 1)[0].Message);
         asker.Held.SetResult(new(AgentPermissionDecisionKind.AllowOnce));

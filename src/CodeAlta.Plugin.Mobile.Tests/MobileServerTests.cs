@@ -228,6 +228,42 @@ public sealed class MobileServerTests
     }
 
     [TestMethod]
+    public async Task ARunThatWaitsForThePerson_IsSaidWithItsRequest_AndTakenOverFromThePhone()
+    {
+        await using var fixture = await Fixture.StartAsync();
+        await fixture.SignInAsync();
+        fixture.Alta.Answer("session status known", FakeAlta.Status("known", "p1", "personal"));
+        fixture.Permissions.Pending["known"] = [new PluginPermissionRequest { RequestId = Guid.NewGuid().ToString(), Kind = "commandExecution", Command = "kubectl rollout undo", WorkingDirectory = "C:/ops" }];
+        JsonObject Run(string status) => new() { ["type"] = "alta.automation.run", ["id"] = "run-1", ["automationId"] = "a1", ["name"] = "Diagnosis", ["status"] = status, ["sessionId"] = "known" };
+
+        // A session no automation started says nothing of one.
+        fixture.Alta.Answer("automation current", (_, _) => FakeAlta.Transcript(0, new JsonObject { ["type"] = "alta.automation.none" }));
+        Assert.IsNull(JsonNode.Parse(await fixture.Client.GetStringAsync("/api/sessions/known/permissions"))!["automation"]);
+
+        // Its run waits for the person: the page says so with the request, and the phone takes it over for the user.
+        fixture.Alta.Answer("automation current", Run("waiting"));
+        var page = JsonNode.Parse(await fixture.Client.GetStringAsync("/api/sessions/known/permissions"))!;
+        Assert.AreEqual(("run-1", "Diagnosis", true), ((string?)page["automation"]!["runId"], (string?)page["automation"]!["name"], (bool)page["automation"]!["waiting"]!));
+        CollectionAssert.AreEqual(new[] { "automation", "current", "--session", "known" }, fixture.Alta.CallsOf("automation current").Last());
+        fixture.Alta.Answer("automation takeover run-1", new JsonObject { ["type"] = "alta.automation.takenOver", ["runId"] = "run-1", ["sessionId"] = "known" });
+        var taken = JsonNode.Parse(await (await fixture.PostAsync("/api/sessions/known/takeover", new JsonObject())).Content.ReadAsStringAsync())!;
+        Assert.AreEqual((true, (string?)null), ((bool)taken["ok"]!, (string?)taken["error"]));
+        Assert.AreEqual(1, fixture.Alta.CallsOf("automation takeover run-1").Length);
+        Assert.IsTrue(fixture.Alta.Options.Last()?.OnBehalfOfUser, "the phone takes it over for the user");
+
+        // A run that does not wait is not taken over; a refusal is said; a session the phone does not see is unknown.
+        fixture.Alta.Answer("automation current", Run("running"));
+        Assert.IsFalse((bool)JsonNode.Parse(await fixture.Client.GetStringAsync("/api/sessions/known/permissions"))!["automation"]!["waiting"]!);
+        var idle = JsonNode.Parse(await (await fixture.PostAsync("/api/sessions/known/takeover", new JsonObject())).Content.ReadAsStringAsync())!;
+        Assert.AreEqual((false, "This run waits for nobody."), ((bool)idle["ok"]!, (string?)idle["error"]));
+        fixture.Alta.Answer("automation current", Run("waiting"));
+        fixture.Alta.Answer("automation takeover run-1", (_, _) => FakeAlta.Transcript(1, new JsonObject { ["type"] = "alta.error", ["message"] = "The machine did not take the request." }));
+        var refused = JsonNode.Parse(await (await fixture.PostAsync("/api/sessions/known/takeover", new JsonObject())).Content.ReadAsStringAsync())!;
+        Assert.AreEqual((false, "The machine did not take the request."), ((bool)refused["ok"]!, (string?)refused["error"]));
+        Assert.AreEqual(HttpStatusCode.NotFound, (await fixture.PostAsync("/api/sessions/unknown/takeover", new JsonObject())).StatusCode);
+    }
+
+    [TestMethod]
     public async Task ThePermissionRequests_AreForThePhonesThatSignedIn()
     {
         await using var fixture = await Fixture.StartAsync();
@@ -528,7 +564,7 @@ public sealed class MobileServerTests
                 Port = port, Access = access, Hosts = () => ["desk.tail1234.ts.net:2584"], Files = files, Sessions = sessions,
                 // An answer the session takes long to take is said pending at once: no test waits the seconds of a phone.
                 Api = new MobileApi(alta, sessions), Asks = new MobileAsks(asks, sessions, TimeSpan.FromMilliseconds(50)),
-                Permissions = new MobilePermissions(permissions, sessions, TimeSpan.FromMilliseconds(50)), Live = live, Logger = XenoAtom.Logging.LogManager.GetLogger("mobile-tests"),
+                Permissions = new MobilePermissions(permissions, sessions, TimeSpan.FromMilliseconds(50), alta), Live = live, Logger = XenoAtom.Logging.LogManager.GetLogger("mobile-tests"),
             });
             await server.StartAsync(default);
             var client = new HttpClient(new HttpClientHandler { UseCookies = true }) { BaseAddress = new Uri($"http://127.0.0.1:{port}") };

@@ -169,6 +169,7 @@ internal sealed partial class MobileServer : IAsyncDisposable
         api.MapGet("/sessions/{id}/permissions", async (string id, CancellationToken ct) => Json(await _options.Permissions.GetAsync(id, ct).ConfigureAwait(false)));
         api.MapPost("/sessions/{id}/permissions/resolve", async (string id, HttpRequest request, CancellationToken ct) =>
             await BodyAsync(request, ct).ConfigureAwait(false) is { } body ? Json(await _options.Permissions.ResolveAsync(id, body, ct).ConfigureAwait(false)) : Invalid());
+        api.MapPost("/sessions/{id}/takeover", async (string id, CancellationToken ct) => Json(await _options.Permissions.TakeOverAsync(id, ct).ConfigureAwait(false)));
 
         // A diagram to open in a tab of its own, at a link that needs no sign-in: a new tab of an app installed on iOS opens in
         // Safari, which has neither the app's cookie nor its storage. The link is a random id, kept two hours.

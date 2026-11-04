@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { approvalKey, approvalMarkKey, approvalQuestion, approvalSubject, approvalWaiting } from "./approval";
+import { approvalKey, approvalMarkKey, approvalQuestion, approvalSubject, approvalTakeOver, approvalWaiting } from "./approval";
 import type { ApprovalRequest, Live } from "./contract";
 
 const command: ApprovalRequest = { id: "r1", kind: "commandExecution", command: "git push", workingDirectory: "C:/code", grantRoot: null, reason: null, shortened: false, outsideSandbox: false, skill: null };
@@ -36,6 +36,15 @@ test("a card is drawn again only when what it shows changes", () => {
   const key = approvalKey(command, false, false, true, "");
   assert.equal(approvalKey({ ...command }, false, false, true, ""), key);
   for (const other of [approvalKey({ ...command, command: "git push --force" }, false, false, true, ""), approvalKey(command, true, false, true, ""),
-    approvalKey(command, false, true, true, ""), approvalKey(command, false, false, false, ""), approvalKey(command, false, false, true, "Refused.")])
+    approvalKey(command, false, true, true, ""), approvalKey(command, false, false, false, ""), approvalKey(command, false, false, true, "Refused."),
+    approvalKey(command, false, false, true, "", "Diagnosis waits for you.")])
     assert.notEqual(other, key);
+});
+
+test("a run that waits for the person says so on its card, to be taken over", () => {
+  assert.equal(approvalTakeOver({ runId: "run-1", name: "Diagnosis", waiting: true }), "Diagnosis waits for you. Take its run over and nothing stops it while you decide.");
+  assert.match(approvalTakeOver({ runId: "run-1", name: null, waiting: true })!, /^An automation waits for you/);
+  assert.equal(approvalTakeOver({ runId: "run-1", name: "Diagnosis", waiting: false }), null, "a run that works waits for nobody");
+  assert.equal(approvalTakeOver({ runId: null, name: "Diagnosis", waiting: true }), null);
+  assert.equal(approvalTakeOver(undefined), null, "an older CodeAlta, or a session no automation started");
 });

@@ -151,6 +151,27 @@ test("the phone page shows what sessions ask permission for, and answers it", { 
     server.push({ ...server.state.sessions[0].live!, approving: null });
     await waitFor(`document.getElementById("approval").hidden`, "the request answered on the computer");
 
+    // A run of an automation that waits for the person is taken over from its request: a refusal says why, then it goes.
+    const held = { ...command, id: "55555555-5555-4555-8555-555555555555" };
+    const takeOvers = () => server.requests.filter(r => r.method === "POST" && r.path === "/api/sessions/s1/takeover");
+    server.state.automations.set("s1", { runId: "run-1", name: "Diagnosis", waiting: true });
+    server.state.approvals.set("s1", [held]);
+    server.push({ ...server.state.sessions[0].live!, approving: mark([held]) });
+    await waitFor(shown('#approval [data-action="takeover"]'), "the take-over of the run that waits");
+    assert.match(await text("#approval .approval-takeover p") ?? "", /^Diagnosis waits for you\./);
+    assert.equal(await evaluate("document.documentElement.scrollWidth <= innerWidth"), true, "the take-over does not widen the page");
+    await shot("04-card-takeover.png");
+    server.state.takeOverResult = { ok: false, error: "The machine did not take the request." };
+    await click('#approval [data-action="takeover"]');
+    await waitFor(`document.querySelector("#approval .ask-note")?.textContent === "The machine did not take the request."`, "why the take-over was refused");
+    await waitFor(enabled('#approval [data-action="takeover"]'), "the take-over again");
+    await click('#approval [data-action="takeover"]');
+    await waitFor(`/You took the run over/.test(document.querySelector("#approval .ask-note")?.textContent ?? "")`, "the run taken over");
+    assert.equal(await evaluate(shown('#approval [data-action="takeover"]')), false, "a run taken over waits for nobody else");
+    assert.equal(await evaluate(shown(allow)), true, "its request stays, for the person to answer");
+    assert.equal(takeOvers().length, 2);
+    server.state.automations.delete("s1");
+
     // What a session sends is text, never markup.
     const marked = { ...next, id: "44444444-4444-4444-8444-444444444444", grantRoot: `<img src=x onerror="window.hacked=1">`, reason: "<b>bold</b>" };
     server.state.approvals.set("s1", [marked]);

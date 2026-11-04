@@ -53,6 +53,19 @@ public interface IAltaAutomations
     /// <param name="cancellationToken">Cancels before the file is written.</param>
     /// <returns>The status <c>ok</c>, <c>not_found</c>, or <c>refused</c> with the reason.</returns>
     Task<AltaAutomationChange> DeleteAsync(string id, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// A person takes a run in progress of an automation with autonomy over: what it asks waits for them as long as they
+    /// take, and no timeout stops it any more. A run on another machine is taken over through its server.
+    /// </summary>
+    /// <param name="runId">The identifier of the run.</param>
+    /// <param name="cancellationToken">Cancels before the request is passed on.</param>
+    /// <returns>
+    /// The status <c>ok</c>, with the session of the run as <see cref="AltaAutomationChange.Id"/> when this host has it;
+    /// <c>not_found</c>; or <c>refused</c> with the reason.
+    /// </returns>
+    Task<AltaAutomationChange> TakeOverAsync(string runId, CancellationToken cancellationToken)
+        => Task.FromResult(new AltaAutomationChange("refused", null, "This host takes no run over."));
 }
 
 /// <summary>An automation.</summary>

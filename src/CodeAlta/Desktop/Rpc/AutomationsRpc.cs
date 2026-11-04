@@ -298,16 +298,8 @@ internal sealed class AutomationsService
         ArgumentNullException.ThrowIfNull(request);
         if (Refuse(request.ExpectedEpoch) is { } refused) return new(refused, null, null);
         if (!AutomationDefinition.IsId(request.Id) || !Identifier(request.RunId)) return new("invalid_request", null, null);
-        if (_automations!.Snapshot.Find(request.Id) is not { } entry) return new("not_found", null, null);
-        if (entry.Definition.RunsOn is not null)
-        {
-            if (_placement is null) return new("refused", "Its machine is reached from no fleet here.", null);
-            var problem = await _placement.TakeOverAsync(entry, request.RunId, cancellationToken).ConfigureAwait(false);
-            return problem is null ? new("ok", null, null) : new("refused", problem, null);
-        }
-
-        return _automations.TakeOver(request.RunId) is { } sessionId ? new("ok", null, sessionId)
-            : new("refused", "This run is not in progress, or its automation does not decide what its runs do without a person.", null);
+        var (status, message, sessionId) = await AutomationTakeOvers.TakeOverAsync(_automations!, _placement, request.Id, request.RunId, cancellationToken).ConfigureAwait(false);
+        return new(status, message, sessionId);
     }
 
     /// <summary>The next times a trigger being written would be due, or what is wrong with it.</summary>

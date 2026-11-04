@@ -61,6 +61,24 @@ public sealed class AutomationHostTests
     }
 
     [TestMethod]
+    public async Task TakeOver_IsAPersonsCommand_ThatAPluginRunsForTheUser()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var agent = new AltaCallerIdentity { Kind = "agent", SourceSessionId = "session-1", SourceProjectId = fixture.Project.Id };
+        foreach (var caller in new[] { agent, AltaCallerIdentity.Cli, agent with { OnBehalfOfUser = true } })
+        {
+            var refused = await fixture.Run(["automation", "takeover", "run-1"], caller: caller);
+            Assert.AreEqual(AltaExitCodes.PolicyDenied, refused.Code, refused.Text);
+            StringAssert.Contains(refused.Text, "automation.needsPerson");
+        }
+
+        var user = AltaCallerIdentity.Cli with { OnBehalfOfUser = true };
+        var unknown = await fixture.Run(["automation", "takeover", "run-1"], caller: user);
+        Assert.AreEqual(AltaExitCodes.NotFound, unknown.Code, unknown.Text);
+        Assert.AreEqual(AltaExitCodes.Usage, (await fixture.Run(["automation", "takeover"], caller: user)).Code);
+    }
+
+    [TestMethod]
     public async Task Show_SaysWhatTheRunsOfAnAutomationDoWithoutAPerson()
     {
         await using var fixture = await Fixture.CreateAsync();

@@ -174,7 +174,7 @@ public sealed class MobilePlugin : PluginBase
         {
             Port = _settings.Port, Access = _access!, Hosts = () => _state.TailnetHost is { } host ? [host] : [],
             Files = Services.AppFiles, Sessions = sessions, Api = new MobileApi(Services.Alta, sessions, attachments),
-            Asks = new MobileAsks(Services.Asks, sessions), Permissions = new MobilePermissions(Services.Permissions, sessions), Live = _live, Logger = Logger,
+            Asks = new MobileAsks(Services.Asks, sessions), Permissions = new MobilePermissions(Services.Permissions, sessions, null, Services.Alta), Live = _live, Logger = Logger,
         });
         try
         {

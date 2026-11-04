@@ -390,6 +390,9 @@ textarea:focus, select:focus { outline: 2px solid var(--accent); outline-offset:
 .approval-detail { margin: 0; color: var(--muted); font-size: .8125rem; line-height: 1.45; overflow-wrap: anywhere; }
 .approval-folder { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: .75rem; }
 .approval-reason { max-height: 16vh; overflow: auto; }
+.approval-takeover { display: flex; align-items: center; gap: .625rem; padding-top: .5rem; border-top: 1px solid var(--line); }
+.approval-takeover > p { flex: 1; min-width: 0; }
+.approval-takeover > button { flex: none; }
 .approval-warning { margin: 0; color: var(--red); font-size: .8125rem; line-height: 1.45; overflow-wrap: anywhere; }
 .approval-actions { display: flex; align-items: center; justify-content: flex-end; gap: .5rem; min-width: 0; }
 .approval-actions button { min-width: 6.5rem; min-height: 44px; justify-content: center; }
