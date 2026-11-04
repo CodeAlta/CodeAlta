@@ -16,4 +16,10 @@ public sealed partial class FleetConnectorOptions
     /// held run its hold; a desktop reads its notifications. Null ignores it.
     /// </summary>
     public Action? BudgetsChanged { get; init; }
+
+    /// <summary>
+    /// Gets what reads the problems of the machine that its heartbeat reports (<see cref="Protocol.Api.FleetHealthKinds.Reported"/>):
+    /// the server turns those that last into notifications for its owner. Null reports nothing (a desktop).
+    /// </summary>
+    public Func<IReadOnlyList<Protocol.Api.FleetHealthProblem>>? Health { get; init; }
 }

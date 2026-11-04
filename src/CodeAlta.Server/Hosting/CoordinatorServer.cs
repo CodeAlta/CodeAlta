@@ -113,6 +113,9 @@ public sealed class CoordinatorServerOptions
     /// null for the built-in clients, overridden by the <c>CODEALTA_SIGNIN_*</c> variables of the environment.
     /// </summary>
     public SignInOptions? SignIn { get; init; }
+
+    /// <summary>Gets the thresholds of the health of the machines: how long a problem lasts before its owner is told, how long a machine may be offline.</summary>
+    public HealthOptions Health { get; init; } = new();
 }
 
 /// <summary>What a running server writes in its data root, for <c>altaserver status</c>.</summary>
@@ -228,6 +231,8 @@ public sealed class CoordinatorServer : IAsyncDisposable
                 await app.StartAsync(cancellationToken).ConfigureAwait(false);
                 // The campaigns a stop interrupted go on, the server's own step included (a new version confirms it).
                 app.Services.GetRequiredService<UpdateCampaignService>().Start();
+                // Machines offline too long, or behind the version of the server, are looked for on a timer.
+                app.Services.GetRequiredService<HealthService>().Start();
             }
             catch
             {
@@ -273,6 +278,7 @@ public sealed class CoordinatorServer : IAsyncDisposable
         try
         {
             await _app.Services.GetRequiredService<UpdateCampaignService>().DisposeAsync().ConfigureAwait(false);
+            await _app.Services.GetRequiredService<HealthService>().DisposeAsync().ConfigureAwait(false);
             await _app.StopAsync(CancellationToken.None).ConfigureAwait(false);
         }
         finally
@@ -429,6 +435,8 @@ public sealed class CoordinatorServer : IAsyncDisposable
         services.AddSingleton(provider => new BudgetService(store, store, provider.GetRequiredService<NotificationService>(), time,
             provider.GetRequiredService<ILoggerFactory>().CreateLogger("CodeAlta.Server.Budgets")));
         services.AddSingleton(provider => new StatisticsService(store, time) { Metrics = metrics, Published = provider.GetRequiredService<BudgetService>().EvaluateAsync });
+        services.AddSingleton(provider => new HealthService(store, store, provider.GetRequiredService<NotificationService>(), provider.GetRequiredService<PresenceRegistry>(),
+            provider.GetRequiredService<ServerUpdateStatusSource>(), time, provider.GetRequiredService<ILoggerFactory>().CreateLogger("CodeAlta.Server.Health"), options.Health));
         services.AddSingleton(provider => new TelemetrySettingsService(store, provider.GetRequiredService<PresenceRegistry>(), telemetry, time,
             provider.GetRequiredService<ILoggerFactory>().CreateLogger("CodeAlta.Server.Telemetry")));
         services.AddSingleton(provider => new OtlpForwarder(telemetry, provider.GetRequiredService<RequestAuthenticator>(),
@@ -453,6 +461,7 @@ public sealed class CoordinatorServer : IAsyncDisposable
             Automations = provider.GetRequiredService<FleetAutomationService>(),
             Stopping = provider.GetRequiredService<IHostApplicationLifetime>().ApplicationStopping,
             Statistics = provider.GetRequiredService<StatisticsService>(),
+            Health = provider.GetRequiredService<HealthService>(),
         });
 
         var app = builder.Build();

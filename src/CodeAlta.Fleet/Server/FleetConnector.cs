@@ -877,8 +877,24 @@ public sealed partial class FleetConnector : IAsyncDisposable
     {
         _activeSessions = active;
         await connection.SendRequestAsync(FleetServerMethods.PresenceUpdate,
-            JsonSerializer.SerializeToElement(new FleetPresenceUpdate(active > 0 ? "busy" : "active", active, _options.UpdateReport?.Invoke()), FleetServerJsonContext.Default.FleetPresenceUpdate),
+            JsonSerializer.SerializeToElement(new FleetPresenceUpdate(active > 0 ? "busy" : "active", active, _options.UpdateReport?.Invoke(), ReadHealth()),
+                FleetServerJsonContext.Default.FleetPresenceUpdate),
             null, stop).ConfigureAwait(false);
+    }
+
+    // The problems of the machine for its heartbeat; a probe that fails says nothing rather than that all is well.
+    private IReadOnlyList<Protocol.Api.FleetHealthProblem>? ReadHealth()
+    {
+        if (_options.Health is not { } health) return null;
+        try
+        {
+            return health();
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException)
+        {
+            if (LogManager.IsInitialized) _logger.Warn($"The health of the machine could not be read: {exception.Message}");
+            return null;
+        }
     }
 
     // Waits for a wake, the time given or the end of the connection; true when woken.

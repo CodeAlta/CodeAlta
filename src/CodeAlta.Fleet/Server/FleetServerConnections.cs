@@ -77,6 +77,9 @@ public sealed class FleetServerConnectionsOptions
 
     /// <summary>Gets what is told, by the id of its link, that a server says the budgets, holds or notifications of this device's person changed; null ignores it.</summary>
     public Action<string>? BudgetsChanged { get; init; }
+
+    /// <summary>Gets what reads the problems of the machine its heartbeats report; null reports nothing.</summary>
+    public Func<IReadOnlyList<Protocol.Api.FleetHealthProblem>>? Health { get; init; }
 }
 
 /// <summary>What a node does with the automations its servers give it.</summary>
@@ -325,6 +328,7 @@ public sealed class FleetServerConnections : IAsyncDisposable
             AutomationsRun = _options.Automations is { } runs ? (request, token) => runs.RunAsync(created!, link, request, token) : null,
             SecretsChanged = _options.SecretsChanged is { } changed ? () => changed(link.Id) : null,
             BudgetsChanged = _options.BudgetsChanged is { } budgets ? () => budgets(link.Id) : null,
+            Health = _options.Health,
         };
         if (_options.Configure is { } configure) options = configure(options);
         var connector = new FleetConnector(options);

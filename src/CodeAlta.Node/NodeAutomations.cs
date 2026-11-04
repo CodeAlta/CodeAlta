@@ -216,8 +216,19 @@ internal sealed partial class NodeAutomations : IFleetNodeAutomations, IAutomati
         lock (_gate) return _assignments.GetValueOrDefault(id)?.Number ?? 0;
     }
 
+    /// <summary>Gets when the local policy of the node last refused a run; null when it refused none since the node started.</summary>
+    internal DateTimeOffset? LastPolicyRefusal { get; private set; }
+
     /// <inheritdoc />
     public string? Check(AutomationEntry entry, ModelProviderDescriptor provider)
+    {
+        var refused = CheckPolicy(entry, provider);
+        // A policy that refuses runs is a problem of the machine its owner hears of (its health).
+        if (refused is not null) LastPolicyRefusal = DateTimeOffset.UtcNow;
+        return refused;
+    }
+
+    private string? CheckPolicy(AutomationEntry entry, ModelProviderDescriptor provider)
     {
         ArgumentNullException.ThrowIfNull(entry);
         ArgumentNullException.ThrowIfNull(provider);

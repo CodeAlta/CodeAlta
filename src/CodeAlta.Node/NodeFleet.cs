@@ -379,6 +379,7 @@ internal sealed class NodeServers : IAsyncDisposable
         var statistics = Fleet.Server.FleetHostStatisticsSource.ForHost(node.Host);
         NodeFleetSecrets? secrets = null;
         NodeBudgets? budgets = null;
+        var health = new NodeHealth(node);
         var connections = new Fleet.Server.FleetServerConnections(new Fleet.Server.FleetServerConnectionsOptions
         {
             FleetRoot = catalog.FleetRoot,
@@ -398,6 +399,8 @@ internal sealed class NodeServers : IAsyncDisposable
             SecretsChanged = linkId => secrets?.Changed(linkId),
             // The budgets and holds of the owner: the runs that wait read them again at once.
             BudgetsChanged = _ => budgets?.Changed(),
+            // The problems of the machine travel with its heartbeat; the server tells its owner of those that last.
+            Health = health.Read,
         });
         secrets = new NodeFleetSecrets(node.Host, connections);
         budgets = new NodeBudgets(connections, source, statistics);
@@ -419,8 +422,11 @@ internal sealed class NodeServers : IAsyncDisposable
 
         connections.Start();
         secrets.Start();
-        return new NodeServers(identity, source, connections, statistics, secrets);
+        return new NodeServers(identity, source, connections, statistics, secrets) { Health = health };
     }
+
+    /// <summary>Gets the problems of the machine its heartbeats report.</summary>
+    public NodeHealth Health { get; private init; } = null!;
 
     // The device list is read again for each relay, so that a device removed from it is refused at once; when the server
     // does not answer, the list last verified is kept.
