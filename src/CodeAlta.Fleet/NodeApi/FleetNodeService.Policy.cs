@@ -109,12 +109,18 @@ public sealed partial class FleetNodeService
         return rules;
     }
 
-    // A prompt that chooses a model is checked against the rules of the space of its session.
-    private void RequirePolicyModel(string? spaceId, string? modelId)
+    // A prompt is checked against the rules of the space of its session with the provider and the model it runs with: those it
+    // names, else the session's. A selection that names another provider is checked as a start is, so that a session started
+    // with an allowed provider cannot go on with one the rules do not allow.
+    private void RequirePolicySelection(CodeAlta.Catalog.SessionViewDescriptor session, FleetModelSelection? selection)
     {
         RequireNotHalted();
-        if (modelId is null || Policy?.RulesFor(spaceId) is not { } rules) return;
-        if (!rules.AllowsModel(modelId)) throw Refused($"The policy of the organization allows only these models: {string.Join(", ", rules.Models!)}; not '{modelId}'.");
+        if (Policy?.RulesFor(session.SpaceId) is not { } rules) return;
+        var providerKey = selection?.ProviderKey ?? session.ResolvedProviderKey;
+        var provider = _host.ModelProviderRegistry.ListProviders().FirstOrDefault(value => string.Equals(value.ProviderId.Value, providerKey, StringComparison.Ordinal));
+        var switched = !string.Equals(providerKey, session.ResolvedProviderKey, StringComparison.Ordinal);
+        var model = selection?.ModelId ?? (switched ? provider?.DefaultModelId : null);
+        if (FleetPolicyGuard.Refusal(rules, provider?.ProviderType, providerKey, model) is { } refusal) throw Refused(refusal);
     }
 
     // The widest permission mode the provider offers within the policy; null when its default already is.
