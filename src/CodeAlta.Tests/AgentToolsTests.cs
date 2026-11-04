@@ -1671,6 +1671,142 @@ public sealed class AgentToolsTests
         Assert.AreEqual("{\"$ref\":\"#/$defs/step\"}", strict.GetProperty("properties").GetProperty("steps").GetProperty("items").GetRawText());
     }
 
+    // The aggregate_events tool of the Vercel MCP server, as an OpenAI provider refused it in strict mode (#324):
+    // "In context=('properties', 'by', 'items'), 'allOf' is not permitted."
+    internal const string VercelAggregateEventsSchema =
+        """
+        {
+          "type": "object",
+          "properties": {
+            "projectId": { "type": "string", "description": "The project." },
+            "event": { "type": "string", "enum": ["request", "function_invocation"] },
+            "by": {
+              "type": "array",
+              "description": "The fields to group by.",
+              "items": { "allOf": [{ "type": "string" }, { "enum": ["path", "status", "region"] }] }
+            },
+            "since": { "type": "string", "format": "date-time" }
+          },
+          "required": ["projectId", "event"],
+          "additionalProperties": false,
+          "$schema": "http://json-schema.org/draft-07/schema#"
+        }
+        """;
+
+    [TestMethod]
+    [DataRow(false, DisplayName = "Strict tools not allowed")]
+    [DataRow(true, DisplayName = "Strict tools allowed")]
+    public void AgentToolBridge_CreateOpenAIInputSchema_SendsAnAllOfSchemaAsItIsWithoutStrictMode(bool allowStrict)
+    {
+        using var schema = JsonDocument.Parse(VercelAggregateEventsSchema);
+
+        var sent = AgentToolBridge.CreateOpenAIInputSchema(schema.RootElement, allowStrict, out var strict);
+
+        Assert.IsFalse(AgentToolBridge.FitsOpenAIStrictMode(schema.RootElement));
+        Assert.IsFalse(strict);
+        Assert.AreEqual(schema.RootElement.GetRawText(), sent.GetRawText());
+    }
+
+    [TestMethod]
+    public void AgentToolBridge_CreateOpenAIInputSchema_SendsTheToolsOwnSchemaUnlessStrictToolsAreAllowed()
+    {
+        using var temp = TestTempDirectory.Create();
+        var readFile = AgentBuiltInToolFactory.CreateDefaultTools(CreateOptions(temp.Path)).Single(static tool => tool.Spec.Name == "read_file");
+
+        var plain = AgentToolBridge.CreateOpenAIInputSchema(readFile.Spec.InputSchema, allowStrict: false, out var plainStrict);
+        Assert.IsFalse(plainStrict);
+        Assert.AreEqual(readFile.Spec.InputSchema.GetRawText(), plain.GetRawText());
+
+        var strict = AgentToolBridge.CreateOpenAIInputSchema(readFile.Spec.InputSchema, allowStrict: true, out var strictStrict);
+        Assert.IsTrue(strictStrict);
+        Assert.AreEqual(AgentToolBridge.CreateOpenAIStrictInputSchema(readFile.Spec.InputSchema).GetRawText(), strict.GetRawText());
+    }
+
+    [TestMethod]
+    public void AgentToolBridge_FitsOpenAIStrictMode_TakesTheBuiltInToolsAndOneOfSchemas()
+    {
+        using var temp = TestTempDirectory.Create();
+        var notFitting = AgentBuiltInToolFactory.CreateDefaultTools(CreateOptions(temp.Path))
+            .Where(static tool => !AgentToolBridge.FitsOpenAIStrictMode(tool.Spec.InputSchema))
+            .Select(static tool => tool.Spec.Name)
+            .ToArray();
+        Assert.AreEqual(0, notFitting.Length, string.Join(", ", notFitting));
+
+        // The selectors of mcp-grafana (#330): the rewrite writes the oneOf as an anyOf.
+        using var oneOf = JsonDocument.Parse(
+            """
+            {
+              "type": "object",
+              "properties": {
+                "matches": {
+                  "type": "array",
+                  "items": {
+                    "oneOf": [
+                      { "type": "string" },
+                      { "type": "object", "properties": { "filters": { "type": "array", "items": { "type": "string" } } }, "required": ["filters"] }
+                    ]
+                  }
+                }
+              }
+            }
+            """);
+        Assert.IsTrue(AgentToolBridge.FitsOpenAIStrictMode(oneOf.RootElement));
+    }
+
+    [TestMethod]
+    [DataRow("""{ "type": "object", "properties": { "a": { "allOf": [{ "type": "string" }] } } }""", DisplayName = "allOf")]
+    [DataRow("""{ "type": "object", "properties": { "a": { "type": "string", "not": { "const": "x" } } } }""", DisplayName = "not")]
+    [DataRow("""{ "type": "object", "properties": { "a": { "type": "string" } }, "if": { "required": ["a"] }, "then": { "required": ["a"] } }""", DisplayName = "if/then")]
+    [DataRow("""{ "type": "object", "properties": {}, "patternProperties": { "^x-": { "type": "string" } } }""", DisplayName = "patternProperties")]
+    [DataRow("""{ "type": "object", "properties": { "a": { "type": "string" } }, "additionalProperties": true }""", DisplayName = "open object")]
+    [DataRow("""{ "type": "object", "properties": { "map": { "type": "object", "additionalProperties": { "type": "string" } } } }""", DisplayName = "map")]
+    [DataRow("""{ "type": "object", "properties": { "data": { "type": "object" } } }""", DisplayName = "free-form object")]
+    [DataRow("""{ "type": "object", "properties": {}, "required": ["fields"] }""", DisplayName = "required without its property")]
+    [DataRow("""{ "type": "object", "properties": { "a": { "type": "array", "items": true } } }""", DisplayName = "boolean schema")]
+    [DataRow("""{ "type": "object", "properties": { "a": { "$ref": "https://example.com/a.json" } } }""", DisplayName = "remote reference")]
+    [DataRow("""{ "type": "object", "properties": { "a": { "$ref": "#/$defs/a", "description": "A." } }, "$defs": { "a": { "type": "string" } } }""", DisplayName = "reference with keywords")]
+    [DataRow("""{ "type": "object", "properties": { "a": { "type": "integer", "default": 1 } } }""", DisplayName = "default")]
+    [DataRow("""{ "type": "object", "properties": { "a": { "type": "array", "prefixItems": [{ "type": "string" }] } } }""", DisplayName = "prefixItems")]
+    [DataRow("""{ "type": "object", "properties": { "a": { "type": "date" } } }""", DisplayName = "unknown type")]
+    [DataRow("""{ "anyOf": [{ "type": "object", "properties": {} }] }""", DisplayName = "choice at the root")]
+    [DataRow("""{ "type": "object", "properties": { "a": { "type": "object", "properties": { "b": { "type": "object", "properties": { "c": { "type": "object", "properties": { "d": { "type": "object", "properties": { "e": { "type": "string" } }, "additionalProperties": false } }, "additionalProperties": false } }, "additionalProperties": false } }, "additionalProperties": false } } }""", DisplayName = "nesting")]
+    public void AgentToolBridge_FitsOpenAIStrictMode_RefusesWhatStrictModeCannotTake(string schemaJson)
+    {
+        using var schema = JsonDocument.Parse(schemaJson);
+
+        Assert.IsFalse(AgentToolBridge.FitsOpenAIStrictMode(schema.RootElement));
+        var sent = AgentToolBridge.CreateOpenAIInputSchema(schema.RootElement, allowStrict: true, out var strict);
+        Assert.IsFalse(strict);
+        Assert.AreEqual("object", sent.GetProperty("type").GetString());
+    }
+
+    [TestMethod]
+    public void AgentToolBridge_FitsOpenAIStrictMode_RefusesASchemaPastTheLimitsOfStrictMode()
+    {
+        var enumValues = string.Join(",", Enumerable.Range(0, 501).Select(static index => $"\"v{index}\""));
+        using var manyEnumValues = JsonDocument.Parse($$"""{ "type": "object", "properties": { "a": { "type": "string", "enum": [{{enumValues}}] } } }""");
+        Assert.IsFalse(AgentToolBridge.FitsOpenAIStrictMode(manyEnumValues.RootElement));
+
+        var properties = string.Join(",", Enumerable.Range(0, 101).Select(static index => $"\"p{index}\": {{ \"type\": \"string\" }}"));
+        using var manyProperties = JsonDocument.Parse($$"""{ "type": "object", "properties": { {{properties}} } }""");
+        Assert.IsFalse(AgentToolBridge.FitsOpenAIStrictMode(manyProperties.RootElement));
+    }
+
+    [TestMethod]
+    [DataRow("""{}""", """{"type":"object","properties":{}}""", DisplayName = "empty schema")]
+    [DataRow("""{"type":"object"}""", """{"type":"object","properties":{}}""", DisplayName = "no properties")]
+    [DataRow("""{"type":"object","properties":null,"description":"None."}""", """{"type":"object","description":"None.","properties":{}}""", DisplayName = "null properties")]
+    [DataRow("""{"properties":{"a":{"type":"string"}}}""", """{"type":"object","properties":{"a":{"type":"string"}}}""", DisplayName = "no type")]
+    public void AgentToolBridge_CreateOpenAIInputSchema_GivesTheRootTheTypeAndPropertiesOfAnObject(string schemaJson, string expected)
+    {
+        using var schema = JsonDocument.Parse(schemaJson);
+
+        var sent = AgentToolBridge.CreateOpenAIInputSchema(schema.RootElement, allowStrict: false, out var strict);
+
+        Assert.IsFalse(strict);
+        Assert.AreEqual(expected, sent.GetRawText());
+    }
+
     private static bool HasSchemaKeyword(JsonElement schema, string keyword)
         => schema.ValueKind switch
         {

@@ -1419,7 +1419,8 @@ internal sealed class OpenAIResponsesTurnExecutor(
         CancellationToken cancellationToken)
     {
         var freeformTools = OpenAIResponsesFreeformTools.Select(provider, request);
-        var toolDefinitions = request.Tools.Select(tool => CreateTool(tool, freeformTools)).ToArray();
+        var allowStrictTools = request.Provider.Profile?.SupportsStrictTools ?? provider.Profile?.SupportsStrictTools ?? false;
+        var toolDefinitions = request.Tools.Select(tool => CreateTool(tool, freeformTools, allowStrictTools)).ToArray();
         var options = new CreateResponseOptions
         {
             Model = request.ModelId,
@@ -1911,17 +1912,24 @@ internal sealed class OpenAIResponsesTurnExecutor(
         return true;
     }
 
-    private static ResponseTool CreateTool(AgentToolDefinition tool, IReadOnlyDictionary<string, AgentToolFreeformInput>? freeformTools)
+    private static ResponseTool CreateTool(
+        AgentToolDefinition tool,
+        IReadOnlyDictionary<string, AgentToolFreeformInput>? freeformTools,
+        bool allowStrictTools)
         => freeformTools is not null && tool.Spec.FreeformInput is { } input
             ? OpenAIResponsesFreeformTools.CreateTool(tool, input)
-            : CreateFunctionTool(tool);
+            : CreateFunctionTool(tool, allowStrictTools);
 
-    private static FunctionTool CreateFunctionTool(AgentToolDefinition tool)
-        => ResponseTool.CreateFunctionTool(
+    // The Responses API makes a function strict when the flag is absent: it is always sent.
+    private static FunctionTool CreateFunctionTool(AgentToolDefinition tool, bool allowStrictTools)
+    {
+        var inputSchema = AgentToolBridge.CreateOpenAIInputSchema(tool.Spec.InputSchema, allowStrictTools, out var strict);
+        return ResponseTool.CreateFunctionTool(
             AgentToolBridge.GetRegisteredToolName(tool.Spec.Name),
-            BinaryData.FromString(AgentToolBridge.CreateOpenAIStrictInputSchema(tool.Spec.InputSchema).GetRawText()),
-            strictModeEnabled: true,
+            BinaryData.FromString(inputSchema.GetRawText()),
+            strictModeEnabled: strict,
             functionDescription: tool.Spec.Description);
+    }
 
     private static (AgentConversationMessage Message, IReadOnlyList<string?> PartContentIds, IReadOnlyList<AgentTurnProviderActivity>? Activities) MapAssistantMessage(
         AgentTurnRequest request,

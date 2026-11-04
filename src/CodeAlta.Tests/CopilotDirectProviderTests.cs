@@ -1323,24 +1323,21 @@ public sealed class CopilotDirectProviderTests
         Assert.IsFalse(path.TryGetProperty("items", out _), path.GetRawText());
         StringAssert.StartsWith(path.GetProperty("description").GetString(), "A file or several.");
         var branches = path.GetProperty("anyOf").EnumerateArray().ToArray();
-        // A strict schema makes an optional value nullable.
+        // The tools are not sent strict, with or without a profile: an optional value stays optional, not nullable.
         CollectionAssert.AreEqual(
-            configuredProfile ? new[] { "string", "array" } : ["string", "array", "null"],
+            new[] { "string", "array" },
             branches.Select(static branch => branch.GetProperty("type").GetString()).ToArray());
         Assert.AreEqual("string", branches[1].GetProperty("items").GetProperty("type").GetString());
         Assert.IsFalse(branches[0].TryGetProperty("items", out _));
-        if (configuredProfile)
-        {
-            Assert.AreEqual(1, branches[1].GetProperty("minItems").GetInt32());
-            Assert.IsFalse(path.TryGetProperty("minItems", out _));
-        }
+        Assert.AreEqual(1, branches[1].GetProperty("minItems").GetInt32());
+        Assert.IsFalse(path.TryGetProperty("minItems", out _));
 
         // A single type that may be null is what Gemini takes: it stays as it is.
         Assert.AreEqual("integer,null", Types(geminiProperties.GetProperty("limit")));
 
         // Another model of the Chat Completions endpoint takes the union.
         var kimiPath = ToolProperties(bodies["kimi-k3"]).GetProperty("path");
-        Assert.AreEqual(configuredProfile ? "string,array" : "string,array,null", Types(kimiPath));
+        Assert.AreEqual("string,array", Types(kimiPath));
 
         static JsonElement ToolProperties(JsonElement body)
             => body.GetProperty("tools")[0].GetProperty("function").GetProperty("parameters").GetProperty("properties");

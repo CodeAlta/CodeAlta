@@ -36,6 +36,45 @@ public static class AgentToolBridge
         "uniqueItems",
     }.ToFrozenSet(StringComparer.Ordinal);
 
+    // The keywords that only narrow one value, which the strict rewrite moves to the description: the model reads them and
+    // the tool checks them. The other keywords of UnsupportedOpenAIStrictKeywords (not, patternProperties, contains...)
+    // change which values or keys are valid, so a schema that has them is not sent strict.
+    private static readonly FrozenSet<string> OpenAIStrictDescriptionKeywords = new[]
+    {
+        "contentEncoding",
+        "contentMediaType",
+        "minLength",
+        "maxLength",
+        "pattern",
+        "format",
+        "minimum",
+        "maximum",
+        "multipleOf",
+        "minItems",
+        "maxItems",
+        "minProperties",
+        "maxProperties",
+        "uniqueItems",
+    }.ToFrozenSet(StringComparer.Ordinal);
+
+    private static readonly FrozenSet<string> JsonSchemaTypeNames = new[]
+    {
+        "string",
+        "number",
+        "integer",
+        "boolean",
+        "object",
+        "array",
+        "null",
+    }.ToFrozenSet(StringComparer.Ordinal);
+
+    // The first limits OpenAI documented for strict schemas, lower than the later ones, so that an endpoint that kept them
+    // (an older Azure OpenAI deployment) does not refuse a schema either.
+    private const int OpenAIStrictMaxNesting = 5;
+    private const int OpenAIStrictMaxProperties = 100;
+    private const int OpenAIStrictMaxEnumValues = 500;
+    private const int OpenAIStrictMaxCharacters = 15_000;
+
     /// <summary>
     /// Converts tool definitions into <see cref="AITool"/> declarations.
     /// </summary>
@@ -64,10 +103,277 @@ public static class AgentToolBridge
     }
 
     /// <summary>
-    /// Normalizes a tool schema for OpenAI strict function calling.
+    /// Creates the input schema of a tool for OpenAI function calling (Responses and Chat Completions), and says whether
+    /// it is sent in strict mode.
+    /// </summary>
+    /// <remarks>
+    /// A tool is sent with its own schema, strict mode off, as Codex sends every tool: strict mode accepts only a subset
+    /// of JSON Schema (no <c>allOf</c>, <c>not</c>, <c>if</c>, open maps, limits of size and nesting) and makes every
+    /// optional argument required and nullable, so it cannot take any valid MCP schema as it is. Only when the provider
+    /// allows strict tools (<c>supports_strict_tools</c>) and the schema fits strict mode once rewritten
+    /// (<see cref="CreateOpenAIStrictInputSchema"/>) is the tool sent strict.
+    /// </remarks>
+    /// <param name="schema">The tool input schema.</param>
+    /// <param name="allowStrict">Whether the provider may receive tools in strict mode.</param>
+    /// <param name="strict">Receives whether the schema returned is for strict mode.</param>
+    /// <returns>The schema to send.</returns>
+    internal static JsonElement CreateOpenAIInputSchema(JsonElement schema, bool allowStrict, out bool strict)
+    {
+        if (allowStrict && FitsOpenAIStrictMode(schema))
+        {
+            strict = true;
+            return CreateOpenAIStrictInputSchema(schema);
+        }
+
+        strict = false;
+        return CreateOpenAIObjectInputSchema(schema);
+    }
+
+    /// <summary>
+    /// Says whether a tool schema can be sent in OpenAI strict mode once rewritten by
+    /// <see cref="CreateOpenAIStrictInputSchema"/>: an object at the root, only the keywords strict mode takes or the
+    /// rewrite moves to the description, closed objects, local references, and within the limits of size and nesting of
+    /// strict mode. Anything else, an unknown keyword included, does not fit.
+    /// </summary>
+    /// <param name="schema">The tool input schema.</param>
+    /// <returns><see langword="true"/> when the schema fits strict mode.</returns>
+    internal static bool FitsOpenAIStrictMode(JsonElement schema)
+    {
+        // The root is an object, not a choice of schemas.
+        if (schema.ValueKind != JsonValueKind.Object ||
+            !(IsObjectType(schema) || schema.TryGetProperty("properties", out _)) ||
+            schema.TryGetProperty("anyOf", out _) ||
+            schema.TryGetProperty("oneOf", out _))
+        {
+            return false;
+        }
+
+        var budget = new OpenAIStrictBudget();
+        return FitsOpenAIStrictMode(schema, nesting: 1, budget) &&
+               budget.Properties <= OpenAIStrictMaxProperties &&
+               budget.EnumValues <= OpenAIStrictMaxEnumValues &&
+               budget.Characters <= OpenAIStrictMaxCharacters;
+    }
+
+    private static bool FitsOpenAIStrictMode(JsonElement schema, int nesting, OpenAIStrictBudget budget)
+    {
+        if (schema.ValueKind != JsonValueKind.Object || nesting > OpenAIStrictMaxNesting)
+        {
+            return false;
+        }
+
+        JsonElement? properties = null;
+        JsonElement? required = null;
+        var closed = false;
+        foreach (var keyword in schema.EnumerateObject())
+        {
+            var value = keyword.Value;
+            switch (keyword.Name)
+            {
+                case "properties":
+                    if (value.ValueKind != JsonValueKind.Object)
+                    {
+                        return false;
+                    }
+
+                    properties = value;
+                    foreach (var property in value.EnumerateObject())
+                    {
+                        budget.Properties++;
+                        budget.Characters += property.Name.Length;
+                        if (!FitsOpenAIStrictMode(property.Value, nesting + 1, budget))
+                        {
+                            return false;
+                        }
+                    }
+
+                    break;
+                case "items":
+                    if (!FitsOpenAIStrictMode(value, nesting + 1, budget))
+                    {
+                        return false;
+                    }
+
+                    break;
+                case "anyOf" or "oneOf":
+                    if (value.ValueKind != JsonValueKind.Array || value.GetArrayLength() == 0)
+                    {
+                        return false;
+                    }
+
+                    foreach (var variant in value.EnumerateArray())
+                    {
+                        if (!FitsOpenAIStrictMode(variant, nesting, budget))
+                        {
+                            return false;
+                        }
+                    }
+
+                    break;
+                case "$defs" or "definitions":
+                    if (value.ValueKind != JsonValueKind.Object)
+                    {
+                        return false;
+                    }
+
+                    foreach (var definition in value.EnumerateObject())
+                    {
+                        budget.Characters += definition.Name.Length;
+                        if (!FitsOpenAIStrictMode(definition.Value, nesting, budget))
+                        {
+                            return false;
+                        }
+                    }
+
+                    break;
+                case "$ref":
+                    if (value.ValueKind != JsonValueKind.String || value.GetString() is not { } reference || !reference.StartsWith('#'))
+                    {
+                        return false;
+                    }
+
+                    break;
+                case "required":
+                    if (value.ValueKind != JsonValueKind.Array ||
+                        value.EnumerateArray().Any(static name => name.ValueKind != JsonValueKind.String))
+                    {
+                        return false;
+                    }
+
+                    required = value;
+                    break;
+                case "additionalProperties":
+                    // Strict mode closes every object: a map open to other keys cannot be sent.
+                    if (value.ValueKind != JsonValueKind.False)
+                    {
+                        return false;
+                    }
+
+                    closed = true;
+                    break;
+                case "type":
+                    if (!IsKnownSchemaType(value))
+                    {
+                        return false;
+                    }
+
+                    break;
+                case "enum":
+                    if (value.ValueKind != JsonValueKind.Array)
+                    {
+                        return false;
+                    }
+
+                    foreach (var item in value.EnumerateArray())
+                    {
+                        budget.EnumValues++;
+                        budget.Characters += item.ValueKind == JsonValueKind.String ? item.GetString()!.Length : item.GetRawText().Length;
+                    }
+
+                    break;
+                case "const":
+                    budget.Characters += value.ValueKind == JsonValueKind.String ? value.GetString()!.Length : value.GetRawText().Length;
+                    break;
+                case "description" or "title":
+                    break;
+                default:
+                    if (!OpenAIStrictDescriptionKeywords.Contains(keyword.Name))
+                    {
+                        return false;
+                    }
+
+                    break;
+            }
+        }
+
+        // Strict mode takes a reference alone, without keywords beside it.
+        if (schema.TryGetProperty("$ref", out _) && schema.EnumerateObject().Count() > 1)
+        {
+            return false;
+        }
+
+        // An object without properties is a free-form object, unless it is closed: strict mode would accept only {}.
+        if (IsObjectType(schema) && properties is null && !closed)
+        {
+            return false;
+        }
+
+        // A required name without its property describes a key strict mode cannot send.
+        return required is not { } requiredNames ||
+               requiredNames.EnumerateArray().All(name => properties is { } declared && declared.TryGetProperty(name.GetString()!, out _));
+    }
+
+    private static bool IsKnownSchemaType(JsonElement type)
+        => type.ValueKind switch
+        {
+            JsonValueKind.String => JsonSchemaTypeNames.Contains(type.GetString()!),
+            JsonValueKind.Array => type.GetArrayLength() > 0 && type.EnumerateArray().All(static item =>
+                item.ValueKind == JsonValueKind.String && JsonSchemaTypeNames.Contains(item.GetString()!)),
+            _ => false,
+        };
+
+    // The tool's own schema, as an object with properties at its root, which the OpenAI endpoints require of any function
+    // (MCP requires the type too, but some servers omit the properties of a tool without arguments, or set them to null).
+    private static JsonElement CreateOpenAIObjectInputSchema(JsonElement schema)
+    {
+        if (schema.ValueKind != JsonValueKind.Object)
+        {
+            using var empty = JsonDocument.Parse("""{"type":"object","properties":{}}""");
+            return empty.RootElement.Clone();
+        }
+
+        var hasType = schema.TryGetProperty("type", out _);
+        var hasProperties = schema.TryGetProperty("properties", out var properties) && properties.ValueKind == JsonValueKind.Object;
+        if (hasType && hasProperties)
+        {
+            return schema;
+        }
+
+        using var stream = new MemoryStream();
+        using (var writer = new Utf8JsonWriter(stream))
+        {
+            writer.WriteStartObject();
+            if (!hasType)
+            {
+                writer.WriteString("type", "object");
+            }
+
+            foreach (var property in schema.EnumerateObject())
+            {
+                if (hasProperties || !property.NameEquals("properties"))
+                {
+                    property.WriteTo(writer);
+                }
+            }
+
+            if (!hasProperties)
+            {
+                writer.WriteStartObject("properties");
+                writer.WriteEndObject();
+            }
+
+            writer.WriteEndObject();
+        }
+
+        using var document = JsonDocument.Parse(stream.ToArray());
+        return document.RootElement.Clone();
+    }
+
+    private sealed class OpenAIStrictBudget
+    {
+        public int Properties { get; set; }
+
+        public int EnumValues { get; set; }
+
+        public int Characters { get; set; }
+    }
+
+    /// <summary>
+    /// Normalizes a tool schema for OpenAI strict function calling: optional properties become required and nullable,
+    /// objects are closed, and the keywords strict mode refuses go to the description.
     /// </summary>
     /// <param name="schema">The original tool input schema.</param>
-    /// <returns>A schema compatible with OpenAI strict mode.</returns>
+    /// <returns>A schema compatible with OpenAI strict mode, for a schema that <see cref="FitsOpenAIStrictMode(JsonElement)"/>.</returns>
     internal static JsonElement CreateOpenAIStrictInputSchema(JsonElement schema)
     {
         using var stream = new MemoryStream();
