@@ -361,6 +361,42 @@ public sealed class AccessControlTests
     }
 
     [TestMethod]
+    public async Task AMaintainerOfAnotherTeam_NeitherReplacesNorTakesOverAProviderTheyDoNotAnswerFor()
+    {
+        await using var server = await ServerFixture.StartAsync();
+        using var owner = new TestDevice("Alex desktop");
+        using var node = new TestDevice("Build box");
+        var (setup, machine) = await server.SetUpWithNodeAsync(owner, node);
+        var (mia, miaId) = await AddPersonAsync(server, owner, setup, "Mia");
+        var (max, maxId) = await AddPersonAsync(server, owner, setup, "Max");
+        var infra = (await server.SendAsync(owner, HttpMethod.Post, "/api/v1/teams", new CreateTeamRequest("Infra"))).Read<TeamDto>();
+        var web = (await server.SendAsync(owner, HttpMethod.Post, "/api/v1/teams", new CreateTeamRequest("Web"))).Read<TeamDto>();
+        await server.SendAsync(owner, HttpMethod.Put, $"/api/v1/teams/{infra.Id}/members/{miaId}", new SetTeamMemberRequest(FleetTeamRoles.Maintainer));
+        await server.SendAsync(owner, HttpMethod.Put, $"/api/v1/teams/{web.Id}/members/{maxId}", new SetTeamMemberRequest(FleetTeamRoles.Maintainer));
+        await server.SendAsync(owner, HttpMethod.Delete, $"/api/v1/teams/{infra.Id}/members/{setup.Owner.Id}");
+        await server.SendAsync(owner, HttpMethod.Delete, $"/api/v1/teams/{web.Id}/members/{setup.Owner.Id}");
+        var offer = (await server.SendAsync(owner, HttpMethod.Post, "/api/v1/transfers", new OfferTransferRequest(FleetResourceKinds.Machine, machine.Id, FleetPrincipalKinds.Team,
+            infra.Id))).Read<TransferDto>();
+        Assert.AreEqual(HttpStatusCode.OK, (await server.SendAsync(mia, HttpMethod.Post, $"/api/v1/transfers/{offer.Id}/accept")).Status);
+        PutScopeProviderRequest Provider(TeamDto team, long version) => new(FleetPrincipalKinds.Team, team.Id, "Gateway", "anthropic", "https://gateway.example/v1",
+            ["claude-opus-5-5"], version, "sealed-key", [new GrantKeyWrapDto(machine.Id, "wrapped")]);
+        Assert.AreEqual(HttpStatusCode.OK, (await server.SendAsync(mia, HttpMethod.Put, "/api/v1/providers/gateway", Provider(infra, 1))).Status);
+
+        // The machine goes to Web; its maintainer sends the id of Infra's provider, a newer version, and Web as its owner.
+        var moved = (await server.SendAsync(mia, HttpMethod.Post, "/api/v1/transfers", new OfferTransferRequest(FleetResourceKinds.Machine, machine.Id, FleetPrincipalKinds.Team,
+            web.Id))).Read<TransferDto>();
+        Assert.AreEqual(HttpStatusCode.OK, (await server.SendAsync(max, HttpMethod.Post, $"/api/v1/transfers/{moved.Id}/accept")).Status);
+        Assert.AreEqual(HttpStatusCode.Forbidden, (await server.SendAsync(max, HttpMethod.Put, "/api/v1/providers/gateway", Provider(web, 2))).Status,
+            "a provider is changed by who answers for the scope it belongs to");
+        var held = (await server.SendAsync(owner, HttpMethod.Get, "/api/v1/providers")).Read<AccessListDto<ScopeProviderDto>>().Items.Single();
+        Assert.AreEqual((infra.Id, 1L), (held.OwnerId, held.Version), "Infra's provider stays as it was");
+
+        // Who answers for both scopes does not move it to the other either: a provider keeps the owner it was made for.
+        await server.SendAsync(owner, HttpMethod.Put, $"/api/v1/teams/{web.Id}/members/{miaId}", new SetTeamMemberRequest(FleetTeamRoles.Maintainer));
+        Assert.AreEqual(HttpStatusCode.BadRequest, (await server.SendAsync(mia, HttpMethod.Put, "/api/v1/providers/gateway", Provider(web, 2))).Status);
+    }
+
+    [TestMethod]
     public async Task AMachineGoesToATeamOnceAMaintainerAcceptsIt_AndAnAutomationTakenWaitsPaused()
     {
         await using var server = await ServerFixture.StartAsync();

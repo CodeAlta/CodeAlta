@@ -50,6 +50,13 @@ internal sealed partial class AccessService
         if (request.OwnerKind == FleetPrincipalKinds.Organization && request.OwnerId != actor.OrganizationId) throw Invalid("The organization is the one of this server.");
         if (!AnswersFor(snapshot, person, request.OwnerKind, request.OwnerId))
             throw Denied("A provider of the organization is set by an owner or an admin, one of a team by a maintainer of the team.");
+        // A provider held already is changed by who answers for the scope it belongs to, and stays in that scope.
+        var existing = (await _access.ListScopeProvidersAsync(actor.OrganizationId, cancellationToken).ConfigureAwait(false)).FirstOrDefault(provider => provider.Provider.Id == providerId)
+            .Provider;
+        if (existing is not null && !AnswersFor(snapshot, person, existing.OwnerKind, existing.OwnerId))
+            throw Denied("This provider belongs to a scope you do not answer for: only who answers for it changes it.");
+        if (existing is not null && (existing.OwnerKind != request.OwnerKind || existing.OwnerId != request.OwnerId))
+            throw Invalid("A provider keeps the scope it was made for: delete it, and make one for the other scope.");
         if (string.IsNullOrWhiteSpace(request.Name) || request.Name.Length > 64 || request.Name.Any(char.IsControl)) throw Invalid("A provider has a name of 1 to 64 characters.");
         if (!AccountProviderTypes.Contains(request.Type ?? string.Empty)) throw Invalid("A provider of a scope runs with the key of an account: " + string.Join(", ", AccountProviderTypes) + ".");
         if (request.Endpoint is { } endpoint && (!Uri.TryCreate(endpoint, UriKind.Absolute, out var address) || address.Scheme != Uri.UriSchemeHttps && !address.IsLoopback))
