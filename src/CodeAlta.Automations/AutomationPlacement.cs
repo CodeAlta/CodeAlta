@@ -11,4 +11,12 @@ internal interface IAutomationPlacement
     /// <param name="cancellationToken">Cancels the request.</param>
     /// <returns>The run as that machine recorded it, or a failed run that says why it did not start there. Failures are results.</returns>
     Task<AutomationRun> RunAsync(AutomationEntry entry, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Why the triggers of an automation that runs on this machine do not start it yet: a machine it was placed on may
+    /// still run its copy, until that machine took it away or a person starts it here anyway.
+    /// </summary>
+    /// <param name="id">The automation.</param>
+    /// <returns>Why it waits; null when nothing does. Called while the caller holds its own lock: it calls nothing back.</returns>
+    string? WaitsHere(string id);
 }
