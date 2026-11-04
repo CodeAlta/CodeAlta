@@ -44,8 +44,11 @@ internal sealed partial class FleetServerService
             FleetSignInCode code;
             if (request.LinkId is not null)
             {
-                if (!FleetServerLinkStore.IsValidId(request.LinkId)) return new("invalid_request", null, null);
-                code = await _servers!.StartLinkCodeAsync(request.LinkId, request.Method, cancellationToken).ConfigureAwait(false);
+                if (!FleetServerLinkStore.IsValidId(request.LinkId) || request.Purpose is not (null or FleetSignInPurposes.Link or FleetSignInPurposes.Confirm))
+                    return new("invalid_request", null, null);
+                code = request.Purpose == FleetSignInPurposes.Confirm
+                    ? await _servers!.StartConfirmCodeAsync(request.LinkId, request.Method, cancellationToken).ConfigureAwait(false)
+                    : await _servers!.StartLinkCodeAsync(request.LinkId, request.Method, cancellationToken).ConfigureAwait(false);
             }
             else
             {
@@ -150,7 +153,8 @@ internal sealed partial class FleetServerService
             || request.Issuer is { Length: > MaximumText } || request.ClientId is { Length: > 512 } || request.ClientSecret is { Length: > MaximumText }
             || request.DisplayName is { Length: > 128 } || request.GroupsClaim is { Length: > 64 } || request.AllowedDomains is { Length: > 50 }
             || request.AllowedTenants is { Length: > 50 } || request.AllowedDomains?.Any(static value => value is null or { Length: > 253 }) == true
-            || request.AllowedTenants?.Any(static value => value is null or { Length: > 64 }) == true)
+            || request.AllowedTenants?.Any(static value => value is null or { Length: > 64 }) == true
+            || request.ConfirmWith is not null && !FleetSignInMethods.IsKnown(request.ConfirmWith))
             return new("invalid_request", null, [], null);
         var company = string.IsNullOrWhiteSpace(request.Issuer) && string.IsNullOrWhiteSpace(request.ClientId)
             ? null
@@ -159,10 +163,16 @@ internal sealed partial class FleetServerService
                 request.AllowedDomains ?? [], request.AllowedTenants ?? []);
         try
         {
-            var settings = await _servers!.SetSignInSettingsAsync(request.LinkId, new SetSignInSettingsRequest(request.Version, enabled, company, request.RequireSso),
-                cancellationToken).ConfigureAwait(false);
+            // A change of the company sign-in asks the person to sign in again first: the page names the method once the server asked.
+            var confirmation = request.ConfirmWith is { } method
+                ? await _servers!.ConfirmSignInAsync(request.LinkId, method, request.Handle, cancellationToken).ConfigureAwait(false)
+                : null;
+            var settings = await _servers!.SetSignInSettingsAsync(request.LinkId,
+                new SetSignInSettingsRequest(request.Version, enabled, company, request.RequireSso, Confirmation: confirmation), cancellationToken).ConfigureAwait(false);
             return new("ok", SettingsView(settings), [], null);
         }
+        catch (DesktopSignInException exception) { return new(exception.Code, null, [], exception.Message); }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { return new("sign_in.cancelled", null, [], null); }
         catch (Exception exception) when (Failure(exception) is { } failure)
         {
             return new(failure.Status, null, [], failure.Message);
@@ -221,7 +231,8 @@ internal sealed record FleetSignInJoinResult(string Status, FleetServerView? Ser
 /// <param name="Method">The method: <c>github</c>.</param>
 /// <param name="Url">The address of the server to join; null for a link.</param>
 /// <param name="LinkId">The link whose person links the account; null to join.</param>
-internal sealed record FleetSignInCodeRequest(string ExpectedEpoch, string Method, string? Url, string? LinkId);
+/// <param name="Purpose"><c>confirm</c> for a sign-in that confirms a change of the settings; null to link (with a link) or join.</param>
+internal sealed record FleetSignInCodeRequest(string ExpectedEpoch, string Method, string? Url, string? LinkId, string? Purpose = null);
 
 /// <summary>The code a person enters at the provider to finish a sign-in (GitHub).</summary>
 /// <param name="Handle">What <c>joinWithSignIn</c>, <c>linkSignIn</c> and <c>openSignInPage</c> name it by.</param>
@@ -297,5 +308,11 @@ internal sealed record FleetSignInSettingsResult(string Status, FleetSignInSetti
 /// <param name="RequireSso">Whether company sign-in is required.</param>
 /// <param name="AllowedDomains">The email domains company sign-in lets in.</param>
 /// <param name="AllowedTenants">The tenant ids company sign-in lets in.</param>
+/// <param name="ConfirmWith">
+/// The method the person signs in again with to confirm a change of the company sign-in (the server answered
+/// <c>sign_in.confirmation_required</c>); null for none.
+/// </param>
+/// <param name="Handle">The handle of <c>startSignInCode</c> with the purpose <c>confirm</c>, for GitHub; null otherwise.</param>
 internal sealed record FleetSignInSettingsRequest(string ExpectedEpoch, string LinkId, int Version, string[] Enabled, string? Issuer, string? ClientId, string? ClientSecret,
-    string? DisplayName, string? GroupsClaim, bool RequireSso, string[]? AllowedDomains = null, string[]? AllowedTenants = null);
+    string? DisplayName, string? GroupsClaim, bool RequireSso, string[]? AllowedDomains = null, string[]? AllowedTenants = null, string? ConfirmWith = null,
+    string? Handle = null);

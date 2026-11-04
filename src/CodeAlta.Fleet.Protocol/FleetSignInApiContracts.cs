@@ -49,6 +49,12 @@ public static class FleetSignInPurposes
 
     /// <summary>A person links a sign-in method (or registers a passkey) from an approved controller device of theirs.</summary>
     public const string Link = "link";
+
+    /// <summary>
+    /// A person signs in again, from an approved controller device of theirs, with a method linked to them, to confirm a
+    /// dangerous action (changing the company sign-in): the sign-in gives a single-use confirmation of a few minutes.
+    /// </summary>
+    public const string Confirm = "confirm";
 }
 
 /// <summary>A sign-in method as a server offers it.</summary>
@@ -107,7 +113,8 @@ public sealed record SignInPersonDto(string Id, string DisplayName, string? Emai
 /// <param name="Person">The person.</param>
 /// <param name="Grant">
 /// For an enrollment, the single-use grant that lets the device of the attempt enroll as a controller device of the
-/// person (<see cref="EnrollRequest.SignInGrant"/>), valid a few minutes; null for a link.
+/// person (<see cref="EnrollRequest.SignInGrant"/>), valid a few minutes; for a confirmation, the single-use
+/// confirmation that this device's person signed in again (<see cref="SetSignInSettingsRequest.Confirmation"/>); null for a link.
 /// </param>
 /// <param name="GrantExpiresAt">When the grant stops working; null for a link.</param>
 /// <param name="Linked">Whether a method was linked to the person (or a passkey registered).</param>
@@ -185,8 +192,13 @@ public sealed record CompanySignInSettings(string Issuer, string ClientId, strin
 /// <param name="Company">The company's provider; null removes it.</param>
 /// <param name="RequireSso">Whether people sign in with the company's provider only (it must be configured and enabled).</param>
 /// <param name="BreakGlassPersonId">The owner who keeps a passkey while company sign-in is required; null for the caller's person.</param>
+/// <param name="Confirmation">
+/// The confirmation of a sign-in of the caller's person with <see cref="FleetSignInPurposes.Confirm"/>, from the calling
+/// device, used once: needed when the change touches the company sign-in (its provider, its secret, who it lets in,
+/// whether it is on or required, the break-glass owner).
+/// </param>
 public sealed record SetSignInSettingsRequest(long Version, IReadOnlyList<string> EnabledMethods, CompanySignInSettings? Company, bool RequireSso,
-    string? BreakGlassPersonId = null);
+    string? BreakGlassPersonId = null, string? Confirmation = null);
 
 /// <summary>A sign-in method linked to a person.</summary>
 /// <param name="Method">The method.</param>

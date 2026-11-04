@@ -172,6 +172,12 @@ or an approval on another of the person's devices), valid 10 to 15 minutes. A ho
 account: no separate administrator account, and a stolen browser session or a hijacked agent cannot reconfigure the
 fleet.
 
+Changing the company sign-in (its provider, secret, domains and tenants, whether it is on or required, the break-glass
+owner) needs it today: the owner's controller device signs in again with a method linked to its person (purpose
+`confirm`, a passkey, a linked account or the company's own sign-in), which gives a single-use confirmation bound to
+that device for 10 minutes. A signed request alone is not enough, and a refused change does not use the confirmation
+up. The approval on another device is to come.
+
 ## Agents acting for people
 
 - A session acts for its person. Its authority on another machine (a child session, a message) comes from a

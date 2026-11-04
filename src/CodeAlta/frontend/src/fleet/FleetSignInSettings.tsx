@@ -49,7 +49,7 @@ export function ServerSignIn({ server, epoch, api = fleetServer, revision }: { s
       // GitHub: a code to enter at GitHub first, then the wait for it under its handle.
       let handle: string | null = null;
       if (method === "github") {
-        const started = await api.startSignInCode({ expectedEpoch: epoch, method, url: null, linkId: server.id }, { signal: abort.signal, timeoutMilliseconds: 30_000 });
+        const started = await api.startSignInCode({ expectedEpoch: epoch, method, url: null, linkId: server.id, purpose: null }, { signal: abort.signal, timeoutMilliseconds: 30_000 });
         if (abort.signal.aborted) return;
         const code = started.status === "ok" ? signInCode(started.code) : null;
         if (!code) { setProblem({ key: signInProblem(started.status) ?? serverProblem(started.status) ?? "The operation did not complete.", detail: started.message }); return; }
@@ -100,38 +100,57 @@ export function ServerSignIn({ server, epoch, api = fleetServer, revision }: { s
       <Button size="small" variant="minimal" disabled={!!linking} icon={linking ? <ActivitySpinner size={14} /> : undefined}>{t("Link…")}</Button>
     </PopoverNext>
     {settings && <Button size="small" variant="minimal" onClick={() => setEditing(true)}>{t("Change…")}</Button>}
-    {editing && settings && <SignInDialog server={server} epoch={epoch} api={api} view={settings}
+    {editing && settings && <SignInDialog server={server} epoch={epoch} api={api} view={settings} logins={logins}
       onClose={changed => { setEditing(false); if (changed) setGeneration(value => value + 1); }} />}
   </div>;
 }
 
-/** How people sign in to the organization: the methods, the company's OpenID Connect provider and whether it is required. */
-function SignInDialog({ server, epoch, api, view, onClose }: {
-  server: FleetServerView; epoch: string; api: Pick<FleetSignInApi, "setSignInSettings">; view: FleetSignInSettingsView; onClose: (changed: boolean) => void;
+/**
+ * How people sign in to the organization: the methods, the company's OpenID Connect provider and whether it is required.
+ * A change of the company sign-in asks the owner to sign in again first, with a method linked to them.
+ */
+function SignInDialog({ server, epoch, api, view, logins, onClose }: {
+  server: FleetServerView; epoch: string; api: Pick<FleetSignInApi, "setSignInSettings" | "startSignInCode" | "openSignInPage">; view: FleetSignInSettingsView;
+  logins: readonly FleetSignInLoginView[]; onClose: (changed: boolean) => void;
 }) {
   const { t } = useShellLanguage();
   const [draft, setDraft] = useState<SignInDraft>(() => signInDraft(view));
   const [working, setWorking] = useState(false);
+  const [confirming, setConfirming] = useState(false);
+  const [confirmCode, setConfirmCode] = useState<Code | null>(null);
   const [problem, setProblem] = useState<{ key: MessageKey; detail?: string | null } | null>(null);
+  // The methods the owner may confirm with: the ones linked to them, once each.
+  const confirmWith = [...new Set(logins.map(login => login.method))];
   const invalid = signInDraftProblem(draft);
   const update = (change: Partial<SignInDraft>) => setDraft(value => ({ ...value, ...change }));
   const toggle = (method: string, on: boolean) => update({ enabled: on ? [...draft.enabled.filter(item => item !== method), method] : draft.enabled.filter(item => item !== method) });
-  async function save() {
+  async function save(method: string | null = null) {
     if (invalid) return;
     setWorking(true);
     setProblem(null);
     try {
+      // GitHub confirms with a code to enter at GitHub, shown here while the host waits for it.
+      let handle: string | null = null;
+      if (method === "github") {
+        const started = await api.startSignInCode({ expectedEpoch: epoch, method, url: null, linkId: server.id, purpose: "confirm" }, { timeoutMilliseconds: 30_000 });
+        const code = started.status === "ok" ? signInCode(started.code) : null;
+        if (!code) { setProblem({ key: signInProblem(started.status) ?? serverProblem(started.status) ?? "The operation did not complete.", detail: started.message }); return; }
+        setConfirmCode(code);
+        handle = code.handle;
+      }
       const company = hasCompany(draft);
       const result = await api.setSignInSettings({ expectedEpoch: epoch, linkId: server.id, version: view.version, enabled: draft.enabled,
         issuer: company ? draft.issuer.trim() : null, clientId: company ? draft.clientId.trim() : null, clientSecret: company && draft.clientSecret ? draft.clientSecret : null,
         displayName: company ? draft.displayName.trim() || null : null, groupsClaim: company ? draft.groupsClaim.trim() || null : null, requireSso: draft.requireSso,
-        allowedDomains: company ? allowedValues(draft.allowedDomains) : null, allowedTenants: company ? allowedValues(draft.allowedTenants) : null },
-        { timeoutMilliseconds: 60_000 });
+        allowedDomains: company ? allowedValues(draft.allowedDomains) : null, allowedTenants: company ? allowedValues(draft.allowedTenants) : null,
+        confirmWith: method, handle },
+        { timeoutMilliseconds: method ? 11 * 60_000 : 60_000 });
       if (result.status === "ok") { onClose(true); return; }
+      if (result.status === "sign_in.confirmation_required") { setConfirming(true); return; }
       setProblem({ key: signInProblem(result.status) ?? serverProblem(result.status) ?? "The operation did not complete.", detail: result.message });
     } catch {
       setProblem({ key: "The server does not answer." });
-    } finally { setWorking(false); }
+    } finally { setWorking(false); setConfirmCode(null); }
   }
   const company = view.methods.find(method => method.id === "company");
   return <Dialog isOpen className="fleet-sign-in-dialog" title={t("How people sign in")} canOutsideClickClose={false} onClose={() => { if (!working) onClose(false); }}>
@@ -172,6 +191,14 @@ function SignInDialog({ server, epoch, api, view, onClose }: {
         {draft.requireSso && <small className="muted-text">{t("Only company sign-in lets a new computer in; your passkey stays as the owner's way in.")}</small>}
         <button type="submit" hidden />
       </form>
+      {confirming && <Callout compact intent="primary" role="status" className="fleet-sign-in-confirm">
+        {t("Changing the company sign-in needs you to sign in again.")}
+        {confirmWith.length === 0 ? <div className="muted-text">{t("Link a passkey or an account first with Link…, then save again.")}</div>
+          : <div className="fleet-sign-in-confirm-methods">{confirmWith.map(method => <Button key={method} size="small" disabled={working}
+            text={t("Continue with {method}", { method: method === "passkey" ? t("Passkey") : methodNames[method] ?? method })} onClick={() => void save(method)} />)}</div>}
+        {working && confirmCode && <SignInCode epoch={epoch} code={confirmCode} api={api} />}
+        {working && !confirmCode && <div className="muted-text">{t("Finish signing in in your browser…")}</div>}
+      </Callout>}
       {(problem ?? (invalid ? { key: invalid } : null)) && <Callout compact intent="warning" role="alert">{t((problem ?? { key: invalid! }).key)}
         {problem?.detail && <div className="muted-text">{problem.detail}</div>}</Callout>}
     </DialogBody>

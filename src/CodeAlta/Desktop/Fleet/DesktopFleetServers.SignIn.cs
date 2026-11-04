@@ -89,6 +89,63 @@ internal sealed partial class DesktopFleetServers
         return StartCodeAsync(Client(linkId), linkId, method, FleetSignInPurposes.Link, cancellationToken);
     }
 
+    /// <summary>
+    /// Starts a sign-in with a code (GitHub) by which the person of this computer confirms a dangerous action at a server;
+    /// <see cref="ConfirmSignInAsync"/> with its handle then waits for it.
+    /// </summary>
+    /// <param name="linkId">The link.</param>
+    /// <param name="method">The method; one that uses a device code.</param>
+    /// <param name="cancellationToken">Cancels the call.</param>
+    /// <returns>The code, and its handle.</returns>
+    /// <exception cref="ArgumentException">The method does not use a device code.</exception>
+    /// <exception cref="KeyNotFoundException">No such link.</exception>
+    /// <exception cref="DesktopSignInException">Too many sign-ins wait.</exception>
+    /// <exception cref="FleetServerException">The server refused, or gave no usable code.</exception>
+    /// <exception cref="HttpRequestException">The server does not answer.</exception>
+    public Task<FleetSignInCode> StartConfirmCodeAsync(string linkId, string method, CancellationToken cancellationToken)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        return StartCodeAsync(Client(linkId), linkId, method, FleetSignInPurposes.Confirm, cancellationToken);
+    }
+
+    /// <summary>
+    /// The person of this computer signs in again at a server with a method linked to them, through the system browser
+    /// (or, for a method that uses a code, by entering the code of <paramref name="handle"/>), to confirm a dangerous
+    /// action: the single-use confirmation the server gives, which only this computer presents, a few minutes.
+    /// </summary>
+    /// <param name="linkId">The link.</param>
+    /// <param name="method">The method.</param>
+    /// <param name="handle">The handle <see cref="StartConfirmCodeAsync"/> gave, for a method that uses a code; null otherwise.</param>
+    /// <param name="cancellationToken">Cancels the sign-in.</param>
+    /// <returns>The confirmation.</returns>
+    /// <exception cref="KeyNotFoundException">No such link.</exception>
+    /// <exception cref="DesktopSignInException">The browser did not open, the person cancelled, the code is not one that waits, or the sign-in expired.</exception>
+    /// <exception cref="FleetServerException">The server refused (a method not linked to the person, among others).</exception>
+    /// <exception cref="HttpRequestException">The server does not answer.</exception>
+    public async Task<string> ConfirmSignInAsync(string linkId, string method, string? handle, CancellationToken cancellationToken)
+    {
+        CompleteSignInResponse signedIn;
+        if (FleetSignInMethods.UsesDeviceCode(method))
+        {
+            var pending = TakeCode(handle, linkId, method, FleetSignInPurposes.Confirm);
+            try
+            {
+                signedIn = await WaitForCodeAsync(pending, cancellationToken).ConfigureAwait(false);
+            }
+            finally
+            {
+                Release(pending);
+            }
+        }
+        else
+        {
+            using var client = Client(linkId);
+            signedIn = await SignInThroughBrowserAsync(client, method, FleetSignInPurposes.Confirm, cancellationToken).ConfigureAwait(false);
+        }
+
+        return signedIn.Grant ?? throw new FleetServerException(HttpStatusCode.OK, FleetServerException.HttpErrorCode, null, "The server gave no confirmation.");
+    }
+
     /// <summary>Opens, in the browser of the system, the page where the person enters the code of a sign-in that waits.</summary>
     /// <param name="handle">The handle of the code.</param>
     /// <returns>Whether it opened; false for a handle of no sign-in that waits, or when no browser opens.</returns>

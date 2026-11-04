@@ -552,6 +552,56 @@ public sealed class SignInTests
     }
 
     [TestMethod]
+    public async Task ChangingTheCompanySignInNeedsTheOwnerToSignInAgain_AConfirmationWorksOnceForItsDeviceAndTenMinutes()
+    {
+        await using var provider = await FakeOidcProvider.StartAsync(clientSecret: "company-secret");
+        await using var server = await ServerFixture.StartAsync(signIn: Options(provider));
+        using var owner = new TestDevice("Desktop");
+        using var node = new TestDevice("Mac mini");
+        using var key = new SoftwareAuthenticator();
+        await server.SetUpWithNodeAsync(owner, node);
+        var origin = server.BaseAddress.GetLeftPart(UriPartial.Authority);
+        await RegisterPasskeyAsync(server, owner, key, origin);
+        var company = new CompanySignInSettings(provider.Issuer.AbsoluteUri, provider.ClientId, provider.ClientSecret, "Contoso", AllowedDomains: ["contoso.example"]);
+        SetSignInSettingsRequest Change(long version, string? confirmation) => new(version, [FleetSignInMethods.Company, FleetSignInMethods.Passkey], company, false,
+            Confirmation: confirmation);
+
+        // A signed request of the owner's device is not enough: a hijacked session or a stolen device key would be.
+        var held = (await server.SendAsync(owner, HttpMethod.Get, "/api/v1/sign-in/settings")).Read<SignInSettingsDto>();
+        var unconfirmed = await server.SendAsync(owner, HttpMethod.Put, "/api/v1/sign-in/settings", Change(held.Version, null));
+        Assert.AreEqual((HttpStatusCode.Forbidden, SignInErrorCodes.ConfirmationRequired), (unconfirmed.Status, unconfirmed.Code), unconfirmed.Body.ToString());
+        Assert.AreEqual(HttpStatusCode.Forbidden, (await server.SendAsync(owner, HttpMethod.Put, "/api/v1/sign-in/settings", Change(held.Version, "asc_guessed"))).Status);
+
+        // A confirmation is for the device that signed in again: another device presenting it is refused (only an owner's controller would get that far).
+        var confirmation = await ConfirmAsync(server, owner, key);
+        Assert.AreEqual(HttpStatusCode.Forbidden, (await server.SendAsync(node, HttpMethod.Put, "/api/v1/sign-in/settings", Change(held.Version, confirmation))).Status);
+        var changed = await server.SendAsync(owner, HttpMethod.Put, "/api/v1/sign-in/settings", Change(held.Version, confirmation));
+        Assert.AreEqual(HttpStatusCode.OK, changed.Status, changed.Body.ToString());
+        var version = changed.Read<SignInSettingsDto>().Version;
+
+        // It works once, and ten minutes.
+        company = company with { ClientSecret = null, AllowedDomains = ["contoso.example", "fabrikam.example"] };
+        Assert.AreEqual(SignInErrorCodes.ConfirmationRequired, (await server.SendAsync(owner, HttpMethod.Put, "/api/v1/sign-in/settings", Change(version, confirmation))).Code);
+        var late = await ConfirmAsync(server, owner, key);
+        server.Clock.Advance(TimeSpan.FromMinutes(11));
+        Assert.AreEqual(SignInErrorCodes.ConfirmationRequired, (await server.SendAsync(owner, HttpMethod.Put, "/api/v1/sign-in/settings", Change(version, late))).Code);
+
+        // A change refused for another reason does not use it up.
+        var fresh = await ConfirmAsync(server, owner, key);
+        Assert.AreEqual(HttpStatusCode.Conflict, (await server.SendAsync(owner, HttpMethod.Put, "/api/v1/sign-in/settings", Change(held.Version, fresh))).Status);
+        Assert.AreEqual(HttpStatusCode.OK, (await server.SendAsync(owner, HttpMethod.Put, "/api/v1/sign-in/settings", Change(version, fresh))).Status);
+
+        // The other methods are turned on and off without one.
+        var now = (await server.SendAsync(owner, HttpMethod.Get, "/api/v1/sign-in/settings")).Read<SignInSettingsDto>();
+        var github = await server.SendAsync(owner, HttpMethod.Put, "/api/v1/sign-in/settings", new SetSignInSettingsRequest(now.Version,
+            [FleetSignInMethods.Company, FleetSignInMethods.Passkey, FleetSignInMethods.GitHub], company, false));
+        Assert.AreEqual(HttpStatusCode.OK, github.Status, github.Body.ToString());
+
+        var audit = (await server.SendAsync(owner, HttpMethod.Get, "/api/v1/audit?limit=500")).Read<ListResponse<AuditRecordDto>>().Items;
+        Assert.IsTrue(audit.Count(static record => record.Action == "sign_in.settings.set" && record.Result == SignInErrorCodes.ConfirmationRequired) >= 3, "refusals are audited");
+    }
+
+    [TestMethod]
     public async Task TheCompanyProviderIsCheckedWhenTheOwnerSetsIt_AndItsSecretNeverComesBack()
     {
         await using var provider = await FakeOidcProvider.StartAsync(clientSecret: "company-secret");
@@ -608,13 +658,31 @@ public sealed class SignInTests
     private static async Task<SignInSettingsDto> ConfigureCompanyAsync(ServerFixture server, TestDevice owner, FakeOidcProvider provider, bool requireSso,
         string[]? domains = null, string[]? tenants = null)
     {
+        var confirmation = await ConfirmAsync(server, owner);
         var held = (await server.SendAsync(owner, HttpMethod.Get, "/api/v1/sign-in/settings")).Read<SignInSettingsDto>();
         var set = await server.SendAsync(owner, HttpMethod.Put, "/api/v1/sign-in/settings", new SetSignInSettingsRequest(held.Version,
             [FleetSignInMethods.Company, FleetSignInMethods.Passkey, FleetSignInMethods.Microsoft, FleetSignInMethods.GitHub],
             new CompanySignInSettings(provider.Issuer.AbsoluteUri, provider.ClientId, held.Company is null ? provider.ClientSecret ?? string.Empty : null, "Contoso", null,
-                domains ?? (tenants is null ? ["contoso.example"] : null), tenants), requireSso));
+                domains ?? (tenants is null ? ["contoso.example"] : null), tenants), requireSso, Confirmation: confirmation));
         Assert.AreEqual(HttpStatusCode.OK, set.Status, set.Body.ToString());
         return set.Read<SignInSettingsDto>();
+    }
+
+    // The owner signs in again from their device with a passkey of theirs (one registered here): the confirmation it gives.
+    private static async Task<string> ConfirmAsync(ServerFixture server, TestDevice owner, SoftwareAuthenticator? key = null)
+    {
+        var origin = server.BaseAddress.GetLeftPart(UriPartial.Authority);
+        using var registered = key is null ? new SoftwareAuthenticator() : null;
+        var authenticator = key ?? registered!;
+        if (key is null) await RegisterPasskeyAsync(server, owner, authenticator, origin);
+        var start = (await server.SendAsync(owner, HttpMethod.Post, "/api/v1/sign-in/start",
+            new StartSignInRequest(FleetSignInMethods.Passkey, owner.PublicKey, Redirect, FleetSignInPurposes.Confirm))).Read<StartSignInResponse>();
+        var back = await PasskeyCeremonyAsync(server, start, "get", options => authenticator.Get(options, origin));
+        var confirmed = await CompleteAsync(server, owner, start, back);
+        Assert.AreEqual(HttpStatusCode.OK, confirmed.Status, confirmed.Body.ToString());
+        var answer = confirmed.Read<CompleteSignInResponse>();
+        Assert.IsFalse(answer.Linked);
+        return answer.Grant!;
     }
 
     private static async Task<(StartSignInResponse Start, Uri Back)> StartAsync(ServerFixture server, TestDevice device, string method, string? purpose = null)

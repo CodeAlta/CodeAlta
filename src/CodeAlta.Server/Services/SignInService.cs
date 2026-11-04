@@ -42,6 +42,9 @@ public sealed class KeepRolesMapper : ISignInRoleMapper
 /// </summary>
 public sealed class SignInService : IDisposable
 {
+    // How long a confirmation works: the fresh confirmation of a dangerous action (doc/fleet/identity.md) lasts 10 to 15 minutes.
+    private static readonly TimeSpan ConfirmationLifetime = TimeSpan.FromMinutes(10);
+
     private static readonly string[] DefaultEnabled = [FleetSignInMethods.Passkey, FleetSignInMethods.Microsoft, FleetSignInMethods.Google, FleetSignInMethods.GitHub];
 
     private readonly ICoordinatorStore _store;
@@ -176,6 +179,14 @@ public sealed class SignInService : IDisposable
         }
 
         var document = new SignInSettingsDocument(enabled, company, request.RequireSso, request.RequireSso ? breakGlass : null);
+        // Changing the company sign-in is a dangerous action: the owner signed in again from this device a few minutes ago.
+        // The confirmation is taken last, so that a change refused for another reason does not use it up.
+        if (ChangesCompanySignIn(held.Document, document, !string.Equals(secret, held.Secret, StringComparison.Ordinal))
+            && _attempts.TakeConfirmation(request.Confirmation, actor.Id)?.PersonId != owner.Id)
+        {
+            throw CoordinatorException.Forbidden(SignInErrorCodes.ConfirmationRequired,
+                "Changing the company sign-in needs you to sign in again: confirm with a passkey or an account linked to you.", "confirm");
+        }
         var record = new SignInSettingsRecord(actor.OrganizationId, JsonSerializer.Serialize(document, SignInSettingsJsonContext.Default.SignInSettingsDocument), secret,
             held.Version + 1, _time.GetUtcNow());
         var details = JsonSerializer.Serialize(new SignInSettingsAudit(enabled, company?.Issuer, request.RequireSso, company?.AllowedDomains, company?.AllowedTenants),
@@ -203,7 +214,7 @@ public sealed class SignInService : IDisposable
         if (request is null || !FleetDevicePublicKey.TryParse(request.PublicKey, out var key))
             throw Invalid("The request needs a method, the public key of the device and its loopback redirect.");
         var purpose = request.Purpose ?? FleetSignInPurposes.Enroll;
-        if (purpose is not (FleetSignInPurposes.Enroll or FleetSignInPurposes.Link)) throw Invalid("purpose must be 'enroll' or 'link'.");
+        if (purpose is not (FleetSignInPurposes.Enroll or FleetSignInPurposes.Link or FleetSignInPurposes.Confirm)) throw Invalid("purpose must be 'enroll', 'link' or 'confirm'.");
         // A device code has no redirect: the device polls instead.
         var deviceFlow = FleetSignInMethods.UsesDeviceCode(request.Method);
         var redirect = deviceFlow ? string.Empty : RequireLoopbackRedirect(request.RedirectUri);
@@ -211,9 +222,9 @@ public sealed class SignInService : IDisposable
             ?? throw CoordinatorException.NotFound(CoordinatorErrorCodes.NotSetUp, "The server is not set up.");
 
         string? linking = null;
-        if (purpose == FleetSignInPurposes.Link)
+        if (purpose is FleetSignInPurposes.Link or FleetSignInPurposes.Confirm)
         {
-            // A link is made by a person on one of their approved controller devices, never by a device the server does not know.
+            // A link or a confirmation is made by a person on one of their approved controller devices, never by a device the server does not know.
             var actor = await _authenticator.AuthenticateAsync(signed, cancellationToken).ConfigureAwait(false);
             if (actor.Id != key.DeviceId || actor.Kind != FleetDeviceKinds.Controller || actor.OwnerPersonId is null)
                 throw CoordinatorException.Forbidden(FleetErrorCodes.Forbidden, "A sign-in method is linked from an approved controller device of its person.");
@@ -405,7 +416,7 @@ public sealed class SignInService : IDisposable
     {
         if (!FleetDevicePublicKey.TryParse(pending.PublicKey, out var started)) throw new InvalidOperationException("An attempt without its key.");
         _authenticator.VerifyWithKey(signed, started);
-        if (pending.Purpose == FleetSignInPurposes.Link
+        if (pending.Purpose is FleetSignInPurposes.Link or FleetSignInPurposes.Confirm
             && await _store.GetDeviceAsync(pending.DeviceId, cancellationToken).ConfigureAwait(false) is not { Status: DeviceStatuses.Approved, Kind: FleetDeviceKinds.Controller })
         {
             throw CoordinatorException.Forbidden(FleetErrorCodes.Forbidden, "A sign-in method is linked from an approved controller device of its person.");
@@ -430,9 +441,19 @@ public sealed class SignInService : IDisposable
         var devices = await _store.ListDevicesAsync(attempt.OrganizationId, cancellationToken).ConfigureAwait(false);
         var hasDevices = devices.Any(other => other.OwnerPersonId == person.Id && other.Kind == FleetDeviceKinds.Controller && other.Status == DeviceStatuses.Approved);
         var answer = new SignInPersonDto(person.Id, person.DisplayName, login?.Email, hasDevices);
+        // A confirmation proves the person of the device that asked, signed in again: another person's sign-in confirms nothing.
+        if (attempt.Purpose == FleetSignInPurposes.Confirm && person.Id != attempt.LinkingPersonId)
+            throw await RefuseAsync(origin, deviceId, attempt.Method, SignInErrorCodes.NotLinked, "This sign-in is not one of yours: confirm with a method linked to you.",
+                cancellationToken, person.Id).ConfigureAwait(false);
         await _store.AppendAuditAsync(new AuditEntry("sign_in.complete", AuditEntry.Success, person.Id, deviceId, attempt.Method, origin.SourceAddress, origin.RequestId,
             $"{{\"purpose\":\"{attempt.Purpose}\"}}"), cancellationToken).ConfigureAwait(false);
         if (attempt.Purpose == FleetSignInPurposes.Link) return new CompleteSignInResponse(attempt.Method, answer, null, null, true);
+        if (attempt.Purpose == FleetSignInPurposes.Confirm)
+        {
+            var until = _time.GetUtcNow() + ConfirmationLifetime;
+            return new CompleteSignInResponse(attempt.Method, answer, _attempts.Confirm(new SignInGrant(attempt.OrganizationId, person.Id, attempt.DeviceId, attempt.Method, until)),
+                until, false);
+        }
 
         var expires = _time.GetUtcNow() + _options.GrantLifetime;
         var grant = _attempts.Grant(new SignInGrant(attempt.OrganizationId, person.Id, attempt.DeviceId, attempt.Method, expires));
@@ -553,6 +574,11 @@ public sealed class SignInService : IDisposable
             if (outcome == LoginLinkOutcome.AlreadyLinked) await _signIn.UpdateLoginAsync(login, cancellationToken).ConfigureAwait(false);
             return (person, login);
         }
+
+        // A confirmation signs in with a method already linked to the person of the device; it links and creates nothing.
+        if (attempt.Purpose == FleetSignInPurposes.Confirm && (existing is null || existing.PersonId != attempt.LinkingPersonId))
+            throw await RefuseAsync(origin, deviceId, attempt.Method, SignInErrorCodes.NotLinked, "This account is not linked to you: confirm with a method linked to you.",
+                cancellationToken).ConfigureAwait(false);
 
         if (existing is not null)
         {
@@ -680,6 +706,18 @@ public sealed class SignInService : IDisposable
     }
 
     private static CoordinatorException Invalid(string message) => CoordinatorException.BadRequest(SignInErrorCodes.SettingsInvalid, message);
+
+    // What makes a change one of the company sign-in: its provider, its secret, who it lets in, whether it is on or
+    // required, and the break-glass owner. The other methods are turned on and off without a confirmation.
+    private static bool ChangesCompanySignIn(SignInSettingsDocument before, SignInSettingsDocument after, bool secretChanged)
+    {
+        if (secretChanged || before.RequireSso != after.RequireSso || before.BreakGlassPersonId != after.BreakGlassPersonId
+            || before.Enabled.Contains(FleetSignInMethods.Company) != after.Enabled.Contains(FleetSignInMethods.Company)) return true;
+        if (before.Company is not { } was || after.Company is not { } now) return before.Company is not null || after.Company is not null;
+        return was.Issuer != now.Issuer || was.ClientId != now.ClientId || was.GroupsClaim != now.GroupsClaim || was.DisplayName != now.DisplayName
+            || !(was.AllowedDomains ?? []).SequenceEqual(now.AllowedDomains ?? [], StringComparer.Ordinal)
+            || !(was.AllowedTenants ?? []).SequenceEqual(now.AllowedTenants ?? [], StringComparer.Ordinal);
+    }
 
     // A tenant named must be the account's; a domain named must be the one of its verified email. Both, when both are named.
     // Settings kept before the owner had to name them let nobody in.

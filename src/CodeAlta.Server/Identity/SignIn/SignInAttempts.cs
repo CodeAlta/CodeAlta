@@ -68,6 +68,9 @@ public static class SignInErrorCodes
     /// <summary>Too many sign-ins wait at once.</summary>
     public const string Busy = "sign_in.busy";
 
+    /// <summary>The change touches the company sign-in: the person signs in again first (<c>FleetSignInPurposes.Confirm</c>).</summary>
+    public const string ConfirmationRequired = "sign_in.confirmation_required";
+
     /// <summary>The company's provider proved an identity outside the domains and tenants the owner named.</summary>
     public const string IdentityNotAllowed = "sign_in.identity_not_allowed";
 }
@@ -166,9 +169,11 @@ public sealed record SignInGrant(string OrganizationId, string PersonId, string 
 public sealed class SignInAttempts
 {
     private const string GrantPrefix = "asg_";
+    private const string ConfirmationPrefix = "asc_";
 
     private readonly ConcurrentDictionary<string, SignInAttempt> _attempts = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, SignInGrant> _grants = new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<string, SignInGrant> _confirmations = new(StringComparer.Ordinal);
     private readonly TimeProvider _time;
     private readonly int _capacity;
 
@@ -258,9 +263,39 @@ public sealed class SignInAttempts
         return grant.ExpiresAt > _time.GetUtcNow() ? grant : null;
     }
 
+    /// <summary>Gives the confirmation of a sign-in that confirms an action.</summary>
+    /// <param name="confirmation">The person and the device who signed in again.</param>
+    /// <returns>Its value, shown once to the device.</returns>
+    public string Confirm(SignInGrant confirmation)
+    {
+        ArgumentNullException.ThrowIfNull(confirmation);
+        Sweep();
+        var value = ConfirmationPrefix + NewSecret();
+        _confirmations[Hash(value)] = confirmation;
+        return value;
+    }
+
+    /// <summary>Takes a confirmation for the device it was given to; it works once.</summary>
+    /// <param name="value">The value of the confirmation.</param>
+    /// <param name="deviceId">The device that presents it.</param>
+    /// <returns>The confirmation, or null when it is unknown, used, expired, or of another device.</returns>
+    public SignInGrant? TakeConfirmation(string? value, string deviceId)
+    {
+        if (string.IsNullOrEmpty(value) || value.Length > 128) return null;
+        var hash = Hash(value);
+        if (!_confirmations.TryGetValue(hash, out var confirmation) || !string.Equals(confirmation.DeviceId, deviceId, StringComparison.Ordinal)) return null;
+        if (!_confirmations.TryRemove(hash, out confirmation)) return null;
+        return confirmation.ExpiresAt > _time.GetUtcNow() ? confirmation : null;
+    }
+
     private void Sweep()
     {
         var now = _time.GetUtcNow();
+        foreach (var pair in _confirmations)
+        {
+            if (pair.Value.ExpiresAt <= now) _confirmations.TryRemove(pair.Key, out _);
+        }
+
         foreach (var pair in _attempts)
         {
             if (pair.Value.ExpiresAt <= now) _attempts.TryRemove(pair.Key, out _);
