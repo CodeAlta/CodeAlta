@@ -235,6 +235,23 @@ public sealed class ExternalSignInClient : IDisposable
             : provider.Method == "google" || provider.Authority.Host.Equals("accounts.google.com", StringComparison.OrdinalIgnoreCase) ? FreshAuthentication.MaxAge
             : FreshAuthentication.Prompt | FreshAuthentication.MaxAge;
 
+    /// <summary>
+    /// Gets whether an issuer is the template of Entra ID's multi-tenant authorities (<c>organizations</c>, <c>common</c>):
+    /// <c>https://login.microsoftonline.com/{tenantid}/v2.0</c>, which each token fills with its own tenant (<c>tid</c>).
+    /// Only Microsoft's own sign-in names its issuer so; a provider elsewhere that copies the placeholder is not believed.
+    /// </summary>
+    /// <param name="authority">The authority configured.</param>
+    /// <param name="issuer">The issuer its discovery document names.</param>
+    /// <returns>Whether the issuer is that template, of the host of the authority.</returns>
+    internal static bool IsTenantTemplate(Uri authority, string? issuer)
+    {
+        if (issuer is null || !IsMicrosoftHost(authority) || authority.Scheme != Uri.UriSchemeHttps) return false;
+        var segments = authority.AbsolutePath.Trim('/').Split('/');
+        if (segments is not [var tenant, "v2.0"] || !(tenant.Equals("organizations", StringComparison.OrdinalIgnoreCase) || tenant.Equals("common", StringComparison.OrdinalIgnoreCase)))
+            return false;
+        return string.Equals(issuer, $"https://{authority.Host}/{TenantPlaceholder}/v2.0", StringComparison.OrdinalIgnoreCase);
+    }
+
     /// <summary>Gets whether an address is of Microsoft's sign-in (Entra ID, Microsoft accounts).</summary>
     /// <param name="address">The address.</param>
     /// <returns>Whether its host is <c>login.microsoftonline.com</c>, <c>login.microsoft.com</c> or <c>sts.windows.net</c>.</returns>
@@ -341,7 +358,9 @@ public sealed class ExternalSignInClient : IDisposable
     {
         ArgumentNullException.ThrowIfNull(provider);
         var configuration = await GetConfigurationAsync(provider, cancellationToken).ConfigureAwait(false);
-        if (!string.Equals(configuration.Issuer?.TrimEnd('/'), provider.Authority.AbsoluteUri.TrimEnd('/'), StringComparison.Ordinal))
+        // The issuer is the authority's, or, for the multi-tenant authorities of Entra ID, the template its tokens fill with their tenant.
+        if (!string.Equals(configuration.Issuer?.TrimEnd('/'), provider.Authority.AbsoluteUri.TrimEnd('/'), StringComparison.Ordinal)
+            && !IsTenantTemplate(provider.Authority, configuration.Issuer))
             throw new ExternalSignInException(SignInErrorCodes.ProviderUnavailable, $"The discovery document of {provider.Authority} names the issuer '{configuration.Issuer}'.");
     }
 
@@ -448,10 +467,11 @@ public sealed class ExternalSignInClient : IDisposable
             IssuerValidator = (issuer, securityToken, _) =>
             {
                 var expected = configuration.Issuer ?? provider.Authority.AbsoluteUri;
-                if (expected.Contains(TenantPlaceholder, StringComparison.Ordinal) && securityToken is JsonWebToken jwt && jwt.TryGetPayloadValue<string>("tid", out var tid)
-                    && !string.IsNullOrEmpty(tid))
+                // The same rule as when the authority was set (ProbeAsync): Microsoft's template only, filled with the token's own tenant.
+                if (IsTenantTemplate(provider.Authority, configuration.Issuer) && securityToken is JsonWebToken jwt && jwt.TryGetPayloadValue<string>("tid", out var tid)
+                    && !string.IsNullOrEmpty(tid) && tid.All(static c => char.IsAsciiLetterOrDigit(c) || c == '-'))
                 {
-                    expected = expected.Replace(TenantPlaceholder, tid, StringComparison.Ordinal);
+                    expected = expected.Replace(TenantPlaceholder, tid, StringComparison.OrdinalIgnoreCase);
                 }
 
                 if (!string.Equals(issuer, expected, StringComparison.Ordinal)) throw new SecurityTokenInvalidIssuerException($"The issuer '{issuer}' is not '{expected}'.");
