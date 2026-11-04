@@ -202,6 +202,12 @@ The management plane, and the whole surface of the console ([console](console.md
   delivery stands, the version as signed), `PUT /api/v1/automations/{id}` (a version or a removal a controller device of
   the machine's owner signed, sealed, never in clear; never replaced by one that is not newer), `DELETE
   .../{id}?machine=` (forgets a removal the machine acknowledged), `POST .../{id}/run` (a signed run by hand, passed to the machine online), `GET .../{id}/runs`.
+- **Access**: `GET /api/v1/access/self`, `people` (`POST` invites, `PUT .../{id}/role`, `POST .../{id}/deprovision`),
+  `teams` (and `.../{id}/members/{personId}`), `service-identities`, `grants` (`POST .../{id}/keys` once a device of the
+  owner of sealed content wrapped its keys), `owners` (`POST .../{kind}/{id}/resume`), `transfers` (`.../accept`,
+  `decline`, `cancel`), `access/review`, `access/proposals` (changes agents propose), and the signed access document:
+  `GET /api/v1/access/documents?after=`, `GET /api/v1/access/draft`, `POST /api/v1/access/documents`. The event
+  `access.changed` tells devices to read again ([access control](access-control.md#the-signed-access-document)).
 - **Telemetry**: `GET`/`PUT /api/v1/telemetry` reads and sets the fleet's signed telemetry setting (an owner's controller
   device only); `POST /otlp/v1/{traces,metrics,logs}` takes the OTLP of approved devices, signed as the API's calls are,
   and forwards it to the collector ([observability](observability.md#where-telemetry-goes)).

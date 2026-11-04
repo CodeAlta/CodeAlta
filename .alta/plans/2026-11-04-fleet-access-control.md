@@ -53,7 +53,7 @@ fields, a new signed document and one new control notification (`access.changed`
 - [x] 7. Agents and access (`alta fleet access` commands, proposals, the skill) and access and keys (pending grants).
 - [x] 8. People and access in CodeAlta Desktop (Settings > Fleet): simple at home, Advanced for teams, grants and
       transfers, changes to sign, proposals, deprovisioning, export.
-- [ ] 9. User guide and the fleet docs.
+- [x] 9. User guide and the fleet docs.
 
 ## Not in this plan
 

@@ -128,6 +128,20 @@ The server can ask; the node answers. Each node keeps a local policy that the se
   default for personal machines);
 - which credentials it lends to which runs ([orchestration](orchestration.md#credentials-of-unattended-runs)).
 
+### The signed access document
+
+What a node takes from the organization (teams, team machines, who is suspended) comes from the **access document**,
+never from the server's word. It is a chain, as the device list is: each version names the hash of the one before and
+the entry of the device list its signer read. Version 1 is signed by a controller device of the person who set the server
+up; each later one by a controller device of an owner or admin the version before lists, who is not suspended; only an
+owner's device changes who the owners and admins are or takes a suspension back. Each device verifies the chain against
+the device list it anchored and pins it per server, so a server can neither add itself to a team nor answer an older
+version. The server keeps a model (roles, teams, owners) that answers the REST API at once and offers a draft of the next
+version; a signer's console says what changes as it reads it and signs it, and changes made by a maintainer who is not a
+signer wait for one. On a team machine each member sees and drives only the sessions they started there, and its
+maintainers manage it; a suspended person's devices are refused, their sessions there stopped and their automations
+refused.
+
 A request to run something on a node is valid only when signed by an entitled person's device: a start or a prompt
 directly; an automation's run through the version of the automation an editor signed, the trigger being only the
 event that the signed definition accepts. The first start by a new person asks the node's owner.

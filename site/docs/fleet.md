@@ -319,6 +319,8 @@ To join the server of your company, open **Settings** > **Fleet** > **Server** a
 3. **Space**: the space that works with the organization, **A new Work space** by default. Its sessions are published to the server: their states and counts, never their content.
 4. **Approval**: another of your computers approves this one, or, for your first computer, an administrator; they see the six words shown here beside it.
 
+To bring someone into your server, the owner or an admin invites them in **Settings** > **Fleet** > **People and access** ([People and Access](people-and-access.md#invite-a-person)), which also sets their role, teams and the owners of machines.
+
 Signing in proves who you are; it does not let this computer in by itself. A device gets the keys that open your titles only once one of your computers approved it: the server alone cannot add one.
 
 ### Sign-in methods
@@ -457,10 +459,11 @@ Ask an agent of CodeAlta Desktop to work with your machines: "run the iOS tests 
 | Reads the statistics, the updates and the health of the fleet | `alta fleet statistics`, `alta fleet update status`, `alta fleet health` |
 | Reads the devices of a machine you manage | `alta fleet machine devices <machine>` |
 | Checks which secrets a machine has, by name only | `alta fleet secret list <machine>` |
+| Reads people, roles, teams, grants and owners, and proposes a change for you to apply | `alta fleet access show`, `people`, `owners`, `propose` |
 
 An agent works with your access and never more:
 
-- It reads devices, permissions and grants, and does not change them: you do, on the page of the machine.
+- It reads devices, permissions, roles, teams and grants, and does not change them: you do, on the page of the machine or in [People and Access](people-and-access.md), where its proposals wait for you.
 - It creates automations disabled, enables none, and places a disabled one only: you enable them in the **Automations** tab. You start an update campaign.
 - Its sandbox and permission mode go with what it starts or drives on another machine. A sandboxed session reads the fleet, and starts, moves or places nothing elsewhere; one whose sandbox does not allow the fleet does not read it either.
 
