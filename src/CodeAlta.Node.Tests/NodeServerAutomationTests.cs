@@ -124,6 +124,14 @@ public sealed class NodeServerAutomationTests
             Assert.AreEqual("no run of this automation with autonomy is in progress with this id", automations.TakeOverFromServer(link, list, setup.Organization.Id, takeOver));
             StringAssert.Contains(automations.TakeOverFromServer(link, list, setup.Organization.Id, takeOver with { Signature = request.Signature }), "signature");
 
+            // A try asked through the server is a dry run of the automation on this machine.
+            var tryId = Guid.CreateVersion7().ToString("N");
+            var tryRequest = FleetAutomationSigning.SignRun(desktopKey, new FleetAutomationRunRequest(FleetAutomationRunRequest.CurrentVersion, setup.Organization.Id, Id, nodeId,
+                tryId, string.Empty, string.Empty, clock.Now) { Action = FleetAutomationRunRequest.TryAction });
+            var tried = await automations.RunFromServerAsync(link, list, setup.Organization.Id, tryRequest, token);
+            Assert.AreEqual((tryId, AutomationService.TryTrigger, (string?)null), (tried.Run?.Id, tried.Run?.Trigger, tried.Refused));
+            await WaitForAsync(() => Task.FromResult(automations.Engine.Runs(Id, 50).FirstOrDefault(run => run.Id == tryId && !run.InProgress)), token);
+
             // Run now while a budget of the machine holds new runs: the machine answers at once that the run waits for Continue
             // anyway, and reports it so to the server, which the desktop reads; continued, the run goes on.
             var decision = new TaskCompletionSource<CodeAlta.Fleet.Server.FleetBudgetAdmission>(TaskCreationOptions.RunContinuationsAsynchronously);

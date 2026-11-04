@@ -134,7 +134,7 @@ internal sealed partial class NodeAutomations
             return (null, reason);
         }
 
-        if (request.Action is not null)
+        if (request.Action is not (null or FleetAutomationRunRequest.TryAction))
         {
             Log($"A run of {request.AutomationId} asked through the server was refused: the request takes a run over, it does not run the automation.");
             return (null, "the request takes a run over");
@@ -147,8 +147,9 @@ internal sealed partial class NodeAutomations
         }
 
         // As a run asked directly: answered at once when a budget holds it, which the reports of the runs tell the server.
-        var run = await RunByHandAsync(request.AutomationId, request.RunId, cancellationToken).ConfigureAwait(false);
-        if (run is not null) Log($"{request.SignerDeviceId} ran the automation {request.AutomationId} through the server: {run.Status}.");
+        var dryRun = request.Action == FleetAutomationRunRequest.TryAction;
+        var run = await RunByHandAsync(request.AutomationId, request.RunId, dryRun, cancellationToken).ConfigureAwait(false);
+        if (run is not null) Log($"{request.SignerDeviceId} {(dryRun ? "tried" : "ran")} the automation {request.AutomationId} through the server: {run.Status}.");
         return (run, run is null ? "the automation is not on this machine" : null);
     }
 

@@ -230,16 +230,20 @@ internal sealed class DesktopAutomationPlacement : IAutomationPlacement, IAsyncD
     }
 
     /// <inheritdoc />
-    public async Task<AutomationRun> RunAsync(AutomationEntry entry, CancellationToken cancellationToken)
+    public Task<AutomationRun> RunAsync(AutomationEntry entry, CancellationToken cancellationToken) => RunAsync(entry, false, cancellationToken);
+
+    /// <inheritdoc />
+    public async Task<AutomationRun> RunAsync(AutomationEntry entry, bool dryRun, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(entry);
         var now = DateTimeOffset.UtcNow;
-        AutomationRun Failed(string message) => new(Guid.CreateVersion7().ToString("N"), entry.Id, now, "manual")
+        var trigger = dryRun ? FleetAutomationRunRequest.TryAction : "manual";
+        AutomationRun Failed(string message) => new(Guid.CreateVersion7().ToString("N"), entry.Id, now, trigger)
             { Name = entry.Definition.Name, Status = AutomationRun.Failed, Message = message, EndedAt = now };
         if (entry.Definition.RunsOn is not { } machineId) return Failed("It runs on this computer.");
         if (_machines(machineId) is not { IsPaired: true } && ServerRoute?.Invoke(machineId) is { } route)
         {
-            using (route) return await RunThroughServerAsync(entry, machineId, route, Failed, cancellationToken).ConfigureAwait(false);
+            using (route) return await RunThroughServerAsync(entry, machineId, route, Failed, dryRun, cancellationToken).ConfigureAwait(false);
         }
 
         if (_machines(machineId) is not { } host) return Failed("No paired machine has the id " + machineId + ".");
@@ -258,7 +262,8 @@ internal sealed class DesktopAutomationPlacement : IAutomationPlacement, IAsyncD
             }
 
             if (Status(entry) is { State: not "copied" } status) return Failed(status.Message ?? "It could not be copied to the machine.");
-            var run = await client.RunAutomationAsync(entry.Id, cancellationToken: cancellationToken).ConfigureAwait(false);
+            var run = dryRun ? await client.TryAutomationAsync(entry.Id, cancellationToken).ConfigureAwait(false)
+                : await client.RunAutomationAsync(entry.Id, cancellationToken: cancellationToken).ConfigureAwait(false);
             lock (_gate) _runsReadAt.Remove(entry.Id);
             Poke();
             return ToRun(run);
@@ -542,7 +547,7 @@ internal sealed class DesktopAutomationPlacement : IAutomationPlacement, IAsyncD
     // Asks the machine, through its server, to run the automation now, with a request this computer signs; the run is the
     // machine's, read with the others. A change not given yet goes first.
     private async Task<AutomationRun> RunThroughServerAsync(AutomationEntry entry, string machineId, DesktopServerAutomationRoute route, Func<string, AutomationRun> failed,
-        CancellationToken cancellationToken)
+        bool dryRun, CancellationToken cancellationToken)
     {
         if (SignRun is not { } sign) return failed($"{route.MachineName} is reached through a server: it runs this automation by its triggers.");
         await _work.WaitAsync(cancellationToken).ConfigureAwait(false);
@@ -561,7 +566,7 @@ internal sealed class DesktopAutomationPlacement : IAutomationPlacement, IAsyncD
         try
         {
             var signed = sign(new FleetAutomationRunRequest(FleetAutomationRunRequest.CurrentVersion, route.OrganizationId, entry.Id, machineId, runId, string.Empty,
-                string.Empty, now));
+                string.Empty, now) { Action = dryRun ? FleetAutomationRunRequest.TryAction : null });
             await route.RunAsync(signed, cancellationToken).ConfigureAwait(false);
         }
         catch (FleetServerException exception)
@@ -577,7 +582,7 @@ internal sealed class DesktopAutomationPlacement : IAutomationPlacement, IAsyncD
         Poke();
         // What the machine reports of the run soon says more: a budget that holds it waits for Continue anyway, offered with it.
         return await ReportedRunAsync(entry, route, runId, cancellationToken).ConfigureAwait(false)
-            ?? new AutomationRun(runId, entry.Id, now, "manual") { Name = entry.Definition.Name, Status = AutomationRun.Running };
+            ?? new AutomationRun(runId, entry.Id, now, dryRun ? FleetAutomationRunRequest.TryAction : "manual") { Name = entry.Definition.Name, Status = AutomationRun.Running };
     }
 
     // The run asked through a server as its machine reported it, once it did within RunReportWait; null when it did not.

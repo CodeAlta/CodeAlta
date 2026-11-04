@@ -131,7 +131,7 @@ An automation runs unattended. Turn on **Autonomy** in the editor to decide what
 - **Calls in an hour, at most** stops those tools after that many calls, all runs together: the next call waits for you.
 - A run that waits for you says **Waits for you** in its list of runs, and in its session you answer as for any session. **Minutes an approval waits** stops the run once that time is over, or keeps it waiting. Leave it empty to wait as long as it takes.
 - **Take over** on a run that waits opens its session and makes it yours: nothing stops it any more, and what it asks waits for you. The [phone](plugins/mobile.md) offers it too, under the request of the run.
-- **Try it (dry run)** runs it once, but the tools it calls by itself are not called: each call is recorded on the run instead, under **Recorded, not made**.
+- **Try it (dry run)** runs it once, a script too, but the tools it calls by itself are not called: each call is recorded on the run instead, under **Recorded, not made**. One that runs on another machine is tried there: the calls are in the session of the run on that machine.
 
 ```toml
 autonomy = { allowed_tools = ["k8s_restart_pod"], max_calls_per_hour = 3, approval_timeout = 30, on_timeout = "stop", approvers = "owner" }

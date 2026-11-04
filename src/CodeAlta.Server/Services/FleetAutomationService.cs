@@ -177,7 +177,7 @@ internal sealed class FleetAutomationService
         if (!key.Verify(FleetAutomationRunRequestDocuments.GetSignedBytes(signed.Payload), signed.Signature))
             throw Invalid("The signature of the run request does not verify with the key of the calling device.");
         if (run.AutomationId != id) throw Invalid("The run request names another automation than the path.");
-        if (run.Action is not null) throw Invalid("A request to take a run over is sent to its run, not to run the automation.");
+        if (run.Action is not (null or FleetAutomationRunRequest.TryAction)) throw Invalid("A request to take a run over is sent to its run, not to run the automation.");
         if (run.SignerDeviceId != actor.Id || run.SignerKey != actor.PublicKey) throw Invalid("The run request must name the device that signs it, with its key.");
         if (run.OrganizationId != actor.OrganizationId) throw Invalid("The run request must name the organization of the server.");
         var held = await _automations.GetAutomationAsync(actor.OrganizationId, id, run.MachineId, cancellationToken).ConfigureAwait(false);

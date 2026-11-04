@@ -601,9 +601,9 @@ internal sealed partial class AutomationService
         if (Snapshot.Find(id) is not { } entry) return (null, NoSuchAutomation);
         if (triggerIndex < -1 || triggerIndex >= entry.Definition.Triggers.Count) return (null, "The automation has no such trigger.");
         if (entry.Problem is { } problem) return (null, problem);
+        // Without an event: its own prompt, the tools its autonomy allows replaced by fakes; on its machine for one placed there.
+        if (triggerIndex == -1) return (await RunAsync(id, null, dryRun: true, cancellationToken).ConfigureAwait(false), null);
         if (entry.Definition.RunsOn is not null) return (null, "It runs on another machine: try it there, or here before you place it.");
-        // Without an event: its own prompt, the tools its autonomy allows replaced by fakes.
-        if (triggerIndex == -1) return (await BeginAsync(entry, TryTrigger, "Try", entry.Definition.Prompt, cancellationToken).ConfigureAwait(false), null);
         var trigger = entry.Definition.Triggers[triggerIndex];
         var (sample, missing) = await SampleAsync(entry.ProjectId, entry.Definition.Prompt, trigger, body, cancellationToken).ConfigureAwait(false);
         if (sample is null) return (null, missing);

@@ -751,6 +751,15 @@ public sealed class FleetNodeClient : IAsyncDisposable
         => CallAsync(FleetNodeMethods.AutomationsRun, new FleetAutomationRef(id), FleetNodeJsonContext.Default.FleetAutomationRef,
             FleetNodeJsonContext.Default.FleetAutomationRunInfo, retryKey ?? NewRetryKey(), cancellationToken);
 
+    /// <summary>Tries an assigned automation now on the node: a dry run, whose tools it calls by itself record their calls on the run instead of making them.</summary>
+    /// <param name="id">The automation.</param>
+    /// <param name="cancellationToken">Cancels the call.</param>
+    /// <returns>The run, once its session exists or it failed to start.</returns>
+    /// <exception cref="FleetException">The node refused the call (<see cref="FleetNodeErrorCodes.AutomationNotFound"/>).</exception>
+    public Task<FleetAutomationRunInfo> TryAutomationAsync(string id, CancellationToken cancellationToken = default)
+        => CallAsync(FleetNodeMethods.AutomationsRun, new FleetAutomationRef(id) { DryRun = true }, FleetNodeJsonContext.Default.FleetAutomationRef,
+            FleetNodeJsonContext.Default.FleetAutomationRunInfo, NewRetryKey(), cancellationToken);
+
     /// <summary>Lists the runs of the automations assigned to the node, newest first.</summary>
     /// <param name="id">The automation; null for all the assigned ones.</param>
     /// <param name="limit">The most runs; null for the node's default.</param>

@@ -43,6 +43,12 @@ export const automationAutonomyMessages = {
     "Seine Läufe brauchen einen Berechtigungsmodus, der fragt: Einer, der alles erlaubt, ließe sie alles ohne Sie tun.",
     "実行には確認する権限モードが必要です。すべてを許可するモードでは、あなたなしで何でもできてしまいます。",
     "其运行需要会询问的权限模式：允许一切的模式会让它们无需你就能做任何事。"],
+  "A try on its machine replaces the tools it calls by itself with fakes: their calls are in the session of the run there, not made.": [
+    "Una prueba en su máquina reemplaza las herramientas que llama por sí sola por simulaciones: sus llamadas están en la sesión de la ejecución allí, no se hacen.",
+    "Un essai sur sa machine remplace les outils qu’elle appelle seule par des simulations : leurs appels sont dans la session de l’exécution là-bas, pas faits.",
+    "Ein Test auf seiner Maschine ersetzt die Tools, die es selbst aufruft, durch Attrappen: Ihre Aufrufe stehen in der Sitzung des Laufs dort, nicht ausgeführt.",
+    "マシンでの試行では、自分で呼び出すツールが模擬に置き換わります。呼び出しはそのマシンの実行のセッションにあり、実際には行われません。",
+    "在其机器上试运行会将它自行调用的工具替换为模拟：调用记录在那里运行的会话中，而不会执行。"],
   "A try replaces the tools it calls by itself with fakes: their calls are recorded on the run, not made.": [
     "Una prueba reemplaza las herramientas que llama por sí sola por simulaciones: sus llamadas se registran en la ejecución, no se hacen.",
     "Un essai remplace les outils qu’elle appelle seule par des simulations : leurs appels sont enregistrés sur l’exécution, pas faits.",

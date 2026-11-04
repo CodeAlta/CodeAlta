@@ -34,6 +34,12 @@ public sealed record FleetAutomationRunRequest(
     public const string TakeOverAction = "takeover";
 
     /// <summary>
+    /// The action of a request that tries the automation (<see cref="Action"/>): a dry run, whose tools it calls by itself are
+    /// replaced by fakes that record their calls on the run instead of making them.
+    /// </summary>
+    public const string TryAction = "try";
+
+    /// <summary>
     /// Gets what the request asks of the run: null to run the automation now (the run takes <see cref="RunId"/>), or
     /// <see cref="TakeOverAction"/> to take the run in progress with <see cref="RunId"/> over: what it waits for waits for
     /// that person, and no approval stops it any more. The signature covers it: one request is never the other. Not
@@ -111,7 +117,7 @@ public static class FleetAutomationRunRequestDocuments
             return false;
         }
 
-        if (read.Action is not (null or FleetAutomationRunRequest.TakeOverAction))
+        if (read.Action is not (null or FleetAutomationRunRequest.TakeOverAction or FleetAutomationRunRequest.TryAction))
         {
             reason = "the action of the run request is not known";
             return false;

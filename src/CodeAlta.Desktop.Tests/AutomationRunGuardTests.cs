@@ -191,6 +191,24 @@ public sealed class AutomationRunGuardTests
         await runner2.Guard.BeforeToolCallAsync(Call("k8s_restart_pod"), default);
         CollectionAssert.AreEqual(new[] { """k8s_restart_pod {"namespace":"shop","pod":"api-7"}""" }, trying.Runs(Id, 1)[0].Calls!.ToArray());
         runner2.Completion.SetResult(new(AutomationRun.Completed));
+
+        // A script of the library is tried the same way: its session runs it, and the calls of the script go through the guard.
+        File.WriteAllText(Path.Combine(root.Path, "script.toml"), """
+            [automations.0199f4c2-6d1e-7c3a-b5f0-2f9c8e4a1d78]
+            name = "Scripted diagnosis"
+            prompt = ""
+            script = "diagnose"
+            autonomy = { allowed_tools = ["k8s_restart_pod"] }
+            """);
+        var runner3 = new GuardedRunner(new Asker());
+        await using var scripted = new AutomationService(Path.Combine(root.Path, "script.toml"), _ => Task.FromResult<IReadOnlyList<CodeAlta.Catalog.ProjectDescriptor>>([]),
+            new AutomationStateStore(Path.Combine(root.Path, "state3.json"), false), runner3, new AutomationClock { Now = Noon }, TimeZoneInfo.Utc);
+        await scripted.RefreshAsync();
+        var (script, scriptProblem) = await scripted.TryAsync("0199f4c2-6d1e-7c3a-b5f0-2f9c8e4a1d78", -1, null, default);
+        Assert.IsNull(scriptProblem);
+        Assert.AreEqual(AutomationService.TryTrigger, script!.Trigger);
+        Assert.IsTrue(runner3.Guard!.DryRun, "the script's run is a dry run");
+        runner3.Completion.SetResult(new(AutomationRun.Completed));
     }
 
     /// <summary>A clock whose timers fire when a test moves it.</summary>

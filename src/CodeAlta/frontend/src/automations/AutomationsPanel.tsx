@@ -215,8 +215,10 @@ function AutomationDetail({ hub, item, paused, busy, taking, now, sessions, epoc
       <div><h3>{item.name}</h3><ScopeTag item={item} /></div>
       <Button intent="primary" disabled={busy || !!item.problem} loading={busy} icon={<AppIcon name="play" size={14} />} onClick={onRun}>{t("Run now")}</Button>
       {/* A try of an automation with autonomy makes none of the calls it would make by itself: it records them on its run. */}
-      {item.autonomy && !item.runsOn && !item.script && <Button disabled={busy || !!item.problem} title={t("A try replaces the tools it calls by itself with fakes: their calls are recorded on the run, not made.")}
-        onClick={onTry}>{t("Try it (dry run)")}</Button>}
+      {/* On another machine, the calls a try records stay in the session of the run there: the server carries no content. */}
+      {item.autonomy && <Button disabled={busy || !!item.problem} onClick={onTry}
+        title={t(item.runsOn ? "A try on its machine replaces the tools it calls by itself with fakes: their calls are in the session of the run there, not made."
+          : "A try replaces the tools it calls by itself with fakes: their calls are recorded on the run, not made.")}>{t("Try it (dry run)")}</Button>}
       <Button icon={<AppIcon name="edit" size={14} />} onClick={onEdit}>{t("Edit")}</Button>
     </header>
     {item.problem && <Callout intent="warning" compact role="alert">{item.problem}</Callout>}

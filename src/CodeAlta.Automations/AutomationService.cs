@@ -516,26 +516,39 @@ internal sealed partial class AutomationService : IAsyncDisposable
     /// <param name="runId">The id of the run; null for a new one.</param>
     /// <param name="cancellationToken">Cancels the start.</param>
     /// <returns>The run; null for an automation that does not exist.</returns>
-    internal async Task<AutomationRun?> RunAsync(string id, string? runId, CancellationToken cancellationToken)
+    internal Task<AutomationRun?> RunAsync(string id, string? runId, CancellationToken cancellationToken) => RunAsync(id, runId, false, cancellationToken);
+
+    /// <summary>
+    /// Runs an automation by hand, or tries it: a dry run of its own prompt, whose tools it calls by itself are fakes that
+    /// record their calls on the run. A run with the id given that exists already is answered as it is.
+    /// </summary>
+    /// <param name="id">The automation.</param>
+    /// <param name="runId">The id of the run; null for a new one.</param>
+    /// <param name="dryRun">Whether it is a dry run.</param>
+    /// <param name="cancellationToken">Cancels the start.</param>
+    /// <returns>The run; null for an automation that does not exist.</returns>
+    internal async Task<AutomationRun?> RunAsync(string id, string? runId, bool dryRun, CancellationToken cancellationToken)
     {
         if (Snapshot.Find(id) is not { } entry) return null;
         if (runId is not null && Runs(id, AutomationStateStore.MaximumRuns).FirstOrDefault(run => run.Id == runId) is { } known) return known;
         if (entry.Definition.RunsOn is not null)
         {
             // It runs on the machine it is placed on, which records the run.
-            if (Placement is { } placement) return await placement.RunAsync(entry, cancellationToken).ConfigureAwait(false);
+            if (Placement is { } placement) return await placement.RunAsync(entry, dryRun, cancellationToken).ConfigureAwait(false);
             entry = entry with { Problem = entry.Problem ?? "It runs on another machine, which this one cannot reach." };
         }
 
         if (entry.Problem is { } problem)
         {
-            var refused = new AutomationRun(NewRunId(), id, _time.GetUtcNow(), "manual") { Name = entry.Definition.Name, Status = AutomationRun.Failed, Message = problem, EndedAt = _time.GetUtcNow() };
+            var refused = new AutomationRun(NewRunId(), id, _time.GetUtcNow(), dryRun ? TryTrigger : "manual")
+                { Name = entry.Definition.Name, Status = AutomationRun.Failed, Message = problem, EndedAt = _time.GetUtcNow() };
             _state.Add(refused);
             Changed?.Invoke();
             return refused;
         }
 
-        return await BeginAsync(entry, "manual", null, entry.Definition.Prompt, cancellationToken, runId).ConfigureAwait(false);
+        return dryRun ? await BeginAsync(entry, TryTrigger, "Try", entry.Definition.Prompt, cancellationToken, runId).ConfigureAwait(false)
+            : await BeginAsync(entry, "manual", null, entry.Definition.Prompt, cancellationToken, runId).ConfigureAwait(false);
     }
 
     /// <summary>
