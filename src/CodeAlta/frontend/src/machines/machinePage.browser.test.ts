@@ -90,7 +90,9 @@ test("the computer that manages a machine sees why each provider is not ready, g
     await page.clickText(".machine-provider-dialog .bp6-button", "Add");
     await page.until(`document.querySelectorAll('${section} li').length === 4`, "the new provider");
 
-    const asked = (await calls(page)).filter(call => call.setProvider || call.signIn);
+    // Under StrictMode the dialog may start the sign-in twice: the machine gives the same running sign-in, and its code, to both.
+    const asked = (await calls(page)).filter(call => call.setProvider || call.signIn)
+      .filter((call, index, all) => !call.signIn || all.findIndex(other => other.signIn === call.signIn) === index);
     assert.deepEqual(asked, [{ setProvider: "openai", type: null, keyGiven: true, makeDefault: false }, { signIn: "copilot" },
       { setProvider: "anthropic", type: "anthropic", keyGiven: true, makeDefault: false }]);
     assert.ok(!JSON.stringify(await calls(page)).includes("sk-"), "the key is never recorded by the page");

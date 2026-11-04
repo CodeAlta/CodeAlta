@@ -98,7 +98,7 @@ const api: MachinePageApi = {
     return { status: "ok", message: null, url: "https://github.com/login/device", userCode: "WDJB-MJHT", expiresAt: null };
   },
   providerSignInWait: async request => {
-    if (++signInWaits < 2) return { status: "waiting", account: null, code: null };
+    if (++signInWaits < 2) { await new Promise(resolve => setTimeout(resolve, 800)); return { status: "waiting", account: null, code: null }; }
     providerList = providerList.map(provider => provider.key === request.key ? { ...provider, state: "ready", reason: null } : provider);
     return { status: "completed", account: "octocat", code: null };
   },
