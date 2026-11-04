@@ -208,7 +208,7 @@ public sealed class AccessControlTests
         PutAutomationRequest Version(TestDevice signer, string id, string? scope)
         {
             var text = FleetAutomationVersionDocuments.Serialize(new FleetAutomationVersion(FleetAutomationVersion.CurrentVersion, setup.Organization.Id, id, 1, machine.Id, false,
-                true, ["hourly"], null, null, "{\"sealed\":\"for the machine\"}", signer.DeviceId, signer.PublicKey, server.Clock.Now) { Scope = scope });
+                true, ["hourly"], null, null, "{\"sealed\":\"for the machine\"}", signer.DeviceId, signer.PublicKey, server.Clock.Now) { Scope = scope, Provider = scope is null ? null : "gateway" });
             return new PutAutomationRequest(new FleetSignedAutomationVersion(text, signer.Sign(FleetAutomationVersionDocuments.GetSignedBytes(text))));
         }
 
@@ -216,6 +216,18 @@ public sealed class AccessControlTests
         Assert.AreEqual(HttpStatusCode.OK, put.Status, put.Body.ToString());
         var owned = (await server.SendAsync(mia, HttpMethod.Get, "/api/v1/owners")).Read<AccessListDto<ResourceOwnerDto>>().Items.Single(resource => resource.ResourceId == "deploy");
         Assert.AreEqual((FleetPrincipalKinds.Team, team.Id, miaId), (owned.OwnerKind, owned.OwnerId, owned.AuthorId), "the team owns it from its first version");
+        // The machine says which of its providers run with the key of an account: the server takes no automation of the team that runs with another.
+        var cursors = await server.GetService<ICoordinatorStore>().GetPublicationCursorsAsync(node.DeviceId);
+        await server.GetService<CodeAlta.Server.Services.PublicationService>().PublishInventoryAsync((await server.GetService<ICoordinatorStore>().GetDeviceAsync(node.DeviceId))!,
+            new FleetInventoryPublish(Math.Max(cursors.Facts, cursors.Inventory) + 1, new FleetMachineInventory("Build box", "linux", Providers: ["openai-chat", "codex"],
+                AccountProviders: ["gateway"])), CancellationToken.None);
+        var plan = Version(mia, "deploy-plan", "team:" + team.Id);
+        var planText = FleetAutomationVersionDocuments.Serialize(FleetAutomationVersionDocuments.TryParse(plan.Version.Payload, out var parsed) ? parsed with { Provider = "codex" } : null!);
+        var onPlan = await server.SendAsync(mia, HttpMethod.Put, "/api/v1/automations/deploy-plan",
+            new PutAutomationRequest(new FleetSignedAutomationVersion(planText, mia.Sign(FleetAutomationVersionDocuments.GetSignedBytes(planText)))));
+        Assert.AreEqual(HttpStatusCode.Conflict, onPlan.Status, "a personal plan is refused by the server too, before the machine refuses it");
+        StringAssert.Contains(onPlan.Body.ToString(), "account credentials only");
+
         // Another maintainer lists it and runs it by hand; a member does neither.
         Assert.IsTrue((await server.SendAsync(ada, HttpMethod.Get, "/api/v1/automations")).Read<AutomationListDto>().Automations.Any(static item => item.Id == "deploy"));
         Assert.IsFalse((await server.SendAsync(max, HttpMethod.Get, "/api/v1/automations")).Read<AutomationListDto>().Automations.Any(static item => item.Id == "deploy"));
@@ -262,7 +274,7 @@ public sealed class AccessControlTests
         PutAutomationRequest Version(TestDevice signer, string id, string? scope)
         {
             var text = FleetAutomationVersionDocuments.Serialize(new FleetAutomationVersion(FleetAutomationVersion.CurrentVersion, setup.Organization.Id, id, 1, machine.Id, false,
-                true, ["hourly"], null, null, "{\"sealed\":\"for the machine\"}", signer.DeviceId, signer.PublicKey, server.Clock.Now) { Scope = scope });
+                true, ["hourly"], null, null, "{\"sealed\":\"for the machine\"}", signer.DeviceId, signer.PublicKey, server.Clock.Now) { Scope = scope, Provider = scope is null ? null : "gateway" });
             return new PutAutomationRequest(new FleetSignedAutomationVersion(text, signer.Sign(FleetAutomationVersionDocuments.GetSignedBytes(text))));
         }
 

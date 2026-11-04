@@ -70,6 +70,15 @@ public sealed record FleetAutomationVersion(
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? Scope { get; init; }
 
+    /// <summary>
+    /// Gets the provider the automation runs with (its id on the machine), said in clear so that the server checks that it
+    /// runs with account credentials there for an automation of a team or of the organization; null for a personal one that
+    /// says none.
+    /// </summary>
+    [JsonPropertyName("provider")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Provider { get; init; }
+
     /// <summary>Gets the team of an automation of a team, or null.</summary>
     [JsonIgnore]
     public string? TeamId => Scope is { } scope && scope.StartsWith(TeamScopePrefix, StringComparison.Ordinal) ? scope[TeamScopePrefix.Length..] : null;
@@ -168,6 +177,8 @@ public static class FleetAutomationVersionDocuments
             return $"a version names at most {MaxTriggers} kinds of triggers, each a short word";
         if (version.Scope is not null && !version.IsOrganizationScope && (version.TeamId is not { } team || !IsName(team, MaxIdLength)))
             return "the scope of a version is a team (team:<id>), the organization, or none for a personal one";
+        if (version.Provider is { } provider && !IsName(provider, MaxIdLength)) return "the provider of a version is its id, 1 to 128 characters";
+        if (version.Scope is not null && !version.Removed && version.Provider is null) return "an automation of a team or of the organization names the provider it runs with";
         if (version.Removed)
         {
             return version.Definition is null && version.Repository is null && version.Sealed is null ? null : "a version that removes the automation holds nothing else";

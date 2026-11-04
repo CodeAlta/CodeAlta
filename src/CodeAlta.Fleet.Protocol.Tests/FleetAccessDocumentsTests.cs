@@ -121,7 +121,7 @@ public sealed class FleetAccessDocumentsTests
         FleetSignedAutomationVersion Version(Key signer, string machine, string? scope)
         {
             var text = FleetAutomationVersionDocuments.Serialize(new FleetAutomationVersion(FleetAutomationVersion.CurrentVersion, Organization, "nightly", 1, machine, false, true, [],
-                null, null, "{\"sealed\":1}", signer.Id, signer.PublicKey, Time) { Scope = scope });
+                null, null, "{\"sealed\":1}", signer.Id, signer.PublicKey, Time) { Scope = scope, Provider = scope is null ? null : "gateway" });
             return new FleetSignedAutomationVersion(text, signer.SignVersion(text));
         }
 
@@ -157,7 +157,7 @@ public sealed class FleetAccessDocumentsTests
         FleetSignedAutomationVersion Version(Key signer, string? scope)
         {
             var text = FleetAutomationVersionDocuments.Serialize(new FleetAutomationVersion(FleetAutomationVersion.CurrentVersion, Organization, "report", 1, world.Node.Id, false,
-                true, [], null, null, "{\"sealed\":1}", signer.Id, signer.PublicKey, Time) { Scope = scope });
+                true, [], null, null, "{\"sealed\":1}", signer.Id, signer.PublicKey, Time) { Scope = scope, Provider = scope is null ? null : "gateway" });
             return new FleetSignedAutomationVersion(text, signer.SignVersion(text));
         }
 

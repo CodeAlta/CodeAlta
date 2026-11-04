@@ -672,6 +672,11 @@ internal sealed partial class NodeAutomations : IFleetNodeAutomations, IAutomati
             Project = entry.ProjectPath, NextDue = Engine.NextDue(entry.Id), Running = Engine.IsRunning(entry.Id), Problem = entry.Problem,
         };
 
+    /// <summary>Tells the credential kind a provider runs with on this machine, as the check before a run does.</summary>
+    /// <param name="provider">The provider.</param>
+    /// <returns>Its kind.</returns>
+    internal AutomationCredentialKind CredentialKindOf(ModelProviderDescriptor provider) => _options.CredentialKind?.Invoke(provider) ?? Classify(provider);
+
     private AutomationCredentialKind Classify(ModelProviderDescriptor provider)
     {
         CodeAltaProviderDocument? configuration = null;

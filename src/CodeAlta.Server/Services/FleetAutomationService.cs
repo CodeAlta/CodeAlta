@@ -117,6 +117,7 @@ internal sealed class FleetAutomationService
             throw CoordinatorException.NotFound(CoordinatorErrorCodes.DeviceNotFound, "No machine of the organization has this id.");
         if (machine.Status != DeviceStatuses.Approved) throw CoordinatorException.Conflict(CoordinatorErrorCodes.DeviceState, "The machine is not a member of the device list.");
         var scope = await ScopeGivenAsync(actor.OrganizationId, version, machine, person, cancellationToken).ConfigureAwait(false);
+        await RequireAccountProviderAsync(actor.OrganizationId, version, cancellationToken).ConfigureAwait(false);
         if (!version.Removed) await RequireOwnedAsync(actor.OrganizationId, version.AutomationId, person, cancellationToken).ConfigureAwait(false);
 
         var record = new AutomationRecord(actor.OrganizationId, version.AutomationId, version.MachineId, person, version.Number, version.Removed, version.Enabled,
@@ -195,6 +196,8 @@ internal sealed class FleetAutomationService
         if (held is null || held.Removed || held.OwnerPersonId != person && !await MaintainsAsync(actor.OrganizationId, id, person, cancellationToken).ConfigureAwait(false))
             throw CoordinatorException.NotFound(CoordinatorErrorCodes.AutomationNotFound, "No automation of yours has this id on this machine.");
         await RequireOwnedAsync(actor.OrganizationId, id, person, cancellationToken).ConfigureAwait(false);
+        if (FleetAutomationVersionDocuments.TryParse(held.Payload, out var running))
+            await RequireAccountProviderAsync(actor.OrganizationId, running, cancellationToken).ConfigureAwait(false);
         if (_presence.Get(run.MachineId) is not { } session)
             throw CoordinatorException.Conflict(CoordinatorErrorCodes.AutomationConflict, "The machine is offline: it runs this automation by its triggers, and by hand once it is online.");
         try
@@ -258,6 +261,19 @@ internal sealed class FleetAutomationService
         _logger.LogInformation("Run {Run} of automation {Automation} on {Machine} was taken over by {Device}", runId, id, run.MachineId, actor.Id);
         await _store.AppendAuditAsync(origin.Audit("automation.takeover", actor, id), CancellationToken.None).ConfigureAwait(false);
         return new AutomationRunDto(runId, id, run.MachineId, held.Number, "manual", FleetAutomationRunRequest.TakeOverAction, run.Time, null, null, null, null, null);
+    }
+
+    // The scheduler's check of the credential kind (doc/fleet/orchestration.md, credentials of unattended runs), beside the
+    // machine's own before each run: an automation of a team or of the organization runs with a provider its machine says runs
+    // with the credentials of an account. A machine that says nothing of its providers is left to its own check.
+    private async Task RequireAccountProviderAsync(string organizationId, FleetAutomationVersion version, CancellationToken cancellationToken)
+    {
+        if (version.Scope is null || version.Removed) return;
+        var machine = (await _store.ListMachinesAsync(organizationId, cancellationToken).ConfigureAwait(false)).FirstOrDefault(record => record.DeviceId == version.MachineId);
+        if (machine?.ReadInventory().AccountProviders is not { } accounts) return;
+        if (version.Provider is not { } provider || !accounts.Contains(provider, StringComparer.Ordinal))
+            throw CoordinatorException.Conflict(CoordinatorErrorCodes.AutomationConflict,
+                $"On {machine.ReadInventory().Name}, the provider '{version.Provider}' does not run with the key of an account: an automation of a team or of the organization runs with account credentials only.");
     }
 
     // Whether the person answers for an automation of a scope: a maintainer of its team, an owner or admin for the organization.

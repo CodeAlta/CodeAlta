@@ -611,6 +611,9 @@ internal sealed class DesktopAutomationPlacement : IAutomationPlacement, IAsyncD
         // Published to a team or the organization: the machine must be theirs, and this person one who answers for it there.
         var scope = entry.Definition.PublishTo;
         if (route.CheckScope(scope) is { } outOfScope) return SetStatus(entry.Id, new(machineId, machineName, "failed", outOfScope, null));
+        if (scope is not null && copy.Model.Provider is null)
+            return SetStatus(entry.Id, new(machineId, machineName, "failed",
+                "An automation of a team or of the organization names the provider it runs with: choose one of the machine that runs with an API key or a gateway.", null));
         var key = scope is null ? Key(copy, repository) : Key(copy, repository) + "|" + scope;
         lock (_gate)
         {
@@ -631,7 +634,7 @@ internal sealed class DesktopAutomationPlacement : IAutomationPlacement, IAsyncD
                 cancellationToken).ConfigureAwait(false);
             // Given to a machine of a team its person maintains, it is an automation of that team (doc/fleet/orchestration.md, scopes).
             var signed = _sign(new FleetAutomationVersion(FleetAutomationVersion.CurrentVersion, route.OrganizationId, entry.Id, number, machineId, false, copy.Enabled,
-                TriggerKinds(copy), null, null, sealedText, _deviceId(), string.Empty, DateTimeOffset.UtcNow) { Scope = scope });
+                TriggerKinds(copy), null, null, sealedText, _deviceId(), string.Empty, DateTimeOffset.UtcNow) { Scope = scope, Provider = scope is null ? null : copy.Model.Provider });
             await route.PutAsync(signed, cancellationToken).ConfigureAwait(false);
             lock (_gate) _numbers[entry.Id] = number;
         }

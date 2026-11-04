@@ -377,6 +377,8 @@ internal sealed class NodeServers : IAsyncDisposable
         var catalog = node.Host.CatalogOptions;
         var identity = DeviceIdentity.LoadOrCreate(catalog);
         var source = new Fleet.Server.FleetHostPublicationSource(node.Host, name, version, ["sessions", "moves"]) { PersonOf = service is null ? null : service.PersonOfSession };
+        // The providers that run with the key of an account, which the server checks automations of a team or the organization against.
+        if (node.Automations is { } classifier) source.IsAccountProvider = provider => classifier.CredentialKindOf(provider) == CodeAlta.Automations.AutomationCredentialKind.Account;
         // The statistics the node counts (its Statistics plugin), published with the facts of its sessions.
         var statistics = Fleet.Server.FleetHostStatisticsSource.ForHost(node.Host);
         NodeFleetSecrets? secrets = null;

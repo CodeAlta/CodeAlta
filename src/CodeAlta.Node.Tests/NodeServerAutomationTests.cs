@@ -244,7 +244,7 @@ public sealed class NodeServerAutomationTests
         automations.ServerAccess = _ => access;
         var sealedText = FleetAutomationSigning.Seal(new FleetAutomationContent(Definition, null), Id, 1, self.DeviceId, list, tablet);
         var signed = FleetAutomationSigning.Sign(tablet, new FleetAutomationVersion(FleetAutomationVersion.CurrentVersion, "org", Id, 1, self.DeviceId, false, true, ["hourly"],
-            null, null, sealedText, string.Empty, string.Empty, DateTimeOffset.UtcNow) { Scope = "team:infra" });
+            null, null, sealedText, string.Empty, string.Empty, DateTimeOffset.UtcNow) { Scope = "team:infra", Provider = "gateway" });
         var outcome = await automations.AcceptFromServerAsync("link-1", list, "org", signed,
             version => FleetAutomationSigning.TryOpen(version.Sealed, version.AutomationId, version.Number, version.MachineId, self, list, out var content, out var reason)
                 ? (content, null) : (null, reason), token);
@@ -309,7 +309,7 @@ public sealed class NodeServerAutomationTests
         automations.ServerAccess = _ => access;
         var sealedText = FleetAutomationSigning.SealForTeam(new FleetAutomationContent(Definition, null), Id, 1, self.DeviceId, "infra", list, access, mia);
         var signed = FleetAutomationSigning.Sign(mia, new FleetAutomationVersion(FleetAutomationVersion.CurrentVersion, "org", Id, 1, self.DeviceId, false, true, ["hourly"],
-            null, null, sealedText, string.Empty, string.Empty, DateTimeOffset.UtcNow) { Scope = "team:infra" });
+            null, null, sealedText, string.Empty, string.Empty, DateTimeOffset.UtcNow) { Scope = "team:infra", Provider = "gateway" });
         var outcome = await automations.AcceptFromServerAsync("link-1", list, "org", signed,
             version => FleetAutomationSigning.TryOpen(version.Sealed, version.AutomationId, version.Number, version.MachineId, self, list, access, out var content, out var reason)
                 ? (content, null) : (null, reason), token);
@@ -348,7 +348,7 @@ public sealed class NodeServerAutomationTests
         automations.ServerAccess = _ => access;
         var sealedText = FleetAutomationSigning.SealForOrganization(new FleetAutomationContent(Definition, null), Id, 1, self.DeviceId, list, access, tablet);
         var signed = FleetAutomationSigning.Sign(tablet, new FleetAutomationVersion(FleetAutomationVersion.CurrentVersion, "org", Id, 1, self.DeviceId, false, true, ["hourly"],
-            null, null, sealedText, string.Empty, string.Empty, DateTimeOffset.UtcNow) { Scope = FleetAutomationVersion.OrganizationScope });
+            null, null, sealedText, string.Empty, string.Empty, DateTimeOffset.UtcNow) { Scope = FleetAutomationVersion.OrganizationScope, Provider = "gateway" });
         var outcome = await automations.AcceptFromServerAsync("link-1", list, "org", signed,
             version => FleetAutomationSigning.TryOpen(version.Sealed, version.AutomationId, version.Number, version.MachineId, self, list, access, out var content, out var reason)
                 ? (content, null) : (null, reason), token);
