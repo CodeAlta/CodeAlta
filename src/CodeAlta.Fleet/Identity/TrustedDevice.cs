@@ -100,6 +100,20 @@ public sealed record TrustedDevice(
 {
     /// <summary>Gets whether the device was revoked: its key is refused.</summary>
     public bool IsRevoked => RevokedAt is not null;
+
+    /// <summary>
+    /// Gets the person of the device, when the node trusts it through the signed access document of an organization (a member
+    /// of the team of a team machine); null for a paired device and the owner's own devices.
+    /// </summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public string? PersonId { get; init; }
+
+    /// <summary>
+    /// Gets whether the device sees and drives only the sessions its person started here: on a team machine, each person sees
+    /// only their own sessions (<c>doc/fleet/security-and-privacy.md</c>, shared machines).
+    /// </summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public bool OwnSessionsOnly { get; init; }
 }
 
 /// <summary>Says which device keys a connection accepts.</summary>

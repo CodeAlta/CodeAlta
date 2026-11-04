@@ -204,6 +204,25 @@ public static class FleetAutomationVersionDocuments
     /// <exception cref="ArgumentNullException"><paramref name="devices"/> is null.</exception>
     public static bool TryVerify(FleetSignedAutomationVersion? signed, FleetDeviceListState devices, string? organizationId, string? machineId,
         [NotNullWhen(true)] out FleetAutomationVersion? version, [NotNullWhen(false)] out string? reason)
+        => TryVerify(signed, devices, null, organizationId, machineId, out version, out reason);
+
+    /// <summary>
+    /// Verifies a version a server delivered, with the signed access document of the organization
+    /// (<c>doc/fleet/access-control.md</c>, what the node decides): a version signed by a device of a suspended person is
+    /// refused; a team machine takes the versions of its team's maintainers, and of its members when the team allows it,
+    /// instead of those of the person the device list names.
+    /// </summary>
+    /// <param name="signed">The signed version.</param>
+    /// <param name="devices">The device list of the server, as the machine verified it.</param>
+    /// <param name="access">The access document of the server, as the machine verified it; null reads the machine as personal.</param>
+    /// <param name="organizationId">The organization of the server.</param>
+    /// <param name="machineId">The device of the machine that verifies.</param>
+    /// <param name="version">The version, when it verifies.</param>
+    /// <param name="reason">Why it does not verify, or null.</param>
+    /// <returns>Whether it verifies.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="devices"/> is null.</exception>
+    public static bool TryVerify(FleetSignedAutomationVersion? signed, FleetDeviceListState devices, FleetAccessState? access, string? organizationId, string? machineId,
+        [NotNullWhen(true)] out FleetAutomationVersion? version, [NotNullWhen(false)] out string? reason)
     {
         ArgumentNullException.ThrowIfNull(devices);
         version = null;
@@ -221,10 +240,9 @@ public static class FleetAutomationVersionDocuments
             return false;
         }
 
-        // Personal automations: only the person who owns the machine gives it automations.
-        if (!devices.Members.TryGetValue(machineId!, out var self) || self.OwnerId is null || !string.Equals(self.OwnerId, signer.OwnerId, StringComparison.Ordinal))
+        if (CheckAccess(signer.OwnerId, machineId!, devices, access) is { } refused)
         {
-            reason = "the version is signed by a device of another person than the owner of this machine";
+            reason = refused;
             return false;
         }
 
@@ -236,6 +254,33 @@ public static class FleetAutomationVersionDocuments
 
         version = parsed;
         return true;
+    }
+
+    /// <summary>
+    /// Says whether the person of a signing device may give a machine automations: not suspended; on a team machine a
+    /// maintainer of its team, or a member when the team runs the automations of its members; on a personal machine its owner.
+    /// </summary>
+    /// <param name="signerPersonId">The person of the device that signed.</param>
+    /// <param name="machineId">The device of the machine.</param>
+    /// <param name="devices">The device list of the server, as the machine verified it.</param>
+    /// <param name="access">The access document of the server, as the machine verified it; null reads the machine as personal.</param>
+    /// <returns>Why not, or null when they may.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="devices"/> is null.</exception>
+    public static string? CheckAccess(string? signerPersonId, string machineId, FleetDeviceListState devices, FleetAccessState? access)
+    {
+        ArgumentNullException.ThrowIfNull(devices);
+        if (access is not null && access.IsSuspended(signerPersonId)) return "the version is signed by a device of a person the organization suspended";
+        if (access?.TeamOf(machineId) is { } team)
+        {
+            var role = FleetAccessState.RoleIn(team, signerPersonId);
+            if (role == FleetTeamRoles.Maintainer || role == FleetTeamRoles.Member && team.RunsMemberAutomations) return null;
+            return "a team machine runs the automations of its team's maintainers, and of its members when the team allows it";
+        }
+
+        // Personal automations: only the person who owns the machine gives it automations.
+        if (!devices.Members.TryGetValue(machineId, out var self) || self.OwnerId is null || !string.Equals(self.OwnerId, signerPersonId, StringComparison.Ordinal))
+            return "the version is signed by a device of another person than the owner of this machine";
+        return null;
     }
 
     private static bool TryRead(FleetSignedAutomationVersion? signed, string? machineId, [NotNullWhen(true)] out FleetAutomationVersion? version, [NotNullWhen(false)] out string? reason)

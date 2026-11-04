@@ -197,6 +197,13 @@ internal sealed partial class NodeAutomations : IFleetNodeAutomations, IAutomati
     /// </summary>
     internal Func<string, FleetDeviceListState?>? ServerDevices { get; set; }
 
+    /// <summary>
+    /// Gets or sets what gives the signed access document of a server link as this node last verified it: an automation
+    /// whose signer the organization suspended waits for its new owner, and a team machine runs what its team allows; null,
+    /// or a null document, keeps the check made when the version was accepted.
+    /// </summary>
+    internal Func<string, FleetAccessState?>? ServerAccess { get; set; }
+
     /// <summary>Starts reading the automations and firing their triggers.</summary>
     internal void Start()
     {
@@ -311,7 +318,7 @@ internal sealed partial class NodeAutomations : IFleetNodeAutomations, IAutomati
         ArgumentNullException.ThrowIfNull(signed);
         ArgumentNullException.ThrowIfNull(open);
         if (DeviceId is not { } self) return new(false, "This machine does not know its own device yet.");
-        if (!FleetAutomationVersionDocuments.TryVerify(signed, devices, organizationId, self, out var version, out var reason))
+        if (!FleetAutomationVersionDocuments.TryVerify(signed, devices, ServerAccess?.Invoke(linkId), organizationId, self, out var version, out var reason))
         {
             Log($"A version of an automation delivered by the server was refused: {reason}.");
             return new(false, $"The signature of the version does not hold: {reason}.");
@@ -420,6 +427,11 @@ internal sealed partial class NodeAutomations : IFleetNodeAutomations, IAutomati
                 && (!devices.Members.TryGetValue(key.DeviceId, out var member) || member.Kind != FleetDeviceKinds.Controller || devices.Removed.Contains(key.DeviceId)
                     || !string.Equals(member.Key.Text, key.Text, StringComparison.Ordinal)))
                 return "The device that gave this automation is no longer a controller device of the organization.";
+            // The signed access document as this node verified it: a suspended signer, a team machine that no longer runs it.
+            if (ServerDevices?.Invoke(link) is { } listed && ServerAccess?.Invoke(link) is { } access && DeviceId is { } machine
+                && listed.Members.TryGetValue(key.DeviceId, out var signer)
+                && FleetAutomationVersionDocuments.CheckAccess(signer.OwnerId, machine, listed, access) is { } refused)
+                return $"This automation waits for its owner: {refused}.";
             return null;
         }
 

@@ -254,18 +254,44 @@ public static class FleetDeviceListMembers
 }
 
 /// <summary>
-/// The trust a node gives, on a relayed channel, to the members of the signed device list of its organization: the
-/// person's own controller devices get the permissions of a paired device, any other member is known but may do nothing
-/// in this step, and a device the list removed is refused.
+/// The trust a node gives, on a relayed channel, to the members of the signed device list of its organization, read with the
+/// signed access document (<c>doc/fleet/access-control.md</c>, what the node decides): on a personal machine, the owner's own
+/// controller devices get the permissions of a paired device; on a team machine, the controller devices of the team's members
+/// view, drive and start their own sessions, and its maintainers also manage it, whoever the device list names as its owner;
+/// any other member is known but may do nothing; a device the list removed, or of a person the document suspended, is refused.
 /// </summary>
 /// <param name="list">Gives the list as last verified; null refuses everyone.</param>
 /// <param name="selfDeviceId">The device of this node, never trusted through the list.</param>
-public sealed class FleetOrganizationTrust(Func<FleetDeviceListState?> list, string selfDeviceId) : IDeviceTrustPolicy
+/// <param name="access">Gives the access document as last verified; null or none reads every machine as personal and suspends nobody.</param>
+public sealed class FleetOrganizationTrust(Func<FleetDeviceListState?> list, string selfDeviceId, Func<FleetAccessState?>? access = null) : IDeviceTrustPolicy
 {
+    /// <summary>What the members of the team of a team machine may do there: their own sessions.</summary>
+    public const DevicePermissions TeamMemberPermissions = DevicePermissions.View | DevicePermissions.Drive | DevicePermissions.Start;
+
+    /// <summary>What its maintainers may do there: their own sessions, the automations of the team, and manage the machine.</summary>
+    public const DevicePermissions TeamMaintainerPermissions = TeamMemberPermissions | DevicePermissions.Automate | DevicePermissions.Manage;
+
     /// <inheritdoc />
     public TrustedDevice? FindTrusted(DeviceFingerprint fingerprint)
     {
         if (list() is not { } current || current.FindByFingerprint(fingerprint) is not { } member || member.DeviceId == selfDeviceId) return null;
+        var document = access?.Invoke();
+        if (document is not null && document.IsSuspended(member.OwnerId)) return null;
+        if (member.Kind == FleetDeviceKinds.Controller && document?.TeamOf(selfDeviceId) is { } team)
+        {
+            var permissions = FleetAccessState.RoleIn(team, member.OwnerId) switch
+            {
+                FleetTeamRoles.Maintainer => TeamMaintainerPermissions,
+                FleetTeamRoles.Member => TeamMemberPermissions,
+                _ => DevicePermissions.None,
+            };
+            return new TrustedDevice(member.DeviceId, member.DeviceId, fingerprint, permissions, DateTimeOffset.UnixEpoch, null)
+            {
+                PersonId = member.OwnerId,
+                OwnSessionsOnly = true,
+            };
+        }
+
         var owner = current.Members.TryGetValue(selfDeviceId, out var self) ? self.OwnerId : null;
         var own = owner is not null && member.OwnerId == owner && member.Kind == FleetDeviceKinds.Controller;
         return new TrustedDevice(member.DeviceId, member.DeviceId, fingerprint, own ? FleetPairingCoordinator.DefaultPermissions : DevicePermissions.None,
@@ -273,7 +299,12 @@ public sealed class FleetOrganizationTrust(Func<FleetDeviceListState?> list, str
     }
 
     /// <inheritdoc />
-    public bool IsRevoked(DeviceFingerprint fingerprint) => list() is { } current && current.IsRemoved(fingerprint);
+    public bool IsRevoked(DeviceFingerprint fingerprint)
+    {
+        if (list() is not { } current) return false;
+        if (current.IsRemoved(fingerprint)) return true;
+        return access?.Invoke() is { } document && current.FindByFingerprint(fingerprint) is { } member && document.IsSuspended(member.OwnerId);
+    }
 }
 
 /// <summary>A paired trust and an organization's, together: a paired device keeps its permissions; a key either one revoked is refused.</summary>

@@ -401,6 +401,8 @@ internal sealed class NodeServers : IAsyncDisposable
             SecretsChanged = linkId => secrets?.Changed(linkId),
             // The budgets and holds of the owner: the runs that wait read them again at once.
             BudgetsChanged = _ => budgets?.Changed(),
+            // A newer access document: the sessions people it suspends started on this machine stop, their channels close.
+            AccessChanged = service is null ? null : (linkId, access) => { _ = ApplyAccessAsync(service, access); },
             // The problems of the machine travel with its heartbeat; the server tells its owner of those that last.
             Health = health.Read,
         });
@@ -417,6 +419,7 @@ internal sealed class NodeServers : IAsyncDisposable
             automations.DeviceId ??= identity.DeviceId;
             Fleet.Server.FleetConnector? ConnectorOf(string linkId) => connections.Find(linkId)?.Connector;
             automations.ServerDevices = linkId => ConnectorOf(linkId)?.Devices.Current;
+            automations.ServerAccess = linkId => ConnectorOf(linkId)?.Access.Current;
             automations.ServerClaim = (linkId, claim, token) => ConnectorOf(linkId) is { } connector
                 ? connector.ClaimAutomationAsync(claim, token)
                 : Task.FromResult<CodeAlta.Fleet.Protocol.FleetAutomationClaimResult?>(null);
@@ -431,6 +434,19 @@ internal sealed class NodeServers : IAsyncDisposable
     /// <summary>Gets the problems of the machine its heartbeats report.</summary>
     public NodeHealth Health { get; private init; } = null!;
 
+    // Applied beside the connection that verified the document; a failure is logged, the next version applies again.
+    private static async Task ApplyAccessAsync(FleetNodeService service, CodeAlta.Fleet.Protocol.FleetAccessState access)
+    {
+        try
+        {
+            await service.ApplyAccessAsync(access, CancellationToken.None).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is IOException or InvalidOperationException or ObjectDisposedException)
+        {
+            if (LogManager.IsInitialized) LogManager.GetLogger("CodeAlta.Node").Warn($"The access document could not be applied: {exception.Message}");
+        }
+    }
+
     // The device list is read again for each relay, so that a device removed from it is refused at once; when the server
     // does not answer, the list last verified is kept.
     private static async Task ServeRelayAsync(FleetNodeService service, Fleet.Server.FleetConnector connector, Stream stream, CancellationToken cancellationToken)
@@ -438,10 +454,16 @@ internal sealed class NodeServers : IAsyncDisposable
         try
         {
             await connector.Devices.RefreshAsync(cancellationToken).ConfigureAwait(false);
+            await connector.Access.RefreshAsync(cancellationToken).ConfigureAwait(false);
         }
         catch (Exception exception) when (exception is Fleet.Server.FleetServerException or HttpRequestException or IOException or TaskCanceledException)
         {
             if (LogManager.IsInitialized) LogManager.GetLogger("CodeAlta.Node").Info($"The device list could not be read again: {exception.Message}");
+        }
+        catch (Fleet.Protocol.FleetAccessDocumentException exception)
+        {
+            // A document that does not verify changes nothing: the version verified before still decides.
+            if (LogManager.IsInitialized) LogManager.GetLogger("CodeAlta.Node").Warn($"The access document was refused: {exception.Message}");
         }
         catch (Fleet.Protocol.FleetDeviceListException exception)
         {
@@ -451,7 +473,7 @@ internal sealed class NodeServers : IAsyncDisposable
             return;
         }
 
-        await service.ServeRelayedAsync(stream, connector.Devices.Trust, cancellationToken).ConfigureAwait(false);
+        await service.ServeRelayedAsync(stream, connector.Trust, cancellationToken).ConfigureAwait(false);
     }
 
     /// <inheritdoc />

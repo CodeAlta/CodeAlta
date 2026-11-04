@@ -46,7 +46,7 @@ fields, a new signed document and one new control notification (`access.changed`
 - [x] 3. Owners of resources and transfers: owner, author and pause of machines and automations, transfers offered and
       accepted, resources whose owner is suspended listed.
 - [ ] 4. The signed access document: protocol, chain verifier, server storage and drafts (done with slice 1–3), signing from the console.
-- [ ] 5. What the node decides: anchored access chain, team machines (own sessions only), suspended people refused,
+- [x] 5. What the node decides: anchored access chain, team machines (own sessions only), suspended people refused,
       automations of team machines and of suspended signers refused, `access.changed` notification.
 - [ ] 6. Deprovisioning: suspend, revoke devices, transfer to a successor paused (server done with slice 1–3), stop work on
       team machines (end-to-end test).
