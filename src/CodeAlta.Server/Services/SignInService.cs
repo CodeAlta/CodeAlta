@@ -33,8 +33,10 @@ public sealed class KeepRolesMapper : ISignInRoleMapper
 /// Sign-in on a server (<c>doc/fleet/identity.md</c>, a new device and linked sign-in methods). A person proves who they
 /// are with a method the owner enabled — a passkey, a linked Microsoft, Google or GitHub account, or the company's
 /// OpenID Connect provider — through the system browser of the device, which comes back to its loopback address; the
-/// server makes the state, the nonce and the PKCE verifier, redeems the code and checks the answer. A sign-in grants
-/// nothing by itself: it gives the device that started it a single-use grant to enroll as a pending controller device of
+/// server makes the state, the nonce and the PKCE verifier, redeems the code and checks the answer. GitHub has no
+/// redirect: the person enters a code at GitHub (the device flow of a GitHub App), and the server, polled by the device,
+/// asks GitHub until it answers; the device code and the user token stay on the server, the token only for one read. A
+/// sign-in grants nothing by itself: it gives the device that started it a single-use grant to enroll as a pending controller device of
 /// that person, which one of their devices, their recovery key or (for a person without a device) the owner then signs
 /// into the device list. Device keys stay the authority for every action.
 /// </summary>
@@ -195,7 +197,9 @@ public sealed class SignInService : IDisposable
             throw Invalid("The request needs a method, the public key of the device and its loopback redirect.");
         var purpose = request.Purpose ?? FleetSignInPurposes.Enroll;
         if (purpose is not (FleetSignInPurposes.Enroll or FleetSignInPurposes.Link)) throw Invalid("purpose must be 'enroll' or 'link'.");
-        var redirect = RequireLoopbackRedirect(request.RedirectUri);
+        // A device code has no redirect: the device polls instead.
+        var deviceFlow = FleetSignInMethods.UsesDeviceCode(request.Method);
+        var redirect = deviceFlow ? string.Empty : RequireLoopbackRedirect(request.RedirectUri);
         var organization = await _store.GetOrganizationAsync(cancellationToken).ConfigureAwait(false)
             ?? throw CoordinatorException.NotFound(CoordinatorErrorCodes.NotSetUp, "The server is not set up.");
 
@@ -216,35 +220,51 @@ public sealed class SignInService : IDisposable
         var settings = await ReadSettingsAsync(organization.Id, cancellationToken).ConfigureAwait(false);
         RequireMethod(settings, request.Method, purpose);
 
-        var attempt = new SignInAttempt
-        {
-            Id = SignInAttempts.NewSecret(), OrganizationId = organization.Id, Method = request.Method, Purpose = purpose, DeviceId = key.DeviceId, PublicKey = key.Text,
-            LinkingPersonId = linking,
-            RedirectUri = redirect, State = SignInAttempts.NewSecret(), Nonce = SignInAttempts.NewSecret(), CodeVerifier = SignInAttempts.NewSecret(),
-            ExpiresAt = _time.GetUtcNow() + _options.AttemptLifetime,
-        };
+        var id = SignInAttempts.NewSecret();
+        var state = SignInAttempts.NewSecret();
+        var nonce = SignInAttempts.NewSecret();
+        var verifier = SignInAttempts.NewSecret();
+        var now = _time.GetUtcNow();
+        var lifetime = _options.AttemptLifetime;
+        DeviceAuthorization? device = null;
         Uri url;
-        if (request.Method == FleetSignInMethods.Passkey)
+        try
         {
-            url = new Uri($"{context.Request.Scheme}://{context.Request.Host}{context.Request.PathBase}/sign-in/passkey#{Uri.EscapeDataString(attempt.Id)}");
+            if (request.Method == FleetSignInMethods.Passkey)
+            {
+                url = new Uri($"{context.Request.Scheme}://{context.Request.Host}{context.Request.PathBase}/sign-in/passkey#{Uri.EscapeDataString(id)}");
+            }
+            else if (deviceFlow)
+            {
+                device = await _external.StartDeviceAuthorizationAsync(Provider(request.Method, settings.Document.Company, settings.Secret)!, cancellationToken).ConfigureAwait(false);
+                url = device.VerificationUri;
+                if (device.ExpiresIn < lifetime) lifetime = device.ExpiresIn;
+            }
+            else
+            {
+                url = await _external.BuildAuthorizationUrlAsync(Provider(request.Method, settings.Document.Company, settings.Secret)!, redirect, state, nonce,
+                    SignInAttempts.Challenge(verifier), cancellationToken).ConfigureAwait(false);
+            }
         }
-        else
+        catch (ExternalSignInException exception)
         {
-            try
-            {
-                url = await _external.BuildAuthorizationUrlAsync(Provider(request.Method, settings.Document.Company, settings.Secret)!, redirect, attempt.State, attempt.Nonce,
-                    SignInAttempts.Challenge(attempt.CodeVerifier), cancellationToken).ConfigureAwait(false);
-            }
-            catch (ExternalSignInException exception)
-            {
-                throw new CoordinatorException(StatusCodes.Status502BadGateway, exception.Code, exception.Message);
-            }
+            throw new CoordinatorException(StatusCodes.Status502BadGateway, exception.Code, exception.Message);
         }
 
+        var attempt = new SignInAttempt
+        {
+            Id = id, OrganizationId = organization.Id, Method = request.Method, Purpose = purpose, DeviceId = key.DeviceId, PublicKey = key.Text,
+            LinkingPersonId = linking,
+            RedirectUri = redirect, State = state, Nonce = nonce, CodeVerifier = verifier,
+            ExpiresAt = now + lifetime,
+            DeviceCode = device?.DeviceCode, PollInterval = device?.Interval ?? 5,
+            // GitHub's interval is the time between two requests for a token, the first one included.
+            NextPollAt = now + TimeSpan.FromSeconds(device?.Interval ?? 0),
+        };
         if (!_attempts.Add(attempt)) throw new CoordinatorException(StatusCodes.Status503ServiceUnavailable, SignInErrorCodes.Busy, "Too many sign-ins wait: try again in a minute.");
         await _store.AppendAuditAsync(new AuditEntry("sign_in.start", AuditEntry.Success, linking, key.DeviceId, request.Method, origin.SourceAddress, origin.RequestId,
             $"{{\"purpose\":\"{purpose}\"}}"), cancellationToken).ConfigureAwait(false);
-        return new StartSignInResponse(attempt.Id, url.AbsoluteUri, attempt.State, attempt.ExpiresAt);
+        return new StartSignInResponse(attempt.Id, url.AbsoluteUri, device is null ? attempt.State : null, attempt.ExpiresAt, device?.UserCode, device?.Interval);
     }
 
     /// <summary>
@@ -264,18 +284,10 @@ public sealed class SignInService : IDisposable
         if (request is null || string.IsNullOrEmpty(request.Code) || request.Code.Length > 4096 || string.IsNullOrEmpty(request.State))
             throw Invalid("The request needs the attempt, the code and the state.");
         var pending = _attempts.Find(request.AttemptId);
-        if (pending is null || pending.DeviceId != signed.DeviceId)
+        if (pending is null || pending.DeviceId != signed.DeviceId || pending.DeviceCode is not null)
             throw await RefuseAsync(origin, signed.DeviceId, request.AttemptId, SignInErrorCodes.AttemptInvalid, "The sign-in is unknown, used or expired: start again.", cancellationToken)
                 .ConfigureAwait(false);
-        // Only the key that started the attempt completes it: a new device is not in the table yet, so its key is the attempt's.
-        if (!FleetDevicePublicKey.TryParse(pending.PublicKey, out var started)) throw new InvalidOperationException("An attempt without its key.");
-        _authenticator.VerifyWithKey(signed, started);
-        // A link completes only from a device that is still an approved controller of its person.
-        if (pending.Purpose == FleetSignInPurposes.Link
-            && await _store.GetDeviceAsync(pending.DeviceId, cancellationToken).ConfigureAwait(false) is not { Status: DeviceStatuses.Approved, Kind: FleetDeviceKinds.Controller })
-        {
-            throw CoordinatorException.Forbidden(FleetErrorCodes.Forbidden, "A sign-in method is linked from an approved controller device of its person.");
-        }
+        await RequireStartingDeviceAsync(pending, signed, cancellationToken).ConfigureAwait(false);
 
         // Taken once: a replayed code finds no attempt, whatever the provider would answer.
         var attempt = _attempts.Take(request.AttemptId);
@@ -322,11 +334,86 @@ public sealed class SignInService : IDisposable
             (person, login) = await ResolvePersonAsync(attempt, identity, origin, signed.DeviceId, cancellationToken).ConfigureAwait(false);
         }
 
+        return await FinishAsync(attempt, settings, person, login, origin, signed.DeviceId, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Asks the provider whether the person entered the code of a sign-in that uses one (GitHub): signed by the key that
+    /// started it, at most once per interval of the provider whatever the device sends. Once the person entered it, the
+    /// sign-in completes as <see cref="CompleteAsync"/> does, once.
+    /// </summary>
+    /// <param name="request">The request.</param>
+    /// <param name="signed">The signature of the request.</param>
+    /// <param name="origin">Where it comes from.</param>
+    /// <param name="cancellationToken">Cancels the poll.</param>
+    /// <returns>Pending with the interval to wait, or what the sign-in gave.</returns>
+    /// <exception cref="CoordinatorException">The attempt is unknown, used, expired or of another device, the person refused or let the code expire, the provider refused, or the account is linked to nobody.</exception>
+    public async Task<PollSignInResponse> PollAsync(PollSignInRequest? request, SignedRequestData signed, RequestOrigin origin, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(signed);
+        ArgumentNullException.ThrowIfNull(origin);
+        if (request is null || string.IsNullOrEmpty(request.AttemptId)) throw Invalid("The request needs the attempt.");
+        var pending = _attempts.Find(request.AttemptId);
+        if (pending is null || pending.DeviceId != signed.DeviceId || pending.DeviceCode is not { } deviceCode)
+            throw await RefuseAsync(origin, signed.DeviceId, null, SignInErrorCodes.AttemptInvalid, "The sign-in is unknown, used or expired: start again.", cancellationToken)
+                .ConfigureAwait(false);
+        await RequireStartingDeviceAsync(pending, signed, cancellationToken).ConfigureAwait(false);
+
+        // One poll of the provider at a time, and never faster than it asked: a device that polls faster only waits.
+        if (!pending.TryBeginPoll(_time.GetUtcNow())) return new PollSignInResponse(true, pending.PollInterval, null);
+        HeldSettings settings;
+        DevicePollResult result;
+        try
+        {
+            settings = await ReadSettingsAsync(pending.OrganizationId, cancellationToken).ConfigureAwait(false);
+            RequireMethod(settings, pending.Method, pending.Purpose);
+            result = await _external.PollDeviceAuthorizationAsync(Provider(pending.Method, settings.Document.Company, settings.Secret)!, deviceCode, pending.PollInterval,
+                cancellationToken).ConfigureAwait(false);
+            pending.PollInterval = result.Interval;
+        }
+        catch (Exception exception) when (exception is CoordinatorException or ExternalSignInException)
+        {
+            // Refused, expired or turned off: the attempt is over.
+            _attempts.Take(pending.Id);
+            var code = exception is CoordinatorException refused ? refused.Code : ((ExternalSignInException)exception).Code;
+            throw await RefuseAsync(origin, signed.DeviceId, pending.Method, code, exception.Message, cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            pending.EndPoll(_time.GetUtcNow());
+        }
+
+        if (result.Pending) return new PollSignInResponse(true, result.Interval, null);
+        var attempt = _attempts.Take(pending.Id);
+        if (attempt is null)
+            throw await RefuseAsync(origin, signed.DeviceId, pending.Method, SignInErrorCodes.AttemptInvalid, "The sign-in expired: start again.", cancellationToken)
+                .ConfigureAwait(false);
+        var (person, login) = await ResolvePersonAsync(attempt, result.Identity!, origin, signed.DeviceId, cancellationToken).ConfigureAwait(false);
+        return new PollSignInResponse(false, result.Interval, await FinishAsync(attempt, settings, person, login, origin, signed.DeviceId, cancellationToken).ConfigureAwait(false));
+    }
+
+    // Only the key that started an attempt completes it: a new device is not in the table yet, so its key is the attempt's;
+    // and a link completes only from a device that is still an approved controller of its person.
+    private async Task RequireStartingDeviceAsync(SignInAttempt pending, SignedRequestData signed, CancellationToken cancellationToken)
+    {
+        if (!FleetDevicePublicKey.TryParse(pending.PublicKey, out var started)) throw new InvalidOperationException("An attempt without its key.");
+        _authenticator.VerifyWithKey(signed, started);
+        if (pending.Purpose == FleetSignInPurposes.Link
+            && await _store.GetDeviceAsync(pending.DeviceId, cancellationToken).ConfigureAwait(false) is not { Status: DeviceStatuses.Approved, Kind: FleetDeviceKinds.Controller })
+        {
+            throw CoordinatorException.Forbidden(FleetErrorCodes.Forbidden, "A sign-in method is linked from an approved controller device of its person.");
+        }
+    }
+
+    // What every sign-in that proved a person ends with: the company sign-in rule, the groups, the audit, and the grant of an enrollment.
+    private async Task<CompleteSignInResponse> FinishAsync(SignInAttempt attempt, HeldSettings settings, PersonRecord person, LoginRecord? login, RequestOrigin origin,
+        string deviceId, CancellationToken cancellationToken)
+    {
         // Company sign-in required: no other way in for anyone but the break-glass owner, whatever the method proved.
         if (attempt.Purpose == FleetSignInPurposes.Enroll && settings.Document.RequireSso && attempt.Method != FleetSignInMethods.Company
             && person.Id != settings.Document.BreakGlassPersonId)
         {
-            throw await RefuseAsync(origin, signed.DeviceId, attempt.Method, SignInErrorCodes.SsoRequired,
+            throw await RefuseAsync(origin, deviceId, attempt.Method, SignInErrorCodes.SsoRequired,
                 "Your organization requires its company sign-in.", cancellationToken, person.Id).ConfigureAwait(false);
         }
 
@@ -336,7 +423,7 @@ public sealed class SignInService : IDisposable
         var devices = await _store.ListDevicesAsync(attempt.OrganizationId, cancellationToken).ConfigureAwait(false);
         var hasDevices = devices.Any(other => other.OwnerPersonId == person.Id && other.Kind == FleetDeviceKinds.Controller && other.Status == DeviceStatuses.Approved);
         var answer = new SignInPersonDto(person.Id, person.DisplayName, login?.Email, hasDevices);
-        await _store.AppendAuditAsync(new AuditEntry("sign_in.complete", AuditEntry.Success, person.Id, signed.DeviceId, attempt.Method, origin.SourceAddress, origin.RequestId,
+        await _store.AppendAuditAsync(new AuditEntry("sign_in.complete", AuditEntry.Success, person.Id, deviceId, attempt.Method, origin.SourceAddress, origin.RequestId,
             $"{{\"purpose\":\"{attempt.Purpose}\"}}"), cancellationToken).ConfigureAwait(false);
         if (attempt.Purpose == FleetSignInPurposes.Link) return new CompleteSignInResponse(attempt.Method, answer, null, null, true);
 
@@ -521,7 +608,8 @@ public sealed class SignInService : IDisposable
     {
         FleetSignInMethods.Microsoft => new ExternalProvider(method, ExternalProviderKind.OpenIdConnect, _options.MicrosoftAuthority, _options.Microsoft, "openid profile email"),
         FleetSignInMethods.Google => new ExternalProvider(method, ExternalProviderKind.OpenIdConnect, _options.GoogleAuthority, _options.Google, "openid profile email"),
-        FleetSignInMethods.GitHub => new ExternalProvider(method, ExternalProviderKind.GitHub, _options.GitHubAddress, _options.GitHub, "read:user user:email",
+        // A GitHub App asks no scope: reading the account needs no permission.
+        FleetSignInMethods.GitHub => new ExternalProvider(method, ExternalProviderKind.GitHub, _options.GitHubAddress, _options.GitHub, string.Empty,
             ApiAddress: _options.GitHubApiAddress),
         FleetSignInMethods.Company when company is not null => new ExternalProvider(method, ExternalProviderKind.OpenIdConnect, new Uri(company.Issuer),
             new SignInClient(company.ClientId, secret), "openid profile email", company.GroupsClaim),

@@ -11,7 +11,8 @@ namespace CodeAlta.Server.Api;
 
 /// <summary>
 /// Sign-in (<c>doc/fleet/identity.md</c>): the methods a person may use, the start and the completion of a sign-in
-/// through the system browser of a device, the server's own passkey page, and the settings an owner changes.
+/// through the system browser of a device (or the polls of a device code), the server's own passkey page, and the
+/// settings an owner changes.
 /// </summary>
 internal static class SignInEndpoints
 {
@@ -37,6 +38,13 @@ internal static class SignInEndpoints
             .WithMetadata(new AllowUnknownDeviceAttribute())
             .Produces<CompleteSignInResponse>()
             .WithSummary("Completes a sign-in with the code the browser brought back, signed by the key that started it, once: a grant to enroll that device, or a link.");
+
+        signIn.MapPost("/poll", async (PollSignInRequest? request, HttpContext context, SignInService service) =>
+                Results.Json(await service.PollAsync(request, DeviceAuthenticationMiddleware.GetSigned(context), ApiEndpoints.Origin(context), context.RequestAborted)
+                    .ConfigureAwait(false), FleetSignInJsonContext.Default.PollSignInResponse))
+            .WithMetadata(new AllowUnknownDeviceAttribute())
+            .Produces<PollSignInResponse>()
+            .WithSummary("Asks whether the person entered the code of a sign-in that uses one (GitHub), signed by the key that started it: pending, or what the sign-in gave, once.");
 
         signIn.MapPost("/passkey/options", async (PasskeyOptionsRequest? request, HttpContext context, SignInService service) =>
                 Results.Json(await service.PasskeyOptionsAsync(request, context).ConfigureAwait(false), FleetSignInJsonContext.Default.PasskeyOptionsResponse))

@@ -113,6 +113,86 @@ public sealed class FleetSignInEndToEndTests
         }
     }
 
+    [TestMethod]
+    public async Task AComputerJoinsWithTheGitHubAccountItsPersonLinked_ByACodeEnteredAtGitHub_AndACancelStopsThePolls()
+    {
+        var token = TestContext.CancellationToken;
+        var root = Directory.CreateTempSubdirectory("codealta-fleet-github-").FullName;
+        string At(string name) => Directory.CreateDirectory(Path.Combine(root, name)).FullName;
+        try
+        {
+            await using var github = await FakeGitHubDeviceFlow.StartAsync();
+            github.Interval = 1;
+            var account = new FakeAccount("octo-alex", "alex@example.com", "Alex Martin", [], 4242);
+            await using var server = await CoordinatorServer.StartAsync(new CoordinatorServerOptions
+            {
+                DataRoot = At("server"), Urls = ["http://127.0.0.1:0"], ConfigureLogging = static _ => { }, EnvironmentVariable = static _ => null,
+                SignIn = new SignInOptions
+                {
+                    AllowLoopbackHttpProviders = true, GitHub = new SignInClient(github.ClientId), GitHubAddress = github.Address, GitHubApiAddress = github.Address,
+                },
+            }, token);
+            var address = server.Addresses.First(static uri => uri.Scheme == "http").ToString();
+
+            // The owner's desktop sets the server up and links its GitHub account: the code comes first, the page opens GitHub only.
+            var opened = new List<Uri>();
+            await using var ownerHost = await HostAsync(At("owner"), root, token);
+            await using var ownerServers = new DesktopFleetServers(ownerHost, "Owner desktop", "4.0.0") { OpenBrowser = page => { lock (opened) opened.Add(page); return true; } };
+            var ownerEpoch = Guid.NewGuid().ToString("D");
+            var owner = new FleetServerService(ownerServers, ownerEpoch) { Spaces = ownerHost.SpaceCatalog, IsPaired = static _ => false };
+            var created = await owner.CreateAsync(new FleetServerCreateRequest(ownerEpoch, address, server.SetupCode!.Code, "Alex", "Home"), token);
+            Assert.AreEqual("ok", created.Status, created.Message);
+            var linkId = created.Server!.Id;
+            var shown = await owner.StartSignInCodeAsync(new FleetSignInCodeRequest(ownerEpoch, "github", null, linkId), token);
+            Assert.AreEqual("ok", shown.Status, shown.Message);
+            var code = shown.Code!;
+            Assert.AreEqual((github.UserCodes.Single(), github.Address.AbsoluteUri.TrimEnd('/') + "/login/device"), (code.UserCode, code.Url));
+            Assert.AreEqual("sign_in.browser", owner.OpenSignInPage(new FleetSignInPageRequest(ownerEpoch, "another-handle")).Status, "only the page of a code that waits opens");
+            Assert.AreEqual("ok", owner.OpenSignInPage(new FleetSignInPageRequest(ownerEpoch, code.Handle)).Status);
+            CollectionAssert.AreEqual(new[] { new Uri(code.Url) }, opened);
+            github.Approve(code.UserCode, account);
+            var linked = await owner.LinkSignInAsync(new FleetSignInLinkRequest(ownerEpoch, linkId, "github", code.Handle), token);
+            Assert.AreEqual("ok", linked.Status, linked.Message);
+            Assert.AreEqual("sign_in.browser", owner.OpenSignInPage(new FleetSignInPageRequest(ownerEpoch, code.Handle)).Status, "the page of a sign-in that ended no longer opens");
+            Assert.AreEqual("sign_in.invalid_attempt", (await owner.LinkSignInAsync(new FleetSignInLinkRequest(ownerEpoch, linkId, "github", code.Handle), token)).Status,
+                "a code continues once");
+            Assert.AreEqual("sign_in.invalid_attempt", (await owner.LinkSignInAsync(new FleetSignInLinkRequest(ownerEpoch, linkId, "github"), token)).Status, "GitHub needs its code");
+
+            // A new computer joins with that account: a device of the person exists, so it approves the new one.
+            await using var laptopHost = await HostAsync(At("laptop"), root, token);
+            await using var laptopServers = new DesktopFleetServers(laptopHost, "Alex laptop", "4.0.0") { OpenBrowser = static _ => true };
+            var laptopEpoch = Guid.NewGuid().ToString("D");
+            var laptop = new FleetServerService(laptopServers, laptopEpoch) { Spaces = laptopHost.SpaceCatalog, IsPaired = static _ => false };
+            CollectionAssert.Contains((await laptop.SignInMethodsAsync(new FleetSignInMethodsRequest(laptopEpoch, address), token)).Methods.Select(static method => method.Id).ToArray(),
+                "github");
+
+            // The person gives up: the polls stop with the call.
+            var abandoned = (await laptop.StartSignInCodeAsync(new FleetSignInCodeRequest(laptopEpoch, "github", address, null), token)).Code!;
+            using (var giveUp = CancellationTokenSource.CreateLinkedTokenSource(token))
+            {
+                giveUp.CancelAfter(TimeSpan.FromSeconds(1.5));
+                Assert.AreEqual("sign_in.cancelled", (await laptop.JoinWithSignInAsync(new FleetSignInJoinRequest(laptopEpoch, address, "github", abandoned.Handle), giveUp.Token)).Status);
+            }
+
+            var polls = github.Polls;
+            await Task.Delay(TimeSpan.FromSeconds(2.5), token);
+            Assert.AreEqual(polls, github.Polls, "a cancelled sign-in polls no more");
+
+            var started = (await laptop.StartSignInCodeAsync(new FleetSignInCodeRequest(laptopEpoch, "github", address, null), token)).Code!;
+            github.Approve(started.UserCode, account);
+            var joined = await laptop.JoinWithSignInAsync(new FleetSignInJoinRequest(laptopEpoch, address, "github", started.Handle), token);
+            Assert.AreEqual("ok", joined.Status, joined.Message);
+            Assert.AreEqual(("Alex", true, "pending"), (joined.Person, joined.HasDevices, joined.Server!.Link), "the owner who linked the account, by the name they set");
+            Assert.AreEqual(0, github.Secrets);
+        }
+        finally
+        {
+            try { Directory.Delete(root, recursive: true); }
+            catch (IOException) { }
+            catch (UnauthorizedAccessException) { }
+        }
+    }
+
     private static Task<CodeAltaHost> HostAsync(string globalRoot, string root, CancellationToken token)
         => CodeAltaHost.CreateAsync(new CodeAltaHostOptions
         {

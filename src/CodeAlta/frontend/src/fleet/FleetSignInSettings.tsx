@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Button, Callout, Dialog, DialogBody, DialogFooter, InputGroup, Menu, MenuItem, PopoverNext, Switch, Tag } from "@blueprintjs/core";
 import { fleetServer, type FleetServerView, type FleetSignInLoginView, type FleetSignInSettingsView } from "#neoastra";
 import { AppIcon } from "../AppIcon";
@@ -6,16 +6,17 @@ import { ActivitySpinner } from "../ActivitySpinner";
 import { useShellLanguage } from "../shellLanguage";
 import type { MessageKey } from "../localization";
 import { serverProblem } from "./fleetServer";
-import { hasCompany, linkableMethods, signInDraft, signInDraftProblem, signInProblem, signInSummary, type SignInDraft } from "./signIn";
+import { hasCompany, linkableMethods, signInCode, signInDraft, signInDraftProblem, signInProblem, signInSummary, type SignInCode as Code, type SignInDraft } from "./signIn";
+import { SignInCode } from "./SignInCode";
 
 /** The calls of the sign-in of a server. */
-export type FleetSignInApi = Pick<typeof fleetServer, "signInSettings" | "setSignInSettings" | "linkSignIn">;
+export type FleetSignInApi = Pick<typeof fleetServer, "signInSettings" | "setSignInSettings" | "linkSignIn" | "startSignInCode" | "openSignInPage">;
 
 const methodNames: Record<string, string> = { microsoft: "Microsoft", google: "Google", github: "GitHub" };
 
 /**
  * The sign-in of a server, in its card of Settings > Fleet > Server: the methods linked to the person of this computer (a
- * passkey, Microsoft, Google or GitHub), with Link… to add one through the browser; and, for an owner, how people sign in
+ * passkey, Microsoft, Google or GitHub), with Link… to add one through the browser (GitHub shows a code to enter there); and, for an owner, how people sign in
  * to the organization, with Change… for the methods, the company's OpenID Connect provider and whether it is required.
  */
 export function ServerSignIn({ server, epoch, api = fleetServer, revision }: { server: FleetServerView; epoch: string; api?: FleetSignInApi; revision: number }) {
@@ -24,6 +25,9 @@ export function ServerSignIn({ server, epoch, api = fleetServer, revision }: { s
   const [logins, setLogins] = useState<readonly FleetSignInLoginView[] | null>(null);
   const [editing, setEditing] = useState(false);
   const [linking, setLinking] = useState<string | null>(null);
+  const [deviceCode, setDeviceCode] = useState<Code | null>(null);
+  const work = useRef<AbortController | null>(null);
+  useEffect(() => () => work.current?.abort(), []);
   const [problem, setProblem] = useState<{ key: MessageKey; detail?: string | null } | null>(null);
   const [generation, setGeneration] = useState(0);
   useEffect(() => {
@@ -37,15 +41,38 @@ export function ServerSignIn({ server, epoch, api = fleetServer, revision }: { s
   }, [api, epoch, server.id, revision, generation]);
 
   async function link(method: string) {
+    const abort = new AbortController();
+    work.current = abort;
     setLinking(method);
     setProblem(null);
     try {
-      const result = await api.linkSignIn({ expectedEpoch: epoch, linkId: server.id, method }, { timeoutMilliseconds: 11 * 60_000 });
+      // GitHub: a code to enter at GitHub first, then the wait for it under its handle.
+      let handle: string | null = null;
+      if (method === "github") {
+        const started = await api.startSignInCode({ expectedEpoch: epoch, method, url: null, linkId: server.id }, { signal: abort.signal, timeoutMilliseconds: 30_000 });
+        if (abort.signal.aborted) return;
+        const code = started.status === "ok" ? signInCode(started.code) : null;
+        if (!code) { setProblem({ key: signInProblem(started.status) ?? serverProblem(started.status) ?? "The operation did not complete.", detail: started.message }); return; }
+        setDeviceCode(code);
+        handle = code.handle;
+      }
+      const result = await api.linkSignIn({ expectedEpoch: epoch, linkId: server.id, method, handle }, { signal: abort.signal, timeoutMilliseconds: 11 * 60_000 });
+      if (abort.signal.aborted) return;
       if (result.status === "ok") { setGeneration(value => value + 1); return; }
       setProblem({ key: signInProblem(result.status) ?? serverProblem(result.status) ?? "The operation did not complete.", detail: result.message });
     } catch {
-      setProblem({ key: "The server does not answer." });
-    } finally { setLinking(null); }
+      if (!abort.signal.aborted) setProblem({ key: "The server does not answer." });
+    } finally {
+      if (work.current === abort) { work.current = null; setLinking(null); setDeviceCode(null); }
+    }
+  }
+
+  function cancelLink() {
+    work.current?.abort();
+    work.current = null;
+    setLinking(null);
+    setDeviceCode(null);
+    setProblem({ key: "The sign-in was cancelled." });
   }
 
   if (!logins) return null;
@@ -62,7 +89,8 @@ export function ServerSignIn({ server, epoch, api = fleetServer, revision }: { s
           : logins.map((login, index) => <Tag key={`${login.method}:${index}`} minimal round title={login.name}>
             {login.method === "passkey" ? t("Passkey") : methodNames[login.method] ?? login.method} · {login.name}</Tag>)}
       </span>
-      {linking && <span className="muted-text">{t("Finish signing in in your browser…")}</span>}
+      {linking && (deviceCode ? <SignInCode epoch={epoch} code={deviceCode} api={api} onCancel={cancelLink} />
+        : <span className="muted-text">{t("Finish signing in in your browser…")}</span>)}
       {problem && <Callout compact intent="warning" role="alert">{t(problem.key)}{problem.detail && <div className="muted-text">{problem.detail}</div>}</Callout>}
     </div>
     <PopoverNext placement="bottom-end" content={<Menu>

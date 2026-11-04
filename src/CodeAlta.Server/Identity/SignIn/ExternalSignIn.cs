@@ -16,7 +16,10 @@ public enum ExternalProviderKind
     /// <summary>OpenID Connect: discovery, an ID token signed by the provider's keys, a nonce.</summary>
     OpenIdConnect,
 
-    /// <summary>GitHub's OAuth: no ID token, the account is read from its API with the access token.</summary>
+    /// <summary>
+    /// GitHub's device flow, with the client id of a GitHub App: no redirect, no client secret, no ID token; the account
+    /// is read from its API with the user token, which is then dropped.
+    /// </summary>
     GitHub,
 }
 
@@ -39,6 +42,20 @@ public sealed record ExternalProvider(string Method, ExternalProviderKind Kind, 
 /// <param name="Groups">Its groups (ids), empty when the provider gives none.</param>
 public sealed record ExternalIdentity(string Issuer, string Subject, string? Email, string? Name, IReadOnlyList<string> Groups);
 
+/// <summary>The device code a provider gave for a sign-in (RFC 8628).</summary>
+/// <param name="DeviceCode">The device code, which only the server holds and polls with.</param>
+/// <param name="UserCode">The code the person enters at <paramref name="VerificationUri"/>.</param>
+/// <param name="VerificationUri">The page where the person enters it.</param>
+/// <param name="ExpiresIn">How long the codes work.</param>
+/// <param name="Interval">How many seconds pass at least between two polls.</param>
+public sealed record DeviceAuthorization(string DeviceCode, string UserCode, Uri VerificationUri, TimeSpan ExpiresIn, int Interval);
+
+/// <summary>What a poll of a device code answered.</summary>
+/// <param name="Pending">Whether the person has not entered the code yet.</param>
+/// <param name="Interval">How many seconds pass at least before the next poll (more after a <c>slow_down</c>).</param>
+/// <param name="Identity">The account, once the person entered the code; null while pending.</param>
+public sealed record DevicePollResult(bool Pending, int Interval, ExternalIdentity? Identity);
+
 /// <summary>A refusal of a provider's answer: the stable code and what went wrong, for the audit log and people.</summary>
 public sealed class ExternalSignInException : Exception
 {
@@ -56,8 +73,9 @@ public sealed class ExternalSignInException : Exception
 /// The relying party of the server: it builds the authorization request of a sign-in (authorization code with PKCE, a
 /// nonce, the loopback address of the device as redirect), redeems the code the device brings back with its verifier and
 /// the client secret it holds, and checks what the provider answered — the issuer, the audience, the nonce, the
-/// signature and the lifetime of the ID token, or GitHub's account read with its access token. Discovery documents and
-/// keys are cached per issuer and refreshed when a key is unknown.
+/// signature and the lifetime of the ID token. For GitHub it runs the device flow of a GitHub App instead: it asks for a
+/// device code, polls GitHub with it, and reads the account with the user token, which it keeps nowhere. Discovery
+/// documents and keys are cached per issuer and refreshed when a key is unknown.
 /// </summary>
 public sealed class ExternalSignInClient : IDisposable
 {
@@ -92,21 +110,21 @@ public sealed class ExternalSignInClient : IDisposable
     /// <param name="codeChallenge">The S256 challenge of the PKCE verifier.</param>
     /// <param name="cancellationToken">Cancels the read of the discovery document.</param>
     /// <returns>The address to open in the browser.</returns>
+    /// <exception cref="ArgumentException">The provider is GitHub, which signs in with its device flow.</exception>
     /// <exception cref="ExternalSignInException">The provider's discovery document cannot be read.</exception>
     public async Task<Uri> BuildAuthorizationUrlAsync(ExternalProvider provider, string redirectUri, string state, string nonce, string codeChallenge,
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(provider);
-        var endpoint = provider.Kind == ExternalProviderKind.GitHub
-            ? Combine(provider.Authority, "login/oauth/authorize")
-            : (await GetConfigurationAsync(provider, cancellationToken).ConfigureAwait(false)).AuthorizationEndpoint;
+        RequireOpenIdConnect(provider);
+        var endpoint = (await GetConfigurationAsync(provider, cancellationToken).ConfigureAwait(false)).AuthorizationEndpoint;
         if (string.IsNullOrEmpty(endpoint)) throw new ExternalSignInException(SignInErrorCodes.ProviderUnavailable, "The provider names no authorization endpoint.");
         var query = new List<KeyValuePair<string, string>>
         {
             new("response_type", "code"), new("client_id", provider.Client.ClientId), new("redirect_uri", redirectUri), new("scope", provider.Scopes), new("state", state),
             new("code_challenge", codeChallenge), new("code_challenge_method", "S256"),
         };
-        if (provider.Kind == ExternalProviderKind.OpenIdConnect) query.Add(new("nonce", nonce));
+        query.Add(new("nonce", nonce));
         if (provider.Method is "microsoft" or "google") query.Add(new("prompt", "select_account"));
         var builder = new UriBuilder(endpoint);
         var existing = builder.Query.TrimStart('?');
@@ -122,13 +140,15 @@ public sealed class ExternalSignInClient : IDisposable
     /// <param name="nonce">The nonce the ID token must carry.</param>
     /// <param name="cancellationToken">Cancels the calls.</param>
     /// <returns>The account.</returns>
+    /// <exception cref="ArgumentException">The provider is GitHub, which signs in with its device flow.</exception>
     /// <exception cref="ExternalSignInException">The provider refused the code, or its answer does not verify.</exception>
     public async Task<ExternalIdentity> RedeemAsync(ExternalProvider provider, string code, string redirectUri, string codeVerifier, string nonce,
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(provider);
-        var configuration = provider.Kind == ExternalProviderKind.GitHub ? null : await GetConfigurationAsync(provider, cancellationToken).ConfigureAwait(false);
-        var tokenEndpoint = configuration is null ? Combine(provider.Authority, "login/oauth/access_token") : configuration.TokenEndpoint;
+        RequireOpenIdConnect(provider);
+        var configuration = await GetConfigurationAsync(provider, cancellationToken).ConfigureAwait(false);
+        var tokenEndpoint = configuration.TokenEndpoint;
         if (string.IsNullOrEmpty(tokenEndpoint)) throw new ExternalSignInException(SignInErrorCodes.ProviderUnavailable, "The provider names no token endpoint.");
         RequireTransport(new Uri(tokenEndpoint));
 
@@ -138,7 +158,7 @@ public sealed class ExternalSignInClient : IDisposable
             new("code_verifier", codeVerifier),
         };
         // The secret goes in the form unless the provider takes it in the Authorization header only (Okta's default).
-        var methods = configuration?.TokenEndpointAuthMethodsSupported;
+        var methods = configuration.TokenEndpointAuthMethodsSupported;
         var basic = !string.IsNullOrEmpty(provider.Client.ClientSecret) && methods is { Count: > 0 } && !methods.Contains("client_secret_post") && methods.Contains("client_secret_basic");
         if (!string.IsNullOrEmpty(provider.Client.ClientSecret) && !basic) form.Add(new("client_secret", provider.Client.ClientSecret));
         using var request = new HttpRequestMessage(HttpMethod.Post, tokenEndpoint) { Content = new FormUrlEncodedContent(form) };
@@ -156,9 +176,89 @@ public sealed class ExternalSignInClient : IDisposable
             throw new ExternalSignInException(SignInErrorCodes.CodeRefused, $"The provider refused the code: {error.GetString()}.");
         }
 
-        return provider.Kind == ExternalProviderKind.GitHub
-            ? await ReadGitHubAccountAsync(provider, root, cancellationToken).ConfigureAwait(false)
-            : await ValidateIdTokenAsync(provider, root, nonce, cancellationToken).ConfigureAwait(false);
+        return await ValidateIdTokenAsync(provider, root, nonce, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>Asks GitHub for the device code of a sign-in: the code the person enters, and the device code the server polls with.</summary>
+    /// <param name="provider">The provider, of kind <see cref="ExternalProviderKind.GitHub"/>.</param>
+    /// <param name="cancellationToken">Cancels the call.</param>
+    /// <returns>The codes.</returns>
+    /// <exception cref="ArgumentException">The provider is not GitHub.</exception>
+    /// <exception cref="ExternalSignInException">GitHub does not answer, refuses the client (the device flow is off), or answers something unusable.</exception>
+    public async Task<DeviceAuthorization> StartDeviceAuthorizationAsync(ExternalProvider provider, CancellationToken cancellationToken)
+    {
+        RequireGitHub(provider);
+        var endpoint = new Uri(Combine(provider.Authority, "login/device/code"));
+        RequireTransport(endpoint);
+        var form = new List<KeyValuePair<string, string>> { new("client_id", provider.Client.ClientId) };
+        if (!string.IsNullOrWhiteSpace(provider.Scopes)) form.Add(new("scope", provider.Scopes));
+        using var request = new HttpRequestMessage(HttpMethod.Post, endpoint) { Content = new FormUrlEncodedContent(form) };
+        request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+        using var answer = await ReadJsonAsync(request, "device code", cancellationToken).ConfigureAwait(false);
+        var root = answer.RootElement;
+        if (root.TryGetProperty("error", out var error))
+        {
+            var text = error.ValueKind == JsonValueKind.String ? error.GetString() : null;
+            throw new ExternalSignInException(SignInErrorCodes.ProviderUnavailable, text == "device_flow_disabled"
+                ? "The GitHub App of this server does not have the device flow on."
+                : $"GitHub refused the client of this server: {text}.");
+        }
+
+        var deviceCode = TextOf(root, "device_code");
+        var userCode = TextOf(root, "user_code");
+        if (deviceCode is not { Length: > 0 and <= 512 } || userCode is not { Length: > 0 and <= 64 } || userCode.Any(static c => c is < '!' or > '~')
+            || !Uri.TryCreate(TextOf(root, "verification_uri"), UriKind.Absolute, out var page))
+            throw new ExternalSignInException(SignInErrorCodes.ProviderUnavailable, "GitHub answered no usable device code.");
+        // The person is sent to GitHub's own page, never to an address elsewhere that an answer would name.
+        if (!string.Equals(page.GetLeftPart(UriPartial.Authority), provider.Authority.GetLeftPart(UriPartial.Authority), StringComparison.OrdinalIgnoreCase))
+            throw new ExternalSignInException(SignInErrorCodes.ProviderUnavailable, $"GitHub named a page at {page.GetLeftPart(UriPartial.Authority)} to enter the code.");
+        RequireTransport(page);
+        var expiresIn = Number(root, "expires_in") is { } seconds and > 0 ? TimeSpan.FromSeconds(Math.Min(seconds, 3600)) : TimeSpan.FromMinutes(15);
+        return new DeviceAuthorization(deviceCode, userCode, page, expiresIn, Interval(Number(root, "interval"), 5));
+    }
+
+    /// <summary>Asks GitHub once whether the person entered the code; once they did, reads their account and drops the user token.</summary>
+    /// <param name="provider">The provider, of kind <see cref="ExternalProviderKind.GitHub"/>.</param>
+    /// <param name="deviceCode">The device code.</param>
+    /// <param name="interval">The interval in force, in seconds.</param>
+    /// <param name="cancellationToken">Cancels the calls.</param>
+    /// <returns>Pending with the interval to keep, or the account.</returns>
+    /// <exception cref="ArgumentException">The provider is not GitHub.</exception>
+    /// <exception cref="ExternalSignInException">
+    /// The person refused (<see cref="SignInErrorCodes.Denied"/>), the code expired (<see cref="SignInErrorCodes.Expired"/>),
+    /// GitHub refused the device code or the client, or its answer does not read.
+    /// </exception>
+    public async Task<DevicePollResult> PollDeviceAuthorizationAsync(ExternalProvider provider, string deviceCode, int interval, CancellationToken cancellationToken)
+    {
+        RequireGitHub(provider);
+        ArgumentException.ThrowIfNullOrEmpty(deviceCode);
+        var endpoint = new Uri(Combine(provider.Authority, "login/oauth/access_token"));
+        RequireTransport(endpoint);
+        var form = new List<KeyValuePair<string, string>>
+        {
+            new("client_id", provider.Client.ClientId), new("device_code", deviceCode), new("grant_type", "urn:ietf:params:oauth:grant-type:device_code"),
+        };
+        using var request = new HttpRequestMessage(HttpMethod.Post, endpoint) { Content = new FormUrlEncodedContent(form) };
+        request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+        using var answer = await ReadJsonAsync(request, "token", cancellationToken).ConfigureAwait(false);
+        var root = answer.RootElement;
+        if (root.TryGetProperty("error", out var error))
+        {
+            return (error.ValueKind == JsonValueKind.String ? error.GetString() : null) switch
+            {
+                "authorization_pending" => new DevicePollResult(true, interval, null),
+                // GitHub adds five seconds to the interval and names the new one.
+                "slow_down" => new DevicePollResult(true, Interval(Number(root, "interval"), interval + 5), null),
+                "expired_token" or "token_expired" => throw new ExternalSignInException(SignInErrorCodes.Expired, "The code expired before it was entered at GitHub."),
+                "access_denied" => throw new ExternalSignInException(SignInErrorCodes.Denied, "The sign-in was refused at GitHub."),
+                "device_flow_disabled" => throw new ExternalSignInException(SignInErrorCodes.ProviderUnavailable, "The GitHub App of this server does not have the device flow on."),
+                "incorrect_client_credentials" or "unsupported_grant_type" => throw new ExternalSignInException(SignInErrorCodes.ProviderUnavailable,
+                    $"GitHub refused the client of this server: {error.GetString()}."),
+                var other => throw new ExternalSignInException(SignInErrorCodes.CodeRefused, $"GitHub refused the device code: {other}."),
+            };
+        }
+
+        return new DevicePollResult(false, interval, await ReadGitHubAccountAsync(provider, root, cancellationToken).ConfigureAwait(false));
     }
 
     /// <summary>Checks that the discovery document of an issuer reads, for an owner who configures it.</summary>
@@ -252,24 +352,45 @@ public sealed class ExternalSignInClient : IDisposable
         return _tokens.ValidateTokenAsync(token, parameters);
     }
 
+    // The user token is used for this one read and kept nowhere: the account is its numeric id and its display name only,
+    // never its login (which its person can change, and give to someone else).
     private async Task<ExternalIdentity> ReadGitHubAccountAsync(ExternalProvider provider, JsonElement answer, CancellationToken cancellationToken)
     {
-        if (!answer.TryGetProperty("access_token", out var accessToken) || accessToken.ValueKind != JsonValueKind.String)
+        if (!answer.TryGetProperty("access_token", out var accessToken) || accessToken.ValueKind != JsonValueKind.String || accessToken.GetString() is not { Length: > 0 } token)
             throw new ExternalSignInException(SignInErrorCodes.TokenInvalid, "GitHub answered no access token.");
         var api = provider.ApiAddress ?? throw new InvalidOperationException("A GitHub provider needs the address of its API.");
-        using var request = new HttpRequestMessage(HttpMethod.Get, Combine(api, "user"));
-        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken.GetString());
+        var address = new Uri(Combine(api, "user"));
+        RequireTransport(address);
+        using var request = new HttpRequestMessage(HttpMethod.Get, address);
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
         request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/vnd.github+json"));
+        request.Headers.Add("X-GitHub-Api-Version", "2022-11-28");
         using var user = await ReadJsonAsync(request, "user", cancellationToken).ConfigureAwait(false);
         var root = user.RootElement;
-        if (!root.TryGetProperty("id", out var id) || id.ValueKind != JsonValueKind.Number)
+        if (!root.TryGetProperty("id", out var id) || id.ValueKind != JsonValueKind.Number || !id.TryGetInt64(out var number) || number <= 0)
             throw new ExternalSignInException(SignInErrorCodes.TokenInvalid, "GitHub did not give the id of the account.");
-        var login = root.TryGetProperty("login", out var value) ? value.GetString() : null;
-        var name = root.TryGetProperty("name", out var named) && named.ValueKind == JsonValueKind.String ? named.GetString() : login;
-        var email = root.TryGetProperty("email", out var mail) && mail.ValueKind == JsonValueKind.String ? mail.GetString() : null;
-        return new ExternalIdentity(provider.Authority.GetLeftPart(UriPartial.Authority), id.GetInt64().ToString(CultureInfo.InvariantCulture), email,
-            name ?? login, []);
+        var name = TextOf(root, "name") is { Length: > 0 } named ? named.Trim() : null;
+        return new ExternalIdentity(provider.Authority.GetLeftPart(UriPartial.Authority), number.ToString(CultureInfo.InvariantCulture), null, name, []);
     }
+
+    private static void RequireOpenIdConnect(ExternalProvider provider)
+    {
+        if (provider.Kind != ExternalProviderKind.OpenIdConnect) throw new ArgumentException("GitHub signs in with its device flow, not with a redirect.", nameof(provider));
+    }
+
+    private static void RequireGitHub(ExternalProvider provider)
+    {
+        ArgumentNullException.ThrowIfNull(provider);
+        if (provider.Kind != ExternalProviderKind.GitHub) throw new ArgumentException("Only GitHub signs in with a device code.", nameof(provider));
+    }
+
+    private static string? TextOf(JsonElement element, string name) => element.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.String ? value.GetString() : null;
+
+    private static int? Number(JsonElement element, string name) => element.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.Number && value.TryGetInt32(out var number)
+        ? number : null;
+
+    // At least a second, at most a minute: an answer never makes the device poll in a loop, nor wait for ever.
+    private static int Interval(int? given, int fallback) => Math.Clamp(given ?? fallback, 1, 60);
 
     private async Task<JsonDocument> ReadJsonAsync(HttpRequestMessage request, string what, CancellationToken cancellationToken)
     {
