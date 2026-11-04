@@ -6,7 +6,8 @@ import { createRoot } from "react-dom/client";
 import type { FleetBudgetSetRequest, FleetBudgetsOverview, FleetSecretRefRequest } from "#neoastra";
 import { ShellLanguageContext } from "../shellLanguage";
 import { FleetBudgetsSettings, type FleetBudgetsApi } from "./FleetBudgetsSettings";
-import { FleetApprovals, type FleetApprovalsApi } from "./FleetApprovals";
+import { translate } from "../localization";
+import { FleetApprovals, showHeldStartToast, type FleetApprovalsApi } from "./FleetApprovals";
 
 document.documentElement.classList.add("bp6-dark");
 
@@ -55,7 +56,10 @@ function Fixture() {
   const [width, setWidth] = useState(1250);
   const [shown, setShown] = useState(false);
   // hideButton then showButton is a start of the window again: a new Fleet button that reads the server anew.
-  Object.assign(window, { fleetBudgetsFixture: { setWidth, calls, showButton: () => setShown(true), hideButton: () => setShown(false) } });
+  Object.assign(window, { fleetBudgetsFixture: { setWidth, calls, showButton: () => setShown(true), hideButton: () => setShown(false),
+    // What the page says when a session started on the Mac mini has its first prompt held by Home tokens (the run of the hold is the session).
+    heldStart: () => showHeldStartToast({ epoch: "12345678-1234-1234-1234-123456789abc", runId: "run-1", api: buttonApi, say: (key, values) => translate("en", key, values),
+      message: translate("en", "The session was started on {name}. Its prompt waits for a reached budget of the machine: it is sent once you continue it anyway.", { name: "Mac mini" }) }) } });
   return <div className="ide-shell settings-dialog-content" style={{ padding: 12, width, boxSizing: "border-box" }}>
     {shown && <FleetApprovals epoch="12345678-1234-1234-1234-123456789abc" api={buttonApi} onOpen={() => calls.push(JSON.stringify({ open: "fleetBudgets" }))} />}
     <FleetBudgetsSettings epoch="12345678-1234-1234-1234-123456789abc" api={api} />

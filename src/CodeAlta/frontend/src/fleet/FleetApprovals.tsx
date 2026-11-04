@@ -3,9 +3,10 @@ import { Button, Tag } from "@blueprintjs/core";
 import { fleetServer, type FleetBudgetHoldView, type FleetDeviceView, type FleetNotificationView, type FleetServerView } from "#neoastra";
 import { AppIcon } from "../AppIcon";
 import { dismissToast, showToast } from "../appToaster";
+import type { MessageKey } from "../localization";
 import { useShellLanguage } from "../shellLanguage";
 import { keyWords } from "./fleetServer";
-import { waitingApprovals, type WaitingApproval } from "./approvals";
+import { continueHeldRun, heldRunToastKey, waitingApprovals, type HeldRunOutcome, type WaitingApproval } from "./approvals";
 import { newNotifications, notificationIntent, notificationPhrase, waitingHolds } from "./budgets";
 
 /** The calls of the Fleet button. */
@@ -134,6 +135,8 @@ export function FleetApprovals({ epoch, api = fleetServer, onOpen }: { epoch: st
       const key = holdKey(item);
       if (announced.current.has(key)) continue;
       announced.current.add(key);
+      // It takes the place of what the start of its session said here before the server listed it.
+      close(heldRunToastKey(item.hold.runId));
       showToast({
         intent: "warning", icon: <AppIcon name="usage" size={16} />, timeout: 0,
         message: <div className="fleet-approval-toast fleet-hold-toast">
@@ -170,6 +173,34 @@ export function FleetApprovals({ epoch, api = fleetServer, onOpen }: { epoch: st
   return <Button variant="minimal" size="small" className="fleet-approvals-button" data-waiting={count > 0 ? "true" : undefined}
     icon={<span className="fleet-approvals-icon"><AppIcon name="server" size={16} />{count > 0 && <span className="fleet-approvals-mark">{count}</span>}</span>}
     aria-label={label} title={label} onClick={onOpen} />;
+}
+
+/**
+ * Says that the first prompt of a session started on a machine waits for a reached budget there, with Continue anyway beside it,
+ * until the server lists its hold: the toast of the hold, with Stop, then takes its place.
+ */
+export function showHeldStartToast({ epoch, runId, message, say, api = fleetServer }: {
+  epoch: string; runId: string; message: string;
+  say: (key: MessageKey, values?: Readonly<Record<string, string | number>>) => string;
+  api?: Pick<typeof fleetServer, "status" | "budgets" | "continueRun">;
+}): void {
+  const key = heldRunToastKey(runId);
+  const show = (problem: string | null) => showToast({
+    intent: "warning", icon: <AppIcon name="usage" size={16} />, timeout: 0,
+    message: <div className="fleet-approval-toast fleet-held-start-toast" data-run={runId}>
+      <strong>{message}</strong>
+      {problem && <span className="muted-text">{problem}</span>}
+      <span className="fleet-approval-actions">
+        <Button size="small" intent="warning" text={say("Continue anyway")} onClick={() => void press()} />
+      </span>
+    </div>,
+  }, key);
+  const press = async () => {
+    const outcome: HeldRunOutcome = await continueHeldRun(api, epoch, runId);
+    if (outcome === "continued") dismissToast(key);
+    else show(say(outcome === "not_found" ? "Your server does not list this run yet: try again in a moment." : "Continue anyway was not accepted."));
+  };
+  show(null);
 }
 
 const toastKey = (approval: WaitingApproval) => `fleet-approval:${approval.server.id}:${approval.device.id}`;

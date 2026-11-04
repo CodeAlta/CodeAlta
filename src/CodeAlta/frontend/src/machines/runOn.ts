@@ -64,6 +64,14 @@ export function remoteStartBlocker(choices: Pick<MachineNewSessionChoices, "stat
   return null;
 }
 
+/**
+ * What became of the first prompt of a session started on a machine: sent; held by a reached budget of the machine, which
+ * sends it once its owner continues it anyway; or not sent, the prompt keeping its text here.
+ */
+export function remoteStartPrompt(status: MachineNewSessionResult["status"] | null | undefined): "sent" | "held" | "not_sent" {
+  return status === "ok" ? "sent" : status === "held" ? "held" : "not_sent";
+}
+
 /** Why a new session on a machine was refused, or its choices could not be read, in words. */
 export function newSessionProblem(status: MachineNewSessionChoices["status"] | MachineNewSessionResult["status"] | null | undefined): MessageKey {
   switch (status) {
