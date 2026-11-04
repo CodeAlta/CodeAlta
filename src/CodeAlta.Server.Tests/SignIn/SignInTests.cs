@@ -214,6 +214,33 @@ public sealed class SignInTests
     }
 
     [TestMethod]
+    public async Task AnIdentityWithoutAName_IsNamedFromItsFirstAndLastName_ElseItsEmail()
+    {
+        await using var provider = await FakeOidcProvider.StartAsync(clientSecret: "company-secret");
+        await using var server = await ServerFixture.StartAsync(signIn: Options(provider));
+        using var owner = new TestDevice("Desktop");
+        using var node = new TestDevice("Mac mini");
+        using var laptop = new TestDevice("Laptop");
+        using var other = new TestDevice("Other laptop");
+        await server.SetUpWithNodeAsync(owner, node);
+        await ConfigureCompanyAsync(server, owner, provider, requireSso: false);
+
+        // No name claim, but its parts (the optional claims of a Microsoft personal account): the person is named from them.
+        provider.Account = new FakeAccount("user-2", "pat@contoso.example", null, [], GivenName: "Pat", FamilyName: "Lee");
+        var (start, back) = await StartAsync(server, laptop, FleetSignInMethods.Company);
+        var completed = await CompleteAsync(server, laptop, start, back);
+        Assert.AreEqual(HttpStatusCode.OK, completed.Status, completed.Body.ToString());
+        Assert.AreEqual("Pat Lee", completed.Read<CompleteSignInResponse>().Person.DisplayName);
+
+        // Neither: the email.
+        provider.Account = new FakeAccount("user-3", "kim@contoso.example", null, []);
+        (start, back) = await StartAsync(server, other, FleetSignInMethods.Company);
+        completed = await CompleteAsync(server, other, start, back);
+        Assert.AreEqual(HttpStatusCode.OK, completed.Status, completed.Body.ToString());
+        Assert.AreEqual("kim@contoso.example", completed.Read<CompleteSignInResponse>().Person.DisplayName);
+    }
+
+    [TestMethod]
     public async Task ALinkedAccountSignsInOnANewDevice_ThatADeviceOfThePersonOrTheirRecoveryKeyConfirms()
     {
         await using var provider = await FakeOidcProvider.StartAsync();

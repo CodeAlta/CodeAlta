@@ -312,7 +312,10 @@ public sealed class ExternalSignInClient : IDisposable
         // A Microsoft account is keyed on its tenant and object id, which stay when its sub (per application) would not.
         if (provider.Method == "microsoft" && Text(claims, "tid") is { } tenant && Text(claims, "oid") is { } objectId) subject = tenant + "/" + objectId;
         var email = Text(claims, "email") ?? Text(claims, "preferred_username");
-        return new ExternalIdentity(issuer, subject, email, Text(claims, "name") ?? email, Groups(claims, provider.GroupsClaim));
+        // The name, else its parts (the optional given_name and family_name claims, which a Microsoft personal account without
+        // a display name may still send), else the email.
+        var parts = string.Join(' ', new[] { Text(claims, "given_name"), Text(claims, "family_name") }.Where(static part => !string.IsNullOrWhiteSpace(part)));
+        return new ExternalIdentity(issuer, subject, email, Text(claims, "name") ?? (parts.Length > 0 ? parts : null) ?? email, Groups(claims, provider.GroupsClaim));
     }
 
     private Task<TokenValidationResult> ValidateAsync(string token, ExternalProvider provider, OpenIdConnectConfiguration configuration)
