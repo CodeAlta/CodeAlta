@@ -254,10 +254,12 @@ public sealed class DesktopAutomationPlacementTests
             await placement.SyncAsync(token);
             Assert.AreEqual(1, a.Node.Puts.Count);
 
-            // The record of the removals is held open by another process: it cannot be replaced.
+            // The record of the removals cannot be written: a folder stands where its staged copy goes. A file held open
+            // would do on Windows only, since Linux and macOS replace a file another process reads.
             handoff.Reach(a, false);
             File.WriteAllText(removals, "[]");
-            using (new FileStream(removals, FileMode.Open, FileAccess.Read, FileShare.Read))
+            var staged = Directory.CreateDirectory(removals + ".tmp");
+            try
             {
                 Assert.IsNull(await automations.SaveAsync(automations.Snapshot.Find(Id)!.Definition with { RunsOn = b.DeviceId }, null, token));
                 await placement.SyncAsync(token);
@@ -265,6 +267,10 @@ public sealed class DesktopAutomationPlacementTests
                 var waiting = placement.Status(automations.Snapshot.Find(Id)!)!;
                 Assert.AreEqual("waiting", waiting.State);
                 StringAssert.Contains(waiting.Message, "could not be written");
+            }
+            finally
+            {
+                staged.Delete();
             }
         }
 
