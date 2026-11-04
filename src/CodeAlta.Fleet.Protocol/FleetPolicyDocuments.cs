@@ -332,6 +332,32 @@ public static class FleetPolicyDocuments
         return true;
     }
 
+    /// <summary>
+    /// Says why the signer of a version a verifier takes after its checkpoint no longer holds authority now, or null when it
+    /// does: its device is a controller device of the device list as the verifier holds it now, not removed, and its person
+    /// signs in the access document the verifier holds now (the founder while there is none). A chain only checks that the
+    /// signer held authority at the versions the version names, which a signer removed since still did; a version taken for the
+    /// first time is held to the authority of now, so that a revoked signer cannot sign a new one against their past authority.
+    /// </summary>
+    /// <param name="signed">The signed version, which verified in its chain.</param>
+    /// <param name="devices">The device list as the verifier holds it now.</param>
+    /// <param name="access">The access document as the verifier holds it now; null or empty when the organization signed none.</param>
+    /// <returns>Why its signer does not hold authority now, or null.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="signed"/> or <paramref name="devices"/> is null.</exception>
+    public static string? CheckCurrentSigner(FleetSignedPolicyDocument signed, FleetDeviceListState devices, FleetAccessState? access)
+    {
+        ArgumentNullException.ThrowIfNull(signed);
+        ArgumentNullException.ThrowIfNull(devices);
+        if (!TryParse(signed.Payload, out var parsed)) return "the version does not read";
+        if (!devices.Members.TryGetValue(parsed.SignerDeviceId, out var member) || member.Kind != FleetDeviceKinds.Controller || devices.Removed.Contains(parsed.SignerDeviceId))
+            return "its signer signs no more: its device is no longer a controller device of the device list";
+        if (access is { Number: > 0 })
+            return access.IsSigner(member.OwnerId) ? null : "its signer signs no more: not an owner or an admin who signs in the access document as it is now, or suspended there";
+        var founder = devices.FirstDeviceId is { } first && devices.Tenures.TryGetValue(first, out var held) ? held.Member.OwnerId
+            : devices.FirstDeviceId is { } id && devices.Members.TryGetValue(id, out var initial) ? initial.OwnerId : null;
+        return founder is not null && member.OwnerId == founder ? null : "its signer signs no more: before any access document, the person who set the server up signs";
+    }
+
     /// <summary>Reads a signed version and checks it was signed by a given device, apart from the chain: what a server checks before it keeps one.</summary>
     /// <param name="signed">The signed version.</param>
     /// <param name="key">The key of the device that sends it.</param>

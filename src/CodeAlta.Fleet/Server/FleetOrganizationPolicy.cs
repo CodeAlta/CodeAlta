@@ -91,22 +91,32 @@ public sealed class FleetOrganizationPolicy
                 if (FleetPolicyDocuments.TryParse(after.Items[^1].Document.Payload, out var newest) && newest.DeviceListSequence > devices.Sequence)
                     devices = await Devices.RefreshAsync(cancellationToken).ConfigureAwait(false);
                 var extended = held;
+                var taken = new List<(FleetSignedPolicyDocument, FleetPolicyState)>(after.Items.Count);
                 foreach (var item in after.Items)
                 {
                     if (!FleetPolicyDocuments.TryAppend(extended, item.Document, devices, Access.At, organization, out var next, out var reason))
                         throw new FleetPolicyDocumentException(extended.Number + 1, reason);
                     extended = next;
+                    taken.Add((item.Document, next));
                 }
 
-                return Accept(held, extended);
+                return AcceptEndorsed(held, taken, devices);
             }
 
             var listed = await client.ListPolicyDocumentsAsync(0, cancellationToken).ConfigureAwait(false);
             var needed = listed.Items.Count == 0 ? 0 : FleetPolicyDocuments.TryParse(listed.Items[^1].Document.Payload, out var last) ? last.DeviceListSequence : long.MaxValue;
             if (devices.Sequence < needed) devices = await Devices.RefreshAsync(cancellationToken).ConfigureAwait(false);
-            var verification = FleetPolicyDocuments.Verify(listed.Items.Select(static item => item.Document), devices, Access.At, organization);
-            if (!verification.IsValid) throw new FleetPolicyDocumentException(verification.BrokenAt!.Value, verification.Reason!);
-            var state = verification.State;
+            // Replayed one version at a time, so that the versions after the checkpoint can be held to the authority of now.
+            var state = FleetPolicyState.Empty;
+            var replayed = new List<(FleetSignedPolicyDocument, FleetPolicyState)>(listed.Items.Count);
+            foreach (var item in listed.Items)
+            {
+                if (!FleetPolicyDocuments.TryAppend(state, item.Document, devices, Access.At, organization, out var next, out var reason))
+                    throw new FleetPolicyDocumentException(state.Number + 1, reason);
+                state = next;
+                replayed.Add((item.Document, next));
+            }
+
             if (held is { Number: > 0 })
             {
                 // The chain held before is the anchor: the same first version, and the version held at the same place.
@@ -119,7 +129,9 @@ public sealed class FleetOrganizationPolicy
             }
 
             _verifiedHere = true;
-            return Accept(held, state);
+            // Without a checkpoint, the first read trusts the chain as it is (as the first read of the device list does); with
+            // one, the versions after it are taken for the first time.
+            return held is { Number: > 0 } ? AcceptEndorsed(held, replayed.Skip((int)held.Number).ToList(), devices) : Accept(held, state);
         }
         finally
         {
@@ -169,6 +181,31 @@ public sealed class FleetOrganizationPolicy
         using (var client = Devices.CreateClient())
             await client.AppendPolicyDocumentAsync(signed, cancellationToken).ConfigureAwait(false);
         return await RefreshAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    // Versions taken for the first time stand only up to the last one whose signer holds authority now (the device list and the
+    // access document as this device holds them now): a later signer who holds it vouches for the versions before it; after
+    // it, a version a revoked signer made against their past authority is refused, and the policy stays as that last one left it.
+    private FleetPolicyState AcceptEndorsed(FleetPolicyState held, IReadOnlyList<(FleetSignedPolicyDocument Document, FleetPolicyState State)> taken, FleetDeviceListState devices)
+    {
+        var endorsed = held;
+        string? refusal = null;
+        var access = Access.Current;
+        foreach (var (document, state) in taken)
+        {
+            if (FleetPolicyDocuments.CheckCurrentSigner(document, devices, access) is { } why)
+            {
+                refusal ??= why;
+            }
+            else
+            {
+                endorsed = state;
+                refusal = null;
+            }
+        }
+
+        var accepted = Accept(held, endorsed);
+        return refusal is null ? accepted : throw new FleetPolicyDocumentException(endorsed.Number + 1, refusal);
     }
 
     private FleetPolicyState Accept(FleetPolicyState? held, FleetPolicyState state)
