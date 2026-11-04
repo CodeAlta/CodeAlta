@@ -103,7 +103,7 @@ internal sealed partial class AutomationService
     /// </summary>
     internal string? WatchProblem(string id)
     {
-        lock (_gate) return _state.Paused ? null : _watchProblems.GetValueOrDefault(id) ?? CommandProblem(id);
+        lock (_gate) return _state.Paused ? null : _watchProblems.GetValueOrDefault(id) ?? CommandProblem(id) ?? _listenerProblems.GetValueOrDefault(id).Problem;
     }
 
     /// <summary>
@@ -114,7 +114,7 @@ internal sealed partial class AutomationService
     /// </summary>
     internal async Task LookAsync(CancellationToken cancellationToken)
     {
-        if (_feed is null && _trackers is null) return;
+        if (_feed is null && _trackers is null && Integrations is null) return;
         AutomationSnapshot snapshot;
         lock (_gate)
         {
@@ -127,11 +127,20 @@ internal sealed partial class AutomationService
         var problems = new Dictionary<string, string>(StringComparer.Ordinal);
         var repositories = new Dictionary<string, string>(StringComparer.Ordinal);
         var watched = new List<(AutomationEntry Entry, AutomationTrigger Trigger)>();
+        var polled = new List<(AutomationEntry Entry, AutomationTrigger Trigger)>();
         foreach (var entry in snapshot.Entries)
         {
             if (!Armed(entry)) continue;
             foreach (var trigger in entry.Definition.Triggers)
             {
+                // Jira is read with the token of its trigger: it needs no project.
+                if (IsPolled(trigger))
+                {
+                    if (Integrations is null) problems.TryAdd(entry.Id, "This host does not watch other tools.");
+                    else polled.Add((entry, trigger));
+                    continue;
+                }
+
                 if (!trigger.IsEvent) continue;
                 if (entry.ProjectPath is null) problems[entry.Id] = "A trigger on issues or pull requests needs a project.";
                 else watched.Add((entry, trigger));
@@ -141,7 +150,7 @@ internal sealed partial class AutomationService
         // The triggers on a tracker of a plugin are looked at apart: they do not read the repository.
         var tracked = watched.Where(static pair => pair.Trigger.IsTracker).ToArray();
         if (_feed is null) watched.Clear(); else watched.RemoveAll(static pair => pair.Trigger.IsTracker);
-        var all = watched.Concat(tracked).ToArray();
+        var all =watched.Concat(tracked).Concat(polled).ToArray();
 
         var groups = watched.GroupBy(static pair => (Path: PathKey(pair.Entry.ProjectPath!), Kind: FeedKind(pair.Trigger))).ToArray();
         lock (_gate)
@@ -191,6 +200,13 @@ internal sealed partial class AutomationService
             cancellationToken.ThrowIfCancellationRequested();
             if (_state.Paused) return;
             waiting |= await HandleTrackerAsync(entry, trigger, now, problems, repositories, cancellationToken).ConfigureAwait(false);
+        }
+
+        foreach (var (entry, trigger) in polled)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (_state.Paused) return;
+            waiting |= await HandleJiraAsync(entry, trigger, now, problems, repositories, cancellationToken).ConfigureAwait(false);
         }
 
         bool changed;
@@ -366,8 +382,8 @@ internal sealed partial class AutomationService
     {
         lock (_gate)
         {
-            if (_feed is null && _trackers is null || _closed || _state.Paused || _look is { IsCompleted: false }) return null;
-            if (!_snapshot.Entries.Any(entry => entry.Definition.Triggers.Any(static trigger => trigger.IsEvent) && Armed(entry)))
+            if (_feed is null && _trackers is null && Integrations is null || _closed || _state.Paused || _look is { IsCompleted: false }) return null;
+            if (!_snapshot.Entries.Any(entry => entry.Definition.Triggers.Any(static trigger => trigger.IsEvent || IsPolled(trigger)) && Armed(entry)))
             {
                 // A trigger that comes back later starts from then.
                 _looked.Clear();

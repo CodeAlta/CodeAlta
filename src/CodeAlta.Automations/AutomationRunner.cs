@@ -14,6 +14,15 @@ internal sealed record AutomationOutcome(string Status, string? Message = null)
 {
     /// <summary>What the session of the run used, as its usage records say; null when it could not be read.</summary>
     public AutomationUsage? Usage { get; init; }
+
+    /// <summary>The last answer of the session, which a trigger of another tool writes back to its source; null when it could not be read.</summary>
+    public string? Answer { get; init; }
+
+    /// <summary>What was done with <see cref="Answer"/>, set by the service.</summary>
+    public string? Reply { get; init; }
+
+    /// <summary>The answer a try kept, set by the service.</summary>
+    public string? Output { get; init; }
 }
 
 /// <summary>What the session of a run used: its tokens, and its cost when the provider reported one, in one unit.</summary>
@@ -259,7 +268,8 @@ internal sealed class AutomationRunner : IAutomationRunner
                     : $"The prompt was not accepted ({admission.Kind.ToString().ToLowerInvariant()}).", null);
             }
 
-            return new(sessionId, null, ObserveAsync(admission.Receipt, sessionId));
+            // Its answer is read only when a trigger of it writes the answer back to the source of its event.
+            return new(sessionId, null, ObserveAsync(admission.Receipt, sessionId, definition.Triggers.Any(static trigger => trigger.Reply)));
         }
         catch (OperationCanceledException)
         {
@@ -281,7 +291,7 @@ internal sealed class AutomationRunner : IAutomationRunner
     internal static string SessionTitle(string name, string? detail)
         => AutomationText.Line(detail, MaximumDetailInTitle) is { Length: > 0 } about ? name + " · " + about : name;
 
-    private async Task<AutomationOutcome> ObserveAsync(OwnedSessionCommandReceipt receipt, string sessionId)
+    private async Task<AutomationOutcome> ObserveAsync(OwnedSessionCommandReceipt receipt, string sessionId, bool answer)
     {
         var result = await receipt.Completion.ConfigureAwait(false);
         AutomationOutcome outcome = result.Outcome switch
@@ -290,7 +300,23 @@ internal sealed class AutomationRunner : IAutomationRunner
             OwnedSessionCommandOutcome.Cancelled => new(AutomationRun.Cancelled),
             _ => new(AutomationRun.Failed, result.Code is { } code ? $"The session did not complete ({code})." : "The session did not complete."),
         };
-        return outcome with { Usage = await ReadUsageAsync(sessionId).ConfigureAwait(false) };
+        return outcome with { Usage = await ReadUsageAsync(sessionId).ConfigureAwait(false), Answer = answer ? await ReadAnswerAsync(sessionId).ConfigureAwait(false) : null };
+    }
+
+    // The last answer of the session, from the newest page of its timeline: what a trigger of another tool writes back.
+    private async Task<string?> ReadAnswerAsync(string sessionId)
+    {
+        try
+        {
+            var tail = await _host.WorkspaceReads.ReadTimelineTailAsync(sessionId, null, CancellationToken.None).ConfigureAwait(false);
+            return tail.Page?.Entries.Select(static entry => entry.Event).OfType<CodeAlta.Agent.AgentContentCompletedEvent>()
+                .LastOrDefault(static content => content.Kind == CodeAlta.Agent.AgentContentKind.Assistant && !string.IsNullOrWhiteSpace(content.Content))?.Content;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException or System.Text.Json.JsonException
+            or InvalidOperationException or ObjectDisposedException)
+        {
+            return null;
+        }
     }
 
     // What the session used, from its usage records; a journal that cannot be read now leaves the run without it.
