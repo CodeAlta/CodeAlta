@@ -107,6 +107,17 @@ public interface IFleetServerAutomations
     /// <returns>A task that completes once the run started or was refused.</returns>
     Task RunAsync(FleetConnector connector, FleetServerLink link, FleetSignedAutomationRunRequest request, CancellationToken cancellationToken);
 
+    /// <summary>
+    /// Takes an event a hook of a server received for this node: the automations whose trigger names the hook check its
+    /// signature with their own secret, and the server is told what happened. Nothing else of the server is trusted.
+    /// </summary>
+    /// <param name="connector">The connector of the server.</param>
+    /// <param name="link">The link of the server.</param>
+    /// <param name="received">The event, as it was pushed.</param>
+    /// <param name="cancellationToken">Cancels the work.</param>
+    /// <returns>A task that completes once the event was taken or refused, and answered.</returns>
+    Task HookEventAsync(FleetConnector connector, FleetServerLink link, FleetHookEvent received, CancellationToken cancellationToken) => Task.CompletedTask;
+
     /// <summary>Is told that the connection of a server is online again, to report what the server may have missed.</summary>
     /// <param name="connector">The connector of the server.</param>
     /// <param name="link">The link of the server.</param>
@@ -326,6 +337,7 @@ public sealed class FleetServerConnections : IAsyncDisposable
             AutomationsAssigned = _options.Automations is { } automations ? (delivery, token) => automations.AcceptAsync(created!, link, delivery, token) : null,
             AutomationsOnline = _options.Automations is { } online ? token => online.OnlineAsync(created!, link, token) : null,
             AutomationsRun = _options.Automations is { } runs ? (request, token) => runs.RunAsync(created!, link, request, token) : null,
+            HookEvent = _options.Automations is { } hooks ? (received, token) => hooks.HookEventAsync(created!, link, received, token) : null,
             SecretsChanged = _options.SecretsChanged is { } changed ? () => changed(link.Id) : null,
             BudgetsChanged = _options.BudgetsChanged is { } budgets ? () => budgets(link.Id) : null,
             Health = _options.Health,

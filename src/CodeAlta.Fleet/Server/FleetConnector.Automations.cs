@@ -22,6 +22,13 @@ public sealed partial class FleetConnectorOptions
 
     /// <summary>Gets what is called each time the connection is online, after the deliveries of the welcome; null for nothing.</summary>
     public Func<CancellationToken, Task>? AutomationsOnline { get; init; }
+
+    /// <summary>
+    /// Gets what receives an event a hook of the server received for this machine (<see cref="FleetHookMethods.Event"/>), as it
+    /// was pushed: it checks its signature before anything runs, and answers with <see cref="FleetConnector.AcknowledgeHookEventsAsync"/>.
+    /// Null ignores them (a desktop does).
+    /// </summary>
+    public Func<FleetHookEvent, CancellationToken, Task>? HookEvent { get; init; }
 }
 
 public sealed partial class FleetConnector
@@ -72,6 +79,17 @@ public sealed partial class FleetConnector
             cancellationToken);
     }
 
+    /// <summary>Tells the server what this machine did with the events of its hooks, when connected.</summary>
+    /// <param name="acks">The answers.</param>
+    /// <param name="cancellationToken">Cancels the request.</param>
+    /// <returns>Whether the server received them; false while offline (it hands them again on the next connection).</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="acks"/> is null.</exception>
+    public Task<bool> AcknowledgeHookEventsAsync(FleetHookAcks acks, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(acks);
+        return SendAutomationRequestAsync(FleetHookMethods.Ack, JsonSerializer.SerializeToElement(acks, FleetHookServerJsonContext.Default.FleetHookAcks), cancellationToken);
+    }
+
     private async Task<bool> SendAutomationRequestAsync(string method, JsonElement parameters, CancellationToken cancellationToken)
     {
         if (Volatile.Read(ref _connection) is not { State: FleetConnectionState.Open } connection) return false;
@@ -103,6 +121,16 @@ public sealed partial class FleetConnector
         try { request = fleetEvent.Payload?.Deserialize(FleetAutomationRunRequestJsonContext.Default.FleetSignedAutomationRunRequest); }
         catch (JsonException) { /* A request this machine does not read runs nothing. */ }
         if (request is { Payload.Length: > 0 }) QueueAutomations(() => run(request, stop), stop);
+    }
+
+    // In the order the server sent them, beside the automations: an event selects one of them.
+    private void OnHookEvent(FleetEvent fleetEvent, CancellationToken stop)
+    {
+        if (_options.HookEvent is not { } receive) return;
+        FleetHookEvent? received = null;
+        try { received = fleetEvent.Payload?.Deserialize(FleetHookServerJsonContext.Default.FleetHookEvent); }
+        catch (JsonException) { /* An event this machine does not read is not answered: it waits at the server until it expires. */ }
+        if (received is { DeliveryId.Length: > 0, HookId.Length: > 0, Headers: not null, Body: not null }) QueueAutomations(() => receive(received, stop), stop);
     }
 
     private void OnAutomationsOnline(CancellationToken stop)

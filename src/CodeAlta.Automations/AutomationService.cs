@@ -551,6 +551,7 @@ internal sealed partial class AutomationService : IAsyncDisposable
         // The next start tells from this what was missed while the application was closed.
         _state.Flush();
         (_feed as IDisposable)?.Dispose();
+        if (Integrations is { DisposesHttp: true } integrations) integrations.Http.Dispose();
         _stop.Dispose();
     }
 

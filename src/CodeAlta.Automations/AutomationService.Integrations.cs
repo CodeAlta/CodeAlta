@@ -31,6 +31,28 @@ internal sealed class AutomationIntegrationOptions
 
     /// <summary>Gets what connects a Socket Mode WebSocket; null for a <see cref="ClientWebSocket"/>.</summary>
     public Func<Uri, CancellationToken, Task<WebSocket>>? SlackConnect { get; init; }
+
+    /// <summary>Gets whether the service disposes <see cref="Http"/> with itself.</summary>
+    public bool DisposesHttp { get; init; }
+
+    /// <summary>
+    /// The options of a host: a client of its own, and the references of a trigger read from the store of secrets of the
+    /// profile for the work of its project, with the values the fleet gave this machine, host side: a value of a trigger
+    /// never reaches the agent's shell (<c>doc/fleet/secrets.md</c>, host-only secrets).
+    /// </summary>
+    /// <param name="globalRoot">The root of the profile, <c>~/.alta</c>.</param>
+    /// <returns>The options; the service disposes their client.</returns>
+    internal static AutomationIntegrationOptions ForHost(string globalRoot)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(globalRoot);
+        return new AutomationIntegrationOptions
+        {
+            Http = new HttpClient { Timeout = Timeout.InfiniteTimeSpan },
+            DisposesHttp = true,
+            Resolve = (projectId, text) => CodeAlta.Catalog.Secrets.SecretReferenceResolver.ForScope(globalRoot, new CodeAlta.Catalog.Secrets.SecretScope(null, projectId, null), shell: false)
+                .TryResolve(text, out var value, out var problem) ? (value, null) : (null, problem),
+        };
+    }
 }
 
 /// <summary>Where the answer of a run goes back to: the event's source.</summary>

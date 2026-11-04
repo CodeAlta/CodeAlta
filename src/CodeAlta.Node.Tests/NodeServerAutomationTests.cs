@@ -274,6 +274,95 @@ public sealed class NodeServerAutomationTests
     }
 
     // A version signed by a controller for a machine, its definition sealed for the machine and the person's controllers.
+    [TestMethod]
+    public async Task AnEventPushedToAHook_RunsTheAutomationThatNamesIt_OnceItsSignatureVerifiesOnTheNode()
+    {
+        var token = TestContext.CancellationToken;
+        using var root = new NodeTestRoot();
+        var clock = new NodeClock { Now = Noon };
+        var server = await CoordinatorServer.StartAsync(new CoordinatorServerOptions
+        {
+            DataRoot = Path.Combine(root.Root, "server"), Urls = ["http://127.0.0.1:0"], ConfigureLogging = static _ => { }, EnvironmentVariable = static _ => null,
+        }, token);
+        var address = server.Addresses.First(static uri => uri.Scheme == "http");
+        using var desktopKey = DeviceIdentity.LoadOrCreate(Path.Combine(root.Root, "desktop-fleet"));
+        using var desktop = new FleetServerClient(address, desktopKey);
+        var setup = await desktop.SetUpAsync(server.SetupCode!.Code, "Alex", "Desktop", "Home", token);
+        var enrollment = await desktop.CreateEnrollmentTokenAsync(null, "test-node", token);
+        Assert.AreEqual(NodeExitCodes.Success, await new NodeApplication(TextWriter.Null, TextWriter.Null) { InitializeLogging = false, ServiceEnvironment = static () => null }
+            .RunAsync(["join", address.ToString(), "--token", enrollment.Token, "--data-root", root.DataRoot, "--name", "test-node", "--no-wait"]));
+        var nodeId = (await desktop.ListDevicesAsync(token)).Single(static device => device.Status == "pending").Id;
+        await desktop.ApproveAsync(nodeId, FleetDeviceKinds.Node, token);
+
+        // The signing secret is the node's: the server never holds it.
+        var key = System.Text.Encoding.UTF8.GetBytes("the-sender-signing-key-0123456789");
+        using var http = new HttpClient();
+        var provider = new ScriptedNodeProvider();
+        await using var node = await NodeHost.StartAsync(root.Options() with
+        {
+            ConfigureModelProviders = provider.Register,
+            Automations = new NodeAutomationOptions
+            {
+                TimeProvider = clock, TimeZone = TimeZoneInfo.Utc, WatchRepositories = false, CredentialKind = static _ => AutomationCredentialKind.Account,
+                Integrations = new AutomationIntegrationOptions
+                {
+                    Http = http,
+                    Resolve = (_, text) => text == "${secret:ALERTS}" ? ("whsec_" + Convert.ToBase64String(key), null) : (null, "not set"),
+                },
+            },
+        }, token);
+        var automations = node.Automations!;
+        var servers = NodeServers.Start(node, null, "test-node", "1.0.0", Fast);
+        try
+        {
+            await WaitForAsync(async () => (await desktop.ListMachinesAsync(token)).Any(static machine => machine.Online) ? "online" : null, token);
+            var hook = await desktop.CreateHookAsync(nodeId, CodeAlta.Fleet.Protocol.Api.HookSources.Webhook, "Alerts", token);
+            var definition = $$"""
+                [automations.{{Id}}]
+                name = "Alerts"
+                triggers = [{ type = "webhook", hook = "{{hook.Id}}", secret = "${secret:ALERTS}", fields = ["/alert"] }]
+                prompt = "Look at the alert."
+                """;
+            var list = await desktop.ReadVerifiedDeviceListAsync(null, token);
+            var sealedText = FleetAutomationSigning.Seal(new FleetAutomationContent(definition, null), Id, 1, nodeId, list, desktopKey);
+            await desktop.PutAutomationAsync(FleetAutomationSigning.Sign(desktopKey, new FleetAutomationVersion(FleetAutomationVersion.CurrentVersion, setup.Organization.Id, Id, 1,
+                nodeId, false, true, ["webhook"], null, null, sealedText, string.Empty, string.Empty, DateTimeOffset.UtcNow)), token);
+            await WaitForAsync(() => Task.FromResult(automations.AssignmentOf(Id) is { Number: 1 } held ? held : null), token);
+
+            async Task<System.Net.HttpStatusCode> PushAsync(string body, string id, byte[] signingKey)
+            {
+                var bytes = System.Text.Encoding.UTF8.GetBytes(body);
+                var stamp = Noon.ToUnixTimeSeconds().ToString(System.Globalization.CultureInfo.InvariantCulture);
+                byte[] signed = [.. System.Text.Encoding.UTF8.GetBytes(id + "." + stamp + "."), .. bytes];
+                var signature = Convert.ToBase64String(System.Security.Cryptography.HMACSHA256.HashData(signingKey, signed));
+                using var request = new HttpRequestMessage(HttpMethod.Post, new Uri(address, hook.Path)) { Content = new ByteArrayContent(bytes) };
+                request.Headers.Add("webhook-id", id);
+                request.Headers.Add("webhook-timestamp", stamp);
+                request.Headers.Add("webhook-signature", "v1," + signature);
+                using var response = await http.SendAsync(request, token);
+                return response.StatusCode;
+            }
+
+            // An event someone made up without the secret reaches the node and runs nothing.
+            Assert.AreEqual(System.Net.HttpStatusCode.Accepted, await PushAsync("""{"alert":"forged"}""", "msg_0", System.Text.Encoding.UTF8.GetBytes("not the key")));
+            await WaitForAsync(async () => (await desktop.ListHookEventsAsync(hook.Id, null, token)).Events.FirstOrDefault(static item => item.State == "refused"), token);
+            Assert.AreEqual(0, automations.Engine.Runs(Id, 10).Count);
+
+            Assert.AreEqual(System.Net.HttpStatusCode.Accepted, await PushAsync("""{"alert":"disk full on db-1","other":"not bound"}""", "msg_1", key));
+            var run = await WaitForAsync(async () => (await desktop.ListAutomationRunsAsync(Id, null, token)).Runs.FirstOrDefault(static item => item.Status == AutomationRun.Completed), token);
+            Assert.AreEqual(("webhook", nodeId), (run.Trigger, run.MachineId));
+            StringAssert.StartsWith(run.Occurrence, "event:webhook:", "the event was claimed with the server: it runs once whatever the machine");
+            StringAssert.Contains(provider.LastUserText, "/alert: disk full on db-1");
+            Assert.IsFalse(provider.LastUserText.Contains("not bound", StringComparison.Ordinal));
+            await WaitForAsync(async () => (await desktop.ListHookEventsAsync(hook.Id, null, token)).Events.FirstOrDefault(static item => item.State == "accepted"), token);
+        }
+        finally
+        {
+            await servers.DisposeAsync();
+            await server.DisposeAsync();
+        }
+    }
+
     private static FleetSignedAutomationVersion Sign(DeviceIdentity signer, FleetDeviceListState list, string organization, string machine, long number, string id = Id)
     {
         var definition = Definition.Replace(Id, id, StringComparison.Ordinal);
@@ -314,6 +403,7 @@ public sealed class NodeServerAutomationTests
         MinimumBackoff = TimeSpan.FromMilliseconds(100), MaximumBackoff = TimeSpan.FromSeconds(1), PollInterval = TimeSpan.FromMilliseconds(500),
         DeviceListPinPath = options.DeviceListPinPath, Devices = options.Devices, MetadataKeys = options.MetadataKeys, AcceptRelay = options.AcceptRelay,
         AutomationsAssigned = options.AutomationsAssigned, AutomationsOnline = options.AutomationsOnline, AutomationsRun = options.AutomationsRun,
+        HookEvent = options.HookEvent,
     };
 
     private async Task<T> WaitForAsync<T>(Func<Task<T?>> read, CancellationToken cancellationToken) where T : class

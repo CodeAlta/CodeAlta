@@ -95,6 +95,24 @@ internal sealed class NodeServerAutomations(NodeAutomations automations, DeviceI
     }
 
     /// <inheritdoc />
+    public async Task HookEventAsync(FleetConnector connector, FleetServerLink link, FleetHookEvent received, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(connector);
+        ArgumentNullException.ThrowIfNull(link);
+        ArgumentNullException.ThrowIfNull(received);
+        byte[] body;
+        try { body = Convert.FromBase64String(received.Body); }
+        catch (FormatException) { body = []; }
+        var (accepted, message) = body.Length == 0 && received.Body.Length > 0
+            ? (false, "The body of the event does not read.")
+            : await automations.Engine.ReceiveHookAsync(received.HookId,
+                new CodeAlta.Automations.Integrations.WebhookRequest(received.Headers.ToDictionary(static pair => pair.Key.ToLowerInvariant(), static pair => pair.Value, StringComparer.Ordinal), body),
+                cancellationToken).ConfigureAwait(false);
+        if (!accepted) Log($"An event of the hook {received.HookId} from {link.Url} was not taken: {message}");
+        await connector.AcknowledgeHookEventsAsync(new FleetHookAcks([new FleetHookAck(received.DeliveryId, accepted, message)]), cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <inheritdoc />
     public Task OnlineAsync(FleetConnector connector, FleetServerLink link, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(link);
