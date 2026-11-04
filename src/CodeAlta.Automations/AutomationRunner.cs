@@ -120,6 +120,33 @@ internal interface IAutomationRunGate
     /// <returns>Why the run may not start; null when it may.</returns>
     Task<string?> AdmitBudgetAsync(AutomationEntry entry, string runId, ProjectDescriptor? project, string spaceId, CancellationToken cancellationToken)
         => Task.FromResult<string?>(null);
+
+    /// <summary>
+    /// Gets what the work in the space of a run must keep to besides its provider and model (the signed policy of the
+    /// organization it is linked to, on a machine of a fleet): the permission mode, the sandbox and the tools off its session
+    /// runs with, whatever its definition asks, or why it may not run at all.
+    /// </summary>
+    /// <param name="entry">The automation.</param>
+    /// <param name="provider">The provider the run would start with.</param>
+    /// <param name="spaceId">The space of the run.</param>
+    /// <returns>The limits; <see cref="AutomationRunLimits.None"/> when nothing limits the run.</returns>
+    AutomationRunLimits LimitsFor(AutomationEntry entry, ModelProviderDescriptor provider, string spaceId) => AutomationRunLimits.None;
+}
+
+/// <summary>What a run keeps to besides its provider and model: given to its session before its first prompt.</summary>
+/// <param name="Problem">Why the run may not start; null when it may.</param>
+/// <param name="PermissionMode">The permission mode its session runs in; null for the one its definition names.</param>
+/// <param name="Sandbox">The sandbox its session runs in; null for the one its definition names.</param>
+/// <param name="ToolsOff">The tools turned off in its session; null for none.</param>
+internal sealed record AutomationRunLimits(string? Problem, string? PermissionMode, string? Sandbox, IReadOnlyList<string>? ToolsOff)
+{
+    /// <summary>Gets the limits of a run nothing limits.</summary>
+    public static AutomationRunLimits None { get; } = new(null, null, null, null);
+
+    /// <summary>Gets the limits of a run that may not start.</summary>
+    /// <param name="problem">Why.</param>
+    /// <returns>The limits.</returns>
+    public static AutomationRunLimits Refused(string problem) => new(problem, null, null, null);
 }
 
 /// <summary>Starts the session of a run and sends it the prompt.</summary>
@@ -256,6 +283,11 @@ internal sealed class AutomationRunner : IAutomationRunner
             }
 
             if (_gate?.CheckModel(entry, provider, model.Id, spaceId) is { } ruled) return Refuse(ruled);
+            // The permission mode, the sandbox and the tools the policy of the space allows, whatever the definition asks.
+            var limits = _gate?.LimitsFor(entry, provider, spaceId) ?? AutomationRunLimits.None;
+            if (limits.Problem is { } limited) return Refuse(limited);
+            var permissionMode = limits.PermissionMode ?? definition.PermissionMode;
+            var sandboxName = limits.Sandbox ?? definition.Sandbox;
             if (definition.Model.Effort is { } effort && model.SupportedReasoningEfforts is { } supported && !supported.Contains(effort))
                 return Refuse($"The model '{model.Id}' has no reasoning effort '{effort.ToString().ToLowerInvariant()}'.");
 
@@ -266,7 +298,7 @@ internal sealed class AutomationRunner : IAutomationRunner
             var agent = definition.Agent ?? drafts.DefaultPromptId;
             if (!drafts.Prompts.Any(candidate => candidate.Id == agent)) return Refuse($"There is no agent prompt '{agent}' in the space '{spaceId}'.");
             // The permission mode is one the provider offers a new session, checked before the session exists.
-            if (definition.PermissionMode is { } mode && !_host.Commands.GetNewSessionPermissionModes(provider.ProviderId.Value).Modes.Contains(mode, StringComparer.Ordinal))
+            if (permissionMode is { } mode && !_host.Commands.GetNewSessionPermissionModes(provider.ProviderId.Value).Modes.Contains(mode, StringComparer.Ordinal))
                 return Refuse($"The provider '{provider.ProviderId.Value}' does not offer the permission mode '{mode}'.");
 
             cancellationToken.ThrowIfCancellationRequested();
@@ -275,14 +307,32 @@ internal sealed class AutomationRunner : IAutomationRunner
             if (_gate?.Check(entry, provider) is { } stopped) return Refuse(stopped);
             // The host keeps a bounded number of pending commands: a prompt that would be refused starts no session.
             if (!_host.Commands.HasCapacity) return Refuse(NoCapacity);
-            var session = await _host.Commands.CreateDraftSessionAsync(project, provider, SessionTitle(definition.Name, detail), new AltaActorProvenance
+            // The tools the policy turns off are off from the creation of the session, as for a session started from another device.
+            string? limitedId = null;
+            if (limits.ToolsOff is { Count: > 0 } off)
             {
-                Kind = AltaActorProvenance.AutomationKind,
-                AutomationId = definition.Id,
-                SourceProjectId = project?.Id,
-                CorrelationId = runId,
-                CreatedAt = DateTimeOffset.UtcNow,
-            }, null, spaceId, definition.PermissionMode, null, null, definition.SessionOptions).ConfigureAwait(false);
+                limitedId = Guid.NewGuid().ToString();
+                _host.RuntimeService.SetDisabledToolPatterns(limitedId, off);
+            }
+
+            SessionViewDescriptor session;
+            try
+            {
+                session = await _host.Commands.CreateDraftSessionAsync(project, provider, SessionTitle(definition.Name, detail), new AltaActorProvenance
+                {
+                    Kind = AltaActorProvenance.AutomationKind,
+                    AutomationId = definition.Id,
+                    SourceProjectId = project?.Id,
+                    CorrelationId = runId,
+                    CreatedAt = DateTimeOffset.UtcNow,
+                }, null, spaceId, permissionMode, limitedId, null, definition.SessionOptions).ConfigureAwait(false);
+            }
+            catch
+            {
+                if (limitedId is not null) _host.RuntimeService.SetDisabledToolPatterns(limitedId, null);
+                throw;
+            }
+
             sessionId = session.SessionId;
             // The processes of the session get the values of the environment it was admitted to, from its first attachment.
             if (admitted is not null) _host.Identities.Environments.Admit(sessionId, admitted);
@@ -290,7 +340,7 @@ internal sealed class AutomationRunner : IAutomationRunner
             if (definition.ReviewBeforeCommit is { } review
                 && (await _host.Commands.SetReviewBeforeCommitAsync(sessionId, review, cancellationToken).ConfigureAwait(false)).Status is var reviewed and not "ok")
                 return new(sessionId, $"The review before commit could not be chosen ({reviewed}).", null);
-            if (definition.Sandbox is { } sandbox
+            if (sandboxName is { } sandbox
                 && (await _host.Commands.SetSandboxAsync(sessionId, sandbox, cancellationToken).ConfigureAwait(false)).Status is var sandboxed and not "ok")
                 return new(sessionId, $"The sandbox '{sandbox}' could not be chosen ({sandboxed}).", null);
 

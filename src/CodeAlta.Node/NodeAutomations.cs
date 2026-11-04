@@ -9,6 +9,7 @@ using CodeAlta.Fleet.NodeApi;
 using CodeAlta.Fleet.Protocol;
 using CodeAlta.Fleet.Server;
 using CodeAlta.Orchestration.Hosting;
+using CodeAlta.Orchestration.Runtime;
 using XenoAtom.Logging;
 
 namespace CodeAlta.Node;
@@ -294,6 +295,43 @@ internal sealed partial class NodeAutomations : IFleetNodeAutomations, IAutomati
         if (rules.AccountCredentials == true && CredentialKindOf(provider) == AutomationCredentialKind.Personal)
             return $"The provider '{provider.ProviderId.Value}' runs with a personal plan, and the policy of the organization runs every automation with account credentials.";
         return null;
+    }
+
+    /// <inheritdoc />
+    public AutomationRunLimits LimitsFor(AutomationEntry entry, ModelProviderDescriptor provider, string spaceId)
+    {
+        ArgumentNullException.ThrowIfNull(entry);
+        ArgumentNullException.ThrowIfNull(provider);
+        // The limits a session of the fleet keeps to (doc/fleet/security-and-privacy.md, policies and the kill switch): those of
+        // the policy of the server the automation came through, else of the server the space of the run is linked to.
+        if (RulesOf(entry, spaceId) is not { } rules) return AutomationRunLimits.None;
+        var definition = entry.Definition;
+        if (rules.ToolsOff is { Count: > 0 } off && off.Select(AgentToolPatterns.Validate).FirstOrDefault(static error => error is not null) is { } invalid)
+            return AutomationRunLimits.Refused($"The tools the policy of the organization turns off do not read: {invalid}");
+
+        var mode = definition.PermissionMode;
+        if (rules.PermissionMode is { } ceiling)
+        {
+            var rank = SessionPermissionModes.Rank(ceiling);
+            if (mode is not null && SessionPermissionModes.Rank(mode) > rank)
+                return AutomationRunLimits.Refused($"This automation runs in the permission mode '{mode}', and the policy of the organization allows '{ceiling}' at most.");
+            if (mode is null)
+            {
+                // The widest mode the provider offers within the ceiling, when its default is above it.
+                var choices = _host.Commands.GetNewSessionPermissionModes(provider.ProviderId.Value);
+                if (SessionPermissionModes.Rank(choices.DefaultMode) > rank)
+                {
+                    mode = choices.Modes.Where(candidate => SessionPermissionModes.Rank(candidate) <= rank).OrderByDescending(SessionPermissionModes.Rank).FirstOrDefault();
+                    if (mode is null)
+                        return AutomationRunLimits.Refused($"The provider '{provider.ProviderId.Value}' offers no permission mode as narrow as '{ceiling}', which the policy of the organization requires.");
+                }
+            }
+        }
+
+        var sandbox = definition.Sandbox ?? rules.Sandbox;
+        if (FleetPolicyGuard.SandboxProblem(sandbox, rules, _host.RuntimeService.ReadSandboxSettings().Profiles) is { } problem)
+            return AutomationRunLimits.Refused($"This automation cannot run here: {problem}.");
+        return new AutomationRunLimits(null, mode, sandbox, rules.ToolsOff is { Count: > 0 } tools ? tools : null);
     }
 
     // The rules that apply to a run of an automation in a space; null when no signed policy says anything there.

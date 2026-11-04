@@ -197,6 +197,40 @@ public sealed class NodeAutomationTests
         Assert.AreNotEqual(AutomationRun.Failed, allowed.Status, allowed.Message);
     }
 
+    // The limits of the signed policy on what a session of the fleet may do reach the runs of automations too, whatever their
+    // definition asks: a permission mode above its ceiling, a sandbox below its floor, the tools it turns off.
+    [TestMethod]
+    public async Task TheRulesOfTheSpace_LimitThePermissionModeTheSandboxAndTheToolsOfARun()
+    {
+        var token = TestContext.CancellationToken;
+        using var root = new NodeTestRoot();
+        await using var fixture = await AutomationFixture.StartAsync(root, new ScriptedNodeProvider(), new NodeClock { Now = Noon }, token);
+        var machine = await fixture.PairAsync(DevicePermissions.View | DevicePermissions.Start | DevicePermissions.Automate, token);
+        await using var client = await FleetNodeClient.ConnectAsync(machine, fixture.ViewerIdentity, token);
+        var policy = FleetPolicyState.Empty with { Number = 1, LastHash = "h1", Rules = new FleetPolicyRules(PermissionMode: "default") };
+        var automations = fixture.Node.Automations!;
+        automations.Policy = new FleetPolicyGuard(fixture.Fleet.DeviceId, () => [new FleetPolicySource("https://fleet.example", policy, null, static _ => true)]);
+
+        await client.PutAutomationAsync(fixture.Signed(Definition("Wide", "Hello.") + "\npermission_mode = \"acceptEdits\"\n", 1), cancellationToken: token);
+        var wide = await client.RunAutomationAsync(Id, cancellationToken: token);
+        Assert.AreEqual(AutomationRun.Failed, wide.Status, "a mode above the ceiling of the policy");
+        StringAssert.Contains(wide.Message, "policy of the organization");
+        Assert.IsNull(wide.SessionId);
+
+        policy = policy with { Number = 2, Rules = new FleetPolicyRules(Network: "off") };
+        await client.PutAutomationAsync(fixture.Signed(Definition("Open", "Hello.") + "\nsandbox = \"off\"\n", 2), cancellationToken: token);
+        var open = await client.RunAutomationAsync(Id, cancellationToken: token);
+        Assert.AreEqual(AutomationRun.Failed, open.Status, "no sandbox where the policy limits the network of the sandbox");
+        StringAssert.Contains(open.Message, "sandbox");
+
+        policy = policy with { Number = 3, Rules = new FleetPolicyRules(ToolsOff: ["shell_command"]) };
+        await client.PutAutomationAsync(fixture.Signed(Definition("Tools", "Hello."), 3), cancellationToken: token);
+        var run = await client.RunAutomationAsync(Id, cancellationToken: token);
+        var sessionId = (await WaitForAsync(() => Task.FromResult(automations.Engine.Runs(Id, 10).FirstOrDefault(candidate => candidate.Id == run.Id && candidate.SessionId is not null)),
+            token)).SessionId!;
+        CollectionAssert.Contains(fixture.Node.Host.RuntimeService.GetDisabledToolPatterns(sessionId).ToList(), "shell_command", "the tools the policy turns off are off");
+    }
+
     // The longest time of a session in the policy reaches the runs of automations.
     [TestMethod]
     public async Task TheLongestTime_EndsTheRunsUnderWay()
