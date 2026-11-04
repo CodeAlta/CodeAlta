@@ -120,6 +120,13 @@ public sealed record FleetAutomationRunFact(string RunId, string AutomationId, l
     /// that owns it; null for its owner. Only a waiting run says it.
     /// </summary>
     public string? Approvers { get; init; }
+
+    /// <summary>
+    /// Gets who the on-call tool of the automation said was on call, by email and name, for a run that waits with
+    /// <see cref="Approvers"/> <c>oncall</c>: the server asks them when they answer the approvals of the automation, else the
+    /// rotation of its team. Null for none.
+    /// </summary>
+    public IReadOnlyList<string>? OnCall { get; init; }
 }
 
 /// <summary>The source-generated contracts of the automation methods of the control connection.</summary>

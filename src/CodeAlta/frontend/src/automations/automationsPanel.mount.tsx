@@ -17,7 +17,7 @@ const item: AutomationItem = {
   projectFolder: null, storeProjectId: null, file: "C:/Users/me/.alta/config.toml", provider: null, model: null, effort: null, agent: null, permissionMode: null,
   reviewBeforeCommit: null, sandbox: null, catchUp: false, triggers: [], problem: null, nextRunAt: null, running: true, lastRun: null, repository: null, watchProblem: null,
   allowed: true, script: null, scriptArguments: null, options: null, runsOn: null, placement: null,
-  autonomy: { allowedTools: ["k8s_get_deployment", "k8s_restart_pod"], maxCallsPerHour: 3, approvalTimeout: 30, onTimeout: "stop", approvers: "oncall",
+  autonomy: { allowedTools: ["k8s_get_deployment", "k8s_restart_pod"], maxCallsPerHour: 3, approvalTimeout: 30, onTimeout: "stop", approvers: "oncall", onCall: null,
     tools: [{ name: "k8s_restart_pod", version: "1.4.2", hash: "sha256:3f", bounds: [{ argument: "namespace", values: ["shop"], min: null, max: null },
       { argument: "replicas", values: null, min: 1, max: 5 }], preconditions: [{ tool: "k8s_get_deployment", arguments: ["namespace"], expect: "available" }] }] },
 };

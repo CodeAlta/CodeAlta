@@ -194,6 +194,11 @@ public sealed class AccessControlTests
         Assert.AreEqual((maxId, 12), (listedTeam.OnCall!.OnCallNow, listedTeam.OnCall.ShiftHours));
         var access = server.GetService<CodeAlta.Server.Services.AccessService>();
         CollectionAssert.AreEqual(new[] { maxId }, (await access.ApproversOfAsync(setup.Organization.Id, "nightly", maxId, "oncall", default)).ToArray());
+        // Its on-call tool names who is on call: they are asked when they answer its approvals; anyone else falls back to the rotation.
+        CollectionAssert.AreEqual(new[] { miaId }, (await access.ApproversOfAsync(setup.Organization.Id, "nightly", maxId, "oncall", ["mia@acme.test", "Mia"], default)).ToArray());
+        var ownerSelf = (await server.SendAsync(owner, HttpMethod.Get, "/api/v1/access/self")).Read<AccessSelfDto>();
+        CollectionAssert.AreEqual(new[] { maxId }, (await access.ApproversOfAsync(setup.Organization.Id, "nightly", maxId, "oncall", [ownerSelf.Person.DisplayName, "zed@acme.test"], default)).ToArray(),
+            "an owner of the organization answers none of its approvals: the tool does not make them");
         CollectionAssert.AreEqual(new[] { miaId, maxId }, (await access.ApproversOfAsync(setup.Organization.Id, "nightly", maxId, null, default)).ToArray(), "its owner team otherwise");
         Assert.AreEqual(HttpStatusCode.OK, (await server.SendAsync(mia, HttpMethod.Delete, $"/api/v1/teams/{team.Id}/oncall")).Status);
         CollectionAssert.AreEqual(new[] { miaId, maxId }, (await access.ApproversOfAsync(setup.Organization.Id, "nightly", maxId, "oncall", default)).ToArray(), "without a rotation, its team");

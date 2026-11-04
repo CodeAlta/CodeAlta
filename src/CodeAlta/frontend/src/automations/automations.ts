@@ -180,7 +180,7 @@ export type AutomationForm = Readonly<{
 }>;
 
 /** The autonomy a person turns on: read only, no tool of another source allowed yet, approvals to the owner, an hour to answer. */
-export const newAutonomy = (): AutomationAutonomyItem => ({ allowedTools: [], maxCallsPerHour: null, approvalTimeout: 60, onTimeout: "stop", approvers: "owner", tools: null });
+export const newAutonomy = (): AutomationAutonomyItem => ({ allowedTools: [], maxCallsPerHour: null, approvalTimeout: 60, onTimeout: "stop", approvers: "owner", tools: null, onCall: null });
 // The tools it allows, trimmed, and the pins, bounds and preconditions of those it still allows.
 function autonomyInput(autonomy: AutomationAutonomyItem): AutomationAutonomyItem {
   const allowedTools = autonomy.allowedTools.map(tool => tool.trim()).filter(Boolean);

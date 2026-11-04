@@ -30,6 +30,12 @@ internal sealed class AutomationIntegrationOptions
     /// <summary>Gets the address of the API of incident.io; null for its own.</summary>
     public Uri? IncidentApi { get; init; }
 
+    /// <summary>Gets the address of the API of PagerDuty; null for its own, but in tests.</summary>
+    public Uri? PagerDutyApi { get; init; }
+
+    /// <summary>Gets the address of the API of Opsgenie, whatever the region; null for the one of the region, but in tests.</summary>
+    public Uri? OpsgenieApi { get; init; }
+
     /// <summary>Gets what connects a Socket Mode WebSocket; null for a <see cref="ClientWebSocket"/>.</summary>
     public Func<Uri, CancellationToken, Task<WebSocket>>? SlackConnect { get; init; }
 

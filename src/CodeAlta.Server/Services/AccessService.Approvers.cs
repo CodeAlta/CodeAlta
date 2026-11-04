@@ -34,17 +34,49 @@ internal sealed partial class AccessService
     /// <param name="cancellationToken">Cancels the read.</param>
     /// <returns>The people, never empty.</returns>
     /// <exception cref="ArgumentNullException">An argument is null.</exception>
-    internal async Task<IReadOnlyList<string>> ApproversOfAsync(string organizationId, string automationId, string personId, string? approvers, CancellationToken cancellationToken)
+    internal Task<IReadOnlyList<string>> ApproversOfAsync(string organizationId, string automationId, string personId, string? approvers, CancellationToken cancellationToken)
+        => ApproversOfAsync(organizationId, automationId, personId, approvers, null, cancellationToken);
+
+    /// <summary>
+    /// Lists the people told that a run waits for an approval, as <see cref="ApproversOfAsync(string, string, string, string?, CancellationToken)"/>
+    /// does, and first, for an automation that asks the person on call, those its on-call tool named (by an email of one of
+    /// their sign-ins, or their name) among the people who answer its approvals: a tool never names someone else.
+    /// </summary>
+    /// <param name="organizationId">The organization.</param>
+    /// <param name="automationId">The automation.</param>
+    /// <param name="personId">The person whose signed version the server holds.</param>
+    /// <param name="approvers">Who the automation says answers its approvals, as its run reported it; null for its owner.</param>
+    /// <param name="onCall">Who its on-call tool said is on call, by email and name, as its run reported it; null for none.</param>
+    /// <param name="cancellationToken">Cancels the read.</param>
+    /// <returns>The people, never empty.</returns>
+    /// <exception cref="ArgumentNullException">An argument is null.</exception>
+    internal async Task<IReadOnlyList<string>> ApproversOfAsync(string organizationId, string automationId, string personId, string? approvers, IReadOnlyList<string>? onCall,
+        CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(organizationId);
         ArgumentNullException.ThrowIfNull(automationId);
         ArgumentNullException.ThrowIfNull(personId);
         var snapshot = await _access.ReadAccessAsync(organizationId, cancellationToken).ConfigureAwait(false);
         var (ownerKind, ownerId) = snapshot.Owner(FleetResourceKinds.Automation, automationId) is { } own ? (own.OwnerKind, own.OwnerId) : (FleetPrincipalKinds.Person, personId);
-        if (approvers == OnCallApprovers && ownerKind == FleetPrincipalKinds.Team
-            && await PersonOnCallAsync(organizationId, ownerId, snapshot, cancellationToken).ConfigureAwait(false) is { } onCall)
-            return [onCall];
         var people = AccessPolicy.Approvers(snapshot, AccessTarget.Resource(FleetResourceKinds.Automation, automationId, ownerKind, ownerId), _time.GetUtcNow());
+        if (approvers == OnCallApprovers && onCall is { Count: > 0 } named)
+        {
+            var found = new List<string>();
+            foreach (var candidate in people)
+            {
+                IReadOnlyList<string> emails = Logins is { } logins
+                    ? [.. (await logins.ListLoginsAsync(candidate, cancellationToken).ConfigureAwait(false)).Select(static login => login.Email).OfType<string>()] : [];
+                var name = snapshot.Person(candidate)?.DisplayName;
+                if (named.Any(identity => emails.Contains(identity, StringComparer.OrdinalIgnoreCase) || string.Equals(identity, name, StringComparison.OrdinalIgnoreCase)))
+                    found.Add(candidate);
+            }
+
+            if (found.Count > 0) return found;
+        }
+
+        if (approvers == OnCallApprovers && ownerKind == FleetPrincipalKinds.Team
+            && await PersonOnCallAsync(organizationId, ownerId, snapshot, cancellationToken).ConfigureAwait(false) is { } inTurn)
+            return [inTurn];
         return people.Count > 0 ? people : [personId];
     }
 

@@ -86,6 +86,11 @@ public sealed class AutomationHostTests
         var saved = await fixture.Rpc.SaveAsync(new(Epoch, Input("Diagnosis") with { Autonomy = autonomy }, null), default);
         Assert.AreEqual("ok", saved.Status, saved.Message);
         var plain = await fixture.Rpc.SaveAsync(new(Epoch, Input("Plain"), null), default);
+        // The schedule of an on-call tool goes to the file and back through the page, with its approvers.
+        var onCall = new AutomationOnCallItem("pagerduty", "PSCHED", "${secret:PD}", null);
+        var paged = await fixture.Rpc.SaveAsync(new(Epoch, Input("Paged") with { Autonomy = autonomy with { Approvers = "oncall", OnCall = onCall } }, null), default);
+        Assert.AreEqual("ok", paged.Status, paged.Message);
+        Assert.AreEqual(onCall, (await fixture.Rpc.ListAsync(new(Epoch), default)).Items.Single(item => item.Id == paged.Id).Autonomy!.OnCall);
 
         var shown = (await fixture.One("alta.automation", "automation", "show", saved.Id!)).GetProperty("autonomy");
         Assert.AreEqual("k8s_restart_pod", shown.GetProperty("allowedTools")[0].GetString());

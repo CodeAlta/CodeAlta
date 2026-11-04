@@ -431,6 +431,7 @@ internal sealed class AutomationsService
             Tools = autonomy.Tools.Count == 0 ? null : [.. autonomy.Tools.Select(static tool => new AutomationAllowedToolItem(tool.Name, tool.Version, tool.Hash,
                 [.. tool.Bounds.Select(static bound => new AutomationToolBoundItem(bound.Argument, bound.Values, Decimal(bound.Min), Decimal(bound.Max)))],
                 [.. tool.Preconditions.Select(static precondition => new AutomationToolPreconditionItem(precondition.Tool, precondition.Arguments, precondition.Expect))]))],
+            OnCall = autonomy.OnCall is { } onCall ? new AutomationOnCallItem(onCall.Source, onCall.Schedule, onCall.Token, onCall.Region) : null,
         };
 
     // A bound as the page shows it, as a decimal: one beyond what a decimal holds (7.9e28) is none a person writes for an argument.
@@ -519,6 +520,8 @@ internal sealed class AutomationsService
                 OnTimeout = Blank(autonomy.OnTimeout) ?? AutomationAutonomy.StopOnTimeout,
                 Approvers = Blank(autonomy.Approvers) ?? AutomationAutonomy.OwnerApprovers,
                 Tools = Tools(autonomy),
+                OnCall = autonomy.OnCall is { } onCall && autonomy.Approvers == AutomationAutonomy.OnCallApprovers
+                    ? new AutomationOnCall(onCall.Source.Trim(), onCall.Schedule.Trim(), onCall.Token.Trim()) { Region = Blank(onCall.Region) } : null,
             } : null,
             CatchUp = input.CatchUp,
             Triggers = triggers,
@@ -697,7 +700,16 @@ internal sealed record AutomationAutonomyItem(IReadOnlyList<string> AllowedTools
 {
     /// <summary>Gets what the allowed tools that say more than their name are pinned to and bounded by; null for none.</summary>
     public IReadOnlyList<AutomationAllowedToolItem>? Tools { get; init; }
+
+    /// <summary>Gets the schedule of the on-call tool its runs read who is on call from; null for the rotation of its team.</summary>
+    public AutomationOnCallItem? OnCall { get; init; }
 }
+
+/// <param name="Source"><c>incident_io</c>, <c>pagerduty</c> or <c>opsgenie</c>.</param>
+/// <param name="Schedule">The id of the schedule in that tool.</param>
+/// <param name="Token">The <c>${secret:NAME}</c> reference of its token.</param>
+/// <param name="Region">For Opsgenie, <c>eu</c> or <c>us</c>; null for the United States.</param>
+internal sealed record AutomationOnCallItem(string Source, string Schedule, string Token, string? Region);
 
 /// <summary>An allowed tool that says more than its name.</summary>
 /// <param name="Name">The tool.</param>

@@ -456,7 +456,7 @@ public sealed class CoordinatorServer : IAsyncDisposable
             }));
         services.AddSingleton(provider =>
         {
-            var access = new AccessService(store, store, store, provider.GetRequiredService<NotificationService>(), time) { OnCall = store };
+            var access = new AccessService(store, store, store, provider.GetRequiredService<NotificationService>(), time) { OnCall = store, Logins = store };
             var devices = provider.GetRequiredService<DeviceService>();
             var presence = provider.GetRequiredService<PresenceRegistry>();
             var relays = provider.GetRequiredService<RelayHub>();
@@ -477,8 +477,8 @@ public sealed class CoordinatorServer : IAsyncDisposable
         {
             // The approvals of an automation go to its owner, the members of the team that owns it, and who is granted them.
             Notifications = provider.GetRequiredService<NotificationService>(),
-            ApprovalRecipients = (automation, approvers, token) => provider.GetRequiredService<AccessService>().ApproversOfAsync(automation.OrganizationId, automation.AutomationId,
-                automation.OwnerPersonId, approvers, token),
+            ApprovalRecipients = (automation, run, token) => provider.GetRequiredService<AccessService>().ApproversOfAsync(automation.OrganizationId, automation.AutomationId,
+                automation.OwnerPersonId, run?.Approvers, run?.OnCall, token),
             MayTakeOver = (automation, person, token) => provider.GetRequiredService<AccessService>().ApprovesAsync(automation.OrganizationId, automation.AutomationId,
                 automation.OwnerPersonId, person, token),
         });

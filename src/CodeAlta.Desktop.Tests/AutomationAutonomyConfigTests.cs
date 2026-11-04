@@ -94,6 +94,30 @@ public sealed class AutomationAutonomyConfigTests
     }
 
     [TestMethod]
+    public void WhoIsOnCall_IsReadFromAScheduleOfItsTool_WithATokenThatIsASecret()
+    {
+        var (definitions, faults) = Read("""{ allowed_tools = ["a"], approvers = "oncall", oncall = { source = "opsgenie", schedule = "sre-primary", token = "${secret:OPSGENIE}", region = "eu" } }""");
+        Assert.AreEqual(0, faults.Count, string.Join("; ", faults.Select(static fault => fault.Message)));
+        var onCall = definitions.Single().Autonomy!.OnCall!;
+        Assert.AreEqual(("opsgenie", "sre-primary", "${secret:OPSGENIE}", "eu"), (onCall.Source, onCall.Schedule, onCall.Token, onCall.Region));
+        var written = AutomationConfig.Write(string.Empty, definitions.Single());
+        StringAssert.Contains(written, """oncall = { source = "opsgenie", schedule = "sre-primary", token = "${secret:OPSGENIE}", region = "eu" }""");
+        Assert.AreEqual(definitions.Single().Fingerprint(), AutomationConfig.Read(written, Global).Definitions.Single().Fingerprint());
+
+        foreach (var (text, problem) in new[]
+        {
+            ("""{ approvers = "oncall", oncall = { source = "pagerduty", schedule = "P1", token = "u+abc" } }""", "never the token itself"),
+            ("""{ approvers = "owner", oncall = { source = "pagerduty", schedule = "P1", token = "${secret:PD}" } }""", "goes with approvers = \"oncall\""),
+            ("""{ approvers = "oncall", oncall = { source = "victorops", schedule = "P1", token = "${secret:PD}" } }""", "incident_io, pagerduty or opsgenie"),
+            ("""{ approvers = "oncall", oncall = { source = "pagerduty", schedule = "P1", token = "${secret:PD}", region = "eu" } }""", "for Opsgenie"),
+            ("""{ approvers = "oncall", oncall = { source = "pagerduty", schedule = "P1", token = "${secret:PD}", team = "x" } }""", "oncall is a table"),
+        })
+        {
+            StringAssert.Contains(Read(text).Faults.Single().Message, problem, text);
+        }
+    }
+
+    [TestMethod]
     public void Autonomy_WithoutAllowedTools_IsReadOnly()
     {
         var autonomy = Read("{ }").Definitions.Single().Autonomy!;

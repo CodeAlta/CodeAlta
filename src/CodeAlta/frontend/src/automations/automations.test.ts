@@ -181,12 +181,12 @@ test("the form of an automation holds what it is, and where it is written", () =
 });
 
 test("the autonomy of an automation goes to the form and back, its tools trimmed", () => {
-  const autonomy = { allowedTools: ["k8s_restart_pod"], maxCallsPerHour: 3, approvalTimeout: 30, onTimeout: "wait", approvers: "owner", tools: null };
+  const autonomy = { allowedTools: ["k8s_restart_pod"], maxCallsPerHour: 3, approvalTimeout: 30, onTimeout: "wait", approvers: "owner", tools: null, onCall: null };
   const form = formOf(item("a", { autonomy }));
   assert.deepEqual(form.autonomy, autonomy);
   assert.deepEqual(inputOf({ ...form, autonomy: { ...autonomy, allowedTools: [" k8s_restart_pod ", "  "] } }).autonomy, autonomy);
   // Turned on, it is read only: no tool allowed, approvals to the owner within an hour, then the run stops.
-  assert.deepEqual(newAutonomy(), { allowedTools: [], maxCallsPerHour: null, approvalTimeout: 60, onTimeout: "stop", approvers: "owner", tools: null });
+  assert.deepEqual(newAutonomy(), { allowedTools: [], maxCallsPerHour: null, approvalTimeout: 60, onTimeout: "stop", approvers: "owner", tools: null, onCall: null });
   // The pins, bounds and preconditions of a tool it still allows are kept; those of a tool taken out go with it.
   const pinned = { name: "k8s_restart_pod", version: "1.4.2", hash: "sha256:00", bounds: [{ argument: "namespace", values: ["shop"], min: null, max: null }],
     preconditions: [{ tool: "k8s_get_deployment", arguments: ["namespace"], expect: "available" }] };

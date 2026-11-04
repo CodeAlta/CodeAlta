@@ -764,6 +764,7 @@ internal sealed partial class AutomationService : IAsyncDisposable
         }
 
         if (taken is not null) return End(run.Id, entry.Id, new(AutomationRun.Skipped, taken), null);
+        await ReadOnCallAsync(entry, run.Id, cancellationToken).ConfigureAwait(false);
         AutomationStart start;
         try
         {

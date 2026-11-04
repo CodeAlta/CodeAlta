@@ -34,6 +34,12 @@ export const automationAutonomyMessages = {
     "在你的服务器上，拥有它的团队轮流值班；没有轮值时，整个团队都会作答。"],
   "Its approvals go to the person on call of its team.": ["Sus aprobaciones van a la persona de guardia de su equipo.", "Ses approbations vont à la personne d’astreinte de son équipe.",
     "Seine Freigaben gehen an die Bereitschaft seines Teams.", "承認はチームの当番に送られます。", "其批准发送给其团队的值班人员。"],
+  "Who is on call comes from the schedule {schedule} of {source}, read with its secret on the machine; else from the rotation of its team.": [
+    "Quién está de guardia viene del calendario {schedule} de {source}, leído con su secreto en la máquina; si no, de la rotación de su equipo.",
+    "La personne d’astreinte vient du planning {schedule} de {source}, lu avec son secret sur la machine ; sinon, du roulement de son équipe.",
+    "Wer Bereitschaft hat, kommt aus dem Plan {schedule} von {source}, mit seinem Geheimnis auf der Maschine gelesen; sonst aus der Rotation seines Teams.",
+    "当番は {source} のスケジュール {schedule} から、マシン上のシークレットで読み取られます。なければチームのローテーションから。",
+    "值班人员来自 {source} 的排班 {schedule}，在机器上用其密钥读取；否则来自其团队的轮值。"],
   "Approvals go to": ["Las aprobaciones van a", "Les approbations vont à", "Freigaben gehen an", "承認の送り先", "批准发送给"],
   "Its owner: you, or on your server the team that owns it and those granted to approve it.": [
     "Su propietario: tú, o en tu servidor el equipo al que pertenece y quienes tienen permiso para aprobarla.",

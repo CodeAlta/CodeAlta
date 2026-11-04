@@ -18,6 +18,9 @@ internal sealed partial class AccessService
     /// <summary>Gets or sets the store of the rotations; null on a server without them.</summary>
     internal IOnCallStore? OnCall { get; init; }
 
+    /// <summary>Gets or sets the sign-ins of the people, whose emails match whom an on-call tool names; null to match their names only.</summary>
+    internal ISignInStore? Logins { get; init; }
+
     /// <summary>Sets the on-call rotation of a team: its people in turn, members of the team; for its maintainers and admins.</summary>
     /// <param name="actor">The calling controller device.</param>
     /// <param name="teamId">The team.</param>

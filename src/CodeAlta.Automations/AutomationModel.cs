@@ -353,7 +353,14 @@ internal sealed record AutomationAutonomy
     /// <summary>A text that changes with every part, for the fingerprint of the automation.</summary>
     internal string Key => string.Join('\t', string.Join(',', AllowedTools), MaxCallsPerHour?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? string.Empty,
         ApprovalTimeout?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? string.Empty, OnTimeout, Approvers)
-        + (Tools.Count == 0 ? string.Empty : "\t" + string.Join('\u001b', Tools.Select(static tool => tool.Key)));
+        + (Tools.Count == 0 ? string.Empty : "\t" + string.Join('\u001b', Tools.Select(static tool => tool.Key)))
+        + (OnCall is { } onCall ? "\toncall\u001b" + onCall.Key : string.Empty);
+
+    /// <summary>
+    /// Gets where its runs read who is on call, for <see cref="OnCallApprovers"/>: a schedule of incident.io, PagerDuty or
+    /// Opsgenie; null for the rotation of the team on its server.
+    /// </summary>
+    public AutomationOnCall? OnCall { get; init; }
 
     /// <summary>What an allowed tool must be and stay within; null for a tool allowed by its name alone.</summary>
     internal AutomationAllowedTool? Tool(string name) => Tools.FirstOrDefault(tool => tool.Name == name);
@@ -393,8 +400,41 @@ internal sealed record AutomationAutonomy
         if (MaxCallsPerHour is < 1 or > MaximumCallsPerHour) return $"max_calls_per_hour is 1 to {MaximumCallsPerHour}.";
         if (ApprovalTimeout is < 1 or > MaximumTimeout) return $"approval_timeout is 1 to {MaximumTimeout} minutes.";
         if (OnTimeout is not (StopOnTimeout or WaitOnTimeout)) return "on_timeout is stop or wait.";
+        if (OnCall is { } onCall)
+        {
+            if (Approvers != OnCallApprovers) return "oncall says where the person on call is read: it goes with approvers = \"oncall\".";
+            if (onCall.Validate() is { } problem) return problem;
+        }
+
         if (Approvers is not (OwnerApprovers or OnCallApprovers))
             return "approvers is owner (its person, or the team that owns it) or oncall (the person on call of the team that owns it, by its rotation on its server).";
+        return null;
+    }
+}
+
+/// <summary>
+/// A schedule of an on-call tool its runs read who is on call from, with the token the machine holds as a fleet secret: the
+/// server then asks that person, when they answer the approvals of the automation, else the rotation of its team.
+/// </summary>
+/// <param name="Source"><c>incident_io</c>, <c>pagerduty</c> or <c>opsgenie</c>.</param>
+/// <param name="Schedule">The id of the schedule in that tool.</param>
+/// <param name="Token">The token of that tool, a <c>${secret:NAME}</c> reference.</param>
+internal sealed record AutomationOnCall(string Source, string Schedule, string Token)
+{
+    /// <summary>Gets, for Opsgenie, <c>eu</c> for its European API; null for the United States.</summary>
+    public string? Region { get; init; }
+
+    /// <summary>A text that changes with every part.</summary>
+    internal string Key => string.Join('\u001d', Source, Schedule, Token, Region ?? string.Empty);
+
+    /// <summary>What is wrong with it, or null.</summary>
+    internal string? Validate()
+    {
+        if (Source is not (Integrations.OnCallClient.IncidentIo or Integrations.OnCallClient.PagerDuty or Integrations.OnCallClient.Opsgenie))
+            return $"'{AutomationText.Line(Source, 40)}' is not a source of who is on call: incident_io, pagerduty or opsgenie.";
+        if (Schedule.Length is 0 or > 128 || Schedule.Any(char.IsControl) || Schedule.Contains("${", StringComparison.Ordinal)) return "The schedule of oncall is its id in its tool.";
+        if (AutomationIntegrationConfig.CredentialProblem(Token, "token of oncall") is { } problem) return problem;
+        if (Region is not (null or "eu" or "us") || Region is not null && Source != Integrations.OnCallClient.Opsgenie) return "region is eu or us, for Opsgenie.";
         return null;
     }
 }

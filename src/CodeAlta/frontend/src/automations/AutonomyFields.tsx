@@ -5,6 +5,9 @@ import { bypassPermissionMode } from "../permissionModes";
 import { useShellLanguage } from "../shellLanguage";
 import { describeAllowedTool, describeAutonomy, newAutonomy, toolNames } from "./automations";
 
+// The on-call tools an automation reads who is on call from, by the names people know them by.
+const onCallSources: Readonly<Record<string, string>> = { incident_io: "incident.io", pagerduty: "PagerDuty", opsgenie: "Opsgenie" };
+
 /**
  * What the runs of an automation do without a person: off, its runs work as any session of its permission mode; on,
  * they read freely, call the tools it names by themselves within a rate, and wait for its owner for anything else.
@@ -55,9 +58,11 @@ export function AutonomyFields({ autonomy, permissionMode, disabled, onChange }:
           <HTMLSelect id="automation-approvers" value={autonomy.approvers} disabled={disabled} onChange={event => set({ approvers: event.target.value })}>
             <option value="owner">{t("Its owner")}</option><option value="oncall">{t("The person on call of its team")}</option>
           </HTMLSelect>
-          <span className="automation-autonomy-approvers">{t(autonomy.approvers === "oncall"
-            ? "On your server, the team that owns it takes turns on call; without a rotation, its whole team answers."
-            : "Its owner: you, or on your server the team that owns it and those granted to approve it.")}</span>
+          <span className="automation-autonomy-approvers">{autonomy.approvers === "oncall" && autonomy.onCall
+            ? t("Who is on call comes from the schedule {schedule} of {source}, read with its secret on the machine; else from the rotation of its team.",
+              { schedule: autonomy.onCall.schedule, source: onCallSources[autonomy.onCall.source] ?? autonomy.onCall.source })
+            : t(autonomy.approvers === "oncall" ? "On your server, the team that owns it takes turns on call; without a rotation, its whole team answers."
+              : "Its owner: you, or on your server the team that owns it and those granted to approve it.")}</span>
         </div>
       </div>
       <p className="automation-autonomy-summary">{describeAutonomy(autonomy, t)}</p>
