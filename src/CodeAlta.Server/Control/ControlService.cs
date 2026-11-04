@@ -332,6 +332,13 @@ public sealed class ControlService
             await automations.RecordRunsAsync(session.Device, facts, token).ConfigureAwait(false);
             return null;
         }));
+
+        // A machine says what it did with a take-over: the person who asked is told then.
+        on(FleetAutomationMethods.TakeOverAck, Handler(FleetAutomationServerJsonContext.Default.FleetAutomationTakeOverAck, (ack, _) =>
+        {
+            automations.AcknowledgeTakeOver(session.Device, ack);
+            return Task.FromResult<JsonElement?>(null);
+        }));
     }
 
     // A span per request: the method, the device in short and the outcome; never the parameters.

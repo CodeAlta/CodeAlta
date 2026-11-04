@@ -96,6 +96,19 @@ public sealed partial class FleetConnector
         return SendAutomationRequestAsync(FleetHookMethods.Ack, JsonSerializer.SerializeToElement(acks, FleetHookServerJsonContext.Default.FleetHookAcks), cancellationToken);
     }
 
+    /// <summary>Tells the server what this machine did with a take-over it was given (<see cref="FleetAutomationMethods.TakeOverAck"/>).</summary>
+    /// <param name="ack">The answer.</param>
+    /// <param name="cancellationToken">Cancels the call.</param>
+    /// <returns>Whether the server was told; false while offline.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="ack"/> is null.</exception>
+    /// <exception cref="FleetException">The server refused it, or does not know the method.</exception>
+    public Task<bool> AnswerTakeOverAsync(FleetAutomationTakeOverAck ack, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(ack);
+        return SendAutomationRequestAsync(FleetAutomationMethods.TakeOverAck, JsonSerializer.SerializeToElement(ack, FleetAutomationServerJsonContext.Default.FleetAutomationTakeOverAck),
+            cancellationToken);
+    }
+
     private async Task<bool> SendAutomationRequestAsync(string method, JsonElement parameters, CancellationToken cancellationToken)
     {
         if (Volatile.Read(ref _connection) is not { State: FleetConnectionState.Open } connection) return false;

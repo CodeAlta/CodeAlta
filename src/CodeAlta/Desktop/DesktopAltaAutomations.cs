@@ -41,8 +41,8 @@ internal sealed class DesktopAltaAutomations(AutomationService automations, Proj
     {
         if (!IsName(runId) || !IsName(machineId) || !AutomationDefinition.IsId(automationId)) return new("not_found");
         if (placement is null) return new("refused", null, "Its machine is reached from no fleet here.");
-        var problem = await placement.TakeOverAsync(automationId, machineId, runId.Trim(), cancellationToken).ConfigureAwait(false);
-        return problem is null ? new("ok") : new("refused", null, problem);
+        var (status, message, _) = (await placement.TakeOverAsync(automationId, machineId, runId.Trim(), cancellationToken).ConfigureAwait(false)).Status();
+        return new(status, null, message);
     }
 
     /// <inheritdoc />

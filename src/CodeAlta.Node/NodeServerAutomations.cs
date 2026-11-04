@@ -123,12 +123,14 @@ internal sealed class NodeServerAutomations(NodeAutomations automations, DeviceI
         catch (FleetDeviceListException exception)
         {
             Log($"A take-over asked through {link.Url} was refused: the device list of the server does not verify ({exception.Reason}).");
+            await AnswerTakeOverAsync(connector, request, "the device list of the server does not verify", cancellationToken).ConfigureAwait(false);
             return;
         }
 
         if (devices is null)
         {
             Log($"A take-over asked through {link.Url} was refused: the device list of the server could not be read.");
+            await AnswerTakeOverAsync(connector, request, "the device list of the server could not be read", cancellationToken).ConfigureAwait(false);
             return;
         }
 
@@ -144,7 +146,24 @@ internal sealed class NodeServerAutomations(NodeAutomations automations, DeviceI
             access = connector.Access.Current;
         }
 
-        automations.TakeOverFromServer(link.Id, devices, link.OrganizationId ?? devices.OrganizationId, request, access);
+        var refused = automations.TakeOverFromServer(link.Id, devices, link.OrganizationId ?? devices.OrganizationId, request, access);
+        // The person who asked is told what this machine did, not that the server passed the request on.
+        await AnswerTakeOverAsync(connector, request, refused, cancellationToken).ConfigureAwait(false);
+    }
+
+    // Tells the server what this machine did with a take-over: accepted, or refused and why. A server that does not take the
+    // answer tells the person it was asked, not that it was done.
+    private async Task AnswerTakeOverAsync(FleetConnector connector, FleetSignedAutomationRunRequest request, string? refused, CancellationToken cancellationToken)
+    {
+        if (!FleetAutomationRunRequestDocuments.TryRead(request.Payload, out var read, out _)) return;
+        try
+        {
+            await connector.AnswerTakeOverAsync(new FleetAutomationTakeOverAck(read.AutomationId, read.RunId, refused is null, refused), cancellationToken).ConfigureAwait(false);
+        }
+        catch (FleetException exception)
+        {
+            Log($"The server did not take the answer to a take-over: {exception.Message}");
+        }
     }
 
     /// <inheritdoc />
