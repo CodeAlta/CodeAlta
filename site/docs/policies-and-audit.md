@@ -32,7 +32,7 @@ The rules apply to the work of the fleet in the spaces linked to the server. A r
 | **Permission mode at most** | Starts the session in that mode or a narrower one |
 | **People start sessions elsewhere** | Refuses a session started from another device when it is **Not allowed** |
 | **Agents start work elsewhere** | Refuses the sessions and prompts of agents of other machines when it is **Not allowed** |
-| **Longest session** | Stops a session of the fleet that runs longer |
+| **Longest session** | Stops a session of the fleet or a run of an automation that runs longer |
 | **Team machines publish the facts…** | A team machine publishes the facts (never the content) of every session of your spaces, Private ones included |
 | **Every automation runs with account credentials** | Refuses an automation that would use a personal plan |
 

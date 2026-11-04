@@ -229,6 +229,34 @@ public sealed class NodeAutomationTests
         CollectionAssert.AreEqual(new[] { first }, (await automations.EnforcePolicyAsync(token)).ToArray(), "past its longest time it is stopped");
     }
 
+    // A stop the node holds (kept from before, read at its start) ends a run under way at the next check, though no newer version
+    // of the policy came after the run started.
+    [TestMethod]
+    public async Task AStopTheNodeHolds_EndsARunUnderWay_WithoutANewerVersion()
+    {
+        var token = TestContext.CancellationToken;
+        using var root = new NodeTestRoot();
+        var provider = new ScriptedNodeProvider();
+        await using var fixture = await AutomationFixture.StartAsync(root, provider, new NodeClock { Now = Noon }, token);
+        var machine = await fixture.PairAsync(DevicePermissions.View | DevicePermissions.Start | DevicePermissions.Automate, token);
+        await using var client = await FleetNodeClient.ConnectAsync(machine, fixture.ViewerIdentity, token);
+        await client.PutAutomationAsync(fixture.Signed(Definition("Long", "Work a while."), 1), cancellationToken: token);
+        FleetPolicyState? policy = null;
+        var automations = fixture.Node.Automations!;
+        automations.Policy = new FleetPolicyGuard(fixture.Fleet.DeviceId, () => [new FleetPolicySource("https://fleet.example", policy, null, static _ => true)]);
+
+        var started = new TaskCompletionSource();
+        provider.Turns.Enqueue(ScriptedNodeProvider.WaitThenReply(new TaskCompletionSource().Task, "Never.", started));
+        var run = await client.RunAutomationAsync(Id, cancellationToken: token);
+        await started.Task.WaitAsync(Patience, token);
+        var sessionId = (await WaitForAsync(() => Task.FromResult(automations.Engine.Runs(Id, 10).FirstOrDefault(candidate => candidate.Id == run.Id && candidate.SessionId is not null)),
+            token)).SessionId!;
+
+        // The guard now reads a stop, as a node does that kept one and read it while the run was starting: no event is raised.
+        policy = FleetPolicyState.Empty with { Number = 1, LastHash = "h1", Stop = new FleetPolicyStop(FleetPolicyStopScopes.Fleet, [], [], "A leaked key") };
+        CollectionAssert.AreEqual(new[] { sessionId }, (await automations.EnforcePolicyAsync(token)).ToArray());
+    }
+
     [TestMethod]
     public async Task Put_RefusesCommandTriggers_UnknownRepositories_AndInvalidDefinitions()
     {

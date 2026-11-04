@@ -76,6 +76,29 @@ public sealed class FleetPolicyNodeTests
         await client.CreateSessionAsync(new FleetCreateSessionParams(Title: "Again"), "create-7", token);
     }
 
+    // A stop the node holds (kept from before, read at its start) ends work under way at the next check of the node, though no
+    // newer version came after the work started.
+    [TestMethod]
+    public async Task AStopTheNodeHolds_EndsWorkUnderWay_WithoutANewerVersion()
+    {
+        var token = TestContext.CancellationToken;
+        await using var fixture = await FleetNodeFixture.StartAsync(token);
+        FleetPolicyState? policy = null;
+        fixture.Service.Policy = new FleetPolicyGuard(fixture.NodeIdentity.DeviceId, () => [new FleetPolicySource("https://fleet.example", policy, null, static _ => true)]);
+        await using var client = await FleetNodeClient.ConnectAsync(await fixture.PairViewerAsync(token), fixture.ViewerIdentity, token);
+        var created = await client.CreateSessionAsync(new FleetCreateSessionParams(Title: "Work"), "create-1", token);
+        var running = new TaskCompletionSource();
+        var started = new TaskCompletionSource();
+        fixture.Provider.Turns.Enqueue(ScriptedFleetProvider.WaitThenReply(running.Task, "Never.", started));
+        await client.SendAsync(created.SessionId, "work", retryKey: "send-1", cancellationToken: token);
+        await started.Task.WaitAsync(Patience, token);
+
+        // The guard now reads a stop, as a node does that kept one and read it while this turn was starting: no event is raised.
+        policy = FleetPolicyState.Empty with { Number = 1, LastHash = "h1", Stop = new FleetPolicyStop(FleetPolicyStopScopes.Fleet, [], [], "A leaked key") };
+        CollectionAssert.AreEqual(new[] { created.SessionId }, (await fixture.Service.EnforcePolicyAsync(token)).ToArray());
+        Assert.IsFalse(running.Task.IsCompleted, "it was stopped, not answered");
+    }
+
     [TestMethod]
     public async Task ASessionOfTheFleetPastTheLongestTimeOfItsPolicyIsStopped()
     {

@@ -36,6 +36,20 @@ public sealed partial class FleetNodeService
         return stopped;
     }
 
+    /// <summary>
+    /// Applies the policies the node holds to the work under way, whatever started it and whenever: while a stop reaches this
+    /// machine, the sessions of the fleet at work are stopped (also those that started before the node read the stop, as at its
+    /// start); otherwise those past the longest time of their policy. The node calls it on a timer.
+    /// </summary>
+    /// <param name="cancellationToken">Cancels before the next session is stopped.</param>
+    /// <returns>The sessions stopped.</returns>
+    public async Task<IReadOnlyList<string>> EnforcePolicyAsync(CancellationToken cancellationToken)
+    {
+        var halted = await ApplyPolicyAsync(cancellationToken).ConfigureAwait(false);
+        var over = await EnforceSessionLengthAsync(cancellationToken).ConfigureAwait(false);
+        return [.. halted, .. over];
+    }
+
     /// <summary>Stops the sessions of the work of the fleet that ran longer than the policy of their space allows.</summary>
     /// <param name="cancellationToken">Cancels before the next session is stopped.</param>
     /// <returns>The sessions stopped.</returns>

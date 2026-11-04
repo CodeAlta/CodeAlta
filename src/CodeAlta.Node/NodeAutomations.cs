@@ -303,13 +303,21 @@ internal sealed partial class NodeAutomations : IFleetNodeAutomations, IAutomati
             : Policy?.RulesFor(spaceId);
 
     /// <summary>
-    /// Applies the signed policies to the runs under way: a run that ran longer than the policy of its space allows is stopped.
-    /// The node calls it on a timer, so that the policy it holds reaches runs whatever started them and whenever.
+    /// Applies the signed policies to the runs under way: while a stop reaches this machine every run is stopped (also one that
+    /// started before the node read the stop, as at its start); otherwise a run that ran longer than the policy of its space
+    /// allows. The node calls it on a timer, so that the policy it holds reaches runs whatever started them and whenever.
     /// </summary>
     /// <param name="cancellationToken">Cancels before the next run is stopped.</param>
     /// <returns>The sessions stopped.</returns>
     internal async Task<IReadOnlyList<string>> EnforcePolicyAsync(CancellationToken cancellationToken)
     {
+        if (Policy?.Halt is { } halt)
+        {
+            var halted = await StopRunsAsync(halt.Describe("this machine"), cancellationToken).ConfigureAwait(false);
+            if (halted.Count > 0 && LogManager.IsInitialized) _logger.Info($"The kill switch of {halt.Server} stopped runs under way: {string.Join(", ", halted)}.");
+            return halted;
+        }
+
         if (Policy is null && ServerPolicy is null) return [];
         var now = _options.TimeProvider.GetUtcNow();
         var stopped = new List<string>();

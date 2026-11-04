@@ -457,7 +457,8 @@ internal sealed class NodeServers : IAsyncDisposable
 
     private readonly CancellationTokenSource _stopping = new();
 
-    // The longest time a policy gives a session of the fleet, and the runs of automations, checked every half minute.
+    // The policies held, applied to the work under way every half minute: a stop the node holds ends work that started before
+    // the node read it (as at its start), and the longest time a policy gives a session of the fleet or a run ends them after it.
     private void WatchPolicy(FleetNodeService? service, NodeAutomations? automations)
         => _ = Task.Run(async () =>
         {
@@ -468,12 +469,12 @@ internal sealed class NodeServers : IAsyncDisposable
                 {
                     try
                     {
-                        if (service is not null) await service.EnforceSessionLengthAsync(_stopping.Token).ConfigureAwait(false);
+                        if (service is not null) await service.EnforcePolicyAsync(_stopping.Token).ConfigureAwait(false);
                         if (automations is not null) await automations.EnforcePolicyAsync(_stopping.Token).ConfigureAwait(false);
                     }
                     catch (Exception exception) when (exception is IOException or InvalidOperationException or ObjectDisposedException)
                     {
-                        if (LogManager.IsInitialized) LogManager.GetLogger("CodeAlta.Node").Warn($"The longest time of the policy could not be applied: {exception.Message}");
+                        if (LogManager.IsInitialized) LogManager.GetLogger("CodeAlta.Node").Warn($"The policy could not be applied to the work under way: {exception.Message}");
                     }
                 }
             }

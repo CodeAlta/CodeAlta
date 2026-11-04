@@ -54,13 +54,12 @@ its tests. The protocol only gains: optional query parameters of `GET /api/v1/au
 - [x] 7. Policies and the kill switch in CodeAlta Desktop (Settings > Fleet > Policies): rules, versions, sign; Stop
       with its popover; the banner; `alta fleet policy` (read only).
 - [x] 8. User guide, `doc/fleet`, the `codealta-fleet` skill.
+- [x] 9. After the merge of `feature/fleet`: the rules also reach a node's own automations (those of its spaces linked to
+      a server), the longest time also stops automation runs, and a stop the node holds ends work under way at its next
+      check (also work that started before the node read the stop, as at its start); tests.
 
 ## Not in this plan, or narrower than the spec
 
-- The longest session reaches the sessions a node started from another device or for an agent; automation runs are
-  stopped by the kill switch but not by the longest time yet (their space is not known at the run gate).
-- Rules of a server automation follow the policy of the server it came through; a node's own local automations follow
-  only the kill switch.
 - "What must be published" applies on team machines (machines the access document gives a team), the narrowest reading of
   "the machines an organization manages".
 - No validity window (`notBefore`/`notAfter`): the chain orders versions and the pin refuses a rollback.
