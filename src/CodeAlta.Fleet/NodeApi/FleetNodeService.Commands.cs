@@ -23,7 +23,7 @@ public sealed partial class FleetNodeService
             throw new FleetException(FleetErrorCodes.InvalidParams, null, $"A title has 1 to {MaxTitleLength} characters.");
         if (parameters.Agent is not null) return CreateAgentSessionAsync(call, parameters);
         var retryKey = RetryKey(call);
-        return CreateRecordedAsync(call, Once(call, FleetNodeJsonContext.Default.FleetCreateSessionResult, () => CreateSessionCoreAsync(retryKey, parameters)));
+        return CreateRecordedAsync(call, Once(call, FleetNodeJsonContext.Default.FleetCreateSessionResult, () => CreateSessionCoreAsync(call.Device, retryKey, parameters)));
     }
 
     // A session started through a team membership is its person's: recorded before its result returns, so that their next call finds it.
@@ -34,7 +34,7 @@ public sealed partial class FleetNodeService
         return result;
     }
 
-    private async Task<FleetCreateSessionResult> CreateSessionCoreAsync(string retryKey, FleetCreateSessionParams parameters)
+    private async Task<FleetCreateSessionResult> CreateSessionCoreAsync(Identity.TrustedDevice? device, string retryKey, FleetCreateSessionParams parameters)
     {
         ProjectDescriptor? project = null;
         if (parameters.ProjectId is { } projectId)
@@ -61,6 +61,8 @@ public sealed partial class FleetNodeService
             _host.RuntimeService.SetDisabledToolPatterns(sessionId, off);
         }
 
+        // Whose work it is is known before the session exists: its identity, read when it attaches, resolves only what that person may use.
+        RecordPrincipal(device, sessionId);
         SessionViewDescriptor session;
         try
         {
@@ -89,8 +91,8 @@ public sealed partial class FleetNodeService
         {
             var selection = Selection(parameters.Selection, provider.ProviderId.Value, session.AgentPromptId);
             // The budgets of the machine admit the first run: it may wait for its owner, the creation does not.
-            send = await WithinBudgetAsync(session.SessionId, session, parameters.Title,
-                () => Admit(_host.Commands.AdmitSend(new OwnedTextSendRequest(retryKey, session.SessionId, prompt) { Selection = selection }))).ConfigureAwait(false);
+            send = await WithinBudgetAsync(session.SessionId, session, parameters.Title, HeldSendOf(retryKey, session.SessionId, prompt, parameters.Title, selection))
+                .ConfigureAwait(false);
         }
 
         return new FleetCreateSessionResult(session.SessionId, provider.ProviderId.Value, send);
@@ -118,7 +120,10 @@ public sealed partial class FleetNodeService
             if (parameters.Prompt is { } prompt)
             {
                 var selection = Selection(parameters.Selection, provider.ProviderId.Value, session.AgentPromptId);
-                _host.Commands.AdmitSend(new OwnedTextSendRequest(retryKey, session.SessionId, prompt) { Selection = selection });
+                // Admitted to its environment, the first run is admitted to the budgets as any other: one may stop or hold it.
+                var sent = await WithinBudgetAsync(session.SessionId, session, parameters.Title, HeldSendOf(retryKey, session.SessionId, prompt, parameters.Title, selection))
+                    .ConfigureAwait(false);
+                if (sent.Code == FleetBudgetCommandStatuses.Reached) LogInfo($"The first prompt of the session {session.SessionId} was stopped by a budget.");
             }
         }
         catch (Exception exception) when (exception is IOException or InvalidOperationException or ObjectDisposedException or UnauthorizedAccessException)
@@ -192,8 +197,7 @@ public sealed partial class FleetNodeService
 
         var selection = Selection(parameters.Selection, session.ResolvedProviderKey, session.AgentPromptId);
         // A send the runtime knows already (a retry) is answered as it was; a new one starts a run the budgets admit first.
-        return await WithinBudgetAsync(retryKey, session, null,
-            () => Admit(_host.Commands.AdmitSend(new OwnedTextSendRequest(retryKey, session.SessionId, text) { Selection = selection }, CancellationToken.None))).ConfigureAwait(false);
+        return await WithinBudgetAsync(retryKey, session, null, HeldSendOf(retryKey, session.SessionId, text, null, selection)).ConfigureAwait(false);
     }
 
     private async Task<FleetQueueResult> QueueAsync(FleetNodeCall call, FleetQueueParams parameters, CancellationToken cancellationToken)

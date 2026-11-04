@@ -1,5 +1,3 @@
-using System.Buffers.Text;
-using System.Security.Cryptography;
 using System.Text.Json;
 using CodeAlta.Catalog;
 using CodeAlta.Fleet.Protocol;
@@ -52,16 +50,19 @@ internal sealed class NodeEnvironmentGate
     /// <param name="environment">The name of the environment.</param>
     /// <param name="runId">The run.</param>
     /// <param name="automationId">The automation of the run; null for a session.</param>
-    /// <param name="title">What the run is, for the approver.</param>
     /// <param name="cancellationToken">Cancels the wait.</param>
     /// <returns>What admitted the run, or why it may not start.</returns>
-    public async Task<EnvironmentAdmissionResult> AdmitAsync(string environment, string runId, string? automationId, string? title, CancellationToken cancellationToken)
+    /// <remarks>
+    /// The approval asked names the run, never what it is about: a title is descriptive metadata the server never reads
+    /// (<c>doc/fleet/security-and-privacy.md</c>, what the server sees).
+    /// </remarks>
+    public async Task<EnvironmentAdmissionResult> AdmitAsync(string environment, string runId, string? automationId, CancellationToken cancellationToken)
     {
-        var problem = await AdmitCoreAsync(environment, runId, automationId, title, cancellationToken).ConfigureAwait(false);
+        var problem = await AdmitCoreAsync(environment, runId, automationId, cancellationToken).ConfigureAwait(false);
         return problem.Admission is { } admission ? new EnvironmentAdmissionResult(null, admission) : EnvironmentAdmissionResult.Refused(problem.Problem!);
     }
 
-    private async Task<(string? Problem, EnvironmentAdmission? Admission)> AdmitCoreAsync(string environment, string runId, string? automationId, string? title,
+    private async Task<(string? Problem, EnvironmentAdmission? Admission)> AdmitCoreAsync(string environment, string runId, string? automationId,
         CancellationToken cancellationToken)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(environment);
@@ -77,11 +78,12 @@ internal sealed class NodeEnvironmentGate
             return ($"The environment '{environment}' runs on machines labeled {string.Join(", ", definition.MachineLabels)}: this machine is not.", null);
         if (definition.Approvers.Count == 0) return (null, new EnvironmentAdmission(environment, definition.EnvironmentId, definition.Number, null));
 
-        var nonce = Base64Url.EncodeToString(RandomNumberGenerator.GetBytes(16));
+        // The nonce carries this machine's signature of what it asks: an approver signs nothing the server made up or changed.
+        var nonce = sync.ApprovalNonce(definition, runId, automationId);
         FleetApprovalDto asked;
         try
         {
-            asked = await sync.RequestApprovalAsync(definition.EnvironmentId, new RequestFleetApprovalRequest(runId, nonce, definition.Number, automationId, title), cancellationToken)
+            asked = await sync.RequestApprovalAsync(definition.EnvironmentId, new RequestFleetApprovalRequest(runId, nonce, definition.Number, automationId, Title: null), cancellationToken)
                 .ConfigureAwait(false);
         }
         catch (Exception exception) when (exception is FleetServerException or HttpRequestException)

@@ -88,6 +88,56 @@ public static class FleetSecretSealing
             .Take(MaxRecipients)];
     }
 
+    /// <summary>
+    /// Gives the holders of the current version of a value that a controller device of the person gave it to: those whose
+    /// copy carries a grant a controller device signed, for this value and version and the key of the copy of this device.
+    /// The list of holders the server gives is not taken: a server could name there any machine of the person.
+    /// </summary>
+    /// <param name="secret">The value as the server lists it for a controller device, with the copies of its holders.</param>
+    /// <param name="list">The device list as this device verified it.</param>
+    /// <returns>The device ids; none when this device holds no copy or the server gives no copies of the holders.</returns>
+    /// <exception cref="ArgumentNullException">An argument is null.</exception>
+    public static IReadOnlyList<string> GrantedHolders(FleetSecretDto secret, FleetDeviceListState list)
+    {
+        ArgumentNullException.ThrowIfNull(secret);
+        ArgumentNullException.ThrowIfNull(list);
+        if (secret.HolderCopies is not { } copies || KeyIdOf(secret.Copy) is not { } keyId) return [];
+        var granted = new List<string>(copies.Count);
+        foreach (var copy in copies)
+        {
+            if (copy?.DeviceId is not { Length: > 0 } deviceId || copy.Sealed is not { Length: > 0 and <= MaxCopyLength } sealedCopy) continue;
+            try
+            {
+                using var document = JsonDocument.Parse(sealedCopy);
+                var root = document.RootElement;
+                if (FleetSealedJson.Text(root, "alg") == Algorithm && FleetSealedJson.Text(root, "kid") == keyId && FleetSealedJson.Text(root, "wrap") is { } wrapped
+                    && FleetKeyWrap.IsGranted(wrapped, keyId, secret.Version, GrantScope(secret.Id), deviceId, list))
+                    granted.Add(deviceId);
+            }
+            catch (JsonException)
+            {
+                // A copy that does not read names no holder.
+            }
+        }
+
+        return [.. granted.Distinct(StringComparer.Ordinal)];
+    }
+
+    // The id of the key of a copy: every copy of one version is of the same key.
+    private static string? KeyIdOf(string? copy)
+    {
+        if (copy is not { Length: > 0 and <= MaxCopyLength }) return null;
+        try
+        {
+            using var document = JsonDocument.Parse(copy);
+            return FleetSealedJson.Text(document.RootElement, "kid") is { Length: > 0 } keyId ? keyId : null;
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
     /// <summary>Seals a value for devices of the list, one copy each.</summary>
     /// <param name="value">The value.</param>
     /// <param name="binding">What the copies are bound to.</param>

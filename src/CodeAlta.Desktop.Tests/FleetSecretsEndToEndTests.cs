@@ -144,7 +144,7 @@ public sealed class FleetSecretsEndToEndTests
                 .FirstOrDefault(approval => approval.RunId == second.SessionId && approval.MayApprove), token);
             Assert.AreEqual(("production", "e2e-node", "pending"), (waiting.Environment, waiting.Machine, waiting.Status));
             Assert.AreEqual(1, model.ToolOutputs.Count, "nothing of the second session runs before the approval");
-            Assert.AreEqual("ok", (await service.ApproveRunAsync(new FleetApprovalActionRequest(epoch, linkId, waiting.Id), token)).Status);
+            Assert.AreEqual("ok", (await service.ApproveRunAsync(new FleetApprovalActionRequest(epoch, linkId, waiting.Id, waiting.Review), token)).Status);
             await AllowShellAsync(node, second.SessionId, token);
             var deployed = await WaitForAsync(() => Task.FromResult(model.ToolOutputs.Skip(1).FirstOrDefault()), token);
             StringAssert.Contains(deployed, "deploy=***", $"the value of the environment reached the shell, masked: {deployed}");

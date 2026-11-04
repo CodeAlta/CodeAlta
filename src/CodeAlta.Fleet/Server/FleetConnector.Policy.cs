@@ -43,28 +43,35 @@ public sealed partial class FleetConnector
         if (Interlocked.Exchange(ref _policyReading, 1) != 0) return;
         Track(Task.Run(async () =>
         {
-            try
+            while (true)
             {
-                while (Interlocked.Exchange(ref _policyAgain, 0) != 0 && !stop.IsCancellationRequested)
+                try
                 {
-                    try
+                    while (Interlocked.Exchange(ref _policyAgain, 0) != 0 && !stop.IsCancellationRequested)
                     {
-                        await Policy.RefreshAsync(stop).ConfigureAwait(false);
-                    }
-                    catch (Exception exception) when (exception is FleetPolicyDocumentException or FleetAccessDocumentException or FleetDeviceListException)
-                    {
-                        // A chain that does not verify changes nothing: the version verified before still holds.
-                        if (LogManager.IsInitialized) _policyLogger.Warn($"The policy of {ServerAddress.ToString()} was refused: {exception.Message}");
-                    }
-                    catch (Exception exception) when (exception is FleetServerException or HttpRequestException or IOException or OperationCanceledException)
-                    {
-                        if (LogManager.IsInitialized && !stop.IsCancellationRequested) _policyLogger.Info($"The policy of {ServerAddress.ToString()} could not be read: {exception.Message}");
+                        try
+                        {
+                            await Policy.RefreshAsync(stop).ConfigureAwait(false);
+                        }
+                        catch (Exception exception) when (exception is FleetPolicyDocumentException or FleetAccessDocumentException or FleetDeviceListException)
+                        {
+                            // A chain that does not verify changes nothing: the version verified before still holds.
+                            if (LogManager.IsInitialized) _policyLogger.Warn($"The policy of {ServerAddress.ToString()} was refused: {exception.Message}");
+                        }
+                        catch (Exception exception) when (exception is FleetServerException or HttpRequestException or IOException or OperationCanceledException)
+                        {
+                            if (LogManager.IsInitialized && !stop.IsCancellationRequested) _policyLogger.Info($"The policy of {ServerAddress.ToString()} could not be read: {exception.Message}");
+                        }
                     }
                 }
-            }
-            finally
-            {
-                Volatile.Write(ref _policyReading, 0);
+                finally
+                {
+                    Volatile.Write(ref _policyReading, 0);
+                }
+
+                // A read asked after the last pass but before the reader was released found it busy: make it now (a stop must
+                // never wait for the next connection).
+                if (Volatile.Read(ref _policyAgain) == 0 || stop.IsCancellationRequested || Interlocked.Exchange(ref _policyReading, 1) != 0) return;
             }
         }, CancellationToken.None));
     }

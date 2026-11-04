@@ -92,6 +92,40 @@ public sealed class NodeScopeProvidersTests
         Assert.AreEqual(("https://gateway.example/v3", "sk-3"), Installed());
     }
 
+    [TestMethod]
+    public async Task AProviderOfTheTeam_RunsAtOnce_TakesARotatedKey_AndStopsOnceTakenAway()
+    {
+        var token = TestContext.CancellationToken;
+        using var root = new NodeTestRoot();
+        await using var node = await NodeHost.StartAsync(root.Options(), token);
+        var catalog = node.Host.CatalogOptions;
+        using var identity = DeviceIdentity.LoadOrCreate(Path.Combine(root.Root, "self"));
+        // The store the node reads the keys of its providers from.
+        var store = new LocalSecretStore(catalog.GlobalRoot);
+        var live = new NodeProviders(node.Host, null);
+        var changes = new List<string>();
+        var providers = new NodeScopeProviders(catalog, store, identity)
+        {
+            ProvidersChanged = changed => { changes.Add(string.Join(",", changed)); live.Reconcile(changed); },
+        };
+        ScopeProviderDto Provider(string id) => new(id, FleetPrincipalKinds.Team, "infra", "Infra gateway", "openai-responses", "https://gateway.example/v1", ["gpt-6.1"], 1,
+            "p2", DateTimeOffset.UtcNow, ["self"]);
+        bool Registered() => node.Host.ModelProviderRegistry.ListProviders(includeDisabled: true).Any(static provider => provider.ProviderId.Value == "infra-gateway");
+
+        providers.Apply("link-1", [(Provider("infra-gateway"), "sk-team")]);
+        Assert.IsTrue(Registered(), "a provider given is run by the node at once, not at its next start");
+        providers.Apply("link-1", [(Provider("infra-gateway"), "sk-team")]);
+        providers.Apply("link-1", [(Provider("infra-gateway"), "sk-rotated")]);
+        CollectionAssert.AreEqual(new[] { "infra-gateway", "infra-gateway" }, changes.ToArray(), "registered again for its new key; an unchanged one is left running");
+
+        // Taken away: the node stops using it, and its key, at once.
+        providers.Apply("link-1", []);
+        // While the runtime still prepares it (its models listed), it is unregistered as soon as that ends.
+        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(60);
+        while (Registered() && DateTime.UtcNow < deadline) await Task.Delay(100, token);
+        Assert.IsFalse(Registered(), "a provider taken away is no longer usable");
+    }
+
     // Keeps values as they are: the protection of the machine is not what this test is about.
     private sealed class PlainProtector : ISecretProtector
     {

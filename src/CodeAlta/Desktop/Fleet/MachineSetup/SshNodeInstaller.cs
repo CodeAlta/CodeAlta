@@ -28,8 +28,8 @@ internal sealed record SshNodeSetupRequest
     /// <summary>Gets the version to install; null for the one of the packages of <see cref="PackageFolder"/>, or the version of this desktop.</summary>
     public string? Version { get; init; }
 
-    /// <summary>Gets whether a host key ssh does not know yet is accepted (the person said they trust the computer).</summary>
-    public bool AcceptNewHostKey { get; init; }
+    /// <summary>Gets the fingerprint of the host key the person trusted, as it was shown to them: only that key is accepted; null for the keys ssh knows.</summary>
+    public string? TrustedHostKey { get; init; }
 
     /// <summary>
     /// Gets whether this desktop manages the node (its devices, projects, secrets, updates: <c>altanode pair --manage</c>),
@@ -121,7 +121,7 @@ internal sealed partial class SshNodeInstaller(ISshRunner ssh, string desktopVer
             connecting.CancelAfter(ConnectTimeout);
             try
             {
-                probe = await ssh.RunAsync(target, ProbeScript, request.AcceptNewHostKey, null, connecting.Token).ConfigureAwait(false);
+                probe = await ssh.RunAsync(target, ProbeScript, request.TrustedHostKey, null, connecting.Token).ConfigureAwait(false);
             }
             catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
             {
@@ -153,20 +153,20 @@ internal sealed partial class SshNodeInstaller(ISshRunner ssh, string desktopVer
         if (packages is not null)
         {
             var stage = await ssh.RunAsync(target, "set -e\nd=\"$HOME/.cache/codealta-setup\"\nrm -rf \"$d\"\nmkdir -p \"$d\"\nprintf '%s\\n' \"$d\"\n",
-                request.AcceptNewHostKey, null, cancellationToken).ConfigureAwait(false);
+                request.TrustedHostKey, null, cancellationToken).ConfigureAwait(false);
             remoteSource = stage.Output.Trim();
             if (!stage.Succeeded || remoteSource.Length == 0) throw Fail(SshSetupSteps.Install, "copy_failed", FirstLines(stage.Error));
-            var copied = await ssh.CopyAsync(target, packages.Files, remoteSource, request.AcceptNewHostKey, cancellationToken).ConfigureAwait(false);
+            var copied = await ssh.CopyAsync(target, packages.Files, remoteSource, request.TrustedHostKey, cancellationToken).ConfigureAwait(false);
             if (!copied.Succeeded) throw Fail(SshSetupSteps.Install, "copy_failed", FirstLines(copied.Error));
         }
 
         var install = await ssh.RunAsync(target, useSdk ? ToolInstallScript(facts, toolPath, version, remoteSource) : RuntimeInstallScript(facts, rid, toolPath, version, remoteSource),
-            request.AcceptNewHostKey, null, cancellationToken).ConfigureAwait(false);
+            request.TrustedHostKey, null, cancellationToken).ConfigureAwait(false);
         if (!install.Succeeded) throw Fail(SshSetupSteps.Install, useSdk ? "tool_install_failed" : "runtime_install_failed", FirstLines(install.Error + install.Output, 6));
         progress(new(SshSetupSteps.Install, "done", $"CodeAlta Node {version} · {toolPath}"));
 
         progress(new(SshSetupSteps.Service, "running"));
-        var service = await ssh.RunAsync(target, ServiceScript(facts, toolPath, dataRoot, request.Port, request.Name), request.AcceptNewHostKey, null, cancellationToken)
+        var service = await ssh.RunAsync(target, ServiceScript(facts, toolPath, dataRoot, request.Port, request.Name), request.TrustedHostKey, null, cancellationToken)
             .ConfigureAwait(false);
         if (!service.Succeeded) throw Fail(SshSetupSteps.Service, "service_failed", FirstLines(service.Error + service.Output, 6));
         progress(new(SshSetupSteps.Service, "done", ServiceDetail(facts, request.Port)));
@@ -175,7 +175,7 @@ internal sealed partial class SshNodeInstaller(ISshRunner ssh, string desktopVer
         using var pairing = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         pairing.CancelAfter(PairTimeout);
         var link = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
-        var waiting = ssh.RunAsync(target, PairScript(facts, toolPath, dataRoot, request.Manage), request.AcceptNewHostKey, line =>
+        var waiting = ssh.RunAsync(target, PairScript(facts, toolPath, dataRoot, request.Manage), request.TrustedHostKey, line =>
         {
             if (PairLinkPattern().Match(line) is { Success: true } match) link.TrySetResult(match.Value);
         }, pairing.Token);

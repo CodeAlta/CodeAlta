@@ -12,7 +12,10 @@ public sealed record FleetSecretProject(string ProjectId, string Identity);
 
 /// <summary>What a refresh of the values of one server took.</summary>
 /// <param name="Taken">How many values this machine holds now from that server.</param>
-/// <param name="Refused">The values whose copy did not open, with why: a copy no controller device of the person gave.</param>
+/// <param name="Refused">
+/// The values and environments not taken, with why: a copy no controller device of the person gave, or a version older
+/// than one this machine took from the organization (a server that answers what it held before).
+/// </param>
 /// <param name="Revoked">Whether this machine was revoked: every value of that server was taken away.</param>
 public sealed record FleetSecretSyncResult(int Taken, IReadOnlyList<string> Refused, bool Revoked);
 
@@ -64,6 +67,18 @@ public sealed class FleetSecretSync
 
     /// <summary>Gets the device id of this machine.</summary>
     public string MachineId => _devices.Identity.DeviceId;
+
+    /// <summary>Makes the nonce of an approval this machine asks: signed by this machine (<see cref="FleetApprovalRequests"/>).</summary>
+    /// <param name="definition">The environment, as this machine verified it.</param>
+    /// <param name="runId">The run.</param>
+    /// <param name="automationId">Its automation; null for a session.</param>
+    /// <returns>The nonce.</returns>
+    /// <exception cref="ArgumentNullException">An argument but <paramref name="automationId"/> is null.</exception>
+    public string ApprovalNonce(FleetEnvironmentDefinition definition, string runId, string? automationId)
+    {
+        ArgumentNullException.ThrowIfNull(definition);
+        return FleetApprovalRequests.Nonce(_devices.Identity, definition.OrganizationId, definition.EnvironmentId, definition.Number, runId, automationId);
+    }
 
     /// <summary>Asks the server, for a run of this machine, the approval an environment requires.</summary>
     /// <param name="environmentId">The environment.</param>
@@ -117,6 +132,14 @@ public sealed class FleetSecretSync
             return Revoke();
         }
 
+        // The newest versions this machine took from the organization, also before a restart: a server that answers an
+        // older document, correctly signed, makes it loosen no rule, bring back no environment taken away, take no older value.
+        var organization = list.OrganizationId;
+        var checkpoint = organization is null ? FleetCheckpoint.Empty : _store.ReadFleetCheckpoint(organization);
+        var takenEnvironments = new Dictionary<string, FleetEnvironmentCheckpoint>(StringComparer.Ordinal);
+        var takenSecrets = new Dictionary<string, int>(StringComparer.Ordinal);
+        var refused = new List<string>();
+
         // The environments whose definition a controller device of the person signed, the newest of each name.
         var verified = ImmutableDictionary.CreateBuilder<string, FleetEnvironmentDefinition>(StringComparer.Ordinal);
         var byId = new Dictionary<string, FleetEnvironmentDefinition>(StringComparer.Ordinal);
@@ -124,6 +147,17 @@ public sealed class FleetSecretSync
         {
             if (!FleetEnvironmentDocuments.TryVerify(environment.Signed, list, _devices.Identity.DeviceId, out var definition, out _) || definition.EnvironmentId != environment.Id)
                 continue;
+            var digest = Digest(environment.Signed.Payload);
+            if (checkpoint.Environments.TryGetValue(definition.EnvironmentId, out var newest)
+                && (definition.Number < newest.Number || definition.Number == newest.Number && digest != newest.Digest))
+            {
+                refused.Add(definition.Number < newest.Number
+                    ? $"environment {definition.Name}: version {definition.Number} is older than version {newest.Number}, which this machine took"
+                    : $"environment {definition.Name}: another definition of version {definition.Number} than the one this machine took");
+                continue;
+            }
+
+            takenEnvironments[definition.EnvironmentId] = new FleetEnvironmentCheckpoint(definition.Number, definition.Removed, digest);
             byId[definition.EnvironmentId] = definition;
             if (!definition.Removed && (!verified.TryGetValue(definition.Name, out var known) || known.Number < definition.Number)) verified[definition.Name] = definition;
         }
@@ -132,23 +166,35 @@ public sealed class FleetSecretSync
         var spaces = SpacesById();
         var projects = await ProjectsByKeyAsync(cancellationToken).ConfigureAwait(false);
         var values = new List<FleetSecretValue>(held.Secrets.Count);
-        var refused = new List<string>();
         foreach (var secret in held.Secrets)
         {
+            if (checkpoint.Secrets.TryGetValue(secret.Id, out var newestVersion) && secret.Version < newestVersion)
+            {
+                refused.Add($"{secret.Name}: version {secret.Version} is older than version {newestVersion}, which this machine took");
+                continue;
+            }
+
             if (!FleetSecretSealing.TryOpen(secret.Copy, FleetSecretBinding.Of(secret), _devices.Identity, list, out var value, out var reason))
             {
                 refused.Add($"{secret.Name}: {reason}");
                 continue;
             }
 
+            takenSecrets[secret.Id] = Math.Max(secret.Version, takenSecrets.GetValueOrDefault(secret.Id));
             // A value of a scope this machine does not know (a space it does not link, a project it does not have) is not kept.
             foreach (var scopeId in LocalScopes(secret.Scope, spaces, projects, byId))
                 values.Add(new FleetSecretValue(_source, secret.Id, secret.Kind, secret.Name, LocalKind(secret.Scope.Kind), scopeId, secret.Version, secret.HostOnly, value));
         }
 
+        // The checkpoint first: a value is kept only once its version is recorded.
+        if (organization is not null) _store.AdvanceFleetCheckpoint(organization, new FleetCheckpoint(takenEnvironments, takenSecrets));
         _store.ReplaceFleetCopies(_source, values);
         return new FleetSecretSyncResult(values.Count, refused, false);
     }
+
+    // The digest of a signed definition, which tells two definitions of one version apart.
+    private static string Digest(string payload)
+        => System.Buffers.Text.Base64Url.EncodeToString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(payload)));
 
     /// <summary>Publishes the uses this machine recorded of the values of the server: which run, which value, which version, never a value.</summary>
     /// <param name="uses">The uses.</param>

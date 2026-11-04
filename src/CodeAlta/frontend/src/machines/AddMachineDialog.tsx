@@ -103,7 +103,8 @@ function SshSetup({ epoch, api, onBusy, onBack, onClose, onOpen }: {
   useEffect(() => onBusy(running), [onBusy, running]);
   const parsed = sshTargetOf(target);
 
-  async function start(acceptNewHostKey: boolean) {
+  // "Trust it" trusts the SSH key shown, by its fingerprint: every connection of the setup requires that key.
+  async function start(trustedHostKey: string | null) {
     if (!parsed) return;
     abort.current?.abort();
     const controller = new AbortController();
@@ -113,7 +114,7 @@ function SshSetup({ epoch, api, onBusy, onBack, onClose, onOpen }: {
     setSteps(Object.fromEntries(setupSteps.map(step => [step, { state: "waiting" }])) as Record<SetupStep, StepState>);
     try {
       const events = await api.addOverSsh({ expectedEpoch: epoch, target: parsed, name: name.trim() || null, port, dataRoot: dataRoot.trim() || null,
-        toolPath: toolPath.trim() || null, packageFolder: packages.trim() || null, acceptNewHostKey, manage }, { signal: controller.signal });
+        toolPath: toolPath.trim() || null, packageFolder: packages.trim() || null, trustedHostKey, manage }, { signal: controller.signal });
       for await (const event of events) {
         if (controller.signal.aborted) return;
         apply(event);
@@ -134,12 +135,16 @@ function SshSetup({ epoch, api, onBusy, onBack, onClose, onOpen }: {
   }
 
   const failure = outcome?.failed;
+
+  // The SSH key shown of a computer ssh does not know yet, which "Trust it" trusts.
+
+  const shownKey = failure ? hostKeyOf(failure.code, failure.detail) : null;
   const problem = failure ? setupProblem(failure.code) : null;
   if (!steps) return <>
     <DialogBody>
       <label className="add-machine-field"><span>{t("Computer")}</span>
         <InputGroup autoFocus fill value={target} placeholder="user@host" aria-label={t("Computer")} onChange={event => setTarget(event.currentTarget.value)}
-          onKeyDown={event => { if (event.key === "Enter" && parsed) void start(false); }} />
+          onKeyDown={event => { if (event.key === "Enter" && parsed) void start(null); }} />
         <small className="muted-text">{t("As you would type it after ssh: user@host, user@host:port, or a host of your SSH configuration. Your SSH keys and agent sign in.")}</small>
       </label>
       {target.trim() && !parsed && <Callout compact intent="warning">{t("Give the computer as user@host, or a host of your SSH configuration.")}</Callout>}
@@ -164,7 +169,7 @@ function SshSetup({ epoch, api, onBusy, onBack, onClose, onOpen }: {
     </DialogBody>
     <DialogFooter actions={<>
       <Button text={t("Back")} onClick={onBack} />
-      <Button intent="primary" disabled={!parsed} text={t("Add the machine")} onClick={() => void start(false)} />
+      <Button intent="primary" disabled={!parsed} text={t("Add the machine")} onClick={() => void start(null)} />
     </>} />
   </>;
 
@@ -188,10 +193,10 @@ function SshSetup({ epoch, api, onBusy, onBack, onClose, onOpen }: {
     <DialogFooter actions={<>
       {running && <Button text={t("Cancel")} onClick={() => { abort.current?.abort(); setRunning(false); setSteps(null); }} />}
       {!running && failure && <Button text={t("Back")} onClick={() => { setSteps(null); setOutcome(null); }} />}
-      {!running && failure?.code === "host_key_unknown" && <Button intent="primary" text={t("Trust it and start over")} title={t("Every step runs again from the first one.")}
-        onClick={() => void start(true)} />}
-      {!running && failure && failure.code !== "host_key_unknown" && <Button intent="primary" icon={<AppIcon name="refresh" size={14} />} text={t("Start over")}
-        title={t("Every step runs again from the first one.")} onClick={() => void start(false)} />}
+      {!running && shownKey && <Button intent="primary" text={t("Trust it and start over")} title={t("Every step runs again from the first one.")}
+        onClick={() => void start(shownKey)} />}
+      {!running && failure && !shownKey && <Button intent="primary" icon={<AppIcon name="refresh" size={14} />} text={t("Start over")}
+        title={t("Every step runs again from the first one.")} onClick={() => void start(null)} />}
       {outcome?.machineId && <>
         <Button text={t("Done")} onClick={() => onClose(true)} />
         <Button intent="primary" text={t("Open its page")} onClick={() => onOpen(outcome.machineId!)} />

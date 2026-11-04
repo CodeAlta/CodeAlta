@@ -91,6 +91,37 @@ public sealed class FleetSecretsTests
     }
 
     [TestMethod]
+    public async Task ARotation_SealsForTheMachinesAControllerGaveTheValueTo_NotTheHoldersTheServerLists()
+    {
+        await using var fleet = await SecretsFixture.StartAsync();
+        var set = await fleet.Manager.SetAsync(FleetSecretKinds.Secret, "GRAFANA_TOKEN", new FleetSecretScopeDto(FleetSecretScopeKinds.Person), Token, false,
+            [fleet.NodeKey.DeviceId], CancellationToken.None);
+        // A genuine copy of another value, which a controller device gave the other machine.
+        var other = await fleet.Manager.SetAsync(FleetSecretKinds.Secret, "OTHER_TOKEN", new FleetSecretScopeDto(FleetSecretScopeKinds.Person), "other-value", false,
+            [fleet.OtherKey.DeviceId], CancellationToken.None);
+        var otherCopy = (await fleet.HeldAsync(fleet.OtherKey)).Secrets.Single().Copy!;
+
+        // The server lists the other machine as a holder of the first value too, with that copy moved over.
+        var store = (IFleetSecretStore)fleet.Server.GetService<ICoordinatorStore>();
+        var organization = (await fleet.NodeListAsync()).OrganizationId!;
+        await store.AddFleetSecretCopiesAsync(organization, set.Id, 1, [new FleetSecretCopyRecord(set.Id, fleet.OtherKey.DeviceId, 1, otherCopy, fleet.DesktopKey.DeviceId,
+            DateTimeOffset.UtcNow)], new AuditEntry("test.forge", AuditEntry.Success, null, null, null, null, null));
+        CollectionAssert.Contains((await fleet.Manager.ListAsync(CancellationToken.None)).Secrets.Single(secret => secret.Id == set.Id).Holders.ToArray(), fleet.OtherKey.DeviceId);
+
+        // Rotate seals the new version for the machines a controller device gave it to, never for one the server added.
+        var rotated = await fleet.Manager.RotateAsync(set.Id, "rotated-value", CancellationToken.None);
+        CollectionAssert.AreEquivalent(new[] { fleet.DesktopKey.DeviceId, fleet.NodeKey.DeviceId }, rotated.Holders.ToArray());
+        Assert.AreEqual("rotated-value", await fleet.OpenHeldAsync(fleet.NodeKey, "GRAFANA_TOKEN"));
+        Assert.IsFalse((await fleet.HeldAsync(fleet.OtherKey)).Secrets.Any(secret => secret.Id == set.Id), "the machine the server added gets nothing");
+
+        // A machine given the value later by a controller device keeps it across the rotation.
+        await fleet.Manager.GrantAsync(other.Id, fleet.NodeKey.DeviceId, CancellationToken.None);
+        await fleet.Manager.RotateAsync(other.Id, "other-rotated", CancellationToken.None);
+        Assert.AreEqual("other-rotated", await fleet.OpenHeldAsync(fleet.NodeKey, "OTHER_TOKEN"));
+        Assert.AreEqual("other-rotated", await fleet.OpenHeldAsync(fleet.OtherKey, "OTHER_TOKEN"));
+    }
+
+    [TestMethod]
     public async Task AMachineAllowedLater_GetsItsCopy_WhenAControllerOfThePersonGivesIt()
     {
         await using var fleet = await SecretsFixture.StartAsync();
@@ -197,30 +228,33 @@ public sealed class FleetSecretsTests
 
         // The machine asks the approval of a run; the person's controller device approves it.
         using var node = new FleetServerClient(fleet.Server.BaseAddress, fleet.NodeKey);
-        var asked = await node.RequestApprovalAsync(environment.Id, new RequestFleetApprovalRequest("run-1", "nonce-1", definition.Number, null, "Deploy"));
+        // The nonce carries the machine's signature of what it asks.
+        var nonce1 = FleetApprovalRequests.Nonce(fleet.NodeKey, list.OrganizationId!, environment.Id, definition.Number, "run-1", null);
+        var asked = await node.RequestApprovalAsync(environment.Id, new RequestFleetApprovalRequest("run-1", nonce1, definition.Number, null, "Deploy"));
         Assert.AreEqual(FleetApprovalStates.Pending, asked.Status);
         Assert.AreEqual(asked.Id, (await fleet.Manager.ListApprovalsAsync(CancellationToken.None)).Approvals.Single().Id, "it waits for the approver");
-        var approved = await fleet.Manager.ApproveAsync(asked.Id, CancellationToken.None);
+        var listed = (await fleet.Manager.ListApprovalsAsync(CancellationToken.None)).Approvals.Single();
+        var approved = await fleet.Manager.ApproveAsync(asked.Id, FleetSecretsManager.ReviewOf(listed), CancellationToken.None);
         Assert.AreEqual(FleetApprovalStates.Approved, approved.Status);
         var given = (await node.GetApprovalAsync(asked.Id)).Approval;
         var now = DateTimeOffset.UtcNow;
-        Assert.IsTrue(FleetEnvironmentDocuments.TryVerifyApproval(given, definition, list, fleet.NodeKey.DeviceId, "run-1", "nonce-1", now, out _, out reason), reason);
+        Assert.IsTrue(FleetEnvironmentDocuments.TryVerifyApproval(given, definition, list, fleet.NodeKey.DeviceId, "run-1", nonce1, now, out _, out reason), reason);
 
         // Replayed for another run, or another nonce, or after it expired: refused.
-        Assert.IsFalse(FleetEnvironmentDocuments.TryVerifyApproval(given, definition, list, fleet.NodeKey.DeviceId, "run-2", "nonce-1", now, out _, out _));
+        Assert.IsFalse(FleetEnvironmentDocuments.TryVerifyApproval(given, definition, list, fleet.NodeKey.DeviceId, "run-2", nonce1, now, out _, out _));
         Assert.IsFalse(FleetEnvironmentDocuments.TryVerifyApproval(given, definition, list, fleet.NodeKey.DeviceId, "run-1", "nonce-2", now, out _, out _));
-        Assert.IsFalse(FleetEnvironmentDocuments.TryVerifyApproval(given, definition, list, fleet.OtherKey.DeviceId, "run-1", "nonce-1", now, out _, out _));
-        Assert.IsFalse(FleetEnvironmentDocuments.TryVerifyApproval(given, definition, list, fleet.NodeKey.DeviceId, "run-1", "nonce-1", now.AddHours(2), out _, out _));
-        Assert.IsFalse(FleetEnvironmentDocuments.TryVerifyApproval(given, definition with { Number = 2 }, list, fleet.NodeKey.DeviceId, "run-1", "nonce-1", now, out _, out _),
+        Assert.IsFalse(FleetEnvironmentDocuments.TryVerifyApproval(given, definition, list, fleet.OtherKey.DeviceId, "run-1", nonce1, now, out _, out _));
+        Assert.IsFalse(FleetEnvironmentDocuments.TryVerifyApproval(given, definition, list, fleet.NodeKey.DeviceId, "run-1", nonce1, now.AddHours(2), out _, out _));
+        Assert.IsFalse(FleetEnvironmentDocuments.TryVerifyApproval(given, definition with { Number = 2 }, list, fleet.NodeKey.DeviceId, "run-1", nonce1, now, out _, out _),
             "an approval is of one version of the rules");
 
         // Forged by the machine itself, or by a server (a key not of a controller device of an approver): refused.
         FleetEnvironmentDocuments.TryReadApproval(given!.Payload, out var approval, out _);
         var byNode = FleetServerClient.SignApproval(fleet.NodeKey, approval!);
-        Assert.IsFalse(FleetEnvironmentDocuments.TryVerifyApproval(byNode, definition, list, fleet.NodeKey.DeviceId, "run-1", "nonce-1", now, out _, out reason));
+        Assert.IsFalse(FleetEnvironmentDocuments.TryVerifyApproval(byNode, definition, list, fleet.NodeKey.DeviceId, "run-1", nonce1, now, out _, out reason));
         StringAssert.Contains(reason, "controller device");
         var tampered = new FleetSignedApproval(FleetEnvironmentDocuments.Serialize(approval! with { RunId = "run-2" }), given.Signature);
-        Assert.IsFalse(FleetEnvironmentDocuments.TryVerifyApproval(tampered, definition, list, fleet.NodeKey.DeviceId, "run-2", "nonce-1", now, out _, out _));
+        Assert.IsFalse(FleetEnvironmentDocuments.TryVerifyApproval(tampered, definition, list, fleet.NodeKey.DeviceId, "run-2", nonce1, now, out _, out _));
 
         // The server takes an approval once, from an approver's device, for what the machine asked.
         var twice = await fleet.Server.SendAsync(TestDevice.From(fleet.DesktopKey), HttpMethod.Post, $"/api/v1/approvals/{asked.Id}/approve", new ApproveFleetApprovalRequest(given));
@@ -274,11 +308,11 @@ public sealed class FleetSecretsTests
         Assert.AreEqual("https://grafana.example", Resolve(new("default", null, null), "${var:GRAFANA_URL}"));
         Assert.IsFalse(store.ListFleetCopies().Any(static copy => copy.ScopeId is null && copy.ScopeKind == "project"), "a project this machine does not have is not kept");
 
-        // A rotation reaches the machine at its next refresh; the old version is no longer masked nor given.
+        // A rotation reaches the machine at its next refresh; the old version is no longer given, and stays masked.
         await fleet.Manager.RotateAsync(person.Id, "person-rotated", CancellationToken.None);
         await sync.SyncAsync(CancellationToken.None);
         Assert.AreEqual("person-rotated", Resolve(new("home", null, null)));
-        Assert.IsFalse(store.GetSecretValues().Contains("person-value"));
+        Assert.IsTrue(store.GetSecretValues().Contains("person-value"), "the old version stays masked: a run may still hold it");
         Assert.IsTrue(store.GetSecretValues().Contains("person-rotated"));
 
         // A copy no controller device of the person gave is refused, and not kept.
@@ -303,6 +337,147 @@ public sealed class FleetSecretsTests
         Assert.AreEqual(0, store.ListFleetCopies().Count);
         Assert.IsFalse(CodeAlta.Catalog.Secrets.SecretReferenceResolver.ForMachine(nodeRoot.Path).TryGet(
             new CodeAlta.Catalog.Secrets.SecretReference(CodeAlta.Catalog.Secrets.SecretReferenceKind.Secret, "TOKEN"), out _));
+    }
+
+    [TestMethod]
+    public async Task AMachine_RefusesARollBackOfItsEnvironmentsAndValues_AlsoAfterARestart()
+    {
+        await using var fleet = await SecretsFixture.StartAsync();
+        var person = (await fleet.NodeListAsync()).Members[fleet.DesktopKey.DeviceId].OwnerId!;
+        await fleet.Manager.PutEnvironmentAsync("production", [], [], [], false, CancellationToken.None);
+        await fleet.Manager.PutEnvironmentAsync("staging", [], [], [], false, CancellationToken.None);
+        var secret = await fleet.Manager.SetAsync(FleetSecretKinds.Secret, "TOKEN", new FleetSecretScopeDto(FleetSecretScopeKinds.Person), "v1-value", false,
+            [fleet.NodeKey.DeviceId], CancellationToken.None);
+
+        using var replay = new ReplayHandler { InnerHandler = new HttpClientHandler() };
+        using var nodeRoot = new TempDirectory();
+        var store = new CodeAlta.Catalog.Secrets.LocalSecretStore(nodeRoot.Path, new CodeAlta.Catalog.Secrets.MasterKeySecretProtector(
+            new CodeAlta.Catalog.Secrets.FileSecretKeyStore(Path.Combine(nodeRoot.Path, "secrets", "key"))));
+        FleetSecretSync NewSync() => new("link-1", new FleetOrganizationDevices(fleet.Server.BaseAddress, fleet.NodeKey,
+            Path.Combine(fleet.Root.Path, "node-link", FleetOrganizationDevices.PinFileName), replay), null, store, null);
+        var sync = NewSync();
+        replay.Recording = true;
+        await sync.SyncAsync(CancellationToken.None);
+        replay.Recording = false;
+        Assert.AreEqual(1L, sync.Environments["production"].Number);
+
+        // The rules get stricter, staging is taken away, the value is rotated: the machine takes it all.
+        await fleet.Manager.PutEnvironmentAsync("production", [person], [], [], false, CancellationToken.None);
+        await fleet.Manager.PutEnvironmentAsync("staging", [], [], [], true, CancellationToken.None);
+        await fleet.Manager.RotateAsync(secret.Id, "v2-value", CancellationToken.None);
+        await sync.SyncAsync(CancellationToken.None);
+        Assert.AreEqual(2L, sync.Environments["production"].Number);
+        Assert.IsFalse(sync.Environments.ContainsKey("staging"));
+
+        // The server answers what it held before, correctly signed: the machine keeps none of it, also once restarted.
+        replay.Replaying = true;
+        foreach (var refreshed in new[] { sync, NewSync() })
+        {
+            var result = await refreshed.SyncAsync(CancellationToken.None);
+            Assert.IsFalse(refreshed.Environments.TryGetValue("production", out var production) && production.Approvers.Count == 0, "the rule of approval is not dropped");
+            Assert.IsFalse(refreshed.Environments.ContainsKey("staging"), "an environment taken away does not come back");
+            Assert.IsFalse(store.ListFleetCopies().Any(static copy => copy.Name == "TOKEN" && copy.Version < 2), "a superseded value does not come back");
+            Assert.IsTrue(result.Refused.Count >= 3, string.Join("; ", result.Refused));
+        }
+    }
+
+    [TestMethod]
+    public async Task AnApproval_SignsTheRunThePersonReviewed_NeverOneTheServerSubstitutesAtTheClick()
+    {
+        await using var fleet = await SecretsFixture.StartAsync();
+        var person = (await fleet.NodeListAsync()).Members[fleet.DesktopKey.DeviceId].OwnerId!;
+        var environment = await fleet.Manager.PutEnvironmentAsync("production", [person], [], [], false, CancellationToken.None);
+        using var node = new FleetServerClient(fleet.Server.BaseAddress, fleet.NodeKey);
+        var nonce = FleetApprovalRequests.Nonce(fleet.NodeKey, (await fleet.NodeListAsync()).OrganizationId!, environment.Id, 1, "run-reviewed", null);
+        var asked = await node.RequestApprovalAsync(environment.Id, new RequestFleetApprovalRequest("run-reviewed", nonce, 1, null, null));
+        var reviewed = (await fleet.Manager.ListApprovalsAsync(CancellationToken.None)).Approvals.Single();
+
+        // Between the listing and the click, the server answers another run, machine and nonce for the same approval.
+        using var swap = new ApprovalSwapHandler { InnerHandler = new HttpClientHandler(), Swap = approval => approval with { RunId = "run-other", Nonce = "nonce-other",
+            MachineId = fleet.OtherKey.DeviceId } };
+        var manager = new FleetSecretsManager(new FleetOrganizationDevices(fleet.Server.BaseAddress, fleet.DesktopKey,
+            Path.Combine(fleet.Root.Path, "desktop-link", FleetOrganizationDevices.PinFileName), swap));
+        await Assert.ThrowsExactlyAsync<InvalidDataException>(() => manager.ApproveAsync(asked.Id, FleetSecretsManager.ReviewOf(reviewed), CancellationToken.None));
+        Assert.AreEqual(0, swap.Sent, "nothing was signed for a run the person did not review");
+        Assert.AreEqual(FleetApprovalStates.Pending, (await node.GetApprovalAsync(asked.Id)).Status);
+
+        // Unchanged, the run reviewed is the one signed.
+        swap.Swap = null;
+        await manager.ApproveAsync(asked.Id, FleetSecretsManager.ReviewOf(reviewed), CancellationToken.None);
+        FleetEnvironmentDocuments.TryReadApproval((await node.GetApprovalAsync(asked.Id)).Approval!.Payload, out var signed, out _);
+        Assert.AreEqual(("run-reviewed", nonce, fleet.NodeKey.DeviceId), (signed!.RunId, signed.Nonce, signed.MachineId));
+    }
+
+    [TestMethod]
+    public async Task AnApproval_IsGivenOnlyForARunTheMachineAskedItself()
+    {
+        await using var fleet = await SecretsFixture.StartAsync();
+        var list = await fleet.NodeListAsync();
+        var person = list.Members[fleet.DesktopKey.DeviceId].OwnerId!;
+        var environment = await fleet.Manager.PutEnvironmentAsync("production", [person], [], [], false, CancellationToken.None);
+
+        // The server makes up a request of the machine, for a run and an automation of its choosing.
+        var store = (IFleetSecretStore)fleet.Server.GetService<ICoordinatorStore>();
+        await store.RequestFleetApprovalAsync(new FleetApprovalRecord("made-up", list.OrganizationId!, environment.Id, 1, fleet.NodeKey.DeviceId, "run-made-up", "server-nonce",
+            "harmless-automation", null, FleetApprovalStates.Pending, DateTimeOffset.UtcNow, null, null, null, null), new AuditEntry("test.forge", AuditEntry.Success, null, null, null, null, null));
+        var forged = (await fleet.Manager.ListApprovalsAsync(CancellationToken.None)).Approvals.Single(static approval => approval.Id == "made-up");
+        await Assert.ThrowsExactlyAsync<InvalidDataException>(() => fleet.Manager.ApproveAsync(forged.Id, FleetSecretsManager.ReviewOf(forged), CancellationToken.None));
+        Assert.AreEqual(FleetApprovalStates.Pending, (await store.GetFleetApprovalAsync(list.OrganizationId!, "made-up"))!.Status, "nothing was signed for it");
+
+        // The machine's own request, signed by it, is approved; changed by the server (another automation), it is not.
+        using var node = new FleetServerClient(fleet.Server.BaseAddress, fleet.NodeKey);
+        var nonce = FleetApprovalRequests.Nonce(fleet.NodeKey, list.OrganizationId!, environment.Id, 1, "run-asked", "nightly");
+        var asked = await node.RequestApprovalAsync(environment.Id, new RequestFleetApprovalRequest("run-asked", nonce, 1, "nightly", null));
+        var listed = (await fleet.Manager.ListApprovalsAsync(CancellationToken.None)).Approvals.Single(approval => approval.Id == asked.Id);
+        Assert.IsTrue(FleetApprovalRequests.IsAskedBy(listed with { AutomationId = "nightly" }, list, out var reason), reason);
+        Assert.IsFalse(FleetApprovalRequests.IsAskedBy(listed with { AutomationId = "harmless-automation" }, list, out _));
+        Assert.IsFalse(FleetApprovalRequests.IsAskedBy(listed with { MachineId = fleet.OtherKey.DeviceId }, list, out _));
+        await fleet.Manager.ApproveAsync(asked.Id, FleetSecretsManager.ReviewOf(listed), CancellationToken.None);
+        Assert.AreEqual(FleetApprovalStates.Approved, (await node.GetApprovalAsync(asked.Id)).Status);
+    }
+
+    // Answers an approval changed by the server.
+    private sealed class ApprovalSwapHandler : DelegatingHandler
+    {
+        private int _sent;
+
+        public Func<FleetApprovalDto, FleetApprovalDto>? Swap { get; set; }
+
+        // The signed approvals sent.
+        public int Sent => Volatile.Read(ref _sent);
+
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            if (request.Method == HttpMethod.Post && request.RequestUri!.AbsolutePath.EndsWith("/approve", StringComparison.Ordinal)) Interlocked.Increment(ref _sent);
+            var response = await base.SendAsync(request, cancellationToken);
+            if (Swap is not { } swap || request.Method != HttpMethod.Get || !request.RequestUri!.AbsolutePath.Contains("/api/v1/approvals/", StringComparison.Ordinal)) return response;
+            var approval = System.Text.Json.JsonSerializer.Deserialize(await response.Content.ReadAsStringAsync(cancellationToken), FleetSecretsApiJsonContext.Default.FleetApprovalDto)!;
+            return new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(System.Text.Json.JsonSerializer.Serialize(swap(approval), FleetSecretsApiJsonContext.Default.FleetApprovalDto), Encoding.UTF8, "application/json"),
+            };
+        }
+    }
+
+    // Answers the environments and the values of a machine as the server answered them while it recorded.
+    private sealed class ReplayHandler : DelegatingHandler
+    {
+        private readonly System.Collections.Concurrent.ConcurrentDictionary<string, string> _recorded = new(StringComparer.Ordinal);
+
+        public bool Recording { get; set; }
+
+        public bool Replaying { get; set; }
+
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            var path = request.RequestUri!.AbsolutePath;
+            var replayed = request.Method == HttpMethod.Get && (path.EndsWith("/api/v1/environments", StringComparison.Ordinal) || path.EndsWith("/api/v1/secrets/held", StringComparison.Ordinal));
+            if (replayed && Replaying && _recorded.TryGetValue(path, out var body))
+                return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(body, Encoding.UTF8, "application/json") };
+            var response = await base.SendAsync(request, cancellationToken);
+            if (replayed && Recording) _recorded[path] = await response.Content.ReadAsStringAsync(cancellationToken);
+            return response;
+        }
     }
 
     // The files of the data root, the database and its log included, read while the server holds them open.

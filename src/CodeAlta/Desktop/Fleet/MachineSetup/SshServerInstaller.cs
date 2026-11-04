@@ -37,8 +37,8 @@ internal sealed record SshServerSetupRequest
     /// <summary>Gets a folder of this computer with the packages of CodeAlta Server; null for nuget.org.</summary>
     public string? PackageFolder { get; init; }
 
-    /// <summary>Gets whether a host key ssh does not know yet is accepted.</summary>
-    public bool AcceptNewHostKey { get; init; }
+    /// <summary>Gets the fingerprint of the host key the person trusted, as it was shown to them: only that key is accepted; null for the keys ssh knows.</summary>
+    public string? TrustedHostKey { get; init; }
 }
 
 /// <summary>The steps of a server set up over SSH.</summary>
@@ -86,7 +86,7 @@ internal sealed class SshServerInstaller(ISshRunner ssh, string desktopVersion)
         using (var connecting = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken))
         {
             connecting.CancelAfter(TimeSpan.FromSeconds(45));
-            try { probe = await ssh.RunAsync(target, SshNodeInstaller.ProbeScript, request.AcceptNewHostKey, null, connecting.Token).ConfigureAwait(false); }
+            try { probe = await ssh.RunAsync(target, SshNodeInstaller.ProbeScript, request.TrustedHostKey, null, connecting.Token).ConfigureAwait(false); }
             catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested) { throw new SshSetupException(SshSetupSteps.Connect, "unreachable", "No answer within 45 s."); }
         }
 
@@ -107,20 +107,20 @@ internal sealed class SshServerInstaller(ISshRunner ssh, string desktopVersion)
         string? source = null;
         if (packages is not null)
         {
-            var stage = await ssh.RunAsync(target, "set -e\nd=\"$HOME/.cache/codealta-setup\"\nrm -rf \"$d\"\nmkdir -p \"$d\"\nprintf '%s\\n' \"$d\"\n", request.AcceptNewHostKey, null, cancellationToken)
+            var stage = await ssh.RunAsync(target, "set -e\nd=\"$HOME/.cache/codealta-setup\"\nrm -rf \"$d\"\nmkdir -p \"$d\"\nprintf '%s\\n' \"$d\"\n", request.TrustedHostKey, null, cancellationToken)
                 .ConfigureAwait(false);
             source = stage.Output.Trim();
             if (!stage.Succeeded || source.Length == 0) throw new SshSetupException(SshSetupSteps.Install, "copy_failed", Lines(stage.Error));
-            var copied = await ssh.CopyAsync(target, packages.Files, source, request.AcceptNewHostKey, cancellationToken).ConfigureAwait(false);
+            var copied = await ssh.CopyAsync(target, packages.Files, source, request.TrustedHostKey, cancellationToken).ConfigureAwait(false);
             if (!copied.Succeeded) throw new SshSetupException(SshSetupSteps.Install, "copy_failed", Lines(copied.Error));
         }
 
-        var install = await ssh.RunAsync(target, InstallScript(facts, toolPath, version, source), request.AcceptNewHostKey, null, cancellationToken).ConfigureAwait(false);
+        var install = await ssh.RunAsync(target, InstallScript(facts, toolPath, version, source), request.TrustedHostKey, null, cancellationToken).ConfigureAwait(false);
         if (!install.Succeeded) throw new SshSetupException(SshSetupSteps.Install, "tool_install_failed", Lines(install.Error + install.Output));
         progress(new(SshSetupSteps.Install, "done", $"CodeAlta Server {version} · {toolPath}"));
 
         progress(new(SshSetupSteps.Service, "running"));
-        var service = await ssh.RunAsync(target, ServiceScript(facts, toolPath, request.DataRoot, request.Port, onNetwork, encrypted), request.AcceptNewHostKey, null, cancellationToken)
+        var service = await ssh.RunAsync(target, ServiceScript(facts, toolPath, request.DataRoot, request.Port, onNetwork, encrypted), request.TrustedHostKey, null, cancellationToken)
             .ConfigureAwait(false);
         if (!service.Succeeded) throw new SshSetupException(SshSetupSteps.Service, "service_failed", Lines(service.Error + service.Output));
         // The pin of the certificate the server made, as its status printed it over SSH: the channel this computer trusts
@@ -138,12 +138,12 @@ internal sealed class SshServerInstaller(ISshRunner ssh, string desktopVersion)
         progress(new(SshServerSteps.Reach, "done", address.ToString().TrimEnd('/')));
 
         progress(new(SshServerSteps.Claim, "running"));
-        var code = await ssh.RunAsync(target, SetupCodeScript(facts, toolPath, dataRoot), request.AcceptNewHostKey, null, cancellationToken).ConfigureAwait(false);
+        var code = await ssh.RunAsync(target, SetupCodeScript(facts, toolPath, dataRoot), request.TrustedHostKey, null, cancellationToken).ConfigureAwait(false);
         if (!code.Succeeded)
             throw new SshSetupException(SshServerSteps.Claim, code.Error.Contains("already has an owner", StringComparison.OrdinalIgnoreCase) ? "server_owned" : "setup_code_failed", Lines(code.Error));
         var setupCode = code.Output.Split('\n', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries).FirstOrDefault() ?? "";
         SshForward forward;
-        try { forward = await ssh.ForwardAsync(target, request.Port, request.AcceptNewHostKey, cancellationToken).ConfigureAwait(false); }
+        try { forward = await ssh.ForwardAsync(target, request.Port, request.TrustedHostKey, cancellationToken).ConfigureAwait(false); }
         catch (IOException exception) { throw new SshSetupException(SshServerSteps.Claim, "forward_failed", exception.Message); }
         using (forward)
         {

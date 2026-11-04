@@ -24,7 +24,7 @@ let overview: FleetSecretsOverview = {
   ],
   environments: [{ id: "env-prod", name: "production", version: 1, approvers: ["p1"], approverNames: ["Alex"], labels: ["prod"], automations: [], verified: true }],
   approvals: [{ id: "a1", environment: "production", machine: "Mac mini", runId: "run-1", title: "Deploy the API", status: "pending", requestedAt: "2026-11-03T12:00:00Z",
-    mayApprove: true }],
+    mayApprove: true, review: "review-a1" }],
   machines: [{ id: "mac", name: "Mac mini" }, { id: "linux", name: "Linux box" }],
   people: [{ id: "p1", name: "Alex" }, { id: "p2", name: "Sam" }],
   spaces: [{ id: "work", name: "Work" }],
