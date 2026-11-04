@@ -45,7 +45,7 @@ import { createPromptHistory, noPromptRecall, recallPrompt } from "./promptHisto
 import { changeSelection, validSelection } from "./sessionSelection";
 import { ProviderChooser } from "./ProviderChooser";
 import { useProviderName } from "./ProviderIcon";
-import { sessionProviderName } from "./machines/machineProviders";
+import { sessionProviderName } from "./machines/machineProviderNames";
 import type { createNextSendSelectionStore } from "./nextSendSelection";
 import { ComposerModelPicker } from "./ComposerModelPicker";
 import { adaptiveChoice, adaptiveTier, composerAdaptiveEntry, composerTierEntries, tierLabels, tierStore, useTiers, type TierName } from "./modelTiers";

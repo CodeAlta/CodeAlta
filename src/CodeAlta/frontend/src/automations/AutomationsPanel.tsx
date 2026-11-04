@@ -14,7 +14,7 @@ import { automationTemplates, describeTrigger, describeTriggers, emptyForm, filt
   type AutomationForm, type AutomationScope, type AutomationTemplate } from "./automations";
 import type { AutomationsHub } from "./automationsHub";
 import type { RunProvider } from "../workItems/runsWith";
-import { automationProjects, machineRunProviders } from "../machines/machineProviders";
+import { automationProjects, machineRunProviders } from "../machines/machineProviderNames";
 import { useRemoteChoices } from "../machines/RunOnChip";
 
 const day = 24 * 60 * 60 * 1000;

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import type { MachineNewSessionChoices } from "#neoastra";
 import type { SessionSettingsApi } from "../sessionSettings/sessionSettingsApi";
-import { automationProjects, machineRunProviders, onMachine, sessionProviderName } from "./machineProviders";
+import { automationProjects, machineRunProviders, onMachine, sessionProviderName } from "./machineProviderNames";
 
 const choices = (status = "ok"): Pick<MachineNewSessionChoices, "status" | "providers"> => ({ status, providers: [
   { key: "claude", name: "Claude (Mac mini)", isDefault: true, defaultModelId: "opus", models: [{ id: "opus", name: "Opus" }, { id: "haiku", name: "Haiku" }] },

@@ -6,7 +6,7 @@ import { AppIcon } from "../AppIcon";
 import { AppWindow } from "../AppWindow";
 import { machineState } from "../machines/machines";
 import { useMachines, useRemoteChoices } from "../machines/RunOnChip";
-import { machineRunProviders, onMachine } from "../machines/machineProviders";
+import { machineRunProviders, onMachine } from "../machines/machineProviderNames";
 import { SessionSettingsChip, useSessionSettingsChoices } from "../sessionSettings/SessionSettingsChip";
 import { sessionSettingsApi } from "../sessionSettings/sessionSettingsApi";
 import { useShellLanguage } from "../shellLanguage";
