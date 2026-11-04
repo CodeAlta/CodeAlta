@@ -96,6 +96,49 @@ test("the computer that manages a machine sets, rotates and deletes its secrets 
     }, options);
   });
 
+test("the computer that manages a machine lets agents of other machines in, space by space, and turning on their bypass asks first", { skip: !edge, timeout: 90_000 },
+  async () => {
+    await withCanvas(async page => {
+      const section = ".machine-agents";
+      const bypass = `${section} input[aria-label="Bypass permissions"]`;
+      const spaces = `[...document.querySelectorAll('${section} .machine-agent-spaces label')].map(label => [label.textContent, label.querySelector('input').checked])`;
+      await page.until(`document.querySelector('${section} .machine-agent-spaces input')`, "the spaces of the machine");
+      assert.deepEqual(await page.evaluate(spaces), [["Default", false], ["Work", false]], "off in every space");
+      assert.equal(await page.evaluate(`document.querySelector('${section} .machine-section-head .bp6-tag').textContent`), "Off");
+      assert.deepEqual(await page.evaluate(`[...document.querySelectorAll('${section} select option')].map(option => [option.value, option.textContent])`),
+        [["", "As their parent"], ["workspace", "workspace"], ["strict", "strict"]]);
+
+      // A space lets them in at once.
+      await page.evaluate(`[...document.querySelectorAll('${section} .machine-agent-spaces label')].find(label => label.textContent === 'Work').querySelector('input').click()`);
+      await page.until(`document.querySelector('${section} .machine-section-head .bp6-tag')?.textContent === 'On'`, "agents on");
+      assert.deepEqual(await page.evaluate(spaces), [["Default", false], ["Work", true]]);
+
+      // The sandbox their sessions run in at least.
+      await page.evaluate(`(() => { const select = document.querySelector('${section} select');
+        Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set.call(select, 'strict');
+        select.dispatchEvent(new Event('change', { bubbles: true })); })()`);
+      await page.until(`document.querySelector('${section} select')?.value === 'strict' && !document.querySelector('${section} select').disabled`, "strict");
+
+      // Turning on the bypass asks beside the switch; nothing changes before the person confirms.
+      await page.evaluate(`document.querySelector('${bypass}').click()`);
+      await page.until(`document.querySelector('.machine-bypass-confirm')`, "the confirmation");
+      assert.equal(await page.evaluate(`document.querySelector('.machine-bypass-confirm p').textContent`), "Let their sessions bypass permissions when their parent does?");
+      assert.equal(await page.evaluate(`document.querySelector('${bypass}').checked`), false);
+      assert.deepEqual(await calls(page), [{ agentSpace: ["work", true] }, { agentSandbox: "strict" }]);
+      await page.shot("machine-page-agents");
+      await page.clickText(".machine-bypass-confirm .bp6-button", "Allow");
+      await page.until(`document.querySelector('${bypass}')?.checked === true`, "bypass allowed");
+
+      // Turning it off does not ask.
+      await page.evaluate(`document.querySelector('${bypass}').click()`);
+      await page.until(`document.querySelector('${bypass}')?.checked === false && !document.querySelector('${bypass}').disabled`, "bypass off");
+      assert.equal(await page.evaluate(`document.querySelector('.machine-bypass-confirm')`), null);
+
+      assert.deepEqual(await calls(page), [{ agentSpace: ["work", true] }, { agentSandbox: "strict" }, { agentBypass: true }, { agentBypass: false }]);
+      assert.deepEqual(page.problems, []);
+    }, options);
+  });
+
 test("giving up managing a machine asks first, and a machine this computer does not manage says how to be given it", { skip: !edge, timeout: 90_000 }, async () => {
   await withCanvas(async page => {
     await page.until(`document.querySelector('input[aria-label="Manage — desktop"]')`, "this computer's switch");
@@ -107,6 +150,7 @@ test("giving up managing a machine asks first, and a machine this computer does 
     await page.until(`document.querySelector('.machine-command')`, "the command for the owner");
     assert.equal(await page.evaluate(`document.querySelector('.machine-command').textContent`), "altanode permissions me --allow manage");
     assert.equal(await page.evaluate(`document.querySelector('.machine-devices')`), null, "no switch for a machine this computer does not manage");
+    assert.equal(await page.evaluate(`document.querySelector('.machine-agents')`), null, "nor for the agents of other machines");
     await page.shot("machine-page-not-managed");
     assert.deepEqual(page.problems, []);
   }, options);

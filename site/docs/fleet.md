@@ -169,7 +169,7 @@ The **+** of the row of a machine in the Explorer opens the same prompt, already
 
 An agent of a session on this computer can hand part of its work to a session on a machine ("run the iOS tests on the Mac"), and get its final answer back as it does from a session of this computer.
 
-1. On the machine, allow it for the spaces you want: `altanode agents allow --space default`. It is off until you do, and `altanode agents` shows what is allowed.
+1. Allow it for the spaces you want: on the page of the machine in **Settings** > **Fleet** > **Machines**, turn on the space under **Agents of other machines** (or, on the machine, `altanode agents allow --space default`). It is off until you do, and `altanode agents` shows what is allowed.
 2. Ask the agent to do it. It runs `alta session create --machine <name> --stdin` (or, in a script, `agent(prompt, { machine: "<name>" })`). `alta fleet machine list` lists the machines, with which ones take a session now ([Let agents use the fleet](#let-agents-use-the-fleet)).
 
 The session starts in the project of the same repository on the machine, as a child of the session of the agent: it shows under it in the Explorer and among its child sessions, with the name of the machine, and opens like any session of the machine. Its final answer, or its failure, comes back to the parent, also when this computer was closed meanwhile: the machine keeps it until this computer takes it. The agent can send it more prompts with `alta session send`.
@@ -177,11 +177,11 @@ The session starts in the project of the same repository on the machine, as a ch
 What the session may do:
 
 - At most what the session of the agent has: its space, the tools it does without, its permission mode and its sandbox. The agent cannot give it more. A sandbox goes with what it allows on this computer: the machine runs the session in a profile at least as strict, or refuses it, even when its own profile of that name allows more (see [sandbox](sessions/sandbox.md#on-other-machines)).
-- It never bypasses permissions on the machine unless you allow it there: `altanode agents allow --bypass`. When it asks before a command, or asks a question, its parent and its row show that it waits for you, with a notice.
-- `altanode agents allow --sandbox strict` makes the sessions of agents run in that sandbox at least; the machine refuses one it cannot sandbox.
+- It never bypasses permissions on the machine unless you allow it there: **Bypass permissions** under **Agents of other machines**, which asks first (or `altanode agents allow --bypass`). When it asks before a command, or asks a question, its parent and its row show that it waits for you, with a notice.
+- **Sandbox** under **Agents of other machines** (or `altanode agents allow --sandbox strict`) makes the sessions of agents run in that sandbox at least; the machine refuses one it cannot sandbox.
 - Each request is signed by this computer: neither a server nor anyone else can start a session in its name. The machine limits how many sessions and prompts agents send it, and logs each one with the session and the computer that asked.
 
-`altanode agents deny --space <id>` (or `--all`) turns it off again. A Private session never starts a session on another machine.
+Turning the space off, or `altanode agents deny --space <id>` (or `--all`), turns it off again. A Private session never starts a session on another machine.
 
 ## Run your automations on it
 
@@ -231,6 +231,7 @@ In **Settings** > **Fleet** > **Machines**, click the name of a machine to open 
 | Section | What you do |
 | --- | --- |
 | **Devices** | Each computer paired with the machine, with a switch per permission: **View**, **Drive**, **Start**, **Move**, **Automate** and **Manage**. **Revoke** (the cross at the end of the row, then **Revoke**) refuses that computer there at once. |
+| **Agents of other machines** | The spaces where agents of other computers may start sessions there and send prompts to its sessions, the sandbox their sessions run in at least, and whether they may bypass permissions ([Let agents start sessions on it](#let-agents-start-sessions-on-it)) |
 | **Projects** | Clone a repository there, add a folder, remove a project |
 | **Providers** | The providers ready on the machine, and its default model. A machine without one cannot start sessions: sign in to a provider on it |
 | **Secrets** | Its [secrets and variables](secrets.md), as **Settings** > **Secrets** shows those of this computer: **Add a secret…**, **Rotate** and **Delete** a secret, edit or delete a variable. A value goes to the machine and is never shown back |
@@ -248,6 +249,7 @@ On the machine itself, the same is done with:
 | `altanode permissions <device>` | Shows what a computer may do |
 | `altanode permissions <device> --deny start` | Takes a permission away: `view`, `drive`, `start`, `move`, `automate` or `manage` (`--allow` gives one) |
 | `altanode pair --manage` | A pairing link whose computer manages the node |
+| `altanode agents allow --space <id>` | Lets agents of other computers start sessions in a space (`deny` stops them; `--sandbox` and `--bypass` as on the page) |
 
 **Forget** on the row of a machine removes it from this computer; its sessions go on there. To make sure a lost or replaced computer can no longer reach a node, revoke it on the page of the machine, from a computer that manages it.
 
