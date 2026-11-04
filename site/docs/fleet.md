@@ -443,7 +443,7 @@ Your nodes tell the server how they are: little disk space left, a provider whos
 
 incident.io and other tools that push signed webhooks send their events to a hook of your server, for one of your machines.
 
-1. In an automation that runs on that machine, add an **incident.io** or **Webhook** trigger and click **Make a hook**. Give the address it shows to the tool (in incident.io: Settings > Webhooks).
+1. In an automation that runs on that machine, add an **incident.io** or **Webhook** trigger and click **Make a hook**. Give the address it shows to the tool (in incident.io: Settings > Webhooks). The address stays hidden in the trigger: **Show the address** reads it again from the server.
 2. Keep the signing secret of the tool, and for incident.io an API key, in the secrets of that machine.
 3. **Test the connection**, then enable the automation.
 

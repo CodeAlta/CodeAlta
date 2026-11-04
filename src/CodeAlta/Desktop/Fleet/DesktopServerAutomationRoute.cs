@@ -85,5 +85,13 @@ internal sealed class DesktopServerAutomationRoute : IDisposable
         return (hook, new Uri(_client.ServerAddress, hook.Path));
     }
 
+    /// <summary>Reads the address of a hook of this computer's person on the server, for its machine.</summary>
+    /// <returns>The address; null when no hook of the person has this id for this machine.</returns>
+    internal async Task<Uri?> HookAddressAsync(string machineId, string hookId, CancellationToken cancellationToken)
+    {
+        var hooks = await _client.ListHooksAsync(cancellationToken).ConfigureAwait(false);
+        return hooks.Hooks.FirstOrDefault(hook => hook.Id == hookId && hook.MachineId == machineId) is { } found ? new Uri(_client.ServerAddress, found.Path) : null;
+    }
+
     public void Dispose() => _client.Dispose();
 }

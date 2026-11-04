@@ -79,6 +79,15 @@ export function IntegrationTriggerFields({ hub, trigger, context, disabled, onCh
     } finally { setBusy(false); }
   }
 
+  async function showAddress() {
+    if (!context.runsOn || !settings.hook) { setCheck({ ok: false, message: t("A hook is an address of a server for one of its machines: choose that machine in Runs on.") }); return; }
+    setBusy(true);
+    try {
+      const read = await hub.hookAddress(context.runsOn, settings.hook);
+      if (read.ok && read.url) { setAddress(read.url); setCheck(null); } else setCheck({ ok: false, message: read.message });
+    } finally { setBusy(false); }
+  }
+
   async function tryIt() {
     if (!context.savedId || !context.saved) { setCheck({ ok: false, message: t("Save the automation first: a try runs it as it is saved.") }); return; }
     setBusy(true);
@@ -129,9 +138,16 @@ export function IntegrationTriggerFields({ hub, trigger, context, disabled, onCh
       {type === "slack" && trigger.event === "message" && <Switch className="automation-integration-reply" checked={settings.threads} disabled={off}
         label={t("Also start on people's replies in the threads it answered")} onChange={event => set({ threads: event.currentTarget.checked })} />}
     </div>
-    {address && <p className="automation-integration-address"><span>{t("Give this address to the tool:")}</span><code>{address}</code>
-      <Button variant="minimal" size="small" icon={<AppIcon name="copy" size={13} />} aria-label={t("Copy the address")} title={t("Copy the address")}
-        onClick={() => void navigator.clipboard?.writeText(address)} /></p>}
+    {/* The address takes events from whoever knows it: hidden as a secret is, shown on demand to give it to the tool. */}
+    {isHooked(type) && (address || settings.hook) && <p className="automation-integration-address">
+      <span>{t(address ? "Give this address to the tool:" : "Address of the hook")}</span>
+      <code>{address ?? "••••••••••••••••"}</code>
+      {address ? <>
+        <Button variant="minimal" size="small" icon={<AppIcon name="copy" size={13} />} aria-label={t("Copy the address")} title={t("Copy the address")}
+          onClick={() => void navigator.clipboard?.writeText(address)} />
+        <Button variant="minimal" size="small" icon={<AppIcon name="hide" size={13} />} aria-label={t("Hide the address")} title={t("Hide the address")} onClick={() => setAddress(null)} />
+      </> : <Button variant="minimal" size="small" disabled={off} icon={<AppIcon name="eye" size={13} />} onClick={() => void showAddress()}>{t("Show the address")}</Button>}
+    </p>}
     <details className="automation-integration-setup">
       <summary>{t("Set up")}</summary>
       <p>{t(guides[type])}</p>

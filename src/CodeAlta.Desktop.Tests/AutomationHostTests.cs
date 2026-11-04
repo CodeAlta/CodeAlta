@@ -48,6 +48,9 @@ public sealed class AutomationHostTests
         Assert.AreEqual("refused", (await fixture.Rpc.SampleEventAsync(new(Epoch, null, slack, "x", null), default)).Status);
         Assert.AreEqual("stale_epoch", (await fixture.Rpc.TryRunAsync(new("other", saved.Id!, 0, null), default)).Status);
         Assert.AreEqual("refused", (await fixture.Rpc.CreateHookAsync(new(Epoch, "node-1", "webhook", null), default)).Status, "no server reaches that machine");
+        var address = await fixture.Rpc.HookAddressAsync(new(Epoch, "node-1", "abcdefghijklmnopqrstuvwxyz"), default);
+        Assert.AreEqual(("refused", (string?)null), (address.Status, address.Url));
+        Assert.AreEqual("invalid_request", (await fixture.Rpc.HookAddressAsync(new(Epoch, "node-1", "../../etc"), default)).Status);
     }
 
     [TestMethod]

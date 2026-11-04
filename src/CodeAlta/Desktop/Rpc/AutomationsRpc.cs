@@ -260,6 +260,33 @@ internal sealed class AutomationsService
         }
     }
 
+    /// <summary>
+    /// Reads again the address of a hook a trigger names, from the server of its machine: for the person in the window, who
+    /// gives it to a tool. No command of the agents reads it from a sandbox (<c>alta fleet hook list</c> is refused there).
+    /// </summary>
+    [NeoRpcMethod("hookAddress")]
+    public async Task<AutomationHookResponse> HookAddressAsync(AutomationHookAddressRequest request, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        if (Refuse(request.ExpectedEpoch) is { } refused) return new(refused, null, null, null);
+        if (!Identifier(request.MachineId) || !AutomationIntegrationConfig.IsHookId(request.HookId)) return new("invalid_request", null, null, null);
+        if (_placement?.ServerRoute?.Invoke(request.MachineId) is not { } route)
+            return new("refused", "This machine is reached through no server online now: its hooks are read from its server.", null, null);
+        using (route)
+        {
+            try
+            {
+                return await route.HookAddressAsync(request.MachineId, request.HookId, cancellationToken).ConfigureAwait(false) is { } address
+                    ? new("ok", null, request.HookId, address.ToString())
+                    : new("refused", "No hook of yours on the server of this machine has this id: make a new one.", null, null);
+            }
+            catch (Exception exception) when (exception is CodeAlta.Fleet.Server.FleetServerException or HttpRequestException or TaskCanceledException)
+            {
+                return new("refused", "The server did not answer: " + exception.Message.ReplaceLineEndings(" "), null, null);
+            }
+        }
+    }
+
     /// <summary>The next times a trigger being written would be due, or what is wrong with it.</summary>
     [NeoRpcMethod("preview")]
     public AutomationPreviewResponse Preview(AutomationPreviewRequest request)
@@ -663,6 +690,10 @@ internal sealed record AutomationTryResponse(string Status, string? Message, Aut
 /// <param name="MachineId">The machine of a server the hook is for.</param>
 /// <param name="Source"><c>incident_io</c> or <c>webhook</c>.</param>
 internal sealed record AutomationHookRequest(string? ExpectedEpoch, string MachineId, string Source, string? Label);
+
+/// <param name="MachineId">The machine of a server the hook is for.</param>
+/// <param name="HookId">The hook a trigger names.</param>
+internal sealed record AutomationHookAddressRequest(string? ExpectedEpoch, string MachineId, string HookId);
 
 /// <param name="HookId">The id of the hook, which its trigger names.</param>
 /// <param name="Url">The address to give the tool.</param>

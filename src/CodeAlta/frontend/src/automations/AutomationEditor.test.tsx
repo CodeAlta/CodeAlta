@@ -61,6 +61,11 @@ test("a trigger of another tool shows its settings, its secrets by name, and how
   assert.match(webhook, /aria-label="Fields that reach the prompt"/);
   assert.doesNotMatch(webhook, /Write the answer back/, "a webhook has nowhere to reply");
   assert.match(integrated(newTrigger("incident_io")), /aria-label="API key"/);
+  // Once it names a hook, its address is hidden until asked for, and never written in the page before.
+  const hooked = newTrigger("incident_io");
+  const masked = integrated({ ...hooked, integration: { ...hooked.integration!, hook: "abcdefghijklmnopqrstuvwxyz" } });
+  assert.match(masked, /Address of the hook[\s\S]*Show the address/);
+  assert.doesNotMatch(masked, /api\/v1\/hooks/);
   for (const locale of locales) assert.ok(integrated(newTrigger("slack"), locale).includes(translate(locale, "Test the connection")), locale);
 });
 

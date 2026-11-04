@@ -46,6 +46,7 @@ function fixture() {
     testTrigger: (request: object) => answer("testTrigger", request, { status: "refused", message: "The secret JIRA_TOKEN is not set on this machine." }),
     sampleEvent: (request: object) => answer("sampleEvent", request, { status: "ok", message: null, detail: "PLAT-7 Crash", prompt: "Triage it.\n---\nTitle: Crash", replyTo: "the Jira issue PLAT-7" }),
     tryRun: (request: object) => answer("tryRun", request, { status: "ok", message: null, run: { ...run("running"), trigger: "try" } }),
+    hookAddress: (request: object) => answer("hookAddress", request, { status: "ok", message: null, hookId: "abcdefghijklmnopqrstuvwxyz", url: "https://fleet.test/api/v1/hooks/abcdefghijklmnopqrstuvwxyz" }),
     createHook: (request: object) => answer("createHook", request, { status: "ok", message: null, hookId: "abcdefghijklmnopqrstuvwxyz", url: "https://fleet.test/api/v1/hooks/abcdefghijklmnopqrstuvwxyz" }),
     watch: async (request: object, options?: { signal?: AbortSignal }) => {
       calls.push(`watch:${JSON.stringify(request)}`);
@@ -195,6 +196,8 @@ test("a trigger of another tool is tested, sampled, tried and given a hook throu
   const tried = await hub.tryRun("a", 0, null);
   assert.deepEqual([tried.ok, tried.run?.trigger], [true, "try"]);
   assert.ok(calls.includes('tryRun:{"expectedEpoch":"epoch-1","id":"a","triggerIndex":0,"body":null}'));
+  assert.deepEqual(await hub.hookAddress("node-1", "abcdefghijklmnopqrstuvwxyz"), { ok: true, message: null, url: "https://fleet.test/api/v1/hooks/abcdefghijklmnopqrstuvwxyz" });
+  assert.ok(calls.includes('hookAddress:{"expectedEpoch":"epoch-1","machineId":"node-1","hookId":"abcdefghijklmnopqrstuvwxyz"}'));
   assert.deepEqual(await hub.createHook("node-1", "incident_io", null),
     { ok: true, message: null, hookId: "abcdefghijklmnopqrstuvwxyz", url: "https://fleet.test/api/v1/hooks/abcdefghijklmnopqrstuvwxyz" });
 });
