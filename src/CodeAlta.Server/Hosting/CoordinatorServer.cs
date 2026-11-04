@@ -493,7 +493,7 @@ public sealed class CoordinatorServer : IAsyncDisposable
         var signIn = options.SignIn ?? SignInOptions.FromEnvironment(options.EnvironmentVariable);
         services.AddSingleton(new SignInAttempts(time, signIn.MaxPendingAttempts));
         services.AddSingleton(provider => new SignInService(store, store, provider.GetRequiredService<RequestAuthenticator>(), provider.GetRequiredService<SignInAttempts>(),
-            signIn, time) { Access = provider.GetRequiredService<AccessService>() });
+            signIn, time) { Access = provider.GetRequiredService<AccessService>(), Proxies = provider.GetRequiredService<TrustedProxies>() });
         services.AddSingleton(provider => new DeviceService(store, provider.GetRequiredService<RequestAuthenticator>(), provider.GetRequiredService<PresenceRegistry>(), time,
             provider.GetRequiredService<RelayHub>())
         {

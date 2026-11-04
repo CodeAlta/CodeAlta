@@ -131,6 +131,9 @@ public sealed class SignInService : IDisposable
     /// <summary>Gets the access control that applies the role the groups give, or null where nothing applies it.</summary>
     internal AccessService? Access { get; init; }
 
+    /// <summary>Gets the reverse proxies the server trusts, whose forwarded scheme names the address of its passkey page; null for none.</summary>
+    internal Hosting.TrustedProxies? Proxies { get; init; }
+
     /// <summary>Lists the methods a person may sign in with now; needs no device.</summary>
     /// <param name="cancellationToken">Cancels the read.</param>
     /// <returns>The methods.</returns>
@@ -308,7 +311,11 @@ public sealed class SignInService : IDisposable
         {
             if (request.Method == FleetSignInMethods.Passkey)
             {
-                url = new Uri($"{context.Request.Scheme}://{context.Request.Host}{context.Request.PathBase}/sign-in/passkey#{Uri.EscapeDataString(id)}");
+                // Behind a proxy that ends TLS (Tailscale Serve, Caddy), the browser reaches the page at https://, which only a
+                // trusted proxy says; the passkey ceremony needs that secure origin.
+                var scheme = Proxies is { Any: true } proxies ? proxies.SchemeOf(context.Connection.RemoteIpAddress, context.Request.Headers, context.Request.Scheme)
+                    : context.Request.Scheme;
+                url = new Uri($"{scheme}://{context.Request.Host}{context.Request.PathBase}/sign-in/passkey#{Uri.EscapeDataString(id)}");
             }
             else if (deviceFlow)
             {

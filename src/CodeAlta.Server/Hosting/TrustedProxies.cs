@@ -49,6 +49,28 @@ public sealed class TrustedProxies
         return peer;
     }
 
+    /// <summary>The header a proxy names the scheme its caller used in: <c>https</c> when it ended TLS.</summary>
+    public const string ForwardedProtoHeader = "X-Forwarded-Proto";
+
+    /// <summary>
+    /// Gets the scheme the caller of a request used: the one a trusted proxy forwards (<c>X-Forwarded-Proto</c>, as
+    /// Tailscale Serve and Caddy send it once they ended TLS), or the one of the request. A caller that is not a trusted
+    /// proxy names no scheme.
+    /// </summary>
+    /// <param name="peer">The peer of the connection.</param>
+    /// <param name="headers">The headers of the request.</param>
+    /// <param name="scheme">The scheme of the request.</param>
+    /// <returns><c>http</c> or <c>https</c>.</returns>
+    public string SchemeOf(IPAddress? peer, IHeaderDictionary headers, string scheme)
+    {
+        ArgumentNullException.ThrowIfNull(headers);
+        if (peer is null || !IsTrusted(peer) || !headers.TryGetValue(ForwardedProtoHeader, out var values)) return scheme;
+        // The proxy next to the server writes the scheme it was reached with; a chain lists the first one's on the left.
+        var first = values.SelectMany(static value => (value ?? string.Empty).Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries))
+            .FirstOrDefault();
+        return first?.ToLowerInvariant() is "https" or "http" ? first.ToLowerInvariant() : scheme;
+    }
+
     /// <summary>Gets whether an address is a trusted proxy.</summary>
     /// <param name="address">The address.</param>
     /// <returns>Whether one of the networks holds it.</returns>

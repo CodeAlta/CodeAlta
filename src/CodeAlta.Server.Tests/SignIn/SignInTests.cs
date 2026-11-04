@@ -876,6 +876,33 @@ public sealed class SignInTests
     }
 
     [TestMethod]
+    public async Task ThePasskeyPageIsAtTheHttpsAddressATrustedProxyServes_AndOnlyATrustedOne()
+    {
+        // Tailscale Serve or Caddy ends TLS and forwards plain HTTP to the server on the loopback.
+        await using var behind = await ServerFixture.StartAsync(configure: options => new Hosting.CoordinatorServerOptions
+        {
+            DataRoot = options.DataRoot, Urls = options.Urls, TimeProvider = options.TimeProvider, ConfigureLogging = options.ConfigureLogging,
+            EnvironmentVariable = options.EnvironmentVariable, TrustedProxies = ["127.0.0.1", "::1"],
+        });
+        using var laptop = new TestDevice("Laptop");
+        using var owner = new TestDevice("Desktop");
+        using var other = new TestDevice("Other desktop");
+        await behind.SetUpAsync(owner);
+        static void Proxied(HttpRequestMessage message) => message.Headers.Add("X-Forwarded-Proto", "https");
+        var start = await behind.SendAsync(laptop, HttpMethod.Post, "/api/v1/sign-in/start", new StartSignInRequest(FleetSignInMethods.Passkey, laptop.PublicKey, Redirect),
+            tamper: Proxied);
+        Assert.AreEqual(HttpStatusCode.OK, start.Status, start.Body.ToString());
+        StringAssert.StartsWith(start.Read<StartSignInResponse>().AuthorizationUrl, $"https://{behind.BaseAddress.Authority}/sign-in/passkey#");
+
+        // Without a trusted proxy, a caller's header names no scheme.
+        await using var direct = await ServerFixture.StartAsync();
+        await direct.SetUpAsync(other);
+        var told = await direct.SendAsync(laptop, HttpMethod.Post, "/api/v1/sign-in/start", new StartSignInRequest(FleetSignInMethods.Passkey, laptop.PublicKey, Redirect),
+            tamper: Proxied);
+        StringAssert.StartsWith(told.Read<StartSignInResponse>().AuthorizationUrl, $"http://{direct.BaseAddress.Authority}/sign-in/passkey#");
+    }
+
+    [TestMethod]
     public async Task TheLastWayInCountsWhatSignsInNow_AndRequiringCompanySignInNeedsTheBreakGlassOwnersPasskey()
     {
         await using var provider = await FakeOidcProvider.StartAsync();
