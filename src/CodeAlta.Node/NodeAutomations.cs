@@ -279,16 +279,28 @@ internal sealed partial class NodeAutomations : IFleetNodeAutomations, IAutomati
         if (kind == AutomationCredentialKind.Personal && policy.Credentials != NodeAutomationPolicy.AnyCredentials)
             return $"The provider '{provider.ProviderId.Value}' runs with a personal plan, and this machine runs automations with account credentials only.";
 
-        // An automation a server gave follows the signed policy of that server's organization: providers, models, credentials.
-        if (AssignmentOf(entry.Id)?.Via is { } via && ServerPolicy?.Invoke(via) is { Number: > 0 } signed)
-        {
-            if (FleetPolicyGuard.Refusal(signed.Rules, provider.ProviderType, provider.ProviderId.Value, entry.Definition.Model.Model) is { } refusal) return refusal;
-            if (kind == AutomationCredentialKind.Personal && signed.Rules.AccountCredentials == true)
-                return $"The provider '{provider.ProviderId.Value}' runs with a personal plan, and the policy of the organization runs every automation with account credentials.";
-        }
-
         return null;
     }
+
+    /// <inheritdoc />
+    public string? CheckModel(AutomationEntry entry, ModelProviderDescriptor provider, string modelId, string spaceId)
+    {
+        ArgumentNullException.ThrowIfNull(entry);
+        ArgumentNullException.ThrowIfNull(provider);
+        // The signed policy of an organization: the one of the server an automation came through, else the one of the server
+        // the space of the run is linked to, for this machine's own automations too.
+        if (RulesOf(entry, spaceId) is not { } rules) return null;
+        if (FleetPolicyGuard.Refusal(rules, provider.ProviderType, provider.ProviderId.Value, modelId) is { } refusal) return refusal;
+        if (rules.AccountCredentials == true && CredentialKindOf(provider) == AutomationCredentialKind.Personal)
+            return $"The provider '{provider.ProviderId.Value}' runs with a personal plan, and the policy of the organization runs every automation with account credentials.";
+        return null;
+    }
+
+    // The rules that apply to a run of an automation in a space; null when no signed policy says anything there.
+    private FleetPolicyRules? RulesOf(AutomationEntry entry, string? spaceId)
+        => AssignmentOf(entry.Id)?.Via is { } via
+            ? ServerPolicy?.Invoke(via) is { Number: > 0 } signed ? signed.Rules : null
+            : Policy?.RulesFor(spaceId);
 
     /// <summary>Gets or sets the signed policies of the servers of the node: a stop refuses every run; null while it joined none.</summary>
     internal FleetPolicyGuard? Policy { get; set; }

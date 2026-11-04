@@ -3,6 +3,7 @@ using CodeAlta.Fleet.Client;
 using CodeAlta.Fleet.Identity;
 using CodeAlta.Fleet.NodeApi;
 using CodeAlta.Fleet.Protocol;
+using CodeAlta.Fleet.Server;
 
 namespace CodeAlta.Node.Tests;
 
@@ -159,6 +160,41 @@ public sealed class NodeAutomationTests
         var forbidden = await Assert.ThrowsExactlyAsync<FleetException>(() => client.PutAutomationAsync(fixture.Signed(Definition("Again", "x"), 3), cancellationToken: token));
         Assert.AreEqual(FleetErrorCodes.Forbidden, forbidden.Error.Code);
         StringAssert.Contains(forbidden.Message, "automate");
+    }
+
+    // The signed policy of the organization of the space a run goes to (doc/fleet/security-and-privacy.md, policies and the kill
+    // switch) applies to the node's own automations too, not only to those a server delivered: its providers, its models, its
+    // account credentials.
+    [TestMethod]
+    public async Task TheRulesOfTheSpace_ApplyToTheNodesOwnAutomations()
+    {
+        var token = TestContext.CancellationToken;
+        using var root = new NodeTestRoot();
+        var kind = AutomationCredentialKind.Account;
+        await using var fixture = await AutomationFixture.StartAsync(root, new ScriptedNodeProvider(), new NodeClock { Now = Noon }, token, _ => kind);
+        var machine = await fixture.PairAsync(DevicePermissions.View | DevicePermissions.Start | DevicePermissions.Automate, token);
+        await using var client = await FleetNodeClient.ConnectAsync(machine, fixture.ViewerIdentity, token);
+        await client.PutAutomationAsync(fixture.Signed(Definition("Own", "Hello."), 1), cancellationToken: token);
+        var policy = FleetPolicyState.Empty with { Number = 1, LastHash = "h1", Rules = new FleetPolicyRules(Providers: ["approved-only"]) };
+        var linked = true;
+        fixture.Node.Automations!.Policy = new FleetPolicyGuard(fixture.Fleet.DeviceId, () => [new FleetPolicySource("https://fleet.example", policy, null, _ => linked)]);
+
+        var provider = await client.RunAutomationAsync(Id, cancellationToken: token);
+        Assert.AreEqual(AutomationRun.Failed, provider.Status);
+        StringAssert.Contains(provider.Message, "approved-only");
+        Assert.IsNull(provider.SessionId, "Nothing is created for a run the policy refuses.");
+
+        policy = policy with { Number = 2, Rules = new FleetPolicyRules(Models: ["claude-*"]) };
+        StringAssert.Contains((await client.RunAutomationAsync(Id, cancellationToken: token)).Message, "claude-*");
+
+        kind = AutomationCredentialKind.Personal;
+        policy = policy with { Number = 3, Rules = new FleetPolicyRules(AccountCredentials: true) };
+        StringAssert.Contains((await client.RunAutomationAsync(Id, cancellationToken: token)).Message, "account credentials");
+
+        // A space not linked to the server of the policy: its rules say nothing there.
+        linked = false;
+        var allowed = await client.RunAutomationAsync(Id, cancellationToken: token);
+        Assert.AreNotEqual(AutomationRun.Failed, allowed.Status, allowed.Message);
     }
 
     [TestMethod]
