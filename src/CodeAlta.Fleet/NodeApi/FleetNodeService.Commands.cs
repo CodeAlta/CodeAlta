@@ -113,7 +113,10 @@ public sealed partial class FleetNodeService
             if (parameters.Prompt is { } prompt)
             {
                 var selection = Selection(parameters.Selection, provider.ProviderId.Value, session.AgentPromptId);
-                _host.Commands.AdmitSend(new OwnedTextSendRequest(retryKey, session.SessionId, prompt) { Selection = selection });
+                // Admitted to its environment, the first run is admitted to the budgets as any other: one may stop or hold it.
+                var sent = await WithinBudgetAsync(session.SessionId, session, parameters.Title,
+                    () => Admit(_host.Commands.AdmitSend(new OwnedTextSendRequest(retryKey, session.SessionId, prompt) { Selection = selection }))).ConfigureAwait(false);
+                if (sent.Code == FleetBudgetCommandStatuses.Reached) LogInfo($"The first prompt of the session {session.SessionId} was stopped by a budget.");
             }
         }
         catch (Exception exception) when (exception is IOException or InvalidOperationException or ObjectDisposedException or UnauthorizedAccessException)

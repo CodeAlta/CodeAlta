@@ -18,6 +18,28 @@ public sealed class FleetNodeBudgetQueueTests
     public TestContext TestContext { get; set; } = null!;
 
     [TestMethod]
+    public async Task TheFirstPromptOfASessionInAnEnvironment_IsAdmittedToTheBudgetsToo()
+    {
+        var token = TestContext.CancellationToken;
+        var admitted = new ConcurrentQueue<FleetNodeBudgetRun>();
+        await using var fixture = await FleetNodeFixture.StartAsync(token, null, (run, _, _) =>
+        {
+            admitted.Enqueue(run);
+            return Task.FromResult(new FleetBudgetAdmission("The budget 'Home' is reached: the run does not start.", []));
+        }, null, false, (environment, _, _, _) => Task.FromResult(new CodeAlta.Orchestration.Runtime.EnvironmentAdmissionResult(null,
+            new CodeAlta.Orchestration.Runtime.EnvironmentAdmission(environment, "env-1", 1, null))));
+        await using var client = await FleetNodeClient.ConnectAsync(await fixture.PairViewerAsync(token), fixture.ViewerIdentity, token);
+        var created = await client.CreateSessionAsync(new FleetCreateSessionParams(Title: "Deploy", Prompt: "Deploy the release.") { Environment = "production" }, "create-env", token);
+
+        // Admitted to its environment, the session's first prompt still goes through the budgets: one that stops it is never sent.
+        var deadline = DateTime.UtcNow + Patience;
+        while (admitted.IsEmpty && DateTime.UtcNow < deadline) await Task.Delay(50, token);
+        Assert.AreEqual(created.SessionId, admitted.SingleOrDefault()?.RunId, "the budgets admit the first run of a session in an environment");
+        await Task.Delay(TimeSpan.FromMilliseconds(300), token);
+        Assert.IsFalse(fixture.Provider.Prompts.Any(static prompt => prompt.Contains("Deploy the release.", StringComparison.Ordinal)), "a prompt a budget stops never reaches the model");
+    }
+
+    [TestMethod]
     public async Task AQueuedPrompt_IsAdmittedToTheBudgetsWhenItsTurnStarts_AndASteerIsPartOfTheRunningTurn()
     {
         var token = TestContext.CancellationToken;
