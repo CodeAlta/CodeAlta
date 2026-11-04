@@ -114,6 +114,8 @@ internal sealed partial class AutomationService
 
     private static readonly TimeSpan ListenAgainAfter = TimeSpan.FromMinutes(1);
     private readonly Dictionary<string, SlackListening> _listeners = new(StringComparer.Ordinal);
+    // The triggers each Slack connection hands its messages to, by app, as the automations are now.
+    private readonly Dictionary<string, IReadOnlyList<SlackRoute>> _slackRoutes = new(StringComparer.Ordinal);
     private readonly HashSet<string> _capped = new(StringComparer.Ordinal);
     private readonly Dictionary<string, (string Problem, DateTimeOffset At)> _listenerProblems = new(StringComparer.Ordinal);
 
@@ -315,11 +317,13 @@ internal sealed partial class AutomationService
             Integrations?.Log?.Invoke($"The Jira query of the automation '{entry.Definition.Name}' ({entry.Id}) matches more than {MaximumQueryIssues} issues: it reads the first {MaximumQueryIssues}, in the order of the query.");
     }
 
-    // Starts and stops the Socket Mode listeners of the Slack triggers as the automations are now; under no lock.
+    // Starts and stops the Socket Mode listeners of the Slack triggers as the automations are now; under no lock. Slack spreads
+    // the events of an app among its connections rather than copying them to each: the triggers of one app share one
+    // connection, which hands each event to every trigger of that app it matches.
     private void ListenToSlack(DateTimeOffset now)
     {
         if (Integrations is not { } integrations) return;
-        var wanted = new Dictionary<string, (AutomationEntry Entry, AutomationTrigger Trigger)>(StringComparer.Ordinal);
+        var armed = new List<(AutomationEntry Entry, AutomationTrigger Trigger)>();
         lock (_gate)
         {
             if (!_closed && !_state.Paused)
@@ -327,49 +331,72 @@ internal sealed partial class AutomationService
                 foreach (var entry in _snapshot.Entries)
                 {
                     if (!Armed(entry)) continue;
-                    foreach (var trigger in entry.Definition.Triggers.Where(static trigger => trigger.Kind == AutomationTriggerKind.Slack))
-                        wanted[entry.Id + "|" + trigger.FingerprintKey] = (entry, trigger);
+                    foreach (var trigger in entry.Definition.Triggers.Where(static trigger => trigger.Kind == AutomationTriggerKind.Slack)) armed.Add((entry, trigger));
                 }
             }
-
-            foreach (var (key, listening) in _listeners.ToArray())
-            {
-                if (wanted.ContainsKey(key)) continue;
-                listening.Stop.Cancel();
-                listening.Stop.Dispose();
-                _listeners.Remove(key);
-            }
-
-            foreach (var id in _listenerProblems.Keys.Where(id => !wanted.Values.Any(pair => pair.Entry.Id == id)).ToArray()) _listenerProblems.Remove(id);
         }
 
-        foreach (var (key, (entry, trigger)) in wanted)
+        // The triggers by the app they listen with, the app known by the hash of its token.
+        var apps = new Dictionary<string, (string Token, List<SlackRoute> Routes)>(StringComparer.Ordinal);
+        foreach (var (entry, trigger) in armed)
         {
-            lock (_gate)
-            {
-                if (_listeners.ContainsKey(key)) continue;
-                if (_listenerProblems.TryGetValue(entry.Id, out var last) && now - last.At < ListenAgainAfter) continue;
-            }
-
             var (appToken, appMissing) = Resolve(entry.ProjectId, trigger.AppToken!);
             var (channel, channelMissing) = Resolve(entry.ProjectId, trigger.Channel!);
             if (appToken is null || channel is null)
             {
-                lock (_gate) _listenerProblems[entry.Id] = (appMissing ?? channelMissing!, now);
-                Changed?.Invoke();
+                bool told;
+                lock (_gate)
+                {
+                    told = _listenerProblems.TryGetValue(entry.Id, out var last) && last.Problem == (appMissing ?? channelMissing!) && now - last.At < ListenAgainAfter;
+                    if (!told) _listenerProblems[entry.Id] = (appMissing ?? channelMissing!, now);
+                }
+
+                if (!told) Changed?.Invoke();
                 continue;
+            }
+
+            var key = "slack:" + Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(appToken)))[..32];
+            if (!apps.TryGetValue(key, out var app)) apps[key] = app = (appToken, []);
+            app.Routes.Add(new SlackRoute(entry.Id, trigger, channel));
+        }
+
+        lock (_gate)
+        {
+            foreach (var (key, listening) in _listeners.ToArray())
+            {
+                if (apps.ContainsKey(key)) continue;
+                listening.Stop.Cancel();
+                listening.Stop.Dispose();
+                _listeners.Remove(key);
+                _slackRoutes.Remove(key);
+            }
+
+            // The routes of a connection that goes on are those of now: a trigger added or removed of its app takes effect at once.
+            foreach (var (key, app) in apps) _slackRoutes[key] = app.Routes;
+            var armedIds = armed.Select(static pair => pair.Entry.Id).ToHashSet(StringComparer.Ordinal);
+            foreach (var id in _listenerProblems.Keys.Where(id => !armedIds.Contains(id)).ToArray()) _listenerProblems.Remove(id);
+        }
+
+        foreach (var (key, (appToken, routes)) in apps)
+        {
+            lock (_gate)
+            {
+                if (_listeners.ContainsKey(key)) continue;
+                if (routes.Any(route => _listenerProblems.TryGetValue(route.AutomationId, out var last) && now - last.At < ListenAgainAfter)) continue;
             }
 
             var listener = new SlackSocketListener(new SlackClient(integrations.Http, integrations.SlackApi), integrations.SlackConnect, _time);
             var stop = CancellationTokenSource.CreateLinkedTokenSource(_stop.Token);
-            var id = entry.Id;
-            var watched = trigger;
-            var task = Task.Run(() => listener.RunAsync(appToken, message => OnSlackAsync(id, watched, channel, message), () =>
+            var app = key;
+            var task = Task.Run(() => listener.RunAsync(appToken, message => FanOutSlackAsync(app, message), () =>
             {
                 lock (_gate)
                 {
-                    if (listener.Problem is { } problem) _listenerProblems[id] = (problem, _time.GetUtcNow());
-                    else _listenerProblems.Remove(id);
+                    foreach (var route in _slackRoutes.GetValueOrDefault(app) ?? [])
+                    {
+                        if (listener.Problem is { } problem) _listenerProblems[route.AutomationId] = (problem, _time.GetUtcNow());
+                        else _listenerProblems.Remove(route.AutomationId);
+                    }
                 }
 
                 Changed?.Invoke();
@@ -381,6 +408,17 @@ internal sealed partial class AutomationService
             }
         }
     }
+
+    // Hands a message of a Slack app to every trigger of that app: each one takes what it matches.
+    private async Task FanOutSlackAsync(string app, SlackMessage message)
+    {
+        IReadOnlyList<SlackRoute> routes;
+        lock (_gate) routes = [.. _slackRoutes.GetValueOrDefault(app) ?? []];
+        foreach (var route in routes) await OnSlackAsync(route.AutomationId, route.Trigger, route.Channel, message).ConfigureAwait(false);
+    }
+
+    // A trigger of a Slack app: the automation, the trigger and the channel it watches.
+    private sealed record SlackRoute(string AutomationId, AutomationTrigger Trigger, string Channel);
 
     private Task OnSlackAsync(string automationId, AutomationTrigger trigger, string channel, SlackMessage message)
     {
@@ -858,6 +896,7 @@ internal sealed partial class AutomationService
     {
         foreach (var listening in _listeners.Values) listening.Stop.Cancel();
         _listeners.Clear();
+        _slackRoutes.Clear();
     }
 
     private sealed record SlackListening(CancellationTokenSource Stop, Task Task);

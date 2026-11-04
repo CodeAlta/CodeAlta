@@ -157,6 +157,38 @@ public sealed class AutomationIntegrationTests
         Assert.IsTrue(fixture.Tools.To("/api/apps.connections.open").All(static request => request.Authorization == "Bearer xapp-app"));
     }
 
+    // Slack spreads the events of an app among its connections, it does not copy them: the triggers of one app share one
+    // connection of this machine, which hands each event to every trigger it matches.
+    [TestMethod]
+    public async Task TheTriggersOfOneSlackApp_ShareOneConnection_AndEachEventReachesItsTrigger()
+    {
+        await using var fixture = await Fixture.CreateAsync("""
+            { type = "slack", event = "mention", channel = "C0123ABCDEF", app_token = "${secret:SLACK_APP}", bot_token = "${secret:SLACK_BOT}" },
+            { type = "slack", event = "mention", channel = "C0FFFFFFFFF", app_token = "${secret:SLACK_APP}", bot_token = "${secret:SLACK_BOT}" }
+            """);
+        fixture.Tools.On(HttpMethod.Post, "/api/apps.connections.open", """{"ok":true,"url":"wss://wss.slack.test/link"}""");
+
+        fixture.Service.Tick(fixture.Clock.Now);
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        var socket = await fixture.Sockets.Accepted.Reader.ReadAsync(timeout.Token);
+        await FakeSlackSockets.SendAsync(socket, Envelope("e1", "Ev1", "app_mention", "C0FFFFFFFFF", "<@A1> the second channel"));
+        var second = await fixture.Runner.NextAsync();
+        StringAssert.Contains(second.Prompt, "C0FFFFFFFFF");
+        second.Complete(new(AutomationRun.Completed));
+        await fixture.UntilAsync(() => !fixture.Service.IsRunning(First));
+
+        await FakeSlackSockets.SendAsync(socket, Envelope("e2", "Ev2", "app_mention", "C0123ABCDEF", "<@A1> the first channel"));
+        var first = await fixture.Runner.NextAsync();
+        StringAssert.Contains(first.Prompt, "C0123ABCDEF");
+        first.Complete(new(AutomationRun.Completed));
+        await fixture.UntilAsync(() => !fixture.Service.IsRunning(First));
+
+        fixture.Service.Tick(fixture.Clock.Now);
+        await Task.Delay(200);
+        Assert.IsFalse(fixture.Sockets.Accepted.Reader.TryRead(out _), "one connection for the app");
+        Assert.HasCount(1, fixture.Tools.To("/api/apps.connections.open"));
+    }
+
     [TestMethod]
     [DataRow(false)]
     [DataRow(true)]
