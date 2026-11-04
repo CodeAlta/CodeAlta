@@ -304,7 +304,8 @@ public sealed class NodeServiceTests
         Assert.AreEqual("io.codealta.altanode", Dict(File.ReadAllText(plistPath))["Label"].Value);
         CollectionAssert.AreEqual(new[]
         {
-            "launchctl bootout gui/501/io.codealta.altanode", "launchctl enable gui/501/io.codealta.altanode", $"launchctl bootstrap gui/501 {plistPath}",
+            "launchctl bootout gui/501/io.codealta.altanode", "launchctl print gui/501/io.codealta.altanode", "launchctl enable gui/501/io.codealta.altanode",
+            $"launchctl bootstrap gui/501 {plistPath}",
         }, machine.Commands);
         var answer = string.Join('\n', ServiceManager.Describe(manager.Query(plan)));
         StringAssert.Contains(answer, "a LaunchAgent of alice");
@@ -313,6 +314,36 @@ public sealed class NodeServiceTests
 
         Assert.AreEqual(NodeExitCodes.Success, manager.Uninstall(plan, new StringWriter(), new StringWriter()));
         Assert.IsFalse(File.Exists(plistPath));
+    }
+
+    [TestMethod]
+    public void MacOS_InstallAgainWhileTheAgentRuns_WaitsUntilLaunchdRemovedTheOldJob()
+    {
+        // As on a Mac: launchd keeps the job it booted out while its process drains, and refuses a bootstrap meanwhile.
+        using var machine = new FakeServiceMachine(ServicePlatform.MacOS);
+        var manager = new ServiceManager(machine.Environment);
+        var plan = manager.Plan(Request(machine));
+        Assert.AreEqual(NodeExitCodes.Success, manager.Install(plan, new StringWriter(), new StringWriter()));
+        machine.LaunchdPrintsWhileStopping = 3;
+        machine.Commands.Clear();
+
+        var error = new StringWriter();
+        Assert.AreEqual(NodeExitCodes.Success, manager.Install(plan, new StringWriter(), error), error.ToString());
+
+        Assert.IsTrue(machine.IsRegistered("io.codealta.altanode"), "the new job is loaded");
+        CollectionAssert.AreEqual(new[]
+        {
+            "launchctl bootout gui/501/io.codealta.altanode", "launchctl print gui/501/io.codealta.altanode", "launchctl print gui/501/io.codealta.altanode",
+            "launchctl print gui/501/io.codealta.altanode", "launchctl print gui/501/io.codealta.altanode", "launchctl enable gui/501/io.codealta.altanode",
+            $"launchctl bootstrap gui/501 {plan.DefinitionPath}",
+        }, machine.Commands);
+        Assert.IsTrue(machine.Slept > TimeSpan.Zero, "it waits between two reads");
+
+        // Uninstall returns once the job is gone too, so that an install right after it finds none.
+        machine.Commands.Clear();
+        Assert.AreEqual(NodeExitCodes.Success, manager.Uninstall(plan, new StringWriter(), error), error.ToString());
+        Assert.AreEqual(5, machine.Commands.Count(static command => command == "launchctl print gui/501/io.codealta.altanode"), string.Join('\n', machine.Commands));
+        Assert.AreEqual(NodeExitCodes.Success, manager.Install(plan, new StringWriter(), error), error.ToString());
     }
 
     [TestMethod]

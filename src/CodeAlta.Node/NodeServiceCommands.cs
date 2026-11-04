@@ -47,12 +47,15 @@ internal sealed class NodeServiceCommands(TextWriter output, TextWriter error, F
             return NodeExitCodes.Success;
         }
 
-        var held = NodeProfileStatus.Read(options.Run.Profile.Resolve(out _)!);
+        var profile = options.Run.Profile.Resolve(out _)!;
+        var held = NodeProfileStatus.Read(profile);
         var code = manager.Install(plan, output, error);
         if (code == NodeExitCodes.Success)
         {
             await output.WriteLineAsync(ServiceExecutableLocator.Describe(UpdateProduct.Node, executable()!)).ConfigureAwait(false);
-            if (held.IsHeld && plan.Spec.Scope == ServiceScope.User)
+            // The node of the service it replaced stopped with it (launchd, systemd): only an instance that still holds the
+            // profile keeps the new one waiting.
+            if (held.IsHeld && plan.Spec.Scope == ServiceScope.User && NodeProfileStatus.Read(profile) is { IsHeld: true } still && still.ProcessId == held.ProcessId)
             {
                 await output.WriteLineAsync($"{held.Describe()} The service's node starts once that instance exits (one instance runs per profile).")
                     .ConfigureAwait(false);
