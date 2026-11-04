@@ -120,8 +120,9 @@ to it.
 - An organization configures its OpenID Connect provider (Entra ID, Okta, Google Workspace, Keycloak...); SAML is not
   planned.
 - The owner sets its issuer, client id and secret; the server reads its discovery document before keeping them, and
-  never gives the secret back. The redirect registered at the provider is the loopback of the desktop
-  (`http://127.0.0.1`, any port).
+  never gives the secret back. The redirect registered at the provider is the loopback of the desktop under the name
+  `localhost` (`http://localhost/callback`, any port; the desktop listens on IPv4 and IPv6), since Entra ID's Web platform
+  registers only `https://` or `http://localhost` addresses; CodeAlta's own clients come back to `127.0.0.1`.
 - **Only the company's own accounts.** A provider serves more than one company (Google, the multi-tenant endpoints of
   Entra ID, a shared Okta), so the owner names the **email domains** and the **tenant ids** it lets in, at least one.
   The server checks every company sign-in, a person's first and the next ones: a tenant named must be the token's

@@ -401,7 +401,9 @@ internal sealed partial class DesktopFleetServers
 
     private async Task<CompleteSignInResponse> SignInThroughBrowserAsync(FleetServerClient client, string method, string purpose, CancellationToken cancellationToken)
     {
-        using var redirect = FleetLoopbackRedirect.Start();
+        // A company registers its own client, and Entra ID's Web platform takes only https:// or http://localhost there; the clients
+        // CodeAlta registers come back to 127.0.0.1.
+        using var redirect = FleetLoopbackRedirect.Start(method == FleetSignInMethods.Company ? FleetLoopbackHost.Localhost : FleetLoopbackHost.IPAddress);
         var start = await client.StartSignInAsync(method, redirect.RedirectUri, purpose, cancellationToken).ConfigureAwait(false);
         if (start.State is not { Length: > 0 } state)
             throw new FleetServerException(HttpStatusCode.OK, FleetServerException.HttpErrorCode, null, "The server gave no state for the sign-in.");
