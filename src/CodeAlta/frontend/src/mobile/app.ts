@@ -25,7 +25,7 @@ import { topLevelCount } from "./sessionTree";
 import { createSheet } from "./sheet";
 import { ago, pageSize, readSizes, createSessionStore, type SessionView } from "./sessionStore";
 import {
-  activityFacts, appendEvents, blockVersion, foldEvents, liveBlock, pendingBlock, planTimeline, prependEvents, stillPending, withDays, type DayBlock, type PendingPrompt, type TimelineBlock,
+  activityFacts, appendEvents, blockVersion, foldEvents, liveBlock, pendingBlock, planTimeline, prependEvents, stillPending, withDays, withQueue, type DayBlock, type PendingPrompt, type TimelineBlock,
 } from "./timeline";
 import { createImageViewer } from "./imageViewer";
 import { createTimelineView } from "./timelineView";
@@ -324,6 +324,8 @@ export function startMobile(window: Window & typeof globalThis) {
   const pendingNotes = new Map<string, string>();
   // The prompts each session accepted that its timeline does not hold yet (a steered one reaches the journal later): shown at once.
   const pendingPrompts = new Map<string, PendingPrompt[]>();
+  // The queued prompts taken back from this page, which a read of the queue on its way may still name.
+  const removedFromQueue = new Set<string>();
   let pendingSeq = 0;
   let working: HTMLLIElement | null = null;
   markdown.handle(timeline);
@@ -332,6 +334,11 @@ export function startMobile(window: Window & typeof globalThis) {
     sessionTitle: id => sessions.view(id)?.title ?? null,
     openSession: id => { window.location.hash = `#/session/${encodeURIComponent(id)}`; },
     viewer: createImageViewer({ window }),
+    readTool: (activityId, seq) => {
+      if (!detail.id) return Promise.reject(new Error("No session is open."));
+      return api.tool(detail.id, activityId, seq === undefined ? undefined : Math.max(0, seq - 1));
+    },
+    withdraw: (key, then) => void withdrawPrompt(key, then),
   });
 
   const nearBottom = () => window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 40;
@@ -351,7 +358,8 @@ export function startMobile(window: Window & typeof globalThis) {
     });
     const pending = stillPending(pendingPrompts.get(detail.id) ?? [], detail.events, busy, Date.now());
     pendingPrompts.set(detail.id, pending);
-    const held: Entry[] = [...entries, ...pending.map(prompt => ({ block: pendingBlock(prompt), live: false, open: false, key: prompt.key, version: `${prompt.key}|${prompt.mode}`, prompt }))];
+    const held: Entry[] = [...entries, ...pending.map(prompt => ({ block: pendingBlock(prompt), live: false, open: false, key: prompt.key,
+      version: `${prompt.key}|${prompt.mode}|${prompt.queueId ?? ""}|${prompt.withdrawalId ?? ""}|${prompt.taken ?? false}`, prompt }))];
     const byBlock = new Map(held.map(entry => [entry.block, entry]));
     // A day line says "Today" until midnight: its label is its version, so that it is drawn again after.
     const all: Entry[] = withDays(held.map(entry => entry.block as TimelineBlock), new Date())
@@ -364,7 +372,7 @@ export function startMobile(window: Window & typeof globalThis) {
       const entry = all[index];
       let drawn = detail.drawn.get(step.key);
       if (step.action === "create" || !drawn) {
-        if (entry.block.kind === "message") drawn = blocksView.messageBlock(entry.block, entry.prompt);
+        if (entry.block.kind === "message") drawn = { ...blocksView.messageBlock(entry.block, entry.prompt), version: entry.version };
         else if (entry.block.kind === "workflow") drawn = { ...blocksView.workflowBlock(entry.block), version: entry.version };
         else if (entry.block.kind === "day") {
           const item = make("li", "day-mark", entry.block.label);
@@ -378,6 +386,12 @@ export function startMobile(window: Window & typeof globalThis) {
           drawn = { element: item, version: entry.version, diagram: false };
         }
         detail.drawn.set(step.key, drawn);
+      } else if (step.action === "update" && entry.block.kind === "message") {
+        // A pending prompt learned what takes it back, or that nothing can any more.
+        const next = { ...blocksView.messageBlock(entry.block, entry.prompt), version: entry.version };
+        drawn.element.replaceWith(next.element);
+        detail.drawn.set(step.key, next);
+        drawn = next;
       } else if (step.action === "update" && entry.block.kind === "activity") {
         blocksView.drawActivity(drawn.element, entry.block, entry.live, entry.open);
         drawn.version = entry.version;
@@ -470,6 +484,7 @@ export function startMobile(window: Window & typeof globalThis) {
           showOlder();
         });
         watchOlder();
+        void readQueue();
         return;
       }
       const page = await api.events(id, since);
@@ -478,11 +493,30 @@ export function startMobile(window: Window & typeof globalThis) {
       detail.since = Math.max(detail.since, page.since ?? since, detail.events.at(-1)?.seq ?? 0);
       if (page.error) detailNote.textContent = page.error;
       drawTimeline();
+      if (queueToRead(id)) void readQueue();
     } catch (error) {
       if (detail.id !== id || error instanceof SignedOutError) return;
       detailNote.textContent = `Could not read the session: ${failureText(error, host)}`;
     }
   });
+  // The queue of the session says which queued prompts wait, also after a reload or when they come from the computer. It is
+  // read while the session works or holds some, and when a session opens: nothing else adds to it.
+  const readQueue = coalesce(async () => {
+    const id = detail.id;
+    if (!id || signedOut) return;
+    try {
+      const page = await api.queue(id);
+      if (detail.id !== id || page.error) return;
+      const held = pendingPrompts.get(id) ?? [];
+      const next = withQueue(held, page.items ?? [], removedFromQueue, detail.events.at(-1)?.seq ?? 0);
+      const same = next.length === held.length && next.every((prompt, index) => prompt === held[index]);
+      if (same) return;
+      pendingPrompts.set(id, next);
+      drawTimeline();
+    } catch { /* The next read says it: the prompts the page holds stay as they are. */ }
+  });
+  function queueToRead(id: string) { return isBusy(sessions.view(id)?.live?.live) || (pendingPrompts.get(id) ?? []).some(prompt => !!prompt.queueId); }
+
   let detailTimer = 0;
   function scheduleDetailRead(ms: number) { window.clearTimeout(detailTimer); detailTimer = window.setTimeout(() => void readDetail(), ms); }
   function refreshDetail() { if (!detail.id) return Promise.resolve(); detail.generation++; detail.replace = true; detail.readingOlder = false; return readDetail(); }
@@ -840,13 +874,20 @@ export function startMobile(window: Window & typeof globalThis) {
     // The prompt shows in the timeline at once, as the user's message: it goes when the journal holds it, or when the send fails.
     const prompt: PendingPrompt = { key: `p${++pendingSeq}`, text, mode, sentAt, after: detail.id === id ? detail.events.at(-1)?.seq ?? 0 : 0,
       ...(sent.length ? { attachments: sent.map(({ title, mediaType }) => ({ title, mediaType })) } : {}) };
-    const forget = () => { pendingPrompts.set(id, (pendingPrompts.get(id) ?? []).filter(p => p !== prompt)); if (detail.id === id) drawTimeline(); };
+    const forget = () => { forgetPrompt(id, prompt.key); };
     pendingPrompts.set(id, [...pendingPrompts.get(id) ?? [], prompt]);
     if (detail.id === id) { drawTimeline(); toBottom(); }
     // What was picked goes with a send or a queue; a steer leaves it for the next one.
     const picked = picks.get(id) ?? {}, selection = mode === "steer" ? {} : pickedChanges(choicesOf.get(id), picked);
     try {
-      await api.prompt(id, text, mode, selection, sent);
+      const answer = await api.prompt(id, text, mode, selection, sent);
+      // What takes the prompt back, once it waits; a send to a session that works was queued.
+      if (answer.queueItemId || answer.withdrawalId) {
+        changePrompt(id, prompt.key, {
+          ...(answer.queueItemId ? { queueId: answer.queueItemId, mode: "queue" as const } : {}),
+          ...(answer.withdrawalId ? { withdrawalId: answer.withdrawalId } : {}),
+        });
+      }
       if (mode !== "steer" && picks.get(id) === picked) picks.delete(id);
       if (Object.keys(selection).length) {
         // The session runs on it now: its choices say so.
@@ -875,6 +916,53 @@ export function startMobile(window: Window & typeof globalThis) {
       showComposer();
     }
   }
+  function forgetPrompt(id: string, key: string) {
+    pendingPrompts.set(id, (pendingPrompts.get(id) ?? []).filter(prompt => prompt.key !== key));
+    if (detail.id === id) drawTimeline();
+  }
+  function changePrompt(id: string, key: string, change: Partial<PendingPrompt>) {
+    pendingPrompts.set(id, (pendingPrompts.get(id) ?? []).map(prompt => prompt.key === key ? { ...prompt, ...change } : prompt));
+    if (detail.id === id) drawTimeline();
+  }
+
+  // Takes a prompt back from the queue or from the run it was steered into. When it is too late, the prompt stays shown, as
+  // what the agent has; its text goes back to the composer only once it is known that the agent will never have it.
+  async function withdrawPrompt(key: string, then: "delete" | "edit") {
+    const id = detail.id, prompt = id ? pendingPrompts.get(id)?.find(item => item.key === key) : null;
+    if (!id || !prompt) return;
+    let gone: boolean;
+    let note = "";
+    try {
+      if (prompt.queueId) {
+        const { status } = await api.unqueue(id, prompt.queueId);
+        gone = status !== "sending";
+        if (gone) removedFromQueue.add(prompt.queueId);
+        else note = "Too late: the session is taking this prompt.";
+      } else if (prompt.withdrawalId) {
+        ({ withdrawn: gone } = await api.unsteer(id, prompt.withdrawalId));
+        if (!gone) note = "Too late: the agent already has this prompt.";
+      } else return;
+    } catch (error) {
+      if (error instanceof SignedOutError) return;
+      if (detail.id === id) detailNote.textContent = `Not removed: ${failureText(error, host)}`;
+      return;
+    }
+    if (!gone) {
+      changePrompt(id, key, { taken: true });
+      if (detail.id === id) detailNote.textContent = note;
+      return;
+    }
+    forgetPrompt(id, key);
+    if (detail.id === id) detailNote.textContent = "";
+    if (then !== "edit" || composerFor !== id) return;
+    const typed = promptBox.value.trim();
+    promptBox.value = typed ? `${prompt.text}\n\n${typed}` : prompt.text;
+    drafts.set(id, promptBox.value);
+    grow();
+    showComposer();
+    promptBox.focus();
+  }
+
   composer.addEventListener("submit", event => {
     event.preventDefault();
     void submitPrompt((composer.dataset.submit as "send" | "steer" | "queue" | undefined) ?? "send");

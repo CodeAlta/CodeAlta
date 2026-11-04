@@ -1,4 +1,4 @@
-import type { ActionResult, ApprovalAnswer, ApprovalPage, ApprovalResult, AskAnswerRequest, AskPage, AskResult, EventPage, JobOutput, JobPage, LatestEventPage, NewSessionRequest, NewSessionResult, Options, ProjectList, PromptAttachment, PromptMode, PromptSelection, Session, SessionChoices, SessionPage } from "./contract";
+import type { ActionResult, ApprovalAnswer, ApprovalPage, ApprovalResult, AskAnswerRequest, AskPage, AskResult, EventPage, JobOutput, JobPage, LatestEventPage, NewSessionRequest, NewSessionResult, Options, ProjectList, PromptAttachment, PromptMode, PromptSelection, QueuePage, Session, SessionChoices, SessionPage, ToolCallDetail, UnqueueResult, UnsteerResult } from "./contract";
 
 /** What the page says when the server no longer knows this phone. */
 export const signedOutMessage = "This phone is no longer connected: scan the QR code of the Mobile tab again.";
@@ -159,6 +159,14 @@ export function createApi(options: Readonly<{ fetch: FetchLike; store: KeyValueS
     /** Sends a prompt; a send or a queue carries what was chosen of the session (a steer takes nothing). Files go with a send. */
     prompt: (id: string, text: string, mode: PromptMode, selection: PromptSelection = {}, attachments: readonly PromptAttachment[] = []) =>
       command<ActionResult>(`${session(id)}/prompt`, { text, mode, ...(attachments.length ? { attachments } : {}), ...(mode === "steer" ? {} : selection) }),
+    /** The prompts that wait in the queue of the session. */
+    queue: (id: string) => call<QueuePage>("GET", `${session(id)}/queue`),
+    /** Removes a prompt from the queue, unless the session is taking it. */
+    unqueue: (id: string, itemId: string) => command<UnqueueResult>(`${session(id)}/queue/${encodeURIComponent(itemId)}/remove`),
+    /** Takes back a steered prompt, unless the run gave it to the model. */
+    unsteer: (id: string, withdrawalId: string) => command<UnsteerResult>(`${session(id)}/steer/${encodeURIComponent(withdrawalId)}/withdraw`),
+    /** One tool call, whole; `since` is the sequence number before its first event. */
+    tool: (id: string, activityId: string, since?: number) => call<ToolCallDetail>("GET", `${session(id)}/tools/${encodeURIComponent(activityId)}${since === undefined ? "" : `?since=${since}`}`),
     abort: (id: string) => command<ActionResult>(`${session(id)}/abort`),
     archive: (id: string) => command<ActionResult>(`${session(id)}/archive`),
     restore: (id: string) => command<ActionResult>(`${session(id)}/restore`),

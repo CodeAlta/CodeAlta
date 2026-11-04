@@ -169,6 +169,33 @@ public sealed class MobileServerTests
     }
 
     [TestMethod]
+    public async Task WhatTakesBackAPrompt_AndReadsAToolCall_IsAuthenticatedAndScopedToItsSession()
+    {
+        await using var fixture = await Fixture.StartAsync();
+        Assert.AreEqual(HttpStatusCode.Unauthorized, (await fixture.Client.GetAsync("/api/sessions/a/queue")).StatusCode);
+        Assert.AreEqual(HttpStatusCode.Unauthorized, (await fixture.Client.GetAsync("/api/sessions/a/tools/call-1")).StatusCode);
+        Assert.AreEqual(HttpStatusCode.Unauthorized, (await fixture.PostAsync("/api/sessions/a/queue/queue-1/remove", new JsonObject())).StatusCode);
+        Assert.AreEqual(HttpStatusCode.Unauthorized, (await fixture.PostAsync("/api/sessions/a/steer/steer-1/withdraw", new JsonObject())).StatusCode);
+        await fixture.SignInAsync();
+        fixture.Alta.Answer("session status a", FakeAlta.Status("a", "p1", "personal"))
+            .Answer("session queued a", new JsonObject { ["type"] = "alta.session.queued.item", ["queueItemId"] = "queue-1", ["kind"] = "queue", ["prompt"] = "Then the docs" })
+            .Answer("session unqueue a queue-1", new JsonObject { ["type"] = "alta.session.unqueued", ["status"] = "removed" })
+            .Answer("session unsteer a steer-1", new JsonObject { ["type"] = "alta.session.unsteered", ["withdrawn"] = true })
+            .Answer("session tool a call-1", new JsonObject { ["type"] = "alta.session.tool", ["name"] = "Bash", ["command"] = "git status" });
+
+        Assert.AreEqual("queue-1", (string?)JsonNode.Parse(await fixture.Client.GetStringAsync("/api/sessions/a/queue"))!["items"]![0]!["id"]);
+        Assert.AreEqual("git status", (string?)JsonNode.Parse(await fixture.Client.GetStringAsync("/api/sessions/a/tools/call-1?since=41"))!["command"]);
+        CollectionAssert.IsSubsetOf(new[] { "--since", "41" }, fixture.Alta.CallsOf("session tool a call-1").Single());
+        Assert.AreEqual("removed", (string?)JsonNode.Parse(await (await fixture.PostAsync("/api/sessions/a/queue/queue-1/remove", new JsonObject())).Content.ReadAsStringAsync())!["status"]);
+        Assert.IsTrue((bool)JsonNode.Parse(await (await fixture.PostAsync("/api/sessions/a/steer/steer-1/withdraw", new JsonObject())).Content.ReadAsStringAsync())!["withdrawn"]!);
+
+        Assert.AreEqual(HttpStatusCode.NotFound, (await fixture.Client.GetAsync("/api/sessions/unknown/queue")).StatusCode);
+        Assert.AreEqual(HttpStatusCode.NotFound, (await fixture.Client.GetAsync("/api/sessions/unknown/tools/call-1")).StatusCode);
+        Assert.AreEqual(HttpStatusCode.NotFound, (await fixture.PostAsync("/api/sessions/unknown/queue/queue-1/remove", new JsonObject())).StatusCode);
+        Assert.AreEqual(HttpStatusCode.NotFound, (await fixture.PostAsync("/api/sessions/unknown/steer/steer-1/withdraw", new JsonObject())).StatusCode);
+    }
+
+    [TestMethod]
     public async Task ThePermissionRequestsOfASession_AreReadAndAnswered_AsTheWindowAnswersThem()
     {
         await using var fixture = await Fixture.StartAsync();

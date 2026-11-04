@@ -21,6 +21,8 @@ const icons = {
   tool: '<path d="M14 6a4 4 0 0 0 5 5l-8 8a2 2 0 0 1-3-3l8-8a4 4 0 0 1-2-2z"/>',
   external: '<path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/>',
   close: '<path d="M6 6l12 12M18 6L6 18"/>',
+  trash: '<path d="M3 6h18M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2M19 6l-1 14a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1L5 6M10 11v6M14 11v6"/>',
+  edit: '<path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/>',
   timer: '<circle cx="12" cy="13" r="8"/><path d="M12 9v4l2 2M10 2h4"/>',
   send: '<path d="M22 2L11 13M22 2l-7 20-4-9-9-4z"/>',
   steer: '<path d="M15 14l5-5-5-5"/><path d="M4 20v-7a4 4 0 0 1 4-4h12"/>',
@@ -59,6 +61,7 @@ export function activityLine(document: Document, facts: ActivityFacts, live: boo
   line.append(icon(document, live ? "spinner" : facts.failed > 0 ? "warning" : "check", "act-mark"));
   const headline = el(document, "span", "act-headline", facts.headline);
   if (facts.names) headline.append(el(document, "small", null, facts.names));
+  if (facts.current) headline.append(el(document, "small", "act-current", facts.current));
   line.append(headline);
   const all = el(document, "span", "act-facts");
   const fact = (name: IconName, value: string | number, label: string, className?: string) => {

@@ -158,6 +158,13 @@ internal sealed partial class MobileServer : IAsyncDisposable
             PromptBodyAsync(request, async body => await _options.Api.CreateAsync(body, ct).ConfigureAwait(false), ct));
         api.MapPost("/sessions/{id}/prompt", (string id, HttpRequest request, CancellationToken ct) =>
             PromptBodyAsync(request, body => _options.Api.PromptAsync(id, body, ct), ct));
+        // A prompt that waits can be taken back: from the queue of the session, or from the run it was steered into.
+        api.MapGet("/sessions/{id}/queue", async (string id, CancellationToken ct) => Json(await _options.Api.QueueAsync(id, ct).ConfigureAwait(false)));
+        api.MapPost("/sessions/{id}/queue/{itemId}/remove", async (string id, string itemId, CancellationToken ct) => Json(await _options.Api.UnqueueAsync(id, itemId, ct).ConfigureAwait(false)));
+        api.MapPost("/sessions/{id}/steer/{withdrawalId}/withdraw", async (string id, string withdrawalId, CancellationToken ct) => Json(await _options.Api.UnsteerAsync(id, withdrawalId, ct).ConfigureAwait(false)));
+        // One tool call, read when the phone opens it: the timeline only says what each call works on.
+        api.MapGet("/sessions/{id}/tools/{activityId}", async (string id, string activityId, long? since, CancellationToken ct) =>
+            Json(await _options.Api.ToolAsync(id, activityId, since, ct).ConfigureAwait(false)));
         api.MapPost("/sessions/{id}/abort", async (string id, CancellationToken ct) => Json(await _options.Api.AbortAsync(id, ct).ConfigureAwait(false)));
         api.MapPost("/sessions/{id}/archive", async (string id, CancellationToken ct) => Json(await _options.Api.ArchiveAsync(id, ct).ConfigureAwait(false)));
         api.MapPost("/sessions/{id}/restore", async (string id, CancellationToken ct) => Json(await _options.Api.RestoreAsync(id, ct).ConfigureAwait(false)));

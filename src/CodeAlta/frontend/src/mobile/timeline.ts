@@ -1,5 +1,5 @@
 import { thoughtHeadline } from "../timelineActivity/activityText";
-import type { ActivityFacts, EventImage, TimelineEvent } from "./contract";
+import type { ActivityFacts, EventImage, QueuedPrompt, TimelineEvent } from "./contract";
 import { hostPromptOf, type HostPrompt } from "./hostPrompt";
 import { foldWorkflows, type WorkflowRun } from "./workflowRun";
 
@@ -15,8 +15,11 @@ export type MessageBlock = Readonly<{
 }>;
 /** A thought of the agent, inside an activity. */
 export type ThoughtRow = Readonly<{ type: "thought"; key: string; text: string; at: string | null }>;
-/** A tool call, inside an activity: its last phase and the times of its first and last events. */
-export type ToolRow = Readonly<{ type: "tool"; key: string; title: string; phase: string; at: string | null; end: string | null; activityId?: string }>;
+/**
+ * A tool call, inside an activity: its last phase, the times of its first and last events, what it works on when its events
+ * say, and the sequence number of its first event, from which the phone reads it when it opens.
+ */
+export type ToolRow = Readonly<{ type: "tool"; key: string; title: string; phase: string; at: string | null; end: string | null; activityId?: string; subject?: string; seq?: number }>;
 /** An image a tool gave the model during an activity: a saved copy of the session. */
 export type ToolImage = Readonly<{ key: string; title: string; id: string }>;
 /**
@@ -108,14 +111,16 @@ export function foldEvents(events: readonly TimelineEvent[]): TimelineBlock[] {
     const index = run.tools.get(id);
     if (index === undefined) {
       run.tools.set(id, run.rows.length);
-      run.rows.push({ type: "tool", key: `c${id}`, title: event.text?.trim() || parts[1] || "tool", phase, at: event.at, end: event.at, ...(event.activityId ? { activityId: event.activityId } : {}) });
+      run.rows.push({ type: "tool", key: `c${id}`, title: event.text?.trim() || parts[1] || "tool", phase, at: event.at, end: event.at, seq: event.seq,
+        ...(event.activityId ? { activityId: event.activityId } : {}), ...(event.subject ? { subject: event.subject } : {}) });
       if (event.activityId) {
         owners.set(event.activityId, run);
         if (scriptCalls.has(event.activityId)) for (const item of runs) if (item.callId === event.activityId && !placed.has(item.runId)) { run.workflows.push(item); placed.add(item.runId); }
       }
     } else {
       const tool = run.rows[index] as ToolRow;
-      run.rows[index] = { ...tool, phase, end: event.at ?? tool.end, title: tool.title === (parts[1] || "tool") && event.text?.trim() ? event.text.trim() : tool.title };
+      run.rows[index] = { ...tool, phase, end: event.at ?? tool.end, title: tool.title === (parts[1] || "tool") && event.text?.trim() ? event.text.trim() : tool.title,
+        ...(!tool.subject && event.subject ? { subject: event.subject } : {}) };
     }
   }
   close();
@@ -126,6 +131,7 @@ export function foldEvents(events: readonly TimelineEvent[]): TimelineBlock[] {
 export function activityFacts(block: ActivityBlock, live: boolean): ActivityFacts & { state: "running" | "done" | "failed" } {
   let headline: string | null = null, thoughts = 0, tools = 0, succeeded = 0, failed = 0, running = 0, start = NaN, end = NaN;
   const names: string[] = [];
+  let current: string | null = null;
   const note = (iso: string | null) => {
     const at = Date.parse(iso ?? "");
     if (!Number.isFinite(at)) return;
@@ -137,15 +143,17 @@ export function activityFacts(block: ActivityBlock, live: boolean): ActivityFact
     tools++; note(row.at); note(row.end);
     if (row.phase === "completed") succeeded++;
     else if (row.phase === "failed") failed++;
-    else if (row.phase !== "canceled") running++;
+    else if (row.phase !== "canceled") { running++; current = row.subject ? `${row.title} · ${row.subject}` : null; }
     if (names.length < 3 && !names.includes(row.title)) names.push(row.title);
   }
   if (!live) { failed += running; running = 0; }
   return {
     state: live ? "running" : failed > 0 ? "failed" : "done",
     headline: headline ?? (tools > 0 ? (live ? "Calling tools…" : "Called tools") : (live ? "Working…" : "Worked")),
-    names: headline === null && names.length ? names.join(", ") : null,
+    // What the running tool works on says more than the names of the tools.
+    names: headline === null && names.length && !(live && current) ? names.join(", ") : null,
     thoughts, tools, succeeded, failed, running,
+    current: live ? current : null,
     startedAt: Number.isFinite(start) ? new Date(start).toISOString() : null,
     endedAt: Number.isFinite(end) ? new Date(end).toISOString() : null,
   };
@@ -159,7 +167,7 @@ export function blockVersion(block: TimelineBlock, live: boolean, open: boolean)
   if (block.kind === "message") return block.key;
   if (block.kind === "workflow") return `${block.key}|${block.run.version}`;
   const runs = (block.workflows ?? []).map(run => `${run.runId}:${run.version}`).join(",");
-  return `${block.rows.map(row => row.type === "tool" ? `${row.key}:${row.phase}` : row.key).join(",")}|${block.images?.length ?? 0}|${runs}|${live}|${open}`;
+  return `${block.rows.map(row => row.type === "tool" ? `${row.key}:${row.phase}:${row.subject ?? ""}` : row.key).join(",")}|${block.images?.length ?? 0}|${runs}|${live}|${open}`;
 }
 
 /** What drawing the timeline again does to each block: keep its element, draw it again in place, or add it. */
@@ -182,8 +190,39 @@ export function planTimeline(drawn: ReadonlyMap<string, string>, blocks: readonl
 export const liveBlock = (blocks: readonly TimelineBlock[], index: number, busy: boolean): boolean =>
   busy && index === blocks.length - 1 && blocks[index].kind === "activity";
 
-/** A prompt the session accepted that its timeline does not hold yet: a steered one only reaches the journal later. */
-export type PendingPrompt = Readonly<{ key: string; text: string; mode: "send" | "steer" | "queue"; sentAt: number; after: number; attachments?: readonly MessageAttachment[] }>;
+/**
+ * A prompt the session accepted that its timeline does not hold yet: a steered one only reaches the journal later. While it
+ * waits it can be taken back, by the id that names it in the queue of the session or in its run; a steered prompt `taken`
+ * was found to be with the agent, and can no longer be.
+ */
+export type PendingPrompt = Readonly<{
+  key: string; text: string; mode: "send" | "steer" | "queue"; sentAt: number; after: number; attachments?: readonly MessageAttachment[];
+  queueId?: string; withdrawalId?: string; taken?: boolean;
+}>;
+
+/** Whether a pending prompt can still be taken back. */
+export const canWithdraw = (prompt: PendingPrompt): boolean => !prompt.taken && (!!prompt.queueId || !!prompt.withdrawalId);
+
+/**
+ * The pending prompts of a session once its queue is read: the queue says which prompts wait, so a queued prompt it no longer
+ * holds goes (its message comes, or it was removed elsewhere), one the phone sent takes its id when its answer has not come
+ * yet, and one the phone does not know (queued before a reload, or from the computer) comes. What was removed from this page
+ * stays gone, whatever a read that was on its way says.
+ */
+export function withQueue(pending: readonly PendingPrompt[], items: readonly QueuedPrompt[], removed: ReadonlySet<string>, after: number): PendingPrompt[] {
+  const waiting = items.filter(item => !removed.has(item.id));
+  const known = new Set(pending.map(prompt => prompt.queueId).filter(id => !!id));
+  const fresh = waiting.filter(item => !known.has(item.id));
+  const kept = pending.filter(prompt => !prompt.queueId || waiting.some(item => item.id === prompt.queueId)).map(prompt => {
+    if (prompt.queueId || prompt.mode === "steer") return prompt;
+    const index = fresh.findIndex(item => item.text.trim() === prompt.text.trim());
+    return index < 0 ? prompt : { ...prompt, mode: "queue" as const, queueId: fresh.splice(index, 1)[0].id };
+  });
+  return [...kept, ...fresh.map((item): PendingPrompt => ({
+    key: `q${item.id}`, text: item.text, mode: "queue", sentAt: Date.parse(item.at ?? "") || Date.now(), after, queueId: item.id,
+    ...(item.files?.length ? { attachments: item.files.map(file => ({ title: file.title, mediaType: file.mediaType ?? "application/octet-stream" })) } : {}),
+  }))];
+}
 
 /** How long a prompt waits for its message once the session is idle: then the journal had time to write it. */
 export const pendingGrace = 30_000;
@@ -197,7 +236,8 @@ export function stillPending(pending: readonly PendingPrompt[], events: readonly
   return pending.filter(prompt => {
     const match = events.find(event => event.kind === "user.message" && event.seq > prompt.after && !used.has(event.seq) && (event.text ?? "").trim() === prompt.text.trim());
     if (match) { used.add(match.seq); return false; }
-    return busy || now - prompt.sentAt < pendingGrace;
+    // The queue says when a queued prompt no longer waits.
+    return !!prompt.queueId || busy || now - prompt.sentAt < pendingGrace;
   });
 }
 

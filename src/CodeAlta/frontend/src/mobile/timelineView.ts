@@ -4,11 +4,12 @@
 // on a tap; what is open stays open while the page shows the session.
 import { activityDuration } from "../timelineActivity/activityText";
 import { plainResult } from "../workflows/scriptResult";
+import type { ToolCallDetail } from "./contract";
 import { activityLine, el, icon } from "./dom";
 import { previewLine, type HostPrompt } from "./hostPrompt";
 import { linkedImageUrl, matchLinkedImages, savedImageUrl, splitFiles, type ImageItem } from "./imageModel";
 import type { ImageViewer } from "./imageViewer";
-import { activityFacts, clockTime, type ActivityBlock, type MessageBlock, type PendingPrompt, type ToolRow, type WorkflowBlock } from "./timeline";
+import { activityFacts, canWithdraw, clockTime, type ActivityBlock, type MessageBlock, type PendingPrompt, type ToolRow, type WorkflowBlock } from "./timeline";
 import { timelineIcon, type TimelineIconName } from "./timelineIcons";
 import type { WorkflowCall, WorkflowRun, WorkflowState } from "./workflowRun";
 
@@ -26,6 +27,10 @@ export type TimelineViewOptions = Readonly<{
   sessionTitle: (id: string) => string | null;
   /** Opens a session on the phone. */
   openSession: (id: string) => void;
+  /** Reads a tool call, when its row opens. */
+  readTool: (activityId: string, seq: number | undefined) => Promise<ToolCallDetail>;
+  /** Takes a pending prompt back, to forget it or to edit it in the composer. */
+  withdraw: (key: string, then: "delete" | "edit") => void;
   viewer: ImageViewer;
 }>;
 
@@ -51,6 +56,8 @@ export function createTimelineView(options: TimelineViewOptions) {
   let shownResults = new Set<string>();
   // The images of each group (a message, an activity), which the viewer goes through.
   let groups = new Map<string, ImageItem[]>();
+  // The last read of each tool call that is open: an answer to an earlier one is dropped.
+  const toolReads = new Map<string, number>();
 
   /** Forgets what was open: another session is shown. */
   function reset() { open = new Set(); shownResults = new Set(); groups = new Map(); }
@@ -133,12 +140,27 @@ export function createTimelineView(options: TimelineViewOptions) {
       time.dateTime = block.at!;
       label.append(time);
     }
+    if (pending && canWithdraw(pending)) {
+      // A prompt with files is not edited here: its files are on the computer, and the composer could not send them again.
+      const actions = make("span", "pending-actions");
+      if (!pending.attachments?.length) actions.append(pendingAction(pending, "edit", "Edit this prompt"));
+      actions.append(pendingAction(pending, "delete", "Delete this prompt"));
+      label.append(actions);
+    }
     item.append(label);
     const content = make("div", "markdown-content");
     const diagram = fillMessage(content, block, block.text);
     if (block.text.trim()) item.append(content);
     files(item, block);
     return { element: item, version: block.key, diagram };
+  }
+
+  function pendingAction(pending: PendingPrompt, then: "delete" | "edit", label: string): HTMLButtonElement {
+    const action = button(`pending-${then}`, label);
+    action.dataset.prompt = pending.key;
+    action.dataset.then = then;
+    action.append(icon(document, then === "delete" ? "trash" : "edit"));
+    return action;
   }
 
   // The files of a message: its images as pictures, the others as chips.
@@ -243,23 +265,89 @@ export function createTimelineView(options: TimelineViewOptions) {
 
   // ---- The activity of a turn: its line, the images of its tools and the runs of its scripts, then its rows when open ----
 
+  // A call is a row, which a tap opens on what the call does: a call whose events have no id cannot be read.
   function toolRow(tool: ToolRow): HTMLDivElement {
-    const element = make("div", "tool-row");
+    const element = make("div", "tool-call");
     element.dataset.key = tool.key;
+    const row = tool.activityId ? button("tool-row") : make("div", "tool-row");
+    if (tool.activityId) row.setAttribute("aria-expanded", "false");
+    element.append(row);
     toolState(element, tool);
     return element;
   }
 
-  // A row says its state by an icon, and how long the call took once it ended.
+  const toolKey = (activityId: string) => `tool:${activityId}`;
+
+  // A row says its state by an icon, what the call works on, and how long the call took once it ended.
   function toolState(element: HTMLElement, tool: ToolRow) {
     element.dataset.phase = tool.phase;
+    element.dataset.subject = tool.subject ?? "";
+    const row = element.querySelector<HTMLElement>(":scope > .tool-row")!;
+    row.dataset.phase = tool.phase;
+    if (tool.activityId) row.dataset.activity = tool.activityId;
+    if (tool.seq !== undefined) row.dataset.seq = String(tool.seq);
     const state: WorkflowState = tool.phase === "completed" ? "completed" : tool.phase === "failed" ? "failed" : tool.phase === "canceled" ? "canceled" : "running";
     const mark = timelineIcon(document, stateIcons[state], "tool-mark");
     mark.title = tool.phase;
     const took = Date.parse(tool.end ?? "") - Date.parse(tool.at ?? "");
     const time = state !== "running" && took >= 1000 ? duration(took) : null;
-    element.replaceChildren(mark, make("strong", null, tool.title), make("span", "tool-phase", time ?? (state === "running" ? "" : tool.phase === "completed" ? "" : tool.phase)));
-    element.setAttribute("aria-label", `${tool.title}: ${tool.phase}`);
+    row.replaceChildren(mark, make("strong", null, tool.title));
+    if (tool.subject) row.append(make("span", "tool-subject", tool.subject));
+    row.append(make("span", "tool-phase", time ?? (state === "running" ? "" : tool.phase === "completed" ? "" : tool.phase)));
+    row.setAttribute("aria-label", `${tool.title}${tool.subject ? ` ${tool.subject}` : ""}: ${tool.phase}`);
+    // What is open follows the call: it says more once the call has ended, and the row comes open again when its activity does.
+    if (tool.activityId && open.has(toolKey(tool.activityId))) void showTool(element, row, tool.activityId);
+  }
+
+  // Reads a call and shows it under its row. A read that a later one replaced, or that comes once the row closed, is dropped.
+  async function showTool(element: HTMLElement, row: HTMLElement, activityId: string) {
+    let panel = element.querySelector<HTMLElement>(":scope > .tool-detail");
+    if (!panel) {
+      panel = make("div", "tool-detail");
+      panel.append(make("p", "tool-note", "Loading…"));
+      element.append(panel);
+    }
+    row.setAttribute("aria-expanded", "true");
+    const reading = (toolReads.get(activityId) ?? 0) + 1;
+    toolReads.set(activityId, reading);
+    const current = () => toolReads.get(activityId) === reading && open.has(toolKey(activityId));
+    let content: Node[];
+    try {
+      const call = await options.readTool(activityId, Number(row.dataset.seq) || undefined);
+      if (!current()) return;
+      content = call.error ? [make("p", "tool-note", call.error)] : toolParts(call);
+    } catch (error) {
+      if (!current()) return;
+      content = [make("p", "tool-note", error instanceof Error ? error.message : String(error))];
+    }
+    panel.replaceChildren(...content);
+  }
+
+  // What a call does, each fact on its own line. Its long texts scroll, and say when only a part of them came.
+  function toolParts(call: ToolCallDetail): Node[] {
+    const parts: Node[] = [];
+    const fact = (label: string, value: string, className?: string) => {
+      const line = make("div", "tool-fact");
+      line.append(make("span", "tool-fact-label", label), make("code", className, value));
+      parts.push(line);
+    };
+    const text = (label: string, value: string | null | undefined, length: number | undefined, kept: "start" | "end") => {
+      if (!value) return;
+      parts.push(make("div", "tool-section", label), make("pre", "tool-text", value));
+      if (length !== undefined && length > value.length) parts.push(make("p", "tool-note", `The ${kept === "start" ? "first" : "last"} ${value.length.toLocaleString()} of ${length.toLocaleString()} characters.`));
+    };
+    const folder = call.workingDirectory || call.sessionFolder;
+    if (folder) fact("Folder", folder);
+    if (call.exitCode !== null && call.exitCode !== undefined) fact("Exit code", String(call.exitCode), call.exitCode !== 0 ? "tool-bad" : undefined);
+    if (call.failure) fact("Error", call.failure, "tool-bad");
+    if (call.command) text("Command", call.command, undefined, "start");
+    else text("Arguments", call.arguments, call.argumentsLength, "start");
+    text("Modified files", call.modifiedFiles?.join("\n"), undefined, "start");
+    text("Read files", call.readFiles?.join("\n"), undefined, "start");
+    text("Diff", call.diff, call.diffLength, "start");
+    text("Output", call.output, call.outputLength, "end");
+    if (!parts.length) parts.push(make("p", "tool-note", "The call says nothing more yet."));
+    return parts;
   }
 
   function activityBody(block: ActivityBlock, body: HTMLElement) {
@@ -277,7 +365,7 @@ export function createTimelineView(options: TimelineViewOptions) {
           fill();
           element.append(make("div", "msg-label", "Thinking"), content);
         } else element = toolRow(entry);
-      } else if (entry.type === "tool" && element.dataset.phase !== entry.phase) toolState(element, entry);
+      } else if (entry.type === "tool" && (element.dataset.phase !== entry.phase || element.dataset.subject !== (entry.subject ?? ""))) toolState(element, entry);
       const expected: ChildNode | null = previous ? previous.nextSibling : body.firstChild;
       if (expected !== element) body.insertBefore(element, expected);
       previous = element;
@@ -452,6 +540,21 @@ export function createTimelineView(options: TimelineViewOptions) {
   /** Answers a tap the view draws for; says whether it did. */
   function click(event: Event): boolean {
     const target = event.target as Element | null;
+    const withdraw = target?.closest<HTMLButtonElement>("button.pending-delete, button.pending-edit");
+    if (withdraw?.dataset.prompt) { options.withdraw(withdraw.dataset.prompt, withdraw.dataset.then === "edit" ? "edit" : "delete"); return true; }
+    const toolCall = target?.closest<HTMLButtonElement>("button.tool-row");
+    if (toolCall?.dataset.activity) {
+      const key = toolKey(toolCall.dataset.activity), element = toolCall.closest<HTMLElement>(".tool-call")!;
+      if (open.has(key)) {
+        open.delete(key);
+        toolCall.setAttribute("aria-expanded", "false");
+        element.querySelector(":scope > .tool-detail")?.remove();
+      } else {
+        open.add(key);
+        void showTool(element, toolCall, toolCall.dataset.activity);
+      }
+      return true;
+    }
     const source = target?.closest<HTMLButtonElement>("button.host-source, button.wf-session");
     if (source?.dataset.session) { options.openSession(source.dataset.session); return true; }
     const shown = target?.closest<HTMLButtonElement>("button.thumb, button.md-image");

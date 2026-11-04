@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import type { TimelineEvent } from "./contract";
 import {
-  activityFacts, appendEvents, blockTime, blockVersion, clockTime, dayLabel, foldEvents, liveBlock, pendingBlock, pendingGrace, planTimeline, prependEvents, stillPending, withDays,
+  activityFacts, appendEvents, blockTime, blockVersion, canWithdraw, clockTime, dayLabel, foldEvents, liveBlock, pendingBlock, pendingGrace, planTimeline, prependEvents, stillPending, withDays, withQueue,
   type ActivityBlock, type DayBlock, type MessageBlock, type PendingPrompt, type TimelineBlock,
 } from "./timeline";
 
@@ -162,6 +162,52 @@ test("a user message keeps its words and the files the server named: their title
   assert.equal(foldEvents([{ ...event("user.message", ""), attachments: files }]).length, 1, "Files alone are a message.");
   const prompt: PendingPrompt = { key: "p", text: "Read these", mode: "send", sentAt: 0, after: 0, attachments: files.map(({ title, mediaType }) => ({ title, mediaType })) };
   assert.deepEqual(stillPending([prompt], [sent], true, pendingGrace).map(item => item.key), []);
+});
+
+test("a queued prompt waits as long as the queue holds it, and the queue names what the phone did not send", () => {
+  const queued: PendingPrompt = { key: "p1", text: "Then the docs", mode: "queue", sentAt: 0, after: 0, queueId: "queue-1" };
+  assert.deepEqual(stillPending([queued], [], false, pendingGrace * 10), [queued], "no grace: the queue says when it goes");
+  const steered: PendingPrompt = { key: "p2", text: "Faster", mode: "steer", sentAt: 0, after: 0, withdrawalId: "steer-1" };
+  assert.deepEqual(stillPending([steered], [], false, pendingGrace * 10), [], "a steered prompt has no list to read");
+  assert.equal(canWithdraw(queued) && canWithdraw(steered), true);
+  assert.equal(canWithdraw({ ...steered, taken: true }), false, "too late");
+  assert.equal(canWithdraw({ key: "p3", text: "x", mode: "send", sentAt: 0, after: 0 }), false, "nothing names it yet");
+
+  // It left the queue, sent or removed elsewhere: it goes.
+  assert.deepEqual(withQueue([queued, steered], [], new Set(), 5), [steered]);
+  // Another prompt of the queue comes, with its files; the steered one stays.
+  const read = withQueue([steered], [{ id: "queue-9", text: "From before", at: "2026-11-05T10:00:00Z", files: [{ title: "a.txt", mediaType: "text/plain" }] }], new Set(), 5);
+  assert.deepEqual(read.map(prompt => [prompt.key, prompt.mode, prompt.queueId, prompt.after, prompt.attachments?.[0]?.title]),
+    [["p2", "steer", undefined, 0, undefined], ["qqueue-9", "queue", "queue-9", 5, "a.txt"]]);
+  // A prompt whose answer has not come yet is the one the queue names, not one more.
+  const sending: PendingPrompt = { key: "p4", text: "Sent while it worked", mode: "send", sentAt: 0, after: 0 };
+  const adopted = withQueue([sending], [{ id: "queue-2", text: " Sent while it worked " }], new Set(), 5);
+  assert.deepEqual(adopted.map(prompt => [prompt.key, prompt.mode, prompt.queueId]), [["p4", "queue", "queue-2"]]);
+  // What this page removed stays gone, whatever a read on its way says.
+  assert.deepEqual(withQueue([], [{ id: "queue-3", text: "Removed" }], new Set(["queue-3"]), 5), []);
+  // Nothing changes: the prompts are the same objects, so nothing is drawn again.
+  assert.equal(withQueue([queued], [{ id: "queue-1", text: "Then the docs" }], new Set(), 5)[0], queued);
+});
+
+test("a tool call says what it works on, from the first of its events that does, and the running one says it on the folded line", () => {
+  seq = 0;
+  const blocks = foldEvents([
+    event("activity.toolcall.requested", "Bash", "call-1"),
+    { ...event("activity.toolcall.started", "Bash", "call-1"), subject: "git status" },
+    { ...event("activity.toolcall.started", "Read", "call-2"), subject: "a.txt" },
+  ]);
+  const block = blocks[0];
+  assert.equal(block.kind, "activity");
+  if (block.kind !== "activity") return;
+  assert.deepEqual(block.rows.map(row => row.type === "tool" ? [row.subject, row.seq, row.activityId] : null), [["git status", 1, "call-1"], ["a.txt", 3, "call-2"]]);
+  const facts = activityFacts(block, true);
+  assert.equal(facts.current, "Read · a.txt", "the last that runs");
+  assert.equal(facts.names, null, "it says more than the names of the tools");
+  assert.equal(activityFacts(block, false).current, null, "a turn that ended runs nothing");
+  assert.notEqual(blockVersion(block, true, false), blockVersion({ ...block, rows: block.rows.map(row => row.type === "tool" ? { ...row, subject: "other" } : row) }, true, false), "a row is drawn again when it learns its subject");
+  // A tool without a subject leaves the names of the tools on the line, as before.
+  const named = foldEvents([event("activity.toolcall.started", "Grep", "call-3")])[0];
+  if (named.kind === "activity") assert.deepEqual([activityFacts(named, true).current, activityFacts(named, true).names], [null, "Grep"]);
 });
 
 test("the host's prompts, the images of tools, the pictures of an answer and the runs of scripts fold where they belong", () => {
