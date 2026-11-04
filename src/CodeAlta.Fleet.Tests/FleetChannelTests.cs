@@ -1,4 +1,5 @@
 using System.Net;
+using System.Net.Sockets;
 using System.Text.Json;
 using CodeAlta.Fleet.Channels;
 using CodeAlta.Fleet.Client;
@@ -88,6 +89,27 @@ public sealed class FleetChannelTests
         Assert.IsFalse(remote.IsFromThisMachine, "A connection from another address of the network is not of this machine.");
         var self = new FleetAcceptedStream(Stream.Null, new IPEndPoint(IPAddress.Parse("192.0.2.1"), 50000), new IPEndPoint(IPAddress.Parse("192.0.2.1"), 2585));
         Assert.IsTrue(self.IsFromThisMachine, "A connection of this machine to its own network address is.");
+    }
+
+    [TestMethod]
+    public async Task Connector_NamesTheFailureOfEachAddress_NotOnlyTheLast()
+    {
+        // A port nothing listens on: the loopback refuses it at once.
+        int closed;
+        using (var probe = new Socket(SocketType.Stream, ProtocolType.Tcp))
+        {
+            probe.Bind(new IPEndPoint(IPAddress.Loopback, 0));
+            closed = ((IPEndPoint)probe.LocalEndPoint!).Port;
+        }
+
+        var refused = FleetDirectConnector.Format(IPAddress.Loopback, closed);
+        var failure = await Assert.ThrowsExactlyAsync<IOException>(() => FleetDirectConnector.ConnectAsync(["not-an-address", refused], TimeSpan.FromSeconds(5),
+            TestContext.CancellationToken));
+        StringAssert.StartsWith(failure.Message, "No address of the machine answered: not-an-address ");
+        StringAssert.Contains(failure.Message, $"; {refused} ");
+        var inner = Assert.IsInstanceOfType<AggregateException>(failure.InnerException, "every failure is kept, for the caller to tell why");
+        Assert.AreEqual(2, inner.InnerExceptions.Count);
+        Assert.IsInstanceOfType<SocketException>(inner.InnerExceptions[1]);
     }
 
     [TestMethod]

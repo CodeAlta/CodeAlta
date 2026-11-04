@@ -111,5 +111,10 @@ public sealed class SshServerInstallerTests
         var closed = new HttpRequestException("Connection refused", new System.Net.Sockets.SocketException((int)System.Net.Sockets.SocketError.ConnectionRefused));
         Assert.IsFalse(LocalNetworkAccess.IsBlockedHere(closed, isMacOS: true), "a port that refuses is the machine's answer");
         Assert.IsFalse(LocalNetworkAccess.ProblemOf(closed, isMacOS: true).BlockedHere);
+        // The connection to a node tries each of its addresses: the loopback of this computer refuses, its network has no route.
+        var node = new IOException("No address of the machine answered: …", new AggregateException(
+            new System.Net.Sockets.SocketException((int)System.Net.Sockets.SocketError.HostUnreachable),
+            new System.Net.Sockets.SocketException((int)System.Net.Sockets.SocketError.ConnectionRefused)));
+        Assert.IsTrue(LocalNetworkAccess.IsBlockedHere(node, isMacOS: true), "the refusal of this computer's own loopback does not hide it");
     }
 }
