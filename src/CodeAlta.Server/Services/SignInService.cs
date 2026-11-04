@@ -223,6 +223,9 @@ public sealed class SignInService : IDisposable
             var keeper = breakGlass is null ? null : await _store.GetPersonAsync(breakGlass, cancellationToken).ConfigureAwait(false);
             if (keeper is null || keeper.OrganizationId != actor.OrganizationId || keeper.Role != PersonRoles.Owner)
                 throw Invalid("The break-glass person must be an owner of the organization.");
+            // Their way in is a passkey: without one, company sign-in required would leave the organization to its provider.
+            if ((await _signIn.ListPasskeysAsync(keeper.Id, cancellationToken).ConfigureAwait(false)).Count == 0)
+                throw Invalid("The break-glass owner needs a passkey before company sign-in is required: add one in Link….");
             // The break-glass owner keeps the way in that company sign-in replaces: a passkey.
             if (!enabled.Contains(FleetSignInMethods.Passkey)) enabled = [.. enabled, FleetSignInMethods.Passkey];
         }
@@ -239,9 +242,14 @@ public sealed class SignInService : IDisposable
             held.Version + 1, _time.GetUtcNow());
         var details = JsonSerializer.Serialize(new SignInSettingsAudit(enabled, company?.Issuer, request.RequireSso, company?.AllowedDomains, company?.AllowedTenants),
             SignInSettingsJsonContext.Default.SignInSettingsAudit);
-        if (!await _signIn.SetSignInSettingsAsync(record, origin.Audit("sign_in.settings.set", actor, actor.OrganizationId, details: details), cancellationToken)
-                .ConfigureAwait(false))
-            throw CoordinatorException.Conflict(SignInErrorCodes.SettingsInvalid, "The sign-in settings changed meanwhile: read them again.");
+        switch (await _signIn.SetSignInSettingsAsync(record, document.BreakGlassPersonId, origin.Audit("sign_in.settings.set", actor, actor.OrganizationId, details: details),
+                    cancellationToken).ConfigureAwait(false))
+        {
+            case SignInSettingsWriteOutcome.VersionMoved:
+                throw CoordinatorException.Conflict(SignInErrorCodes.SettingsInvalid, "The sign-in settings changed meanwhile: read them again.");
+            case SignInSettingsWriteOutcome.BreakGlassWithoutPasskey:
+                throw Invalid("The break-glass owner needs a passkey before company sign-in is required: add one in Link….");
+        }
         return ToDto(new HeldSettings(document, secret, record.Version, record.UpdatedAt));
     }
 
@@ -690,22 +698,39 @@ public sealed class SignInService : IDisposable
             throw CoordinatorException.Forbidden(SignInErrorCodes.ManagedByOrganization,
                 "A company account is managed by your organization: an admin removes the person in People and access.");
 
-        // An owner keeps a way in while nothing else lets them back in when every device is lost.
-        var keepLast = person.Role == PersonRoles.Owner && !(await _store.ListDevicesAsync(person.OrganizationId, cancellationToken).ConfigureAwait(false))
-            .Any(device => device.Kind == FleetDeviceKinds.Recovery && device.Status == DeviceStatuses.Approved && device.OwnerPersonId == person.Id);
+        // An owner keeps a way in that signs them in under the settings now while nothing else lets them back in when every
+        // device is lost, and the break-glass owner a passkey while company sign-in is required: checked in the write,
+        // against the settings it was judged by, read again when they moved on meanwhile.
         var method = login?.Method ?? FleetSignInMethods.Passkey;
         var audit = origin.Audit("sign_in.login.remove", actor, person.Id, details: $"{{\"method\":\"{method}\"}}");
-        var outcome = login is not null
-            ? await _signIn.RemoveLoginAsync(login, keepLast, audit, cancellationToken).ConfigureAwait(false)
-            : await _signIn.RemovePasskeyAsync(passkey!, keepLast, audit, cancellationToken).ConfigureAwait(false);
+        var outcome = LoginRemovalOutcome.SettingsChanged;
+        for (var tries = 0; tries < 3 && outcome == LoginRemovalOutcome.SettingsChanged; tries++)
+        {
+            var settings = await ReadSettingsAsync(person.OrganizationId, cancellationToken).ConfigureAwait(false);
+            var rule = new WayInRemoval(settings.Version, UsableMethods(settings.Document, person.Id), person.Role == PersonRoles.Owner,
+                settings.Document.RequireSso && settings.Document.BreakGlassPersonId == person.Id);
+            outcome = login is not null
+                ? await _signIn.RemoveLoginAsync(login, rule, audit, cancellationToken).ConfigureAwait(false)
+                : await _signIn.RemovePasskeyAsync(passkey!, rule, audit, cancellationToken).ConfigureAwait(false);
+        }
+
         return outcome switch
         {
             LoginRemovalOutcome.Removed => await LoginsOfAsync(person, cancellationToken).ConfigureAwait(false),
             LoginRemovalOutcome.LastWayIn => throw CoordinatorException.Conflict(SignInErrorCodes.LastWayIn,
-                "This is the last way this owner signs in, and they have no recovery key: make the recovery key first, or link another way to sign in."),
+                "This is the last way this owner signs in now, and they have no recovery key: make the recovery key first, or link another way to sign in."),
+            LoginRemovalOutcome.BreakGlassPasskey => throw CoordinatorException.Conflict(SignInErrorCodes.LastWayIn,
+                "This is the break-glass owner's last passkey while company sign-in is required: add another passkey first."),
+            LoginRemovalOutcome.SettingsChanged => throw CoordinatorException.Conflict(SignInErrorCodes.SettingsInvalid, "The sign-in settings keep changing: try again."),
             _ => throw CoordinatorException.NotFound(SignInErrorCodes.LoginNotFound, "No way to sign in of this person has this id."),
         };
     }
+
+    // The methods that sign a person in on a new device under the settings: the enabled and available ones, and, while
+    // company sign-in is required, company sign-in, with the passkeys of the break-glass owner.
+    private IReadOnlyCollection<string> UsableMethods(SignInSettingsDocument document, string personId)
+        => [.. Describe(document).Where(static method => method.Enabled && method.Available).Select(static method => method.Id)
+            .Where(method => !document.RequireSso || method == FleetSignInMethods.Company || method == FleetSignInMethods.Passkey && personId == document.BreakGlassPersonId)];
 
     // The person whose ways in a call reads or removes: the calling device's own, or another of the organization for a
     // device whose person manages the people (an owner, an admin).

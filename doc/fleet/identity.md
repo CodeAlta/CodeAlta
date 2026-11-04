@@ -84,8 +84,10 @@ to it.
   App, no ID token: the server reads the numeric user id and the name through the API with the user token, once, and
   keeps neither the token nor the login, which its person can change and give away), Apple later.
 - **Removing** a linked account or a passkey (`DELETE /api/v1/sign-in/logins/{id}`, the person's own, or anyone's for
-  `access.manage`) makes it sign nobody in; the ids are opaque hashes, never the issuer, subject or credential id. Two
-  are kept: the last way in of an owner without a recovery key (`sign_in.last_way_in`, checked in the same write), and a
+  `access.manage`) makes it sign nobody in; the ids are opaque hashes, never the issuer, subject or credential id. Some
+  are kept: the last way in that still signs an owner without a recovery key in under the settings (an account of
+  Microsoft signs nobody in while company sign-in is required), and the last passkey of the break-glass owner then
+  (`sign_in.last_way_in`, checked in the same write against the settings it was judged by); and a
   company account (`sign_in.managed_by_organization`), which would only come back as a new person at its next sign-in:
   a person leaves through deprovisioning. There is no sign-out: the server keeps no session, a device key acts.
 - A self-hosted server has its own host name, so it cannot use a redirect address registered once for everyone. The
@@ -135,7 +137,7 @@ to it.
   Entra ID needs its tenant ids, since its emails are not verified. An identity outside is refused and audited, and no
   person is made for it.
 - **Enforcement**: the organization requires its company sign-in, and no other way signs a new device in, except
-  the passkey of one **break-glass Owner**.
+  the passkey of one **break-glass Owner**, who must have one before the organization requires company sign-in.
 - People are created at their first sign-in, as members; the groups of each sign-in are kept with its login, and map
   to roles by **group id** (Entra app roles rather than group claims, which overflow past 200 groups): at each company
   sign-in the widest mapped role applies, member for none. No group makes or unmakes an owner, so the break-glass owner

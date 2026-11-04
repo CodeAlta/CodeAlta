@@ -876,6 +876,44 @@ public sealed class SignInTests
     }
 
     [TestMethod]
+    public async Task TheLastWayInCountsWhatSignsInNow_AndRequiringCompanySignInNeedsTheBreakGlassOwnersPasskey()
+    {
+        await using var provider = await FakeOidcProvider.StartAsync();
+        await using var server = await ServerFixture.StartAsync(signIn: Options(provider));
+        using var owner = new TestDevice("Desktop");
+        using var key = new SoftwareAuthenticator();
+        await server.SetUpAsync(owner);
+        var origin = server.BaseAddress.GetLeftPart(UriPartial.Authority);
+        var (link, linkBack) = await StartAsync(server, owner, FleetSignInMethods.Microsoft, FleetSignInPurposes.Link);
+        Assert.AreEqual(HttpStatusCode.OK, (await CompleteAsync(server, owner, link, linkBack)).Status);
+        async Task<ApiAnswer> RequireSsoAsync(string confirmation)
+        {
+            var held = (await server.SendAsync(owner, HttpMethod.Get, "/api/v1/sign-in/settings")).Read<SignInSettingsDto>();
+            return await server.SendAsync(owner, HttpMethod.Put, "/api/v1/sign-in/settings", new SetSignInSettingsRequest(held.Version,
+                [FleetSignInMethods.Company, FleetSignInMethods.Passkey, FleetSignInMethods.Microsoft],
+                new CompanySignInSettings(provider.Issuer.AbsoluteUri, provider.ClientId, held.Company is null ? string.Empty : null, "Contoso", AllowedDomains: ["contoso.example"]),
+                true, Confirmation: confirmation));
+        }
+
+        // Requiring company sign-in needs a passkey of the break-glass owner: their Microsoft account would sign nobody in then.
+        var withoutPasskey = await RequireSsoAsync(await ConfirmWithAsync(server, owner, FleetSignInMethods.Microsoft));
+        Assert.AreEqual((HttpStatusCode.BadRequest, SignInErrorCodes.SettingsInvalid), Answer(withoutPasskey), withoutPasskey.Body.ToString());
+        await RegisterPasskeyAsync(server, owner, key, origin, await ConfirmWithAsync(server, owner, FleetSignInMethods.Microsoft));
+        var required = await RequireSsoAsync(await ConfirmAsync(server, owner, key));
+        Assert.AreEqual(HttpStatusCode.OK, required.Status, required.Body.ToString());
+
+        // The owner has no recovery key: the passkey is their last way in that signs in while company sign-in is required.
+        var logins = (await server.SendAsync(owner, HttpMethod.Get, "/api/v1/sign-in/logins")).Read<ListResponse<SignInLoginDto>>().Items;
+        var passkey = logins.Single(static login => login.Method == FleetSignInMethods.Passkey);
+        var refused = await server.SendAsync(owner, HttpMethod.Delete, $"/api/v1/sign-in/logins/{passkey.Id}");
+        Assert.AreEqual((HttpStatusCode.Conflict, SignInErrorCodes.LastWayIn), Answer(refused), refused.Body.ToString());
+
+        // The Microsoft account, which signs nobody in now, goes.
+        var microsoft = logins.Single(static login => login.Method == FleetSignInMethods.Microsoft);
+        Assert.AreEqual(HttpStatusCode.OK, (await server.SendAsync(owner, HttpMethod.Delete, $"/api/v1/sign-in/logins/{microsoft.Id}")).Status);
+    }
+
+    [TestMethod]
     public async Task APasskeyIsAddedOnlyAtTheSignedCompletion_AndARevokedDeviceAddsNone()
     {
         await using var server = await ServerFixture.StartAsync();

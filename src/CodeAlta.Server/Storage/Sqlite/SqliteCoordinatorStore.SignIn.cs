@@ -20,7 +20,12 @@ public sealed partial class SqliteCoordinatorStore : ISignInStore
     }
 
     /// <inheritdoc />
-    public ValueTask<bool> SetSignInSettingsAsync(SignInSettingsRecord settings, AuditEntry audit, CancellationToken cancellationToken = default)
+    public async ValueTask<bool> SetSignInSettingsAsync(SignInSettingsRecord settings, AuditEntry audit, CancellationToken cancellationToken = default)
+        => await SetSignInSettingsAsync(settings, null, audit, cancellationToken).ConfigureAwait(false) == SignInSettingsWriteOutcome.Set;
+
+    /// <inheritdoc />
+    public ValueTask<SignInSettingsWriteOutcome> SetSignInSettingsAsync(SignInSettingsRecord settings, string? breakGlassPersonId, AuditEntry audit,
+        CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(settings);
         ArgumentNullException.ThrowIfNull(audit);
@@ -28,9 +33,11 @@ public sealed partial class SqliteCoordinatorStore : ISignInStore
         return WriteAsync((connection, transaction) =>
         {
             // The settings change only from the version they name: two owners editing at once do not overwrite each other.
-            var held = QuerySingle(connection, transaction, "SELECT version FROM sign_in_settings WHERE organization_id = $org", static reader => reader.GetInt64(0),
-                ("$org", settings.OrganizationId));
-            if (settings.Version != held + 1) return false;
+            var held = SettingsVersion(connection, transaction, settings.OrganizationId);
+            if (settings.Version != held + 1) return SignInSettingsWriteOutcome.VersionMoved;
+            // Company sign-in required leaves its break-glass owner a passkey, whatever was removed meanwhile.
+            if (breakGlassPersonId is not null && CountWhere(connection, transaction, "passkeys", "person_id", breakGlassPersonId) == 0)
+                return SignInSettingsWriteOutcome.BreakGlassWithoutPasskey;
             Execute(connection, transaction,
                 "INSERT INTO sign_in_settings (organization_id, settings, company_client_secret_sealed, version, updated_at) VALUES ($org, $settings, $secret, $version, $at) " +
                 "ON CONFLICT (organization_id) DO UPDATE SET settings = excluded.settings, company_client_secret = NULL, " +
@@ -38,9 +45,12 @@ public sealed partial class SqliteCoordinatorStore : ISignInStore
                 ("$org", settings.OrganizationId), ("$settings", settings.Settings), ("$secret", secret), ("$version", settings.Version),
                 ("$at", ToTime(settings.UpdatedAt)));
             AppendAudit(connection, transaction, audit);
-            return true;
+            return SignInSettingsWriteOutcome.Set;
         }, cancellationToken);
     }
+
+    private static long SettingsVersion(SqliteConnection connection, SqliteTransaction transaction, string organizationId)
+        => QuerySingle(connection, transaction, "SELECT version FROM sign_in_settings WHERE organization_id = $org", static reader => reader.GetInt64(0), ("$org", organizationId));
 
     /// <inheritdoc />
     public ValueTask<LoginRecord?> FindLoginAsync(string organizationId, string issuer, string subject, CancellationToken cancellationToken = default)
@@ -124,13 +134,15 @@ public sealed partial class SqliteCoordinatorStore : ISignInStore
     }
 
     /// <inheritdoc />
-    public ValueTask<LoginRemovalOutcome> RemoveLoginAsync(LoginRecord login, bool keepLastWayIn, AuditEntry audit, CancellationToken cancellationToken = default)
+    public ValueTask<LoginRemovalOutcome> RemoveLoginAsync(LoginRecord login, WayInRemoval rule, AuditEntry audit, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(login);
+        ArgumentNullException.ThrowIfNull(rule);
         ArgumentNullException.ThrowIfNull(audit);
         return WriteAsync((connection, transaction) =>
         {
-            if (keepLastWayIn && WaysIn(connection, transaction, login.PersonId) <= 1) return LoginRemovalOutcome.LastWayIn;
+            var kept = Kept(connection, transaction, login.OrganizationId, login.PersonId, rule, login, null);
+            if (kept != LoginRemovalOutcome.Removed) return kept;
             var removed = Execute(connection, transaction, "DELETE FROM logins WHERE organization_id = $org AND issuer = $issuer AND subject = $subject AND person_id = $person",
                 ("$org", login.OrganizationId), ("$issuer", login.Issuer), ("$subject", login.Subject), ("$person", login.PersonId));
             if (removed == 0) return LoginRemovalOutcome.NotFound;
@@ -140,19 +152,42 @@ public sealed partial class SqliteCoordinatorStore : ISignInStore
     }
 
     /// <inheritdoc />
-    public ValueTask<LoginRemovalOutcome> RemovePasskeyAsync(PasskeyRecord passkey, bool keepLastWayIn, AuditEntry audit, CancellationToken cancellationToken = default)
+    public ValueTask<LoginRemovalOutcome> RemovePasskeyAsync(PasskeyRecord passkey, WayInRemoval rule, AuditEntry audit, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(passkey);
+        ArgumentNullException.ThrowIfNull(rule);
         ArgumentNullException.ThrowIfNull(audit);
         return WriteAsync((connection, transaction) =>
         {
-            if (keepLastWayIn && WaysIn(connection, transaction, passkey.PersonId) <= 1) return LoginRemovalOutcome.LastWayIn;
+            var kept = Kept(connection, transaction, passkey.OrganizationId, passkey.PersonId, rule, null, passkey);
+            if (kept != LoginRemovalOutcome.Removed) return kept;
             var removed = Execute(connection, transaction, "DELETE FROM passkeys WHERE credential_id = $id AND person_id = $person",
                 ("$id", passkey.CredentialId), ("$person", passkey.PersonId));
             if (removed == 0) return LoginRemovalOutcome.NotFound;
             AppendAudit(connection, transaction, audit);
             return LoginRemovalOutcome.Removed;
         }, cancellationToken);
+    }
+
+    // Whether a way in may go (Removed), or what keeps it: the settings it was judged by moved on, it is the last passkey of the
+    // break-glass owner, or the last way in that still signs an owner without a recovery key in. A way in counts only when
+    // its method signs in under the settings (an account of Microsoft while company sign-in is required signs nobody in).
+    private static LoginRemovalOutcome Kept(SqliteConnection connection, SqliteTransaction transaction, string organizationId, string personId, WayInRemoval rule,
+        LoginRecord? login, PasskeyRecord? passkey)
+    {
+        if (SettingsVersion(connection, transaction, organizationId) != rule.SettingsVersion) return LoginRemovalOutcome.SettingsChanged;
+        var otherPasskeys = QueryList(connection, transaction, PasskeyColumns + " WHERE person_id = $person", ReadPasskey, ("$person", personId))
+            .Count(other => other.CredentialId != passkey?.CredentialId);
+        if (passkey is not null && rule.KeepBreakGlassPasskey && otherPasskeys == 0) return LoginRemovalOutcome.BreakGlassPasskey;
+        if (!rule.KeepOwnersLastWayIn) return LoginRemovalOutcome.Removed;
+        var usable = QueryList(connection, transaction, LoginColumns + " WHERE person_id = $person", ReadLogin, ("$person", personId))
+            .Count(other => rule.UsableMethods.Contains(other.Method) && !(login is not null && other.Issuer == login.Issuer && other.Subject == login.Subject))
+            + (rule.UsableMethods.Contains(CodeAlta.Fleet.Protocol.Api.FleetSignInMethods.Passkey) ? otherPasskeys : 0);
+        if (usable > 0) return LoginRemovalOutcome.Removed;
+        var recoveryKeys = QuerySingle(connection, transaction,
+            "SELECT COUNT(*) FROM devices WHERE owner_person_id = $person AND kind = $kind AND status = $status", static reader => reader.GetInt64(0),
+            ("$person", personId), ("$kind", CodeAlta.Fleet.Protocol.FleetDeviceKinds.Recovery), ("$status", DeviceStatuses.Approved));
+        return recoveryKeys > 0 ? LoginRemovalOutcome.Removed : LoginRemovalOutcome.LastWayIn;
     }
 
     // The accounts and passkeys of a person: the ways they sign in, beside their devices and their recovery key.

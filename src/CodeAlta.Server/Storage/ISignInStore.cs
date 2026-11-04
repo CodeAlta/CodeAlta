@@ -89,6 +89,35 @@ public enum LoginRemovalOutcome
 
     /// <summary>It is the last way in of the person, which the caller asked to keep.</summary>
     LastWayIn,
+
+    /// <summary>The sign-in settings changed since the caller read them: what signs in may have changed too.</summary>
+    SettingsChanged,
+
+    /// <summary>It is the last passkey of the break-glass owner while company sign-in is required.</summary>
+    BreakGlassPasskey,
+}
+
+/// <summary>
+/// What a removal of a way to sign in keeps, checked in the same write against the settings it was computed from: the
+/// ways in that sign a new device in under those settings, not every one stored.
+/// </summary>
+/// <param name="SettingsVersion">The version of the sign-in settings the rule was computed from (0 for the defaults).</param>
+/// <param name="UsableMethods">The methods that sign the person in under them (company sign-in required leaves fewer).</param>
+/// <param name="KeepOwnersLastWayIn">Whether the person is an owner, who keeps a usable way in unless they have a recovery key.</param>
+/// <param name="KeepBreakGlassPasskey">Whether the person is the break-glass owner while company sign-in is required, who keeps a passkey.</param>
+public sealed record WayInRemoval(long SettingsVersion, IReadOnlyCollection<string> UsableMethods, bool KeepOwnersLastWayIn, bool KeepBreakGlassPasskey);
+
+/// <summary>What happened to a change of the sign-in settings.</summary>
+public enum SignInSettingsWriteOutcome
+{
+    /// <summary>They were set.</summary>
+    Set,
+
+    /// <summary>The version moved on.</summary>
+    VersionMoved,
+
+    /// <summary>Company sign-in is required, and its break-glass owner has no passkey.</summary>
+    BreakGlassWithoutPasskey,
 }
 
 /// <summary>
@@ -109,6 +138,18 @@ public interface ISignInStore
     /// <param name="cancellationToken">Cancels the write.</param>
     /// <returns>Whether they were set; false when the version moved on.</returns>
     ValueTask<bool> SetSignInSettingsAsync(SignInSettingsRecord settings, AuditEntry audit, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Sets the sign-in settings, when the version held is the one before and, while company sign-in is required, its
+    /// break-glass owner has a passkey, in the same write.
+    /// </summary>
+    /// <param name="settings">The settings, numbered after the ones held (1 for the first).</param>
+    /// <param name="breakGlassPersonId">The break-glass owner while company sign-in is required; null otherwise.</param>
+    /// <param name="audit">The audit event.</param>
+    /// <param name="cancellationToken">Cancels the write.</param>
+    /// <returns>What happened.</returns>
+    ValueTask<SignInSettingsWriteOutcome> SetSignInSettingsAsync(SignInSettingsRecord settings, string? breakGlassPersonId, AuditEntry audit,
+        CancellationToken cancellationToken = default);
 
     /// <summary>Finds a linked account by its issuer and subject.</summary>
     /// <param name="organizationId">The organization.</param>
@@ -141,19 +182,19 @@ public interface ISignInStore
 
     /// <summary>Removes an account linked to a person: it signs nobody in afterwards.</summary>
     /// <param name="login">The login.</param>
-    /// <param name="keepLastWayIn">Whether to refuse when it is the last account or passkey of its person, checked in the same write.</param>
+    /// <param name="rule">What the removal keeps, checked in the same write.</param>
     /// <param name="audit">The audit event.</param>
     /// <param name="cancellationToken">Cancels the write.</param>
     /// <returns>What happened.</returns>
-    ValueTask<LoginRemovalOutcome> RemoveLoginAsync(LoginRecord login, bool keepLastWayIn, AuditEntry audit, CancellationToken cancellationToken = default);
+    ValueTask<LoginRemovalOutcome> RemoveLoginAsync(LoginRecord login, WayInRemoval rule, AuditEntry audit, CancellationToken cancellationToken = default);
 
     /// <summary>Removes a passkey of a person: it signs nobody in afterwards.</summary>
     /// <param name="passkey">The passkey.</param>
-    /// <param name="keepLastWayIn">Whether to refuse when it is the last account or passkey of its person, checked in the same write.</param>
+    /// <param name="rule">What the removal keeps, checked in the same write.</param>
     /// <param name="audit">The audit event.</param>
     /// <param name="cancellationToken">Cancels the write.</param>
     /// <returns>What happened.</returns>
-    ValueTask<LoginRemovalOutcome> RemovePasskeyAsync(PasskeyRecord passkey, bool keepLastWayIn, AuditEntry audit, CancellationToken cancellationToken = default);
+    ValueTask<LoginRemovalOutcome> RemovePasskeyAsync(PasskeyRecord passkey, WayInRemoval rule, AuditEntry audit, CancellationToken cancellationToken = default);
 
     /// <summary>Records a sign-in of a linked account: its email, name and groups as the provider gave them now.</summary>
     /// <param name="login">The login as it is now.</param>
