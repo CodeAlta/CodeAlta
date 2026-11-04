@@ -156,13 +156,14 @@ internal sealed class NodeServerAutomations(NodeAutomations automations, DeviceI
         byte[] body;
         try { body = Convert.FromBase64String(received.Body); }
         catch (FormatException) { body = []; }
-        var (accepted, message) = body.Length == 0 && received.Body.Length > 0
-            ? (false, "The body of the event does not read.")
+        var receipt = body.Length == 0 && received.Body.Length > 0
+            ? new CodeAlta.Automations.AutomationService.AutomationHookReceipt(false, "The body of the event does not read.", "unreadable")
             : await automations.Engine.ReceiveHookAsync(received.HookId,
                 new CodeAlta.Automations.Integrations.WebhookRequest(received.Headers.ToDictionary(static pair => pair.Key.ToLowerInvariant(), static pair => pair.Value, StringComparer.Ordinal), body),
                 cancellationToken).ConfigureAwait(false);
-        if (!accepted) Log($"An event of the hook {received.HookId} from {link.Url} was not taken: {message}");
-        await connector.AcknowledgeHookEventsAsync(new FleetHookAcks([new FleetHookAck(received.DeliveryId, accepted, message)]), cancellationToken).ConfigureAwait(false);
+        if (!receipt.Accepted) Log($"An event of the hook {received.HookId} from {link.Url} was not taken: {receipt.Message}");
+        // The server records the report: the automations by their ids, never their names (they are sealed in a Private space).
+        await connector.AcknowledgeHookEventsAsync(new FleetHookAcks([new FleetHookAck(received.DeliveryId, receipt.Accepted, receipt.Report)]), cancellationToken).ConfigureAwait(false);
     }
 
     /// <inheritdoc />

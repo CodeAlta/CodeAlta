@@ -199,9 +199,15 @@ public sealed class AutomationIntegrationTests
         Assert.IsFalse(forged.Accepted);
         StringAssert.Contains(forged.Message, "does not verify");
         Assert.AreEqual(0, fixture.Tools.Requests.Count);
+        // What the server is told names the automation by its id and says what happened in a word: no name, no secret of the machine.
+        var name = fixture.Service.Snapshot.Find(First)!.Definition.Name;
+        Assert.AreEqual($"{First}: signature refused", forged.Report);
+        Assert.IsFalse(forged.Report.Contains(name, StringComparison.Ordinal));
+        StringAssert.Contains(forged.Message, name, "the machine's own log says more");
 
         var taken = await fixture.Service.ReceiveHookAsync(Hook, Signed(body, "msg_1"), default);
         Assert.IsTrue(taken.Accepted, taken.Message);
+        Assert.AreEqual($"{First}: started", taken.Report);
         var start = await fixture.Runner.NextAsync();
         StringAssert.Contains(start.Prompt, "incident INC-42 was declared");
         StringAssert.Contains(start.Prompt, "Name: Checkout errors");

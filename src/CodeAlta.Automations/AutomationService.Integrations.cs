@@ -392,40 +392,49 @@ internal sealed partial class AutomationService
     /// <param name="hookId">The hook.</param>
     /// <param name="request">The event, as pushed.</param>
     /// <param name="cancellationToken">Cancels the reading again of an incident.</param>
-    /// <returns>Whether an automation took it, and what happened, for the server's record.</returns>
-    internal async Task<(bool Accepted, string Message)> ReceiveHookAsync(string hookId, WebhookRequest request, CancellationToken cancellationToken)
+    /// <returns>Whether an automation took it, what happened for this machine's log, and what the server records of it.</returns>
+    internal async Task<AutomationHookReceipt> ReceiveHookAsync(string hookId, WebhookRequest request, CancellationToken cancellationToken)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(hookId);
         ArgumentNullException.ThrowIfNull(request);
         AutomationSnapshot snapshot;
         lock (_gate) snapshot = _snapshot;
         var named = snapshot.Entries.SelectMany(entry => entry.Definition.Triggers.Where(trigger => trigger.IsHooked && trigger.Hook == hookId).Select(trigger => (entry, trigger))).ToArray();
-        if (named.Length == 0) return (false, "No automation of this machine has a trigger on this hook.");
-        if (Integrations is null) return (false, "This host does not take the events of other tools.");
+        if (named.Length == 0) return new(false, "No automation of this machine has a trigger on this hook.", "no automation");
+        if (Integrations is null) return new(false, "This host does not take the events of other tools.", "no integrations");
+        // What the machine's log says names the automation and why; what the server records says what happened in a word, of
+        // an automation by its id: its name and the names of its secrets are not the server's to read.
         var outcomes = new List<string>();
+        var reports = new List<string>();
         var accepted = false;
+        void Note(AutomationEntry entry, string code, string message)
+        {
+            outcomes.Add($"{entry.Definition.Name}: {message}");
+            reports.Add($"{entry.Id}: {code}");
+        }
+
         foreach (var (entry, trigger) in named)
         {
             if (_state.Paused || !Armed(entry))
             {
-                outcomes.Add($"{entry.Definition.Name}: not enabled here.");
+                Note(entry, "not enabled", "not enabled here.");
                 continue;
             }
 
             var (secret, missing) = Resolve(entry.ProjectId, trigger.Secret!);
-            if (secret is null) { outcomes.Add($"{entry.Definition.Name}: {missing}"); continue; }
+            if (secret is null) { Note(entry, "secret missing", missing!); continue; }
             var (eventId, refused) = WebhookSignatures.Verify(trigger.Signature ?? AutomationSignatures.Standard, secret, request, trigger.SignatureHeader, _time.GetUtcNow());
             if (eventId is null)
             {
                 // An event that does not verify is not authentic: nothing of it reaches a prompt.
-                outcomes.Add($"{entry.Definition.Name}: {refused}");
+                Note(entry, "signature refused", refused!);
                 continue;
             }
 
             if (!FirstSeen(entry, trigger, eventId))
             {
                 accepted = true;
-                outcomes.Add($"{entry.Definition.Name}: this event was taken already.");
+                Note(entry, "taken already", "this event was taken already.");
                 continue;
             }
 
@@ -434,17 +443,23 @@ internal sealed partial class AutomationService
                 : (WebhookSample(entry.Definition.Prompt, trigger, eventId, request.Body), null);
             if (sample is null)
             {
-                outcomes.Add($"{entry.Definition.Name}: {problem}");
+                Note(entry, "event refused", problem!);
                 continue;
             }
 
             accepted = true;
-            outcomes.Add(Trigger(entry, trigger.KindName, sample.Detail, sample.Prompt, occurrence: EventOccurrence(trigger, eventId), reply: sample.Reply)
-                ? $"{entry.Definition.Name}: started." : $"{entry.Definition.Name}: not started (see its runs).");
+            if (Trigger(entry, trigger.KindName, sample.Detail, sample.Prompt, occurrence: EventOccurrence(trigger, eventId), reply: sample.Reply)) Note(entry, "started", "started.");
+            else Note(entry, "not started", "not started (see its runs).");
         }
 
-        return (accepted, AutomationText.Line(string.Join(" ", outcomes), 500));
+        return new(accepted, AutomationText.Line(string.Join(" ", outcomes), 500), AutomationText.Line(string.Join("; ", reports), 500));
     }
+
+    /// <summary>What a machine did with an event a hook of the server received.</summary>
+    /// <param name="Accepted">Whether an automation took it (its signature verified).</param>
+    /// <param name="Message">What happened, for the log of this machine: the names of the automations, and why.</param>
+    /// <param name="Report">What happened, for the record of the server: each automation by its id, in a word.</param>
+    internal sealed record AutomationHookReceipt(bool Accepted, string Message, string Report);
 
     /// <summary>Tests the connection of a trigger as the editor writes it: the credentials it names, and what it watches.</summary>
     /// <param name="projectId">The project the automation runs in, whose secrets come first; null for a chat.</param>
