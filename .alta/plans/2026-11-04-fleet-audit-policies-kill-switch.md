@@ -1,6 +1,6 @@
 ---
 title: Audit viewer and exports, signed policies and the kill switch (M4, 4.0)
-status: in-progress
+status: done
 created: 2026-11-04
 summary: The audit log as a filterable, paged timeline with chain verification and CSV / JSON Lines exports; the organization's policy as a signed, hash-chained document that machines pin, verify and enforce; the kill switch as a signed stop in that document that machines obey offline.
 ---
