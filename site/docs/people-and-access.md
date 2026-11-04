@@ -45,6 +45,9 @@ Your machines are yours: the people of your organization see and use them only w
 
 Every machine and automation has one owner: a person, a team or the organization. **Machines and automations** lists them; **Give to…** offers one to another owner, who accepts or declines it under **Waiting for you**. An automation that changes owner is **Paused** until its new owner clicks **Resume**.
 
+- Given to a person from your computer, an automation goes with what it does, sealed for their computers only. **Resume** on their computer adds it to their automations there (add its project to CodeAlta first), and it leaves your computer and your machines.
+- Given to a team or the organization, or left by a person who left, it keeps only its facts: what it does stays sealed for its former owner, so its new owner makes it again.
+
 ## Grants
 
 A grant gives a person or a team one capability somewhere: on the organization, a team, or one machine. **Add a grant…** chooses who, what and where; the trash icon takes it back.

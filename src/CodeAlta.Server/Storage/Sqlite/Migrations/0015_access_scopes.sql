@@ -16,3 +16,13 @@ CREATE TABLE grant_keys (
 ) WITHOUT ROWID;
 
 CREATE INDEX grant_keys_device ON grant_keys (device_id);
+
+-- The hand-over of an automation given to a person (ownership over time): what it does, sealed by a computer of its former
+-- owner for the devices of who takes it; dropped with an offer declined or cancelled.
+CREATE TABLE transfer_handovers (
+    transfer_id TEXT NOT NULL REFERENCES transfers (id),
+    device_id TEXT NOT NULL,
+    sealed TEXT NOT NULL,
+    wrapped TEXT NOT NULL,
+    PRIMARY KEY (transfer_id, device_id)
+) WITHOUT ROWID;

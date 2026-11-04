@@ -170,6 +170,11 @@ internal static class AccessEndpoints
             .Produces<TransferDto>(StatusCodes.Status201Created)
             .WithSummary("Offers a machine or an automation to another owner: a person, a team or the organization, who accepts it.");
 
+        api.MapGet("/transfers/{id}/handover", (string id, HttpContext context, AccessService access) =>
+                Read(context, json.TransferHandoverCopyDto, actor => access.GetHandoverAsync(actor, id, context.RequestAborted)))
+            .Produces<TransferHandoverCopyDto>()
+            .WithSummary("What an automation given to the caller's person does, sealed by its former owner's computer, and this device's copy of its key.");
+
         foreach (var (verb, state) in new[] { ("accept", FleetTransferStates.Accepted), ("decline", FleetTransferStates.Declined), ("cancel", FleetTransferStates.Cancelled) })
         {
             api.MapPost("/transfers/{id}/" + verb, (string id, HttpContext context, AccessService access) =>

@@ -50,12 +50,44 @@ internal sealed partial class AccessService
         var to = ResolveOwner(snapshot, actor.OrganizationId, request.ToKind, request.ToId);
         if (to.Kind == owner.Kind && to.Id == owner.Id) throw Invalid("The resource is theirs already.");
         var transfer = new TransferRecord(SetupService.NewId(), actor.OrganizationId, request.ResourceKind, request.ResourceId, owner.Kind, owner.Id, to.Kind, to.Id,
-            FleetTransferStates.Offered, FleetTransferReasons.Transfer, person.Id, _time.GetUtcNow(), null, null);
-        if (!await _access.OfferTransferAsync(transfer, origin.Audit("transfer.offer", actor, transfer.ResourceId, details: TransferDetails(transfer)), cancellationToken)
-                .ConfigureAwait(false))
+            FleetTransferStates.Offered, FleetTransferReasons.Transfer, person.Id, _time.GetUtcNow(), null, null) { HasHandover = request.Handover is not null };
+        if (request.Handover is { } handover)
+        {
+            // What an automation does goes sealed from its owner's computer to the devices of the person who takes it, and to no other.
+            if (request.ResourceKind != FleetResourceKinds.Automation || to.Kind != FleetPrincipalKinds.Person || owner.Kind != FleetPrincipalKinds.Person || owner.Id != person.Id)
+                throw Invalid("A hand-over goes with an automation its owner gives to a person.");
+            if (string.IsNullOrEmpty(handover.Sealed) || handover.Sealed.Length > MaxSealedLength || handover.Wraps is not { Count: > 0 and <= MaxWraps })
+                throw Invalid("A hand-over is what the automation does, sealed, and a copy of its key for each device of who takes it.");
+            var devices = (await _store.ListDevicesAsync(actor.OrganizationId, cancellationToken).ConfigureAwait(false))
+                .Where(device => device.Kind == FleetDeviceKinds.Controller && device.Status == DeviceStatuses.Approved && device.OwnerPersonId == to.Id)
+                .Select(static device => device.Id).ToHashSet(StringComparer.Ordinal);
+            if (handover.Wraps.Any(wrap => wrap is null || !devices.Contains(wrap.DeviceId) || string.IsNullOrEmpty(wrap.Wrapped) || wrap.Wrapped.Length > MaxWrappedLength)
+                || handover.Wraps.Select(static wrap => wrap.DeviceId).Distinct(StringComparer.Ordinal).Count() != handover.Wraps.Count)
+                throw Invalid("A copy of the key of a hand-over goes once to each device of who takes it, and to no other.");
+        }
+
+        if (!await _access.OfferTransferAsync(transfer, request.Handover?.Sealed, [.. request.Handover?.Wraps.Select(static wrap => (wrap.DeviceId, wrap.Wrapped)) ?? []],
+                origin.Audit("transfer.offer", actor, transfer.ResourceId, details: TransferDetails(transfer)), cancellationToken).ConfigureAwait(false))
             throw CoordinatorException.Conflict(CoordinatorErrorCodes.AccessConflict, "A transfer of this resource is offered already: it is decided or cancelled first.");
         Changed(actor.OrganizationId);
         return ToDto(transfer, owner.Name);
+    }
+
+    /// <summary>Reads the hand-over of a transfer for the calling device: one of the person it is offered or given to.</summary>
+    /// <param name="actor">The calling controller device.</param>
+    /// <param name="transferId">The transfer.</param>
+    /// <param name="cancellationToken">Cancels the read.</param>
+    /// <returns>What the automation does, sealed, and this device's copy of the key.</returns>
+    /// <exception cref="CoordinatorException">No hand-over is there for this device.</exception>
+    public async Task<TransferHandoverCopyDto> GetHandoverAsync(DeviceRecord actor, string transferId, CancellationToken cancellationToken)
+    {
+        var (_, person) = await ReadAsync(actor, cancellationToken).ConfigureAwait(false);
+        var transfer = await _access.GetTransferAsync(transferId, cancellationToken).ConfigureAwait(false);
+        if (transfer is null || transfer.OrganizationId != actor.OrganizationId || transfer.ToKind != FleetPrincipalKinds.Person || transfer.ToId != person.Id
+            || transfer.State is not (FleetTransferStates.Offered or FleetTransferStates.Accepted)
+            || await _access.GetTransferHandoverAsync(transferId, actor.Id, cancellationToken).ConfigureAwait(false) is not { } copy)
+            throw NotFound("No hand-over of this transfer is there for this device.");
+        return new TransferHandoverCopyDto(transfer.Id, transfer.ResourceId, transfer.FromId, copy.Sealed, copy.Wrapped);
     }
 
     /// <summary>Lists the transfers the caller may see: those that concern them or their teams, all for those who manage access.</summary>

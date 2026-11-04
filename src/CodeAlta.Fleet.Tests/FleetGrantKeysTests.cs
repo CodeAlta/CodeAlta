@@ -64,6 +64,33 @@ public sealed class FleetGrantKeysTests
         Assert.ThrowsExactly<ArgumentException>(() => FleetGrantKeys.Seal("org", "g1", "s1", metadata, [], list.Sequence, devices.Desk));
     }
 
+    [TestMethod]
+    public void AnAutomationHandedOverOpensOnTheDevicesOfWhoTakesIt_WhenItsFormerOwnerSignedIt()
+    {
+        using var devices = new Devices();
+        var list = devices.List();
+        var content = new FleetAutomationContent("[automations.nightly]\nname = \"Nightly\"\n", "github.com/codealta/codealta");
+        var (sealedText, wraps) = FleetTransferHandover.Seal("org", "h1", "nightly", content, [PublicKey(devices.Bea)], list.Sequence, devices.Desk);
+        Assert.IsFalse(sealedText.Contains("Nightly", StringComparison.Ordinal), "the server holds ciphertext only");
+        var opened = FleetTransferHandover.Open(sealedText, wraps.Single().Wrapped, "org", "nightly", "p1", devices.Bea, list);
+        Assert.AreEqual(content, opened);
+
+        // Another device, automation, organization or former owner: refused; so is a copy signed by someone else than its former owner.
+        Assert.ThrowsExactly<InvalidDataException>(() => FleetTransferHandover.Open(sealedText, wraps.Single().Wrapped, "org", "nightly", "p1", devices.Cy, list));
+        Assert.ThrowsExactly<InvalidDataException>(() => FleetTransferHandover.Open(sealedText, wraps.Single().Wrapped, "org", "other", "p1", devices.Bea, list));
+        Assert.ThrowsExactly<InvalidDataException>(() => FleetTransferHandover.Open(sealedText, wraps.Single().Wrapped, "else", "nightly", "p1", devices.Bea, list));
+        Assert.ThrowsExactly<InvalidDataException>(() => FleetTransferHandover.Open(sealedText, wraps.Single().Wrapped, "org", "nightly", "p3", devices.Bea, list));
+        var (byCy, cyWraps) = FleetTransferHandover.Seal("org", "h1", "nightly", content, [PublicKey(devices.Bea)], list.Sequence, devices.Cy);
+        Assert.ThrowsExactly<InvalidDataException>(() => FleetTransferHandover.Open(byCy, cyWraps.Single().Wrapped, "org", "nightly", "p1", devices.Bea, list));
+        // A copy of another hand-over does not open this one, nor does a grant's copy of a key.
+        var (other, _) = FleetTransferHandover.Seal("org", "h2", "nightly", content, [PublicKey(devices.Bea)], list.Sequence, devices.Desk);
+        Assert.ThrowsExactly<InvalidDataException>(() => FleetTransferHandover.Open(other, wraps.Single().Wrapped, "org", "nightly", "p1", devices.Bea, list));
+        var (_, grantWraps) = FleetGrantKeys.Seal("org", "h1", "automation:nightly", new FleetSessionMetadata("Title"), [PublicKey(devices.Bea)], list.Sequence, devices.Desk);
+        Assert.ThrowsExactly<InvalidDataException>(() => FleetTransferHandover.Open(sealedText, grantWraps.Single().Wrapped, "org", "nightly", "p1", devices.Bea, list));
+        Assert.ThrowsExactly<InvalidDataException>(() => FleetTransferHandover.Open(sealedText.Replace("\"ct\":\"", "\"ct\":\"A", StringComparison.Ordinal), wraps.Single().Wrapped,
+            "org", "nightly", "p1", devices.Bea, list));
+    }
+
     // The founder's laptop, the desk of the owner of the session (p1), their node, Bea (p2) and Cy (p3).
     private sealed class Devices : IDisposable
     {

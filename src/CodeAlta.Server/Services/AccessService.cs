@@ -760,7 +760,7 @@ internal sealed partial class AccessService
 
     internal static TransferDto ToDto(TransferRecord transfer, string? name)
         => new(transfer.Id, transfer.ResourceKind, transfer.ResourceId, name, transfer.FromKind, transfer.FromId, transfer.ToKind, transfer.ToId, transfer.State, transfer.Reason,
-            transfer.OfferedByPersonId, transfer.OfferedAt, transfer.DecidedByPersonId, transfer.DecidedAt);
+            transfer.OfferedByPersonId, transfer.OfferedAt, transfer.DecidedByPersonId, transfer.DecidedAt, transfer.HasHandover);
 
     internal static AccessProposalDto ToDto(AccessProposalRecord proposal)
         => new(proposal.Id, proposal.PersonId, proposal.SessionId, proposal.Kind, proposal.Summary, proposal.Payload, proposal.State, proposal.CreatedAt,

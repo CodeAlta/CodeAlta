@@ -246,6 +246,19 @@ public sealed partial class FleetServerClient
     public Task<AccessListDto<GrantKeyDto>> ListGrantKeysAsync(CancellationToken cancellationToken = default)
         => SendAsync(HttpMethod.Get, "api/v1/grant-keys", null, AccessJson.AccessListDtoGrantKeyDto, cancellationToken);
 
+    /// <summary>Reads what an automation given to this person does, sealed by its former owner's computer, and this device's copy of its key.</summary>
+    /// <param name="transferId">The transfer.</param>
+    /// <param name="cancellationToken">Cancels the call.</param>
+    /// <returns>The hand-over, which this device verifies and opens.</returns>
+    /// <exception cref="ArgumentException"><paramref name="transferId"/> is empty.</exception>
+    /// <exception cref="FleetServerException">The server holds no hand-over of it for this device.</exception>
+    /// <exception cref="HttpRequestException">The server does not answer.</exception>
+    public Task<TransferHandoverCopyDto> GetTransferHandoverAsync(string transferId, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(transferId);
+        return SendAsync(HttpMethod.Get, $"api/v1/transfers/{Uri.EscapeDataString(transferId)}/handover", null, AccessJson.TransferHandoverCopyDto, cancellationToken);
+    }
+
     /// <summary>Lists the resources this person may see and their owners.</summary>
     /// <param name="cancellationToken">Cancels the call.</param>
     /// <returns>The resources.</returns>

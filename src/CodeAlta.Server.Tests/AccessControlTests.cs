@@ -139,6 +139,55 @@ public sealed class AccessControlTests
     }
 
     [TestMethod]
+    public async Task AnAutomationGivenToAPersonCarriesItsHandOverForTheirDevicesOnly_AndItsFormerOwnerGivesItNoMoreVersions()
+    {
+        await using var server = await ServerFixture.StartAsync();
+        using var owner = new TestDevice("Alex desktop");
+        using var node = new TestDevice("Mac mini");
+        var (setup, machine) = await server.SetUpWithNodeAsync(owner, node);
+        var (bea, beaId) = await AddPersonAsync(server, owner, setup, "Bea");
+        var (mia, _) = await AddPersonAsync(server, owner, setup, "Mia");
+        FleetSignedAutomationVersion Version(long number, bool removed = false)
+        {
+            var text = FleetAutomationVersionDocuments.Serialize(new FleetAutomationVersion(FleetAutomationVersion.CurrentVersion, setup.Organization.Id, "nightly", number,
+                machine.Id, removed, !removed, removed ? [] : ["hourly"], null, null, removed ? null : "{\"sealed\":\"for the machine\"}", owner.DeviceId, owner.PublicKey,
+                server.Clock.Now));
+            return new FleetSignedAutomationVersion(text, owner.Sign(FleetAutomationVersionDocuments.GetSignedBytes(text)));
+        }
+
+        Assert.AreEqual(HttpStatusCode.OK, (await server.SendAsync(owner, HttpMethod.Put, "/api/v1/automations/nightly", new PutAutomationRequest(Version(1)))).Status);
+        var toMia = await server.SendAsync(owner, HttpMethod.Post, "/api/v1/transfers", new OfferTransferRequest(FleetResourceKinds.Automation, "nightly", FleetPrincipalKinds.Person,
+            beaId, new TransferHandoverDto("sealed", [new GrantKeyWrapDto(mia.DeviceId, "wrapped")])));
+        Assert.AreEqual(HttpStatusCode.BadRequest, toMia.Status, "a hand-over goes to the devices of who takes it only");
+        var offer = await server.SendAsync(owner, HttpMethod.Post, "/api/v1/transfers", new OfferTransferRequest(FleetResourceKinds.Automation, "nightly", FleetPrincipalKinds.Person,
+            beaId, new TransferHandoverDto("sealed", [new GrantKeyWrapDto(bea.DeviceId, "wrapped")])));
+        Assert.AreEqual(HttpStatusCode.Created, offer.Status, offer.Body.ToString());
+        var transfer = offer.Read<TransferDto>();
+        Assert.IsTrue(transfer.HasHandover);
+        var copy = await server.SendAsync(bea, HttpMethod.Get, $"/api/v1/transfers/{transfer.Id}/handover");
+        Assert.AreEqual(HttpStatusCode.OK, copy.Status, copy.Body.ToString());
+        Assert.AreEqual(("nightly", setup.Owner.Id, "sealed", "wrapped"), (copy.Read<TransferHandoverCopyDto>().ResourceId, copy.Read<TransferHandoverCopyDto>().FromPersonId,
+            copy.Read<TransferHandoverCopyDto>().Sealed, copy.Read<TransferHandoverCopyDto>().Wrapped));
+        Assert.AreEqual(HttpStatusCode.NotFound, (await server.SendAsync(mia, HttpMethod.Get, $"/api/v1/transfers/{transfer.Id}/handover")).Status, "nothing for another device");
+
+        // Before Bea takes it, its owner still changes it; once she did, the automation is hers: no new version from him, only its removal.
+        Assert.AreEqual(HttpStatusCode.OK, (await server.SendAsync(owner, HttpMethod.Put, "/api/v1/automations/nightly", new PutAutomationRequest(Version(2)))).Status);
+        Assert.AreEqual(HttpStatusCode.OK, (await server.SendAsync(bea, HttpMethod.Post, $"/api/v1/transfers/{transfer.Id}/accept")).Status);
+        var refused = await server.SendAsync(owner, HttpMethod.Put, "/api/v1/automations/nightly", new PutAutomationRequest(Version(3)));
+        Assert.AreEqual(HttpStatusCode.Forbidden, refused.Status, "an automation given away gets no new version from its former owner");
+        Assert.AreEqual(HttpStatusCode.OK, (await server.SendAsync(owner, HttpMethod.Put, "/api/v1/automations/nightly", new PutAutomationRequest(Version(4, removed: true)))).Status,
+            "its former owner takes it off his machines");
+        Assert.AreEqual(HttpStatusCode.OK, (await server.SendAsync(bea, HttpMethod.Get, $"/api/v1/transfers/{transfer.Id}/handover")).Status, "the hand-over stays for her devices");
+
+        // A declined offer takes its hand-over with it.
+        var back = await server.SendAsync(bea, HttpMethod.Post, "/api/v1/transfers", new OfferTransferRequest(FleetResourceKinds.Automation, "nightly", FleetPrincipalKinds.Person,
+            setup.Owner.Id, new TransferHandoverDto("sealed", [new GrantKeyWrapDto(owner.DeviceId, "wrapped")])));
+        Assert.AreEqual(HttpStatusCode.Created, back.Status, back.Body.ToString());
+        Assert.AreEqual(HttpStatusCode.OK, (await server.SendAsync(owner, HttpMethod.Post, $"/api/v1/transfers/{back.Read<TransferDto>().Id}/decline")).Status);
+        Assert.AreEqual(HttpStatusCode.NotFound, (await server.SendAsync(owner, HttpMethod.Get, $"/api/v1/transfers/{back.Read<TransferDto>().Id}/handover")).Status);
+    }
+
+    [TestMethod]
     public async Task AMachineGoesToATeamOnceAMaintainerAcceptsIt_AndAnAutomationTakenWaitsPaused()
     {
         await using var server = await ServerFixture.StartAsync();

@@ -172,8 +172,8 @@ internal sealed partial class FleetServerService
         {
             if (!FleetResourceKinds.Transfers(request!.ResourceKind) || string.IsNullOrEmpty(request.ResourceId) || !FleetPrincipalKinds.CanOwn(request.ToKind))
                 return new FleetSecretActionResult("invalid_request", null);
-            await _servers!.AccessCallAsync(request.LinkId, (client, token) => client.OfferTransferAsync(new OfferTransferRequest(request.ResourceKind, request.ResourceId,
-                request.ToKind, request.ToId ?? string.Empty), token), cancellationToken).ConfigureAwait(false);
+            await _servers!.OfferTransferAsync(request.LinkId, new OfferTransferRequest(request.ResourceKind, request.ResourceId, request.ToKind, request.ToId ?? string.Empty),
+                cancellationToken).ConfigureAwait(false);
             return new FleetSecretActionResult("ok", null);
         });
 
@@ -193,8 +193,10 @@ internal sealed partial class FleetServerService
         => SecretActionAsync(request?.ExpectedEpoch, request?.LinkId, async () =>
         {
             if (!FleetResourceKinds.IsKnown(request!.Kind) || string.IsNullOrEmpty(request.Id)) return new FleetSecretActionResult("invalid_request", null);
-            await _servers!.AccessCallAsync(request.LinkId, (client, token) => client.ResumeResourceAsync(request.Kind, request.Id, token), cancellationToken).ConfigureAwait(false);
-            return new FleetSecretActionResult("ok", null);
+            // An automation handed over is taken here first: this computer then signs and seals its versions for the new owner's machines.
+            return await _servers!.ResumeResourceAsync(request.LinkId, request.Kind, request.Id, cancellationToken).ConfigureAwait(false) is { } problem
+                ? new FleetSecretActionResult("refused", problem)
+                : new FleetSecretActionResult("ok", null);
         });
 
     /// <summary>Makes a service identity of a team or of the organization, disabled.</summary>

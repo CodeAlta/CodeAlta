@@ -47,7 +47,7 @@ public static class FleetGrantKeys
         var key = FleetMetadataKey.Generate();
         var sealedText = key.Seal(sessionId, metadata);
         var wraps = new List<(string, string)>(recipients.Count);
-        foreach (var recipient in recipients) wraps.Add((recipient.DeviceId, Wrap(key, recipient, organizationId, grantId, sessionId, listSequence, signer)));
+        foreach (var recipient in recipients) wraps.Add((recipient.DeviceId, Wrap(key, recipient, organizationId, grantId, sessionId, listSequence, signer, Grants)));
         return (sealedText, wraps);
     }
 
@@ -73,6 +73,23 @@ public static class FleetGrantKeys
         ArgumentNullException.ThrowIfNull(wrapped);
         ArgumentNullException.ThrowIfNull(identity);
         ArgumentNullException.ThrowIfNull(list);
+        var key = Unwrap(wrapped, organizationId, grantId, sessionId, identity, list, signer => list.Members.TryGetValue(machineId, out var machine) && machine.OwnerId is not null
+            && machine.OwnerId == signer.OwnerId, Grants);
+        return key.TryOpen(sessionId, sealedText, out var metadata) && metadata is not null
+            ? metadata
+            : throw new InvalidDataException("The metadata of the grant does not open with its key.");
+    }
+
+    // What a copy binds and signs: grants of sessions, and hand-overs of automations, each under a domain of its own.
+    internal sealed record Purpose(string Domain, string SignDomain);
+
+    internal static readonly Purpose Grants = new(Domain, SignDomain);
+
+    // Opens a copy of a key for this device once it holds against the device list this device verified: for this device and
+    // these two bindings, signed by a controller device that the caller's rule accepts.
+    internal static FleetMetadataKey Unwrap(string wrapped, string organizationId, string grantId, string sessionId, DeviceIdentity identity, FleetDeviceListState list,
+        Func<FleetDeviceListMember, bool> holds, Purpose purpose)
+    {
         try
         {
             using var document = JsonDocument.Parse(wrapped);
@@ -87,19 +104,18 @@ public static class FleetGrantKeys
             var signerId = Field("signer");
             if (list.MemberFrom(signerId, sequence) is not { Kind: FleetDeviceKinds.Controller } signer)
                 throw new InvalidDataException("The copy was not given by a controller device of the device list.");
-            if (!list.Members.TryGetValue(machineId, out var machine) || machine.OwnerId is null || machine.OwnerId != signer.OwnerId)
-                throw new InvalidDataException("The copy was not given by a device of the owner of the session.");
+            if (!holds(signer)) throw new InvalidDataException("The copy was not given by a device of the owner of the content.");
             var epkText = Field("epk");
             var ivText = Field("iv");
             var ctText = Field("ct");
-            if (!signer.Key.Verify(SignedBytes(keyId, identity.DeviceId, organizationId, grantId, sessionId, sequence, signerId, epkText, ivText, ctText), Field("sig")))
+            if (!signer.Key.Verify(SignedBytes(purpose, keyId, identity.DeviceId, organizationId, grantId, sessionId, sequence, signerId, epkText, ivText, ctText), Field("sig")))
                 throw new InvalidDataException("The signature of the copy does not verify with the key of its signer.");
             var epk = Base64Url.DecodeFromChars(epkText);
             var nonce = Base64Url.DecodeFromChars(ivText);
             var sealedBytes = Base64Url.DecodeFromChars(ctText);
             if (nonce.Length != NonceLength || sealedBytes.Length != FleetMetadataKey.KeyLength + TagLength) throw new InvalidDataException("The copy of the key does not read.");
             var secret = identity.DeriveSharedSecret(epk);
-            var associated = Associated(keyId, identity.DeviceId, grantId, sessionId);
+            var associated = Associated(purpose, keyId, identity.DeviceId, grantId, sessionId);
             var wrapping = HKDF.DeriveKey(HashAlgorithmName.SHA256, secret, FleetMetadataKey.KeyLength, SHA256.HashData(epk), associated);
             CryptographicOperations.ZeroMemory(secret);
             var material = new byte[FleetMetadataKey.KeyLength];
@@ -107,10 +123,7 @@ public static class FleetGrantKeys
             {
                 using (var aes = new AesGcm(wrapping, TagLength))
                     aes.Decrypt(nonce, sealedBytes.AsSpan(0, FleetMetadataKey.KeyLength), sealedBytes.AsSpan(FleetMetadataKey.KeyLength), material, associated);
-                var key = new FleetMetadataKey(keyId, material);
-                return key.TryOpen(sessionId, sealedText, out var metadata) && metadata is not null
-                    ? metadata
-                    : throw new InvalidDataException("The metadata of the grant does not open with its key.");
+                return new FleetMetadataKey(keyId, material);
             }
             finally
             {
@@ -171,14 +184,15 @@ public static class FleetGrantKeys
 
     private const string SessionScope = "session:";
 
-    private static string Wrap(FleetMetadataKey key, FleetDevicePublicKey recipient, string organizationId, string grantId, string sessionId, long sequence, DeviceIdentity signer)
+    internal static string Wrap(FleetMetadataKey key, FleetDevicePublicKey recipient, string organizationId, string grantId, string sessionId, long sequence, DeviceIdentity signer,
+        Purpose purpose)
     {
         using var ephemeral = ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256);
         using var peer = ECDiffieHellman.Create();
         peer.ImportSubjectPublicKeyInfo(recipient.ExportSubjectPublicKeyInfo(), out _);
         var secret = ephemeral.DeriveRawSecretAgreement(peer.PublicKey);
         var epk = ephemeral.ExportSubjectPublicKeyInfo();
-        var associated = Associated(key.Id, recipient.DeviceId, grantId, sessionId);
+        var associated = Associated(purpose, key.Id, recipient.DeviceId, grantId, sessionId);
         var wrapping = HKDF.DeriveKey(HashAlgorithmName.SHA256, secret, FleetMetadataKey.KeyLength, SHA256.HashData(epk), associated);
         CryptographicOperations.ZeroMemory(secret);
         var nonce = RandomNumberGenerator.GetBytes(NonceLength);
@@ -187,7 +201,7 @@ public static class FleetGrantKeys
             aes.Encrypt(nonce, key.Material, sealedBytes.AsSpan(0, FleetMetadataKey.KeyLength), sealedBytes.AsSpan(FleetMetadataKey.KeyLength), associated);
         CryptographicOperations.ZeroMemory(wrapping);
         var (epkText, ivText, ctText) = (Base64Url.EncodeToString(epk), Base64Url.EncodeToString(nonce), Base64Url.EncodeToString(sealedBytes));
-        var signature = signer.SignData(SignedBytes(key.Id, recipient.DeviceId, organizationId, grantId, sessionId, sequence, signer.DeviceId, epkText, ivText, ctText));
+        var signature = signer.SignData(SignedBytes(purpose, key.Id, recipient.DeviceId, organizationId, grantId, sessionId, sequence, signer.DeviceId, epkText, ivText, ctText));
         return Encoding.UTF8.GetString(FleetSealedJson.Write(writer =>
         {
             writer.WriteString("alg", FleetKeyWrap.Algorithm);
@@ -205,11 +219,11 @@ public static class FleetGrantKeys
         }));
     }
 
-    private static byte[] SignedBytes(string keyId, string deviceId, string organizationId, string grantId, string sessionId, long sequence, string signerId, string epk, string iv,
-        string ct)
+    private static byte[] SignedBytes(Purpose purpose, string keyId, string deviceId, string organizationId, string grantId, string sessionId, long sequence, string signerId,
+        string epk, string iv, string ct)
         => Encoding.UTF8.GetBytes(string.Create(CultureInfo.InvariantCulture,
-            $"{SignDomain}\n{FleetKeyWrap.Algorithm}\n{keyId}\n{deviceId}\n{organizationId}\n{grantId}\n{sessionId}\n{sequence}\n{signerId}\n{epk}\n{iv}\n{ct}"));
+            $"{purpose.SignDomain}\n{FleetKeyWrap.Algorithm}\n{keyId}\n{deviceId}\n{organizationId}\n{grantId}\n{sessionId}\n{sequence}\n{signerId}\n{epk}\n{iv}\n{ct}"));
 
-    private static byte[] Associated(string keyId, string deviceId, string grantId, string sessionId)
-        => Encoding.UTF8.GetBytes($"{Domain}\n{FleetKeyWrap.Algorithm}\n{keyId}\n{deviceId}\n{grantId}\n{sessionId}");
+    private static byte[] Associated(Purpose purpose, string keyId, string deviceId, string grantId, string sessionId)
+        => Encoding.UTF8.GetBytes($"{purpose.Domain}\n{FleetKeyWrap.Algorithm}\n{keyId}\n{deviceId}\n{grantId}\n{sessionId}");
 }

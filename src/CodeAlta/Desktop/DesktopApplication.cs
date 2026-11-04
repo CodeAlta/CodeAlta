@@ -898,6 +898,7 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                     PausesPlaced = !options.Developer,
                 };
                 automations.Placement = placement;
+                if (placedServers is not null) placedServers.Handover = new Fleet.DesktopAutomationHandover(automations, token => host.ProjectCatalog.LoadAsync(token));
                 fleet.Changed += placement.Poke;
                 if (placedServers is not null) placedServers.Changed += placement.Poke;
                 // A host that has the user review the commands of its sessions lets no session type in a terminal, nor

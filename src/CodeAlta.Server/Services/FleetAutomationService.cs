@@ -50,6 +50,9 @@ internal sealed class FleetAutomationService
         (_store, _automations, _presence, _time, _logger) = (store, automations, presence, time, logger);
     }
 
+    /// <summary>Gets the owners of resources, by which an automation given to another owner takes nothing more from its former one; null for none.</summary>
+    public IAccessStore? Access { get; init; }
+
     /// <summary>Lists the automations of the person of the calling controller device, per machine.</summary>
     /// <param name="actor">The calling device.</param>
     /// <param name="cancellationToken">Cancels the operation.</param>
@@ -96,6 +99,7 @@ internal sealed class FleetAutomationService
         if (machine.Status != DeviceStatuses.Approved) throw CoordinatorException.Conflict(CoordinatorErrorCodes.DeviceState, "The machine is not a member of the device list.");
         if (!string.Equals(machine.OwnerPersonId, person, StringComparison.Ordinal))
             throw CoordinatorException.Forbidden(FleetErrorCodes.Forbidden, "A person gives automations to the machines they own only.");
+        if (!version.Removed) await RequireOwnedAsync(actor.OrganizationId, version.AutomationId, person, cancellationToken).ConfigureAwait(false);
 
         var record = new AutomationRecord(actor.OrganizationId, version.AutomationId, version.MachineId, person, version.Number, version.Removed, version.Enabled,
             JsonSerializer.Serialize(version.Triggers, FleetAutomationApiJsonContext.Default.IReadOnlyListString), signed.Payload, signed.Signature, actor.Id,
@@ -162,6 +166,7 @@ internal sealed class FleetAutomationService
         var held = await _automations.GetAutomationAsync(actor.OrganizationId, id, run.MachineId, cancellationToken).ConfigureAwait(false);
         if (held is null || held.Removed || held.OwnerPersonId != person)
             throw CoordinatorException.NotFound(CoordinatorErrorCodes.AutomationNotFound, "No automation of yours has this id on this machine.");
+        await RequireOwnedAsync(actor.OrganizationId, id, person, cancellationToken).ConfigureAwait(false);
         if (_presence.Get(run.MachineId) is not { } session)
             throw CoordinatorException.Conflict(CoordinatorErrorCodes.AutomationConflict, "The machine is offline: it runs this automation by its triggers, and by hand once it is online.");
         try
@@ -178,6 +183,16 @@ internal sealed class FleetAutomationService
         _logger.LogInformation("Automation {Automation} was asked to run on {Machine} by {Device} (run {Run})", id, run.MachineId, actor.Id, run.RunId);
         await _store.AppendAuditAsync(origin.Audit("automation.run", actor, id), CancellationToken.None).ConfigureAwait(false);
         return new AutomationRunDto(run.RunId, id, run.MachineId, held.Number, "manual", "requested", run.Time, null, null, null, null, null);
+    }
+
+    // An automation given to another owner (doc/fleet/access-control.md, ownership over time) takes no new version and no run
+    // by hand from its former owner: only its removal from their machines. Its new owner gives it versions of their own.
+    private async Task RequireOwnedAsync(string organizationId, string automationId, string person, CancellationToken cancellationToken)
+    {
+        if (Access is not { } access) return;
+        var snapshot = await access.ReadAccessAsync(organizationId, cancellationToken).ConfigureAwait(false);
+        if (snapshot.Owner(FleetResourceKinds.Automation, automationId) is { } owner && !(owner.OwnerKind == FleetPrincipalKinds.Person && owner.OwnerId == person))
+            throw CoordinatorException.Forbidden(FleetErrorCodes.Forbidden, "This automation was given to another owner: its former owner only takes it off their machines.");
     }
 
     /// <summary>Lists the runs of an automation of the caller's person, as its machines reported them, the newest first.</summary>
