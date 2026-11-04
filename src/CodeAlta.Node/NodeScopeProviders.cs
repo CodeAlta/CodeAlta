@@ -44,10 +44,23 @@ internal sealed class NodeScopeProviders
     /// </summary>
     internal Action<IReadOnlyCollection<string>>? ProvidersChanged { get; init; }
 
-    /// <summary>The name of the secret that holds the key of a provider of a scope.</summary>
+    /// <summary>
+    /// The name of the secret that holds the key of a provider of a scope: one per id, never shared by two. An id of lowercase
+    /// letters and digits in words joined by single dashes reads in it (<c>my-gateway</c>: <c>CODEALTA_PROVIDER_MY_GATEWAY</c>),
+    /// which never holds two underscores in a row; any other id (<c>my_gateway</c>, <c>My-Gateway</c>) is named by a digest
+    /// after two underscores, so that it never takes the name of another.
+    /// </summary>
     /// <param name="providerId">The provider.</param>
     /// <returns>The name.</returns>
-    internal static string SecretName(string providerId) => "CODEALTA_PROVIDER_" + providerId.ToUpperInvariant().Replace('-', '_');
+    internal static string SecretName(string providerId)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(providerId);
+        const string Prefix = "CODEALTA_PROVIDER_";
+        var readable = providerId.Length <= 64 && providerId.Split('-').All(static word => word.Length > 0 && word.All(static c => c is (>= 'a' and <= 'z') or (>= '0' and <= '9')));
+        return readable
+            ? Prefix + providerId.ToUpperInvariant().Replace('-', '_')
+            : Prefix + "_" + Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(providerId)))[..32];
+    }
 
     /// <summary>Reads the providers a server gives this machine again, and applies them.</summary>
     /// <param name="linkId">The link.</param>

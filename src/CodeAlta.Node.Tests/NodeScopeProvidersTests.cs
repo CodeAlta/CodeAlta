@@ -126,6 +126,15 @@ public sealed class NodeScopeProvidersTests
         Assert.IsFalse(Registered(), "a provider taken away is no longer usable");
     }
 
+    [TestMethod]
+    public void TwoProvidersWhoseIdsReadAlike_NeverShareTheSecretOfTheirKey()
+    {
+        Assert.AreEqual("CODEALTA_PROVIDER_MY_GATEWAY", NodeScopeProviders.SecretName("my-gateway"), "an id of words joined by dashes reads in its name");
+        var names = new[] { "my-gateway", "my_gateway", "My-Gateway", "my--gateway", "-my-gateway", "my-gateway-" }.Select(NodeScopeProviders.SecretName).ToArray();
+        Assert.AreEqual(names.Length, names.Distinct(StringComparer.OrdinalIgnoreCase).Count(), string.Join(", ", names));
+        Assert.IsTrue(names.All(LocalSecretStore.IsName), string.Join(", ", names));
+    }
+
     // Keeps values as they are: the protection of the machine is not what this test is about.
     private sealed class PlainProtector : ISecretProtector
     {
