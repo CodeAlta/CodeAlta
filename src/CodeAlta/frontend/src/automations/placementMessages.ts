@@ -1,6 +1,12 @@
 // English source keys; translations in es, fr, de, ja, zh-CN order.
 export const automationPlacementMessages = {
   "Runs on": ["Se ejecuta en", "S’exécute sur", "Läuft auf", "実行場所", "运行于"],
+  "Publish to": ["Publicar para", "Publier pour", "Veröffentlichen für", "公開先", "发布给"],
+  "Unavailable team or organization": ["Equipo u organización no disponible", "Équipe ou organisation indisponible", "Team oder Organisation nicht verfügbar",
+    "利用できないチームまたは組織", "不可用的团队或组织"],
+  "It runs as a service identity, with account credentials only.": ["Se ejecuta como una identidad de servicio, solo con credenciales de cuenta.",
+    "Elle s’exécute en tant qu’identité de service, avec des identifiants de compte uniquement.", "Sie läuft als Dienstidentität, nur mit Konto-Anmeldedaten.",
+    "サービス ID として、アカウントの認証情報だけで実行されます。", "它以服务身份运行，仅使用账户凭据。"],
   "{machine} (offline)": ["{machine} (sin conexión)", "{machine} (hors ligne)", "{machine} (offline)", "{machine}（オフライン）", "{machine}（离线）"],
   "Unavailable machine": ["Máquina no disponible", "Machine indisponible", "Nicht verfügbare Maschine", "利用できないマシン", "不可用的机器"],
   "Waits for Continue anyway": ["Espera a continuar de todos modos", "Attend Continuer quand même", "Wartet auf Trotzdem fortsetzen", "それでも続行を待っています", "等待仍然继续"],

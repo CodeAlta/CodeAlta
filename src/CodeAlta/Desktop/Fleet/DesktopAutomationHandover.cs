@@ -59,7 +59,7 @@ internal sealed class DesktopAutomationHandover : IDesktopAutomationHandover
         var repository = entry.ProjectPath is { } folder ? await _repositoryOf(folder, cancellationToken).ConfigureAwait(false) : null;
         if (entry.ProjectPath is not null && repository is null) return null;
         // Where it runs and the folder of its project are this computer's: the new owner places it on machines of their own.
-        return new FleetAutomationContent(AutomationConfig.Write(string.Empty, entry.Definition with { RunsOn = null, Project = null }), repository);
+        return new FleetAutomationContent(AutomationConfig.Write(string.Empty, entry.Definition with { RunsOn = null, PublishTo = null, Project = null }), repository);
     }
 
     /// <inheritdoc />
@@ -87,7 +87,7 @@ internal sealed class DesktopAutomationHandover : IDesktopAutomationHandover
             definition = definition with { Project = folder };
         }
 
-        return await _automations.SaveAsync(definition with { RunsOn = null }, null, cancellationToken).ConfigureAwait(false);
+        return await _automations.SaveAsync(definition with { RunsOn = null, PublishTo = null }, null, cancellationToken).ConfigureAwait(false);
     }
 
     /// <inheritdoc />

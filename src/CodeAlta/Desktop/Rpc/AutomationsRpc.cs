@@ -50,6 +50,31 @@ internal sealed class AutomationsService
         (_automations, _projects, _epoch, _scripts, _placement) = (automations, projects, epoch, scripts, placement);
     }
 
+    /// <summary>
+    /// Gets what reads whom this computer's person may publish an automation to on the server of a machine: the teams they
+    /// maintain and, for an owner or an admin, the organization; null where no server is linked.
+    /// </summary>
+    internal Func<string, CancellationToken, Task<IReadOnlyList<AutomationPublishTarget>>>? PublishTargets { get; init; }
+
+    /// <summary>Whom an automation that runs on a machine may be published to: the person, a team they maintain, the organization.</summary>
+    [NeoRpcMethod("publishTargets")]
+    public async Task<AutomationPublishTargetsResponse> PublishTargetsAsync(AutomationMachineRequest request, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        if (Refuse(request.ExpectedEpoch) is { } refused) return new(refused, []);
+        if (string.IsNullOrEmpty(request.MachineId) || request.MachineId.Length > AutomationDefinition.MaximumMachineLength) return new("invalid_request", []);
+        if (PublishTargets is null) return new("ok", []);
+        try
+        {
+            return new("ok", [.. await PublishTargets(request.MachineId, cancellationToken).ConfigureAwait(false)]);
+        }
+        catch (Exception exception) when (exception is HttpRequestException or IOException or TaskCanceledException or InvalidOperationException
+            or CodeAlta.Fleet.Server.FleetServerException && !cancellationToken.IsCancellationRequested)
+        {
+            return new("unreachable", []);
+        }
+    }
+
     /// <summary>The scripts of the library an automation of a project, or of the user, can run, with their parameters.</summary>
     [NeoRpcMethod("scripts")]
     public async Task<AutomationScriptsResponse> ScriptsAsync(AutomationScriptsRequest request, CancellationToken cancellationToken)
@@ -400,6 +425,7 @@ internal sealed class AutomationsService
                 ScriptArguments = definition.ScriptArguments,
                 Options = SessionOptionsChoice.Of(definition.SessionOptions),
                 RunsOn = definition.RunsOn,
+                PublishTo = definition.PublishTo,
                 Placement = placed,
                 Autonomy = Autonomy(definition.Autonomy),
             };
@@ -483,6 +509,7 @@ internal sealed class AutomationsService
             ReviewBeforeCommit = input.ReviewBeforeCommit,
             Sandbox = Blank(input.Sandbox),
             RunsOn = Blank(input.RunsOn),
+            PublishTo = Blank(input.RunsOn) is null ? null : Blank(input.PublishTo),
             SessionOptions = SessionOptionsChoice.Record(input.Options),
             Autonomy = input.Autonomy is { } autonomy ? new AutomationAutonomy
             {
@@ -652,6 +679,9 @@ internal sealed record AutomationItem(string Id, string Name, bool Enabled, stri
     /// <summary>The paired machine it runs on (its device id); null when it runs on this computer.</summary>
     public string? RunsOn { get; init; }
 
+    /// <summary>Whom it is published to on the server of its machine: <c>team:&lt;id&gt;</c>, <c>organization</c>, or null for the person's own.</summary>
+    public string? PublishTo { get; init; }
+
     /// <summary>Where it stands on the machine it runs on; null when it runs on this computer.</summary>
     public AutomationPlacementItem? Placement { get; init; }
 
@@ -677,6 +707,21 @@ internal sealed record AutomationAutonomyItem(IReadOnlyList<string> AllowedTools
 /// <param name="Message">Why it is pending or failed.</param>
 /// <param name="CopiedAt">When the machine last took it.</param>
 internal sealed record AutomationPlacementItem(string MachineId, string? MachineName, string State, string? Message, DateTimeOffset? CopiedAt);
+
+/// <summary>Asks whom an automation that runs on a machine may be published to.</summary>
+/// <param name="ExpectedEpoch">The host epoch the page knows.</param>
+/// <param name="MachineId">The machine it runs on.</param>
+internal sealed record AutomationMachineRequest(string? ExpectedEpoch, string? MachineId);
+
+/// <summary>Whom an automation may be published to: the person, a team they maintain, the organization.</summary>
+/// <param name="Scope"><c>team:&lt;id&gt;</c> or <c>organization</c>.</param>
+/// <param name="Name">Its name.</param>
+internal sealed record AutomationPublishTarget(string Scope, string Name);
+
+/// <summary>Whom an automation may be published to.</summary>
+/// <param name="Status"><c>ok</c>, <c>unreachable</c>, <c>invalid_request</c> or <c>stale_epoch</c>.</param>
+/// <param name="Targets">The teams and the organization, beside the person.</param>
+internal sealed record AutomationPublishTargetsResponse(string Status, AutomationPublishTarget[] Targets);
 
 /// <summary>Asks for the scripts an automation can run.</summary>
 /// <param name="ProjectId">The project it runs in, whose scripts come first; null for a chat.</param>
@@ -788,6 +833,9 @@ internal sealed record AutomationInput(string? Id, string Name, bool Enabled, st
 
     /// <summary>The paired machine it runs on (its device id); null to run it on this computer. Only for an automation of the user.</summary>
     public string? RunsOn { get; init; }
+
+    /// <summary>Whom it is published to on the server of its machine: <c>team:&lt;id&gt;</c>, <c>organization</c>, or null for the person's own.</summary>
+    public string? PublishTo { get; init; }
 
     /// <summary>What its runs may do without a person; null for an automation that runs as before.</summary>
     public AutomationAutonomyItem? Autonomy { get; init; }

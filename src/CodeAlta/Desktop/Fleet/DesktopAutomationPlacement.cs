@@ -608,7 +608,10 @@ internal sealed class DesktopAutomationPlacement : IAutomationPlacement, IAsyncD
         }
 
         var copy = Copy(entry);
-        var key = Key(copy, repository);
+        // Published to a team or the organization: the machine must be theirs, and this person one who answers for it there.
+        var scope = entry.Definition.PublishTo;
+        if (route.CheckScope(scope) is { } outOfScope) return SetStatus(entry.Id, new(machineId, machineName, "failed", outOfScope, null));
+        var key = scope is null ? Key(copy, repository) : Key(copy, repository) + "|" + scope;
         lock (_gate)
         {
             // Given already: where it stands is what the server last said (read with the runs).
@@ -624,11 +627,11 @@ internal sealed class DesktopAutomationPlacement : IAutomationPlacement, IAsyncD
         try
         {
             // The server reads only the facts beside it: what it does is sealed for the machine and this person's controllers.
-            var sealedText = await route.SealAsync(new FleetAutomationContent(AutomationConfig.Write(string.Empty, copy), repository), entry.Id, number, machineId,
+            var sealedText = await route.SealAsync(new FleetAutomationContent(AutomationConfig.Write(string.Empty, copy), repository), entry.Id, number, machineId, scope,
                 cancellationToken).ConfigureAwait(false);
             // Given to a machine of a team its person maintains, it is an automation of that team (doc/fleet/orchestration.md, scopes).
             var signed = _sign(new FleetAutomationVersion(FleetAutomationVersion.CurrentVersion, route.OrganizationId, entry.Id, number, machineId, false, copy.Enabled,
-                TriggerKinds(copy), null, null, sealedText, _deviceId(), string.Empty, DateTimeOffset.UtcNow) { Scope = route.Scope });
+                TriggerKinds(copy), null, null, sealedText, _deviceId(), string.Empty, DateTimeOffset.UtcNow) { Scope = scope });
             await route.PutAsync(signed, cancellationToken).ConfigureAwait(false);
             lock (_gate) _numbers[entry.Id] = number;
         }
@@ -1053,7 +1056,7 @@ internal sealed class DesktopAutomationPlacement : IAutomationPlacement, IAsyncD
     // What the machine runs: the definition without where it runs here, its project found there by its repository, and
     // disabled while the automations here are paused.
     private AutomationDefinition Copy(AutomationEntry entry)
-        => entry.Definition with { RunsOn = null, Project = null, Enabled = entry.Definition.Enabled && !(PausesPlaced && _automations.Paused) };
+        => entry.Definition with { RunsOn = null, PublishTo = null, Project = null, Enabled = entry.Definition.Enabled && !(PausesPlaced && _automations.Paused) };
 
     /// <summary>The kinds of the triggers of an automation, the facts a version says in clear.</summary>
     internal static IReadOnlyList<string> TriggerKinds(AutomationDefinition definition)

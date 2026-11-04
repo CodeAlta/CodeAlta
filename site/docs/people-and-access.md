@@ -59,12 +59,12 @@ A grant gives a person or a team one capability somewhere: on the organization, 
 
 ### Automations of a team
 
-An automation you send to a machine of a team you maintain (its **Runs on**) becomes an automation of the team: the team owns it, and its maintainers change it.
+When an automation runs on a machine of a team you maintain, **Publish to** in its editor makes it an automation of that team: the team owns it, every maintainer reads, changes and runs it. On a machine of the organization, owners and admins publish it to the organization the same way. **Me** keeps it yours.
 
 - It runs only while the team has a service identity turned on, once that change is signed (see [Sign what machines follow](#sign-what-machines-follow)).
 - A machine of a team runs automations with account credentials only: an API key or a gateway, never a personal plan such as a Claude, Codex or Copilot subscription.
 
-A machine given to the organization runs the automations of the organization: its owners and admins send them, and they run as a service identity of the organization, with account credentials only.
+A machine given to the organization runs the automations of the organization only. They run as a service identity of the organization, with account credentials only.
 
 ## Sign what machines follow
 

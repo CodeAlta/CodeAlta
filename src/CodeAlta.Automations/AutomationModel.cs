@@ -468,6 +468,13 @@ internal sealed record AutomationDefinition(string Id, string Name)
     /// </summary>
     public string? RunsOn { get; init; }
 
+    /// <summary>
+    /// In the configuration of the user only, beside <see cref="RunsOn"/>: whom the automation is published to on the server
+    /// of its machine (<c>doc/fleet/orchestration.md</c>, scopes): <c>team:&lt;id&gt;</c> for a team its person maintains,
+    /// <c>organization</c> for the organization; null keeps it the person's.
+    /// </summary>
+    public string? PublishTo { get; init; }
+
     /// <summary>The provider, model and effort asked for.</summary>
     public AutomationModelRef Model { get; init; }
 
@@ -521,6 +528,8 @@ internal sealed record AutomationDefinition(string Id, string Name)
         if (Script is not null) text += "\nscript\n" + Script + "\n" + (ScriptArguments ?? string.Empty);
         // Nor without a machine of their own.
         if (RunsOn is not null) text += "\nruns_on\n" + RunsOn;
+        // Nor without a scope of its own.
+        if (PublishTo is not null) text += "\npublish_to\n" + PublishTo;
         // Nor without an environment.
         if (Environment is not null) text += "\nenvironment\n" + Environment;
         // Nor without autonomy.

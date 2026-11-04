@@ -122,3 +122,28 @@ internal sealed partial class DesktopFleetServers
         }
     }
 }
+
+// Whom an automation that runs on a machine of a server may be published to (doc/fleet/orchestration.md, scopes).
+internal sealed partial class DesktopFleetServers
+{
+    /// <summary>
+    /// Reads whom this computer's person may publish an automation to that runs on a machine: the team that owns the machine
+    /// when they maintain it, the organization when it owns the machine and they are an owner or an admin who signs, as the
+    /// access document and the device list this computer verified say; the names come from the server.
+    /// </summary>
+    /// <param name="machineId">The machine.</param>
+    /// <param name="cancellationToken">Cancels the read.</param>
+    /// <returns>The targets beside the person; empty for a personal machine or one of no server.</returns>
+    /// <exception cref="FleetServerException">The server refused the read.</exception>
+    /// <exception cref="HttpRequestException">The server does not answer.</exception>
+    internal async Task<IReadOnlyList<CodeAlta.Desktop.Rpc.AutomationPublishTarget>> PublishTargetsAsync(string machineId, CancellationToken cancellationToken)
+    {
+        using var route = AutomationRoute(machineId);
+        if (route is null) return [];
+        if (route.OfOrganization)
+            return [new(FleetAutomationVersion.OrganizationScope, Connections.FirstOrDefault(connection => connection.Link.Id == route.LinkId)?.Link.OrganizationName ?? "Organization")];
+        if (route.TeamId is not { } team) return [];
+        var teams = await AccessCallAsync(route.LinkId, static (client, token) => client.ListTeamsAsync(token), cancellationToken).ConfigureAwait(false);
+        return [new(FleetAutomationVersion.TeamScopePrefix + team, teams.Items.FirstOrDefault(item => item.Id == team)?.Name ?? team)];
+    }
+}

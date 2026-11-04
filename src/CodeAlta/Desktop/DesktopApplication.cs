@@ -1153,7 +1153,10 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                     builder.AddModelCatalogService(providers);
                     builder.AddReminderService(reminders);
                     builder.AddSessionRetentionProtectionService(retention.ProtectionRpc);
-                    builder.AddAutomationsService(new AutomationsService(automations, host.ProjectCatalog, epoch, host.CodeModeScripts, placement));
+                    builder.AddAutomationsService(new AutomationsService(automations, host.ProjectCatalog, epoch, host.CodeModeScripts, placement)
+                    {
+                        PublishTargets = fleetServers is { } publishing ? publishing.PublishTargetsAsync : null,
+                    });
                     var pullRequestPrompts = new CodeAlta.Catalog.PullRequests.PullRequestPromptCatalog(host.CatalogOptions);
                     builder.AddPullRequestPromptsService(new PullRequestPromptsService(pullRequestPrompts, host.ProjectCatalog, epoch));
                     var startPrompts = new CodeAlta.Catalog.StartPrompts.StartPromptCatalog(host.CatalogOptions);
