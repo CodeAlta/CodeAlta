@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { MachineDeviceView } from "#neoastra";
-import { confirmsLoss, devicePermissions, hasPermission, managementProblem, managesMachine, orderedDevices, permissionLabel, permissionsEditable, projectSource,
+import { agentSandboxChoices, agentsAllowed, confirmsBypass, confirmsLoss, devicePermissions, hasPermission, managementProblem, managesMachine, orderedDevices, permissionLabel, permissionsEditable, projectSource,
   updateSummary } from "./machineManagement";
 
 const device = (change: Partial<MachineDeviceView> = {}): MachineDeviceView => ({ id: "d1", name: "laptop", fingerprint: "ABCD EFGH IJKL", permissions: ["view", "drive", "start"],
@@ -26,6 +26,21 @@ test("A revoked device keeps its switches still, and giving up managing from her
   assert.ok(confirmsLoss(device({ isThisComputer: true }), "manage"));
   assert.ok(!confirmsLoss(device({ isThisComputer: true }), "move"));
   assert.ok(!confirmsLoss(device(), "manage"), "another device loses it with one click, as any other permission");
+});
+
+test("Agents of other machines are off until a space lets them in, and only turning on their bypass asks first", () => {
+  assert.ok(!agentsAllowed({ spaces: [] }));
+  assert.ok(!agentsAllowed({ spaces: [{ id: "default", name: "Default", allowed: false }] }));
+  assert.ok(agentsAllowed({ spaces: [{ id: "default", name: "Default", allowed: false }, { id: "work", name: "Work", allowed: true }] }));
+  assert.ok(confirmsBypass(true));
+  assert.ok(!confirmsBypass(false), "taking it back is one click");
+});
+
+test("The sandbox of agents' sessions is their parent's first, then the profiles of the machine and the one its policy names", () => {
+  assert.deepEqual(agentSandboxChoices({ sandboxes: ["workspace", "strict"], sandbox: null }), ["", "workspace", "strict"]);
+  assert.deepEqual(agentSandboxChoices({ sandboxes: ["workspace", "strict"], sandbox: "Strict" }), ["", "workspace", "strict"], "a name in another case is the same profile");
+  assert.deepEqual(agentSandboxChoices({ sandboxes: ["workspace", "strict"], sandbox: "ci" }), ["", "workspace", "strict", "ci"]);
+  assert.deepEqual(agentSandboxChoices({ sandboxes: [], sandbox: null }), [""]);
 });
 
 test("Devices are listed this computer first, then by pairing, the revoked ones last", () => {
