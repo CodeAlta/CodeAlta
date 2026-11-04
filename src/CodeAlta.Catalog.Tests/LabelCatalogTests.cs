@@ -66,6 +66,34 @@ public sealed class LabelCatalogTests
     }
 
     [TestMethod]
+    public async Task TopLevelLabels_ShareANameOnlyWhenTheyAreNotInTheSameSpace()
+    {
+        using var fixture = new Fixture();
+        Assert.IsTrue((await fixture.Spaces.CreateAsync("Work")).Succeeded);
+        Assert.IsTrue((await fixture.Spaces.CreateAsync("Home")).Succeeded);
+        var work = await fixture.Labels.CreateAsync("Brain", space: "work");
+        Assert.AreEqual(LabelChangeStatus.Ok, work.Status, work.Message);
+        var home = await fixture.Labels.CreateAsync("brain", space: "home");
+        Assert.AreEqual(LabelChangeStatus.Ok, home.Status, "The top-level labels of two spaces never show side by side: " + home.Message);
+        Assert.AreEqual("brain-2", home.Label!.Id);
+
+        Assert.AreEqual(LabelChangeStatus.Invalid, (await fixture.Labels.CreateAsync("BRAIN", space: "work")).Status, "Two labels of one space do not share a name.");
+        Assert.AreEqual(LabelChangeStatus.Invalid, (await fixture.Labels.CreateAsync("Brain")).Status, "A label of every space is beside the labels of each space.");
+
+        // A rename, a change of space and a move to the top check the space the label ends in.
+        var notes = (await fixture.Labels.CreateAsync("Notes", space: "work")).Label!;
+        Assert.AreEqual(LabelChangeStatus.Invalid, (await fixture.Labels.UpdateAsync(notes.Id, new LabelEdit(Name: "brain"))).Status);
+        Assert.AreEqual(LabelChangeStatus.Invalid, (await fixture.Labels.UpdateAsync("brain-2", new LabelEdit(Space: "work"))).Status);
+        Assert.AreEqual(LabelChangeStatus.Invalid, (await fixture.Labels.UpdateAsync("brain-2", new LabelEdit(Space: ""))).Status);
+        var under = (await fixture.Labels.CreateAsync("Brain", parent: notes.Id)).Label!;
+        Assert.AreEqual(LabelChangeStatus.Invalid, (await fixture.Labels.MoveAsync(under.Id, null, -1)).Status, "Moved to the top, it stays in the space of Notes.");
+
+        var labels = await fixture.Labels.LoadAsync();
+        Assert.AreEqual("home", labels.Single(label => label.Id == "brain-2").Space);
+        Assert.AreEqual(notes.Id, labels.Single(label => label.Id == under.Id).Parent);
+    }
+
+    [TestMethod]
     public async Task TheTree_IsCappedInDepth()
     {
         using var fixture = new Fixture();
