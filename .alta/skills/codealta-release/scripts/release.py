@@ -290,7 +290,7 @@ def check_links(text: str, only: str | None = None) -> int:
         mark = "ok  " if status == 200 else "FAIL"
         bad += status != 200
         note = ""
-        if status == 200 and anchor and "codealta.github.io" in page:
+        if status == 200 and anchor and "codealta.io" in page:
             html = urllib.request.urlopen(urllib.request.Request(page, headers={"User-Agent": "codealta-release"}), timeout=30).read().decode("utf-8", "replace")
             if f'id="{anchor}"' not in html:
                 mark, note = "FAIL", f" (no heading #{anchor})"
@@ -346,7 +346,7 @@ def cmd_site(args: argparse.Namespace) -> int:
         # release adds answers 404 until then, so the check is tried again for up to ten minutes.
         text = Path(args.check).read_text(encoding="utf-8")
         for attempt in range(10):
-            if not check_links(text, only="codealta.github.io"):
+            if not check_links(text, only="codealta.io"):
                 return 0
             print("  the CDN may still serve the old site: checking again in a minute")
             time.sleep(60)
@@ -391,7 +391,7 @@ def cmd_nuget(args: argparse.Namespace) -> int:
         time.sleep(60)
 
 
-FOOTER = "_This comment was written by [CodeAlta](https://codealta.github.io), an AI coding agent._"
+FOOTER = "_This comment was written by [CodeAlta](https://codealta.io), an AI coding agent._"
 
 
 def comment_message(path: Path) -> str:
@@ -480,7 +480,7 @@ def main() -> int:
     notes.add_argument("--out", help="where to keep the composed notes (default: tmp/release-<version>/release.md)")
     notes.set_defaults(func=cmd_notes)
     site = commands.add_parser("site")
-    site.add_argument("--check", help="Markdown file whose codealta.github.io links are checked after the deploy")
+    site.add_argument("--check", help="Markdown file whose codealta.io links are checked after the deploy")
     site.set_defaults(func=cmd_site)
     close = commands.add_parser("close")
     close.add_argument("version")

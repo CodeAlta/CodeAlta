@@ -46,7 +46,7 @@ public sealed class GitHubAppRegistrationTests
         StringAssert.Contains(page, "name=\"manifest\"");
         using var manifest = JsonDocument.Parse(WebUtility.HtmlDecode(Regex.Match(page, "name=\"manifest\" value=\"([^\"]*)\"").Groups[1].Value));
         var root = manifest.RootElement;
-        Assert.AreEqual(("CodeAlta", "https://codealta.github.io", true, false), (root.GetProperty("name").GetString(), root.GetProperty("url").GetString(),
+        Assert.AreEqual(("CodeAlta", "https://codealta.io", true, false), (root.GetProperty("name").GetString(), root.GetProperty("url").GetString(),
             root.GetProperty("public").GetBoolean(), root.GetProperty("request_oauth_on_install").GetBoolean()));
         Assert.AreEqual(0, root.GetProperty("default_permissions").EnumerateObject().Count(), "identity only: reading /user needs no permission");
         Assert.IsFalse(root.GetProperty("hook_attributes").GetProperty("active").GetBoolean(), "no webhook");

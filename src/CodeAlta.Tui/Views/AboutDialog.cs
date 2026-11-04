@@ -16,7 +16,7 @@ namespace CodeAlta.Tui.Views;
 internal sealed class AboutDialog
 {
     internal const string GitHubProjectUri = CodeAlta.Hosting.CodeAltaNuGetUpdateChecker.GitHubProjectUri;
-    internal const string WebsiteUri = "https://codealta.github.io/";
+    internal const string WebsiteUri = "https://codealta.io/";
 
     private readonly Func<Rectangle?> _getBounds;
     private readonly Func<Visual?> _getFocusTarget;
