@@ -1,6 +1,6 @@
 ---
 title: Ownership and access control of the fleet (M4, 4.0)
-status: in-progress
+status: done
 created: 2026-11-04
 summary: Principals, organization and team roles, grants, owners of resources, transfers, team machines, a signed access document that nodes verify themselves, deprovisioning, agents and access, access and keys, audit, and the People and access page of CodeAlta Desktop.
 ---
@@ -45,10 +45,10 @@ fields, a new signed document and one new control notification (`access.changed`
       `/audit` for owners, admins and auditors only; "who can do what" export.
 - [x] 3. Owners of resources and transfers: owner, author and pause of machines and automations, transfers offered and
       accepted, resources whose owner is suspended listed.
-- [x] 4. The signed access document: protocol, chain verifier, server storage and drafts (done with slice 1–3), signing from the console.
+- [x] 4. The signed access document: protocol, chain verifier, server storage and drafts (done with slice 1ï¿½3), signing from the console.
 - [x] 5. What the node decides: anchored access chain, team machines (own sessions only), suspended people refused,
       automations of team machines and of suspended signers refused, `access.changed` notification.
-- [x] 6. Deprovisioning: suspend, revoke devices, transfer to a successor paused (server done with slice 1–3), stop work on
+- [x] 6. Deprovisioning: suspend, revoke devices, transfer to a successor paused (server done with slice 1ï¿½3), stop work on
       team machines (end-to-end test).
 - [x] 7. Agents and access (`alta fleet access` commands, proposals, the skill) and access and keys (pending grants).
 - [x] 8. People and access in CodeAlta Desktop (Settings > Fleet): simple at home, Advanced for teams, grants and
