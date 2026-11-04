@@ -82,15 +82,17 @@ public sealed class PasskeyCeremonies : IDisposable
         return (result.CreationOptionsJson, result.AttestationState ?? string.Empty);
     }
 
-    /// <summary>Ends the registration of a passkey and keeps it for the person.</summary>
+    /// <summary>
+    /// Ends the ceremony of the registration of a passkey and verifies it, without keeping it: the device that started the
+    /// registration adds it once it completes the sign-in with its signature (<see cref="ISignInStore.AddPasskeyAsync(PasskeyRecord, WayInAddition, AuditEntry, CancellationToken)"/>).
+    /// </summary>
     /// <param name="person">The person.</param>
     /// <param name="credentialJson">What <c>navigator.credentials.create()</c> answered.</param>
     /// <param name="state">The state of the ceremony.</param>
     /// <param name="context">The request of the page.</param>
-    /// <param name="audit">The audit event.</param>
-    /// <returns>The passkey.</returns>
+    /// <returns>The passkey, to add.</returns>
     /// <exception cref="ExternalSignInException">The attestation does not verify, or the credential exists.</exception>
-    public async Task<PasskeyRecord> CompleteRegistrationAsync(PersonRecord person, string credentialJson, string state, HttpContext context, AuditEntry audit)
+    public async Task<PasskeyRecord> VerifyRegistrationAsync(PersonRecord person, string credentialJson, string state, HttpContext context)
     {
         ArgumentNullException.ThrowIfNull(person);
         var result = await _handler.PerformAttestationAsync(new PasskeyAttestationContext { HttpContext = context, CredentialJson = credentialJson, AttestationState = state })
@@ -99,7 +101,7 @@ public sealed class PasskeyCeremonies : IDisposable
             throw new ExternalSignInException(SignInErrorCodes.PasskeyInvalid, $"The passkey does not verify: {result.Failure?.Message ?? "no passkey"}.");
         var now = _time.GetUtcNow();
         var record = new PasskeyRecord(Base64Url.EncodeToString(result.Passkey.CredentialId), person.OrganizationId, person.Id, Name(context), Serialize(result.Passkey), now, null);
-        if (!await _store.AddPasskeyAsync(record, audit).ConfigureAwait(false))
+        if (await _store.FindPasskeyAsync(record.CredentialId).ConfigureAwait(false) is not null)
             throw new ExternalSignInException(SignInErrorCodes.PasskeyInvalid, "This passkey is registered already.");
         return record;
     }

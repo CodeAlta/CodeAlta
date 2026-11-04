@@ -386,6 +386,7 @@ public sealed class SignInService : IDisposable
                     .ConfigureAwait(false);
             person = await _store.GetPersonAsync(attempt.PasskeyPersonId, cancellationToken).ConfigureAwait(false)
                 ?? throw new InvalidOperationException("A passkey without its person.");
+            if (attempt.Purpose == FleetSignInPurposes.Link) await AddPendingPasskeyAsync(attempt, person, origin, signed.DeviceId, cancellationToken).ConfigureAwait(false);
         }
         else
         {
@@ -505,6 +506,30 @@ public sealed class SignInService : IDisposable
         }
     }
 
+    // The passkey the page registered becomes a way in now, by the signed completion of the device that started it, and
+    // only if that device is still an approved controller of the acting person, in the same write.
+    private async Task AddPendingPasskeyAsync(SignInAttempt attempt, PersonRecord person, RequestOrigin origin, string deviceId, CancellationToken cancellationToken)
+    {
+        if (attempt.PendingPasskey is not { } passkey || passkey.PersonId != person.Id)
+            throw await RefuseAsync(origin, deviceId, attempt.Method, SignInErrorCodes.PasskeyInvalid, "The passkey sign-in did not finish.", cancellationToken).ConfigureAwait(false);
+        var outcome = await _signIn.AddPasskeyAsync(passkey, new WayInAddition(attempt.DeviceId, attempt.FirstWayIn),
+            new AuditEntry("passkey.add", AuditEntry.Success, person.Id, attempt.DeviceId, person.Id, origin.SourceAddress, origin.RequestId), cancellationToken).ConfigureAwait(false);
+        if (outcome != PasskeyAddOutcome.Added) throw await AdditionRefusedAsync(outcome == PasskeyAddOutcome.Exists ? null : outcome == PasskeyAddOutcome.NotFirst, origin, deviceId,
+            attempt.Method, person.Id, cancellationToken).ConfigureAwait(false);
+    }
+
+    // A way in that was not added: a passkey registered already (null), the device no longer approved (false), or a first
+    // way in another one came before (true).
+    private async Task<CoordinatorException> AdditionRefusedAsync(bool? notFirst, RequestOrigin origin, string deviceId, string method, string personId,
+        CancellationToken cancellationToken) => notFirst switch
+    {
+        null => await RefuseAsync(origin, deviceId, method, SignInErrorCodes.PasskeyInvalid, "This passkey is registered already.", cancellationToken, personId).ConfigureAwait(false),
+        true => await RefuseAsync(origin, deviceId, method, SignInErrorCodes.ConfirmationRequired,
+            "Adding a way to sign in needs you to sign in again with one you have, from this device.", cancellationToken, personId).ConfigureAwait(false),
+        false => await RefuseAsync(origin, deviceId, method, FleetErrorCodes.Forbidden, "A sign-in method is linked from an approved controller device of its person.",
+            cancellationToken, personId).ConfigureAwait(false),
+    };
+
     // What every sign-in that proved a person ends with: the company sign-in rule, the groups, the audit, and the grant of an enrollment.
     private async Task<CompleteSignInResponse> FinishAsync(SignInAttempt attempt, HeldSettings settings, PersonRecord person, LoginRecord? login, RequestOrigin origin,
         string deviceId, CancellationToken cancellationToken)
@@ -593,8 +618,9 @@ public sealed class SignInService : IDisposable
             {
                 var person = await _store.GetPersonAsync(attempt.LinkingPersonId!, context.RequestAborted).ConfigureAwait(false)
                     ?? throw new InvalidOperationException("A link without its person.");
-                await _passkeys.CompleteRegistrationAsync(person, request.CredentialJson, state, context,
-                    new AuditEntry("passkey.add", AuditEntry.Success, person.Id, attempt.DeviceId, person.Id, origin.SourceAddress, origin.RequestId)).ConfigureAwait(false);
+                // Verified here, added only by the signed completion of the device (CompleteAsync): the page proves the
+                // authenticator, never that the device may still add a way in.
+                attempt.PendingPasskey = await _passkeys.VerifyRegistrationAsync(person, request.CredentialJson, state, context).ConfigureAwait(false);
                 attempt.PasskeyPersonId = person.Id;
             }
             else
@@ -732,13 +758,12 @@ public sealed class SignInService : IDisposable
         if (attempt.Purpose == FleetSignInPurposes.Link)
         {
             var person = await _store.GetPersonAsync(attempt.LinkingPersonId!, cancellationToken).ConfigureAwait(false) ?? throw new InvalidOperationException("A link without its person.");
-            // Two first links started at once: only the first one to complete is a first way in.
-            if (attempt.FirstWayIn && await HasWayInAsync(person.Id, cancellationToken).ConfigureAwait(false))
-                throw await RefuseAsync(origin, deviceId, attempt.Method, SignInErrorCodes.ConfirmationRequired,
-                    "Adding a way to sign in needs you to sign in again with one you have, from this device.", cancellationToken, person.Id).ConfigureAwait(false);
             var login = new LoginRecord(attempt.OrganizationId, person.Id, attempt.Method, identity.Issuer, identity.Subject, identity.Email, name, groups, now, now);
-            var outcome = await _signIn.LinkLoginAsync(login, new AuditEntry("sign_in.link", AuditEntry.Success, person.Id, deviceId, attempt.Method, origin.SourceAddress,
-                origin.RequestId), cancellationToken).ConfigureAwait(false);
+            // The device is still an approved controller of the acting person, and a first way in still the first, in the same write.
+            var outcome = await _signIn.LinkLoginAsync(login, new WayInAddition(attempt.DeviceId, attempt.FirstWayIn), new AuditEntry("sign_in.link", AuditEntry.Success, person.Id,
+                deviceId, attempt.Method, origin.SourceAddress, origin.RequestId), cancellationToken).ConfigureAwait(false);
+            if (outcome is LoginLinkOutcome.DeviceNotApproved or LoginLinkOutcome.NotFirst)
+                throw await AdditionRefusedAsync(outcome == LoginLinkOutcome.NotFirst, origin, attempt.DeviceId, attempt.Method, person.Id, cancellationToken).ConfigureAwait(false);
             if (outcome == LoginLinkOutcome.LinkedElsewhere)
                 throw await RefuseAsync(origin, deviceId, attempt.Method, SignInErrorCodes.LinkedElsewhere, "This account is linked to another person of the organization.",
                     cancellationToken, person.Id).ConfigureAwait(false);
@@ -869,7 +894,8 @@ public sealed class SignInService : IDisposable
         var status = code switch
         {
             SignInErrorCodes.MethodDisabled or SignInErrorCodes.SsoRequired or SignInErrorCodes.NotLinked or SignInErrorCodes.LinkedElsewhere
-                or SignInErrorCodes.IdentityNotAllowed or SignInErrorCodes.ConfirmationRequired or SignInErrorCodes.FirstWayInExpired => StatusCodes.Status403Forbidden,
+                or SignInErrorCodes.IdentityNotAllowed or SignInErrorCodes.ConfirmationRequired or SignInErrorCodes.FirstWayInExpired or FleetErrorCodes.Forbidden
+                => StatusCodes.Status403Forbidden,
             SignInErrorCodes.ProviderUnavailable => StatusCodes.Status502BadGateway,
             _ => StatusCodes.Status401Unauthorized,
         };

@@ -176,6 +176,9 @@ public sealed class SignInAttempt
 
     /// <summary>Gets or sets the person the passkey proved (or the passkey registered for), or null.</summary>
     public string? PasskeyPersonId { get; set; }
+
+    /// <summary>Gets or sets the passkey the page registered and verified, which only the signed completion of the device adds; null otherwise.</summary>
+    public Storage.PasskeyRecord? PendingPasskey { get; set; }
 }
 
 /// <summary>A change of the company sign-in that waits for another controller device of its owner to approve it, in memory.</summary>
@@ -377,6 +380,30 @@ public sealed class SignInAttempts
     {
         if (FindApproval(id) is not { ApprovedBy: not null } approval || approval.RequesterDeviceId != deviceId) return null;
         return _approvals.TryRemove(approval.Id, out var taken) ? taken : null;
+    }
+
+    /// <summary>
+    /// Forgets what a device has in progress, once it is revoked: its sign-ins (a passkey its page registers, an account it
+    /// links), its confirmations and the changes it asked to have approved.
+    /// </summary>
+    /// <param name="deviceId">The device.</param>
+    public void ForgetDevice(string deviceId)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(deviceId);
+        foreach (var pair in _attempts)
+        {
+            if (pair.Value.DeviceId == deviceId) _attempts.TryRemove(pair.Key, out _);
+        }
+
+        foreach (var pair in _confirmations)
+        {
+            if (pair.Value.DeviceId == deviceId) _confirmations.TryRemove(pair.Key, out _);
+        }
+
+        foreach (var pair in _approvals)
+        {
+            if (pair.Value.RequesterDeviceId == deviceId) _approvals.TryRemove(pair.Key, out _);
+        }
     }
 
     private void Sweep()

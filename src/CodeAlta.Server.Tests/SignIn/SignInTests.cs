@@ -876,6 +876,47 @@ public sealed class SignInTests
     }
 
     [TestMethod]
+    public async Task APasskeyIsAddedOnlyAtTheSignedCompletion_AndARevokedDeviceAddsNone()
+    {
+        await using var server = await ServerFixture.StartAsync();
+        using var owner = new TestDevice("Desktop");
+        using var laptop = new TestDevice("Laptop");
+        using var ownerKey = new SoftwareAuthenticator();
+        using var stolen = new SoftwareAuthenticator();
+        var setup = await server.SetUpAsync(owner);
+        var origin = server.BaseAddress.GetLeftPart(UriPartial.Authority);
+        await RegisterPasskeyAsync(server, owner, ownerKey, origin);
+
+        // The owner's laptop, a second controller device of theirs, signed in with the passkey and approved.
+        var start = (await server.SendAsync(laptop, HttpMethod.Post, "/api/v1/sign-in/start", new StartSignInRequest(FleetSignInMethods.Passkey, laptop.PublicKey, Redirect)))
+            .Read<StartSignInResponse>();
+        var grant = (await CompleteAsync(server, laptop, start, await PasskeyCeremonyAsync(server, start, "get", options => ownerKey.Get(options, origin))))
+            .Read<CompleteSignInResponse>().Grant;
+        Assert.AreEqual(HttpStatusCode.Created, (await server.SendAsync(laptop, HttpMethod.Post, "/api/v1/enroll", new EnrollRequest(string.Empty, laptop.PublicKey, laptop.Name, null, grant))).Status);
+        var entry = await server.NextEntryAsync(owner, FleetDeviceListOperations.Add, laptop.DeviceId, laptop.PublicKey, FleetDeviceKinds.Controller, setup.Owner.Id, setup.Organization.Id);
+        Assert.AreEqual(HttpStatusCode.OK, (await server.SendAsync(owner, HttpMethod.Post, $"/api/v1/devices/{laptop.DeviceId}/approve", new DeviceListChangeRequest(entry))).Status);
+
+        // The laptop registers a passkey; its browser ends the ceremony: nothing is added before the laptop's signed completion.
+        var register = (await server.SendAsync(laptop, HttpMethod.Post, "/api/v1/sign-in/start", new StartSignInRequest(FleetSignInMethods.Passkey, laptop.PublicKey, Redirect,
+            FleetSignInPurposes.Link, await ConfirmAsync(server, laptop, ownerKey)))).Read<StartSignInResponse>();
+        var created = await PasskeyCeremonyAsync(server, register, "create", options => stolen.Create(options, origin));
+        Assert.AreEqual(1, (await ((ISignInStore)server.Server.Store).ListPasskeysAsync(setup.Owner.Id)).Count, "the ceremony alone adds nothing");
+
+        // A second registration the laptop started waits for its page.
+        var other = (await server.SendAsync(laptop, HttpMethod.Post, "/api/v1/sign-in/start", new StartSignInRequest(FleetSignInMethods.Passkey, laptop.PublicKey, Redirect,
+            FleetSignInPurposes.Link, await ConfirmAsync(server, laptop, ownerKey)))).Read<StartSignInResponse>();
+
+        // The laptop is revoked meanwhile: its completion adds no passkey, and the attempt that waits is forgotten.
+        var removal = await server.NextEntryAsync(owner, FleetDeviceListOperations.Remove, laptop.DeviceId, null, null, null, setup.Organization.Id);
+        Assert.AreEqual(HttpStatusCode.OK, (await server.SendAsync(owner, HttpMethod.Post, $"/api/v1/devices/{laptop.DeviceId}/revoke", new DeviceListChangeRequest(removal))).Status);
+        var completed = await CompleteAsync(server, laptop, register, created);
+        Assert.AreNotEqual(HttpStatusCode.OK, completed.Status, completed.Body.ToString());
+        Assert.AreEqual(1, (await ((ISignInStore)server.Server.Store).ListPasskeysAsync(setup.Owner.Id)).Count, "a revoked device adds no way in");
+        var page = await server.SendAsync(null, HttpMethod.Post, "/api/v1/sign-in/passkey/options", new PasskeyOptionsRequest(other.AttemptId));
+        Assert.AreEqual(SignInErrorCodes.AttemptInvalid, page.Code, "the page of a revoked device has nothing to finish");
+    }
+
+    [TestMethod]
     public async Task AConfirmationIsAFreshSignInAtTheProvider_NotTheSessionItKeeps()
     {
         await using var provider = await FakeOidcProvider.StartAsync();

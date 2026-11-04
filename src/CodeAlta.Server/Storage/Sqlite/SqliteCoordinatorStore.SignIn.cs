@@ -78,6 +78,52 @@ public sealed partial class SqliteCoordinatorStore : ISignInStore
     }
 
     /// <inheritdoc />
+    public ValueTask<LoginLinkOutcome> LinkLoginAsync(LoginRecord login, WayInAddition addition, AuditEntry audit, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(login);
+        ArgumentNullException.ThrowIfNull(addition);
+        ArgumentNullException.ThrowIfNull(audit);
+        return WriteAsync((connection, transaction) =>
+        {
+            var existing = QuerySingle(connection, transaction, LoginColumns + " WHERE organization_id = $org AND issuer = $issuer AND subject = $subject", ReadLogin,
+                ("$org", login.OrganizationId), ("$issuer", login.Issuer), ("$subject", login.Subject));
+            if (existing is not null)
+                return existing.PersonId == login.PersonId ? LoginLinkOutcome.AlreadyLinked : LoginLinkOutcome.LinkedElsewhere;
+            if (!MayAddWayIn(connection, transaction, login.PersonId, addition.DeviceId)) return LoginLinkOutcome.DeviceNotApproved;
+            if (addition.FirstWayIn && WaysIn(connection, transaction, login.PersonId) > 0) return LoginLinkOutcome.NotFirst;
+            InsertLogin(connection, transaction, login);
+            AppendAudit(connection, transaction, audit);
+            return LoginLinkOutcome.Linked;
+        }, cancellationToken);
+    }
+
+    /// <inheritdoc />
+    public ValueTask<PasskeyAddOutcome> AddPasskeyAsync(PasskeyRecord passkey, WayInAddition addition, AuditEntry audit, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(passkey);
+        ArgumentNullException.ThrowIfNull(addition);
+        ArgumentNullException.ThrowIfNull(audit);
+        return WriteAsync((connection, transaction) =>
+        {
+            if (!MayAddWayIn(connection, transaction, passkey.PersonId, addition.DeviceId)) return PasskeyAddOutcome.DeviceNotApproved;
+            if (addition.FirstWayIn && WaysIn(connection, transaction, passkey.PersonId) > 0) return PasskeyAddOutcome.NotFirst;
+            if (InsertPasskey(connection, transaction, passkey) == 0) return PasskeyAddOutcome.Exists;
+            AppendAudit(connection, transaction, audit);
+            return PasskeyAddOutcome.Added;
+        }, cancellationToken);
+    }
+
+    // A way in is added by a device that is, at the moment of the write, an approved controller device of its acting person:
+    // a revocation or a suspension that came after the sign-in started leaves nothing added.
+    private static bool MayAddWayIn(SqliteConnection connection, SqliteTransaction transaction, string personId, string deviceId)
+    {
+        var device = ReadDevice(connection, transaction, deviceId);
+        if (device is not { Status: DeviceStatuses.Approved, Kind: CodeAlta.Fleet.Protocol.FleetDeviceKinds.Controller } || device.OwnerPersonId != personId) return false;
+        var person = QuerySingle(connection, transaction, PersonColumns + " FROM people WHERE id = $id", ReadPerson, ("$id", personId));
+        return person is { IsActive: true };
+    }
+
+    /// <inheritdoc />
     public ValueTask<LoginRemovalOutcome> RemoveLoginAsync(LoginRecord login, bool keepLastWayIn, AuditEntry audit, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(login);
@@ -148,16 +194,18 @@ public sealed partial class SqliteCoordinatorStore : ISignInStore
         ArgumentNullException.ThrowIfNull(audit);
         return WriteAsync((connection, transaction) =>
         {
-            var added = Execute(connection, transaction,
-                "INSERT INTO passkeys (credential_id, organization_id, person_id, name, data, created_at, last_used_at) VALUES ($id, $org, $person, $name, $data, $created, $used) " +
-                "ON CONFLICT (credential_id) DO NOTHING",
-                ("$id", passkey.CredentialId), ("$org", passkey.OrganizationId), ("$person", passkey.PersonId), ("$name", passkey.Name), ("$data", passkey.Data),
-                ("$created", ToTime(passkey.CreatedAt)), ("$used", ToNullableTime(passkey.LastUsedAt)));
-            if (added == 0) return false;
+            if (InsertPasskey(connection, transaction, passkey) == 0) return false;
             AppendAudit(connection, transaction, audit);
             return true;
         }, cancellationToken);
     }
+
+    private static int InsertPasskey(SqliteConnection connection, SqliteTransaction transaction, PasskeyRecord passkey)
+        => Execute(connection, transaction,
+            "INSERT INTO passkeys (credential_id, organization_id, person_id, name, data, created_at, last_used_at) VALUES ($id, $org, $person, $name, $data, $created, $used) " +
+            "ON CONFLICT (credential_id) DO NOTHING",
+            ("$id", passkey.CredentialId), ("$org", passkey.OrganizationId), ("$person", passkey.PersonId), ("$name", passkey.Name), ("$data", passkey.Data),
+            ("$created", ToTime(passkey.CreatedAt)), ("$used", ToNullableTime(passkey.LastUsedAt)));
 
     /// <inheritdoc />
     public ValueTask<PasskeyRecord?> FindPasskeyAsync(string credentialId, CancellationToken cancellationToken = default)

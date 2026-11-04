@@ -309,6 +309,8 @@ public sealed class DeviceService
         }
 
         await _presence.DisconnectAsync(revoked.Id, new FleetError(FleetErrorCodes.Revoked, null, "The device was revoked.")).ConfigureAwait(false);
+        // What it had in progress ends with it: a way to sign in its page was adding, a confirmation it held.
+        SignInGrants?.ForgetDevice(revoked.Id);
         if (_relays is not null) await _relays.CloseDeviceAsync(revoked.Id).ConfigureAwait(false);
         return revoked.ToDto(false);
     }

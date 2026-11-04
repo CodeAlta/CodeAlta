@@ -114,7 +114,9 @@ to it.
   nobody in. Linking is not done by the device key alone, which a thief may hold: a person who has a way in signs in
   with it again first (a single-use confirmation from the same device, as for dangerous actions below), and their first
   way in is linked within an hour of the device joining (the setup of the server, or a device another one just
-  approved), when its key was just proved.
+  approved), when its key was just proved. A passkey the server's page registers is only verified there: the signed
+  completion of the device adds it, in the same write that checks the device is still an approved controller of its
+  acting person, and a revocation ends what the device had in progress.
 - Sign-in on the server's own web pages (a browser, the phone) needs an application the admin registers with the
   provider, or a passkey.
 
