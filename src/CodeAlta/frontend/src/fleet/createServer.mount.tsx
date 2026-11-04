@@ -53,13 +53,18 @@ let opened = false;
 const joinApi: JoinOrganizationApi = {
   join: async request => {
     calls.push(JSON.stringify({ joinOrg: request.url, token: request.token }));
+    // A server without an owner refuses an enrollment code: what was typed is its setup code.
+    if (request.token.startsWith("SETUP")) return { status: "enrollment.server_not_set_up", message: "This server has no owner yet: set it up with its setup code.", recoveryWords: null, server: null };
     return { status: "ok", message: null, recoveryWords: null, server: { id: "corp", url: request.url, organization: "Contoso", link: "pending", connection: "pending", problem: null, controller: false, spaces: [],
       recoveryKey: null, shareUrl: null } };
   },
   status: async () => ({ status: "ok", servers: joinApproved ? [{ id: "corp", url: "https://fleet.contoso.com", organization: "Contoso", link: "approved", connection: "online", problem: null,
     controller: false, spaces: [], recoveryKey: null, shareUrl: null } as never] : [], deviceId: "me", words: "cabin onion leopard pigeon peach needle", personName: null }),
   // A server whose address names SSO offers its company sign-in and a passkey, one that names GitHub offers GitHub; the others offer none, and take an enrollment code.
-  signInMethods: async request => request.url.includes("sso")
+  signInMethods: async request => request.url.includes("everything")
+    ? { status: "ok", organization: "Contoso", ssoRequired: false, message: null, methods: [{ id: "company", name: "Contoso", breakGlass: false }, { id: "passkey", name: "Passkey", breakGlass: false },
+      { id: "microsoft", name: "Microsoft", breakGlass: false }, { id: "google", name: "Google", breakGlass: false }, { id: "github", name: "GitHub", breakGlass: false }] }
+    : request.url.includes("sso")
     ? { status: "ok", organization: "Contoso", ssoRequired: false, message: null, methods: [{ id: "passkey", name: "Passkey", breakGlass: false }, { id: "company", name: "Contoso", breakGlass: false }] }
     : request.url.includes("github")
       ? { status: "ok", organization: "Contoso", ssoRequired: false, message: null, methods: [{ id: "github", name: "GitHub", breakGlass: false }] }
@@ -111,8 +116,8 @@ function Fixture() {
     <FleetApprovals epoch={epoch} api={approvalsApi} onOpen={() => calls.push(JSON.stringify({ open: "fleetServer" }))} />
     {shown === "create" && <CreateServerDialog epoch={epoch} api={api} machinesApi={machinesApi} spacesApi={{ link: { linkSpace: joinApi.linkSpace }, list: spacesApi }} onExisting={() => calls.push(JSON.stringify({ existing: true }))}
       onClose={(created, words) => calls.push(JSON.stringify({ close: created, recoveryWords: words ?? null }))} />}
-    {shown === "join" && <JoinOrganizationDialog epoch={epoch} api={joinApi} spaces={spacesApi} onClose={joined => calls.push(JSON.stringify({ closeJoin: joined }))} />}
-    {shown === "joinOwn" && <JoinOrganizationDialog epoch={epoch} kind="own" api={joinApi} spaces={spacesApi} onClose={joined => calls.push(JSON.stringify({ closeJoin: joined }))} />}
+    {shown === "join" && <JoinOrganizationDialog epoch={epoch} api={joinApi} spaces={spacesApi} onSetUp={address => calls.push(JSON.stringify({ setUp: address }))} onClose={joined => calls.push(JSON.stringify({ closeJoin: joined }))} />}
+    {shown === "joinOwn" && <JoinOrganizationDialog epoch={epoch} kind="own" api={joinApi} spaces={spacesApi} onSetUp={address => calls.push(JSON.stringify({ setUp: address }))} onClose={joined => calls.push(JSON.stringify({ closeJoin: joined }))} />}
   </>;
 }
 

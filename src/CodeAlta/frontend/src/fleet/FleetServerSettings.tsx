@@ -39,6 +39,8 @@ export function FleetServerSettings({ epoch, api = fleetServer }: { epoch: strin
   const [creating, setCreating] = useState(false);
   // Join an organization… or Connect to my server…: its server, signing in, the spaces, the approval.
   const [joining, setJoining] = useState<"own" | "organization" | null>(null);
+  // The address of a server the person found has no owner yet, taken to It runs already.
+  const [setupAddress, setSetupAddress] = useState<string | null>(null);
   // The words of a recovery key just made: shown once, until the person showed they kept them.
   const [recoveryWords, setRecoveryWords] = useState<string | null>(null);
   const [revision, setRevision] = useState(0);
@@ -72,11 +74,12 @@ export function FleetServerSettings({ epoch, api = fleetServer }: { epoch: strin
             status => status === "left_unreachable" ? { key: "The server did not answer: what this computer published there stays on it.", intent: "warning" } : undefined)} />)}
       </div>}
     {listing?.words && <p className="fleet-server-key muted-text">{t("The key of this computer:")} <code>{listing.words}</code></p>}
-    {dialog && epoch && <ServerDialog kind={dialog} epoch={epoch} api={api} personName={listing?.personName ?? null} onClose={(linked, words) => { setDialog(null); if (words) setRecoveryWords(words); if (linked) reload(); }} />}
+    {dialog && epoch && <ServerDialog kind={dialog} epoch={epoch} api={api} initialUrl={dialog === "create" ? setupAddress : null} personName={listing?.personName ?? null} onClose={(linked, words) => { setDialog(null); if (words) setRecoveryWords(words); if (linked) reload(); }} />}
     {joining && epoch && <JoinOrganizationDialog epoch={epoch} kind={joining} onRecover={() => { setJoining(null); setDialog("recover"); }}
+      onSetUp={address => { setJoining(null); setSetupAddress(address); setDialog("create"); }}
       onClose={joined => { setJoining(null); if (joined) reload(); }} />}
     {/* A server created here comes with the owner's recovery key: its words are shown next, once. */}
-    {creating && epoch && <CreateServerDialog epoch={epoch} onExisting={() => { setCreating(false); setDialog("create"); }}
+    {creating && epoch && <CreateServerDialog epoch={epoch} onExisting={() => { setCreating(false); setSetupAddress(null); setDialog("create"); }}
       onClose={(created, words) => { setCreating(false); if (words) setRecoveryWords(words); if (created) reload(); }} />}
     {recoveryWords && <RecoveryWordsDialog words={recoveryWords} onClose={() => setRecoveryWords(null)} />}
   </SettingsPage>;
@@ -624,11 +627,13 @@ type ServerDialogKind = "create" | "join" | "recover";
  * Create my server (address, setup code, the owner's name), Join a server (address, enrollment code), or Recover with the
  * recovery key (address, its 32 words): this computer becomes one of the person's, with their keys, when every other is lost.
  */
-function ServerDialog({ kind, epoch, api, personName = null, onClose }: {
-  kind: ServerDialogKind; epoch: string; api: Pick<FleetServerApi, "create" | "join" | "recover">; personName?: string | null; onClose: (linked: boolean, recoveryWords?: string | null) => void;
+function ServerDialog({ kind, epoch, api, personName = null, initialUrl = null, onClose }: {
+  kind: ServerDialogKind; epoch: string; api: Pick<FleetServerApi, "create" | "join" | "recover">; personName?: string | null;
+  /** The address the form starts with, when the person gave it already. */
+  initialUrl?: string | null; onClose: (linked: boolean, recoveryWords?: string | null) => void;
 }) {
   const { t } = useShellLanguage();
-  const [url, setUrl] = useState(kind === "create" ? localServerAddress : "");
+  const [url, setUrl] = useState(initialUrl ?? (kind === "create" ? localServerAddress : ""));
   const [code, setCode] = useState("");
   // The full name of the person signed in to this computer, as the system knows it: the owner's name until changed.
   const [owner, setOwner] = useState(kind === "create" ? personName ?? "" : "");

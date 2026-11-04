@@ -4,7 +4,7 @@ import type { FleetDeviceView, FleetMachineView, FleetServerView, FleetSessionVi
 import { campaignProgress, campaignStateIntent, campaignStateLabel, canCancelCampaign, emptyUpdateDraft, fleetGroups, fleetSummary, isVersion, joinCommand, keyWords, waitingRuns,
   machineStateIntent, machineStateLabel, orderedDevices, policyDraft, policyDraftProblem, policySummary, recoveryCheckPasses, recoveryCheckPositions, serverAddressOf,
   serverConnection, serverConnectionIntent,
-  serverConnectionLabel, serverOfSpace, serverProblem, sessionModel, sessionState, sessionStateLabel, telemetryDraft, telemetryHeaderEdits, telemetryProblem, telemetrySummary,
+  serverConnectionLabel, notSetUpProblem, serverOfSpace, serverProblem, sessionModel, sessionState, sessionStateLabel, telemetryDraft, telemetryHeaderEdits, telemetryProblem, telemetrySummary,
   updateDraftProblem, updateProblem, updateStart } from "./fleetServer";
 import { changedSessionOptions, storedSessionOptions } from "../sessionSettings/sessionOptions";
 
@@ -33,6 +33,8 @@ test("the refusals of a server say what to do; an unknown one says the operation
   assert.equal(serverProblem("ok"), null);
   assert.equal(serverProblem("setup.invalid_code"), "This is not the setup code the server waits for.");
   assert.equal(serverProblem("setup.loopback_only"), "Set the server up from the computer it runs on.");
+  assert.equal(serverProblem("enrollment.server_not_set_up"), notSetUpProblem);
+  assert.match(notSetUpProblem, /setup code\. Use Create my server… → It runs already\.$/u);
   assert.equal(serverProblem("enrollment.token_used"), "This enrollment code was used already.");
   assert.equal(serverProblem("unreachable"), "The server does not answer.");
   assert.equal(serverProblem("whatever"), "The operation did not complete.");

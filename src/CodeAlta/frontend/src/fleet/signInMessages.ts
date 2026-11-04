@@ -142,5 +142,12 @@ export const signInMessages = {
   "None yet.": ["Ninguno todavía.", "Aucune pour l’instant.", "Noch keine.", "まだありません。", "暂无。"],
   "Link…": ["Vincular…", "Lier…", "Verknüpfen …", "リンク…", "关联…"],
   "Add a passkey": ["Añadir una llave de acceso", "Ajouter une clé d’accès", "Passkey hinzufügen", "パスキーを追加", "添加通行密钥"],
+  "This server has no owner yet: its code is a setup code. Use Create my server… → It runs already.": [
+    "Este servidor aún no tiene propietario: su código es un código de configuración. Usa Crear mi servidor… → Ya se ejecuta.",
+    "Ce serveur n’a pas encore de propriétaire : son code est un code d’installation. Utilisez Créer mon serveur… → Il tourne déjà.",
+    "Dieser Server hat noch keinen Eigentümer: Sein Code ist ein Einrichtungscode. Verwende Meinen Server einrichten… → Er läuft bereits.",
+    "このサーバーにはまだ所有者がいません。このコードはセットアップコードです。「自分のサーバーを作成…」→「すでに実行中」を使ってください。",
+    "此服务器还没有所有者：它的代码是设置代码。请使用“创建我的服务器…”→“已在运行”。"],
+  "Set it up…": ["Configurarlo…", "L’installer…", "Einrichten …", "セットアップ…", "设置它…"],
   "Link {method}": ["Vincular {method}", "Lier {method}", "{method} verknüpfen", "{method} をリンク", "关联 {method}"],
 } satisfies Record<string, Row>;

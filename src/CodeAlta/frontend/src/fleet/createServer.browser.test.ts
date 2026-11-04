@@ -129,6 +129,39 @@ test("Join an organization signs in through the browser with the server's method
   }, options);
 });
 
+test("Join an organization shows the mark of each brand, and a setup code typed as an enrollment code leads to It runs already", { skip: !edge, timeout: 90_000 }, async () => {
+  await withCanvas(async page => {
+    await page.evaluate(`window.serverFixture.show('join')`);
+    await page.until(`document.querySelector('.join-organization-dialog input')`, "the address");
+    await page.evaluate(type(".join-organization-dialog input", "everything.contoso.com"));
+    await page.clickText(".join-organization-dialog .bp6-button", "Next");
+    await page.until(`document.querySelectorAll('.join-organization-methods .bp6-button').length === 5`, "the five methods");
+    // Each method carries its mark, 16 px, in front of its label; only the branded ones are never on the primary blue.
+    assert.deepEqual(await page.evaluate(`[...document.querySelectorAll('.join-organization-methods .bp6-button')].map(button => {
+      const icon = button.querySelector('svg'); const box = icon.getBoundingClientRect(); const text = button.querySelector('.bp6-button-text').getBoundingClientRect();
+      return [button.dataset.method, icon.dataset.brand ?? 'app', Math.round(box.width), Math.round(box.height), box.right <= text.left, button.classList.contains('bp6-intent-primary')]; })`),
+    [["company", "app", 16, 16, true, true], ["passkey", "app", 16, 16, true, false], ["microsoft", "microsoft", 16, 16, true, false], ["google", "google", 16, 16, true, false],
+      ["github", "github", 16, 16, true, false]]);
+    await page.shot("join-organization-sign-in-marks");
+
+    // A setup code: the dialog says so, and its button opens It runs already with the address.
+    await page.clickText(".join-organization-dialog .bp6-button", "Back");
+    await page.evaluate(type(".join-organization-dialog input", "box.local:2586"));
+    await page.clickText(".join-organization-dialog .bp6-button", "Next");
+    await page.until(`document.querySelector('.join-organization-dialog input[aria-label="Enrollment code"]')`, "the code");
+    await page.evaluate(type(".join-organization-dialog input[aria-label='Enrollment code']", "SETUP-CODE"));
+    await page.clickText(".join-organization-dialog .bp6-button", "Sign in");
+    await page.until(`document.querySelector('.join-organization-dialog [role=alert]')`, "the answer");
+    assert.match(await page.evaluate(`document.querySelector('.join-organization-dialog [role=alert]').textContent`) as string,
+      /^This server has no owner yet: its code is a setup code\. Use Create my server… → It runs already\./u);
+    assert.equal(await page.evaluate(`document.querySelectorAll('.join-organization-dialog [role=alert] .muted-text').length`), 0, "the server's own sentence says the same: not repeated");
+    await page.shot("join-organization-setup-code");
+    await page.clickText(".join-organization-dialog [role=alert] .bp6-button", "Set it up…");
+    assert.deepEqual((await calls(page)).filter(call => call.setUp), [{ setUp: "https://box.local:2586" }]);
+    assert.deepEqual(page.problems, []);
+  }, options);
+});
+
 test("Join an organization with GitHub shows the code to enter at GitHub, opens GitHub's page, and Cancel stops the wait", { skip: !edge, timeout: 90_000 }, async () => {
   await withCanvas(async page => {
     await page.evaluate(`window.serverFixture.show('join')`);

@@ -140,5 +140,8 @@
 .fleet-sign-in-dialog { width: min(560px, calc(100vw - 32px)); }
 .fleet-sign-in-groups { display: grid; gap: 6px; justify-items: start; }
 .fleet-sign-in-group { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 6px; align-items: center; width: 100%; }
+.join-organization-setup { margin-top: 6px; }
+.sign-in-method-icon { flex: none; }
+.fleet-sign-in-method-label { display: inline-flex; align-items: center; gap: 6px; }
 .fleet-sign-in-methods { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 2px 12px; }
 .create-server-reach .bp6-control { margin-bottom: 4px; }

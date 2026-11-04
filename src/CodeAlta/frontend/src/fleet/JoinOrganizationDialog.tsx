@@ -5,10 +5,11 @@ import { AppIcon } from "../AppIcon";
 import { ActivitySpinner } from "../ActivitySpinner";
 import { useShellLanguage } from "../shellLanguage";
 import type { MessageKey } from "../localization";
-import { keyWords, serverProblem } from "./fleetServer";
+import { keyWords, notSetUpProblem, serverProblem } from "./fleetServer";
 import { defaultJoinSpaces, joinSteps, joinWords, organizationAddressOf, type JoinCase, type JoinStep } from "./joinOrganization";
 import { orderedSignInMethods, signInCode, signInProblem, type SignInCode as Code } from "./signIn";
 import { SignInCode } from "./SignInCode";
+import { hasBrandMark, SignInMethodIcon } from "./SignInMethodIcon";
 
 /** The calls of the dialog. */
 export type JoinOrganizationApi = Pick<typeof fleetServer, "join" | "linkSpace" | "status" | "signInMethods" | "joinWithSignIn" | "startSignInCode" | "openSignInPage">;
@@ -31,8 +32,10 @@ export type JoinOrganizationSpacesApi = Pick<typeof spacesApi, "list" | "create"
  * the owner for a person's first one. A person whose computers are all lost starts from here too: `onRecover` goes to the
  * recovery key instead.
  */
-export function JoinOrganizationDialog({ epoch, kind = "organization", api = fleetServer, spaces = spacesApi, onRecover, onClose }: {
-  epoch: string; kind?: JoinCase; api?: JoinOrganizationApi; spaces?: JoinOrganizationSpacesApi; onRecover?: () => void; onClose: (joined: boolean) => void;
+export function JoinOrganizationDialog({ epoch, kind = "organization", api = fleetServer, spaces = spacesApi, onRecover, onSetUp, onClose }: {
+  epoch: string; kind?: JoinCase; api?: JoinOrganizationApi; spaces?: JoinOrganizationSpacesApi; onRecover?: () => void;
+  /** Called with the address of a server that has no owner yet, when a setup code was typed as an enrollment code: the page goes on with Create my server… > It runs already. */
+  onSetUp?: (address: string) => void; onClose: (joined: boolean) => void;
 }) {
   const { t } = useShellLanguage();
   // The words of the person's own server (at home they are its owner) or of an organization's.
@@ -190,8 +193,9 @@ export function JoinOrganizationDialog({ epoch, kind = "organization", api = fle
         {methods === null ? <div className="join-organization-methods muted-text"><ActivitySpinner size={14} /> {t("Checking how this server signs people in…")}</div>
           : <div className="join-organization-methods" role="group" aria-label={t("Sign in with")}>
             {methods.map((method, index) => <Button key={method.id} fill alignText="start" data-method={method.id} disabled={busy}
-              intent={index === 0 && !method.breakGlass ? "primary" : undefined} variant={method.breakGlass ? "minimal" : undefined} size={method.breakGlass ? "small" : undefined}
-              icon={waiting === method.id ? <ActivitySpinner size={14} /> : undefined}
+              intent={index === 0 && !method.breakGlass && !hasBrandMark(method.id) ? "primary" : undefined} variant={method.breakGlass ? "minimal" : undefined}
+              size={method.breakGlass ? "small" : undefined}
+              icon={waiting === method.id ? <ActivitySpinner size={16} /> : <SignInMethodIcon method={method.id} size={method.breakGlass ? 14 : 16} />}
               text={method.breakGlass ? t("Owner's passkey") : t("Continue with {method}", { method: method.id === "passkey" ? t("Passkey") : method.name })}
               onClick={() => void signInWith(method)} />)}
           </div>}
@@ -227,7 +231,11 @@ export function JoinOrganizationDialog({ epoch, kind = "organization", api = fle
         {words && <div className="pair-machine-words add-machine-words">{keyWords(words).map((word, index) => <Tag key={`${index}:${word}`} minimal>{word}</Tag>)}</div>}
         <div className="muted-text">{t("Settings > Fleet > Server shows when it is done.")}</div>
       </Callout>}
-      {problem && <Callout compact intent="warning" role="alert">{t(problem.key)}{problem.detail && <div className="muted-text">{problem.detail}</div>}</Callout>}
+      {problem && <Callout compact intent="warning" role="alert">{t(problem.key)}{problem.detail && problem.key !== notSetUpProblem && <div className="muted-text">{problem.detail}</div>}
+        {/* A setup code typed here: Create my server… > It runs already takes it, with this address. */}
+        {problem.key === notSetUpProblem && onSetUp && url && <div className="join-organization-setup">
+          <Button size="small" intent="primary" icon={<AppIcon name="server" size={14} />} text={t("Set it up…")} onClick={() => onSetUp(url)} /></div>}
+      </Callout>}
     </DialogBody>
     <DialogFooter actions={<>
       {step === "address" && <><Button text={t("Cancel")} onClick={() => onClose(false)} />
