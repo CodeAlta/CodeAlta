@@ -388,7 +388,11 @@ internal sealed class NodeServers : IAsyncDisposable
         {
             AccessRequests = service is null ? null : () => [.. service.People.Read().Asks.Select(static ask => ask.PersonId)],
         };
-        var providers = new NodeScopeProviders(node.Host.CatalogOptions, new CodeAlta.Catalog.Secrets.LocalSecretStore(node.Host.CatalogOptions.GlobalRoot), identity);
+        // A provider the fleet gives, rotates or takes away is run as it is now at once: none keeps its old key, none runs once taken away.
+        var providers = new NodeScopeProviders(node.Host.CatalogOptions, new CodeAlta.Catalog.Secrets.LocalSecretStore(node.Host.CatalogOptions.GlobalRoot), identity)
+        {
+            ProvidersChanged = new NodeProviders(node.Host, node.ModelCatalog).Reconcile,
+        };
         Fleet.Server.FleetServerConnections? connections = null;
         connections = new Fleet.Server.FleetServerConnections(new Fleet.Server.FleetServerConnectionsOptions
         {

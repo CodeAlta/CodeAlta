@@ -38,6 +38,12 @@ internal sealed class NodeScopeProviders
         (_catalog, _secrets, _identity) = (catalog, secrets, identity);
     }
 
+    /// <summary>
+    /// Gets what is told the providers an accepted change added, redefined, gave a new key or took away, so that the node
+    /// runs them as they are now (<see cref="NodeProviders.Reconcile"/>); null tells nothing.
+    /// </summary>
+    internal Action<IReadOnlyCollection<string>>? ProvidersChanged { get; init; }
+
     /// <summary>The name of the secret that holds the key of a provider of a scope.</summary>
     /// <param name="providerId">The provider.</param>
     /// <returns>The name.</returns>
@@ -93,10 +99,12 @@ internal sealed class NodeScopeProviders
         var definitions = store.LoadGlobalProviderDefinitions(includeDisabled: true).ToList();
         var ours = applied.Values.SelectMany(static ids => ids).ToHashSet(StringComparer.Ordinal);
         var kept = new List<string>();
+        var changed = new List<string>();
         foreach (var (provider, key) in opened)
         {
             var existing = definitions.FirstOrDefault(definition => string.Equals(definition.ProviderKey, provider.Id, StringComparison.OrdinalIgnoreCase));
             if (existing is not null && !ours.Contains(provider.Id)) continue;
+            if (Differs(existing, provider, key)) changed.Add(provider.Id);
             if (existing is not null) definitions.Remove(existing);
             _secrets.SetSecret(SecretName(provider.Id), key, "fleet");
             definitions.Add(new CodeAltaProviderDocument
@@ -111,14 +119,22 @@ internal sealed class NodeScopeProviders
         {
             definitions.RemoveAll(definition => string.Equals(definition.ProviderKey, gone, StringComparison.OrdinalIgnoreCase));
             _secrets.DeleteSecret(SecretName(gone));
+            changed.Add(gone);
         }
 
         if (kept.Count > 0 || before.Count > 0) store.SaveGlobalProviderDefinitions(definitions);
         applied[linkId] = kept;
         WriteApplied(applied);
         if (LogManager.IsInitialized && (kept.Count > 0 || before.Count > 0)) _logger.Info($"The providers of {linkId} on this machine: {string.Join(", ", kept)}.");
+        if (changed.Count > 0) ProvidersChanged?.Invoke(changed);
         return kept;
     }
+
+    // Whether a provider given differs from the one this machine runs: new, another definition, or another key (a rotation).
+    private bool Differs(CodeAltaProviderDocument? existing, ScopeProviderDto provider, string key)
+        => existing is null || existing.DisplayName != provider.Name || existing.ProviderType != provider.Type || existing.ApiUrl != provider.Endpoint
+            || existing.Model != provider.Models.FirstOrDefault() || existing.Enabled == false
+            || !_secrets.TryGetSecret(SecretName(provider.Id), out var held) || !string.Equals(held, key, StringComparison.Ordinal);
 
     private Dictionary<string, List<string>> ReadApplied()
     {

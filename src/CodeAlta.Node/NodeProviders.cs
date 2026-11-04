@@ -247,6 +247,22 @@ internal sealed class NodeProviders(CodeAltaHost host, ModelsDevCatalogService? 
         }
     });
 
+    /// <summary>
+    /// Runs the providers a change of the configuration made by the fleet touched as they are now: one given or redefined, or
+    /// whose key was rotated, is registered again with its key; one taken away is unregistered, so that nothing uses it or its
+    /// key any more. The others stay as they are.
+    /// </summary>
+    /// <param name="changed">The providers changed.</param>
+    internal void Reconcile(IReadOnlyCollection<string> changed)
+    {
+        ArgumentNullException.ThrowIfNull(changed);
+        var store = Store;
+        foreach (var provider in changed.Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            lock (_gate) Apply(store, provider);
+        }
+    }
+
     // Starts the providers of the configuration again, as Settings > Providers does on the desktop: the one changed is registered
     // (or replaced) when it can run, and unregistered when it cannot any more. The others, and those of plugins, stay as they are.
     // While a provider is still prepared (its models listed), the runtime refuses to replace it: the change is saved, and applied
