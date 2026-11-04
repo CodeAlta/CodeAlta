@@ -902,7 +902,8 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                     PausesPlaced = !options.Developer,
                 };
                 automations.Placement = placement;
-                if (placedServers is not null) placedServers.Handover = new Fleet.DesktopAutomationHandover(automations, token => host.ProjectCatalog.LoadAsync(token));
+                // An automation of a team another maintainer gave is opened here in the editor, recorded as given at its version.
+                if (placedServers is not null) placedServers.Handover = new Fleet.DesktopAutomationHandover(automations, token => host.ProjectCatalog.LoadAsync(token)) { Placement = placement };
                 fleet.Changed += placement.Poke;
                 if (placedServers is not null) placedServers.Changed += placement.Poke;
                 // A host that has the user review the commands of its sessions lets no session type in a terminal, nor
@@ -1159,6 +1160,8 @@ internal sealed class DesktopApplication(DesktopLaunchOptions options, DesktopLo
                     builder.AddAutomationsService(new AutomationsService(automations, host.ProjectCatalog, epoch, host.CodeModeScripts, placement)
                     {
                         PublishTargets = fleetServers is { } publishing ? publishing.PublishTargetsAsync : null,
+                        TeamAutomations = fleetServers is { } teams ? teams.TeamAutomationsAsync : null,
+                        OpenTeamAutomation = fleetServers is { } opening ? opening.OpenTeamAutomationAsync : null,
                     });
                     var pullRequestPrompts = new CodeAlta.Catalog.PullRequests.PullRequestPromptCatalog(host.CatalogOptions);
                     builder.AddPullRequestPromptsService(new PullRequestPromptsService(pullRequestPrompts, host.ProjectCatalog, epoch));

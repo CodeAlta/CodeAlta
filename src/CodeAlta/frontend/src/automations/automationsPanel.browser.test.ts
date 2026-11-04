@@ -63,6 +63,15 @@ test("a run that waits for the person is taken over from the list, a try lists i
       assert.deepEqual((await page.evaluate(calls) as unknown[])[2], { tryRun: "0199f4c2-6d1e-7c3a-b5f0-2f9c8e4a1d77", index: -1 });
       assert.equal(await page.evaluate(`document.querySelector('.automation-detail header').scrollWidth <= document.querySelector('.automation-detail header').clientWidth + 1`), true,
         "the header keeps Run now and Edit on one line");
+
+      // An automation of the team another maintainer gave: opened in this person's editor, as its machine holds it.
+      await page.until(`document.querySelector('[data-team-automation="nightly"]')`, "the automations of the teams");
+      await picture(page, "automations-team");
+      await page.clickText("[data-team-automation=\"nightly\"] .bp6-button", "Open in my editor");
+      await page.until(`document.querySelector('.automation-editor')`, "the editor");
+      assert.deepEqual((await page.evaluate(calls) as unknown[])[3], { openTeam: "nightly" });
+      assert.equal(await page.evaluate(`document.querySelector('.automation-editor input')?.value`), "Nightly builds");
+      assert.equal(await page.evaluate(`document.querySelector('[data-team-automation]')`), null, "taken here, it is no longer offered");
       assert.deepEqual(page.problems, []);
     }, options);
   });

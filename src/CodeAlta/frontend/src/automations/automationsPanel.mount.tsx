@@ -39,6 +39,17 @@ const hub = {
   runs: async () => runs,
   run: async () => ({ ok: true, run: null }),
   tryRun: async (id: string, index: number) => { calls.push(JSON.stringify({ tryRun: id, index })); return { ok: true, run: null }; },
+  // An automation of the team Infra another maintainer gave the build box, until it is taken here to be edited.
+  teamAutomations: async () => state.items.some(other => other.id === "nightly") ? []
+    : [{ linkId: "link-1", id: "nightly", machineId: "box", machineName: "Build box", name: "Nightly builds", scope: "team:infra", scopeName: "Infra" }],
+  openTeamAutomation: async (team: { id: string }) => {
+    calls.push(JSON.stringify({ openTeam: team.id }));
+    state = { ...state, items: [...state.items, { ...item, id: "nightly", name: "Nightly builds", autonomy: null, runsOn: "box", publishTo: "team:infra" }] };
+    for (const listener of listeners) listener();
+    return { ok: true, id: "nightly", message: null };
+  },
+  scripts: async () => [], publishTargets: async () => [{ scope: "team:infra", name: "Infra" }],
+  preview: async () => ({ ok: true, message: null, times: [] }),
   takeOver: async (id: string, runId: string) => {
     calls.push(JSON.stringify({ takeOver: runId }));
     runs = runs.map(other => other.id === runId ? { ...other, status: "running", message: "Taken over by a person." } : other);

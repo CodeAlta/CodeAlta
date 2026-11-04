@@ -13,6 +13,7 @@ const listed = (items: AutomationItem[], change: Partial<AutomationsListResponse
   ({ status: "ok", paused: false, scanned: true, items, faults: [], runs: [], upcoming: [], ...change });
 const trigger: AutomationTriggerItem = { type: "daily", minute: 0, every: 1, at: ["09:00"], days: [], expression: null, event: "opened", authors: "trusted", command: null, folder: null, integration: null };
 const settle = () => new Promise<void>(resolve => setTimeout(resolve, 0));
+const teamItem = { linkId: "link-1", id: "nightly", machineId: "box", machineName: "Build box", name: "Nightly", scope: "team:infra", scopeName: "Infra" };
 
 // A host that answers what the test says and records what it is asked. Its notices are sent by the test.
 function fixture() {
@@ -49,6 +50,8 @@ function fixture() {
     hookAddress: (request: object) => answer("hookAddress", request, { status: "ok", message: null, hookId: "abcdefghijklmnopqrstuvwxyz", url: "https://fleet.test/api/v1/hooks/abcdefghijklmnopqrstuvwxyz" }),
     takeOver: (request: object) => answer("takeOver", request, (request as { runId: string }).runId === "r1" ? { status: "ok", message: null, sessionId: "s1" }
       : { status: "refused", message: "This run is not in progress.", sessionId: null }),
+    teamAutomations: (request: object) => answer("teamAutomations", request, { status: "ok", items: [teamItem] }),
+    openTeamAutomation: (request: object) => answer("openTeamAutomation", request, state.mutation),
     createHook: (request: object) => answer("createHook", request, { status: "ok", message: null, hookId: "abcdefghijklmnopqrstuvwxyz", url: "https://fleet.test/api/v1/hooks/abcdefghijklmnopqrstuvwxyz" }),
     watch: async (request: object, options?: { signal?: AbortSignal }) => {
       calls.push(`watch:${JSON.stringify(request)}`);
@@ -163,6 +166,22 @@ test("a change is sent to the host and the list is read again before it answers"
   assert.deepEqual(calls.filter(call => !call.startsWith("list:")), ['setEnabled:{"expectedEpoch":"epoch-1","id":"a","enabled":false}', 'allow:{"expectedEpoch":"epoch-1","id":"a"}',
     'startPlaced:{"expectedEpoch":"epoch-1","id":"a"}', 'setPaused:{"expectedEpoch":"epoch-1","paused":true}',
     'delete:{"expectedEpoch":"epoch-1","id":"a"}', 'refresh:{"expectedEpoch":"epoch-1"}']);
+});
+
+test("an automation of a team another maintainer gave is listed, then taken here to be edited, and the list is read again", async () => {
+  const { hub, calls, state } = fixture();
+  hub.connect("epoch-1");
+  await settle();
+  calls.length = 0;
+  assert.deepEqual(await hub.teamAutomations(), [teamItem]);
+  state.list = listed([item("a"), item("nightly")]);
+  state.mutation = { status: "ok", id: "nightly", message: null };
+  assert.deepEqual(await hub.openTeamAutomation(teamItem), { ok: true, id: "nightly", message: null });
+  assert.deepEqual(calls, ['teamAutomations:{"expectedEpoch":"epoch-1"}', 'openTeamAutomation:{"expectedEpoch":"epoch-1","linkId":"link-1","id":"nightly","machineId":"box"}',
+    'list:{"expectedEpoch":"epoch-1"}']);
+  assert.ok(hub.getSnapshot().items.some(value => value.id === "nightly"), "it is in the list, to open in the editor");
+  state.mutation = { status: "failed", id: null as unknown as string, message: "Add the project of github.com/codealta/codealta to CodeAlta first." };
+  assert.deepEqual(await hub.openTeamAutomation(teamItem), { ok: false, id: null, message: "Add the project of github.com/codealta/codealta to CodeAlta first." });
 });
 
 test("a change that the host also announces returns once the newest list is shown", async () => {

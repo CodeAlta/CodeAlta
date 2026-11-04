@@ -24,6 +24,25 @@ internal interface IDesktopAutomationHandover
     /// <returns>Why it could not be added, or null once it is.</returns>
     Task<string?> TakeAsync(FleetAutomationContent content, CancellationToken cancellationToken);
 
+    /// <summary>Gets whether an automation with this id is one of the automations of this computer.</summary>
+    /// <param name="automationId">The automation.</param>
+    /// <returns>Whether it is here.</returns>
+    bool Holds(string automationId);
+
+    /// <summary>
+    /// Adds an automation of a team or of the organization, as its machine holds it, to the user's automations on this computer
+    /// so that the user changes it in their editor: it runs on that machine, published to that scope, and the next change is a
+    /// version signed here.
+    /// </summary>
+    /// <param name="content">What it does.</param>
+    /// <param name="machineId">The machine it runs on.</param>
+    /// <param name="scope">The scope it is published to.</param>
+    /// <param name="linkId">The server it was given through.</param>
+    /// <param name="number">The number of the version the server holds.</param>
+    /// <param name="cancellationToken">Cancels the write.</param>
+    /// <returns>Why it could not be added, or null once it is.</returns>
+    Task<string?> EditAsync(FleetAutomationContent content, string machineId, string scope, string linkId, long number, CancellationToken cancellationToken);
+
     /// <summary>Takes an automation given to another owner off this computer, when it is one of the user's automations here.</summary>
     /// <param name="automationId">The automation.</param>
     /// <param name="cancellationToken">Cancels the write.</param>
@@ -62,32 +81,53 @@ internal sealed class DesktopAutomationHandover : IDesktopAutomationHandover
         return new FleetAutomationContent(AutomationConfig.Write(string.Empty, entry.Definition with { RunsOn = null, PublishTo = null, Project = null }), repository);
     }
 
+    /// <summary>Gets what records the automations given through a server, which an automation taken to be changed here is recorded in; null for none.</summary>
+    internal DesktopAutomationPlacement? Placement { get; set; }
+
     /// <inheritdoc />
     public async Task<string?> TakeAsync(FleetAutomationContent content, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(content);
-        var (definitions, faults) = AutomationConfig.Read(content.Definition, new AutomationSource("handover", null, null));
-        if (definitions.Count != 1 || faults.Count > 0) return "What was handed over is not an automation this version reads.";
-        var definition = definitions[0];
-        if (_automations.Snapshot.Find(definition.Id) is not null) return "An automation with the same id is here already.";
-        if (content.Repository is { } repository)
-        {
-            string? folder = null;
-            foreach (var project in await _projects(cancellationToken).ConfigureAwait(false))
-            {
-                if (project.Archived || string.IsNullOrEmpty(project.ProjectPath)) continue;
-                if (await _repositoryOf(project.ProjectPath, cancellationToken).ConfigureAwait(false) == repository)
-                {
-                    folder = project.ProjectPath;
-                    break;
-                }
-            }
+        var (definition, problem) = await ReadHereAsync(content, cancellationToken).ConfigureAwait(false);
+        if (definition is null) return problem;
+        return await _automations.SaveAsync(definition with { RunsOn = null, PublishTo = null }, null, cancellationToken).ConfigureAwait(false);
+    }
 
-            if (folder is null) return $"Add the project of {repository} to CodeAlta first: the automation runs in it.";
-            definition = definition with { Project = folder };
+    /// <inheritdoc />
+    public bool Holds(string automationId) => _automations.Snapshot.Find(automationId) is not null;
+
+    /// <inheritdoc />
+    public async Task<string?> EditAsync(FleetAutomationContent content, string machineId, string scope, string linkId, long number, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(content);
+        ArgumentException.ThrowIfNullOrEmpty(machineId);
+        ArgumentException.ThrowIfNullOrEmpty(scope);
+        ArgumentException.ThrowIfNullOrEmpty(linkId);
+        var (read, problem) = await ReadHereAsync(content, cancellationToken).ConfigureAwait(false);
+        if (read is null) return problem;
+        var definition = read with { RunsOn = machineId, PublishTo = scope };
+        Task<string?> Save() => _automations.SaveAsync(definition, null, cancellationToken);
+        // Recorded as given at the version its machine holds: opening it gives the machine nothing; saving a change gives it the next version.
+        return Placement is { } placement
+            ? await placement.AdoptAsync(definition, content.Repository, linkId, number, Save, cancellationToken).ConfigureAwait(false)
+            : await Save().ConfigureAwait(false);
+    }
+
+    // What an automation of another computer is here: read, and in the project of its repository; null and why not.
+    private async Task<(AutomationDefinition? Definition, string? Problem)> ReadHereAsync(FleetAutomationContent content, CancellationToken cancellationToken)
+    {
+        var (definitions, faults) = AutomationConfig.Read(content.Definition, new AutomationSource("handover", null, null));
+        if (definitions.Count != 1 || faults.Count > 0) return (null, "What was handed over is not an automation this version reads.");
+        var definition = definitions[0];
+        if (_automations.Snapshot.Find(definition.Id) is not null) return (null, "An automation with the same id is here already.");
+        if (content.Repository is not { } repository) return (definition, null);
+        foreach (var project in await _projects(cancellationToken).ConfigureAwait(false))
+        {
+            if (project.Archived || string.IsNullOrEmpty(project.ProjectPath)) continue;
+            if (await _repositoryOf(project.ProjectPath, cancellationToken).ConfigureAwait(false) == repository) return (definition with { Project = project.ProjectPath }, null);
         }
 
-        return await _automations.SaveAsync(definition with { RunsOn = null, PublishTo = null }, null, cancellationToken).ConfigureAwait(false);
+        return (null, $"Add the project of {repository} to CodeAlta first: the automation runs in it.");
     }
 
     /// <inheritdoc />

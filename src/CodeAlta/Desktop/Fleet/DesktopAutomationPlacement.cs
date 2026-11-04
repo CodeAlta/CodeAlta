@@ -689,6 +689,65 @@ internal sealed class DesktopAutomationPlacement : IAutomationPlacement, IAsyncD
         return true;
     }
 
+    /// <summary>
+    /// Takes into the automations of this computer one of a team or of the organization that another person who answers for it
+    /// gave its machine through a server, as that machine holds it: it is written here while the placement records it as given
+    /// at that version, so that it is not given again as it is, and the next change made here is a newer version, signed here.
+    /// </summary>
+    /// <param name="definition">What it does, with the machine it runs on and the scope it is published to.</param>
+    /// <param name="repository">The repository of its project; null for none.</param>
+    /// <param name="linkId">The server it was given through.</param>
+    /// <param name="number">The number of the version the server holds.</param>
+    /// <param name="save">Writes it into the automations of this computer; gives why it could not, or null.</param>
+    /// <param name="cancellationToken">Cancels the wait for the placement.</param>
+    /// <returns>Why it could not be taken, or null once it is.</returns>
+    internal async Task<string?> AdoptAsync(AutomationDefinition definition, string? repository, string linkId, long number, Func<Task<string?>> save,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(definition);
+        ArgumentException.ThrowIfNullOrEmpty(linkId);
+        ArgumentNullException.ThrowIfNull(save);
+        if (definition.RunsOn is not { } machineId) throw new ArgumentException("It runs on the machine it was given.", nameof(definition));
+        var copy = definition with { RunsOn = null, PublishTo = null, Project = null, Enabled = definition.Enabled && !(PausesPlaced && _automations.Paused) };
+        var key = definition.PublishTo is { } scope ? Key(copy, repository) + "|" + scope : Key(copy, repository);
+        // Under the work of the placement: it does not see the automation written before it is recorded as given, which would
+        // give its machine the same again, nor recorded and not written, which would take it off its machine.
+        await _work.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            lock (_gate)
+            {
+                if (_placed.ContainsKey(definition.Id)) return "This automation is placed from this computer already.";
+                _placed[definition.Id] = new PlacedAutomation(machineId, key, DateTimeOffset.UtcNow) { Number = number, Via = linkId };
+                _numbers[definition.Id] = Math.Max(_numbers.GetValueOrDefault(definition.Id), number);
+            }
+
+            string? problem;
+            try
+            {
+                problem = await save().ConfigureAwait(false);
+            }
+            catch
+            {
+                lock (_gate) _placed.Remove(definition.Id);
+                throw;
+            }
+
+            lock (_gate)
+            {
+                if (problem is not null) _placed.Remove(definition.Id);
+                Save();
+                SaveNumbers();
+            }
+
+            return problem;
+        }
+        finally
+        {
+            _work.Release();
+        }
+    }
+
     // Under _work. Reads where an automation given through a server stands (taken, waiting, refused by the machine) and its runs, at most every so often.
     private async Task<bool> ReadThroughServerAsync(string id, string machineId, DesktopServerAutomationRoute route, CancellationToken cancellationToken)
     {

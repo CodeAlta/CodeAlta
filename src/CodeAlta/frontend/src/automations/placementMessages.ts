@@ -52,4 +52,8 @@ export const automationPlacementMessages = {
     "Ein Befehlsauslöser läuft nur auf diesem Computer.",
     "コマンドトリガーはこのコンピューターでのみ実行されます。",
     "命令触发器只在本机运行。"],
+  "Automations of your teams": ["Automatizaciones de tus equipos", "Automatisations de vos équipes", "Automationen deiner Teams", "チームの自動化", "你的团队的自动化"],
+  "Open in my editor": ["Abrir en mi editor", "Ouvrir dans mon éditeur", "In meinem Editor öffnen", "自分のエディターで開く", "在我的编辑器中打开"],
+  "The automation could not be opened.": ["No se pudo abrir la automatización.", "L’automatisation n’a pas pu être ouverte.", "Die Automation konnte nicht geöffnet werden.",
+    "自動化を開けませんでした。", "无法打开该自动化。"],
 } as const;

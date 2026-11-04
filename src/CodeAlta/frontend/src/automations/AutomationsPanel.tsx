@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { Alert, Button, Callout, InputGroup, Menu, MenuDivider, MenuItem, PopoverNext, SegmentedControl, Switch, Tag } from "@blueprintjs/core";
-import type { AutomationItem, AutomationRunItem, WorkspaceProject, WorkspaceSession } from "#neoastra";
+import type { AutomationItem, AutomationRunItem, AutomationTeamItem, WorkspaceProject, WorkspaceSession } from "#neoastra";
 import { ActivitySpinner } from "../ActivitySpinner";
 import { AppIcon } from "../AppIcon";
 import { ConfirmPopover } from "../ConfirmPopover";
@@ -308,10 +308,19 @@ export function AutomationsPanel({ hub, projects, sessions, projectId, providers
   const [deleting, setDeleting] = useState<AutomationItem | null>(null);
   const [busy, setBusy] = useState<ReadonlySet<string>>(new Set());
   const [notice, setNotice] = useState<string | null>(null);
+  // The automations of the teams this person maintains that another maintainer gave, read when the page shows.
+  const [teamItems, setTeamItems] = useState<readonly AutomationTeamItem[]>([]);
+  const [teamRead, setTeamRead] = useState(0);
   const byId = useMemo(() => new Map(sessions.map(session => [session.id, session])), [sessions]);
   const shown = useMemo(() => filterAutomations(state.items, query, scope), [state.items, query, scope]);
   const current = state.items.find(item => item.id === selected) ?? null;
   useEffect(() => { if (visible) void hub.refresh(); }, [hub, visible]);
+  useEffect(() => {
+    if (!visible) return;
+    const abort = new AbortController();
+    void hub.teamAutomations(abort.signal).then(items => { if (!abort.signal.aborted) setTeamItems(items); });
+    return () => abort.abort();
+  }, [hub, visible, epoch, teamRead]);
   useEffect(() => {
     if (!focus || !state.items.some(item => item.id === focus)) return;
     setSelected(focus); setQuery(""); setScope("all");
@@ -367,6 +376,16 @@ export function AutomationsPanel({ hub, projects, sessions, projectId, providers
     const sessionId = outcome.sessionId ?? run.sessionId;
     if (sessionId) onOpenSession(sessionId, run.projectId);
   }
+  // An automation of a team given by another maintainer: taken here as its machine holds it, then changed in the editor.
+  async function openTeam(item: AutomationTeamItem) {
+    setNotice(null);
+    const outcome = await during(item.id, () => hub.openTeamAutomation(item));
+    setTeamRead(value => value + 1);
+    if (!outcome.ok) { setNotice(outcome.message ?? t("The automation could not be opened.")); return; }
+    const taken = hub.getSnapshot().items.find(candidate => candidate.id === item.id);
+    setSelected(item.id);
+    if (taken) setEditing(formOf(taken));
+  }
   const create = (form: AutomationForm) => setEditing(form);
   const fromTemplate = (template: AutomationTemplate) => create({ ...emptyForm(template.project ? projectId : null), name: t(template.name), prompt: template.prompt,
     script: template.script ?? "", scriptArguments: template.scriptArguments ?? "", triggers: template.triggers });
@@ -411,6 +430,14 @@ export function AutomationsPanel({ hub, projects, sessions, projectId, providers
                     onStartPlaced={() => void startPlaced(item)} onDuplicate={() => create({ ...formOf(item), id: null, name: t("{name} (copy)", { name: item.name }) })} onDelete={() => setDeleting(item)} />)}</ul>}
             </section>
           </>}
+        {teamItems.length > 0 && <section className="automation-list automation-team-list" aria-label={t("Automations of your teams")}>
+          <div className="automation-list-head"><h3>{t("Automations of your teams")}<span className="count">{teamItems.length}</span></h3></div>
+          <ul className="automation-cards">{teamItems.map(item => <li key={`${item.linkId}|${item.id}|${item.machineId}`} className="automation-card automation-team-card" data-team-automation={item.id}>
+            <div className="automation-team-text"><strong>{item.name}</strong>
+              <span className="muted-text">{item.scope === "organization" ? t("The organization") : t("Team {name}", { name: item.scopeName })} · {item.machineName}</span></div>
+            <Button size="small" icon={<AppIcon name="edit" size={14} />} disabled={busy.has(item.id)} onClick={() => void openTeam(item)}>{t("Open in my editor")}</Button>
+          </li>)}</ul>
+        </section>}
         <Templates onPick={fromTemplate} chatOnly={ownProjects.length === 0} />
       </div>
       {state.items.length > 0 && <aside className="automations-side">

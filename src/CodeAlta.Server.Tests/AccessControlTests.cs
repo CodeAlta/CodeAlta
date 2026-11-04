@@ -208,9 +208,9 @@ public sealed class AccessControlTests
         var offer = (await server.SendAsync(owner, HttpMethod.Post, "/api/v1/transfers", new OfferTransferRequest(FleetResourceKinds.Machine, machine.Id, FleetPrincipalKinds.Team,
             team.Id))).Read<TransferDto>();
         Assert.AreEqual(HttpStatusCode.OK, (await server.SendAsync(mia, HttpMethod.Post, $"/api/v1/transfers/{offer.Id}/accept")).Status);
-        PutAutomationRequest Version(TestDevice signer, string id, string? scope)
+        PutAutomationRequest Version(TestDevice signer, string id, string? scope, long number = 1)
         {
-            var text = FleetAutomationVersionDocuments.Serialize(new FleetAutomationVersion(FleetAutomationVersion.CurrentVersion, setup.Organization.Id, id, 1, machine.Id, false,
+            var text = FleetAutomationVersionDocuments.Serialize(new FleetAutomationVersion(FleetAutomationVersion.CurrentVersion, setup.Organization.Id, id, number, machine.Id, false,
                 true, ["hourly"], null, null, "{\"sealed\":\"for the machine\"}", signer.DeviceId, signer.PublicKey, server.Clock.Now) { Scope = scope, Provider = scope is null ? null : "gateway" });
             return new PutAutomationRequest(new FleetSignedAutomationVersion(text, signer.Sign(FleetAutomationVersionDocuments.GetSignedBytes(text))));
         }
@@ -234,6 +234,16 @@ public sealed class AccessControlTests
         // Another maintainer lists it and runs it by hand; a member does neither.
         Assert.IsTrue((await server.SendAsync(ada, HttpMethod.Get, "/api/v1/automations")).Read<AutomationListDto>().Automations.Any(static item => item.Id == "deploy"));
         Assert.IsFalse((await server.SendAsync(max, HttpMethod.Get, "/api/v1/automations")).Read<AutomationListDto>().Automations.Any(static item => item.Id == "deploy"));
+
+        // Ada opens it in her editor and saves it: her version follows Mia's, the team still owns it, and Mia still reads it.
+        var edited = await server.SendAsync(ada, HttpMethod.Put, "/api/v1/automations/deploy", Version(ada, "deploy", "team:" + team.Id, 2));
+        Assert.AreEqual(HttpStatusCode.OK, edited.Status, edited.Body.ToString());
+        Assert.AreEqual((2L, ada.DeviceId), (edited.Read<AutomationDto>().Number, edited.Read<AutomationDto>().SignerDeviceId));
+        Assert.AreEqual(2L, (await server.SendAsync(mia, HttpMethod.Get, "/api/v1/automations")).Read<AutomationListDto>().Automations.Single(static item => item.Id == "deploy").Number);
+        var still = (await server.SendAsync(mia, HttpMethod.Get, "/api/v1/owners")).Read<AccessListDto<ResourceOwnerDto>>().Items.Single(resource => resource.ResourceId == "deploy");
+        Assert.AreEqual((FleetPrincipalKinds.Team, team.Id), (still.OwnerKind, still.OwnerId));
+        Assert.AreEqual(HttpStatusCode.Forbidden, (await server.SendAsync(max, HttpMethod.Put, "/api/v1/automations/deploy", Version(max, "deploy", "team:" + team.Id, 3))).Status,
+            "a member gives it no version");
         RunAutomationRequest Run(TestDevice device)
         {
             var text = FleetAutomationRunRequestDocuments.Serialize(new FleetAutomationRunRequest(FleetAutomationRunRequest.CurrentVersion, setup.Organization.Id, "deploy",

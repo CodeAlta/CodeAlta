@@ -355,6 +355,31 @@ public sealed class NodeServerAutomationTests
         Assert.IsFalse(byAda?.Contains("another person", StringComparison.Ordinal) == true, byAda);
         var (_, byMax) = await automations.RunFromServerAsync("link-1", list, "org", Ask(max), token);
         StringAssert.Contains(byMax, "another person", "a member does not run what the team runs");
+
+        // Ada opens it in her editor and saves it: her newer version, sealed for the team, is taken; a member's is not.
+        FleetSignedAutomationVersion Edited(DeviceIdentity device, long number, string name) => FleetAutomationSigning.Sign(device, new FleetAutomationVersion(
+            FleetAutomationVersion.CurrentVersion, "org", Id, number, self.DeviceId, false, true, ["hourly"], null, null,
+            FleetAutomationSigning.SealForTeam(new FleetAutomationContent(Definition.Replace("Half past", name, StringComparison.Ordinal), null), Id, number, self.DeviceId,
+                "infra", list, access, device), string.Empty, string.Empty, DateTimeOffset.UtcNow) { Scope = "team:infra", Provider = "gateway" });
+        (FleetAutomationContent?, string?) Open(FleetAutomationVersion version)
+            => FleetAutomationSigning.TryOpen(version.Sealed, version.AutomationId, version.Number, version.MachineId, self, list, access, out var content, out var reason)
+                ? (content, null) : (null, reason);
+        var adaVersion = Edited(ada, 2, "Half past, by Ada");
+        var byAdaEdit = await automations.AcceptFromServerAsync("link-1", list, "org", adaVersion, Open, token);
+        Assert.IsTrue(byAdaEdit.Applied, byAdaEdit.Message);
+        Assert.AreEqual("Half past, by Ada", automations.Engine.Snapshot.Find(Id)!.Definition.Name);
+        Assert.IsTrue(FleetAutomationVersionDocuments.TryParse(adaVersion.Payload, out var adas));
+        Assert.IsTrue(FleetAutomationSigning.TryOpen(adas.Sealed, Id, 2, self.DeviceId, mia, list, access, out var forMia, out var notForMia), notForMia);
+        StringAssert.Contains(forMia.Definition, "by Ada", "the other maintainers open what she saved");
+        Assert.ThrowsExactly<ArgumentException>(() => Edited(max, 3, "Half past, by Max"), "a member does not seal for the team");
+        var byMaxEdit = await automations.AcceptFromServerAsync("link-1", list, "org", FleetAutomationSigning.Sign(max, new FleetAutomationVersion(
+            FleetAutomationVersion.CurrentVersion, "org", Id, 3, self.DeviceId, false, true, ["hourly"], null, null,
+            FleetAutomationSigning.Seal(new FleetAutomationContent(Definition, null), Id, 3, self.DeviceId, list, max), string.Empty, string.Empty, DateTimeOffset.UtcNow)
+        {
+            Scope = "team:infra", Provider = "gateway",
+        }), Open, token);
+        Assert.IsFalse(byMaxEdit.Applied, "a member gives the team's automation no version");
+        Assert.AreEqual("Half past, by Ada", automations.Engine.Snapshot.Find(Id)!.Definition.Name);
     }
 
     [TestMethod]
