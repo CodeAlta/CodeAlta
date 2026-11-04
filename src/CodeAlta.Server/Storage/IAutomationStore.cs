@@ -99,6 +99,12 @@ public interface IAutomationStore
     /// <returns>The versions.</returns>
     ValueTask<IReadOnlyList<AutomationRecord>> ListAutomationsAsync(string organizationId, string ownerPersonId, CancellationToken cancellationToken = default);
 
+    /// <summary>Lists who holds each automation of the organization that is not removed: its id and the person of its versions, once per pair.</summary>
+    /// <param name="organizationId">The organization.</param>
+    /// <param name="cancellationToken">Cancels the operation.</param>
+    /// <returns>The automations and their people, by automation.</returns>
+    ValueTask<IReadOnlyList<(string AutomationId, string PersonId)>> ListAutomationHoldersAsync(string organizationId, CancellationToken cancellationToken = default);
+
     /// <summary>Lists the versions a machine has not taken yet.</summary>
     /// <param name="organizationId">The organization.</param>
     /// <param name="machineId">The machine.</param>

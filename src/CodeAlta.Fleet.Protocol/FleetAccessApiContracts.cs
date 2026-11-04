@@ -99,8 +99,26 @@ public sealed record ResourceOwnerDto(string ResourceKind, string ResourceId, st
 /// <param name="OfferedAt">When.</param>
 /// <param name="DecidedBy">The person who accepted or declined it.</param>
 /// <param name="DecidedAt">When.</param>
+/// <param name="HasHandover">Whether a computer of its former owner sealed what it does for the devices of who takes it.</param>
 public sealed record TransferDto(string Id, string ResourceKind, string ResourceId, string? ResourceName, string FromKind, string FromId, string ToKind, string ToId, string State,
-    string Reason, string OfferedBy, DateTimeOffset OfferedAt, string? DecidedBy, DateTimeOffset? DecidedAt);
+    string Reason, string OfferedBy, DateTimeOffset OfferedAt, string? DecidedBy, DateTimeOffset? DecidedAt, bool HasHandover = false);
+
+/// <summary>
+/// The hand-over of an automation given to a person (<c>doc/fleet/access-control.md</c>, ownership over time): what it does,
+/// sealed by a computer of its owner with a key made for the transfer, and that key wrapped to each device of the person who
+/// takes it. The server stores it without opening it.
+/// </summary>
+/// <param name="Sealed">What the automation does, sealed.</param>
+/// <param name="Wraps">The copy of the key for each device of who takes it.</param>
+public sealed record TransferHandoverDto(string Sealed, IReadOnlyList<GrantKeyWrapDto> Wraps);
+
+/// <summary>What a hand-over gives the calling device (<c>GET /api/v1/transfers/{id}/handover</c>).</summary>
+/// <param name="TransferId">The transfer.</param>
+/// <param name="ResourceId">The automation.</param>
+/// <param name="FromPersonId">Its former owner, whose computer sealed and signed it.</param>
+/// <param name="Sealed">What it does, sealed.</param>
+/// <param name="Wrapped">This device's copy of the key.</param>
+public sealed record TransferHandoverCopyDto(string TransferId, string ResourceId, string FromPersonId, string Sealed, string Wrapped);
 
 /// <summary>Where the signed access document stands, as People and access shows it.</summary>
 /// <param name="Number">The number of the last signed version; 0 when none was signed yet.</param>
@@ -168,7 +186,8 @@ public sealed record CreateGrantRequest(string SubjectKind, string SubjectId, st
 /// <param name="ResourceId">Its id.</param>
 /// <param name="ToKind">A person, a team or the organization.</param>
 /// <param name="ToId">Their id.</param>
-public sealed record OfferTransferRequest(string ResourceKind, string ResourceId, string ToKind, string ToId);
+/// <param name="Handover">For an automation given to a person: what it does, sealed for their devices; null for none.</param>
+public sealed record OfferTransferRequest(string ResourceKind, string ResourceId, string ToKind, string ToId, TransferHandoverDto? Handover = null);
 
 /// <summary>The body of <c>POST /api/v1/people/{id}/deprovision</c>.</summary>
 /// <param name="SuccessorKind">Who takes what they owned in team and organization scopes: a person or a team; null for the organization.</param>
@@ -259,6 +278,27 @@ public sealed record CreateAccessProposalRequest(string Kind, string Summary, st
 /// <param name="State"><c>applied</c> once the person applied it, or <c>dismissed</c>.</param>
 public sealed record DecideAccessProposalRequest(string State);
 
+/// <summary>The copy of the key of a grant of sealed content for one device of the grantee.</summary>
+/// <param name="DeviceId">The device.</param>
+/// <param name="Wrapped">The key, wrapped to that device and signed by the device that gives it.</param>
+public sealed record GrantKeyWrapDto(string DeviceId, string Wrapped);
+
+/// <summary>
+/// The body of <c>POST /api/v1/grants/{id}/keys</c> for a grant of sealed session content: the metadata of the session sealed with
+/// a key made for the grant, and that key wrapped to each device of the grantee, by a device of the owner of the session.
+/// </summary>
+/// <param name="Sealed">The sealed metadata, which the server cannot open.</param>
+/// <param name="Wraps">The copies of its key.</param>
+public sealed record ConfirmGrantKeysRequest(string Sealed, IReadOnlyList<GrantKeyWrapDto> Wraps);
+
+/// <summary>What a grant of sealed content gives the calling device: the sealed metadata of a session and the copy of its key for that device.</summary>
+/// <param name="GrantId">The grant.</param>
+/// <param name="SessionId">The session.</param>
+/// <param name="MachineId">The machine of the session, whose owner gave the key.</param>
+/// <param name="Sealed">The sealed metadata.</param>
+/// <param name="Wrapped">The copy of its key for the calling device.</param>
+public sealed record GrantKeyDto(string GrantId, string SessionId, string MachineId, string Sealed, string Wrapped);
+
 /// <summary>A list of items of access control.</summary>
 /// <typeparam name="T">The type of the items.</typeparam>
 /// <param name="Items">The items.</param>
@@ -295,5 +335,8 @@ public sealed record AccessListDto<T>(IReadOnlyList<T> Items);
 [JsonSerializable(typeof(DeprovisionResultDto))]
 [JsonSerializable(typeof(CreateAccessProposalRequest))]
 [JsonSerializable(typeof(DecideAccessProposalRequest))]
+[JsonSerializable(typeof(ConfirmGrantKeysRequest))]
+[JsonSerializable(typeof(TransferHandoverCopyDto))]
+[JsonSerializable(typeof(AccessListDto<GrantKeyDto>))]
 [JsonSerializable(typeof(ApiProblemDto))]
 public sealed partial class FleetAccessApiJsonContext : JsonSerializerContext;

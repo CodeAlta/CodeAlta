@@ -98,6 +98,46 @@ public sealed class FleetAccessDocumentsTests
         Assert.IsFalse(FleetAccessDocuments.SaySame(after, after with { Suspended = [] }));
     }
 
+    [TestMethod]
+    public void ATeamNamesTheServiceIdentitiesItRunsAs_AndATeamAutomationVerifiesOnlyFromItsMaintainersOnItsMachines()
+    {
+        using var world = new World();
+        // A team with no service identity writes the format as before: the hash of a version signed earlier does not move.
+        Assert.IsFalse(FleetAccessDocuments.Serialize(Document(1, null, 4, owners: ["alex"], teams: [Team("infra", ["ada"], [])])).Contains("services", StringComparison.Ordinal));
+        var chain = new List<FleetSignedAccessDocument> { world.Founder.Sign(Document(1, null, 4, owners: ["alex"], signers: ["ada"], teams: [Team("infra", ["ada"], ["bea"])],
+            machines: [new FleetAccessMachine(world.Node.Id, "infra")])) };
+        var before = FleetAccessDocuments.Verify(chain, world.Devices, Organization).State;
+        Assert.IsNull(before.TeamOf(world.Node.Id)!.Services);
+        var after = Document(2, Hash(chain), 4, owners: ["alex"], signers: ["ada"], teams: [Team("infra", ["ada"], ["bea"]) with { Services = ["svc-infra"] }],
+            machines: [new FleetAccessMachine(world.Node.Id, "infra")]);
+        CollectionAssert.AreEqual(new[] { "Infra runs its automations as infra-bot" },
+            FleetAccessDocuments.Describe(before, after, id => id switch { "infra" => "Infra", "svc-infra" => "infra-bot", _ => null }).ToArray());
+        Assert.IsFalse(FleetAccessDocuments.SaySame(before, after), "a service identity turned on is a change machines follow");
+        chain.Add(world.Ada.Sign(after));
+        var state = FleetAccessDocuments.Verify(chain, world.Devices, Organization).State;
+        CollectionAssert.AreEqual(new[] { "svc-infra" }, state.TeamOf(world.Node.Id)!.Services!.ToArray());
+
+        // A version for the team: from its maintainer, for a machine of that team; never from a member, nor for another team or a personal machine.
+        FleetSignedAutomationVersion Version(Key signer, string machine, string? scope)
+        {
+            var text = FleetAutomationVersionDocuments.Serialize(new FleetAutomationVersion(FleetAutomationVersion.CurrentVersion, Organization, "nightly", 1, machine, false, true, [],
+                null, null, "{\"sealed\":1}", signer.Id, signer.PublicKey, Time) { Scope = scope });
+            return new FleetSignedAutomationVersion(text, signer.SignVersion(text));
+        }
+
+        Assert.IsTrue(FleetAutomationVersionDocuments.TryVerify(Version(world.Ada, world.Node.Id, "team:infra"), world.Devices, state, Organization, world.Node.Id, out var version,
+            out var reason), reason);
+        Assert.AreEqual("team:infra", version.Scope);
+        Assert.IsFalse(FleetAutomationVersionDocuments.TryVerify(Version(world.Bea, world.Node.Id, "team:infra"), world.Devices, state with { Teams = state.Teams.SetItem("infra",
+            state.Teams["infra"] with { RunsMemberAutomations = true }) }, Organization, world.Node.Id, out _, out reason), "a member gives the team none of its automations");
+        Assert.IsFalse(FleetAutomationVersionDocuments.TryVerify(Version(world.Ada, world.Node.Id, "team:web"), world.Devices, state, Organization, world.Node.Id, out _, out _));
+        Assert.IsFalse(FleetAutomationVersionDocuments.TryVerify(Version(world.Ada, world.Node.Id, "organization"), world.Devices, state, Organization, world.Node.Id, out _, out _),
+            "a scope this version does not know");
+        Assert.IsTrue(FleetAutomationVersionDocuments.TryVerify(Version(world.Ada, world.Node.Id, null), world.Devices, state, Organization, world.Node.Id, out var personal, out _));
+        Assert.IsNull(personal.Scope);
+        Assert.IsFalse(FleetAutomationVersionDocuments.Serialize(personal).Contains("scope", StringComparison.Ordinal), "a personal version writes the format as before");
+    }
+
     private static void AssertBroken(IReadOnlyList<FleetSignedAccessDocument> chain, World world, long at, string reason, string organization = Organization,
         FleetDeviceListState? devices = null)
     {
@@ -185,6 +225,9 @@ public sealed class FleetAccessDocumentsTests
             return new FleetSignedAccessDocument(text, Base64Url.EncodeToString(_key.SignData(FleetAccessDocuments.GetSignedBytes(text), HashAlgorithmName.SHA256,
                 DSASignatureFormat.IeeeP1363FixedFieldConcatenation)));
         }
+
+        public string SignVersion(string text)
+            => Base64Url.EncodeToString(_key.SignData(FleetAutomationVersionDocuments.GetSignedBytes(text), HashAlgorithmName.SHA256, DSASignatureFormat.IeeeP1363FixedFieldConcatenation));
 
         public void Dispose() => _key.Dispose();
     }

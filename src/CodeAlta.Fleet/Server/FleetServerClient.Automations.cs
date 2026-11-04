@@ -65,6 +65,23 @@ public sealed partial class FleetServerClient
             Body(new RunAutomationRequest(signed), FleetAutomationApiJsonContext.Default.RunAutomationRequest), FleetAutomationApiJsonContext.Default.AutomationRunDto, cancellationToken);
     }
 
+    /// <summary>Asks a machine, through the server, to let the person take a run in progress over, with a request this device signed.</summary>
+    /// <param name="signed">The signed request, whose action is <see cref="FleetAutomationRunRequest.TakeOverAction"/>.</param>
+    /// <param name="cancellationToken">Cancels the call.</param>
+    /// <returns>The run as asked.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="signed"/> is null.</exception>
+    /// <exception cref="ArgumentException">The request does not read, or does not take a run over.</exception>
+    /// <exception cref="FleetServerException">The server refused it: the machine is offline, or the automation is not this device's person's on that machine.</exception>
+    /// <exception cref="HttpRequestException">The server does not answer.</exception>
+    public Task<AutomationRunDto> TakeOverAutomationRunAsync(FleetSignedAutomationRunRequest signed, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(signed);
+        if (!FleetAutomationRunRequestDocuments.TryRead(signed.Payload, out var request, out var reason) || request.Action != FleetAutomationRunRequest.TakeOverAction)
+            throw new ArgumentException($"The request does not take a run over{(reason is null ? string.Empty : ": " + reason)}.", nameof(signed));
+        return SendAsync(HttpMethod.Post, $"api/v1/automations/{Uri.EscapeDataString(request.AutomationId)}/runs/{Uri.EscapeDataString(request.RunId)}/takeover",
+            Body(new RunAutomationRequest(signed), FleetAutomationApiJsonContext.Default.RunAutomationRequest), FleetAutomationApiJsonContext.Default.AutomationRunDto, cancellationToken);
+    }
+
     /// <summary>Lists the runs of an automation as its machines reported them, the newest first.</summary>
     /// <param name="automationId">The automation.</param>
     /// <param name="limit">The most runs; null for the server's default.</param>

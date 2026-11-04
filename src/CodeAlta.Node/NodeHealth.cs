@@ -62,6 +62,9 @@ internal sealed class NodeHealth
     /// </summary>
     public Func<(long Free, long Total)?> DiskSpace { get; set; }
 
+    /// <summary>Gets or sets what lists the people who asked to use the machine and wait for its owner; null for none.</summary>
+    public Func<IReadOnlyList<string>>? AccessRequests { get; set; }
+
     /// <summary>Gets or sets what lists the enabled providers whose sign-in is checked.</summary>
     public Func<IReadOnlyList<CodeAltaProviderDocument>> SignInDefinitions { get; set; }
 
@@ -127,6 +130,9 @@ internal sealed class NodeHealth
 
         // A sign-in about to expire that does not renew itself, read in the background.
         problems.AddRange(SignIns());
+
+        // A person who asked to use the machine: its owner is told, and lets them in on the page of the machine.
+        foreach (var person in AccessRequests?.Invoke() ?? []) problems.Add(new FleetHealthProblem(FleetHealthKinds.AccessRequest, person));
 
         if (_node.Automations is { } automations)
         {

@@ -71,6 +71,7 @@ internal sealed class AccessDocumentService
         var names = new Dictionary<string, string>(StringComparer.Ordinal);
         foreach (var other in snapshot.People) names[other.Id] = other.DisplayName;
         foreach (var team in snapshot.Teams) names[team.Id] = team.Name;
+        foreach (var identity in snapshot.ServiceIdentities) names[identity.Id] = identity.Name;
         foreach (var device in devices) names[device.Id] = device.Name;
         return new AccessDocumentDraftDto(draft, changes, names);
     }
@@ -151,6 +152,7 @@ internal sealed class AccessDocumentService
             StringComparer.Ordinal);
         foreach (var person in snapshot.People) names[person.Id] = person.DisplayName;
         foreach (var team in snapshot.Teams) names[team.Id] = team.Name;
+        foreach (var identity in snapshot.ServiceIdentities) names[identity.Id] = identity.Name;
         IReadOnlyList<string> pending = !needed ? [] : FleetAccessDocuments.Describe(before, model, id => names.GetValueOrDefault(id));
         if (needed && last is null && pending.Count == 0) pending = ["The first version of the access document"];
         var signer = last is null ? null : (await _store.GetDeviceAsync(last.SignerDeviceId, cancellationToken).ConfigureAwait(false))?.OwnerPersonId;
@@ -168,10 +170,13 @@ internal sealed class AccessDocumentService
             .Select(team =>
             {
                 var members = snapshot.Members.Where(member => member.TeamId == team.Id && snapshot.Person(member.PersonId) is { IsActive: true }).ToList();
+                // The service identities of the team that are on: its automations run as one of them, and machines follow them once signed.
+                var services = snapshot.ServiceIdentities.Where(identity => identity.Enabled && identity.OwnerKind == FleetPrincipalKinds.Team && identity.OwnerId == team.Id)
+                    .Select(static identity => identity.Id).Order(StringComparer.Ordinal).ToArray();
                 return new FleetAccessTeam(team.Id,
                     [.. members.Where(static member => member.Role == FleetTeamRoles.Maintainer).Select(static member => member.PersonId).Order(StringComparer.Ordinal)],
                     [.. members.Where(static member => member.Role != FleetTeamRoles.Maintainer).Select(static member => member.PersonId).Order(StringComparer.Ordinal)],
-                    team.RunsMemberAutomations);
+                    team.RunsMemberAutomations, services.Length == 0 ? null : services);
             }).ToList();
         var living = new HashSet<string>(teams.Select(static team => team.Id), StringComparer.Ordinal);
         var machines = snapshot.Owners.Where(owner => owner.ResourceKind == FleetResourceKinds.Machine && owner.OwnerKind == FleetPrincipalKinds.Team && living.Contains(owner.OwnerId)

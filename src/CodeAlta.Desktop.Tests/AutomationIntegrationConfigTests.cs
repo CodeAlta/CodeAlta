@@ -86,6 +86,7 @@ public sealed class AutomationIntegrationConfigTests
     [DataRow("""{ type = "webhook", hook = "h0123456789abcdefghij", secret = "${secret:S}", reply = true }""", "nowhere to reply")]
     [DataRow("""{ type = "slack", event = "reaction", app_token = "${secret:A}", bot_token = "${secret:B}", channel = "C0123ABCDEF" }""", "message or mention")]
     [DataRow("""{ type = "slack", app_token = "${secret:A}", bot_token = "${secret:B}", channel = "C0123ABCDEF", token = "${secret:T}" }""", "has no site, email or token")]
+    [DataRow("""{ type = "slack", event = "mention", app_token = "${secret:A}", bot_token = "${secret:B}", channel = "C0123ABCDEF", threads = true }""", "threads is for a Slack trigger on every message")]
     public void Read_SaysWhatATriggerOfAnotherToolLacks(string trigger, string expected)
     {
         var (definitions, faults) = AutomationConfig.Read($$"""

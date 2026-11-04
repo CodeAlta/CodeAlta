@@ -58,6 +58,12 @@ public sealed class FleetHostPublicationSource : IFleetPublicationSource, IAsync
     /// <inheritdoc />
     public event Action? Changed;
 
+    /// <summary>
+    /// Gets or sets what names the person who started a session here through a team membership (a team machine), which the
+    /// server's directory shows that session to; null names none.
+    /// </summary>
+    public Func<string, string?>? PersonOf { get; set; }
+
     /// <inheritdoc />
     public ValueTask<FleetMachineInventory> ReadInventoryAsync(CancellationToken cancellationToken)
     {
@@ -116,7 +122,7 @@ public sealed class FleetHostPublicationSource : IFleetPublicationSource, IAsync
             var projectIdentity = isPrivate || project is null ? null : await FleetProjectKeys.IdentityAsync(project, _repositories, cancellationToken).ConfigureAwait(false);
             result.Add(new FleetLocalSession(session.SessionId, space, isPrivate,
                 epochs.TryGetValue(session.SessionId, out var epoch) ? epoch : 0, state, session.CreatedAt, session.UpdatedAt, Bounded(providerType),
-                Bounded(session.ViewState?.ModelId ?? session.ModelId), counts, isPrivate ? null : title, projectIdentity));
+                Bounded(session.ViewState?.ModelId ?? session.ModelId), counts, isPrivate ? null : title, projectIdentity, PersonOf?.Invoke(session.SessionId)));
         }
 
         // The sessions gone from the instance are forgotten with their counts.

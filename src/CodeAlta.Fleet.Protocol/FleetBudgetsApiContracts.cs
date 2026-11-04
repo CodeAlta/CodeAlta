@@ -133,6 +133,9 @@ public static class FleetNotificationKinds
 
     /// <summary>A machine has a problem that lasts (<see cref="FleetHealthKinds"/>).</summary>
     public const string Health = "health";
+
+    /// <summary>A run of an automation waits for an approval of the person (<c>doc/fleet/orchestration.md</c>, "Autonomy and approvals").</summary>
+    public const string Approval = "approval";
 }
 
 /// <summary>
@@ -181,8 +184,14 @@ public static class FleetHealthKinds
     /// <summary>A policy of the machine refused runs; its subject is what refused them.</summary>
     public const string PolicyRefusing = "policy_refusing";
 
+    /// <summary>
+    /// A person of the organization the machine does not name tried to use it, and waits for its owner to let them in; its subject
+    /// is the person (<c>doc/fleet/access-control.md</c>: "the first start by a new person asks the node's owner").
+    /// </summary>
+    public const string AccessRequest = "access_request";
+
     /// <summary>The kinds a machine reports in its heartbeat; the server sees <see cref="Offline"/> and <see cref="VersionBehind"/> for itself.</summary>
-    public static IReadOnlyList<string> Reported { get; } = [SignIn, SignInFailed, DiskLow, AutomationFailing, PolicyRefusing];
+    public static IReadOnlyList<string> Reported { get; } = [SignIn, SignInFailed, DiskLow, AutomationFailing, PolicyRefusing, AccessRequest];
 
     /// <summary>Gets whether a machine may report a kind (<see cref="Reported"/>).</summary>
     /// <param name="kind">The kind.</param>

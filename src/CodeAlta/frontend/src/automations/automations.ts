@@ -1,6 +1,6 @@
 // What the page knows of an automation without asking the host: how a trigger reads, what a form holds, the
 // templates a new one can start from.
-import type { AutomationInput, AutomationItem, AutomationRunItem, AutomationTriggerItem, SessionOptionsChoice } from "#neoastra";
+import type { AutomationAutonomyItem, AutomationInput, AutomationItem, AutomationRunItem, AutomationTriggerItem, SessionOptionsChoice } from "#neoastra";
 import type { IconName } from "../AppIcon";
 import type { Locale, MessageKey } from "../localization";
 import { permissionModeName } from "../permissionModes";
@@ -81,7 +81,7 @@ export function newTrigger(type: TriggerType): AutomationTriggerItem {
   const integration = isIntegration(type) ? {
     site: null, email: null, token: null, jiraProject: null, query: null, appToken: null, botToken: null, channel: null, match: null, apiKey: null, hook: null, secret: null,
     // Writing in another tool is something the person turns on: a new trigger only reads.
-    signature: type === "webhook" ? "standard" : null, signatureHeader: null, fields: [], reply: false,
+    signature: type === "webhook" ? "standard" : null, signatureHeader: null, fields: [], reply: false, threads: false,
   } : null;
   return { type, minute: 0, every: 1, at: type === "daily" || type === "weekly" ? ["09:00"] : [], days: type === "weekly" ? ["mon"] : [],
     expression: type === "cron" ? "0 9 * * 1-5" : null, event: isIntegration(type) ? integrationEvents[type][0]! : type === "jira" ? "created" : "opened", authors: "trusted",
@@ -145,10 +145,10 @@ export function describeTriggers(triggers: readonly AutomationTriggerItem[], t: 
 export type RunTone = "running" | "ok" | "failed" | "held" | "muted";
 /** How the status of a run is shown. */
 export function runTone(status: string): RunTone {
-  return status === "running" ? "running" : status === "completed" ? "ok" : status === "failed" ? "failed" : status === "held" ? "held" : "muted";
+  return status === "running" || status === "waiting" ? "running" : status === "completed" ? "ok" : status === "failed" ? "failed" : status === "held" ? "held" : "muted";
 }
 const statusLabels: Readonly<Record<string, MessageKey>> = {
-  running: "Running", completed: "Completed", failed: "Failed", cancelled: "Cancelled", interrupted: "Interrupted", skipped: "Skipped",
+  running: "Running", waiting: "Waits for you", completed: "Completed", failed: "Failed", cancelled: "Cancelled", interrupted: "Interrupted", skipped: "Skipped",
   // A budget of its machine is reached: the run goes on once its owner continues it anyway.
   held: "Waits for Continue anyway",
 };
@@ -175,12 +175,23 @@ export type AutomationForm = Readonly<{
   /** The paired machine it runs on (its id); null for this computer. Only an automation kept in the configuration of the user runs elsewhere. */
   runsOn: string | null;
   triggers: readonly AutomationTriggerItem[];
+  /** What its runs may do without a person; null for an automation that runs as before. */
+  autonomy: AutomationAutonomyItem | null;
 }>;
+
+/** The autonomy a person turns on: read only, no tool of another source allowed yet, approvals to the owner, an hour to answer. */
+export const newAutonomy = (): AutomationAutonomyItem => ({ allowedTools: [], maxCallsPerHour: null, approvalTimeout: 60, onTimeout: "stop", approvers: "owner" });
+/** What the runs of an automation with autonomy do without a person, in one line. */
+export const describeAutonomy = (autonomy: AutomationAutonomyItem, t: Translate): string => autonomy.allowedTools.length === 0
+  ? t("Read only: it asks you before anything else than reading.")
+  : t("It calls {tools} by itself; it asks you for anything else.", { tools: autonomy.allowedTools.join(", ") });
+/** The names of tools a person writes, one per comma or line, without repeats. */
+export const toolNames = (text: string): readonly string[] => [...new Set(text.split(/[\s,]+/).map(name => name.trim()).filter(Boolean))];
 
 /** The form of a new automation, in a project or as a chat. */
 export function emptyForm(projectId: string | null): AutomationForm {
   return { id: null, name: "", enabled: true, prompt: "", script: "", scriptArguments: "", projectId, storeInProject: false, provider: "", model: "", effort: "", agent: "", catchUp: false,
-    permissionMode: "", reviewBeforeCommit: null, sandbox: "", options: null, runsOn: null, triggers: [] };
+    permissionMode: "", reviewBeforeCommit: null, sandbox: "", options: null, runsOn: null, triggers: [], autonomy: null };
 }
 
 /** The form of an automation that exists. */
@@ -188,7 +199,7 @@ export function formOf(item: AutomationItem): AutomationForm {
   return { id: item.id, name: item.name, enabled: item.enabled, prompt: item.prompt, script: item.script ?? "", scriptArguments: item.scriptArguments ?? "", projectId: item.projectId, storeInProject: item.storeProjectId !== null,
     provider: item.provider ?? "", model: item.model ?? "", effort: item.effort ?? "", agent: item.agent ?? "", catchUp: item.catchUp,
     permissionMode: item.permissionMode ?? "", reviewBeforeCommit: item.reviewBeforeCommit, sandbox: item.sandbox ?? "", options: storedSessionOptions(item.options),
-    runsOn: item.runsOn ?? null, triggers: item.triggers };
+    runsOn: item.runsOn ?? null, triggers: item.triggers, autonomy: item.autonomy ?? null };
 }
 
 /** The machine an automation runs on, in words: null for this computer. */
@@ -271,6 +282,7 @@ export function inputOf(form: AutomationForm): AutomationInput {
     options: storedSessionOptions(form.options),
     // The configuration of a project runs its automations on the machines that have it.
     runsOn: form.storeInProject ? null : form.runsOn,
+    autonomy: form.autonomy ? { ...form.autonomy, allowedTools: form.autonomy.allowedTools.map(tool => tool.trim()).filter(Boolean) } : null,
     // An automation that is run by hand misses nothing.
     catchUp: form.catchUp && form.triggers.length > 0,
     triggers: form.triggers.map(trigger => ({ ...trigger, at: [...trigger.at].sort(), expression: trigger.type === "cron" ? (trigger.expression ?? "").trim() : null,

@@ -99,6 +99,10 @@
 button.automation-run { cursor: pointer; }
 button.automation-run:hover, button.automation-run:focus-visible { background: var(--panel-3); outline: none; }
 .automation-run-text { display: grid; min-width: 0; }
+.automation-run-waits { display: flex; align-items: center; gap: 10px; margin: 0 8px 6px 30px; color: var(--muted); font-size: 12px; }
+.automation-run-waits > span { flex: 1; min-width: 0; }
+.automation-run-calls { margin: 0 8px 6px 30px; padding: 0; list-style: none; display: grid; gap: 2px; }
+.automation-run-calls > li { color: var(--muted); font-family: var(--code-font); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .automation-run-text strong { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .automation-run-text span { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .automation-run time { color: var(--muted); white-space: nowrap; }
@@ -174,6 +178,15 @@ button.automation-run:hover, button.automation-run:focus-visible { background: v
 .automation-integration-check p { margin: 2px 0; }
 .automation-integration-prompt { max-height: 180px; overflow: auto; margin: 6px 0 0; padding: 6px 8px; border-radius: 6px; background: var(--panel); font-family: var(--code-font);
   font-size: 11px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.automation-autonomy .bp6-form-content { display: grid; gap: 8px; }
+.automation-autonomy .bp6-control { margin: 0; }
+.automation-autonomy-help, .automation-autonomy-summary { margin: 0; color: var(--muted); font-size: 12px; }
+.automation-autonomy-grid { display: grid; grid-template-columns: max-content minmax(0, 1fr); align-items: center; gap: 6px 12px; }
+.automation-autonomy-grid > label, .automation-autonomy-label { font-size: 12px; }
+.automation-autonomy-approvers { color: var(--muted); font-size: 12px; }
+#automation-allowed-tools { font-family: var(--code-font); font-size: 12px; }
+.automation-autonomy-grid .bp6-numeric-input { width: 96px; }
+.automation-autonomy-timeout { display: flex; gap: 8px; align-items: center; }
 .automation-editor-switches { display: flex; flex-wrap: wrap; gap: 4px 22px; margin-bottom: 8px; }
 .automation-editor-switches .bp6-control { margin: 0; }
 .automation-editor-footer { flex: none; display: flex; justify-content: flex-end; gap: 8px; padding: 10px 18px 14px; border-top: 1px solid var(--line); }

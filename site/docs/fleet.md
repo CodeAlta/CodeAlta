@@ -207,6 +207,7 @@ The machine fires its schedules and starts its sessions; **Run now** runs it the
 - Its project is found on the machine by its git repository: the machine needs a checkout of it (`altanode projects clone <url>`). An automation of no project runs as a chat there.
 - **Runs with** lists the providers and models of the machine once you choose it in **Runs on**, paired or reached through your server, named as the machine names them (a machine that does not answer leaves the providers of this computer); leave it to the defaults for the machine's default provider. **Runs in** lists the projects of this computer: the machine finds its own checkout of the project.
 - A command trigger runs on this computer only, and an automation kept in the configuration of a project runs on the machines that have the project.
+- An automation with [autonomy](automations.md#decide-what-it-does-without-you) waits for you on the machine. Through your server, a run that waits comes as a message to the owner of the automation (for a team's, its members) and to the people granted to approve it; **Take over** on the run is signed by your computer and checked by the machine, and you answer in its session.
 
 A machine of your server that is not paired with this computer gets the automation through the server, with no permission to give on the machine: it must be one of your machines. The server keeps it sealed, so it cannot read nor change it, and the machine gets it when it connects. Its details say whether the machine took it or refused it, and why. **Run now** asks the machine through the server while it is online; its triggers run it either way, also while the server is away.
 
@@ -240,6 +241,7 @@ In **Settings** > **Fleet** > **Machines**, click the name of a machine to open 
 | --- | --- |
 | **Devices** | Each computer paired with the machine, with a switch per permission: **View**, **Drive**, **Start**, **Move**, **Automate** and **Manage**. **Revoke** (the cross at the end of the row, then **Revoke**) refuses that computer there at once. |
 | **Agents of other machines** | The spaces where agents of other computers may start sessions there and send prompts to its sessions, the sandbox their sessions run in at least, and whether they may bypass permissions ([Let agents start sessions on it](#let-agents-start-sessions-on-it)) |
+| **People** | The people of your organization who may use it, each on their own sessions, and who asked to ([People and Access](people-and-access.md#people-on-your-own-machines)) |
 | **Labels** | Its [labels](#label-your-machines), which it publishes to its servers: add them, or remove one with its cross |
 | **Projects** | Clone a repository there, add a folder, remove a project |
 | **Providers** | Each provider of the machine and whether it is ready; when it is not, why: no key, the secret of the machine it waits for, not signed in. **Add a provider…** and **Add its key…** take its key here: it goes to the machine encrypted from end to end and is kept in its secrets (`PROVIDER_<KEY>_API_KEY`), never in its configuration. **Sign in…** signs in a provider such as GitHub Copilot or xAI on the machine: its code shows here with **Copy**; enter it on the provider's page in your browser. A provider with its own login on the machine (Codex, Claude Code) is signed in there |
@@ -329,8 +331,8 @@ The card of the server shows **Sign-in**: the ways people sign in on a new compu
 
 - **Link…** adds a way to sign in to you, from a computer already approved: **Add a passkey** (the server's page opens in your browser) or **Link Microsoft**, **Google**, **GitHub** (a code to enter at GitHub, as when you join). An account signs nobody in until someone linked it. The server keeps only the id and the name of a GitHub account, never its login or a token.
 - On the owner's computer, **Change…** turns each method on or off and sets the company's sign-in: its **Issuer** (the OpenID Connect address of Entra ID, Okta, Google Workspace, Keycloak...), the **Client id** and **Client secret** you registered there, with the redirect `http://127.0.0.1` (any port), and the **Groups claim**. The secret is never shown again. **Email domains let in** and **Tenant ids let in** say whose accounts it accepts: give at least one, and the tenant id for Entra ID. An account of another domain or tenant is refused. People sign in with it the first time without an invitation; their first computer waits for your approval. Saving a change of the company sign-in asks you to sign in again: **Continue with** a passkey or an account linked to you (link one first with **Link…**).
+- **Roles from groups** gives a role to the members of a group of your company, by the id of the group in the groups claim: **Add a group**, then choose **Admin**, **Member**, **Auditor** or **Guest**. At each company sign-in a person gets the widest role among their groups, or member when they are in none. No group makes an owner, and owners keep their role.
 - **Require company sign-in** leaves only the company's sign-in for a new computer, and your passkey as the owner's way in.
-- Microsoft, Google and GitHub show **Not registered yet** until CodeAlta's own sign-in applications for them exist.
 
 ### Keep your recovery key
 
@@ -445,7 +447,7 @@ Your nodes tell the server how they are: little disk space left, a provider whos
 
 incident.io and other tools that push signed webhooks send their events to a hook of your server, for one of your machines.
 
-1. In an automation that runs on that machine, add an **incident.io** or **Webhook** trigger and click **Make a hook**. Give the address it shows to the tool (in incident.io: Settings > Webhooks).
+1. In an automation that runs on that machine, add an **incident.io** or **Webhook** trigger and click **Make a hook**. Give the address it shows to the tool (in incident.io: Settings > Webhooks). The address stays hidden in the trigger: **Show the address** reads it again from the server.
 2. Keep the signing secret of the tool, and for incident.io an API key, in the secrets of that machine.
 3. **Test the connection**, then enable the automation.
 

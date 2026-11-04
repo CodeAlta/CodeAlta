@@ -96,15 +96,30 @@ public sealed class AccessControlTests
         var scoped = await server.SendAsync(owner, HttpMethod.Post, "/api/v1/grants",
             new CreateGrantRequest(FleetPrincipalKinds.Person, maxId, "session.view-content", FleetScopeKinds.Team, team.Id));
         Assert.AreEqual((HttpStatusCode.BadRequest, CoordinatorErrorCodes.AccessInvalid), (scoped.Status, scoped.Code), "content never flows down a scope");
-        var byAdmin = await server.SendAsync(owner, HttpMethod.Post, "/api/v1/grants",
-            new CreateGrantRequest(FleetPrincipalKinds.Person, maxId, "machine.logs", FleetScopeKinds.Resource, "machine:" + machine.Id, Sealed: true));
-        Assert.AreEqual(HttpStatusCode.Created, byAdmin.Status, "the owner of the machine grants its log");
-        var pending = byAdmin.Read<GrantDto>();
+        Assert.AreEqual(HttpStatusCode.BadRequest, (await server.SendAsync(owner, HttpMethod.Post, "/api/v1/grants",
+            new CreateGrantRequest(FleetPrincipalKinds.Person, maxId, "machine.logs", FleetScopeKinds.Resource, "machine:" + machine.Id, Sealed: true))).Status,
+            "what is sealed for a grant is the content of a session");
+        await PublishSessionAsync(server, node, "s1");
+        var byOwner = await server.SendAsync(owner, HttpMethod.Post, "/api/v1/grants",
+            new CreateGrantRequest(FleetPrincipalKinds.Person, maxId, "session.view-content", FleetScopeKinds.Resource, "session:s1", Sealed: true));
+        Assert.AreEqual(HttpStatusCode.Created, byOwner.Status, byOwner.Body.ToString());
+        var pending = byOwner.Read<GrantDto>();
         Assert.AreEqual(FleetGrantStatuses.PendingKeys, pending.Status, "sealed content waits for a device that holds its keys");
-        Assert.AreEqual(HttpStatusCode.Forbidden, (await server.SendAsync(mia, HttpMethod.Post, $"/api/v1/grants/{pending.Id}/keys")).Status,
-            "only a device of the owner of the content confirms its keys");
-        var active = await server.SendAsync(owner, HttpMethod.Post, $"/api/v1/grants/{pending.Id}/keys");
+        var keys = new ConfirmGrantKeysRequest("sealed", [new GrantKeyWrapDto(max.DeviceId, "wrapped")]);
+        Assert.AreEqual(HttpStatusCode.Forbidden, (await server.SendAsync(mia, HttpMethod.Post, $"/api/v1/grants/{pending.Id}/keys", keys)).Status,
+            "only a device of the owner of the content gives its keys");
+        Assert.AreEqual(HttpStatusCode.BadRequest, (await server.SendAsync(owner, HttpMethod.Post, $"/api/v1/grants/{pending.Id}/keys")).Status,
+            "the keys of a session are given, not only said to be");
+        Assert.AreEqual(HttpStatusCode.BadRequest, (await server.SendAsync(owner, HttpMethod.Post, $"/api/v1/grants/{pending.Id}/keys",
+            new ConfirmGrantKeysRequest("sealed", [new GrantKeyWrapDto(mia.DeviceId, "wrapped")]))).Status, "a copy goes to the devices of the grantee only");
+        var active = await server.SendAsync(owner, HttpMethod.Post, $"/api/v1/grants/{pending.Id}/keys", keys);
+        Assert.AreEqual(HttpStatusCode.OK, active.Status, active.Body.ToString());
         Assert.AreEqual(FleetGrantStatuses.Active, active.Read<GrantDto>().Status);
+        var given = (await server.SendAsync(max, HttpMethod.Get, "/api/v1/grant-keys")).Read<AccessListDto<GrantKeyDto>>().Items.Single();
+        Assert.AreEqual((pending.Id, "s1", machine.Id, "sealed", "wrapped"), (given.GrantId, given.SessionId, given.MachineId, given.Sealed, given.Wrapped));
+        Assert.AreEqual(0, (await server.SendAsync(mia, HttpMethod.Get, "/api/v1/grant-keys")).Read<AccessListDto<GrantKeyDto>>().Items.Count, "nothing for another person");
+        var listed = (await server.SendAsync(max, HttpMethod.Get, "/api/v1/sessions")).Read<ListResponse<SessionDto>>().Items;
+        Assert.AreEqual("s1", listed.Single().Id, "the grantee sees the session whose content they were given");
         var teamGrant = await server.SendAsync(mia, HttpMethod.Post, "/api/v1/grants",
             new CreateGrantRequest(FleetPrincipalKinds.Person, maxId, "automation.edit", FleetScopeKinds.Team, team.Id));
         Assert.AreEqual(HttpStatusCode.Created, teamGrant.Status, "a maintainer grants on the team");
@@ -113,6 +128,7 @@ public sealed class AccessControlTests
         var maxGrants = (await server.SendAsync(max, HttpMethod.Get, "/api/v1/grants")).Read<AccessListDto<GrantDto>>();
         Assert.AreEqual(2, maxGrants.Items.Count, "a person sees the grants made to them");
         Assert.AreEqual(HttpStatusCode.OK, (await server.SendAsync(max, HttpMethod.Delete, $"/api/v1/grants/{pending.Id}")).Status, "and may give one back");
+        Assert.AreEqual(0, (await server.SendAsync(max, HttpMethod.Get, "/api/v1/grant-keys")).Read<AccessListDto<GrantKeyDto>>().Items.Count, "its keys go with it");
 
         var review = await server.SendAsync(owner, HttpMethod.Get, "/api/v1/access/review");
         Assert.AreEqual(HttpStatusCode.OK, review.Status, review.Body.ToString());
@@ -120,6 +136,100 @@ public sealed class AccessControlTests
         Assert.IsTrue(rows.Any(row => row.PrincipalId == miaId && row.Source == $"team:{team.Id}:maintainer"));
         Assert.IsTrue(rows.Any(row => row.PrincipalId == maxId && row.Capability == "automation.edit" && row.Source.StartsWith("grant:", StringComparison.Ordinal)));
         Assert.AreEqual(HttpStatusCode.Forbidden, (await server.SendAsync(max, HttpMethod.Get, "/api/v1/access/review")).Status);
+    }
+
+    [TestMethod]
+    public async Task AnAutomationGivenToAPersonCarriesItsHandOverForTheirDevicesOnly_AndItsFormerOwnerGivesItNoMoreVersions()
+    {
+        await using var server = await ServerFixture.StartAsync();
+        using var owner = new TestDevice("Alex desktop");
+        using var node = new TestDevice("Mac mini");
+        var (setup, machine) = await server.SetUpWithNodeAsync(owner, node);
+        var (bea, beaId) = await AddPersonAsync(server, owner, setup, "Bea");
+        var (mia, _) = await AddPersonAsync(server, owner, setup, "Mia");
+        FleetSignedAutomationVersion Version(long number, bool removed = false)
+        {
+            var text = FleetAutomationVersionDocuments.Serialize(new FleetAutomationVersion(FleetAutomationVersion.CurrentVersion, setup.Organization.Id, "nightly", number,
+                machine.Id, removed, !removed, removed ? [] : ["hourly"], null, null, removed ? null : "{\"sealed\":\"for the machine\"}", owner.DeviceId, owner.PublicKey,
+                server.Clock.Now));
+            return new FleetSignedAutomationVersion(text, owner.Sign(FleetAutomationVersionDocuments.GetSignedBytes(text)));
+        }
+
+        Assert.AreEqual(HttpStatusCode.OK, (await server.SendAsync(owner, HttpMethod.Put, "/api/v1/automations/nightly", new PutAutomationRequest(Version(1)))).Status);
+        var toMia = await server.SendAsync(owner, HttpMethod.Post, "/api/v1/transfers", new OfferTransferRequest(FleetResourceKinds.Automation, "nightly", FleetPrincipalKinds.Person,
+            beaId, new TransferHandoverDto("sealed", [new GrantKeyWrapDto(mia.DeviceId, "wrapped")])));
+        Assert.AreEqual(HttpStatusCode.BadRequest, toMia.Status, "a hand-over goes to the devices of who takes it only");
+        var offer = await server.SendAsync(owner, HttpMethod.Post, "/api/v1/transfers", new OfferTransferRequest(FleetResourceKinds.Automation, "nightly", FleetPrincipalKinds.Person,
+            beaId, new TransferHandoverDto("sealed", [new GrantKeyWrapDto(bea.DeviceId, "wrapped")])));
+        Assert.AreEqual(HttpStatusCode.Created, offer.Status, offer.Body.ToString());
+        var transfer = offer.Read<TransferDto>();
+        Assert.IsTrue(transfer.HasHandover);
+        var copy = await server.SendAsync(bea, HttpMethod.Get, $"/api/v1/transfers/{transfer.Id}/handover");
+        Assert.AreEqual(HttpStatusCode.OK, copy.Status, copy.Body.ToString());
+        Assert.AreEqual(("nightly", setup.Owner.Id, "sealed", "wrapped"), (copy.Read<TransferHandoverCopyDto>().ResourceId, copy.Read<TransferHandoverCopyDto>().FromPersonId,
+            copy.Read<TransferHandoverCopyDto>().Sealed, copy.Read<TransferHandoverCopyDto>().Wrapped));
+        Assert.AreEqual(HttpStatusCode.NotFound, (await server.SendAsync(mia, HttpMethod.Get, $"/api/v1/transfers/{transfer.Id}/handover")).Status, "nothing for another device");
+
+        // Before Bea takes it, its owner still changes it; once she did, the automation is hers: no new version from him, only its removal.
+        Assert.AreEqual(HttpStatusCode.OK, (await server.SendAsync(owner, HttpMethod.Put, "/api/v1/automations/nightly", new PutAutomationRequest(Version(2)))).Status);
+        Assert.AreEqual(HttpStatusCode.OK, (await server.SendAsync(bea, HttpMethod.Post, $"/api/v1/transfers/{transfer.Id}/accept")).Status);
+        var refused = await server.SendAsync(owner, HttpMethod.Put, "/api/v1/automations/nightly", new PutAutomationRequest(Version(3)));
+        Assert.AreEqual(HttpStatusCode.Forbidden, refused.Status, "an automation given away gets no new version from its former owner");
+        Assert.AreEqual(HttpStatusCode.OK, (await server.SendAsync(owner, HttpMethod.Put, "/api/v1/automations/nightly", new PutAutomationRequest(Version(4, removed: true)))).Status,
+            "its former owner takes it off his machines");
+        Assert.AreEqual(HttpStatusCode.OK, (await server.SendAsync(bea, HttpMethod.Get, $"/api/v1/transfers/{transfer.Id}/handover")).Status, "the hand-over stays for her devices");
+
+        // A declined offer takes its hand-over with it.
+        var back = await server.SendAsync(bea, HttpMethod.Post, "/api/v1/transfers", new OfferTransferRequest(FleetResourceKinds.Automation, "nightly", FleetPrincipalKinds.Person,
+            setup.Owner.Id, new TransferHandoverDto("sealed", [new GrantKeyWrapDto(owner.DeviceId, "wrapped")])));
+        Assert.AreEqual(HttpStatusCode.Created, back.Status, back.Body.ToString());
+        Assert.AreEqual(HttpStatusCode.OK, (await server.SendAsync(owner, HttpMethod.Post, $"/api/v1/transfers/{back.Read<TransferDto>().Id}/decline")).Status);
+        Assert.AreEqual(HttpStatusCode.NotFound, (await server.SendAsync(owner, HttpMethod.Get, $"/api/v1/transfers/{back.Read<TransferDto>().Id}/handover")).Status);
+    }
+
+    [TestMethod]
+    public async Task AMaintainerGivesATeamMachineAnAutomationOfTheTeam_WhichTheTeamOwns_AndTheDocumentNamesTheIdentityItRunsAs()
+    {
+        await using var server = await ServerFixture.StartAsync();
+        using var owner = new TestDevice("Alex desktop");
+        using var node = new TestDevice("Build box");
+        var (setup, machine) = await server.SetUpWithNodeAsync(owner, node);
+        var (mia, miaId) = await AddPersonAsync(server, owner, setup, "Mia");
+        var (max, maxId) = await AddPersonAsync(server, owner, setup, "Max");
+        var team = (await server.SendAsync(owner, HttpMethod.Post, "/api/v1/teams", new CreateTeamRequest("Infra"))).Read<TeamDto>();
+        await server.SendAsync(owner, HttpMethod.Put, $"/api/v1/teams/{team.Id}/members/{miaId}", new SetTeamMemberRequest(FleetTeamRoles.Maintainer));
+        await server.SendAsync(owner, HttpMethod.Put, $"/api/v1/teams/{team.Id}/members/{maxId}", new SetTeamMemberRequest(FleetTeamRoles.Member));
+        await server.SendAsync(owner, HttpMethod.Delete, $"/api/v1/teams/{team.Id}/members/{setup.Owner.Id}");
+        var offer = (await server.SendAsync(owner, HttpMethod.Post, "/api/v1/transfers", new OfferTransferRequest(FleetResourceKinds.Machine, machine.Id, FleetPrincipalKinds.Team,
+            team.Id))).Read<TransferDto>();
+        Assert.AreEqual(HttpStatusCode.OK, (await server.SendAsync(mia, HttpMethod.Post, $"/api/v1/transfers/{offer.Id}/accept")).Status);
+        PutAutomationRequest Version(TestDevice signer, string id, string? scope)
+        {
+            var text = FleetAutomationVersionDocuments.Serialize(new FleetAutomationVersion(FleetAutomationVersion.CurrentVersion, setup.Organization.Id, id, 1, machine.Id, false,
+                true, ["hourly"], null, null, "{\"sealed\":\"for the machine\"}", signer.DeviceId, signer.PublicKey, server.Clock.Now) { Scope = scope });
+            return new PutAutomationRequest(new FleetSignedAutomationVersion(text, signer.Sign(FleetAutomationVersionDocuments.GetSignedBytes(text))));
+        }
+
+        var put = await server.SendAsync(mia, HttpMethod.Put, "/api/v1/automations/deploy", Version(mia, "deploy", "team:" + team.Id));
+        Assert.AreEqual(HttpStatusCode.OK, put.Status, put.Body.ToString());
+        var owned = (await server.SendAsync(mia, HttpMethod.Get, "/api/v1/owners")).Read<AccessListDto<ResourceOwnerDto>>().Items.Single(resource => resource.ResourceId == "deploy");
+        Assert.AreEqual((FleetPrincipalKinds.Team, team.Id, miaId), (owned.OwnerKind, owned.OwnerId, owned.AuthorId), "the team owns it from its first version");
+        Assert.AreEqual(HttpStatusCode.Forbidden, (await server.SendAsync(max, HttpMethod.Put, "/api/v1/automations/other", Version(max, "other", "team:" + team.Id))).Status,
+            "a member gives the team none of its automations");
+        Assert.AreEqual(HttpStatusCode.Forbidden, (await server.SendAsync(max, HttpMethod.Put, "/api/v1/automations/mine", Version(max, "mine", null))).Status,
+            "nor its own, while the team does not run those of its members");
+        Assert.AreEqual(HttpStatusCode.Forbidden, (await server.SendAsync(owner, HttpMethod.Put, "/api/v1/automations/mine", Version(owner, "mine", null))).Status,
+            "the machine is the team's now, not its former owner's");
+        Assert.AreEqual(HttpStatusCode.Forbidden, (await server.SendAsync(mia, HttpMethod.Put, "/api/v1/automations/web", Version(mia, "web", "team:web"))).Status,
+            "an automation of a team goes to a machine of that team");
+
+        // The service identity of the team, once on, is in the next version of the document that machines follow.
+        var identity = (await server.SendAsync(mia, HttpMethod.Post, "/api/v1/service-identities",
+            new CreateServiceIdentityRequest("infra-bot", FleetPrincipalKinds.Team, team.Id))).Read<ServiceIdentityDto>();
+        var enabled = await server.SendAsync(mia, HttpMethod.Post, $"/api/v1/service-identities/{identity.Id}/enable");
+        Assert.AreEqual(HttpStatusCode.OK, enabled.Status, enabled.Body.ToString());
+        var draft = (await server.SendAsync(owner, HttpMethod.Get, "/api/v1/access/draft")).Read<AccessDocumentDraftDto>();
+        CollectionAssert.AreEqual(new[] { identity.Id }, draft.Document.Teams.Single().Services!.ToArray());
     }
 
     [TestMethod]
@@ -284,6 +394,15 @@ public sealed class AccessControlTests
         var approved = await server.SendAsync(owner, HttpMethod.Post, $"/api/v1/devices/{device.DeviceId}/approve", new DeviceListChangeRequest(entry));
         Assert.AreEqual(HttpStatusCode.OK, approved.Status, approved.Body.ToString());
         return (device, invitation.Person.Id);
+    }
+
+    // A machine publishes the fact of one session, as its control connection does.
+    private static async Task PublishSessionAsync(ServerFixture server, TestDevice machine, string sessionId)
+    {
+        var cursors = await server.GetService<ICoordinatorStore>().GetPublicationCursorsAsync(machine.DeviceId);
+        var device = (await server.GetService<ICoordinatorStore>().GetDeviceAsync(machine.DeviceId))!;
+        await server.GetService<CodeAlta.Server.Services.PublicationService>().PublishFactsAsync(device, new FleetFactsPublish(Math.Max(cursors.Facts, cursors.Inventory) + 1,
+            [new FleetSessionFact(sessionId, 1, 1, "idle", server.Clock.Now, server.Clock.Now, "anthropic", "claude", new FleetSessionCounts(1, 0, 10, 5))]), CancellationToken.None);
     }
 
     internal static async Task<ApiAnswer> SignDraftAsync(ServerFixture server, TestDevice signer)

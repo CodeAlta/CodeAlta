@@ -76,7 +76,11 @@ public sealed record ResourceOwnerRecord(string OrganizationId, string ResourceK
 /// <param name="DecidedByPersonId">Who accepted or declined it.</param>
 /// <param name="DecidedAt">When.</param>
 public sealed record TransferRecord(string Id, string OrganizationId, string ResourceKind, string ResourceId, string FromKind, string FromId, string ToKind, string ToId,
-    string State, string Reason, string OfferedByPersonId, DateTimeOffset OfferedAt, string? DecidedByPersonId, DateTimeOffset? DecidedAt);
+    string State, string Reason, string OfferedByPersonId, DateTimeOffset OfferedAt, string? DecidedByPersonId, DateTimeOffset? DecidedAt)
+{
+    /// <summary>Gets whether a hand-over of what the resource does goes with it.</summary>
+    public bool HasHandover { get; init; }
+}
 
 /// <summary>A version of the signed access document, as stored.</summary>
 /// <param name="OrganizationId">Its organization.</param>
@@ -241,6 +245,23 @@ public interface IAccessStore
     /// <returns>The grant as written, or null when it was not in the status expected.</returns>
     ValueTask<GrantRecord?> SetGrantStatusAsync(string grantId, string expected, string status, DateTimeOffset at, AuditEntry audit, CancellationToken cancellationToken = default);
 
+    /// <summary>Makes a grant of sealed content active with its keys: the sealed metadata and the copy of its key for each device.</summary>
+    /// <param name="grantId">The grant, waiting for its keys.</param>
+    /// <param name="sealedText">The sealed metadata.</param>
+    /// <param name="wraps">The device and its copy of the key.</param>
+    /// <param name="at">The time.</param>
+    /// <param name="audit">The audit record.</param>
+    /// <param name="cancellationToken">Cancels the write.</param>
+    /// <returns>The grant, active; null when it did not wait for its keys.</returns>
+    ValueTask<GrantRecord?> ActivateGrantKeysAsync(string grantId, string sealedText, IReadOnlyList<(string DeviceId, string Wrapped)> wraps, DateTimeOffset at, AuditEntry audit,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>Lists the keys of active grants given to a device: the grant, its scope and the copy for that device.</summary>
+    /// <param name="deviceId">The device.</param>
+    /// <param name="cancellationToken">Cancels the read.</param>
+    /// <returns>The grant, the id of its scope, the sealed metadata and the copy of the key.</returns>
+    ValueTask<IReadOnlyList<(string GrantId, string? ScopeId, string Sealed, string Wrapped)>> ListGrantKeysAsync(string deviceId, CancellationToken cancellationToken = default);
+
     /// <summary>Records the owner of a resource, who made it, and whether it is paused.</summary>
     /// <param name="owner">The record.</param>
     /// <param name="audit">The audit record, or null when the change is not one of access (its author recorded at its creation).</param>
@@ -254,6 +275,23 @@ public interface IAccessStore
     /// <param name="cancellationToken">Cancels the write.</param>
     /// <returns>Whether it was written: false when another transfer of the resource is offered.</returns>
     ValueTask<bool> OfferTransferAsync(TransferRecord transfer, AuditEntry audit, CancellationToken cancellationToken = default);
+
+    /// <summary>Offers a transfer with the hand-over of what the resource does; one at a time per resource.</summary>
+    /// <param name="transfer">The transfer.</param>
+    /// <param name="sealedText">What the resource does, sealed; null for no hand-over.</param>
+    /// <param name="wraps">The copy of its key for each device of who takes it.</param>
+    /// <param name="audit">The audit record.</param>
+    /// <param name="cancellationToken">Cancels the write.</param>
+    /// <returns>Whether it was written: false when another transfer of the resource is offered.</returns>
+    ValueTask<bool> OfferTransferAsync(TransferRecord transfer, string? sealedText, IReadOnlyList<(string DeviceId, string Wrapped)> wraps, AuditEntry audit,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>Reads the hand-over of a transfer for one device.</summary>
+    /// <param name="transferId">The transfer.</param>
+    /// <param name="deviceId">The device.</param>
+    /// <param name="cancellationToken">Cancels the read.</param>
+    /// <returns>What it does, sealed, and the copy of the key for that device; null for none.</returns>
+    ValueTask<(string Sealed, string Wrapped)?> GetTransferHandoverAsync(string transferId, string deviceId, CancellationToken cancellationToken = default);
 
     /// <summary>Decides an offered transfer, with the new owner of the resource when it is accepted.</summary>
     /// <param name="transferId">The transfer.</param>

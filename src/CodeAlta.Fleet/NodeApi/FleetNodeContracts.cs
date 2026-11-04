@@ -165,6 +165,15 @@ public static class FleetNodeMethods
     /// <summary>The owner's local control, or a device that manages the node: sets the labels of the machine.</summary>
     public const string ControlLabelsSet = "control.labels.set";
 
+    /// <summary>
+    /// The owner's local control, or a device that manages the node: the people of the organization this personal machine lets
+    /// in, and the people who asked to start sessions on it (<c>doc/fleet/access-control.md</c>, what the node decides).
+    /// </summary>
+    public const string ControlPeopleGet = "control.people.get";
+
+    /// <summary>The owner's local control, or a device that manages the node: lets a person in with permissions, takes them out, or refuses their request.</summary>
+    public const string ControlPeopleSet = "control.people.set";
+
     /// <summary>Copies an automation to the node, which runs it from now on (<see cref="IFleetNodeAutomations"/>).</summary>
     public const string AutomationsPut = "automations.put";
 
@@ -817,6 +826,30 @@ public sealed record FleetEmpty;
 /// <param name="AllowBypass">Whether their sessions may bypass permissions (when their parent does); off by default.</param>
 public sealed record FleetAgentPolicyInfo(IReadOnlyList<string> Spaces, string? Sandbox = null, bool AllowBypass = false);
 
+/// <summary>A person of the organization a personal machine names, with what their devices may do there.</summary>
+/// <param name="PersonId">The person, as the signed device list names them.</param>
+/// <param name="Permissions">What their controller devices may do: <c>view</c>, <c>drive</c>, <c>start</c>; on their own sessions only.</param>
+/// <param name="AddedAt">When the owner named them.</param>
+public sealed record FleetNodePerson(string PersonId, IReadOnlyList<string> Permissions, DateTimeOffset AddedAt);
+
+/// <summary>A person of the organization who tried to start a session on the machine, and waits for its owner.</summary>
+/// <param name="PersonId">The person.</param>
+/// <param name="DeviceId">The device they asked from.</param>
+/// <param name="AskedAt">When they first asked.</param>
+public sealed record FleetNodeAsk(string PersonId, string DeviceId, DateTimeOffset AskedAt);
+
+/// <summary>The people a personal machine lets in, and who asks to be.</summary>
+/// <param name="People">The people it names.</param>
+/// <param name="Asks">The requests that wait for its owner.</param>
+/// <param name="Refused">The people its owner refused: their requests are not recorded again.</param>
+public sealed record FleetNodePeopleInfo(IReadOnlyList<FleetNodePerson> People, IReadOnlyList<FleetNodeAsk> Asks, IReadOnlyList<string> Refused);
+
+/// <summary>The parameters of <c>control.people.set</c>: one person let in, changed, taken out, or refused.</summary>
+/// <param name="PersonId">The person.</param>
+/// <param name="Permissions">What they may do; null or empty takes them out.</param>
+/// <param name="Refuse">Whether to refuse their request: it is dropped and not recorded again until they are let in.</param>
+public sealed record FleetNodePeopleChange(string PersonId, IReadOnlyList<string>? Permissions = null, bool Refuse = false);
+
 /// <summary>The labels the owner gives a machine (<c>control.labels.get</c>, <c>control.labels.set</c>), which it publishes in its inventory.</summary>
 /// <param name="Labels">The labels, such as <c>gpu</c> or <c>prod</c>.</param>
 public sealed record FleetMachineLabelsInfo(IReadOnlyList<string> Labels);
@@ -927,6 +960,8 @@ public sealed record FleetAgentDeliveryAckParams(IReadOnlyList<string> Ids);
 [JsonSerializable(typeof(FleetAutomationRunInfo))]
 [JsonSerializable(typeof(FleetAutomationRunList))]
 [JsonSerializable(typeof(FleetAgentPolicyInfo))]
+[JsonSerializable(typeof(FleetNodePeopleInfo))]
+[JsonSerializable(typeof(FleetNodePeopleChange))]
 [JsonSerializable(typeof(FleetMachineLabelsInfo))]
 [JsonSerializable(typeof(FleetAgentDeliveryTakeParams))]
 [JsonSerializable(typeof(FleetAgentDeliveryList))]

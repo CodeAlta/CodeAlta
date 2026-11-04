@@ -75,6 +75,18 @@ export const signInMessages = {
     "Ein Geheimnis ist gesetzt: leer lassen, um es zu behalten.", "シークレットが設定されています。保持するには空のままにします。", "已设置密钥：留空即保留。"],
   "Name shown": ["Nombre mostrado", "Nom affiché", "Angezeigter Name", "表示名", "显示名称"],
   "Groups claim": ["Notificación de grupos", "Revendication des groupes", "Gruppen-Claim", "グループのクレーム", "组声明"],
+  "Roles from groups": ["Roles según los grupos", "Rôles selon les groupes", "Rollen aus Gruppen", "グループからのロール", "按组分配角色"],
+  "Group id": ["Id. del grupo", "Id. du groupe", "Gruppen-ID", "グループ ID", "组 ID"],
+  "Add a group": ["Añadir un grupo", "Ajouter un groupe", "Gruppe hinzufügen", "グループを追加", "添加组"],
+  "Remove the group {name}": ["Quitar el grupo {name}", "Retirer le groupe {name}", "Gruppe {name} entfernen", "グループ {name} を削除", "移除组 {name}"],
+  "At each company sign-in, a person gets the widest role of their groups, member in none. Owners keep their role.": [
+    "En cada inicio de sesión de empresa, una persona recibe el rol más amplio de sus grupos, miembro si no está en ninguno. Los propietarios conservan su rol.",
+    "À chaque connexion d’entreprise, une personne reçoit le rôle le plus large de ses groupes, membre si elle n’est dans aucun. Les propriétaires gardent leur rôle.",
+    "Bei jeder Unternehmensanmeldung erhält eine Person die weiteste Rolle ihrer Gruppen, Mitglied ohne Gruppe. Eigentümer behalten ihre Rolle.",
+    "会社のサインインのたびに、所属グループのうち最も広いロールが与えられ、どのグループにも属さない場合はメンバーになります。所有者のロールは変わりません。",
+    "每次公司登录时，此人获得其所属组中最广的角色，不属于任何组则为成员。所有者保留其角色。"],
+  "Each group needs its id.": ["Cada grupo necesita su id.", "Chaque groupe a besoin de son id.", "Jede Gruppe braucht ihre ID.", "各グループには ID が必要です。", "每个组都需要其 ID。"],
+  "A group gives one role.": ["Un grupo da un solo rol.", "Un groupe donne un seul rôle.", "Eine Gruppe gibt eine Rolle.", "1 つのグループが与えるロールは 1 つです。", "一个组只给一个角色。"],
   "Redirect to register at the provider: http://127.0.0.1 (any port).": [
     "Redirección que registrar en el proveedor: http://127.0.0.1 (cualquier puerto).", "Redirection à enregistrer chez le fournisseur : http://127.0.0.1 (tout port).",
     "Beim Anbieter zu registrierende Weiterleitung: http://127.0.0.1 (beliebiger Port).", "プロバイダーに登録するリダイレクト: http://127.0.0.1 (任意のポート)。",

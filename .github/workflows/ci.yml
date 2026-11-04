@@ -24,3 +24,8 @@ jobs:
         run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
       - name: "Build, Test, Pack and Publish"
         uses: xoofx/.github/.github/actions/dotnet-releaser-action@main
+        env:
+          # The Google client of CodeAlta sign-in, built into CodeAlta Server (CodeAlta.Server.csproj): never in the source.
+          # Pull requests from forks get no secret and build without it.
+          CODEALTA_SIGNIN_GOOGLE_CLIENT_ID: ${{ secrets.CODEALTA_SIGNIN_GOOGLE_CLIENT_ID }}
+          CODEALTA_SIGNIN_GOOGLE_CLIENT_SECRET: ${{ secrets.CODEALTA_SIGNIN_GOOGLE_CLIENT_SECRET }}

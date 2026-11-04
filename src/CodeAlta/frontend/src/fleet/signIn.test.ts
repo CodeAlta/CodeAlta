@@ -7,7 +7,15 @@ const settings = (look: Partial<FleetSignInSettingsView> = {}): FleetSignInSetti
   { id: "company", name: "Contoso", enabled: true, available: true }, { id: "passkey", name: "Passkey", enabled: true, available: true },
   { id: "microsoft", name: "Microsoft", enabled: true, available: false }, { id: "google", name: "Google", enabled: false, available: true },
   { id: "github", name: "GitHub", enabled: true, available: true }], issuer: "https://login.contoso.example", clientId: "client", hasClientSecret: true, displayName: "Contoso",
-  groupsClaim: "groups", requireSso: false, version: 3, updatedAt: null, allowedDomains: ["contoso.example"], allowedTenants: [], ...look });
+  groupsClaim: "groups", groupRoles: [{ group: "g-admins", role: "admin" }], requireSso: false, version: 3, updatedAt: null, allowedDomains: ["contoso.example"], allowedTenants: [],
+  ...look });
+
+test("the groups that give roles name each group once, by its id", () => {
+  const draft = signInDraft(settings());
+  assert.deepEqual(draft.groupRoles, [{ group: "g-admins", role: "admin" }]);
+  assert.equal(signInDraftProblem({ ...draft, groupRoles: [...draft.groupRoles, { group: " ", role: "member" }] }), "Each group needs its id.");
+  assert.equal(signInDraftProblem({ ...draft, groupRoles: [...draft.groupRoles, { group: "g-admins ", role: "auditor" }] }), "A group gives one role.");
+});
 
 test("the company's sign-in comes first, then a passkey, then the linked accounts", () => {
   assert.deepEqual(orderedSignInMethods([{ id: "github", name: "GitHub", breakGlass: false }, { id: "passkey", name: "Passkey", breakGlass: true },

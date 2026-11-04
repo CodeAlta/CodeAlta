@@ -157,10 +157,19 @@ public sealed record PasskeyFinishResponse(string RedirectUrl);
 /// <param name="HasClientSecret">Whether a client secret is set; the server never gives it back.</param>
 /// <param name="DisplayName">The name of the provider for people, such as "Contoso".</param>
 /// <param name="GroupsClaim">The claim of the ID token that holds the groups (<c>groups</c> or <c>roles</c>).</param>
+/// <param name="GroupRoles">The groups that give a role at each company sign-in; empty when roles are set by hand only.</param>
 /// <param name="AllowedDomains">The email domains it lets in (a verified email of one of them); empty or null for none named.</param>
 /// <param name="AllowedTenants">The tenant ids it lets in (the <c>tid</c> of Entra ID); empty or null for none named.</param>
 public sealed record CompanySignInDto(string Issuer, string ClientId, bool HasClientSecret, string? DisplayName, string GroupsClaim,
-    IReadOnlyList<string>? AllowedDomains = null, IReadOnlyList<string>? AllowedTenants = null);
+    IReadOnlyList<GroupRoleDto>? GroupRoles = null, IReadOnlyList<string>? AllowedDomains = null, IReadOnlyList<string>? AllowedTenants = null);
+
+/// <summary>
+/// A group of the company's provider and the organization role its members get at each company sign-in (<c>doc/fleet/identity.md</c>,
+/// company SSO): by the group's id, as the groups claim gives it. Never the owner role.
+/// </summary>
+/// <param name="Group">The id of the group (or the app role) in the claim.</param>
+/// <param name="Role">The role: <c>admin</c>, <c>member</c>, <c>auditor</c> or <c>guest</c>.</param>
+public sealed record GroupRoleDto(string Group, string Role);
 
 /// <summary>The sign-in settings of the organization (<c>GET /api/v1/sign-in/settings</c>), for an owner's controller device.</summary>
 /// <param name="Methods">Every method, with whether it is enabled and available.</param>
@@ -178,13 +187,14 @@ public sealed record SignInSettingsDto(IReadOnlyList<SignInMethodDto> Methods, C
 /// <param name="ClientSecret">The client secret; null keeps the one set, empty removes it (a public client with PKCE).</param>
 /// <param name="DisplayName">The name for people, or null.</param>
 /// <param name="GroupsClaim">The claim of the groups; null for <c>groups</c>.</param>
+/// <param name="GroupRoles">The groups that give a role at each company sign-in; null keeps the ones set, empty removes them.</param>
 /// <param name="AllowedDomains">
 /// The email domains it lets in: an identity is let in only with a verified email (<c>email_verified</c>) of one of them.
-/// At least one domain or one tenant is named.
+/// At least one domain or one tenant is named; null for both keeps the ones set.
 /// </param>
 /// <param name="AllowedTenants">The tenant ids it lets in (the <c>tid</c> claim; Entra ID needs them, its emails are not verified).</param>
 public sealed record CompanySignInSettings(string Issuer, string ClientId, string? ClientSecret = null, string? DisplayName = null, string? GroupsClaim = null,
-    IReadOnlyList<string>? AllowedDomains = null, IReadOnlyList<string>? AllowedTenants = null);
+    IReadOnlyList<GroupRoleDto>? GroupRoles = null, IReadOnlyList<string>? AllowedDomains = null, IReadOnlyList<string>? AllowedTenants = null);
 
 /// <summary>The body of <c>PUT /api/v1/sign-in/settings</c>, sent by an owner's controller device.</summary>
 /// <param name="Version">The version it changes (<see cref="SignInSettingsDto.Version"/>).</param>

@@ -72,6 +72,26 @@ internal sealed partial class DesktopFleetServers
     }
 
     /// <summary>
+    /// Gives a grant that waits for its keys what it opens, as this computer of the owner of the content: the metadata of the
+    /// session, opened here, sealed for the grant and its key wrapped to each device of the grantee.
+    /// </summary>
+    /// <param name="linkId">The link.</param>
+    /// <param name="grantId">The grant.</param>
+    /// <param name="cancellationToken">Cancels the call.</param>
+    /// <returns>The grant, active.</returns>
+    /// <exception cref="KeyNotFoundException">No such link, grant or session.</exception>
+    /// <exception cref="InvalidOperationException">This computer does not hold the key of the session, or the grantee has no device.</exception>
+    /// <exception cref="FleetServerException">The server refused it.</exception>
+    /// <exception cref="HttpRequestException">The server does not answer.</exception>
+    public async Task<GrantDto> ConfirmGrantKeysAsync(string linkId, string grantId, CancellationToken cancellationToken)
+    {
+        var keys = Volatile.Read(ref _connections)?.Find(linkId)?.Connector?.MetadataKeys
+            ?? throw new InvalidOperationException("This computer is not connected to the server: it cannot open the content of the grant.");
+        using var client = Client(linkId);
+        return await FleetGrantKeys.ConfirmAsync(client, keys, grantId, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
     /// Deprovisions a person who leaves, then signs their devices out of the device list with this computer's key: the server
     /// refuses them already, and the machines of the organization once they read the list. The signed access document that
     /// stops their work on team machines is signed next, by a signer who reviews it.

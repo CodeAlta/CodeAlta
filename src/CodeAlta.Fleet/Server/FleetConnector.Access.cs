@@ -17,6 +17,12 @@ public sealed partial class FleetConnectorOptions
     /// and at each connection): a node then stops the work of suspended people. Null tells nobody.
     /// </summary>
     public Action<FleetAccessState>? AccessChanged { get; init; }
+
+    /// <summary>
+    /// Gets what is told each time this device read access again because the server said it changed (and at each connection):
+    /// a desktop then follows the transfers of its person. Null tells nobody.
+    /// </summary>
+    public Action? AccessRead { get; init; }
 }
 
 // The signed access document of the server, read again when the server says access changed and at each connection.
@@ -28,6 +34,9 @@ public sealed partial class FleetConnector
     /// <summary>Gets the access document of the organization of the server, as this device verified it.</summary>
     public FleetOrganizationAccess Access { get; private set; } = null!;
 
+    /// <summary>Gets the titles of the sessions grants of sealed content give this device, opened here; read again when access changes.</summary>
+    public FleetGrantKeyring GrantKeys { get; private set; } = null!;
+
     /// <summary>
     /// Gets the trust a node gives the members of the organization on a relayed channel: the device list and the access
     /// document, both as this device verified them, read live at each call.
@@ -37,6 +46,7 @@ public sealed partial class FleetConnector
     private void InitializeAccess()
     {
         Access = _options.Access ?? new FleetOrganizationAccess(Devices, _options.AccessPinPath);
+        GrantKeys = new FleetGrantKeyring(Devices);
         if (_options.AccessChanged is { } changed) Access.Changed += changed;
     }
 
@@ -49,6 +59,9 @@ public sealed partial class FleetConnector
             try
             {
                 await Access.RefreshAsync(stop).ConfigureAwait(false);
+                // A controller device reads the keys grants give it: the titles of the sessions shared with its person.
+                if (_options.Client.Kind == "desktop") await GrantKeys.RefreshAsync(stop).ConfigureAwait(false);
+                _options.AccessRead?.Invoke();
             }
             catch (Exception exception) when (exception is FleetAccessDocumentException or FleetDeviceListException)
             {

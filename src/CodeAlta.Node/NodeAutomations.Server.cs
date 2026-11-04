@@ -134,6 +134,12 @@ internal sealed partial class NodeAutomations
             return (null, reason);
         }
 
+        if (request.Action is not null)
+        {
+            Log($"A run of {request.AutomationId} asked through the server was refused: the request takes a run over, it does not run the automation.");
+            return (null, "the request takes a run over");
+        }
+
         if (AssignmentOf(request.AutomationId) is not { Via: { } via } || via != linkId)
         {
             Log($"A run of {request.AutomationId} asked through the server was refused: this machine holds no such automation from that server.");
@@ -144,6 +150,35 @@ internal sealed partial class NodeAutomations
         var run = await RunByHandAsync(request.AutomationId, request.RunId, cancellationToken).ConfigureAwait(false);
         if (run is not null) Log($"{request.SignerDeviceId} ran the automation {request.AutomationId} through the server: {run.Status}.");
         return (run, run is null ? "the automation is not on this machine" : null);
+    }
+
+    /// <summary>
+    /// Takes a run in progress over for the person who asked it through the server of a link: the request must verify as a
+    /// run asked by hand does (a controller device of the owner of this machine, for this machine, within minutes), take a
+    /// run over, and name a run of an automation this node holds from that server. The run then waits for that person.
+    /// </summary>
+    /// <param name="linkId">The server link it came through.</param>
+    /// <param name="devices">The device list of that server, as this node verified it now.</param>
+    /// <param name="organizationId">The organization of that server.</param>
+    /// <param name="signed">The signed request.</param>
+    /// <returns>Why the request was refused; null once the run was taken over.</returns>
+    internal string? TakeOverFromServer(string linkId, FleetDeviceListState devices, string? organizationId, FleetSignedAutomationRunRequest signed)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(linkId);
+        ArgumentNullException.ThrowIfNull(devices);
+        ArgumentNullException.ThrowIfNull(signed);
+        if (DeviceId is not { } self) return "This machine does not know its own device yet.";
+        if (!FleetAutomationRunRequestDocuments.TryVerify(signed, devices, organizationId, self, _options.TimeProvider.GetUtcNow(), out var request, out var reason))
+        {
+            Log($"A take-over asked through the server was refused: {reason}.");
+            return reason;
+        }
+
+        if (request.Action != FleetAutomationRunRequest.TakeOverAction) return "the request does not take a run over";
+        if (AssignmentOf(request.AutomationId) is not { Via: { } via } || via != linkId) return "this machine holds no such automation from that server";
+        if (Engine.TakeOver(request.RunId) is null) return "no run of this automation with autonomy is in progress with this id";
+        Log($"{request.SignerDeviceId} took the run {request.RunId} of the automation {request.AutomationId} over through the server.");
+        return null;
     }
 
     /// <summary>Reports to the server of a link the runs of the automations it gave this node: all of the latest ones, or only those that changed.</summary>

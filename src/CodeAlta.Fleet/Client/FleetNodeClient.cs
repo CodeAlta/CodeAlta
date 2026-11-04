@@ -389,10 +389,31 @@ public sealed class FleetNodeClient : IAsyncDisposable
         => CallAsync(FleetNodeMethods.AgentsDeliveriesAck, new FleetAgentDeliveryAckParams(ids), FleetNodeJsonContext.Default.FleetAgentDeliveryAckParams,
             FleetNodeJsonContext.Default.FleetEmpty, null, cancellationToken);
 
-    /// <summary>The owner's local control, or a device that manages the node: whether agents of other machines may start sessions there.</summary>
+    /// <summary>The owner's local control, or a device that manages the node: the people the machine names, and who asks to be let in.</summary>
+    /// <param name="cancellationToken">Cancels the call.</param>
+    /// <returns>The people and the requests.</returns>
+    /// <exception cref="FleetException">The node refused the call.</exception>
+    public Task<FleetNodePeopleInfo> GetPeopleAsync(CancellationToken cancellationToken = default)
+        => CallAsync(FleetNodeMethods.ControlPeopleGet, new FleetEmpty(), FleetNodeJsonContext.Default.FleetEmpty, FleetNodeJsonContext.Default.FleetNodePeopleInfo,
+            null, cancellationToken);
+
+    /// <summary>The owner's local control, or a device paired to manage the node: lets a person in, takes them out, or refuses their request.</summary>
+    /// <param name="change">The change.</param>
+    /// <param name="cancellationToken">Cancels the call.</param>
+    /// <returns>The people and the requests, as the node holds them now.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="change"/> is null.</exception>
+    /// <exception cref="FleetException">The node refused it.</exception>
+    public Task<FleetNodePeopleInfo> SetPeopleAsync(FleetNodePeopleChange change, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(change);
+        return CallAsync(FleetNodeMethods.ControlPeopleSet, change, FleetNodeJsonContext.Default.FleetNodePeopleChange, FleetNodeJsonContext.Default.FleetNodePeopleInfo,
+            null, cancellationToken);
+    }
+
+    /// <summary>The owner's local control, or a device that manages the node: the policy of the node for the agents of other machines.</summary>
     /// <param name="cancellationToken">Cancels the call.</param>
     /// <returns>The policy.</returns>
-    /// <exception cref="FleetException">The node refused the call.</exception>
+    /// <exception cref="FleetException">The node refused it.</exception>
     public Task<FleetAgentPolicyInfo> GetAgentPolicyAsync(CancellationToken cancellationToken = default)
         => CallAsync(FleetNodeMethods.ControlAgentsGet, new FleetEmpty(), FleetNodeJsonContext.Default.FleetEmpty, FleetNodeJsonContext.Default.FleetAgentPolicyInfo,
             null, cancellationToken);

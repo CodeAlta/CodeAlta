@@ -16,7 +16,7 @@ public sealed partial class SqliteCoordinatorStore : IAccessStore
         "FROM resource_owners";
 
     private const string TransferColumns = "SELECT id, organization_id, resource_kind, resource_id, from_kind, from_id, to_kind, to_id, state, reason, offered_by_person_id, " +
-        "offered_at, decided_by_person_id, decided_at FROM transfers";
+        "offered_at, decided_by_person_id, decided_at, EXISTS (SELECT 1 FROM transfer_handovers h WHERE h.transfer_id = transfers.id) FROM transfers";
 
     private const string AccessDocumentColumns = "SELECT organization_id, number, payload, signature, signer_device_id, hash, recorded_at FROM access_documents";
 
@@ -100,6 +100,9 @@ public sealed partial class SqliteCoordinatorStore : IAccessStore
             // Their teams raise their versions: the next signed document says they left.
             Execute(connection, transaction, "UPDATE teams SET version = version + 1 WHERE id IN (SELECT team_id FROM team_members WHERE person_id = $id)", ("$id", personId));
             Execute(connection, transaction, "DELETE FROM team_members WHERE person_id = $id", ("$id", personId));
+            Execute(connection, transaction, "DELETE FROM grant_keys WHERE grant_id IN (SELECT id FROM grants WHERE organization_id = $org AND subject_kind = $person " +
+                "AND subject_id = $id) OR device_id IN (SELECT id FROM devices WHERE owner_person_id = $id)", ("$org", organizationId), ("$person", FleetPrincipalKinds.Person),
+                ("$id", personId));
             Execute(connection, transaction, "UPDATE grants SET status = $revoked, revoked_at = $at WHERE organization_id = $org AND subject_kind = $person AND subject_id = $id " +
                 "AND status <> $revoked", ("$revoked", FleetGrantStatuses.Revoked), ("$at", ToTime(now)), ("$org", organizationId), ("$person", FleetPrincipalKinds.Person),
                 ("$id", personId));
@@ -208,9 +211,46 @@ public sealed partial class SqliteCoordinatorStore : IAccessStore
             var changed = Execute(connection, transaction, "UPDATE grants SET status = $status, revoked_at = $revokedAt WHERE id = $id AND status = $expected",
                 ("$status", status), ("$revokedAt", status == FleetGrantStatuses.Revoked ? ToTime(at) : null), ("$id", grantId), ("$expected", expected));
             if (changed == 0) return null;
+            if (status == FleetGrantStatuses.Revoked) Execute(connection, transaction, "DELETE FROM grant_keys WHERE grant_id = $id", ("$id", grantId));
             AppendAudit(connection, transaction, audit);
             return QuerySingle(connection, transaction, GrantColumns + " WHERE id = $id", ReadGrant, ("$id", grantId));
         }, cancellationToken);
+    }
+
+    /// <inheritdoc />
+    public ValueTask<GrantRecord?> ActivateGrantKeysAsync(string grantId, string sealedText, IReadOnlyList<(string DeviceId, string Wrapped)> wraps, DateTimeOffset at,
+        AuditEntry audit, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(grantId);
+        ArgumentNullException.ThrowIfNull(sealedText);
+        ArgumentNullException.ThrowIfNull(wraps);
+        ArgumentNullException.ThrowIfNull(audit);
+        return WriteAsync((connection, transaction) =>
+        {
+            var changed = Execute(connection, transaction, "UPDATE grants SET status = $active WHERE id = $id AND status = $pending",
+                ("$active", FleetGrantStatuses.Active), ("$id", grantId), ("$pending", FleetGrantStatuses.PendingKeys));
+            if (changed == 0) return null;
+            foreach (var (deviceId, wrapped) in wraps)
+            {
+                Execute(connection, transaction, "INSERT INTO grant_keys (grant_id, device_id, sealed, wrapped, created_at) VALUES ($grant, $device, $sealed, $wrapped, $at) " +
+                    "ON CONFLICT (grant_id, device_id) DO UPDATE SET sealed = excluded.sealed, wrapped = excluded.wrapped, created_at = excluded.created_at",
+                    ("$grant", grantId), ("$device", deviceId), ("$sealed", sealedText), ("$wrapped", wrapped), ("$at", ToTime(at)));
+            }
+
+            AppendAudit(connection, transaction, audit);
+            return QuerySingle(connection, transaction, GrantColumns + " WHERE id = $id", ReadGrant, ("$id", grantId));
+        }, cancellationToken);
+    }
+
+    /// <inheritdoc />
+    public ValueTask<IReadOnlyList<(string GrantId, string? ScopeId, string Sealed, string Wrapped)>> ListGrantKeysAsync(string deviceId,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(deviceId);
+        return ReadAsync(connection => QueryList(connection, null,
+            "SELECT k.grant_id, g.scope_id, k.sealed, k.wrapped FROM grant_keys k JOIN grants g ON g.id = k.grant_id WHERE k.device_id = $device AND g.status = $active",
+            static reader => (reader.GetString(0), GetNullableString(reader, 1), reader.GetString(2), reader.GetString(3)), ("$device", deviceId),
+            ("$active", FleetGrantStatuses.Active)), cancellationToken);
     }
 
     /// <inheritdoc />
@@ -227,8 +267,23 @@ public sealed partial class SqliteCoordinatorStore : IAccessStore
 
     /// <inheritdoc />
     public ValueTask<bool> OfferTransferAsync(TransferRecord transfer, AuditEntry audit, CancellationToken cancellationToken = default)
+        => OfferTransferAsync(transfer, null, [], audit, cancellationToken);
+
+    /// <inheritdoc />
+    public ValueTask<(string Sealed, string Wrapped)?> GetTransferHandoverAsync(string transferId, string deviceId, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(transferId);
+        ArgumentException.ThrowIfNullOrEmpty(deviceId);
+        return ReadAsync(connection => QuerySingle<(string, string)?>(connection, null, "SELECT sealed, wrapped FROM transfer_handovers WHERE transfer_id = $id AND device_id = $device",
+            static reader => (reader.GetString(0), reader.GetString(1)), ("$id", transferId), ("$device", deviceId)), cancellationToken);
+    }
+
+    /// <inheritdoc />
+    public ValueTask<bool> OfferTransferAsync(TransferRecord transfer, string? sealedText, IReadOnlyList<(string DeviceId, string Wrapped)> wraps, AuditEntry audit,
+        CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(transfer);
+        ArgumentNullException.ThrowIfNull(wraps);
         ArgumentNullException.ThrowIfNull(audit);
         return WriteAsync((connection, transaction) =>
         {
@@ -237,6 +292,15 @@ public sealed partial class SqliteCoordinatorStore : IAccessStore
                 ("$offered", FleetTransferStates.Offered));
             if (open is not null) return false;
             InsertTransfer(connection, transaction, transfer);
+            if (sealedText is not null)
+            {
+                foreach (var (deviceId, wrapped) in wraps)
+                {
+                    Execute(connection, transaction, "INSERT INTO transfer_handovers (transfer_id, device_id, sealed, wrapped) VALUES ($id, $device, $sealed, $wrapped)",
+                        ("$id", transfer.Id), ("$device", deviceId), ("$sealed", sealedText), ("$wrapped", wrapped));
+                }
+            }
+
             AppendAudit(connection, transaction, audit);
             return true;
         }, cancellationToken);
@@ -254,6 +318,8 @@ public sealed partial class SqliteCoordinatorStore : IAccessStore
                 "UPDATE transfers SET state = $state, decided_by_person_id = $by, decided_at = $at WHERE id = $id AND state = $offered",
                 ("$state", state), ("$by", personId), ("$at", ToTime(at)), ("$id", transferId), ("$offered", FleetTransferStates.Offered));
             if (changed == 0) return null;
+            // A hand-over goes with an offer taken; one declined or cancelled takes it away.
+            if (state != FleetTransferStates.Accepted) Execute(connection, transaction, "DELETE FROM transfer_handovers WHERE transfer_id = $id", ("$id", transferId));
             if (owner is not null) UpsertOwner(connection, transaction, owner);
             AppendAudit(connection, transaction, audit);
             return QuerySingle(connection, transaction, TransferColumns + " WHERE id = $id", ReadTransfer, ("$id", transferId));
@@ -381,7 +447,7 @@ public sealed partial class SqliteCoordinatorStore : IAccessStore
     private static TransferRecord ReadTransfer(SqliteDataReader reader)
         => new(reader.GetString(0), reader.GetString(1), reader.GetString(2), reader.GetString(3), reader.GetString(4), reader.GetString(5), reader.GetString(6),
             reader.GetString(7), reader.GetString(8), reader.GetString(9), reader.GetString(10), FromTime(reader.GetInt64(11)), GetNullableString(reader, 12),
-            GetNullableTime(reader, 13));
+            GetNullableTime(reader, 13)) { HasHandover = reader.GetInt64(14) != 0 };
 
     private static AccessDocumentRecord ReadAccessDocument(SqliteDataReader reader)
         => new(reader.GetString(0), reader.GetInt64(1), reader.GetString(2), reader.GetString(3), reader.GetString(4), reader.GetString(5), FromTime(reader.GetInt64(6)));

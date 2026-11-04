@@ -37,6 +37,15 @@ internal sealed class DesktopServerAutomationRoute : IDisposable
     /// <summary>Gets the name of the machine.</summary>
     internal string MachineName { get; }
 
+    /// <summary>
+    /// Gets the team of the machine when this computer's person maintains it, as the signed access document this computer
+    /// verified says: what is given to that machine is an automation of the team, which runs as its service identity; null otherwise.
+    /// </summary>
+    internal string? TeamId { get; init; }
+
+    /// <summary>Gets the scope the versions given through this route name: the team of the machine, or none for a personal automation.</summary>
+    internal string? Scope => TeamId is { } team ? FleetAutomationVersion.TeamScopePrefix + team : null;
+
     /// <summary>Seals what a version does for its machine and the controllers of this computer's person, as the device list of the server verifies them now.</summary>
     /// <exception cref="FleetDeviceListException">The device list does not verify.</exception>
     /// <exception cref="ArgumentException">The machine is not in the device list.</exception>
@@ -65,6 +74,9 @@ internal sealed class DesktopServerAutomationRoute : IDisposable
     /// <summary>Asks the machine, through the server, to run an automation now.</summary>
     internal Task<AutomationRunDto> RunAsync(FleetSignedAutomationRunRequest signed, CancellationToken cancellationToken) => _client.RunAutomationAsync(signed, cancellationToken);
 
+    /// <summary>Passes a take-over of a run in progress, signed by this computer, to the machine through the server.</summary>
+    internal Task<AutomationRunDto> TakeOverAsync(FleetSignedAutomationRunRequest signed, CancellationToken cancellationToken) => _client.TakeOverAutomationRunAsync(signed, cancellationToken);
+
     /// <summary>Forgets an automation for the machine once it took away what it held.</summary>
     internal Task<AutomationListDto> DeleteAsync(string automationId, string machineId, CancellationToken cancellationToken)
         => _client.DeleteAutomationAsync(automationId, machineId, cancellationToken);
@@ -83,6 +95,14 @@ internal sealed class DesktopServerAutomationRoute : IDisposable
     {
         var hook = await _client.CreateHookAsync(machineId, source, label, cancellationToken).ConfigureAwait(false);
         return (hook, new Uri(_client.ServerAddress, hook.Path));
+    }
+
+    /// <summary>Reads the address of a hook of this computer's person on the server, for its machine.</summary>
+    /// <returns>The address; null when no hook of the person has this id for this machine.</returns>
+    internal async Task<Uri?> HookAddressAsync(string machineId, string hookId, CancellationToken cancellationToken)
+    {
+        var hooks = await _client.ListHooksAsync(cancellationToken).ConfigureAwait(false);
+        return hooks.Hooks.FirstOrDefault(hook => hook.Id == hookId && hook.MachineId == machineId) is { } found ? new Uri(_client.ServerAddress, found.Path) : null;
     }
 
     public void Dispose() => _client.Dispose();

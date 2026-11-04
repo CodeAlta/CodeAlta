@@ -105,6 +105,7 @@ internal static class AutomationConfig
         if (definition.Environment is { } environment
             && (environment.Length is 0 or > 64 || !environment.All(static ch => char.IsAsciiLetterOrDigit(ch) || ch is '-' or '_')))
             return "The environment of an automation is the name of an environment of the fleet: letters, digits, - and _, at most 64.";
+        if (definition.Autonomy?.Validate() is { } autonomy) return autonomy;
         if (definition.Triggers.Count > AutomationDefinition.MaximumTriggers) return $"An automation has at most {AutomationDefinition.MaximumTriggers} triggers.";
         foreach (var trigger in definition.Triggers)
         {
@@ -259,6 +260,16 @@ internal static class AutomationConfig
         }
 
         if (!AutomationModelRef.TryParse(model, out var reference, out problem)) return false;
+        AutomationAutonomy? autonomy = null;
+        if (table.TryGetValue("autonomy", out var autonomyValue))
+        {
+            if (autonomyValue is not TomlTable autonomyTable || !TryReadAutonomy(autonomyTable, out autonomy, out problem))
+            {
+                problem ??= "autonomy is a table, such as { allowed_tools = [\"restart_pod\"], approval_timeout = 30 }.";
+                return false;
+            }
+        }
+
         var triggers = new List<AutomationTrigger>();
         if (table.TryGetValue("triggers", out var value))
         {
@@ -304,11 +315,61 @@ internal static class AutomationConfig
             Sandbox = Blank(sandbox),
             Environment = Blank(environment),
             SessionOptions = AgentSessionOptions.Stored(new AgentSessionOptions { SubSessions = subSessions }),
+            Autonomy = autonomy,
             CatchUp = catchUp,
             Triggers = triggers,
         };
         problem = Validate(definition);
         return problem is null;
+    }
+
+    // autonomy = { allowed_tools = [...], max_calls_per_hour = N, approval_timeout = minutes, on_timeout = "stop", approvers = "owner" }
+    private static bool TryReadAutonomy(TomlTable table, out AutomationAutonomy? autonomy, out string? problem)
+    {
+        autonomy = null;
+        foreach (var key in table.Keys)
+        {
+            if (key is not ("allowed_tools" or "max_calls_per_hour" or "approval_timeout" or "on_timeout" or "approvers"))
+            {
+                problem = $"autonomy has no {key}: allowed_tools, max_calls_per_hour, approval_timeout, on_timeout or approvers.";
+                return false;
+            }
+        }
+
+        if (!TryTexts(table, "allowed_tools", out var tools, out problem) || !TryText(table, "on_timeout", out var onTimeout, out problem)
+            || !TryText(table, "approvers", out var approvers, out problem)) return false;
+        int? calls = null, timeout = null;
+        foreach (var (key, assign) in new (string, Action<int>)[] { ("max_calls_per_hour", value => calls = value), ("approval_timeout", value => timeout = value) })
+        {
+            if (!table.TryGetValue(key, out var value)) continue;
+            if (value is not long number || number < 0 || number > int.MaxValue)
+            {
+                problem = key + " is a whole number.";
+                return false;
+            }
+
+            assign((int)number);
+        }
+
+        autonomy = new AutomationAutonomy
+        {
+            AllowedTools = [.. tools.Select(static tool => tool.Trim())],
+            MaxCallsPerHour = calls,
+            ApprovalTimeout = timeout,
+            OnTimeout = Blank(onTimeout)?.ToLowerInvariant() ?? AutomationAutonomy.StopOnTimeout,
+            Approvers = Blank(approvers)?.ToLowerInvariant() ?? AutomationAutonomy.OwnerApprovers,
+        };
+        return true;
+    }
+
+    private static string Format(AutomationAutonomy autonomy)
+    {
+        var builder = new StringBuilder("{ allowed_tools = [").Append(string.Join(", ", autonomy.AllowedTools.Select(Quote))).Append(']');
+        if (autonomy.MaxCallsPerHour is { } calls) builder.Append(", max_calls_per_hour = ").Append(calls.ToString(CultureInfo.InvariantCulture));
+        if (autonomy.ApprovalTimeout is { } timeout) builder.Append(", approval_timeout = ").Append(timeout.ToString(CultureInfo.InvariantCulture));
+        if (autonomy.OnTimeout != AutomationAutonomy.StopOnTimeout) builder.Append(", on_timeout = ").Append(Quote(autonomy.OnTimeout));
+        if (autonomy.Approvers != AutomationAutonomy.OwnerApprovers) builder.Append(", approvers = ").Append(Quote(autonomy.Approvers));
+        return builder.Append(" }").ToString();
     }
 
     internal static bool TryReadTrigger(TomlTable table, out AutomationTrigger? trigger, out string? problem)
@@ -445,6 +506,7 @@ internal static class AutomationConfig
         if (definition.ReviewBeforeCommit is { } review) builder.Append("review_before_commit = ").Append(review ? "true" : "false").Append(newline);
         if (definition.Sandbox is { } sandbox) builder.Append("sandbox = ").Append(Quote(sandbox)).Append(newline);
         if (definition.Environment is { } environment) builder.Append("environment = ").Append(Quote(environment)).Append(newline);
+        if (definition.Autonomy is { } autonomy) builder.Append("autonomy = ").Append(Format(autonomy)).Append(newline);
         // An option is written only when it is not its default.
         if (AgentSessionOptions.Stored(definition.SessionOptions) is { SubSessions: false }) builder.Append("sub_sessions = false").Append(newline);
         if (definition.CatchUp) builder.Append("catch_up = true").Append(newline);

@@ -294,8 +294,15 @@ public sealed class FleetOrganizationTrust(Func<FleetDeviceListState?> list, str
 
         var owner = current.Members.TryGetValue(selfDeviceId, out var self) ? self.OwnerId : null;
         var own = owner is not null && member.OwnerId == owner && member.Kind == FleetDeviceKinds.Controller;
+        // Another person's controller device gets nothing from the organization here; the people the machine names get what
+        // its owner gave them, on their own sessions (FleetNamedPeopleTrust), and a first try asks the owner.
+        var other = !own && member.Kind == FleetDeviceKinds.Controller && member.OwnerId is not null;
         return new TrustedDevice(member.DeviceId, member.DeviceId, fingerprint, own ? FleetPairingCoordinator.DefaultPermissions : DevicePermissions.None,
-            DateTimeOffset.UnixEpoch, null);
+            DateTimeOffset.UnixEpoch, null)
+        {
+            PersonId = other ? member.OwnerId : null,
+            OwnSessionsOnly = other,
+        };
     }
 
     /// <inheritdoc />

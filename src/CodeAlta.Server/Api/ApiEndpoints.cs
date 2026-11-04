@@ -54,21 +54,25 @@ internal static class ApiEndpoints
             .Produces<EnrollResponse>(StatusCodes.Status201Created)
             .WithSummary("Registers a machine's key as a pending device with an enrollment token; the request is signed by that key.");
 
-        api.MapGet("/organization", async (HttpContext context, ICoordinatorStore store) =>
+        api.MapGet("/organization", async (HttpContext context, ICoordinatorStore store, DirectoryVisibility visibility) =>
             {
                 var actor = DeviceAuthenticationMiddleware.GetDevice(context);
                 var organization = await store.GetOrganizationAsync(context.RequestAborted).ConfigureAwait(false)
                     ?? throw CoordinatorException.NotFound(CoordinatorErrorCodes.NotSetUp, "The server is not set up.");
                 var people = await store.ListPeopleAsync(actor.OrganizationId, context.RequestAborted).ConfigureAwait(false);
-                return new OrganizationDto(organization.Id, organization.Name, organization.CreatedAt, people.Select(static person => person.ToDto()).ToArray());
+                // The people are listed to whoever may view access; a guest or a node sees themselves only.
+                var scope = await visibility.ScopeAsync(actor, context.RequestAborted).ConfigureAwait(false);
+                return new OrganizationDto(organization.Id, organization.Name, organization.CreatedAt,
+                    people.Where(person => scope.SeesPerson(person.Id)).Select(static person => person.ToDto()).ToArray());
             })
             .WithSummary("The organization of the server and its people.");
 
-        api.MapGet("/devices", async (HttpContext context, ICoordinatorStore store, PresenceRegistry presence) =>
+        api.MapGet("/devices", async (HttpContext context, ICoordinatorStore store, PresenceRegistry presence, DirectoryVisibility visibility) =>
             {
                 var actor = DeviceAuthenticationMiddleware.GetDevice(context);
                 var devices = await store.ListDevicesAsync(actor.OrganizationId, context.RequestAborted).ConfigureAwait(false);
-                return new ListResponse<DeviceDto>(devices.Select(device => device.ToDto(presence.IsOnline(device.Id))).ToArray());
+                var scope = await visibility.ScopeAsync(actor, context.RequestAborted).ConfigureAwait(false);
+                return new ListResponse<DeviceDto>(devices.Where(device => scope.SeesDevice(device.Id)).Select(device => device.ToDto(presence.IsOnline(device.Id))).ToArray());
             })
             .WithSummary("The devices of the organization: controller devices and nodes, pending, approved and revoked.");
 
@@ -127,13 +131,14 @@ internal static class ApiEndpoints
             .Produces<EnrollmentTokenResponse>(StatusCodes.Status201Created)
             .WithSummary("Makes an enrollment token for a machine: single use, 10 minutes to 24 hours, shown once.");
 
-        api.MapGet("/machines", async (HttpContext context, ICoordinatorStore store, PresenceRegistry presence) =>
+        api.MapGet("/machines", async (HttpContext context, ICoordinatorStore store, PresenceRegistry presence, DirectoryVisibility visibility) =>
             {
                 var actor = DeviceAuthenticationMiddleware.GetDevice(context);
+                var scope = await visibility.ScopeAsync(actor, context.RequestAborted).ConfigureAwait(false);
                 var devices = (await store.ListDevicesAsync(actor.OrganizationId, context.RequestAborted).ConfigureAwait(false))
                     .ToDictionary(static device => device.Id, StringComparer.Ordinal);
                 var machines = await store.ListMachinesAsync(actor.OrganizationId, context.RequestAborted).ConfigureAwait(false);
-                return new ListResponse<MachineDto>(machines.Select(machine =>
+                return new ListResponse<MachineDto>(machines.Where(machine => scope.SeesMachine(machine.DeviceId)).Select(machine =>
                 {
                     devices.TryGetValue(machine.DeviceId, out var device);
                     return new MachineDto(machine.DeviceId, device?.Name ?? machine.DeviceId, device?.Kind ?? FleetDeviceKinds.Node, device?.Status ?? DeviceStatuses.Revoked,
@@ -142,11 +147,13 @@ internal static class ApiEndpoints
             })
             .WithSummary("The machines of the organization and their last inventory.");
 
-        api.MapGet("/sessions", async (HttpContext context, ICoordinatorStore store) =>
+        api.MapGet("/sessions", async (HttpContext context, ICoordinatorStore store, DirectoryVisibility visibility) =>
             {
                 var actor = DeviceAuthenticationMiddleware.GetDevice(context);
                 var sessions = await store.ListSessionsAsync(actor.OrganizationId, context.RequestAborted).ConfigureAwait(false);
-                return new ListResponse<SessionDto>(sessions.Select(static session => session.ToDto()).ToArray());
+                var scope = await visibility.ScopeAsync(actor, context.RequestAborted).ConfigureAwait(false);
+                return new ListResponse<SessionDto>(sessions.Where(session => scope.SeesSession(session.MachineId, session.Id, session.PersonId))
+                    .Select(static session => session.ToDto()).ToArray());
             })
             .WithSummary("The published sessions: their facts and their sealed metadata, which the server cannot read.");
 
@@ -198,13 +205,22 @@ internal static class ApiEndpoints
             .Produces<TelemetrySettingsDto>()
             .WithSummary("Sets the telemetry of the fleet with a setting the calling owner's controller device signed: applied at once and pushed to the machines, which check its signature.");
 
-        api.MapGet("/updates", (HttpContext context, UpdateCampaignService updates)
-                => updates.GetAsync(DeviceAuthenticationMiddleware.GetDevice(context), context.RequestAborted))
+        api.MapGet("/updates", async (HttpContext context, UpdateCampaignService updates, DirectoryVisibility visibility) =>
+            {
+                var actor = DeviceAuthenticationMiddleware.GetDevice(context);
+                var read = await updates.GetAsync(actor, context.RequestAborted).ConfigureAwait(false);
+                var scope = await visibility.ScopeAsync(actor, context.RequestAborted).ConfigureAwait(false);
+                return read with { Campaigns = [.. read.Campaigns.Select(campaign => Visible(campaign, scope))] };
+            })
             .Produces<UpdatesDto>()
             .WithSummary("The updates of the fleet: the versions of the server, the update policy and the recent campaigns with each machine's state; for a controller device.");
 
-        api.MapGet("/updates/campaigns/{id}", (string id, HttpContext context, UpdateCampaignService updates)
-                => updates.GetCampaignAsync(DeviceAuthenticationMiddleware.GetDevice(context), id, context.RequestAborted))
+        api.MapGet("/updates/campaigns/{id}", async (string id, HttpContext context, UpdateCampaignService updates, DirectoryVisibility visibility) =>
+            {
+                var actor = DeviceAuthenticationMiddleware.GetDevice(context);
+                var campaign = await updates.GetCampaignAsync(actor, id, context.RequestAborted).ConfigureAwait(false);
+                return Visible(campaign, await visibility.ScopeAsync(actor, context.RequestAborted).ConfigureAwait(false));
+            })
             .Produces<UpdateCampaignDto>()
             .WithSummary("An update campaign and the state of each of its machines; for a controller device.");
 
@@ -236,6 +252,10 @@ internal static class ApiEndpoints
         app.Map(FleetServerMethods.ControlPath, (HttpContext context, ControlService control) => control.HandleAsync(context)).ExcludeFromDescription();
         app.Map(FleetServerMethods.RelayPath + "/{ticket}", (string ticket, HttpContext context, RelayHub relays) => relays.HandleAsync(context, ticket)).ExcludeFromDescription();
     }
+
+    // A campaign names to each caller the machines that caller sees.
+    private static UpdateCampaignDto Visible(UpdateCampaignDto campaign, DirectoryScope scope)
+        => campaign with { Machines = [.. campaign.Machines.Where(machine => scope.SeesMachine(machine.DeviceId))] };
 
     internal static RequestOrigin Origin(HttpContext context) => new(context.Connection.RemoteIpAddress, context.TraceIdentifier);
 

@@ -84,6 +84,9 @@ public sealed class FleetServerConnectionsOptions
     /// </summary>
     public Action<string, Protocol.FleetAccessState>? AccessChanged { get; init; }
 
+    /// <summary>Gets what is told, by the id of its link, each time a device read access again because its server said it changed; null tells nobody.</summary>
+    public Action<string>? AccessRead { get; init; }
+
     /// <summary>Gets what reads the problems of the machine its heartbeats report; null reports nothing.</summary>
     public Func<IReadOnlyList<Protocol.Api.FleetHealthProblem>>? Health { get; init; }
 }
@@ -123,6 +126,14 @@ public interface IFleetServerAutomations
     /// <param name="cancellationToken">Cancels the work.</param>
     /// <returns>A task that completes once the event was taken or refused, and answered.</returns>
     Task HookEventAsync(FleetConnector connector, FleetServerLink link, FleetHookEvent received, CancellationToken cancellationToken) => Task.CompletedTask;
+
+    /// <summary>Takes a run in progress over for the person who asked it through a server, once the signed request verifies.</summary>
+    /// <param name="connector">The connector of the server.</param>
+    /// <param name="link">The link of the server.</param>
+    /// <param name="request">The signed request, whose action is <see cref="FleetAutomationRunRequest.TakeOverAction"/>.</param>
+    /// <param name="cancellationToken">Cancels the work.</param>
+    /// <returns>A task that completes once the run was taken over or the request refused.</returns>
+    Task TakeOverAsync(FleetConnector connector, FleetServerLink link, FleetSignedAutomationRunRequest request, CancellationToken cancellationToken) => Task.CompletedTask;
 
     /// <summary>Is told that the connection of a server is online again, to report what the server may have missed.</summary>
     /// <param name="connector">The connector of the server.</param>
@@ -335,6 +346,7 @@ public sealed class FleetServerConnections : IAsyncDisposable
             DeviceListPinPath = Path.Combine(_store.LinkFolder(link.Id), FleetOrganizationDevices.PinFileName),
             AccessPinPath = Path.Combine(_store.LinkFolder(link.Id), FleetOrganizationAccess.PinFileName),
             AccessChanged = _options.AccessChanged is { } accessChanged ? state => accessChanged(link.Id, state) : null,
+            AccessRead = _options.AccessRead is { } accessRead ? () => accessRead(link.Id) : null,
             AcceptRelay = _options.AcceptRelay is { } accept ? (incoming, stream, token) => accept(created!, incoming, stream, token) : null,
             TelemetrySettings = _options.TelemetrySettings is { } receive ? (settings, token) => receive(created!, link, settings, token) : null,
             Metrics = _options.Metrics,
@@ -346,6 +358,7 @@ public sealed class FleetServerConnections : IAsyncDisposable
             AutomationsOnline = _options.Automations is { } online ? token => online.OnlineAsync(created!, link, token) : null,
             AutomationsRun = _options.Automations is { } runs ? (request, token) => runs.RunAsync(created!, link, request, token) : null,
             HookEvent = _options.Automations is { } hooks ? (received, token) => hooks.HookEventAsync(created!, link, received, token) : null,
+            AutomationsTakeOver = _options.Automations is { } takeOvers ? (request, token) => takeOvers.TakeOverAsync(created!, link, request, token) : null,
             SecretsChanged = _options.SecretsChanged is { } changed ? () => changed(link.Id) : null,
             BudgetsChanged = _options.BudgetsChanged is { } budgets ? () => budgets(link.Id) : null,
             Health = _options.Health,

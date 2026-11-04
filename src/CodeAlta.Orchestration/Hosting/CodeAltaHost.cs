@@ -95,8 +95,10 @@ public sealed class CodeAltaHost : IAsyncDisposable
             ModelOptions = modelProviderInitializationService.SetModelOptionAsync,
         };
         Commands.Fallback.ProviderStates = () => modelProviderInitializationService.CurrentStates;
-        // Every tool call of a session goes through the tool hooks of the plugins, whatever runs the session.
-        if (Commands.Plugins is { } toolHooks) runtimeService.ToolInterceptorOf = toolHooks.CreateToolInterceptor;
+        // Every tool call of a session goes through the tool hooks of the plugins, whatever runs the session, then through the
+        // guard the host gave that session (the autonomy of an automation's run), looked up at each call.
+        var toolHooks = Commands.Plugins;
+        runtimeService.ToolInterceptorOf = scope => ToolGuards.Compose(scope, toolHooks?.CreateToolInterceptor(scope));
         // A plugin can continue a session whose run ended, with a prompt of its own.
         if (runtimeService.PluginEventObserver is { } pluginEvents)
             pluginEvents.RunEndHooks = new PluginRunEndHooks(pluginRuntime.Adapter, () => pluginRuntime.ActivePlugins,
@@ -273,6 +275,12 @@ public sealed class CodeAltaHost : IAsyncDisposable
 
     /// <summary>Gets host-owned admission and drainage for up to eight actual cached workspace reads.</summary>
     public OwnedSessionWorkspace WorkspaceReads { get; }
+
+    /// <summary>
+    /// Gets the tool guards the host gives sessions, by session: every tool call of a session goes through its guard after the
+    /// hooks of the plugins (the autonomy of the run of an automation).
+    /// </summary>
+    public SessionToolGuards ToolGuards { get; } = new();
 
     /// <summary>Gets the runs of the Code Mode scripts of the sessions.</summary>
     public Runtime.Scripts.CodeModeRunRegistry CodeModeRuns { get; }

@@ -54,11 +54,18 @@ test("a trigger of another tool shows its settings, its secrets by name, and how
   const slack = integrated(newTrigger("slack"));
   assert.match(slack, /aria-label="Channel id"[\s\S]*aria-label="App-level token"[\s\S]*aria-label="Bot token"/);
   assert.match(slack, /Socket Mode/);
+  assert.doesNotMatch(slack, /replies in the threads it answered/, "a trigger on mentions answers each mention");
+  assert.match(integrated({ ...newTrigger("slack"), event: "message" }), /Also start on people&#x27;s replies in the threads it answered/);
   const webhook = integrated(newTrigger("webhook"));
   assert.match(webhook, /aria-label="Hook"[\s\S]*Make a hook[\s\S]*aria-label="Signing secret"/);
   assert.match(webhook, /aria-label="Fields that reach the prompt"/);
   assert.doesNotMatch(webhook, /Write the answer back/, "a webhook has nowhere to reply");
   assert.match(integrated(newTrigger("incident_io")), /aria-label="API key"/);
+  // Once it names a hook, its address is hidden until asked for, and never written in the page before.
+  const hooked = newTrigger("incident_io");
+  const masked = integrated({ ...hooked, integration: { ...hooked.integration!, hook: "abcdefghijklmnopqrstuvwxyz" } });
+  assert.match(masked, /Address of the hook[\s\S]*Show the address/);
+  assert.doesNotMatch(masked, /api\/v1\/hooks/);
   for (const locale of locales) assert.ok(integrated(newTrigger("slack"), locale).includes(translate(locale, "Test the connection")), locale);
 });
 

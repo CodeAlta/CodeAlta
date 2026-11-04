@@ -29,6 +29,12 @@ public sealed partial class FleetConnectorOptions
     /// Null ignores them (a desktop does).
     /// </summary>
     public Func<FleetHookEvent, CancellationToken, Task>? HookEvent { get; init; }
+
+    /// <summary>
+    /// Gets what receives the take-over of a run a person asked through the server (<see cref="FleetAutomationMethods.TakeOver"/>),
+    /// as signed: it verifies the request before the run waits for that person. Null ignores it.
+    /// </summary>
+    public Func<FleetSignedAutomationRunRequest, CancellationToken, Task>? AutomationsTakeOver { get; init; }
 }
 
 public sealed partial class FleetConnector
@@ -121,6 +127,15 @@ public sealed partial class FleetConnector
         try { request = fleetEvent.Payload?.Deserialize(FleetAutomationRunRequestJsonContext.Default.FleetSignedAutomationRunRequest); }
         catch (JsonException) { /* A request this machine does not read runs nothing. */ }
         if (request is { Payload.Length: > 0 }) QueueAutomations(() => run(request, stop), stop);
+    }
+
+    private void OnAutomationTakeOver(FleetEvent fleetEvent, CancellationToken stop)
+    {
+        if (_options.AutomationsTakeOver is not { } takeOver) return;
+        FleetSignedAutomationRunRequest? request = null;
+        try { request = fleetEvent.Payload?.Deserialize(FleetAutomationRunRequestJsonContext.Default.FleetSignedAutomationRunRequest); }
+        catch (JsonException) { /* A request this machine does not read changes nothing. */ }
+        if (request is { Payload.Length: > 0 }) QueueAutomations(() => takeOver(request, stop), stop);
     }
 
     // In the order the server sent them, beside the automations: an event selects one of them.

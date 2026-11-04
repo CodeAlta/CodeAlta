@@ -112,11 +112,28 @@ internal sealed partial class DesktopFleetServers : IAsyncDisposable
                 || machine.Kind != FleetDeviceKinds.Node)
                 continue;
             if ((connection.Link.OrganizationId ?? connector.Devices.Current?.OrganizationId) is not { } organization) continue;
-            return new DesktopServerAutomationRoute(connection.Link.Id, organization, machine.Inventory.Name, connector.Devices, Identity(), Client(connection.Link.Id));
+            var identity = Identity();
+            return new DesktopServerAutomationRoute(connection.Link.Id, organization, machine.Inventory.Name, connector.Devices, identity, Client(connection.Link.Id))
+            {
+                TeamId = MaintainedTeamOf(connector.Access.Current, connector.Devices.Current, identity.DeviceId, machineId),
+            };
         }
 
         return null;
     }
+
+    /// <summary>
+    /// Gets the team that owns a machine when the person of this device maintains it, as the access document and the device
+    /// list this device verified say; null for a personal machine or a team this person does not maintain.
+    /// </summary>
+    /// <param name="access">The access document as this device verified it.</param>
+    /// <param name="devices">The device list as this device verified it.</param>
+    /// <param name="deviceId">This device.</param>
+    /// <param name="machineId">The machine.</param>
+    /// <returns>The team, or null.</returns>
+    internal static string? MaintainedTeamOf(FleetAccessState? access, FleetDeviceListState? devices, string deviceId, string machineId)
+        => access?.TeamOf(machineId) is { } team && devices is not null && devices.Members.TryGetValue(deviceId, out var self)
+            && FleetAccessState.RoleIn(team, self.OwnerId) == FleetTeamRoles.Maintainer ? team.Id : null;
 
     /// <summary>Gets the id of this device, once its key exists.</summary>
     public string? DeviceId => Volatile.Read(ref _identity)?.DeviceId;
@@ -699,6 +716,8 @@ internal sealed partial class DesktopFleetServers : IAsyncDisposable
             Configure = _configure,
             // A budget reached, a run that waits, a notification: the pages and the Fleet button read them again.
             BudgetsChanged = _ => OnChanged(),
+            // An automation this person gave away and that its new owner took: off this computer, and so off its machines.
+            AccessRead = linkId => _ = FollowTransfersAsync(linkId),
         });
         connections.Changed += OnChanged;
         Volatile.Write(ref _connections, connections);

@@ -103,6 +103,10 @@ Every event has an id, so a run happens once even when two machines see the same
 | Team or organization | The scope's service identity | The scope's machines | Account credentials of the scope |
 | Started by an agent | The agent's principal (a delegated token with its chain) | As its parent allows | As above |
 
+A machine decides this from what is signed, never from the server's word: the scope is in the version its editor signed
+(`team:<id>`, by a maintainer, for a machine of that team), and a team's service identities that are on are in the signed
+access document. Without one, an automation of the team does not run; a machine of a team never runs a personal plan.
+
 ### Credentials of unattended runs
 
 Personal subscriptions (Claude Code with a Claude plan, the Codex subscription, Copilot seats) belong to one person for

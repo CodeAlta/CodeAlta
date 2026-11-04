@@ -210,7 +210,7 @@ public sealed partial class FleetNodeService : IAsyncDisposable
     {
         ArgumentNullException.ThrowIfNull(stream);
         ArgumentNullException.ThrowIfNull(organization);
-        var trust = new Server.FleetCombinedTrust(_trusted, organization);
+        var trust = new Server.FleetCombinedTrust(_trusted, new FleetNamedPeopleTrust(organization, People));
         FleetChannel channel;
         try
         {
@@ -329,6 +329,7 @@ public sealed partial class FleetNodeService : IAsyncDisposable
             RegisterProviders(caller, Access.Owner, Access.Owner);
             RegisterAgentPolicy(caller, Access.Owner);
             RegisterLabels(caller, Access.Owner);
+            RegisterPeople(caller, Access.Owner);
             // The owner may bring a session to its own node (altanode remote <machine> move), and read its moves.
             RegisterMoves(caller, Access.Owner);
             On(caller, FleetNodeMethods.MovesList, Access.Owner, FleetNodeJsonContext.Default.FleetEmpty, FleetNodeJsonContext.Default.FleetMoveList,
@@ -404,6 +405,8 @@ public sealed partial class FleetNodeService : IAsyncDisposable
         RegisterProviders(caller, Access.Manage, Access.ManagePaired);
         RegisterAgentPolicy(caller, Access.Manage);
         RegisterLabels(caller, Access.Manage);
+        // Who the machine lets in is its owner's: a device paired to manage it, never one trusted through the organization alone.
+        RegisterPeople(caller, Access.ManagePaired);
     }
 
     private void RegisterManagementExtras(FleetNodeCaller caller, Access access)
@@ -525,7 +528,18 @@ public sealed partial class FleetNodeService : IAsyncDisposable
         if (access.AnyoneMayCall) return device;
         if (device is null) throw new FleetException(FleetErrorCodes.Unauthenticated, FleetErrorHints.Reauthenticate, "This device is not paired with the node.");
         if ((device.Permissions & access.Required) != access.Required)
+        {
+            // A person of the organization the machine does not name: their first try asks its owner, who lets them in or not.
+            if (device is { PersonId: { } person, OwnSessionsOnly: true, Permissions: DevicePermissions.None } && _trusted.FindTrusted(caller.Fingerprint) is null
+                && (access.Required & (DevicePermissions.View | DevicePermissions.Start)) != 0)
+            {
+                People.Ask(person, device.DeviceId);
+                throw new FleetException(FleetErrorCodes.Forbidden, null, "The owner of this machine was asked to let you use it: try again once they did.");
+            }
+
             throw new FleetException(FleetErrorCodes.Forbidden, null, $"This device may not do this on the node (it needs {string.Join(", ", Describe(access.Required & ~device.Permissions))}).");
+        }
+
         if (access.PairedOnly && _trusted.FindTrusted(caller.Fingerprint) is null)
             throw new FleetException(FleetErrorCodes.Forbidden, null, "Only a device paired with the node may do this.");
         return device;

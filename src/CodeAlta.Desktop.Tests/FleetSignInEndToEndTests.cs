@@ -58,7 +58,8 @@ public sealed class FleetSignInEndToEndTests
             Assert.AreEqual("ok", held.Status, held.Message);
             Assert.IsFalse(held.Settings!.Methods.Single(static method => method.Id == "microsoft").Available, "the public client of the project is a placeholder");
             var change = new FleetSignInSettingsRequest(ownerEpoch, linkId, held.Settings.Version, ["company", "passkey"],
-                provider.Issuer.AbsoluteUri, provider.ClientId, provider.ClientSecret, "Contoso", null, false, ["contoso.example"]);
+                provider.Issuer.AbsoluteUri, provider.ClientId, provider.ClientSecret, "Contoso", null, false, [new FleetSignInGroupRoleView("0b1e-engineering", "auditor")],
+                AllowedDomains: ["contoso.example"]);
             Assert.AreEqual("sign_in.confirmation_required", (await owner.SetSignInSettingsAsync(change, token)).Status, "changing the company sign-in needs the owner to sign in again");
 
             // The owner links their GitHub account, then confirms with it: a code to enter at GitHub, and the change goes on.
@@ -72,6 +73,7 @@ public sealed class FleetSignInEndToEndTests
             var set = await owner.SetSignInSettingsAsync(change with { ConfirmWith = "github", Handle = confirmCode.Code.Handle }, token);
             Assert.AreEqual("ok", set.Status, set.Message);
             Assert.IsTrue(set.Settings!.HasClientSecret);
+            Assert.AreEqual(("0b1e-engineering", "auditor"), (set.Settings.GroupRoles.Single().Group, set.Settings.GroupRoles.Single().Role));
 
             // A new computer: the methods of the server, then company sign-in through its browser.
             await using var laptopHost = await HostAsync(At("laptop"), root, token);
@@ -119,6 +121,8 @@ public sealed class FleetSignInEndToEndTests
             var own = await laptop.SignInSettingsAsync(new FleetServerLinkRequest(laptopEpoch, joined.Server.Id), token);
             Assert.AreEqual("ok", own.Status, own.Message);
             Assert.IsNull(own.Settings, "a member does not see the settings of the organization");
+            var people = await owner.AccessAsync(new FleetServerLinkRequest(ownerEpoch, linkId), token);
+            Assert.AreEqual("auditor", people.People.Single(static person => person.Name == "Sam Rivera").Role, "their group gave the role at their sign-in");
             Assert.AreEqual(("company", "sam@contoso.example"), (own.Logins.Single().Method, own.Logins.Single().Name));
         }
         finally

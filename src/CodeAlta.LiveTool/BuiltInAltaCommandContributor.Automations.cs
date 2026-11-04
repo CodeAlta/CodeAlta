@@ -607,6 +607,11 @@ internal sealed partial class BuiltInAltaCommandContributor
         file = automation.File,
         script = automation.Script,
         prompt = prompt && automation.Script is null ? automation.Prompt : null,
+        autonomy = automation.Autonomy is { } autonomy ? new
+        {
+            allowedTools = autonomy.AllowedTools, maxCallsPerHour = autonomy.MaxCallsPerHour, approvalTimeout = autonomy.ApprovalTimeout,
+            onTimeout = autonomy.OnTimeout, approvers = autonomy.Approvers,
+        } : null,
         note,
     };
 

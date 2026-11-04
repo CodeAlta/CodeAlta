@@ -319,7 +319,11 @@ public sealed class ExternalSignInClient : IDisposable
         // Only the email claim, with email_verified true, proves a domain; a preferred_username never does.
         var verified = emailClaim is not null && claims.TryGetValue("email_verified", out var flag)
             && (flag is true || flag is string text && string.Equals(text, "true", StringComparison.OrdinalIgnoreCase));
-        return new ExternalIdentity(issuer, subject, email, Text(claims, "name") ?? email, Groups(claims, provider.GroupsClaim), Text(claims, "tid"), verified);
+        // The name, else its parts (the optional given_name and family_name claims, which a Microsoft personal account without
+        // a display name may still send), else the email.
+        var parts = string.Join(' ', new[] { Text(claims, "given_name"), Text(claims, "family_name") }.Where(static part => !string.IsNullOrWhiteSpace(part)));
+        return new ExternalIdentity(issuer, subject, email, Text(claims, "name") ?? (parts.Length > 0 ? parts : null) ?? email, Groups(claims, provider.GroupsClaim),
+            Text(claims, "tid"), verified);
     }
 
     private Task<TokenValidationResult> ValidateAsync(string token, ExternalProvider provider, OpenIdConnectConfiguration configuration)

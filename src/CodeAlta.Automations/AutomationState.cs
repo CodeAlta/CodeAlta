@@ -28,11 +28,20 @@ internal sealed record AutomationRun(string Id, string AutomationId, DateTimeOff
     /// <summary>A trigger was due while the previous run was still in progress.</summary>
     internal const string Skipped = "skipped";
 
+    /// <summary>The run is in progress and waits for a person: an approval of a call it may not make by itself.</summary>
+    internal const string Waiting = "waiting";
+
     /// <summary>
     /// The run waits for its owner to continue it anyway: a budget of the machine is reached and holds new runs. It goes
     /// on as <see cref="Running"/> once continued, or fails once stopped.
     /// </summary>
     internal const string Held = "held";
+
+    /// <summary>The most calls a try records.</summary>
+    internal const int MaximumCalls = 50;
+
+    /// <summary>Whether the run is in progress: working, waiting for a person, or held by a budget.</summary>
+    internal bool InProgress => Status is Running or Waiting or Held;
 
     /// <summary>The name of the automation when it ran: a run outlives a rename, and its automation.</summary>
     public string? Name { get; init; }
@@ -72,6 +81,9 @@ internal sealed record AutomationRun(string Id, string AutomationId, DateTimeOff
 
     /// <summary>The answer a try kept instead of writing it back; null otherwise.</summary>
     public string? Output { get; init; }
+
+    /// <summary>The calls of allowed tools a try recorded instead of making them, as the tool and its arguments; null for none.</summary>
+    public IReadOnlyList<string>? Calls { get; init; }
 }
 
 /// <summary>What an event trigger has already seen of a repository.</summary>
@@ -134,7 +146,7 @@ internal sealed class AutomationStateStore
         // What was in progress when the application stopped did not finish.
         for (var index = 0; index < _state.Runs.Count; index++)
         {
-            if (_state.Runs[index].Status is AutomationRun.Running or AutomationRun.Held)
+            if (_state.Runs[index].InProgress)
                 _state.Runs[index] = _state.Runs[index] with { Status = AutomationRun.Interrupted, EndedAt = _state.Runs[index].EndedAt ?? _state.AliveAt };
         }
     }
@@ -219,14 +231,14 @@ internal sealed class AutomationStateStore
             var kept = _state.Runs.Count(candidate => candidate.AutomationId == run.AutomationId);
             for (var index = 0; index < _state.Runs.Count && kept > MaximumRunsPerAutomation; index++)
             {
-                if (_state.Runs[index].AutomationId != run.AutomationId || _state.Runs[index].Status == AutomationRun.Running) continue;
+                if (_state.Runs[index].AutomationId != run.AutomationId || _state.Runs[index].InProgress) continue;
                 _state.Runs.RemoveAt(index--);
                 kept--;
             }
 
             for (var index = 0; index < _state.Runs.Count && _state.Runs.Count > MaximumRuns; index++)
             {
-                if (_state.Runs[index].Status != AutomationRun.Running) _state.Runs.RemoveAt(index--);
+                if (!_state.Runs[index].InProgress) _state.Runs.RemoveAt(index--);
             }
 
             Save();
@@ -281,25 +293,28 @@ internal sealed class AutomationStateStore
     /// Records what an event trigger has seen. Only the latest items are kept by their number: the older ones
     /// are remembered as everything up to the highest of them.
     /// </summary>
-    internal void SetWatermark(string automationId, string triggerKey, AutomationWatermark watermark)
+    internal void SetWatermark(string automationId, string triggerKey, AutomationWatermark watermark) => SetWatermark(automationId, triggerKey, watermark, MaximumSeen, MaximumHeads);
+
+    /// <summary>Records what a trigger has seen, keeping at most so many items and heads: a trigger of another tool keeps more.</summary>
+    internal void SetWatermark(string automationId, string triggerKey, AutomationWatermark watermark, int maximumSeen, int maximumHeads)
     {
         ArgumentNullException.ThrowIfNull(watermark);
         lock (_gate)
         {
-            if (watermark.Seen.Count > MaximumSeen)
+            if (watermark.Seen.Count > maximumSeen)
             {
-                var dropped = watermark.Seen.Count - MaximumSeen;
+                var dropped = watermark.Seen.Count - maximumSeen;
                 var floor = watermark.Floor;
                 foreach (var number in watermark.Seen.Take(dropped))
                 {
                     if (long.TryParse(number, System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out var value) && value > floor) floor = value;
                 }
 
-                watermark = watermark with { Floor = floor, Seen = watermark.Seen.GetRange(dropped, MaximumSeen) };
+                watermark = watermark with { Floor = floor, Seen = watermark.Seen.GetRange(dropped, maximumSeen) };
             }
 
             // The pull requests with the lowest numbers are the oldest ones.
-            foreach (var old in watermark.Heads.Keys.OrderByDescending(static key => key.Length).ThenByDescending(static key => key, StringComparer.Ordinal).Skip(MaximumHeads).ToArray())
+            foreach (var old in watermark.Heads.Keys.OrderByDescending(static key => key.Length).ThenByDescending(static key => key, StringComparer.Ordinal).Skip(maximumHeads).ToArray())
                 watermark.Heads.Remove(old);
             _state.Watermarks[automationId + "|" + triggerKey] = watermark;
             Save();

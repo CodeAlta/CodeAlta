@@ -186,13 +186,15 @@ public sealed class SignInTests
     [TestMethod]
     public async Task AMethodTheServerDoesNotOfferIsRefused()
     {
-        await using var server = await ServerFixture.StartAsync();
+        // A server whose Microsoft and Google clients are placeholders (a build without them) does not offer them.
+        await using var server = await ServerFixture.StartAsync(signIn: new SignInOptions
+        {
+            Microsoft = new SignInClient(PublicSignInClients.PlaceholderPrefix + "microsoft"),
+            Google = new SignInClient(PublicSignInClients.PlaceholderPrefix + "google", "secret"),
+        });
         using var owner = new TestDevice("Desktop");
         using var laptop = new TestDevice("Laptop");
         await server.SetUpAsync(owner);
-
-        // A public client of the CodeAlta project that is still a placeholder is not offered (Microsoft, Google); the
-        // CodeAlta GitHub App is registered, so GitHub is.
         var methods = (await server.SendAsync(null, HttpMethod.Get, "/api/v1/sign-in/methods")).Read<SignInMethodsResponse>();
         CollectionAssert.AreEquivalent(new[] { FleetSignInMethods.Passkey, FleetSignInMethods.GitHub }, methods.Methods.Select(static method => method.Id).ToArray());
         var settings = (await server.SendAsync(owner, HttpMethod.Get, "/api/v1/sign-in/settings")).Read<SignInSettingsDto>();
@@ -209,6 +211,33 @@ public sealed class SignInTests
         Assert.AreEqual(HttpStatusCode.OK, disabled.Status, disabled.Body.ToString());
         Assert.AreEqual(SignInErrorCodes.MethodDisabled,
             (await server.SendAsync(laptop, HttpMethod.Post, "/api/v1/sign-in/start", new StartSignInRequest(FleetSignInMethods.Passkey, laptop.PublicKey, Redirect))).Code);
+    }
+
+    [TestMethod]
+    public async Task AnIdentityWithoutAName_IsNamedFromItsFirstAndLastName_ElseItsEmail()
+    {
+        await using var provider = await FakeOidcProvider.StartAsync(clientSecret: "company-secret");
+        await using var server = await ServerFixture.StartAsync(signIn: Options(provider));
+        using var owner = new TestDevice("Desktop");
+        using var node = new TestDevice("Mac mini");
+        using var laptop = new TestDevice("Laptop");
+        using var other = new TestDevice("Other laptop");
+        await server.SetUpWithNodeAsync(owner, node);
+        await ConfigureCompanyAsync(server, owner, provider, requireSso: false);
+
+        // No name claim, but its parts (the optional claims of a Microsoft personal account): the person is named from them.
+        provider.Account = new FakeAccount("user-2", "pat@contoso.example", null, [], GivenName: "Pat", FamilyName: "Lee");
+        var (start, back) = await StartAsync(server, laptop, FleetSignInMethods.Company);
+        var completed = await CompleteAsync(server, laptop, start, back);
+        Assert.AreEqual(HttpStatusCode.OK, completed.Status, completed.Body.ToString());
+        Assert.AreEqual("Pat Lee", completed.Read<CompleteSignInResponse>().Person.DisplayName);
+
+        // Neither: the email.
+        provider.Account = new FakeAccount("user-3", "kim@contoso.example", null, []);
+        (start, back) = await StartAsync(server, other, FleetSignInMethods.Company);
+        completed = await CompleteAsync(server, other, start, back);
+        Assert.AreEqual(HttpStatusCode.OK, completed.Status, completed.Body.ToString());
+        Assert.AreEqual("kim@contoso.example", completed.Read<CompleteSignInResponse>().Person.DisplayName);
     }
 
     [TestMethod]
@@ -373,6 +402,9 @@ public sealed class SignInTests
             defaults.GitHub.ClientSecret));
         Assert.AreEqual(PublicSignInClients.GitHubClientId, defaults.GitHub.ClientId);
         Assert.IsFalse(PublicSignInClients.IsPlaceholder(defaults.GitHub.ClientId), "the CodeAlta GitHub App is registered");
+        // The Microsoft app of the CodeAlta project is registered too, a public client without secret.
+        Assert.IsFalse(PublicSignInClients.IsPlaceholder(defaults.Microsoft.ClientId), "the CodeAlta Microsoft app is registered");
+        Assert.IsNull(defaults.Microsoft.ClientSecret);
 
         var variables = new Dictionary<string, string>
         {
@@ -386,6 +418,27 @@ public sealed class SignInTests
         Assert.AreEqual("https://api.github.com/", SignInOptions.FromEnvironment(name => variables.GetValueOrDefault(name)).GitHubApiAddress.AbsoluteUri);
         variables["CODEALTA_SIGNIN_GITHUB_URL"] = "http://github.contoso.example";
         Assert.ThrowsExactly<ArgumentException>(() => SignInOptions.FromEnvironment(name => variables.GetValueOrDefault(name)));
+    }
+
+    [TestMethod]
+    public void TheGoogleClientIsBuiltInOnlyFromTheVariablesOfTheBuild_BothOrNeither()
+    {
+        // The build writes Google's client id and desktop secret from CODEALTA_SIGNIN_GOOGLE_CLIENT_ID and _CLIENT_SECRET (secrets
+        // of the CI, so that the public repository never holds them). The tests run in the environment of the build: with the
+        // variables, the built-in client is theirs; without them, it is a placeholder, and the server does not offer Google.
+        var id = Environment.GetEnvironmentVariable("CODEALTA_SIGNIN_GOOGLE_CLIENT_ID");
+        var secret = Environment.GetEnvironmentVariable("CODEALTA_SIGNIN_GOOGLE_CLIENT_SECRET");
+        Assert.AreEqual(PublicSignInClients.IsPlaceholder(PublicSignInClients.GoogleClientId), PublicSignInClients.IsPlaceholder(PublicSignInClients.GoogleClientSecret),
+            "the id and the secret come together");
+        if (!string.IsNullOrWhiteSpace(id) && !string.IsNullOrWhiteSpace(secret))
+        {
+            Assert.AreEqual(PublicSignInClients.GoogleClientId, id.Trim(), "the build carries the client id it was given");
+            Assert.AreEqual(PublicSignInClients.GoogleClientSecret, secret.Trim(), "the build carries the secret it was given");
+        }
+        else
+        {
+            Assert.IsTrue(PublicSignInClients.IsPlaceholder(PublicSignInClients.GoogleClientId), "a build without the variables has no Google client");
+        }
     }
 
     [TestMethod]
@@ -626,6 +679,58 @@ public sealed class SignInTests
         Assert.IsFalse(audit.Any(static record => record.Details?.Contains("company-secret", StringComparison.Ordinal) == true), "the audit log never holds the secret");
     }
 
+    [TestMethod]
+    public async Task TheGroupsOfACompanySignInGiveTheRole_AtEachSignIn_ButNeverMakeOrUnmakeAnOwner()
+    {
+        await using var provider = await FakeOidcProvider.StartAsync(clientSecret: "company-secret");
+        await using var server = await ServerFixture.StartAsync(signIn: Options(provider));
+        using var owner = new TestDevice("Desktop");
+        using var laptop = new TestDevice("Laptop");
+        await server.SetUpAsync(owner);
+        await ConfigureCompanyAsync(server, owner, provider, requireSso: false);
+        var held = (await server.SendAsync(owner, HttpMethod.Get, "/api/v1/sign-in/settings")).Read<SignInSettingsDto>();
+        CompanySignInSettings Company(params GroupRoleDto[] roles) => new(provider.Issuer.AbsoluteUri, provider.ClientId, null, "Contoso", null, roles, ["contoso.example"]);
+        var ownerRole = await server.SendAsync(owner, HttpMethod.Put, "/api/v1/sign-in/settings", new SetSignInSettingsRequest(held.Version,
+            [FleetSignInMethods.Company, FleetSignInMethods.Passkey], Company(new GroupRoleDto("g-admins", FleetOrganizationRoles.Owner)), false));
+        Assert.AreEqual((HttpStatusCode.BadRequest, SignInErrorCodes.SettingsInvalid), (ownerRole.Status, ownerRole.Code), "no group makes an owner");
+        var twice = await server.SendAsync(owner, HttpMethod.Put, "/api/v1/sign-in/settings", new SetSignInSettingsRequest(held.Version,
+            [FleetSignInMethods.Company, FleetSignInMethods.Passkey], Company(new GroupRoleDto("g-admins", "admin"), new GroupRoleDto("g-admins", "auditor")), false));
+        Assert.AreEqual(HttpStatusCode.BadRequest, twice.Status, "a group maps to one role");
+        var set = await server.SendAsync(owner, HttpMethod.Put, "/api/v1/sign-in/settings", new SetSignInSettingsRequest(held.Version,
+            [FleetSignInMethods.Company, FleetSignInMethods.Passkey], Company(new GroupRoleDto("g-admins", FleetOrganizationRoles.Admin), new GroupRoleDto("g-audit", FleetOrganizationRoles.Auditor)),
+            false, Confirmation: await ConfirmAsync(server, owner)));
+        Assert.AreEqual(HttpStatusCode.OK, set.Status, set.Body.ToString());
+        var mapped = set.Read<SignInSettingsDto>().Company!.GroupRoles!;
+        Assert.AreEqual(2, mapped.Count);
+        // Read again without the mapping, a change keeps it (a client that does not know it); an empty one removes it.
+        var kept = await server.SendAsync(owner, HttpMethod.Put, "/api/v1/sign-in/settings", new SetSignInSettingsRequest(set.Read<SignInSettingsDto>().Version,
+            [FleetSignInMethods.Company, FleetSignInMethods.Passkey], new CompanySignInSettings(provider.Issuer.AbsoluteUri, provider.ClientId, null, "Contoso"), false));
+        Assert.AreEqual(2, kept.Read<SignInSettingsDto>().Company!.GroupRoles!.Count);
+
+        // In g-admins: an admin from the first sign-in; the audit says the groups did it.
+        var (start, back) = await StartAsync(server, laptop, FleetSignInMethods.Company);
+        var signedIn = (await CompleteAsync(server, laptop, start, back)).Read<CompleteSignInResponse>();
+        Assert.AreEqual(PersonRoles.Admin, (await server.Server.Store.GetPersonAsync(signedIn.Person.Id))!.Role);
+        var audit = (await server.SendAsync(owner, HttpMethod.Get, "/api/v1/audit?limit=500")).Read<ListResponse<AuditRecordDto>>().Items;
+        Assert.IsTrue(audit.Any(record => record.Action == "person.role" && record.Target == signedIn.Person.Id && record.Details?.Contains("sign-in", StringComparison.Ordinal) == true));
+
+        // Out of g-admins, in g-audit: an auditor at the next sign-in; in no mapped group: a member.
+        provider.Account = provider.Account with { Groups = ["g-engineering", "g-audit"] };
+        (start, back) = await StartAsync(server, laptop, FleetSignInMethods.Company);
+        await CompleteAsync(server, laptop, start, back);
+        Assert.AreEqual(FleetOrganizationRoles.Auditor, (await server.Server.Store.GetPersonAsync(signedIn.Person.Id))!.Role);
+        provider.Account = provider.Account with { Groups = ["g-engineering"] };
+        (start, back) = await StartAsync(server, laptop, FleetSignInMethods.Company);
+        await CompleteAsync(server, laptop, start, back);
+        Assert.AreEqual(PersonRoles.Member, (await server.Server.Store.GetPersonAsync(signedIn.Person.Id))!.Role);
+
+        // An owner stays an owner whatever their groups say.
+        Assert.AreEqual(HttpStatusCode.OK, (await server.SendAsync(owner, HttpMethod.Put, $"/api/v1/people/{signedIn.Person.Id}/role", new SetRoleRequest(FleetOrganizationRoles.Owner))).Status);
+        (start, back) = await StartAsync(server, laptop, FleetSignInMethods.Company);
+        await CompleteAsync(server, laptop, start, back);
+        Assert.AreEqual(PersonRoles.Owner, (await server.Server.Store.GetPersonAsync(signedIn.Person.Id))!.Role);
+    }
+
     internal static SignInOptions Options(FakeOidcProvider provider) => new()
     {
         AllowLoopbackHttpProviders = true,
@@ -664,7 +769,7 @@ public sealed class SignInTests
         var set = await server.SendAsync(owner, HttpMethod.Put, "/api/v1/sign-in/settings", new SetSignInSettingsRequest(held.Version,
             [FleetSignInMethods.Company, FleetSignInMethods.Passkey, FleetSignInMethods.Microsoft, FleetSignInMethods.GitHub],
             new CompanySignInSettings(provider.Issuer.AbsoluteUri, provider.ClientId, held.Company is null ? provider.ClientSecret ?? string.Empty : null, "Contoso", null,
-                domains ?? (tenants is null ? ["contoso.example"] : null), tenants), requireSso, Confirmation: confirmation));
+                AllowedDomains: domains ?? (tenants is null ? ["contoso.example"] : null), AllowedTenants: tenants), requireSso, Confirmation: confirmation));
         Assert.AreEqual(HttpStatusCode.OK, set.Status, set.Body.ToString());
         return set.Read<SignInSettingsDto>();
     }

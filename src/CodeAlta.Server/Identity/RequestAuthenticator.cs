@@ -109,7 +109,8 @@ public sealed class RequestAuthenticator
     private async ValueTask<DeviceRecord> AuthenticateCoreAsync(SignedRequestData request, CancellationToken cancellationToken)
     {
         var timestamp = CheckForm(request);
-        var device = await _store.GetDeviceAsync(request.DeviceId!, cancellationToken).ConfigureAwait(false);
+        // The device and whether its person is suspended, in one read: a suspension refuses the next request at once.
+        var (device, suspended) = await _store.GetDeviceOfRequestAsync(request.DeviceId!, cancellationToken).ConfigureAwait(false);
         // An unknown device and a wrong signature answer the same, so that the answer does not tell which ids exist.
         if (device is null || !FleetDevicePublicKey.TryParse(device.PublicKey, out var key)) throw SignatureInvalid();
         CheckSignature(request, timestamp, key);
@@ -122,8 +123,7 @@ public sealed class RequestAuthenticator
         }
 
         // A person who left is refused on every device of theirs at once, before the console signs their devices out of the list.
-        if (device.OwnerPersonId is { } owner && await _store.GetPersonAsync(owner, cancellationToken).ConfigureAwait(false) is { IsActive: false })
-            throw CoordinatorException.Forbidden(FleetErrorCodes.Revoked, "The person of this device is suspended.");
+        if (suspended) throw CoordinatorException.Forbidden(FleetErrorCodes.Revoked, "The person of this device is suspended.");
         return device;
     }
 

@@ -41,6 +41,35 @@ public sealed class SqliteCoordinatorStoreTests
     private static DeviceRecord Node(string id) => new(id, "org", id, FleetDeviceKinds.Node, "key-" + id, "fp-" + id, "alex", DeviceStatuses.Approved, "desktop", null, Start, Start, null, 1);
 
     [TestMethod]
+    public async Task ADeviceOfARequestComesWithWhetherItsPersonIsSuspended_InOneRead_AndAutomationsWithWhoHoldsThem()
+    {
+        using var root = new TempDirectory();
+        await using var store = await OpenAsync(root);
+        var (organization, owner) = await SetUpAsync(store);
+        Assert.AreEqual((owner.Id, false), ((await store.GetDeviceOfRequestAsync(owner.Id)).Device?.Id, (await store.GetDeviceOfRequestAsync(owner.Id)).PersonSuspended));
+        Assert.IsNull((await store.GetDeviceOfRequestAsync("nobody")).Device);
+        await using (var connection = new SqliteConnection($"Data Source={Path.Combine(root.Path, "test.sqlite3")};Pooling=False"))
+        {
+            await connection.OpenAsync();
+            await using var command = connection.CreateCommand();
+            command.CommandText = "UPDATE people SET status = 'suspended' WHERE id = 'alex'";
+            await command.ExecuteNonQueryAsync();
+        }
+
+        Assert.IsTrue((await store.GetDeviceOfRequestAsync(owner.Id)).PersonSuspended, "the read tells a suspension at once");
+
+        var automations = (IAutomationStore)store;
+        await InsertDevicesAsync(root, Node("mini"));
+        foreach (var (id, number, removed) in new[] { ("nightly", 1L, false), ("weekly", 1L, true) })
+        {
+            await automations.PutAutomationAsync(new AutomationRecord(organization.Id, id, "mini", "alex", number, removed, true, "[]", "{}", "sig", owner.Id, Start, "pending", null),
+                Audit("automation.put", id));
+        }
+
+        CollectionAssert.AreEqual(new[] { ("nightly", "alex") }, (await automations.ListAutomationHoldersAsync(organization.Id)).ToArray(), "removed ones hold nothing");
+    }
+
+    [TestMethod]
     public async Task MigrationsRunFromAnEmptyFileAndOnceOnly()
     {
         using var root = new TempDirectory();

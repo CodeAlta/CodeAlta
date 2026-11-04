@@ -93,8 +93,12 @@ to it.
   App, the desktop shows the user code and opens `github.com/login/device`, and polls the server, which asks GitHub
   at most once per interval GitHub sets (`slow_down` lengthens it); the device code never leaves the server. A
   company's own GitHub Enterprise Server app is the same, at its address (`CODEALTA_SIGNIN_GITHUB_URL`).
-- No registration per server; the ids are configuration of the server (`CODEALTA_SIGNIN_<PROVIDER>_CLIENT_ID`) until a
-  release carries them, and a method whose id is missing is not offered.
+- No registration per server: every release carries the project's ids (`PublicSignInClients`). A server may replace
+  them (`CODEALTA_SIGNIN_<PROVIDER>_CLIENT_ID`, and `_CLIENT_SECRET` for Microsoft and Google), and a method whose id is
+  missing is not offered. Google's client id and desktop secret ship in the packages but not in the source: the CI build
+  writes them from repository secrets (`CODEALTA_SIGNIN_GOOGLE_CLIENT_ID`, `_CLIENT_SECRET`), so that secret scanners
+  of the public repository have nothing to flag, and a build without them does not offer Google. Google documents that
+  this secret is not confidential for an installed application; the code stays bound to its PKCE verifier.
 - **Registering the GitHub App** is one confirmation in a browser: `pwsh src/CodeAlta.Server/Identity/SignIn/register-github-app.ps1`
   posts `github-app-manifest.json` (public, no permission, no webhook) to the CodeAlta organization, converts the code
   GitHub sends back (`POST /app-manifests/{code}/conversions`) and prints the app id, slug and client id. The owner
@@ -122,7 +126,9 @@ to it.
 - **Enforcement**: the organization requires its company sign-in, and no other way signs a new device in, except
   the passkey of one **break-glass Owner**.
 - People are created at their first sign-in, as members; the groups of each sign-in are kept with its login, and map
-  to roles by **group id** in milestone 4 (Entra app roles rather than group claims, which overflow past 200 groups).
+  to roles by **group id** (Entra app roles rather than group claims, which overflow past 200 groups): at each company
+  sign-in the widest mapped role applies, member for none. No group makes or unmakes an owner, so the break-glass owner
+  never depends on the provider; machines follow the new role once a signer signs the access document.
 - **SCIM 2.0** (users, groups) deprovisions without waiting for a sign-in: the person is suspended, their devices and
   delegations revoked, their sessions on team machines stopped, the audit trail kept (milestone 5).
 

@@ -1,12 +1,12 @@
 import { useEffect, useRef, useState } from "react";
-import { Button, Callout, Dialog, DialogBody, DialogFooter, InputGroup, Menu, MenuItem, PopoverNext, Switch, Tag } from "@blueprintjs/core";
+import { Button, Callout, Dialog, DialogBody, DialogFooter, HTMLSelect, InputGroup, Menu, MenuItem, PopoverNext, Switch, Tag } from "@blueprintjs/core";
 import { fleetServer, type FleetServerView, type FleetSignInLoginView, type FleetSignInSettingsView } from "#neoastra";
 import { AppIcon } from "../AppIcon";
 import { ActivitySpinner } from "../ActivitySpinner";
 import { useShellLanguage } from "../shellLanguage";
 import type { MessageKey } from "../localization";
 import { serverProblem } from "./fleetServer";
-import { allowedValues, hasCompany, linkableMethods, signInCode, signInDraft, signInDraftProblem, signInProblem, signInSummary, type SignInCode as Code, type SignInDraft } from "./signIn";
+import { allowedValues, groupRoleChoices, hasCompany, linkableMethods, signInCode, signInDraft, signInDraftProblem, signInProblem, signInSummary, type SignInCode as Code, type SignInDraft } from "./signIn";
 import { SignInCode } from "./SignInCode";
 
 /** The calls of the sign-in of a server. */
@@ -105,6 +105,28 @@ export function ServerSignIn({ server, epoch, api = fleetServer, revision }: { s
   </div>;
 }
 
+/** The groups of the company's provider that give a role at each sign-in: the widest of a person's groups applies, a member in none; owners keep theirs. */
+function GroupRoles({ draft, working, update }: { draft: SignInDraft; working: boolean; update: (change: Partial<SignInDraft>) => void }) {
+  const { t } = useShellLanguage();
+  const names: Record<string, MessageKey> = { admin: "Admin", member: "Member", auditor: "Auditor", guest: "Guest" };
+  const set = (index: number, change: Partial<{ group: string; role: string }>) =>
+    update({ groupRoles: draft.groupRoles.map((role, at) => at === index ? { ...role, ...change } : role) });
+  return <div className="fleet-sign-in-groups" role="group" aria-label={t("Roles from groups")}>
+    <span>{t("Roles from groups")}</span>
+    {draft.groupRoles.map((role, index) => <div key={index} className="fleet-sign-in-group">
+      <InputGroup value={role.group} disabled={working} spellCheck={false} placeholder={t("Group id")} aria-label={t("Group id")}
+        onChange={event => set(index, { group: event.target.value })} />
+      <HTMLSelect value={role.role} disabled={working} aria-label={t("Role")} onChange={event => set(index, { role: event.target.value })}
+        options={groupRoleChoices.map(choice => ({ value: choice, label: t(names[choice]) }))} />
+      <Button size="small" variant="minimal" icon={<AppIcon name="trash" size={14} />} disabled={working}
+        aria-label={t("Remove the group {name}", { name: role.group || t("Group id") })} onClick={() => update({ groupRoles: draft.groupRoles.filter((_role, at) => at !== index) })} />
+    </div>)}
+    <Button size="small" variant="minimal" icon={<AppIcon name="plus" size={14} />} disabled={working} text={t("Add a group")}
+      onClick={() => update({ groupRoles: [...draft.groupRoles, { group: "", role: "member" }] })} />
+    {draft.groupRoles.length > 0 && <small className="muted-text">{t("At each company sign-in, a person gets the widest role of their groups, member in none. Owners keep their role.")}</small>}
+  </div>;
+}
+
 /**
  * How people sign in to the organization: the methods, the company's OpenID Connect provider and whether it is required.
  * A change of the company sign-in asks the owner to sign in again first, with a method linked to them.
@@ -142,6 +164,7 @@ function SignInDialog({ server, epoch, api, view, logins, onClose }: {
       const result = await api.setSignInSettings({ expectedEpoch: epoch, linkId: server.id, version: view.version, enabled: draft.enabled,
         issuer: company ? draft.issuer.trim() : null, clientId: company ? draft.clientId.trim() : null, clientSecret: company && draft.clientSecret ? draft.clientSecret : null,
         displayName: company ? draft.displayName.trim() || null : null, groupsClaim: company ? draft.groupsClaim.trim() || null : null, requireSso: draft.requireSso,
+        groupRoles: company ? draft.groupRoles.map(role => ({ group: role.group.trim(), role: role.role })) : null,
         allowedDomains: company ? allowedValues(draft.allowedDomains) : null, allowedTenants: company ? allowedValues(draft.allowedTenants) : null,
         confirmWith: method, handle },
         { timeoutMilliseconds: method ? 11 * 60_000 : 60_000 });
@@ -187,6 +210,7 @@ function SignInDialog({ server, epoch, api, view, logins, onClose }: {
               onChange={event => update({ allowedTenants: event.target.value })} /></label>
         </div>
         <small className="muted-text">{t("Redirect to register at the provider: http://127.0.0.1 (any port).")}</small>
+        {hasCompany(draft) && <GroupRoles draft={draft} working={working} update={update} />}
         <Switch checked={draft.requireSso} disabled={working} label={t("Require company sign-in")} onChange={event => update({ requireSso: event.currentTarget.checked })} />
         {draft.requireSso && <small className="muted-text">{t("Only company sign-in lets a new computer in; your passkey stays as the owner's way in.")}</small>}
         <button type="submit" hidden />

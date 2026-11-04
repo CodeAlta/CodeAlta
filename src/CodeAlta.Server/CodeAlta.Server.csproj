@@ -71,4 +71,39 @@
   <ItemGroup>
     <InternalsVisibleTo Include="CodeAlta.Server.Tests" />
   </ItemGroup>
+
+  <!--
+    The Google client of CodeAlta sign-in is not in the source (PublicSignInClients): the build writes it into a generated
+    file from CODEALTA_SIGNIN_GOOGLE_CLIENT_ID and CODEALTA_SIGNIN_GOOGLE_CLIENT_SECRET, secrets of the repository's CI.
+    A build without them, or with a value of unexpected characters, writes placeholders: Google is then not offered.
+  -->
+  <PropertyGroup>
+    <_CodeAltaGoogleClientId Condition="'$(CODEALTA_SIGNIN_GOOGLE_CLIENT_ID)' != '' and $([System.Text.RegularExpressions.Regex]::IsMatch('$(CODEALTA_SIGNIN_GOOGLE_CLIENT_ID)', '^[A-Za-z0-9._-]+$')) and '$(CODEALTA_SIGNIN_GOOGLE_CLIENT_SECRET)' != '' and $([System.Text.RegularExpressions.Regex]::IsMatch('$(CODEALTA_SIGNIN_GOOGLE_CLIENT_SECRET)', '^[A-Za-z0-9._-]+$'))">$(CODEALTA_SIGNIN_GOOGLE_CLIENT_ID)</_CodeAltaGoogleClientId>
+    <_CodeAltaGoogleClientSecret Condition="'$(_CodeAltaGoogleClientId)' != ''">$(CODEALTA_SIGNIN_GOOGLE_CLIENT_SECRET)</_CodeAltaGoogleClientSecret>
+    <_CodeAltaGoogleClientId Condition="'$(_CodeAltaGoogleClientId)' == ''">codealta-register-google-client-id</_CodeAltaGoogleClientId>
+    <_CodeAltaGoogleClientSecret Condition="'$(_CodeAltaGoogleClientSecret)' == ''">codealta-register-google-desktop-client-secret</_CodeAltaGoogleClientSecret>
+  </PropertyGroup>
+
+  <Target Name="_CodeAltaWritePublicSignInBuild" BeforeTargets="CoreCompile;BeforeCompile">
+    <!-- In the target, where the build has set its intermediate folder: never next to the source. -->
+    <PropertyGroup>
+      <_CodeAltaSignInBuildFile>$([System.IO.Path]::Combine('$(ProjectDir)', '$(IntermediateOutputPath)', 'PublicSignInBuild.g.cs'))</_CodeAltaSignInBuildFile>
+    </PropertyGroup>
+    <Error Condition="'$(IntermediateOutputPath)' == ''" Text="The intermediate folder of the build is not set: the sign-in values are never written next to the source." />
+    <ItemGroup>
+      <_CodeAltaSignInBuildLine Include="// &lt;auto-generated/&gt; Written by CodeAlta.Server.csproj from the CI secrets of CodeAlta sign-in." />
+      <_CodeAltaSignInBuildLine Include="namespace CodeAlta.Server.Identity.SignIn%3B" />
+      <_CodeAltaSignInBuildLine Include="internal static class PublicSignInBuild" />
+      <_CodeAltaSignInBuildLine Include="{" />
+      <_CodeAltaSignInBuildLine Include="    internal const string GoogleClientId = &quot;$(_CodeAltaGoogleClientId)&quot;%3B" />
+      <_CodeAltaSignInBuildLine Include="    internal const string GoogleClientSecret = &quot;$(_CodeAltaGoogleClientSecret)&quot;%3B" />
+      <_CodeAltaSignInBuildLine Include="}" />
+    </ItemGroup>
+    <WriteLinesToFile File="$(_CodeAltaSignInBuildFile)" Lines="@(_CodeAltaSignInBuildLine)" Overwrite="true" WriteOnlyWhenDifferent="true" />
+    <ItemGroup>
+      <Compile Remove="$(_CodeAltaSignInBuildFile)" />
+      <Compile Include="$(_CodeAltaSignInBuildFile)" />
+      <FileWrites Include="$(_CodeAltaSignInBuildFile)" />
+    </ItemGroup>
+  </Target>
 </Project>
