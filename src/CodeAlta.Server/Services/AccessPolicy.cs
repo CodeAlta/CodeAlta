@@ -1,3 +1,4 @@
+using System.Collections.Frozen;
 using CodeAlta.Fleet.Protocol;
 using CodeAlta.Server.Storage;
 
@@ -57,19 +58,19 @@ internal sealed record AccessDecision(bool Allowed, string Source);
 internal static class AccessPolicy
 {
     // What a member of a team may do with what the team owns; maintainers may do everything.
-    private static readonly HashSet<string> TeamMemberNames = new(StringComparer.Ordinal)
+    private static readonly FrozenSet<string> TeamMemberNames = new[]
     {
         "view", "view-facts", "view-content", "start", "approve", "use", "read", "post", "view-team", "run",
-    };
+    }.ToFrozenSet(StringComparer.Ordinal);
 
     // What every person of the organization may do at its scope.
-    private static readonly HashSet<string> EveryoneCapabilities = new(StringComparer.Ordinal) { "statistics.view-own", "access.view" };
+    private static readonly FrozenSet<string> EveryoneCapabilities = new[] { "statistics.view-own", "access.view" }.ToFrozenSet(StringComparer.Ordinal);
 
     // What an auditor reads beyond the facts.
-    private static readonly HashSet<string> AuditorCapabilities = new(StringComparer.Ordinal)
+    private static readonly FrozenSet<string> AuditorCapabilities = new[]
     {
         "audit.read", "audit.export", "access.view", "access.review", "statistics.view-organization", "statistics.view-team", "statistics.view-own",
-    };
+    }.ToFrozenSet(StringComparer.Ordinal);
 
     /// <summary>Decides whether a person holds a capability on a target.</summary>
     /// <param name="snapshot">The access of the organization.</param>
