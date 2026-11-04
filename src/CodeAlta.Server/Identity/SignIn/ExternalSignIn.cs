@@ -115,8 +115,30 @@ public sealed class ExternalSignInClient : IDisposable
     /// <returns>The address to open in the browser.</returns>
     /// <exception cref="ArgumentException">The provider is GitHub, which signs in with its device flow.</exception>
     /// <exception cref="ExternalSignInException">The provider's discovery document cannot be read.</exception>
-    public async Task<Uri> BuildAuthorizationUrlAsync(ExternalProvider provider, string redirectUri, string state, string nonce, string codeChallenge,
+    public Task<Uri> BuildAuthorizationUrlAsync(ExternalProvider provider, string redirectUri, string state, string nonce, string codeChallenge,
         CancellationToken cancellationToken)
+        => BuildAuthorizationUrlAsync(provider, redirectUri, state, nonce, codeChallenge, false, cancellationToken);
+
+    /// <summary>
+    /// Builds the address of the authorization request, asking the provider to authenticate the person again when the
+    /// sign-in confirms a dangerous action: a session the browser keeps at the provider does not confirm anything.
+    /// </summary>
+    /// <param name="provider">The provider.</param>
+    /// <param name="redirectUri">The loopback address of the device.</param>
+    /// <param name="state">The state.</param>
+    /// <param name="nonce">The nonce (OpenID Connect).</param>
+    /// <param name="codeChallenge">The S256 challenge of the PKCE verifier.</param>
+    /// <param name="requireFreshAuthentication">
+    /// Whether the person authenticates again at the provider: <c>prompt=login</c> (Microsoft's, which ignores
+    /// <c>max_age=0</c>), <c>max_age=0</c> (Google's, which has no <c>prompt=login</c>), or both (OpenID Connect).
+    /// <see cref="RedeemAsync(ExternalProvider, string, string, string, string, DateTimeOffset?, CancellationToken)"/> then checks <c>auth_time</c>.
+    /// </param>
+    /// <param name="cancellationToken">Cancels the read of the discovery document.</param>
+    /// <returns>The address to open in the browser.</returns>
+    /// <exception cref="ArgumentException">The provider is GitHub, which signs in with its device flow.</exception>
+    /// <exception cref="ExternalSignInException">The provider's discovery document cannot be read.</exception>
+    public async Task<Uri> BuildAuthorizationUrlAsync(ExternalProvider provider, string redirectUri, string state, string nonce, string codeChallenge,
+        bool requireFreshAuthentication, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(provider);
         RequireOpenIdConnect(provider);
@@ -128,8 +150,11 @@ public sealed class ExternalSignInClient : IDisposable
             new("code_challenge", codeChallenge), new("code_challenge_method", "S256"),
         };
         query.Add(new("nonce", nonce));
+        var fresh = requireFreshAuthentication ? FreshAuthenticationOf(provider) : FreshAuthentication.None;
+        if ((fresh & FreshAuthentication.Prompt) != 0) query.Add(new("prompt", "login"));
         // The browser may hold several accounts of the provider: the person chooses, rather than the one signed in last.
-        if (provider.Method is "microsoft" or "google" or "company") query.Add(new("prompt", "select_account"));
+        else if (provider.Method is "microsoft" or "google" or "company") query.Add(new("prompt", "select_account"));
+        if ((fresh & FreshAuthentication.MaxAge) != 0) query.Add(new("max_age", "0"));
         var builder = new UriBuilder(endpoint);
         var existing = builder.Query.TrimStart('?');
         builder.Query = (existing.Length > 0 ? existing + "&" : string.Empty) + string.Join('&', query.Select(static pair => pair.Key + "=" + Uri.EscapeDataString(pair.Value)));
@@ -146,8 +171,27 @@ public sealed class ExternalSignInClient : IDisposable
     /// <returns>The account.</returns>
     /// <exception cref="ArgumentException">The provider is GitHub, which signs in with its device flow.</exception>
     /// <exception cref="ExternalSignInException">The provider refused the code, or its answer does not verify.</exception>
-    public async Task<ExternalIdentity> RedeemAsync(ExternalProvider provider, string code, string redirectUri, string codeVerifier, string nonce,
+    public Task<ExternalIdentity> RedeemAsync(ExternalProvider provider, string code, string redirectUri, string codeVerifier, string nonce,
         CancellationToken cancellationToken)
+        => RedeemAsync(provider, code, redirectUri, codeVerifier, nonce, null, cancellationToken);
+
+    /// <summary>Redeems a code and checks what the provider answers, and that the person authenticated again since a time.</summary>
+    /// <param name="provider">The provider.</param>
+    /// <param name="code">The code the browser brought back.</param>
+    /// <param name="redirectUri">The redirect of the authorization request.</param>
+    /// <param name="codeVerifier">The PKCE verifier.</param>
+    /// <param name="nonce">The nonce the ID token must carry.</param>
+    /// <param name="authenticatedSince">
+    /// For a sign-in that asked for a fresh authentication, the start of the sign-in: the ID token's <c>auth_time</c> must
+    /// not be older (a provider that answered <c>max_age</c> always sends it; Microsoft's sends it only as an optional
+    /// claim, and its <c>prompt=login</c> is trusted without it); null for an ordinary sign-in.
+    /// </param>
+    /// <param name="cancellationToken">Cancels the calls.</param>
+    /// <returns>The account.</returns>
+    /// <exception cref="ArgumentException">The provider is GitHub, which signs in with its device flow.</exception>
+    /// <exception cref="ExternalSignInException">The provider refused the code, its answer does not verify, or the person did not authenticate again.</exception>
+    public async Task<ExternalIdentity> RedeemAsync(ExternalProvider provider, string code, string redirectUri, string codeVerifier, string nonce,
+        DateTimeOffset? authenticatedSince, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(provider);
         RequireOpenIdConnect(provider);
@@ -180,7 +224,30 @@ public sealed class ExternalSignInClient : IDisposable
             throw new ExternalSignInException(SignInErrorCodes.CodeRefused, $"The provider refused the code: {error.GetString()}.");
         }
 
-        return await ValidateIdTokenAsync(provider, root, nonce, cancellationToken).ConfigureAwait(false);
+        return await ValidateIdTokenAsync(provider, root, nonce, authenticatedSince, cancellationToken).ConfigureAwait(false);
+    }
+
+    // How a provider is asked to authenticate the person again. Entra ID and Microsoft accounts take prompt=login and
+    // answer max_age=0 with an auth_time older than the token; Google has no prompt=login and takes max_age; any other
+    // OpenID Connect provider takes both, and must then send auth_time (OpenID Connect Core 3.1.2.1, 2).
+    private static FreshAuthentication FreshAuthenticationOf(ExternalProvider provider)
+        => IsMicrosoftHost(provider.Authority) ? FreshAuthentication.Prompt
+            : provider.Method == "google" || provider.Authority.Host.Equals("accounts.google.com", StringComparison.OrdinalIgnoreCase) ? FreshAuthentication.MaxAge
+            : FreshAuthentication.Prompt | FreshAuthentication.MaxAge;
+
+    /// <summary>Gets whether an address is of Microsoft's sign-in (Entra ID, Microsoft accounts).</summary>
+    /// <param name="address">The address.</param>
+    /// <returns>Whether its host is <c>login.microsoftonline.com</c>, <c>login.microsoft.com</c> or <c>sts.windows.net</c>.</returns>
+    internal static bool IsMicrosoftHost(Uri address)
+        => address.Host.Equals("login.microsoftonline.com", StringComparison.OrdinalIgnoreCase) || address.Host.Equals("login.microsoft.com", StringComparison.OrdinalIgnoreCase)
+            || address.Host.Equals("sts.windows.net", StringComparison.OrdinalIgnoreCase);
+
+    [Flags]
+    private enum FreshAuthentication
+    {
+        None = 0,
+        Prompt = 1,
+        MaxAge = 2,
     }
 
     /// <summary>Asks GitHub for the device code of a sign-in: the code the person enters, and the device code the server polls with.</summary>
@@ -281,7 +348,8 @@ public sealed class ExternalSignInClient : IDisposable
     /// <inheritdoc />
     public void Dispose() => _http.Dispose();
 
-    private async Task<ExternalIdentity> ValidateIdTokenAsync(ExternalProvider provider, JsonElement answer, string nonce, CancellationToken cancellationToken)
+    private async Task<ExternalIdentity> ValidateIdTokenAsync(ExternalProvider provider, JsonElement answer, string nonce, DateTimeOffset? authenticatedSince,
+        CancellationToken cancellationToken)
     {
         if (!answer.TryGetProperty("id_token", out var idToken) || idToken.ValueKind != JsonValueKind.String)
             throw new ExternalSignInException(SignInErrorCodes.TokenInvalid, "The provider answered no ID token.");
@@ -311,6 +379,7 @@ public sealed class ExternalSignInClient : IDisposable
         var claims = result.Claims;
         if (!claims.TryGetValue("nonce", out var claimed) || !string.Equals(claimed as string, nonce, StringComparison.Ordinal))
             throw new ExternalSignInException(SignInErrorCodes.WrongNonce, "The ID token does not carry the nonce of this sign-in.");
+        if (authenticatedSince is { } since) RequireFreshAuthentication(provider, claims, since);
         var issuer = (string)claims["iss"];
         var subject = Text(claims, "sub") ?? throw new ExternalSignInException(SignInErrorCodes.TokenInvalid, "The ID token has no subject.");
         // A Microsoft account is keyed on its tenant and object id, which stay when its sub (per application) would not.
@@ -325,6 +394,34 @@ public sealed class ExternalSignInClient : IDisposable
         var parts = string.Join(' ', new[] { Text(claims, "given_name"), Text(claims, "family_name") }.Where(static part => !string.IsNullOrWhiteSpace(part)));
         return new ExternalIdentity(issuer, subject, email, Text(claims, "name") ?? (parts.Length > 0 ? parts : null) ?? email, Groups(claims, provider.GroupsClaim),
             Text(claims, "tid"), verified);
+    }
+
+    // A token issued now proves a session, not a person who just authenticated: the provider says when they did.
+    private static void RequireFreshAuthentication(ExternalProvider provider, IDictionary<string, object> claims, DateTimeOffset since)
+    {
+        if (!claims.TryGetValue("auth_time", out var value) || !TryReadSeconds(value, out var seconds))
+        {
+            if ((FreshAuthenticationOf(provider) & FreshAuthentication.MaxAge) == 0) return;
+            throw new ExternalSignInException(SignInErrorCodes.NotFresh, "The provider did not say when you signed in: sign in again.");
+        }
+
+        if (DateTimeOffset.FromUnixTimeSeconds(seconds) < since - FreshnessSkew)
+            throw new ExternalSignInException(SignInErrorCodes.NotFresh, "The provider used a sign-in of before: sign in again there.");
+    }
+
+    // The clocks of the provider and of the server differ by a little.
+    private static readonly TimeSpan FreshnessSkew = TimeSpan.FromMinutes(2);
+
+    private static bool TryReadSeconds(object value, out long seconds)
+    {
+        switch (value)
+        {
+            case long number: seconds = number; return true;
+            case int number: seconds = number; return true;
+            case double number when number is > 0 and < long.MaxValue: seconds = (long)number; return true;
+            case string text when long.TryParse(text, NumberStyles.None, CultureInfo.InvariantCulture, out var parsed): seconds = parsed; return true;
+            default: seconds = 0; return false;
+        }
     }
 
     private Task<TokenValidationResult> ValidateAsync(string token, ExternalProvider provider, OpenIdConnectConfiguration configuration)

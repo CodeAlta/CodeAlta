@@ -876,6 +876,45 @@ public sealed class SignInTests
     }
 
     [TestMethod]
+    public async Task AConfirmationIsAFreshSignInAtTheProvider_NotTheSessionItKeeps()
+    {
+        await using var provider = await FakeOidcProvider.StartAsync();
+        await using var server = await ServerFixture.StartAsync(signIn: Options(provider));
+        using var owner = new TestDevice("Desktop");
+        await server.SetUpAsync(owner);
+        var (link, linkBack) = await StartAsync(server, owner, FleetSignInMethods.Microsoft, FleetSignInPurposes.Link);
+        Assert.AreEqual(HttpStatusCode.OK, (await CompleteAsync(server, owner, link, linkBack)).Status);
+
+        // The provider is asked to authenticate the person again: an ordinary sign-in lets them choose an account only.
+        var (confirm, back) = await StartAsync(server, owner, FleetSignInMethods.Microsoft, FleetSignInPurposes.Confirm);
+        var asked = provider.Authorizations.Last();
+        Assert.AreEqual(("login", "0"), (asked.GetValueOrDefault("prompt"), asked.GetValueOrDefault("max_age")));
+        Assert.AreEqual(HttpStatusCode.OK, (await CompleteAsync(server, owner, confirm, back)).Status, "signed in again now");
+        using var stranger = new TestDevice("Stranger");
+        await StartAsync(server, stranger, FleetSignInMethods.Microsoft);
+        Assert.AreEqual(("select_account", null), (provider.Authorizations.Last().GetValueOrDefault("prompt"), provider.Authorizations.Last().GetValueOrDefault("max_age")));
+
+        // A provider that answers with the session the browser kept an hour ago confirms nothing.
+        provider.SessionStartedAt = DateTimeOffset.UtcNow - TimeSpan.FromHours(1);
+        provider.IgnoresReauthentication = true;
+        (confirm, back) = await StartAsync(server, owner, FleetSignInMethods.Microsoft, FleetSignInPurposes.Confirm);
+        var stale = await CompleteAsync(server, owner, confirm, back);
+        Assert.AreEqual(SignInErrorCodes.NotFresh, stale.Code, stale.Body.ToString());
+
+        // Nor one that does not say when the person signed in, once max_age was asked.
+        provider.IgnoresReauthentication = false;
+        provider.IssuesAuthTime = false;
+        (confirm, back) = await StartAsync(server, owner, FleetSignInMethods.Microsoft, FleetSignInPurposes.Confirm);
+        Assert.AreEqual(SignInErrorCodes.NotFresh, (await CompleteAsync(server, owner, confirm, back)).Code);
+
+        // An ordinary sign-in on a new device needs no fresh authentication.
+        provider.SessionStartedAt = DateTimeOffset.UtcNow - TimeSpan.FromHours(1);
+        using var laptop = new TestDevice("Laptop");
+        var (enroll, enrollBack) = await StartAsync(server, laptop, FleetSignInMethods.Microsoft);
+        Assert.AreEqual(HttpStatusCode.OK, (await CompleteAsync(server, laptop, enroll, enrollBack)).Status);
+    }
+
+    [TestMethod]
     public async Task AWayInIsAddedOnlyWithOneThePersonHas_OrAsTheirFirstSoonAfterTheDeviceJoined()
     {
         await using var provider = await FakeOidcProvider.StartAsync();

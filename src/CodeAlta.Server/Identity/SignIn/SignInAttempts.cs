@@ -50,6 +50,9 @@ public static class SignInErrorCodes
     /// <summary>The ID token expired.</summary>
     public const string TokenExpired = "sign_in.token_expired";
 
+    /// <summary>A confirmation was answered with an earlier sign-in at the provider, not a fresh one.</summary>
+    public const string NotFresh = "sign_in.not_fresh";
+
     /// <summary>No person of the server linked this account.</summary>
     public const string NotLinked = "sign_in.not_linked";
 
@@ -131,6 +134,9 @@ public sealed class SignInAttempt
 
     /// <summary>Gets when it stops working.</summary>
     public required DateTimeOffset ExpiresAt { get; init; }
+
+    /// <summary>Gets when it started: a confirmation is answered by an authentication at the provider since then.</summary>
+    public DateTimeOffset StartedAt { get; init; }
 
     /// <summary>Gets the provider's device code, which never leaves the server; null for a redirect.</summary>
     public string? DeviceCode { get; init; }

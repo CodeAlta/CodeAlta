@@ -310,8 +310,9 @@ public sealed class SignInService : IDisposable
             }
             else
             {
+                // A confirmation is a fresh sign-in at the provider, never the session the browser keeps there.
                 url = await _external.BuildAuthorizationUrlAsync(Provider(request.Method, settings.Document.Company, settings.Secret)!, redirect, state, nonce,
-                    SignInAttempts.Challenge(verifier), cancellationToken).ConfigureAwait(false);
+                    SignInAttempts.Challenge(verifier), purpose == FleetSignInPurposes.Confirm, cancellationToken).ConfigureAwait(false);
             }
         }
         catch (ExternalSignInException exception)
@@ -324,7 +325,7 @@ public sealed class SignInService : IDisposable
             Id = id, OrganizationId = organization.Id, Method = request.Method, Purpose = purpose, DeviceId = key.DeviceId, PublicKey = key.Text,
             LinkingPersonId = linking, FirstWayIn = firstWayIn,
             RedirectUri = redirect, State = state, Nonce = nonce, CodeVerifier = verifier,
-            ExpiresAt = now + lifetime,
+            ExpiresAt = now + lifetime, StartedAt = now,
             DeviceCode = device?.DeviceCode, PollInterval = device?.Interval ?? 5,
             // GitHub's interval is the time between two requests for a token, the first one included.
             NextPollAt = now + TimeSpan.FromSeconds(device?.Interval ?? 0),
@@ -392,7 +393,7 @@ public sealed class SignInService : IDisposable
             try
             {
                 identity = await _external.RedeemAsync(Provider(attempt.Method, settings.Document.Company, settings.Secret)!, request.Code, attempt.RedirectUri, attempt.CodeVerifier,
-                    attempt.Nonce, cancellationToken).ConfigureAwait(false);
+                    attempt.Nonce, attempt.Purpose == FleetSignInPurposes.Confirm ? attempt.StartedAt : null, cancellationToken).ConfigureAwait(false);
             }
             catch (ExternalSignInException exception)
             {
@@ -1022,8 +1023,7 @@ public sealed class SignInService : IDisposable
 
     private static bool IsTenant(string value) => value.Length <= 64 && value.All(static c => char.IsAsciiLetterOrDigit(c) || c is '-' or '.' or '_');
 
-    private static bool IsEntraId(Uri issuer) => issuer.Host.Equals("login.microsoftonline.com", StringComparison.OrdinalIgnoreCase)
-        || issuer.Host.Equals("login.microsoft.com", StringComparison.OrdinalIgnoreCase) || issuer.Host.Equals("sts.windows.net", StringComparison.OrdinalIgnoreCase);
+    private static bool IsEntraId(Uri issuer) => ExternalSignInClient.IsMicrosoftHost(issuer);
 
     private static bool CryptographicEquals(string left, string right)
         => System.Security.Cryptography.CryptographicOperations.FixedTimeEquals(System.Text.Encoding.UTF8.GetBytes(left), System.Text.Encoding.UTF8.GetBytes(right));
