@@ -72,7 +72,7 @@ public sealed class FleetNodeServiceOptions
     /// environment, the run, and what the run is for its approver: null when it may start, else why not. It may wait for
     /// an approval. Null runs no session in an environment.
     /// </summary>
-    public Func<string, string, string?, CancellationToken, Task<string?>>? AdmitEnvironment { get; init; }
+    public Func<string, string, string?, CancellationToken, Task<EnvironmentAdmissionResult>>? AdmitEnvironment { get; init; }
 
     /// <summary>
     /// Gets the log and the self-update the node gives its owner and the devices that manage it (<c>control.log</c>,

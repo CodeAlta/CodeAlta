@@ -94,13 +94,13 @@ public sealed class NodeLabelTests
             await WaitForAsync(async () => (await desktop.ListMachinesAsync(token)).Any(static machine => machine.Online) ? "online" : null, token);
             await manager.PutEnvironmentAsync("gpu-only", [], ["gpu"], [], false, token);
             var gate = node.Automations!.Environments!;
-            StringAssert.Contains(await gate.AdmitAsync("gpu-only", Guid.CreateVersion7().ToString("N"), null, "A run", token), "machines labeled gpu");
+            StringAssert.Contains((await gate.AdmitAsync("gpu-only", Guid.CreateVersion7().ToString("N"), null, "A run", token)).Problem, "machines labeled gpu");
 
             // The owner labels the machine: the server lists the label at the next publication, and the environment admits the run.
             FleetMachineLabels.Write(node.Host.CatalogOptions.FleetRoot, ["gpu"]);
             var listed = await WaitForAsync(async () => (await desktop.ListMachinesAsync(token)).FirstOrDefault(machine => machine.Inventory.Labels?.Contains("gpu") == true), token);
             Assert.AreEqual(nodeId, listed.DeviceId);
-            Assert.IsNull(await gate.AdmitAsync("gpu-only", Guid.CreateVersion7().ToString("N"), null, "A run", token));
+            Assert.IsNull((await gate.AdmitAsync("gpu-only", Guid.CreateVersion7().ToString("N"), null, "A run", token)).Problem);
         }
         finally
         {

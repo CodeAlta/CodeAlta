@@ -73,14 +73,14 @@ public sealed partial class FleetNodeService
     {
         try
         {
-            var problem = await _options.AdmitEnvironment!(environment, session.SessionId, parameters.Title ?? "A session", CancellationToken.None).ConfigureAwait(false);
-            if (problem is not null)
+            var result = await _options.AdmitEnvironment!(environment, session.SessionId, parameters.Title ?? "A session", CancellationToken.None).ConfigureAwait(false);
+            if (result.Admission is not { } admission)
             {
-                LogInfo($"The session {session.SessionId} was not admitted to the environment '{environment}': {problem}");
+                LogInfo($"The session {session.SessionId} was not admitted to the environment '{environment}': {result.Problem}");
                 return;
             }
 
-            _host.Identities.Environments.Admit(session.SessionId, environment);
+            _host.Identities.Environments.Admit(session.SessionId, admission);
             if (parameters.Prompt is { } prompt)
             {
                 var selection = Selection(parameters.Selection, provider.ProviderId.Value, session.AgentPromptId);

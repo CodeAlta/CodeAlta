@@ -5,6 +5,7 @@ using CodeAlta.Catalog;
 using CodeAlta.Fleet.Protocol;
 using CodeAlta.Fleet.Protocol.Api;
 using CodeAlta.Fleet.Server;
+using CodeAlta.Orchestration.Runtime;
 using XenoAtom.Logging;
 
 namespace CodeAlta.Node;
@@ -53,21 +54,28 @@ internal sealed class NodeEnvironmentGate
     /// <param name="automationId">The automation of the run; null for a session.</param>
     /// <param name="title">What the run is, for the approver.</param>
     /// <param name="cancellationToken">Cancels the wait.</param>
-    /// <returns>Null when the run may start with the values of the environment; else why not.</returns>
-    public async Task<string?> AdmitAsync(string environment, string runId, string? automationId, string? title, CancellationToken cancellationToken)
+    /// <returns>What admitted the run, or why it may not start.</returns>
+    public async Task<EnvironmentAdmissionResult> AdmitAsync(string environment, string runId, string? automationId, string? title, CancellationToken cancellationToken)
+    {
+        var problem = await AdmitCoreAsync(environment, runId, automationId, title, cancellationToken).ConfigureAwait(false);
+        return problem.Admission is { } admission ? new EnvironmentAdmissionResult(null, admission) : EnvironmentAdmissionResult.Refused(problem.Problem!);
+    }
+
+    private async Task<(string? Problem, EnvironmentAdmission? Admission)> AdmitCoreAsync(string environment, string runId, string? automationId, string? title,
+        CancellationToken cancellationToken)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(environment);
         ArgumentException.ThrowIfNullOrWhiteSpace(runId);
         // The newest rules and values before the run.
         await _secrets.SyncAsync(cancellationToken).ConfigureAwait(false);
         if (!_secrets.Environments().TryGetValue(environment, out var found))
-            return $"The environment '{environment}' is not an environment of the owner of this machine that a controller device signed.";
+            return ($"The environment '{environment}' is not an environment of the owner of this machine that a controller device signed.", null);
         var (definition, sync) = found;
         if (definition.Automations.Count > 0 && (automationId is null || !definition.Automations.Contains(automationId, StringComparer.Ordinal)))
-            return $"The environment '{environment}' is open to some automations only, not to this run.";
+            return ($"The environment '{environment}' is open to some automations only, not to this run.", null);
         if (definition.MachineLabels.Count > 0 && !definition.MachineLabels.Intersect(FleetMachineLabels.Read(_fleetRoot), StringComparer.OrdinalIgnoreCase).Any())
-            return $"The environment '{environment}' runs on machines labeled {string.Join(", ", definition.MachineLabels)}: this machine is not.";
-        if (definition.Approvers.Count == 0) return null;
+            return ($"The environment '{environment}' runs on machines labeled {string.Join(", ", definition.MachineLabels)}: this machine is not.", null);
+        if (definition.Approvers.Count == 0) return (null, new EnvironmentAdmission(environment, definition.EnvironmentId, definition.Number, null));
 
         var nonce = Base64Url.EncodeToString(RandomNumberGenerator.GetBytes(16));
         FleetApprovalDto asked;
@@ -78,7 +86,7 @@ internal sealed class NodeEnvironmentGate
         }
         catch (Exception exception) when (exception is FleetServerException or HttpRequestException)
         {
-            return $"The approval of the run could not be asked: {exception.Message}";
+            return ($"The approval of the run could not be asked: {exception.Message}", null);
         }
 
         Log($"The run {runId} waits for the approval of the environment '{environment}'.");
@@ -105,18 +113,18 @@ internal sealed class NodeEnvironmentGate
                 }
                 catch (Exception exception) when (exception is FleetServerException or HttpRequestException or FleetDeviceListException)
                 {
-                    return $"The approval could not be checked against the device list: {exception.Message}";
+                    return ($"The approval could not be checked against the device list: {exception.Message}", null);
                 }
 
                 if (!FleetEnvironmentDocuments.TryVerifyApproval(signed, definition, list, sync.MachineId, runId, nonce, DateTimeOffset.UtcNow, out var approval, out var reason))
-                    return $"The approval of the run was refused: {reason}.";
-                if (!TakeOnce(approval.ApprovalId)) return "The approval of the run was used already.";
+                    return ($"The approval of the run was refused: {reason}.", null);
+                if (!TakeOnce(approval.ApprovalId)) return ("The approval of the run was used already.", null);
                 Log($"The run {runId} was approved for the environment '{environment}' by {approval.ApproverPersonId}.");
-                return null;
+                return (null, new EnvironmentAdmission(environment, definition.EnvironmentId, definition.Number, approval.ApprovalId));
             }
 
             var left = deadline - DateTimeOffset.UtcNow;
-            if (left <= TimeSpan.Zero) return $"No approver of the environment '{environment}' approved the run in time.";
+            if (left <= TimeSpan.Zero) return ($"No approver of the environment '{environment}' approved the run in time.", null);
             using var wait = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             wait.CancelAfter(left < ApprovalPoll ? left : ApprovalPoll);
             try { await signal.WaitAsync(wait.Token).ConfigureAwait(false); }

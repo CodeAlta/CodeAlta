@@ -70,7 +70,9 @@ never by the server.
   that uses it starts, limit it to machines with labels, to automations, or to branches. Its rules are signed by a
   controller device of its person, so that a server cannot drop one. The approval is a person's device signature, as
   for every remote action, bound to the environment and the version of its rules, the machine, the run and a nonce the
-  machine chose, valid for a while; the machine verifies it against its anchored device list and takes it once.
+  machine chose, valid for a while; the machine verifies it against its anchored device list and takes it once. The
+  machine keeps the admission of the session it started, bound to the environment, the version of its rules and the
+  approval taken: a restart keeps it, and new rules end it.
 
 ## Logins are not secrets of the store
 

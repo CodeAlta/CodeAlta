@@ -594,7 +594,9 @@ public sealed class CodeAltaHost : IAsyncDisposable
                         (identity, scope) => SpaceIdentityEnvironment.Create(identity, SecretReferenceResolver.ForScope(catalogOptions.GlobalRoot, scope, shell: true,
                                 scope.RunId is { } run ? used => secretUses.Record(used, run) : null).Read,
                             Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), OperatingSystem.IsWindows()),
-                        new CodeAltaConfigStore(catalogOptions).LoadProjectCliProfiles, new SessionSecretEnvironments())
+                        new CodeAltaConfigStore(catalogOptions).LoadProjectCliProfiles,
+                        // An admission to an environment is kept across a restart of the host, bound to the rules and the approval that admitted it.
+                        new SessionSecretEnvironments(readOnlyGlobalState ? null : Path.Combine(catalogOptions.FleetRoot, "environment-admissions.json")))
                     : SessionIdentityResolver.None,
                 AskWhenConversationHeld = options.AskWhenConversationHeld,
                 SandboxBackend = options.SandboxBackend,

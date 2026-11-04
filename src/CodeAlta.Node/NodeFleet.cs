@@ -136,7 +136,7 @@ internal sealed class NodeFleet : IAsyncDisposable
                 // A session that names an environment is admitted as a run of an automation is, once the node joined a server.
                 AdmitEnvironment = (environment, runId, title, token) => node.Automations?.Environments is { } gate
                     ? gate.AdmitAsync(environment, runId, null, title, token)
-                    : Task.FromResult<string?>($"This machine runs no session in the environment '{environment}': it joined no server."),
+                    : Task.FromResult(CodeAlta.Orchestration.Runtime.EnvironmentAdmissionResult.Refused($"This machine runs no session in the environment '{environment}': it joined no server.")),
             });
             // An assigned automation runs while the device that assigned it is still paired, with the automate permission.
             if (node.Automations is { } automations)
@@ -395,6 +395,8 @@ internal sealed class NodeServers : IAsyncDisposable
         secrets = new NodeFleetSecrets(node.Host, connections);
         // A run that names an environment is admitted by its rules and its approval, as the servers verified them.
         if (node.Automations is { } admitted) admitted.Environments = new NodeEnvironmentGate(secrets, catalog);
+        // An admission kept across a restart holds while the rules this node verified are the version that admitted it.
+        node.Host.Identities.Environments.Validate = secrets.Holds;
         if (node.Automations is { } automations)
         {
             automations.DeviceId ??= identity.DeviceId;

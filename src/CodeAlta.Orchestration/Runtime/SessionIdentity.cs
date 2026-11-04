@@ -1,4 +1,3 @@
-using System.Collections.Concurrent;
 using CodeAlta.Agent;
 using CodeAlta.Catalog;
 using CodeAlta.Catalog.Secrets;
@@ -25,38 +24,6 @@ public sealed record SessionIdentity(string? SpaceId, SpaceIdentity? Identity, A
     /// empty when they are all the space's.
     /// </summary>
     public IReadOnlyList<string> ProjectProfiles { get; init; } = [];
-}
-
-/// <summary>
-/// The environments (<c>doc/fleet/secrets.md</c>, environments) the sessions of this host were admitted to, by session:
-/// the host that admits a run (its protection rules held, its approval verified) records it before the session attaches,
-/// and the processes of that session then get the values of that environment. Nothing is kept across a restart: a run
-/// is admitted again.
-/// </summary>
-public sealed class SessionSecretEnvironments
-{
-    private readonly ConcurrentDictionary<string, string> _environments = new(StringComparer.Ordinal);
-
-    /// <summary>Records the environment a session was admitted to.</summary>
-    /// <param name="sessionId">The session.</param>
-    /// <param name="environment">The name of the environment.</param>
-    /// <exception cref="ArgumentException">An argument is empty.</exception>
-    public void Admit(string sessionId, string environment)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
-        ArgumentException.ThrowIfNullOrWhiteSpace(environment);
-        _environments[sessionId] = environment;
-    }
-
-    /// <summary>Gets the environment a session was admitted to.</summary>
-    /// <param name="sessionId">The session.</param>
-    /// <returns>The name of the environment, or null.</returns>
-    public string? Get(string sessionId) => _environments.GetValueOrDefault(sessionId);
-
-    /// <summary>Forgets the environment of a session.</summary>
-    /// <param name="sessionId">The session.</param>
-    /// <returns>Whether it had one.</returns>
-    public bool Remove(string sessionId) => _environments.TryRemove(sessionId, out _);
 }
 
 /// <summary>

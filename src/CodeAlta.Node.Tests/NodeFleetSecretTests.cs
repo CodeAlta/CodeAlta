@@ -44,11 +44,12 @@ public sealed class NodeFleetSecretTests
         await desktop.ApproveAsync(nodeId, FleetDeviceKinds.Node, token);
 
         var provider = new ScriptedNodeProvider();
-        await using var node = await NodeHost.StartAsync(root.Options() with
+        var nodeOptions = root.Options() with
         {
             ConfigureModelProviders = provider.Register,
             Automations = new NodeAutomationOptions { TimeZone = TimeZoneInfo.Utc, WatchRepositories = false, CredentialKind = static _ => AutomationCredentialKind.Account },
-        }, token);
+        };
+        var node = await NodeHost.StartAsync(nodeOptions, token);
         // The space gives its sessions a CLI profile that reads the secret by its name: the run's processes get it from the fleet.
         await node.Host.SpaceCatalog.UpdateSettingsAsync(SpaceDescriptor.DefaultId, settings => settings with
         {
@@ -97,6 +98,25 @@ public sealed class NodeFleetSecretTests
             var uses = await WaitForAsync(async () => (await manager.ListUsesAsync(deploy.Id, token)).Uses is { Count: > 0 } found ? found : null, token);
             Assert.AreEqual((sessionId, 1, nodeId), (uses[0].RunId, uses[0].Version, uses[0].MachineId));
 
+            // The node restarts: the session keeps its admission, bound to the environment, its version and the approval
+            // taken, which is neither asked nor taken again.
+            await servers.DisposeAsync();
+            await node.DisposeAsync();
+            node = await NodeHost.StartAsync(nodeOptions, token);
+            servers = NodeServers.Start(node, null, "test-node", "1.0.0", Fast);
+            var restarted = servers;
+            await WaitForAsync(() => Task.FromResult(restarted.Secrets.Environments().ContainsKey("production") ? "synced" : null), token);
+            Assert.AreEqual(waiting.Id, node.Host.Identities.Environments.Find(sessionId)?.Admission.ApprovalId, "the approval that admitted it is kept with it");
+            environment = (await node.Host.RuntimeService.GetSessionIdentityAsync(sessionId, token)).Environment;
+            Assert.AreEqual(DeployToken, environment.Get("DEPLOY_TOKEN"), "a restart does not drop the values of its environment");
+            Assert.AreEqual(1, (await manager.ListApprovalsAsync(token)).Approvals.Count(approval => approval.RunId == runId), "no approval is asked again");
+
+            // New rules of the environment: the admission was to the version before, and gives nothing more until the run is admitted again.
+            await manager.PutEnvironmentAsync("production", [setup.Owner.Id], [], [Id], false, token);
+            await WaitForAsync(() => Task.FromResult(restarted.Secrets.Environments().TryGetValue("production", out var found) && found.Definition.Number == 2 ? "v2" : null), token);
+            Assert.IsNull(node.Host.Identities.Environments.Get(sessionId));
+            Assert.IsNull((await node.Host.RuntimeService.GetSessionIdentityAsync(sessionId, token)).Environment.Get("DEPLOY_TOKEN"));
+
             // An automation the environment does not name is refused, without asking any approval.
             var otherRun = Guid.CreateVersion7().ToString("N");
             await desktop.RunAutomationAsync(FleetAutomationSigning.SignRun(desktopKey, new FleetAutomationRunRequest(FleetAutomationRunRequest.CurrentVersion,
@@ -115,6 +135,7 @@ public sealed class NodeFleetSecretTests
         finally
         {
             await servers.DisposeAsync();
+            await node.DisposeAsync();
         }
     }
 

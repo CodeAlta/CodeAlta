@@ -6,6 +6,7 @@ using CodeAlta.Fleet.Protocol;
 using CodeAlta.Fleet.Protocol.Api;
 using CodeAlta.Fleet.Server;
 using CodeAlta.Orchestration.Hosting;
+using CodeAlta.Orchestration.Runtime;
 using XenoAtom.Logging;
 
 namespace CodeAlta.Node;
@@ -76,6 +77,20 @@ internal sealed class NodeFleetSecrets : IAsyncDisposable
         }
 
         return environments;
+    }
+
+    /// <summary>
+    /// Tells whether an admission of a session to an environment still holds: until a server was read since the node
+    /// started, the kept admission holds; then the environment must be the one admitted, at the version that admitted it.
+    /// </summary>
+    /// <param name="admission">The admission.</param>
+    /// <returns>Whether it holds.</returns>
+    public bool Holds(SessionEnvironmentAdmission admission)
+    {
+        ArgumentNullException.ThrowIfNull(admission);
+        if (!_links.Values.Any(static state => state.Synced)) return true;
+        return Environments().TryGetValue(admission.Admission.Environment, out var found) && found.Definition.EnvironmentId == admission.Admission.EnvironmentId
+            && found.Definition.Number == admission.Admission.Version;
     }
 
     /// <summary>Reads the values of every link again now, before a run: what a server does not answer keeps what was held.</summary>
@@ -150,6 +165,7 @@ internal sealed class NodeFleetSecrets : IAsyncDisposable
             state.Dirty = false;
             var result = await state.Sync.SyncAsync(cancellationToken).ConfigureAwait(false);
             state.LastSync = DateTimeOffset.UtcNow;
+            state.Synced = !result.Revoked;
             foreach (var refused in result.Refused) Log(true, $"A value of {FleetServerAddress.Format(connector.ServerAddress)} was refused: {refused}.");
             if (result.Revoked) Log(true, $"This machine was revoked by {FleetServerAddress.Format(connector.ServerAddress)}: the values it gave were taken away.");
             // The sessions of the node mask the values they may now be given, and stop masking those taken away.
@@ -232,6 +248,8 @@ internal sealed class NodeFleetSecrets : IAsyncDisposable
         public volatile bool Dirty = true;
 
         public bool WasOnline { get; set; }
+
+        public bool Synced { get; set; }
 
         public DateTimeOffset LastSync { get; set; } = DateTimeOffset.MinValue;
     }

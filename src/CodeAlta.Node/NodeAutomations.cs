@@ -239,12 +239,12 @@ internal sealed partial class NodeAutomations : IFleetNodeAutomations, IAutomati
     internal NodeEnvironmentGate? Environments { get; set; }
 
     /// <inheritdoc />
-    public Task<string?> AdmitEnvironmentAsync(AutomationEntry entry, string runId, string environment, CancellationToken cancellationToken)
+    public Task<CodeAlta.Orchestration.Runtime.EnvironmentAdmissionResult> AdmitEnvironmentAsync(AutomationEntry entry, string runId, string environment, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(entry);
         return Environments is { } environments
             ? environments.AdmitAsync(environment, runId, entry.Definition.Id, entry.Definition.Name, cancellationToken)
-            : Task.FromResult<string?>($"This machine runs no automation in the environment '{environment}': it joined no server.");
+            : Task.FromResult(CodeAlta.Orchestration.Runtime.EnvironmentAdmissionResult.Refused($"This machine runs no automation in the environment '{environment}': it joined no server."));
     }
 
     /// <inheritdoc />
