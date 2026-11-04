@@ -104,6 +104,61 @@ public sealed class AccessDocumentNodeTests
         Assert.AreEqual(3, console.Current!.Number);
     }
 
+    [TestMethod]
+    public async Task AnAccessChangedThatArrivesWhileAReadRuns_IsReadAfterIt_NeverDropped()
+    {
+        await using var server = await ServerFixture.StartAsync();
+        using var root = new TempDirectory();
+        using var ownerKey = DeviceIdentity.LoadOrCreate(Path.Combine(root.Path, "owner"));
+        using var nodeKey = DeviceIdentity.LoadOrCreate(Path.Combine(root.Path, "node"));
+        using var owner = new FleetServerClient(server.BaseAddress, ownerKey);
+        await owner.SetUpAsync(server.SetupCode, "Alex", "Desktop", "Acme", CancellationToken.None);
+        var enrollment = await owner.CreateEnrollmentTokenAsync(null, "build-box", CancellationToken.None);
+        using (var node = new FleetServerClient(server.BaseAddress, nodeKey)) await node.EnrollAsync(enrollment.Token, "Build box", CancellationToken.None);
+        await owner.ApproveAsync(nodeKey.DeviceId, FleetDeviceKinds.Node, CancellationToken.None);
+        var console = new FleetOrganizationAccess(new FleetOrganizationDevices(server.BaseAddress, ownerKey, Path.Combine(root.Path, "owner-link", FleetOrganizationDevices.PinFileName)),
+            Path.Combine(root.Path, "owner-link", FleetOrganizationAccess.PinFileName));
+        await console.SignAsync((await console.PrepareAsync(CancellationToken.None))!, CancellationToken.None);
+
+        // The reader of the connector tells what it read (a desktop follows its transfers there), with the version then held; once
+        // armed, the next one waits there until released: the reader is still busy when the next access.changed arrives.
+        var reads = new System.Collections.Concurrent.ConcurrentQueue<long>();
+        using var entered = new ManualResetEventSlim();
+        using var release = new ManualResetEventSlim();
+        var armed = 0;
+        FleetConnector? self = null;
+        await using var connector = new FleetConnector(new FleetConnectorOptions
+        {
+            ServerAddress = server.BaseAddress, Identity = nodeKey, OutboxPath = Path.Combine(root.Path, "node-outbox.json"), Client = new FleetClientInfo("node", "4.0.0", "linux"),
+            AccessPinPath = Path.Combine(root.Path, "node-link", FleetOrganizationAccess.PinFileName), MinimumBackoff = TimeSpan.FromMilliseconds(100),
+            AccessRead = () =>
+            {
+                reads.Enqueue(Volatile.Read(ref self)?.Access.Current?.Number ?? 0);
+                if (Interlocked.Exchange(ref armed, 0) == 0) return;
+                entered.Set();
+                release.Wait(Patience);
+            },
+        });
+        Volatile.Write(ref self, connector);
+        connector.Start();
+        await WaitForAsync(() => reads.LastOrDefault() == 1, "the node reads the document when it connects");
+
+        Volatile.Write(ref armed, 1);
+        await owner.CreateTeamAsync("Infra");
+        await console.SignAsync((await console.PrepareAsync(CancellationToken.None))!, CancellationToken.None);
+        Assert.IsTrue(entered.Wait(Patience), "access.changed makes the reader read");
+        await owner.CreateTeamAsync("Web");
+        Assert.AreEqual(3, (await console.SignAsync((await console.PrepareAsync(CancellationToken.None))!, CancellationToken.None)).Number);
+        // The access.changed of version 3 reaches the node while the reader is still busy; give it time to arrive.
+        await Task.Delay(500);
+        Assert.AreNotEqual(3L, reads.Last(), "the reader was held before version 3 was signed");
+        release.Set();
+
+        var deadline = DateTime.UtcNow + Patience;
+        while (reads.Last() != 3 && DateTime.UtcNow < deadline) await Task.Delay(50);
+        Assert.AreEqual(3L, reads.Last(), $"reads {string.Join(",", reads)}, held {connector.Access.Current?.Number}");
+    }
+
     // Records the reads of the access document, and answers a list of its own once given one.
     private sealed class RecordingHandler : DelegatingHandler
     {
