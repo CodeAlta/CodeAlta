@@ -93,6 +93,41 @@ internal sealed partial class DesktopFleetServers
         return null;
     }
 
+    private int _rekeyingGrants;
+
+    // Keys again the grants of sealed sessions whose grantee has devices their copies miss (a new device, a member who joined
+    // the team), when this computer holds the key of the session; one pass at a time.
+    private async Task RekeyGrantsAsync(string linkId)
+    {
+        if (Interlocked.Exchange(ref _rekeyingGrants, 1) != 0) return;
+        try
+        {
+            if (Volatile.Read(ref _connections)?.Find(linkId)?.Connector?.MetadataKeys is not { } keys) return;
+            using var client = Client(linkId);
+            foreach (var grant in (await client.ListGrantsAsync(CancellationToken.None).ConfigureAwait(false)).Items.Where(static grant => grant.MissingKeys))
+            {
+                try
+                {
+                    await FleetGrantKeys.ConfirmAsync(client, keys, grant.Id, CancellationToken.None).ConfigureAwait(false);
+                    if (LogManager.IsInitialized) _handoverLogger.Info($"The grant {grant.Id} was keyed again for the devices of its grantee.");
+                }
+                catch (Exception exception) when (exception is InvalidOperationException or KeyNotFoundException or FleetServerException)
+                {
+                    // A session of another person, or one this computer cannot open: a computer of its owner keys it.
+                }
+            }
+        }
+        catch (Exception exception) when (exception is FleetServerException or HttpRequestException or IOException or KeyNotFoundException or OperationCanceledException
+            or FleetDeviceListException)
+        {
+            if (LogManager.IsInitialized) _handoverLogger.Info($"The grants of {linkId} could not be keyed again: {exception.Message}");
+        }
+        finally
+        {
+            Volatile.Write(ref _rekeyingGrants, 0);
+        }
+    }
+
     // Takes off this computer the automations this person gave away and that their new owner took: the last transfer of each
     // decides, so that one given back later stays. One read at a time; a read asked meanwhile is folded into it.
     private async Task FollowTransfersAsync(string linkId)

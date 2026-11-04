@@ -53,7 +53,7 @@ Every machine and automation has one owner: a person, a team or the organization
 A grant gives a person or a team one capability somewhere: on the organization, a team, or one machine. **Add a grant…** chooses who, what and where; the trash icon takes it back.
 
 - Reading content (a session, the log of a machine) is granted on one machine or session, never on a whole team or the organization. **Read a session** lists your own sessions whose title your computer opens.
-- The server cannot read what a session says. Check **The content is sealed from the server** and the grant shows **Waiting for keys**; on a computer of yours, **Confirm keys** seals the session for the grantee's computers only. The session and its title then appear in the grantee's **Fleet** page, until the grant is taken back.
+- The server cannot read what a session says. Check **The content is sealed from the server** and the grant shows **Waiting for keys**; on a computer of yours, **Confirm keys** seals the session for the grantee's computers only. The session and its title then appear in the grantee's **Fleet** page, until the grant is taken back. A computer the grantee adds later, or a person who joins the team of the grant, gets the key the next time a computer of yours is online.
 
 **Service identities** are what team and organization automations run as. A new one stays off until a person turns it on.
 

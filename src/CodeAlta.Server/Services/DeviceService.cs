@@ -75,6 +75,9 @@ public sealed class DeviceService
     /// <summary>Gets the store of the devices that sign-ins register; null for none.</summary>
     public ISignInStore? SignInStore { get; init; }
 
+    /// <summary>Gets what is told, with its organization, that a device was approved or revoked: grants of sealed content are keyed again for it; null tells nobody.</summary>
+    public Action<string>? DevicesChanged { get; init; }
+
     /// <summary>
     /// Gets what tells whether a controller device may revoke a device of another person (<c>doc/fleet/access-control.md</c>):
     /// an owner or admin, or a maintainer for a team machine. Null lets a controller revoke only the devices of its own person.
@@ -212,7 +215,7 @@ public sealed class DeviceService
     /// <returns>The approved device.</returns>
     /// <exception cref="CoordinatorException">The caller is not a controller, the device is unknown or not pending, or the entry is wrong, badly signed or behind the list.</exception>
     public Task<DeviceDto> ApproveAsync(DeviceRecord actor, string deviceId, DeviceListChangeRequest? request, RequestOrigin origin, CancellationToken cancellationToken)
-        => CountedAsync("approve", () => ApproveCoreAsync(actor, deviceId, request, origin, cancellationToken));
+        => CountedAsync("approve", () => ApproveCoreAsync(actor, deviceId, request, origin, cancellationToken), actor?.OrganizationId);
 
     private async Task<DeviceDto> ApproveCoreAsync(DeviceRecord actor, string deviceId, DeviceListChangeRequest? request, RequestOrigin origin, CancellationToken cancellationToken)
     {
@@ -258,7 +261,7 @@ public sealed class DeviceService
     /// <returns>The revoked device.</returns>
     /// <exception cref="CoordinatorException">The caller is not a controller, the device is unknown, revoked or the last controller, or the entry is wrong.</exception>
     public Task<DeviceDto> RevokeAsync(DeviceRecord actor, string deviceId, DeviceListChangeRequest? request, RequestOrigin origin, CancellationToken cancellationToken)
-        => CountedAsync("revoke", () => RevokeCoreAsync(actor, deviceId, request, origin, cancellationToken));
+        => CountedAsync("revoke", () => RevokeCoreAsync(actor, deviceId, request, origin, cancellationToken), actor?.OrganizationId);
 
     private async Task<DeviceDto> RevokeCoreAsync(DeviceRecord actor, string deviceId, DeviceListChangeRequest? request, RequestOrigin origin, CancellationToken cancellationToken)
     {
@@ -462,12 +465,13 @@ public sealed class DeviceService
         }
     }
 
-    private async Task<DeviceDto> CountedAsync(string operation, Func<Task<DeviceDto>> change)
+    private async Task<DeviceDto> CountedAsync(string operation, Func<Task<DeviceDto>> change, string? organizationId = null)
     {
         try
         {
             var device = await change().ConfigureAwait(false);
             Metrics?.DeviceListChange(operation, null);
+            if (DevicesChanged is { } changed && organizationId is not null) changed(organizationId);
             return device;
         }
         catch (CoordinatorException exception)

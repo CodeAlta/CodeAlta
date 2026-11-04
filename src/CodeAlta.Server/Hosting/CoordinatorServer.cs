@@ -433,7 +433,12 @@ public sealed class CoordinatorServer : IAsyncDisposable
         services.AddSingleton(provider => new SignInService(store, store, provider.GetRequiredService<RequestAuthenticator>(), provider.GetRequiredService<SignInAttempts>(),
             signIn, time) { Access = provider.GetRequiredService<AccessService>() });
         services.AddSingleton(provider => new DeviceService(store, provider.GetRequiredService<RequestAuthenticator>(), provider.GetRequiredService<PresenceRegistry>(), time,
-            provider.GetRequiredService<RelayHub>()) { Metrics = metrics, SignInGrants = provider.GetRequiredService<SignInAttempts>(), SignInStore = store });
+            provider.GetRequiredService<RelayHub>())
+        {
+            Metrics = metrics, SignInGrants = provider.GetRequiredService<SignInAttempts>(), SignInStore = store,
+            // A device approved or revoked: the computers of owners key their grants of sealed content again for the devices of the grantees.
+            DevicesChanged = organization => provider.GetRequiredService<AccessService>().Changed(organization),
+        });
         services.AddSingleton(provider => new PublicationService(store, provider.GetRequiredService<DirectoryHub>(), time) { Metrics = metrics });
         services.AddSingleton(_ => new MetadataKeyService(store, time));
         services.AddSingleton(provider => new FleetSecretService(store, store, time) { Presence = provider.GetRequiredService<PresenceRegistry>() });

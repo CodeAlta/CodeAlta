@@ -245,14 +245,20 @@ public interface IAccessStore
     /// <returns>The grant as written, or null when it was not in the status expected.</returns>
     ValueTask<GrantRecord?> SetGrantStatusAsync(string grantId, string expected, string status, DateTimeOffset at, AuditEntry audit, CancellationToken cancellationToken = default);
 
-    /// <summary>Makes a grant of sealed content active with its keys: the sealed metadata and the copy of its key for each device.</summary>
-    /// <param name="grantId">The grant, waiting for its keys.</param>
+    /// <summary>Lists which devices hold a copy of the key of each grant of the organization.</summary>
+    /// <param name="organizationId">The organization.</param>
+    /// <param name="cancellationToken">Cancels the read.</param>
+    /// <returns>The grants and the devices of their copies.</returns>
+    ValueTask<IReadOnlyList<(string GrantId, string DeviceId)>> ListGrantKeyDevicesAsync(string organizationId, CancellationToken cancellationToken = default);
+
+    /// <summary>Activates a grant of sealed content, or keys it again: its sealed metadata and the copies of its key replace those held.</summary>
+    /// <param name="grantId">The grant.</param>
     /// <param name="sealedText">The sealed metadata.</param>
-    /// <param name="wraps">The device and its copy of the key.</param>
+    /// <param name="wraps">The copy of the key for each device.</param>
     /// <param name="at">The time.</param>
     /// <param name="audit">The audit record.</param>
     /// <param name="cancellationToken">Cancels the write.</param>
-    /// <returns>The grant, active; null when it did not wait for its keys.</returns>
+    /// <returns>The grant, active; null when it waits for nothing and is not active.</returns>
     ValueTask<GrantRecord?> ActivateGrantKeysAsync(string grantId, string sealedText, IReadOnlyList<(string DeviceId, string Wrapped)> wraps, DateTimeOffset at, AuditEntry audit,
         CancellationToken cancellationToken = default);
 

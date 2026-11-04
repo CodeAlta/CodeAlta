@@ -364,9 +364,24 @@ internal sealed partial class AccessService
         var now = _time.GetUtcNow();
         var all = AccessPolicy.Allows(snapshot, person.Id, "access.manage", AccessTarget.Organization, now)
             || AccessPolicy.Allows(snapshot, person.Id, "access.review", AccessTarget.Organization, now);
-        return new([.. snapshot.Grants.Where(grant => all || grant.SubjectKind == FleetPrincipalKinds.Person && grant.SubjectId == person.Id
+        var visible = snapshot.Grants.Where(grant => all || grant.SubjectKind == FleetPrincipalKinds.Person && grant.SubjectId == person.Id
             || grant.SubjectKind == FleetPrincipalKinds.Team && snapshot.TeamRole(grant.SubjectId, person.Id) is not null
-            || grant.ScopeKind == FleetScopeKinds.Team && snapshot.TeamRole(grant.ScopeId!, person.Id) == FleetTeamRoles.Maintainer).Select(ToDto)]);
+            || grant.ScopeKind == FleetScopeKinds.Team && snapshot.TeamRole(grant.ScopeId!, person.Id) == FleetTeamRoles.Maintainer).ToList();
+        // An active grant of a session whose grantee has a device its copies of the key miss: a computer of the owner keys it again.
+        var keyed = visible.Where(static grant => grant.Status == FleetGrantStatuses.Active && grant.Capability == "session.view-content").ToList();
+        HashSet<string> missing = new(StringComparer.Ordinal);
+        if (keyed.Count > 0)
+        {
+            var devices = await _store.ListDevicesAsync(actor.OrganizationId, cancellationToken).ConfigureAwait(false);
+            var held = (await _access.ListGrantKeyDevicesAsync(actor.OrganizationId, cancellationToken).ConfigureAwait(false)).ToLookup(static key => key.GrantId, static key => key.DeviceId);
+            foreach (var grant in keyed)
+            {
+                var copies = held[grant.Id].ToHashSet(StringComparer.Ordinal);
+                if (copies.Count > 0 && GranteeDevices(snapshot, grant, devices).Any(device => !copies.Contains(device))) missing.Add(grant.Id);
+            }
+        }
+
+        return new([.. visible.Select(grant => ToDto(grant) with { MissingKeys = missing.Contains(grant.Id) })]);
     }
 
     /// <summary>
@@ -453,7 +468,9 @@ internal sealed partial class AccessService
     {
         var (snapshot, person) = await ReadAsync(actor, cancellationToken).ConfigureAwait(false);
         var grant = snapshot.Grants.FirstOrDefault(other => other.Id == grantId) ?? throw NotFound("No grant has this id.");
-        if (grant.Status != FleetGrantStatuses.PendingKeys) throw CoordinatorException.Conflict(CoordinatorErrorCodes.AccessConflict, "The grant does not wait for keys.");
+        // A grant of a session waits for its keys, or is keyed again when its grantee has devices its copies miss.
+        if (grant.Status != FleetGrantStatuses.PendingKeys && !(grant.Status == FleetGrantStatuses.Active && grant.Capability == "session.view-content" && request is not null))
+            throw CoordinatorException.Conflict(CoordinatorErrorCodes.AccessConflict, "The grant does not wait for keys.");
         var target = await GrantTargetAsync(actor.OrganizationId, snapshot, grant.ScopeKind, grant.ScopeId, cancellationToken).ConfigureAwait(false);
         var holds = target.OwnerKind == FleetPrincipalKinds.Person ? target.OwnerId == person.Id
             : target.OwnerKind == FleetPrincipalKinds.Team && target.OwnerId is { } team && snapshot.TeamRole(team, person.Id) == FleetTeamRoles.Maintainer;
@@ -513,6 +530,17 @@ internal sealed partial class AccessService
             _ => [],
         };
         var devices = await _store.ListDevicesAsync(organizationId, cancellationToken).ConfigureAwait(false);
+        return GranteeDevices(snapshot, grant, devices);
+    }
+
+    private static HashSet<string> GranteeDevices(AccessSnapshot snapshot, GrantRecord grant, IReadOnlyList<DeviceRecord> devices)
+    {
+        var people = grant.SubjectKind switch
+        {
+            FleetPrincipalKinds.Person => new HashSet<string>([grant.SubjectId], StringComparer.Ordinal),
+            FleetPrincipalKinds.Team => snapshot.Members.Where(member => member.TeamId == grant.SubjectId).Select(static member => member.PersonId).ToHashSet(StringComparer.Ordinal),
+            _ => [],
+        };
         return devices.Where(device => device.Kind == FleetDeviceKinds.Controller && device.Status == DeviceStatuses.Approved && device.OwnerPersonId is { } owner
             && people.Contains(owner) && snapshot.Person(owner) is { IsActive: true }).Select(static device => device.Id).ToHashSet(StringComparer.Ordinal);
     }

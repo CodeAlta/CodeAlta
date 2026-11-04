@@ -68,7 +68,11 @@ public sealed record ServiceIdentityDto(string Id, string Name, string OwnerKind
 /// <param name="CreatedBy">The person who made it.</param>
 /// <param name="ExpiresAt">When it stops applying; null for never.</param>
 public sealed record GrantDto(string Id, string SubjectKind, string SubjectId, string Capability, string ScopeKind, string? ScopeId, string Status, DateTimeOffset CreatedAt,
-    string CreatedBy, DateTimeOffset? ExpiresAt);
+    string CreatedBy, DateTimeOffset? ExpiresAt)
+{
+    /// <summary>Gets whether its grantee has a device its copies of the key miss: a computer of the owner of the content keys it again.</summary>
+    public bool MissingKeys { get; init; }
+}
 
 /// <summary>The owner of a resource, who wrote it, and whether it waits for its owner.</summary>
 /// <param name="ResourceKind">The kind of resource (<see cref="FleetResourceKinds"/>).</param>

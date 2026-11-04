@@ -218,6 +218,15 @@ public sealed partial class SqliteCoordinatorStore : IAccessStore
     }
 
     /// <inheritdoc />
+    public ValueTask<IReadOnlyList<(string GrantId, string DeviceId)>> ListGrantKeyDevicesAsync(string organizationId, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(organizationId);
+        return ReadAsync(connection => QueryList(connection, null,
+            "SELECT k.grant_id, k.device_id FROM grant_keys k JOIN grants g ON g.id = k.grant_id WHERE g.organization_id = $org ORDER BY k.grant_id, k.device_id",
+            static reader => (reader.GetString(0), reader.GetString(1)), ("$org", organizationId)), cancellationToken);
+    }
+
+    /// <inheritdoc />
     public ValueTask<GrantRecord?> ActivateGrantKeysAsync(string grantId, string sealedText, IReadOnlyList<(string DeviceId, string Wrapped)> wraps, DateTimeOffset at,
         AuditEntry audit, CancellationToken cancellationToken = default)
     {
@@ -227,9 +236,11 @@ public sealed partial class SqliteCoordinatorStore : IAccessStore
         ArgumentNullException.ThrowIfNull(audit);
         return WriteAsync((connection, transaction) =>
         {
-            var changed = Execute(connection, transaction, "UPDATE grants SET status = $active WHERE id = $id AND status = $pending",
+            // Waiting for its keys, or keyed again for the devices of its grantee now: the copies given replace those held.
+            var changed = Execute(connection, transaction, "UPDATE grants SET status = $active WHERE id = $id AND status IN ($pending, $active)",
                 ("$active", FleetGrantStatuses.Active), ("$id", grantId), ("$pending", FleetGrantStatuses.PendingKeys));
             if (changed == 0) return null;
+            Execute(connection, transaction, "DELETE FROM grant_keys WHERE grant_id = $grant", ("$grant", grantId));
             foreach (var (deviceId, wrapped) in wraps)
             {
                 Execute(connection, transaction, "INSERT INTO grant_keys (grant_id, device_id, sealed, wrapped, created_at) VALUES ($grant, $device, $sealed, $wrapped, $at) " +

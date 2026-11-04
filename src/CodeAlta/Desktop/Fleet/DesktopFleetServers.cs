@@ -719,7 +719,12 @@ internal sealed partial class DesktopFleetServers : IAsyncDisposable
             // A budget reached, a run that waits, a notification: the pages and the Fleet button read them again.
             BudgetsChanged = _ => OnChanged(),
             // An automation this person gave away and that its new owner took: off this computer, and so off its machines.
-            AccessRead = linkId => _ = FollowTransfersAsync(linkId),
+            AccessRead = linkId =>
+            {
+                _ = FollowTransfersAsync(linkId);
+                // A grantee with a device or a member its grant has no copy for: this computer, which holds the key, seals for them again.
+                _ = RekeyGrantsAsync(linkId);
+            },
         });
         connections.Changed += OnChanged;
         Volatile.Write(ref _connections, connections);
