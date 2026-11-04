@@ -160,6 +160,8 @@ button.automation-run:hover, button.automation-run:focus-visible { background: v
 .automation-integration-fields .bp6-input-group { flex: 1 1 160px; min-width: 120px; }
 .automation-integration-fields .automation-integration-wide { flex: 3 1 100%; }
 .automation-integration-fields input { font-family: var(--code-font); font-size: 12px; }
+.automation-integration-fields .bp6-input-left-container { display: flex; align-items: center; height: 100%; }
+.automation-integration-secret-icon { display: grid; place-items: center; padding: 0 2px 0 8px; color: var(--muted); }
 .automation-integration-reply.bp6-control { flex: 1 0 100%; margin: 0; }
 .automation-integration-address { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 0; font-size: 12px; color: var(--muted); }
 .automation-integration-address code { overflow-wrap: anywhere; color: var(--text); }

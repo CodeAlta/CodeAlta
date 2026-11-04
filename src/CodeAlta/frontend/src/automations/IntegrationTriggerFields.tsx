@@ -34,7 +34,7 @@ const guides: Readonly<Record<IntegrationType, MessageKey>> = {
 /** A setting of a trigger that names a secret: the field takes its name, the trigger keeps the reference. */
 function SecretField({ label, value, disabled, onChange }: { label: MessageKey; value: string | null; disabled: boolean; onChange: (reference: string | null) => void }) {
   const { t } = useShellLanguage();
-  return <InputGroup className="automation-integration-secret" leftIcon={<AppIcon name="secret" size={13} />} value={secretName(value)} disabled={disabled} spellCheck={false}
+  return <InputGroup className="automation-integration-secret" leftElement={<span className="automation-integration-secret-icon"><AppIcon name="secret" size={13} /></span>} value={secretName(value)} disabled={disabled} spellCheck={false}
     aria-label={t(label)} title={t("The name of a secret of Settings > Secrets")} placeholder={t(label)} maxLength={64}
     onChange={event => onChange(secretReference(event.target.value))} />;
 }
