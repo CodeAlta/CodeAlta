@@ -14,6 +14,7 @@ public sealed partial class FleetNodeService
     private Task<FleetCreateSessionResult> CreateSessionAsync(FleetNodeCall call, FleetCreateSessionParams parameters, CancellationToken cancellationToken)
     {
         RequireWork();
+        RequireNotHalted();
         if (parameters.Prompt is { } prompt && (string.IsNullOrWhiteSpace(prompt) || prompt.Length > MaxPromptLength))
             throw new FleetException(FleetErrorCodes.InvalidParams, null, $"A prompt has 1 to {MaxPromptLength} characters.");
         if (parameters.Prompt is not null && (call.Device!.Permissions & Identity.DevicePermissions.Drive) == 0)
@@ -49,16 +50,32 @@ public sealed partial class FleetNodeService
             throw new FleetException(FleetErrorCodes.InvalidParams, null, _options.AdmitEnvironment is null ? "This node runs no session in an environment." : "The name of an environment has 1 to 64 characters.");
 
         var provider = ResolveProvider(parameters.Selection?.ProviderKey, project?.ProjectPath);
+        // The policy of the organization of the space, before the session exists: who starts, the provider, the model, the mode.
+        var rules = RequirePolicyStart(parameters.SpaceId, provider, parameters.Selection?.ModelId, agent: false);
+        var permissionMode = PolicyPermissionMode(provider.ProviderId.Value, rules?.PermissionMode);
+        var sessionId = Guid.NewGuid().ToString();
+        if (rules?.ToolsOff is { Count: > 0 } off)
+        {
+            if (off.Select(AgentToolPatterns.Validate).FirstOrDefault(static error => error is not null) is { } invalid)
+                throw Refused($"The tools the policy of the organization turns off do not read: {invalid}");
+            _host.RuntimeService.SetDisabledToolPatterns(sessionId, off);
+        }
+
         SessionViewDescriptor session;
         try
         {
-            session = await _host.Commands.CreateDraftSessionAsync(project, provider, parameters.Title, null, null, parameters.SpaceId, null, null, null, null)
+            session = await _host.Commands.CreateDraftSessionAsync(project, provider, parameters.Title, null, null, parameters.SpaceId, permissionMode, sessionId, null, null)
                 .ConfigureAwait(false);
         }
         catch (ObjectDisposedException)
         {
+            _host.RuntimeService.SetDisabledToolPatterns(sessionId, null);
             throw new FleetException(FleetNodeErrorCodes.NodeStopping, FleetErrorHints.Retry, "The node is stopping.");
         }
+
+        // Work of the fleet: a stop of the kill switch and the longest time of a policy reach it.
+        Work.Record(session.SessionId, parameters.SpaceId, "remote", _options.TimeProvider.GetUtcNow());
+        if (rules is not null) await ApplyPolicySandboxAsync(session.SessionId, rules).ConfigureAwait(false);
 
         // The session is admitted to its environment before its first prompt: an approval may wait, the creation does not.
         if (parameters.Environment is { } environment)
@@ -149,9 +166,11 @@ public sealed partial class FleetNodeService
     private async Task<FleetCommandResult> SendAsync(FleetNodeCall call, FleetSendParams parameters, CancellationToken cancellationToken)
     {
         RequireWork();
+        RequireNotHalted();
         var retryKey = RetryKey(call);
         RequirePrompt(parameters.Text);
         var session = await RequireSessionAsync(parameters.SessionId, cancellationToken).ConfigureAwait(false);
+        RequirePolicyModel(session.SpaceId, parameters.Selection?.ModelId);
         var text = parameters.Text;
         // An agent's prompt is checked and attributed once: a retry of the same key gets the first receipt.
         if (parameters.Agent is not null)
@@ -173,6 +192,7 @@ public sealed partial class FleetNodeService
     private async Task<FleetQueueResult> QueueAsync(FleetNodeCall call, FleetQueueParams parameters, CancellationToken cancellationToken)
     {
         RequireWork();
+        RequireNotHalted();
         RequirePrompt(parameters.Text);
         _ = await RequireRemoteSessionAsync(parameters.SessionId, cancellationToken).ConfigureAwait(false);
         return await Once(call, FleetNodeJsonContext.Default.FleetQueueResult, async () =>
@@ -189,6 +209,7 @@ public sealed partial class FleetNodeService
     private async Task<FleetCommandResult> SteerAsync(FleetNodeCall call, FleetSteerParams parameters, CancellationToken cancellationToken)
     {
         RequireWork();
+        RequireNotHalted();
         var retryKey = RetryKey(call);
         RequirePrompt(parameters.Text);
         var sessionId = await RequireRemoteSessionAsync(parameters.SessionId, cancellationToken).ConfigureAwait(false);

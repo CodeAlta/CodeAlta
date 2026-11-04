@@ -63,8 +63,13 @@ internal sealed class FleetNodeFixture : IAsyncDisposable
     public static Task<FleetNodeFixture> StartAsync(CancellationToken cancellationToken, IFleetNodeAutomations? automations) => StartAsync(cancellationToken, automations, null);
 
     /// <summary>Starts the node, with the automations it runs for its devices and what admits its runs to budgets; null for none.</summary>
-    public static async Task<FleetNodeFixture> StartAsync(CancellationToken cancellationToken, IFleetNodeAutomations? automations,
+    public static Task<FleetNodeFixture> StartAsync(CancellationToken cancellationToken, IFleetNodeAutomations? automations,
         Func<FleetNodeBudgetRun, Action, CancellationToken, Task<CodeAlta.Fleet.Server.FleetBudgetAdmission>>? admitBudget)
+        => StartAsync(cancellationToken, automations, admitBudget, null);
+
+    /// <summary>Starts the node as above, with the clock of its node API; null for the system's.</summary>
+    public static async Task<FleetNodeFixture> StartAsync(CancellationToken cancellationToken, IFleetNodeAutomations? automations,
+        Func<FleetNodeBudgetRun, Action, CancellationToken, Task<CodeAlta.Fleet.Server.FleetBudgetAdmission>>? admitBudget, TimeProvider? time)
     {
         var root = Path.Combine(Path.GetTempPath(), "codealta-desktop-fleet-tests", Guid.NewGuid().ToString("N"));
         var global = Path.Combine(root, "global");
@@ -85,7 +90,7 @@ internal sealed class FleetNodeFixture : IAsyncDisposable
         var service = new FleetNodeService(new FleetNodeServiceOptions
         {
             Host = host, Identity = identity, TrustedDevices = new TrustedDeviceStore(nodeFleet, TimeProvider.System), Name = "test-node", Version = "1.0.0",
-            PairingAddresses = () => addresses, Automations = automations, AdmitBudget = admitBudget,
+            PairingAddresses = () => addresses, Automations = automations, AdmitBudget = admitBudget, TimeProvider = time ?? TimeProvider.System,
         });
         var listener = FleetDirectListener.Start(new IPEndPoint(IPAddress.Loopback, 0), service.ServeAsync);
         addresses = [FleetDirectConnector.Format(IPAddress.Loopback, listener.LocalEndPoint.Port)];

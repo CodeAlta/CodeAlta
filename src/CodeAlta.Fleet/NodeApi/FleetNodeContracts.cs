@@ -199,6 +199,12 @@ public static class FleetNodeMethods
 /// <summary>The error codes of the node API, beside those of the protocol (<see cref="Protocol.FleetErrorCodes"/>).</summary>
 public static class FleetNodeErrorCodes
 {
+    /// <summary>The kill switch of an organization stops the work of the fleet on the node: it takes none until a version of its policy lifts it.</summary>
+    public const string FleetStopped = "fleet.stopped";
+
+    /// <summary>The signed policy of the organization of the space refuses the request: a provider, a model, a sandbox, who starts.</summary>
+    public const string PolicyRefused = "policy.refused";
+
     /// <summary>No session of the node has that id.</summary>
     public const string SessionNotFound = "session.not_found";
 

@@ -94,6 +94,21 @@ internal sealed class DesktopRemoteChildren : IRemoteChildSessions, IAsyncDispos
     /// </summary>
     internal Func<string, CancellationToken, Task>? Created { get; set; }
 
+    /// <summary>
+    /// Gets or sets the signed policies of the servers of this computer (<c>doc/fleet/security-and-privacy.md</c>, policies and
+    /// the kill switch): a stop that reaches it, or rules of the organization of a space that keep agents from other machines,
+    /// refuse here what an agent of this computer would start or send elsewhere. Null while it joined no server.
+    /// </summary>
+    internal CodeAlta.Fleet.Server.FleetPolicyGuard? Policy { get; set; }
+
+    // Why the policy refuses work of an agent of this computer on another machine, in a space; null when it allows it.
+    private string? PolicyRefusal(string? spaceId)
+    {
+        if (Policy is not { } policy) return null;
+        if (policy.Halt is { } halt) return halt.Describe(_machineName);
+        return policy.RulesFor(spaceId) is { AgentStarts: false } ? "The policy of the organization lets no agent start work on another machine, nor prompt it." : null;
+    }
+
     /// <summary>Starts the loop that takes the deliveries of the machines.</summary>
     public void Start() => _loop = Task.Run(RunAsync);
 
@@ -117,6 +132,7 @@ internal sealed class DesktopRemoteChildren : IRemoteChildSessions, IAsyncDispos
         // A sandbox goes with what it confines here, which the machine holds the child to: never its name alone.
         if (request.Sandbox is not null && request.Confinement is null)
             return Refused("agent_request_denied", $"The sandbox '{request.Sandbox}' of the session cannot be used here: it starts nothing on another machine.");
+        if (PolicyRefusal(request.SpaceId) is { } policyRefusal) return Refused("policy_refused", policyRefusal);
         var name = NameOf(host);
         if (await OnlineAsync(host, cancellationToken).ConfigureAwait(false) is null) return Refused("machine_offline", $"{name} is {RemoteSessionHost.Describe(host.State)}.", name);
         try
@@ -198,6 +214,7 @@ internal sealed class DesktopRemoteChildren : IRemoteChildSessions, IAsyncDispos
         ArgumentNullException.ThrowIfNull(request);
         var host = request.Machine is { } machine ? Resolve(machine) : _fleet.Hosts.FirstOrDefault(value => value.Lists(request.SessionId));
         if (host is null) return new("refused", "session_missing", $"No machine this computer reaches lists the session '{request.SessionId}'.", request.Machine);
+        if (PolicyRefusal(request.SpaceId) is { } refusal) return new("refused", "policy_refused", refusal, request.Machine);
         var name = NameOf(host);
         if (await OnlineAsync(host, cancellationToken).ConfigureAwait(false) is not { } client) return new("refused", "machine_offline", $"{name} is {RemoteSessionHost.Describe(host.State)}.", name);
         try

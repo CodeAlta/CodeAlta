@@ -256,6 +256,8 @@ internal sealed partial class NodeAutomations : IFleetNodeAutomations, IAutomati
         if (policy.Problem is { } problem)
             return $"This machine runs no automations while its policy cannot be read ({problem}): its owner sets it again with altanode automations policy.";
         if (!policy.Enabled) return "This machine runs no automations: its owner turned them off.";
+        // The kill switch of an organization stops every run of this machine until a signed version lifts it.
+        if (Policy?.Halt is { } halt) return halt.Describe("this machine");
         if (entry.Source.IsAssigned && CheckAssignment(entry) is { } refused) return refused;
 
         // Who a run acts as (doc/fleet/orchestration.md): an automation of a team runs on a machine of that team, as one of the
@@ -272,7 +274,47 @@ internal sealed partial class NodeAutomations : IFleetNodeAutomations, IAutomati
             return $"The provider '{provider.ProviderId.Value}' runs with a personal plan, and a machine of a team runs automations with account credentials only.";
         if (kind == AutomationCredentialKind.Personal && policy.Credentials != NodeAutomationPolicy.AnyCredentials)
             return $"The provider '{provider.ProviderId.Value}' runs with a personal plan, and this machine runs automations with account credentials only.";
+
+        // An automation a server gave follows the signed policy of that server's organization: providers, models, credentials.
+        if (AssignmentOf(entry.Id)?.Via is { } via && ServerPolicy?.Invoke(via) is { Number: > 0 } signed)
+        {
+            if (FleetPolicyGuard.Refusal(signed.Rules, provider.ProviderType, provider.ProviderId.Value, entry.Definition.Model.Model) is { } refusal) return refusal;
+            if (kind == AutomationCredentialKind.Personal && signed.Rules.AccountCredentials == true)
+                return $"The provider '{provider.ProviderId.Value}' runs with a personal plan, and the policy of the organization runs every automation with account credentials.";
+        }
+
         return null;
+    }
+
+    /// <summary>Gets or sets the signed policies of the servers of the node: a stop refuses every run; null while it joined none.</summary>
+    internal FleetPolicyGuard? Policy { get; set; }
+
+    /// <summary>Gets or sets the policy of a server, by the id of its link, as the node verified it; null while it joined none.</summary>
+    internal Func<string, FleetPolicyState?>? ServerPolicy { get; set; }
+
+    /// <summary>Stops the runs under way: a stop of the kill switch reached this machine.</summary>
+    /// <param name="reason">Why, recorded by each session stopped.</param>
+    /// <param name="cancellationToken">Cancels before the next run is stopped.</param>
+    /// <returns>The sessions stopped.</returns>
+    internal async Task<IReadOnlyList<string>> StopRunsAsync(string reason, CancellationToken cancellationToken)
+    {
+        var stopped = new List<string>();
+        foreach (var run in Engine.Runs(null, 500))
+        {
+            if (run.Status is not (AutomationRun.Running or AutomationRun.Waiting or AutomationRun.Held) || run.SessionId is not { } sessionId) continue;
+            cancellationToken.ThrowIfCancellationRequested();
+            try
+            {
+                await _host.RuntimeService.AbortTreeAsync(sessionId, reason, cancellationToken).ConfigureAwait(false);
+                stopped.Add(sessionId);
+            }
+            catch (Exception exception) when (exception is InvalidOperationException or KeyNotFoundException or IOException)
+            {
+                if (LogManager.IsInitialized) _logger.Warn($"The run of session {sessionId} could not be stopped by the kill switch: {exception.Message}");
+            }
+        }
+
+        return stopped;
     }
 
     // The team of this machine, as the access document of the server an automation came through says, and the team the

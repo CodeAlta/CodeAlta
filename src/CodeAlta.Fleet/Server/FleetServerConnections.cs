@@ -84,6 +84,12 @@ public sealed class FleetServerConnectionsOptions
     /// </summary>
     public Action<string, Protocol.FleetAccessState>? AccessChanged { get; init; }
 
+    /// <summary>
+    /// Gets what is told, with the link, once a newer version of the policy of its server verified, and at the start with the
+    /// version kept: a machine stops the work of the fleet a stop names. Null tells nobody.
+    /// </summary>
+    public Action<string, Protocol.FleetPolicyState>? PolicyChanged { get; init; }
+
     /// <summary>Gets what is told, by the id of its link, each time a device read access again because its server said it changed; null tells nobody.</summary>
     public Action<string>? AccessRead { get; init; }
 
@@ -347,6 +353,8 @@ public sealed class FleetServerConnections : IAsyncDisposable
             AccessPinPath = Path.Combine(_store.LinkFolder(link.Id), FleetOrganizationAccess.PinFileName),
             AccessChanged = _options.AccessChanged is { } accessChanged ? state => accessChanged(link.Id, state) : null,
             AccessRead = _options.AccessRead is { } accessRead ? () => accessRead(link.Id) : null,
+            PolicyPath = Path.Combine(_store.LinkFolder(link.Id), FleetOrganizationPolicy.PinFileName),
+            PolicyChanged = _options.PolicyChanged is { } policyChanged ? state => policyChanged(link.Id, state) : null,
             AcceptRelay = _options.AcceptRelay is { } accept ? (incoming, stream, token) => accept(created!, incoming, stream, token) : null,
             TelemetrySettings = _options.TelemetrySettings is { } receive ? (settings, token) => receive(created!, link, settings, token) : null,
             Metrics = _options.Metrics,
