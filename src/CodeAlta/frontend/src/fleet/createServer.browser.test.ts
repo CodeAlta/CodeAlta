@@ -56,6 +56,9 @@ test("Join an organization goes from the server to signing in, the space and the
     assert.deepEqual(await page.evaluate(`[...document.querySelectorAll('.join-organization-dialog .add-machine-words .bp6-tag')].map(tag => tag.textContent)`),
       ["cabin", "onion", "leopard", "pigeon", "peach", "needle"]);
     await page.shot("join-organization-approval");
+    // Once approved, the dialog says so: the person does not wait on, nor look for it elsewhere.
+    await page.evaluate(`window.serverFixture.approveJoin()`);
+    await page.until(`document.querySelector('.join-organization-dialog [role=status]')?.textContent.includes('This computer is approved: it is one of yours on Contoso.')`, "the approval to be told");
     assert.deepEqual((await calls(page)).filter(call => call.joinOrg || call.space || call.link), [{ joinOrg: "https://fleet.contoso.com", token: "CODE-1" }, { space: "Work" },
       { link: "work-1", server: "corp" }]);
   }, options);
