@@ -9,6 +9,13 @@ using CodeAlta.Fleet.Protocol.Api;
 
 namespace CodeAlta.Fleet.Server;
 
+/// <summary>What the person who confirms a grant decided: whom it gives what, as the console showed it to them.</summary>
+/// <param name="SubjectKind">A person or a team.</param>
+/// <param name="SubjectId">The person or the team.</param>
+/// <param name="Capability">What it gives.</param>
+/// <param name="ScopeId">On what; null for a scope without an id.</param>
+public sealed record FleetGrantDecision(string SubjectKind, string SubjectId, string Capability, string? ScopeId);
+
 /// <summary>
 /// The keys of a grant of sealed content (<c>doc/fleet/access-control.md</c>, access and keys): granting a person or a team
 /// <c>session.view-content</c> on a session of a Private space gives them exactly that session's metadata, never a key that opens
@@ -141,26 +148,37 @@ public static class FleetGrantKeys
     /// Gives a grant that waits for its keys what it opens, from a controller device of the owner of the content: for a grant of a
     /// session, opens the session's metadata here with the key of its space, seals it for the grant and wraps that key to each
     /// controller device of the grantee in the device list this device verified, then sends them; other grants are confirmed as such.
+    /// The grant must be the one the person decided, and the people of a team grantee are those of the signed access document
+    /// this device verified, never the roster the server answers.
     /// </summary>
     /// <param name="client">The client of the server, as this device.</param>
     /// <param name="keys">The metadata keys this device holds.</param>
     /// <param name="grantId">The grant.</param>
+    /// <param name="decision">What the person who confirms it decided, as the console showed it.</param>
+    /// <param name="access">The access document this device verified, which names the people of a team; null when none was verified.</param>
     /// <param name="cancellationToken">Cancels the operation.</param>
     /// <returns>The grant, active.</returns>
     /// <exception cref="ArgumentNullException">An argument is null.</exception>
     /// <exception cref="ArgumentException"><paramref name="grantId"/> is empty.</exception>
     /// <exception cref="KeyNotFoundException">No grant or session has this id.</exception>
-    /// <exception cref="InvalidOperationException">This device does not hold the key of the session, or the grantee has no device.</exception>
+    /// <exception cref="InvalidOperationException">
+    /// The server describes another grant than the one decided, this device does not hold the key of the session, the team is not in
+    /// the signed access document, or the grantee has no device.
+    /// </exception>
     /// <exception cref="FleetServerException">The server refused it.</exception>
     /// <exception cref="HttpRequestException">The server does not answer.</exception>
     /// <exception cref="FleetDeviceListException">The device list does not verify.</exception>
-    public static async Task<GrantDto> ConfirmAsync(FleetServerClient client, FleetMetadataKeyring keys, string grantId, CancellationToken cancellationToken)
+    public static async Task<GrantDto> ConfirmAsync(FleetServerClient client, FleetMetadataKeyring keys, string grantId, FleetGrantDecision decision, FleetAccessState? access,
+        CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(client);
         ArgumentNullException.ThrowIfNull(keys);
         ArgumentException.ThrowIfNullOrEmpty(grantId);
+        ArgumentNullException.ThrowIfNull(decision);
         var grant = (await client.ListGrantsAsync(cancellationToken).ConfigureAwait(false)).Items.FirstOrDefault(other => other.Id == grantId)
             ?? throw new KeyNotFoundException("No grant has this id.");
+        if (grant.SubjectKind != decision.SubjectKind || grant.SubjectId != decision.SubjectId || grant.Capability != decision.Capability || grant.ScopeId != decision.ScopeId)
+            throw new InvalidOperationException("The server describes this grant otherwise than the one you confirm: nothing was given. Read the grants again.");
         if (grant.Capability != "session.view-content" || grant.ScopeId is not { } scope || !scope.StartsWith(SessionScope, StringComparison.Ordinal))
             return await client.ConfirmGrantKeysAsync(grantId, cancellationToken).ConfigureAwait(false);
         var sessionId = scope[SessionScope.Length..];
@@ -169,10 +187,19 @@ public static class FleetGrantKeys
         if (!keys.TryOpen(sessionId, session.SealedMetadata, out var metadata) || metadata is null)
             throw new InvalidOperationException("This computer does not hold the key of the session: confirm the grant from a computer of its owner that opens it.");
 
-        var people = grant.SubjectKind == FleetPrincipalKinds.Team
-            ? (await client.ListTeamsAsync(cancellationToken).ConfigureAwait(false)).Items.FirstOrDefault(team => team.Id == grant.SubjectId)?.Members
-                .Select(static member => member.PersonId).ToHashSet(StringComparer.Ordinal) ?? []
-            : new HashSet<string>([grant.SubjectId], StringComparer.Ordinal);
+        // The people the copies go to: the person granted, or the people of the team as the owners signed it (not suspended).
+        HashSet<string> people;
+        if (grant.SubjectKind == FleetPrincipalKinds.Team)
+        {
+            if (access is null || !access.Teams.TryGetValue(grant.SubjectId, out var team))
+                throw new InvalidOperationException("The team of the grant is not in the signed access document this computer verified: have a signer sign it, then confirm again.");
+            people = team.Maintainers.Concat(team.Members).Where(person => !access.IsSuspended(person)).ToHashSet(StringComparer.Ordinal);
+        }
+        else
+        {
+            if (access?.IsSuspended(grant.SubjectId) == true) throw new InvalidOperationException("The person of the grant is suspended: nothing is given to them.");
+            people = new HashSet<string>([grant.SubjectId], StringComparer.Ordinal);
+        }
         var list = await keys.Devices.RefreshAsync(cancellationToken).ConfigureAwait(false);
         var recipients = list.Members.Values.Where(member => member.Kind == FleetDeviceKinds.Controller && member.OwnerId is { } owner && people.Contains(owner))
             .Select(static member => member.Key).ToArray();

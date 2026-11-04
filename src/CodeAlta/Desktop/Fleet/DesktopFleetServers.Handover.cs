@@ -102,13 +102,17 @@ internal sealed partial class DesktopFleetServers
         if (Interlocked.Exchange(ref _rekeyingGrants, 1) != 0) return;
         try
         {
-            if (Volatile.Read(ref _connections)?.Find(linkId)?.Connector?.MetadataKeys is not { } keys) return;
+            if (Volatile.Read(ref _connections)?.Find(linkId)?.Connector is not { MetadataKeys: { } keys } connector) return;
             using var client = Client(linkId);
+            // Only a grant a person of this computer confirmed, as they decided it: the server's description of it decides nothing.
+            var decisions = ReadGrantDecisions(linkId);
+            var access = await connector.Access.RefreshAsync(CancellationToken.None).ConfigureAwait(false);
             foreach (var grant in (await client.ListGrantsAsync(CancellationToken.None).ConfigureAwait(false)).Items.Where(static grant => grant.MissingKeys))
             {
+                if (!decisions.TryGetValue(grant.Id, out var decision)) continue;
                 try
                 {
-                    await FleetGrantKeys.ConfirmAsync(client, keys, grant.Id, CancellationToken.None).ConfigureAwait(false);
+                    await FleetGrantKeys.ConfirmAsync(client, keys, grant.Id, decision, access, CancellationToken.None).ConfigureAwait(false);
                     if (LogManager.IsInitialized) _handoverLogger.Info($"The grant {grant.Id} was keyed again for the devices of its grantee.");
                 }
                 catch (Exception exception) when (exception is InvalidOperationException or KeyNotFoundException or FleetServerException)
@@ -118,7 +122,7 @@ internal sealed partial class DesktopFleetServers
             }
         }
         catch (Exception exception) when (exception is FleetServerException or HttpRequestException or IOException or KeyNotFoundException or OperationCanceledException
-            or FleetDeviceListException)
+            or FleetDeviceListException or FleetAccessDocumentException)
         {
             if (LogManager.IsInitialized) _handoverLogger.Info($"The grants of {linkId} could not be keyed again: {exception.Message}");
         }

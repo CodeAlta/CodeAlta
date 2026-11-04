@@ -442,7 +442,8 @@ function Grants({ context }: { context: Context }) {
           <span className="fleet-secret-tags">{grant.status === "pending_keys" && <Tag minimal intent="warning">{t("Waiting for keys")}</Tag>}</span>
           <span className="secret-actions">
             {grant.status === "pending_keys" && <Button size="small" disabled={busy} text={t("Confirm keys")}
-              onClick={() => void run(() => api.confirmGrantKeys({ expectedEpoch: epoch, linkId, id: grant.id }, call))} />}
+              onClick={() => void run(() => api.confirmGrantKeys({ expectedEpoch: epoch, linkId, id: grant.id, subjectKind: grant.subjectKind, subjectId: grant.subjectId,
+                capability: grant.capability, scopeId: grant.scopeId ?? null }, call))} />}
             <Button size="small" variant="minimal" intent="danger" icon={<AppIcon name="trash" size={14} />} aria-label={t("Remove the grant of {name}", { name: grant.subjectName })}
               disabled={busy} onClick={() => void run(() => api.revokeGrant({ expectedEpoch: epoch, linkId, id: grant.id }, call))} />
           </span>
