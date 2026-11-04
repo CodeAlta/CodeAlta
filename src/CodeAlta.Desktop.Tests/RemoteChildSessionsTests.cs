@@ -395,6 +395,41 @@ public sealed class RemoteChildSessionsTests
         Assert.AreEqual(1, Answers(), "The parent is prompted once.");
     }
 
+    // A child that answers before its creation returns here is not dropped: while a creation to its machine is in progress,
+    // a delivery of a child this computer does not know yet stays in the outbox of the machine, and is delivered once known.
+    [TestMethod]
+    public async Task AFastAnswer_OfAChildStillBeingCreated_IsKeptUntilItsLineageIsRecorded()
+    {
+        var token = TestContext.CancellationToken;
+        await using var two = await TwoHosts.StartAsync(token, startDeliveries: false);
+        var parent = await two.CreateParentAsync(token);
+        two.Node.Service.AgentSessions.WritePolicy(new FleetAgentPolicyInfo(["default"]));
+        var prompts = RecordPrompts(two.ParentProvider, 4);
+        int Answers(string text) => prompts.Count(prompt => prompt.Contains(text, StringComparison.Ordinal));
+
+        // A first child on the machine: its deliveries are taken from that machine at each round.
+        two.Node.Provider.Turns.Enqueue((_, _) => Task.FromResult(ScriptedFleetProvider.Answer("The iOS tests pass.")));
+        Assert.AreEqual("created", (await two.Children.CreateAsync(Request(parent.SessionId, "Run the iOS tests."), token)).Status);
+        await WaitForAsync(() => two.Node.Service.AgentSessions.Take(two.Fleet.DeviceId, 10).Count == 1, "the first answer to be in the outbox", token);
+        await two.Children.DeliverOnceAsync(token);
+        await WaitForAsync(() => Answers("The iOS tests pass.") == 1, "the first answer to reach the parent", token);
+
+        // A second child answers before its creation returns here: a round taken meanwhile keeps its answer.
+        two.Node.Provider.Turns.Enqueue((_, _) => Task.FromResult(ScriptedFleetProvider.Answer("The Android tests pass.")));
+        two.Children.Created = async (_, cancellationToken) =>
+        {
+            await WaitForAsync(() => two.Node.Service.AgentSessions.Take(two.Fleet.DeviceId, 10).Count == 1, "the second answer to be in the outbox", cancellationToken);
+            await two.Children.DeliverOnceAsync(cancellationToken);
+            Assert.AreEqual(1, two.Node.Service.AgentSessions.Take(two.Fleet.DeviceId, 10).Count, "not acknowledged while its child is being created");
+        };
+        var second = await two.Children.CreateAsync(Request(parent.SessionId, "Run the Android tests."), token);
+        two.Children.Created = null;
+        Assert.AreEqual("created", second.Status, second.Message);
+        await two.Children.DeliverOnceAsync(token);
+        await WaitForAsync(() => Answers("The Android tests pass.") == 1, "the second answer to reach the parent", token);
+        Assert.AreEqual(0, two.Node.Service.AgentSessions.Take(two.Fleet.DeviceId, 10).Count);
+    }
+
     // The mode a session runs in is the one to hold to, not the one it records: a session without a mode of its own runs
     // in the one its provider is configured with, which may bypass permissions.
     [TestMethod]

@@ -66,6 +66,21 @@ public sealed class NodeAutomationCommandTests
         Assert.IsTrue(NodeAutomationPolicy.Load(fleetRoot).Enabled, "what its owner set replaces the broken file");
     }
 
+    // A policy that is there but cannot be opened is not a missing one: the owner may have turned automations off in it.
+    [TestMethod]
+    public void Policy_ThatIsThereButCannotBeOpened_RunsNothing_AndSaysWhy()
+    {
+        using var root = new NodeTestRoot();
+        var fleetRoot = FleetRoot(root);
+        var path = Path.Combine(fleetRoot, NodeAutomationPolicy.FileName);
+        Directory.CreateDirectory(path);
+
+        var policy = NodeAutomationPolicy.Load(fleetRoot);
+        Assert.IsFalse(policy.Enabled, "a policy that cannot be opened runs nothing");
+        Assert.AreEqual(NodeAutomationPolicy.AccountCredentials, policy.Credentials);
+        StringAssert.Contains(policy.Problem, path);
+    }
+
     [TestMethod]
     public async Task ListAndRuns_ShowWhatDevicesGave_AndTheirRuns_AsTheNodeWroteThem()
     {

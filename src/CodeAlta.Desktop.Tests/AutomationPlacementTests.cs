@@ -191,5 +191,7 @@ public sealed class AutomationPlacementTests
             Ran.Add(entry);
             return Task.FromResult(new AutomationRun("remote-run", entry.Id, Noon, "manual") { Status = AutomationRun.Running });
         }
+
+        public string? WaitsHere(string id) => null;
     }
 }
